@@ -778,6 +778,65 @@
                 box-shadow: none;
             }
 
+            button.editor-motion-color-button {
+                min-width: 32px;
+                min-height: 32px;
+                padding: 4px;
+                border-radius: 7px;
+                border: none;
+                background: transparent;
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            button.editor-motion-color-button:hover,
+            button.editor-motion-color-button:active,
+            button.editor-motion-color-button:checked,
+            button.editor-motion-color-button:focus:checked {
+                border: none;
+                background: alpha(white, 0.08);
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            button.editor-motion-color-button:focus:not(:checked) {
+                border: none;
+                background: transparent;
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            .editor-motion-color-swatch {
+                min-width: 24px;
+                min-height: 24px;
+                border-radius: 5px;
+                border: 1px solid alpha(white, 0.12);
+            }
+
+            popover.editor-motion-color-popover,
+            popover.editor-motion-color-popover > contents {
+                padding: 0;
+                border: none;
+                background: transparent;
+                box-shadow: none;
+            }
+
+            .editor-motion-color-popover-body {
+                padding: 10px;
+                border-radius: 12px;
+                border: 1px solid alpha(white, 0.10);
+                background: #18181d;
+                box-shadow: 0 14px 32px alpha(black, 0.55);
+            }
+
+            .editor-motion-color-chooser {
+                color: #f1f1f3;
+                background: transparent;
+            }
+
             /* --- Sliders (mirrors the video editor's minimal style) --- */
             .editor-root scale {
                 min-height: 20px;

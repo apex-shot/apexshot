@@ -1058,7 +1058,7 @@ impl Default for MotionAppearance {
             // border instead of silently stroking in invisible white.
             border_fill_color: [1.0, 1.0, 1.0, 1.0],
             shadow_blur: 16.0,
-            shadow_opacity: 0.28,
+            shadow_opacity: 0.0,
             shadow_position: (0.0, 16.0),
         }
     }

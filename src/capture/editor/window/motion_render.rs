@@ -507,14 +507,26 @@ fn paint_backdrop(
                 MotionBackgroundFillType::Image => appearance.custom_background_image.as_deref(),
                 _ => None,
             };
+            let (x, y, scene_w, scene_h) =
+                scene.unwrap_or((0.0, 0.0, f64::from(width), f64::from(height)));
             if let Some(surface) = background_surface {
-                paint_image_background(context, surface, width, height, appearance.background_blur);
+                paint_image_background(
+                    context,
+                    surface,
+                    x,
+                    y,
+                    scene_w,
+                    scene_h,
+                    appearance.background_blur,
+                );
             } else if let Some(surface) = path.and_then(load_motion_background_surface) {
                 paint_image_background(
                     context,
                     &surface,
-                    width,
-                    height,
+                    x,
+                    y,
+                    scene_w,
+                    scene_h,
                     appearance.background_blur,
                 );
             } else {
@@ -550,30 +562,85 @@ pub(super) fn load_motion_background_surface(path: &str) -> Option<ImageSurface>
 fn paint_image_background(
     context: &Context,
     surface: &ImageSurface,
-    width: i32,
-    height: i32,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
     blur: f64,
 ) {
     let blur = blur.clamp(0.0, 1.0);
     if blur <= 0.001 {
-        paint_cover_fit(context, surface, width, height, Filter::Good);
+        paint_cover_fit_at(context, surface, x, y, width, height, Filter::Good);
         return;
     }
-    // Cairo has no Gaussian filter. Rendering the image into a much smaller
-    // surface and scaling it back up with bilinear filtering averages whole
-    // neighborhoods per pixel, producing a visible, stable blur that is
-    // identical between preview and export.
-    let factor = 2.0 + blur * 30.0;
-    let small_w = ((f64::from(width) / factor).round() as i32).max(1);
-    let small_h = ((f64::from(height) / factor).round() as i32).max(1);
-    let Ok(small) = ImageSurface::create(Format::ARgb32, small_w, small_h) else {
-        paint_cover_fit(context, surface, width, height, Filter::Good);
+
+    // Render the cover-fitted image once at a bounded resolution, then blur
+    // its pixels. Downsampling alone only softened resampling artifacts and
+    // did not produce a reliable background blur.
+    let render_scale = (720.0 / width.max(height)).min(1.0);
+    let render_w = (width * render_scale).ceil().max(1.0) as i32;
+    let render_h = (height * render_scale).ceil().max(1.0) as i32;
+    let Ok(mut rendered) = ImageSurface::create(Format::ARgb32, render_w, render_h) else {
+        paint_cover_fit_at(context, surface, x, y, width, height, Filter::Good);
         return;
     };
-    if let Ok(small_context) = Context::new(&small) {
-        paint_cover_fit(&small_context, surface, small_w, small_h, Filter::Good);
+    if let Ok(rendered_context) = Context::new(&rendered) {
+        paint_cover_fit(&rendered_context, surface, render_w, render_h, Filter::Good);
     }
-    paint_cover_fit(context, &small, width, height, Filter::Bilinear);
+    rendered.flush();
+    let stride = rendered.stride() as usize;
+    let mut rgba = {
+        let Ok(data) = rendered.data() else {
+            return;
+        };
+        crate::capture::editor::render::cairo_argb_to_rgba_image(
+            render_w as u32,
+            render_h as u32,
+            stride,
+            data.as_ref(),
+        )
+    };
+    let blur_rect = crate::capture::editor::types::Rect {
+        x: 0,
+        y: 0,
+        width: render_w,
+        height: render_h,
+    };
+    let radius = (blur * 32.0 * render_scale).max(1.0);
+    for _ in 0..3 {
+        crate::capture::editor::render::apply_blur_rect(&mut rgba, blur_rect, radius, true);
+    }
+    let Some(blurred) = crate::capture::editor::render::rgba_image_to_surface(&rgba) else {
+        return;
+    };
+    let _ = context.save();
+    context.translate(x, y);
+    context.scale(width / f64::from(render_w), height / f64::from(render_h));
+    context.set_source_surface(&blurred, 0.0, 0.0).ok();
+    context.source().set_filter(Filter::Bilinear);
+    context.paint().ok();
+    context.restore().ok();
+}
+
+fn paint_cover_fit_at(
+    context: &Context,
+    surface: &ImageSurface,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    filter: Filter,
+) {
+    let _ = context.save();
+    context.translate(x, y);
+    paint_cover_fit(
+        context,
+        surface,
+        width.ceil() as i32,
+        height.ceil() as i32,
+        filter,
+    );
+    context.restore().ok();
 }
 
 /// Draw a surface cover-fitted (scaled to fill, center-cropped) into the
@@ -652,7 +719,7 @@ fn draw_transformed_card(
     let (cx, cy) = motion_card_center(img_w, img_h, fit, stage, transform, zoom_anchor);
     let corners = project_card_corners(img_w, img_h, fit, transform, cx, cy);
     if alpha >= 0.99 {
-        paint_card_shadow(context, corners, appearance, transform.perspective);
+        paint_card_shadow(context, stage, corners, appearance, transform.perspective);
     }
 
     paint_perspective_card(
@@ -732,26 +799,101 @@ fn rounded_rectangle(context: &Context, x: f64, y: f64, width: f64, height: f64,
 
 fn paint_card_shadow(
     context: &Context,
+    stage: MotionStage,
     corners: [(f64, f64); 4],
     appearance: &MotionAppearance,
     perspective: f64,
 ) {
     let blur = appearance.shadow_blur.max(0.0);
-    let samples = if blur < 0.5 { 1 } else { 5 };
-    let opacity = appearance.shadow_opacity.clamp(0.0, 1.0) / samples as f64;
-    for sample in 0..samples {
-        let angle = sample as f64 / samples as f64 * std::f64::consts::TAU;
-        let spread = if samples == 1 { 0.0 } else { blur * 0.35 };
-        let offset_x = appearance.shadow_position.0 + angle.cos() * spread;
-        let offset_y = appearance.shadow_position.1 + perspective * 10.0 + angle.sin() * spread;
+    let opacity = appearance.shadow_opacity.clamp(0.0, 1.0);
+    if opacity <= 0.001 {
+        return;
+    }
+
+    let base_x = appearance.shadow_position.0;
+    let base_y = appearance.shadow_position.1 + perspective * 10.0;
+
+    let scene_x = stage.center_x - stage.bounds_w * 0.5;
+    let scene_y = stage.center_y - stage.bounds_h * 0.5;
+    let _ = context.save();
+    context.rectangle(scene_x, scene_y, stage.bounds_w, stage.bounds_h);
+    context.clip();
+
+    if blur < 0.5 {
         context.set_source_rgba(0.0, 0.0, 0.0, opacity);
-        context.move_to(corners[0].0 + offset_x, corners[0].1 + offset_y);
+        context.move_to(corners[0].0 + base_x, corners[0].1 + base_y);
         for corner in &corners[1..] {
-            context.line_to(corner.0 + offset_x, corner.1 + offset_y);
+            context.line_to(corner.0 + base_x, corner.1 + base_y);
         }
         context.close_path();
         context.fill().ok();
+        context.restore().ok();
+        return;
     }
+
+    // Rasterize one shadow silhouette, then blur its alpha mask. The previous
+    // implementation painted concentric polygon copies, leaving staircase
+    // edges and making blur look like a larger solid shadow.
+    let render_scale = (720.0 / stage.bounds_w.max(stage.bounds_h)).min(1.0);
+    let mask_w = (stage.bounds_w * render_scale).ceil().max(1.0) as i32;
+    let mask_h = (stage.bounds_h * render_scale).ceil().max(1.0) as i32;
+    let blurred_surface = (|| {
+        let mut mask = ImageSurface::create(Format::ARgb32, mask_w, mask_h).ok()?;
+        {
+            let mask_context = Context::new(&mask).ok()?;
+            mask_context.set_source_rgba(0.0, 0.0, 0.0, opacity);
+            mask_context.move_to(
+                (corners[0].0 + base_x - scene_x) * render_scale,
+                (corners[0].1 + base_y - scene_y) * render_scale,
+            );
+            for corner in &corners[1..] {
+                mask_context.line_to(
+                    (corner.0 + base_x - scene_x) * render_scale,
+                    (corner.1 + base_y - scene_y) * render_scale,
+                );
+            }
+            mask_context.close_path();
+            mask_context.fill().ok()?;
+        }
+        mask.flush();
+        let stride = mask.stride() as usize;
+        let mut rgba = {
+            let data = mask.data().ok()?;
+            crate::capture::editor::render::cairo_argb_to_rgba_image(
+                mask_w as u32,
+                mask_h as u32,
+                stride,
+                data.as_ref(),
+            )
+        };
+        // CSS-style blur radii are approximately twice Gaussian sigma. A
+        // slightly tighter factor keeps the shadow soft without inflating it.
+        let sigma = (blur * render_scale * 0.4).max(0.1);
+        let mask_rect = crate::capture::editor::types::Rect {
+            x: 0,
+            y: 0,
+            width: mask_w,
+            height: mask_h,
+        };
+        // Three separable box passes closely approximate a Gaussian while
+        // keeping animated preview work linear in the mask dimensions.
+        for _ in 0..3 {
+            crate::capture::editor::render::apply_blur_rect(&mut rgba, mask_rect, sigma, true);
+        }
+        crate::capture::editor::render::rgba_image_to_surface(&rgba)
+    })();
+
+    if let Some(surface) = blurred_surface {
+        context.translate(scene_x, scene_y);
+        context.scale(
+            stage.bounds_w / f64::from(mask_w),
+            stage.bounds_h / f64::from(mask_h),
+        );
+        context.set_source_surface(&surface, 0.0, 0.0).ok();
+        context.source().set_filter(Filter::Bilinear);
+        context.paint().ok();
+    }
+    context.restore().ok();
 }
 
 /// Keep the selected source point stationary while a camera scales in. The
@@ -1050,8 +1192,8 @@ fn unique_motion_path(dir: &Path, stem: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        draw_motion_frame, motion_pose_differs, motion_text_contains_view_point,
-        view_point_to_motion_text_position, CardLayout, MotionStage,
+        draw_motion_frame, motion_pose_differs, motion_text_contains_view_point, paint_card_shadow,
+        paint_image_background, view_point_to_motion_text_position, CardLayout, MotionStage,
     };
     use crate::recording::editor::model::{
         project_card_corners, MotionBackgroundFillType, MotionState, MotionTransform,
@@ -1163,6 +1305,89 @@ mod tests {
         let data = frame.data().unwrap();
         assert_eq!(&data[card_corner..card_corner + 4], &[0, 0, 0, 255]);
         assert_eq!(&data[card_center..card_center + 4], &[255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn card_shadow_has_a_smooth_falloff_and_stays_inside_the_scene() {
+        let mut frame = ImageSurface::create(Format::ARgb32, 160, 120).unwrap();
+        let stage = MotionStage {
+            bounds_w: 120.0,
+            bounds_h: 80.0,
+            center_x: 80.0,
+            center_y: 60.0,
+        };
+        let corners = [(50.0, 40.0), (110.0, 40.0), (110.0, 80.0), (50.0, 80.0)];
+        let mut appearance = MotionState::default().appearance;
+        appearance.shadow_opacity = 1.0;
+        appearance.shadow_blur = 20.0;
+        appearance.shadow_position = (0.0, 0.0);
+        {
+            let context = Context::new(&frame).unwrap();
+            context.set_source_rgb(1.0, 1.0, 1.0);
+            context.paint().unwrap();
+            paint_card_shadow(&context, stage, corners, &appearance, 0.0);
+        }
+        frame.flush();
+        let data = frame.data().unwrap();
+        let channel = |x: usize, y: usize| data[(y * 160 + x) * 4];
+
+        assert_eq!(channel(10, 60), 255, "shadow escaped the scene bounds");
+        assert!(channel(80, 60) < channel(46, 60));
+        assert!(channel(46, 60) < channel(30, 60));
+
+        let mut falloff = (25..50).map(|x| channel(x, 60)).collect::<Vec<_>>();
+        falloff.sort_unstable();
+        falloff.dedup();
+        assert!(falloff.len() > 12, "shadow edge is visibly stepped");
+    }
+
+    #[test]
+    fn zero_blur_keeps_a_hard_offset_shadow() {
+        let mut frame = ImageSurface::create(Format::ARgb32, 100, 80).unwrap();
+        let stage = MotionStage::frame(100.0, 80.0);
+        let corners = [(30.0, 20.0), (70.0, 20.0), (70.0, 60.0), (30.0, 60.0)];
+        let mut appearance = MotionState::default().appearance;
+        appearance.shadow_opacity = 1.0;
+        appearance.shadow_blur = 0.0;
+        appearance.shadow_position = (8.0, 8.0);
+        {
+            let context = Context::new(&frame).unwrap();
+            context.set_source_rgb(1.0, 1.0, 1.0);
+            context.paint().unwrap();
+            paint_card_shadow(&context, stage, corners, &appearance, 0.0);
+        }
+        frame.flush();
+        let data = frame.data().unwrap();
+        let channel = |x: usize, y: usize| data[(y * 100 + x) * 4];
+        assert_eq!(channel(75, 40), 0);
+        assert_eq!(channel(25, 40), 255);
+    }
+
+    #[test]
+    fn background_blur_softens_image_edges() {
+        let source = ImageSurface::create(Format::ARgb32, 64, 64).unwrap();
+        {
+            let context = Context::new(&source).unwrap();
+            context.set_source_rgb(0.0, 0.0, 0.0);
+            context.rectangle(0.0, 0.0, 32.0, 64.0);
+            context.fill().unwrap();
+            context.set_source_rgb(1.0, 1.0, 1.0);
+            context.rectangle(32.0, 0.0, 32.0, 64.0);
+            context.fill().unwrap();
+        }
+        source.flush();
+
+        let mut frame = ImageSurface::create(Format::ARgb32, 64, 64).unwrap();
+        {
+            let context = Context::new(&frame).unwrap();
+            paint_image_background(&context, &source, 0.0, 0.0, 64.0, 64.0, 1.0);
+        }
+        frame.flush();
+        let data = frame.data().unwrap();
+        let channel = |x: usize| data[(32 * 64 + x) * 4];
+        assert!(channel(28) > 0);
+        assert!(channel(28) < channel(36));
+        assert!(channel(36) < 255);
     }
 
     #[test]

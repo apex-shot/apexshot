@@ -7,9 +7,9 @@
 use gtk4::cairo::Context;
 use gtk4::{
     gdk, glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, CheckButton,
-    ColorButton, DrawingArea, Entry, EventControllerKey, EventControllerMotion, FileChooserAction,
-    FileChooserNative, FileFilter, GestureClick, GestureDrag, Grid, Label, Orientation, Overlay,
-    ResponseType, Stack, ToggleButton,
+    ColorChooserWidget, DrawingArea, Entry, EventControllerKey, EventControllerMotion,
+    FileChooserAction, FileChooserNative, FileFilter, GestureClick, GestureDrag, Grid, Label,
+    MenuButton, Orientation, Overlay, Popover, ResponseType, Stack, ToggleButton,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -661,6 +661,29 @@ fn build_motion_appearance_panel(
     session: &MotionSession,
     preview: &DrawingArea,
 ) -> GtkBox {
+    let (
+        initial_background_color,
+        initial_gradient_start,
+        initial_gradient_end,
+        initial_border,
+        initial_shadow_opacity,
+        initial_shadow_blur,
+        initial_shadow_position,
+        initial_fill_type,
+    ) = {
+        let runtime = session.runtime.borrow();
+        let appearance = &runtime.motion.appearance;
+        (
+            motion_rgba(appearance.background_color),
+            motion_rgba(appearance.gradient_color_1),
+            motion_rgba(appearance.gradient_color_2),
+            motion_rgba(appearance.border_fill_color),
+            appearance.shadow_opacity,
+            appearance.shadow_blur,
+            appearance.shadow_position,
+            appearance.background_fill_type.clone(),
+        )
+    };
     let root = GtkBox::new(Orientation::Vertical, 12);
     root.add_css_class("editor-inspector-placeholder-shell");
     root.add_css_class("editor-motion-inspector");
@@ -676,55 +699,37 @@ fn build_motion_appearance_panel(
     let fill_label = Label::new(Some(&t("Background")));
     fill_label.add_css_class("editor-background-section-title");
     fill_label.set_xalign(0.0);
-    let fills = GtkBox::new(Orientation::Horizontal, 4);
-    fills.set_homogeneous(true);
-    let fill_options = [
-        ("None", MotionBackgroundFillType::None),
-        ("Color", MotionBackgroundFillType::Color),
-        ("Gradient", MotionBackgroundFillType::Gradient),
-        ("Wallpaper", MotionBackgroundFillType::Wallpaper),
-        ("Image", MotionBackgroundFillType::Image),
-    ];
-    for (label, fill_type) in fill_options {
-        let button = Button::with_label(&t(label));
-        button.set_has_frame(false);
-        button.add_css_class("editor-inspector-tab-button");
-        if fill_type == MotionBackgroundFillType::None {
-            button.add_css_class("active-inspector-tab");
-        }
-        button.connect_clicked({
-            let runtime = session.runtime.clone();
-            let preview = preview.clone();
-            let fills = fills.clone();
-            let button = button.clone();
-            move |_| {
-                runtime.borrow_mut().motion.appearance.background_fill_type = fill_type.clone();
-                let mut child = fills.first_child();
-                while let Some(widget) = child {
-                    widget.remove_css_class("active-inspector-tab");
-                    child = widget.next_sibling();
-                }
-                button.add_css_class("active-inspector-tab");
-                preview.queue_draw();
-            }
-        });
-        fills.append(&button);
+    let none_button = Button::with_label(&t("None"));
+    none_button.set_has_frame(false);
+    none_button.set_hexpand(true);
+    none_button.add_css_class("recording-editor-zoom-chip");
+    if initial_fill_type == MotionBackgroundFillType::None {
+        none_button.add_css_class("recording-editor-zoom-chip-active");
     }
+    none_button.connect_clicked({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        let none_button = none_button.clone();
+        move |_| {
+            runtime.borrow_mut().motion.appearance.background_fill_type =
+                MotionBackgroundFillType::None;
+            none_button.add_css_class("recording-editor-zoom-chip-active");
+            preview.queue_draw();
+        }
+    });
     fill_section.append(&fill_label);
-    fill_section.append(&fills);
+    fill_section.append(&none_button);
     root.append(&fill_section);
 
     let color_section = GtkBox::new(Orientation::Vertical, 6);
     let color_title = Label::new(Some(&t("Color")));
     color_title.add_css_class("editor-background-section-title");
     color_title.set_xalign(0.0);
-    let color = ColorButton::new();
-    color.set_rgba(&gdk::RGBA::new(0.0, 0.0, 0.0, 1.0));
-    color.connect_rgba_notify({
+    let color = motion_color_control(initial_background_color, "Background color", {
         let runtime = session.runtime.clone();
         let preview = preview.clone();
-        move |button| {
-            let rgba = button.rgba();
+        let none_button = none_button.clone();
+        move |rgba| {
             let mut runtime = runtime.borrow_mut();
             runtime.motion.appearance.background_color = [
                 rgba.red().into(),
@@ -733,6 +738,7 @@ fn build_motion_appearance_panel(
                 rgba.alpha().into(),
             ];
             runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+            none_button.remove_css_class("recording-editor-zoom-chip-active");
             preview.queue_draw();
         }
     });
@@ -745,14 +751,11 @@ fn build_motion_appearance_panel(
     gradient_title.add_css_class("editor-background-section-title");
     gradient_title.set_xalign(0.0);
     let gradient_row = GtkBox::new(Orientation::Horizontal, 6);
-    let gradient_start = ColorButton::new();
-    gradient_start.set_rgba(&gdk::RGBA::new(0.0, 0.0, 0.0, 1.0));
-    gradient_start.set_tooltip_text(Some(&t("Gradient start color")));
-    gradient_start.connect_rgba_notify({
+    let gradient_start = motion_color_control(initial_gradient_start, "Gradient start color", {
         let runtime = session.runtime.clone();
         let preview = preview.clone();
-        move |button| {
-            let rgba = button.rgba();
+        let none_button = none_button.clone();
+        move |rgba| {
             let mut runtime = runtime.borrow_mut();
             runtime.motion.appearance.gradient_color_1 = [
                 rgba.red().into(),
@@ -762,17 +765,15 @@ fn build_motion_appearance_panel(
             ];
             runtime.motion.appearance.selected_gradient_preset_index = None;
             runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
+            none_button.remove_css_class("recording-editor-zoom-chip-active");
             preview.queue_draw();
         }
     });
-    let gradient_end = ColorButton::new();
-    gradient_end.set_rgba(&gdk::RGBA::new(0.0, 0.0, 0.0, 1.0));
-    gradient_end.set_tooltip_text(Some(&t("Gradient end color")));
-    gradient_end.connect_rgba_notify({
+    let gradient_end = motion_color_control(initial_gradient_end, "Gradient end color", {
         let runtime = session.runtime.clone();
         let preview = preview.clone();
-        move |button| {
-            let rgba = button.rgba();
+        let none_button = none_button.clone();
+        move |rgba| {
             let mut runtime = runtime.borrow_mut();
             runtime.motion.appearance.gradient_color_2 = [
                 rgba.red().into(),
@@ -782,6 +783,7 @@ fn build_motion_appearance_panel(
             ];
             runtime.motion.appearance.selected_gradient_preset_index = None;
             runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
+            none_button.remove_css_class("recording-editor-zoom-chip-active");
             preview.queue_draw();
         }
     });
@@ -798,6 +800,7 @@ fn build_motion_appearance_panel(
         window,
         session,
         preview,
+        &none_button,
     ));
     root.append(&motion_image_section(
         "Image",
@@ -806,6 +809,7 @@ fn build_motion_appearance_panel(
         window,
         session,
         preview,
+        &none_button,
     ));
 
     let padding = motion_appearance_slider("Padding", 0.0, 200.0, 96.0, "px");
@@ -841,17 +845,72 @@ fn build_motion_appearance_panel(
     });
     root.append(&noise.widget());
 
+    let shadow_opacity =
+        motion_appearance_slider("Shadow opacity", 0.0, 1.0, initial_shadow_opacity, "%");
+    shadow_opacity.connect_value_changed({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |slider| {
+            runtime.borrow_mut().motion.appearance.shadow_opacity = slider.value();
+            preview.queue_draw();
+        }
+    });
+    root.append(&shadow_opacity.widget());
+
+    let shadow_blur =
+        motion_appearance_slider("Shadow blur", 0.0, 120.0, initial_shadow_blur, "px");
+    shadow_blur.connect_value_changed({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |slider| {
+            runtime.borrow_mut().motion.appearance.shadow_blur = slider.value();
+            preview.queue_draw();
+        }
+    });
+    root.append(&shadow_blur.widget());
+
+    let shadow_x = motion_appearance_slider(
+        "Shadow position X",
+        -200.0,
+        200.0,
+        initial_shadow_position.0,
+        "px",
+    );
+    shadow_x.connect_value_changed({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |slider| {
+            runtime.borrow_mut().motion.appearance.shadow_position.0 = slider.value();
+            preview.queue_draw();
+        }
+    });
+    root.append(&shadow_x.widget());
+
+    let shadow_y = motion_appearance_slider(
+        "Shadow position Y",
+        -200.0,
+        200.0,
+        initial_shadow_position.1,
+        "px",
+    );
+    shadow_y.connect_value_changed({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |slider| {
+            runtime.borrow_mut().motion.appearance.shadow_position.1 = slider.value();
+            preview.queue_draw();
+        }
+    });
+    root.append(&shadow_y.widget());
+
     let border_section = GtkBox::new(Orientation::Vertical, 6);
     let border_title = Label::new(Some(&t("Border Color")));
     border_title.add_css_class("editor-background-section-title");
     border_title.set_xalign(0.0);
-    let border_color = ColorButton::new();
-    border_color.set_rgba(&gdk::RGBA::new(1.0, 1.0, 1.0, 1.0));
-    border_color.connect_rgba_notify({
+    let border_color = motion_color_control(initial_border, "Border color", {
         let runtime = session.runtime.clone();
         let preview = preview.clone();
-        move |button| {
-            let rgba = button.rgba();
+        move |rgba| {
             runtime.borrow_mut().motion.appearance.border_fill_color = [
                 rgba.red().into(),
                 rgba.green().into(),
@@ -891,6 +950,76 @@ fn build_motion_appearance_panel(
     root
 }
 
+fn motion_color_control(
+    initial: gdk::RGBA,
+    tooltip: &str,
+    on_changed: impl Fn(gdk::RGBA) + 'static,
+) -> Overlay {
+    let trigger = MenuButton::new();
+    trigger.set_size_request(32, 32);
+    trigger.set_halign(Align::Start);
+    trigger.set_hexpand(false);
+    trigger.set_tooltip_text(Some(&t(tooltip)));
+    trigger.add_css_class("editor-motion-color-button");
+
+    let swatch = DrawingArea::new();
+    swatch.set_content_width(24);
+    swatch.set_content_height(24);
+    swatch.set_can_target(false);
+    swatch.set_halign(Align::Center);
+    swatch.set_valign(Align::Center);
+    swatch.add_css_class("editor-motion-color-swatch");
+    let selected = Rc::new(RefCell::new(initial));
+    swatch.set_draw_func({
+        let selected = selected.clone();
+        move |_area, context, width, height| {
+            let rgba = selected.borrow();
+            context.set_source_rgba(
+                rgba.red().into(),
+                rgba.green().into(),
+                rgba.blue().into(),
+                rgba.alpha().into(),
+            );
+            context.rectangle(0.0, 0.0, width as f64, height as f64);
+            context.fill().ok();
+        }
+    });
+    let trigger_host = Overlay::new();
+    trigger_host.set_size_request(32, 32);
+    trigger_host.set_halign(Align::Start);
+    trigger_host.set_hexpand(false);
+    trigger_host.set_child(Some(&trigger));
+    trigger_host.add_overlay(&swatch);
+
+    let chooser = ColorChooserWidget::new();
+    chooser.set_use_alpha(true);
+    chooser.set_rgba(&initial);
+    chooser.add_css_class("editor-motion-color-chooser");
+    chooser.connect_rgba_notify(move |chooser| {
+        let rgba = chooser.rgba();
+        *selected.borrow_mut() = rgba;
+        swatch.queue_draw();
+        on_changed(rgba);
+    });
+
+    let body = GtkBox::new(Orientation::Vertical, 0);
+    body.add_css_class("editor-motion-color-popover-body");
+    body.append(&chooser);
+
+    let popover = Popover::new();
+    popover.set_has_arrow(false);
+    popover.set_position(gtk4::PositionType::Bottom);
+    popover.set_offset(0, 4);
+    popover.add_css_class("editor-motion-color-popover");
+    popover.set_child(Some(&body));
+    trigger.set_popover(Some(&popover));
+    trigger_host
+}
+
+fn motion_rgba([red, green, blue, alpha]: [f64; 4]) -> gdk::RGBA {
+    gdk::RGBA::new(red as f32, green as f32, blue as f32, alpha as f32)
+}
+
 fn motion_appearance_slider(
     title: &str,
     min: f64,
@@ -918,6 +1047,7 @@ fn motion_image_section(
     window: &ApplicationWindow,
     session: &MotionSession,
     preview: &DrawingArea,
+    none_button: &Button,
 ) -> GtkBox {
     let section = GtkBox::new(Orientation::Vertical, 6);
     let label = Label::new(Some(&t(title)));
@@ -930,6 +1060,7 @@ fn motion_image_section(
         let window = window.downgrade();
         let session = session.clone();
         let preview = preview.clone();
+        let none_button = none_button.clone();
         let dialog_title = dialog_title.to_string();
         move |_| {
             let chooser = FileChooserNative::new(
@@ -948,6 +1079,7 @@ fn motion_image_section(
             let session = session.clone();
             let preview = preview.clone();
             let kind = kind.clone();
+            let none_button = none_button.clone();
             chooser.connect_response(move |dialog, response| {
                 if response != ResponseType::Accept {
                     return;
@@ -978,6 +1110,7 @@ fn motion_image_section(
                 };
                 runtime.background_surface =
                     active_path.and_then(super::motion_render::load_motion_background_surface);
+                none_button.remove_css_class("recording-editor-zoom-chip-active");
                 preview.queue_draw();
             });
             chooser.show();
@@ -2812,5 +2945,18 @@ mod tests {
         assert!(!session.has_segments());
         let identity = session.runtime.borrow().motion.sample(1.5);
         assert!((identity.scale - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn appearance_uses_one_none_tile_instead_of_redundant_fill_tabs() {
+        let source = include_str!("motion_mode.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(source.contains("none_button.add_css_class(\"recording-editor-zoom-chip\")"));
+        assert!(
+            source.contains("none_button.remove_css_class(\"recording-editor-zoom-chip-active\")")
+        );
+        assert!(!source.contains("let fill_options = ["));
     }
 }
