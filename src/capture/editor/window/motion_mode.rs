@@ -7,8 +7,9 @@
 use gtk4::cairo::Context;
 use gtk4::{
     gdk, glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, CheckButton,
-    DrawingArea, Entry, EventControllerKey, EventControllerMotion, GestureClick, GestureDrag, Grid,
-    Label, Orientation, Overlay, Stack, ToggleButton,
+    ColorButton, DrawingArea, Entry, EventControllerKey, EventControllerMotion, FileChooserAction,
+    FileChooserNative, FileFilter, GestureClick, GestureDrag, Grid, Label, Orientation, Overlay,
+    ResponseType, Stack, ToggleButton,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -22,12 +23,12 @@ use crate::capture::editor::state::EditorState;
 use crate::config::{load_config, save_config};
 use crate::i18n::t;
 use crate::recording::editor::model::{
-    MotionEffectTransformTiming, MotionState, MotionTextAnimation, MotionTextScope,
-    DEFAULT_MOTION_DURATION_SECONDS, DEFAULT_MOTION_TEXT_POS_X, DEFAULT_MOTION_TEXT_POS_Y,
-    DEFAULT_MOTION_TEXT_SIZE, MAX_MOTION_DURATION_SECONDS, MAX_MOTION_POS, MAX_MOTION_TEXT_POS,
-    MAX_MOTION_TEXT_SIZE, MAX_MOTION_YAW, MAX_ZOOM_EASE_MS, MIN_MOTION_DURATION_SECONDS,
-    MIN_MOTION_POS, MIN_MOTION_TEXT_POS, MIN_MOTION_TEXT_SIZE, MIN_MOTION_YAW, MIN_ZOOM_EASE_MS,
-    MOTION_SCALE_PRESETS,
+    MotionBackgroundFillType, MotionEffectTransformTiming, MotionState, MotionTextAnimation,
+    MotionTextScope, DEFAULT_MOTION_DURATION_SECONDS, DEFAULT_MOTION_TEXT_POS_X,
+    DEFAULT_MOTION_TEXT_POS_Y, DEFAULT_MOTION_TEXT_SIZE, MAX_MOTION_DURATION_SECONDS,
+    MAX_MOTION_POS, MAX_MOTION_TEXT_POS, MAX_MOTION_TEXT_SIZE, MAX_MOTION_YAW, MAX_ZOOM_EASE_MS,
+    MIN_MOTION_DURATION_SECONDS, MIN_MOTION_POS, MIN_MOTION_TEXT_POS, MIN_MOTION_TEXT_SIZE,
+    MIN_MOTION_YAW, MIN_ZOOM_EASE_MS, MOTION_SCALE_PRESETS,
 };
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
@@ -55,6 +56,7 @@ pub(super) struct MotionModeParts {
     pub playhead_overlay: DrawingArea,
     pub page: GtkBox,
     pub inspector: GtkBox,
+    pub appearance_inspector: GtkBox,
     pub duration_slider: FillSlider,
     pub duration_value: Label,
     pub blur_slider: FillSlider,
@@ -114,6 +116,7 @@ pub(super) struct MotionModeParts {
 pub(super) struct MotionRuntime {
     pub(super) snapshot: Option<RgbaImage>,
     pub(super) card: Option<gtk4::cairo::ImageSurface>,
+    pub(super) background_surface: Option<gtk4::cairo::ImageSurface>,
     pub(super) motion: MotionState,
     pub(super) playing: bool,
     pub(super) live_preview: bool,
@@ -127,6 +130,7 @@ impl MotionRuntime {
         Self {
             snapshot: None,
             card: None,
+            background_surface: None,
             motion: MotionState::default(),
             playing: false,
             live_preview: false,
@@ -162,6 +166,17 @@ impl MotionSession {
         let snapshot = state.to_final_image().ok();
         let mut runtime = self.runtime.borrow_mut();
         runtime.card = snapshot.as_ref().and_then(rgba_image_to_surface);
+        let scene_path = match runtime.motion.appearance.background_fill_type {
+            MotionBackgroundFillType::Wallpaper => {
+                runtime.motion.appearance.wallpaper_image_name.as_deref()
+            }
+            MotionBackgroundFillType::Image => {
+                runtime.motion.appearance.custom_background_image.as_deref()
+            }
+            _ => None,
+        };
+        runtime.background_surface =
+            scene_path.and_then(super::motion_render::load_motion_background_surface);
         runtime.snapshot = snapshot;
         runtime.motion.playhead = 0.0;
         runtime.playing = false;
@@ -190,6 +205,7 @@ impl MotionSession {
         let mut runtime = self.runtime.borrow_mut();
         runtime.snapshot = None;
         runtime.card = None;
+        runtime.background_surface = None;
         runtime.playing = false;
         runtime.live_preview = false;
         runtime.last_tick = None;
@@ -202,7 +218,10 @@ impl MotionSession {
     }
 }
 
-pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionSession) {
+pub(super) fn build_motion_mode(
+    window: &ApplicationWindow,
+    prefers_dark: bool,
+) -> (MotionModeParts, MotionSession) {
     let session = MotionSession::new(prefers_dark);
 
     let static_toolbar = GtkBox::new(Orientation::Horizontal, 0);
@@ -523,6 +542,8 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
     delete_btn.set_sensitive(false);
     inspector.append(&delete_btn);
 
+    let appearance_inspector = build_motion_appearance_panel(window, &session, &preview);
+
     let confirm_overlay = GtkBox::new(Orientation::Vertical, 0);
     confirm_overlay.add_css_class("editor-motion-confirm-scrim");
     confirm_overlay.set_halign(Align::Fill);
@@ -561,6 +582,7 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
             playhead_overlay: timeline.playhead,
             page,
             inspector,
+            appearance_inspector,
             duration_slider,
             duration_value,
             blur_slider,
@@ -627,7 +649,343 @@ pub(super) struct MotionModeChrome {
     pub motion_control: GtkBox,
     pub history_control: GtkBox,
     pub inspector_tabs: GtkBox,
+    pub motion_tabs: GtkBox,
     pub inspector_stack: Stack,
+}
+
+/// Shotbase keeps Motion appearance as a scene-level inspector rather than an
+/// animation clip.  The five fill controls map one-to-one to the recovered
+/// `BackgroundFillType` cases and only mutate the compositor state.
+fn build_motion_appearance_panel(
+    window: &ApplicationWindow,
+    session: &MotionSession,
+    preview: &DrawingArea,
+) -> GtkBox {
+    let root = GtkBox::new(Orientation::Vertical, 12);
+    root.add_css_class("editor-inspector-placeholder-shell");
+    root.add_css_class("editor-motion-inspector");
+    root.set_hexpand(false);
+    root.set_vexpand(false);
+
+    let title = Label::new(Some(&t("Appearance")));
+    title.add_css_class("editor-inspector-title");
+    title.set_xalign(0.0);
+    root.append(&title);
+
+    let fill_section = GtkBox::new(Orientation::Vertical, 6);
+    let fill_label = Label::new(Some(&t("Background")));
+    fill_label.add_css_class("editor-background-section-title");
+    fill_label.set_xalign(0.0);
+    let fills = GtkBox::new(Orientation::Horizontal, 4);
+    fills.set_homogeneous(true);
+    let fill_options = [
+        ("None", MotionBackgroundFillType::None),
+        ("Color", MotionBackgroundFillType::Color),
+        ("Gradient", MotionBackgroundFillType::Gradient),
+        ("Wallpaper", MotionBackgroundFillType::Wallpaper),
+        ("Image", MotionBackgroundFillType::Image),
+    ];
+    for (label, fill_type) in fill_options {
+        let button = Button::with_label(&t(label));
+        button.set_has_frame(false);
+        button.add_css_class("editor-inspector-tab-button");
+        if fill_type == MotionBackgroundFillType::None {
+            button.add_css_class("active-inspector-tab");
+        }
+        button.connect_clicked({
+            let runtime = session.runtime.clone();
+            let preview = preview.clone();
+            let fills = fills.clone();
+            let button = button.clone();
+            move |_| {
+                runtime.borrow_mut().motion.appearance.background_fill_type = fill_type.clone();
+                let mut child = fills.first_child();
+                while let Some(widget) = child {
+                    widget.remove_css_class("active-inspector-tab");
+                    child = widget.next_sibling();
+                }
+                button.add_css_class("active-inspector-tab");
+                preview.queue_draw();
+            }
+        });
+        fills.append(&button);
+    }
+    fill_section.append(&fill_label);
+    fill_section.append(&fills);
+    root.append(&fill_section);
+
+    let color_section = GtkBox::new(Orientation::Vertical, 6);
+    let color_title = Label::new(Some(&t("Color")));
+    color_title.add_css_class("editor-background-section-title");
+    color_title.set_xalign(0.0);
+    let color = ColorButton::new();
+    color.set_rgba(&gdk::RGBA::new(0.0, 0.0, 0.0, 1.0));
+    color.connect_rgba_notify({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |button| {
+            let rgba = button.rgba();
+            let mut runtime = runtime.borrow_mut();
+            runtime.motion.appearance.background_color = [
+                rgba.red().into(),
+                rgba.green().into(),
+                rgba.blue().into(),
+                rgba.alpha().into(),
+            ];
+            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+            preview.queue_draw();
+        }
+    });
+    color_section.append(&color_title);
+    color_section.append(&color);
+    root.append(&color_section);
+
+    let gradient_section = GtkBox::new(Orientation::Vertical, 6);
+    let gradient_title = Label::new(Some(&t("Gradient")));
+    gradient_title.add_css_class("editor-background-section-title");
+    gradient_title.set_xalign(0.0);
+    let gradient_row = GtkBox::new(Orientation::Horizontal, 6);
+    let gradient_start = ColorButton::new();
+    gradient_start.set_rgba(&gdk::RGBA::new(0.0, 0.0, 0.0, 1.0));
+    gradient_start.set_tooltip_text(Some(&t("Gradient start color")));
+    gradient_start.connect_rgba_notify({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |button| {
+            let rgba = button.rgba();
+            let mut runtime = runtime.borrow_mut();
+            runtime.motion.appearance.gradient_color_1 = [
+                rgba.red().into(),
+                rgba.green().into(),
+                rgba.blue().into(),
+                rgba.alpha().into(),
+            ];
+            runtime.motion.appearance.selected_gradient_preset_index = None;
+            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
+            preview.queue_draw();
+        }
+    });
+    let gradient_end = ColorButton::new();
+    gradient_end.set_rgba(&gdk::RGBA::new(0.0, 0.0, 0.0, 1.0));
+    gradient_end.set_tooltip_text(Some(&t("Gradient end color")));
+    gradient_end.connect_rgba_notify({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |button| {
+            let rgba = button.rgba();
+            let mut runtime = runtime.borrow_mut();
+            runtime.motion.appearance.gradient_color_2 = [
+                rgba.red().into(),
+                rgba.green().into(),
+                rgba.blue().into(),
+                rgba.alpha().into(),
+            ];
+            runtime.motion.appearance.selected_gradient_preset_index = None;
+            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
+            preview.queue_draw();
+        }
+    });
+    gradient_row.append(&gradient_start);
+    gradient_row.append(&gradient_end);
+    gradient_section.append(&gradient_title);
+    gradient_section.append(&gradient_row);
+    root.append(&gradient_section);
+
+    root.append(&motion_image_section(
+        "Wallpaper",
+        "Choose Wallpaper Image",
+        MotionBackgroundFillType::Wallpaper,
+        window,
+        session,
+        preview,
+    ));
+    root.append(&motion_image_section(
+        "Image",
+        "Choose Background Image",
+        MotionBackgroundFillType::Image,
+        window,
+        session,
+        preview,
+    ));
+
+    let padding = motion_appearance_slider("Padding", 0.0, 200.0, 96.0, "px");
+    padding.connect_value_changed({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |slider| {
+            runtime.borrow_mut().motion.appearance.background_padding = slider.value();
+            preview.queue_draw();
+        }
+    });
+    root.append(&padding.widget());
+
+    let blur = motion_appearance_slider("Background blur", 0.0, 1.0, 0.0, "%");
+    blur.connect_value_changed({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |slider| {
+            runtime.borrow_mut().motion.appearance.background_blur = slider.value();
+            preview.queue_draw();
+        }
+    });
+    root.append(&blur.widget());
+
+    let noise = motion_appearance_slider("Background noise", 0.0, 1.0, 0.0, "%");
+    noise.connect_value_changed({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |slider| {
+            runtime.borrow_mut().motion.appearance.background_noise = slider.value();
+            preview.queue_draw();
+        }
+    });
+    root.append(&noise.widget());
+
+    let border_section = GtkBox::new(Orientation::Vertical, 6);
+    let border_title = Label::new(Some(&t("Border Color")));
+    border_title.add_css_class("editor-background-section-title");
+    border_title.set_xalign(0.0);
+    let border_color = ColorButton::new();
+    border_color.set_rgba(&gdk::RGBA::new(1.0, 1.0, 1.0, 1.0));
+    border_color.connect_rgba_notify({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |button| {
+            let rgba = button.rgba();
+            runtime.borrow_mut().motion.appearance.border_fill_color = [
+                rgba.red().into(),
+                rgba.green().into(),
+                rgba.blue().into(),
+                rgba.alpha().into(),
+            ];
+            preview.queue_draw();
+        }
+    });
+    border_section.append(&border_title);
+    border_section.append(&border_color);
+    root.append(&border_section);
+
+    let thickness = motion_appearance_slider("Border thickness", 0.0, 24.0, 0.0, "px");
+    thickness.connect_value_changed({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |slider| {
+            runtime.borrow_mut().motion.appearance.border_thickness = slider.value();
+            preview.queue_draw();
+        }
+    });
+    root.append(&thickness.widget());
+
+    // The radius rounds the captured image card itself; the background
+    // scene stays a full rectangle.
+    let radius = motion_appearance_slider("Border Radius", 0.0, 120.0, 0.0, "px");
+    radius.connect_value_changed({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |slider| {
+            runtime.borrow_mut().motion.appearance.border_radius = slider.value();
+            preview.queue_draw();
+        }
+    });
+    root.append(&radius.widget());
+    root
+}
+
+fn motion_appearance_slider(
+    title: &str,
+    min: f64,
+    max: f64,
+    value: f64,
+    suffix: &'static str,
+) -> FillSlider {
+    let slider = FillSlider::new_with_value_text(&t(title), move |value, _, _| {
+        if suffix == "%" {
+            format!("{:.0}%", value * 100.0)
+        } else {
+            format!("{value:.0}{suffix}")
+        }
+    });
+    slider.set_range(min, max);
+    slider.set_increments((max - min) / 100.0, (max - min) / 10.0);
+    slider.set_value(value);
+    slider
+}
+
+fn motion_image_section(
+    title: &str,
+    dialog_title: &str,
+    kind: MotionBackgroundFillType,
+    window: &ApplicationWindow,
+    session: &MotionSession,
+    preview: &DrawingArea,
+) -> GtkBox {
+    let section = GtkBox::new(Orientation::Vertical, 6);
+    let label = Label::new(Some(&t(title)));
+    label.add_css_class("editor-background-section-title");
+    label.set_xalign(0.0);
+    let choose = Button::with_label(&t("Choose…"));
+    choose.set_has_frame(false);
+    choose.add_css_class("editor-sidebar-action-button");
+    choose.connect_clicked({
+        let window = window.downgrade();
+        let session = session.clone();
+        let preview = preview.clone();
+        let dialog_title = dialog_title.to_string();
+        move |_| {
+            let chooser = FileChooserNative::new(
+                Some(&dialog_title),
+                window.upgrade().as_ref(),
+                FileChooserAction::Open,
+                Some(&t("Choose")),
+                Some(&t("Cancel")),
+            );
+            let filter = FileFilter::new();
+            filter.set_name(Some(&t("Images")));
+            for pattern in ["*.png", "*.jpg", "*.jpeg", "*.webp"] {
+                filter.add_pattern(pattern);
+            }
+            chooser.add_filter(&filter);
+            let session = session.clone();
+            let preview = preview.clone();
+            let kind = kind.clone();
+            chooser.connect_response(move |dialog, response| {
+                if response != ResponseType::Accept {
+                    return;
+                }
+                let Some(path) = dialog.file().and_then(|file| file.path()) else {
+                    return;
+                };
+                let path = path.to_string_lossy().into_owned();
+                let mut runtime = session.runtime.borrow_mut();
+                match kind {
+                    MotionBackgroundFillType::Wallpaper => {
+                        runtime.motion.appearance.wallpaper_image_name = Some(path);
+                    }
+                    MotionBackgroundFillType::Image => {
+                        runtime.motion.appearance.custom_background_image = Some(path);
+                    }
+                    _ => return,
+                }
+                runtime.motion.appearance.background_fill_type = kind.clone();
+                let active_path = match kind {
+                    MotionBackgroundFillType::Wallpaper => {
+                        runtime.motion.appearance.wallpaper_image_name.as_deref()
+                    }
+                    MotionBackgroundFillType::Image => {
+                        runtime.motion.appearance.custom_background_image.as_deref()
+                    }
+                    _ => None,
+                };
+                runtime.background_surface =
+                    active_path.and_then(super::motion_render::load_motion_background_surface);
+                preview.queue_draw();
+            });
+            chooser.show();
+        }
+    });
+    section.append(&label);
+    section.append(&choose);
+    section
 }
 
 pub(super) fn apply_editor_mode(chrome: &MotionModeChrome, motion: bool, last_inspector: &str) {
@@ -638,6 +996,7 @@ pub(super) fn apply_editor_mode(chrome: &MotionModeChrome, motion: bool, last_in
     chrome.motion_control.set_visible(!motion);
     chrome.history_control.set_visible(!motion);
     chrome.inspector_tabs.set_visible(!motion);
+    chrome.motion_tabs.set_visible(motion);
     if motion {
         chrome.inspector_stack.set_visible_child_name(MOTION_PAGE);
     } else {
@@ -1646,10 +2005,12 @@ pub(super) fn wire_motion_controls(
             };
             let transform = runtime.motion.sample(runtime.motion.playhead);
             let zoom_anchor = runtime.motion.zoom_anchor_at(runtime.motion.playhead);
+            let stage = super::motion_render::MotionStage::preview(width, height);
+            let padding = runtime.motion.appearance.background_padding;
             let (pos_x, pos_y) = super::motion_render::view_point_to_motion_text_position(
                 card,
-                width,
-                height,
+                stage,
+                padding,
                 transform,
                 zoom_anchor,
                 x,
@@ -1683,10 +2044,12 @@ pub(super) fn wire_motion_controls(
                 .selected_text_segment()
                 .and_then(|segment| {
                     runtime.card.as_ref().map(|card| {
+                        let width = preview.allocated_width().max(1) as f64;
+                        let height = preview.allocated_height().max(1) as f64;
                         super::motion_render::motion_text_contains_view_point(
                             card,
-                            preview.allocated_width().max(1) as f64,
-                            preview.allocated_height().max(1) as f64,
+                            super::motion_render::MotionStage::preview(width, height),
+                            runtime.motion.appearance.background_padding,
                             runtime.motion.sample(runtime.motion.playhead),
                             runtime.motion.zoom_anchor_at(runtime.motion.playhead),
                             segment,
@@ -2381,6 +2744,7 @@ fn draw_motion_preview(
         height,
         surface,
         &runtime.motion,
+        runtime.background_surface.as_ref(),
         runtime.motion.playhead,
         true,
         prefers_dark,

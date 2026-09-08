@@ -1269,7 +1269,7 @@ fn setup_editor_window_full(
         save_btn.set_sensitive(false);
     }
 
-    let (motion_parts, motion_session) = motion_mode::build_motion_mode(prefers_dark);
+    let (motion_parts, motion_session) = motion_mode::build_motion_mode(&window, prefers_dark);
     let motion_session = Rc::new(motion_session);
     let last_inspector = Rc::new(RefCell::new(String::from("placeholder")));
     let in_motion = Rc::new(Cell::new(false));
@@ -1493,6 +1493,9 @@ fn setup_editor_window_full(
 
     let InspectorParts {
         inspector_tabs,
+        motion_tabs,
+        motion_tab_btn,
+        appearance_tab_btn,
         background_tab_btn,
         colors_tab_btn,
         inspector,
@@ -1522,6 +1525,7 @@ fn setup_editor_window_full(
         colors_inspector: &colors_inspector,
         placeholder_inspector: &placeholder_inspector,
         motion_inspector: &motion_parts.inspector,
+        motion_appearance_inspector: &motion_parts.appearance_inspector,
         copy_btn: &copy_btn,
         upload_btn: &upload_btn,
         save_btn: &save_btn,
@@ -2059,6 +2063,11 @@ fn setup_editor_window_full(
         history_group: &history_group,
         zoom_popup: &zoom_popup,
     });
+    // Add this after the full-width drag chrome. GTK overlays are hit-tested
+    // in stacking order; placing the Motion tool pill above the drag strip is
+    // what keeps both buttons clickable, just like the static toolbar tools.
+    canvas_with_toolbar.add_overlay(&motion_tabs);
+    canvas_with_toolbar.set_clip_overlay(&motion_tabs, true);
     motion_mode::install_confirm_overlay(&root_overlay, &motion_parts.confirm_overlay);
 
     let motion_chrome = Rc::new(motion_mode::MotionModeChrome {
@@ -2068,7 +2077,28 @@ fn setup_editor_window_full(
         motion_control: window_chrome.motion_control,
         history_control: window_chrome.history_control,
         inspector_tabs: inspector_tabs.clone(),
+        motion_tabs: motion_tabs.clone(),
         inspector_stack: inspector_stack.clone(),
+    });
+    motion_tab_btn.connect_clicked({
+        let inspector_stack = inspector_stack.clone();
+        let motion_tab_btn = motion_tab_btn.clone();
+        let appearance_tab_btn = appearance_tab_btn.clone();
+        move |_| {
+            inspector_stack.set_visible_child_name("motion");
+            motion_tab_btn.add_css_class("active-tool");
+            appearance_tab_btn.remove_css_class("active-tool");
+        }
+    });
+    appearance_tab_btn.connect_clicked({
+        let inspector_stack = inspector_stack.clone();
+        let motion_tab_btn = motion_tab_btn.clone();
+        let appearance_tab_btn = appearance_tab_btn.clone();
+        move |_| {
+            inspector_stack.set_visible_child_name("motion-appearance");
+            appearance_tab_btn.add_css_class("active-tool");
+            motion_tab_btn.remove_css_class("active-tool");
+        }
     });
     motion_mode::wire_motion_controls(
         &motion_parts,

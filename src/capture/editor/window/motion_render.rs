@@ -1,6 +1,6 @@
 //! Shared Motion preview/export drawing.
 
-use gtk4::cairo::{Context, Format, ImageSurface, Matrix};
+use gtk4::cairo::{Context, Filter, Format, ImageSurface, LinearGradient, Matrix};
 use image::RgbaImage;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -8,7 +8,8 @@ use std::process::Command;
 
 use crate::recording::editor::model::{
     affine_from_three_points as affine_components, card_depth, project_card_corners, project_point,
-    MotionBlurBudgetMode, MotionState, MotionTextSegment, MotionTransform, MOTION_EXPORT_FPS,
+    MotionAppearance, MotionBackgroundFillType, MotionBlurBudgetMode, MotionState,
+    MotionTextSegment, MotionTransform, MOTION_EXPORT_FPS,
 };
 
 pub fn draw_motion_frame(
@@ -17,12 +18,28 @@ pub fn draw_motion_frame(
     height: i32,
     surface: &ImageSurface,
     motion: &MotionState,
+    background_surface: Option<&ImageSurface>,
     time: f64,
     checkerboard: bool,
     prefers_dark: bool,
     live_preview: bool,
 ) {
-    paint_backdrop(context, width, height, checkerboard, prefers_dark);
+    paint_backdrop(
+        context,
+        width,
+        height,
+        motion,
+        background_surface,
+        checkerboard,
+        prefers_dark,
+    );
+    // Padding, zoom, and titles all lay out against the background's
+    // rectangle so the card can never sit outside the scene it belongs to.
+    let stage = if checkerboard {
+        MotionStage::preview(f64::from(width), f64::from(height))
+    } else {
+        MotionStage::frame(f64::from(width), f64::from(height))
+    };
     let current_transform = motion.sample(time);
     let current_anchor = motion.zoom_anchor_at(time);
     // The card is drawn as a triangle mesh that approximates the perspective
@@ -58,10 +75,10 @@ pub fn draw_motion_frame(
             draw_transformed_card(
                 context,
                 surface,
-                width as f64,
-                height as f64,
+                stage,
                 transform,
                 anchor,
+                &motion.appearance,
                 sample.opacity,
                 mesh_div,
             );
@@ -70,14 +87,47 @@ pub fn draw_motion_frame(
     draw_transformed_card(
         context,
         surface,
-        width as f64,
-        height as f64,
+        stage,
         current_transform,
         current_anchor,
+        &motion.appearance,
         1.0,
         mesh_div,
     );
-    paint_motion_text(context, surface, width as f64, height as f64, motion, time);
+    paint_motion_text(context, surface, stage, motion, time);
+}
+
+/// The rectangle the Motion card is laid out inside: the background fill's
+/// area. Exports lay out against the full frame; the editor lays out against
+/// the bounded scene panel so padding can never push the card outside the
+/// background. Both rectangles share the viewport's center.
+#[derive(Clone, Copy)]
+pub(super) struct MotionStage {
+    pub bounds_w: f64,
+    pub bounds_h: f64,
+    pub center_x: f64,
+    pub center_y: f64,
+}
+
+impl MotionStage {
+    pub(super) fn frame(width: f64, height: f64) -> Self {
+        Self {
+            bounds_w: width,
+            bounds_h: height,
+            center_x: width / 2.0,
+            center_y: height / 2.0,
+        }
+    }
+
+    pub(super) fn preview(width: f64, height: f64) -> Self {
+        let (_, _, bounds_w, bounds_h) = motion_scene_bounds(width, height);
+        Self {
+            bounds_w,
+            bounds_h,
+            center_x: width / 2.0,
+            center_y: height / 2.0,
+        }
+    }
 }
 
 /// A held camera pose is already identical to the sharp overlay. Skipping it
@@ -108,18 +158,17 @@ fn motion_pose_differs(
 fn paint_motion_text(
     context: &Context,
     surface: &ImageSurface,
-    viewport_w: f64,
-    viewport_h: f64,
+    stage: MotionStage,
     motion: &MotionState,
     time: f64,
 ) {
     let transform = motion.sample(time);
-    let layout = CardLayout::new(
+    let layout = CardLayout::with_padding(
         surface,
-        viewport_w,
-        viewport_h,
+        stage,
         transform,
         motion.zoom_anchor_at(time),
+        motion.appearance.background_padding,
     );
     for segment in &motion.text_segments {
         let Some(style) = segment.sample(time) else {
@@ -203,8 +252,8 @@ fn visible_motion_text(
 /// rewrite its coordinates by dragging empty canvas space.
 pub fn motion_text_contains_view_point(
     surface: &ImageSurface,
-    viewport_w: f64,
-    viewport_h: f64,
+    stage: MotionStage,
+    padding: f64,
     transform: MotionTransform,
     zoom_anchor: (f64, f64),
     segment: &MotionTextSegment,
@@ -226,7 +275,7 @@ pub fn motion_text_contains_view_point(
         return false;
     }
 
-    let layout = CardLayout::new(surface, viewport_w, viewport_h, transform, zoom_anchor);
+    let layout = CardLayout::with_padding(surface, stage, transform, zoom_anchor, padding);
     let size = (layout.img_h * 0.060 * segment.size.clamp(0.5, 2.2)).clamp(14.0, 160.0);
     let Ok(measure) = Context::new(surface) else {
         return false;
@@ -246,8 +295,8 @@ pub fn motion_text_contains_view_point(
         segment.pos_y.clamp(0.05, 0.95) * layout.img_h + style.offset_y * layout.img_h / 1080.0;
     let pointer = view_point_to_motion_text_position(
         surface,
-        viewport_w,
-        viewport_h,
+        stage,
+        padding,
         transform,
         zoom_anchor,
         view_x,
@@ -277,28 +326,20 @@ struct CardLayout {
 }
 
 impl CardLayout {
-    fn new(
+    fn with_padding(
         surface: &ImageSurface,
-        viewport_w: f64,
-        viewport_h: f64,
+        stage: MotionStage,
         transform: MotionTransform,
         zoom_anchor: (f64, f64),
+        padding: f64,
     ) -> Self {
         let img_w = surface.width().max(1) as f64;
         let img_h = surface.height().max(1) as f64;
-        let pad = 96.0;
-        let fit = ((viewport_w - pad) / img_w)
-            .min((viewport_h - pad) / img_h)
+        let pad = padding.clamp(0.0, (stage.bounds_w.min(stage.bounds_h) - 2.0).max(0.0));
+        let fit = ((stage.bounds_w - pad) / img_w)
+            .min((stage.bounds_h - pad) / img_h)
             .clamp(0.05, 1.0);
-        let (cx, cy) = motion_card_center(
-            img_w,
-            img_h,
-            fit,
-            viewport_w,
-            viewport_h,
-            transform,
-            zoom_anchor,
-        );
+        let (cx, cy) = motion_card_center(img_w, img_h, fit, stage, transform, zoom_anchor);
         Self {
             img_w,
             img_h,
@@ -349,14 +390,14 @@ impl CardLayout {
 /// perspective projection used by the card mesh.
 pub fn view_point_to_motion_text_position(
     surface: &ImageSurface,
-    viewport_w: f64,
-    viewport_h: f64,
+    stage: MotionStage,
+    padding: f64,
     transform: MotionTransform,
     zoom_anchor: (f64, f64),
     view_x: f64,
     view_y: f64,
 ) -> (f64, f64) {
-    let layout = CardLayout::new(surface, viewport_w, viewport_h, transform, zoom_anchor);
+    let layout = CardLayout::with_padding(surface, stage, transform, zoom_anchor, padding);
     let mut best = (0.5, 0.5);
     let mut best_distance = f64::INFINITY;
     for row in 0..=12 {
@@ -401,10 +442,16 @@ fn paint_backdrop(
     context: &Context,
     width: i32,
     height: i32,
+    motion: &MotionState,
+    background_surface: Option<&ImageSurface>,
     checkerboard: bool,
     prefers_dark: bool,
 ) {
-    if checkerboard {
+    let appearance = &motion.appearance;
+    // The editor canvas keeps its checkerboard; a chosen fill paints inside a
+    // bounded scene panel so the fill reads as a layer with visible
+    // boundaries. Exports have no canvas: fills cover the full frame.
+    let scene = if checkerboard {
         crate::capture::editor::render::draw_canvas_checkerboard_background(
             context,
             width,
@@ -412,58 +459,299 @@ fn paint_backdrop(
             None,
             !prefers_dark,
         );
-    } else if prefers_dark {
-        context.set_source_rgb(0.067, 0.067, 0.067);
-        context.paint().ok();
+        Some(motion_scene_bounds(f64::from(width), f64::from(height)))
     } else {
-        context.set_source_rgb(0.93, 0.94, 0.96);
-        context.paint().ok();
+        None
+    };
+    // The preview shows the plain checkerboard until a fill is chosen;
+    // Shotbase's black scene for an unset fill only applies to exports.
+    if checkerboard
+        && matches!(
+            appearance.background_fill_type,
+            MotionBackgroundFillType::None
+        )
+    {
+        return;
+    }
+    let _ = context.save();
+    if let Some((x, y, scene_w, scene_h)) = scene {
+        let radius = 16.0_f64.min(scene_w.min(scene_h) * 0.5);
+        rounded_rectangle(context, x, y, scene_w, scene_h, radius);
+        context.clip();
+    }
+    match appearance.background_fill_type {
+        // Shotbase's explicit Motion-mode rule: None is a black scene, not
+        // the editor's transparent checkerboard.
+        MotionBackgroundFillType::None => {
+            context.set_source_rgb(0.0, 0.0, 0.0);
+            context.paint().ok();
+        }
+        MotionBackgroundFillType::Color => {
+            let [r, g, b, a] = appearance.background_color;
+            context.set_source_rgba(r, g, b, a);
+            context.paint().ok();
+        }
+        MotionBackgroundFillType::Gradient => {
+            let [r1, g1, b1, a1] = appearance.gradient_color_1;
+            let [r2, g2, b2, a2] = appearance.gradient_color_2;
+            let (x, y, w, h) = scene.unwrap_or((0.0, 0.0, f64::from(width), f64::from(height)));
+            let gradient = LinearGradient::new(x, y, x + w, y + h);
+            gradient.add_color_stop_rgba(0.0, r1, g1, b1, a1);
+            gradient.add_color_stop_rgba(1.0, r2, g2, b2, a2);
+            context.set_source(&gradient).ok();
+            context.paint().ok();
+        }
+        MotionBackgroundFillType::Wallpaper | MotionBackgroundFillType::Image => {
+            let path = match appearance.background_fill_type {
+                MotionBackgroundFillType::Wallpaper => appearance.wallpaper_image_name.as_deref(),
+                MotionBackgroundFillType::Image => appearance.custom_background_image.as_deref(),
+                _ => None,
+            };
+            if let Some(surface) = background_surface {
+                paint_image_background(context, surface, width, height, appearance.background_blur);
+            } else if let Some(surface) = path.and_then(load_motion_background_surface) {
+                paint_image_background(
+                    context,
+                    &surface,
+                    width,
+                    height,
+                    appearance.background_blur,
+                );
+            } else {
+                context.set_source_rgb(0.0, 0.0, 0.0);
+                context.paint().ok();
+            }
+        }
+    }
+    paint_background_noise(context, width, height, appearance.background_noise);
+    context.restore().ok();
+}
+
+/// Preview-only scene panel: an inset rounded rectangle that keeps the
+/// editor's checkerboard visible around the Motion fill as its boundary.
+fn motion_scene_bounds(width: f64, height: f64) -> (f64, f64, f64, f64) {
+    const MARGIN: f64 = 24.0;
+    let w = width.max(0.0);
+    let h = height.max(0.0);
+    let inset = MARGIN.min(w.min(h) * 0.25);
+    (
+        inset,
+        inset,
+        (w - inset * 2.0).max(1.0),
+        (h - inset * 2.0).max(1.0),
+    )
+}
+
+pub(super) fn load_motion_background_surface(path: &str) -> Option<ImageSurface> {
+    let image = image::open(path).ok()?.into_rgba8();
+    crate::capture::editor::render::rgba_image_to_surface(&image)
+}
+
+fn paint_image_background(
+    context: &Context,
+    surface: &ImageSurface,
+    width: i32,
+    height: i32,
+    blur: f64,
+) {
+    let blur = blur.clamp(0.0, 1.0);
+    if blur <= 0.001 {
+        paint_cover_fit(context, surface, width, height, Filter::Good);
+        return;
+    }
+    // Cairo has no Gaussian filter. Rendering the image into a much smaller
+    // surface and scaling it back up with bilinear filtering averages whole
+    // neighborhoods per pixel, producing a visible, stable blur that is
+    // identical between preview and export.
+    let factor = 2.0 + blur * 30.0;
+    let small_w = ((f64::from(width) / factor).round() as i32).max(1);
+    let small_h = ((f64::from(height) / factor).round() as i32).max(1);
+    let Ok(small) = ImageSurface::create(Format::ARgb32, small_w, small_h) else {
+        paint_cover_fit(context, surface, width, height, Filter::Good);
+        return;
+    };
+    if let Ok(small_context) = Context::new(&small) {
+        paint_cover_fit(&small_context, surface, small_w, small_h, Filter::Good);
+    }
+    paint_cover_fit(context, &small, width, height, Filter::Bilinear);
+}
+
+/// Draw a surface cover-fitted (scaled to fill, center-cropped) into the
+/// given rectangle.
+fn paint_cover_fit(
+    context: &Context,
+    surface: &ImageSurface,
+    width: i32,
+    height: i32,
+    filter: Filter,
+) {
+    let source_w = surface.width().max(1) as f64;
+    let source_h = surface.height().max(1) as f64;
+    let scale = (f64::from(width) / source_w).max(f64::from(height) / source_h);
+    let drawn_w = source_w * scale;
+    let drawn_h = source_h * scale;
+    let _ = context.save();
+    context.rectangle(0.0, 0.0, f64::from(width), f64::from(height));
+    context.clip();
+    context.translate(
+        (f64::from(width) - drawn_w) * 0.5,
+        (f64::from(height) - drawn_h) * 0.5,
+    );
+    context.scale(scale, scale);
+    context.set_source_surface(surface, 0.0, 0.0).ok();
+    context.source().set_filter(filter);
+    context.paint().ok();
+    context.restore().ok();
+}
+
+fn paint_background_noise(context: &Context, width: i32, height: i32, amount: f64) {
+    let amount = amount.clamp(0.0, 1.0);
+    if amount <= 0.001 {
+        return;
+    }
+    // Fixed pseudo-noise keeps every frame stable (and therefore exportable)
+    // rather than shimmering as the Motion playhead advances.
+    let step = 4;
+    for y in (0..height.max(0)).step_by(step) {
+        for x in (0..width.max(0)).step_by(step) {
+            let hash =
+                ((x as u32).wrapping_mul(73_856_093)) ^ ((y as u32).wrapping_mul(19_349_663));
+            let light = if hash & 1 == 0 { 1.0 } else { 0.0 };
+            context.set_source_rgba(light, light, light, amount * 0.045);
+            context.rectangle(f64::from(x), f64::from(y), step as f64, step as f64);
+            context.fill().ok();
+        }
     }
 }
 
 fn draw_transformed_card(
     context: &Context,
     surface: &ImageSurface,
-    viewport_w: f64,
-    viewport_h: f64,
+    stage: MotionStage,
     transform: MotionTransform,
     zoom_anchor: (f64, f64),
+    appearance: &MotionAppearance,
     alpha: f64,
     mesh_div: usize,
 ) {
+    // The radius rounds the captured image's own corners; the background
+    // scene behind it stays a full rectangle.
+    let rounded = rounded_motion_surface(surface, appearance.border_radius);
+    let surface = rounded.as_ref().unwrap_or(surface);
     let img_w = surface.width() as f64;
     let img_h = surface.height() as f64;
     if img_w < 1.0 || img_h < 1.0 {
         return;
     }
-    let pad = 96.0;
-    let fit = ((viewport_w - pad) / img_w)
-        .min((viewport_h - pad) / img_h)
+    let pad = appearance
+        .background_padding
+        .clamp(0.0, (stage.bounds_w.min(stage.bounds_h) - 2.0).max(0.0));
+    let fit = ((stage.bounds_w - pad) / img_w)
+        .min((stage.bounds_h - pad) / img_h)
         .clamp(0.05, 1.0);
-    let (cx, cy) = motion_card_center(
-        img_w,
-        img_h,
-        fit,
-        viewport_w,
-        viewport_h,
-        transform,
-        zoom_anchor,
-    );
+    let (cx, cy) = motion_card_center(img_w, img_h, fit, stage, transform, zoom_anchor);
     let corners = project_card_corners(img_w, img_h, fit, transform, cx, cy);
     if alpha >= 0.99 {
-        let drop = 16.0 + transform.perspective * 10.0;
-        context.set_source_rgba(0.0, 0.0, 0.0, 0.28);
-        context.move_to(corners[0].0, corners[0].1 + drop);
-        context.line_to(corners[1].0, corners[1].1 + drop);
-        context.line_to(corners[2].0, corners[2].1 + drop);
-        context.line_to(corners[3].0, corners[3].1 + drop);
-        context.close_path();
-        let _ = context.fill();
+        paint_card_shadow(context, corners, appearance, transform.perspective);
     }
 
     paint_perspective_card(
         context, surface, img_w, img_h, fit, transform, cx, cy, alpha, mesh_div,
     );
+    if alpha >= 0.99 && appearance.border_thickness > 0.0 {
+        let [r, g, b, a] = appearance.border_fill_color;
+        context.set_source_rgba(r, g, b, a);
+        context.set_line_width(appearance.border_thickness.max(0.0));
+        context.move_to(corners[0].0, corners[0].1);
+        for corner in &corners[1..] {
+            context.line_to(corner.0, corner.1);
+        }
+        context.close_path();
+        context.stroke().ok();
+    }
+}
+
+/// Render the card into a scratch surface clipped to a rounded rectangle so
+/// the captured image's corners appear rounded wherever the card is drawn.
+fn rounded_motion_surface(surface: &ImageSurface, radius: f64) -> Option<ImageSurface> {
+    let radius = radius.max(0.0);
+    if radius < 0.5 {
+        return None;
+    }
+    let width = surface.width().max(1);
+    let height = surface.height().max(1);
+    let rounded = ImageSurface::create(Format::ARgb32, width, height).ok()?;
+    let context = Context::new(&rounded).ok()?;
+    rounded_rectangle(
+        &context,
+        0.0,
+        0.0,
+        f64::from(width),
+        f64::from(height),
+        radius.min(f64::from(width.min(height)) * 0.5),
+    );
+    context.clip();
+    context.set_source_surface(surface, 0.0, 0.0).ok()?;
+    context.paint().ok()?;
+    Some(rounded)
+}
+
+fn rounded_rectangle(context: &Context, x: f64, y: f64, width: f64, height: f64, radius: f64) {
+    let radius = radius.min(width.min(height) * 0.5).max(0.0);
+    context.new_sub_path();
+    context.arc(
+        x + width - radius,
+        y + radius,
+        radius,
+        -std::f64::consts::FRAC_PI_2,
+        0.0,
+    );
+    context.arc(
+        x + width - radius,
+        y + height - radius,
+        radius,
+        0.0,
+        std::f64::consts::FRAC_PI_2,
+    );
+    context.arc(
+        x + radius,
+        y + height - radius,
+        radius,
+        std::f64::consts::FRAC_PI_2,
+        std::f64::consts::PI,
+    );
+    context.arc(
+        x + radius,
+        y + radius,
+        radius,
+        std::f64::consts::PI,
+        std::f64::consts::FRAC_PI_2 * 3.0,
+    );
+    context.close_path();
+}
+
+fn paint_card_shadow(
+    context: &Context,
+    corners: [(f64, f64); 4],
+    appearance: &MotionAppearance,
+    perspective: f64,
+) {
+    let blur = appearance.shadow_blur.max(0.0);
+    let samples = if blur < 0.5 { 1 } else { 5 };
+    let opacity = appearance.shadow_opacity.clamp(0.0, 1.0) / samples as f64;
+    for sample in 0..samples {
+        let angle = sample as f64 / samples as f64 * std::f64::consts::TAU;
+        let spread = if samples == 1 { 0.0 } else { blur * 0.35 };
+        let offset_x = appearance.shadow_position.0 + angle.cos() * spread;
+        let offset_y = appearance.shadow_position.1 + perspective * 10.0 + angle.sin() * spread;
+        context.set_source_rgba(0.0, 0.0, 0.0, opacity);
+        context.move_to(corners[0].0 + offset_x, corners[0].1 + offset_y);
+        for corner in &corners[1..] {
+            context.line_to(corner.0 + offset_x, corner.1 + offset_y);
+        }
+        context.close_path();
+        context.fill().ok();
+    }
 }
 
 /// Keep the selected source point stationary while a camera scales in. The
@@ -474,13 +762,12 @@ fn motion_card_center(
     img_w: f64,
     img_h: f64,
     fit: f64,
-    viewport_w: f64,
-    viewport_h: f64,
+    stage: MotionStage,
     transform: MotionTransform,
     zoom_anchor: (f64, f64),
 ) -> (f64, f64) {
-    let cx = viewport_w / 2.0 + transform.pos_x * viewport_w * 0.12;
-    let cy = viewport_h / 2.0 + transform.pos_y * viewport_h * 0.12;
+    let cx = stage.center_x + transform.pos_x * stage.bounds_w * 0.12;
+    let cy = stage.center_y + transform.pos_y * stage.bounds_h * 0.12;
     let (anchor_x, anchor_y) = (zoom_anchor.0.clamp(0.0, 1.0), zoom_anchor.1.clamp(0.0, 1.0));
     if (transform.scale - 1.0).abs() < f64::EPSILON
         || ((anchor_x - 0.5).abs() < f64::EPSILON && (anchor_y - 0.5).abs() < f64::EPSILON)
@@ -645,6 +932,19 @@ pub fn export_motion_mp4(
     let Some(card) = crate::capture::editor::render::rgba_image_to_surface(snapshot) else {
         return Err("could not prepare the Motion still".into());
     };
+    let background_surface = match motion.appearance.background_fill_type {
+        MotionBackgroundFillType::Wallpaper => motion
+            .appearance
+            .wallpaper_image_name
+            .as_deref()
+            .and_then(load_motion_background_surface),
+        MotionBackgroundFillType::Image => motion
+            .appearance
+            .custom_background_image
+            .as_deref()
+            .and_then(load_motion_background_surface),
+        _ => None,
+    };
 
     let config = crate::config::load_config().sanitized();
     let fallback = source_image
@@ -686,6 +986,7 @@ pub fn export_motion_mp4(
                 out_h,
                 &card,
                 motion,
+                background_surface.as_ref(),
                 time,
                 false,
                 prefers_dark,
@@ -749,13 +1050,14 @@ fn unique_motion_path(dir: &Path, stem: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        motion_pose_differs, motion_text_contains_view_point, view_point_to_motion_text_position,
-        CardLayout,
+        draw_motion_frame, motion_pose_differs, motion_text_contains_view_point,
+        view_point_to_motion_text_position, CardLayout, MotionStage,
     };
     use crate::recording::editor::model::{
-        project_card_corners, MotionState, MotionTransform, DEFAULT_MOTION_ZOOM,
+        project_card_corners, MotionBackgroundFillType, MotionState, MotionTransform,
+        DEFAULT_MOTION_ZOOM,
     };
-    use gtk4::cairo::{Format, ImageSurface};
+    use gtk4::cairo::{Context, Format, ImageSurface};
 
     /// Shotbase starts Motion with an empty track; tests add their own clip.
     fn motion_with_first_clip() -> MotionState {
@@ -764,6 +1066,103 @@ mod tests {
             .add_segment_at(0.0)
             .expect("a fresh track accepts a first move");
         motion
+    }
+
+    /// Export-style layout: the full frame with Shotbase's default padding.
+    fn frame_layout(
+        surface: &ImageSurface,
+        transform: MotionTransform,
+        zoom_anchor: (f64, f64),
+    ) -> CardLayout {
+        CardLayout::with_padding(
+            surface,
+            MotionStage::frame(1440.0, 900.0),
+            transform,
+            zoom_anchor,
+            96.0,
+        )
+    }
+
+    fn render_appearance_frame(
+        card: &ImageSurface,
+        motion: &MotionState,
+        preview: bool,
+    ) -> ImageSurface {
+        let frame = ImageSurface::create(Format::ARgb32, 128, 96).unwrap();
+        {
+            let context = Context::new(&frame).unwrap();
+            draw_motion_frame(
+                &context, 128, 96, card, motion, None, 0.0, preview, true, false,
+            );
+        }
+        frame.flush();
+        frame
+    }
+
+    #[test]
+    fn scene_fill_is_bounded_in_preview_and_full_frame_on_export() {
+        let card = ImageSurface::create(Format::ARgb32, 8, 8).unwrap();
+        let mut motion = MotionState::default();
+        let center = 48 * 128 * 4 + 64 * 4;
+
+        // The preview keeps the checkerboard canvas until a fill is chosen.
+        let mut frame = render_appearance_frame(&card, &motion, true);
+        let data = frame.data().unwrap();
+        assert_ne!(&data[..4], &[0, 0, 0, 255]);
+
+        // A chosen fill paints inside the bounded scene panel: the panel
+        // center takes the color while the canvas corner stays checkerboard.
+        motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+        motion.appearance.background_color = [0.2, 0.4, 0.6, 1.0];
+        let mut frame = render_appearance_frame(&card, &motion, true);
+        let data = frame.data().unwrap();
+        // Cairo ARgb32 is BGRA on the Linux targets we support.
+        assert_eq!(&data[center..center + 4], &[153, 102, 51, 255]);
+        assert_ne!(&data[..4], &[153, 102, 51, 255]);
+
+        // Exports have no editor canvas: the fill covers the whole frame and
+        // an unset fill is Shotbase's black scene. The radius belongs to the
+        // card, so the background corners stay filled regardless of it.
+        motion.appearance.background_fill_type = MotionBackgroundFillType::None;
+        motion.appearance.border_radius = 40.0;
+        let mut frame = render_appearance_frame(&card, &motion, false);
+        let data = frame.data().unwrap();
+        assert_eq!(&data[..4], &[0, 0, 0, 255]);
+        assert_eq!(&data[center..center + 4], &[0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn border_radius_rounds_the_captured_card_not_the_background() {
+        let card = ImageSurface::create(Format::ARgb32, 64, 64).unwrap();
+        {
+            let context = Context::new(&card).unwrap();
+            context.set_source_rgb(1.0, 1.0, 1.0);
+            context.paint().ok();
+        }
+        card.flush();
+        let mut motion = MotionState::default();
+        motion.appearance.background_padding = 0.0;
+        // Black export scene behind an opaque white card: the card fills the
+        // middle of the frame, so its corner pixels are directly observable.
+        motion.appearance.background_fill_type = MotionBackgroundFillType::None;
+        motion.appearance.background_color = [0.0, 0.0, 0.0, 1.0];
+        let card_center = 48 * 128 * 4 + 64 * 4;
+        let card_corner = 17 * 128 * 4 + 33 * 4;
+
+        // Square card: the image reaches into its own corners.
+        motion.appearance.border_radius = 0.0;
+        let mut frame = render_appearance_frame(&card, &motion, false);
+        let data = frame.data().unwrap();
+        assert_eq!(&data[card_corner..card_corner + 4], &[255, 255, 255, 255]);
+
+        // A radius of half the card side rounds the corners away entirely:
+        // the image corner is cut and the background shows through, while the
+        // card center stays image.
+        motion.appearance.border_radius = 32.0;
+        let mut frame = render_appearance_frame(&card, &motion, false);
+        let data = frame.data().unwrap();
+        assert_eq!(&data[card_corner..card_corner + 4], &[0, 0, 0, 255]);
+        assert_eq!(&data[card_center..card_center + 4], &[255, 255, 255, 255]);
     }
 
     #[test]
@@ -855,13 +1254,13 @@ mod tests {
             pos_y: -0.12,
         };
         let zoom_anchor = (0.22, 0.78);
-        let layout = CardLayout::new(&surface, 1440.0, 900.0, transform, zoom_anchor);
+        let layout = frame_layout(&surface, transform, zoom_anchor);
         let expected = (0.27, 0.71);
         let point = layout.project(expected.0 * layout.img_w, expected.1 * layout.img_h);
         let actual = view_point_to_motion_text_position(
             &surface,
-            1440.0,
-            900.0,
+            MotionStage::frame(1440.0, 900.0),
+            96.0,
             transform,
             zoom_anchor,
             point.0,
@@ -885,14 +1284,14 @@ mod tests {
             ..MotionTransform::default()
         };
         let zoom_anchor = (0.32, 0.68);
-        let layout = CardLayout::new(&surface, 1440.0, 900.0, transform, zoom_anchor);
+        let layout = frame_layout(&surface, transform, zoom_anchor);
         let title_center =
             layout.project(segment.pos_x * layout.img_w, segment.pos_y * layout.img_h);
 
         assert!(motion_text_contains_view_point(
             &surface,
-            1440.0,
-            900.0,
+            MotionStage::frame(1440.0, 900.0),
+            96.0,
             transform,
             zoom_anchor,
             segment,
@@ -902,8 +1301,8 @@ mod tests {
         ));
         assert!(!motion_text_contains_view_point(
             &surface,
-            1440.0,
-            900.0,
+            MotionStage::frame(1440.0, 900.0),
+            96.0,
             transform,
             zoom_anchor,
             segment,
@@ -1034,8 +1433,8 @@ mod tests {
         };
         let mut unzoomed = transform;
         unzoomed.scale = 1.0;
-        let before = CardLayout::new(&surface, 1440.0, 900.0, unzoomed, (0.5, 0.5));
-        let after = CardLayout::new(&surface, 1440.0, 900.0, transform, zoom_anchor);
+        let before = frame_layout(&surface, unzoomed, (0.5, 0.5));
+        let after = frame_layout(&surface, transform, zoom_anchor);
         let source_x = zoom_anchor.0 * before.img_w;
         let source_y = zoom_anchor.1 * before.img_h;
         let expected = before.project(source_x, source_y);

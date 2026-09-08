@@ -12,10 +12,11 @@ mod stroke;
 mod text;
 
 use gtk4::{
-    prelude::*, Box as GtkBox, Button, Label, Orientation, PolicyType, ScrolledWindow, Stack,
+    prelude::*, Box as GtkBox, Button, Image, Label, Orientation, PolicyType, ScrolledWindow, Stack,
 };
 
 use super::background_panel::BACKGROUND_SIDEBAR_WIDTH;
+use super::icon_names;
 use crate::i18n::t;
 
 use crop::{build_crop_inspector, CropInspectorInputs};
@@ -30,6 +31,9 @@ use text::{build_text_inspector, TextInspectorInputs};
 
 pub(super) struct InspectorParts {
     pub inspector_tabs: GtkBox,
+    pub motion_tabs: GtkBox,
+    pub motion_tab_btn: Button,
+    pub appearance_tab_btn: Button,
     pub background_tab_btn: Button,
     pub colors_tab_btn: Button,
     pub inspector: GtkBox,
@@ -65,6 +69,7 @@ pub(super) struct InspectorContentInputs<'a> {
     pub colors_inspector: &'a GtkBox,
     pub placeholder_inspector: &'a GtkBox,
     pub motion_inspector: &'a GtkBox,
+    pub motion_appearance_inspector: &'a GtkBox,
     pub copy_btn: &'a Button,
     pub upload_btn: &'a Button,
     pub save_btn: &'a Button,
@@ -134,6 +139,40 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     inspector_tabs.append(&background_tab_btn);
     inspector_tabs.append(&colors_tab_btn);
 
+    // Shotbase places Motion tools in a compact vertical rail immediately to
+    // the left of the options inspector. The rail is not part of the panel;
+    // it selects which Motion-specific panel the inspector displays.
+    let motion_tabs = GtkBox::new(Orientation::Vertical, 4);
+    // Reuse the image editor's actual toolbar pill — this is the same shell
+    // surrounding Arrow, Line, and the other static editor tools.
+    motion_tabs.add_css_class("editor-toolbar");
+    motion_tabs.set_hexpand(false);
+    motion_tabs.set_halign(gtk4::Align::End);
+    motion_tabs.set_valign(gtk4::Align::Start);
+    motion_tabs.set_margin_top(8);
+    motion_tabs.set_margin_end(8);
+    motion_tabs.set_visible(false);
+    motion_tabs.set_can_target(true);
+    let motion_tab_btn = Button::new();
+    motion_tab_btn.set_has_frame(false);
+    motion_tab_btn.set_can_target(true);
+    motion_tab_btn.set_tooltip_text(Some(&t("Motion")));
+    let motion_icon = Image::from_icon_name(icon_names::custom::WAND_SPARKLES_SYMBOLIC);
+    motion_icon.set_pixel_size(16);
+    motion_tab_btn.set_child(Some(&motion_icon));
+    motion_tab_btn.add_css_class("editor-tool-button");
+    motion_tab_btn.add_css_class("active-tool");
+    let appearance_tab_btn = Button::new();
+    appearance_tab_btn.set_has_frame(false);
+    appearance_tab_btn.set_can_target(true);
+    appearance_tab_btn.set_tooltip_text(Some(&t("Appearance")));
+    let appearance_icon = Image::from_icon_name(icon_names::custom::IMAGE_ALT_SYMBOLIC);
+    appearance_icon.set_pixel_size(16);
+    appearance_tab_btn.set_child(Some(&appearance_icon));
+    appearance_tab_btn.add_css_class("editor-tool-button");
+    motion_tabs.append(&motion_tab_btn);
+    motion_tabs.append(&appearance_tab_btn);
+
     let inspector = GtkBox::new(Orientation::Vertical, 0);
     inspector.add_css_class("editor-right-inspector");
     inspector.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
@@ -174,6 +213,8 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     inspector_stack.add_named(input.placeholder_inspector, Some("placeholder"));
     input.motion_inspector.set_visible(true);
     inspector_stack.add_named(input.motion_inspector, Some("motion"));
+    input.motion_appearance_inspector.set_visible(true);
+    inspector_stack.add_named(input.motion_appearance_inspector, Some("motion-appearance"));
     inspector_stack.set_visible_child_name("placeholder");
 
     let scroll = ScrolledWindow::new();
@@ -200,6 +241,9 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
 
     InspectorParts {
         inspector_tabs,
+        motion_tabs,
+        motion_tab_btn,
+        appearance_tab_btn,
         background_tab_btn,
         colors_tab_btn,
         inspector,
