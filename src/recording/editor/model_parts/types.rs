@@ -510,8 +510,11 @@ impl ZoomClip {
 pub const DEFAULT_MOTION_DURATION_SECONDS: f64 = 3.0;
 pub const MIN_MOTION_DURATION_SECONDS: f64 = 1.0;
 pub const MAX_MOTION_DURATION_SECONDS: f64 = 10.0;
-pub const DEFAULT_MOTION_END_SCALE: f64 = 1.12;
-pub const DEFAULT_MOTION_END_ROTATION_Y: f64 = 8.0;
+/// Shotbase's `MotionEffectDefaults`: a new move targets 200% zoom, and the
+/// remembered value is clamped to the 100%..400% range.
+pub const DEFAULT_MOTION_ZOOM: f64 = 2.0;
+pub const MIN_MOTION_ZOOM: f64 = 1.0;
+pub const MAX_MOTION_ZOOM: f64 = 4.0;
 pub const DEFAULT_MOTION_END_PERSPECTIVE: f64 = 0.18;
 /// Recovered from Shotbase's Motion transform-timing editor defaults.
 pub const DEFAULT_MOTION_TRANSITION_SECONDS: f64 = 1.2;
@@ -534,13 +537,16 @@ pub const MAX_MOTION_TEXT_POS: f64 = 0.95;
 pub const DEFAULT_MOTION_TEXT_SIZE: f64 = 1.0;
 pub const MIN_MOTION_TEXT_SIZE: f64 = 0.5;
 pub const MAX_MOTION_TEXT_SIZE: f64 = 2.2;
-pub const MOTION_SCALE_PRESETS: [(&str, f64); 6] = [
-    ("1.0×", 1.0),
-    ("1.12×", 1.12),
-    ("1.25×", 1.25),
-    ("1.5×", 1.5),
-    ("1.8×", 1.8),
-    ("2.2×", 2.2),
+pub const MOTION_SCALE_PRESETS: [(&str, f64); 9] = [
+    ("100%", 1.0),
+    ("125%", 1.25),
+    ("150%", 1.5),
+    ("175%", 1.75),
+    ("200%", 2.0),
+    ("250%", 2.5),
+    ("300%", 3.0),
+    ("350%", 3.5),
+    ("400%", 4.0),
 ];
 
 /// Identity camera for a still or the start of a motion segment.
@@ -641,8 +647,6 @@ pub struct MotionSegment {
     pub is_disabled: bool,
     pub from: MotionTransform,
     pub to: MotionTransform,
-    pub ease_ms: u32,
-    pub easing: ZoomEasing,
 }
 
 impl MotionSegment {
@@ -650,31 +654,7 @@ impl MotionSegment {
         (self.end - self.start).max(0.0)
     }
 
-    /// ApexShot's default still → Motion move.
-    pub fn default_cinematic(duration: f64) -> Self {
-        let end = DEFAULT_MOTION_SEGMENT_SECONDS
-            .min(duration.max(MIN_MOTION_SEGMENT_SECONDS))
-            .max(MIN_MOTION_SEGMENT_SECONDS);
-        Self {
-            start: 0.0,
-            end,
-            zoom_mode: MotionZoomMode::Manual,
-            intensity: 1.0,
-            zoom_anchor_x: 0.5,
-            zoom_anchor_y: 0.5,
-            is_disabled: false,
-            from: MotionTransform::default(),
-            to: MotionTransform {
-                scale: DEFAULT_MOTION_END_SCALE,
-                rotation_y: DEFAULT_MOTION_END_ROTATION_Y,
-                ..MotionTransform::default()
-            },
-            ease_ms: (DEFAULT_MOTION_TRANSITION_SECONDS * 1000.0) as u32,
-            easing: ZoomEasing::Glide,
-        }
-    }
-
-    pub fn sample(&self, time: f64) -> MotionTransform {
+    fn sample(&self, time: f64, transform_timing: MotionEffectTransformTiming) -> MotionTransform {
         if self.is_disabled {
             return self.from;
         }
@@ -683,60 +663,22 @@ impl MotionSegment {
         if span <= f64::EPSILON {
             return target;
         }
-        let ease = (self.ease_ms as f64 / 1000.0).clamp(0.0, span / 2.0);
-        if ease <= f64::EPSILON {
-            let local = ((time - self.start) / span).clamp(0.0, 1.0);
-            return lerp_transform(self.from, target, motion_easing_apply(self.easing, local));
-        }
-        if time < self.start + ease {
-            let alpha = ((time - self.start) / ease).clamp(0.0, 1.0);
-            return lerp_transform(self.from, target, motion_easing_apply(self.easing, alpha));
-        }
-        target
-    }
-
-    fn sample_with_timing(
-        &self,
-        time: f64,
-        transform_timing: MotionEffectTransformTiming,
-    ) -> MotionTransform {
-        if self.is_disabled {
-            return self.from;
-        }
-        let target = self.target_transform();
-        let span = self.duration();
-        if span <= f64::EPSILON {
-            return target;
-        }
-        // Shotbase applies one timing curve to the entire Motion effects
-        // track. The old non-Glide presets remain compatibility overrides for
-        // users who have explicitly selected them in ApexShot.
-        let is_shotbase_timing = self.easing == ZoomEasing::Glide;
-        let configured_duration = if is_shotbase_timing {
-            transform_timing.clamped().transition_duration
-        } else {
-            self.ease_ms as f64 / 1000.0
-        };
+        // Shotbase applies one global timing curve to the entire Motion
+        // effects track: `transitionDuration` with the recovered Bézier
+        // control points. There is no per-segment easing.
+        let ease = transform_timing
+            .clamped()
+            .transition_duration
+            .clamp(0.0, span);
         // A Motion transform enters once then holds its end pose; unlike the
-        // legacy zoom clip it is not a symmetric in/out animation.
-        let ease = configured_duration.clamp(0.0, span);
+        // legacy zoom clip it is not a symmetric in/out animation. A zero
+        // transition means the target pose applies for the whole segment.
         if ease <= f64::EPSILON {
-            let local = ((time - self.start) / span).clamp(0.0, 1.0);
-            let progress = if is_shotbase_timing {
-                transform_timing.apply(local)
-            } else {
-                motion_easing_apply(self.easing, local)
-            };
-            return lerp_transform(self.from, target, progress);
+            return target;
         }
         if time < self.start + ease {
             let alpha = ((time - self.start) / ease).clamp(0.0, 1.0);
-            let progress = if is_shotbase_timing {
-                transform_timing.apply(alpha)
-            } else {
-                motion_easing_apply(self.easing, alpha)
-            };
-            return lerp_transform(self.from, target, progress);
+            return lerp_transform(self.from, target, transform_timing.apply(alpha));
         }
         target
     }
@@ -1019,23 +961,6 @@ impl MotionBlurSettings {
     }
 }
 
-fn motion_easing_apply(easing: ZoomEasing, t: f64) -> f64 {
-    let t = t.clamp(0.0, 1.0);
-    match easing {
-        ZoomEasing::Linear => t,
-        ZoomEasing::Glide => 1.0 - (1.0 - t).powi(3),
-        ZoomEasing::Smooth => {
-            if t < 0.5 {
-                4.0 * t * t * t
-            } else {
-                1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
-            }
-        }
-        // Opposite of Glide so the four buttons are readable on a short ease window.
-        ZoomEasing::Snappy => t.powi(3),
-    }
-}
-
 fn cubic_bezier_ease(timing: MotionEffectTransformTiming, progress: f64) -> f64 {
     let progress = progress.clamp(0.0, 1.0);
     if progress <= f64::EPSILON || (1.0 - progress) <= f64::EPSILON {
@@ -1062,7 +987,7 @@ fn cubic_bezier_ease(timing: MotionEffectTransformTiming, progress: f64) -> f64 
     sample((low + high) * 0.5, timing.easing_y1, timing.easing_y2)
 }
 
-fn lerp_transform(from: MotionTransform, to: MotionTransform, t: f64) -> MotionTransform {
+pub(super) fn lerp_transform(from: MotionTransform, to: MotionTransform, t: f64) -> MotionTransform {
     let t = t.clamp(0.0, 1.0);
     MotionTransform {
         scale: from.scale + (to.scale - from.scale) * t,
@@ -1153,15 +1078,6 @@ impl MotionState {
         self.reconcile_effect_segments();
     }
 
-    pub fn seed_default_cinematic(&mut self) {
-        if self.segments.is_empty() {
-            self.segments
-                .push(MotionSegment::default_cinematic(self.duration));
-            self.selected = Some(0);
-            self.selected_text = None;
-        }
-    }
-
     pub fn add_segment_at(&mut self, start: f64) -> Option<usize> {
         let start = start.clamp(0.0, self.duration);
         if self.segment_index_at(start).is_some() {
@@ -1218,12 +1134,9 @@ impl MotionState {
             is_disabled: false,
             from: MotionTransform::default(),
             to: MotionTransform {
-                scale: DEFAULT_MOTION_END_SCALE,
-                rotation_y: DEFAULT_MOTION_END_ROTATION_Y,
+                scale: DEFAULT_MOTION_ZOOM,
                 ..MotionTransform::default()
             },
-            ease_ms: (DEFAULT_MOTION_TRANSITION_SECONDS * 1000.0) as u32,
-            easing: ZoomEasing::Glide,
         });
         self.segments.sort_by(|a, b| a.start.total_cmp(&b.start));
         self.reconcile_effect_segments();
@@ -1330,7 +1243,7 @@ impl MotionState {
 
     pub fn set_selected_end_scale(&mut self, scale: f64) {
         if let Some(segment) = self.selected_segment_mut() {
-            segment.to.scale = scale.clamp(1.0, 3.0);
+            segment.to.scale = scale.clamp(MIN_MOTION_ZOOM, MAX_MOTION_ZOOM);
         }
         self.reconcile_effect_segments();
     }
@@ -1369,28 +1282,17 @@ impl MotionState {
         self.reconcile_effect_segments();
     }
 
-    pub fn set_selected_easing(&mut self, easing: ZoomEasing) {
-        if let Some(segment) = self.selected_segment_mut() {
-            segment.easing = easing;
-        }
-    }
-
-    pub fn set_selected_ease_ms(&mut self, ease_ms: u32) {
-        let ease_ms = ease_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
-        if let Some(segment) = self.selected_segment_mut() {
-            segment.ease_ms = ease_ms;
-        }
-        self.transform_timing.transition_duration = ease_ms as f64 / 1000.0;
+    /// Shotbase stores one transition duration for the whole Motion effects
+    /// track. The inspector's millisecond slider writes through to the global
+    /// timing; there is no per-segment ease.
+    pub fn set_selected_transition_ms(&mut self, transition_ms: u32) {
+        let transition_ms = transition_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
+        self.transform_timing.transition_duration = transition_ms as f64 / 1000.0;
     }
 
     pub fn set_transform_timing(&mut self, timing: MotionEffectTransformTiming) {
         self.transform_timing = timing.clamped();
-        let ease_ms = (self.transform_timing.transition_duration * 1000.0).round() as u32;
-        if let Some(segment) = self.selected_segment_mut() {
-            segment.ease_ms = ease_ms;
-        }
     }
-
     pub fn set_selected_end_pitch(&mut self, pitch: f64) {
         if let Some(segment) = self.selected_segment_mut() {
             segment.to.rotation_x = pitch.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
@@ -1625,7 +1527,7 @@ impl MotionState {
             .iter()
             .find(|segment| time >= segment.start && time <= segment.end)
         {
-            segment.sample_with_timing(time, self.transform_timing)
+            segment.sample(time, self.transform_timing)
         } else {
             self.segments
                 .iter()

@@ -23,9 +23,20 @@ pub fn draw_motion_frame(
     live_preview: bool,
 ) {
     paint_backdrop(context, width, height, checkerboard, prefers_dark);
-    let mesh_div = if live_preview { 3 } else { 8 };
     let current_transform = motion.sample(time);
     let current_anchor = motion.zoom_anchor_at(time);
+    // The card is drawn as a triangle mesh that approximates the perspective
+    // warp. Zooming in magnifies each affine cell until the tessellation
+    // reads as a wavy warp, so live previews subdivide more when zoomed.
+    let mesh_div = if live_preview {
+        if current_transform.scale > 1.75 {
+            7
+        } else {
+            3
+        }
+    } else {
+        8
+    };
     // Cairo has no equivalent of Shotbase's full-quality CIMotionBlur and
     // CIZoomBlur filters, so ApexShot uses this bounded temporal fallback.
     // The recovered schema and bounds remain shared with the source app.
@@ -742,24 +753,30 @@ mod tests {
         CardLayout,
     };
     use crate::recording::editor::model::{
-        project_card_corners, MotionSegment, MotionState, MotionTransform,
-        DEFAULT_MOTION_END_ROTATION_Y, DEFAULT_MOTION_END_SCALE,
+        project_card_corners, MotionState, MotionTransform, DEFAULT_MOTION_ZOOM,
     };
     use gtk4::cairo::{Format, ImageSurface};
 
-    #[test]
-    fn cinematic_sample_starts_identity_and_ends_at_target() {
+    /// Shotbase starts Motion with an empty track; tests add their own clip.
+    fn motion_with_first_clip() -> MotionState {
         let mut motion = MotionState::default();
-        motion.seed_default_cinematic();
+        motion
+            .add_segment_at(0.0)
+            .expect("a fresh track accepts a first move");
+        motion
+    }
+
+    #[test]
+    fn new_segment_starts_identity_and_holds_shotbase_default_zoom() {
+        let motion = motion_with_first_clip();
         let start = motion.sample(0.0);
         let end = motion.sample(motion.duration);
         assert!((start.scale - 1.0).abs() < 1e-6);
         assert!(start.rotation_y.abs() < 1e-6);
-        assert!((end.scale - DEFAULT_MOTION_END_SCALE).abs() < 1e-6);
-        assert!((end.rotation_y - DEFAULT_MOTION_END_ROTATION_Y).abs() < 1e-6);
+        assert!((end.scale - DEFAULT_MOTION_ZOOM).abs() < 1e-6);
+        assert!(end.rotation_y.abs() < 1e-6);
         assert_eq!(motion.segments.len(), 1);
         assert_eq!(motion.selected, Some(0));
-        assert_eq!(motion.segments[0], MotionSegment::default_cinematic(3.0));
     }
 
     #[test]
@@ -779,20 +796,18 @@ mod tests {
     }
 
     #[test]
-    fn stretching_duration_holds_end_pose_after_the_seeded_move() {
-        let mut motion = MotionState::default();
-        motion.seed_default_cinematic();
-        let seed_end = motion.segments[0].end;
+    fn stretching_duration_holds_end_pose_after_the_move() {
+        let mut motion = motion_with_first_clip();
+        let move_end = motion.segments[0].end;
         motion.set_duration(6.0);
-        assert!((motion.segments[0].end - seed_end).abs() < 1e-6);
+        assert!((motion.segments[0].end - move_end).abs() < 1e-6);
         let end = motion.sample(6.0);
-        assert!((end.scale - DEFAULT_MOTION_END_SCALE).abs() < 1e-6);
+        assert!((end.scale - DEFAULT_MOTION_ZOOM).abs() < 1e-6);
     }
 
     #[test]
     fn effect_segments_inherit_the_camera_pose_before_them() {
-        let mut motion = MotionState::default();
-        motion.seed_default_cinematic();
+        let mut motion = motion_with_first_clip();
         motion.set_duration(6.0);
         motion
             .add_segment_at(2.0)
@@ -815,8 +830,7 @@ mod tests {
 
     #[test]
     fn timeline_snap_targets_include_the_playhead_and_track_boundaries() {
-        let mut motion = MotionState::default();
-        motion.seed_default_cinematic();
+        let mut motion = motion_with_first_clip();
         motion.set_duration(6.0);
         motion.playhead = 2.5;
         motion
@@ -900,27 +914,8 @@ mod tests {
     }
 
     #[test]
-    fn glide_and_snappy_diverge_during_the_ease_window() {
-        let mut glide = MotionState::default();
-        glide.seed_default_cinematic();
-        glide.set_selected_easing(crate::recording::editor::model::ZoomEasing::Glide);
-        let mut snappy = MotionState::default();
-        snappy.seed_default_cinematic();
-        snappy.selected = Some(0);
-        snappy.set_selected_easing(crate::recording::editor::model::ZoomEasing::Snappy);
-        let t = 0.2;
-        let g = glide.sample(t).scale;
-        let s = snappy.sample(t).scale;
-        assert!(
-            (g - s).abs() > 0.01,
-            "Glide and Snappy should disagree mid-ease, got {g} vs {s}"
-        );
-    }
-
-    #[test]
     fn shotbase_transform_timing_defaults_drive_glide_motion() {
-        let mut motion = MotionState::default();
-        motion.seed_default_cinematic();
+        let mut motion = motion_with_first_clip();
         let timing = motion.transform_timing;
         assert!((timing.transition_duration - 1.2).abs() < f64::EPSILON);
         assert!((timing.easing_x1 - 0.25).abs() < f64::EPSILON);
@@ -943,13 +938,26 @@ mod tests {
             default_progress > linear_progress + 0.01,
             "Shotbase's recovered Bézier should advance ahead of linear at mid-transition"
         );
-        assert!((linear_progress - 1.06).abs() < 0.002);
+        // linear progress at t=0.6 of a 1.2s transition is 0.5: scale 1 + (2-1)*0.5
+        assert!((linear_progress - 1.5).abs() < 0.002);
+    }
+
+    #[test]
+    fn transition_ms_slider_drives_the_global_timing() {
+        let mut motion = motion_with_first_clip();
+        motion.set_selected_transition_ms(300);
+        assert!((motion.transform_timing.transition_duration - 0.3).abs() < 1e-9);
+        // Inside the shortened window the move has already finished.
+        let held = motion.sample(0.35);
+        assert!((held.scale - DEFAULT_MOTION_ZOOM).abs() < 1e-6);
+        // A zero-duration transition jumps straight to the target pose.
+        motion.set_selected_transition_ms(0);
+        assert!((motion.sample(0.0).scale - DEFAULT_MOTION_ZOOM).abs() < 1e-6);
     }
 
     #[test]
     fn blur_and_position_setters_stick() {
-        let mut motion = MotionState::default();
-        motion.seed_default_cinematic();
+        let mut motion = motion_with_first_clip();
         motion.set_motion_blur(0.4);
         motion.set_selected_end_pos_x(0.5);
         motion.set_selected_end_pos_y(-0.25);
@@ -966,8 +974,7 @@ mod tests {
 
     #[test]
     fn recovered_disabled_effect_and_text_fields_are_no_ops() {
-        let mut motion = MotionState::default();
-        motion.seed_default_cinematic();
+        let mut motion = motion_with_first_clip();
         motion.set_selected_perspective(0.0);
         motion.set_selected_disabled(true);
         assert_eq!(motion.sample(0.4), MotionTransform::default());
@@ -988,8 +995,7 @@ mod tests {
 
     #[test]
     fn recovered_perspective_intensity_is_global_across_effect_segments() {
-        let mut motion = MotionState::default();
-        motion.seed_default_cinematic();
+        let mut motion = motion_with_first_clip();
         motion.set_selected_perspective(0.42);
         motion.add_segment_at(3.0).expect("second effect clip");
 
@@ -1001,8 +1007,7 @@ mod tests {
 
     #[test]
     fn recovered_segment_intensity_blends_the_camera_target() {
-        let mut motion = MotionState::default();
-        motion.seed_default_cinematic();
+        let mut motion = motion_with_first_clip();
         motion.set_selected_perspective(0.0);
         motion.set_selected_intensity(0.0);
 
@@ -1010,8 +1015,8 @@ mod tests {
 
         motion.set_selected_intensity(0.5);
         let half = motion.sample(motion.duration);
-        assert!((half.scale - 1.06).abs() < 1e-6);
-        assert!((half.rotation_y - 4.0).abs() < 1e-6);
+        assert!((half.scale - 1.5).abs() < 1e-6);
+        assert!(half.rotation_y.abs() < 1e-6);
     }
 
     #[test]
@@ -1047,8 +1052,7 @@ mod tests {
 
     #[test]
     fn text_effect_presets_and_typewriter_scope_are_applied() {
-        let mut motion = MotionState::default();
-        motion.seed_default_cinematic();
+        let mut motion = motion_with_first_clip();
         let first = motion.add_text_at(0.05).expect("text clip");
         assert_eq!(motion.text_segments.len(), 1);
         assert_eq!(motion.selected_text, Some(first));
@@ -1081,8 +1085,7 @@ mod tests {
 
     #[test]
     fn add_segment_fills_a_gap_and_rejects_overlap() {
-        let mut motion = MotionState::default();
-        motion.seed_default_cinematic();
+        let mut motion = motion_with_first_clip();
         let first_end = motion.segments[0].end;
         assert!(motion.add_segment_at(first_end + 0.05).is_some());
         assert_eq!(motion.segments.len(), 2);

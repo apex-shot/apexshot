@@ -22,7 +22,7 @@ use crate::capture::editor::state::EditorState;
 use crate::config::{load_config, save_config};
 use crate::i18n::t;
 use crate::recording::editor::model::{
-    MotionEffectTransformTiming, MotionState, MotionTextAnimation, MotionTextScope, ZoomEasing,
+    MotionEffectTransformTiming, MotionState, MotionTextAnimation, MotionTextScope,
     DEFAULT_MOTION_DURATION_SECONDS, DEFAULT_MOTION_TEXT_POS_X, DEFAULT_MOTION_TEXT_POS_Y,
     DEFAULT_MOTION_TEXT_SIZE, MAX_MOTION_DURATION_SECONDS, MAX_MOTION_POS, MAX_MOTION_TEXT_POS,
     MAX_MOTION_TEXT_SIZE, MAX_MOTION_YAW, MAX_ZOOM_EASE_MS, MIN_MOTION_DURATION_SECONDS,
@@ -75,6 +75,7 @@ pub(super) struct MotionModeParts {
     pub text_anim_buttons: Vec<(MotionTextAnimation, ToggleButton)>,
     pub text_scope_buttons: Vec<(MotionTextScope, ToggleButton)>,
     pub clip_hint: Label,
+    pub scale_value: Label,
     pub scale_chips: Vec<Button>,
     pub intensity_slider: FillSlider,
     pub intensity_value: Label,
@@ -105,7 +106,6 @@ pub(super) struct MotionModeParts {
     pub easing_y2_slider: FillSlider,
     pub easing_y2_value: Label,
     pub reset_timing_btn: Button,
-    pub easing_buttons: Vec<(ZoomEasing, ToggleButton)>,
     pub delete_btn: Button,
     pub inspector_syncing: Rc<Cell<bool>>,
     pub confirm_overlay: GtkBox,
@@ -118,6 +118,8 @@ pub(super) struct MotionRuntime {
     pub(super) playing: bool,
     pub(super) live_preview: bool,
     pub(super) last_tick: Option<Instant>,
+    /// Playhead time at which an edit-triggered transition preview stops.
+    pub(super) preview_end: Option<f64>,
 }
 
 impl MotionRuntime {
@@ -129,6 +131,7 @@ impl MotionRuntime {
             playing: false,
             live_preview: false,
             last_tick: None,
+            preview_end: None,
         }
     }
 }
@@ -164,7 +167,9 @@ impl MotionSession {
         runtime.playing = false;
         runtime.live_preview = false;
         runtime.last_tick = None;
-        runtime.motion.seed_default_cinematic();
+        runtime.preview_end = None;
+        // Shotbase enters Motion with an empty effects track; clips appear
+        // when the user clicks or drags the timeline.
     }
 
     pub(super) fn export_mp4(&self, source_image: &std::path::Path) -> Result<PathBuf, String> {
@@ -188,6 +193,7 @@ impl MotionSession {
         runtime.playing = false;
         runtime.live_preview = false;
         runtime.last_tick = None;
+        runtime.preview_end = None;
         runtime.motion.playhead = 0.0;
         runtime.motion.segments.clear();
         runtime.motion.text_segments.clear();
@@ -302,10 +308,17 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
     move_title.set_xalign(0.0);
     clip_box.append(&move_title);
 
+    let scale_header = GtkBox::new(Orientation::Horizontal, 8);
     let scale_label = Label::new(Some(&t("Scale")));
     scale_label.add_css_class("recording-editor-zoom-kicker");
     scale_label.set_xalign(0.0);
-    clip_box.append(&scale_label);
+    scale_label.set_hexpand(true);
+    let scale_value = Label::new(Some("200%"));
+    scale_value.add_css_class("recording-editor-zoom-kicker");
+    scale_value.set_xalign(1.0);
+    scale_header.append(&scale_label);
+    scale_header.append(&scale_value);
+    clip_box.append(&scale_header);
     let chips = Grid::new();
     chips.add_css_class("recording-editor-zoom-chips");
     chips.set_column_spacing(4);
@@ -406,33 +419,8 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
     reset_timing_btn.set_halign(gtk4::Align::Start);
     clip_box.append(&reset_timing_btn);
 
-    let easing_label = Label::new(Some(&t("Easing")));
-    easing_label.add_css_class("recording-editor-zoom-kicker");
-    easing_label.set_xalign(0.0);
-    clip_box.append(&easing_label);
-    let easing_row = GtkBox::new(Orientation::Horizontal, 6);
-    easing_row.add_css_class("recording-editor-zoom-easing");
-    easing_row.set_hexpand(true);
-    easing_row.set_homogeneous(true);
-    let easing_buttons: Vec<(ZoomEasing, ToggleButton)> = ZoomEasing::ALL
-        .iter()
-        .map(|&easing| {
-            let button = ToggleButton::with_label(&t(easing.label()));
-            button.add_css_class("recording-editor-zoom-easing-btn");
-            button.set_has_frame(false);
-            button.set_hexpand(true);
-            easing_row.append(&button);
-            (easing, button)
-        })
-        .collect();
-    if let Some((_, first)) = easing_buttons.first() {
-        for (index, (_, button)) in easing_buttons.iter().enumerate() {
-            if index > 0 {
-                button.set_group(Some(first));
-            }
-        }
-    }
-    clip_box.append(&easing_row);
+    // Shotbase's Motion timing is a single global cubic-Bézier curve — there
+    // are no named easing presets on the Motion track.
     inspector.append(&clip_box);
 
     let text_box = GtkBox::new(Orientation::Vertical, 10);
@@ -593,6 +581,7 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
             text_anim_buttons,
             text_scope_buttons,
             clip_hint,
+            scale_value,
             scale_chips,
             intensity_slider,
             intensity_value,
@@ -623,7 +612,6 @@ pub(super) fn build_motion_mode(prefers_dark: bool) -> (MotionModeParts, MotionS
             easing_y2_slider,
             easing_y2_value,
             reset_timing_btn,
-            easing_buttons,
             delete_btn,
             inspector_syncing,
             confirm_overlay,
@@ -755,6 +743,7 @@ pub(super) fn wire_motion_controls(
         let text_anim_buttons = parts.text_anim_buttons.clone();
         let text_scope_buttons = parts.text_scope_buttons.clone();
         let clip_hint = parts.clip_hint.clone();
+        let scale_value = parts.scale_value.clone();
         let scale_chips = parts.scale_chips.clone();
         let intensity_slider = parts.intensity_slider.clone();
         let intensity_value = parts.intensity_value.clone();
@@ -785,7 +774,6 @@ pub(super) fn wire_motion_controls(
         let easing_y2_slider = parts.easing_y2_slider.clone();
         let easing_y2_value = parts.easing_y2_value.clone();
         let reset_timing_btn = parts.reset_timing_btn.clone();
-        let easing_buttons = parts.easing_buttons.clone();
         let delete_btn = parts.delete_btn.clone();
         let syncing = parts.inspector_syncing.clone();
         Rc::new(move || {
@@ -888,14 +876,12 @@ pub(super) fn wire_motion_controls(
                 ));
                 for (chip, &(_, scale)) in scale_chips.iter().zip(MOTION_SCALE_PRESETS.iter()) {
                     if (segment.to.scale - scale).abs() < 0.03 {
-                        chip.add_css_class("recording-editor-timeline-tool-active");
+                        chip.add_css_class("recording-editor-zoom-chip-active");
                     } else {
-                        chip.remove_css_class("recording-editor-timeline-tool-active");
+                        chip.remove_css_class("recording-editor-zoom-chip-active");
                     }
                 }
-                for (easing, button) in &easing_buttons {
-                    button.set_active(*easing == segment.easing);
-                }
+                scale_value.set_label(&format!("{:.0}%", segment.to.scale * 100.0));
             }
             delete_btn.set_sensitive(has_clip || has_text);
             syncing.set(false);
@@ -941,6 +927,35 @@ pub(super) fn wire_motion_controls(
                 preview.queue_draw();
                 glib::ControlFlow::Break
             });
+        })
+    };
+
+    // Editing a timed clip parameter has to be judged in motion: a static
+    // frame at the playhead is identical before and after most edits. Like
+    // Shotbase, play the affected transition once. If the playhead is already
+    // inside the transition window the preview continues from there instead
+    // of restarting.
+    let request_transition_preview = {
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        Rc::new(move |segment_start: f64| {
+            let mut runtime = session.borrow_mut();
+            let transition = runtime
+                .motion
+                .transform_timing
+                .clamped()
+                .transition_duration;
+            let start = segment_start.max(0.0).min(runtime.motion.duration);
+            let end = (start + transition + 0.4).min(runtime.motion.duration);
+            let inside = runtime.motion.playhead >= start && runtime.motion.playhead <= end;
+            if !inside {
+                runtime.motion.playhead = start;
+            }
+            runtime.playing = true;
+            runtime.last_tick = Some(Instant::now());
+            runtime.preview_end = Some(end);
+            drop(runtime);
+            redraw();
         })
     };
 
@@ -1024,6 +1039,11 @@ pub(super) fn wire_motion_controls(
                 } else {
                     None
                 };
+                // Manual playback always runs the whole composition; only an
+                // edit-triggered preview stops early.
+                if runtime.playing {
+                    runtime.preview_end = None;
+                }
                 if runtime.playing && runtime.motion.playhead >= runtime.motion.duration {
                     runtime.motion.playhead = 0.0;
                 }
@@ -1663,14 +1683,25 @@ pub(super) fn wire_motion_controls(
         chip.connect_clicked({
             let session = session.runtime.clone();
             let redraw = redraw.clone();
+            let request_transition_preview = request_transition_preview.clone();
             let syncing = parts.inspector_syncing.clone();
             let scale = *scale;
             move |_| {
                 if syncing.get() {
                     return;
                 }
+                let segment_start = {
+                    let runtime = session.borrow();
+                    runtime
+                        .motion
+                        .selected_segment()
+                        .map(|segment| segment.start)
+                };
                 session.borrow_mut().motion.set_selected_end_scale(scale);
-                redraw();
+                match segment_start {
+                    Some(start) => request_transition_preview(start),
+                    None => redraw(),
+                }
             }
         });
     }
@@ -1678,6 +1709,7 @@ pub(super) fn wire_motion_controls(
     parts.intensity_slider.connect_value_changed({
         let session = session.runtime.clone();
         let intensity_value = parts.intensity_value.clone();
+        let request_transition_preview = request_transition_preview.clone();
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.inspector_syncing.clone();
         move |slider| {
@@ -1685,9 +1717,19 @@ pub(super) fn wire_motion_controls(
                 return;
             }
             let value = slider.value();
+            let segment_start = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map(|segment| segment.start)
+            };
             session.borrow_mut().motion.set_selected_intensity(value);
             intensity_value.set_label(&format!("{:.0}%", value * 100.0));
-            request_live_preview();
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => request_live_preview(),
+            }
         }
     });
 
@@ -1704,6 +1746,7 @@ pub(super) fn wire_motion_controls(
         ),
     ] {
         let session = session.runtime.clone();
+        let request_transition_preview = request_transition_preview.clone();
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.inspector_syncing.clone();
         slider.connect_value_changed(move |slider| {
@@ -1711,6 +1754,13 @@ pub(super) fn wire_motion_controls(
                 return;
             }
             let value = slider.value();
+            let segment_start = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map(|segment| segment.start)
+            };
             let mut runtime = session.borrow_mut();
             let (mut x, mut y) = runtime
                 .motion
@@ -1726,13 +1776,17 @@ pub(super) fn wire_motion_controls(
             runtime.motion.set_selected_zoom_anchor(x, y);
             drop(runtime);
             value_label.set_label(&format!("{:.0}%", value * 100.0));
-            request_live_preview();
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => request_live_preview(),
+            }
         });
     }
 
     parts.yaw_slider.connect_value_changed({
         let session = session.runtime.clone();
         let yaw_value = parts.yaw_value.clone();
+        let request_transition_preview = request_transition_preview.clone();
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.inspector_syncing.clone();
         move |slider| {
@@ -1740,14 +1794,25 @@ pub(super) fn wire_motion_controls(
                 return;
             }
             let value = slider.value();
+            let segment_start = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map(|segment| segment.start)
+            };
             session.borrow_mut().motion.set_selected_end_yaw(value);
             yaw_value.set_label(&format!("{:.0}°", value));
-            request_live_preview();
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => request_live_preview(),
+            }
         }
     });
     parts.pitch_slider.connect_value_changed({
         let session = session.runtime.clone();
         let pitch_value = parts.pitch_value.clone();
+        let request_transition_preview = request_transition_preview.clone();
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.inspector_syncing.clone();
         move |slider| {
@@ -1755,14 +1820,25 @@ pub(super) fn wire_motion_controls(
                 return;
             }
             let value = slider.value();
+            let segment_start = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map(|segment| segment.start)
+            };
             session.borrow_mut().motion.set_selected_end_pitch(value);
             pitch_value.set_label(&format!("{:.0}°", value));
-            request_live_preview();
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => request_live_preview(),
+            }
         }
     });
     parts.roll_slider.connect_value_changed({
         let session = session.runtime.clone();
         let roll_value = parts.roll_value.clone();
+        let request_transition_preview = request_transition_preview.clone();
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.inspector_syncing.clone();
         move |slider| {
@@ -1770,9 +1846,19 @@ pub(super) fn wire_motion_controls(
                 return;
             }
             let value = slider.value();
+            let segment_start = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map(|segment| segment.start)
+            };
             session.borrow_mut().motion.set_selected_end_roll(value);
             roll_value.set_label(&format!("{:.0}°", value));
-            request_live_preview();
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => request_live_preview(),
+            }
         }
     });
     parts.perspective_slider.connect_value_changed({
@@ -1793,6 +1879,7 @@ pub(super) fn wire_motion_controls(
     parts.pos_x_slider.connect_value_changed({
         let session = session.runtime.clone();
         let pos_x_value = parts.pos_x_value.clone();
+        let request_transition_preview = request_transition_preview.clone();
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.inspector_syncing.clone();
         move |slider| {
@@ -1800,14 +1887,25 @@ pub(super) fn wire_motion_controls(
                 return;
             }
             let value = slider.value();
+            let segment_start = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map(|segment| segment.start)
+            };
             session.borrow_mut().motion.set_selected_end_pos_x(value);
             pos_x_value.set_label(&format!("{:.0}%", value * 100.0));
-            request_live_preview();
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => request_live_preview(),
+            }
         }
     });
     parts.pos_y_slider.connect_value_changed({
         let session = session.runtime.clone();
         let pos_y_value = parts.pos_y_value.clone();
+        let request_transition_preview = request_transition_preview.clone();
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.inspector_syncing.clone();
         move |slider| {
@@ -1815,24 +1913,48 @@ pub(super) fn wire_motion_controls(
                 return;
             }
             let value = slider.value();
+            let segment_start = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map(|segment| segment.start)
+            };
             session.borrow_mut().motion.set_selected_end_pos_y(value);
             pos_y_value.set_label(&format!("{:.0}%", value * 100.0));
-            request_live_preview();
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => request_live_preview(),
+            }
         }
     });
     parts.ease_slider.connect_value_changed({
         let session = session.runtime.clone();
         let ease_value = parts.ease_value.clone();
+        let request_transition_preview = request_transition_preview.clone();
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.inspector_syncing.clone();
         move |slider| {
             if syncing.get() {
                 return;
             }
-            let ease_ms = slider.value().round() as u32;
-            session.borrow_mut().motion.set_selected_ease_ms(ease_ms);
-            ease_value.set_label(&format!("{ease_ms}ms"));
-            request_live_preview();
+            let transition_ms = slider.value().round() as u32;
+            let segment_start = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map(|segment| segment.start)
+            };
+            session
+                .borrow_mut()
+                .motion
+                .set_selected_transition_ms(transition_ms);
+            ease_value.set_label(&format!("{transition_ms}ms"));
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => request_live_preview(),
+            }
         }
     });
 
@@ -1859,6 +1981,7 @@ pub(super) fn wire_motion_controls(
         ),
     ] {
         let session = session.runtime.clone();
+        let request_transition_preview = request_transition_preview.clone();
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.inspector_syncing.clone();
         slider.connect_value_changed(move |slider| {
@@ -1866,6 +1989,13 @@ pub(super) fn wire_motion_controls(
                 return;
             }
             let value = slider.value();
+            let segment_start = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map(|segment| segment.start)
+            };
             let mut runtime = session.borrow_mut();
             let mut timing = runtime.motion.transform_timing;
             match axis {
@@ -1877,39 +2007,35 @@ pub(super) fn wire_motion_controls(
             runtime.motion.set_transform_timing(timing);
             drop(runtime);
             value_label.set_label(&format!("{:.0}%", value * 100.0));
-            request_live_preview();
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => request_live_preview(),
+            }
         });
     }
 
     parts.reset_timing_btn.connect_clicked({
         let session = session.runtime.clone();
         let redraw = redraw.clone();
+        let request_transition_preview = request_transition_preview.clone();
         move |_| {
-            let mut runtime = session.borrow_mut();
-            runtime
+            let segment_start = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map(|segment| segment.start)
+            };
+            session
+                .borrow_mut()
                 .motion
                 .set_transform_timing(MotionEffectTransformTiming::default());
-            runtime.motion.set_selected_easing(ZoomEasing::Glide);
-            drop(runtime);
-            redraw();
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => redraw(),
+            }
         }
     });
-
-    for (easing, button) in &parts.easing_buttons {
-        let easing = *easing;
-        button.connect_toggled({
-            let session = session.runtime.clone();
-            let redraw = redraw.clone();
-            let syncing = parts.inspector_syncing.clone();
-            move |button| {
-                if syncing.get() || !button.is_active() {
-                    return;
-                }
-                session.borrow_mut().motion.set_selected_easing(easing);
-                redraw();
-            }
-        });
-    }
 
     parts.delete_btn.connect_clicked({
         let session = session.runtime.clone();
@@ -1975,10 +2101,18 @@ pub(super) fn wire_motion_controls(
                         .unwrap_or(0.0);
                     runtime.last_tick = Some(now);
                     runtime.motion.playhead += dt;
-                    if runtime.motion.playhead >= runtime.motion.duration {
+                    let preview_done = runtime
+                        .preview_end
+                        .is_some_and(|end| runtime.motion.playhead >= end);
+                    if preview_done {
+                        runtime.motion.playhead = runtime.preview_end.take().unwrap_or(0.0);
+                        runtime.playing = false;
+                        runtime.last_tick = None;
+                    } else if runtime.motion.playhead >= runtime.motion.duration {
                         runtime.motion.playhead = 0.0;
                         runtime.playing = false;
                         runtime.last_tick = None;
+                        runtime.preview_end = None;
                     }
                 }
                 let playhead = runtime.motion.playhead;
@@ -2264,14 +2398,14 @@ mod tests {
     }
 
     #[test]
-    fn entering_motion_seeds_a_cinematic_segment() {
+    fn entering_motion_starts_with_an_empty_track() {
         let state = blank_state();
         let session = MotionSession::new(true);
         session.capture_snapshot(&state);
-        assert!(session.has_segments());
-        let start = session.runtime.borrow().motion.sample(0.0);
-        let end = session.runtime.borrow().motion.sample(3.0);
-        assert!((start.scale - 1.0).abs() < 1e-6);
-        assert!(end.scale > 1.05);
+        // Shotbase shows the hint and waits for a click or drag; nothing plays
+        // until the user adds a clip.
+        assert!(!session.has_segments());
+        let identity = session.runtime.borrow().motion.sample(1.5);
+        assert!((identity.scale - 1.0).abs() < 1e-6);
     }
 }

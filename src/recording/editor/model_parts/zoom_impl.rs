@@ -500,20 +500,24 @@ impl VideoEditState {
         else {
             return MotionTransform::default();
         };
-        MotionSegment {
-            start: clip.start,
-            end: clip.end,
-            zoom_mode: super::types::MotionZoomMode::Manual,
-            intensity: 1.0,
-            zoom_anchor_x: 0.5,
-            zoom_anchor_y: 0.5,
-            is_disabled: false,
-            from: MotionTransform::default(),
-            to: clip.card_pose(),
-            ease_ms: clip.ease_ms,
-            easing: clip.easing,
+        let target = clip.card_pose();
+        let span = (clip.end - clip.start).max(0.0);
+        if span <= f64::EPSILON {
+            return target;
         }
-        .sample(timeline_t)
+        let ease = (clip.ease_ms as f64 / 1000.0).clamp(0.0, span / 2.0);
+        let alpha = if ease <= f64::EPSILON {
+            ((timeline_t - clip.start) / span).clamp(0.0, 1.0)
+        } else if timeline_t < clip.start + ease {
+            ((timeline_t - clip.start) / ease).clamp(0.0, 1.0)
+        } else {
+            return target;
+        };
+        lerp_transform(
+            MotionTransform::default(),
+            target,
+            zoom_clip_easing(clip.easing, alpha),
+        )
     }
 
     pub fn eval_zoom(&self, t: f64) -> (f64, (f64, f64)) {
@@ -549,5 +553,24 @@ impl VideoEditState {
             scale,
             recenter_if_near_edge(center, (cursor_x, cursor_y), scale, frame_w, frame_h),
         )
+    }
+}
+
+/// The video editor zoom curve. Deliberately separate from the Motion track's
+/// global Bézier timing: zoom clips keep per-clip easing presets.
+fn zoom_clip_easing(easing: ZoomEasing, t: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    match easing {
+        ZoomEasing::Linear => t,
+        ZoomEasing::Glide => 1.0 - (1.0 - t).powi(3),
+        ZoomEasing::Smooth => {
+            if t < 0.5 {
+                4.0 * t * t * t
+            } else {
+                1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+            }
+        }
+        // Opposite of Glide so the four buttons are readable on a short ease window.
+        ZoomEasing::Snappy => t.powi(3),
     }
 }
