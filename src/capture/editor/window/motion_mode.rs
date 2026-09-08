@@ -959,6 +959,29 @@ pub(super) fn wire_motion_controls(
         })
     };
 
+    // Text entrances run on their own clock (typewriter reveal or the shared
+    // 0.28s slide), so picking an animation replays the title's entrance
+    // instead of leaving the static preview on its invisible first frame.
+    let request_text_transition_preview = {
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        Rc::new(move |text_start: f64, typewriter_time: f64| {
+            let mut runtime = session.borrow_mut();
+            let span = typewriter_time.max(0.28) + 0.25;
+            let start = text_start.max(0.0).min(runtime.motion.duration);
+            let end = (start + span).min(runtime.motion.duration);
+            let inside = runtime.motion.playhead >= start && runtime.motion.playhead <= end;
+            if !inside {
+                runtime.motion.playhead = start;
+            }
+            runtime.playing = true;
+            runtime.last_tick = Some(Instant::now());
+            runtime.preview_end = Some(end);
+            drop(runtime);
+            redraw();
+        })
+    };
+
     parts.duration_slider.connect_value_changed({
         let session_runtime = session.runtime.clone();
         let duration_value = parts.duration_value.clone();
@@ -1489,17 +1512,26 @@ pub(super) fn wire_motion_controls(
         let animation = *animation;
         button.connect_toggled({
             let session = session.runtime.clone();
-            let request_live_preview = request_live_preview.clone();
+            let request_text_transition_preview = request_text_transition_preview.clone();
             let syncing = parts.inspector_syncing.clone();
             move |button| {
                 if syncing.get() || !button.is_active() {
                     return;
                 }
+                let text_start = {
+                    let runtime = session.borrow();
+                    runtime
+                        .motion
+                        .selected_text_segment()
+                        .map(|segment| (segment.start, segment.typewriter_time))
+                };
                 session
                     .borrow_mut()
                     .motion
                     .set_selected_text_animation(animation);
-                request_live_preview();
+                if let Some((start, typewriter_time)) = text_start {
+                    request_text_transition_preview(start, typewriter_time);
+                }
             }
         });
     }
@@ -1508,14 +1540,23 @@ pub(super) fn wire_motion_controls(
         let scope = *scope;
         button.connect_toggled({
             let session = session.runtime.clone();
-            let request_live_preview = request_live_preview.clone();
+            let request_text_transition_preview = request_text_transition_preview.clone();
             let syncing = parts.inspector_syncing.clone();
             move |button| {
                 if syncing.get() || !button.is_active() {
                     return;
                 }
+                let text_start = {
+                    let runtime = session.borrow();
+                    runtime
+                        .motion
+                        .selected_text_segment()
+                        .map(|segment| (segment.start, segment.typewriter_time))
+                };
                 session.borrow_mut().motion.set_selected_text_scope(scope);
-                request_live_preview();
+                if let Some((start, typewriter_time)) = text_start {
+                    request_text_transition_preview(start, typewriter_time);
+                }
             }
         });
     }
