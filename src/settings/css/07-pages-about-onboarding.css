@@ -1,0 +1,187 @@
+            /* FILENAME TAG PILLS */
+            .filename-tag-pill {
+                background-color: #fce4d6;
+                color: #b05c38;
+                border: none;
+                border-radius: 4px;
+                padding: 2px 8px;
+                font-family: monospace;
+                font-weight: bold;
+                box-shadow: none;
+            }
+            .filename-tag-pill:hover {
+                background-color: #f8d0b5;
+            }
+
+            .format-palette-box {
+                background-color: alpha(@window_fg_color, 0.05); /* Adaptive gray */
+                border: 1px solid alpha(@window_fg_color, 0.1);
+                border-radius: 8px;
+                padding: 20px;
+            }
+
+            .format-entry {
+                background: @view_bg_color;
+                color: @view_fg_color;
+                border: 1px solid alpha(@window_fg_color, 0.2);
+                border-radius: 6px;
+                padding: 10px;
+                font-size: 14px;
+            }
+
+            .modal-container {
+                background-color: @window_bg_color;
+                border-radius: 12px;
+            }
+
+            /* ABOUT TAB STYLES */
+            .about-app-name {
+                font-size: 24px;
+                font-weight: 800;
+                margin-bottom: 4px;
+            }
+            .about-version-label {
+                font-size: 13px;
+                opacity: 0.6;
+                margin-bottom: 24px;
+            }
+            .about-link-button {
+                background: transparent;
+                border: none;
+                color: #b05c38;
+                font-size: 13px;
+                padding: 4px 8px;
+                border-radius: 4px;
+                transition: all 0.15s ease;
+            }
+            .about-link-button:hover {
+                background: alpha(#b05c38, 0.08);
+                color: #b05c38;
+                text-decoration: underline;
+            }
+            .editor-root.editor-theme-light .about-link-button {
+                color: #9a4c2c;
+            }
+            .editor-root.editor-theme-light .about-link-button:hover {
+                color: #9a4c2c;
+            }
+
+            .about-support-title {
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: 0.2px;
+                opacity: 0.72;
+            }
+
+            .about-support-copy {
+                font-size: 12px;
+                line-height: 1.45;
+                opacity: 0.58;
+            }
+
+            .editor-root.editor-theme-light .about-support-title {
+                color: alpha(#1d2129, 0.78);
+                opacity: 1;
+            }
+
+            .editor-root.editor-theme-light .about-support-copy {
+                color: alpha(#1d2129, 0.58);
+                opacity: 1;
+            }
+
+            /* Onboarding */
+            .onboarding-back-button {
+                padding: 4px 14px;
+                min-height: 24px;
+                font-size: 12px;
+            }
+
+            .editor-root.editor-theme-light .onboarding-back-button {
+                color: #1d2129;
+            }
+
+            .onboarding-dot {
+                min-width: 6px;
+                min-height: 6px;
+                border-radius: 999px;
+                background-color: alpha(white, 0.18);
+                padding: 0;
+                margin: 0 2px;
+            }
+
+            .onboarding-dot-active {
+                background-color: #b05c38;
+                min-width: 18px;
+            }
+
+            .editor-root.editor-theme-light .onboarding-dot {
+                background-color: alpha(#111827, 0.14);
+            }
+
+            .editor-root.editor-theme-light .onboarding-dot-active {
+                background-color: #b05c38;
+            }
+
+            .onboarding-card-list {
+                margin-top: 8px;
+            }
+
+            .onboarding-feature-row {
+                padding: 12px 16px;
+            }
+
+            .onboarding-icon-badge {
+                background-color: alpha(#e8764a, 0.16);
+                color: #e8764a;
+                border-radius: 10px;
+                min-width: 40px;
+                min-height: 40px;
+            }
+
+            .onboarding-option-icon {
+                min-width: 32px;
+                min-height: 32px;
+            }
+
+            .editor-root.editor-theme-light .onboarding-icon-badge {
+                background-color: alpha(#b05c38, 0.12);
+                color: #9a4c2c;
+            }
+
+            .onboarding-option-card {
+                padding: 14px 16px;
+                margin: 0;
+            }
+
+            .onboarding-status-pill {
+                background-color: alpha(#e8764a, 0.14);
+                color: #e8764a;
+                border-radius: 999px;
+                padding: 3px 12px;
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+            }
+
+            .editor-root.editor-theme-light .onboarding-status-pill {
+                background-color: alpha(#b05c38, 0.12);
+                color: #9a4c2c;
+            }
+
+            .cloud-avatar {
+                background-color: #bb6d7a;
+                color: white;
+                border-radius: 50%;
+                font-size: 24px;
+                font-weight: bold;
+            }
+
+            .cloud-user-name {
+                font-weight: bold;
+                font-size: 16px;
+            }
+
+            .cloud-user-email {
+                font-size: 13px;
+                opacity: 0.6;
+            }

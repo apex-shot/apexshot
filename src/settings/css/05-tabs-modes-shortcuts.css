@@ -1,0 +1,164 @@
+            .editor-root.editor-theme-light .recording-tab-switcher {
+                background-color: alpha(#111827, 0.04);
+                border-color: alpha(#111827, 0.08);
+            }
+
+            .editor-root.editor-theme-light .recording-tab-button {
+                color: alpha(#111827, 0.6);
+            }
+
+            .editor-root.editor-theme-light .recording-tab-button:hover {
+                color: #17202a;
+            }
+
+            .editor-root.editor-theme-light .settings-action-button {
+                background-color: alpha(#111827, 0.06);
+                border-color: alpha(#111827, 0.12);
+                color: #17202a;
+            }
+
+            .editor-root.editor-theme-light .settings-action-button:hover {
+                background-color: alpha(#111827, 0.10);
+            }
+
+            .editor-root.editor-theme-light .mode-preview-box {
+                background-color: alpha(#111827, 0.04);
+            }
+
+            .editor-root.editor-theme-light .mode-preview-box.active {
+                border-color: #b05c38;
+                background-color: alpha(#b05c38, 0.08);
+                box-shadow: 0 4px 12px alpha(black, 0.12);
+            }
+
+            .editor-root.editor-theme-light .shortcuts-row-zebra {
+                background-color: alpha(#111827, 0.04);
+            }
+
+            .recording-tab-switcher {
+                background-color: alpha(white, 0.04);
+                border-radius: 9px;
+                padding: 4px;
+                border: 1px solid alpha(white, 0.08);
+            }
+
+            .recording-tab-button {
+                min-width: 90px;
+                min-height: 28px;
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+                color: alpha(white, 0.6);
+                font-size: 13px;
+                font-weight: 500;
+                box-shadow: none;
+                transition: all 0.2s;
+            }
+
+            .recording-tab-button:hover {
+                color: white;
+            }
+
+            .recording-tab-button.active {
+                background-color: #b05c38;
+                color: white;
+                box-shadow: 0 1px 3px alpha(black, 0.2);
+            }
+
+            .settings-action-button {
+                min-height: 24px;
+                padding: 2px 10px;
+                background-color: alpha(white, 0.08);
+                border-radius: 6px;
+                border: 1px solid alpha(white, 0.1);
+                font-size: 11px;
+                color: white;
+            }
+
+            .settings-action-button:hover {
+                background-color: alpha(white, 0.12);
+            }
+
+            .settings-sub-option-hint {
+                font-size: 11px;
+                opacity: 0.64;
+                line-height: 1.4;
+            }
+
+            .mode-preview-box {
+                background-color: alpha(white, 0.04);
+                border-radius: 10px;
+                border: 2px solid transparent;
+                transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            }
+
+            .mode-preview-box.active {
+                border-color: #b05c38;
+                background-color: alpha(#b05c38, 0.08);
+                box-shadow: 0 4px 12px alpha(black, 0.3);
+            }
+
+            .mode-icon-check {
+                opacity: 0;
+                min-width: 0;
+                min-height: 0;
+            }
+
+            .selection-mode-radio {
+                margin-right: 8px;
+            }
+
+            .shortcuts-header-title {
+                font-weight: bold;
+                font-size: 15px;
+            }
+
+            .shortcuts-row-zebra {
+                background-color: alpha(white, 0.04);
+            }
+
+            .shortcuts-label {
+                font-size: 13px;
+                opacity: 0.9;
+            }
+
+            .shortcuts-record-btn {
+                background-color: alpha(white, 0.06);
+                border: 1px solid alpha(white, 0.1);
+                border-radius: 8px;
+                color: alpha(white, 0.86);
+                font-family: monospace;
+                transition: all 0.2s;
+            }
+
+            .shortcuts-record-btn:hover {
+                background-color: alpha(white, 0.12);
+                border-color: alpha(white, 0.2);
+            }
+
+            .shortcuts-record-btn:active {
+                background-color: alpha(white, 0.2);
+            }
+
+            .editor-root.editor-theme-light .shortcuts-record-btn {
+                background-image: none;
+                background-color: #ffffff;
+                border-color: alpha(#111827, 0.18);
+                color: #17202a;
+            }
+
+            .editor-root.editor-theme-light .shortcuts-record-btn:hover {
+                background-color: #f8fafc;
+                border-color: alpha(#111827, 0.28);
+                color: #17202a;
+            }
+
+            .editor-root.editor-theme-light .shortcuts-record-btn:active {
+                background-color: alpha(#b05c38, 0.10);
+                border-color: alpha(#b05c38, 0.35);
+            }
+
+            .shortcuts-tip {
+                font-size: 13px;
+                line-height: 1.55;
+            }

@@ -2231,3 +2231,36 @@ msgid "Scope"
 msgstr "範囲"
 msgid "Unpin"
 msgstr "ピン留めを解除"
+
+msgid "Appearance"
+msgstr "外観"
+
+msgid "Border Color"
+msgstr "枠線の色"
+
+msgid "Choose"
+msgstr "選択"
+
+msgid "Choose Watermark Image"
+msgstr "透かし画像を選択"
+
+msgid "Choose…"
+msgstr "選択…"
+
+msgid "Hex color"
+msgstr "16進カラー"
+
+msgid "No image selected"
+msgstr "画像が選択されていません"
+
+msgid "Remove"
+msgstr "削除"
+
+msgid "Show all wallpapers"
+msgstr "すべての壁紙を表示"
+
+msgid "Wallpapers"
+msgstr "壁紙"
+
+msgid "Watermark"
+msgstr "透かし"

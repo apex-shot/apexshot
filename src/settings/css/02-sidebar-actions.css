@@ -1,0 +1,204 @@
+            .settings-sidebar-wrapper {
+                background-color: alpha(black, 0.25);
+                border-right: 1px solid alpha(white, 0.06);
+                min-width: 170px;
+            }
+
+            .settings-sidebar {
+                padding: 10px 8px;
+                background-color: transparent;
+                border: none;
+            }
+
+            .settings-nav-item {
+                min-height: 24px;
+                padding: 5px 10px;
+                border-radius: 5px;
+                margin-bottom: 1px;
+            }
+
+            .settings-nav-item-hover {
+                background-color: alpha(white, 0.06);
+            }
+
+            .settings-nav-item-selected {
+                background-color: alpha(white, 0.10);
+                box-shadow: none;
+            }
+
+            .settings-nav-icon {
+                opacity: 0.72;
+            }
+
+            .settings-nav-icon-selected {
+                opacity: 1;
+                color: #e8764a;
+            }
+
+            .settings-nav-label {
+                font-size: 12px;
+                font-weight: 500;
+                margin-top: 0;
+                opacity: 0.78;
+            }
+
+            .settings-nav-label-selected {
+                opacity: 1;
+                color: #ffffff;
+            }
+
+            .settings-nav-icon-hover,
+            .settings-nav-label-hover {
+                color: white;
+                opacity: 1;
+            }
+
+            .editor-root button.settings-primary-btn {
+                background-image: none;
+                background-color: #b05c38;
+                border: none;
+                border-radius: 6px;
+                padding: 4px 16px;
+                font-size: 12px;
+                font-weight: 600;
+                color: white;
+                min-height: 24px;
+                box-shadow: none;
+            }
+
+            .editor-root button.settings-primary-btn:hover {
+                background-image: none;
+                background-color: #c06540;
+                box-shadow: none;
+            }
+
+            /* Settings sidebar Save: grey until there are unsaved changes, then orange */
+            .editor-root button.settings-save-btn {
+                background-image: none;
+                background-color: alpha(white, 0.10);
+                border: none;
+                border-radius: 6px;
+                padding: 4px 16px;
+                font-size: 12px;
+                font-weight: 600;
+                color: alpha(white, 0.42);
+                min-height: 24px;
+                box-shadow: none;
+                transition: background-color 140ms ease, color 140ms ease;
+            }
+
+            .editor-root button.settings-save-btn:hover {
+                background-image: none;
+                background-color: alpha(white, 0.12);
+                color: alpha(white, 0.50);
+                box-shadow: none;
+            }
+
+            .editor-root button.settings-save-btn.settings-save-btn-ready {
+                background-color: #b05c38;
+                color: white;
+            }
+
+            .editor-root button.settings-save-btn.settings-save-btn-ready:hover {
+                background-color: #c06540;
+                color: white;
+            }
+
+            .editor-root button.settings-save-btn:disabled,
+            .editor-root button.settings-save-btn:disabled:hover {
+                background-image: none;
+                background-color: alpha(white, 0.08);
+                color: alpha(white, 0.32);
+                opacity: 1;
+                box-shadow: none;
+            }
+
+            .editor-root button.settings-save-btn.settings-save-btn-ready:disabled,
+            .editor-root button.settings-save-btn.settings-save-btn-ready:disabled:hover {
+                background-color: alpha(white, 0.08);
+                color: alpha(white, 0.32);
+            }
+
+            .editor-root.editor-theme-light .settings-sidebar-wrapper {
+                border-right-color: alpha(#111827, 0.06);
+                background-color: alpha(#111827, 0.04);
+            }
+
+            .editor-root.editor-theme-light .settings-sidebar {
+                background-color: transparent;
+                border: none;
+            }
+
+            .editor-root.editor-theme-light .settings-nav-item-hover {
+                background-color: alpha(#111827, 0.06);
+            }
+
+            .editor-root.editor-theme-light .settings-nav-item-selected {
+                background-color: alpha(#111827, 0.08);
+                box-shadow: none;
+            }
+
+            .editor-root.editor-theme-light .settings-nav-icon {
+                color: #1d2129;
+                opacity: 0.62;
+            }
+
+            .editor-root.editor-theme-light .settings-nav-icon-selected {
+                color: #b05c38;
+                opacity: 1;
+            }
+
+            .editor-root.editor-theme-light .settings-nav-label {
+                color: #1d2129;
+                opacity: 0.72;
+            }
+
+            .editor-root.editor-theme-light .settings-nav-label-selected {
+                color: #1d2129;
+                opacity: 1;
+            }
+
+            .editor-root.editor-theme-light .settings-nav-icon-hover,
+            .editor-root.editor-theme-light .settings-nav-label-hover {
+                color: #1d2129;
+                opacity: 1;
+            }
+
+            .editor-root.editor-theme-light button.settings-primary-btn {
+                background-color: #b05c38;
+                border-color: #9a4c2c;
+                color: white;
+            }
+
+            .editor-root.editor-theme-light button.settings-primary-btn:hover {
+                background-color: #c06540;
+            }
+
+            .editor-root.editor-theme-light button.settings-save-btn {
+                background-color: alpha(#111827, 0.08);
+                color: alpha(#1d2129, 0.38);
+            }
+
+            .editor-root.editor-theme-light button.settings-save-btn:hover {
+                background-color: alpha(#111827, 0.12);
+                color: alpha(#1d2129, 0.48);
+            }
+
+            .editor-root.editor-theme-light button.settings-save-btn.settings-save-btn-ready {
+                background-color: #b05c38;
+                color: white;
+            }
+
+            .editor-root.editor-theme-light button.settings-save-btn.settings-save-btn-ready:hover {
+                background-color: #c06540;
+                color: white;
+            }
+
+            .editor-root.editor-theme-light button.settings-save-btn:disabled,
+            .editor-root.editor-theme-light button.settings-save-btn:disabled:hover,
+            .editor-root.editor-theme-light button.settings-save-btn.settings-save-btn-ready:disabled,
+            .editor-root.editor-theme-light button.settings-save-btn.settings-save-btn-ready:disabled:hover {
+                background-color: alpha(#111827, 0.06);
+                color: alpha(#1d2129, 0.28);
+                opacity: 1;
+            }

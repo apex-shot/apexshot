@@ -2272,3 +2272,36 @@ msgid "Scope"
 msgstr "Ámbito"
 msgid "Unpin"
 msgstr "Desanclar"
+
+msgid "Appearance"
+msgstr "Apariencia"
+
+msgid "Border Color"
+msgstr "Color del borde"
+
+msgid "Choose"
+msgstr "Elegir"
+
+msgid "Choose Watermark Image"
+msgstr "Elegir imagen de marca de agua"
+
+msgid "Choose…"
+msgstr "Elegir…"
+
+msgid "Hex color"
+msgstr "Color hexadecimal"
+
+msgid "No image selected"
+msgstr "No se ha seleccionado ninguna imagen"
+
+msgid "Remove"
+msgstr "Eliminar"
+
+msgid "Show all wallpapers"
+msgstr "Mostrar todos los fondos de pantalla"
+
+msgid "Wallpapers"
+msgstr "Fondos de pantalla"
+
+msgid "Watermark"
+msgstr "Marca de agua"

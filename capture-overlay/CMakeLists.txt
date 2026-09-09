@@ -19,7 +19,17 @@ add_executable(apexshot-capture
     src/CaptureOverlay.cpp
     src/CaptureOverlay.h
     src/CaptureOverlay_p.h
+    src/CaptureOverlay_DrawingPrimitives_p.h
+    src/CaptureOverlay_DrawingPrimitives.cpp
+    src/CaptureOverlay_Layout.cpp
     src/CaptureOverlay_Drawing.cpp
+    src/CaptureOverlay_Paint.cpp
+    src/CaptureOverlay_Audio.cpp
+    src/CaptureOverlay_ScrollPopupDrawing.cpp
+    src/CaptureOverlay_DropdownDrawing.cpp
+    src/CaptureOverlay_RecordingSettingsDrawing.cpp
+    src/CaptureOverlay_RecordingDrawing.cpp
+    src/CaptureOverlay_ToolbarDrawing.cpp
     src/CaptureOverlay_Events.cpp
     src/CaptureOverlay_Scroll.cpp
     src/CaptureOverlay_HitTest.cpp

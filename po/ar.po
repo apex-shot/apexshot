@@ -2247,3 +2247,36 @@ msgid "Scope"
 msgstr "النطاق"
 msgid "Unpin"
 msgstr "إلغاء التثبيت"
+
+msgid "Appearance"
+msgstr "المظهر"
+
+msgid "Border Color"
+msgstr "لون الحدود"
+
+msgid "Choose"
+msgstr "اختر"
+
+msgid "Choose Watermark Image"
+msgstr "اختر صورة العلامة المائية"
+
+msgid "Choose…"
+msgstr "اختر…"
+
+msgid "Hex color"
+msgstr "لون سداسي عشري"
+
+msgid "No image selected"
+msgstr "لم تُحدد صورة"
+
+msgid "Remove"
+msgstr "إزالة"
+
+msgid "Show all wallpapers"
+msgstr "عرض كل الخلفيات"
+
+msgid "Wallpapers"
+msgstr "الخلفيات"
+
+msgid "Watermark"
+msgstr "علامة مائية"

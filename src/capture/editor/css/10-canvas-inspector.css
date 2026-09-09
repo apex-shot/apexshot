@@ -1,0 +1,361 @@
+            .editor-canvas-frame {
+                border-radius: 0;
+                border: none;
+                background-color: transparent;
+                padding: 0;
+            }
+
+            .editor-canvas-workspace {
+                background-color: transparent;
+            }
+
+            .editor-right-inspector {
+                min-width: 210px;
+                background: alpha(black, 0.25);
+                border-left: none;
+                padding: 0;
+            }
+
+            .editor-inspector-scroll,
+            .editor-inspector-scroll > viewport,
+            .editor-inspector-scroll scrollbar {
+                background: transparent;
+                border: none;
+            }
+
+            .editor-right-inspector scrollbar,
+            .editor-right-inspector scrollbar.overlay-indicator {
+                padding: 0;
+                margin: 0;
+                border: none;
+                background: transparent;
+            }
+
+            .editor-right-inspector scrollbar.vertical {
+                min-width: 6px;
+            }
+
+            .editor-right-inspector scrollbar.vertical:hover,
+            .editor-right-inspector scrollbar.vertical.hovering,
+            .editor-right-inspector scrollbar.vertical.dragging {
+                min-width: 10px;
+            }
+
+            .editor-right-inspector scrollbar contents,
+            .editor-right-inspector scrollbar trough {
+                min-width: 0;
+                min-height: 0;
+                padding: 0;
+                margin: 0;
+                border: none;
+                background: transparent;
+            }
+
+            .editor-right-inspector scrollbar slider {
+                background-color: alpha(white, 0.18);
+                border-radius: 999px;
+                min-width: 5px;
+                min-height: 5px;
+                margin: 0;
+                padding: 0;
+                border: none;
+            }
+
+            .editor-right-inspector scrollbar:hover slider,
+            .editor-right-inspector scrollbar.hovering slider,
+            .editor-right-inspector scrollbar.dragging slider {
+                min-width: 8px;
+                min-height: 8px;
+            }
+
+            .editor-right-inspector scrollbar slider:hover {
+                background-color: alpha(white, 0.28);
+            }
+
+            .editor-right-inspector scrollbar slider:active {
+                background-color: alpha(white, 0.35);
+            }
+
+            .editor-inspector-title {
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: -0.1px;
+            }
+
+            .editor-inspector-tabs {
+                margin-top: 16px;
+                margin-bottom: 12px;
+                margin-left: 16px;
+                margin-right: 16px;
+            }
+
+            button.editor-inspector-tab-button {
+                min-height: 20px;
+                padding: 0;
+                border-radius: 0;
+                border: none;
+                background: transparent;
+                color: rgba(241, 241, 243, 0.82);
+                box-shadow: none;
+            }
+
+            button.editor-inspector-tab-button:hover {
+                background: transparent;
+                color: #ffffff;
+            }
+
+            button.editor-inspector-tab-button.active-inspector-tab {
+                background: transparent;
+                border: none;
+                color: #b05c38;
+            }
+
+            .editor-inspector-placeholder-shell {
+                min-width: 210px;
+                padding: 16px;
+            }
+
+            /* Motion borrows the recording editor's 288px sidebar controls.
+             * The widget does not expand horizontally, so this establishes the
+             * panel width without relying on unsupported GTK max-width CSS. */
+            .editor-motion-inspector {
+                min-width: 288px;
+            }
+
+            .editor-inspector-placeholder {
+                color: rgba(255, 255, 255, 0.62);
+                font-size: 11px;
+                line-height: 1.4;
+            }
+
+            .editor-select-inspector-status {
+                color: rgba(255, 255, 255, 0.9);
+                font-size: 12px;
+                font-weight: 600;
+                padding: 10px 12px;
+            }
+
+            .editor-select-inspector-detail,
+            .editor-select-inspector-metric,
+            .editor-select-inspector-hint {
+                color: rgba(255, 255, 255, 0.68);
+                font-size: 11px;
+                line-height: 1.4;
+                padding: 10px 12px;
+            }
+
+            .editor-select-inspector-hint {
+                color: rgba(255, 255, 255, 0.52);
+            }
+
+            .editor-inspector-section {
+                margin-bottom: 12px;
+            }
+
+            .editor-inspector-section-body {
+                background: alpha(white, 0.06);
+                border: none;
+                border-radius: 6px;
+            }
+
+            .editor-inspector-option-list {
+                background: transparent;
+            }
+
+            .editor-inspector-toggle-row {
+                padding: 10px 12px;
+            }
+
+            .editor-inspector-toggle-row checkbutton {
+                color: rgba(241, 241, 243, 0.9);
+            }
+
+            button.editor-crop-inspector-option {
+                border-radius: 8px;
+                color: rgba(241, 241, 243, 0.9);
+            }
+
+            button.editor-crop-inspector-option:hover {
+                background: alpha(white, 0.06);
+                color: #ffffff;
+            }
+
+            button.editor-crop-inspector-option.editor-crop-inspector-option-active {
+                background: alpha(white, 0.10);
+                border: none;
+            }
+
+            .editor-crop-inspector-check {
+                color: #b05c38;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .editor-crop-dimensions-row {
+                padding: 12px 0;
+            }
+
+            .editor-dimension-box {
+                background: alpha(white, 0.04);
+                border: 1px solid alpha(white, 0.06);
+                border-radius: 6px;
+                padding: 6px 10px;
+                min-width: 72px;
+                transition: background-color 120ms ease, border-color 120ms ease;
+            }
+
+            .editor-crop-dimensions-value {
+                color: rgba(255, 255, 255, 0.94);
+                font-size: 13px;
+                font-weight: 600;
+                font-family: 'DejaVu Sans Mono', 'Liberation Mono', Monospace;
+            }
+
+            .editor-crop-dimensions-separator {
+                color: rgba(255, 255, 255, 0.42);
+                font-size: 13px;
+                font-weight: 500;
+                margin: 0 4px;
+            }
+
+            .editor-dimension-label {
+                color: rgba(255, 255, 255, 0.46);
+                font-size: 9px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                margin-top: 2px;
+            }
+
+            button.editor-crop-action-button {
+                min-height: 30px;
+                padding: 0 12px;
+                border-radius: 6px;
+                font-size: 12px;
+                font-weight: 600;
+                box-shadow: none;
+                transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+            }
+
+            button.editor-crop-action-button-secondary {
+                border: 1px solid alpha(white, 0.08);
+                background: alpha(white, 0.04);
+                color: rgba(255, 255, 255, 0.86);
+            }
+
+            button.editor-crop-action-button-secondary:hover {
+                background: alpha(white, 0.08);
+                border-color: alpha(white, 0.12);
+                color: #ffffff;
+            }
+
+            button.editor-crop-action-button-primary {
+                border: none;
+                background: #b05c38;
+                color: #ffffff;
+            }
+
+            button.editor-crop-action-button-primary:hover {
+                background: #c06540;
+                color: #ffffff;
+            }
+
+            button.editor-crop-action-button-primary:active {
+                background: #8a4a2d;
+            }
+
+            button.editor-crop-action-button:disabled {
+                opacity: 0.45;
+            }
+
+            /* Unified inspector option rows (settings-nav pattern). */
+            button.editor-arrow-inspector-option,
+            button.editor-text-inspector-option,
+            button.editor-obfuscate-inspector-option,
+            button.editor-number-style-option,
+            button.editor-number-size-option {
+                border-radius: 5px;
+                color: rgba(255, 255, 255, 0.82);
+                border: none;
+                background: transparent;
+                transition: background-color 120ms ease, color 120ms ease;
+            }
+
+            button.editor-arrow-inspector-option:hover,
+            button.editor-text-inspector-option:hover,
+            button.editor-obfuscate-inspector-option:hover,
+            button.editor-number-style-option:hover,
+            button.editor-number-size-option:hover {
+                background: alpha(white, 0.06);
+                color: #ffffff;
+            }
+
+            button.editor-arrow-inspector-option.editor-arrow-inspector-option-active,
+            button.editor-text-inspector-option.editor-text-inspector-option-active,
+            button.editor-obfuscate-inspector-option.editor-obfuscate-inspector-option-active,
+            button.editor-number-style-option.editor-number-style-option-active,
+            button.editor-number-size-option.editor-number-size-option-active {
+                background: alpha(white, 0.10);
+                border: none;
+                color: #ffffff;
+            }
+
+            .editor-arrow-inspector-check,
+            .editor-text-inspector-check,
+            .editor-obfuscate-inspector-check,
+            .editor-number-style-check,
+            .editor-number-size-check {
+                color: #b05c38;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .editor-number-start-label {
+                color: rgba(255, 255, 255, 0.82);
+                font-size: 11px;
+                font-weight: 500;
+            }
+
+            .editor-number-start-entry {
+                min-height: 30px;
+                min-width: 48px;
+                padding: 0 10px;
+                border-radius: 6px;
+                border: 1px solid alpha(white, 0.08);
+                background: alpha(white, 0.04);
+                color: rgba(255, 255, 255, 0.94);
+                font-size: 12px;
+                font-weight: 600;
+                box-shadow: none;
+                transition: background-color 120ms ease, border-color 120ms ease;
+            }
+
+            .editor-number-start-entry:focus {
+                border-color: alpha(white, 0.20);
+                background: alpha(white, 0.08);
+            }
+
+            button.editor-number-start-stepper {
+                min-width: 32px;
+                min-height: 32px;
+                padding: 0;
+                border-radius: 6px;
+                border: 1px solid alpha(white, 0.16);
+                background: alpha(white, 0.10);
+                color: #ffffff;
+                font-size: 16px;
+                font-weight: 700;
+                box-shadow: none;
+                transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+            }
+
+            button.editor-number-start-stepper:hover {
+                background: alpha(white, 0.16);
+                border-color: alpha(white, 0.26);
+                color: #ffffff;
+            }
+
+            button.editor-number-start-stepper:active {
+                background: alpha(white, 0.22);
+            }

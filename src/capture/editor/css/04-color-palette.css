@@ -1,0 +1,351 @@
+            .editor-color-group {
+                padding: 0;
+                margin: 0 2px;
+            }
+
+            .editor-toolbar-color-status {
+                min-height: 22px;
+                padding: 0 6px;
+                border: none;
+                background: transparent;
+            }
+
+            .editor-toolbar-color-status-swatch {
+                min-width: 12px;
+                min-height: 12px;
+                border-radius: 3px;
+                border: 1px solid alpha(white, 0.18);
+                background: #121212;
+                box-shadow: none;
+            }
+
+            .editor-toolbar-color-status-text {
+                padding: 0;
+            }
+
+            .editor-toolbar-color-status-label {
+                color: rgba(245, 245, 247, 0.94);
+                font-size: 12px;
+                font-weight: 700;
+                letter-spacing: 0.1px;
+            }
+
+            .editor-toolbar-color-status-hint {
+                color: rgba(245, 245, 247, 0.42);
+                font-size: 10px;
+                font-weight: 500;
+                margin-top: -1px;
+            }
+
+            .editor-color-trigger-shell {
+                min-height: 30px;
+                border-radius: 999px;
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                background-image: linear-gradient(to bottom,
+                    rgba(38, 38, 44, 0.95),
+                    rgba(25, 25, 30, 0.95));
+                padding: 2px 6px 2px 4px;
+                transition: all 160ms ease;
+                box-shadow:
+                    0 1px 2px rgba(0, 0, 0, 0.35),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+            }
+
+            .editor-color-trigger-shell:hover {
+                border-color: rgba(255, 255, 255, 0.18);
+                background-image: linear-gradient(to bottom,
+                    rgba(46, 46, 54, 0.98),
+                    rgba(31, 31, 38, 0.98));
+                box-shadow:
+                    0 3px 8px rgba(0, 0, 0, 0.35),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-color-trigger-shell:active {
+                border-color: rgba(255, 255, 255, 0.12);
+                background-image: linear-gradient(to bottom,
+                    rgba(22, 22, 27, 0.98),
+                    rgba(17, 17, 21, 0.98));
+                box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.4);
+            }
+
+            button.editor-color-trigger-menu-button {
+                min-width: 20px;
+                min-height: 20px;
+                padding: 0;
+                margin: 0;
+                border: none;
+                border-radius: 0;
+                background: transparent;
+                background-image: none;
+                box-shadow: none;
+            }
+
+            button.editor-color-trigger-menu-button > arrow {
+                min-width: 20px;
+                min-height: 20px;
+                opacity: 0;
+                color: transparent;
+            }
+
+            button.editor-color-trigger-menu-button:hover,
+            button.editor-color-trigger-menu-button:active,
+            button.editor-color-trigger-menu-button:focus {
+                background: transparent;
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            button.editor-color-trigger-menu-button image {
+                min-width: 20px;
+                min-height: 20px;
+                opacity: 0;
+            }
+
+            .editor-color-trigger-dot {
+                min-width: 20px;
+                min-height: 20px;
+                border-radius: 999px;
+                border: 1px solid rgba(255, 255, 255, 0.24);
+                box-shadow:
+                    0 0 0 1px rgba(0, 0, 0, 0.5),
+                    inset 0 1px 2px rgba(0, 0, 0, 0.22);
+            }
+
+            .editor-color-trigger-divider {
+                min-width: 1px;
+                min-height: 14px;
+                margin: 0 5px;
+                background: rgba(255, 255, 255, 0.11);
+                border-radius: 1px;
+            }
+
+            .editor-color-trigger-arrow-box {
+                min-width: 14px;
+                min-height: 14px;
+                padding: 0;
+            }
+
+            .editor-color-trigger-arrow {
+                opacity: 0.72;
+                transition: all 140ms ease;
+            }
+
+            .editor-color-trigger-shell:hover .editor-color-trigger-arrow {
+                opacity: 1.0;
+                transform: translateY(0.5px);
+            }
+
+            .editor-color-trigger-arrow-box image {
+                filter: brightness(0) invert(1);
+            }
+
+            .editor-color-dot,
+            .editor-color-placeholder-dot {
+                min-width: 18px;
+                min-height: 18px;
+                border-radius: 999px;
+            }
+
+            .editor-color-dot {
+                border: 1px solid alpha(white, 0.16);
+                box-shadow: none;
+            }
+
+            popover.editor-color-popover,
+            popover.editor-color-popover > contents {
+                background: transparent;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+            }
+
+            .editor-color-popover-body {
+                padding: 8px;
+                border-radius: 14px;
+                background-image: linear-gradient(to bottom,
+                    rgba(28, 28, 34, 0.98),
+                    rgba(18, 18, 23, 0.98));
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                box-shadow:
+                    0 14px 32px rgba(0, 0, 0, 0.55),
+                    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            }
+
+            .editor-color-swatches-side {
+                padding: 0;
+            }
+
+            .editor-color-dropdown-columns {
+                margin-bottom: 4px;
+            }
+
+            .editor-color-dropdown-column {
+                min-width: 32px;
+                margin-top: 0;
+                margin-bottom: 0;
+            }
+
+            button.editor-color-button {
+                min-width: 26px;
+                min-height: 26px;
+                border-radius: 6px;
+                padding: 3px;
+                margin: 0;
+                border: none;
+                background: transparent;
+                transition: background-color 120ms ease;
+                box-shadow: none;
+            }
+
+            button.editor-color-button:hover {
+                background: alpha(white, 0.06);
+                border: none;
+            }
+
+            button.editor-color-button.active-color {
+                background: alpha(white, 0.14);
+                border: none;
+            }
+
+            .editor-color-popover-body *:drop(active) {
+                border-color: transparent;
+                outline: none;
+                box-shadow: none;
+            }
+
+            button.editor-color-button:drop(active),
+            button.editor-custom-color-slot:drop(active),
+            .editor-custom-color-slot-overlay:drop(active) {
+                border-color: transparent;
+                background: transparent;
+                outline: none;
+                box-shadow: none;
+            }
+
+            .editor-color-placeholder-dot {
+                border: 1px dashed alpha(white, 0.22);
+                background: alpha(white, 0.03);
+            }
+
+            .editor-custom-color-slot-overlay {
+                min-width: 26px;
+                min-height: 26px;
+            }
+
+            button.editor-custom-color-slot:hover .editor-color-placeholder-dot {
+                border-color: alpha(white, 0.36);
+                background: alpha(white, 0.06);
+            }
+
+            button.editor-custom-color-slot:drop(active) .editor-color-placeholder-dot {
+                border-color: alpha(white, 0.46);
+                background: alpha(white, 0.10);
+            }
+
+            .editor-custom-color-slot-overlay:drop(active) button.editor-custom-color-slot {
+                background: transparent;
+                border-color: transparent;
+            }
+
+            button.editor-custom-color-remove-button {
+                min-width: 12px;
+                min-height: 12px;
+                border-radius: 999px;
+                padding: 0;
+                border: 1px solid alpha(white, 0.20);
+                background: #1a1a1a;
+                color: rgba(255, 255, 255, 0.86);
+                outline: none;
+                box-shadow: none;
+                transition: background-color 120ms ease, border-color 120ms ease;
+            }
+
+            button.editor-custom-color-remove-button:hover,
+            button.editor-custom-color-remove-button:active,
+            button.editor-custom-color-remove-button:focus,
+            button.editor-custom-color-remove-button:focus-visible {
+                border: 1px solid alpha(white, 0.36);
+                background: #2a2a2a;
+                color: #ffffff;
+                outline: none;
+                box-shadow: none;
+            }
+
+            button.editor-custom-color-remove-button image.editor-custom-color-remove-icon {
+                color: #ffffff;
+                opacity: 0.96;
+                -gtk-icon-size: 10px;
+            }
+
+            .editor-color-dropdown-footer {
+                padding: 4px;
+                margin-top: 3px;
+                border-radius: 10px;
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                background: rgba(10, 10, 14, 0.6);
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+            }
+
+            button.editor-universal-color-button {
+                min-width: 30px;
+                min-height: 30px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                background: rgba(255, 255, 255, 0.04);
+                padding: 0;
+                transition: all 150ms ease;
+            }
+
+            button.editor-universal-color-button:hover {
+                background: rgba(255, 255, 255, 0.11);
+                border-color: rgba(255, 255, 255, 0.2);
+                box-shadow: 0 2px 5px rgba(0,0,0,0.25);
+            }
+
+            button.editor-universal-color-button:active {
+                background: rgba(255, 255, 255, 0.05);
+                border-color: rgba(255, 255, 255, 0.14);
+            }
+
+            .editor-universal-color-wheel {
+                min-width: 22px;
+                min-height: 22px;
+                border-radius: 7px;
+                border: 1px solid rgba(255, 255, 255, 0.22);
+                box-shadow: inset 0 0 0 1px rgba(0,0,0,0.24);
+                background-image: linear-gradient(135deg,
+                    #ff3b30 0%,
+                    #ff9500 18%,
+                    #ffd60a 34%,
+                    #30d158 50%,
+                    #64d2ff 66%,
+                    #0a84ff 82%,
+                    #bf5af2 100%);
+            }
+
+            button.editor-universal-arrow-button {
+                min-width: 30px;
+                min-height: 30px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                background: rgba(255, 255, 255, 0.04);
+                padding: 0;
+                transition: all 150ms ease;
+            }
+
+            button.editor-universal-arrow-button:hover {
+                background: rgba(255, 255, 255, 0.11);
+                border-color: rgba(255, 255, 255, 0.2);
+                box-shadow: 0 2px 5px rgba(0,0,0,0.25);
+            }
+
+            button.editor-universal-arrow-button:active {
+                background: rgba(255, 255, 255, 0.05);
+                border-color: rgba(255, 255, 255, 0.14);
+            }
+
+            .editor-picker-back-arrow {
+                -gtk-icon-transform: rotate(180deg);
+            }

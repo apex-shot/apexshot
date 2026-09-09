@@ -2266,3 +2266,36 @@ msgid "Scope"
 msgstr "Область"
 msgid "Unpin"
 msgstr "Открепить"
+
+msgid "Appearance"
+msgstr "Внешний вид"
+
+msgid "Border Color"
+msgstr "Цвет рамки"
+
+msgid "Choose"
+msgstr "Выбрать"
+
+msgid "Choose Watermark Image"
+msgstr "Выбрать изображение водяного знака"
+
+msgid "Choose…"
+msgstr "Выбрать…"
+
+msgid "Hex color"
+msgstr "Шестнадцатеричный цвет"
+
+msgid "No image selected"
+msgstr "Изображение не выбрано"
+
+msgid "Remove"
+msgstr "Удалить"
+
+msgid "Show all wallpapers"
+msgstr "Показать все обои"
+
+msgid "Wallpapers"
+msgstr "Обои"
+
+msgid "Watermark"
+msgstr "Водяной знак"

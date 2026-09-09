@@ -1,0 +1,53 @@
+            entry.editor-text-entry {
+                background: transparent;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+                margin: 0;
+            }
+
+            entry.editor-text-entry text {
+                background: transparent;
+            }
+
+            button.editor-tool-button image,
+            button.standalone-tool image,
+            button.editor-footer-icon-button image,
+            button.editor-universal-arrow-button image,
+            button.editor-eyedropper-button image,
+            .editor-color-trigger-arrow-box image {
+                filter: brightness(0) invert(0.96);
+            }
+
+            button.editor-done-button {
+                min-width: 72px;
+                min-height: 26px;
+                border-radius: 6px;
+                padding: 0 14px;
+                background: #b05c38;
+                border: none;
+                color: white;
+                font-size: 12px;
+                font-weight: 600;
+                outline: none;
+                transition: all 120ms ease;
+                box-shadow: none;
+            }
+
+            button.editor-done-button label {
+                color: white;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            button.editor-done-button:hover {
+                background: #c06a44;
+            }
+
+            button.editor-done-button:hover label {
+                color: white;
+            }
+
+            button.editor-done-button:active {
+                background: #8a4a2d;
+            }

@@ -1,0 +1,374 @@
+            .editor-background-sidebar {
+                min-width: 210px;
+                padding: 16px;
+                background: transparent;
+                border-right: none;
+            }
+
+            .editor-background-sidebar-title {
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: -0.1px;
+            }
+
+            .editor-background-sidebar-body {
+                color: rgba(255, 255, 255, 0.62);
+                font-size: 11px;
+                line-height: 1.4;
+            }
+
+            .editor-background-sidebar-options {
+                margin-top: 4px;
+            }
+
+            .editor-colors-panel {
+                min-width: 210px;
+                padding: 16px;
+            }
+
+            .editor-colors-panel-helper {
+                color: rgba(255, 255, 255, 0.62);
+                font-size: 11px;
+                line-height: 1.4;
+                margin-bottom: 2px;
+            }
+
+            .editor-colors-panel-section {
+                margin-top: 2px;
+            }
+
+            .editor-colors-panel-current-row {
+                min-height: 32px;
+            }
+
+            .editor-colors-panel-current-preview {
+                min-width: 28px;
+                min-height: 28px;
+                border-radius: 8px;
+                border: 1px solid rgba(255, 255, 255, 0.12);
+                background: rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-colors-panel-current-value {
+                color: rgba(245, 245, 247, 0.92);
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .editor-colors-panel-action-button {
+                min-height: 30px;
+                padding: 0 12px;
+                border-radius: 6px;
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                background: rgba(255, 255, 255, 0.03);
+                color: rgba(245, 245, 247, 0.9);
+                box-shadow: none;
+            }
+
+            .editor-colors-panel-action-button:hover {
+                background: alpha(white, 0.06);
+                color: #ffffff;
+            }
+
+            .editor-background-gradients-section {
+                margin-top: 10px;
+            }
+
+            .editor-background-section-title {
+                color: rgba(255, 255, 255, 0.46);
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.6px;
+                text-transform: uppercase;
+                margin-top: 4px;
+            }
+
+            button.editor-background-section-action-button {
+                padding: 0;
+                margin: 0;
+                background: transparent;
+                border: none;
+                box-shadow: none;
+                color: #b05c38;
+                font-size: 10px;
+                font-weight: 600;
+                letter-spacing: 0.4px;
+                text-transform: uppercase;
+                transition: color 120ms ease;
+            }
+
+            button.editor-background-section-action-button:hover {
+                color: #c06540;
+                background: transparent;
+            }
+
+            button.editor-background-section-action-button:active {
+                color: #8a4a2d;
+                background: transparent;
+            }
+
+            .editor-background-gradients-grid {
+                margin-top: 4px;
+            }
+
+            .editor-background-wallpaper-section {
+                margin-top: 10px;
+            }
+
+            .editor-background-wallpaper-grid {
+                margin-top: 4px;
+            }
+
+            .editor-background-wallpaper-row {
+            }
+
+            .editor-background-blurred-section {
+                margin-top: 10px;
+            }
+
+            .editor-background-blurred-row {
+            }
+
+            .editor-background-plain-color-section {
+                margin-top: 10px;
+            }
+
+            .editor-background-plain-color-grid {
+                margin-top: 4px;
+            }
+
+            .editor-background-plain-color-row {
+                min-height: 18px;
+            }
+
+            .editor-background-plain-color-cell {
+                min-height: 18px;
+            }
+
+            .editor-background-plain-color-end-spacer {
+                min-width: 0;
+            }
+
+            .editor-background-preview-spacer {
+                min-height: 46px;
+            }
+
+            .editor-background-divider-row {
+                margin-top: 12px;
+                margin-bottom: 2px;
+            }
+
+            .editor-background-divider {
+                min-height: 1px;
+                margin-top: 0;
+                margin-bottom: 0;
+                background: rgba(255, 255, 255, 0.10);
+            }
+
+            .editor-background-padding-section {
+                margin-top: 4px;
+            }
+
+            .editor-background-padding-slider-row {
+                margin-top: 2px;
+            }
+
+            .editor-background-padding-slider {
+                margin-top: 0;
+            }
+
+            .editor-background-padding-slider,
+            .editor-background-compact-slider {
+                min-width: 0;
+                margin: 0;
+            }
+
+            .editor-toolbar-size-slider {
+                margin: 0 4px;
+            }
+
+            .editor-background-compact-controls {
+                margin-top: 8px;
+            }
+
+            .editor-background-compact-controls-row {
+                margin-top: 2px;
+            }
+
+            .editor-background-compact-slider-section {
+                margin-top: 0;
+            }
+
+            .editor-background-compact-title-spacer {
+                min-height: 18px;
+            }
+
+            .editor-background-compact-slider-row {
+                margin-top: 2px;
+            }
+
+            .editor-background-compact-slider {
+                min-width: 32px;
+            }
+
+            .editor-background-compact-control-spacer {
+                min-width: 0;
+                min-height: 30px;
+            }
+
+            .editor-background-alignment-grid {
+                margin-top: 2px;
+            }
+
+            .editor-background-alignment-row {
+                margin-top: 0;
+            }
+
+            button.editor-background-alignment-button {
+                min-height: 24px;
+                min-width: 34px;
+                border-radius: 5px;
+                border: none;
+                padding: 0;
+                background: transparent;
+                box-shadow: none;
+                transition: background-color 120ms ease, box-shadow 120ms ease;
+            }
+
+            .editor-background-alignment-icon {
+                min-width: 34px;
+                min-height: 24px;
+                border: none;
+                border-radius: 5px;
+            }
+
+            .editor-background-alignment-icon-frame {
+                min-width: 10px;
+                min-height: 6px;
+                background: rgba(255, 255, 255, 0.78);
+                border-radius: 1px;
+                margin: 3px;
+                border: none;
+            }
+
+            button.editor-background-alignment-button:hover {
+                background: alpha(white, 0.06);
+            }
+
+            button.editor-background-alignment-button:active,
+            button.editor-background-alignment-button:focus-visible {
+                background: alpha(white, 0.10);
+            }
+
+            .editor-background-checkbox-row {
+                min-height: 30px;
+                margin-top: 0;
+            }
+
+            checkbutton.editor-background-checkbox {
+                color: rgba(255, 255, 255, 0.82);
+                min-width: 20px;
+                padding: 0;
+                font-size: 11px;
+            }
+
+            checkbutton.editor-background-checkbox check {
+                border-radius: 4px;
+                background: alpha(white, 0.04);
+                border: 1px solid alpha(white, 0.18);
+                min-width: 14px;
+                min-height: 14px;
+            }
+
+            checkbutton.editor-background-checkbox check:checked {
+                background: #b05c38;
+                border-color: #b05c38;
+            }
+
+            checkbutton.editor-background-checkbox label {
+                color: rgba(255, 255, 255, 0.82);
+                min-width: 20px;
+            }
+
+            .editor-background-ratio-dropdown-row {
+                margin-top: 2px;
+            }
+
+            /* Dropdowns in the editor mirror the settings UI ComboBoxText style:
+               flat alpha-white surface, no border, dark popover with subtle border. */
+            dropdown.editor-background-ratio-dropdown {
+                min-height: 28px;
+                min-width: 20px;
+                padding: 0;
+                background: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
+            dropdown.editor-background-ratio-dropdown > button {
+                min-height: 28px;
+                min-width: 20px;
+                border-radius: 5px;
+                padding: 0 8px;
+                background: alpha(white, 0.06);
+                background-image: none;
+                border: none;
+                color: #F1F1F3;
+                box-shadow: none;
+                transition: background-color 120ms ease;
+            }
+
+            dropdown.editor-background-ratio-dropdown > button > box {
+                border-spacing: 0;
+            }
+
+            dropdown.editor-background-ratio-dropdown > button:hover {
+                background: alpha(white, 0.10);
+                border: none;
+            }
+
+            dropdown.editor-background-ratio-dropdown > button:active,
+            dropdown.editor-background-ratio-dropdown > button:focus-visible,
+            dropdown.editor-background-ratio-dropdown > button:checked {
+                background: alpha(white, 0.12);
+                border: none;
+                outline: none;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover {
+                background-color: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover > contents {
+                background-color: #141414;
+                color: #F1F1F3;
+                border: 1px solid alpha(white, 0.12);
+                border-radius: 8px;
+                padding: 4px;
+                box-shadow: none;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover listview,
+            dropdown.editor-background-ratio-dropdown popover listview row {
+                background-color: transparent;
+                color: #F1F1F3;
+                border-radius: 5px;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover listview row:hover {
+                background-color: alpha(white, 0.08);
+                color: #F1F1F3;
+            }
+
+            dropdown.editor-background-ratio-dropdown popover listview row:selected {
+                background-color: alpha(white, 0.12);
+                color: #F1F1F3;
+            }
+
+            /* Hide the tick/checkmark in dropdown popover (selection is shown via row bg). */
+            dropdown.editor-background-ratio-dropdown popover > contents listview row image {
+                opacity: 0;
+            }

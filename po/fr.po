@@ -2275,3 +2275,36 @@ msgid "Scope"
 msgstr "Portée"
 msgid "Unpin"
 msgstr "Détacher"
+
+msgid "Appearance"
+msgstr "Apparence"
+
+msgid "Border Color"
+msgstr "Couleur de bordure"
+
+msgid "Choose"
+msgstr "Choisir"
+
+msgid "Choose Watermark Image"
+msgstr "Choisir une image de filigrane"
+
+msgid "Choose…"
+msgstr "Choisir…"
+
+msgid "Hex color"
+msgstr "Couleur hexadécimale"
+
+msgid "No image selected"
+msgstr "Aucune image sélectionnée"
+
+msgid "Remove"
+msgstr "Supprimer"
+
+msgid "Show all wallpapers"
+msgstr "Afficher tous les fonds d’écran"
+
+msgid "Wallpapers"
+msgstr "Fonds d’écran"
+
+msgid "Watermark"
+msgstr "Filigrane"

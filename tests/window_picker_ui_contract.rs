@@ -1,17 +1,17 @@
 #[test]
 fn window_tool_removed_from_toolbars() {
-    let cpp_drawing = include_str!("../capture-overlay/src/CaptureOverlay_Drawing.cpp");
+    let cpp_toolbar = include_str!("../capture-overlay/src/CaptureOverlay_ToolbarDrawing.cpp");
     let cpp_events = include_str!("../capture-overlay/src/CaptureOverlay_Events.cpp");
     let rust_icons = include_str!("../src/overlay/icons.rs");
     let rust_toolbar = include_str!("../src/overlay/window/input/click/toolbar.rs");
 
     assert!(
-        cpp_drawing.contains("\"Area\", \"Fullscreen\", \"Scroll\"")
-            || cpp_drawing.contains("\"Area\", \"Fullscreen\", \"Scroll\", \"Timer\""),
+        cpp_toolbar.contains("\"Area\", \"Fullscreen\", \"Scroll\"")
+            || cpp_toolbar.contains("\"Area\", \"Fullscreen\", \"Scroll\", \"Timer\""),
         "C++ toolbar labels must not include Window"
     );
     assert!(
-        !cpp_drawing.contains("\"Window\""),
+        !cpp_toolbar.contains("\"Window\""),
         "C++ toolbar must not list Window as a tool label"
     );
     assert!(
@@ -31,14 +31,14 @@ fn window_tool_removed_from_toolbars() {
 
 #[test]
 fn capture_timer_badge_uses_timer_tool_tile() {
-    let cpp_drawing = include_str!("../capture-overlay/src/CaptureOverlay_Drawing.cpp");
+    let cpp_toolbar = include_str!("../capture-overlay/src/CaptureOverlay_ToolbarDrawing.cpp");
 
     assert!(
-        cpp_drawing.contains("if (i == kTimerToolIndex && timerToolActive)"),
+        cpp_toolbar.contains("if (i == kTimerToolIndex && timerToolActive)"),
         "C++ timer badge must be drawn on the Timer tile"
     );
     assert!(
-        !cpp_drawing.contains("if (i == 4 && timerToolActive)"),
+        !cpp_toolbar.contains("if (i == 4 && timerToolActive)"),
         "C++ timer badge must not use the OCR tile index"
     );
 }

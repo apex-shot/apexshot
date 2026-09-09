@@ -2228,3 +2228,36 @@ msgid "Scope"
 msgstr "范围"
 msgid "Unpin"
 msgstr "取消固定"
+
+msgid "Appearance"
+msgstr "外观"
+
+msgid "Border Color"
+msgstr "边框颜色"
+
+msgid "Choose"
+msgstr "选择"
+
+msgid "Choose Watermark Image"
+msgstr "选择水印图片"
+
+msgid "Choose…"
+msgstr "选择…"
+
+msgid "Hex color"
+msgstr "十六进制颜色"
+
+msgid "No image selected"
+msgstr "未选择图片"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "Show all wallpapers"
+msgstr "显示所有壁纸"
+
+msgid "Wallpapers"
+msgstr "壁纸"
+
+msgid "Watermark"
+msgstr "水印"

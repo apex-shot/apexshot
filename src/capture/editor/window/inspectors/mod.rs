@@ -34,6 +34,7 @@ pub(super) struct InspectorParts {
     pub motion_tabs: GtkBox,
     pub motion_tab_btn: Button,
     pub appearance_tab_btn: Button,
+    pub watermark_tab_btn: Button,
     pub background_tab_btn: Button,
     pub colors_tab_btn: Button,
     pub inspector: GtkBox,
@@ -70,6 +71,7 @@ pub(super) struct InspectorContentInputs<'a> {
     pub placeholder_inspector: &'a GtkBox,
     pub motion_inspector: &'a GtkBox,
     pub motion_appearance_inspector: &'a GtkBox,
+    pub motion_watermark_inspector: &'a GtkBox,
     pub copy_btn: &'a Button,
     pub upload_btn: &'a Button,
     pub save_btn: &'a Button,
@@ -170,8 +172,17 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     appearance_icon.set_pixel_size(16);
     appearance_tab_btn.set_child(Some(&appearance_icon));
     appearance_tab_btn.add_css_class("editor-tool-button");
+    let watermark_tab_btn = Button::new();
+    watermark_tab_btn.set_has_frame(false);
+    watermark_tab_btn.set_can_target(true);
+    watermark_tab_btn.set_tooltip_text(Some(&t("Watermark")));
+    let watermark_icon = Image::from_icon_name(icon_names::IMAGE_REGULAR);
+    watermark_icon.set_pixel_size(16);
+    watermark_tab_btn.set_child(Some(&watermark_icon));
+    watermark_tab_btn.add_css_class("editor-tool-button");
     motion_tabs.append(&motion_tab_btn);
     motion_tabs.append(&appearance_tab_btn);
+    motion_tabs.append(&watermark_tab_btn);
 
     let inspector = GtkBox::new(Orientation::Vertical, 0);
     inspector.add_css_class("editor-right-inspector");
@@ -215,6 +226,8 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     inspector_stack.add_named(input.motion_inspector, Some("motion"));
     input.motion_appearance_inspector.set_visible(true);
     inspector_stack.add_named(input.motion_appearance_inspector, Some("motion-appearance"));
+    input.motion_watermark_inspector.set_visible(true);
+    inspector_stack.add_named(input.motion_watermark_inspector, Some("motion-watermark"));
     inspector_stack.set_visible_child_name("placeholder");
 
     let scroll = ScrolledWindow::new();
@@ -244,6 +257,7 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
         motion_tabs,
         motion_tab_btn,
         appearance_tab_btn,
+        watermark_tab_btn,
         background_tab_btn,
         colors_tab_btn,
         inspector,

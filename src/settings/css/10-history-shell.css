@@ -1,0 +1,293 @@
+            /* ── History window ── */
+            .history-page-subtitle {
+                font-size: 13px;
+                opacity: 0.55;
+                margin-top: 2px;
+            }
+
+            /* Borderless GNOME-style chrome shared by the History and Settings
+               windows: no header divider, no sidebar divider, and a full-height
+               sidebar at one fixed width. Scoped under .settings-shell, which
+               both window roots carry, so other windows using these classes
+               (onboarding) keep the original chrome.
+
+               290px is stated as a minimum because GTK has no CSS upper-bound
+               width property; both sidebar wrappers are set non-expanding in
+               code, which is what holds them at exactly this width. */
+            .settings-shell .settings-window-controls {
+                border-bottom: none;
+                padding: 8px 12px;
+            }
+
+            .settings-shell .settings-sidebar-wrapper {
+                border-right: none;
+                min-width: 290px;
+            }
+
+            .settings-shell .settings-sidebar-title {
+                font-size: 16px;
+                font-weight: 700;
+                margin: 0 10px 0 14px;
+            }
+
+            /* Scoped under .history-root so these header-bar widgets always
+               outrank the shared stylesheet's generic entry/button rules. */
+            .history-root .history-header-search {
+                min-width: 340px;
+                min-height: 30px;
+                padding: 0 12px;
+                border-radius: 8px;
+                background-color: alpha(white, 0.07);
+                color: #F1F1F3;
+                border: none;
+                box-shadow: none;
+                caret-color: #F1F1F3;
+            }
+
+            .history-root .history-header-search:focus-within {
+                background-color: alpha(white, 0.10);
+            }
+
+            .history-root .history-header-search:disabled {
+                opacity: 0.45;
+            }
+
+            .history-root .history-header-refresh {
+                min-width: 30px;
+                min-height: 30px;
+                padding: 0;
+                margin-right: 6px;
+                border-radius: 999px;
+                background-color: transparent;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                color: alpha(white, 0.75);
+            }
+
+            .history-root .history-header-refresh:hover,
+            .history-root .history-header-refresh:focus {
+                background-color: alpha(white, 0.10);
+                color: white;
+            }
+
+            /* File-manager-style icon items: flat until hovered, then a soft
+               rounded highlight behind thumbnail + filename (no fade). */
+            .history-root button.recent-captures-card {
+                padding: 8px;
+                border-radius: 12px;
+                transition: background 0.15s ease;
+            }
+
+            .history-root button.recent-captures-card:hover,
+            .history-root button.recent-captures-card:focus {
+                background: alpha(white, 0.08);
+                opacity: 1;
+            }
+
+            .history-root button.recent-captures-card:active {
+                background: alpha(white, 0.12);
+                opacity: 1;
+            }
+
+            .history-root .recent-captures-card-image {
+                border: none;
+                background: transparent;
+            }
+
+            .history-root .recent-captures-card-title {
+                font-size: 13px;
+                font-weight: 500;
+                margin-top: 6px;
+            }
+
+            .history-root .history-action-separator {
+                min-height: 1px;
+                margin: 4px 2px;
+                background: alpha(white, 0.10);
+            }
+
+            .history-card-placeholder {
+                color: alpha(white, 0.28);
+            }
+
+            .history-media-badge {
+                color: white;
+                background: alpha(black, 0.55);
+                border: 1px solid alpha(white, 0.18);
+                border-radius: 999px;
+                padding: 6px;
+            }
+
+            .history-action-popover {
+                background: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
+            .history-action-popover contents {
+                /* Popovers are sized from their trigger in code. A fixed
+                   content minimum made them wider than that trigger. */
+                min-width: 0;
+                background-color: #1d1d1d;
+                color: #F1F1F3;
+                border: 1px solid alpha(white, 0.12);
+                border-radius: 12px;
+                padding: 6px;
+                box-shadow: 0 12px 32px alpha(black, 0.45);
+            }
+
+            /* Scoped under the popover so the flat menu rows outrank the
+               shared stylesheet's generic `.editor-root button` boxes. */
+            .history-action-popover .history-action-btn {
+                min-height: 0;
+                background-color: transparent;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                border-radius: 6px;
+                padding: 8px 12px;
+                font-size: 13px;
+                font-weight: 500;
+                color: alpha(white, 0.85);
+            }
+
+            /* Mouse-open focus stays visually neutral; only hover or genuine
+               keyboard focus paints a row. */
+            .history-action-popover .history-action-btn:hover,
+            .history-action-popover .history-action-btn:focus-visible {
+                background-color: alpha(white, 0.08);
+                color: white;
+            }
+
+            .history-action-popover .history-action-btn:active {
+                background-color: alpha(white, 0.12);
+                color: white;
+            }
+
+            .history-action-popover .settings-select-option-active {
+                background-color: alpha(white, 0.12);
+                color: white;
+            }
+
+            .history-action-popover .history-action-btn:disabled {
+                background-color: transparent;
+                color: alpha(white, 0.35);
+            }
+
+            .history-action-popover .history-action-btn-destructive {
+                color: #f0a09a;
+            }
+
+            .history-action-popover .history-action-btn-destructive:hover,
+            .history-action-popover .history-action-btn-destructive:focus-visible {
+                background-color: alpha(#e34a4a, 0.18);
+                color: #ffb3ad;
+            }
+
+            .history-empty-icon {
+                opacity: 0.25;
+                margin-bottom: 14px;
+            }
+
+            .history-load-more {
+                margin-top: 20px;
+                margin-bottom: 8px;
+            }
+
+            /* History — light theme */
+            .editor-root.editor-theme-light.settings-shell .settings-window-controls {
+                border-bottom: none;
+            }
+
+            .editor-root.editor-theme-light.settings-shell .settings-sidebar-wrapper {
+                border-right: none;
+            }
+
+            .editor-root.editor-theme-light.history-root .history-header-search {
+                background-color: alpha(#111827, 0.06);
+                color: #1d2129;
+                border: none;
+                caret-color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light.history-root .history-header-search:focus-within {
+                background-color: alpha(#111827, 0.08);
+            }
+
+            .editor-root.editor-theme-light.history-root .history-header-refresh {
+                color: alpha(#111827, 0.70);
+            }
+
+            .editor-root.editor-theme-light.history-root .history-header-refresh:hover,
+            .editor-root.editor-theme-light.history-root .history-header-refresh:focus {
+                background-color: alpha(#111827, 0.08);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light.history-root button.recent-captures-card:hover,
+            .editor-root.editor-theme-light.history-root button.recent-captures-card:focus {
+                background: alpha(#111827, 0.06);
+                opacity: 1;
+            }
+
+            .editor-root.editor-theme-light.history-root button.recent-captures-card:active {
+                background: alpha(#111827, 0.10);
+                opacity: 1;
+            }
+
+            .editor-root.editor-theme-light.history-root .recent-captures-card-image {
+                border: none;
+                background: transparent;
+            }
+
+            .editor-root.editor-theme-light.history-root .history-action-separator {
+                background: alpha(#111827, 0.12);
+            }
+
+            .editor-root.editor-theme-light .history-card-placeholder {
+                color: alpha(#111827, 0.30);
+            }
+
+            .editor-root.editor-theme-light .history-action-popover contents {
+                background-color: #ffffff;
+                color: #1d2129;
+                border-color: alpha(#111827, 0.12);
+                box-shadow: 0 12px 32px alpha(#111827, 0.18);
+            }
+
+            .editor-root.editor-theme-light .history-action-popover .history-action-btn {
+                background-color: transparent;
+                color: alpha(#1d2129, 0.82);
+            }
+
+            .editor-root.editor-theme-light .history-action-popover .history-action-btn:hover,
+            .editor-root.editor-theme-light .history-action-popover .history-action-btn:focus-visible {
+                background-color: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light .history-action-popover .history-action-btn:active {
+                background-color: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light .history-action-popover .settings-select-option-active {
+                background-color: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light .history-action-popover .history-action-btn:disabled {
+                background-color: transparent;
+                color: alpha(#111827, 0.35);
+            }
+
+            .editor-root.editor-theme-light .history-action-popover .history-action-btn-destructive {
+                color: #8a2822;
+            }
+
+            .editor-root.editor-theme-light .history-action-popover .history-action-btn-destructive:hover,
+            .editor-root.editor-theme-light .history-action-popover .history-action-btn-destructive:focus-visible {
+                background-color: alpha(#e34a4a, 0.12);
+                color: #8a2822;
+            }

@@ -1,0 +1,189 @@
+            .shortcut-capture-dialog {
+                background: #1a1a1a;
+                border-radius: 12px;
+                border: 1px solid alpha(white, 0.08);
+            }
+
+            .shortcut-capture-dialog .titlebar {
+                min-height: 0;
+                padding: 0;
+                background: transparent;
+                box-shadow: none;
+                border: none;
+            }
+
+            .shortcut-capture-title {
+                font-size: 16px;
+                font-weight: 600;
+                color: white;
+            }
+
+            .shortcut-capture-subtitle {
+                font-size: 13px;
+                color: rgba(255,255,255,0.78);
+                line-height: 1.35;
+            }
+
+            .shortcut-capture-hint {
+                font-size: 11px;
+                color: rgba(255,255,255,0.45);
+                line-height: 1.35;
+                margin-top: 10px;
+            }
+
+            .shortcut-capture-listening-icon {
+                font-size: 56px;
+                color: #e8764a;
+                margin-top: 14px;
+                margin-bottom: 10px;
+            }
+
+            .shortcut-capture-keycaps-row {
+                margin-top: 14px;
+            }
+
+            .shortcut-capture-keycap {
+                background: alpha(white, 0.08);
+                color: white;
+                border-radius: 6px;
+                padding: 6px 12px;
+                font-size: 13px;
+                font-weight: 600;
+            }
+
+            .shortcut-capture-plus {
+                color: rgba(255,255,255,0.45);
+                font-size: 16px;
+                font-weight: 700;
+                margin-top: 5px;
+            }
+
+            .shortcut-capture-cleared-label {
+                color: rgba(255,255,255,0.64);
+                font-size: 13px;
+            }
+
+            .shortcut-capture-dialog button.shortcut-capture-primary-btn,
+            .shortcut-capture-dialog button.shortcut-capture-secondary-btn {
+                min-height: 26px;
+                min-width: 0;
+                padding: 2px 14px;
+                font-weight: 600;
+                font-size: 12px;
+                border: none;
+                border-radius: 6px;
+                outline: none;
+                box-shadow: none;
+            }
+
+            .shortcut-capture-dialog button.shortcut-capture-primary-btn {
+                background: #b05c38;
+                color: white;
+            }
+
+            .shortcut-capture-dialog button.shortcut-capture-primary-btn:hover {
+                background: #c06540;
+            }
+
+            .shortcut-capture-dialog button.shortcut-capture-primary-btn:disabled {
+                background: alpha(white, 0.06);
+                color: rgba(255,255,255,0.35);
+            }
+
+            .shortcut-capture-dialog button.shortcut-capture-secondary-btn {
+                background: alpha(white, 0.06);
+                color: white;
+            }
+
+            .shortcut-capture-dialog button.shortcut-capture-secondary-btn:hover {
+                background: alpha(white, 0.10);
+            }
+
+            .secondary-settings-button {
+                background: alpha(white, 0.06);
+                border: none;
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 12px;
+                color: rgba(255,255,255,0.78);
+            }
+
+            .secondary-settings-button:hover { background: alpha(white, 0.10); }
+            .secondary-settings-button:active { background: alpha(white, 0.14); }
+
+            /* ── Light-mode shortcut capture dialog ── */
+
+            .shortcut-capture-dialog.editor-theme-light {
+                background: #f6f7fb;
+                border: 1px solid alpha(#111827, 0.08);
+            }
+
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-title {
+                color: #1d2129;
+            }
+
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-subtitle {
+                color: rgba(29, 33, 41, 0.72);
+            }
+
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-hint {
+                color: rgba(29, 33, 41, 0.45);
+            }
+
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-listening-icon {
+                color: #b05c38;
+            }
+
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-keycap {
+                background: alpha(#111827, 0.06);
+                color: #17202a;
+                border: none;
+                box-shadow: none;
+            }
+
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-plus {
+                color: rgba(29, 33, 41, 0.35);
+            }
+
+            .shortcut-capture-dialog.editor-theme-light .shortcut-capture-cleared-label {
+                color: rgba(29, 33, 41, 0.55);
+            }
+
+            .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-primary-btn {
+                background: #b05c38;
+                color: white;
+            }
+
+            .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-primary-btn:hover {
+                background: #c06540;
+            }
+
+            .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-primary-btn:disabled {
+                background: alpha(#111827, 0.06);
+                color: alpha(#17202a, 0.35);
+            }
+
+            .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-secondary-btn {
+                background: alpha(#111827, 0.04);
+                color: #17202a;
+                border: none;
+            }
+
+            .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-secondary-btn:hover {
+                background: alpha(#111827, 0.08);
+            }
+
+            .editor-root.editor-theme-light .secondary-settings-button {
+                border-color: alpha(#111827, 0.18);
+                color: #17202a;
+            }
+
+            .editor-root.editor-theme-light .secondary-settings-button:hover {
+                background: alpha(#111827, 0.06);
+                color: #17202a;
+            }
+
+            .editor-root.editor-theme-light .secondary-settings-button:active {
+                background: alpha(#111827, 0.10);
+                color: #17202a;
+            }

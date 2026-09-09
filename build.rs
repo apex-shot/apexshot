@@ -20,7 +20,18 @@ fn build_capture_overlay() {
     println!("cargo:rerun-if-changed=capture-overlay/src/main.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay.h");
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_DrawingPrimitives_p.h");
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_DrawingPrimitives.cpp");
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_Layout.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_Drawing.cpp");
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_Paint.cpp");
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_Audio.cpp");
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_ScrollPopupDrawing.cpp");
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_DropdownDrawing.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_RecordingSettingsDrawing.cpp");
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_RecordingDrawing.cpp");
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_ToolbarDrawing.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_Events.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_Scroll.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_HitTest.cpp");
