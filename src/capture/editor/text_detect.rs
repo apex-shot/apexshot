@@ -456,7 +456,7 @@ impl Default for BackgroundTextDetection {
 ///
 /// Returns immediately. Results are set on the provided detector.
 pub fn spawn_text_detection(
-    image: RgbaImage,
+    image: Arc<RgbaImage>,
     detector: Arc<Mutex<TextDetector>>,
     ready_flag: Arc<AtomicBool>,
 ) -> BackgroundTextDetection {

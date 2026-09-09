@@ -51,12 +51,10 @@ fn load_image_into_editor(
     loading_spinner.start();
     open_button.set_sensitive(false);
 
-    let (sender, receiver) = mpsc::channel::<Result<(), String>>();
+    let (sender, receiver) = mpsc::channel::<Result<image::RgbaImage, String>>();
     let path_thread = path.clone();
     std::thread::spawn(move || {
-        let result = image::open(&path_thread)
-            .map(|_| ())
-            .map_err(|e| e.to_string());
+        let result = super::load_editor_image(&path_thread);
         let _ = sender.send(result);
     });
 
@@ -74,10 +72,16 @@ fn load_image_into_editor(
             open_button.set_sensitive(true);
         };
         match receiver.try_recv() {
-            Ok(Ok(())) => {
+            Ok(Ok(image)) => {
                 stop_loading();
                 // Rebuild the editor UI with the image, reusing this window.
-                super::setup_editor_window_full(&app, path.clone(), false, Some(window.clone()));
+                super::setup_editor_window_full(
+                    &app,
+                    path.clone(),
+                    false,
+                    Some(window.clone()),
+                    Some(image),
+                );
                 glib::ControlFlow::Break
             }
             Ok(Err(err)) => {
@@ -280,9 +284,7 @@ mod tests {
             source.contains("fn is_supported_image_path")
                 && source
                     .contains("Some(\"png\") | Some(\"jpg\") | Some(\"jpeg\") | Some(\"webp\")")
-                && source.contains(
-                    "setup_editor_window_full(&app, path.clone(), false, Some(window.clone()))"
-                )
+                && source.contains("Some(window.clone()),\n                    Some(image),")
                 && source.contains("Drop an image here")
                 && source.contains("Loading image…")
                 && source.contains("root_overlay.add_controller(drop_target)"),

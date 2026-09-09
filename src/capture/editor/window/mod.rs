@@ -384,7 +384,7 @@ pub fn open_image_editor_empty() -> Result<(), EditorError> {
         .build();
 
     app.connect_activate(move |application| {
-        setup_editor_window_full(application, PathBuf::from("Untitled.png"), true, None);
+        setup_editor_window_full(application, PathBuf::from("Untitled.png"), true, None, None);
     });
 
     let _ = app.run_with_args::<String>(&[]);
@@ -505,7 +505,17 @@ fn set_window_always_on_top(
 }
 
 pub fn setup_editor_window(app: &Application, path: PathBuf) {
-    setup_editor_window_full(app, path, false, None);
+    setup_editor_window_full(app, path, false, None, None);
+}
+
+fn load_editor_image(path: &std::path::Path) -> Result<image::RgbaImage, String> {
+    if let Ok(Some(original)) = crate::annotations::load_original_image(path) {
+        return Ok(original);
+    }
+
+    image::open(path)
+        .map(|image| image.to_rgba8())
+        .map_err(|error| error.to_string())
 }
 
 /// `empty_drop_zone = true` opens the exact same editor window but with a
@@ -519,6 +529,7 @@ fn setup_editor_window_full(
     path: PathBuf,
     empty_drop_zone: bool,
     reuse_window: Option<ApplicationWindow>,
+    loaded_image: Option<image::RgbaImage>,
 ) {
     use std::sync::Once;
     static INIT_ICONS: Once = Once::new();
@@ -536,14 +547,14 @@ fn setup_editor_window_full(
     ));
 
     // Check if we have a saved original (for non-destructive re-editing)
-    let image = if empty_drop_zone {
+    let image = if let Some(image) = loaded_image {
+        image
+    } else if empty_drop_zone {
         // Transparent placeholder canvas until the user drops/opens a file.
         image::RgbaImage::new(1280, 800)
-    } else if let Ok(Some(original)) = crate::annotations::load_original_image(&path) {
-        original
     } else {
-        match image::open(&path) {
-            Ok(img) => img.to_rgba8(),
+        match load_editor_image(&path) {
+            Ok(image) => image,
             Err(e) => {
                 eprintln!("Failed to load image for editing: {e}");
                 app.quit();
@@ -553,7 +564,7 @@ fn setup_editor_window_full(
     };
 
     let (img_width, img_height) = image.dimensions();
-    let state = Arc::new(Mutex::new(EditorState::new(image.clone())));
+    let state = Arc::new(Mutex::new(EditorState::new(image)));
     {
         let mut st = state.lock().unwrap();
         st.inverse_arrow_direction = annotate_config.inverse_arrow_direction;
@@ -631,7 +642,9 @@ fn setup_editor_window_full(
             let detector = st.text_detector.clone();
             let ready_flag = st.text_detection_ready.clone();
             st.text_detection_handle = Some(super::text_detect::spawn_text_detection(
-                image, detector, ready_flag,
+                Arc::clone(&st.base_image),
+                detector,
+                ready_flag,
             ));
         }
     }
