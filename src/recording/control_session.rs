@@ -7,6 +7,8 @@ use anyhow::Context;
 use tokio::{sync::mpsc, task::JoinHandle};
 
 pub const RECORDING_CONTROL_OBJECT_PATH: &str = "/org/apexshot/RecordingControl";
+const RECORDING_CONTROL_INTERFACE: &str = "org.apexshot.RecordingControl";
+const RECORDING_CONTROL_BUS_PREFIX: &str = "org.apexshot.RecordingControl.p";
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RecordingControlCommand {
     Pause,
@@ -19,6 +21,16 @@ pub enum RecordingControlCommand {
 impl RecordingControlCommand {
     pub fn ends_session(self) -> bool {
         matches!(self, Self::StopSave | Self::StopDiscard)
+    }
+
+    fn dbus_method(self) -> &'static str {
+        match self {
+            Self::Pause => "PauseActive",
+            Self::Resume => "ResumeActive",
+            Self::Restart => "RestartActive",
+            Self::StopSave => "StopActive",
+            Self::StopDiscard => "DiscardActive",
+        }
     }
 }
 
@@ -142,6 +154,42 @@ pub fn send_active_recording_command(command: RecordingControlCommand) -> bool {
     true
 }
 
+pub fn send_external_recording_command(command: RecordingControlCommand) -> bool {
+    crate::utils::run_off_tokio(move || {
+        let Ok(connection) = zbus::blocking::Connection::session() else {
+            return false;
+        };
+        let Ok(reply) = connection.call_method(
+            Some("org.freedesktop.DBus"),
+            "/org/freedesktop/DBus",
+            Some("org.freedesktop.DBus"),
+            "ListNames",
+            &(),
+        ) else {
+            return false;
+        };
+        let Ok(names) = reply.body().deserialize::<Vec<String>>() else {
+            return false;
+        };
+
+        names
+            .into_iter()
+            .filter(|name| name.starts_with(RECORDING_CONTROL_BUS_PREFIX))
+            .any(|name| {
+                let Ok(reply) = connection.call_method(
+                    Some(name.as_str()),
+                    RECORDING_CONTROL_OBJECT_PATH,
+                    Some(RECORDING_CONTROL_INTERFACE),
+                    command.dbus_method(),
+                    &(),
+                ) else {
+                    return false;
+                };
+                reply.body().deserialize::<bool>().unwrap_or(false)
+            })
+    })
+}
+
 pub fn toggle_active_recording_pause() -> bool {
     let active = active_recording_control()
         .lock()
@@ -204,6 +252,26 @@ impl RecordingControlIface {
 
     async fn restart(&self, session_id: &str) -> zbus::fdo::Result<bool> {
         self.send(session_id, RecordingControlCommand::Restart)
+    }
+
+    async fn stop_active(&self) -> zbus::fdo::Result<bool> {
+        self.send(&self.session_id, RecordingControlCommand::StopSave)
+    }
+
+    async fn discard_active(&self) -> zbus::fdo::Result<bool> {
+        self.send(&self.session_id, RecordingControlCommand::StopDiscard)
+    }
+
+    async fn pause_active(&self) -> zbus::fdo::Result<bool> {
+        self.send(&self.session_id, RecordingControlCommand::Pause)
+    }
+
+    async fn resume_active(&self) -> zbus::fdo::Result<bool> {
+        self.send(&self.session_id, RecordingControlCommand::Resume)
+    }
+
+    async fn restart_active(&self) -> zbus::fdo::Result<bool> {
+        self.send(&self.session_id, RecordingControlCommand::Restart)
     }
 }
 
@@ -325,6 +393,27 @@ mod tests {
         assert!(!RecordingControlCommand::Pause.ends_session());
         assert!(!RecordingControlCommand::Resume.ends_session());
         assert!(!RecordingControlCommand::Restart.ends_session());
+    }
+
+    #[test]
+    fn external_control_methods_match_recording_commands() {
+        assert_eq!(
+            RecordingControlCommand::StopSave.dbus_method(),
+            "StopActive"
+        );
+        assert_eq!(
+            RecordingControlCommand::StopDiscard.dbus_method(),
+            "DiscardActive"
+        );
+        assert_eq!(RecordingControlCommand::Pause.dbus_method(), "PauseActive");
+        assert_eq!(
+            RecordingControlCommand::Resume.dbus_method(),
+            "ResumeActive"
+        );
+        assert_eq!(
+            RecordingControlCommand::Restart.dbus_method(),
+            "RestartActive"
+        );
     }
 
     #[tokio::test]

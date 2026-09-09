@@ -159,6 +159,9 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
     if (m_dragging || m_moving || m_resizing != HandlePos::None) {
         p.fillRect(sel, QColor(255, 102, 0, 30));
     }
+    if (m_countdownActive && m_windowSelectionCapture) {
+        p.fillRect(sel, QColor(12, 12, 14, 82));
+    }
 
     // ── Selection handles ─────────────────────────────────────────────────────
     {

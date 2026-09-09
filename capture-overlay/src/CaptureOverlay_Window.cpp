@@ -67,8 +67,8 @@ void drawListRow(QPainter& p,
     path.addRoundedRect(row, 12, 12);
 
     if (hovered) {
-        p.fillPath(path, QColor(176, 92, 56, 210));
-        p.setPen(QPen(QColor(255, 212, 178, 255), 1.6));
+        p.fillPath(path, QColor(255, 102, 0, 210));
+        p.setPen(QPen(QColor(255, 220, 190, 255), 1.6));
     } else {
         p.fillPath(path, QColor(255, 255, 255, 18));
         p.setPen(QPen(QColor(255, 255, 255, 36), 1.0));
@@ -361,6 +361,37 @@ QList<CaptureOverlay::WindowInfo> CaptureOverlay::enumerateWindows() const
     return windows;
 }
 
+bool CaptureOverlay::activateWindowForCapture(quint64 windowId) const
+{
+    if (windowId == 0) {
+        return false;
+    }
+
+    QDBusInterface iface(QStringLiteral("org.apexshot.WindowList"),
+                         QStringLiteral("/org/apexshot/WindowList"),
+                         QStringLiteral("org.apexshot.WindowList"),
+                         QDBusConnection::sessionBus());
+    if (iface.isValid()) {
+        iface.setTimeout(3000);
+        const QDBusReply<bool> reply = iface.call(
+            QStringLiteral("ActivateWindowById"), static_cast<uint>(windowId));
+        if (reply.isValid() && reply.value()) {
+            return true;
+        }
+    }
+
+    Display* display = XOpenDisplay(nullptr);
+    if (!display) {
+        return false;
+    }
+    const Window window = static_cast<Window>(windowId);
+    XMapRaised(display, window);
+    XSetInputFocus(display, window, RevertToPointerRoot, CurrentTime);
+    XSync(display, false);
+    XCloseDisplay(display);
+    return true;
+}
+
 // ── Layout / hit testing ─────────────────────────────────────────────────────
 
 void CaptureOverlay::recomputeWindowPickerLayout()
@@ -597,79 +628,35 @@ void CaptureOverlay::drawWindowPickerMode(QPainter& p, const QRect& widgetRect)
     QFont hintFont;
     hintFont.setPointSizeF(10.5);
     p.setFont(hintFont);
-    const QString hint = QStringLiteral("ESC or Area to go back  •  Click a row to capture");
+    const QString hint = QStringLiteral("Back to capture menu");
     QFontMetrics hfm(hintFont);
-    const int hw = hfm.horizontalAdvance(hint) + 28;
+    const int keyW = 38;
+    const int hw = keyW + hfm.horizontalAdvance(hint) + 34;
     const int hx = (width() - hw) / 2;
-    const int hy = height() - 108;
+    const int hy = height() - 58;
     QPainterPath hpill;
-    hpill.addRoundedRect(QRectF(hx, hy, hw, 28), 10, 10);
-    p.fillPath(hpill, QColor(0, 0, 0, 140));
-    p.setPen(QColor(255, 255, 255, 165));
-    p.drawText(QRect(hx, hy, hw, 28), Qt::AlignCenter, hint);
-
-    // Reduced toolbar: Area + Window
-    const QRectF panel = windowPickerToolbarRect();
-    QPainterPath panelPath;
-    panelPath.addRoundedRect(panel, kWindowPickerToolRadius, kWindowPickerToolRadius);
-    p.fillPath(panelPath, QColor(28, 28, 34, 220));
+    hpill.addRoundedRect(QRectF(hx, hy, hw, 34), 12, 12);
+    p.fillPath(hpill, QColor(5, 5, 7, 225));
     p.setPen(QPen(QColor(255, 255, 255, 28), 1.0));
     p.setBrush(Qt::NoBrush);
-    p.drawPath(panelPath);
+    p.drawPath(hpill);
 
-    const QColor warmFill(176, 92, 56, 210);
-    const QColor hoverFill(255, 255, 255, 28);
-    const QColor hoverRim(255, 212, 178, 160);
-    const QColor activeText(255, 236, 220, 255);
+    const QRectF keyRect(hx + 5, hy + 5, keyW, 24);
+    QPainterPath keyPath;
+    keyPath.addRoundedRect(keyRect, 8, 8);
+    p.fillPath(keyPath, QColor(255, 102, 0, 220));
+    QFont keyFont(QStringLiteral("Inter"));
+    keyFont.setPixelSize(10);
+    keyFont.setWeight(QFont::DemiBold);
+    p.setFont(keyFont);
+    p.setPen(Qt::white);
+    p.drawText(keyRect, Qt::AlignCenter, QStringLiteral("ESC"));
 
-    auto drawAccentCell = [&](const QRectF& cell, const QColor& fill, const QColor& rim) {
-        const double hx = cell.x() + 4.0;
-        const double hy = cell.y() + 4.0;
-        const double hw = cell.width() - 8.0;
-        const double hh = cell.height() - 8.0;
-        QPainterPath card;
-        card.addRoundedRect(QRectF(hx, hy, hw, hh), 10.0, 10.0);
-        p.fillPath(card, fill);
-        if (rim.alpha() > 0) {
-            p.setPen(QPen(rim, 1.2));
-            p.setBrush(Qt::NoBrush);
-            p.drawPath(card);
-        }
-    };
-
-    drawAccentCell(windowPickerToolbarItemRect(1), warmFill, QColor(0, 0, 0, 0));
-    if (m_hoveredWindowTool >= 0 && m_hoveredWindowTool < kWindowPickerToolCount) {
-        drawAccentCell(windowPickerToolbarItemRect(m_hoveredWindowTool), hoverFill, hoverRim);
-    }
-
-    for (int i = 0; i < kWindowPickerToolCount; ++i) {
-        const QRectF cell = windowPickerToolbarItemRect(i);
-        const double cx = cell.x() + cell.width() / 2.0;
-        const bool hovered = (m_hoveredWindowTool == i);
-        const bool active = (i == 1);
-        const double iconY = cell.y() + ((hovered || active) ? 23.5 : 24.0);
-        const QColor iconColor = active ? activeText : QColor(255, 255, 255, 240);
-
-        drawWindowPickerToolIcon(p,
-                                 kWindowPickerToolIcons[i],
-                                 cx + 0.6,
-                                 iconY + 0.8,
-                                 QColor(0, 0, 0, hovered ? 62 : 118));
-        drawWindowPickerToolIcon(p, kWindowPickerToolIcons[i], cx, iconY, iconColor);
-
-        QFont f;
-        f.setFamily(QStringLiteral("Sans"));
-        f.setPointSizeF(7.1);
-        f.setBold(hovered || active);
-        p.setFont(f);
-        QFontMetricsF fm(f);
-        const QString label(kWindowPickerToolLabels[i]);
-        const double tw = fm.horizontalAdvance(label);
-        p.setPen(QColor(0, 0, 0, hovered ? 62 : 118));
-        p.drawText(QPointF(cx - tw / 2.0 + 0.6, cell.y() + 50.0 + 0.8), label);
-        p.setPen(active ? activeText : QColor(244, 244, 244, 240));
-        p.drawText(QPointF(cx - tw / 2.0, cell.y() + 50.0), label);
-    }
+    p.setFont(hintFont);
+    p.setPen(QColor(245, 245, 247, 220));
+    p.drawText(QRectF(keyRect.right() + 10, hy, hw - keyW - 20, 34),
+               Qt::AlignVCenter | Qt::AlignLeft,
+               hint);
 }
 
 QRegion CaptureOverlay::windowHoverDirtyRegion(int index) const

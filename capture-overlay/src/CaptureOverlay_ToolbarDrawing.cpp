@@ -83,10 +83,12 @@ void CaptureOverlay::drawToolbar(QPainter& p,
     const bool timerToolActive = timerToolEnabled && m_timerDelayActive && m_captureDelaySeconds > 0;
     constexpr int kTimerToolIndex = 3;
 
-    drawFrostedPanel(p,
-                     layout.leftToolsPanel.x(), layout.leftToolsPanel.y(),
-                     layout.leftToolsPanel.width(), layout.leftToolsPanel.height(),
-                     FEATURE_PANEL_RADIUS, blurPtr, screenW, screenH);
+    if (!m_captureMenuAreaMode) {
+        drawFrostedPanel(p,
+                         layout.leftToolsPanel.x(), layout.leftToolsPanel.y(),
+                         layout.leftToolsPanel.width(), layout.leftToolsPanel.height(),
+                         FEATURE_PANEL_RADIUS, blurPtr, screenW, screenH);
+    }
 
     drawFrostedPanel(p,
                      layout.topCluster.x(), layout.topCluster.y(),
@@ -133,13 +135,15 @@ void CaptureOverlay::drawToolbar(QPainter& p,
         );
     };
 
-    drawActiveToolCell(activeTool);
-    if (timerToolActive && activeTool != kTimerToolIndex) {
-        drawActiveToolCell(kTimerToolIndex);
+    if (!m_captureMenuAreaMode) {
+        drawActiveToolCell(activeTool);
+        if (timerToolActive && activeTool != kTimerToolIndex) {
+            drawActiveToolCell(kTimerToolIndex);
+        }
     }
 
     // ── Hover highlight on hovered tool ──────────────────────────────────────
-    if (m_hoveredTool >= 0 && m_hoveredTool < NUM_TOOLS) {
+    if (!m_captureMenuAreaMode && m_hoveredTool >= 0 && m_hoveredTool < NUM_TOOLS) {
         drawAccentCard(
             layout.toolCells[m_hoveredTool],
             QColor(255, 255, 255, 22),
@@ -173,7 +177,7 @@ void CaptureOverlay::drawToolbar(QPainter& p,
     }
 
     // ── Tool icons + labels ───────────────────────────────────────────────────
-    for (int i = 0; i < NUM_TOOLS; ++i) {
+    for (int i = 0; !m_captureMenuAreaMode && i < NUM_TOOLS; ++i) {
         QRectF cell = layout.toolCells[i];
         double cx = cell.x() + cell.width() / 2.0;
         bool hovered = (m_hoveredTool == i);

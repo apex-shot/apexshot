@@ -14,6 +14,10 @@ add_executable(apexshot-capture
     src/ScreenCapture.h
     src/MonitorPicker.cpp
     src/MonitorPicker.h
+    src/CaptureModeToolbar.cpp
+    src/CaptureModeToolbar.h
+    src/CaptureCountdownPill.cpp
+    src/CaptureCountdownPill.h
     src/request.cpp
     src/request.h
     src/CaptureOverlay.cpp

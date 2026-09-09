@@ -1,9 +1,11 @@
 #include "CaptureOverlay.h"
+#include "CaptureModeToolbar.h"
 #include "CaptureOverlay_p.h"
 #include <QMouseEvent>
 #include <QKeyEvent>
 #include <QApplication>
 #include <QDesktopServices>
+#include <QEventLoop>
 #include <QMessageBox>
 #include <QDateTime>
 #include <QPoint>
@@ -439,7 +441,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             return;
         }
 
-        const int toolIndex = hitTestWindowPickerToolbar(pos);
+        const int toolIndex = m_captureMenuAreaMode ? -1 : hitTestWindowPickerToolbar(pos);
         if (toolIndex == 0) {
             // Area — leave picker, restore prior (or default) area selection
             std::fprintf(stderr, "[CaptureOverlay] Window picker → Area (stay in overlay)\n");
@@ -454,6 +456,10 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         const int rowIndex = hitTestWindowPickerCard(pos);
         if (rowIndex >= 0 && rowIndex < m_windows.size()) {
             const WindowInfo chosen = m_windows[rowIndex];
+            const bool activated = activateWindowForCapture(chosen.id);
+            std::fprintf(stderr,
+                         "[CaptureOverlay] Window activation before capture: %s\n",
+                         activated ? "ok" : "unavailable");
             // List pick → crop the freeze (or live area) to this window's rect.
             m_selection = chosen.rect.normalized();
             if (m_selection.width() < kMinSize || m_selection.height() < kMinSize) {
@@ -462,7 +468,10 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 m_selection = chosen.desktopRect.translated(-origin.x(), -origin.y()).normalized();
             }
             m_hasSelection = true;
-            m_captureIntent = CaptureIntent::Area;
+            m_windowSelectionCapture = true;
+            if (m_captureIntent != CaptureIntent::Ocr) {
+                m_captureIntent = CaptureIntent::Area;
+            }
             m_windowMode = false;
             m_hoveredWindow = -1;
             m_hoveredWindowTool = -1;
@@ -676,7 +685,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
         };
 
         if (clickInsideOrOnSelection) {
-            for (int i = 0; i < NUM_TOOLS; ++i) {
+            for (int i = 0; !m_captureMenuAreaMode && i < NUM_TOOLS; ++i) {
                 if (layout.toolCells[i].contains(pos)) {
                     std::fprintf(stderr, "[CaptureOverlay] Tool clicked (inside): index=%d\n", i);
                     handleToolClick(i);
@@ -691,11 +700,11 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
                 return;
             }
         } else {
-            bool clickedToolbar = layout.leftToolsPanel.contains(pos) ||
+            bool clickedToolbar = (!m_captureMenuAreaMode && layout.leftToolsPanel.contains(pos)) ||
                                   layout.sizeCard.contains(pos) ||
                                   layout.cropCard.contains(pos);
             if (clickedToolbar) {
-                for (int i = 0; i < NUM_TOOLS; ++i) {
+                for (int i = 0; !m_captureMenuAreaMode && i < NUM_TOOLS; ++i) {
                     if (layout.toolCells[i].contains(pos)) {
                         handleToolClick(i);
                         return;
@@ -861,7 +870,7 @@ void CaptureOverlay::mouseMoveEvent(QMouseEvent* event)
 
     // Window picker — hover cards + reduced toolbar
     if (m_windowMode) {
-        const int newToolHover = hitTestWindowPickerToolbar(pos);
+        const int newToolHover = m_captureMenuAreaMode ? -1 : hitTestWindowPickerToolbar(pos);
         const int newCardHover =
             (newToolHover >= 0) ? -1 : hitTestWindowPickerCard(pos);
 
@@ -1420,6 +1429,36 @@ void CaptureOverlay::keyPressEvent(QKeyEvent* event)
 
     switch (event->key()) {
         case Qt::Key_Escape:
+            if (m_windowMode && m_captureMenuAreaMode) {
+                releaseKeyboard();
+                releaseMouse();
+                hide();
+                QApplication::processEvents(QEventLoop::AllEvents, 50);
+
+                const CaptureModeToolbar::Result result = CaptureModeToolbar::choose();
+                if (result.action == CaptureModeToolbar::Action::Cancel) {
+                    cancelSelection();
+                    return;
+                }
+
+                setCaptureMenuAreaMode(result.ocr, result.timerSeconds);
+                if (result.action == CaptureModeToolbar::Action::Area) {
+                    exitWindowMode(true);
+                } else if (result.action == CaptureModeToolbar::Action::Display) {
+                    m_windowMode = false;
+                    m_windows.clear();
+                    m_windowCardRects.clear();
+                    m_selection = rect();
+                    m_hasSelection = true;
+                    m_fullscreenMode = true;
+                }
+
+                focusAndRaiseOverlay();
+                if (result.action == CaptureModeToolbar::Action::Display) {
+                    confirmSelection();
+                }
+                return;
+            }
             cancelSelection();
             return;
         case Qt::Key_Return:

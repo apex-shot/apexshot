@@ -113,9 +113,9 @@ pub(super) fn dispatch_daemon_action(
             tokio::task::spawn_blocking(capture_handlers::spawn_empty_image_editor_subprocess);
         }
         DaemonAction::StopRecordingSave => {
-            let stopped = crate::recording::send_active_recording_command(
-                crate::recording::RecordingControlCommand::StopSave,
-            );
+            let command = crate::recording::RecordingControlCommand::StopSave;
+            let stopped = crate::recording::send_active_recording_command(command)
+                || crate::recording::send_external_recording_command(command);
             if !stopped {
                 eprintln!("[daemon] No active recording available for stop/save.");
                 idle_recording_tray(tray_handle, recording_tray_state);

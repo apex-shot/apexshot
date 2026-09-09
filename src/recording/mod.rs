@@ -15,8 +15,8 @@ mod stop_overlay;
 mod stop_overlay_tests;
 use control_session::RecordingControlServer;
 pub use control_session::{
-    has_active_recording_control, send_active_recording_command, toggle_active_recording_pause,
-    RecordingControlCommand,
+    has_active_recording_control, send_active_recording_command, send_external_recording_command,
+    toggle_active_recording_pause, RecordingControlCommand,
 };
 pub use stop_overlay::{
     run_recording_countdown_bar, RecordingControlsParams, StopAction, StopOverlayError,
