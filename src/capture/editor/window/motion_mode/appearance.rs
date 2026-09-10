@@ -1,11 +1,14 @@
 use gtk4::cairo::Context;
 use gtk4::{
-    prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, DrawingArea, FileChooserAction,
-    FileChooserNative, FileFilter, Label, Orientation, Overlay, ResponseType, Stack,
+    glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, DrawingArea,
+    FileChooserAction, FileChooserNative, FileFilter, Label, Orientation, Overlay, ResponseType,
+    Stack,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::mpsc;
+use std::time::Duration;
 
 use crate::i18n::t;
 use crate::recording::editor::model::MotionBackgroundFillType;
@@ -462,30 +465,31 @@ fn motion_wallpaper_catalog_section(
     all.append(&all_grid);
     stack.add_named(&all, Some("all"));
 
-    let paths: Vec<PathBuf> =
-        crate::capture::editor::window::background_panel::BACKGROUND_GRADIENT_PREVIEW_FILES
+    let paths: Vec<(PathBuf, PathBuf)> =
+        crate::capture::editor::window::background_panel::MOTION_WALLPAPER_FILES
             .iter()
-            .map(|file_name| {
-                crate::capture::editor::window::background_panel::background_gradient_asset_path(
-                    file_name,
-                )
+            .filter_map(|file_name| {
+                let path = crate::capture::editor::window::background_panel::background_gradient_asset_path(file_name);
+                path.is_file().then(|| {
+                    let preview_path = crate::capture::editor::window::background_panel::motion_wallpaper_preview_asset_path(file_name);
+                    (path, preview_path)
+                })
             })
-            .filter(|path| path.is_file())
             .collect();
     let selection_buttons = Rc::new(RefCell::new(Vec::<(PathBuf, Button)>::new()));
-    for path in paths.iter().take(3) {
+    for (path, preview_path) in paths.iter().take(3) {
         compact_row.append(&motion_wallpaper_thumbnail(
             path,
+            preview_path,
             session,
             preview,
             none_button,
             selection_buttons.clone(),
         ));
     }
-    // The static editor also creates a Motion host, but people opening a
-    // screenshot should not have to synchronously decode every wallpaper just
-    // to see the first editor frame.  Keep the compact strip eager and build
-    // the full catalog only when its affordance is opened.
+    // Keep the compact strip eager, then populate one small row per frame when
+    // expanded. This keeps the Show all click responsive even with a large
+    // bundled catalog.
     let all_populated = Rc::new(Cell::new(false));
     let populate_all: Rc<dyn Fn()> = Rc::new({
         let all_grid = all_grid.clone();
@@ -499,25 +503,43 @@ fn motion_wallpaper_catalog_section(
             if all_populated.replace(true) {
                 return;
             }
-            for row_paths in paths.chunks(4) {
-                let row = GtkBox::new(Orientation::Horizontal, 6);
-                row.add_css_class("editor-motion-wallpaper-row");
-                for path in row_paths {
-                    row.append(&motion_wallpaper_thumbnail(
-                        path,
-                        &session,
-                        &preview,
-                        &none_button,
-                        selection_buttons.clone(),
-                    ));
+            let next_row = Rc::new(Cell::new(0usize));
+            glib::timeout_add_local(Duration::from_millis(12), {
+                let all_grid = all_grid.clone();
+                let paths = paths.clone();
+                let session = session.clone();
+                let preview = preview.clone();
+                let none_button = none_button.clone();
+                let selection_buttons = selection_buttons.clone();
+                let next_row = next_row.clone();
+                move || {
+                    let start = next_row.get();
+                    if start >= paths.len() {
+                        return glib::ControlFlow::Break;
+                    }
+                    let row_paths = &paths[start..(start + 4).min(paths.len())];
+                    next_row.set(start + row_paths.len());
+                    let row = GtkBox::new(Orientation::Horizontal, 6);
+                    row.add_css_class("editor-motion-wallpaper-row");
+                    for (path, preview_path) in row_paths {
+                        row.append(&motion_wallpaper_thumbnail(
+                            path,
+                            preview_path,
+                            &session,
+                            &preview,
+                            &none_button,
+                            selection_buttons.clone(),
+                        ));
+                    }
+                    all_grid.append(&row);
+                    glib::ControlFlow::Continue
                 }
-                all_grid.append(&row);
-            }
+            });
         }
     });
-    if let Some(path) = paths.get(3) {
+    if let Some((_, preview_path)) = paths.get(3) {
         compact_row.append(&motion_wallpaper_stack_thumbnail(
-            path,
+            preview_path,
             &stack,
             populate_all,
         ));
@@ -533,7 +555,7 @@ fn motion_wallpaper_catalog_section(
         let preview = preview.clone();
         let none_button = none_button.clone();
         let selection_buttons = selection_buttons.clone();
-        let default_path = paths.first().cloned();
+        let default_path = paths.first().map(|(path, _)| path.clone());
         move || {
             let Some(default_path) = default_path.clone() else {
                 return;
@@ -571,6 +593,7 @@ fn motion_wallpaper_catalog_section(
 
 fn motion_wallpaper_thumbnail(
     path: &std::path::Path,
+    preview_path: &std::path::Path,
     session: &MotionSession,
     preview: &DrawingArea,
     none_button: &Button,
@@ -578,15 +601,17 @@ fn motion_wallpaper_thumbnail(
 ) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
-    button.set_size_request(48, 48);
+    button.set_size_request(56, 56);
     button.add_css_class("editor-background-gradient-button");
     button.add_css_class("editor-background-preview-size-regular");
     button.add_css_class("editor-motion-wallpaper-thumbnail");
     button.set_tooltip_text(path.file_stem().and_then(|name| name.to_str()));
     let path = path.to_path_buf();
-    let surface =
-        super::super::motion_render::load_motion_background_surface(&path.to_string_lossy());
-    let thumbnail = motion_wallpaper_thumbnail_area(surface.clone());
+    let preview_path = preview_path.to_path_buf();
+    let preview_surface = super::super::motion_render::load_motion_background_surface(
+        &preview_path.to_string_lossy(),
+    );
+    let thumbnail = motion_wallpaper_thumbnail_area(preview_surface);
     button.set_child(Some(&thumbnail));
 
     if session
@@ -608,12 +633,19 @@ fn motion_wallpaper_thumbnail(
         let preview = preview.clone();
         let none_button = none_button.clone();
         let selection_buttons = selection_buttons.clone();
+        let preview_path = preview_path.clone();
         move |_| {
             let mut runtime = session.runtime.borrow_mut();
             runtime.motion.appearance.wallpaper_image_name =
                 Some(path.to_string_lossy().into_owned());
             runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Wallpaper;
-            runtime.background_surface = surface.clone();
+            // The thumbnail is already inexpensive to decode. Show it now,
+            // then replace it with the full wallpaper from a worker thread.
+            runtime.background_surface =
+                super::super::motion_render::load_motion_background_surface(
+                    &preview_path.to_string_lossy(),
+                );
+            runtime.backdrop_cache = None;
             for (candidate_path, candidate) in selection_buttons.borrow().iter() {
                 if candidate_path == &path {
                     candidate.add_css_class("active-background-option");
@@ -623,6 +655,7 @@ fn motion_wallpaper_thumbnail(
             }
             none_button.remove_css_class("active-background-option");
             preview.queue_draw();
+            load_motion_wallpaper_asynchronously(path.clone(), session.clone(), preview.clone());
         }
     });
     button
@@ -632,20 +665,21 @@ fn motion_wallpaper_thumbnail(
 /// remains a wallpaper thumbnail, with a small overlay indicating that it
 /// opens the complete collection rather than selecting that particular image.
 fn motion_wallpaper_stack_thumbnail(
-    path: &std::path::Path,
+    preview_path: &std::path::Path,
     stack: &Stack,
     populate_all: Rc<dyn Fn()>,
 ) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
-    button.set_size_request(48, 48);
+    button.set_size_request(56, 56);
     button.add_css_class("editor-background-gradient-button");
     button.add_css_class("editor-background-preview-size-regular");
     button.add_css_class("editor-motion-wallpaper-thumbnail");
     button.add_css_class("editor-motion-wallpaper-stack-thumbnail");
     button.set_tooltip_text(Some(&t("Show all wallpapers")));
-    let surface =
-        super::super::motion_render::load_motion_background_surface(&path.to_string_lossy());
+    let surface = super::super::motion_render::load_motion_background_surface(
+        &preview_path.to_string_lossy(),
+    );
     let thumbnail = motion_wallpaper_thumbnail_area(surface);
     let overlay = Overlay::new();
     overlay.set_child(Some(&thumbnail));
@@ -668,8 +702,8 @@ fn motion_wallpaper_stack_thumbnail(
 
 fn motion_wallpaper_thumbnail_area(surface: Option<gtk4::cairo::ImageSurface>) -> DrawingArea {
     let thumbnail = DrawingArea::new();
-    thumbnail.set_content_width(48);
-    thumbnail.set_content_height(48);
+    thumbnail.set_content_width(56);
+    thumbnail.set_content_height(56);
     thumbnail.set_draw_func(move |_, context, width, height| {
         let Some(surface) = surface.as_ref() else {
             return;
@@ -697,6 +731,44 @@ fn motion_wallpaper_thumbnail_area(surface: Option<gtk4::cairo::ImageSurface>) -
         context.restore().ok();
     });
     thumbnail
+}
+
+/// Decode a selected full-resolution wallpaper off the UI thread. The tile's
+/// small preview is already assigned as a temporary background, so the
+/// inspector remains responsive while the full image is prepared.
+fn load_motion_wallpaper_asynchronously(
+    path: PathBuf,
+    session: MotionSession,
+    preview: DrawingArea,
+) {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn({
+        let path = path.clone();
+        move || {
+            let image = image::open(&path).ok().map(|image| image.into_rgba8());
+            let _ = sender.send((path, image));
+        }
+    });
+    glib::timeout_add_local(Duration::from_millis(16), move || {
+        match receiver.try_recv() {
+            Ok((loaded_path, Some(image))) => {
+                let mut runtime = session.runtime.borrow_mut();
+                let still_selected = runtime.motion.appearance.background_fill_type
+                    == MotionBackgroundFillType::Wallpaper
+                    && runtime.motion.appearance.wallpaper_image_name.as_deref()
+                        == Some(loaded_path.to_string_lossy().as_ref());
+                if still_selected {
+                    runtime.background_surface =
+                        crate::capture::editor::render::rgba_image_to_surface(&image);
+                    runtime.backdrop_cache = None;
+                    preview.queue_draw();
+                }
+                glib::ControlFlow::Break
+            }
+            Ok((_, None)) | Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+        }
+    });
 }
 
 fn motion_thumbnail_rounded_rectangle(

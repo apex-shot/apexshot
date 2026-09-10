@@ -64,11 +64,6 @@ fn paint_backdrop(
             context.paint().ok();
         }
         MotionBackgroundFillType::Wallpaper | MotionBackgroundFillType::Image => {
-            let path = match appearance.background_fill_type {
-                MotionBackgroundFillType::Wallpaper => appearance.wallpaper_image_name.as_deref(),
-                MotionBackgroundFillType::Image => appearance.custom_background_image.as_deref(),
-                _ => None,
-            };
             let (x, y, scene_w, scene_h) =
                 scene.unwrap_or((0.0, 0.0, f64::from(width), f64::from(height)));
             if let Some(surface) = background_surface {
@@ -86,22 +81,9 @@ fn paint_backdrop(
                         EXPORT_BACKGROUND_BLUR_MAX_EDGE
                     },
                 );
-            } else if let Some(surface) = path.and_then(load_motion_background_surface) {
-                paint_image_background_with_max_edge(
-                    context,
-                    &surface,
-                    x,
-                    y,
-                    scene_w,
-                    scene_h,
-                    appearance.background_blur,
-                    if checkerboard {
-                        PREVIEW_BACKGROUND_BLUR_MAX_EDGE
-                    } else {
-                        EXPORT_BACKGROUND_BLUR_MAX_EDGE
-                    },
-                );
             } else {
+                // A wallpaper may still be decoding in a worker. Drawing must
+                // never synchronously read it from disk and freeze the UI.
                 context.set_source_rgb(0.0, 0.0, 0.0);
                 context.paint().ok();
             }
