@@ -28,10 +28,11 @@ pub(super) fn install(
                     .selected_segment()
                     .map(|segment| segment.start)
             };
-            session
-                .borrow_mut()
-                .motion
-                .set_selected_end_scale(slider.value());
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_end_scale(slider.value());
+            }
             match segment_start {
                 Some(start) => request_transition_preview(start),
                 None => redraw(),
@@ -57,7 +58,11 @@ pub(super) fn install(
                     .selected_segment()
                     .map(|segment| segment.start)
             };
-            session.borrow_mut().motion.set_selected_intensity(value);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_intensity(value);
+            }
             intensity_value.set_label(&format!("{:.0}%", value * 100.0));
             match segment_start {
                 Some(start) => request_transition_preview(start),
@@ -95,6 +100,7 @@ pub(super) fn install(
                     .map(|segment| segment.start)
             };
             let mut runtime = session.borrow_mut();
+            runtime.begin_motion_edit();
             let (mut x, mut y) = runtime
                 .motion
                 .selected_segment()
@@ -134,7 +140,11 @@ pub(super) fn install(
                     .selected_segment()
                     .map(|segment| segment.start)
             };
-            session.borrow_mut().motion.set_selected_end_yaw(value);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_end_yaw(value);
+            }
             yaw_value.set_label(&format!("{:.0}°", value));
             match segment_start {
                 Some(start) => request_transition_preview(start),
@@ -160,7 +170,11 @@ pub(super) fn install(
                     .selected_segment()
                     .map(|segment| segment.start)
             };
-            session.borrow_mut().motion.set_selected_end_pitch(value);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_end_pitch(value);
+            }
             pitch_value.set_label(&format!("{:.0}°", value));
             match segment_start {
                 Some(start) => request_transition_preview(start),
@@ -186,7 +200,11 @@ pub(super) fn install(
                     .selected_segment()
                     .map(|segment| segment.start)
             };
-            session.borrow_mut().motion.set_selected_end_roll(value);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_end_roll(value);
+            }
             roll_value.set_label(&format!("{:.0}°", value));
             match segment_start {
                 Some(start) => request_transition_preview(start),
@@ -204,7 +222,11 @@ pub(super) fn install(
                 return;
             }
             let value = slider.value();
-            session.borrow_mut().motion.set_selected_perspective(value);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_perspective(value);
+            }
             perspective_value.set_label(&format!("{:.0}%", value * 100.0));
             request_live_preview();
         }
@@ -230,7 +252,11 @@ pub(super) fn install(
                         (Some(segment.start), segment.to.pos_y)
                     })
             };
-            session.borrow_mut().motion.set_selected_end_pos_x(value);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_end_pos_x(value);
+            }
             position_pad.set_position(value, pos_y);
             pos_x_value.set_label(&format!("{:.0}", value * 1000.0));
             match segment_start {
@@ -260,7 +286,11 @@ pub(super) fn install(
                         (Some(segment.start), segment.to.pos_x)
                     })
             };
-            session.borrow_mut().motion.set_selected_end_pos_y(value);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_end_pos_y(value);
+            }
             position_pad.set_position(pos_x, value);
             pos_y_value.set_label(&format!("{:.0}", value * 1000.0));
             match segment_start {
@@ -290,6 +320,7 @@ pub(super) fn install(
                     .map(|segment| segment.start)
             };
             let mut runtime = session.borrow_mut();
+            runtime.begin_motion_edit();
             runtime.motion.set_selected_end_pos_x(x);
             runtime.motion.set_selected_end_pos_y(y);
             drop(runtime);
@@ -325,10 +356,11 @@ pub(super) fn install(
                     .selected_segment()
                     .map(|segment| segment.start)
             };
-            session
-                .borrow_mut()
-                .motion
-                .set_selected_transition_ms(transition_ms);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_transition_ms(transition_ms);
+            }
             ease_value.set_label(&format!("{transition_ms}ms"));
             match segment_start {
                 Some(start) => request_transition_preview(start),
@@ -376,6 +408,7 @@ pub(super) fn install(
                     .map(|segment| segment.start)
             };
             let mut runtime = session.borrow_mut();
+            runtime.begin_motion_edit();
             let mut timing = runtime.motion.transform_timing;
             match axis {
                 0 => timing.easing_x1 = value,
@@ -405,10 +438,13 @@ pub(super) fn install(
                     .selected_segment()
                     .map(|segment| segment.start)
             };
-            session
-                .borrow_mut()
-                .motion
-                .set_transform_timing(MotionEffectTransformTiming::default());
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime
+                    .motion
+                    .set_transform_timing(MotionEffectTransformTiming::default());
+            }
             match segment_start {
                 Some(start) => request_transition_preview(start),
                 None => redraw(),

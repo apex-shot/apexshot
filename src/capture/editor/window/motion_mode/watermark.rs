@@ -93,6 +93,7 @@ pub(super) fn build_motion_watermark_panel(
                         .unwrap_or(&path),
                 );
                 let mut runtime = session.runtime.borrow_mut();
+                runtime.begin_motion_edit();
                 runtime.motion.watermark.image_file_name = Some(path);
                 runtime.watermark_surface = Some(surface);
                 preview.queue_draw();
@@ -111,6 +112,7 @@ pub(super) fn build_motion_watermark_panel(
         let selected_file = selected_file.clone();
         move |_| {
             let mut runtime = session.runtime.borrow_mut();
+            runtime.begin_motion_edit();
             runtime.motion.watermark.image_file_name = None;
             runtime.watermark_surface = None;
             selected_file.set_text(&t("No image selected"));
@@ -124,7 +126,9 @@ pub(super) fn build_motion_watermark_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.watermark.size = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.watermark.size = slider.value();
             preview.queue_draw();
         }
     });
@@ -135,7 +139,9 @@ pub(super) fn build_motion_watermark_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.watermark.inset = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.watermark.inset = slider.value();
             preview.queue_draw();
         }
     });
@@ -146,7 +152,9 @@ pub(super) fn build_motion_watermark_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.watermark.position.0 = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.watermark.position.0 = slider.value();
             preview.queue_draw();
         }
     });
@@ -157,7 +165,9 @@ pub(super) fn build_motion_watermark_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.watermark.position.1 = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.watermark.position.1 = slider.value();
             preview.queue_draw();
         }
     });

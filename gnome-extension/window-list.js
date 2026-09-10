@@ -20,25 +20,22 @@ const DBUS_INTERFACE = `
   </interface>
 </node>`;
 
-const APEXSHOT_CLASSES = [
-    'io.github.codegoddy.apexshot',
-    'apexshot',
-    'com.apexshot.recording',
-];
+const RECORDING_OVERLAY_CLASSES = ['com.apexshot.recording'];
 
-function isApexShotWindow(appName, wmClass) {
-    return appName.toLowerCase() === 'apexshot' ||
-        APEXSHOT_CLASSES.includes(wmClass.toLowerCase());
+function isRecordingOverlayWindow(wmClass) {
+    return RECORDING_OVERLAY_CLASSES.includes(wmClass.toLowerCase());
 }
 
 /// Serializes the given window records for ApexShot's window picker.
 ///
-/// ApexShot's own windows and windows that are not in the window list (docks,
-/// panels) are dropped, and sizes are clamped so the picker never has to lay
-/// out a zero-sized card.
+/// ApexShot's recording overlays and windows that are not in the window list
+/// (docks, panels) are dropped, and sizes are clamped so the picker never has
+/// to lay out a zero-sized card.
 export function buildWindowListPayload(windows) {
     return windows
-        .filter(window => Number.isFinite(window.id) && !window.skipTaskbar && !window.apexshot)
+        .filter(window =>
+            Number.isFinite(window.id) && !window.skipTaskbar &&
+            !isRecordingOverlayWindow(window.wmClass))
         .map(window => ({
             id: Math.trunc(window.id),
             title: window.title || 'Window',
@@ -137,7 +134,7 @@ export class WindowListService {
                     height: frame.height,
                     minimized: metaWindow.minimized,
                     skipTaskbar: metaWindow.is_skip_taskbar(),
-                    apexshot: isApexShotWindow(appName, wmClass),
+                    wmClass,
                     metaWindow,
                 });
             }

@@ -404,6 +404,8 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
                 skip_forward: timeline.skip_forward,
                 add_btn: timeline.add_btn,
                 add_text_btn: timeline.add_text_btn,
+                undo_btn: timeline.undo_btn,
+                redo_btn: timeline.redo_btn,
                 playhead_clock: timeline.playhead_clock,
                 duration_clock: timeline.duration_clock,
                 timeline_card: timeline.dock,

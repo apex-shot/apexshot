@@ -117,6 +117,7 @@ pub(super) fn install(
                 None,
             );
             if n_press >= 2 {
+                runtime.begin_motion_edit();
                 if runtime.motion.add_segment_at(time).is_none() {
                     runtime.motion.selected = runtime.motion.segment_index_at(time);
                     runtime.motion.selected_text = None;
@@ -175,6 +176,11 @@ pub(super) fn install(
             if let Some(index) = kind.map(drag_kind_index) {
                 runtime.motion.selected = Some(index);
                 runtime.motion.selected_text = None;
+            }
+            // One checkpoint per drag: the pre-drag state is what Undo
+            // restores, and the drag updates themselves stay checkpoint-free.
+            if kind.is_some() {
+                runtime.begin_motion_edit();
             }
             drop(runtime);
             drag_kind.set(kind);
@@ -298,6 +304,7 @@ pub(super) fn install(
                 None,
             );
             if n_press >= 2 {
+                runtime.begin_motion_edit();
                 if runtime.motion.add_text_at(time).is_none() {
                     runtime.motion.selected_text = runtime.motion.text_index_at(time);
                     runtime.motion.selected = None;
@@ -357,6 +364,10 @@ pub(super) fn install(
             if let Some(index) = kind.map(drag_kind_index) {
                 runtime.motion.selected_text = Some(index);
                 runtime.motion.selected = None;
+            }
+            // Same checkpoint-per-drag rule as the motion lane.
+            if kind.is_some() {
+                runtime.begin_motion_edit();
             }
             drop(runtime);
             text_drag_kind.set(kind);
@@ -460,6 +471,7 @@ pub(super) fn install(
         move |_| {
             let mut runtime = session.borrow_mut();
             let playhead = runtime.motion.playhead;
+            runtime.begin_motion_edit();
             let _ = runtime.motion.add_segment_at(playhead);
             drop(runtime);
             redraw();
@@ -472,6 +484,7 @@ pub(super) fn install(
         move |_| {
             let mut runtime = session.borrow_mut();
             let playhead = runtime.motion.playhead;
+            runtime.begin_motion_edit();
             let _ = runtime.motion.add_text_at(playhead);
             drop(runtime);
             redraw();

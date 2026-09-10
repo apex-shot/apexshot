@@ -1,6 +1,14 @@
-<svg version="1.1" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
- <g transform="translate(1)" color="#000000" fill="#808080">
-  <path d="m8 3 1e-3 5c0.76-0.348 1.535-0.737 2.323-1.166a44.09 44.09 0 0 0 2.259-1.334 51.555 51.555 0 0 0-2.26-1.32 43.088 43.088 0 0 0-2.323-1.18z" overflow="visible"/>
-  <path d="m4.5 5c-1.93 0-3.5 1.57-3.5 3.5s1.57 3.5 3.5 3.5h3.5v-1h-3.5a2.484 2.484 0 0 1-2.5-2.5c0-1.394 1.106-2.5 2.5-2.5h4.5v-1h-0.5z" style="font-feature-settings:normal;font-variant-alternates:normal;font-variant-caps:normal;font-variant-ligatures:normal;font-variant-numeric:normal;font-variant-position:normal;isolation:auto;mix-blend-mode:normal;shape-padding:0;text-decoration-color:#000000;text-decoration-line:none;text-decoration-style:solid;text-indent:0;text-orientation:mixed;text-transform:none"/>
- </g>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16px" height="16px" viewBox="0 0 24 24">
+  <!-- Lucide "redo-2" (mirror of undo-2), converted to filled paths: GTK
+       symbolic icons recolor fill and drop strokes. -->
+  <path fill="#222222" d="M 14.293 13.293 L 15.707 14.707 L 20.707 9.707 L 19.293 8.293 Z"/>
+  <path fill="#222222" d="M 19.375 9.781 L 20.625 8.219 L 15.625 4.219 L 14.375 5.781 Z"/>
+  <path fill="#222222" d="M 20 8 L 9.5 8 L 9.5 10 L 20 10 Z"/>
+  <path fill="#222222" d="M 9.5 21 A 6.5 6.5 0 0 1 9.5 8 L 9.5 10 A 4.5 4.5 0 0 0 9.5 19 Z"/>
+  <path fill="#222222" d="M 9.5 21 L 13 21 L 13 19 L 9.5 19 Z"/>
+  <path fill="#222222" d="M 21 9 A 1 1 0 1 0 19 9 A 1 1 0 1 0 21 9 Z"/>
+  <path fill="#222222" d="M 16 14 A 1 1 0 1 0 14 14 A 1 1 0 1 0 16 14 Z"/>
+  <path fill="#222222" d="M 16 5 A 1 1 0 1 0 14 5 A 1 1 0 1 0 16 5 Z"/>
+  <path fill="#222222" d="M 14 20 A 1 1 0 1 0 12 20 A 1 1 0 1 0 14 20 Z"/>
 </svg>

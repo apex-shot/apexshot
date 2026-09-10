@@ -172,8 +172,32 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
         let session = session.runtime.clone();
         let redraw = redraw.clone();
         move |_| {
-            session.borrow_mut().motion.remove_selected();
+            let mut runtime = session.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.remove_selected();
+            drop(runtime);
             redraw();
+        }
+    });
+
+    // Timeline history: the same stacks power the dock buttons and the
+    // Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) shortcuts.
+    parts.timeline.undo_btn.connect_clicked({
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        move |_| {
+            if session.borrow_mut().undo_motion() {
+                redraw();
+            }
+        }
+    });
+    parts.timeline.redo_btn.connect_clicked({
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        move |_| {
+            if session.borrow_mut().redo_motion() {
+                redraw();
+            }
         }
     });
 
@@ -182,14 +206,39 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
         let session = session.runtime.clone();
         let redraw = redraw.clone();
         let in_motion = in_motion.clone();
-        move |_, key, _, _| {
+        move |_, key, _, state| {
             if !in_motion.get() {
                 return glib::Propagation::Proceed;
+            }
+            if key == gdk::Key::z
+                && state.contains(gdk::ModifierType::CONTROL_MASK)
+            {
+                let changed = if state.contains(gdk::ModifierType::SHIFT_MASK) {
+                    session.borrow_mut().redo_motion()
+                } else {
+                    session.borrow_mut().undo_motion()
+                };
+                if changed {
+                    redraw();
+                    return glib::Propagation::Stop;
+                }
+                return glib::Propagation::Stop;
+            }
+            if key == gdk::Key::y && state.contains(gdk::ModifierType::CONTROL_MASK) {
+                let changed = session.borrow_mut().redo_motion();
+                if changed {
+                    redraw();
+                }
+                return glib::Propagation::Stop;
             }
             if key != gdk::Key::Delete && key != gdk::Key::BackSpace {
                 return glib::Propagation::Proceed;
             }
-            if session.borrow_mut().motion.remove_selected() {
+            let mut runtime = session.borrow_mut();
+            runtime.begin_motion_edit();
+            let changed = runtime.motion.remove_selected();
+            drop(runtime);
+            if changed {
                 redraw();
                 return glib::Propagation::Stop;
             }

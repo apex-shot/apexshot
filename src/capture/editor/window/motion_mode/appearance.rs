@@ -75,8 +75,9 @@ pub(super) fn build_motion_appearance_panel(
         let preview = preview.clone();
         let none_button = none_button.clone();
         move |_| {
-            runtime.borrow_mut().motion.appearance.background_fill_type =
-                MotionBackgroundFillType::None;
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::None;
             none_button.add_css_class("active-background-option");
             preview.queue_draw();
         }
@@ -93,6 +94,7 @@ pub(super) fn build_motion_appearance_panel(
         let none_button = none_button.clone();
         move |rgba| {
             let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
             runtime.motion.appearance.background_color = [
                 rgba.red().into(),
                 rgba.green().into(),
@@ -117,6 +119,7 @@ pub(super) fn build_motion_appearance_panel(
         let none_button = none_button.clone();
         move |stop, rgba| {
             let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
             let color = [
                 rgba.red().into(),
                 rgba.green().into(),
@@ -187,7 +190,9 @@ pub(super) fn build_motion_appearance_panel(
         let wallpapers_choice = wallpapers_choice.clone();
         let image_choice = image_choice.clone();
         move |_| {
-            runtime.borrow_mut().motion.appearance.background_fill_type =
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.background_fill_type =
                 MotionBackgroundFillType::Color;
             none_button.remove_css_class("active-background-option");
             color_choice.add_css_class("active-background-option");
@@ -208,7 +213,9 @@ pub(super) fn build_motion_appearance_panel(
         let wallpapers_choice = wallpapers_choice.clone();
         let image_choice = image_choice.clone();
         move |_| {
-            runtime.borrow_mut().motion.appearance.background_fill_type =
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.background_fill_type =
                 MotionBackgroundFillType::Gradient;
             none_button.remove_css_class("active-background-option");
             color_choice.remove_css_class("active-background-option");
@@ -276,7 +283,9 @@ pub(super) fn build_motion_appearance_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.appearance.background_padding = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.background_padding = slider.value();
             preview.queue_draw();
         }
     });
@@ -287,7 +296,9 @@ pub(super) fn build_motion_appearance_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.appearance.background_blur = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.background_blur = slider.value();
             preview.queue_draw();
         }
     });
@@ -298,7 +309,9 @@ pub(super) fn build_motion_appearance_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.appearance.background_noise = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.background_noise = slider.value();
             preview.queue_draw();
         }
     });
@@ -312,7 +325,9 @@ pub(super) fn build_motion_appearance_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.appearance.shadow_opacity = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.shadow_opacity = slider.value();
             preview.queue_draw();
         }
     });
@@ -324,7 +339,9 @@ pub(super) fn build_motion_appearance_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.appearance.shadow_blur = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.shadow_blur = slider.value();
             preview.queue_draw();
         }
     });
@@ -341,7 +358,9 @@ pub(super) fn build_motion_appearance_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.appearance.shadow_position.0 = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.shadow_position.0 = slider.value();
             preview.queue_draw();
         }
     });
@@ -358,7 +377,9 @@ pub(super) fn build_motion_appearance_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.appearance.shadow_position.1 = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.shadow_position.1 = slider.value();
             preview.queue_draw();
         }
     });
@@ -369,11 +390,13 @@ pub(super) fn build_motion_appearance_panel(
     let border_title = Label::new(Some(&t("Color")));
     border_title.add_css_class("editor-background-section-title");
     border_title.set_xalign(0.0);
-    let border_color = motion_color_control(initial_border, "Border color", false, {
+    let     border_color = motion_color_control(initial_border, "Border color", false, {
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |rgba| {
-            runtime.borrow_mut().motion.appearance.border_fill_color = [
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.border_fill_color = [
                 rgba.red().into(),
                 rgba.green().into(),
                 rgba.blue().into(),
@@ -390,7 +413,9 @@ pub(super) fn build_motion_appearance_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.appearance.border_thickness = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.border_thickness = slider.value();
             preview.queue_draw();
         }
     });
@@ -403,7 +428,9 @@ pub(super) fn build_motion_appearance_panel(
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |slider| {
-            runtime.borrow_mut().motion.appearance.border_radius = slider.value();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.border_radius = slider.value();
             preview.queue_draw();
         }
     });
@@ -566,6 +593,7 @@ fn motion_wallpaper_catalog_section(
                     runtime.motion.appearance.background_fill_type,
                     MotionBackgroundFillType::Wallpaper
                 ) {
+                    runtime.begin_motion_edit();
                     runtime.motion.appearance.wallpaper_image_name =
                         Some(default_path.to_string_lossy().into_owned());
                     runtime.motion.appearance.background_fill_type =
@@ -636,6 +664,7 @@ fn motion_wallpaper_thumbnail(
         let preview_path = preview_path.clone();
         move |_| {
             let mut runtime = session.runtime.borrow_mut();
+            runtime.begin_motion_edit();
             runtime.motion.appearance.wallpaper_image_name =
                 Some(path.to_string_lossy().into_owned());
             runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Wallpaper;
@@ -861,6 +890,7 @@ fn motion_image_section(
                 };
                 let path = path.to_string_lossy().into_owned();
                 let mut runtime = session.runtime.borrow_mut();
+                runtime.begin_motion_edit();
                 match kind {
                     MotionBackgroundFillType::Wallpaper => {
                         runtime.motion.appearance.wallpaper_image_name = Some(path);

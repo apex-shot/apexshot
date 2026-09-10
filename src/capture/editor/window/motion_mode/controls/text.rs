@@ -21,10 +21,13 @@ pub(super) fn install(
             if syncing.get() {
                 return;
             }
-            session
-                .borrow_mut()
-                .motion
-                .set_selected_text_value(entry.text().to_string());
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime
+                    .motion
+                    .set_selected_text_value(entry.text().to_string());
+            }
             request_live_preview();
         }
     });
@@ -46,10 +49,11 @@ pub(super) fn install(
                         .selected_text_segment()
                         .map(|segment| (segment.start, segment.typewriter_time))
                 };
-                session
-                    .borrow_mut()
-                    .motion
-                    .set_selected_text_animation(animation);
+                {
+                    let mut runtime = session.borrow_mut();
+                    runtime.begin_motion_edit();
+                    runtime.motion.set_selected_text_animation(animation);
+                }
                 if let Some((start, typewriter_time)) = text_start {
                     request_text_transition_preview(start, typewriter_time);
                 }
@@ -74,7 +78,11 @@ pub(super) fn install(
                         .selected_text_segment()
                         .map(|segment| (segment.start, segment.typewriter_time))
                 };
-                session.borrow_mut().motion.set_selected_text_scope(scope);
+                {
+                    let mut runtime = session.borrow_mut();
+                    runtime.begin_motion_edit();
+                    runtime.motion.set_selected_text_scope(scope);
+                }
                 if let Some((start, typewriter_time)) = text_start {
                     request_text_transition_preview(start, typewriter_time);
                 }
@@ -98,10 +106,11 @@ pub(super) fn install(
                 .selected_text_segment()
                 .map(|segment| segment.pos_y)
                 .unwrap_or(DEFAULT_MOTION_TEXT_POS_Y);
-            session
-                .borrow_mut()
-                .motion
-                .set_selected_text_pos(value, pos_y);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_text_pos(value, pos_y);
+            }
             text_pos_x_value.set_label(&format!("{:.0}%", value * 100.0));
             request_live_preview();
         }
@@ -122,10 +131,11 @@ pub(super) fn install(
                 .selected_text_segment()
                 .map(|segment| segment.pos_x)
                 .unwrap_or(DEFAULT_MOTION_TEXT_POS_X);
-            session
-                .borrow_mut()
-                .motion
-                .set_selected_text_pos(pos_x, value);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_text_pos(pos_x, value);
+            }
             text_pos_y_value.set_label(&format!("{:.0}%", value * 100.0));
             request_live_preview();
         }
@@ -140,7 +150,11 @@ pub(super) fn install(
                 return;
             }
             let value = slider.value();
-            session.borrow_mut().motion.set_selected_text_size(value);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_text_size(value);
+            }
             text_size_value.set_label(&format!("{:.0}%", value * 100.0));
             request_live_preview();
         }
@@ -180,10 +194,11 @@ pub(super) fn install(
                     y,
                 );
             drop(runtime);
-            session
-                .borrow_mut()
-                .motion
-                .set_selected_text_pos(pos_x, pos_y);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_selected_text_pos(pos_x, pos_y);
+            }
             syncing.set(true);
             text_pos_x_slider.set_value(pos_x);
             text_pos_x_value.set_label(&format!("{:.0}%", pos_x * 100.0));

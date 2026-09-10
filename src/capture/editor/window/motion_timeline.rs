@@ -11,6 +11,7 @@ use crate::i18n::t;
 use crate::typography::UI_FONT_FAMILY;
 
 use super::motion_mode::MotionRuntime;
+use super::icon_names::custom::{EDIT_UNDO_RTL_SYMBOLIC, EDIT_UNDO_SYMBOLIC};
 
 pub(super) struct MotionTimeline {
     pub dock: GtkBox,
@@ -19,6 +20,8 @@ pub(super) struct MotionTimeline {
     pub skip_forward: Button,
     pub add_btn: Button,
     pub add_text_btn: Button,
+    pub undo_btn: Button,
+    pub redo_btn: Button,
     pub playhead_clock: Label,
     pub duration_clock: Label,
     pub ruler: DrawingArea,
@@ -58,6 +61,11 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     let add_text_btn =
         labeled_tool_button("list-add-symbolic", &t("Text"), &t("Add text at playhead"));
 
+    let undo_btn = icon_button(EDIT_UNDO_SYMBOLIC, &t("Undo"));
+    let redo_btn = icon_button(EDIT_UNDO_RTL_SYMBOLIC, &t("Redo"));
+    undo_btn.set_sensitive(false);
+    redo_btn.set_sensitive(false);
+
     let toolbar = GtkBox::new(Orientation::Horizontal, 0);
     toolbar.add_css_class("recording-editor-timeline-toolbar");
     toolbar.set_hexpand(true);
@@ -81,6 +89,8 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     let right = GtkBox::new(Orientation::Horizontal, 6);
     right.set_halign(Align::End);
     right.set_hexpand(true);
+    right.append(&undo_btn);
+    right.append(&redo_btn);
 
     toolbar.append(&left);
     toolbar.append(&center);
@@ -160,6 +170,8 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
         skip_forward,
         add_btn,
         add_text_btn,
+        undo_btn,
+        redo_btn,
         playhead_clock,
         duration_clock,
         ruler,

@@ -17,6 +17,8 @@ pub(super) fn make_redraw(parts: &MotionModeParts, session: &MotionSession) -> R
     let playhead_clock = parts.timeline.playhead_clock.clone();
     let duration_clock = parts.timeline.duration_clock.clone();
     let play_btn = parts.timeline.play_btn.clone();
+    let undo_btn = parts.timeline.undo_btn.clone();
+    let redo_btn = parts.timeline.redo_btn.clone();
     let session = session.runtime.clone();
     let text_track = parts.timeline.text_track.clone();
     let blur_slider = parts.shared.blur_slider.clone();
@@ -95,6 +97,7 @@ pub(super) fn make_redraw(parts: &MotionModeParts, session: &MotionSession) -> R
         }
         let selected = runtime.motion.selected_segment().cloned();
         let selected_text = runtime.motion.selected_text_segment().cloned();
+        let (can_undo, can_redo) = runtime.motion_history_availability();
         let blur = runtime.motion.motion_blur;
         let blur_settings = runtime.motion.motion_blur_settings.clamped();
         let perspective_intensity = runtime.motion.perspective_intensity;
@@ -172,6 +175,8 @@ pub(super) fn make_redraw(parts: &MotionModeParts, session: &MotionSession) -> R
             scale_slider.set_value(segment.to.scale);
         }
         delete_btn.set_sensitive(has_clip || has_text);
+        undo_btn.set_sensitive(can_undo);
+        redo_btn.set_sensitive(can_redo);
         syncing.set(false);
         preview.queue_draw();
         ruler.queue_draw();
@@ -194,7 +199,10 @@ pub(super) fn install_shared(
         let redraw = redraw.clone();
         move |slider| {
             let duration = MotionState::clamp_duration(slider.value());
-            session_runtime.borrow_mut().motion.set_duration(duration);
+            let mut runtime = session_runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.set_duration(duration);
+            drop(runtime);
             duration_value.set_label(&format_duration_label(duration));
             redraw();
         }
@@ -210,7 +218,11 @@ pub(super) fn install_shared(
                 return;
             }
             let value = slider.value();
-            session.borrow_mut().motion.set_motion_blur(value);
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.set_motion_blur(value);
+            }
             blur_value.set_label(&format!("{:.0}%", value * 100.0));
             request_live_preview();
         }
@@ -226,11 +238,11 @@ pub(super) fn install_shared(
                 return;
             }
             let shutter = slider.value().clamp(0.0, 360.0);
-            session
-                .borrow_mut()
-                .motion
-                .motion_blur_settings
-                .shutter_angle = shutter;
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.motion_blur_settings.shutter_angle = shutter;
+            }
             value_label.set_label(&format!("{shutter:.0}°"));
             request_live_preview();
         }
@@ -246,11 +258,11 @@ pub(super) fn install_shared(
                 return;
             }
             let trail = slider.value().clamp(0.0, 1.0);
-            session
-                .borrow_mut()
-                .motion
-                .motion_blur_settings
-                .transform_trail_opacity = trail;
+            {
+                let mut runtime = session.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.motion_blur_settings.transform_trail_opacity = trail;
+            }
             value_label.set_label(&format!("{:.0}%", trail * 100.0));
             request_live_preview();
         }

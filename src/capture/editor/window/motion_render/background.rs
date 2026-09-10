@@ -98,6 +98,9 @@ pub(super) fn load_motion_background_surface(path: &str) -> Option<ImageSurface>
     crate::capture::editor::render::rgba_image_to_surface(&image)
 }
 
+/// Export-default wrapper kept for tests; release code always passes an
+/// explicit `max_render_edge`.
+#[cfg(test)]
 fn paint_image_background(
     context: &Context,
     surface: &ImageSurface,

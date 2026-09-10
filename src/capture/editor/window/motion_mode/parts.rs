@@ -32,6 +32,8 @@ pub(in crate::capture::editor::window) struct MotionTimelineParts {
     pub skip_forward: Button,
     pub add_btn: Button,
     pub add_text_btn: Button,
+    pub undo_btn: Button,
+    pub redo_btn: Button,
     pub playhead_clock: Label,
     pub duration_clock: Label,
     #[allow(dead_code)]
