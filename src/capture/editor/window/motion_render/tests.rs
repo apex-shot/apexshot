@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use super::{
-        draw_motion_frame, motion_pose_differs, motion_text_contains_view_point, paint_card_shadow,
-        paint_image_background, view_point_to_motion_text_position, CardLayout, MotionStage,
+        draw_motion_backdrop, draw_motion_foreground, draw_motion_frame, motion_pose_differs,
+        motion_text_contains_view_point, paint_card_shadow, paint_image_background,
+        view_point_to_motion_text_position, CardLayout, MotionStage,
     };
     use crate::recording::editor::model::{
         project_card_corners, MotionBackgroundFillType, MotionState, MotionTransform,
@@ -320,6 +321,114 @@ mod tests {
             (0.5, 0.5),
         ));
         assert!(motion_pose_differs(pose, pose, (0.51, 0.5), (0.5, 0.5)));
+    }
+
+    #[test]
+    fn transition_playback_uses_the_same_card_mesh_as_the_still_preview() {
+        let card = ImageSurface::create(Format::ARgb32, 96, 64).unwrap();
+        {
+            let context = Context::new(&card).unwrap();
+            context.set_source_rgb(1.0, 1.0, 1.0);
+            context.paint().unwrap();
+            context.set_source_rgb(0.0, 0.0, 0.0);
+            for y in 0..8 {
+                for x in 0..12 {
+                    if (x + y) % 2 == 0 {
+                        context.rectangle((x * 8) as f64, (y * 8) as f64, 8.0, 8.0);
+                    }
+                }
+            }
+            context.fill().unwrap();
+        }
+        card.flush();
+
+        let motion = motion_with_first_clip();
+        let time = 0.3;
+        let render = |live_preview| {
+            let frame = ImageSurface::create(Format::ARgb32, 192, 128).unwrap();
+            {
+                let context = Context::new(&frame).unwrap();
+                draw_motion_frame(
+                    &context,
+                    192,
+                    128,
+                    &card,
+                    &motion,
+                    None,
+                    None,
+                    time,
+                    true,
+                    true,
+                    live_preview,
+                );
+            }
+            frame.flush();
+            frame
+        };
+
+        let mut still = render(false);
+        let mut playing = render(true);
+        let still_pixels = still.data().unwrap().to_vec();
+        let playing_pixels = playing.data().unwrap().to_vec();
+        assert_eq!(
+            still_pixels,
+            playing_pixels,
+            "playing an Ease preview must not change the perspective mesh"
+        );
+    }
+
+    #[test]
+    fn cached_backdrop_composition_matches_a_direct_preview_frame() {
+        let card = ImageSurface::create(Format::ARgb32, 64, 64).unwrap();
+        {
+            let context = Context::new(&card).unwrap();
+            context.set_source_rgb(0.15, 0.45, 0.85);
+            context.paint().unwrap();
+            context.set_source_rgb(1.0, 1.0, 1.0);
+            context.rectangle(16.0, 16.0, 32.0, 32.0);
+            context.fill().unwrap();
+        }
+        card.flush();
+
+        let mut motion = motion_with_first_clip();
+        motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
+        motion.appearance.gradient_color_1 = [0.08, 0.12, 0.22, 1.0];
+        motion.appearance.gradient_color_2 = [0.42, 0.18, 0.54, 1.0];
+        motion.appearance.background_noise = 0.4;
+        let time = 0.35;
+
+        let direct = ImageSurface::create(Format::ARgb32, 160, 120).unwrap();
+        {
+            let context = Context::new(&direct).unwrap();
+            draw_motion_frame(
+                &context, 160, 120, &card, &motion, None, None, time, true, true, true,
+            );
+        }
+        direct.flush();
+
+        let backdrop = ImageSurface::create(Format::ARgb32, 160, 120).unwrap();
+        {
+            let context = Context::new(&backdrop).unwrap();
+            draw_motion_backdrop(&context, 160, 120, &motion, None, true, true);
+        }
+        backdrop.flush();
+
+        let cached = ImageSurface::create(Format::ARgb32, 160, 120).unwrap();
+        {
+            let context = Context::new(&cached).unwrap();
+            context.set_source_surface(&backdrop, 0.0, 0.0).unwrap();
+            context.paint().unwrap();
+            draw_motion_foreground(&context, 160, 120, &card, &motion, None, time, true, true);
+        }
+        cached.flush();
+
+        let mut direct = direct;
+        let mut cached = cached;
+        assert_eq!(
+            direct.data().unwrap().to_vec(),
+            cached.data().unwrap().to_vec(),
+            "the cached backdrop path must preserve the direct preview pixels"
+        );
     }
 
     #[test]

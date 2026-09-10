@@ -368,7 +368,7 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
         .build();
 
     app.connect_activate(move |application| {
-        setup_editor_window(application, path.clone());
+        setup_image_loading_shell(application, Some(path.clone()));
     });
 
     let _ = app.run_with_args::<String>(&[]);
@@ -384,7 +384,7 @@ pub fn open_image_editor_empty() -> Result<(), EditorError> {
         .build();
 
     app.connect_activate(move |application| {
-        setup_editor_window_full(application, PathBuf::from("Untitled.png"), true, None, None);
+        setup_image_loading_shell(application, None);
     });
 
     let _ = app.run_with_args::<String>(&[]);
@@ -506,6 +506,75 @@ fn set_window_always_on_top(
 
 pub fn setup_editor_window(app: &Application, path: PathBuf) {
     setup_editor_window_full(app, path, false, None, None);
+}
+
+/// Show a minimal, interactive load shell before constructing the full static
+/// and Motion editors.  The old empty-editor path built every inspector twice:
+/// once for the empty canvas and again after decoding the selected image.  A
+/// lean shell lets GTK paint immediately while the worker reads the image,
+/// then the normal editor is built exactly once with the decoded pixels.
+fn setup_image_loading_shell(app: &Application, initial_image_path: Option<PathBuf>) {
+    install_editor_css();
+    crate::recording::editor::ui_support::install_recording_editor_css();
+    // Match the normal editor's established default size. The loading shell
+    // is reused for the final editor, so it must never impose its own width.
+    let (default_width, default_height) = recommended_window_size_with_extra_width(0, 0, 280);
+
+    // Use the editor's own chrome from the first frame; a compact close
+    // control below keeps the loading shell dismissible without constructing
+    // the full toolbar.
+    let window = ApplicationWindow::builder()
+        .application(app)
+        .title(t("ApexShot Editor"))
+        .icon_name(crate::app_identity::icon_name())
+        .default_width(default_width)
+        .default_height(default_height)
+        .decorated(false)
+        .build();
+    window.add_css_class("editor-window");
+    window.set_size_request(EDITOR_MIN_WINDOW_WIDTH, -1);
+
+    let root_overlay = Overlay::new();
+    root_overlay.add_css_class("editor-root");
+    if prefers_dark_glass_theme() {
+        root_overlay.add_css_class("editor-theme-dark");
+    } else {
+        root_overlay.add_css_class("editor-theme-light");
+    }
+
+    let canvas_with_toolbar = Overlay::new();
+    canvas_with_toolbar.set_hexpand(true);
+    canvas_with_toolbar.set_vexpand(true);
+    let canvas = GtkBox::new(Orientation::Vertical, 0);
+    canvas.set_hexpand(true);
+    canvas.set_vexpand(true);
+    canvas.add_css_class("editor-canvas");
+    canvas_with_toolbar.set_child(Some(&canvas));
+    root_overlay.set_child(Some(&canvas_with_toolbar));
+
+    let close = super::ui_support::traffic_light_button("traffic-light-red", &t("Close"));
+    close.remove_css_class("recent-captures-wm-btn");
+    close.remove_css_class("recent-captures-wm-close");
+    close.add_css_class("recording-editor-traffic-btn");
+    close.set_halign(gtk4::Align::End);
+    close.set_valign(gtk4::Align::Start);
+    close.set_margin_top(12);
+    close.set_margin_end(12);
+    close.connect_clicked({
+        let window = window.clone();
+        move |_| window.close()
+    });
+    root_overlay.add_overlay(&close);
+
+    empty_state::install_empty_drop_zone(
+        app,
+        &window,
+        &canvas_with_toolbar,
+        &root_overlay,
+        initial_image_path,
+    );
+    window.set_child(Some(&root_overlay));
+    window.present();
 }
 
 fn load_editor_image(path: &std::path::Path) -> Result<image::RgbaImage, String> {
@@ -2094,7 +2163,14 @@ fn setup_editor_window_full(
     });
 
     if empty_drop_zone {
-        empty_state::install_empty_drop_zone(app, &window, &canvas_with_toolbar, &root_overlay);
+        let initial_image_path = path.is_file().then_some(path.clone());
+        empty_state::install_empty_drop_zone(
+            app,
+            &window,
+            &canvas_with_toolbar,
+            &root_overlay,
+            initial_image_path,
+        );
     }
 
     window.set_child(Some(&root_overlay));

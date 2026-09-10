@@ -6,13 +6,25 @@ use std::time::Instant;
 
 use crate::capture::editor::render::rgba_image_to_surface;
 use crate::capture::editor::state::EditorState;
-use crate::recording::editor::model::{MotionBackgroundFillType, MotionState};
+use crate::recording::editor::model::{MotionAppearance, MotionBackgroundFillType, MotionState};
+
+/// Cached scene-only preview. Motion's card, text, and watermark remain
+/// dynamic, but the checkerboard/background layer can be reused for every
+/// timeline frame until its Appearance or viewport changes.
+pub(in crate::capture::editor::window) struct MotionBackdropCache {
+    pub(in crate::capture::editor::window) width: i32,
+    pub(in crate::capture::editor::window) height: i32,
+    pub(in crate::capture::editor::window) prefers_dark: bool,
+    pub(in crate::capture::editor::window) appearance: MotionAppearance,
+    pub(in crate::capture::editor::window) surface: gtk4::cairo::ImageSurface,
+}
 
 pub(in crate::capture::editor::window) struct MotionRuntime {
     pub(in crate::capture::editor::window) snapshot: Option<RgbaImage>,
     pub(in crate::capture::editor::window) card: Option<gtk4::cairo::ImageSurface>,
     pub(in crate::capture::editor::window) background_surface: Option<gtk4::cairo::ImageSurface>,
     pub(in crate::capture::editor::window) watermark_surface: Option<gtk4::cairo::ImageSurface>,
+    pub(in crate::capture::editor::window) backdrop_cache: Option<MotionBackdropCache>,
     pub(in crate::capture::editor::window) motion: MotionState,
     pub(in crate::capture::editor::window) playing: bool,
     pub(in crate::capture::editor::window) live_preview: bool,
@@ -28,6 +40,7 @@ impl MotionRuntime {
             card: None,
             background_surface: None,
             watermark_surface: None,
+            backdrop_cache: None,
             motion: MotionState::default(),
             playing: false,
             live_preview: false,
@@ -80,6 +93,7 @@ impl MotionSession {
             .image_file_name
             .as_deref()
             .and_then(super::super::motion_render::load_motion_background_surface);
+        runtime.backdrop_cache = None;
         runtime.snapshot = snapshot;
         runtime.motion.playhead = 0.0;
         runtime.playing = false;
@@ -113,6 +127,7 @@ impl MotionSession {
         runtime.card = None;
         runtime.background_surface = None;
         runtime.watermark_surface = None;
+        runtime.backdrop_cache = None;
         runtime.playing = false;
         runtime.live_preview = false;
         runtime.last_tick = None;

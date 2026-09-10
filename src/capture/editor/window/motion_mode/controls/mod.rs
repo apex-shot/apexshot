@@ -3,6 +3,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
 
+use crate::i18n::t;
 use crate::recording::editor::model::MotionState;
 
 use super::{MotionModeChrome, MotionModeParts, MotionSession};
@@ -26,6 +27,38 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
     in_motion: Rc<Cell<bool>>,
 ) {
     let redraw = sync::make_redraw(parts, session);
+    // Playhead changes do not alter the inspector or track geometry. Updating
+    // only the moving pieces avoids running every slider sync and a full
+    // timeline repaint for each scrub event or animation frame.
+    let redraw_playhead: Redraw = {
+        let session = session.runtime.clone();
+        let preview = parts.shell.preview.clone();
+        let ruler = parts.timeline.ruler.clone();
+        let playhead_overlay = parts.timeline.playhead_overlay.clone();
+        let playhead_clock = parts.timeline.playhead_clock.clone();
+        let play_btn = parts.timeline.play_btn.clone();
+        Rc::new(move || {
+            let runtime = session.borrow();
+            let playhead = runtime.motion.playhead;
+            let playing = runtime.playing;
+            drop(runtime);
+            playhead_clock.set_text(&super::super::motion_timeline::format_clock(playhead));
+            play_btn.set_tooltip_text(Some(&if playing { t("Pause") } else { t("Play") }));
+            if let Some(image) = play_btn
+                .child()
+                .and_then(|child| child.downcast::<gtk4::Image>().ok())
+            {
+                image.set_icon_name(Some(if playing {
+                    "media-playback-pause-symbolic"
+                } else {
+                    "media-playback-start-symbolic"
+                }));
+            }
+            preview.queue_draw();
+            ruler.queue_draw();
+            playhead_overlay.queue_draw();
+        })
+    };
 
     // Segment trimming and movement can generate far more pointer updates than
     // the expensive perspective preview can render. Keep the direct-manipulation
@@ -68,7 +101,7 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
     // the same visible duration.
     let request_transition_preview = {
         let session = session.runtime.clone();
-        let redraw = redraw.clone();
+        let redraw_playhead = redraw_playhead.clone();
         Rc::new(move |segment_start: f64| {
             let mut runtime = session.borrow_mut();
             let (start, end) = motion_transition_preview_range(&runtime.motion, segment_start);
@@ -80,7 +113,7 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
             runtime.last_tick = Some(Instant::now());
             runtime.preview_end = Some(end);
             drop(runtime);
-            redraw();
+            redraw_playhead();
         })
     };
 
@@ -89,7 +122,7 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
     // instead of leaving the static preview on its invisible first frame.
     let request_text_transition_preview = {
         let session = session.runtime.clone();
-        let redraw = redraw.clone();
+        let redraw_playhead = redraw_playhead.clone();
         Rc::new(move |text_start: f64, typewriter_time: f64| {
             let mut runtime = session.borrow_mut();
             let span = typewriter_time.max(0.28) + 0.25;
@@ -103,7 +136,7 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
             runtime.last_tick = Some(Instant::now());
             runtime.preview_end = Some(end);
             drop(runtime);
-            redraw();
+            redraw_playhead();
         })
     };
 
@@ -115,6 +148,7 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
         parts,
         session,
         redraw.clone(),
+        redraw_playhead,
         redraw_motion_track,
         redraw_text_track,
     );

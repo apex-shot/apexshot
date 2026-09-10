@@ -1,3 +1,6 @@
+const PREVIEW_BACKGROUND_BLUR_MAX_EDGE: f64 = 360.0;
+const EXPORT_BACKGROUND_BLUR_MAX_EDGE: f64 = 720.0;
+
 fn paint_backdrop(
     context: &Context,
     width: i32,
@@ -69,7 +72,7 @@ fn paint_backdrop(
             let (x, y, scene_w, scene_h) =
                 scene.unwrap_or((0.0, 0.0, f64::from(width), f64::from(height)));
             if let Some(surface) = background_surface {
-                paint_image_background(
+                paint_image_background_with_max_edge(
                     context,
                     surface,
                     x,
@@ -77,9 +80,14 @@ fn paint_backdrop(
                     scene_w,
                     scene_h,
                     appearance.background_blur,
+                    if checkerboard {
+                        PREVIEW_BACKGROUND_BLUR_MAX_EDGE
+                    } else {
+                        EXPORT_BACKGROUND_BLUR_MAX_EDGE
+                    },
                 );
             } else if let Some(surface) = path.and_then(load_motion_background_surface) {
-                paint_image_background(
+                paint_image_background_with_max_edge(
                     context,
                     &surface,
                     x,
@@ -87,6 +95,11 @@ fn paint_backdrop(
                     scene_w,
                     scene_h,
                     appearance.background_blur,
+                    if checkerboard {
+                        PREVIEW_BACKGROUND_BLUR_MAX_EDGE
+                    } else {
+                        EXPORT_BACKGROUND_BLUR_MAX_EDGE
+                    },
                 );
             } else {
                 context.set_source_rgb(0.0, 0.0, 0.0);
@@ -112,6 +125,28 @@ fn paint_image_background(
     height: f64,
     blur: f64,
 ) {
+    paint_image_background_with_max_edge(
+        context,
+        surface,
+        x,
+        y,
+        width,
+        height,
+        blur,
+        EXPORT_BACKGROUND_BLUR_MAX_EDGE,
+    );
+}
+
+fn paint_image_background_with_max_edge(
+    context: &Context,
+    surface: &ImageSurface,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    blur: f64,
+    max_render_edge: f64,
+) {
     let blur = blur.clamp(0.0, 1.0);
     if blur <= 0.001 {
         paint_cover_fit_at(context, surface, x, y, width, height, Filter::Good);
@@ -121,7 +156,7 @@ fn paint_image_background(
     // Render the cover-fitted image once at a bounded resolution, then blur
     // its pixels. Downsampling alone only softened resampling artifacts and
     // did not produce a reliable background blur.
-    let render_scale = (720.0 / width.max(height)).min(1.0);
+    let render_scale = (max_render_edge / width.max(height)).min(1.0);
     let render_w = (width * render_scale).ceil().max(1.0) as i32;
     let render_h = (height * render_scale).ceil().max(1.0) as i32;
     let Ok(mut rendered) = ImageSurface::create(Format::ARgb32, render_w, render_h) else {

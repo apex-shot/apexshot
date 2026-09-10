@@ -63,7 +63,9 @@ fn load_image_into_editor(
     let loading_revealer = loading_revealer.clone();
     let loading_spinner = loading_spinner.clone();
     let open_button = open_button.clone();
-    glib::timeout_add_local(Duration::from_millis(100), move || {
+    // Keep the loading shell responsive and show a decoded image on the next
+    // display frame instead of adding a fixed tenth-of-a-second delay.
+    glib::timeout_add_local(Duration::from_millis(16), move || {
         let stop_loading = || {
             loading.set(false);
             loading_revealer.set_reveal_child(false);
@@ -161,6 +163,7 @@ pub(super) fn install_empty_drop_zone(
     window: &ApplicationWindow,
     canvas_with_toolbar: &Overlay,
     root_overlay: &Overlay,
+    initial_image_path: Option<PathBuf>,
 ) {
     // Reuse the video editor's button / banner styles so the empty
     // states look identical.
@@ -194,6 +197,12 @@ pub(super) fn install_empty_drop_zone(
     drop_center.append(&drop_title);
     drop_center.append(&drop_hint);
     drop_center.append(&open_btn);
+
+    // A direct launch already has a file on its way to the worker.  Avoid
+    // flashing an empty-state prompt beneath the loading banner.
+    if initial_image_path.is_some() {
+        drop_center.set_visible(false);
+    }
 
     // Keep the empty state centered in the canvas pane, excluding the inspector.
     canvas_with_toolbar.add_overlay(&drop_center);
@@ -273,6 +282,21 @@ pub(super) fn install_empty_drop_zone(
         true
     });
     root_overlay.add_controller(drop_target);
+
+    // Direct editor launches share the same shell as the manual picker, but
+    // start their decode immediately. The window can therefore appear before
+    // a large PNG/JPEG/WebP has been read and converted on the worker thread.
+    if let Some(path) = initial_image_path {
+        load_image_into_editor(
+            app,
+            window,
+            path,
+            &loading_revealer,
+            &loading_spinner,
+            loading,
+            &open_btn,
+        );
+    }
 }
 
 #[cfg(test)]
@@ -287,6 +311,7 @@ mod tests {
                 && source.contains("Some(window.clone()),\n                    Some(image),")
                 && source.contains("Drop an image here")
                 && source.contains("Loading image…")
+                && source.contains("initial_image_path: Option<PathBuf>")
                 && source.contains("root_overlay.add_controller(drop_target)"),
             "empty state must validate image types and reload into the same window"
         );

@@ -6,6 +6,12 @@ use std::time::Instant;
 use super::super::{MotionModeParts, MotionSession};
 use super::Redraw;
 
+/// Motion is an interactive camera tool, so target a display-refresh cadence
+/// instead of the old 30 Hz edit-preview timer. `Instant` still supplies the
+/// elapsed time, which keeps the animation duration independent of frames
+/// that GTK may skip under load.
+const MOTION_PREVIEW_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
+
 pub(super) fn install_primary(parts: &MotionModeParts, session: &MotionSession, redraw: Redraw) {
     parts.timeline.play_btn.connect_clicked({
         let session = session.runtime.clone();
@@ -61,7 +67,7 @@ pub(super) fn install_timer(
         }
     });
 
-    glib::timeout_add_local(std::time::Duration::from_millis(33), {
+    glib::timeout_add_local(MOTION_PREVIEW_FRAME_INTERVAL, {
         let session_runtime = session.runtime.clone();
         let redraw = redraw.clone();
         let preview = parts.shell.preview.clone();

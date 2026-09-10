@@ -1,4 +1,4 @@
-use gtk4::{gdk, prelude::*, DrawingArea, EventControllerMotion, GestureClick, GestureDrag};
+use gtk4::{gdk, glib, prelude::*, DrawingArea, EventControllerMotion, GestureClick, GestureDrag};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -12,10 +12,17 @@ enum DragKind {
     Body { index: usize, origin: f64 },
 }
 
+fn drag_kind_index(kind: DragKind) -> usize {
+    match kind {
+        DragKind::Start(index) | DragKind::End(index) | DragKind::Body { index, .. } => index,
+    }
+}
+
 pub(super) fn install(
     parts: &MotionModeParts,
     session: &MotionSession,
     redraw: Redraw,
+    redraw_playhead: Redraw,
     redraw_motion_track: Redraw,
     redraw_text_track: Redraw,
 ) {
@@ -23,7 +30,7 @@ pub(super) fn install(
     ruler_click.set_button(1);
     ruler_click.connect_pressed({
         let session = session.runtime.clone();
-        let redraw = redraw.clone();
+        let redraw_playhead = redraw_playhead.clone();
         move |gesture, _, x, _| {
             let width = gesture
                 .widget()
@@ -33,7 +40,7 @@ pub(super) fn install(
             let duration = runtime.motion.duration.max(0.001);
             runtime.motion.playhead = ((x / width) * duration).clamp(0.0, duration);
             drop(runtime);
-            redraw();
+            redraw_playhead();
         }
     });
     parts.timeline.ruler.add_controller(ruler_click);
@@ -44,7 +51,7 @@ pub(super) fn install(
     ruler_drag.set_button(1);
     ruler_drag.connect_drag_update({
         let session = session.runtime.clone();
-        let redraw = redraw.clone();
+        let redraw_playhead = redraw_playhead.clone();
         move |gesture, offset_x, _| {
             let Some((start_x, _)) = gesture.start_point() else {
                 return;
@@ -58,7 +65,7 @@ pub(super) fn install(
             runtime.motion.playhead =
                 (((start_x + offset_x) / width) * duration).clamp(0.0, duration);
             drop(runtime);
-            redraw();
+            redraw_playhead();
         }
     });
     parts.timeline.ruler.add_controller(ruler_drag);
@@ -69,7 +76,7 @@ pub(super) fn install(
     source_click.set_button(1);
     source_click.connect_pressed({
         let session = session.runtime.clone();
-        let redraw = redraw.clone();
+        let redraw_playhead = redraw_playhead.clone();
         move |gesture, _, x, _| {
             let width = gesture
                 .widget()
@@ -79,17 +86,25 @@ pub(super) fn install(
             let duration = runtime.motion.duration.max(0.001);
             runtime.motion.playhead = ((x / width) * duration).clamp(0.0, duration);
             drop(runtime);
-            redraw();
+            redraw_playhead();
         }
     });
     parts.timeline.source_track.add_controller(source_click);
 
+    // A press on a clip may become a drag. Defer the expensive inspector
+    // refresh until release so the first pointer move is never blocked by a
+    // full preview render.
+    let motion_track_dragged = Rc::new(Cell::new(false));
     let track_click = GestureClick::new();
     track_click.set_button(1);
-    track_click.connect_pressed({
+    track_click.connect_released({
         let session = session.runtime.clone();
         let redraw = redraw.clone();
+        let motion_track_dragged = motion_track_dragged.clone();
         move |gesture, n_press, x, _| {
+            if motion_track_dragged.replace(false) {
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -127,12 +142,14 @@ pub(super) fn install(
     drag.connect_drag_begin({
         let session = session.runtime.clone();
         let drag_kind = drag_kind.clone();
+        let motion_track_dragged = motion_track_dragged.clone();
+        let redraw_motion_track = redraw_motion_track.clone();
         move |gesture, x, _| {
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
-            let runtime = session.borrow();
+            let mut runtime = session.borrow_mut();
             let duration = runtime.motion.duration.max(0.001);
             let time = ((x / width) * duration).clamp(0.0, duration);
             let edge_seconds = (8.0 / width) * duration;
@@ -155,7 +172,16 @@ pub(super) fn install(
                         None
                     }
                 });
+            if let Some(index) = kind.map(drag_kind_index) {
+                runtime.motion.selected = Some(index);
+                runtime.motion.selected_text = None;
+            }
+            drop(runtime);
             drag_kind.set(kind);
+            motion_track_dragged.set(kind.is_some());
+            if kind.is_some() {
+                redraw_motion_track();
+            }
         }
     });
     drag.connect_drag_update({
@@ -235,20 +261,31 @@ pub(super) fn install(
     drag.connect_drag_end({
         let drag_kind = drag_kind.clone();
         let redraw = redraw.clone();
+        let motion_track_dragged = motion_track_dragged.clone();
         move |_, _, _| {
             drag_kind.set(None);
             redraw();
+            // GestureClick's release can arrive before or after GestureDrag's
+            // end callback. Keep this suppression through the release phase,
+            // then clear it even on toolkits that do not emit that click.
+            let reset_dragged = motion_track_dragged.clone();
+            glib::idle_add_local_once(move || reset_dragged.set(false));
         }
     });
     parts.timeline.motion_track.add_controller(drag);
     install_track_end_cursor(&parts.timeline.motion_track, session.runtime.clone(), false);
 
+    let text_track_dragged = Rc::new(Cell::new(false));
     let text_click = GestureClick::new();
     text_click.set_button(1);
-    text_click.connect_pressed({
+    text_click.connect_released({
         let session = session.runtime.clone();
         let redraw = redraw.clone();
+        let text_track_dragged = text_track_dragged.clone();
         move |gesture, n_press, x, _| {
+            if text_track_dragged.replace(false) {
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -286,12 +323,14 @@ pub(super) fn install(
     text_drag.connect_drag_begin({
         let session = session.runtime.clone();
         let text_drag_kind = text_drag_kind.clone();
+        let text_track_dragged = text_track_dragged.clone();
+        let redraw_text_track = redraw_text_track.clone();
         move |gesture, x, _| {
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
-            let runtime = session.borrow();
+            let mut runtime = session.borrow_mut();
             let duration = runtime.motion.duration.max(0.001);
             let time = ((x / width) * duration).clamp(0.0, duration);
             let edge_seconds = (8.0 / width) * duration;
@@ -315,7 +354,16 @@ pub(super) fn install(
                             None
                         }
                     });
+            if let Some(index) = kind.map(drag_kind_index) {
+                runtime.motion.selected_text = Some(index);
+                runtime.motion.selected = None;
+            }
+            drop(runtime);
             text_drag_kind.set(kind);
+            text_track_dragged.set(kind.is_some());
+            if kind.is_some() {
+                redraw_text_track();
+            }
         }
     });
     text_drag.connect_drag_update({
@@ -395,9 +443,12 @@ pub(super) fn install(
     text_drag.connect_drag_end({
         let text_drag_kind = text_drag_kind.clone();
         let redraw = redraw.clone();
+        let text_track_dragged = text_track_dragged.clone();
         move |_, _, _| {
             text_drag_kind.set(None);
             redraw();
+            let reset_dragged = text_track_dragged.clone();
+            glib::idle_add_local_once(move || reset_dragged.set(false));
         }
     });
     parts.timeline.text_track.add_controller(text_drag);

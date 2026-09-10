@@ -1,3 +1,11 @@
+/// Keep the interactive card tessellation identical to the export renderer.
+///
+/// Ease edits immediately replay a Motion segment. Previously that replay
+/// selected a coarse mesh (and changed it again once the scale passed 1.75x),
+/// so the perspective approximation visibly rippled even though the only
+/// property being edited was timing.
+const CARD_MESH_DIVISIONS: usize = 8;
+
 pub fn draw_motion_frame(
     context: &Context,
     width: i32,
@@ -11,6 +19,39 @@ pub fn draw_motion_frame(
     prefers_dark: bool,
     live_preview: bool,
 ) {
+    draw_motion_backdrop(
+        context,
+        width,
+        height,
+        motion,
+        background_surface,
+        checkerboard,
+        prefers_dark,
+    );
+    draw_motion_foreground(
+        context,
+        width,
+        height,
+        surface,
+        motion,
+        watermark_surface,
+        time,
+        checkerboard,
+        live_preview,
+    );
+}
+
+/// Paint the scene layer shared by the static Motion preview and playback
+/// frames. The editor caches this output while its Appearance is unchanged.
+pub(super) fn draw_motion_backdrop(
+    context: &Context,
+    width: i32,
+    height: i32,
+    motion: &MotionState,
+    background_surface: Option<&ImageSurface>,
+    checkerboard: bool,
+    prefers_dark: bool,
+) {
     paint_backdrop(
         context,
         width,
@@ -20,6 +61,22 @@ pub fn draw_motion_frame(
         checkerboard,
         prefers_dark,
     );
+}
+
+/// Paint the animated layers over an already-prepared Motion backdrop.
+/// Keeping this separate lets the interactive editor avoid regenerating an
+/// unchanged wallpaper, blur, checkerboard, or noise field on every frame.
+pub(super) fn draw_motion_foreground(
+    context: &Context,
+    width: i32,
+    height: i32,
+    surface: &ImageSurface,
+    motion: &MotionState,
+    watermark_surface: Option<&ImageSurface>,
+    time: f64,
+    checkerboard: bool,
+    live_preview: bool,
+) {
     // Padding, zoom, and titles all lay out against the background's
     // rectangle so the card can never sit outside the scene it belongs to.
     let stage = if checkerboard {
@@ -41,17 +98,10 @@ pub fn draw_motion_frame(
     let current_transform = motion.sample(time);
     let current_anchor = motion.zoom_anchor_at(time);
     // The card is drawn as a triangle mesh that approximates the perspective
-    // warp. Zooming in magnifies each affine cell until the tessellation
-    // reads as a wavy warp, so live previews subdivide more when zoomed.
-    let mesh_div = if live_preview {
-        if current_transform.scale > 1.75 {
-            7
-        } else {
-            3
-        }
-    } else {
-        8
-    };
+    // warp. Its resolution must not depend on playhead scale: Ease edits
+    // replay the segment, and a changing grid makes an otherwise smooth
+    // timing curve look like a wave. Use the same stable density as export.
+    let mesh_div = CARD_MESH_DIVISIONS;
     // Cairo has no equivalent of Shotbase's full-quality CIMotionBlur and
     // CIZoomBlur filters, so ApexShot uses this bounded temporal fallback.
     // The recovered schema and bounds remain shared with the source app.

@@ -3,7 +3,7 @@ use gtk4::{
     prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, DrawingArea, FileChooserAction,
     FileChooserNative, FileFilter, Label, Orientation, Overlay, ResponseType, Stack,
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -482,23 +482,45 @@ fn motion_wallpaper_catalog_section(
             selection_buttons.clone(),
         ));
     }
-    if let Some(path) = paths.get(3) {
-        compact_row.append(&motion_wallpaper_stack_thumbnail(path, &stack));
-    }
-
-    for row_paths in paths.chunks(4) {
-        let row = GtkBox::new(Orientation::Horizontal, 6);
-        row.add_css_class("editor-motion-wallpaper-row");
-        for path in row_paths {
-            row.append(&motion_wallpaper_thumbnail(
-                path,
-                session,
-                preview,
-                none_button,
-                selection_buttons.clone(),
-            ));
+    // The static editor also creates a Motion host, but people opening a
+    // screenshot should not have to synchronously decode every wallpaper just
+    // to see the first editor frame.  Keep the compact strip eager and build
+    // the full catalog only when its affordance is opened.
+    let all_populated = Rc::new(Cell::new(false));
+    let populate_all: Rc<dyn Fn()> = Rc::new({
+        let all_grid = all_grid.clone();
+        let paths = paths.clone();
+        let session = session.clone();
+        let preview = preview.clone();
+        let none_button = none_button.clone();
+        let selection_buttons = selection_buttons.clone();
+        let all_populated = all_populated.clone();
+        move || {
+            if all_populated.replace(true) {
+                return;
+            }
+            for row_paths in paths.chunks(4) {
+                let row = GtkBox::new(Orientation::Horizontal, 6);
+                row.add_css_class("editor-motion-wallpaper-row");
+                for path in row_paths {
+                    row.append(&motion_wallpaper_thumbnail(
+                        path,
+                        &session,
+                        &preview,
+                        &none_button,
+                        selection_buttons.clone(),
+                    ));
+                }
+                all_grid.append(&row);
+            }
         }
-        all_grid.append(&row);
+    });
+    if let Some(path) = paths.get(3) {
+        compact_row.append(&motion_wallpaper_stack_thumbnail(
+            path,
+            &stack,
+            populate_all,
+        ));
     }
 
     show_less.connect_clicked({
@@ -609,7 +631,11 @@ fn motion_wallpaper_thumbnail(
 /// The fourth compact preview is the catalog's visual stack affordance.  It
 /// remains a wallpaper thumbnail, with a small overlay indicating that it
 /// opens the complete collection rather than selecting that particular image.
-fn motion_wallpaper_stack_thumbnail(path: &std::path::Path, stack: &Stack) -> Button {
+fn motion_wallpaper_stack_thumbnail(
+    path: &std::path::Path,
+    stack: &Stack,
+    populate_all: Rc<dyn Fn()>,
+) -> Button {
     let button = Button::new();
     button.set_has_frame(false);
     button.set_size_request(48, 48);
@@ -632,7 +658,10 @@ fn motion_wallpaper_stack_thumbnail(path: &std::path::Path, stack: &Stack) -> Bu
     button.set_child(Some(&overlay));
     button.connect_clicked({
         let stack = stack.clone();
-        move |_| stack.set_visible_child_name("all")
+        move |_| {
+            populate_all();
+            stack.set_visible_child_name("all");
+        }
     });
     button
 }
