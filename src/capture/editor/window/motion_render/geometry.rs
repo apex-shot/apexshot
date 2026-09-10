@@ -154,8 +154,8 @@ pub fn view_point_to_motion_text_position(
     (best.0.clamp(0.05, 0.95), best.1.clamp(0.05, 0.95))
 }
 
-/// Preview-only scene panel: an inset rounded rectangle that keeps the
-/// editor's checkerboard visible around the Motion fill as its boundary.
+/// Preview-only scene panel: an inset rectangle that keeps the editor's
+/// checkerboard visible around the Motion fill as its boundary.
 fn motion_scene_bounds(width: f64, height: f64) -> (f64, f64, f64, f64) {
     const MARGIN: f64 = 24.0;
     let w = width.max(0.0);
@@ -215,8 +215,11 @@ fn motion_card_center(
     transform: MotionTransform,
     zoom_anchor: (f64, f64),
 ) -> (f64, f64) {
-    let cx = stage.center_x + transform.pos_x * stage.bounds_w * 0.12;
-    let cy = stage.center_y + transform.pos_y * stage.bounds_h * 0.12;
+    // Position is the card center in the background's coordinate space. The
+    // pad edges therefore map directly to the background edges at every scale
+    // instead of behaving like a small translation or a zoom-dependent pan.
+    let cx = stage.center_x + transform.pos_x * stage.bounds_w * 0.5;
+    let cy = stage.center_y + transform.pos_y * stage.bounds_h * 0.5;
     let (anchor_x, anchor_y) = (zoom_anchor.0.clamp(0.0, 1.0), zoom_anchor.1.clamp(0.0, 1.0));
     if (transform.scale - 1.0).abs() < f64::EPSILON
         || ((anchor_x - 0.5).abs() < f64::EPSILON && (anchor_y - 0.5).abs() < f64::EPSILON)

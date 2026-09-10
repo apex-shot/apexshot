@@ -54,21 +54,28 @@ mod tests {
     fn scene_fill_is_bounded_in_preview_and_full_frame_on_export() {
         let card = ImageSurface::create(Format::ARgb32, 8, 8).unwrap();
         let mut motion = MotionState::default();
-        let center = 48 * 128 * 4 + 64 * 4;
+        let (scene_x, scene_y, scene_w, scene_h) = super::motion_scene_bounds(128.0, 96.0);
+        let center_x = (scene_x + scene_w * 0.5).floor() as usize;
+        let center_y = (scene_y + scene_h * 0.5).floor() as usize;
+        let center = center_y * 128 * 4 + center_x * 4;
+        let corner_x = scene_x.ceil() as usize + 1;
+        let corner_y = scene_y.ceil() as usize + 1;
+        let scene_corner = corner_y * 128 * 4 + corner_x * 4;
 
         // The preview keeps the checkerboard canvas until a fill is chosen.
         let mut frame = render_appearance_frame(&card, &motion, true);
         let data = frame.data().unwrap();
         assert_ne!(&data[..4], &[0, 0, 0, 255]);
 
-        // A chosen fill paints inside the bounded scene panel: the panel
-        // center takes the color while the canvas corner stays checkerboard.
+        // A chosen fill paints a square bounded scene panel: its center and
+        // corners take the color while the outer canvas stays checkerboard.
         motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
         motion.appearance.background_color = [0.2, 0.4, 0.6, 1.0];
         let mut frame = render_appearance_frame(&card, &motion, true);
         let data = frame.data().unwrap();
         // Cairo ARgb32 is BGRA on the Linux targets we support.
         assert_eq!(&data[center..center + 4], &[153, 102, 51, 255]);
+        assert_eq!(&data[scene_corner..scene_corner + 4], &[153, 102, 51, 255]);
         assert_ne!(&data[..4], &[153, 102, 51, 255]);
 
         // Exports have no editor canvas: the fill covers the whole frame and
@@ -80,6 +87,43 @@ mod tests {
         let data = frame.data().unwrap();
         assert_eq!(&data[..4], &[0, 0, 0, 255]);
         assert_eq!(&data[center..center + 4], &[0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn transformed_motion_composition_stays_inside_the_background() {
+        let blank_card = ImageSurface::create(Format::ARgb32, 64, 64).unwrap();
+        let white_card = ImageSurface::create(Format::ARgb32, 64, 64).unwrap();
+        {
+            let context = Context::new(&white_card).unwrap();
+            context.set_source_rgb(1.0, 1.0, 1.0);
+            context.paint().ok();
+        }
+        white_card.flush();
+
+        let mut motion = motion_with_first_clip();
+        motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+        motion.appearance.background_color = [0.2, 0.4, 0.6, 1.0];
+        motion.appearance.background_padding = 0.0;
+        motion.set_selected_transition_ms(0);
+        motion.set_selected_end_scale(4.0);
+
+        let mut baseline = render_appearance_frame(&blank_card, &motion, true);
+        let baseline_data = baseline.data().unwrap();
+        let stage = MotionStage::preview(128.0, 96.0);
+        let scene_center_x = stage.center_x.floor() as usize;
+        let scene_center_y = stage.center_y.floor() as usize;
+        let outside_scene = scene_center_y * 128 * 4 + 10 * 4;
+        let expected_canvas_pixel = baseline_data[outside_scene..outside_scene + 4].to_vec();
+        drop(baseline_data);
+
+        let mut frame = render_appearance_frame(&white_card, &motion, true);
+        let data = frame.data().unwrap();
+        let scene_center = scene_center_y * 128 * 4 + scene_center_x * 4;
+        assert_eq!(
+            &data[outside_scene..outside_scene + 4],
+            expected_canvas_pixel.as_slice()
+        );
+        assert_eq!(&data[scene_center..scene_center + 4], &[255, 255, 255, 255]);
     }
 
     #[test]
@@ -531,6 +575,24 @@ mod tests {
             (expected.1 - actual.1).abs() < 1e-6,
             "y: {expected:?} {actual:?}"
         );
+    }
+
+    #[test]
+    fn position_extremes_map_the_card_center_to_the_stage_edges() {
+        let surface = ImageSurface::create(Format::ARgb32, 1600, 900).expect("surface");
+        let layout = frame_layout(
+            &surface,
+            MotionTransform {
+                scale: 2.0,
+                pos_x: 1.0,
+                pos_y: 1.0,
+                ..MotionTransform::default()
+            },
+            (0.5, 0.5),
+        );
+
+        assert!((layout.cx - 1440.0).abs() < 1e-6);
+        assert!((layout.cy - 900.0).abs() < 1e-6);
     }
 
     #[test]

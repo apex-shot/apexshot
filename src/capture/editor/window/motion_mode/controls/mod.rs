@@ -3,6 +3,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
 
+use crate::recording::editor::model::MotionState;
+
 use super::{MotionModeChrome, MotionModeParts, MotionSession};
 
 mod playback;
@@ -61,23 +63,15 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
         })
     };
 
-    // Editing a timed clip parameter has to be judged in motion: a static
-    // frame at the playhead is identical before and after most edits. Like
-    // Shotbase, play the affected transition once. If the playhead is already
-    // inside the transition window the preview continues from there instead
-    // of restarting.
+    // Editing a timed clip parameter has to be judged in motion. Play through
+    // the complete clip so the automatic preview and its timeline block have
+    // the same visible duration.
     let request_transition_preview = {
         let session = session.runtime.clone();
         let redraw = redraw.clone();
         Rc::new(move |segment_start: f64| {
             let mut runtime = session.borrow_mut();
-            let transition = runtime
-                .motion
-                .transform_timing
-                .clamped()
-                .transition_duration;
-            let start = segment_start.max(0.0).min(runtime.motion.duration);
-            let end = (start + transition + 0.4).min(runtime.motion.duration);
+            let (start, end) = motion_transition_preview_range(&runtime.motion, segment_start);
             let inside = runtime.motion.playhead >= start && runtime.motion.playhead <= end;
             if !inside {
                 runtime.motion.playhead = start;
@@ -171,4 +165,33 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
     parts.shell.page.add_controller(delete_keys);
 
     playback::install_timer(parts, session, redraw, in_motion);
+}
+
+fn motion_transition_preview_range(motion: &MotionState, segment_start: f64) -> (f64, f64) {
+    let start = segment_start.clamp(0.0, motion.duration.max(0.0));
+    let end = motion
+        .segments
+        .iter()
+        .find(|segment| (segment.start - start).abs() < 1e-6)
+        .map(|segment| segment.end)
+        .unwrap_or(start)
+        .clamp(start, motion.duration.max(start));
+    (start, end)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn automatic_preview_uses_the_complete_motion_clip() {
+        let mut motion = MotionState::default();
+        motion.add_segment_at(0.0).expect("motion clip");
+        motion.set_selected_transition_ms(300);
+
+        let (start, end) = motion_transition_preview_range(&motion, 0.0);
+        assert!((start - motion.segments[0].start).abs() < f64::EPSILON);
+        assert!((end - motion.segments[0].end).abs() < f64::EPSILON);
+        assert!(end > motion.transform_timing.transition_duration);
+    }
 }

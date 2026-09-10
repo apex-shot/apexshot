@@ -2081,7 +2081,6 @@ fn setup_editor_window_full(
     motion_host.install(motion_host::MotionHostInstallInputs {
         window: &window,
         root_overlay: &root_overlay,
-        canvas_with_toolbar: &canvas_with_toolbar,
         canvas_stack: &canvas_stack,
         window_chrome,
         inspector_tabs: &inspector_tabs,

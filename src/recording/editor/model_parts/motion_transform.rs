@@ -28,17 +28,6 @@ pub const MAX_MOTION_TEXT_POS: f64 = 0.95;
 pub const DEFAULT_MOTION_TEXT_SIZE: f64 = 1.0;
 pub const MIN_MOTION_TEXT_SIZE: f64 = 0.5;
 pub const MAX_MOTION_TEXT_SIZE: f64 = 2.2;
-pub const MOTION_SCALE_PRESETS: [(&str, f64); 9] = [
-    ("100%", 1.0),
-    ("125%", 1.25),
-    ("150%", 1.5),
-    ("175%", 1.75),
-    ("200%", 2.0),
-    ("250%", 2.5),
-    ("300%", 3.0),
-    ("350%", 3.5),
-    ("400%", 4.0),
-];
 
 /// Identity camera for a still or the start of a motion segment.
 /// Field names follow Shotbase `orientationRotation*` / `perspectiveIntensity`.

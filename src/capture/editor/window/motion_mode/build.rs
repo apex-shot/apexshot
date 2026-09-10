@@ -1,17 +1,18 @@
 use gtk4::{
     prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, DrawingArea, Entry, Grid, Label,
-    Orientation, ToggleButton,
+    Orientation, Overlay, ToggleButton,
 };
 use std::cell::Cell;
 use std::rc::Rc;
 
+use crate::capture::editor::ui_support::EDITOR_TOP_CHROME_HEIGHT;
 use crate::i18n::t;
 use crate::recording::editor::model::{
     MotionTextAnimation, MotionTextScope, DEFAULT_MOTION_DURATION_SECONDS,
     DEFAULT_MOTION_TEXT_POS_X, DEFAULT_MOTION_TEXT_POS_Y, DEFAULT_MOTION_TEXT_SIZE,
-    MAX_MOTION_DURATION_SECONDS, MAX_MOTION_TEXT_POS, MAX_MOTION_TEXT_SIZE, MAX_MOTION_YAW,
-    MAX_ZOOM_EASE_MS, MIN_MOTION_DURATION_SECONDS, MIN_MOTION_TEXT_POS, MIN_MOTION_TEXT_SIZE,
-    MIN_MOTION_YAW, MIN_ZOOM_EASE_MS, MOTION_SCALE_PRESETS,
+    DEFAULT_MOTION_ZOOM, MAX_MOTION_DURATION_SECONDS, MAX_MOTION_TEXT_POS, MAX_MOTION_TEXT_SIZE,
+    MAX_MOTION_YAW, MAX_MOTION_ZOOM, MAX_ZOOM_EASE_MS, MIN_MOTION_DURATION_SECONDS,
+    MIN_MOTION_TEXT_POS, MIN_MOTION_TEXT_SIZE, MIN_MOTION_YAW, MIN_MOTION_ZOOM, MIN_ZOOM_EASE_MS,
 };
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
@@ -20,9 +21,10 @@ use super::parts::{
     MotionModeParts, MotionModeShellParts, MotionPanelParts, MotionSharedControlParts,
     MotionTextControlParts, MotionTimelineParts, MotionTransformControlParts,
 };
+use super::position_pad::MotionPositionPad;
 use super::watermark::build_motion_watermark_panel;
 use super::widgets::{
-    angle_slider_row, format_duration_label, percent_slider_row, span_slider_row,
+    angle_slider_row, format_duration_label, position_slider_row, span_slider_row,
 };
 use super::MotionSession;
 
@@ -57,15 +59,40 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     preview.set_vexpand(true);
     preview.add_css_class("editor-canvas");
     preview.add_css_class("editor-motion-preview");
+    // Reserve overlay chrome in GTK layout, not in renderer coordinates. This
+    // keeps Position and Zoom Anchor math independent of the surrounding UI.
+    preview.set_margin_top(EDITOR_TOP_CHROME_HEIGHT);
+    preview.set_margin_end(64);
 
     let timeline = super::super::motion_timeline::build_motion_timeline(session.runtime.clone());
+
+    let preview_backdrop = DrawingArea::new();
+    preview_backdrop.set_hexpand(true);
+    preview_backdrop.set_vexpand(true);
+    preview_backdrop.set_can_target(false);
+    preview_backdrop.set_draw_func(move |_, context, width, height| {
+        crate::capture::editor::render::draw_canvas_checkerboard_background(
+            context,
+            width,
+            height,
+            None,
+            !prefers_dark,
+        );
+    });
+
+    let preview_shell = Overlay::new();
+    preview_shell.set_hexpand(true);
+    preview_shell.set_vexpand(true);
+    preview_shell.set_child(Some(&preview_backdrop));
+    preview_shell.add_overlay(&preview);
+    preview_shell.set_clip_overlay(&preview, true);
 
     let page = GtkBox::new(Orientation::Vertical, 0);
     page.set_hexpand(true);
     page.set_vexpand(true);
     page.set_focusable(true);
     page.add_css_class("editor-motion-page");
-    page.append(&preview);
+    page.append(&preview_shell);
     page.append(&timeline.dock);
 
     let duration_value = Label::new(Some(&format_duration_label(
@@ -85,21 +112,19 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     inspector.add_css_class("editor-motion-inspector");
     inspector.set_hexpand(false);
     inspector.set_vexpand(false);
-    let duration_title = Label::new(Some(&t("Duration")));
-    duration_title.add_css_class("editor-inspector-title");
-    duration_title.set_xalign(0.0);
-    duration_title.set_visible(false);
+    let composition_section = motion_settings_section("Composition");
     duration_value.set_visible(false);
-    inspector.append(&duration_title);
-    inspector.append(&duration_value);
-    inspector.append(&duration_slider.widget());
+    composition_section.append(&duration_value);
+    composition_section.append(&duration_slider.widget());
+    inspector.append(&composition_section);
 
+    let motion_blur_section = motion_settings_section("Motion Blur");
     let blur_value = Label::new(Some("0%"));
     let blur_slider = FillSlider::new(&t("Motion blur"));
     blur_slider.set_range(0.0, 1.0);
     blur_slider.set_increments(0.01, 0.1);
     blur_slider.set_value(0.0);
-    inspector.append(&blur_slider.widget());
+    motion_blur_section.append(&blur_slider.widget());
 
     let blur_shutter_value = Label::new(Some("180°"));
     let blur_shutter_slider =
@@ -107,7 +132,7 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     blur_shutter_slider.set_range(0.0, 360.0);
     blur_shutter_slider.set_increments(5.0, 15.0);
     blur_shutter_slider.set_value(180.0);
-    inspector.append(&blur_shutter_slider.widget());
+    motion_blur_section.append(&blur_shutter_slider.widget());
 
     let blur_trail_value = Label::new(Some("28%"));
     let blur_trail_slider = FillSlider::new_with_value_text(&t("Blur trail"), |value, _, _| {
@@ -116,7 +141,8 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     blur_trail_slider.set_range(0.0, 0.4);
     blur_trail_slider.set_increments(0.01, 0.04);
     blur_trail_slider.set_value(0.28);
-    inspector.append(&blur_trail_slider.widget());
+    motion_blur_section.append(&blur_trail_slider.widget());
+    inspector.append(&motion_blur_section);
 
     let clip_hint = Label::new(Some(&t(
         "Click a clip, or double-click a track to add a move or text",
@@ -135,52 +161,33 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     move_title.set_xalign(0.0);
     clip_box.append(&move_title);
 
-    let scale_header = GtkBox::new(Orientation::Horizontal, 8);
-    let scale_label = Label::new(Some(&t("Scale")));
-    scale_label.add_css_class("recording-editor-zoom-kicker");
-    scale_label.set_xalign(0.0);
-    scale_label.set_hexpand(true);
-    let scale_value = Label::new(Some("200%"));
-    scale_value.add_css_class("recording-editor-zoom-kicker");
-    scale_value.set_xalign(1.0);
-    scale_header.append(&scale_label);
-    scale_header.append(&scale_value);
-    clip_box.append(&scale_header);
-    let chips = Grid::new();
-    chips.add_css_class("recording-editor-zoom-chips");
-    chips.set_column_spacing(4);
-    chips.set_row_spacing(4);
-    chips.set_column_homogeneous(true);
-    chips.set_hexpand(true);
+    let transform_section = motion_settings_section("Transform");
+    let scale_slider =
+        FillSlider::new_with_value_text(&t("Scale"), |value, _, _| format!("{value:.1}x"));
+    scale_slider.set_range(MIN_MOTION_ZOOM, MAX_MOTION_ZOOM);
+    scale_slider.set_increments(0.1, 0.5);
+    scale_slider.set_value(DEFAULT_MOTION_ZOOM);
     let inspector_syncing = Rc::new(Cell::new(false));
-    let scale_chips: Vec<Button> = MOTION_SCALE_PRESETS
-        .iter()
-        .enumerate()
-        .map(|(i, &(label, _))| {
-            let chip = Button::with_label(label);
-            chip.add_css_class("recording-editor-zoom-chip");
-            chip.set_hexpand(true);
-            chip.set_has_frame(false);
-            chips.attach(&chip, (i % 3) as i32, (i / 3) as i32, 1, 1);
-            chip
-        })
-        .collect();
-    clip_box.append(&chips);
+    transform_section.append(&scale_slider.widget());
 
     let (intensity_header, intensity_value, intensity_slider) =
         span_slider_row(&t("Intensity"), 1.0, 0.0, 1.0);
-    clip_box.append(&intensity_header);
-    clip_box.append(&intensity_slider.widget());
+    transform_section.append(&intensity_header);
+    transform_section.append(&intensity_slider.widget());
+    clip_box.append(&transform_section);
 
+    let zoom_anchor_section = motion_settings_section("Zoom Anchor");
     let (zoom_anchor_x_header, zoom_anchor_x_value, zoom_anchor_x_slider) =
         span_slider_row(&t("Anchor X"), 0.5, 0.0, 1.0);
-    clip_box.append(&zoom_anchor_x_header);
-    clip_box.append(&zoom_anchor_x_slider.widget());
+    zoom_anchor_section.append(&zoom_anchor_x_header);
+    zoom_anchor_section.append(&zoom_anchor_x_slider.widget());
     let (zoom_anchor_y_header, zoom_anchor_y_value, zoom_anchor_y_slider) =
         span_slider_row(&t("Anchor Y"), 0.5, 0.0, 1.0);
-    clip_box.append(&zoom_anchor_y_header);
-    clip_box.append(&zoom_anchor_y_slider.widget());
+    zoom_anchor_section.append(&zoom_anchor_y_header);
+    zoom_anchor_section.append(&zoom_anchor_y_slider.widget());
+    clip_box.append(&zoom_anchor_section);
 
+    let rotation_section = motion_settings_section("Rotation & Perspective");
     let yaw_value = Label::new(Some("8°"));
     yaw_value.set_visible(false);
     let yaw_slider =
@@ -188,15 +195,15 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     yaw_slider.set_range(MIN_MOTION_YAW, MAX_MOTION_YAW);
     yaw_slider.set_increments(1.0, 5.0);
     yaw_slider.set_value(8.0);
-    clip_box.append(&yaw_value);
-    clip_box.append(&yaw_slider.widget());
+    rotation_section.append(&yaw_value);
+    rotation_section.append(&yaw_slider.widget());
 
     let (pitch_header, pitch_value, pitch_slider) = angle_slider_row(&t("Pitch"), 0.0);
-    clip_box.append(&pitch_header);
-    clip_box.append(&pitch_slider.widget());
+    rotation_section.append(&pitch_header);
+    rotation_section.append(&pitch_slider.widget());
     let (roll_header, roll_value, roll_slider) = angle_slider_row(&t("Roll"), 0.0);
-    clip_box.append(&roll_header);
-    clip_box.append(&roll_slider.widget());
+    rotation_section.append(&roll_header);
+    rotation_section.append(&roll_slider.widget());
 
     let perspective_value = Label::new(Some("18%"));
     perspective_value.set_visible(false);
@@ -204,16 +211,23 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     perspective_slider.set_range(0.0, 1.0);
     perspective_slider.set_increments(0.01, 0.1);
     perspective_slider.set_value(0.18);
-    clip_box.append(&perspective_value);
-    clip_box.append(&perspective_slider.widget());
+    rotation_section.append(&perspective_value);
+    rotation_section.append(&perspective_slider.widget());
+    clip_box.append(&rotation_section);
 
-    let (pos_x_header, pos_x_value, pos_x_slider) = percent_slider_row(&t("X"), 0.0);
-    clip_box.append(&pos_x_header);
-    clip_box.append(&pos_x_slider.widget());
-    let (pos_y_header, pos_y_value, pos_y_slider) = percent_slider_row(&t("Y"), 0.0);
-    clip_box.append(&pos_y_header);
-    clip_box.append(&pos_y_slider.widget());
+    let position_section = motion_settings_section("Position");
+    position_section.add_css_class("editor-motion-position-section");
+    let position_pad = MotionPositionPad::new();
+    position_section.append(&position_pad.widget());
+    let (pos_x_header, pos_x_value, pos_x_slider) = position_slider_row(&t("X"), 0.0);
+    position_section.append(&pos_x_header);
+    position_section.append(&pos_x_slider.widget());
+    let (pos_y_header, pos_y_value, pos_y_slider) = position_slider_row(&t("Y"), 0.0);
+    position_section.append(&pos_y_header);
+    position_section.append(&pos_y_slider.widget());
+    clip_box.append(&position_section);
 
+    let timing_section = motion_settings_section("Timing");
     let ease_value = Label::new(Some("1200ms"));
     ease_value.set_visible(false);
     let ease_slider =
@@ -221,30 +235,31 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     ease_slider.set_range(MIN_ZOOM_EASE_MS as f64, MAX_ZOOM_EASE_MS as f64);
     ease_slider.set_increments(20.0, 100.0);
     ease_slider.set_value(1200.0);
-    clip_box.append(&ease_value);
-    clip_box.append(&ease_slider.widget());
+    timing_section.append(&ease_value);
+    timing_section.append(&ease_slider.widget());
 
     let (easing_x1_header, easing_x1_value, easing_x1_slider) =
         span_slider_row(&t("Ease X1"), 0.25, 0.0, 1.0);
-    clip_box.append(&easing_x1_header);
-    clip_box.append(&easing_x1_slider.widget());
+    timing_section.append(&easing_x1_header);
+    timing_section.append(&easing_x1_slider.widget());
     let (easing_y1_header, easing_y1_value, easing_y1_slider) =
         span_slider_row(&t("Ease Y1"), 1.0, 0.0, 1.0);
-    clip_box.append(&easing_y1_header);
-    clip_box.append(&easing_y1_slider.widget());
+    timing_section.append(&easing_y1_header);
+    timing_section.append(&easing_y1_slider.widget());
     let (easing_x2_header, easing_x2_value, easing_x2_slider) =
         span_slider_row(&t("Ease X2"), 0.50, 0.0, 1.0);
-    clip_box.append(&easing_x2_header);
-    clip_box.append(&easing_x2_slider.widget());
+    timing_section.append(&easing_x2_header);
+    timing_section.append(&easing_x2_slider.widget());
     let (easing_y2_header, easing_y2_value, easing_y2_slider) =
         span_slider_row(&t("Ease Y2"), 1.0, 0.0, 1.0);
-    clip_box.append(&easing_y2_header);
-    clip_box.append(&easing_y2_slider.widget());
+    timing_section.append(&easing_y2_header);
+    timing_section.append(&easing_y2_slider.widget());
     let reset_timing_btn = Button::with_label(&t("Reset"));
     reset_timing_btn.add_css_class("recording-editor-zoom-easing-btn");
     reset_timing_btn.set_has_frame(false);
     reset_timing_btn.set_halign(gtk4::Align::Start);
-    clip_box.append(&reset_timing_btn);
+    timing_section.append(&reset_timing_btn);
+    clip_box.append(&timing_section);
 
     // Shotbase's Motion timing is a single global cubic-Bézier curve — there
     // are no named easing presets on the Motion track.
@@ -257,38 +272,39 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     text_title.add_css_class("editor-inspector-title");
     text_title.set_xalign(0.0);
     text_box.append(&text_title);
+    let text_content_section = motion_settings_section("Content");
     let text_entry = Entry::new();
     text_entry.set_placeholder_text(Some(&t("Title")));
     text_entry.set_hexpand(true);
-    text_box.append(&text_entry);
+    text_content_section.append(&text_entry);
+    text_box.append(&text_content_section);
+    let text_placement_section = motion_settings_section("Placement");
     let (text_pos_x_header, text_pos_x_value, text_pos_x_slider) = span_slider_row(
         &t("X"),
         DEFAULT_MOTION_TEXT_POS_X,
         MIN_MOTION_TEXT_POS,
         MAX_MOTION_TEXT_POS,
     );
-    text_box.append(&text_pos_x_header);
-    text_box.append(&text_pos_x_slider.widget());
+    text_placement_section.append(&text_pos_x_header);
+    text_placement_section.append(&text_pos_x_slider.widget());
     let (text_pos_y_header, text_pos_y_value, text_pos_y_slider) = span_slider_row(
         &t("Y"),
         DEFAULT_MOTION_TEXT_POS_Y,
         MIN_MOTION_TEXT_POS,
         MAX_MOTION_TEXT_POS,
     );
-    text_box.append(&text_pos_y_header);
-    text_box.append(&text_pos_y_slider.widget());
+    text_placement_section.append(&text_pos_y_header);
+    text_placement_section.append(&text_pos_y_slider.widget());
     let (text_size_header, text_size_value, text_size_slider) = span_slider_row(
         &t("Size"),
         DEFAULT_MOTION_TEXT_SIZE,
         MIN_MOTION_TEXT_SIZE,
         MAX_MOTION_TEXT_SIZE,
     );
-    text_box.append(&text_size_header);
-    text_box.append(&text_size_slider.widget());
-    let text_anim_label = Label::new(Some(&t("Animation")));
-    text_anim_label.add_css_class("recording-editor-zoom-kicker");
-    text_anim_label.set_xalign(0.0);
-    text_box.append(&text_anim_label);
+    text_placement_section.append(&text_size_header);
+    text_placement_section.append(&text_size_slider.widget());
+    text_box.append(&text_placement_section);
+    let text_animation_section = motion_settings_section("Animation");
     let text_anim_grid = Grid::new();
     text_anim_grid.add_css_class("recording-editor-zoom-easing");
     text_anim_grid.set_hexpand(true);
@@ -314,11 +330,11 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
             }
         }
     }
-    text_box.append(&text_anim_grid);
+    text_animation_section.append(&text_anim_grid);
     let text_scope_label = Label::new(Some(&t("Scope")));
     text_scope_label.add_css_class("recording-editor-zoom-kicker");
     text_scope_label.set_xalign(0.0);
-    text_box.append(&text_scope_label);
+    text_animation_section.append(&text_scope_label);
     let text_scope_row = GtkBox::new(Orientation::Horizontal, 6);
     text_scope_row.add_css_class("recording-editor-zoom-easing");
     text_scope_row.set_hexpand(true);
@@ -341,7 +357,8 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
             }
         }
     }
-    text_box.append(&text_scope_row);
+    text_animation_section.append(&text_scope_row);
+    text_box.append(&text_animation_section);
     inspector.append(&text_box);
 
     let delete_btn = Button::with_label(&t("Delete"));
@@ -377,6 +394,7 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
                 static_btn,
                 motion_btn,
                 preview,
+                preview_shell,
                 page,
                 confirm_overlay,
             },
@@ -427,8 +445,7 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
             },
             transform: MotionTransformControlParts {
                 clip_box,
-                scale_value,
-                scale_chips,
+                scale_slider,
                 intensity_slider,
                 intensity_value,
                 zoom_anchor_x_slider,
@@ -443,6 +460,7 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
                 roll_value,
                 perspective_slider,
                 perspective_value,
+                position_pad,
                 pos_x_slider,
                 pos_x_value,
                 pos_y_slider,
@@ -462,4 +480,14 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
         },
         session,
     )
+}
+
+fn motion_settings_section(title: &str) -> GtkBox {
+    let section = GtkBox::new(Orientation::Vertical, 8);
+    section.add_css_class("editor-motion-settings-section");
+    let heading = Label::new(Some(&t(title)));
+    heading.add_css_class("editor-background-section-title");
+    heading.set_xalign(0.0);
+    section.append(&heading);
+    section
 }

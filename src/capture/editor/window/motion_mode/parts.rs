@@ -1,9 +1,11 @@
-use gtk4::{Box as GtkBox, Button, DrawingArea, Entry, Label, ToggleButton};
+use gtk4::{Box as GtkBox, Button, DrawingArea, Entry, Label, Overlay, ToggleButton};
 use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::recording::editor::model::{MotionTextAnimation, MotionTextScope};
 use crate::recording::editor::window::tool_sidebar::FillSlider;
+
+use super::position_pad::MotionPositionPad;
 
 pub(in crate::capture::editor::window) struct MotionModeParts {
     pub shell: MotionModeShellParts,
@@ -19,6 +21,7 @@ pub(in crate::capture::editor::window) struct MotionModeShellParts {
     pub static_btn: Button,
     pub motion_btn: Button,
     pub preview: DrawingArea,
+    pub preview_shell: Overlay,
     pub page: GtkBox,
     pub confirm_overlay: GtkBox,
 }
@@ -75,8 +78,7 @@ pub(in crate::capture::editor::window) struct MotionTextControlParts {
 
 pub(in crate::capture::editor::window) struct MotionTransformControlParts {
     pub clip_box: GtkBox,
-    pub scale_value: Label,
-    pub scale_chips: Vec<Button>,
+    pub scale_slider: FillSlider,
     pub intensity_slider: FillSlider,
     pub intensity_value: Label,
     pub zoom_anchor_x_slider: FillSlider,
@@ -91,6 +93,7 @@ pub(in crate::capture::editor::window) struct MotionTransformControlParts {
     pub roll_value: Label,
     pub perspective_slider: FillSlider,
     pub perspective_value: Label,
+    pub position_pad: MotionPositionPad,
     pub pos_x_slider: FillSlider,
     pub pos_x_value: Label,
     pub pos_y_slider: FillSlider,

@@ -27,6 +27,17 @@ pub fn draw_motion_frame(
     } else {
         MotionStage::frame(f64::from(width), f64::from(height))
     };
+    // The background and animated foreground are one composition. Keep every
+    // transformed layer inside the same scene bounds instead of allowing a
+    // scaled or rotated card to spill over the preview checkerboard.
+    let _ = context.save();
+    context.rectangle(
+        stage.center_x - stage.bounds_w * 0.5,
+        stage.center_y - stage.bounds_h * 0.5,
+        stage.bounds_w,
+        stage.bounds_h,
+    );
+    context.clip();
     let current_transform = motion.sample(time);
     let current_anchor = motion.zoom_anchor_at(time);
     // The card is drawn as a triangle mesh that approximates the perspective
@@ -88,6 +99,7 @@ pub fn draw_motion_frame(
     if let Some(watermark_surface) = watermark_surface {
         paint_motion_watermark(context, surface, stage, motion, watermark_surface, time);
     }
+    context.restore().ok();
 }
 
 /// A held camera pose is already identical to the sharp overlay. Skipping it

@@ -3,7 +3,10 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use gtk4::{prelude::*, ApplicationWindow, Box as GtkBox, Button, Overlay, Stack};
+use gtk4::{
+    prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Overlay, Revealer,
+    RevealerTransitionType, Stack,
+};
 
 use crate::capture::editor::state::EditorState;
 
@@ -20,7 +23,6 @@ pub(super) struct MotionHost {
 pub(super) struct MotionHostInstallInputs<'a> {
     pub window: &'a ApplicationWindow,
     pub root_overlay: &'a Overlay,
-    pub canvas_with_toolbar: &'a Overlay,
     pub canvas_stack: &'a Stack,
     pub window_chrome: WindowChrome,
     pub inspector_tabs: &'a GtkBox,
@@ -69,7 +71,6 @@ impl MotionHost {
         let MotionHostInstallInputs {
             window,
             root_overlay,
-            canvas_with_toolbar,
             canvas_stack,
             window_chrome,
             inspector_tabs,
@@ -82,11 +83,21 @@ impl MotionHost {
             empty_drop_zone,
         } = input;
 
-        // Add this after the full-width drag chrome. GTK overlays are hit-tested
-        // in stacking order; placing the Motion tool pill above the drag strip is
-        // what keeps both buttons clickable, just like the static toolbar tools.
-        canvas_with_toolbar.add_overlay(motion_tabs);
-        canvas_with_toolbar.set_clip_overlay(motion_tabs, true);
+        let motion_tabs_revealer = Revealer::new();
+        motion_tabs_revealer.set_transition_type(RevealerTransitionType::SlideLeft);
+        motion_tabs_revealer.set_transition_duration(180);
+        motion_tabs_revealer.set_reveal_child(false);
+        motion_tabs_revealer.set_halign(Align::End);
+        motion_tabs_revealer.set_valign(Align::Center);
+        motion_tabs_revealer.set_child(Some(motion_tabs));
+        self.parts
+            .shell
+            .preview_shell
+            .add_overlay(&motion_tabs_revealer);
+        self.parts
+            .shell
+            .preview_shell
+            .set_clip_overlay(&motion_tabs_revealer, true);
         motion_mode::install_confirm_overlay(root_overlay, &self.parts.shell.confirm_overlay);
 
         let motion_chrome = Rc::new(MotionModeChrome {
@@ -97,6 +108,7 @@ impl MotionHost {
             history_control: window_chrome.history_control,
             inspector_tabs: inspector_tabs.clone(),
             motion_tabs: motion_tabs.clone(),
+            motion_tabs_revealer,
             inspector_stack: inspector_stack.clone(),
             motion_tab_btn: motion_tab_btn.clone(),
             appearance_tab_btn: appearance_tab_btn.clone(),

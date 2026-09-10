@@ -35,8 +35,7 @@ fn paint_backdrop(
     }
     let _ = context.save();
     if let Some((x, y, scene_w, scene_h)) = scene {
-        let radius = 16.0_f64.min(scene_w.min(scene_h) * 0.5);
-        rounded_rectangle(context, x, y, scene_w, scene_h, radius);
+        context.rectangle(x, y, scene_w, scene_h);
         context.clip();
     }
     match appearance.background_fill_type {

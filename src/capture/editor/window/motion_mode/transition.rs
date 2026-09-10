@@ -1,6 +1,6 @@
 use gtk4::{
     prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, CheckButton, Label, Orientation,
-    Overlay, Stack,
+    Overlay, Revealer, Stack,
 };
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
@@ -19,6 +19,7 @@ pub(in crate::capture::editor::window) struct MotionModeChrome {
     pub history_control: GtkBox,
     pub inspector_tabs: GtkBox,
     pub motion_tabs: GtkBox,
+    pub motion_tabs_revealer: Revealer,
     pub inspector_stack: Stack,
     pub motion_tab_btn: Button,
     pub appearance_tab_btn: Button,
@@ -37,7 +38,8 @@ pub(in crate::capture::editor::window) fn apply_editor_mode(
     chrome.motion_control.set_visible(!motion);
     chrome.history_control.set_visible(!motion);
     chrome.inspector_tabs.set_visible(!motion);
-    chrome.motion_tabs.set_visible(motion);
+    chrome.motion_tabs.set_can_target(motion);
+    chrome.motion_tabs_revealer.set_reveal_child(motion);
     if motion {
         chrome.inspector_stack.set_visible_child_name(MOTION_PAGE);
         chrome.motion_tab_btn.add_css_class("active-tool");

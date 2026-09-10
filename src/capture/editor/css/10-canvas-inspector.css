@@ -123,6 +123,13 @@
                 min-width: 288px;
             }
 
+            .editor-motion-settings-section {
+                padding: 10px;
+                background: alpha(white, 0.025);
+                border: none;
+                border-radius: 8px;
+            }
+
             .editor-inspector-placeholder {
                 color: rgba(255, 255, 255, 0.62);
                 font-size: 11px;

@@ -37,6 +37,14 @@
                 background-color: #eef0f5;
             }
 
+            .editor-root.editor-theme-light .editor-motion-tool-notch {
+                background-color: #eef0f5;
+            }
+
+            .editor-root.editor-theme-light .editor-motion-settings-section {
+                background: alpha(#111827, 0.025);
+            }
+
             .editor-root.editor-theme-light .editor-footer {
                 background-color: #f6f7fb;
                 border-top-color: alpha(#111827, 0.06);

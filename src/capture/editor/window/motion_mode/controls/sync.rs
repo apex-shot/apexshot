@@ -2,7 +2,7 @@ use gtk4::prelude::*;
 use std::rc::Rc;
 
 use crate::i18n::t;
-use crate::recording::editor::model::{MotionState, MOTION_SCALE_PRESETS};
+use crate::recording::editor::model::MotionState;
 
 use super::super::widgets::format_duration_label;
 use super::super::{MotionModeParts, MotionSession};
@@ -37,8 +37,7 @@ pub(super) fn make_redraw(parts: &MotionModeParts, session: &MotionSession) -> R
     let text_anim_buttons = parts.text.text_anim_buttons.clone();
     let text_scope_buttons = parts.text.text_scope_buttons.clone();
     let clip_hint = parts.shared.clip_hint.clone();
-    let scale_value = parts.transform.scale_value.clone();
-    let scale_chips = parts.transform.scale_chips.clone();
+    let scale_slider = parts.transform.scale_slider.clone();
     let intensity_slider = parts.transform.intensity_slider.clone();
     let intensity_value = parts.transform.intensity_value.clone();
     let zoom_anchor_x_slider = parts.transform.zoom_anchor_x_slider.clone();
@@ -53,6 +52,7 @@ pub(super) fn make_redraw(parts: &MotionModeParts, session: &MotionSession) -> R
     let roll_value = parts.transform.roll_value.clone();
     let perspective_slider = parts.transform.perspective_slider.clone();
     let perspective_value = parts.transform.perspective_value.clone();
+    let position_pad = parts.transform.position_pad.clone();
     let pos_x_slider = parts.transform.pos_x_slider.clone();
     let pos_x_value = parts.transform.pos_x_value.clone();
     let pos_y_slider = parts.transform.pos_y_slider.clone();
@@ -159,23 +159,17 @@ pub(super) fn make_redraw(parts: &MotionModeParts, session: &MotionSession) -> R
             roll_value.set_label(&format!("{:.0}°", segment.to.rotation_z));
             perspective_slider.set_value(perspective_intensity);
             perspective_value.set_label(&format!("{:.0}%", perspective_intensity * 100.0));
+            position_pad.set_position(segment.to.pos_x, segment.to.pos_y);
             pos_x_slider.set_value(segment.to.pos_x);
-            pos_x_value.set_label(&format!("{:.0}%", segment.to.pos_x * 100.0));
+            pos_x_value.set_label(&format!("{:.0}", segment.to.pos_x * 1000.0));
             pos_y_slider.set_value(segment.to.pos_y);
-            pos_y_value.set_label(&format!("{:.0}%", segment.to.pos_y * 100.0));
+            pos_y_value.set_label(&format!("{:.0}", segment.to.pos_y * 1000.0));
             ease_slider.set_value(transform_timing.transition_duration * 1000.0);
             ease_value.set_label(&format!(
                 "{:.0}ms",
                 transform_timing.transition_duration * 1000.0
             ));
-            for (chip, &(_, scale)) in scale_chips.iter().zip(MOTION_SCALE_PRESETS.iter()) {
-                if (segment.to.scale - scale).abs() < 0.03 {
-                    chip.add_css_class("recording-editor-zoom-chip-active");
-                } else {
-                    chip.remove_css_class("recording-editor-zoom-chip-active");
-                }
-            }
-            scale_value.set_label(&format!("{:.0}%", segment.to.scale * 100.0));
+            scale_slider.set_value(segment.to.scale);
         }
         delete_btn.set_sensitive(has_clip || has_text);
         syncing.set(false);

@@ -141,26 +141,18 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     inspector_tabs.append(&background_tab_btn);
     inspector_tabs.append(&colors_tab_btn);
 
-    // Shotbase places Motion tools in a compact vertical rail immediately to
-    // the left of the options inspector. The rail is not part of the panel;
-    // it selects which Motion-specific panel the inspector displays.
-    let motion_tabs = GtkBox::new(Orientation::Vertical, 4);
-    // Reuse the image editor's actual toolbar pill — this is the same shell
-    // surrounding Arrow, Line, and the other static editor tools.
-    motion_tabs.add_css_class("editor-toolbar");
+    // Motion tools become a compact notch attached to the inspector edge. The
+    // preview overlay positions it midway between the window top and timeline.
+    let motion_tabs = GtkBox::new(Orientation::Vertical, 8);
+    motion_tabs.add_css_class("editor-motion-tool-notch");
     motion_tabs.set_hexpand(false);
-    motion_tabs.set_halign(gtk4::Align::End);
-    motion_tabs.set_valign(gtk4::Align::Start);
-    motion_tabs.set_margin_top(8);
-    motion_tabs.set_margin_end(8);
-    motion_tabs.set_visible(false);
     motion_tabs.set_can_target(true);
     let motion_tab_btn = Button::new();
     motion_tab_btn.set_has_frame(false);
     motion_tab_btn.set_can_target(true);
     motion_tab_btn.set_tooltip_text(Some(&t("Motion")));
     let motion_icon = Image::from_icon_name(icon_names::custom::WAND_SPARKLES_SYMBOLIC);
-    motion_icon.set_pixel_size(16);
+    motion_icon.set_pixel_size(20);
     motion_tab_btn.set_child(Some(&motion_icon));
     motion_tab_btn.add_css_class("editor-tool-button");
     motion_tab_btn.add_css_class("active-tool");
@@ -169,7 +161,7 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     appearance_tab_btn.set_can_target(true);
     appearance_tab_btn.set_tooltip_text(Some(&t("Appearance")));
     let appearance_icon = Image::from_icon_name(icon_names::custom::IMAGE_ALT_SYMBOLIC);
-    appearance_icon.set_pixel_size(16);
+    appearance_icon.set_pixel_size(20);
     appearance_tab_btn.set_child(Some(&appearance_icon));
     appearance_tab_btn.add_css_class("editor-tool-button");
     let watermark_tab_btn = Button::new();
@@ -177,7 +169,7 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     watermark_tab_btn.set_can_target(true);
     watermark_tab_btn.set_tooltip_text(Some(&t("Watermark")));
     let watermark_icon = Image::from_icon_name(icon_names::IMAGE_REGULAR);
-    watermark_icon.set_pixel_size(16);
+    watermark_icon.set_pixel_size(20);
     watermark_tab_btn.set_child(Some(&watermark_icon));
     watermark_tab_btn.add_css_class("editor-tool-button");
     motion_tabs.append(&motion_tab_btn);

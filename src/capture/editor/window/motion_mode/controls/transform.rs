@@ -1,6 +1,6 @@
 use gtk4::prelude::*;
 
-use crate::recording::editor::model::{MotionEffectTransformTiming, MOTION_SCALE_PRESETS};
+use crate::recording::editor::model::MotionEffectTransformTiming;
 
 use super::super::{MotionModeParts, MotionSession};
 use super::{Redraw, RequestLivePreview, RequestTransitionPreview};
@@ -12,33 +12,32 @@ pub(super) fn install(
     request_live_preview: RequestLivePreview,
     request_transition_preview: RequestTransitionPreview,
 ) {
-    for (i, (_, scale)) in MOTION_SCALE_PRESETS.iter().enumerate() {
-        let chip = parts.transform.scale_chips[i].clone();
-        chip.connect_clicked({
-            let session = session.runtime.clone();
-            let redraw = redraw.clone();
-            let request_transition_preview = request_transition_preview.clone();
-            let syncing = parts.shared.inspector_syncing.clone();
-            let scale = *scale;
-            move |_| {
-                if syncing.get() {
-                    return;
-                }
-                let segment_start = {
-                    let runtime = session.borrow();
-                    runtime
-                        .motion
-                        .selected_segment()
-                        .map(|segment| segment.start)
-                };
-                session.borrow_mut().motion.set_selected_end_scale(scale);
-                match segment_start {
-                    Some(start) => request_transition_preview(start),
-                    None => redraw(),
-                }
+    parts.transform.scale_slider.connect_value_changed({
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        let request_transition_preview = request_transition_preview.clone();
+        let syncing = parts.shared.inspector_syncing.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
             }
-        });
-    }
+            let segment_start = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map(|segment| segment.start)
+            };
+            session
+                .borrow_mut()
+                .motion
+                .set_selected_end_scale(slider.value());
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => redraw(),
+            }
+        }
+    });
 
     parts.transform.intensity_slider.connect_value_changed({
         let session = session.runtime.clone();
@@ -212,6 +211,7 @@ pub(super) fn install(
     });
     parts.transform.pos_x_slider.connect_value_changed({
         let session = session.runtime.clone();
+        let position_pad = parts.transform.position_pad.clone();
         let pos_x_value = parts.transform.pos_x_value.clone();
         let request_transition_preview = request_transition_preview.clone();
         let request_live_preview = request_live_preview.clone();
@@ -221,15 +221,18 @@ pub(super) fn install(
                 return;
             }
             let value = slider.value();
-            let segment_start = {
+            let (segment_start, pos_y) = {
                 let runtime = session.borrow();
                 runtime
                     .motion
                     .selected_segment()
-                    .map(|segment| segment.start)
+                    .map_or((None, 0.0), |segment| {
+                        (Some(segment.start), segment.to.pos_y)
+                    })
             };
             session.borrow_mut().motion.set_selected_end_pos_x(value);
-            pos_x_value.set_label(&format!("{:.0}%", value * 100.0));
+            position_pad.set_position(value, pos_y);
+            pos_x_value.set_label(&format!("{:.0}", value * 1000.0));
             match segment_start {
                 Some(start) => request_transition_preview(start),
                 None => request_live_preview(),
@@ -238,6 +241,7 @@ pub(super) fn install(
     });
     parts.transform.pos_y_slider.connect_value_changed({
         let session = session.runtime.clone();
+        let position_pad = parts.transform.position_pad.clone();
         let pos_y_value = parts.transform.pos_y_value.clone();
         let request_transition_preview = request_transition_preview.clone();
         let request_live_preview = request_live_preview.clone();
@@ -247,6 +251,37 @@ pub(super) fn install(
                 return;
             }
             let value = slider.value();
+            let (segment_start, pos_x) = {
+                let runtime = session.borrow();
+                runtime
+                    .motion
+                    .selected_segment()
+                    .map_or((None, 0.0), |segment| {
+                        (Some(segment.start), segment.to.pos_x)
+                    })
+            };
+            session.borrow_mut().motion.set_selected_end_pos_y(value);
+            position_pad.set_position(pos_x, value);
+            pos_y_value.set_label(&format!("{:.0}", value * 1000.0));
+            match segment_start {
+                Some(start) => request_transition_preview(start),
+                None => request_live_preview(),
+            }
+        }
+    });
+    parts.transform.position_pad.connect_value_changed({
+        let session = session.runtime.clone();
+        let pos_x_slider = parts.transform.pos_x_slider.clone();
+        let pos_x_value = parts.transform.pos_x_value.clone();
+        let pos_y_slider = parts.transform.pos_y_slider.clone();
+        let pos_y_value = parts.transform.pos_y_value.clone();
+        let request_transition_preview = request_transition_preview.clone();
+        let request_live_preview = request_live_preview.clone();
+        let syncing = parts.shared.inspector_syncing.clone();
+        move |x, y| {
+            if syncing.get() {
+                return;
+            }
             let segment_start = {
                 let runtime = session.borrow();
                 runtime
@@ -254,8 +289,18 @@ pub(super) fn install(
                     .selected_segment()
                     .map(|segment| segment.start)
             };
-            session.borrow_mut().motion.set_selected_end_pos_y(value);
-            pos_y_value.set_label(&format!("{:.0}%", value * 100.0));
+            let mut runtime = session.borrow_mut();
+            runtime.motion.set_selected_end_pos_x(x);
+            runtime.motion.set_selected_end_pos_y(y);
+            drop(runtime);
+
+            syncing.set(true);
+            pos_x_slider.set_value(x);
+            pos_x_value.set_label(&format!("{:.0}", x * 1000.0));
+            pos_y_slider.set_value(y);
+            pos_y_value.set_label(&format!("{:.0}", y * 1000.0));
+            syncing.set(false);
+
             match segment_start {
                 Some(start) => request_transition_preview(start),
                 None => request_live_preview(),

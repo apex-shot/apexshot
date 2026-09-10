@@ -13,40 +13,65 @@
                 box-shadow: none;
             }
 
-            button.editor-motion-color-button {
-                min-width: 42px;
-                min-height: 42px;
-                padding: 4px;
+            menubutton.editor-motion-color-button > button,
+            menubutton.editor-motion-color-button > button:hover,
+            menubutton.editor-motion-color-button > button:active,
+            menubutton.editor-motion-color-button > button:checked,
+            menubutton.editor-motion-color-button > button:focus {
+                min-width: 32px;
+                min-height: 32px;
+                padding: 0;
                 border-radius: 7px;
-                border: 2px solid #c06540;
+                border: 2px solid alpha(white, 0.18);
                 background: alpha(white, 0.03);
                 background-image: none;
                 box-shadow: none;
                 outline: none;
             }
 
-            button.editor-motion-color-button:hover,
-            button.editor-motion-color-button:active,
-            button.editor-motion-color-button:checked,
-            button.editor-motion-color-button:focus:checked {
-                border: 2px solid #c06540;
-                background: alpha(white, 0.08);
+            menubutton.editor-motion-color-button.active-motion-color-control > button,
+            menubutton.editor-motion-color-button.active-motion-color-control > button:hover,
+            menubutton.editor-motion-color-button.active-motion-color-control > button:active,
+            menubutton.editor-motion-color-button.active-motion-color-control > button:checked,
+            menubutton.editor-motion-color-button.active-motion-color-control > button:focus {
+                border-color: #c06540;
+                background: alpha(#c06540, 0.10);
                 background-image: none;
-                box-shadow: inset 0 0 0 2px #c06540;
+                box-shadow: 0 0 0 1px #c06540;
                 outline: none;
             }
 
-            button.editor-motion-color-button:focus:not(:checked) {
-                border: 2px solid #c06540;
+            /* Gradient stops share one hex field.  The orange outline names
+             * the stop that field currently edits. */
+            menubutton.editor-motion-gradient-stop > button,
+            menubutton.editor-motion-gradient-stop > button:hover,
+            menubutton.editor-motion-gradient-stop > button:active,
+            menubutton.editor-motion-gradient-stop > button:checked,
+            menubutton.editor-motion-gradient-stop > button:focus {
+                min-width: 32px;
+                min-height: 32px;
+                padding: 0;
+                border-radius: 7px;
+                border: 2px solid alpha(white, 0.18);
                 background: alpha(white, 0.03);
                 background-image: none;
                 box-shadow: none;
                 outline: none;
+            }
+
+            menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button,
+            menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button:hover,
+            menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button:active,
+            menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button:checked,
+            menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button:focus {
+                border-color: #c06540;
+                background: alpha(#c06540, 0.10);
+                box-shadow: 0 0 0 1px #c06540;
             }
 
             .editor-motion-color-swatch {
-                min-width: 32px;
-                min-height: 32px;
+                min-width: 28px;
+                min-height: 28px;
                 border-radius: 5px;
                 border: 1px solid alpha(white, 0.16);
             }

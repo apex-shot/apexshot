@@ -44,6 +44,24 @@
                 box-shadow: none;
             }
 
+            .editor-motion-tool-notch {
+                padding: 9px 7px;
+                background-color: #0f0f0f;
+                border: none;
+                border-radius: 10px 0 0 10px;
+                box-shadow: none;
+            }
+
+            .editor-motion-tool-notch button.editor-tool-button {
+                min-width: 40px;
+                min-height: 40px;
+                border-radius: 7px;
+            }
+
+            .editor-motion-tool-notch button.editor-tool-button image {
+                -gtk-icon-size: 20px;
+            }
+
             .editor-root button.recording-editor-traffic-btn {
                 min-width: 28px;
                 min-height: 28px;

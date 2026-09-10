@@ -10,7 +10,9 @@ use std::rc::Rc;
 use crate::i18n::t;
 use crate::recording::editor::model::MotionBackgroundFillType;
 
-use super::widgets::{motion_appearance_slider, motion_color_control, motion_rgba};
+use super::widgets::{
+    motion_appearance_slider, motion_color_control, motion_gradient_color_control, motion_rgba,
+};
 use super::MotionSession;
 
 /// Shotbase keeps Motion appearance as a scene-level inspector rather than an
@@ -57,10 +59,7 @@ pub(super) fn build_motion_appearance_panel(
 
     let fill_section = GtkBox::new(Orientation::Vertical, 0);
     fill_section.add_css_class("editor-motion-background-picker");
-    let fill_label = Label::new(Some(&t("Background")));
-    fill_label.add_css_class("editor-background-section-title");
-    fill_label.set_xalign(0.0);
-    root.append(&fill_label);
+    let background_section = motion_appearance_section("Background");
     let none_button = Button::with_label(&t("None"));
     none_button.set_has_frame(false);
     none_button.set_hexpand(true);
@@ -85,7 +84,7 @@ pub(super) fn build_motion_appearance_panel(
     let color_title = Label::new(Some(&t("Color")));
     color_title.add_css_class("editor-background-section-title");
     color_title.set_xalign(0.0);
-    let color = motion_color_control(initial_background_color, "Background color", {
+    let color = motion_color_control(initial_background_color, "Background color", true, {
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         let none_button = none_button.clone();
@@ -109,47 +108,31 @@ pub(super) fn build_motion_appearance_panel(
     let gradient_title = Label::new(Some(&t("Gradient")));
     gradient_title.add_css_class("editor-background-section-title");
     gradient_title.set_xalign(0.0);
-    let gradient_row = GtkBox::new(Orientation::Horizontal, 6);
-    let gradient_start = motion_color_control(initial_gradient_start, "Gradient start color", {
+    let gradient = motion_gradient_color_control(initial_gradient_start, initial_gradient_end, {
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         let none_button = none_button.clone();
-        move |rgba| {
+        move |stop, rgba| {
             let mut runtime = runtime.borrow_mut();
-            runtime.motion.appearance.gradient_color_1 = [
+            let color = [
                 rgba.red().into(),
                 rgba.green().into(),
                 rgba.blue().into(),
                 rgba.alpha().into(),
             ];
+            if stop == 0 {
+                runtime.motion.appearance.gradient_color_1 = color;
+            } else {
+                runtime.motion.appearance.gradient_color_2 = color;
+            }
             runtime.motion.appearance.selected_gradient_preset_index = None;
             runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
             none_button.remove_css_class("active-background-option");
             preview.queue_draw();
         }
     });
-    let gradient_end = motion_color_control(initial_gradient_end, "Gradient end color", {
-        let runtime = session.runtime.clone();
-        let preview = preview.clone();
-        let none_button = none_button.clone();
-        move |rgba| {
-            let mut runtime = runtime.borrow_mut();
-            runtime.motion.appearance.gradient_color_2 = [
-                rgba.red().into(),
-                rgba.green().into(),
-                rgba.blue().into(),
-                rgba.alpha().into(),
-            ];
-            runtime.motion.appearance.selected_gradient_preset_index = None;
-            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
-            none_button.remove_css_class("active-background-option");
-            preview.queue_draw();
-        }
-    });
-    gradient_row.append(&gradient_start);
-    gradient_row.append(&gradient_end);
     gradient_section.append(&gradient_title);
-    gradient_section.append(&gradient_row);
+    gradient_section.append(&gradient);
     let (wallpaper_catalog, activate_wallpaper_catalog) =
         motion_wallpaper_catalog_section(session, preview, &none_button);
     let image_section = motion_image_section(
@@ -283,7 +266,7 @@ pub(super) fn build_motion_appearance_panel(
             selection_stack.set_visible_child_name("empty");
         }
     });
-    root.append(&fill_section);
+    background_section.append(&fill_section);
 
     let padding = motion_appearance_slider("Padding", 0.0, 200.0, 96.0, "px");
     padding.connect_value_changed({
@@ -294,7 +277,7 @@ pub(super) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    root.append(&padding.widget());
+    background_section.append(&padding.widget());
 
     let blur = motion_appearance_slider("Background blur", 0.0, 1.0, 0.0, "%");
     blur.connect_value_changed({
@@ -305,7 +288,7 @@ pub(super) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    root.append(&blur.widget());
+    background_section.append(&blur.widget());
 
     let noise = motion_appearance_slider("Background noise", 0.0, 1.0, 0.0, "%");
     noise.connect_value_changed({
@@ -316,8 +299,10 @@ pub(super) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    root.append(&noise.widget());
+    background_section.append(&noise.widget());
+    root.append(&background_section);
 
+    let shadow_section = motion_appearance_section("Shadow");
     let shadow_opacity =
         motion_appearance_slider("Shadow opacity", 0.0, 1.0, initial_shadow_opacity, "%");
     shadow_opacity.connect_value_changed({
@@ -328,7 +313,7 @@ pub(super) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    root.append(&shadow_opacity.widget());
+    shadow_section.append(&shadow_opacity.widget());
 
     let shadow_blur =
         motion_appearance_slider("Shadow blur", 0.0, 120.0, initial_shadow_blur, "px");
@@ -340,7 +325,7 @@ pub(super) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    root.append(&shadow_blur.widget());
+    shadow_section.append(&shadow_blur.widget());
 
     let shadow_x = motion_appearance_slider(
         "Shadow position X",
@@ -357,7 +342,7 @@ pub(super) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    root.append(&shadow_x.widget());
+    shadow_section.append(&shadow_x.widget());
 
     let shadow_y = motion_appearance_slider(
         "Shadow position Y",
@@ -374,13 +359,14 @@ pub(super) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    root.append(&shadow_y.widget());
+    shadow_section.append(&shadow_y.widget());
+    root.append(&shadow_section);
 
-    let border_section = GtkBox::new(Orientation::Vertical, 6);
-    let border_title = Label::new(Some(&t("Border Color")));
+    let border_section = motion_appearance_section("Border");
+    let border_title = Label::new(Some(&t("Color")));
     border_title.add_css_class("editor-background-section-title");
     border_title.set_xalign(0.0);
-    let border_color = motion_color_control(initial_border, "Border color", {
+    let border_color = motion_color_control(initial_border, "Border color", false, {
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |rgba| {
@@ -395,7 +381,6 @@ pub(super) fn build_motion_appearance_panel(
     });
     border_section.append(&border_title);
     border_section.append(&border_color);
-    root.append(&border_section);
 
     let thickness = motion_appearance_slider("Border thickness", 0.0, 24.0, 0.0, "px");
     thickness.connect_value_changed({
@@ -406,7 +391,7 @@ pub(super) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    root.append(&thickness.widget());
+    border_section.append(&thickness.widget());
 
     // The radius rounds the captured image card itself; the background
     // scene stays a full rectangle.
@@ -419,8 +404,19 @@ pub(super) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    root.append(&radius.widget());
+    border_section.append(&radius.widget());
+    root.append(&border_section);
     root
+}
+
+fn motion_appearance_section(title: &str) -> GtkBox {
+    let section = GtkBox::new(Orientation::Vertical, 8);
+    section.add_css_class("editor-motion-settings-section");
+    let heading = Label::new(Some(&t(title)));
+    heading.add_css_class("editor-background-section-title");
+    heading.set_xalign(0.0);
+    section.append(&heading);
+    section
 }
 
 /// Motion uses the app's bundled background catalog rather than requiring a
