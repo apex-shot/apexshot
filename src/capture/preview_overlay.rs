@@ -1,3 +1,4 @@
+use crate::capture_overlay::CaptureDisplay;
 use crate::config::load_config;
 use crate::i18n::t;
 use gdk4x11::X11Surface;
@@ -250,6 +251,14 @@ pub enum CapturePreviewError {
 }
 
 pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewError> {
+    let display = preview_display_from_env();
+    show_capture_preview_overlay_on_display(path, display)
+}
+
+pub fn show_capture_preview_overlay_on_display(
+    path: PathBuf,
+    display: Option<CaptureDisplay>,
+) -> Result<(), CapturePreviewError> {
     let probe = PreviewStartupProbe::from_env(path.clone());
     probe.log("preview-entry");
 
@@ -300,7 +309,13 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
         let preview_id = generate_preview_id(pid);
         probe_activate.log("before-setup-preview-window");
 
-        setup_preview_window(app, &path_clone, preview_id, probe_activate.clone());
+        setup_preview_window(
+            app,
+            &path_clone,
+            preview_id,
+            probe_activate.clone(),
+            display,
+        );
     });
 
     probe.log("before-app-run");
@@ -309,11 +324,34 @@ pub fn show_capture_preview_overlay(path: PathBuf) -> Result<(), CapturePreviewE
     Ok(())
 }
 
+fn preview_display_from_env() -> Option<CaptureDisplay> {
+    Some(CaptureDisplay {
+        x: std::env::var("APEXSHOT_PREVIEW_SCREEN_X")
+            .ok()?
+            .parse()
+            .ok()?,
+        y: std::env::var("APEXSHOT_PREVIEW_SCREEN_Y")
+            .ok()?
+            .parse()
+            .ok()?,
+        width: std::env::var("APEXSHOT_PREVIEW_SCREEN_WIDTH")
+            .ok()?
+            .parse()
+            .ok()?,
+        height: std::env::var("APEXSHOT_PREVIEW_SCREEN_HEIGHT")
+            .ok()?
+            .parse()
+            .ok()?,
+    })
+    .filter(|display| display.width > 0 && display.height > 0)
+}
+
 fn setup_preview_window(
     app: &gtk4::Application,
     path: &Path,
     preview_id: String,
     probe: PreviewStartupProbe,
+    target_display: Option<CaptureDisplay>,
 ) {
     probe.log("setup-preview-window-enter");
     let startup = probe.startup;
@@ -355,7 +393,8 @@ fn setup_preview_window(
     let window: Window = appwin.upcast();
     window.add_css_class("capture-preview-window");
     probe.log("before-configure-window-positioning");
-    let layer_shell_active = configure_window_positioning(&window, side, preview_width);
+    let layer_shell_active =
+        configure_window_positioning(&window, side, preview_width, target_display);
     probe.log("after-configure-window-positioning");
     // Intentionally silent when layer-shell is unavailable — the fallback
     // (bottom-left placement via X11 input-region) works correctly on X11
@@ -485,34 +524,40 @@ fn setup_preview_window(
     } else {
         // Keep a monitor-sized transparent fallback surface so the card can stay
         // bottom-left even when layer-shell is unavailable.
-        let (fallback_width, fallback_height) = gdk::Display::default()
-            .map(|display| {
-                let monitors = display.monitors();
-                let mut min_x = i32::MAX;
-                let mut min_y = i32::MAX;
-                let mut max_x = i32::MIN;
-                let mut max_y = i32::MIN;
+        let (fallback_min_x, fallback_min_y, fallback_width, fallback_height) = target_display
+            .map(|display| (display.x, display.y, display.width, display.height))
+            .or_else(|| {
+                gdk::Display::default().map(|display| {
+                    let monitors = display.monitors();
+                    let mut min_x = i32::MAX;
+                    let mut min_y = i32::MAX;
+                    let mut max_x = i32::MIN;
+                    let mut max_y = i32::MIN;
 
-                for i in 0..monitors.n_items() {
-                    if let Some(obj) = monitors.item(i) {
-                        if let Ok(monitor) = obj.downcast::<gdk::Monitor>() {
-                            let geometry = monitor.geometry();
-                            min_x = min_x.min(geometry.x());
-                            min_y = min_y.min(geometry.y());
-                            max_x = max_x.max(geometry.x() + geometry.width());
-                            max_y = max_y.max(geometry.y() + geometry.height());
+                    for i in 0..monitors.n_items() {
+                        if let Some(obj) = monitors.item(i) {
+                            if let Ok(monitor) = obj.downcast::<gdk::Monitor>() {
+                                let geometry = monitor.geometry();
+                                min_x = min_x.min(geometry.x());
+                                min_y = min_y.min(geometry.y());
+                                max_x = max_x.max(geometry.x() + geometry.width());
+                                max_y = max_y.max(geometry.y() + geometry.height());
+                            }
                         }
                     }
-                }
 
-                if min_x == i32::MAX || min_y == i32::MAX || max_x == i32::MIN || max_y == i32::MIN
-                {
-                    (1280, 720)
-                } else {
-                    ((max_x - min_x).max(1), (max_y - min_y).max(1))
-                }
+                    if min_x == i32::MAX
+                        || min_y == i32::MAX
+                        || max_x == i32::MIN
+                        || max_y == i32::MIN
+                    {
+                        (0, 0, 1280, 720)
+                    } else {
+                        (min_x, min_y, (max_x - min_x).max(1), (max_y - min_y).max(1))
+                    }
+                })
             })
-            .unwrap_or((1280, 720));
+            .unwrap_or((0, 0, 1280, 720));
 
         let fallback_window_width =
             fallback_width.max(preview_width + chrome_pad + PREVIEW_EDGE_MARGIN * 2);
@@ -540,18 +585,27 @@ fn setup_preview_window(
             PreviewSide::Right => Align::End,
         });
         chrome.set_valign(Align::End);
+        let target_left = target_display
+            .map(|display| (display.x - fallback_min_x).max(0))
+            .unwrap_or(0);
+        let target_right = target_display
+            .map(|display| (fallback_min_x + fallback_width - display.x - display.width).max(0))
+            .unwrap_or(0);
+        let target_bottom = target_display
+            .map(|display| (fallback_min_y + fallback_height - display.y - display.height).max(0))
+            .unwrap_or(0);
         chrome.set_margin_start(if side == PreviewSide::Left {
-            PREVIEW_EDGE_MARGIN
+            target_left + PREVIEW_EDGE_MARGIN
         } else {
             0
         });
         chrome.set_margin_end(if side == PreviewSide::Right {
-            PREVIEW_EDGE_MARGIN
+            target_right + PREVIEW_EDGE_MARGIN
         } else {
             0
         });
         chrome.set_margin_top(PREVIEW_EDGE_MARGIN);
-        chrome.set_margin_bottom(PREVIEW_EDGE_MARGIN + PREVIEW_BOTTOM_SAFE_OFFSET);
+        chrome.set_margin_bottom(target_bottom + PREVIEW_EDGE_MARGIN + PREVIEW_BOTTOM_SAFE_OFFSET);
         fallback_shell.add_overlay(&chrome);
         fallback_shell.set_measure_overlay(&chrome, false);
 
@@ -562,6 +616,11 @@ fn setup_preview_window(
     probe.log("before-window-present");
     window.present();
     probe.log("after-window-present");
+    if is_gnome_wayland_session() {
+        if let Some(display) = target_display {
+            request_gnome_preview_position(display);
+        }
+    }
 
     let use_fallback_input_region = !layer_shell_active;
     install_fallback_input_region_tracking(&window, &card);
@@ -955,6 +1014,22 @@ fn setup_preview_window(
             // On X11 the extension is not used; no additional signal needed.
         }
     }
+}
+
+fn request_gnome_preview_position(display: CaptureDisplay) {
+    let pid = std::process::id() as i64;
+    std::thread::spawn(move || {
+        let Ok(connection) = zbus::blocking::Connection::session() else {
+            return;
+        };
+        let _ = connection.call_method(
+            Some("org.apexshot.ShellOverlay"),
+            "/org/apexshot/ShellOverlay",
+            Some("org.apexshot.ShellOverlay"),
+            "PositionQuickAccess",
+            &(pid, display.x, display.y),
+        );
+    });
 }
 
 /// On X11, set `_NET_WM_WINDOW_TYPE_NOTIFICATION` so the preview card:
@@ -1565,7 +1640,12 @@ fn preview_texture(path: &Path) -> Option<gdk::Texture> {
     Some(gdk::Texture::for_pixbuf(&preview_pixbuf))
 }
 
-fn configure_window_positioning(window: &Window, side: PreviewSide, _preview_width: i32) -> bool {
+fn configure_window_positioning(
+    window: &Window,
+    side: PreviewSide,
+    _preview_width: i32,
+    target_display: Option<CaptureDisplay>,
+) -> bool {
     if std::env::var_os(PREVIEW_DISABLE_LAYER_SHELL_ENV).is_some() {
         return false;
     }
@@ -1586,6 +1666,22 @@ fn configure_window_positioning(window: &Window, side: PreviewSide, _preview_wid
         window.init_layer_shell();
         window.set_namespace(Some("apexshot-capture-preview"));
         window.set_layer(Layer::Overlay);
+        if let (Some(target), Some(display)) = (target_display, gdk::Display::default()) {
+            let monitors = display.monitors();
+            for index in 0..monitors.n_items() {
+                let Some(object) = monitors.item(index) else {
+                    continue;
+                };
+                let Ok(monitor) = object.downcast::<gdk::Monitor>() else {
+                    continue;
+                };
+                let geometry = monitor.geometry();
+                if geometry.x() == target.x && geometry.y() == target.y {
+                    window.set_monitor(Some(&monitor));
+                    break;
+                }
+            }
+        }
 
         window.set_anchor(Edge::Left, side == PreviewSide::Left);
         window.set_anchor(Edge::Right, side == PreviewSide::Right);

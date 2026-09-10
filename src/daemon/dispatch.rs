@@ -33,6 +33,11 @@ pub(super) fn dispatch_daemon_action(
                 }
             });
         }
+        DaemonAction::QuickCapture => {
+            tokio::task::spawn_blocking(move || {
+                capture_handlers::handle_quick_capture(state_clone)
+            });
+        }
         DaemonAction::CaptureArea => {
             tokio::task::spawn_blocking(move || capture_handlers::handle_capture_area(state_clone));
         }

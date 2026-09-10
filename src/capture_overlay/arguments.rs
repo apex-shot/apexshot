@@ -120,6 +120,12 @@ fn build_recording_ui_args(config: &crate::config::AppConfig) -> Vec<String> {
     args
 }
 
+fn build_quick_capture_args(config: &crate::config::AppConfig) -> Vec<String> {
+    let mut args = build_area_init_args(config);
+    args.push("--capture-menu".into());
+    args
+}
+
 fn build_crosshair_args(config: &crate::config::AppConfig) -> Vec<String> {
     let mut args = vec!["--crosshair-capture".into()];
     append_screenshot_timer_args(&mut args, config);

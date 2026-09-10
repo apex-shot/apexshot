@@ -12,7 +12,9 @@ pub use editor::{open_image_editor, open_image_editor_empty, EditorError};
 pub fn copy_capture_uri_to_clipboard(path: &Path) -> Result<(), String> {
     editor::copy_file_uri_to_clipboard(path)
 }
-pub use preview_overlay::{show_capture_preview_overlay, CapturePreviewError};
+pub use preview_overlay::{
+    show_capture_preview_overlay, show_capture_preview_overlay_on_display, CapturePreviewError,
+};
 
 use crate::backend::{CaptureData, CursorData, PixelFormat};
 use image::buffer::ConvertBuffer;

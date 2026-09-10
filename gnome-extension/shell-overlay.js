@@ -45,6 +45,11 @@ const DBUS_INTERFACE = `
       <arg type="x" name="pid" direction="in"/>
       <arg type="b" name="focused" direction="out"/>
     </method>
+    <method name="PositionQuickAccess">
+      <arg type="x" name="pid" direction="in"/>
+      <arg type="i" name="monitor_x" direction="in"/>
+      <arg type="i" name="monitor_y" direction="in"/>
+    </method>
     <method name="StartPointerTrack"/>
     <method name="StopPointerTrack">
       <arg type="x" name="t0" direction="out"/>
@@ -217,7 +222,8 @@ export class ShellOverlayService {
         const actor = global.get_window_actors().find(candidate => {
             const window = candidate.meta_window;
             return window && window.get_pid() === pid
-                && window.get_title() === 'ApexShot Capture';
+                && (window.get_title() === 'ApexShot Capture'
+                    || window.get_title() === 'ApexShot Display Picker');
         });
         if (!actor)
             return false;
@@ -230,6 +236,31 @@ export class ShellOverlayService {
         window.make_above();
         Main.activateWindow(window, global.get_current_time());
         return true;
+    }
+
+    PositionQuickAccess(pid, monitorX, monitorY) {
+        let attempts = 0;
+        const position = () => {
+            const actor = global.get_window_actors().find(candidate => {
+                const window = candidate.meta_window;
+                return window && window.get_pid() === pid
+                    && window.get_title() === 'ApexShot Preview';
+            });
+            if (!actor) {
+                attempts++;
+                return attempts < 20 ? GLib.SOURCE_CONTINUE : GLib.SOURCE_REMOVE;
+            }
+
+            const window = actor.meta_window;
+            window.move_frame(true, monitorX, monitorY);
+            window.make_above();
+            if (typeof window.raise === 'function')
+                window.raise();
+            return GLib.SOURCE_REMOVE;
+        };
+
+        if (position() === GLib.SOURCE_CONTINUE)
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, position);
     }
 
     ShowCaptureCountdown(monitorX, monitorY, monitorWidth, seconds,

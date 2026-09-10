@@ -6,7 +6,8 @@ use crate::{
     capture_overlay::{
         begin_capture_session, capture_area_file_via_cpp, capture_crosshair_file_via_cpp,
         capture_screen_file_via_cpp, capture_still_via_portal, is_launch_blocked_error,
-        request_existing_overlay_focus, user_facing_capture_failure_message, AreaCapturePathResult,
+        open_quick_capture_via_cpp, request_existing_overlay_focus,
+        user_facing_capture_failure_message, AreaCapturePathResult, CaptureDisplay,
         CaptureOverlayGuard, LaunchBlockedReason,
     },
     config::load_config,
@@ -112,6 +113,7 @@ pub(super) fn play_shutter_sound_if_enabled() {
 pub(super) fn apply_screenshot_after_capture_actions(
     saved_path: std::path::PathBuf,
     state: Arc<Mutex<DaemonState>>,
+    target_display: Option<CaptureDisplay>,
 ) {
     let config = load_config().sanitized();
     state.lock().unwrap().last_capture_path = Some(saved_path.clone());
@@ -150,7 +152,7 @@ pub(super) fn apply_screenshot_after_capture_actions(
     }
 
     if show_quick_access {
-        let child = show_preview_subprocess(saved_path);
+        let child = show_preview_subprocess(saved_path, target_display);
         replace_preview_child(&state, child);
     }
 }
@@ -214,7 +216,7 @@ pub(super) fn save_and_open(
             eprintln!("[daemon] Saved: {}", path.display());
             crate::usage_telemetry::record_screenshot();
             play_shutter_sound_if_enabled();
-            apply_screenshot_after_capture_actions(path, state);
+            apply_screenshot_after_capture_actions(path, state, None);
             true
         }
         Err(e) => {
@@ -225,6 +227,14 @@ pub(super) fn save_and_open(
 }
 
 pub(super) fn save_existing_png_and_open(path: std::path::PathBuf, state: Arc<Mutex<DaemonState>>) {
+    save_existing_png_and_open_on_display(path, state, None);
+}
+
+fn save_existing_png_and_open_on_display(
+    path: std::path::PathBuf,
+    state: Arc<Mutex<DaemonState>>,
+    target_display: Option<CaptureDisplay>,
+) {
     let config = load_config().sanitized();
     if !config.after_capture_save {
         // Even if not saving, copy to clipboard if enabled
@@ -244,7 +254,7 @@ pub(super) fn save_existing_png_and_open(path: std::path::PathBuf, state: Arc<Mu
         Ok(saved_path) => {
             eprintln!("[daemon] Saved: {}", saved_path.display());
             crate::usage_telemetry::record_screenshot();
-            apply_screenshot_after_capture_actions(saved_path, state);
+            apply_screenshot_after_capture_actions(saved_path, state, target_display);
         }
         Err(e) => {
             let _ = std::fs::remove_file(&path);
@@ -434,7 +444,7 @@ pub(super) fn show_preview_for_path(
     path: std::path::PathBuf,
     state: &Arc<Mutex<DaemonState>>,
 ) -> bool {
-    let child = show_preview_subprocess(path);
+    let child = show_preview_subprocess(path, None);
     let shown = child.is_some();
     replace_preview_child(state, child);
     shown
@@ -491,14 +501,17 @@ pub(super) fn notify_screenshot_capture_failed(context: &str, err: &impl std::fm
 }
 
 /// Spawn `apexshot preview <path>` as a subprocess so it gets its own GTK context.
-pub(super) fn show_preview_subprocess(path: std::path::PathBuf) -> Option<std::process::Child> {
-    match crate::preview_launch::spawn_preview_subprocess(&path) {
+pub(super) fn show_preview_subprocess(
+    path: std::path::PathBuf,
+    target_display: Option<CaptureDisplay>,
+) -> Option<std::process::Child> {
+    match crate::preview_launch::spawn_preview_subprocess_on_display(&path, target_display) {
         Ok(child) => Some(child),
         Err(e) => {
             eprintln!(
                 "[daemon] Failed to spawn preview subprocess: {e}, falling back to in-app preview"
             );
-            crate::preview_launch::show_preview_direct(path);
+            crate::preview_launch::show_preview_direct_on_display(path, target_display);
             None
         }
     }
@@ -600,6 +613,16 @@ pub(super) fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
     handle_capture_area_with_active_session(state);
 }
 
+pub(super) fn handle_quick_capture(state: Arc<Mutex<DaemonState>>) {
+    let Some(_session_guard) = acquire_capture_session_guard("quick-capture") else {
+        return;
+    };
+    let _ = stop_preview_overlay(&state);
+    let gtk_tx = state.lock().unwrap().gtk_tx.clone();
+    let result = open_quick_capture_via_cpp().map_err(anyhow::Error::from);
+    handle_interactive_capture_result(result, state, gtk_tx, "Quick Capture");
+}
+
 pub(super) fn handle_capture_crosshair(state: Arc<Mutex<DaemonState>>) {
     let Some(_session_guard) = acquire_capture_session_guard("crosshair") else {
         return;
@@ -660,9 +683,21 @@ pub(super) fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonSta
         capture_area_file_via_cpp().map_err(anyhow::Error::from)
     };
 
-    match cpp_area_init {
+    handle_interactive_capture_result(cpp_area_init, state, gtk_tx, "Area");
+}
+
+fn handle_interactive_capture_result(
+    result: anyhow::Result<AreaCapturePathResult>,
+    state: Arc<Mutex<DaemonState>>,
+    gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
+    label: &str,
+) {
+    match result {
         Ok(AreaCapturePathResult::Captured(path)) => {
             save_existing_png_and_open(path, state);
+        }
+        Ok(AreaCapturePathResult::CapturedOnDisplay(path, display)) => {
+            save_existing_png_and_open_on_display(path, state, Some(display));
         }
         Ok(AreaCapturePathResult::ScrollCaptured(path)) => {
             save_existing_png_and_open(path, state);
@@ -671,7 +706,7 @@ pub(super) fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonSta
             run_ocr_and_report(capture);
         }
         Ok(AreaCapturePathResult::Cancelled) => {
-            eprintln!("[daemon] Area selection cancelled.");
+            eprintln!("[daemon] {label} cancelled.");
         }
         Ok(AreaCapturePathResult::RecordingConfigUpdated) => {
             eprintln!("[daemon] Recording overlay state updated.");
@@ -697,10 +732,10 @@ pub(super) fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonSta
                 .downcast_ref::<crate::overlay::SelectionError>()
                 .is_some_and(is_launch_blocked_error)
             {
-                eprintln!("[daemon] Area capture blocked: {err}");
+                eprintln!("[daemon] {label} blocked: {err}");
                 return;
             }
-            notify_screenshot_capture_failed("Area", &err);
+            notify_screenshot_capture_failed(label, &err);
         }
     }
 }

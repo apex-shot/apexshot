@@ -46,6 +46,12 @@ fn should_use_gtk_layer_shell_selector_from_env(
 }
 
 fn should_use_gtk_layer_shell_selector() -> bool {
+    // Development-only route for visual parity testing on a desktop that would
+    // normally take the Qt path (for example GNOME Wayland).
+    if std::env::var_os("APEXSHOT_PREVIEW_RUST_CAPTURE_MENU").is_some() {
+        return true;
+    }
+
     let distro_is_arch = crate::distro::DistroInfo::detect()
         .map(|info| info.is_arch())
         .unwrap_or(false);

@@ -50,7 +50,28 @@ fn parse_area_capture_output_with_persist(
                 } else if matches!(mode.as_deref(), Some("scroll")) {
                     Ok(AreaCapturePathResult::ScrollCaptured(path))
                 } else {
-                    Ok(AreaCapturePathResult::Captured(path))
+                    let display = match (
+                        extract_int(stdout.trim(), "screen_x"),
+                        extract_int(stdout.trim(), "screen_y"),
+                        extract_int(stdout.trim(), "screen_width"),
+                        extract_int(stdout.trim(), "screen_height"),
+                    ) {
+                        (Some(x), Some(y), Some(width), Some(height))
+                            if width > 0 && height > 0 =>
+                        {
+                            Some(CaptureDisplay {
+                                x,
+                                y,
+                                width,
+                                height,
+                            })
+                        }
+                        _ => None,
+                    };
+                    Ok(match display {
+                        Some(display) => AreaCapturePathResult::CapturedOnDisplay(path, display),
+                        None => AreaCapturePathResult::Captured(path),
+                    })
                 }
             }
         }

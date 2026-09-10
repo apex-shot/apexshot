@@ -2,19 +2,20 @@
 mod tests {
     use super::{
         append_screenshot_timer_args, build_area_init_args, build_crosshair_args,
-        build_recording_ui_args, classify_overlay_exit_code, execute_builtin_overlay_query,
-        is_gnome_wayland_session_from_env, parse_area_capture_output_with_persist,
-        parse_area_capture_output_with_stderr, parse_capture_screen_json,
-        parse_capture_screen_json_with_mode, parse_recording_json, parse_selection_json,
-        save_capture_to_temp_png, should_request_screenshot_lock,
+        build_quick_capture_args, build_recording_ui_args, classify_overlay_exit_code,
+        execute_builtin_overlay_query, is_gnome_wayland_session_from_env,
+        parse_area_capture_output_with_persist, parse_area_capture_output_with_stderr,
+        parse_capture_screen_json, parse_capture_screen_json_with_mode, parse_recording_json,
+        parse_selection_json, save_capture_to_temp_png, should_request_screenshot_lock,
         should_use_gtk_layer_shell_selector_from_env, tracked_overlay_id,
-        CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode, OverlaySelection,
-        RecordingType,
+        AreaCapturePathResult, CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode,
+        OverlaySelection, RecordingType,
     };
     use crate::{
         backend::{CaptureData, PixelFormat},
         config::AppConfig,
     };
+    use std::path::PathBuf;
 
     #[test]
     fn crosshair_capture_does_not_build_area_init_settings_args() {
@@ -173,6 +174,28 @@ mod tests {
         .unwrap();
         assert_eq!(path.to_string_lossy(), "/tmp/demo.png");
         assert_eq!(mode.as_deref(), Some("ocr"));
+    }
+
+    #[test]
+    fn capture_output_preserves_selected_display_geometry() {
+        let result = parse_area_capture_output_with_persist(
+            Some(0),
+            r#"{"path":"/tmp/demo.png","width":1920,"height":1080,"mode":"area","screen_x":1920,"screen_y":0,"screen_width":2560,"screen_height":1440}"#,
+            "",
+            |_| Ok(()),
+        )
+        .unwrap();
+
+        match result {
+            AreaCapturePathResult::CapturedOnDisplay(path, display) => {
+                assert_eq!(path, PathBuf::from("/tmp/demo.png"));
+                assert_eq!(display.x, 1920);
+                assert_eq!(display.y, 0);
+                assert_eq!(display.width, 2560);
+                assert_eq!(display.height, 1440);
+            }
+            other => panic!("unexpected result: {other:?}"),
+        }
     }
 
     #[test]
@@ -340,6 +363,13 @@ mod tests {
         let args = build_recording_ui_args(&crate::config::AppConfig::default());
         assert!(args.iter().any(|arg| arg == "--area-init"));
         assert!(args.iter().any(|arg| arg == "--open-recording-ui"));
+    }
+
+    #[test]
+    fn build_quick_capture_args_opens_unified_menu() {
+        let args = build_quick_capture_args(&crate::config::AppConfig::default());
+        assert!(args.iter().any(|arg| arg == "--area-init"));
+        assert!(args.iter().any(|arg| arg == "--capture-menu"));
     }
 
     #[test]

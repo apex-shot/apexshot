@@ -5,12 +5,12 @@ use apexshot::{
     capture::{save_capture, ImageFormat, SaveConfig},
     capture_overlay::{
         capture_area_via_cpp, capture_crosshair_via_cpp, capture_screen_via_cpp,
-        is_launch_blocked_error, open_recording_ui_via_cpp, run_capture_overlay,
-        AreaCapturePathResult, AreaCaptureResult,
+        is_launch_blocked_error, open_recording_ui_via_cpp, quick_capture_via_cpp,
+        run_capture_overlay, AreaCapturePathResult, AreaCaptureResult,
     },
     hotkeys::ensure_desktop_entry_pub,
     ocr::{extract_text_from_capture, extract_text_from_path, ContentSource, OcrConfig, OcrOutput},
-    preview_launch::{launch_preview, show_preview_direct},
+    preview_launch::{launch_preview_on_display, show_preview_direct_on_display},
     recording::{
         run_overlay_recording_request, run_recording_with_controls, start_recording,
         RecordingConfig, RecordingControlsParams, StopAction,
@@ -20,6 +20,7 @@ use std::path::PathBuf;
 
 pub(crate) fn capture_daemon_action(capture_type: &str) -> Option<&'static str> {
     match capture_type {
+        "menu" | "quick" => Some("quick_capture"),
         "area" => Some("capture_area"),
         "crosshair" => Some("capture_crosshair"),
         "previous-area" | "previous_area" => Some("capture_area"),
@@ -182,6 +183,7 @@ pub(crate) fn run_capture(args: &[String]) {
         }
     }
 
+    let mut target_display = None;
     let capture: CaptureData = match capture_type {
         "screen" => match capture_screen_via_cpp() {
             Ok(capture) => {
@@ -197,9 +199,18 @@ pub(crate) fn run_capture(args: &[String]) {
                 std::process::exit(1);
             }
         },
-        "area" => match capture_area_via_cpp() {
+        "area" | "menu" | "quick" => match if capture_type == "area" {
+            capture_area_via_cpp()
+        } else {
+            quick_capture_via_cpp()
+        } {
             Ok(AreaCaptureResult::Captured(capture)) => {
                 println!("Captured area...");
+                capture
+            }
+            Ok(AreaCaptureResult::CapturedOnDisplay(capture, display)) => {
+                println!("Captured display...");
+                target_display = Some(display);
                 capture
             }
             Ok(AreaCaptureResult::ScrollCaptured(capture)) => {
@@ -239,6 +250,10 @@ pub(crate) fn run_capture(args: &[String]) {
         "crosshair" => match capture_crosshair_via_cpp() {
             Ok(AreaCaptureResult::Captured(capture)) => {
                 println!("Captured crosshair area...");
+                capture
+            }
+            Ok(AreaCaptureResult::CapturedOnDisplay(capture, display)) => {
+                target_display = Some(display);
                 capture
             }
             Ok(AreaCaptureResult::Cancelled) => {
@@ -405,9 +420,9 @@ pub(crate) fn run_capture(args: &[String]) {
     // Keep preview in a subprocess on desktops where that preserves the
     // existing GTK isolation / shell tracking behavior. KDE Wayland uses a
     // direct launch path to avoid extra taskbar/loading artifacts.
-    if let Err(e) = launch_preview(&saved_path) {
+    if let Err(e) = launch_preview_on_display(&saved_path, target_display) {
         eprintln!("Warning: Failed to launch preview overlay: {}", e);
-        show_preview_direct(saved_path.clone());
+        show_preview_direct_on_display(saved_path.clone(), target_display);
     }
 }
 

@@ -253,15 +253,15 @@ impl Default for AppConfig {
             shortcut_pin_to_screen: String::new(),
             shortcut_restore_recently_closed: String::new(),
             shortcut_toggle_overlays: String::new(),
-            shortcut_capture_area: "Shift+Super+4".to_string(),
+            shortcut_capture_area: String::new(),
             shortcut_capture_crosshair: "Ctrl+Alt+X".to_string(),
             shortcut_capture_previous_area: String::new(),
             shortcut_capture_fullscreen: "Shift+Super+3".to_string(),
             // Empty — window capture is temporarily discontinued.
             shortcut_capture_window: String::new(),
-            shortcut_capture_menu: String::new(),
+            shortcut_capture_menu: "Shift+Super+5".to_string(),
             shortcut_show_last_preview: "Ctrl+Alt+P".to_string(),
-            shortcut_open_recording_ui: "Ctrl+Alt+R".to_string(),
+            shortcut_open_recording_ui: String::new(),
             shortcut_record_screen: String::new(),
             shortcut_recording_stop_save: "Ctrl+Alt+Shift+S".to_string(),
             cloud_screenshot_quality: "Optimized for sharing".to_string(),
@@ -418,6 +418,30 @@ fn should_migrate_legacy_quick_access_overlay_size(raw: &str, config: &AppConfig
         && (config.quick_access_overlay_size - QUICK_ACCESS_OVERLAY_SCALE_MIN).abs() < f64::EPSILON
 }
 
+fn migrate_legacy_capture_shortcuts(config: &mut AppConfig) -> bool {
+    let mut changed = false;
+    if config.shortcut_capture_menu.trim().is_empty() {
+        let replacement = if !config.shortcut_capture_area.trim().is_empty() {
+            config.shortcut_capture_area.clone()
+        } else {
+            config.shortcut_open_recording_ui.clone()
+        };
+        if !replacement.is_empty() {
+            config.shortcut_capture_menu = replacement;
+            changed = true;
+        }
+    }
+    if !config.shortcut_capture_area.is_empty() {
+        config.shortcut_capture_area.clear();
+        changed = true;
+    }
+    if !config.shortcut_open_recording_ui.is_empty() {
+        config.shortcut_open_recording_ui.clear();
+        changed = true;
+    }
+    changed
+}
+
 pub fn config_path() -> Option<PathBuf> {
     let mut path = dirs::config_dir()?;
     path.push("apexshot");
@@ -440,8 +464,9 @@ pub fn load_config() -> AppConfig {
             if should_migrate_legacy_quick_access_overlay_size(&raw, &sanitized) {
                 sanitized.quick_access_overlay_size = QUICK_ACCESS_OVERLAY_SCALE_BASELINE;
             }
+            let shortcuts_changed = migrate_legacy_capture_shortcuts(&mut sanitized);
             let cloud_changed = apply_cloud_env_overrides_in_place(&mut sanitized);
-            if cloud_changed {
+            if shortcuts_changed || cloud_changed {
                 // Persist migrations (default backend URL, drop ghost sessions)
                 // so Settings/login don't keep lying after the first launch.
                 let _ = save_config(&sanitized);
@@ -1046,16 +1071,34 @@ quick_access_overlay_size: 0.5
     }
 
     #[test]
-    fn shortcut_defaults_include_open_recording_ui_and_stop() {
+    fn shortcut_defaults_include_quick_capture_and_recording_stop() {
         let cfg = AppConfig::default();
-        assert_eq!(cfg.shortcut_open_recording_ui, "Ctrl+Alt+R");
+        assert_eq!(cfg.shortcut_capture_menu, "Shift+Super+5");
+        assert_eq!(cfg.shortcut_capture_area, "");
+        assert_eq!(cfg.shortcut_open_recording_ui, "");
         assert_eq!(cfg.shortcut_record_screen, "");
         assert_eq!(cfg.shortcut_recording_stop_save, "Ctrl+Alt+Shift+S");
     }
 
     #[test]
+    fn legacy_area_shortcut_migrates_to_quick_capture() {
+        let mut cfg = AppConfig {
+            shortcut_capture_menu: String::new(),
+            shortcut_capture_area: "Ctrl+Alt+A".into(),
+            shortcut_open_recording_ui: "Ctrl+Alt+R".into(),
+            ..AppConfig::default()
+        };
+
+        assert!(migrate_legacy_capture_shortcuts(&mut cfg));
+        assert_eq!(cfg.shortcut_capture_menu, "Ctrl+Alt+A");
+        assert!(cfg.shortcut_capture_area.is_empty());
+        assert!(cfg.shortcut_open_recording_ui.is_empty());
+    }
+
+    #[test]
     fn config_yaml_round_trip_preserves_recording_shortcuts() {
         let original = AppConfig {
+            shortcut_capture_menu: "Alt+M".into(),
             shortcut_open_recording_ui: "Alt+R".into(),
             shortcut_record_screen: "Ctrl+Shift+R".into(),
             shortcut_recording_stop_save: "Alt+S".into(),
@@ -1065,6 +1108,7 @@ quick_access_overlay_size: 0.5
         let yaml = serde_yml::to_string(&original).unwrap();
         let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
 
+        assert_eq!(loaded.shortcut_capture_menu, original.shortcut_capture_menu);
         assert_eq!(
             loaded.shortcut_open_recording_ui,
             original.shortcut_open_recording_ui

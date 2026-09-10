@@ -57,6 +57,13 @@ pub(super) fn handle_toolbar_click(
             y,
         )
     };
+    // Capture-menu Area already committed the capture intent.  Its C++
+    // counterpart keeps frame/crop controls but disables the legacy tool rail.
+    let hit = if st.capture_menu_area_mode && matches!(hit, Some(ToolbarHit::Tool(_))) {
+        None
+    } else {
+        hit
+    };
     let clicked = match hit {
         Some(ToolbarHit::Tool(index)) => Some(TOOLBAR_ICONS[index]),
         _ => None,

@@ -30,7 +30,10 @@ public:
         bool speaker = false;
     };
 
-    static Result choose(QLocalServer* controlServer = nullptr);
+    // When a display was chosen before opening the toolbar, keep the toolbar
+    // and every resulting capture action scoped to that display.
+    static Result choose(QLocalServer* controlServer = nullptr,
+                         QScreen* targetScreen = nullptr);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -40,7 +43,7 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
-    explicit CaptureModeToolbar(QScreen* screen);
+    explicit CaptureModeToolbar(QScreen* screen, bool screenIsLocked = false);
 
     QRectF itemRect(int index) const;
     int hitTest(const QPoint& point) const;
@@ -49,6 +52,7 @@ private:
     void drawIcon(QPainter& painter, int index, const QPointF& center, const QColor& color) const;
 
     QScreen* m_screen;
+    bool m_screenIsLocked = false;
     Action m_action = Action::Cancel;
     int m_hovered = -1;
     bool m_finished = false;

@@ -149,6 +149,52 @@ pub fn open_recording_ui_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
     parse_area_capture_output_with_stderr(output.status.code(), stdout.trim(), stderr.trim())
 }
 
+pub fn open_quick_capture_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
+    if should_use_gtk_layer_shell_selector() {
+        eprintln!(
+            "[capture_overlay] Using ApexShot GTK capture menu on wlroots compositor"
+        );
+        return open_quick_capture_via_gtk_layer_shell_wlroots();
+    }
+
+    let config = crate::config::load_config();
+    let extra_args = build_quick_capture_args(&config);
+    let arg_refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();
+    let output = run_capture_binary(&arg_refs, None)?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    parse_area_capture_output_with_stderr(output.status.code(), stdout.trim(), stderr.trim())
+}
+
+pub fn quick_capture_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
+    match open_quick_capture_via_cpp()? {
+        AreaCapturePathResult::Captured(path) => {
+            let capture = load_capture_data_from_path(&path);
+            let _ = std::fs::remove_file(&path);
+            capture.map(AreaCaptureResult::Captured)
+        }
+        AreaCapturePathResult::CapturedOnDisplay(path, display) => {
+            let capture = load_capture_data_from_path(&path);
+            let _ = std::fs::remove_file(&path);
+            capture.map(|capture| AreaCaptureResult::CapturedOnDisplay(capture, display))
+        }
+        AreaCapturePathResult::ScrollCaptured(path) => {
+            let capture = load_capture_data_from_path(&path);
+            let _ = std::fs::remove_file(&path);
+            capture.map(AreaCaptureResult::ScrollCaptured)
+        }
+        AreaCapturePathResult::OcrRequested(capture) => {
+            Ok(AreaCaptureResult::OcrRequested(capture))
+        }
+        AreaCapturePathResult::RecordingRequested(request) => {
+            Ok(AreaCaptureResult::RecordingRequested(request))
+        }
+        AreaCapturePathResult::RecordingConfigUpdated | AreaCapturePathResult::Cancelled => {
+            Ok(AreaCaptureResult::Cancelled)
+        }
+    }
+}
+
 pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
     // Flatpak builds omit apexshot-capture; use the interactive Screenshot portal.
     if crate::app_identity::portal_only() {
@@ -204,6 +250,11 @@ pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
             let capture = load_capture_data_from_path(&path);
             let _ = std::fs::remove_file(&path);
             capture.map(AreaCaptureResult::Captured)
+        }
+        AreaCapturePathResult::CapturedOnDisplay(path, display) => {
+            let capture = load_capture_data_from_path(&path);
+            let _ = std::fs::remove_file(&path);
+            capture.map(|capture| AreaCaptureResult::CapturedOnDisplay(capture, display))
         }
         AreaCapturePathResult::ScrollCaptured(path) => {
             let capture = load_capture_data_from_path(&path);

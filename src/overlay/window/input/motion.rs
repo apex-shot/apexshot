@@ -311,6 +311,12 @@ pub(in crate::overlay::window) fn wire_selection_motion(
                             y,
                         )
                     };
+                    let hit =
+                        if st.capture_menu_area_mode && matches!(hit, Some(ToolbarHit::Tool(_))) {
+                            None
+                        } else {
+                            hit
+                        };
 
                     let mut next_hovered_window = None;
                     if !st.completed && !st.is_dragging && hit.is_none() && record_hit.is_none() {

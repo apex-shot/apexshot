@@ -657,7 +657,7 @@ mod tests {
     }
 
     #[test]
-    fn merge_missing_defaults_does_not_reintroduce_conflicting_record_screen() {
+    fn merge_missing_defaults_replaces_retired_recording_ui_binding() {
         let mut cfg = HotkeyConfig {
             bindings: vec![HotkeyBinding {
                 name: Some("open_recording_ui".into()),
@@ -667,14 +667,14 @@ mod tests {
         };
 
         assert!(merge_missing_default_hotkeys(&mut cfg));
-        assert!(cfg
-            .bindings
-            .iter()
-            .any(|binding| binding.name.as_deref() == Some("open_recording_ui")));
         assert!(!cfg
             .bindings
             .iter()
-            .any(|binding| binding.name.as_deref() == Some("record_screen")));
+            .any(|binding| binding.name.as_deref() == Some("open_recording_ui")));
+        assert!(cfg
+            .bindings
+            .iter()
+            .any(|binding| binding.name.as_deref() == Some("quick_capture")));
     }
 
     #[test]
@@ -709,7 +709,8 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(names.contains(&"recording_stop_save".to_string()));
-        assert!(names.contains(&"open_recording_ui".to_string()));
+        assert!(names.contains(&"quick_capture".to_string()));
+        assert!(!names.contains(&"open_recording_ui".to_string()));
         assert!(!names.contains(&"record_screen".to_string()));
         assert!(!names.contains(&"recording_pause_resume".to_string()));
         assert!(!names.contains(&"recording_restart".to_string()));
@@ -740,12 +741,11 @@ mod tests {
             .iter()
             .any(|binding| { binding.name.as_deref() == Some("record_screen") }));
 
-        // `record_area`, `open_recording_ui`, and `show_last_preview` ship with
-        // working defaults so the user can rebind them in the Shortcuts settings.
+        // Quick Capture and Show Last Preview ship with working defaults.
         assert!(hotkeys
             .bindings
             .iter()
-            .any(|binding| { binding.name.as_deref() == Some("open_recording_ui") }));
+            .any(|binding| { binding.name.as_deref() == Some("quick_capture") }));
 
         let show_last_preview = hotkeys
             .bindings
@@ -757,9 +757,9 @@ mod tests {
     }
 
     #[test]
-    fn app_config_can_expose_record_screen_separately_from_open_recording_ui() {
+    fn app_config_exposes_record_screen_separately_from_quick_capture() {
         let cfg = crate::config::AppConfig {
-            shortcut_open_recording_ui: "Ctrl+Alt+R".into(),
+            shortcut_capture_menu: "Ctrl+Alt+M".into(),
             shortcut_record_screen: "Ctrl+Shift+R".into(),
             ..crate::config::AppConfig::default()
         };
@@ -767,8 +767,9 @@ mod tests {
         let hotkeys = hotkey_config_from_app_config(&cfg);
 
         assert!(hotkeys.bindings.iter().any(|binding| {
-            binding.name.as_deref() == Some("open_recording_ui")
-                && binding.accelerator == "CTRL+ALT+R"
+            binding.name.as_deref() == Some("quick_capture")
+                && binding.accelerator == "CTRL+ALT+M"
+                && binding.args == vec!["capture", "menu"]
         }));
         assert!(hotkeys.bindings.iter().any(|binding| {
             binding.name.as_deref() == Some("record_screen")
@@ -784,11 +785,10 @@ mod tests {
             shortcut_open_from_clipboard: "Ctrl+Alt+V".into(),
             shortcut_restore_recently_closed: "Ctrl+Alt+Z".into(),
             shortcut_toggle_overlays: "Ctrl+Alt+H".into(),
-            shortcut_capture_area: "Shift+Super+4".into(),
+            shortcut_capture_menu: "Shift+Super+5".into(),
             shortcut_capture_crosshair: "Ctrl+Alt+X".into(),
             shortcut_capture_fullscreen: "Shift+Super+3".into(),
             shortcut_capture_window: "Shift+Super+5".into(),
-            shortcut_open_recording_ui: "Ctrl+Alt+R".into(),
             shortcut_recording_stop_save: "Ctrl+Alt+Shift+S".into(),
             ..crate::config::AppConfig::default()
         };
@@ -816,16 +816,16 @@ mod tests {
                 && binding.args == vec!["toggle-overlays".to_string()]
         }));
         assert!(hotkeys.bindings.iter().any(|binding| {
-            binding.name.as_deref() == Some("open_recording_ui")
-                && binding.accelerator == "CTRL+ALT+R"
-                && binding.args == vec!["record".to_string(), "ui".to_string()]
+            binding.name.as_deref() == Some("quick_capture")
+                && binding.accelerator == "SHIFT+SUPER+5"
+                && binding.args == vec!["capture".to_string(), "menu".to_string()]
         }));
     }
 
     #[test]
     fn blank_shortcuts_are_omitted_from_runtime_hotkeys() {
         let cfg = crate::config::AppConfig {
-            shortcut_open_recording_ui: String::new(),
+            shortcut_capture_menu: String::new(),
             ..crate::config::AppConfig::default()
         };
 
@@ -834,7 +834,7 @@ mod tests {
         assert!(!hotkeys
             .bindings
             .iter()
-            .any(|binding| binding.name.as_deref() == Some("open_recording_ui")));
+            .any(|binding| binding.name.as_deref() == Some("quick_capture")));
     }
 
     #[test]

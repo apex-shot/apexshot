@@ -3,11 +3,10 @@ use std::sync::mpsc::Sender;
 #[derive(Debug, Clone)]
 pub enum TrayAction {
     OpenUpdate(String),
-    CaptureArea,
+    QuickCapture,
     CaptureCrosshair,
     CaptureScreen,
     CaptureWindow,
-    OpenRecordingUi,
     OpenVideoEditor,
     OpenImageEditor,
     RecordScreen,
@@ -124,7 +123,7 @@ fn tray_icons() -> &'static Vec<ksni::Icon> {
 impl ksni::Tray for ApexShotTray {
     fn activate(&mut self, _x: i32, _y: i32) {
         if !self.recording {
-            self.send(TrayAction::CaptureArea);
+            self.send(TrayAction::QuickCapture);
         }
     }
 
@@ -189,9 +188,9 @@ impl ksni::Tray for ApexShotTray {
 
         menu.extend([
             item!(
-                &crate::i18n::t("Capture Area"),
+                &crate::i18n::t("Quick Capture"),
                 idle,
-                TrayAction::CaptureArea
+                TrayAction::QuickCapture
             ),
             item!(
                 &crate::i18n::t("Crosshair Capture"),
@@ -204,11 +203,6 @@ impl ksni::Tray for ApexShotTray {
                 TrayAction::CaptureScreen
             ),
             MenuItem::Separator,
-            item!(
-                &crate::i18n::t("Open Recording UI"),
-                idle,
-                TrayAction::OpenRecordingUi
-            ),
             item!(
                 &crate::i18n::t("Record Screen"),
                 idle,

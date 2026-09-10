@@ -64,9 +64,10 @@ Qt::WindowFlags toolbarFlags()
 
 } // namespace
 
-CaptureModeToolbar::CaptureModeToolbar(QScreen* screen)
+CaptureModeToolbar::CaptureModeToolbar(QScreen* screen, bool screenIsLocked)
     : QWidget(nullptr, toolbarFlags())
     , m_screen(screen)
+    , m_screenIsLocked(screenIsLocked)
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose, false);
@@ -79,14 +80,18 @@ CaptureModeToolbar::CaptureModeToolbar(QScreen* screen)
     move(available.center().x() - width() / 2, available.top() + 28);
 }
 
-CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServer)
+CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServer,
+                                                       QScreen* targetScreen)
 {
-    QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
+    QScreen* screen = targetScreen;
+    if (!screen) {
+        screen = QGuiApplication::screenAt(QCursor::pos());
+    }
     if (!screen) {
         screen = QGuiApplication::primaryScreen();
     }
 
-    CaptureModeToolbar toolbar(screen);
+    CaptureModeToolbar toolbar(screen, targetScreen != nullptr);
     QEventLoop loop;
     QObject::connect(&toolbar, &QObject::destroyed, &loop, &QEventLoop::quit);
     if (controlServer) {
@@ -412,7 +417,10 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         break;
     case 2:
         if (m_recording || !m_ocr) {
-            if (QScreen* currentScreen = QGuiApplication::screenAt(QCursor::pos())) {
+            QScreen* currentScreen = m_screenIsLocked
+                ? nullptr
+                : QGuiApplication::screenAt(QCursor::pos());
+            if (currentScreen) {
                 m_screen = currentScreen;
             }
             finish(Action::Display);

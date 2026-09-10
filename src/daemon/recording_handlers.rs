@@ -140,6 +140,9 @@ pub(super) async fn handle_open_recording_ui(_tx: std::sync::mpsc::Sender<Daemon
         Ok(Ok(AreaCapturePathResult::RecordingConfigUpdated)) => {
             eprintln!("[daemon] Recording UI updated settings only.");
         }
+        Ok(Ok(AreaCapturePathResult::CapturedOnDisplay(_, _))) => {
+            eprintln!("[daemon] Unexpected display capture from recording UI.");
+        }
         Ok(Ok(AreaCapturePathResult::Cancelled)) => {
             eprintln!("[daemon] Recording UI cancelled.");
         }

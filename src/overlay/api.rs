@@ -1,6 +1,7 @@
 use super::background::{
     background_frame_from_capture, background_frame_from_image, BackgroundFrame,
 };
+use super::capture_menu::CaptureMenuResult;
 use super::monitor_picker::MonitorChoice;
 use super::state::{OverlayMode, RecordingState, SelectorState};
 use super::window::setup_window;
@@ -104,6 +105,23 @@ impl AreaSelector {
     fn new_window_picker() -> Self {
         // Window capture is discontinued — open a normal area selector.
         Self::new()
+    }
+
+    fn new_with_capture_menu_result(menu: CaptureMenuResult) -> Self {
+        let selector = Self::new();
+        let mut state = selector.state.lock().unwrap();
+        // Match CaptureOverlay::setCaptureMenuAreaMode(): this is not the
+        // ordinary GTK selector, so it must not reveal the old left rail.
+        state.capture_menu_area_mode = true;
+        state.intent = if menu.ocr {
+            crate::overlay::recording::state::OverlayIntent::Ocr
+        } else {
+            crate::overlay::recording::state::OverlayIntent::Area
+        };
+        state.timer_delay_active = menu.timer_seconds > 0;
+        state.capture_delay_seconds = i32::from(menu.timer_seconds);
+        drop(state);
+        selector
     }
 
     /// Run the area selection dialog
@@ -332,6 +350,18 @@ pub fn select_area_from_capture_with_gtk_on_monitor(
     let selector = AreaSelector::new();
     let background = background_frame_from_capture(capture)?;
     selector.run_with_background_on_monitor(Some(background), preselected)
+}
+
+/// Run an area or OCR selector after the GTK capture menu chose its options.
+/// The monitor has already been selected, so no second display picker is shown.
+pub(crate) fn select_area_from_capture_with_gtk_from_capture_menu(
+    capture: &CaptureData,
+    preselected: MonitorChoice,
+    menu: CaptureMenuResult,
+) -> SelectionResult {
+    let selector = AreaSelector::new_with_capture_menu_result(menu);
+    let background = background_frame_from_capture(capture)?;
+    selector.run_with_background_on_monitor(Some(background), Some(preselected))
 }
 
 pub fn select_crosshair_from_capture_with_gtk(capture: &CaptureData) -> SelectionResult {

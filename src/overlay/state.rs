@@ -51,6 +51,10 @@ pub(crate) struct SelectorState {
     /// True when the user clicked Fullscreen — selection covers the whole screen,
     /// waiting for Enter to confirm the capture.
     pub(crate) fullscreen_mode: bool,
+    /// The selector was opened from the compact capture menu.  In this mode
+    /// the C++ overlay deliberately omits its legacy left tool rail; only the
+    /// frame and crop controls remain available.
+    pub(crate) capture_menu_area_mode: bool,
     // Menu state (capture-area only)
     pub(crate) capture_crop_menu_open: bool,
     pub(crate) capture_aspect_ratio_index: usize,
@@ -110,6 +114,7 @@ impl Default for SelectorState {
             hover_size_panel: false,
             hover_crop_panel: false,
             fullscreen_mode: false,
+            capture_menu_area_mode: false,
             capture_crop_menu_open: false,
             capture_aspect_ratio_index: 0,
             hovered_capture_crop_menu_item: -1,

@@ -34,6 +34,9 @@ constexpr int kListRowH = 52;
 constexpr int kListRowGap = 6;
 constexpr int kListPanelMaxW = 560;
 constexpr int kListPanelPad = 10;
+constexpr QColor kWindowPanel(5, 5, 7, 238);
+constexpr QColor kWindowRow(25, 25, 28, 246);
+constexpr QColor kWindowAccent(255, 102, 0, 210);
 
 void drawWindowPickerToolIcon(QPainter& p, int iconId, double cx, double cy, const QColor& col)
 {
@@ -67,11 +70,11 @@ void drawListRow(QPainter& p,
     path.addRoundedRect(row, 12, 12);
 
     if (hovered) {
-        p.fillPath(path, QColor(255, 102, 0, 210));
+        p.fillPath(path, kWindowAccent);
         p.setPen(QPen(QColor(255, 220, 190, 255), 1.6));
     } else {
-        p.fillPath(path, QColor(255, 255, 255, 18));
-        p.setPen(QPen(QColor(255, 255, 255, 36), 1.0));
+        p.fillPath(path, kWindowRow);
+        p.setPen(QPen(QColor(255, 255, 255, 30), 1.0));
     }
     p.setBrush(Qt::NoBrush);
     p.drawPath(path);
@@ -557,9 +560,17 @@ void CaptureOverlay::drawWindowPickerMode(QPainter& p, const QRect& widgetRect)
     titleFont.setBold(true);
     p.setFont(titleFont);
     p.setPen(QColor(255, 255, 255, 230));
-    p.drawText(QRect(0, 18, width(), 50),
-               Qt::AlignCenter,
-               QStringLiteral("Select a window"));
+    const QString title = QStringLiteral("Select a window");
+    const int titleW = QFontMetrics(titleFont).horizontalAdvance(title) + 36;
+    const QRectF titlePill((width() - titleW) / 2.0, 24.0, titleW, 38.0);
+    QPainterPath titlePath;
+    titlePath.addRoundedRect(titlePill, 14, 14);
+    p.fillPath(titlePath, kWindowPanel);
+    p.setPen(QPen(QColor(255, 255, 255, 28), 1.0));
+    p.setBrush(Qt::NoBrush);
+    p.drawPath(titlePath);
+    p.setPen(QColor(255, 255, 255, 230));
+    p.drawText(titlePill, Qt::AlignCenter, title);
 
     if (m_windows.isEmpty()) {
         QFont f;
@@ -570,7 +581,7 @@ void CaptureOverlay::drawWindowPickerMode(QPainter& p, const QRect& widgetRect)
                    Qt::AlignCenter,
                    QStringLiteral(
                        "No windows found on this display.\n"
-                       "Click Area to go back.\n"
+                       "Press Escape to go back.\n"
                        "On GNOME Wayland, enable the ApexShot extension for the window list."));
     } else {
         // Panel behind the list
@@ -582,9 +593,12 @@ void CaptureOverlay::drawWindowPickerMode(QPainter& p, const QRect& widgetRect)
                               first.width() + kListPanelPad * 2,
                               last.bottom() - first.y() + kListPanelPad * 2 + 1);
             QPainterPath panelPath;
-            panelPath.addRoundedRect(panel, 16, 16);
-            p.fillPath(panelPath, QColor(20, 20, 26, 230));
-            p.setPen(QPen(QColor(255, 255, 255, 28), 1.0));
+            panelPath.addRoundedRect(panel, 20, 20);
+            QPainterPath panelShadow;
+            panelShadow.addRoundedRect(panel.translated(0, 4), 20, 20);
+            p.fillPath(panelShadow, QColor(0, 0, 0, 110));
+            p.fillPath(panelPath, kWindowPanel);
+            p.setPen(QPen(QColor(255, 255, 255, 42), 1.0));
             p.setBrush(Qt::NoBrush);
             p.drawPath(panelPath);
         }

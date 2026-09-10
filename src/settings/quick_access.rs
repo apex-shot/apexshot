@@ -10,7 +10,6 @@ use super::select::SettingsSelect;
 pub struct QuickAccessSettingsWidgets {
     pub section: GtkBox,
     pub position_input: SettingsSelect,
-    pub multi_display_check: CheckButton,
     pub overlay_size_input: Scale,
     pub auto_close_enabled_check: CheckButton,
     pub auto_close_action_input: SettingsSelect,
@@ -69,18 +68,6 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     pos_hbox.append(&pos_label);
     pos_hbox.append(position_input.widget());
     overlay_frame.append(&build_row!(&pos_hbox, false));
-
-    // Multi-display
-    let multi_display_check = CheckButton::new();
-    multi_display_check.set_active(config.quick_access_multi_display);
-    let multi_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    multi_hbox.set_hexpand(true);
-    let multi_option = Label::new(Some(&t("Show on all displays")));
-    multi_option.set_xalign(0.0);
-    multi_option.set_hexpand(true);
-    multi_hbox.append(&multi_option);
-    multi_hbox.append(&multi_display_check);
-    overlay_frame.append(&build_row!(&multi_hbox, true));
 
     // Overlay Size
     let overlay_size_input = Scale::with_range(Orientation::Horizontal, 0.5, 1.5, 0.1);
@@ -216,7 +203,6 @@ pub fn build_quick_access_section(config: &AppConfig) -> QuickAccessSettingsWidg
     QuickAccessSettingsWidgets {
         section,
         position_input,
-        multi_display_check,
         overlay_size_input,
         auto_close_enabled_check,
         auto_close_action_input,

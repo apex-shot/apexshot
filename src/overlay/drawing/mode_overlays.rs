@@ -358,7 +358,7 @@ pub(super) fn draw_window_picker(
     center_y: f64,
     screen_width: f64,
     screen_height: f64,
-    background: Option<&BackgroundFrame>,
+    _background: Option<&BackgroundFrame>,
     windows: &[crate::compositor::WindowInfo],
     hovered_entry: i32,
 ) {
@@ -380,17 +380,15 @@ pub(super) fn draw_window_picker(
     let popup_y = picker.panel.y;
     let total_h = picker.panel.height;
 
-    draw_popup_panel(
-        context,
-        popup_x,
-        popup_y,
-        menu_w,
-        total_h,
-        12.0,
-        screen_width,
-        screen_height,
-        background,
-    );
+    super::rounded_rect_path(context, popup_x, popup_y + 4.0, menu_w, total_h, 20.0);
+    context.set_source_rgba(0.0, 0.0, 0.0, 110.0 / 255.0);
+    let _ = context.fill();
+    super::rounded_rect_path(context, popup_x, popup_y, menu_w, total_h, 20.0);
+    context.set_source_rgba(5.0 / 255.0, 5.0 / 255.0, 7.0 / 255.0, 238.0 / 255.0);
+    let _ = context.fill_preserve();
+    context.set_source_rgba(1.0, 1.0, 1.0, 42.0 / 255.0);
+    context.set_line_width(1.0);
+    let _ = context.stroke();
 
     // Section header "Select a Window"
     context.select_font_face(
@@ -418,18 +416,28 @@ pub(super) fn draw_window_picker(
         };
         let hovered = i as i32 == hovered_entry;
 
+        super::rounded_rect_path(
+            context,
+            item_rect.x,
+            item_rect.y,
+            item_rect.width,
+            item_rect.height,
+            8.0,
+        );
         if hovered {
-            super::rounded_rect_path(
-                context,
-                item_rect.x,
-                item_rect.y,
-                item_rect.width,
-                item_rect.height,
-                6.0,
-            );
-            context.set_source_rgba(176.0 / 255.0, 92.0 / 255.0, 56.0 / 255.0, 220.0 / 255.0);
-            let _ = context.fill();
+            context.set_source_rgba(1.0, 102.0 / 255.0, 0.0, 210.0 / 255.0);
+        } else {
+            context.set_source_rgba(25.0 / 255.0, 25.0 / 255.0, 28.0 / 255.0, 246.0 / 255.0);
         }
+        let _ = context.fill_preserve();
+        context.set_source_rgba(
+            1.0,
+            if hovered { 220.0 / 255.0 } else { 1.0 },
+            if hovered { 190.0 / 255.0 } else { 1.0 },
+            if hovered { 1.0 } else { 30.0 / 255.0 },
+        );
+        context.set_line_width(if hovered { 1.6 } else { 1.0 });
+        let _ = context.stroke();
 
         let text_color = if hovered {
             (1.0, 234.0 / 255.0, 214.0 / 255.0, 1.0)

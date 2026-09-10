@@ -32,10 +32,19 @@ pub enum OverlayResult {
 #[derive(Debug)]
 pub enum AreaCaptureResult {
     Captured(CaptureData),
+    CapturedOnDisplay(CaptureData, CaptureDisplay),
     ScrollCaptured(CaptureData),
     OcrRequested(CaptureData),
     RecordingRequested(RecordingRequest),
     Cancelled,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CaptureDisplay {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
 }
 
 /// Recording request from the capture overlay.
@@ -116,6 +125,7 @@ pub enum RecordingType {
 #[derive(Debug)]
 pub enum AreaCapturePathResult {
     Captured(PathBuf),
+    CapturedOnDisplay(PathBuf, CaptureDisplay),
     ScrollCaptured(PathBuf),
     OcrRequested(CaptureData),
     RecordingRequested(RecordingRequest),

@@ -134,21 +134,32 @@ QByteArray jsonEscape(const QString& value)
     return escaped;
 }
 
-void printCaptureScreenJson(const QString& path, const QSize& size, const char* mode = nullptr)
+void printCaptureScreenJson(const QString& path,
+                            const QSize& size,
+                            const char* mode = nullptr,
+                            const QRect& targetDisplay = QRect())
 {
     const auto escapedPath = jsonEscape(path);
+    QByteArray fields;
     if (mode && *mode) {
-        std::printf("{\"path\":\"%s\",\"width\":%d,\"height\":%d,\"mode\":\"%s\"}\n",
-                    escapedPath.constData(),
-                    size.width(),
-                    size.height(),
-                    mode);
-    } else {
-        std::printf("{\"path\":\"%s\",\"width\":%d,\"height\":%d}\n",
-                    escapedPath.constData(),
-                    size.width(),
-                    size.height());
+        fields += ",\"mode\":\"";
+        fields += mode;
+        fields += '"';
     }
+    if (targetDisplay.isValid()) {
+        fields += QStringLiteral(",\"screen_x\":%1,\"screen_y\":%2,"
+                                 "\"screen_width\":%3,\"screen_height\":%4")
+                      .arg(targetDisplay.x())
+                      .arg(targetDisplay.y())
+                      .arg(targetDisplay.width())
+                      .arg(targetDisplay.height())
+                      .toUtf8();
+    }
+    std::printf("{\"path\":\"%s\",\"width\":%d,\"height\":%d%s}\n",
+                escapedPath.constData(),
+                size.width(),
+                size.height(),
+                fields.constData());
     std::fflush(stdout);
 }
 
@@ -848,7 +859,19 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
 
     CaptureModeToolbar::Result captureMenuResult;
     if (captureMenuMode) {
-        captureMenuResult = CaptureModeToolbar::choose(&sessionServer);
+        QScreen* targetScreen = nullptr;
+        if (QGuiApplication::screens().size() > 1) {
+            targetScreen = MonitorPicker::selectTargetScreen();
+            if (!targetScreen) {
+                sessionServer.close();
+                QLocalServer::removeServer(sessionSocketPath);
+                return 1;
+            }
+        }
+
+        // Choose the display before opening the capture menu, so the menu and
+        // every action it starts stay on the chosen display.
+        captureMenuResult = CaptureModeToolbar::choose(&sessionServer, targetScreen);
         if (captureMenuResult.action == CaptureModeToolbar::Action::Cancel) {
             sessionServer.close();
             QLocalServer::removeServer(sessionSocketPath);
@@ -937,7 +960,8 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             imagePath = persistCaptureForStandaloneTest(imagePath, saveOutput);
             printCaptureScreenJson(imagePath,
                                    imageSize,
-                                   captureMenuResult.ocr ? "ocr" : nullptr);
+                                   captureMenuResult.ocr ? "ocr" : nullptr,
+                                   displayGeometry);
             return 0;
         }
 
@@ -1286,7 +1310,12 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                          image.width(),
                          image.height());
             path = persistCaptureForStandaloneTest(path, saveOutput);
-            printCaptureScreenJson(path, image.size());
+            printCaptureScreenJson(path,
+                                   image.size(),
+                                   nullptr,
+                                   captureMenuMode && targetScreen
+                                       ? targetScreen->geometry()
+                                       : QRect());
             return 0;
         }
         std::fprintf(stderr,
@@ -1435,7 +1464,8 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         printCaptureScreenJson(
           imagePath,
           imageSize,
-          crosshairCaptureMode ? "area" : (ocrRequested ? "ocr" : "area"));
+          crosshairCaptureMode ? "area" : (ocrRequested ? "ocr" : "area"),
+          captureMenuMode && targetScreen ? targetScreen->geometry() : QRect());
     } else {
         const QRect selGlobal = overlay->desktopSelection();
         std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d}\n",
