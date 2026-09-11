@@ -2261,3 +2261,30 @@ msgstr "壁纸"
 
 msgid "Watermark"
 msgstr "水印"
+
+msgid "Double-click to add motion"
+msgstr "双击添加运动"
+
+msgid "Double-click to add text"
+msgstr "双击添加文本"
+
+msgid "Show all gradients"
+msgstr "显示所有渐变"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "原始画布宽高比"
+
+msgid "Square 1:1 output"
+msgstr "方形 1:1 输出"
+
+msgid "Widescreen 16:9 output"
+msgstr "宽屏 16:9 输出"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "X（Twitter）链接卡片 1.91:1 输出"

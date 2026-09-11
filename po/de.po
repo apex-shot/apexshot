@@ -2310,3 +2310,30 @@ msgstr "Hintergrundbilder"
 
 msgid "Watermark"
 msgstr "Wasserzeichen"
+
+msgid "Double-click to add motion"
+msgstr "Doppelklicken, um eine Bewegung hinzuzufügen"
+
+msgid "Double-click to add text"
+msgstr "Doppelklicken, um Text hinzuzufügen"
+
+msgid "Show all gradients"
+msgstr "Alle Farbverläufe anzeigen"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "Originales Seitenverhältnis der Leinwand"
+
+msgid "Square 1:1 output"
+msgstr "Quadratische 1:1-Ausgabe"
+
+msgid "Widescreen 16:9 output"
+msgstr "Breitbild-16:9-Ausgabe"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "X-(Twitter-)Link-Karten-Ausgabe 1.91:1"

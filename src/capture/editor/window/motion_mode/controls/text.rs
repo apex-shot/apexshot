@@ -181,7 +181,11 @@ pub(super) fn install(
             };
             let transform = runtime.motion.sample(runtime.motion.playhead);
             let zoom_anchor = runtime.motion.zoom_anchor_at(runtime.motion.playhead);
-            let stage = super::super::super::motion_render::MotionStage::preview(width, height);
+            let stage = super::super::super::motion_render::MotionStage::preview(
+                width,
+                height,
+                runtime.motion.frame.preset.aspect(),
+            );
             let padding = runtime.motion.appearance.background_padding;
             let (pos_x, pos_y) =
                 super::super::super::motion_render::view_point_to_motion_text_position(
@@ -226,7 +230,11 @@ pub(super) fn install(
                         let height = preview.allocated_height().max(1) as f64;
                         super::super::super::motion_render::motion_text_contains_view_point(
                             card,
-                            super::super::super::motion_render::MotionStage::preview(width, height),
+                            super::super::super::motion_render::MotionStage::preview(
+                                width,
+                                height,
+                                runtime.motion.frame.preset.aspect(),
+                            ),
                             runtime.motion.appearance.background_padding,
                             runtime.motion.sample(runtime.motion.playhead),
                             runtime.motion.zoom_anchor_at(runtime.motion.playhead),

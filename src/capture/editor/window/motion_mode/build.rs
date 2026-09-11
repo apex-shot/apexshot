@@ -414,6 +414,7 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
                 motion_track: timeline.track,
                 text_track: timeline.text_track,
                 playhead_overlay: timeline.playhead,
+                playhead_handle: timeline.playhead_handle,
             },
             panels: MotionPanelParts {
                 inspector,

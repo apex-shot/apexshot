@@ -133,10 +133,13 @@ pub(super) fn motion_gradient_color_control(
     initial_start: gdk::RGBA,
     initial_end: gdk::RGBA,
     on_changed: impl Fn(usize, gdk::RGBA) + 'static,
-) -> GtkBox {
+) -> (GtkBox, Rc<dyn Fn(gdk::RGBA, gdk::RGBA)>) {
     let on_changed = Rc::new(on_changed);
     let colors = Rc::new(RefCell::new([initial_start, initial_end]));
     let active_stop = Rc::new(Cell::new(0usize));
+    // Programmatic updates (gradient presets) must not re-enter `on_changed`,
+    // which would clear the preset selection the update is installing.
+    let syncing = Rc::new(Cell::new(false));
 
     let (start_host, start_button, start_swatch, start_chooser, start_swatch_color) =
         motion_gradient_stop_button(initial_start, "Gradient start color");
@@ -200,7 +203,11 @@ pub(super) fn motion_gradient_color_control(
             let swatches = swatches.clone();
             let swatch_color = swatch_colors[index].clone();
             let on_changed = on_changed.clone();
+            let syncing = syncing.clone();
             move |chooser| {
+                if syncing.get() {
+                    return;
+                }
                 let rgba = chooser.rgba();
                 colors.borrow_mut()[index] = rgba;
                 *swatch_color.borrow_mut() = rgba;
@@ -219,7 +226,7 @@ pub(super) fn motion_gradient_color_control(
     hex_entry.connect_changed({
         let active_stop = active_stop.clone();
         let colors = colors.clone();
-        let choosers = [start_chooser, end_chooser];
+        let choosers = [start_chooser.clone(), end_chooser.clone()];
         move |entry| {
             let Some(rgba) = motion_color_from_hex(entry.text().as_str()) else {
                 return;
@@ -231,12 +238,32 @@ pub(super) fn motion_gradient_color_control(
         }
     });
 
+    let apply_colors = Rc::new({
+        let colors = colors.clone();
+        let swatches = swatches.clone();
+        let swatch_colors = swatch_colors.clone();
+        let choosers = [start_chooser, end_chooser];
+        let hex_entry = hex_entry.clone();
+        let syncing = syncing.clone();
+        move |start: gdk::RGBA, end: gdk::RGBA| {
+            syncing.set(true);
+            *colors.borrow_mut() = [start, end];
+            for (index, rgba) in [start, end].into_iter().enumerate() {
+                *swatch_colors[index].borrow_mut() = rgba;
+                swatches[index].queue_draw();
+                choosers[index].set_rgba(&rgba);
+            }
+            hex_entry.set_text(&motion_color_hex(start));
+            syncing.set(false);
+        }
+    });
+
     let control = GtkBox::new(Orientation::Horizontal, 8);
     control.add_css_class("editor-motion-gradient-color-control");
     control.append(&start_host);
     control.append(&end_host);
     control.append(&hex_entry);
-    control
+    (control, apply_colors)
 }
 
 fn motion_gradient_stop_button(

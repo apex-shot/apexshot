@@ -92,6 +92,40 @@ impl Default for MotionWatermark {
     }
 }
 
+/// Shotbase's image-Motion `framePresetId` section with recovered labels
+/// Standard, Instagram, X (Twitter), and YouTube. The binary does not expose
+/// the presets' dimensions or safe areas, so the output aspects below are
+/// Apexshot design decisions: each preset re-fits the Motion scene into a
+/// centered social output format, while Standard keeps the original canvas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MotionFramePreset {
+    #[default]
+    Standard,
+    Instagram,
+    X,
+    YouTube,
+}
+
+impl MotionFramePreset {
+    /// Target output width/height ratio; `None` keeps the source canvas.
+    pub fn aspect(self) -> Option<f64> {
+        match self {
+            Self::Standard => None,
+            Self::Instagram => Some(1.0),
+            // X link-card ratio.
+            Self::X => Some(1200.0 / 628.0),
+            Self::YouTube => Some(16.0 / 9.0),
+        }
+    }
+}
+
+/// A separately persisted Frame layer, matching Shotbase's own
+/// `frameSnapshot` contract rather than a field of the Appearance scene.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct MotionFrame {
+    pub preset: MotionFramePreset,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MotionState {
     pub duration: f64,
@@ -109,6 +143,7 @@ pub struct MotionState {
     pub selected_text: Option<usize>,
     pub appearance: MotionAppearance,
     pub watermark: MotionWatermark,
+    pub frame: MotionFrame,
 }
 
 impl Default for MotionState {
@@ -126,6 +161,7 @@ impl Default for MotionState {
             selected_text: None,
             appearance: MotionAppearance::default(),
             watermark: MotionWatermark::default(),
+            frame: MotionFrame::default(),
         }
     }
 }

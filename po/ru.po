@@ -2299,3 +2299,30 @@ msgstr "Обои"
 
 msgid "Watermark"
 msgstr "Водяной знак"
+
+msgid "Double-click to add motion"
+msgstr "Двойной щелчок, чтобы добавить движение"
+
+msgid "Double-click to add text"
+msgstr "Двойной щелчок, чтобы добавить текст"
+
+msgid "Show all gradients"
+msgstr "Показать все градиенты"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "Пропорции исходного холста"
+
+msgid "Square 1:1 output"
+msgstr "Квадратный вывод 1:1"
+
+msgid "Widescreen 16:9 output"
+msgstr "Широкоэкранный вывод 16:9"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "Вывод карточки ссылки X (Twitter) 1.91:1"

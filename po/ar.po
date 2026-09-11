@@ -2280,3 +2280,30 @@ msgstr "الخلفيات"
 
 msgid "Watermark"
 msgstr "علامة مائية"
+
+msgid "Double-click to add motion"
+msgstr "انقر نقرًا مزدوجًا لإضافة حركة"
+
+msgid "Double-click to add text"
+msgstr "انقر نقرًا مزدوجًا لإضافة نص"
+
+msgid "Show all gradients"
+msgstr "عرض كل التدرجات"
+
+msgid "Instagram"
+msgstr "إنستغرام"
+
+msgid "YouTube"
+msgstr "يوتيوب"
+
+msgid "Original canvas aspect"
+msgstr "نسبة أبعاد اللوحة الأصلية"
+
+msgid "Square 1:1 output"
+msgstr "إخراج مربع 1:1"
+
+msgid "Widescreen 16:9 output"
+msgstr "إخراج عريض 16:9"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "إخراج بطاقة روابط X (تويتر) 1.91:1"

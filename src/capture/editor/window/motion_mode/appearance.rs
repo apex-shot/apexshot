@@ -11,12 +11,127 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::i18n::t;
-use crate::recording::editor::model::MotionBackgroundFillType;
+use crate::recording::editor::model::{MotionBackgroundFillType, MotionFramePreset};
 
 use super::widgets::{
     motion_appearance_slider, motion_color_control, motion_gradient_color_control, motion_rgba,
 };
 use super::MotionSession;
+
+/// Two-stop gradient presets for Motion backgrounds. Shotbase ships a
+/// gradient-preset model (`selectedGradientPresetIndex`) whose exact visuals
+/// are not recoverable from the binary, so these are Apexshot's own presets;
+/// selecting one copies its stops into the editable gradient colors.
+const MOTION_GRADIENT_PRESETS: [(&str, [f64; 4], [f64; 4]); 8] = [
+    ("Dusk", [0.10, 0.14, 0.30, 1.0], [0.45, 0.22, 0.55, 1.0]),
+    ("Sunset", [0.98, 0.55, 0.30, 1.0], [0.88, 0.28, 0.48, 1.0]),
+    ("Ocean", [0.13, 0.62, 0.65, 1.0], [0.07, 0.22, 0.47, 1.0]),
+    ("Forest", [0.20, 0.55, 0.34, 1.0], [0.05, 0.25, 0.18, 1.0]),
+    ("Ember", [0.85, 0.25, 0.21, 1.0], [0.30, 0.07, 0.10, 1.0]),
+    ("Slate", [0.55, 0.58, 0.64, 1.0], [0.16, 0.18, 0.22, 1.0]),
+    ("Peach", [1.00, 0.85, 0.72, 1.0], [0.98, 0.55, 0.55, 1.0]),
+    ("Violet", [0.58, 0.36, 0.90, 1.0], [0.20, 0.16, 0.50, 1.0]),
+];
+
+/// One gradient preset swatch, sized and styled exactly like the wallpaper
+/// thumbnails so both catalogs fill the inspector width the same way.
+fn motion_gradient_preset_button(
+    index: usize,
+    start: [f64; 4],
+    end: [f64; 4],
+    session: &MotionSession,
+    preview: &DrawingArea,
+    none_button: &Button,
+    apply_gradient_colors: &Rc<dyn Fn(gtk4::gdk::RGBA, gtk4::gdk::RGBA)>,
+    selection_buttons: &Rc<RefCell<Vec<(usize, Button)>>>,
+) -> Button {
+    let button = Button::new();
+    button.set_has_frame(false);
+    button.set_size_request(56, 56);
+    button.add_css_class("editor-background-gradient-button");
+    button.add_css_class("editor-background-preview-size-regular");
+    button.add_css_class("editor-motion-gradient-preset");
+    button.set_tooltip_text(Some(&t(MOTION_GRADIENT_PRESETS[index].0)));
+    button.set_child(Some(&motion_gradient_preset_area(start, end)));
+    selection_buttons.borrow_mut().push((index, button.clone()));
+    button.connect_clicked({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        let none_button = none_button.clone();
+        let selection_buttons = selection_buttons.clone();
+        let apply_gradient_colors = apply_gradient_colors.clone();
+        move |_| {
+            {
+                let mut runtime = runtime.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.appearance.gradient_color_1 = start;
+                runtime.motion.appearance.gradient_color_2 = end;
+                runtime.motion.appearance.selected_gradient_preset_index = Some(index);
+                runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
+                none_button.remove_css_class("active-background-option");
+                preview.queue_draw();
+            }
+            let [r1, g1, b1, a1] = start;
+            let [r2, g2, b2, a2] = end;
+            apply_gradient_colors(
+                gtk4::gdk::RGBA::new(r1 as f32, g1 as f32, b1 as f32, a1 as f32),
+                gtk4::gdk::RGBA::new(r2 as f32, g2 as f32, b2 as f32, a2 as f32),
+            );
+            for (candidate_index, candidate) in selection_buttons.borrow().iter() {
+                if *candidate_index == index {
+                    candidate.add_css_class("active-background-option");
+                } else {
+                    candidate.remove_css_class("active-background-option");
+                }
+            }
+        }
+    });
+    button
+}
+
+/// The compact strip's expand affordance: a fifth preset rendered like a
+/// wallpaper thumbnail with the catalog's stack glyph, opening the full grid.
+fn motion_gradient_expand_tile(start: [f64; 4], end: [f64; 4], stack: &Stack) -> Button {
+    let button = Button::new();
+    button.set_has_frame(false);
+    button.set_size_request(56, 56);
+    button.add_css_class("editor-background-gradient-button");
+    button.add_css_class("editor-background-preview-size-regular");
+    button.add_css_class("editor-motion-gradient-preset");
+    button.set_tooltip_text(Some(&t("Show all gradients")));
+    let overlay = Overlay::new();
+    overlay.set_child(Some(&motion_gradient_preset_area(start, end)));
+    let expand = Label::new(Some("⌄"));
+    expand.set_halign(Align::Center);
+    expand.set_valign(Align::End);
+    expand.set_can_target(false);
+    expand.add_css_class("editor-motion-wallpaper-stack-glyph");
+    overlay.add_overlay(&expand);
+    button.set_child(Some(&overlay));
+    button.connect_clicked({
+        let stack = stack.clone();
+        move |_| stack.set_visible_child_name("all")
+    });
+    button
+}
+
+fn motion_gradient_preset_area(start: [f64; 4], end: [f64; 4]) -> DrawingArea {
+    let area = DrawingArea::new();
+    area.set_content_width(56);
+    area.set_content_height(56);
+    area.set_can_target(false);
+    area.set_draw_func(move |_, cr, width, height| {
+        let gradient = gtk4::cairo::LinearGradient::new(0.0, 0.0, f64::from(width), f64::from(height));
+        let [r1, g1, b1, a1] = start;
+        let [r2, g2, b2, a2] = end;
+        gradient.add_color_stop_rgba(0.0, r1, g1, b1, a1);
+        gradient.add_color_stop_rgba(1.0, r2, g2, b2, a2);
+        cr.set_source(&gradient).ok();
+        motion_thumbnail_rounded_rectangle(cr, 0.0, 0.0, f64::from(width), f64::from(height), 11.0);
+        cr.fill().ok();
+    });
+    area
+}
 
 /// Shotbase keeps Motion appearance as a scene-level inspector rather than an
 /// animation clip.  The five fill controls map one-to-one to the recovered
@@ -113,32 +228,110 @@ pub(super) fn build_motion_appearance_panel(
     let gradient_title = Label::new(Some(&t("Gradient")));
     gradient_title.add_css_class("editor-background-section-title");
     gradient_title.set_xalign(0.0);
-    let gradient = motion_gradient_color_control(initial_gradient_start, initial_gradient_end, {
-        let runtime = session.runtime.clone();
-        let preview = preview.clone();
-        let none_button = none_button.clone();
-        move |stop, rgba| {
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            let color = [
-                rgba.red().into(),
-                rgba.green().into(),
-                rgba.blue().into(),
-                rgba.alpha().into(),
-            ];
-            if stop == 0 {
-                runtime.motion.appearance.gradient_color_1 = color;
-            } else {
-                runtime.motion.appearance.gradient_color_2 = color;
+    let preset_buttons: Rc<RefCell<Vec<(usize, Button)>>> = Rc::new(RefCell::new(Vec::new()));
+    let (gradient, apply_gradient_colors) =
+        motion_gradient_color_control(initial_gradient_start, initial_gradient_end, {
+            let runtime = session.runtime.clone();
+            let preview = preview.clone();
+            let none_button = none_button.clone();
+            let preset_buttons = preset_buttons.clone();
+            move |stop, rgba| {
+                let mut runtime = runtime.borrow_mut();
+                runtime.begin_motion_edit();
+                let color = [
+                    rgba.red().into(),
+                    rgba.green().into(),
+                    rgba.blue().into(),
+                    rgba.alpha().into(),
+                ];
+                if stop == 0 {
+                    runtime.motion.appearance.gradient_color_1 = color;
+                } else {
+                    runtime.motion.appearance.gradient_color_2 = color;
+                }
+                runtime.motion.appearance.selected_gradient_preset_index = None;
+                runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
+                none_button.remove_css_class("active-background-option");
+                for (_, button) in preset_buttons.borrow().iter() {
+                    button.remove_css_class("active-background-option");
+                }
+                preview.queue_draw();
             }
-            runtime.motion.appearance.selected_gradient_preset_index = None;
-            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
-            none_button.remove_css_class("active-background-option");
-            preview.queue_draw();
-        }
-    });
+        });
     gradient_section.append(&gradient_title);
     gradient_section.append(&gradient);
+
+    // Presets follow the wallpaper catalog's compact-strip → full-grid
+    // progression, with swatches much smaller than wallpaper thumbnails so
+    // the inspector width never grows.
+    let initial_gradient_preset = {
+        let runtime = session.runtime.borrow();
+        runtime.motion.appearance.selected_gradient_preset_index
+    };
+    let presets_section = GtkBox::new(Orientation::Vertical, 5);
+    let presets_stack = Stack::new();
+    presets_stack.set_hhomogeneous(false);
+    presets_stack.set_vhomogeneous(false);
+    presets_section.append(&presets_stack);
+    let compact_row = GtkBox::new(Orientation::Horizontal, 5);
+    compact_row.add_css_class("editor-motion-gradient-presets");
+    presets_stack.add_named(&compact_row, Some("compact"));
+    let all_view = GtkBox::new(Orientation::Vertical, 5);
+    let show_less = Button::with_label(&t("Show less"));
+    show_less.set_has_frame(false);
+    show_less.set_halign(Align::End);
+    show_less.add_css_class("editor-background-section-action-button");
+    all_view.append(&show_less);
+    presets_stack.add_named(&all_view, Some("all"));
+
+    let add_preset_button = |index: usize,
+                             start: [f64; 4],
+                             end: [f64; 4],
+                             target: &GtkBox,
+                             initial_active: Option<usize>| {
+        let button = motion_gradient_preset_button(
+            index,
+            start,
+            end,
+            session,
+            preview,
+            &none_button,
+            &apply_gradient_colors,
+            &preset_buttons,
+        );
+        if initial_active == Some(index) {
+            button.add_css_class("active-background-option");
+        }
+        target.append(&button);
+    };
+    let expand_preset = &MOTION_GRADIENT_PRESETS[3];
+    for (index, (_, start, end)) in MOTION_GRADIENT_PRESETS.iter().enumerate().take(3) {
+        add_preset_button(index, *start, *end, &compact_row, initial_gradient_preset);
+    }
+    compact_row.append(&motion_gradient_expand_tile(
+        expand_preset.1,
+        expand_preset.2,
+        &presets_stack,
+    ));
+    for row_start in (0..MOTION_GRADIENT_PRESETS.len()).step_by(4) {
+        let row = GtkBox::new(Orientation::Horizontal, 5);
+        row.add_css_class("editor-motion-gradient-presets");
+        for (index, (_, start, end)) in MOTION_GRADIENT_PRESETS
+            .iter()
+            .enumerate()
+            .skip(row_start)
+            .take(4)
+        {
+            add_preset_button(index, *start, *end, &row, initial_gradient_preset);
+        }
+        all_view.append(&row);
+    }
+    show_less.connect_clicked({
+        let stack = presets_stack.clone();
+        move |_| stack.set_visible_child_name("compact")
+    });
+    presets_stack.set_visible_child_name("compact");
+    gradient_section.append(&presets_section);
     let (wallpaper_catalog, activate_wallpaper_catalog) =
         motion_wallpaper_catalog_section(session, preview, &none_button);
     let image_section = motion_image_section(
@@ -436,6 +629,76 @@ pub(super) fn build_motion_appearance_panel(
     });
     border_section.append(&radius.widget());
     root.append(&border_section);
+
+    // Shotbase's Frame section: an independent layer with its own persisted
+    // preset id, not an Appearance field. Standard keeps the original canvas;
+    // the other presets re-fit the scene into a centered social format.
+    let frame_section = motion_appearance_section("Frame");
+    let initial_frame_preset = {
+        let runtime = session.runtime.borrow();
+        runtime.motion.frame.preset
+    };
+    let frame_buttons: Rc<RefCell<Vec<(MotionFramePreset, Button)>>> =
+        Rc::new(RefCell::new(Vec::new()));
+    let frame_row = GtkBox::new(Orientation::Horizontal, 6);
+    for (preset, label, tooltip) in [
+        (
+            MotionFramePreset::Standard,
+            t("Standard"),
+            t("Original canvas aspect"),
+        ),
+        (
+            MotionFramePreset::Instagram,
+            t("Instagram"),
+            t("Square 1:1 output"),
+        ),
+        (
+            MotionFramePreset::X,
+            t("X"),
+            t("X (Twitter) link-card 1.91:1 output"),
+        ),
+        (
+            MotionFramePreset::YouTube,
+            t("YouTube"),
+            t("Widescreen 16:9 output"),
+        ),
+    ] {
+        let button = Button::with_label(&label);
+        button.set_has_frame(false);
+        button.set_hexpand(true);
+        button.add_css_class("editor-background-option-button");
+        button.set_tooltip_text(Some(&tooltip));
+        if initial_frame_preset == preset {
+            button.add_css_class("active-background-option");
+        }
+        button.connect_clicked({
+            let runtime = session.runtime.clone();
+            let preview = preview.clone();
+            let frame_buttons = frame_buttons.clone();
+            move |_| {
+                {
+                    let mut runtime = runtime.borrow_mut();
+                    runtime.begin_motion_edit();
+                    runtime.motion.frame.preset = preset;
+                    // The scene rectangle changes with the preset, so the
+                    // cached backdrop is no longer valid.
+                    runtime.backdrop_cache = None;
+                    preview.queue_draw();
+                }
+                for (candidate, button) in frame_buttons.borrow().iter() {
+                    if *candidate == preset {
+                        button.add_css_class("active-background-option");
+                    } else {
+                        button.remove_css_class("active-background-option");
+                    }
+                }
+            }
+        });
+        frame_buttons.borrow_mut().push((preset, button.clone()));
+        frame_row.append(&button);
+    }
+    frame_section.append(&frame_row);
+    root.append(&frame_section);
     root
 }
 

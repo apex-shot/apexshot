@@ -43,6 +43,7 @@ pub(in crate::capture::editor::window) struct MotionTimelineParts {
     pub motion_track: DrawingArea,
     pub text_track: DrawingArea,
     pub playhead_overlay: DrawingArea,
+    pub playhead_handle: DrawingArea,
 }
 
 pub(in crate::capture::editor::window) struct MotionPanelParts {

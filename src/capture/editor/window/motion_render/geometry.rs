@@ -20,8 +20,9 @@ impl MotionStage {
         }
     }
 
-    pub(super) fn preview(width: f64, height: f64) -> Self {
+    pub(super) fn preview(width: f64, height: f64, frame_aspect: Option<f64>) -> Self {
         let (_, _, bounds_w, bounds_h) = motion_scene_bounds(width, height);
+        let (bounds_w, bounds_h) = fit_stage_aspect(bounds_w, bounds_h, frame_aspect);
         Self {
             bounds_w,
             bounds_h,
@@ -29,6 +30,34 @@ impl MotionStage {
             center_y: height / 2.0,
         }
     }
+}
+
+/// Largest centered rectangle with the requested aspect inside the given
+/// bounds; `None` (Standard) keeps the bounds unchanged.
+pub(super) fn fit_stage_aspect(bounds_w: f64, bounds_h: f64, aspect: Option<f64>) -> (f64, f64) {
+    let Some(aspect) = aspect else {
+        return (bounds_w, bounds_h);
+    };
+    let width = bounds_w.min(bounds_h * aspect);
+    (width, width / aspect)
+}
+
+/// The preview scene panel rectangle for the current Frame preset: the inset
+/// scene bounds re-fitted to the preset's aspect. The backdrop clip and the
+/// foreground stage must agree on this rectangle.
+pub(super) fn motion_preview_scene_rect(
+    width: f64,
+    height: f64,
+    frame_aspect: Option<f64>,
+) -> (f64, f64, f64, f64) {
+    let (x, y, bounds_w, bounds_h) = motion_scene_bounds(width, height);
+    let (scene_w, scene_h) = fit_stage_aspect(bounds_w, bounds_h, frame_aspect);
+    (
+        x + (bounds_w - scene_w) / 2.0,
+        y + (bounds_h - scene_h) / 2.0,
+        scene_w,
+        scene_h,
+    )
 }
 
 #[derive(Clone, Copy)]

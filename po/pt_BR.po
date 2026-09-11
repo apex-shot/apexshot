@@ -2300,3 +2300,30 @@ msgstr "Papéis de parede"
 
 msgid "Watermark"
 msgstr "Marca-d'água"
+
+msgid "Double-click to add motion"
+msgstr "Clique duas vezes para adicionar movimento"
+
+msgid "Double-click to add text"
+msgstr "Clique duas vezes para adicionar texto"
+
+msgid "Show all gradients"
+msgstr "Mostrar todos os gradientes"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "Proporção da tela original"
+
+msgid "Square 1:1 output"
+msgstr "Saída quadrada 1:1"
+
+msgid "Widescreen 16:9 output"
+msgstr "Saída widescreen 16:9"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "Saída de cartão de link do X (Twitter) 1.91:1"

@@ -2308,3 +2308,30 @@ msgstr "Fonds d’écran"
 
 msgid "Watermark"
 msgstr "Filigrane"
+
+msgid "Double-click to add motion"
+msgstr "Double-cliquez pour ajouter un mouvement"
+
+msgid "Double-click to add text"
+msgstr "Double-cliquez pour ajouter du texte"
+
+msgid "Show all gradients"
+msgstr "Afficher tous les dégradés"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "Format du canevas d'origine"
+
+msgid "Square 1:1 output"
+msgstr "Sortie carrée 1:1"
+
+msgid "Widescreen 16:9 output"
+msgstr "Sortie grand écran 16:9"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "Sortie carte de lien X (Twitter) 1.91:1"

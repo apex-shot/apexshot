@@ -7,8 +7,7 @@ pub fn export_motion_mp4(
     crate::recording::editor::ffmpeg::ensure_tools_available()
         .map_err(|error| error.to_string())?;
 
-    let out_w = 1920i32;
-    let out_h = 1080i32;
+    let (out_w, out_h) = motion_frame_output_size(motion.frame.preset);
     let Some(card) = crate::capture::editor::render::rgba_image_to_surface(snapshot) else {
         return Err("could not prepare the Motion still".into());
     };
@@ -115,6 +114,20 @@ pub fn export_motion_mp4(
         return Err("ffmpeg failed to encode the Motion video".into());
     }
     Ok(output)
+}
+
+/// Output canvas for a Frame preset. The long edge keeps the established
+/// 1920px budget; dimensions are rounded to even values because the MP4
+/// encoder's yuv420p pixel format requires even sizes.
+fn motion_frame_output_size(preset: MotionFramePreset) -> (i32, i32) {
+    fn even(value: f64) -> i32 {
+        ((value.round() as i32) / 2 * 2).max(2)
+    }
+    match preset.aspect() {
+        None => (1920, 1080),
+        Some(aspect) if aspect >= 1.0 => (1920, even(1920.0 / aspect)),
+        Some(aspect) => (even(1080.0 * aspect), 1080),
+    }
 }
 
 fn unique_motion_path(dir: &Path, stem: &str) -> PathBuf {

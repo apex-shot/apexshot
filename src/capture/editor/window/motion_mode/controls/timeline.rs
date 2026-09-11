@@ -1,4 +1,6 @@
-use gtk4::{gdk, glib, prelude::*, DrawingArea, EventControllerMotion, GestureClick, GestureDrag};
+use gtk4::{
+    gdk, glib, prelude::*, DrawingArea, EventControllerMotion, GestureClick, GestureDrag, Overlay,
+};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -93,7 +95,8 @@ pub(super) fn install(
 
     // A press on a clip may become a drag. Defer the expensive inspector
     // refresh until release so the first pointer move is never blocked by a
-    // full preview render.
+    // full preview render. Clicking empty track space only changes selection;
+    // the playhead is moved by dragging the playhead handle.
     let motion_track_dragged = Rc::new(Cell::new(false));
     let track_click = GestureClick::new();
     track_click.set_button(1);
@@ -121,7 +124,6 @@ pub(super) fn install(
                 if runtime.motion.add_segment_at(time).is_none() {
                     runtime.motion.selected = runtime.motion.segment_index_at(time);
                     runtime.motion.selected_text = None;
-                    runtime.motion.playhead = time;
                 }
             } else if let Some(index) = runtime.motion.segment_index_at(time) {
                 runtime.motion.selected = Some(index);
@@ -129,7 +131,6 @@ pub(super) fn install(
             } else {
                 runtime.motion.selected = None;
                 runtime.motion.selected_text = None;
-                runtime.motion.playhead = time;
             }
             drop(runtime);
             redraw();
@@ -308,7 +309,6 @@ pub(super) fn install(
                 if runtime.motion.add_text_at(time).is_none() {
                     runtime.motion.selected_text = runtime.motion.text_index_at(time);
                     runtime.motion.selected = None;
-                    runtime.motion.playhead = time;
                 }
             } else if let Some(index) = runtime.motion.text_index_at(time) {
                 runtime.motion.selected_text = Some(index);
@@ -316,7 +316,6 @@ pub(super) fn install(
             } else {
                 runtime.motion.selected_text = None;
                 runtime.motion.selected = None;
-                runtime.motion.playhead = time;
             }
             drop(runtime);
             redraw();
@@ -464,6 +463,60 @@ pub(super) fn install(
     });
     parts.timeline.text_track.add_controller(text_drag);
     install_track_end_cursor(&parts.timeline.text_track, session.runtime.clone(), true);
+
+    // The playhead only moves by dragging its handle. The pointer's board x
+    // is the handle's *allocated* position plus the widget-local pointer x;
+    // reading the margin property instead lags the real layout by a frame and
+    // made the playhead overshoot and oscillate under a moving pointer.
+    let playhead_drag = GestureDrag::new();
+    playhead_drag.set_button(1);
+    playhead_drag.connect_drag_begin({
+        let session = session.runtime.clone();
+        move |_, _, _| {
+            // Holding the handle pauses playback; otherwise the timer keeps
+            // advancing the playhead the drag is trying to reposition.
+            let mut runtime = session.borrow_mut();
+            runtime.playing = false;
+            runtime.last_tick = None;
+            runtime.preview_end = None;
+        }
+    });
+    playhead_drag.connect_drag_update({
+        let session = session.runtime.clone();
+        let redraw_playhead = redraw_playhead.clone();
+        let handle = parts.timeline.playhead_handle.clone();
+        move |gesture, offset_x, _| {
+            let Some((start_x, _)) = gesture.start_point() else {
+                return;
+            };
+            let width = gesture
+                .widget()
+                .and_then(|widget| widget.ancestor(Overlay::static_type()))
+                .map(|board| board.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            let pointer_board_x = handle.allocation().x() as f64 + start_x + offset_x;
+            let mut runtime = session.borrow_mut();
+            let duration = runtime.motion.duration.max(0.001);
+            runtime.motion.playhead =
+                (pointer_board_x / width * duration).clamp(0.0, duration);
+            drop(runtime);
+            redraw_playhead();
+        }
+    });
+    parts.timeline.playhead_handle.add_controller(playhead_drag);
+
+    let handle_pointer = EventControllerMotion::new();
+    handle_pointer.connect_enter(move |controller, _, _| {
+        if let Some(widget) = controller.widget() {
+            widget.set_cursor(gdk::Cursor::from_name("ew-resize", None).as_ref());
+        }
+    });
+    handle_pointer.connect_leave(|controller| {
+        if let Some(widget) = controller.widget() {
+            widget.set_cursor(None);
+        }
+    });
+    parts.timeline.playhead_handle.add_controller(handle_pointer);
 
     parts.timeline.add_btn.connect_clicked({
         let session = session.runtime.clone();

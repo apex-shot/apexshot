@@ -22,7 +22,11 @@ fn paint_backdrop(
             None,
             !prefers_dark,
         );
-        Some(motion_scene_bounds(f64::from(width), f64::from(height)))
+        Some(motion_preview_scene_rect(
+            f64::from(width),
+            f64::from(height),
+            motion.frame.preset.aspect(),
+        ))
     } else {
         None
     };

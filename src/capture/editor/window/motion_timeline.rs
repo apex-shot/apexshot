@@ -29,6 +29,7 @@ pub(super) struct MotionTimeline {
     pub track: DrawingArea,
     pub text_track: DrawingArea,
     pub playhead: DrawingArea,
+    pub playhead_handle: DrawingArea,
 }
 
 pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> MotionTimeline {
@@ -153,11 +154,24 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     playhead.set_hexpand(true);
     playhead.set_vexpand(true);
     playhead.set_can_target(false);
+
+    // A narrow grabbable strip that follows the drawn playhead line. Clicking
+    // the tracks no longer scrubs, so dragging this handle is the way to
+    // reposition the playhead.
+    let playhead_handle = DrawingArea::new();
+    playhead_handle.set_width_request(12);
+    playhead_handle.set_halign(Align::Start);
+    playhead_handle.set_vexpand(true);
     playhead.set_draw_func({
         let runtime = runtime.clone();
-        move |_, cr, width, height| draw_playhead(cr, width, height, &runtime)
+        let handle = playhead_handle.clone();
+        move |_, cr, width, height| {
+            let x = draw_playhead(cr, width, height, &runtime);
+            handle.set_margin_start((x - 6.0).max(0.0) as i32);
+        }
     });
     board.add_overlay(&playhead);
+    board.add_overlay(&playhead_handle);
 
     card.append(&toolbar);
     card.append(&board);
@@ -179,6 +193,7 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
         track,
         text_track,
         playhead,
+        playhead_handle,
     }
 }
 
@@ -333,11 +348,38 @@ fn format_ruler_label(seconds: f64, major: f64) -> String {
     }
 }
 
+fn draw_track_placeholder(cr: &Context, w: f64, h: f64, label: &str) {
+    let y = 7.0;
+    let clip_h = h - 14.0;
+    rounded_rect(cr, 0.0, y, w, clip_h, 5.0);
+    cr.set_source_rgba(0.19, 0.23, 0.30, 0.35);
+    let _ = cr.fill();
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.12);
+    rounded_rect(cr, 0.5, y + 0.5, (w - 1.0).max(0.0), (clip_h - 1.0).max(0.0), 4.5);
+    cr.set_line_width(1.0);
+    let _ = cr.stroke();
+    cr.select_font_face(
+        UI_FONT_FAMILY,
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
+    cr.set_font_size(11.0);
+    if let Ok(ext) = cr.text_extents(label) {
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
+        cr.move_to((w - ext.width()) / 2.0, y + clip_h / 2.0 + ext.height() / 2.0);
+        let _ = cr.show_text(label);
+    }
+}
+
 fn draw_motion_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<MotionRuntime>>) {
     let runtime = runtime.borrow();
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
     let duration = runtime.motion.duration.max(0.001);
+    if runtime.motion.segments.is_empty() {
+        draw_track_placeholder(cr, w, h, &t("Double-click to add motion"));
+        return;
+    }
     for (index, segment) in runtime.motion.segments.iter().enumerate() {
         let x0 = time_to_x(segment.start, duration, w);
         let x1 = time_to_x(segment.end, duration, w);
@@ -386,6 +428,10 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
     let duration = runtime.motion.duration.max(0.001);
+    if runtime.motion.text_segments.is_empty() {
+        draw_track_placeholder(cr, w, h, &t("Double-click to add text"));
+        return;
+    }
     for (index, segment) in runtime.motion.text_segments.iter().enumerate() {
         let x0 = time_to_x(segment.start, duration, w);
         let x1 = time_to_x(segment.end, duration, w);
@@ -435,7 +481,7 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
     }
 }
 
-fn draw_playhead(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<MotionRuntime>>) {
+fn draw_playhead(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<MotionRuntime>>) -> f64 {
     let runtime = runtime.borrow();
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
@@ -450,6 +496,7 @@ fn draw_playhead(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<Mot
     cr.line_to(x, 32.0);
     cr.close_path();
     let _ = cr.fill();
+    x
 }
 
 fn rounded_rect(cr: &Context, x: f64, y: f64, w: f64, h: f64, r: f64) {

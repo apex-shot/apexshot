@@ -2264,3 +2264,30 @@ msgstr "壁紙"
 
 msgid "Watermark"
 msgstr "透かし"
+
+msgid "Double-click to add motion"
+msgstr "ダブルクリックでモーションを追加"
+
+msgid "Double-click to add text"
+msgstr "ダブルクリックでテキストを追加"
+
+msgid "Show all gradients"
+msgstr "すべてのグラデーションを表示"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "元のキャンバスのアスペクト比"
+
+msgid "Square 1:1 output"
+msgstr "正方形 1:1 出力"
+
+msgid "Widescreen 16:9 output"
+msgstr "ワイド画面 16:9 出力"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "X（Twitter）リンクカード 1.91:1 出力"

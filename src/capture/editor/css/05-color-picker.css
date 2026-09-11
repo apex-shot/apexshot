@@ -76,6 +76,16 @@
                 border: 1px solid alpha(white, 0.16);
             }
 
+            /* Gradient presets reuse the wallpaper thumbnail size and chrome
+             * (editor-background-gradient-button + preview-size-regular); the
+             * only extra rule is the active outline, matching wallpapers. */
+            button.editor-motion-gradient-preset.active-background-option,
+            button.editor-motion-gradient-preset.active-background-option:hover,
+            button.editor-motion-gradient-preset.active-background-option:active {
+                border: 2px solid #c06540;
+                box-shadow: 0 0 0 1px #c06540;
+            }
+
             entry.editor-motion-color-hex-entry {
                 min-height: 42px;
                 min-width: 128px;

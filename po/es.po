@@ -2305,3 +2305,30 @@ msgstr "Fondos de pantalla"
 
 msgid "Watermark"
 msgstr "Marca de agua"
+
+msgid "Double-click to add motion"
+msgstr "Doble clic para añadir movimiento"
+
+msgid "Double-click to add text"
+msgstr "Doble clic para añadir texto"
+
+msgid "Show all gradients"
+msgstr "Mostrar todos los degradados"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "Relación de aspecto del lienzo original"
+
+msgid "Square 1:1 output"
+msgstr "Salida cuadrada 1:1"
+
+msgid "Widescreen 16:9 output"
+msgstr "Salida panorámica 16:9"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "Salida de tarjeta de enlace de X (Twitter) 1.91:1"

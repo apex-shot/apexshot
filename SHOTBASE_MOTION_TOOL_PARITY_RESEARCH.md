@@ -12,7 +12,7 @@ Shotbase captured image → Motion editor → animated export
 Apexshot captured image → Motion editor → animated MP4 export
 ```
 
-Within that scope, the earlier high-level conclusion holds and is now more precise: Apexshot has implemented the Motion transform/timeline work and most of Shotbase’s **Appearance / Background** card-scene foundation. It has not implemented the remaining Shotbase image-Motion tools: Browser Chrome, Scene Shadows, Frame presets, Motion cursor overlay, Motion camera overlay, or image-Motion audio tracks. Watermark now has a user-image layer with size, inset, and XY controls; it does not yet replicate a Shotbase built-in catalog or byte-backed project resource. Border and the recovered Shadow controls are implemented.
+Within that scope, the earlier high-level conclusion holds and is now more precise: Apexshot has implemented the Motion transform/timeline work and most of Shotbase’s **Appearance / Background** card-scene foundation. It has not implemented the remaining Shotbase image-Motion tools: Browser Chrome, Scene Shadows, Motion cursor overlay, Motion camera overlay, or image-Motion audio tracks. Watermark now has a user-image layer with size, inset, and XY controls; it does not yet replicate a Shotbase built-in catalog or byte-backed project resource. Border and the recovered Shadow controls are implemented. **Frame presets are now implemented**: an independent `MotionFrame` state (`framePresetId` contract), a compositor stage that re-fits the scene, per-preset MP4 output sizes, and a Frame inspector section — the aspect values are Apexshot decisions because the binary does not expose them. **Gradient presets are now live**: `selected_gradient_preset_index` is set by an 8-preset picker with wallpaper-style catalog UI; preset visuals are Apexshot's own.
 
 ## Evidence and method
 
@@ -85,13 +85,13 @@ Status meanings: **Present** = Apexshot’s capture-image Motion editor contains
 
 | Shotbase image-Motion tool | Verified Shotbase behavior | Apexshot image-Motion equivalent | Status |
 | --- | --- | --- | --- |
-| Appearance → Background | Fill cases `none`, `color`, `gradient`, `wallpaper`, `image`; padding, blur, noise; gradient-preset index; wallpaper/custom-image state. | `MotionBackgroundFillType` has the same five fill cases. The Appearance inspector provides fill selection, color and two-stop gradient editing, selected wallpaper/image files, padding, background blur, noise, preview, and MP4 export rendering. | Partial-to-strong |
+| Appearance → Background | Fill cases `none`, `color`, `gradient`, `wallpaper`, `image`; padding, blur, noise; gradient-preset index; wallpaper/custom-image state. | `MotionBackgroundFillType` has the same five fill cases. The Appearance inspector provides fill selection, color and two-stop gradient editing, an 8-preset gradient strip (sets `selected_gradient_preset_index`; Apexshot's own preset visuals), selected wallpaper/image files, padding, background blur, noise, preview, and MP4 export rendering. | Partial-to-strong |
 | Appearance → Border | Border radius, thickness, and fill color; explicit `Border` UI. | Motion UI and renderer implement color, thickness, and radius on the image card. | Present |
 | Appearance → Shadow | Shadow blur, opacity, and position; explicit `Shadow`, `Blur`, `Opacity`, and `Position` UI strings. | Motion state, renderer, and Appearance inspector expose blur, opacity, and X/Y position. | Present |
 | Appearance → Browser | Browser effect, URL, tab text, and scale; explicit `Browser` section. | No browser-chrome image-Motion state, inspector, or compositor layer. | Absent |
 | Overlays → Watermark | Image bytes/file name, active ID, size, inset, position; `Watermark`, `Size`, `Inset`, and `Position` UI strings. | Dedicated image-Motion watermark state, image chooser, size/inset/XY controls, and card-projected preview/MP4 compositor layer. User-owned file paths are retained rather than Shotbase-style bytes/catalog IDs. | Partial |
 | Overlays → Scene Shadows | Preset ID, opacity, placement; overlay/underlay render-layer distinction; 14 numbered shipped shadow presets. | No image-Motion scene-shadow asset system, placement control, or compositing layer. | Absent |
-| Frame | `framePresetId`; explicit `Frame` UI. Labels include Standard, Instagram, X (Twitter), and YouTube. | No frame-preset state, selector, or image-Motion renderer. | Absent |
+| Frame | `framePresetId`; explicit `Frame` UI. Labels include Standard, Instagram, X (Twitter), and YouTube. | **Present.** `MotionFramePreset`/`MotionFrame` state, Frame inspector section, preview scene re-fit, and per-preset MP4 output dimensions (Instagram 1:1, X 1.91:1, YouTube 16:9; aspects are Apexshot decisions). | Present (aspect values are Apexshot decisions) |
 | Cursor | Visibility, skin, size, rotation, always-pointer, spring smoothing parameters, tilt, and dedicated cursor track. | No cursor track/state, cursor inspector, or cursor compositor stage in capture-image Motion. | Absent |
 | Camera | Visibility, mirror, separate track, shape, size, roundness, position, shrink-during-zoom, and shrink multiplier. | No camera overlay track/state/UI/compositor in capture-image Motion. | Absent |
 | Audio | Separate microphone and system-audio tracks plus separate mute states. | No image-Motion audio source, source-track state, audio UI, or audio attachment to the still-image MP4 export. | Absent |
@@ -104,7 +104,7 @@ Shotbase exposes five recoverable fill values: `none`, `color`, `gradient`, `wal
 
 Apexshot’s capture-image Motion mode matches the five fill types directly. `build_motion_appearance_panel` creates selectors for None, Color, Gradient, Wallpapers, and Image; Wallpapers now opens a compact strip of bundled app backgrounds with an expandable full grid, while Image retains a user-file chooser. It also adjusts padding, blur, and noise. `motion_render.rs` renders these effects for both the image-Motion preview and MP4 export.
 
-The remaining confirmed Background gap is catalog parity. Apexshot Motion now reuses its bundled app-background catalog for Wallpapers, but it does not ship Shotbase’s recovered 55-wallpaper catalog or its gradient-preset model. Image remains a user-chosen file and Gradient remains a custom two-color fill.
+The remaining confirmed Background gap is catalog parity. Apexshot Motion now reuses its bundled app-background catalog for Wallpapers, and its Gradient section now offers an 8-preset strip that sets the recovered `selectedGradientPresetIndex` contract (Apexshot's own preset visuals, since Shotbase's are not recoverable); custom two-color editing remains available and clears the preset selection. Image remains a user-chosen file.
 
 ### Appearance → Border and Shadow
 
@@ -131,7 +131,7 @@ Scene Shadows do not yet exist in Apexshot’s capture-image Motion compositor. 
 
 Shotbase stores a `framePresetId` and exposes a `Frame` section. Recovered labels identify Standard, Instagram, X (Twitter), and YouTube presets. The strings do not prove their exact dimensions or safe-area rules, so those are intentionally not claimed.
 
-No comparable image-Motion frame preset state, UI, or renderer is present in Apexshot.
+**Implemented.** Apexshot now has an independent `MotionFrame`/`MotionFramePreset` state (`framePresetId` contract), a Frame section in the Motion inspector, and a compositor stage that re-fits the scene into the largest centered rectangle of the preset's aspect — shared by preview, text hit-testing, and export. MP4 output dimensions switch per preset (Instagram 1920×1920, X 1920×1004, YouTube/Standard 1920×1080). The exact Shotbase aspect values, masks, and safe areas remain unrecovered, so the shipped aspects are Apexshot design decisions.
 
 ### Cursor
 
@@ -175,9 +175,9 @@ This is why the next work should begin with independent image-Motion snapshots/s
 
 ## Recommended remaining image-Motion parity order
 
-1. Expand the bundled background/gradient preset library if closer catalog parity is needed; the Motion Wallpapers picker now reuses the app’s existing catalog.
-2. Extend the compositing-layer contract for the remaining image-Motion tools: durable state, preview/export equivalence, resource ownership, and explicit z-order. The Shotbase snapshot names establish that Browser Chrome, Watermark, Scene Shadows, Frame, Cursor, and Camera are independent layers.
-3. Add Frame as a deterministic image layer. Watermark’s first user-image layer is implemented; catalog/resource ownership parity remains optional follow-up work.
+1. ~~Expand the bundled background/gradient preset library~~ **Done for gradients** (8-preset picker now sets `selected_gradient_preset_index`); wallpaper catalog reuse already shipped. Closer Shotbase catalog parity (55 wallpapers) remains optional.
+2. Extend the compositing-layer contract for the remaining image-Motion tools: durable state, preview/export equivalence, resource ownership, and explicit z-order. The Shotbase snapshot names establish that Browser Chrome, Watermark, Scene Shadows, Cursor, and Camera are independent layers. ~~Frame~~ **Done** — its snapshot/state/stage/output-size pattern is the template.
+3. ~~Add Frame as a deterministic image layer~~ **Done** (see Frame findings). Watermark's first user-image layer is implemented; catalog/resource ownership parity remains optional follow-up work.
 4. Add Scene Shadows as asset-backed overlay/underlay placement—not as an extension of card drop shadow.
 5. Add the tracked Cursor and Camera layers, including their inputs and interaction with the existing Motion transform/zoom path.
 6. Add separate image-Motion microphone/system-audio track handling and mixing only after the visual layer contract is stable.

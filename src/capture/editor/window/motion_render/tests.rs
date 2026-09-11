@@ -11,6 +11,18 @@ mod tests {
     };
     use gtk4::cairo::{Context, Format, ImageSurface};
 
+    /// Frame presets re-fit the scene into the largest centered rectangle of
+    /// the target aspect; Standard (None) keeps the bounds untouched.
+    #[test]
+    fn frame_preset_refits_the_stage_aspect() {
+        let (square_w, square_h) = super::fit_stage_aspect(100.0, 50.0, Some(1.0));
+        assert_eq!((square_w, square_h), (50.0, 50.0));
+        let (wide_w, wide_h) = super::fit_stage_aspect(50.0, 100.0, Some(16.0 / 9.0));
+        assert!((wide_w / wide_h - 16.0 / 9.0).abs() < 1e-9);
+        assert!(wide_w <= 50.0 && wide_h <= 100.0);
+        assert_eq!(super::fit_stage_aspect(100.0, 50.0, None), (100.0, 50.0));
+    }
+
     /// Shotbase starts Motion with an empty track; tests add their own clip.
     fn motion_with_first_clip() -> MotionState {
         let mut motion = MotionState::default();
@@ -110,7 +122,7 @@ mod tests {
 
         let mut baseline = render_appearance_frame(&blank_card, &motion, true);
         let baseline_data = baseline.data().unwrap();
-        let stage = MotionStage::preview(128.0, 96.0);
+        let stage = MotionStage::preview(128.0, 96.0, None);
         let scene_center_x = stage.center_x.floor() as usize;
         let scene_center_y = stage.center_y.floor() as usize;
         let outside_scene = scene_center_y * 128 * 4 + 10 * 4;
