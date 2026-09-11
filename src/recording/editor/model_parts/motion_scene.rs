@@ -126,6 +126,75 @@ pub struct MotionFrame {
     pub preset: MotionFramePreset,
 }
 
+/// Shotbase's `sceneShadowPresetId` concept. Its shipped `Shadow-01` …
+/// `Shadow-14` assets are not recoverable, so the shapes below are Apexshot's
+/// own procedurally drawn shading presets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MotionSceneShadowPreset {
+    #[default]
+    None,
+    Diagonal,
+    Window,
+    Top,
+    Bottom,
+    Vignette,
+    Side,
+}
+
+impl MotionSceneShadowPreset {
+    pub const ALL: [Self; 7] = [
+        Self::None,
+        Self::Diagonal,
+        Self::Window,
+        Self::Top,
+        Self::Bottom,
+        Self::Vignette,
+        Self::Side,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "None",
+            Self::Diagonal => "Diagonal",
+            Self::Window => "Window",
+            Self::Top => "Top",
+            Self::Bottom => "Bottom",
+            Self::Vignette => "Vignette",
+            Self::Side => "Side",
+        }
+    }
+}
+
+/// Shotbase stores a scene-shadow `placement` with distinct `Shadow-Overlay`
+/// and `Shadow-Underlay` render layers; their enum values were not recovered,
+/// so the above/below-card split below is the Apexshot interpretation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MotionSceneShadowPlacement {
+    #[default]
+    Underlay,
+    Overlay,
+}
+
+/// A separately persisted Scene Shadows layer, matching Shotbase's
+/// `sceneShadowSnapshot` contract: preset id, opacity, and placement. This is
+/// deliberately not an extension of the card's drop shadow.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MotionSceneShadow {
+    pub preset: MotionSceneShadowPreset,
+    pub opacity: f64,
+    pub placement: MotionSceneShadowPlacement,
+}
+
+impl Default for MotionSceneShadow {
+    fn default() -> Self {
+        Self {
+            preset: MotionSceneShadowPreset::None,
+            opacity: 1.0,
+            placement: MotionSceneShadowPlacement::Underlay,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct MotionState {
     pub duration: f64,
@@ -144,6 +213,7 @@ pub struct MotionState {
     pub appearance: MotionAppearance,
     pub watermark: MotionWatermark,
     pub frame: MotionFrame,
+    pub scene_shadow: MotionSceneShadow,
 }
 
 impl Default for MotionState {
@@ -162,6 +232,7 @@ impl Default for MotionState {
             appearance: MotionAppearance::default(),
             watermark: MotionWatermark::default(),
             frame: MotionFrame::default(),
+            scene_shadow: MotionSceneShadow::default(),
         }
     }
 }

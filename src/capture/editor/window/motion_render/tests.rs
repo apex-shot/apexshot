@@ -257,6 +257,58 @@ mod tests {
     }
 
     #[test]
+    fn scene_shadow_placement_splits_above_and_below_the_card() {
+        use crate::recording::editor::model::{MotionSceneShadowPreset, MotionSceneShadowPlacement};
+
+        let card = ImageSurface::create(Format::ARgb32, 64, 64).unwrap();
+        {
+            let context = Context::new(&card).unwrap();
+            context.set_source_rgb(1.0, 1.0, 1.0);
+            context.paint().unwrap();
+        }
+        card.flush();
+
+        let render = |motion: &MotionState| {
+            let frame = ImageSurface::create(Format::ARgb32, 128, 96).unwrap();
+            {
+                let context = Context::new(&frame).unwrap();
+                draw_motion_frame(
+                    &context, 128, 96, &card, motion, None, None, 0.0, false, true, false,
+                );
+            }
+            frame.flush();
+            frame
+        };
+
+        // A white scene behind a white card: only the shading can darken
+        // pixels. Padding 0 centers the 64px card in the 128x96 stage.
+        let mut motion = MotionState::default();
+        motion.appearance.background_padding = 0.0;
+        motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+        motion.appearance.background_color = [1.0, 1.0, 1.0, 1.0];
+        motion.appearance.shadow_opacity = 0.0;
+        motion.scene_shadow.preset = MotionSceneShadowPreset::Side;
+        motion.scene_shadow.opacity = 1.0;
+
+        // Underlay shades the background next to the card but never the
+        // card itself.
+        motion.scene_shadow.placement = MotionSceneShadowPlacement::Underlay;
+        let mut frame = render(&motion);
+        let data = frame.data().unwrap();
+        let scene_left = (48 * 128 + 8) * 4;
+        let card_center = (48 * 128 + 64) * 4;
+        assert!(data[scene_left] < 255, "underlay must shade the scene");
+        assert_eq!(&data[card_center..card_center + 4], &[255, 255, 255, 255]);
+
+        // Overlay shades both the scene and the card, and the card center
+        // now sits under the shadow.
+        motion.scene_shadow.placement = MotionSceneShadowPlacement::Overlay;
+        let mut frame = render(&motion);
+        let data = frame.data().unwrap();
+        assert!(data[card_center] < 255, "overlay must shade the card");
+    }
+
+    #[test]
     fn watermark_is_a_card_space_layer_in_the_shared_compositor() {
         let card = ImageSurface::create(Format::ARgb32, 64, 64).unwrap();
         let mark = ImageSurface::create(Format::ARgb32, 8, 8).unwrap();

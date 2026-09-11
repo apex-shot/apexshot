@@ -9,7 +9,7 @@ use std::process::Command;
 use crate::recording::editor::model::{
     affine_from_three_points as affine_components, card_depth, project_card_corners, project_point,
     MotionAppearance, MotionBackgroundFillType, MotionBlurBudgetMode, MotionFramePreset,
-    MotionState, MotionTextSegment, MotionTransform, MOTION_EXPORT_FPS,
+    MotionSceneShadowPreset, MotionState, MotionTextSegment, MotionTransform, MOTION_EXPORT_FPS,
 };
 
 include!("motion_render/geometry.rs");

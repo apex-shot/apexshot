@@ -114,6 +114,101 @@ fn paint_motion_watermark(
     context.restore().ok();
 }
 
+/// Paint the selected Scene Shadows preset across the scene rectangle.
+/// Shotbase names distinct overlay and underlay shadow render layers; the
+/// `underlay` pass draws beneath the card, the overlay pass above card and
+/// titles but below the watermark. Presets are procedural shading rather
+/// than image assets, so preview and export share this one painter.
+fn paint_motion_scene_shadow(
+    context: &Context,
+    stage: MotionStage,
+    motion: &MotionState,
+    underlay: bool,
+) {
+    let shadow = &motion.scene_shadow;
+    if shadow.preset == MotionSceneShadowPreset::None {
+        return;
+    }
+    if (shadow.placement == crate::recording::editor::model::MotionSceneShadowPlacement::Underlay)
+        != underlay
+    {
+        return;
+    }
+    let opacity = shadow.opacity.clamp(0.0, 1.0);
+    if opacity <= 0.001 {
+        return;
+    }
+    let left = stage.center_x - stage.bounds_w * 0.5;
+    let top = stage.center_y - stage.bounds_h * 0.5;
+    let right = left + stage.bounds_w;
+    let bottom = top + stage.bounds_h;
+    let _ = context.save();
+    context.rectangle(left, top, stage.bounds_w, stage.bounds_h);
+    context.clip();
+    match shadow.preset {
+        MotionSceneShadowPreset::None => {}
+        MotionSceneShadowPreset::Diagonal => {
+            let gradient = LinearGradient::new(left, top, right, bottom);
+            gradient.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, opacity);
+            gradient.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.0);
+            context.set_source(&gradient).ok();
+        }
+        MotionSceneShadowPreset::Top => {
+            let gradient = LinearGradient::new(0.0, top, 0.0, bottom);
+            gradient.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, opacity);
+            gradient.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.0);
+            context.set_source(&gradient).ok();
+        }
+        MotionSceneShadowPreset::Bottom => {
+            let gradient = LinearGradient::new(0.0, top, 0.0, bottom);
+            gradient.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.0);
+            gradient.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, opacity);
+            context.set_source(&gradient).ok();
+        }
+        MotionSceneShadowPreset::Side => {
+            let gradient = LinearGradient::new(left, 0.0, right, 0.0);
+            gradient.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, opacity);
+            gradient.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.0);
+            context.set_source(&gradient).ok();
+        }
+        MotionSceneShadowPreset::Vignette => {
+            let radius = stage.bounds_w.max(stage.bounds_h) * 0.5;
+            let gradient = gtk4::cairo::RadialGradient::new(
+                stage.center_x,
+                stage.center_y,
+                0.0,
+                stage.center_x,
+                stage.center_y,
+                radius,
+            );
+            gradient.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.0);
+            gradient.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, opacity);
+            context.set_source(&gradient).ok();
+        }
+        MotionSceneShadowPreset::Window => {
+            // Two soft diagonal light gaps across the scene, expressed as one
+            // striped gradient along the diagonal.
+            let gradient = LinearGradient::new(left, top, right, bottom);
+            for (offset, strength) in [
+                (0.08, 0.0),
+                (0.16, 0.0),
+                (0.24, opacity),
+                (0.32, 0.0),
+                (0.5, 0.0),
+                (0.58, 0.0),
+                (0.66, opacity * 0.8),
+                (0.74, 0.0),
+                (1.0, 0.0),
+            ] {
+                gradient.add_color_stop_rgba(offset, 0.0, 0.0, 0.0, strength);
+            }
+            context.set_source(&gradient).ok();
+        }
+    }
+    context.paint().ok();
+    context.restore().ok();
+}
+
 fn visible_motion_text(
     text: &str,
     scope: crate::recording::editor::model::MotionTextScope,

@@ -95,6 +95,9 @@ pub(super) fn draw_motion_foreground(
         stage.bounds_h,
     );
     context.clip();
+    // Shotbase's underlay shadow layer sits between the background scene and
+    // the animated card, so the card's own drop shadow still reads on top.
+    paint_motion_scene_shadow(context, stage, motion, true);
     let current_transform = motion.sample(time);
     let current_anchor = motion.zoom_anchor_at(time);
     // The card is drawn as a triangle mesh that approximates the perspective
@@ -143,6 +146,9 @@ pub(super) fn draw_motion_foreground(
         mesh_div,
     );
     paint_motion_text(context, surface, stage, motion, time);
+    // The overlay shadow pass shades the card and titles; the watermark
+    // stays the topmost layer.
+    paint_motion_scene_shadow(context, stage, motion, false);
     // ApexShot keeps the user-selected mark above card content and Motion
     // titles. Its card-space projection makes the layer track zoom and
     // perspective identically in preview and export.

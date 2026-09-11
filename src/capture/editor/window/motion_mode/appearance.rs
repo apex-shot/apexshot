@@ -11,7 +11,10 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::i18n::t;
-use crate::recording::editor::model::{MotionBackgroundFillType, MotionFramePreset};
+use crate::recording::editor::model::{
+    MotionBackgroundFillType, MotionFramePreset, MotionSceneShadowPreset,
+    MotionSceneShadowPlacement,
+};
 
 use super::widgets::{
     motion_appearance_slider, motion_color_control, motion_gradient_color_control, motion_rgba,
@@ -640,8 +643,13 @@ pub(super) fn build_motion_appearance_panel(
     };
     let frame_buttons: Rc<RefCell<Vec<(MotionFramePreset, Button)>>> =
         Rc::new(RefCell::new(Vec::new()));
-    let frame_row = GtkBox::new(Orientation::Horizontal, 6);
-    for (preset, label, tooltip) in [
+    // Two chips per row keeps the longest labels ("Instagram", "Diagonal")
+    // inside the fixed sidebar width at the standard button text size; one
+    // four-button row forced the panel wider and left blank space beside the
+    // wallpaper grid.
+    let frame_rows = GtkBox::new(Orientation::Vertical, 6);
+    let mut frame_row: Option<GtkBox> = None;
+    for (index, (preset, label, tooltip)) in [
         (
             MotionFramePreset::Standard,
             t("Standard"),
@@ -662,7 +670,16 @@ pub(super) fn build_motion_appearance_panel(
             t("YouTube"),
             t("Widescreen 16:9 output"),
         ),
-    ] {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if index % 2 == 0 {
+            let row = GtkBox::new(Orientation::Horizontal, 6);
+            row.set_homogeneous(true);
+            frame_rows.append(&row);
+            frame_row = Some(row);
+        }
         let button = Button::with_label(&label);
         button.set_has_frame(false);
         button.set_hexpand(true);
@@ -695,10 +712,145 @@ pub(super) fn build_motion_appearance_panel(
             }
         });
         frame_buttons.borrow_mut().push((preset, button.clone()));
-        frame_row.append(&button);
+        if let Some(row) = frame_row.as_ref() {
+            row.append(&button);
+        }
     }
-    frame_section.append(&frame_row);
+    frame_section.append(&frame_rows);
     root.append(&frame_section);
+
+    // Shotbase's Scene Shadows: an independent overlay layer with its own
+    // preset id, opacity, and above/below-card placement — deliberately not
+    // the card's Border/Shadow drop shadow. The presets are Apexshot's own
+    // procedural shading because Shotbase's assets are not recoverable.
+    let scene_shadow_section = motion_appearance_section("Scene Shadows");
+    // Exports render an unset background fill as a solid black scene, so a
+    // dark shadow over it cannot be seen. Say so instead of leaving users to
+    // discover a missing effect in their MP4.
+    let shadow_hint = Label::new(Some(&t(
+        "Needs a background fill to appear in exports",
+    )));
+    shadow_hint.add_css_class("editor-select-inspector-hint");
+    shadow_hint.set_xalign(0.0);
+    shadow_hint.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    scene_shadow_section.append(&shadow_hint);
+    let initial_scene_shadow = {
+        let runtime = session.runtime.borrow();
+        runtime.motion.scene_shadow.clone()
+    };
+    let shadow_preset_buttons: Rc<RefCell<Vec<(MotionSceneShadowPreset, Button)>>> =
+        Rc::new(RefCell::new(Vec::new()));
+    let shadow_preset_rows = GtkBox::new(Orientation::Vertical, 6);
+    let mut shadow_row: Option<GtkBox> = None;
+    for (index, preset) in MotionSceneShadowPreset::ALL.iter().enumerate() {
+        if index % 2 == 0 {
+            let row = GtkBox::new(Orientation::Horizontal, 6);
+            row.set_homogeneous(true);
+            shadow_preset_rows.append(&row);
+            shadow_row = Some(row);
+        }
+        let button = Button::with_label(&t(preset.label()));
+        button.set_has_frame(false);
+        button.set_hexpand(true);
+        button.add_css_class("editor-background-option-button");
+        if initial_scene_shadow.preset == *preset {
+            button.add_css_class("active-background-option");
+        }
+        button.connect_clicked({
+            let runtime = session.runtime.clone();
+            let preview = preview.clone();
+            let shadow_preset_buttons = shadow_preset_buttons.clone();
+            move |_| {
+                {
+                    let mut runtime = runtime.borrow_mut();
+                    runtime.begin_motion_edit();
+                    runtime.motion.scene_shadow.preset = *preset;
+                    preview.queue_draw();
+                }
+                for (candidate, button) in shadow_preset_buttons.borrow().iter() {
+                    if *candidate == *preset {
+                        button.add_css_class("active-background-option");
+                    } else {
+                        button.remove_css_class("active-background-option");
+                    }
+                }
+            }
+        });
+        shadow_preset_buttons.borrow_mut().push((*preset, button.clone()));
+        if let Some(row) = shadow_row.as_ref() {
+            row.append(&button);
+        }
+    }
+    scene_shadow_section.append(&shadow_preset_rows);
+
+    let shadow_opacity = motion_appearance_slider(
+        "Shadow opacity",
+        0.0,
+        1.0,
+        initial_scene_shadow.opacity,
+        "%",
+    );
+    shadow_opacity.connect_value_changed({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        move |slider| {
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.scene_shadow.opacity = slider.value();
+            preview.queue_draw();
+        }
+    });
+    scene_shadow_section.append(&shadow_opacity.widget());
+
+    let shadow_placement_buttons: Rc<RefCell<Vec<(MotionSceneShadowPlacement, Button)>>> =
+        Rc::new(RefCell::new(Vec::new()));
+    let placement_row = GtkBox::new(Orientation::Horizontal, 6);
+    placement_row.set_homogeneous(true);
+    for (placement, label, tooltip) in [
+        (
+            MotionSceneShadowPlacement::Underlay,
+            t("Underlay"),
+            t("Shade beneath the card"),
+        ),
+        (
+            MotionSceneShadowPlacement::Overlay,
+            t("Overlay"),
+            t("Shade above the card"),
+        ),
+    ] {
+        let button = Button::with_label(&label);
+        button.set_has_frame(false);
+        button.set_hexpand(true);
+        button.add_css_class("editor-background-option-button");
+        button.set_tooltip_text(Some(&tooltip));
+        if initial_scene_shadow.placement == placement {
+            button.add_css_class("active-background-option");
+        }
+        button.connect_clicked({
+            let runtime = session.runtime.clone();
+            let preview = preview.clone();
+            let shadow_placement_buttons = shadow_placement_buttons.clone();
+            move |_| {
+                {
+                    let mut runtime = runtime.borrow_mut();
+                    runtime.begin_motion_edit();
+                    runtime.motion.scene_shadow.placement = placement;
+                    preview.queue_draw();
+                }
+                for (candidate, button) in shadow_placement_buttons.borrow().iter() {
+                    if *candidate == placement {
+                        button.add_css_class("active-background-option");
+                    } else {
+                        button.remove_css_class("active-background-option");
+                    }
+                }
+            }
+        });
+        shadow_placement_buttons.borrow_mut().push((placement, button.clone()));
+        placement_row.append(&button);
+    }
+    scene_shadow_section.append(&placement_row);
+    root.append(&scene_shadow_section);
     root
 }
 
