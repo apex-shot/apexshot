@@ -27,6 +27,13 @@ pub(in crate::capture::editor::window) struct MotionBackdropCache {
     pub(in crate::capture::editor::window) surface: gtk4::cairo::ImageSurface,
 }
 
+/// Empty effect lane names, used to paint the row's add affordance.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::capture::editor::window) enum MotionHoverTrack {
+    Motion,
+    Text,
+}
+
 pub(in crate::capture::editor::window) struct MotionRuntime {
     pub(in crate::capture::editor::window) snapshot: Option<RgbaImage>,
     pub(in crate::capture::editor::window) card: Option<gtk4::cairo::ImageSurface>,
@@ -45,6 +52,15 @@ pub(in crate::capture::editor::window) struct MotionRuntime {
     pub(in crate::capture::editor::window) last_tick: Option<Instant>,
     /// Playhead time at which an edit-triggered transition preview stops.
     pub(in crate::capture::editor::window) preview_end: Option<f64>,
+    /// UI-only selection of the source (image) lane. Motion and Text selection
+    /// live on the model; this one never needs undo.
+    pub(in crate::capture::editor::window) source_selected: bool,
+    /// Pointer read-out time, drawn as the red hover hairline. `None` when the
+    /// pointer is outside the timeline.
+    pub(in crate::capture::editor::window) hover_time: Option<f64>,
+    /// Which track row the pointer is over, so an empty row can show its add
+    /// affordance. UI-only.
+    pub(in crate::capture::editor::window) hover_track: Option<MotionHoverTrack>,
 }
 
 impl MotionRuntime {
@@ -63,6 +79,9 @@ impl MotionRuntime {
             live_preview: false,
             last_tick: None,
             preview_end: None,
+            source_selected: false,
+            hover_time: None,
+            hover_track: None,
         }
     }
 
@@ -187,6 +206,9 @@ impl MotionSession {
         runtime.live_preview = false;
         runtime.last_tick = None;
         runtime.preview_end = None;
+        runtime.source_selected = false;
+        runtime.hover_time = None;
+        runtime.hover_track = None;
         runtime.reset_motion_history();
         // Shotbase enters Motion with an empty effects track; clips appear
         // when the user clicks or drags the timeline.
@@ -225,6 +247,9 @@ impl MotionSession {
         runtime.motion.text_segments.clear();
         runtime.motion.selected = None;
         runtime.motion.selected_text = None;
+        runtime.source_selected = false;
+        runtime.hover_time = None;
+        runtime.hover_track = None;
         runtime.reset_motion_history();
     }
 }

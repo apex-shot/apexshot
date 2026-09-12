@@ -1,4 +1,4 @@
-pub const DEFAULT_MOTION_DURATION_SECONDS: f64 = 3.0;
+pub const DEFAULT_MOTION_DURATION_SECONDS: f64 = 6.0;
 pub const MIN_MOTION_DURATION_SECONDS: f64 = 1.0;
 pub const MAX_MOTION_DURATION_SECONDS: f64 = 10.0;
 /// Shotbase's `MotionEffectDefaults`: a new move targets 200% zoom, and the
@@ -15,12 +15,12 @@ pub const DEFAULT_MOTION_EASING_X2: f64 = 0.50;
 pub const DEFAULT_MOTION_EASING_Y2: f64 = 1.0;
 pub const MOTION_EXPORT_FPS: u32 = 30;
 pub const MIN_MOTION_SEGMENT_SECONDS: f64 = 0.25;
-pub const DEFAULT_MOTION_SEGMENT_SECONDS: f64 = 1.8;
+pub const DEFAULT_MOTION_SEGMENT_SECONDS: f64 = 1.0;
 pub const MIN_MOTION_YAW: f64 = -24.0;
 pub const MAX_MOTION_YAW: f64 = 24.0;
 pub const MIN_MOTION_POS: f64 = -1.0;
 pub const MAX_MOTION_POS: f64 = 1.0;
-pub const DEFAULT_MOTION_TEXT_SECONDS: f64 = 1.6;
+pub const DEFAULT_MOTION_TEXT_SECONDS: f64 = 1.0;
 pub const DEFAULT_MOTION_TEXT_POS_X: f64 = 0.5;
 pub const DEFAULT_MOTION_TEXT_POS_Y: f64 = 0.78;
 pub const MIN_MOTION_TEXT_POS: f64 = 0.05;

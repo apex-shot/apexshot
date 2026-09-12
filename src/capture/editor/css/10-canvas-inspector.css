@@ -16,6 +16,13 @@
                 padding: 0;
             }
 
+            /* The Motion timeline is canvas chrome, not the video editor's
+             * opaque dock: reuse the Motion inspector surface so the two read
+             * as the same panel. */
+            .editor-root .editor-motion-timeline-dock {
+                background: alpha(black, 0.25);
+            }
+
             .editor-inspector-scroll,
             .editor-inspector-scroll > viewport,
             .editor-inspector-scroll scrollbar {

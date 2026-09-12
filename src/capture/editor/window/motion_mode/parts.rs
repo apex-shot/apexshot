@@ -44,6 +44,9 @@ pub(in crate::capture::editor::window) struct MotionTimelineParts {
     pub text_track: DrawingArea,
     pub playhead_overlay: DrawingArea,
     pub playhead_handle: DrawingArea,
+    pub hover_playhead: DrawingArea,
+    pub playhead_dragging: Rc<Cell<bool>>,
+    pub playhead_hovered: Rc<Cell<bool>>,
 }
 
 pub(in crate::capture::editor::window) struct MotionPanelParts {

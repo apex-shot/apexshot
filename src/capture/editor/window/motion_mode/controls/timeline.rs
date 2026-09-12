@@ -4,8 +4,17 @@ use gtk4::{
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use super::super::{MotionModeParts, MotionRuntime, MotionSession};
+use super::super::{MotionHoverTrack, MotionModeParts, MotionRuntime, MotionSession};
 use super::Redraw;
+
+/// Which empty lane's add affordance should be painted for a pointer position
+/// inside `widget` (allocation is board-relative, like the interaction code
+/// already assumes for the playhead handle).
+fn hovered_lane(widget: &DrawingArea, pointer_y: f64) -> bool {
+    let allocation = widget.allocation();
+    let top = allocation.y() as f64;
+    pointer_y >= top && pointer_y <= top + allocation.height() as f64
+}
 
 #[derive(Clone, Copy)]
 enum DragKind {
@@ -72,23 +81,21 @@ pub(super) fn install(
     });
     parts.timeline.ruler.add_controller(ruler_drag);
 
-    // The source thumbnail lane is an actual scrub target, matching the
-    // timeline's visible source segment instead of being decorative chrome.
+    // The source thumbnail lane is selectable chrome, not a scrub surface:
+    // scrubbing belongs to the ruler and the playhead handle. Clicking it
+    // selects the source clip and clears any effect-clip selection.
     let source_click = GestureClick::new();
     source_click.set_button(1);
     source_click.connect_pressed({
         let session = session.runtime.clone();
-        let redraw_playhead = redraw_playhead.clone();
-        move |gesture, _, x, _| {
-            let width = gesture
-                .widget()
-                .map(|widget| widget.allocated_width().max(1) as f64)
-                .unwrap_or(1.0);
+        let redraw = redraw.clone();
+        move |_, _, _, _| {
             let mut runtime = session.borrow_mut();
-            let duration = runtime.motion.duration.max(0.001);
-            runtime.motion.playhead = ((x / width) * duration).clamp(0.0, duration);
+            runtime.source_selected = true;
+            runtime.motion.selected = None;
+            runtime.motion.selected_text = None;
             drop(runtime);
-            redraw_playhead();
+            redraw();
         }
     });
     parts.timeline.source_track.add_controller(source_click);
@@ -104,7 +111,7 @@ pub(super) fn install(
         let session = session.runtime.clone();
         let redraw = redraw.clone();
         let motion_track_dragged = motion_track_dragged.clone();
-        move |gesture, n_press, x, _| {
+        move |gesture, _n_press, x, _| {
             if motion_track_dragged.replace(false) {
                 return;
             }
@@ -113,23 +120,24 @@ pub(super) fn install(
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
             let mut runtime = session.borrow_mut();
+            runtime.source_selected = false;
             let duration = runtime.motion.duration.max(0.001);
-            let time = runtime.motion.snap_effect_time(
-                ((x / width) * duration).clamp(0.0, duration),
-                (10.0 / width) * duration,
-                None,
-            );
-            if n_press >= 2 {
-                runtime.begin_motion_edit();
-                if runtime.motion.add_segment_at(time).is_none() {
-                    runtime.motion.selected = runtime.motion.segment_index_at(time);
-                    runtime.motion.selected_text = None;
-                }
-            } else if let Some(index) = runtime.motion.segment_index_at(time) {
+            let raw_time = ((x / width) * duration).clamp(0.0, duration);
+            // Selection tests the real pointer position: snapping it first
+            // could land on the next clip's edge and select it while the user
+            // clicked in the empty gap before it.
+            if let Some(index) = runtime.motion.segment_index_at(raw_time) {
                 runtime.motion.selected = Some(index);
                 runtime.motion.selected_text = None;
             } else {
-                runtime.motion.selected = None;
+                let time =
+                    runtime
+                        .motion
+                        .snap_effect_time(raw_time, (10.0 / width) * duration, None);
+                runtime.begin_motion_edit();
+                if runtime.motion.add_segment_at(time).is_none() {
+                    runtime.motion.selected = None;
+                }
                 runtime.motion.selected_text = None;
             }
             drop(runtime);
@@ -177,6 +185,7 @@ pub(super) fn install(
             if let Some(index) = kind.map(drag_kind_index) {
                 runtime.motion.selected = Some(index);
                 runtime.motion.selected_text = None;
+                runtime.source_selected = false;
             }
             // One checkpoint per drag: the pre-drag state is what Undo
             // restores, and the drag updates themselves stay checkpoint-free.
@@ -289,7 +298,7 @@ pub(super) fn install(
         let session = session.runtime.clone();
         let redraw = redraw.clone();
         let text_track_dragged = text_track_dragged.clone();
-        move |gesture, n_press, x, _| {
+        move |gesture, _n_press, x, _| {
             if text_track_dragged.replace(false) {
                 return;
             }
@@ -298,23 +307,21 @@ pub(super) fn install(
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
             let mut runtime = session.borrow_mut();
+            runtime.source_selected = false;
             let duration = runtime.motion.duration.max(0.001);
-            let time = runtime.motion.snap_text_time(
-                ((x / width) * duration).clamp(0.0, duration),
-                (10.0 / width) * duration,
-                None,
-            );
-            if n_press >= 2 {
-                runtime.begin_motion_edit();
-                if runtime.motion.add_text_at(time).is_none() {
-                    runtime.motion.selected_text = runtime.motion.text_index_at(time);
-                    runtime.motion.selected = None;
-                }
-            } else if let Some(index) = runtime.motion.text_index_at(time) {
+            let raw_time = ((x / width) * duration).clamp(0.0, duration);
+            // Same single-click rule as the motion lane.
+            if let Some(index) = runtime.motion.text_index_at(raw_time) {
                 runtime.motion.selected_text = Some(index);
                 runtime.motion.selected = None;
             } else {
-                runtime.motion.selected_text = None;
+                let time = runtime
+                    .motion
+                    .snap_text_time(raw_time, (10.0 / width) * duration, None);
+                runtime.begin_motion_edit();
+                if runtime.motion.add_text_at(time).is_none() {
+                    runtime.motion.selected_text = None;
+                }
                 runtime.motion.selected = None;
             }
             drop(runtime);
@@ -363,6 +370,7 @@ pub(super) fn install(
             if let Some(index) = kind.map(drag_kind_index) {
                 runtime.motion.selected_text = Some(index);
                 runtime.motion.selected = None;
+                runtime.source_selected = false;
             }
             // Same checkpoint-per-drag rule as the motion lane.
             if kind.is_some() {
@@ -464,37 +472,41 @@ pub(super) fn install(
     parts.timeline.text_track.add_controller(text_drag);
     install_track_end_cursor(&parts.timeline.text_track, session.runtime.clone(), true);
 
-    // The playhead only moves by dragging its handle. The pointer's board x
-    // is the handle's *allocated* position plus the widget-local pointer x;
-    // reading the margin property instead lags the real layout by a frame and
-    // made the playhead overshoot and oscillate under a moving pointer.
+    // The playhead only moves by dragging its handle. The handle's allocation
+    // is frozen for the duration of the drag (see motion_timeline.rs), so the
+    // board position captured at drag begin plus the gesture offset tracks the
+    // pointer exactly instead of chasing a layout that changes under it.
     let playhead_drag = GestureDrag::new();
     playhead_drag.set_button(1);
+    let playhead_start_x = Rc::new(Cell::new(0.0f64));
     playhead_drag.connect_drag_begin({
         let session = session.runtime.clone();
-        move |_, _, _| {
+        let handle = parts.timeline.playhead_handle.clone();
+        let start_x = playhead_start_x.clone();
+        let dragging = parts.timeline.playhead_dragging.clone();
+        move |_, x, _| {
             // Holding the handle pauses playback; otherwise the timer keeps
             // advancing the playhead the drag is trying to reposition.
             let mut runtime = session.borrow_mut();
             runtime.playing = false;
             runtime.last_tick = None;
             runtime.preview_end = None;
+            drop(runtime);
+            start_x.set(handle.allocation().x() as f64 + x);
+            dragging.set(true);
         }
     });
     playhead_drag.connect_drag_update({
         let session = session.runtime.clone();
         let redraw_playhead = redraw_playhead.clone();
-        let handle = parts.timeline.playhead_handle.clone();
+        let start_x = playhead_start_x.clone();
         move |gesture, offset_x, _| {
-            let Some((start_x, _)) = gesture.start_point() else {
-                return;
-            };
             let width = gesture
                 .widget()
                 .and_then(|widget| widget.ancestor(Overlay::static_type()))
                 .map(|board| board.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
-            let pointer_board_x = handle.allocation().x() as f64 + start_x + offset_x;
+            let pointer_board_x = start_x.get() + offset_x;
             let mut runtime = session.borrow_mut();
             let duration = runtime.motion.duration.max(0.001);
             runtime.motion.playhead = (pointer_board_x / width * duration).clamp(0.0, duration);
@@ -502,7 +514,99 @@ pub(super) fn install(
             redraw_playhead();
         }
     });
+    playhead_drag.connect_drag_end({
+        let dragging = parts.timeline.playhead_dragging.clone();
+        let hovered = parts.timeline.playhead_hovered.clone();
+        let redraw_playhead = redraw_playhead.clone();
+        move |_, _, _| {
+            dragging.set(false);
+            // Pointer grabs suppress board motion events, so the pre-drag
+            // hover value can survive a drag that ends away from the head and
+            // leave the clock pill stuck open. Collapse until motion proves
+            // the pointer is back on the capsule.
+            hovered.set(false);
+            redraw_playhead();
+        }
+    });
     parts.timeline.playhead_handle.add_controller(playhead_drag);
+
+    // The handle strip is only as wide as the idle capsule, so hover is
+    // tracked on the whole board: only the capsule head expands into the clock
+    // pill, so the stem and lanes below it stay inert.
+    if let Some(board) = parts
+        .timeline
+        .playhead_handle
+        .ancestor(Overlay::static_type())
+    {
+        let hover = EventControllerMotion::new();
+        hover.connect_motion({
+            let session = session.runtime.clone();
+            let hovered = parts.timeline.playhead_hovered.clone();
+            let hover_playhead = parts.timeline.hover_playhead.clone();
+            let motion_track = parts.timeline.motion_track.clone();
+            let text_track = parts.timeline.text_track.clone();
+            let redraw_playhead = redraw_playhead.clone();
+            move |controller, x, y| {
+                let width = controller
+                    .widget()
+                    .map(|widget| widget.allocated_width().max(1) as f64)
+                    .unwrap_or(1.0);
+                let near = {
+                    let mut runtime = session.borrow_mut();
+                    let duration = runtime.motion.duration.max(0.001);
+                    runtime.hover_time = Some((x / width).clamp(0.0, 1.0) * duration);
+                    let line_x = (runtime.motion.playhead / duration).clamp(0.0, 1.0) * width;
+                    runtime.hover_track = if hovered_lane(&motion_track, y) {
+                        Some(MotionHoverTrack::Motion)
+                    } else if hovered_lane(&text_track, y) {
+                        Some(MotionHoverTrack::Text)
+                    } else {
+                        None
+                    };
+                    super::super::super::motion_timeline::playhead_head_hit(
+                        x,
+                        y,
+                        line_x,
+                        hovered.get(),
+                    )
+                };
+                // The add ghost is anchored to hover_time, so the lanes must
+                // repaint on every motion, not just when the lane changes.
+                hover_playhead.queue_draw();
+                motion_track.queue_draw();
+                text_track.queue_draw();
+                if hovered.replace(near) != near {
+                    redraw_playhead();
+                }
+            }
+        });
+        hover.connect_leave({
+            let session = session.runtime.clone();
+            let hovered = parts.timeline.playhead_hovered.clone();
+            let hover_playhead = parts.timeline.hover_playhead.clone();
+            let motion_track = parts.timeline.motion_track.clone();
+            let text_track = parts.timeline.text_track.clone();
+            let redraw_playhead = redraw_playhead.clone();
+            move |_| {
+                let lane_changed = {
+                    let mut runtime = session.borrow_mut();
+                    runtime.hover_time = None;
+                    let changed = runtime.hover_track.is_some();
+                    runtime.hover_track = None;
+                    changed
+                };
+                hover_playhead.queue_draw();
+                if lane_changed {
+                    motion_track.queue_draw();
+                    text_track.queue_draw();
+                }
+                if hovered.replace(false) {
+                    redraw_playhead();
+                }
+            }
+        });
+        board.add_controller(hover);
+    }
 
     let handle_pointer = EventControllerMotion::new();
     handle_pointer.connect_enter(move |controller, _, _| {
@@ -526,6 +630,7 @@ pub(super) fn install(
         move |_| {
             let mut runtime = session.borrow_mut();
             let playhead = runtime.motion.playhead;
+            runtime.source_selected = false;
             runtime.begin_motion_edit();
             let _ = runtime.motion.add_segment_at(playhead);
             drop(runtime);
@@ -539,6 +644,7 @@ pub(super) fn install(
         move |_| {
             let mut runtime = session.borrow_mut();
             let playhead = runtime.motion.playhead;
+            runtime.source_selected = false;
             runtime.begin_motion_edit();
             let _ = runtime.motion.add_text_at(playhead);
             drop(runtime);

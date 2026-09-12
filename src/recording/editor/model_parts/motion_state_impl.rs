@@ -42,48 +42,39 @@ impl MotionState {
         self.reconcile_effect_segments();
     }
 
-    pub fn add_segment_at(&mut self, start: f64) -> Option<usize> {
+    /// The exact span a click at `start` would create, or `None` when the
+    /// click is inside an existing clip or the surrounding free gap is
+    /// shorter than a default clip. Inside a gap the clip is nudged back so
+    /// it fits flush against the following clip instead of being rejected.
+    /// The timeline's add ghost shares this so the affordance can never
+    /// promise a clip the click cannot create.
+    pub fn motion_add_span(&self, start: f64) -> Option<(f64, f64)> {
         let start = start.clamp(0.0, self.duration);
         if self.segment_index_at(start).is_some() {
             return None;
         }
-        let mut end = (start + DEFAULT_MOTION_SEGMENT_SECONDS).min(self.duration);
-        if end - start < MIN_MOTION_SEGMENT_SECONDS {
-            let start = (self.duration - MIN_MOTION_SEGMENT_SECONDS).max(0.0);
-            end = self.duration;
-            if end - start < MIN_MOTION_SEGMENT_SECONDS
-                || self
-                    .segments
-                    .iter()
-                    .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
-            {
-                return None;
-            }
-            return self.insert_segment(start, end);
-        }
-        if self
+        let gap_start = self
             .segments
             .iter()
-            .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
-        {
-            if let Some(next_start) = self
-                .segments
-                .iter()
-                .filter(|segment| segment.start >= start)
-                .map(|segment| segment.start)
-                .min_by(|a, b| a.total_cmp(b))
-            {
-                end = next_start;
-            }
-            if end - start < MIN_MOTION_SEGMENT_SECONDS
-                || self
-                    .segments
-                    .iter()
-                    .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
-            {
-                return None;
-            }
+            .filter(|segment| segment.end <= start + 1e-9)
+            .map(|segment| segment.end)
+            .fold(0.0, f64::max);
+        let gap_end = self
+            .segments
+            .iter()
+            .filter(|segment| segment.start >= start - 1e-9)
+            .map(|segment| segment.start)
+            .fold(self.duration, f64::min);
+        let length = DEFAULT_MOTION_SEGMENT_SECONDS;
+        if gap_end - gap_start + 1e-9 < length {
+            return None;
         }
+        let fitted = start.clamp(gap_start, gap_end - length);
+        Some((fitted, fitted + length))
+    }
+
+    pub fn add_segment_at(&mut self, start: f64) -> Option<usize> {
+        let (start, end) = self.motion_add_span(start)?;
         self.insert_segment(start, end)
     }
 
@@ -113,10 +104,12 @@ impl MotionState {
         Some(index)
     }
 
+    /// Half-open on the end: a click exactly at a clip's edge starts a new
+    /// clip instead of grabbing the one that just ended.
     pub fn segment_index_at(&self, time: f64) -> Option<usize> {
         self.segments
             .iter()
-            .position(|segment| time >= segment.start && time <= segment.end)
+            .position(|segment| time >= segment.start && time < segment.end)
     }
 
     /// Find the nearest meaningful timeline edge for an effect segment. The
@@ -312,54 +305,41 @@ impl MotionState {
         }
     }
 
+    /// Half-open on the end, like [`Self::segment_index_at`].
     pub fn text_index_at(&self, time: f64) -> Option<usize> {
         self.text_segments
             .iter()
-            .position(|segment| time >= segment.start && time <= segment.end)
+            .position(|segment| time >= segment.start && time < segment.end)
     }
 
-    pub fn add_text_at(&mut self, start: f64) -> Option<usize> {
+    /// Text counterpart of [`Self::motion_add_span`].
+    pub fn text_add_span(&self, start: f64) -> Option<(f64, f64)> {
         let start = start.clamp(0.0, self.duration);
         if self.text_index_at(start).is_some() {
             return None;
         }
-        let mut end = (start + DEFAULT_MOTION_TEXT_SECONDS).min(self.duration);
-        if end - start < MIN_MOTION_SEGMENT_SECONDS {
-            let start = (self.duration - MIN_MOTION_SEGMENT_SECONDS).max(0.0);
-            end = self.duration;
-            if end - start < MIN_MOTION_SEGMENT_SECONDS
-                || self
-                    .text_segments
-                    .iter()
-                    .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
-            {
-                return None;
-            }
-            return self.insert_text(start, end);
-        }
-        if self
+        let gap_start = self
             .text_segments
             .iter()
-            .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
-        {
-            if let Some(next_start) = self
-                .text_segments
-                .iter()
-                .filter(|segment| segment.start >= start)
-                .map(|segment| segment.start)
-                .min_by(|a, b| a.total_cmp(b))
-            {
-                end = next_start;
-            }
-            if end - start < MIN_MOTION_SEGMENT_SECONDS
-                || self
-                    .text_segments
-                    .iter()
-                    .any(|segment| motion_ranges_overlap(start, end, segment.start, segment.end))
-            {
-                return None;
-            }
+            .filter(|segment| segment.end <= start + 1e-9)
+            .map(|segment| segment.end)
+            .fold(0.0, f64::max);
+        let gap_end = self
+            .text_segments
+            .iter()
+            .filter(|segment| segment.start >= start - 1e-9)
+            .map(|segment| segment.start)
+            .fold(self.duration, f64::min);
+        let length = DEFAULT_MOTION_TEXT_SECONDS;
+        if gap_end - gap_start + 1e-9 < length {
+            return None;
         }
+        let fitted = start.clamp(gap_start, gap_end - length);
+        Some((fitted, fitted + length))
+    }
+
+    pub fn add_text_at(&mut self, start: f64) -> Option<usize> {
+        let (start, end) = self.text_add_span(start)?;
         self.insert_text(start, end)
     }
 

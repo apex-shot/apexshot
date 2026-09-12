@@ -19,7 +19,7 @@ pub(super) use build::build_motion_mode;
 pub(super) use controls::wire_motion_controls;
 pub(super) use parts::MotionModeParts;
 use preview::draw_motion_preview;
-pub(super) use session::{MotionRuntime, MotionSession};
+pub(super) use session::{MotionHoverTrack, MotionRuntime, MotionSession};
 pub(super) use transition::{
     apply_editor_mode, install_confirm_overlay, request_enter_motion, request_leave_motion,
     MotionModeChrome,
@@ -70,7 +70,7 @@ mod tests {
 
     #[test]
     fn default_duration_matches_shotbase_still_length() {
-        assert!((MotionState::default().duration - 3.0).abs() < f64::EPSILON);
+        assert!((MotionState::default().duration - 6.0).abs() < f64::EPSILON);
     }
 
     #[test]

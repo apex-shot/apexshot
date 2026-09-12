@@ -616,6 +616,9 @@ mod tests {
     #[test]
     fn shotbase_transform_timing_defaults_drive_glide_motion() {
         let mut motion = motion_with_first_clip();
+        // Keep the clip longer than the 1.2s transition so the timing curve
+        // is not clamped by the default one-second clip.
+        motion.set_segment_range(0, 0.0, 2.0);
         let timing = motion.transform_timing;
         assert!((timing.transition_duration - 1.2).abs() < f64::EPSILON);
         assert!((timing.easing_x1 - 0.25).abs() < f64::EPSILON);
@@ -803,14 +806,34 @@ mod tests {
 
     #[test]
     fn add_segment_fills_a_gap_and_rejects_overlap() {
-        let mut motion = motion_with_first_clip();
-        let first_end = motion.segments[0].end;
-        assert!(motion.add_segment_at(first_end + 0.05).is_some());
+        let mut motion = MotionState::default();
+        let first = motion.add_segment_at(0.0).expect("first clip");
+        assert!(
+            (motion.segments[first].end - motion.segments[first].start - 1.0).abs() < f64::EPSILON,
+            "new clips are one second long"
+        );
+        assert!(motion.add_segment_at(2.0).is_some(), "second clip in the gap");
         assert_eq!(motion.segments.len(), 2);
+
+        // The one-second gap takes a full clip even when the pointer is late
+        // in the gap: it is fitted flush against the following clip.
+        let fitted = motion.add_segment_at(1.6).expect("the gap fits a clip");
+        assert!((motion.segments[fitted].start - 1.0).abs() < 1e-9);
+        assert!((motion.segments[fitted].end - 2.0).abs() < 1e-9);
+
+        // Clicking inside an existing clip never adds.
         assert!(motion.add_segment_at(0.2).is_none());
-        motion.selected = Some(1);
+        motion.selected = Some(fitted);
         assert!(motion.remove_selected());
-        assert_eq!(motion.segments.len(), 1);
+        assert_eq!(motion.segments.len(), 2);
+    }
+
+    #[test]
+    fn add_segment_rejects_gaps_shorter_than_a_clip() {
+        let mut motion = MotionState::default();
+        motion.add_segment_at(0.0).expect("first clip");
+        motion.add_segment_at(1.5).expect("clip leaving a 0.5s gap");
+        assert!(motion.add_segment_at(1.1).is_none());
     }
 
     #[test]

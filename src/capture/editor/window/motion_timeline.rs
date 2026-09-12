@@ -4,14 +4,15 @@ use gtk4::cairo::Context;
 use gtk4::{
     prelude::*, Align, Box as GtkBox, Button, DrawingArea, Image, Label, Orientation, Overlay,
 };
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::i18n::t;
+use crate::recording::editor::model::DEFAULT_MOTION_DURATION_SECONDS;
 use crate::typography::UI_FONT_FAMILY;
 
 use super::icon_names::custom::{EDIT_UNDO_RTL_SYMBOLIC, EDIT_UNDO_SYMBOLIC};
-use super::motion_mode::MotionRuntime;
+use super::motion_mode::{MotionHoverTrack, MotionRuntime};
 
 pub(super) struct MotionTimeline {
     pub dock: GtkBox,
@@ -30,11 +31,15 @@ pub(super) struct MotionTimeline {
     pub text_track: DrawingArea,
     pub playhead: DrawingArea,
     pub playhead_handle: DrawingArea,
+    pub hover_playhead: DrawingArea,
+    pub playhead_dragging: Rc<Cell<bool>>,
+    pub playhead_hovered: Rc<Cell<bool>>,
 }
 
 pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> MotionTimeline {
     let dock = GtkBox::new(Orientation::Vertical, 0);
     dock.add_css_class("recording-editor-timeline-dock");
+    dock.add_css_class("editor-motion-timeline-dock");
     dock.set_hexpand(true);
     dock.set_vexpand(false);
     dock.set_valign(Align::End);
@@ -45,7 +50,7 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
 
     let playhead_clock = Label::new(Some("0:00"));
     playhead_clock.add_css_class("recording-editor-timeline-clock");
-    let duration_clock = Label::new(Some("0:03"));
+    let duration_clock = Label::new(Some(&format_clock(DEFAULT_MOTION_DURATION_SECONDS)));
     duration_clock.add_css_class("recording-editor-timeline-clock");
 
     let play_btn = icon_button("media-playback-start-symbolic", &t("Play"));
@@ -157,19 +162,44 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
 
     // A narrow grabbable strip that follows the drawn playhead line. Clicking
     // the tracks no longer scrubs, so dragging this handle is the way to
-    // reposition the playhead.
+    // reposition the playhead. Its allocation is frozen while a drag is in
+    // flight: moving it under the pointer would feed the drag offset (which
+    // GTK derives from widget-local coordinates) back into the position we
+    // compute from it, which reads as lag and rubber-banding.
     let playhead_handle = DrawingArea::new();
-    playhead_handle.set_width_request(12);
+    playhead_handle.set_width_request(PLAYHEAD_HANDLE_W as i32);
+    playhead_handle.set_height_request(PLAYHEAD_HANDLE_H as i32);
     playhead_handle.set_halign(Align::Start);
-    playhead_handle.set_vexpand(true);
+    playhead_handle.set_valign(Align::Start);
+    playhead_handle.set_margin_top(PLAYHEAD_HANDLE_TOP as i32);
+    let playhead_dragging = Rc::new(Cell::new(false));
+    let playhead_hovered = Rc::new(Cell::new(false));
     playhead.set_draw_func({
         let runtime = runtime.clone();
         let handle = playhead_handle.clone();
+        let dragging = playhead_dragging.clone();
+        let hovered = playhead_hovered.clone();
         move |_, cr, width, height| {
-            let x = draw_playhead(cr, width, height, &runtime);
-            handle.set_margin_start((x - 6.0).max(0.0) as i32);
+            let expanded = dragging.get() || hovered.get();
+            let (hx, pill_w) = draw_playhead(cr, width, height, &runtime, expanded);
+            if !dragging.get() {
+                handle.set_width_request(pill_w as i32);
+                handle.set_margin_start(hx.max(0.0) as i32);
+            }
         }
     });
+    // Hover read-out: a red hairline under the playhead. It tracks the pointer
+    // anywhere over the timeline (no capsule yet); snapping and other behavior
+    // will attach to it later.
+    let hover_playhead = DrawingArea::new();
+    hover_playhead.set_hexpand(true);
+    hover_playhead.set_vexpand(true);
+    hover_playhead.set_can_target(false);
+    hover_playhead.set_draw_func({
+        let runtime = runtime.clone();
+        move |_, cr, width, height| draw_hover_playhead(cr, width, height, &runtime)
+    });
+    board.add_overlay(&hover_playhead);
     board.add_overlay(&playhead);
     board.add_overlay(&playhead_handle);
 
@@ -194,6 +224,9 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
         text_track,
         playhead,
         playhead_handle,
+        hover_playhead,
+        playhead_dragging,
+        playhead_hovered,
     }
 }
 
@@ -202,57 +235,135 @@ fn draw_source_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
     let inset = 6.0;
-    let x = 0.0;
     let y = inset;
-    let clip_w = w;
     let clip_h = (h - inset * 2.0).max(1.0);
 
-    rounded_rect(cr, x, y, clip_w, clip_h, 5.0);
-    cr.set_source_rgba(0.19, 0.23, 0.30, 0.72);
+    rounded_rect(cr, 0.0, y, w, clip_h, 5.0);
+    cr.set_source_rgba(0.10, 0.11, 0.13, 0.9);
     let _ = cr.fill();
 
-    let Some(card) = runtime.card.as_ref() else {
-        return;
-    };
-    let _ = cr.save();
-    rounded_rect(cr, x, y, clip_w, clip_h, 5.0);
-    cr.clip();
-    let image_w = card.width().max(1) as f64;
-    let image_h = card.height().max(1) as f64;
-    // Repeated cover thumbnails make the still readable across the full
-    // duration without inventing motion that does not exist in the source.
-    let thumbnail_w: f64 = 92.0;
-    let mut thumbnail_x = x;
-    while thumbnail_x < x + clip_w {
-        let tile_w = thumbnail_w.min(x + clip_w - thumbnail_x);
-        let scale = (tile_w / image_w).max(clip_h / image_h);
-        let painted_w = image_w * scale;
-        let painted_h = image_h * scale;
+    if let Some(card) = runtime.card.as_ref() {
         let _ = cr.save();
-        cr.rectangle(thumbnail_x, y, tile_w, clip_h);
+        rounded_rect(cr, 0.0, y, w, clip_h, 5.0);
         cr.clip();
-        cr.translate(
-            thumbnail_x + (tile_w - painted_w) / 2.0,
-            y + (clip_h - painted_h) / 2.0,
-        );
-        cr.scale(scale, scale);
-        cr.set_source_surface(card, 0.0, 0.0).ok();
-        let _ = cr.paint_with_alpha(0.82);
+        let image_w = card.width().max(1) as f64;
+        let image_h = card.height().max(1) as f64;
+        // Repeated cover thumbnails make the still readable across the full
+        // duration without inventing motion that does not exist in the source.
+        let thumbnail_w: f64 = 92.0;
+        let mut thumbnail_x = 0.0;
+        while thumbnail_x < w {
+            let tile_w = thumbnail_w.min(w - thumbnail_x);
+            let scale = (tile_w / image_w).max(clip_h / image_h);
+            let painted_w = image_w * scale;
+            let painted_h = image_h * scale;
+            let _ = cr.save();
+            cr.rectangle(thumbnail_x, y, tile_w, clip_h);
+            cr.clip();
+            cr.translate(
+                thumbnail_x + (tile_w - painted_w) / 2.0,
+                y + (clip_h - painted_h) / 2.0,
+            );
+            cr.scale(scale, scale);
+            cr.set_source_surface(card, 0.0, 0.0).ok();
+            let _ = cr.paint();
+            let _ = cr.restore();
+            thumbnail_x += thumbnail_w;
+        }
         let _ = cr.restore();
-        thumbnail_x += thumbnail_w;
     }
-    let _ = cr.restore();
-    cr.set_source_rgba(0.64, 0.74, 0.88, 0.72);
-    rounded_rect(
-        cr,
-        x + 0.5,
-        y + 0.5,
-        (clip_w - 1.0).max(0.0),
-        (clip_h - 1.0).max(0.0),
-        4.5,
+
+    draw_source_chip(cr, y, clip_h, runtime.motion.duration);
+
+    if runtime.source_selected {
+        rounded_rect(
+            cr,
+            0.5,
+            y + 0.5,
+            (w - 1.0).max(0.0),
+            (clip_h - 1.0).max(0.0),
+            4.5,
+        );
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.45);
+        cr.set_line_width(1.0);
+        let _ = cr.stroke();
+    }
+}
+
+/// The source lane's identity badge: icon, "Image", and the clip length.
+fn draw_source_chip(cr: &Context, y: f64, clip_h: f64, duration: f64) {
+    let title = t("Image");
+    cr.select_font_face(
+        UI_FONT_FAMILY,
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
     );
-    cr.set_line_width(1.0);
-    let _ = cr.stroke();
+    cr.set_font_size(11.0);
+    let title_w = cr
+        .text_extents(&title)
+        .map(|ext| ext.width())
+        .unwrap_or(0.0);
+    let duration_label = format!("{}s", duration.round().max(0.0) as i64);
+    cr.select_font_face(
+        UI_FONT_FAMILY,
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
+    cr.set_font_size(10.0);
+    let duration_w = cr
+        .text_extents(&duration_label)
+        .map(|ext| ext.width())
+        .unwrap_or(0.0);
+
+    let chip_h = 34.0;
+    let chip_x = 8.0;
+    let chip_y = y + (clip_h - chip_h) / 2.0;
+    let icon_size = 20.0;
+    let chip_w = 8.0 + icon_size + 7.0 + title_w.max(duration_w) + 10.0;
+    rounded_rect(cr, chip_x, chip_y, chip_w, chip_h, 8.0);
+    cr.set_source_rgba(0.06, 0.06, 0.08, 0.92);
+    let _ = cr.fill();
+
+    let icon_x = chip_x + 8.0;
+    let icon_y = chip_y + (chip_h - icon_size) / 2.0;
+    rounded_rect(cr, icon_x, icon_y, icon_size, icon_size, 5.0);
+    cr.set_source_rgba(0.95, 0.96, 0.98, 1.0);
+    let _ = cr.fill();
+    let _ = cr.save();
+    rounded_rect(cr, icon_x, icon_y, icon_size, icon_size, 5.0);
+    cr.clip();
+    cr.set_source_rgba(0.10, 0.10, 0.12, 1.0);
+    cr.arc(icon_x + 6.5, icon_y + 6.5, 2.2, 0.0, std::f64::consts::TAU);
+    let _ = cr.fill();
+    cr.move_to(icon_x + 2.0, icon_y + icon_size - 3.0);
+    cr.line_to(icon_x + 8.0, icon_y + 9.0);
+    cr.line_to(icon_x + 12.5, icon_y + 14.5);
+    cr.line_to(icon_x + icon_size - 1.0, icon_y + 7.5);
+    cr.line_to(icon_x + icon_size - 1.0, icon_y + icon_size - 1.0);
+    cr.line_to(icon_x + 2.0, icon_y + icon_size - 1.0);
+    cr.close_path();
+    let _ = cr.fill();
+    let _ = cr.restore();
+
+    let text_x = icon_x + icon_size + 7.0;
+    cr.set_source_rgba(0.96, 0.97, 1.0, 0.96);
+    cr.select_font_face(
+        UI_FONT_FAMILY,
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Bold,
+    );
+    cr.set_font_size(11.0);
+    cr.move_to(text_x, chip_y + 14.0);
+    let _ = cr.show_text(&title);
+    cr.set_source_rgba(0.86, 0.88, 0.92, 0.72);
+    cr.select_font_face(
+        UI_FONT_FAMILY,
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
+    cr.set_font_size(10.0);
+    cr.move_to(text_x, chip_y + 26.0);
+    let _ = cr.show_text(&duration_label);
 }
 
 fn icon_button(icon_name: &str, tooltip: &str) -> Button {
@@ -348,36 +459,67 @@ fn format_ruler_label(seconds: f64, major: f64) -> String {
     }
 }
 
-fn draw_track_placeholder(cr: &Context, w: f64, h: f64, label: &str) {
+/// Empty-lane affordance: a ghost of the clip the next click will create,
+/// starting at the red hover hairline and running for the default clip length.
+/// It names the clip kind so the row explains itself.
+fn draw_add_track(
+    cr: &Context,
+    w: f64,
+    h: f64,
+    duration: f64,
+    start: f64,
+    end: f64,
+    label: &str,
+    tint: (f64, f64, f64),
+    edge: (f64, f64, f64),
+) {
+    // The span comes from the model, so the ghost begins exactly at the hover
+    // line and is only shown when the click would really create that clip.
+    let x0 = time_to_x(start, duration, w);
+    let x1 = time_to_x(end, duration, w);
+    let clip_w = (x1 - x0).max(22.0);
     let y = 7.0;
-    let clip_h = h - 14.0;
-    rounded_rect(cr, 0.0, y, w, clip_h, 5.0);
-    cr.set_source_rgba(0.19, 0.23, 0.30, 0.35);
-    let _ = cr.fill();
-    cr.set_source_rgba(1.0, 1.0, 1.0, 0.12);
-    rounded_rect(
-        cr,
-        0.5,
-        y + 0.5,
-        (w - 1.0).max(0.0),
-        (clip_h - 1.0).max(0.0),
-        4.5,
-    );
+    let clip_h = (h - 14.0).max(1.0);
+    rounded_rect(cr, x0, y, clip_w, clip_h, 5.0);
+    cr.set_source_rgba(tint.0, tint.1, tint.2, 0.18);
+    let _ = cr.fill_preserve();
+    cr.set_source_rgba(edge.0, edge.1, edge.2, 0.45);
     cr.set_line_width(1.0);
     let _ = cr.stroke();
+
     cr.select_font_face(
         UI_FONT_FAMILY,
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
     cr.set_font_size(11.0);
-    if let Ok(ext) = cr.text_extents(label) {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
-        cr.move_to(
-            (w - ext.width()) / 2.0,
-            y + clip_h / 2.0 + ext.height() / 2.0,
-        );
-        let _ = cr.show_text(label);
+    let label_ext = cr.text_extents(label).ok();
+    let label_w = label_ext.map(|ext| ext.width()).unwrap_or(0.0);
+    let plus_r = 5.0;
+    let content_w = plus_r * 2.0 + 7.0 + label_w;
+    let cy = y + clip_h / 2.0;
+
+    cr.set_source_rgba(0.94, 0.96, 1.0, 0.9);
+    cr.set_line_width(1.6);
+    let cx = if content_w + 16.0 <= clip_w {
+        x0 + (clip_w - content_w) / 2.0 + plus_r
+    } else {
+        x0 + clip_w / 2.0
+    };
+    cr.move_to(cx - plus_r, cy);
+    cr.line_to(cx + plus_r, cy);
+    cr.move_to(cx, cy - plus_r);
+    cr.line_to(cx, cy + plus_r);
+    let _ = cr.stroke();
+
+    if content_w + 16.0 <= clip_w {
+        if let Some(ext) = label_ext {
+            cr.move_to(
+                x0 + (clip_w - content_w) / 2.0 + plus_r * 2.0 + 7.0,
+                cy - ext.y_bearing() - ext.height() / 2.0,
+            );
+            let _ = cr.show_text(label);
+        }
     }
 }
 
@@ -386,9 +528,23 @@ fn draw_motion_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
     let duration = runtime.motion.duration.max(0.001);
-    if runtime.motion.segments.is_empty() {
-        draw_track_placeholder(cr, w, h, &t("Double-click to add motion"));
-        return;
+    if runtime.hover_track == Some(MotionHoverTrack::Motion) {
+        if let Some((start, end)) = runtime
+            .hover_time
+            .and_then(|hover| runtime.motion.motion_add_span(hover))
+        {
+            draw_add_track(
+                cr,
+                w,
+                h,
+                duration,
+                start,
+                end,
+                &t("Motion"),
+                (0.23, 0.38, 0.62),
+                (0.72, 0.84, 1.0),
+            );
+        }
     }
     for (index, segment) in runtime.motion.segments.iter().enumerate() {
         let x0 = time_to_x(segment.start, duration, w);
@@ -397,9 +553,27 @@ fn draw_motion_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
         let y = 7.0;
         let clip_h = h - 14.0;
         let selected = runtime.motion.selected == Some(index);
+        let (fill_r, fill_g, fill_b) = if selected {
+            (0.28, 0.46, 0.74)
+        } else {
+            (0.23, 0.38, 0.62)
+        };
         rounded_rect(cr, x0, y, clip_w, clip_h, 5.0);
-        cr.set_source_rgba(0.30, 0.48, 0.86, if selected { 0.42 } else { 0.26 });
+        cr.set_source_rgba(fill_r, fill_g, fill_b, 1.0);
         let _ = cr.fill();
+        if selected {
+            rounded_rect(
+                cr,
+                x0 + 0.5,
+                y + 0.5,
+                (clip_w - 1.0).max(0.0),
+                (clip_h - 1.0).max(0.0),
+                4.5,
+            );
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.45);
+            cr.set_line_width(1.0);
+            let _ = cr.stroke();
+        }
         cr.set_source_rgba(0.72, 0.84, 1.0, 0.98);
         rounded_rect(
             cr,
@@ -438,9 +612,23 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
     let duration = runtime.motion.duration.max(0.001);
-    if runtime.motion.text_segments.is_empty() {
-        draw_track_placeholder(cr, w, h, &t("Double-click to add text"));
-        return;
+    if runtime.hover_track == Some(MotionHoverTrack::Text) {
+        if let Some((start, end)) = runtime
+            .hover_time
+            .and_then(|hover| runtime.motion.text_add_span(hover))
+        {
+            draw_add_track(
+                cr,
+                w,
+                h,
+                duration,
+                start,
+                end,
+                &t("Text"),
+                (0.62, 0.32, 0.18),
+                (0.98, 0.78, 0.62),
+            );
+        }
     }
     for (index, segment) in runtime.motion.text_segments.iter().enumerate() {
         let x0 = time_to_x(segment.start, duration, w);
@@ -449,9 +637,27 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
         let y = 6.0;
         let clip_h = h - 12.0;
         let selected = runtime.motion.selected_text == Some(index);
+        let (fill_r, fill_g, fill_b) = if selected {
+            (0.72, 0.39, 0.22)
+        } else {
+            (0.62, 0.32, 0.18)
+        };
         rounded_rect(cr, x0, y, clip_w, clip_h, 5.0);
-        cr.set_source_rgba(0.69, 0.36, 0.22, if selected { 0.50 } else { 0.30 });
+        cr.set_source_rgba(fill_r, fill_g, fill_b, 1.0);
         let _ = cr.fill();
+        if selected {
+            rounded_rect(
+                cr,
+                x0 + 0.5,
+                y + 0.5,
+                (clip_w - 1.0).max(0.0),
+                (clip_h - 1.0).max(0.0),
+                4.5,
+            );
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.45);
+            cr.set_line_width(1.0);
+            let _ = cr.stroke();
+        }
         cr.set_source_rgba(0.98, 0.78, 0.62, 0.98);
         rounded_rect(
             cr,
@@ -491,27 +697,110 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
     }
 }
 
+const PLAYHEAD_HANDLE_W: f64 = 12.0;
+const PLAYHEAD_HANDLE_H: f64 = 26.0;
+const PLAYHEAD_HANDLE_TOP: f64 = 2.0;
+// Hovered/dragged handle: a wide pill that shows the playhead clock, because
+// the thumb covers the ruler ticks users would otherwise read.
+const PLAYHEAD_CLOCK_W: f64 = 58.0;
+const PLAYHEAD_HOVER_SLOP: f64 = 6.0;
+
+/// Hit-test for the playhead *head* (the capsule) only. The stem below it must
+/// not expand the capsule; and once expanded the pointer may roam the wide
+/// pill without it collapsing.
+pub(in crate::capture::editor::window) fn playhead_head_hit(
+    pointer_x: f64,
+    pointer_y: f64,
+    line_x: f64,
+    expanded: bool,
+) -> bool {
+    let half_w = if expanded {
+        PLAYHEAD_CLOCK_W / 2.0
+    } else {
+        PLAYHEAD_HANDLE_W / 2.0
+    };
+    pointer_y <= PLAYHEAD_HANDLE_TOP + PLAYHEAD_HANDLE_H + PLAYHEAD_HOVER_SLOP
+        && (pointer_x - line_x).abs() <= half_w + PLAYHEAD_HOVER_SLOP
+}
+
+/// Pointer read-out line. Unlike the playhead it has no capsule, so it can be
+/// drawn under everything and updated on every motion event cheaply.
+fn draw_hover_playhead(
+    cr: &Context,
+    width: i32,
+    height: i32,
+    runtime: &Rc<RefCell<MotionRuntime>>,
+) {
+    let runtime = runtime.borrow();
+    let Some(time) = runtime.hover_time else {
+        return;
+    };
+    let w = width.max(1) as f64;
+    let h = height.max(1) as f64;
+    let x = time_to_x(time, runtime.motion.duration, w).floor() + 0.5;
+    cr.set_source_rgba(0.80, 0.22, 0.20, 0.95);
+    cr.set_line_width(2.0);
+    cr.move_to(x, 0.0);
+    cr.line_to(x, h);
+    let _ = cr.stroke();
+}
+
 fn draw_playhead(
     cr: &Context,
     width: i32,
     height: i32,
     runtime: &Rc<RefCell<MotionRuntime>>,
-) -> f64 {
+    expanded: bool,
+) -> (f64, f64) {
     let runtime = runtime.borrow();
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
     let x = time_to_x(runtime.motion.playhead, runtime.motion.duration, w).floor() + 0.5;
-    cr.set_source_rgba(0.86, 0.90, 0.98, 1.0);
-    cr.set_line_width(2.0);
-    cr.move_to(x, 26.0);
+
+    // Stem: thin light line running from the handle to the bottom of the board.
+    cr.set_source_rgba(0.86, 0.90, 0.98, 0.9);
+    cr.set_line_width(1.5);
+    cr.move_to(x, PLAYHEAD_HANDLE_TOP + PLAYHEAD_HANDLE_H);
     cr.line_to(x, h);
     let _ = cr.stroke();
-    cr.move_to(x - 4.5, 26.0);
-    cr.line_to(x + 4.5, 26.0);
-    cr.line_to(x, 32.0);
-    cr.close_path();
-    let _ = cr.fill();
-    x
+
+    let (pill_w, pill_h) = if expanded {
+        (PLAYHEAD_CLOCK_W, PLAYHEAD_HANDLE_H)
+    } else {
+        (PLAYHEAD_HANDLE_W, PLAYHEAD_HANDLE_H)
+    };
+    // The stem must pierce the capsule's center even on the first/last frame.
+    // Clamping the capsule into the board pushed it off the stem, so let it
+    // clip at the edge instead, like the video editor's playhead mark.
+    let hx = x - pill_w / 2.0;
+
+    // Handle: dark capsule with a light outline; expanded it carries the clock.
+    rounded_rect(cr, hx, PLAYHEAD_HANDLE_TOP, pill_w, pill_h, pill_h / 2.0);
+    cr.set_source_rgba(0.04, 0.05, 0.07, 1.0);
+    let _ = cr.fill_preserve();
+    cr.set_source_rgba(0.86, 0.90, 0.98, 1.0);
+    cr.set_line_width(1.5);
+    let _ = cr.stroke();
+
+    if expanded {
+        cr.select_font_face(
+            UI_FONT_FAMILY,
+            gtk4::cairo::FontSlant::Normal,
+            gtk4::cairo::FontWeight::Bold,
+        );
+        cr.set_font_size(13.0);
+        let label = format_clock(runtime.motion.playhead);
+        if let Ok(ext) = cr.text_extents(&label) {
+            cr.set_source_rgba(0.94, 0.96, 1.0, 1.0);
+            cr.move_to(
+                hx + (pill_w - ext.width()) / 2.0 - ext.x_bearing(),
+                PLAYHEAD_HANDLE_TOP + pill_h / 2.0 - ext.y_bearing() - ext.height() / 2.0,
+            );
+            let _ = cr.show_text(&label);
+        }
+    }
+
+    (hx, pill_w)
 }
 
 fn rounded_rect(cr: &Context, x: f64, y: f64, w: f64, h: f64, r: f64) {

@@ -308,6 +308,9 @@
                 background: alpha(#111827, 0.04);
                 border-left: none;
             }
+            .editor-root.editor-theme-light .editor-motion-timeline-dock {
+                background: alpha(#111827, 0.04);
+            }
             .editor-root.editor-theme-light .editor-right-inspector scrollbar slider {
                 background-color: alpha(#111827, 0.18);
             }
