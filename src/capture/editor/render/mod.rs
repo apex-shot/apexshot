@@ -933,12 +933,8 @@ pub fn cairo_argb_to_rgba_image(width: u32, height: u32, stride: usize, data: &[
 mod tests {
     #[test]
     fn dump_checkerboard_for_artifact_debug() {
-        let mut surface = gtk4::cairo::ImageSurface::create(
-            gtk4::cairo::Format::ARgb32,
-            560,
-            300,
-        )
-        .expect("surface");
+        let mut surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 560, 300)
+            .expect("surface");
         let context = gtk4::cairo::Context::new(&surface).expect("context");
         draw_canvas_checkerboard_background(&context, 560, 300, None, false);
         surface.flush();
@@ -960,8 +956,7 @@ mod tests {
                 }
             }
         }
-        let png =
-            crate::capture::editor::render::cairo_argb_to_rgba_image(560, 300, stride, &data);
+        let png = crate::capture::editor::render::cairo_argb_to_rgba_image(560, 300, stride, &data);
         let _ = image::save_buffer(
             "/tmp/checker_test.png",
             &png,
@@ -969,7 +964,10 @@ mod tests {
             300,
             image::ColorType::Rgba8,
         );
-        assert_eq!(unexpected, 0, "checkerboard produced non-tile pixels: {unexpected}");
+        assert_eq!(
+            unexpected, 0,
+            "checkerboard produced non-tile pixels: {unexpected}"
+        );
     }
 
     use super::*;

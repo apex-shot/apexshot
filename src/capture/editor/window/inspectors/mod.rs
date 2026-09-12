@@ -156,22 +156,19 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     motion_tab_btn.set_child(Some(&motion_icon));
     motion_tab_btn.add_css_class("editor-tool-button");
     motion_tab_btn.add_css_class("active-tool");
-    let appearance_tab_btn = Button::new();
-    appearance_tab_btn.set_has_frame(false);
-    appearance_tab_btn.set_can_target(true);
-    appearance_tab_btn.set_tooltip_text(Some(&t("Appearance")));
-    let appearance_icon = Image::from_icon_name(icon_names::custom::IMAGE_ALT_SYMBOLIC);
-    appearance_icon.set_pixel_size(20);
-    appearance_tab_btn.set_child(Some(&appearance_icon));
-    appearance_tab_btn.add_css_class("editor-tool-button");
-    let watermark_tab_btn = Button::new();
-    watermark_tab_btn.set_has_frame(false);
-    watermark_tab_btn.set_can_target(true);
-    watermark_tab_btn.set_tooltip_text(Some(&t("Watermark")));
-    let watermark_icon = Image::from_icon_name(icon_names::IMAGE_REGULAR);
-    watermark_icon.set_pixel_size(20);
-    watermark_tab_btn.set_child(Some(&watermark_icon));
-    watermark_tab_btn.add_css_class("editor-tool-button");
+    let notch_btn = |tooltip: &str, icon: &str| {
+        let btn = Button::new();
+        btn.set_has_frame(false);
+        btn.set_can_target(true);
+        btn.set_tooltip_text(Some(&t(tooltip)));
+        let image = Image::from_icon_name(icon);
+        image.set_pixel_size(20);
+        btn.set_child(Some(&image));
+        btn.add_css_class("editor-tool-button");
+        btn
+    };
+    let appearance_tab_btn = notch_btn("Appearance", icon_names::custom::IMAGE_ALT_SYMBOLIC);
+    let watermark_tab_btn = notch_btn("Watermark", icon_names::IMAGE_REGULAR);
     motion_tabs.append(&motion_tab_btn);
     motion_tabs.append(&appearance_tab_btn);
     motion_tabs.append(&watermark_tab_btn);

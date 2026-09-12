@@ -12,8 +12,8 @@ use std::time::Duration;
 
 use crate::i18n::t;
 use crate::recording::editor::model::{
-    MotionBackgroundFillType, MotionFramePreset, MotionSceneShadowPreset,
-    MotionSceneShadowPlacement,
+    MotionBackgroundFillType, MotionFramePreset, MotionSceneShadowPlacement,
+    MotionSceneShadowPreset,
 };
 
 use super::widgets::{
@@ -124,7 +124,8 @@ fn motion_gradient_preset_area(start: [f64; 4], end: [f64; 4]) -> DrawingArea {
     area.set_content_height(56);
     area.set_can_target(false);
     area.set_draw_func(move |_, cr, width, height| {
-        let gradient = gtk4::cairo::LinearGradient::new(0.0, 0.0, f64::from(width), f64::from(height));
+        let gradient =
+            gtk4::cairo::LinearGradient::new(0.0, 0.0, f64::from(width), f64::from(height));
         let [r1, g1, b1, a1] = start;
         let [r2, g2, b2, a2] = end;
         gradient.add_color_stop_rgba(0.0, r1, g1, b1, a1);
@@ -388,8 +389,7 @@ pub(super) fn build_motion_appearance_panel(
         move |_| {
             let mut runtime = runtime.borrow_mut();
             runtime.begin_motion_edit();
-            runtime.motion.appearance.background_fill_type =
-                MotionBackgroundFillType::Color;
+            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
             none_button.remove_css_class("active-background-option");
             color_choice.add_css_class("active-background-option");
             gradient_choice.remove_css_class("active-background-option");
@@ -411,8 +411,7 @@ pub(super) fn build_motion_appearance_panel(
         move |_| {
             let mut runtime = runtime.borrow_mut();
             runtime.begin_motion_edit();
-            runtime.motion.appearance.background_fill_type =
-                MotionBackgroundFillType::Gradient;
+            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
             none_button.remove_css_class("active-background-option");
             color_choice.remove_css_class("active-background-option");
             gradient_choice.add_css_class("active-background-option");
@@ -586,7 +585,7 @@ pub(super) fn build_motion_appearance_panel(
     let border_title = Label::new(Some(&t("Color")));
     border_title.add_css_class("editor-background-section-title");
     border_title.set_xalign(0.0);
-    let     border_color = motion_color_control(initial_border, "Border color", false, {
+    let border_color = motion_color_control(initial_border, "Border color", false, {
         let runtime = session.runtime.clone();
         let preview = preview.clone();
         move |rgba| {
@@ -727,9 +726,7 @@ pub(super) fn build_motion_appearance_panel(
     // Exports render an unset background fill as a solid black scene, so a
     // dark shadow over it cannot be seen. Say so instead of leaving users to
     // discover a missing effect in their MP4.
-    let shadow_hint = Label::new(Some(&t(
-        "Needs a background fill to appear in exports",
-    )));
+    let shadow_hint = Label::new(Some(&t("Needs a background fill to appear in exports")));
     shadow_hint.add_css_class("editor-select-inspector-hint");
     shadow_hint.set_xalign(0.0);
     shadow_hint.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -776,7 +773,9 @@ pub(super) fn build_motion_appearance_panel(
                 }
             }
         });
-        shadow_preset_buttons.borrow_mut().push((*preset, button.clone()));
+        shadow_preset_buttons
+            .borrow_mut()
+            .push((*preset, button.clone()));
         if let Some(row) = shadow_row.as_ref() {
             row.append(&button);
         }
@@ -846,7 +845,9 @@ pub(super) fn build_motion_appearance_panel(
                 }
             }
         });
-        shadow_placement_buttons.borrow_mut().push((placement, button.clone()));
+        shadow_placement_buttons
+            .borrow_mut()
+            .push((placement, button.clone()));
         placement_row.append(&button);
     }
     scene_shadow_section.append(&placement_row);

@@ -66,7 +66,7 @@ fn build_preview_inner(
     picture.set_vexpand(true);
     picture.set_halign(Align::Fill);
     picture.set_valign(Align::Fill);
-    picture.set_keep_aspect_ratio(true);
+    picture.set_content_fit(gtk4::ContentFit::Contain);
     picture.set_can_shrink(true);
     picture.add_css_class("recording-editor-video-zoom-live");
     picture.set_visible(has_video);

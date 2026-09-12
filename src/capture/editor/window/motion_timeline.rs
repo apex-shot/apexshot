@@ -10,8 +10,8 @@ use std::rc::Rc;
 use crate::i18n::t;
 use crate::typography::UI_FONT_FAMILY;
 
-use super::motion_mode::MotionRuntime;
 use super::icon_names::custom::{EDIT_UNDO_RTL_SYMBOLIC, EDIT_UNDO_SYMBOLIC};
+use super::motion_mode::MotionRuntime;
 
 pub(super) struct MotionTimeline {
     pub dock: GtkBox,
@@ -355,7 +355,14 @@ fn draw_track_placeholder(cr: &Context, w: f64, h: f64, label: &str) {
     cr.set_source_rgba(0.19, 0.23, 0.30, 0.35);
     let _ = cr.fill();
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.12);
-    rounded_rect(cr, 0.5, y + 0.5, (w - 1.0).max(0.0), (clip_h - 1.0).max(0.0), 4.5);
+    rounded_rect(
+        cr,
+        0.5,
+        y + 0.5,
+        (w - 1.0).max(0.0),
+        (clip_h - 1.0).max(0.0),
+        4.5,
+    );
     cr.set_line_width(1.0);
     let _ = cr.stroke();
     cr.select_font_face(
@@ -366,7 +373,10 @@ fn draw_track_placeholder(cr: &Context, w: f64, h: f64, label: &str) {
     cr.set_font_size(11.0);
     if let Ok(ext) = cr.text_extents(label) {
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.42);
-        cr.move_to((w - ext.width()) / 2.0, y + clip_h / 2.0 + ext.height() / 2.0);
+        cr.move_to(
+            (w - ext.width()) / 2.0,
+            y + clip_h / 2.0 + ext.height() / 2.0,
+        );
         let _ = cr.show_text(label);
     }
 }
@@ -481,7 +491,12 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
     }
 }
 
-fn draw_playhead(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<MotionRuntime>>) -> f64 {
+fn draw_playhead(
+    cr: &Context,
+    width: i32,
+    height: i32,
+    runtime: &Rc<RefCell<MotionRuntime>>,
+) -> f64 {
     let runtime = runtime.borrow();
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;

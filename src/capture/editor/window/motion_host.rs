@@ -114,42 +114,30 @@ impl MotionHost {
             appearance_tab_btn: appearance_tab_btn.clone(),
             watermark_tab_btn: watermark_tab_btn.clone(),
         });
-        motion_tab_btn.connect_clicked({
+        // One notch button per Motion tool; the table keeps the next
+        // Shotbase tab (Cursor, Camera, Audio, Frame, …) to a one-line addition.
+        let tool_tabs: [(Button, &str); 3] = [
+            (motion_tab_btn.clone(), "motion"),
+            (appearance_tab_btn.clone(), "motion-appearance"),
+            (watermark_tab_btn.clone(), "motion-watermark"),
+        ];
+        let peers: Vec<Button> = tool_tabs.iter().map(|(btn, _)| btn.clone()).collect();
+        for (active_btn, page) in &tool_tabs {
             let inspector_stack = inspector_stack.clone();
-            let motion_tab_btn = motion_tab_btn.clone();
-            let appearance_tab_btn = appearance_tab_btn.clone();
-            let watermark_tab_btn = watermark_tab_btn.clone();
-            move |_| {
-                inspector_stack.set_visible_child_name("motion");
-                motion_tab_btn.add_css_class("active-tool");
-                appearance_tab_btn.remove_css_class("active-tool");
-                watermark_tab_btn.remove_css_class("active-tool");
-            }
-        });
-        appearance_tab_btn.connect_clicked({
-            let inspector_stack = inspector_stack.clone();
-            let motion_tab_btn = motion_tab_btn.clone();
-            let appearance_tab_btn = appearance_tab_btn.clone();
-            let watermark_tab_btn = watermark_tab_btn.clone();
-            move |_| {
-                inspector_stack.set_visible_child_name("motion-appearance");
-                appearance_tab_btn.add_css_class("active-tool");
-                motion_tab_btn.remove_css_class("active-tool");
-                watermark_tab_btn.remove_css_class("active-tool");
-            }
-        });
-        watermark_tab_btn.connect_clicked({
-            let inspector_stack = inspector_stack.clone();
-            let motion_tab_btn = motion_tab_btn.clone();
-            let appearance_tab_btn = appearance_tab_btn.clone();
-            let watermark_tab_btn = watermark_tab_btn.clone();
-            move |_| {
-                inspector_stack.set_visible_child_name("motion-watermark");
-                watermark_tab_btn.add_css_class("active-tool");
-                motion_tab_btn.remove_css_class("active-tool");
-                appearance_tab_btn.remove_css_class("active-tool");
-            }
-        });
+            let peers = peers.clone();
+            let for_compare = active_btn.clone();
+            let page = *page;
+            active_btn.connect_clicked(move |_| {
+                inspector_stack.set_visible_child_name(page);
+                for peer in &peers {
+                    if *peer == for_compare {
+                        peer.add_css_class("active-tool");
+                    } else {
+                        peer.remove_css_class("active-tool");
+                    }
+                }
+            });
+        }
         motion_mode::wire_motion_controls(
             &self.parts,
             self.session.as_ref(),

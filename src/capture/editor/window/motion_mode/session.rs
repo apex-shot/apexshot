@@ -111,7 +111,8 @@ impl MotionRuntime {
         let Some(next) = self.redo_stack.pop() else {
             return false;
         };
-        self.undo_stack.push(std::mem::replace(&mut self.motion, next));
+        self.undo_stack
+            .push(std::mem::replace(&mut self.motion, next));
         self.last_edit = None;
         self.refresh_motion_surfaces();
         true

@@ -497,8 +497,7 @@ pub(super) fn install(
             let pointer_board_x = handle.allocation().x() as f64 + start_x + offset_x;
             let mut runtime = session.borrow_mut();
             let duration = runtime.motion.duration.max(0.001);
-            runtime.motion.playhead =
-                (pointer_board_x / width * duration).clamp(0.0, duration);
+            runtime.motion.playhead = (pointer_board_x / width * duration).clamp(0.0, duration);
             drop(runtime);
             redraw_playhead();
         }
@@ -516,7 +515,10 @@ pub(super) fn install(
             widget.set_cursor(None);
         }
     });
-    parts.timeline.playhead_handle.add_controller(handle_pointer);
+    parts
+        .timeline
+        .playhead_handle
+        .add_controller(handle_pointer);
 
     parts.timeline.add_btn.connect_clicked({
         let session = session.runtime.clone();

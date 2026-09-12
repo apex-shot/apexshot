@@ -210,9 +210,7 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
             if !in_motion.get() {
                 return glib::Propagation::Proceed;
             }
-            if key == gdk::Key::z
-                && state.contains(gdk::ModifierType::CONTROL_MASK)
-            {
+            if key == gdk::Key::z && state.contains(gdk::ModifierType::CONTROL_MASK) {
                 let changed = if state.contains(gdk::ModifierType::SHIFT_MASK) {
                     session.borrow_mut().redo_motion()
                 } else {

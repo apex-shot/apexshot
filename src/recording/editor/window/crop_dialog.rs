@@ -115,7 +115,7 @@ pub(super) fn show_crop(
     picture.set_vexpand(true);
     picture.set_halign(Align::Fill);
     picture.set_valign(Align::Fill);
-    picture.set_keep_aspect_ratio(true);
+    picture.set_content_fit(gtk4::ContentFit::Contain);
     picture.set_can_shrink(true);
 
     let clip = GtkBox::new(Orientation::Vertical, 0);
