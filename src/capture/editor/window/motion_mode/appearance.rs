@@ -377,6 +377,13 @@ pub(super) fn build_motion_appearance_panel(
     selection_stack.add_named(&image_section, Some("image"));
     selection_stack.set_visible_child_name("empty");
     fill_section.append(&selection_stack);
+    // The Motion default selects a wallpaper before this panel is built, so
+    // reflect it: Wallpapers active with its catalog already open.
+    if initial_fill_type == MotionBackgroundFillType::Wallpaper {
+        none_button.remove_css_class("active-background-option");
+        wallpapers_choice.add_css_class("active-background-option");
+        selection_stack.set_visible_child_name("wallpapers");
+    }
     color_choice.connect_clicked({
         let selection_stack = selection_stack.clone();
         let runtime = session.runtime.clone();

@@ -32,7 +32,7 @@ mod tests {
     use super::*;
     use crate::capture::editor::state::EditorState;
     use crate::capture::editor::types::{AnnotationAction, Point, Rect};
-    use crate::recording::editor::model::MotionState;
+    use crate::recording::editor::model::{MotionBackgroundFillType, MotionState};
     use image::RgbaImage;
 
     fn blank_state() -> EditorState {
@@ -83,6 +83,26 @@ mod tests {
         assert!(!session.has_segments());
         let identity = session.runtime.borrow().motion.sample(1.5);
         assert!((identity.scale - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn entering_motion_starts_with_the_default_wallpaper_selected() {
+        let Some(expected) =
+            crate::capture::editor::window::background_panel::default_motion_wallpaper()
+        else {
+            // Environments without the bundled catalog keep the old default.
+            return;
+        };
+        let session = MotionSession::new(true);
+        let runtime = session.runtime.borrow();
+        assert_eq!(
+            runtime.motion.appearance.background_fill_type,
+            MotionBackgroundFillType::Wallpaper
+        );
+        assert_eq!(
+            runtime.motion.appearance.wallpaper_image_name.as_deref(),
+            Some(expected.as_str())
+        );
     }
 
     #[test]

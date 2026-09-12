@@ -189,8 +189,21 @@ pub(in crate::capture::editor::window) struct MotionSession {
 
 impl MotionSession {
     pub(in crate::capture::editor::window) fn new(prefers_dark: bool) -> Self {
+        let runtime = Rc::new(RefCell::new(MotionRuntime::new()));
+        // Motion opens with a bundled wallpaper already selected so the first
+        // static → motion switch composes against a real scene instead of the
+        // black default. Setting it before the appearance panel is built keeps
+        // its picker in sync; a different fill chosen later persists for the
+        // session, like any other appearance edit.
+        if let Some(wallpaper) =
+            crate::capture::editor::window::background_panel::default_motion_wallpaper()
+        {
+            let mut runtime = runtime.borrow_mut();
+            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Wallpaper;
+            runtime.motion.appearance.wallpaper_image_name = Some(wallpaper);
+        }
         Self {
-            runtime: Rc::new(RefCell::new(MotionRuntime::new())),
+            runtime,
             prefers_dark,
         }
     }
@@ -210,9 +223,7 @@ impl MotionSession {
         runtime.card_preview = None;
         runtime.card_scale = 1.0;
         if let Some(card) = runtime.card.as_ref() {
-            if let Some((preview, scale)) =
-                super::super::motion_render::scaled_card_preview(card)
-            {
+            if let Some((preview, scale)) = super::super::motion_render::scaled_card_preview(card) {
                 runtime.card_preview = Some(preview);
                 runtime.card_scale = scale;
             }
