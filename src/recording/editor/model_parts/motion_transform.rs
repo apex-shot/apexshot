@@ -150,9 +150,10 @@ impl MotionSegment {
             .clamped()
             .transition_duration
             .clamp(0.0, span);
-        // A Motion transform enters once then holds its end pose; unlike the
-        // legacy zoom clip it is not a symmetric in/out animation. A zero
-        // transition means the target pose applies for the whole segment.
+        // A Motion transform enters once then holds its end pose for the rest
+        // of its clip; the eased return to the initial framing happens in the
+        // gap after it (`release_after`). A zero transition means the target
+        // pose applies for the whole segment.
         if ease <= f64::EPSILON {
             return target;
         }
@@ -168,5 +169,31 @@ impl MotionSegment {
     /// authored target, so zero is a true no-op and one is the full move.
     fn target_transform(&self) -> MotionTransform {
         lerp_transform(self.from, self.to, self.intensity.clamp(0.0, 1.0))
+    }
+
+    /// Pose while the camera eases back to the initial framing in the gap
+    /// after this move. The gap's length sets the release speed, capped by
+    /// the track's global transition timing; the final move releases over
+    /// whatever time is left on the timeline.
+    fn release_after(
+        &self,
+        time: f64,
+        transform_timing: MotionEffectTransformTiming,
+        available: f64,
+    ) -> MotionTransform {
+        let target = self.target_transform();
+        let ease = transform_timing
+            .clamped()
+            .transition_duration
+            .min(available.max(0.0));
+        if ease <= f64::EPSILON {
+            return MotionTransform::default();
+        }
+        let progress = ((time - self.end) / ease).clamp(0.0, 1.0);
+        lerp_transform(
+            target,
+            MotionTransform::default(),
+            transform_timing.apply(progress),
+        )
     }
 }

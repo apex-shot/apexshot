@@ -360,14 +360,21 @@ mod tests {
     }
 
     #[test]
-    fn new_segment_starts_identity_and_holds_shotbase_default_zoom() {
+    fn new_segment_starts_identity_reaches_the_default_zoom_and_releases() {
         let motion = motion_with_first_clip();
         let start = motion.sample(0.0);
+        let reach = motion.sample(motion.segments[0].end);
+        let releasing = motion.sample(motion.segments[0].end + 0.6);
         let end = motion.sample(motion.duration);
         assert!((start.scale - 1.0).abs() < 1e-6);
         assert!(start.rotation_y.abs() < 1e-6);
-        assert!((end.scale - DEFAULT_MOTION_ZOOM).abs() < 1e-6);
-        assert!(end.rotation_y.abs() < 1e-6);
+        assert!((reach.scale - DEFAULT_MOTION_ZOOM).abs() < 1e-6);
+        assert!(reach.rotation_y.abs() < 1e-6);
+        assert!(
+            releasing.scale > 1.0 && releasing.scale < DEFAULT_MOTION_ZOOM,
+            "the tail eases back instead of freezing on the last pose"
+        );
+        assert!((end.scale - 1.0).abs() < 1e-6);
         assert_eq!(motion.segments.len(), 1);
         assert_eq!(motion.selected, Some(0));
     }
@@ -500,36 +507,76 @@ mod tests {
     }
 
     #[test]
-    fn stretching_duration_holds_end_pose_after_the_move() {
+    fn stretching_duration_keeps_the_move_and_releases_after_it() {
         let mut motion = motion_with_first_clip();
         let move_end = motion.segments[0].end;
         motion.set_duration(6.0);
         assert!((motion.segments[0].end - move_end).abs() < 1e-6);
-        let end = motion.sample(6.0);
-        assert!((end.scale - DEFAULT_MOTION_ZOOM).abs() < 1e-6);
+        assert!((motion.sample(move_end).scale - DEFAULT_MOTION_ZOOM).abs() < 1e-6);
+        // The camera returns to the initial framing by the track's end.
+        assert!((motion.sample(6.0).scale - 1.0).abs() < 1e-6);
     }
 
     #[test]
-    fn effect_segments_inherit_the_camera_pose_before_them() {
-        let mut motion = motion_with_first_clip();
-        motion.set_duration(6.0);
-        motion
-            .add_segment_at(2.0)
-            .expect("a second non-overlapping move");
+    fn a_shorter_gap_releases_faster_at_the_same_elapsed_time() {
+        let scale_after = |gap: f64| {
+            let mut motion = motion_with_first_clip();
+            motion.set_duration(6.0);
+            motion
+                .add_segment_at(1.0 + gap)
+                .expect("a move after the gap");
+            motion.sample(1.0 + 0.1).scale
+        };
+        assert!(
+            scale_after(0.25) < scale_after(2.0),
+            "a short gap pulls the camera home faster than a long one"
+        );
+    }
 
-        let first_end = motion.segments[0].to;
-        assert_eq!(motion.segments[1].from, first_end);
+    #[test]
+    fn flush_moves_chain_and_gapped_moves_restart_from_identity() {
+        let mut flush = motion_with_first_clip();
+        flush.set_duration(6.0);
+        flush.add_segment_at(1.0).expect("a flush second move");
+        let first_end = flush.segments[0].to;
+        assert_eq!(flush.segments[1].from, first_end);
+        flush.selected = Some(0);
+        flush.set_selected_end_scale(1.5);
+        assert!((flush.segments[1].from.scale - 1.5).abs() < 1e-6);
+
+        let mut gapped = motion_with_first_clip();
+        gapped.set_duration(6.0);
+        gapped.add_segment_at(2.0).expect("a move after a gap");
         assert_eq!(
-            motion.sample(2.0),
+            gapped.segments[1].from,
+            MotionTransform::default(),
+            "a gap releases the camera to identity before the next move"
+        );
+        assert_eq!(
+            gapped.sample(2.0),
             MotionTransform {
-                perspective: motion.perspective_intensity,
-                ..first_end
+                perspective: gapped.perspective_intensity,
+                ..MotionTransform::default()
             }
         );
+        // The gap is consumed by the release: identity by the next move.
+        assert!((gapped.sample(2.0 - 1e-6).scale - 1.0).abs() < 1e-3);
+    }
 
-        motion.selected = Some(0);
-        motion.set_selected_end_scale(1.5);
-        assert!((motion.segments[1].from.scale - 1.5).abs() < 1e-6);
+    #[test]
+    fn a_move_added_flush_while_zoomed_defaults_to_pulling_back_out() {
+        let mut motion = motion_with_first_clip();
+        motion.set_duration(6.0);
+        motion.add_segment_at(1.0).expect("a flush second move");
+
+        let second = &motion.segments[1];
+        assert!((second.from.scale - DEFAULT_MOTION_ZOOM).abs() < 1e-6);
+        assert!((second.to.scale - 1.0).abs() < 1e-6);
+        let mid = motion.sample(second.start + second.duration() / 2.0);
+        assert!(
+            mid.scale > 1.0 && mid.scale < DEFAULT_MOTION_ZOOM,
+            "the flush second move must animate instead of holding 2x → 2x"
+        );
     }
 
     #[test]
@@ -671,7 +718,7 @@ mod tests {
         assert!((motion.motion_blur - 0.4).abs() < 1e-6);
         assert!(motion.motion_blur_settings.enabled);
         assert!((motion.effective_motion_blur() - 0.4).abs() < 1e-6);
-        let end = motion.sample(motion.duration);
+        let end = motion.sample(motion.segments[0].end);
         assert!((end.pos_x - 0.5).abs() < 1e-6);
         assert!((end.pos_y + 0.25).abs() < 1e-6);
         let start = motion.sample(0.0);
@@ -718,10 +765,13 @@ mod tests {
         motion.set_selected_perspective(0.0);
         motion.set_selected_intensity(0.0);
 
-        assert_eq!(motion.sample(motion.duration), MotionTransform::default());
+        assert_eq!(
+            motion.sample(motion.segments[0].end),
+            MotionTransform::default()
+        );
 
         motion.set_selected_intensity(0.5);
-        let half = motion.sample(motion.duration);
+        let half = motion.sample(motion.segments[0].end);
         assert!((half.scale - 1.5).abs() < 1e-6);
         assert!(half.rotation_y.abs() < 1e-6);
     }

@@ -79,6 +79,22 @@ impl MotionState {
     }
 
     fn insert_segment(&mut self, start: f64, end: f64) -> Option<usize> {
+        // Default the new move to the opposite of where the camera already
+        // is: pull back to identity when the move it chains from left the
+        // camera at the default zoom, otherwise push in to the default zoom.
+        // Across a gap the camera has already released to identity, so the
+        // new move always starts there and pushes in.
+        let incoming_scale = self
+            .segments
+            .iter()
+            .find(|segment| !segment.is_disabled && (segment.end - start).abs() <= 1e-9)
+            .map(|segment| segment.target_transform().scale)
+            .unwrap_or(MIN_MOTION_ZOOM);
+        let target_scale = if (incoming_scale - DEFAULT_MOTION_ZOOM).abs() < 1e-6 {
+            MIN_MOTION_ZOOM
+        } else {
+            DEFAULT_MOTION_ZOOM
+        };
         self.segments.push(MotionSegment {
             start,
             end,
@@ -89,7 +105,7 @@ impl MotionState {
             is_disabled: false,
             from: MotionTransform::default(),
             to: MotionTransform {
-                scale: DEFAULT_MOTION_ZOOM,
+                scale: target_scale,
                 ..MotionTransform::default()
             },
         });
@@ -472,13 +488,26 @@ impl MotionState {
             .find(|segment| time >= segment.start && time <= segment.end)
         {
             segment.sample(time, self.transform_timing)
-        } else {
-            self.segments
+        } else if let Some((index, previous)) = self
+            .segments
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, segment)| time > segment.end && !segment.is_disabled)
+        {
+            // The camera always eases back to the initial framing in a gap.
+            // The gap's length sets the release speed, capped by the track's
+            // transition timing; the following move starts from identity when
+            // the gap ends. Flush moves never enter this branch: they chain
+            // directly through `reconcile_effect_segments`.
+            let release_end = self.segments[index + 1..]
                 .iter()
-                .rev()
-                .find(|segment| time > segment.end && !segment.is_disabled)
-                .map(MotionSegment::target_transform)
-                .unwrap_or_default()
+                .find(|segment| !segment.is_disabled)
+                .map(|segment| segment.start)
+                .unwrap_or(self.duration);
+            previous.release_after(time, self.transform_timing, release_end - previous.end)
+        } else {
+            MotionTransform::default()
         };
         MotionTransform {
             perspective: self.perspective_intensity,
@@ -509,17 +538,23 @@ impl MotionState {
             .unwrap_or((0.5, 0.5))
     }
 
-    /// Preserve a single camera through every effect segment. Shotbase stores
-    /// effect segments as a reconciled track: the next segment begins at the
-    /// pose left by the preceding segment, including across an intentional
-    /// timeline gap. Without this, adding a second move visibly snaps the card
-    /// back to its identity transform.
+    /// Each move starts from the pose the timeline leaves at its start. A
+    /// flush (adjacent) move chains from the previous target, so two moves
+    /// placed together read as one camera transition; a move after a gap
+    /// starts from identity, because the gap released the camera back to the
+    /// initial framing first.
     fn reconcile_effect_segments(&mut self) {
-        let mut previous = MotionTransform::default();
+        let mut previous_end = 0.0;
+        let mut previous_pose = MotionTransform::default();
         for segment in &mut self.segments {
-            segment.from = previous;
+            segment.from = if segment.start <= previous_end + 1e-9 {
+                previous_pose
+            } else {
+                MotionTransform::default()
+            };
+            previous_end = segment.end;
             if !segment.is_disabled {
-                previous = segment.target_transform();
+                previous_pose = segment.target_transform();
             }
         }
     }
