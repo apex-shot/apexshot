@@ -113,6 +113,82 @@ pub const BACKGROUND_GRADIENT_PREVIEW_FILES: [&str; 20] = [
     "gradient-19.jpg",
     "gradient-20.jpg",
 ];
+
+/// Built-in Motion wallpaper catalog. The first ten entries preserve the
+/// existing ApexShot backgrounds; the remaining entries are the curated image
+/// collection.
+pub const MOTION_WALLPAPER_FILES: [&str; 70] = [
+    "gradient-01.jpg",
+    "gradient-02.jpg",
+    "gradient-03.jpg",
+    "gradient-04.jpg",
+    "gradient-05.jpg",
+    "gradient-06.jpg",
+    "gradient-07.jpg",
+    "gradient-08.jpg",
+    "gradient-09.jpg",
+    "gradient-10.jpg",
+    "wallpaper-001.jpg",
+    "wallpaper-002.jpg",
+    "wallpaper-003.jpg",
+    "wallpaper-004.jpg",
+    "wallpaper-005.jpg",
+    "wallpaper-006.jpg",
+    "wallpaper-007.jpg",
+    "wallpaper-008.jpg",
+    "wallpaper-009.jpg",
+    "wallpaper-010.jpg",
+    "wallpaper-011.jpg",
+    "wallpaper-012.jpg",
+    "wallpaper-013.jpg",
+    "wallpaper-014.jpg",
+    "wallpaper-015.jpg",
+    "wallpaper-016.jpg",
+    "wallpaper-017.jpg",
+    "wallpaper-018.jpg",
+    "wallpaper-019.jpg",
+    "wallpaper-020.jpg",
+    "wallpaper-021.jpg",
+    "wallpaper-022.jpg",
+    "wallpaper-023.jpg",
+    "wallpaper-024.jpg",
+    "wallpaper-025.jpg",
+    "wallpaper-026.jpg",
+    "wallpaper-027.jpg",
+    "wallpaper-028.jpg",
+    "wallpaper-029.jpg",
+    "wallpaper-030.jpg",
+    "wallpaper-031.jpg",
+    "wallpaper-032.jpg",
+    "wallpaper-033.jpg",
+    "wallpaper-034.jpg",
+    "wallpaper-035.jpg",
+    "wallpaper-036.jpg",
+    "wallpaper-037.jpg",
+    "wallpaper-038.jpg",
+    "wallpaper-039.jpg",
+    "wallpaper-040.jpg",
+    "wallpaper-041.jpg",
+    "wallpaper-042.jpg",
+    "wallpaper-043.jpg",
+    "wallpaper-044.jpg",
+    "wallpaper-045.jpg",
+    "wallpaper-046.jpg",
+    "wallpaper-047.jpg",
+    "wallpaper-048.jpg",
+    "wallpaper-049.jpg",
+    "wallpaper-050.jpg",
+    "wallpaper-051.jpg",
+    "wallpaper-052.jpg",
+    "wallpaper-053.jpg",
+    "wallpaper-054.jpg",
+    "wallpaper-055.jpg",
+    "wallpaper-056.jpg",
+    "wallpaper-057.jpg",
+    "wallpaper-058.jpg",
+    "wallpaper-059.jpg",
+    "wallpaper-060.jpg",
+];
 const BACKGROUND_GRADIENT_PREVIEW_CLASSES: [&str; 20] = [
     "editor-background-gradient-preview-1",
     "editor-background-gradient-preview-2",
@@ -162,6 +238,34 @@ pub fn background_gradient_asset_path(file_name: &str) -> PathBuf {
                 .join(file_name)
         })
 }
+
+/// Locate the small, bundled preview for a Motion wallpaper. Both the legacy
+/// ApexShot gradients and imported wallpapers have dedicated thumbnails, so
+/// expanding the catalog never decodes a full-size background on the UI
+/// thread.
+pub fn motion_wallpaper_preview_asset_path(file_name: &str) -> PathBuf {
+    let preview_file_name = file_name
+        .strip_prefix("wallpaper-")
+        .map(|suffix| format!("wallpaper-thumb-{suffix}"))
+        .or_else(|| {
+            file_name
+                .strip_prefix("gradient-")
+                .map(|suffix| format!("gradient-thumb-{suffix}"))
+        })
+        .unwrap_or_else(|| file_name.to_owned());
+    background_gradient_asset_path(&preview_file_name)
+}
+
+/// First bundled Motion wallpaper that exists on disk. Motion opens with this
+/// selected so the first static → motion switch shows a composed scene
+/// instead of Shotbase's black default.
+pub fn default_motion_wallpaper() -> Option<String> {
+    MOTION_WALLPAPER_FILES.iter().find_map(|file_name| {
+        let path = background_gradient_asset_path(file_name);
+        path.is_file().then(|| path.to_string_lossy().into_owned())
+    })
+}
+
 pub(super) fn load_background_preview_image(path: &Path, preview_size: u32) -> Option<RgbaImage> {
     let img = match image::io::Reader::open(path) {
         Ok(reader) => match reader.with_guessed_format() {
@@ -1437,6 +1541,8 @@ pub(super) fn build_background_panel(
 
 #[cfg(test)]
 mod tests {
+    use super::{motion_wallpaper_preview_asset_path, MOTION_WALLPAPER_FILES};
+
     #[test]
     fn alignment_section_is_placed_below_none_button_and_before_gradients() {
         let source = include_str!("background_panel.rs");
@@ -1534,6 +1640,31 @@ mod tests {
             production_source.contains("/usr/share/apexshot/background-images")
                 && production_source.contains("/usr/local/share/apexshot/background-images"),
             "background gradient lookup should support installed shared asset directories",
+        );
+    }
+
+    #[test]
+    fn motion_wallpaper_catalog_includes_full_size_assets_only() {
+        assert_eq!(MOTION_WALLPAPER_FILES.len(), 70);
+        assert!(MOTION_WALLPAPER_FILES.contains(&"wallpaper-001.jpg"));
+        assert!(MOTION_WALLPAPER_FILES.contains(&"wallpaper-060.jpg"));
+        assert_eq!(
+            motion_wallpaper_preview_asset_path("wallpaper-001.jpg")
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("wallpaper-thumb-001.jpg"),
+        );
+        assert_eq!(
+            motion_wallpaper_preview_asset_path("wallpaper-060.jpg")
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("wallpaper-thumb-060.jpg"),
+        );
+        assert_eq!(
+            motion_wallpaper_preview_asset_path("gradient-01.jpg")
+                .file_name()
+                .and_then(|name| name.to_str()),
+            Some("gradient-thumb-01.jpg"),
         );
     }
 }

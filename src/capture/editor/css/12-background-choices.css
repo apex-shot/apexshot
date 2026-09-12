@@ -1,0 +1,324 @@
+            button.editor-background-option-button {
+                min-height: 32px;
+                border-radius: 6px;
+                padding: 0 12px;
+                background: alpha(white, 0.04);
+                border: 1px solid alpha(white, 0.06);
+                color: rgba(255, 255, 255, 0.82);
+                box-shadow: none;
+                transition: background-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+            }
+
+            button.editor-background-option-button:hover {
+                background: alpha(white, 0.08);
+                border-color: alpha(white, 0.10);
+                color: #ffffff;
+            }
+
+            button.editor-background-option-button:active {
+                background: alpha(white, 0.12);
+                border-color: alpha(white, 0.14);
+            }
+
+            button.editor-background-option-button.active-background-option {
+                background: alpha(white, 0.10);
+                border: 1px solid transparent;
+                color: #ffffff;
+                box-shadow: inset 0 0 0 1px #b05c38;
+            }
+
+            /* Motion keeps its background choices in one expanding card.
+             * A choice reveals its controls below the list, preserving the
+             * selection context instead of navigating to a separate page. */
+            .editor-motion-background-picker {
+                background: alpha(white, 0.08);
+                border: 1px solid alpha(white, 0.06);
+                border-radius: 10px;
+            }
+
+            .editor-motion-background-picker > button.editor-background-option-button {
+                min-height: 40px;
+                border: none;
+                border-radius: 0;
+                padding: 0 12px;
+                background: transparent;
+                color: rgba(255, 255, 255, 0.86);
+                box-shadow: inset 0 -1px 0 alpha(white, 0.08);
+            }
+
+            .editor-motion-background-picker > button.editor-background-option-button:hover {
+                background: alpha(white, 0.06);
+            }
+
+            .editor-motion-background-picker > button.editor-background-option-button.active-background-option {
+                background: alpha(#d68155, 0.16);
+                color: #ffad7c;
+                box-shadow: inset 0 -1px 0 alpha(white, 0.08);
+            }
+
+            .editor-motion-background-picker > stack {
+                padding: 10px 12px 12px;
+                background: alpha(black, 0.10);
+            }
+
+            button.editor-motion-wallpaper-show-all {
+                min-width: 56px;
+                min-height: 56px;
+                border-radius: 12px;
+                padding: 0;
+                background: alpha(white, 0.16);
+                border: 1px solid alpha(white, 0.10);
+                color: rgba(255, 255, 255, 0.90);
+                font-size: 20px;
+                font-weight: 700;
+            }
+
+            button.editor-motion-wallpaper-show-all:hover {
+                background: alpha(white, 0.24);
+                color: #ffffff;
+            }
+
+            .editor-motion-wallpaper-stack-glyph {
+                padding: 0;
+                background: transparent;
+                color: #ffffff;
+                font-size: 26px;
+                font-weight: 700;
+            }
+
+            button.editor-background-alignment-button.active-alignment-option {
+                background: alpha(white, 0.10);
+                border: none;
+                border-radius: 5px;
+                box-shadow: inset 0 0 0 1px #b05c38;
+            }
+
+            button.editor-background-gradient-button {
+                padding: 0;
+                background-color: alpha(white, 0.04);
+                border: 1px solid alpha(white, 0.06);
+                box-shadow: none;
+                transition: box-shadow 120ms ease, border-color 120ms ease;
+            }
+
+            button.editor-background-gradient-button.active-background-option {
+                border: 1px solid transparent;
+                background-color: alpha(white, 0.06);
+                box-shadow: inset 0 0 0 2px #b05c38;
+            }
+
+            .text-entry-overlay {
+                background: transparent;
+                border: none;
+                outline: none;
+            }
+
+            button.editor-background-gradient-button.editor-background-preview-size-regular {
+                min-width: 56px;
+                min-height: 56px;
+                border-radius: 12px;
+            }
+
+            button.editor-background-gradient-button.editor-background-preview-size-medium {
+                min-width: 48px;
+                min-height: 48px;
+                border-radius: 11px;
+            }
+
+            button.editor-background-gradient-button.editor-background-preview-size-compact {
+                min-width: 44px;
+                min-height: 44px;
+                border-radius: 10px;
+            }
+
+            button.editor-background-gradient-button:hover {
+                border-color: alpha(white, 0.16);
+                box-shadow: none;
+            }
+
+            button.editor-background-gradient-button:active {
+                border-color: alpha(white, 0.22);
+                box-shadow: none;
+            }
+
+            /* Keep the active Motion wallpaper visible above the generic
+             * thumbnail hover/active rules. */
+            button.editor-motion-wallpaper-thumbnail.active-background-option,
+            button.editor-motion-wallpaper-thumbnail.active-background-option:hover,
+            button.editor-motion-wallpaper-thumbnail.active-background-option:active {
+                border: 2px solid #c06540;
+                box-shadow: 0 0 0 1px #c06540;
+            }
+
+            button.editor-background-add-button {
+                padding: 0;
+                background-color: alpha(white, 0.02);
+                border: 1px dashed alpha(white, 0.22);
+                color: rgba(255, 255, 255, 0.78);
+                box-shadow: none;
+                transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+            }
+
+            button.editor-background-add-button.editor-background-preview-size-regular {
+                min-width: 56px;
+                min-height: 56px;
+                border-radius: 12px;
+            }
+
+            button.editor-background-add-button.editor-background-preview-size-medium {
+                min-width: 48px;
+                min-height: 48px;
+                border-radius: 11px;
+            }
+
+            button.editor-background-add-button.editor-background-preview-size-compact {
+                min-width: 44px;
+                min-height: 44px;
+                border-radius: 10px;
+            }
+
+            button.editor-background-add-button:hover {
+                background-color: alpha(white, 0.06);
+                border-color: alpha(white, 0.32);
+                color: #ffffff;
+            }
+
+            button.editor-background-add-button:active {
+                background-color: alpha(white, 0.04);
+                border-color: alpha(white, 0.38);
+            }
+
+            .editor-background-add-label {
+                font-weight: 500;
+            }
+
+            .editor-background-add-label.editor-background-preview-size-regular {
+                font-size: 22px;
+            }
+
+            .editor-background-add-label.editor-background-preview-size-medium {
+                font-size: 19px;
+            }
+
+            .editor-background-add-label.editor-background-preview-size-compact {
+                font-size: 17px;
+            }
+
+            button.editor-background-blurred-button {
+                background-image: linear-gradient(135deg, alpha(white, 0.16) 0%, alpha(white, 0.06) 100%);
+                border: 1px solid alpha(white, 0.10);
+            }
+
+            button.editor-background-blurred-button.active-background-option {
+                border: 1px solid transparent;
+                background-color: alpha(white, 0.10);
+                box-shadow: inset 0 0 0 2px #b05c38;
+            }
+
+            /* Blur intensity visual indicators */
+            button.editor-background-blurred-button.blur-light {
+                background: linear-gradient(135deg, rgba(220, 220, 220, 0.5) 0%, rgba(200, 200, 200, 0.3) 100%);
+            }
+
+            button.editor-background-blurred-button.blur-medium {
+                background: linear-gradient(135deg, rgba(160, 160, 160, 0.6) 0%, rgba(130, 130, 130, 0.5) 100%);
+            }
+
+            button.editor-background-blurred-button.blur-heavy {
+                background: linear-gradient(135deg, rgba(90, 90, 90, 0.7) 0%, rgba(60, 60, 60, 0.6) 100%);
+            }
+
+            .editor-blur-intensity-label {
+                font-size: 14px;
+                font-weight: bold;
+                color: rgba(255, 255, 255, 0.9);
+                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+            }
+
+            button.editor-background-plain-color-button {
+                min-width: 18px;
+                min-height: 18px;
+                padding: 0;
+                border-radius: 999px;
+                border: 1px solid alpha(white, 0.16);
+                box-shadow: none;
+                transition: box-shadow 120ms ease, border-color 120ms ease;
+            }
+
+            button.editor-background-plain-color-button:hover {
+                border-color: alpha(white, 0.32);
+            }
+
+            button.editor-background-plain-color-button:active {
+                border-color: alpha(white, 0.42);
+            }
+
+            button.editor-background-plain-color-button.active-background-option {
+                border-color: transparent;
+                box-shadow: 0 0 0 2px #b05c38;
+            }
+
+            button.editor-background-plain-color-button.editor-background-plain-color-1 { background: #ffffff; }
+            button.editor-background-plain-color-button.editor-background-plain-color-2 { background: #e5e7eb; }
+            button.editor-background-plain-color-button.editor-background-plain-color-3 { background: #9ca3af; }
+            button.editor-background-plain-color-button.editor-background-plain-color-4 { background: #111827; }
+            button.editor-background-plain-color-button.editor-background-plain-color-5 { background: #ef4444; }
+            button.editor-background-plain-color-button.editor-background-plain-color-6 { background: #f97316; }
+            button.editor-background-plain-color-button.editor-background-plain-color-7 { background: #facc15; }
+            button.editor-background-plain-color-button.editor-background-plain-color-8 { background: #22c55e; }
+            button.editor-background-plain-color-button.editor-background-plain-color-9 { background: #14b8a6; }
+            button.editor-background-plain-color-button.editor-background-plain-color-10 { background: #06b6d4; }
+            button.editor-background-plain-color-button.editor-background-plain-color-11 { background: #3b82f6; }
+            button.editor-background-plain-color-button.editor-background-plain-color-12 { background: #6366f1; }
+            button.editor-background-plain-color-button.editor-background-plain-color-13 { background: #8b5cf6; }
+            button.editor-background-plain-color-button.editor-background-plain-color-14 { background: #a855f7; }
+            button.editor-background-plain-color-button.editor-background-plain-color-15 { background: #ec4899; }
+            button.editor-background-plain-color-button.editor-background-plain-color-16 { background: #f43f5e; }
+            button.editor-background-plain-color-button.editor-background-plain-color-17 { background: #92400e; }
+            button.editor-background-plain-color-button.editor-background-plain-color-18 { background: #0f766e; }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-1 {
+                background-image: linear-gradient(135deg, #4f46e5 0%, #9333ea 55%, #ec4899 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-2 {
+                background-image: linear-gradient(135deg, #0f172a 0%, #1d4ed8 48%, #38bdf8 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-3 {
+                background-image: linear-gradient(135deg, #f97316 0%, #fb7185 52%, #a855f7 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-4 {
+                background-image: linear-gradient(135deg, #134e4a 0%, #14b8a6 50%, #99f6e4 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-5 {
+                background-image: linear-gradient(135deg, #111827 0%, #374151 45%, #f59e0b 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-6 {
+                background-image: linear-gradient(135deg, #7c2d12 0%, #ea580c 50%, #fdba74 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-7 {
+                background-image: linear-gradient(135deg, #052e16 0%, #16a34a 50%, #bbf7d0 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-8 {
+                background-image: linear-gradient(135deg, #172554 0%, #2563eb 55%, #c4b5fd 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-9 {
+                background-image: linear-gradient(135deg, #4a044e 0%, #c026d3 48%, #f9a8d4 100%);
+            }
+
+            button.editor-background-gradient-button.editor-background-gradient-preview-10 {
+                background-image: linear-gradient(135deg, #3f3f46 0%, #71717a 40%, #e4e4e7 100%);
+            }
+
+            .editor-canvas {
+                border-radius: 0;
+                background-color: transparent;
+                border: none;
+            }

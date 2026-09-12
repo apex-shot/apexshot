@@ -24,7 +24,7 @@ ashpd = { version = "0.13", default-features = false, features = ["tokio", "scre
 url = "2.5"
 
 # GUI overlay for area selection (X11)
-gtk4 = "0.10"
+gtk4 = { version = "0.10", features = ["v4_8"] }
 gdk4x11 = { package = "gdk4-x11", version = "0.10" }
 gtk4-layer-shell = "0.7.1"
 
@@ -171,6 +171,8 @@ assets = [
     ["src/capture/editor/background-images/gradient-08.jpg", "usr/share/apexshot/background-images/", "644"],
     ["src/capture/editor/background-images/gradient-09.jpg", "usr/share/apexshot/background-images/", "644"],
     ["src/capture/editor/background-images/gradient-10.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/gradient-thumb-*.jpg", "usr/share/apexshot/background-images/", "644"],
+    ["src/capture/editor/background-images/wallpaper*.jpg", "usr/share/apexshot/background-images/", "644"],
     ["assets/sounds/camera.ogg", "usr/share/apexshot/sounds/", "644"],
     ["assets/sounds/classic.ogg", "usr/share/apexshot/sounds/", "644"],
     ["assets/sounds/pop.ogg", "usr/share/apexshot/sounds/", "644"],

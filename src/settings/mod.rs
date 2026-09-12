@@ -537,6 +537,13 @@ fn build_settings_window(app: &Application) {
         video_export_location: recordings.video_export_location_entry.clone(),
         rec_filename_pattern: recordings.rec_filename_pattern_entry.clone(),
         rec_remember_export_folder: recordings.rec_remember_export_folder.clone(),
+        rec_controls: recordings.rec_controls.clone(),
+        rec_hidpi: recordings.rec_hidpi.clone(),
+        rec_notifications: recordings.rec_notifications.clone(),
+        rec_countdown: recordings.rec_countdown.clone(),
+        rec_video_max_res: recordings.rec_video_max_res.clone(),
+        rec_video_fps: recordings.rec_video_fps.clone(),
+        rec_video_mono: recordings.rec_video_mono.clone(),
         screenshot_quick_access: after_capture.screenshot_after_capture_checks[0].clone(),
         screenshot_copy_to_clipboard: after_capture.screenshot_after_capture_checks[1].clone(),
         screenshot_save: after_capture.screenshot_after_capture_checks[2].clone(),
@@ -545,7 +552,6 @@ fn build_settings_window(app: &Application) {
         rec_save: after_capture.rec_save.clone(),
         rec_open_video_editor: after_capture.rec_open_video_editor.clone(),
         quick_access_position: quick_access.position_input.clone(),
-        quick_access_multi_display: quick_access.multi_display_check.clone(),
         quick_access_overlay_size: quick_access.overlay_size_input.clone(),
         quick_access_auto_close_enabled: quick_access.auto_close_enabled_check.clone(),
         quick_access_auto_close_action: quick_access.auto_close_action_input.clone(),
@@ -564,13 +570,12 @@ fn build_settings_window(app: &Application) {
         shortcut_open_from_clipboard: shortcuts.open_clipboard_btn.clone(),
         shortcut_restore_recently_closed: shortcuts.restore_file_btn.clone(),
         shortcut_toggle_overlays: shortcuts.toggle_overlays_btn.clone(),
-        shortcut_capture_area: shortcuts.capture_area_btn.clone(),
+        shortcut_capture_menu: shortcuts.quick_capture_btn.clone(),
         shortcut_capture_crosshair: shortcuts.capture_crosshair_btn.clone(),
         shortcut_capture_previous_area: shortcuts.capture_prev_btn.clone(),
         shortcut_capture_fullscreen: shortcuts.capture_fullscreen_btn.clone(),
         shortcut_capture_window: shortcuts.capture_window_btn.clone(),
         shortcut_show_last_preview: shortcuts.show_last_preview_btn.clone(),
-        shortcut_open_recording_ui: shortcuts.open_recording_ui_btn.clone(),
         shortcut_record_screen: shortcuts.record_screen_btn.clone(),
         shortcut_recording_stop_save: shortcuts.recording_stop_save_btn.clone(),
         adv_retina_suffix: advanced.retina_suffix_check.clone(),
@@ -753,6 +758,13 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_entry(&inputs.video_export_location);
     wire_entry(&inputs.rec_filename_pattern);
     wire_check(&inputs.rec_remember_export_folder);
+    wire_check(&inputs.rec_controls);
+    wire_check(&inputs.rec_hidpi);
+    wire_check(&inputs.rec_notifications);
+    wire_check(&inputs.rec_countdown);
+    wire_combo(&inputs.rec_video_max_res);
+    wire_combo(&inputs.rec_video_fps);
+    wire_check(&inputs.rec_video_mono);
     wire_check(&inputs.screenshot_quick_access);
     wire_check(&inputs.screenshot_copy_to_clipboard);
     wire_check(&inputs.screenshot_save);
@@ -761,7 +773,6 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_check(&inputs.rec_save);
     wire_check(&inputs.rec_open_video_editor);
     wire_combo(&inputs.quick_access_position);
-    wire_check(&inputs.quick_access_multi_display);
     wire_scale(&inputs.quick_access_overlay_size);
     wire_check(&inputs.quick_access_auto_close_enabled);
     wire_combo(&inputs.quick_access_auto_close_action);
@@ -780,13 +791,12 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_shortcut_btn(&inputs.shortcut_open_from_clipboard);
     wire_shortcut_btn(&inputs.shortcut_restore_recently_closed);
     wire_shortcut_btn(&inputs.shortcut_toggle_overlays);
-    wire_shortcut_btn(&inputs.shortcut_capture_area);
+    wire_shortcut_btn(&inputs.shortcut_capture_menu);
     wire_shortcut_btn(&inputs.shortcut_capture_crosshair);
     wire_shortcut_btn(&inputs.shortcut_capture_previous_area);
     wire_shortcut_btn(&inputs.shortcut_capture_fullscreen);
     wire_shortcut_btn(&inputs.shortcut_capture_window);
     wire_shortcut_btn(&inputs.shortcut_show_last_preview);
-    wire_shortcut_btn(&inputs.shortcut_open_recording_ui);
     wire_shortcut_btn(&inputs.shortcut_record_screen);
     wire_shortcut_btn(&inputs.shortcut_recording_stop_save);
     wire_check(&inputs.adv_retina_suffix);

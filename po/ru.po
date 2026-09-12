@@ -2245,3 +2245,84 @@ msgstr "Заголовок"
 
 msgid "Drag on the preview to place the title"
 msgstr "Перетащите на предпросмотре, чтобы разместить заголовок"
+
+msgid "Anchor X"
+msgstr "Якорь X"
+msgid "Anchor Y"
+msgstr "Якорь Y"
+msgid "Blur shutter"
+msgstr "Затвор размытия"
+msgid "Blur trail"
+msgstr "Шлейф размытия"
+msgid "Ease X1"
+msgstr "Сглаживание X1"
+msgid "Ease X2"
+msgstr "Сглаживание X2"
+msgid "Ease Y1"
+msgstr "Сглаживание Y1"
+msgid "Ease Y2"
+msgstr "Сглаживание Y2"
+msgid "Scope"
+msgstr "Область"
+msgid "Unpin"
+msgstr "Открепить"
+
+msgid "Appearance"
+msgstr "Внешний вид"
+
+msgid "Border Color"
+msgstr "Цвет рамки"
+
+msgid "Choose"
+msgstr "Выбрать"
+
+msgid "Choose Watermark Image"
+msgstr "Выбрать изображение водяного знака"
+
+msgid "Choose…"
+msgstr "Выбрать…"
+
+msgid "Hex color"
+msgstr "Шестнадцатеричный цвет"
+
+msgid "No image selected"
+msgstr "Изображение не выбрано"
+
+msgid "Remove"
+msgstr "Удалить"
+
+msgid "Show all wallpapers"
+msgstr "Показать все обои"
+
+msgid "Wallpapers"
+msgstr "Обои"
+
+msgid "Watermark"
+msgstr "Водяной знак"
+
+msgid "Double-click to add motion"
+msgstr "Двойной щелчок, чтобы добавить движение"
+
+msgid "Double-click to add text"
+msgstr "Двойной щелчок, чтобы добавить текст"
+
+msgid "Show all gradients"
+msgstr "Показать все градиенты"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "Пропорции исходного холста"
+
+msgid "Square 1:1 output"
+msgstr "Квадратный вывод 1:1"
+
+msgid "Widescreen 16:9 output"
+msgstr "Широкоэкранный вывод 16:9"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "Вывод карточки ссылки X (Twitter) 1.91:1"

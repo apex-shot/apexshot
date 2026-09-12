@@ -29,7 +29,7 @@ function window(overrides) {
         height: 600,
         minimized: false,
         skipTaskbar: false,
-        apexshot: false,
+        wmClass: '',
     }, overrides);
 }
 
@@ -46,13 +46,15 @@ runTest('window list keeps normal windows, including minimized ones', () => {
     assertEqual(payload[1].minimized, true, 'minimized state should be reported');
 });
 
-runTest('window list drops ApexShot windows and windows outside the window list', () => {
+runTest('window list drops recording overlays and windows outside the window list, keeps normal ApexShot windows', () => {
     const payload = buildWindowListPayload([
         window({id: 8, app: 'Dock', skipTaskbar: true}),
-        window({id: 9, app: 'ApexShot', apexshot: true}),
+        window({id: 9, app: 'Recording', wmClass: 'com.apexshot.recording'}),
+        window({id: 10, app: 'ApexShot', wmClass: 'io.github.codegoddy.apexshot'}),
     ]);
 
-    assertEqual(payload.length, 0, 'neither window should be offered to the picker');
+    assertEqual(payload.length, 1, 'only the normal ApexShot window should be offered to the picker');
+    assertEqual(payload[0].id, 10, 'the normal ApexShot window should be listed');
 });
 
 runTest('window list clamps sizes so the picker can always lay out a card', () => {

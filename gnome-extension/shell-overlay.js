@@ -31,6 +31,25 @@ const DBUS_INTERFACE = `
       <arg type="u" name="seconds" direction="in"/>
     </method>
     <method name="HideCountdown"/>
+    <method name="ShowCaptureCountdown">
+      <arg type="i" name="monitor_x" direction="in"/>
+      <arg type="i" name="monitor_y" direction="in"/>
+      <arg type="i" name="monitor_width" direction="in"/>
+      <arg type="u" name="seconds" direction="in"/>
+      <arg type="i" name="fade_x" direction="in"/>
+      <arg type="i" name="fade_y" direction="in"/>
+      <arg type="i" name="fade_width" direction="in"/>
+      <arg type="i" name="fade_height" direction="in"/>
+    </method>
+    <method name="FocusCaptureMenu">
+      <arg type="x" name="pid" direction="in"/>
+      <arg type="b" name="focused" direction="out"/>
+    </method>
+    <method name="PositionQuickAccess">
+      <arg type="x" name="pid" direction="in"/>
+      <arg type="i" name="monitor_x" direction="in"/>
+      <arg type="i" name="monitor_y" direction="in"/>
+    </method>
     <method name="StartPointerTrack"/>
     <method name="StopPointerTrack">
       <arg type="x" name="t0" direction="out"/>
@@ -61,6 +80,8 @@ const POINTER_POLL_MS = 16;
 const MAX_POINTER_SAMPLES = 8000;
 const COUNTDOWN_STYLE = 'background-color: rgba(0, 0, 0, 0.94); border-radius: 92px;';
 const COUNTDOWN_LABEL_STYLE = 'color: white; font-size: 72px; font-weight: bold; font-family: Inter, Cantarell, sans-serif;';
+const CAPTURE_COUNTDOWN_STYLE = 'background-color: rgba(255, 102, 0, 0.95); border: 1px solid rgba(255, 224, 196, 0.5); border-radius: 22px;';
+const CAPTURE_COUNTDOWN_LABEL_STYLE = 'color: white; font-size: 22px; font-weight: bold; font-family: Inter, Cantarell, sans-serif;';
 
 /// Dims everything outside the area ApexShot is recording.
 ///
@@ -76,6 +97,7 @@ export class ShellOverlayService {
         this._maskGroup = null;
         this._rect = null;
         this._countdown = null;
+        this._captureFade = null;
         this._countdownTimerId = 0;
         this._tracking = false;
         this._t0 = 0;
@@ -194,6 +216,105 @@ export class ShellOverlayService {
 
     HideCountdown() {
         this._destroyCountdown();
+    }
+
+    FocusCaptureMenu(pid) {
+        const actor = global.get_window_actors().find(candidate => {
+            const window = candidate.meta_window;
+            return window && window.get_pid() === pid
+                && (window.get_title() === 'ApexShot Capture'
+                    || window.get_title() === 'ApexShot Display Picker');
+        });
+        if (!actor)
+            return false;
+
+        const window = actor.meta_window;
+        const workspace = global.workspace_manager.get_active_workspace();
+        if (window.get_workspace() !== workspace)
+            window.change_workspace(workspace);
+        window.unminimize();
+        window.make_above();
+        Main.activateWindow(window, global.get_current_time());
+        return true;
+    }
+
+    PositionQuickAccess(pid, monitorX, monitorY) {
+        let attempts = 0;
+        const position = () => {
+            const actor = global.get_window_actors().find(candidate => {
+                const window = candidate.meta_window;
+                return window && window.get_pid() === pid
+                    && window.get_title() === 'ApexShot Preview';
+            });
+            if (!actor) {
+                attempts++;
+                return attempts < 20 ? GLib.SOURCE_CONTINUE : GLib.SOURCE_REMOVE;
+            }
+
+            const window = actor.meta_window;
+            window.move_frame(true, monitorX, monitorY);
+            window.make_above();
+            if (typeof window.raise === 'function')
+                window.raise();
+            return GLib.SOURCE_REMOVE;
+        };
+
+        if (position() === GLib.SOURCE_CONTINUE)
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, position);
+    }
+
+    ShowCaptureCountdown(monitorX, monitorY, monitorWidth, seconds,
+        fadeX, fadeY, fadeWidth, fadeHeight) {
+        this._destroyCountdown();
+        if (monitorWidth <= 0 || seconds <= 0)
+            return;
+
+        let remaining = seconds;
+        const label = new St.Label({
+            text: `${remaining}`,
+            x_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.CENTER,
+            style: CAPTURE_COUNTDOWN_LABEL_STYLE,
+        });
+        this._countdown = new St.Bin({
+            reactive: false,
+            can_focus: false,
+            x: Math.round(monitorX + monitorWidth / 2 - 59),
+            y: Math.round(monitorY + 28),
+            width: 118,
+            height: 45,
+            style: CAPTURE_COUNTDOWN_STYLE,
+        });
+        this._countdown.set_child(label);
+
+        if (fadeWidth > 0 && fadeHeight > 0) {
+            this._captureFade = new St.Widget({
+                reactive: false,
+                can_focus: false,
+                x: fadeX,
+                y: fadeY,
+                width: fadeWidth,
+                height: fadeHeight,
+                style: 'background-color: rgba(12, 12, 14, 0.30);',
+            });
+            Main.layoutManager.addTopChrome(this._captureFade, {
+                trackFullscreen: true,
+            });
+        }
+        Main.layoutManager.addTopChrome(this._countdown, {
+            trackFullscreen: true,
+        });
+
+        this._countdownTimerId = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 1, () => {
+            remaining--;
+            if (remaining <= 0) {
+                this._countdownTimerId = 0;
+                this._destroyCountdown();
+                return GLib.SOURCE_REMOVE;
+            }
+            label.text = `${remaining}`;
+            return GLib.SOURCE_CONTINUE;
+        });
     }
 
     StartPointerTrack() {
@@ -449,6 +570,10 @@ export class ShellOverlayService {
         if (this._countdown) {
             this._countdown.destroy();
             this._countdown = null;
+        }
+        if (this._captureFade) {
+            this._captureFade.destroy();
+            this._captureFade = null;
         }
     }
 }

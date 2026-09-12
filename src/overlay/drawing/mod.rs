@@ -84,6 +84,7 @@ pub(crate) fn draw_feature_toolbar(
     screen_width: f64,
     screen_height: f64,
     background: Option<&BackgroundFrame>,
+    capture_menu_area_mode: bool,
     active_tool_index: usize,
     hover_tool_index: Option<usize>,
     hover_size_panel: bool,
@@ -111,17 +112,19 @@ pub(crate) fn draw_feature_toolbar(
     let crop_active = capture_crop_menu_open || capture_aspect_ratio_index > 0;
     let timer_tool_active = timer_delay_active && capture_delay_seconds > 0;
 
-    draw_frosted_panel(
-        context,
-        layout.tools_panel.x,
-        layout.tools_panel.y,
-        layout.tools_panel.width,
-        layout.tools_panel.height,
-        FEATURE_PANEL_RADIUS,
-        screen_width,
-        screen_height,
-        background,
-    );
+    if !capture_menu_area_mode {
+        draw_frosted_panel(
+            context,
+            layout.tools_panel.x,
+            layout.tools_panel.y,
+            layout.tools_panel.width,
+            layout.tools_panel.height,
+            FEATURE_PANEL_RADIUS,
+            screen_width,
+            screen_height,
+            background,
+        );
+    }
 
     // Single combined panel for size + crop (matches C++ topCluster)
     let top_cluster_x = layout.size_panel.x;
@@ -159,18 +162,20 @@ pub(crate) fn draw_feature_toolbar(
         let _ = context.fill();
     };
 
-    draw_accent(context, layout.item_cells[active_tool_index], true);
-    if timer_tool_active && active_tool_index != super::icons::TOOLBAR_TIMER_INDEX {
-        draw_accent(
-            context,
-            layout.item_cells[super::icons::TOOLBAR_TIMER_INDEX],
-            true,
-        );
-    }
-    if let Some(index) = hover_tool_index {
-        if let Some(cell) = layout.item_cells.get(index) {
-            if index != active_tool_index {
-                draw_accent(context, *cell, false);
+    if !capture_menu_area_mode {
+        draw_accent(context, layout.item_cells[active_tool_index], true);
+        if timer_tool_active && active_tool_index != super::icons::TOOLBAR_TIMER_INDEX {
+            draw_accent(
+                context,
+                layout.item_cells[super::icons::TOOLBAR_TIMER_INDEX],
+                true,
+            );
+        }
+        if let Some(index) = hover_tool_index {
+            if let Some(cell) = layout.item_cells.get(index) {
+                if index != active_tool_index {
+                    draw_accent(context, *cell, false);
+                }
             }
         }
     }
@@ -181,8 +186,13 @@ pub(crate) fn draw_feature_toolbar(
         draw_accent(context, crop_panel, crop_active);
     }
 
-    // Icons + labels
-    for (index, icon) in TOOLBAR_ICONS.iter().enumerate() {
+    // Icons + labels.  The compact capture-menu area flow intentionally has
+    // no legacy tool rail, exactly as CaptureOverlay_ToolbarDrawing.cpp.
+    for (index, icon) in (!capture_menu_area_mode)
+        .then_some(())
+        .into_iter()
+        .flat_map(|_| TOOLBAR_ICONS.iter().enumerate())
+    {
         let cell = layout.item_cells[index];
         let center_x = cell.x + cell.width / 2.0;
         let label = t(TOOLBAR_LABELS[index]);
@@ -802,6 +812,7 @@ pub(crate) fn draw_overlay(
                 screen_width,
                 screen_height,
                 background,
+                st.capture_menu_area_mode,
                 st.active_tool_index,
                 st.hover_tool_index,
                 st.hover_size_panel,
@@ -939,6 +950,7 @@ pub(crate) fn draw_overlay(
                 screen_width,
                 screen_height,
                 background,
+                st.capture_menu_area_mode,
                 st.active_tool_index,
                 st.hover_tool_index,
                 st.hover_size_panel,

@@ -1046,7 +1046,7 @@ fn cursor_slider_row(label: &str) -> CursorSliderRow {
 }
 
 #[derive(Clone)]
-struct FillSlider {
+pub(crate) struct FillSlider {
     area: DrawingArea,
     value: Rc<Cell<f64>>,
     min: Rc<Cell<f64>>,
@@ -1056,10 +1056,20 @@ struct FillSlider {
     hovered: Rc<Cell<bool>>,
     dragging: Rc<Cell<bool>>,
     listeners: Rc<RefCell<Vec<Rc<dyn Fn(&FillSlider)>>>>,
+    value_text: Rc<dyn Fn(f64, f64, f64) -> String>,
 }
 
 impl FillSlider {
-    fn new(label: &str) -> Self {
+    pub(crate) fn new(label: &str) -> Self {
+        Self::new_with_value_text(label, |value, min, max| {
+            format!("{:.0}", ((value - min) / (max - min).max(1e-9) * 100.0).round())
+        })
+    }
+
+    pub(crate) fn new_with_value_text<F>(label: &str, value_text: F) -> Self
+    where
+        F: Fn(f64, f64, f64) -> String + 'static,
+    {
         let area = DrawingArea::new();
         area.add_css_class("recording-editor-fill-slider");
         area.set_hexpand(true);
@@ -1074,6 +1084,7 @@ impl FillSlider {
             hovered: Rc::new(Cell::new(false)),
             dragging: Rc::new(Cell::new(false)),
             listeners: Rc::new(RefCell::new(Vec::new())),
+            value_text: Rc::new(value_text),
         };
         area.set_draw_func({
             let slider = slider.clone();
@@ -1129,11 +1140,15 @@ impl FillSlider {
         slider
     }
 
-    fn value(&self) -> f64 {
+    pub(crate) fn widget(&self) -> DrawingArea {
+        self.area.clone()
+    }
+
+    pub(crate) fn value(&self) -> f64 {
         self.value.get()
     }
 
-    fn set_value(&self, value: f64) {
+    pub(crate) fn set_value(&self, value: f64) {
         let min = self.min.get();
         let max = self.max.get();
         let value = value.clamp(min.min(max), min.max(max));
@@ -1145,17 +1160,17 @@ impl FillSlider {
         }
     }
 
-    fn set_range(&self, min: f64, max: f64) {
+    pub(crate) fn set_range(&self, min: f64, max: f64) {
         self.min.set(min);
         self.max.set(max.max(min + 1e-9));
         self.set_value(self.value.get());
     }
 
-    fn set_increments(&self, step: f64, _page: f64) {
+    pub(crate) fn set_increments(&self, step: f64, _page: f64) {
         self.step.set(step.max(0.0));
     }
 
-    fn set_sensitive(&self, sensitive: bool) {
+    pub(crate) fn set_sensitive(&self, sensitive: bool) {
         self.enabled.set(sensitive);
         self.area.set_sensitive(sensitive);
         if !sensitive {
@@ -1165,7 +1180,7 @@ impl FillSlider {
         self.area.queue_draw();
     }
 
-    fn connect_value_changed<F>(&self, f: F)
+    pub(crate) fn connect_value_changed<F>(&self, f: F)
     where
         F: Fn(&FillSlider) + 'static,
     {
@@ -1265,8 +1280,7 @@ impl FillSlider {
         cr.set_font_size(12.0);
         cr.move_to(14.0, h * 0.66);
         let _ = cr.show_text(label);
-        let display = (progress * 100.0).round() as i32;
-        let text = display.to_string();
+        let text = (self.value_text)(self.value.get(), min, max);
         if let Ok(ext) = cr.text_extents(&text) {
             cr.move_to(w - 14.0 - ext.width(), h * 0.66);
             let _ = cr.show_text(&text);

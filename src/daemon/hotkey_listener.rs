@@ -414,6 +414,9 @@ pub(super) fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<Daemon
     // First try matching by the binding's name field.
     if let Some(name) = binding.name.as_deref() {
         match name {
+            "quick_capture" | "quick-capture" | "capture_menu" | "capture-menu" => {
+                return Some(super::DaemonAction::QuickCapture);
+            }
             "capture_area" | "capture-area" => return Some(super::DaemonAction::CaptureArea),
             "capture_crosshair" | "capture-crosshair" => {
                 return Some(super::DaemonAction::CaptureCrosshair);
@@ -457,6 +460,7 @@ pub(super) fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<Daemon
     // Fallback: derive action from the args list.
     match binding.args.first().map(|s| s.as_str()) {
         Some("capture") => match binding.args.get(1).map(|s| s.as_str()) {
+            Some("menu") => Some(super::DaemonAction::QuickCapture),
             Some("area") => Some(super::DaemonAction::CaptureArea),
             Some("crosshair") => Some(super::DaemonAction::CaptureCrosshair),
             Some("screen") => Some(super::DaemonAction::CaptureScreen),

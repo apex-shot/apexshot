@@ -285,7 +285,14 @@ pub fn fit_dimensions(src_w: u32, src_h: u32, box_w: u32, box_h: u32) -> (u32, u
 }
 
 pub fn card_depth(hw: f64, hh: f64, perspective: f64) -> f64 {
-    hw.max(hh) * (2.8 - perspective.clamp(0.0, 1.0) * 1.3).max(1.15)
+    // `perspectiveIntensity` is a camera setting, not a per-axis skew. Use
+    // the card's half diagonal as the film-size reference so the same value
+    // has comparable yaw and pitch on wide, square, and portrait captures.
+    // This is ApexShot's aspect-invariant focal heuristic. The corresponding
+    // Shotbase CIPerspectiveTransform parameter construction is not inferred
+    // from this value.
+    let half_diagonal = hw.hypot(hh).max(1.0);
+    half_diagonal * (2.44 - perspective.clamp(0.0, 1.0) * 1.30).max(1.15)
 }
 
 pub fn project_point(mut x: f64, mut y: f64, transform: MotionTransform, depth: f64) -> (f64, f64) {
@@ -305,7 +312,10 @@ pub fn project_point(mut x: f64, mut y: f64, transform: MotionTransform, depth: 
     let (x3, y3) = (x * cos_z - y * sin_z, x * sin_z + y * cos_z);
     x = x3;
     y = y3;
-    let w = 1.0 / (1.0 + z / depth.max(1.0)).clamp(0.45, 1.85);
+    // Keep the card in front of the virtual camera. The clamp is only a
+    // near-plane guard for deliberately extreme authored rotations; normal
+    // Motion limits remain fully projective rather than flattening early.
+    let w = 1.0 / (1.0 + z / depth.max(1.0)).clamp(0.35, 2.5);
     (x * w, y * w)
 }
 

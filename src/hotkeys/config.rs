@@ -114,9 +114,9 @@ pub struct HotkeyConfig {
 pub(super) fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
     vec![
         HotkeyBinding {
-            name: Some("capture_area".into()),
-            accelerator: "CTRL+ALT+A".into(),
-            args: vec!["capture".into(), "area".into()],
+            name: Some("quick_capture".into()),
+            accelerator: "SHIFT+SUPER+5".into(),
+            args: vec!["capture".into(), "menu".into()],
         },
         HotkeyBinding {
             name: Some("capture_crosshair".into()),
@@ -134,11 +134,6 @@ pub(super) fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
             args: vec!["show-last-preview".into()],
         },
         HotkeyBinding {
-            name: Some("open_recording_ui".into()),
-            accelerator: "CTRL+ALT+R".into(),
-            args: vec!["record".into(), "ui".into()],
-        },
-        HotkeyBinding {
             name: Some("recording_stop_save".into()),
             accelerator: "CTRL+ALT+SHIFT+S".into(),
             args: vec!["record".into(), "stop".into()],
@@ -151,7 +146,15 @@ pub(super) fn accelerator_key(accel: &str) -> String {
 }
 
 pub(super) fn merge_missing_default_hotkeys(cfg: &mut HotkeyConfig) -> bool {
-    let mut changed = false;
+    const RETIRED_ACTIONS: &[&str] = &["capture_area", "record_area", "open_recording_ui"];
+    let previous_len = cfg.bindings.len();
+    cfg.bindings.retain(|binding| {
+        !binding
+            .name
+            .as_deref()
+            .is_some_and(|name| RETIRED_ACTIONS.contains(&name))
+    });
+    let mut changed = cfg.bindings.len() != previous_len;
     let mut used_accels: HashSet<String> = cfg
         .bindings
         .iter()
@@ -180,7 +183,7 @@ pub(super) fn merge_missing_default_hotkeys(cfg: &mut HotkeyConfig) -> bool {
 
 /// Keep the first binding when two actions share an accelerator.
 /// GNOME custom keybindings silently fail (or fire both) on duplicates, which
-/// is how `record_screen` + `open_recording_ui` both on Ctrl+Alt+R get stuck.
+/// is how two recording actions on the same accelerator can get stuck.
 pub(super) fn drop_duplicate_hotkey_accelerators(cfg: &mut HotkeyConfig) -> bool {
     let mut seen = HashSet::new();
     let before = cfg.bindings.len();
@@ -260,9 +263,9 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
     );
     push_binding(
         &mut bindings,
-        "capture_area",
-        &app_config.shortcut_capture_area,
-        &["capture", "area"],
+        "quick_capture",
+        &app_config.shortcut_capture_menu,
+        &["capture", "menu"],
     );
     push_binding(
         &mut bindings,
@@ -290,12 +293,6 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
         "show_last_preview",
         &app_config.shortcut_show_last_preview,
         &["show-last-preview"],
-    );
-    push_binding(
-        &mut bindings,
-        "open_recording_ui",
-        &app_config.shortcut_open_recording_ui,
-        &["record", "ui"],
     );
     push_binding(
         &mut bindings,

@@ -48,14 +48,22 @@ pub fn open_in_apexshot_editor(entry: &CaptureEntry) -> Result<String, String> {
     ))
 }
 
-/// Copy a still to the clipboard as an image, a recording as a file reference.
+/// Copy a still to the clipboard per the configured clipboard mode, a
+/// recording as a file reference (recordings have no image form).
 pub fn copy_to_clipboard(entry: &CaptureEntry) -> Result<String, String> {
     ensure_exists(&entry.path)?;
 
     match entry.kind {
         MediaKind::Image => {
-            crate::utils::clipboard::copy_image_to_clipboard(&entry.path)?;
-            Ok(t("Image copied to clipboard"))
+            let mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
+                &crate::config::load_config().sanitized().adv_clipboard_mode,
+            );
+            crate::utils::clipboard::copy_screenshot_with_mode(&entry.path, mode)?;
+            Ok(if mode.includes_image() {
+                t("Image copied to clipboard")
+            } else {
+                t("File copied to clipboard")
+            })
         }
         MediaKind::Video => {
             crate::utils::clipboard::copy_uri_to_clipboard(&entry.path)?;

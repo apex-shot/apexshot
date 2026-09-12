@@ -1,0 +1,508 @@
+            /* COHESIVE SETTINGS-LIKE DESIGN */
+            .recent-captures-root {
+                /* Intentionally empty to let .editor-root's background and borders shine through natively */
+            }
+
+            .recent-captures-toolbar-status {
+                font-size: 12px;
+                font-weight: 400;
+                opacity: 0.5;
+            }
+
+            .recent-captures-statusbar {
+                padding: 6px 0;
+                border-top: 1px solid alpha(white, 0.06);
+            }
+
+            .recent-captures-shell {
+                margin: 0;
+            }
+
+            .recent-captures-header {
+                padding: 10px 0;
+                margin-bottom: 24px;
+            }
+
+            .recent-captures-title {
+                font-size: 26px;
+                font-weight: 700;
+            }
+
+            .recent-captures-subtitle {
+                font-size: 13px;
+                opacity: 0.7;
+            }
+
+            .recent-captures-hero {
+                padding: 0;
+                border-radius: 12px;
+                background: transparent;
+                border: none;
+            }
+
+            .recent-captures-hero-image {
+                border-radius: 8px;
+                border: 1px solid alpha(white, 0.1);
+                background: alpha(white, 0.04);
+            }
+
+            .recent-captures-card-image {
+                border-radius: 8px;
+                border: 1px solid alpha(white, 0.1);
+                background: alpha(white, 0.04);
+            }
+
+            .recent-captures-list-row {
+                padding: 12px;
+                border-radius: 12px;
+                transition: background 0.2s;
+            }
+
+            .recent-captures-list-row:hover {
+                background: alpha(white, 0.03);
+            }
+
+            .recent-captures-list-row.recent-captures-card-alt {
+                background: alpha(white, 0.015);
+            }
+            .recent-captures-list-row.recent-captures-card-alt:hover {
+                background: alpha(white, 0.03);
+            }
+
+            .recent-captures-hero-meta {
+                min-width: 320px;
+                padding-left: 20px;
+                margin-top: 8px;
+            }
+
+            .recent-captures-hero-title {
+                font-size: 20px;
+                font-weight: 700;
+            }
+
+            .recent-captures-hero-timestamp {
+                font-size: 13px;
+                font-weight: 500;
+                color: #b05c38;
+                margin-top: 4px;
+            }
+
+            .recent-captures-hero-supporting {
+                font-size: 13px;
+                line-height: 1.5;
+                opacity: 0.8;
+                margin-top: 10px;
+                margin-bottom: 24px;
+            }
+
+            .recent-captures-hero-actions {
+                margin-top: 24px;
+            }
+
+            .recent-captures-grid-title {
+                font-size: 18px;
+                font-weight: 700;
+                margin-top: 32px;
+                margin-bottom: 8px;
+            }
+
+            .recent-captures-grid {
+                margin-top: 0;
+            }
+
+            button.recent-captures-card {
+                padding: 12px;
+                border-radius: 10px;
+                border: none;
+                background: transparent;
+                box-shadow: none;
+                transition: opacity 0.2s ease, transform 0.2s ease;
+            }
+
+            button.recent-captures-card:hover,
+            button.recent-captures-card:focus {
+                background: transparent;
+                opacity: 0.7;
+            }
+
+            button.recent-captures-card-alt {
+                margin-top: 0px;
+            }
+
+            .recent-captures-card-title {
+                font-size: 14px;
+                font-weight: 700;
+                margin-top: 10px;
+            }
+
+            .recent-captures-card-timestamp {
+                font-size: 12px;
+                font-weight: 500;
+                color: #b05c38;
+                margin-top: 4px;
+            }
+
+            .recent-captures-card-meta {
+                font-size: 12px;
+                opacity: 0.6;
+                margin-top: 2px;
+            }
+
+            .recent-captures-empty-state {
+                padding: 48px 20px;
+                border-radius: 12px;
+                background: alpha(white, 0.03);
+                border: 1px solid alpha(white, 0.08);
+            }
+
+            .recent-captures-empty-title {
+                font-size: 18px;
+                font-weight: 700;
+            }
+
+            .recent-captures-empty-detail {
+                font-size: 14px;
+                opacity: 0.7;
+                margin-top: 8px;
+            }
+
+            .recent-captures-primary-button,
+            .recent-captures-secondary-button,
+            .recent-captures-refresh-button {
+                background: alpha(white, 0.08);
+                border: 1px solid alpha(white, 0.1);
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+                font-weight: 600;
+                color: white;
+                transition: all 0.2s;
+            }
+
+            .recent-captures-primary-button {
+                background-color: #b05c38;
+                border-color: #9a4c2c;
+                color: white;
+            }
+
+            .recent-captures-primary-button:hover,
+            .recent-captures-primary-button:focus {
+                background-color: #c06540;
+            }
+
+            .recent-captures-secondary-button:hover,
+            .recent-captures-secondary-button:focus,
+            .recent-captures-refresh-button:hover,
+            .recent-captures-refresh-button:focus {
+                background-color: alpha(white, 0.12);
+            }
+
+            .recent-captures-icon-btn {
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 8px;
+                color: #b05c38;
+                opacity: 0.8;
+                transition: opacity 0.2s, background 0.2s;
+            }
+
+            .recent-captures-icon-btn:hover {
+                background: alpha(white, 0.08);
+                opacity: 1.0;
+            }
+
+            .recent-captures-picture-missing {
+                background: alpha(white, 0.04);
+            }
+
+
+            button.recent-captures-wm-btn {
+                min-width: 28px;
+                min-height: 28px;
+                padding: 0;
+                border-radius: 999px;
+                background: transparent;
+                background-image: none;
+                color: alpha(white, 0.92);
+                border: none;
+                box-shadow: none;
+                outline: none;
+                transition: background 0.15s, color 0.15s;
+            }
+            button.recent-captures-wm-btn image {
+                -gtk-icon-size: 16px;
+            }
+            button.recent-captures-wm-btn:hover {
+                background: rgba(255, 255, 255, 0.08);
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                outline: none;
+                color: #ffffff;
+            }
+            button.recent-captures-wm-btn:active {
+                background: rgba(255, 255, 255, 0.08);
+                background-image: none;
+                color: #ffffff;
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+            button.recent-captures-wm-btn:focus {
+                background: transparent;
+                background-image: none;
+                color: alpha(white, 0.92);
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+            button.recent-captures-wm-btn:hover:focus {
+                background: rgba(255, 255, 255, 0.08);
+                color: #ffffff;
+            }
+            button.recent-captures-wm-close:hover,
+            button.recent-captures-wm-close:hover:focus,
+            button.recording-editor-traffic-close:hover,
+            button.recording-editor-traffic-close:hover:focus {
+                background: #e81123;
+                color: #ffffff;
+            }
+            button.recent-captures-wm-close:active,
+            button.recording-editor-traffic-close:active {
+                background: #c50f1f;
+                color: #ffffff;
+            }
+
+            .editor-root.editor-theme-light button.recent-captures-wm-btn {
+                background: transparent;
+                background-image: none;
+                color: alpha(#111827, 0.82);
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            .editor-root.editor-theme-light button.recent-captures-wm-btn:hover {
+                background: alpha(#111827, 0.10);
+                background-image: none;
+                color: alpha(#111827, 0.85);
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+            .editor-root.editor-theme-light button.recent-captures-wm-btn:active {
+                background: alpha(#111827, 0.14);
+                color: alpha(#111827, 0.85);
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+            .editor-root.editor-theme-light button.recent-captures-wm-btn:focus {
+                background: transparent;
+                color: alpha(#111827, 0.58);
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+            .editor-root.editor-theme-light button.recent-captures-wm-btn:hover:focus {
+                background: alpha(#111827, 0.10);
+                color: alpha(#111827, 0.85);
+            }
+
+            .editor-root.editor-theme-light button.recent-captures-wm-close:hover,
+            .editor-root.editor-theme-light button.recent-captures-wm-close:hover:focus,
+            .editor-root.editor-theme-light button.recording-editor-traffic-close:hover,
+            .editor-root.editor-theme-light button.recording-editor-traffic-close:hover:focus {
+                background: #e81123;
+                color: #ffffff;
+            }
+            .editor-root.editor-theme-light button.recent-captures-wm-close:active,
+            .editor-root.editor-theme-light button.recording-editor-traffic-close:active {
+                background: #c50f1f;
+                color: #ffffff;
+            }
+
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn {
+                min-width: 28px;
+                min-height: 28px;
+                padding: 0;
+                margin: 0;
+                border-radius: 999px;
+                background: transparent;
+                background-image: none;
+                color: alpha(white, 0.92);
+                border: none;
+                box-shadow: none;
+            }
+
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn image {
+                -gtk-icon-size: 16px;
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn {
+                color: alpha(#111827, 0.82);
+                background: transparent;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+            }
+
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn:hover {
+                background: rgba(255, 255, 255, 0.08);
+                background-image: none;
+                color: #ffffff;
+                border: none;
+                border-radius: 999px;
+                box-shadow: none;
+            }
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn:active {
+                background: rgba(255, 255, 255, 0.08);
+                color: #ffffff;
+                border: none;
+                box-shadow: none;
+            }
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn:focus {
+                background: transparent;
+                color: alpha(white, 0.92);
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+            .editor-root .settings-window-controls button.recording-editor-traffic-btn:hover:focus {
+                background: rgba(255, 255, 255, 0.08);
+                color: #ffffff;
+            }
+            .editor-root .settings-window-controls button.recording-editor-traffic-close:hover,
+            .editor-root .settings-window-controls button.recording-editor-traffic-close:hover:focus {
+                background: #e81123;
+                color: #ffffff;
+            }
+            .editor-root .settings-window-controls button.recording-editor-traffic-close:active {
+                background: #c50f1f;
+                color: #ffffff;
+            }
+
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:hover {
+                background: alpha(#111827, 0.10);
+                background-image: none;
+                color: alpha(#111827, 0.85);
+                border: none;
+                border-radius: 999px;
+                box-shadow: none;
+            }
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:active {
+                background: alpha(#111827, 0.14);
+                color: alpha(#111827, 0.85);
+                border: none;
+                box-shadow: none;
+            }
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:focus {
+                background: transparent;
+                color: alpha(#111827, 0.82);
+                border: none;
+                box-shadow: none;
+                outline: none;
+            }
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-btn:hover:focus {
+                background: alpha(#111827, 0.10);
+                color: alpha(#111827, 0.85);
+            }
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-close:hover,
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-close:hover:focus {
+                background: #e81123;
+                color: #ffffff;
+            }
+            .editor-root.editor-theme-light .settings-window-controls button.recording-editor-traffic-close:active {
+                background: #c50f1f;
+                color: #ffffff;
+            }
+
+            .recent-captures-segmented-control {
+                background: alpha(white, 0.05);
+                border-radius: 8px;
+                padding: 4px;
+            }
+            .recent-captures-segmented-btn {
+                background: transparent;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 16px;
+                color: alpha(white, 0.6);
+                font-size: 13px;
+                font-weight: 500;
+                transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+            }
+            .recent-captures-segmented-btn:hover {
+                color: white;
+            }
+            .recent-captures-segmented-btn:checked {
+                background: #b05c38;
+                color: white;
+                box-shadow: 0 1px 3px alpha(black, 0.2);
+            }
+
+            /* LIGHT THEME OVERRIDES (Match settings UI light theme) */
+            .editor-root.editor-theme-light .recent-captures-hero-image,
+            .editor-root.editor-theme-light .recent-captures-card-image {
+                border-color: alpha(#111827, 0.12);
+                background: alpha(#111827, 0.04);
+            }
+
+            .editor-root.editor-theme-light button.recent-captures-card:hover,
+            .editor-root.editor-theme-light button.recent-captures-card:focus {
+                background: transparent;
+                opacity: 0.7;
+            }
+
+            .editor-root.editor-theme-light .recent-captures-primary-button {
+                background-color: #b05c38;
+                border-color: #9a4c2c;
+                color: white;
+            }
+
+            .editor-root.editor-theme-light .recent-captures-primary-button:hover,
+            .editor-root.editor-theme-light .recent-captures-primary-button:focus {
+                background-color: #c06540;
+            }
+
+            .editor-root.editor-theme-light .recent-captures-secondary-button,
+            .editor-root.editor-theme-light .recent-captures-refresh-button {
+                background-color: transparent;
+                color: #1d2129;
+                border-color: alpha(#111827, 0.2);
+            }
+
+            .editor-root.editor-theme-light .recent-captures-secondary-button:hover,
+            .editor-root.editor-theme-light .recent-captures-secondary-button:focus,
+            .editor-root.editor-theme-light .recent-captures-refresh-button:hover,
+            .editor-root.editor-theme-light .recent-captures-refresh-button:focus {
+                background-color: alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light .recent-captures-empty-state {
+                background: alpha(#111827, 0.03);
+                border-color: alpha(#111827, 0.08);
+            }
+
+            .editor-root.editor-theme-light .recent-captures-icon-btn {
+                color: #9a4c2c;
+            }
+
+            .editor-root.editor-theme-light .recent-captures-icon-btn:hover {
+                background: alpha(#111827, 0.06);
+            }
+
+            .editor-root.editor-theme-light .recent-captures-segmented-control {
+                background: alpha(black, 0.05);
+            }
+            .editor-root.editor-theme-light .recent-captures-segmented-btn {
+                color: alpha(black, 0.6);
+            }
+            .editor-root.editor-theme-light .recent-captures-segmented-btn:hover {
+                color: black;
+            }
+            .editor-root.editor-theme-light .recent-captures-segmented-btn:checked {
+                background: #b05c38;
+                color: white;
+                box-shadow: 0 1px 3px alpha(black, 0.1);
+            }

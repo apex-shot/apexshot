@@ -1,0 +1,41 @@
+# ApexShot installer Worker — wrangler config.
+#
+# Deploy from the repository root:
+#
+#   cd /path/to/apexshot
+#   npx wrangler deploy --config scripts/cloudflare-wrangler.toml
+#
+# `main` is resolved relative to THIS file, so no path juggling is needed.
+#
+# TOML ORDERING MATTERS: all top-level keys (name, main, compatibility_date,
+# routes, workers_dev) MUST appear before the first table header. A key placed
+# after `[[r2_buckets]]` becomes a field of that table and is silently dropped
+# with a warning like:
+#   "Unexpected fields found in r2_buckets[0] field: routes"
+
+name = "apexshot-install"
+main = "cloudflare-worker.js"
+compatibility_date = "2025-01-01"
+
+# Intercept only these paths on the existing apexshot.org zone. `/install*`
+# also covers /install/ubuntu, /install/arch and /install/fedora; `/update*`
+# covers the matching updaters. A route pattern is more specific than the zone
+# default, so these paths are handled here and everything else on apexshot.org
+# keeps serving from its existing origin untouched.
+routes = [
+  { pattern = "apexshot.org/install*", zone_name = "apexshot.org" },
+  { pattern = "apexshot.org/update*", zone_name = "apexshot.org" },
+]
+
+# Keep the workers.dev URL alive so the Worker can be tested directly, without
+# depending on route registration or DNS.
+workers_dev = true
+
+# R2 mirror of the installer scripts. CI syncs scripts/ into this bucket under
+# the `scripts/` prefix (see docs/CLOUDFLARE_CDN_SETUP.md, step 7).
+[[r2_buckets]]
+binding = "RELEASES"
+bucket_name = "apexshot-releases"
+
+[observability]
+enabled = true

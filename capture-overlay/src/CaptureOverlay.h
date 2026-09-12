@@ -79,6 +79,9 @@ public:
     bool countdownHandledInOverlay() const { return true; }
     void focusAndRaiseOverlay();
     void openRecordingPanelForShortcut();
+    /// Configure the selector launched from the unified pre-capture toolbar.
+    /// It keeps the Frame controls but suppresses the legacy side tool rail.
+    void setCaptureMenuAreaMode(bool ocr, int timerSeconds);
     /// Enter the in-overlay window picker (used by Window tool and --window-capture).
     void openWindowPickerMode();
     /// Full window-surface PNG written when a card was selected (may be empty).
@@ -296,6 +299,7 @@ private:
     QList<WindowInfo> enumerateWindows() const;
     QList<WindowInfo> enumerateWindowsFromExtension() const;
     QList<WindowInfo> enumerateWindowsFromX11() const;
+    bool activateWindowForCapture(quint64 windowId) const;
     QPoint windowListDesktopOrigin() const;
     QRect targetScreenDesktopGeometry() const;
     bool captureWindowByIdToTemp(quint64 windowId, QString& outPath, QSize& outSize) const;
@@ -327,6 +331,7 @@ private:
     QString   m_selectionCursorMode;
     bool      m_showZoomPreview;
     bool      m_freezeSelectionBackground;
+    bool      m_captureMenuAreaMode;
     bool      m_timerDelayActive;
     int       m_captureDelaySeconds;
     bool      m_countdownActive;
@@ -370,6 +375,7 @@ private:
     QRect             m_selectionBeforeWindowMode;
     bool              m_hadSelectionBeforeWindowMode;
     bool              m_fullscreenBeforeWindowMode;
+    bool              m_windowSelectionCapture;
     QString           m_preCapturedImagePath; // full window surface capture path
 
     // Recording panel state

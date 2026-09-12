@@ -5,6 +5,7 @@
 
 mod api;
 mod background;
+mod capture_menu;
 pub(crate) mod drawing;
 mod geometry;
 mod hit_testing;
@@ -18,6 +19,7 @@ mod window;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use api::select_area_from_capture_with_gtk_from_capture_menu;
 pub use api::{
     select_area, select_area_from_capture, select_area_from_capture_with_gtk,
     select_area_from_capture_with_gtk_on_monitor, select_area_from_image,
@@ -25,4 +27,5 @@ pub use api::{
     select_window_from_capture_with_gtk, AreaSelector, OverlaySelection, SelectionArea,
     SelectionError, SelectionResult,
 };
+pub use capture_menu::{choose_capture_mode, CaptureMenuAction, CaptureMenuResult};
 pub use monitor_picker::{select_target_monitor_choice, MonitorChoice};

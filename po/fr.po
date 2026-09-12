@@ -2254,3 +2254,84 @@ msgstr "Titre"
 
 msgid "Drag on the preview to place the title"
 msgstr "Glissez sur l’aperçu pour placer le titre"
+
+msgid "Anchor X"
+msgstr "Ancre X"
+msgid "Anchor Y"
+msgstr "Ancre Y"
+msgid "Blur shutter"
+msgstr "Obturateur du flou"
+msgid "Blur trail"
+msgstr "Traînée de flou"
+msgid "Ease X1"
+msgstr "Lissage X1"
+msgid "Ease X2"
+msgstr "Lissage X2"
+msgid "Ease Y1"
+msgstr "Lissage Y1"
+msgid "Ease Y2"
+msgstr "Lissage Y2"
+msgid "Scope"
+msgstr "Portée"
+msgid "Unpin"
+msgstr "Détacher"
+
+msgid "Appearance"
+msgstr "Apparence"
+
+msgid "Border Color"
+msgstr "Couleur de bordure"
+
+msgid "Choose"
+msgstr "Choisir"
+
+msgid "Choose Watermark Image"
+msgstr "Choisir une image de filigrane"
+
+msgid "Choose…"
+msgstr "Choisir…"
+
+msgid "Hex color"
+msgstr "Couleur hexadécimale"
+
+msgid "No image selected"
+msgstr "Aucune image sélectionnée"
+
+msgid "Remove"
+msgstr "Supprimer"
+
+msgid "Show all wallpapers"
+msgstr "Afficher tous les fonds d’écran"
+
+msgid "Wallpapers"
+msgstr "Fonds d’écran"
+
+msgid "Watermark"
+msgstr "Filigrane"
+
+msgid "Double-click to add motion"
+msgstr "Double-cliquez pour ajouter un mouvement"
+
+msgid "Double-click to add text"
+msgstr "Double-cliquez pour ajouter du texte"
+
+msgid "Show all gradients"
+msgstr "Afficher tous les dégradés"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "Format du canevas d'origine"
+
+msgid "Square 1:1 output"
+msgstr "Sortie carrée 1:1"
+
+msgid "Widescreen 16:9 output"
+msgstr "Sortie grand écran 16:9"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "Sortie carte de lien X (Twitter) 1.91:1"

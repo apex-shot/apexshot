@@ -2207,3 +2207,84 @@ msgstr "标题"
 
 msgid "Drag on the preview to place the title"
 msgstr "在预览中拖动以放置标题"
+
+msgid "Anchor X"
+msgstr "锚点 X"
+msgid "Anchor Y"
+msgstr "锚点 Y"
+msgid "Blur shutter"
+msgstr "模糊快门"
+msgid "Blur trail"
+msgstr "模糊拖影"
+msgid "Ease X1"
+msgstr "缓动 X1"
+msgid "Ease X2"
+msgstr "缓动 X2"
+msgid "Ease Y1"
+msgstr "缓动 Y1"
+msgid "Ease Y2"
+msgstr "缓动 Y2"
+msgid "Scope"
+msgstr "范围"
+msgid "Unpin"
+msgstr "取消固定"
+
+msgid "Appearance"
+msgstr "外观"
+
+msgid "Border Color"
+msgstr "边框颜色"
+
+msgid "Choose"
+msgstr "选择"
+
+msgid "Choose Watermark Image"
+msgstr "选择水印图片"
+
+msgid "Choose…"
+msgstr "选择…"
+
+msgid "Hex color"
+msgstr "十六进制颜色"
+
+msgid "No image selected"
+msgstr "未选择图片"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "Show all wallpapers"
+msgstr "显示所有壁纸"
+
+msgid "Wallpapers"
+msgstr "壁纸"
+
+msgid "Watermark"
+msgstr "水印"
+
+msgid "Double-click to add motion"
+msgstr "双击添加运动"
+
+msgid "Double-click to add text"
+msgstr "双击添加文本"
+
+msgid "Show all gradients"
+msgstr "显示所有渐变"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "原始画布宽高比"
+
+msgid "Square 1:1 output"
+msgstr "方形 1:1 输出"
+
+msgid "Widescreen 16:9 output"
+msgstr "宽屏 16:9 输出"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "X（Twitter）链接卡片 1.91:1 输出"

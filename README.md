@@ -56,7 +56,7 @@ the matching install path (openSUSE is development-stage and refused until a
 binary ships). **Video recording is not supported on Fedora**:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
+curl -fsSL https://apexshot.org/install | sh
 ```
 
 Works best today on:
@@ -144,7 +144,7 @@ and Arch Linux; Fedora is usable for **screenshots** (video recording is not
 supported). openSUSE remains development-stage for full runtime validation:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/install.sh | bash
+curl -fsSL https://apexshot.org/install | sh
 ```
 
 > **Tip:** The installer shows a stylish progress UI with spinners, colour-coded
@@ -247,7 +247,7 @@ in progress.
 The generic updater detects the distro:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/update.sh | bash
+curl -fsSL https://apexshot.org/update | sh
 ```
 
 Direct Ubuntu / Debian command:

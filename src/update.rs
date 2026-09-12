@@ -14,8 +14,7 @@ use std::{
 
 pub const RELEASES_URL: &str = "https://github.com/apex-shot/apexshot/releases";
 const LATEST_RELEASE_API: &str = "https://api.github.com/repos/apex-shot/apexshot/releases/latest";
-const UPDATE_SCRIPT_URL: &str =
-    "https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/update.sh";
+const UPDATE_SCRIPT_URL: &str = "https://apexshot.org/update";
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const PROMPT_SNOOZE: Duration = Duration::from_secs(24 * 60 * 60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
@@ -236,7 +235,7 @@ pub fn launch_update() -> Result<(), String> {
         )
     } else {
         format!(
-            "curl -fsSL {UPDATE_SCRIPT_URL} | bash; printf '\\nApexShot update finished. You can close this window.\\n'; exec bash"
+            "curl -fsSL {UPDATE_SCRIPT_URL} | sh; printf '\\nApexShot update finished. You can close this window.\\n'; exec bash"
         )
     };
 
@@ -273,6 +272,11 @@ mod tests {
     fn ignores_invalid_versions() {
         assert!(!is_newer_version("next", "0.2.35"));
         assert!(!is_newer_version("0.2.36", "development"));
+    }
+
+    #[test]
+    fn native_updater_uses_the_public_posix_entrypoint() {
+        assert_eq!(UPDATE_SCRIPT_URL, "https://apexshot.org/update");
     }
 
     #[test]

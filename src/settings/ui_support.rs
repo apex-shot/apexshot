@@ -1,7 +1,18 @@
 use gtk4::gdk;
 use gtk4::{prelude::*, Button, CssProvider};
 
-const SETTINGS_CSS: &str = include_str!("settings.css");
+const SETTINGS_CSS: &str = concat!(
+    include_str!("css/01-shell-controls.css"),
+    include_str!("css/02-sidebar-actions.css"),
+    include_str!("css/03-shared-content.css"),
+    include_str!("css/04-native-widgets.css"),
+    include_str!("css/05-tabs-modes-shortcuts.css"),
+    include_str!("css/06-shortcut-dialog.css"),
+    include_str!("css/07-pages-about-onboarding.css"),
+    include_str!("css/08-recent-captures.css"),
+    include_str!("css/09-noir-gallery.css"),
+    include_str!("css/10-history-shell.css"),
+);
 
 pub fn install_settings_css() {
     if let Some(display) = gdk::Display::default() {

@@ -322,13 +322,12 @@ pub fn install_shortcut_editors(widgets: &ShortcutSettingsWidgets, parent: &Appl
         &widgets.open_clipboard_btn,
         &widgets.restore_file_btn,
         &widgets.toggle_overlays_btn,
-        &widgets.capture_area_btn,
+        &widgets.quick_capture_btn,
         &widgets.capture_crosshair_btn,
         &widgets.capture_prev_btn,
         &widgets.capture_fullscreen_btn,
         &widgets.capture_window_btn,
         &widgets.show_last_preview_btn,
-        &widgets.open_recording_ui_btn,
         &widgets.record_screen_btn,
         &widgets.recording_stop_save_btn,
     ] {
@@ -342,13 +341,12 @@ pub struct ShortcutSettingsWidgets {
     pub open_clipboard_btn: Button,
     pub restore_file_btn: Button,
     pub toggle_overlays_btn: Button,
-    pub capture_area_btn: Button,
+    pub quick_capture_btn: Button,
     pub capture_crosshair_btn: Button,
     pub capture_prev_btn: Button,
     pub capture_fullscreen_btn: Button,
     pub capture_window_btn: Button,
     pub show_last_preview_btn: Button,
-    pub open_recording_ui_btn: Button,
     pub record_screen_btn: Button,
     pub recording_stop_save_btn: Button,
 }
@@ -483,11 +481,11 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
     // --- Screenshots Section ---
     create_header(&section, "Screenshots", "camera-photo-symbolic");
     let screenshots_frame = build_frame();
-    let capture_area_btn = create_row(
+    let quick_capture_btn = create_row(
         &screenshots_frame,
-        "Capture Area:",
-        None,
-        &config.shortcut_capture_area,
+        "Quick Capture:",
+        Some("Open the screenshot and recording menu"),
+        &config.shortcut_capture_menu,
         false,
     );
     let capture_crosshair_btn = create_row(
@@ -526,19 +524,12 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
 
     create_header(&section, "Recording", "camera-video-symbolic");
     let recording_frame = build_frame();
-    let open_recording_ui_btn = create_row(
-        &recording_frame,
-        "Open Recording UI:",
-        None,
-        &config.shortcut_open_recording_ui,
-        false,
-    );
     let record_screen_btn = create_row(
         &recording_frame,
         "Record Screen:",
         None,
         &config.shortcut_record_screen,
-        true,
+        false,
     );
     let recording_stop_save_btn = create_row(
         &recording_frame,
@@ -555,13 +546,12 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         open_clipboard_btn,
         restore_file_btn,
         toggle_overlays_btn,
-        capture_area_btn,
+        quick_capture_btn,
         capture_crosshair_btn,
         capture_prev_btn,
         capture_fullscreen_btn,
         capture_window_btn,
         show_last_preview_btn,
-        open_recording_ui_btn,
         record_screen_btn,
         recording_stop_save_btn,
     }
@@ -667,6 +657,9 @@ mod tests {
             .iter()
             .any(|label| label == "Restore Recently Closed File:"));
         assert!(labels.iter().any(|label| label == "Hide/Show Overlays:"));
+        assert!(labels.iter().any(|label| label == "Quick Capture:"));
+        assert!(!labels.iter().any(|label| label == "Capture Area:"));
+        assert!(!labels.iter().any(|label| label == "Open Recording UI:"));
     }
 
     #[test]

@@ -16,7 +16,7 @@ mod rail;
 mod timeline;
 mod timeline_card;
 mod tool_section;
-mod tool_sidebar;
+pub(crate) mod tool_sidebar;
 mod toolbar;
 
 use super::ffmpeg;

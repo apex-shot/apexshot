@@ -1,16 +1,21 @@
-#!/bin/bash
+#!/bin/sh
 # Backward-compatible installer entrypoint.
-set -euo pipefail
+# This entrypoint is deliberately POSIX: it is advertised as
+# `curl -fsSL https://apexshot.org/install | sh`.  The distro-specific
+# installers remain Bash programs and are explicitly handed to Bash below.
+set -eu
 
-SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+SCRIPT_SOURCE="${0:-}"
 SCRIPT_DIR=""
-if [[ -n "$SCRIPT_SOURCE" ]]; then
+if [ -n "$SCRIPT_SOURCE" ]; then
     SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 fi
 
 is_gnome_session() {
-    local desktop="${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}"
-    [[ -n "${GNOME_SETUP_DISPLAY:-}" ]] || [[ "${desktop,,}" == *gnome* ]]
+    desktop="${XDG_CURRENT_DESKTOP:-}:${XDG_SESSION_DESKTOP:-}:${DESKTOP_SESSION:-}"
+    desktop_lower="$(printf '%s' "$desktop" | tr '[:upper:]' '[:lower:]')"
+    [ -n "${GNOME_SETUP_DISPLAY:-}" ] || case "$desktop_lower" in *gnome*) return 0 ;; esac
+    return 1
 }
 
 refuse_steamos() {
@@ -35,18 +40,18 @@ EOF
 }
 
 detect_distro_family() {
-    local id=""
-    local id_like=""
+    id=""
+    id_like=""
 
-    if [[ -r /etc/os-release ]]; then
+    if [ -r /etc/os-release ]; then
         # shellcheck disable=SC1091
-        source /etc/os-release
+        . /etc/os-release
         id="${ID:-}"
         id_like="${ID_LIKE:-}"
     fi
 
     # SteamOS sets ID_LIKE=arch and ships pacman, but it is not Arch.
-    if [[ "${id}" == "steamos" ]] || [[ -e /etc/steamos-release ]] || command -v steamos-readonly >/dev/null 2>&1; then
+    if [ "${id}" = "steamos" ] || [ -e /etc/steamos-release ] || command -v steamos-readonly >/dev/null 2>&1; then
         printf '%s' "steamos"
         return
     fi
@@ -92,22 +97,22 @@ case "$(detect_distro_family)" in
         refuse_steamos
         ;;
     arch)
-        if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/arch-install.sh" ]]; then
+        if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/arch-install.sh" ]; then
             exec bash "${SCRIPT_DIR}/arch-install.sh" "$@"
         fi
-        exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-install.sh)"
+        exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/arch-install.sh)" bash "$@"
         ;;
     ubuntu)
-        if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/ubuntu-install.sh" ]]; then
+        if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/ubuntu-install.sh" ]; then
             exec bash "${SCRIPT_DIR}/ubuntu-install.sh" "$@"
         fi
-        exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ubuntu-install.sh)"
+        exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/ubuntu-install.sh)" bash "$@"
         ;;
     fedora)
-        if [[ -n "$SCRIPT_DIR" && -f "${SCRIPT_DIR}/fedora-install.sh" ]]; then
+        if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/fedora-install.sh" ]; then
             exec bash "${SCRIPT_DIR}/fedora-install.sh" "$@"
         fi
-        exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/fedora-install.sh)"
+        exec bash -c "$(curl -fsSL https://raw.githubusercontent.com/apex-shot/apexshot/main/scripts/fedora-install.sh)" bash "$@"
         ;;
     opensuse)
         echo "openSUSE binary packages are not published yet." >&2

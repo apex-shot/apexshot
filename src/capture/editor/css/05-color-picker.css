@@ -1,0 +1,334 @@
+            .editor-color-picker-panel {
+                min-width: 252px;
+                padding: 0 0 0 10px;
+                margin-left: 8px;
+                border-left: 1px solid rgba(255, 255, 255, 0.08);
+            }
+
+            .editor-gradient-area {
+                min-width: 252px;
+                min-height: 150px;
+                border-radius: 8px;
+                border: 1px solid alpha(white, 0.08);
+                box-shadow: none;
+            }
+
+            menubutton.editor-motion-color-button > button,
+            menubutton.editor-motion-color-button > button:hover,
+            menubutton.editor-motion-color-button > button:active,
+            menubutton.editor-motion-color-button > button:checked,
+            menubutton.editor-motion-color-button > button:focus {
+                min-width: 32px;
+                min-height: 32px;
+                padding: 0;
+                border-radius: 7px;
+                border: 2px solid alpha(white, 0.18);
+                background: alpha(white, 0.03);
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            menubutton.editor-motion-color-button.active-motion-color-control > button,
+            menubutton.editor-motion-color-button.active-motion-color-control > button:hover,
+            menubutton.editor-motion-color-button.active-motion-color-control > button:active,
+            menubutton.editor-motion-color-button.active-motion-color-control > button:checked,
+            menubutton.editor-motion-color-button.active-motion-color-control > button:focus {
+                border-color: #c06540;
+                background: alpha(#c06540, 0.10);
+                background-image: none;
+                box-shadow: 0 0 0 1px #c06540;
+                outline: none;
+            }
+
+            /* Gradient stops share one hex field.  The orange outline names
+             * the stop that field currently edits. */
+            menubutton.editor-motion-gradient-stop > button,
+            menubutton.editor-motion-gradient-stop > button:hover,
+            menubutton.editor-motion-gradient-stop > button:active,
+            menubutton.editor-motion-gradient-stop > button:checked,
+            menubutton.editor-motion-gradient-stop > button:focus {
+                min-width: 32px;
+                min-height: 32px;
+                padding: 0;
+                border-radius: 7px;
+                border: 2px solid alpha(white, 0.18);
+                background: alpha(white, 0.03);
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button,
+            menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button:hover,
+            menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button:active,
+            menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button:checked,
+            menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button:focus {
+                border-color: #c06540;
+                background: alpha(#c06540, 0.10);
+                box-shadow: 0 0 0 1px #c06540;
+            }
+
+            .editor-motion-color-swatch {
+                min-width: 28px;
+                min-height: 28px;
+                border-radius: 5px;
+                border: 1px solid alpha(white, 0.16);
+            }
+
+            /* Gradient presets reuse the wallpaper thumbnail size and chrome
+             * (editor-background-gradient-button + preview-size-regular); the
+             * only extra rule is the active outline, matching wallpapers. */
+            button.editor-motion-gradient-preset.active-background-option,
+            button.editor-motion-gradient-preset.active-background-option:hover,
+            button.editor-motion-gradient-preset.active-background-option:active {
+                border: 2px solid #c06540;
+                box-shadow: 0 0 0 1px #c06540;
+            }
+
+            entry.editor-motion-color-hex-entry {
+                min-height: 42px;
+                min-width: 128px;
+                padding: 0 12px;
+                border: none;
+                border-radius: 8px;
+                background: alpha(white, 0.08);
+                color: rgba(255, 255, 255, 0.72);
+                font-family: monospace;
+                font-size: 13px;
+                box-shadow: none;
+            }
+
+            entry.editor-motion-color-hex-entry:focus {
+                color: #ffffff;
+                background: alpha(white, 0.11);
+                box-shadow: inset 0 0 0 1px #c06540;
+            }
+
+            popover.editor-motion-color-popover,
+            popover.editor-motion-color-popover > contents {
+                padding: 0;
+                border: none;
+                background: transparent;
+                box-shadow: none;
+            }
+
+            .editor-motion-color-popover-body {
+                /* Same surface treatment as the in-window updater card. */
+                padding: 8px;
+                border-radius: 14px;
+                border: 1px solid alpha(white, 0.10);
+                background: #1d1d1d;
+                box-shadow: 0 18px 50px alpha(black, 0.42);
+            }
+
+            .editor-motion-color-chooser {
+                color: #f1f1f3;
+                background: transparent;
+                min-width: 260px;
+                min-height: 260px;
+            }
+
+            /* --- Sliders (mirrors the video editor's minimal style) --- */
+            .editor-root scale {
+                min-height: 20px;
+            }
+
+            .editor-root scale trough {
+                min-height: 4px;
+                border-radius: 999px;
+                background: alpha(white, 0.08);
+                border: none;
+            }
+
+            .editor-root scale highlight {
+                min-height: 4px;
+                border-radius: 999px;
+                background: #b05c38;
+            }
+
+            .editor-root scale:disabled trough {
+                background: alpha(white, 0.04);
+            }
+
+            .editor-root scale:disabled highlight {
+                background: alpha(#b05c38, 0.42);
+            }
+
+            .editor-root.editor-theme-light scale trough {
+                background: alpha(#111827, 0.08);
+            }
+
+            .editor-root.editor-theme-light scale highlight {
+                background: #b05c38;
+            }
+
+            .editor-root.editor-theme-light scale:disabled trough {
+                background: alpha(#111827, 0.04);
+            }
+
+            .editor-root.editor-theme-light scale:disabled highlight {
+                background: alpha(#b05c38, 0.42);
+            }
+
+            .editor-root scale.editor-hue-slider trough {
+                min-height: 8px;
+                border-radius: 999px;
+                box-shadow: none;
+                border: 1px solid alpha(white, 0.08);
+                background-color: transparent;
+                background-image: linear-gradient(to right,
+                    #ff0000 0%, #ffff00 17%, #00ff00 33%,
+                    #00ffff 50%, #0000ff 67%, #ff00ff 83%, #ff0000 100%);
+            }
+
+            .editor-root scale.editor-hue-slider highlight {
+                background: transparent;
+            }
+
+            .editor-color-preview {
+                min-width: 24px;
+                min-height: 24px;
+                border-radius: 999px;
+                background: #37805B;
+                border: 1px solid rgba(255, 255, 255, 0.22);
+                box-shadow:
+                    inset 0 1px 3px rgba(0,0,0,0.28),
+                    0 1px 2px rgba(0,0,0,0.26);
+            }
+
+            button.editor-eyedropper-button {
+                min-width: 30px;
+                min-height: 30px;
+                border: 1px solid rgba(255, 255, 255, 0.10);
+                border-radius: 7px;
+                background: rgba(255, 255, 255, 0.04);
+                padding: 0;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.24);
+                transition: all 150ms ease;
+            }
+
+            button.editor-eyedropper-button:hover {
+                background: rgba(255, 255, 255, 0.11);
+                border-color: rgba(255, 255, 255, 0.18);
+                transform: translateY(-1px);
+                box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+            }
+
+            button.editor-eyedropper-button:active {
+                background: rgba(255, 255, 255, 0.05);
+                transform: translateY(0);
+                box-shadow: none;
+            }
+
+            button.editor-eyedropper-button image {
+                margin: 0;
+            }
+
+            window.editor-eyedropper-picker-window {
+                background: transparent;
+            }
+
+            .editor-eyedropper-surface {
+                background: #000000;
+            }
+
+            .editor-screen-eyedropper-ring {
+                min-width: 132px;
+                min-height: 132px;
+                border-radius: 999px;
+                border: none;
+                box-shadow: none;
+                background: transparent;
+            }
+
+            entry.editor-hex-entry,
+            entry.editor-rgba-entry {
+                min-height: 30px;
+                border-radius: 6px;
+                padding: 2px 8px;
+                background: alpha(white, 0.05);
+                border: 1px solid alpha(white, 0.06);
+                box-shadow: none;
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 12px;
+                font-family: 'DejaVu Sans Mono', 'Liberation Mono', Monospace;
+                font-style: normal;
+                font-weight: 600;
+                transition: background-color 120ms ease, border-color 120ms ease;
+            }
+
+            entry.editor-hex-entry:focus,
+            entry.editor-rgba-entry:focus {
+                border-color: alpha(white, 0.20);
+                background: alpha(white, 0.08);
+                box-shadow: none;
+            }
+
+            entry.editor-hex-entry text,
+            entry.editor-rgba-entry text {
+                color: rgba(255, 255, 255, 0.92);
+            }
+
+            .editor-color-field-label {
+                font-size: 10px;
+                font-weight: 600;
+                color: rgba(255, 255, 255, 0.52);
+                margin-top: 1px;
+                text-transform: uppercase;
+                letter-spacing: 0.55px;
+            }
+
+            button.editor-add-to-colors-button {
+                min-width: 220px;
+                min-height: 30px;
+                border-radius: 6px;
+                background: #B05C38;
+                color: #ffffff;
+                font-weight: 600;
+                font-size: 12px;
+                border: none;
+                padding: 0 14px;
+                outline: none;
+                transition: background-color 120ms ease;
+                box-shadow: none;
+            }
+
+            button.editor-add-to-colors-button:hover {
+                background: #C66B4A;
+                border: none;
+                box-shadow: none;
+            }
+
+            button.editor-add-to-colors-button:active {
+                background: #8A4A2D;
+                box-shadow: none;
+            }
+
+            .editor-color-dot.editor-color-black,
+            .editor-color-trigger-dot.editor-color-black { background: #121212; }
+            .editor-color-dot.editor-color-blue,
+            .editor-color-trigger-dot.editor-color-blue { background: #0a84ff; }
+            .editor-color-dot.editor-color-dark-green,
+            .editor-color-trigger-dot.editor-color-dark-green { background: #005933; }
+            .editor-color-dot.editor-color-red,
+            .editor-color-trigger-dot.editor-color-red { background: #eb2424; }
+            .editor-color-dot.editor-color-orange,
+            .editor-color-trigger-dot.editor-color-orange { background: #ff9900; }
+            .editor-color-dot.editor-color-yellow,
+            .editor-color-trigger-dot.editor-color-yellow { background: #ffd601; }
+            .editor-color-dot.editor-color-green,
+            .editor-color-trigger-dot.editor-color-green { background: #29ba5c; }
+            .editor-color-dot.editor-color-cyan,
+            .editor-color-trigger-dot.editor-color-cyan { background: #00cfc7; }
+            .editor-color-dot.editor-color-blue-bright,
+            .editor-color-trigger-dot.editor-color-blue-bright { background: #338efb; }
+            .editor-color-dot.editor-color-purple,
+            .editor-color-trigger-dot.editor-color-purple { background: #9e5cfb; }
+            .editor-color-dot.editor-color-pink,
+            .editor-color-trigger-dot.editor-color-pink { background: #ff1478; }
+            .editor-color-dot.editor-color-white,
+            .editor-color-trigger-dot.editor-color-white {
+                background: #f2f2f2;
+                border: 1px solid rgba(255, 255, 255, 0.16);
+            }

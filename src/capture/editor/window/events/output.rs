@@ -7,10 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::annotations::{save_annotations, AnnotationError};
-use crate::capture::editor::{
-    io_ops::{copy_uri_to_clipboard, save_edited_image},
-    state::EditorState,
-};
+use crate::capture::editor::{io_ops::save_edited_image, state::EditorState};
 
 pub fn persist_image_session(path: &Path, state: &EditorState) -> Result<(), AnnotationError> {
     save_annotations(
@@ -44,7 +41,11 @@ pub(super) fn wire_output_lifecycle(
 ) {
     let path_copy = path.to_path_buf();
     copy_btn.connect_clicked(move |_| {
-        if let Err(error) = copy_uri_to_clipboard(&path_copy) {
+        let config = crate::config::load_config().sanitized();
+        let mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
+            &config.adv_clipboard_mode,
+        );
+        if let Err(error) = crate::utils::clipboard::copy_screenshot_with_mode(&path_copy, mode) {
             eprintln!("Copy failed: {error}");
         }
     });

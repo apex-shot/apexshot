@@ -342,6 +342,7 @@ mod empty_state;
 mod events;
 mod footer;
 mod inspectors;
+mod motion_host;
 mod motion_mode;
 mod motion_render;
 mod motion_timeline;
@@ -367,7 +368,7 @@ pub fn open_image_editor(path: PathBuf) -> Result<(), EditorError> {
         .build();
 
     app.connect_activate(move |application| {
-        setup_editor_window(application, path.clone());
+        setup_image_loading_shell(application, Some(path.clone()));
     });
 
     let _ = app.run_with_args::<String>(&[]);
@@ -383,7 +384,7 @@ pub fn open_image_editor_empty() -> Result<(), EditorError> {
         .build();
 
     app.connect_activate(move |application| {
-        setup_editor_window_full(application, PathBuf::from("Untitled.png"), true, None);
+        setup_image_loading_shell(application, None);
     });
 
     let _ = app.run_with_args::<String>(&[]);
@@ -504,7 +505,86 @@ fn set_window_always_on_top(
 }
 
 pub fn setup_editor_window(app: &Application, path: PathBuf) {
-    setup_editor_window_full(app, path, false, None);
+    setup_editor_window_full(app, path, false, None, None);
+}
+
+/// Show a minimal, interactive load shell before constructing the full static
+/// and Motion editors.  The old empty-editor path built every inspector twice:
+/// once for the empty canvas and again after decoding the selected image.  A
+/// lean shell lets GTK paint immediately while the worker reads the image,
+/// then the normal editor is built exactly once with the decoded pixels.
+fn setup_image_loading_shell(app: &Application, initial_image_path: Option<PathBuf>) {
+    install_editor_css();
+    crate::recording::editor::ui_support::install_recording_editor_css();
+    // Match the normal editor's established default size. The loading shell
+    // is reused for the final editor, so it must never impose its own width.
+    let (default_width, default_height) = recommended_window_size_with_extra_width(0, 0, 280);
+
+    // Use the editor's own chrome from the first frame; a compact close
+    // control below keeps the loading shell dismissible without constructing
+    // the full toolbar.
+    let window = ApplicationWindow::builder()
+        .application(app)
+        .title(t("ApexShot Editor"))
+        .icon_name(crate::app_identity::icon_name())
+        .default_width(default_width)
+        .default_height(default_height)
+        .decorated(false)
+        .build();
+    window.add_css_class("editor-window");
+    window.set_size_request(EDITOR_MIN_WINDOW_WIDTH, -1);
+
+    let root_overlay = Overlay::new();
+    root_overlay.add_css_class("editor-root");
+    if prefers_dark_glass_theme() {
+        root_overlay.add_css_class("editor-theme-dark");
+    } else {
+        root_overlay.add_css_class("editor-theme-light");
+    }
+
+    let canvas_with_toolbar = Overlay::new();
+    canvas_with_toolbar.set_hexpand(true);
+    canvas_with_toolbar.set_vexpand(true);
+    let canvas = GtkBox::new(Orientation::Vertical, 0);
+    canvas.set_hexpand(true);
+    canvas.set_vexpand(true);
+    canvas.add_css_class("editor-canvas");
+    canvas_with_toolbar.set_child(Some(&canvas));
+    root_overlay.set_child(Some(&canvas_with_toolbar));
+
+    let close = super::ui_support::traffic_light_button("traffic-light-red", &t("Close"));
+    close.remove_css_class("recent-captures-wm-btn");
+    close.remove_css_class("recent-captures-wm-close");
+    close.add_css_class("recording-editor-traffic-btn");
+    close.set_halign(gtk4::Align::End);
+    close.set_valign(gtk4::Align::Start);
+    close.set_margin_top(12);
+    close.set_margin_end(12);
+    close.connect_clicked({
+        let window = window.clone();
+        move |_| window.close()
+    });
+    root_overlay.add_overlay(&close);
+
+    empty_state::install_empty_drop_zone(
+        app,
+        &window,
+        &canvas_with_toolbar,
+        &root_overlay,
+        initial_image_path,
+    );
+    window.set_child(Some(&root_overlay));
+    window.present();
+}
+
+fn load_editor_image(path: &std::path::Path) -> Result<image::RgbaImage, String> {
+    if let Ok(Some(original)) = crate::annotations::load_original_image(path) {
+        return Ok(original);
+    }
+
+    image::open(path)
+        .map(|image| image.to_rgba8())
+        .map_err(|error| error.to_string())
 }
 
 /// `empty_drop_zone = true` opens the exact same editor window but with a
@@ -518,6 +598,7 @@ fn setup_editor_window_full(
     path: PathBuf,
     empty_drop_zone: bool,
     reuse_window: Option<ApplicationWindow>,
+    loaded_image: Option<image::RgbaImage>,
 ) {
     use std::sync::Once;
     static INIT_ICONS: Once = Once::new();
@@ -535,14 +616,14 @@ fn setup_editor_window_full(
     ));
 
     // Check if we have a saved original (for non-destructive re-editing)
-    let image = if empty_drop_zone {
+    let image = if let Some(image) = loaded_image {
+        image
+    } else if empty_drop_zone {
         // Transparent placeholder canvas until the user drops/opens a file.
         image::RgbaImage::new(1280, 800)
-    } else if let Ok(Some(original)) = crate::annotations::load_original_image(&path) {
-        original
     } else {
-        match image::open(&path) {
-            Ok(img) => img.to_rgba8(),
+        match load_editor_image(&path) {
+            Ok(image) => image,
             Err(e) => {
                 eprintln!("Failed to load image for editing: {e}");
                 app.quit();
@@ -552,7 +633,7 @@ fn setup_editor_window_full(
     };
 
     let (img_width, img_height) = image.dimensions();
-    let state = Arc::new(Mutex::new(EditorState::new(image.clone())));
+    let state = Arc::new(Mutex::new(EditorState::new(image)));
     {
         let mut st = state.lock().unwrap();
         st.inverse_arrow_direction = annotate_config.inverse_arrow_direction;
@@ -630,7 +711,9 @@ fn setup_editor_window_full(
             let detector = st.text_detector.clone();
             let ready_flag = st.text_detection_ready.clone();
             st.text_detection_handle = Some(super::text_detect::spawn_text_detection(
-                image, detector, ready_flag,
+                Arc::clone(&st.base_image),
+                detector,
+                ready_flag,
             ));
         }
     }
@@ -1269,13 +1352,9 @@ fn setup_editor_window_full(
         save_btn.set_sensitive(false);
     }
 
-    let (motion_parts, motion_session) = motion_mode::build_motion_mode(prefers_dark);
-    let motion_session = Rc::new(motion_session);
-    let last_inspector = Rc::new(RefCell::new(String::from("placeholder")));
-    let in_motion = Rc::new(Cell::new(false));
-    if empty_drop_zone {
-        motion_parts.motion_btn.set_sensitive(false);
-    }
+    let motion_host = motion_host::MotionHost::new(&window, prefers_dark, empty_drop_zone);
+    let last_inspector = motion_host.last_inspector();
+    let in_motion = motion_host.in_motion();
 
     let tracked_window_id = next_tracked_window_id("annotate-editor");
     let window_title = "ApexShot Editor";
@@ -1493,6 +1572,10 @@ fn setup_editor_window_full(
 
     let InspectorParts {
         inspector_tabs,
+        motion_tabs,
+        motion_tab_btn,
+        appearance_tab_btn,
+        watermark_tab_btn,
         background_tab_btn,
         colors_tab_btn,
         inspector,
@@ -1521,7 +1604,9 @@ fn setup_editor_window_full(
         background_inspector: &background_inspector,
         colors_inspector: &colors_inspector,
         placeholder_inspector: &placeholder_inspector,
-        motion_inspector: &motion_parts.inspector,
+        motion_inspector: &motion_host.parts.panels.inspector,
+        motion_appearance_inspector: &motion_host.parts.panels.appearance_inspector,
+        motion_watermark_inspector: &motion_host.parts.panels.watermark_inspector,
         copy_btn: &copy_btn,
         upload_btn: &upload_btn,
         save_btn: &save_btn,
@@ -1538,7 +1623,10 @@ fn setup_editor_window_full(
     canvas_stack.set_hexpand(true);
     canvas_stack.set_vexpand(true);
     canvas_stack.add_named(&canvas, Some(motion_mode::STATIC_PAGE));
-    canvas_stack.add_named(&motion_parts.page, Some(motion_mode::MOTION_PAGE));
+    canvas_stack.add_named(
+        &motion_host.parts.shell.page,
+        Some(motion_mode::MOTION_PAGE),
+    );
     canvas_stack.set_visible_child_name(motion_mode::STATIC_PAGE);
     canvas_with_toolbar.set_child(Some(&canvas_stack));
 
@@ -2051,106 +2139,38 @@ fn setup_editor_window_full(
         root_overlay: &root_overlay,
         window: &window,
         toolbar: &toolbar,
-        static_toolbar: &motion_parts.static_toolbar,
+        static_toolbar: &motion_host.parts.shell.static_toolbar,
         zoom_minus_btn: &zoom_minus_btn,
         zoom_button: &zoom_button,
         zoom_plus_btn: &zoom_plus_btn,
-        motion_btn: &motion_parts.motion_btn,
+        motion_btn: &motion_host.parts.shell.motion_btn,
         history_group: &history_group,
         zoom_popup: &zoom_popup,
     });
-    motion_mode::install_confirm_overlay(&root_overlay, &motion_parts.confirm_overlay);
-
-    let motion_chrome = Rc::new(motion_mode::MotionModeChrome {
-        mode_stack: window_chrome.mode_stack,
-        canvas_stack: canvas_stack.clone(),
-        bottom_left_stack: window_chrome.bottom_left_stack,
-        motion_control: window_chrome.motion_control,
-        history_control: window_chrome.history_control,
-        inspector_tabs: inspector_tabs.clone(),
-        inspector_stack: inspector_stack.clone(),
-    });
-    motion_mode::wire_motion_controls(
-        &motion_parts,
-        motion_session.as_ref(),
-        motion_chrome.clone(),
-        last_inspector.clone(),
-        in_motion.clone(),
-    );
-
-    let enter_motion = {
-        let state = state.clone();
-        let session = motion_session.clone();
-        let preview = motion_parts.preview.clone();
-        let ruler = motion_parts.ruler.clone();
-        let motion_track = motion_parts.motion_track.clone();
-        let text_track = motion_parts.text_track.clone();
-        let playhead_overlay = motion_parts.playhead_overlay.clone();
-        let motion_chrome = motion_chrome.clone();
-        let last_inspector = last_inspector.clone();
-        let in_motion = in_motion.clone();
-        let duration_slider = motion_parts.duration_slider.clone();
-        let duration_value = motion_parts.duration_value.clone();
-        Rc::new(move || {
-            session.capture_snapshot(&state.lock().unwrap());
-            let duration = session.duration();
-            duration_slider.set_value(duration);
-            duration_value.set_label(&format!("{duration:.1}s"));
-            motion_mode::apply_editor_mode(&motion_chrome, true, last_inspector.borrow().as_str());
-            in_motion.set(true);
-            preview.queue_draw();
-            ruler.queue_draw();
-            motion_track.queue_draw();
-            text_track.queue_draw();
-            playhead_overlay.queue_draw();
-        }) as Rc<dyn Fn()>
-    };
-    let leave_motion = {
-        let session = motion_session.clone();
-        let motion_chrome = motion_chrome.clone();
-        let last_inspector = last_inspector.clone();
-        let in_motion = in_motion.clone();
-        Rc::new(move || {
-            session.clear_snapshot();
-            motion_mode::apply_editor_mode(&motion_chrome, false, last_inspector.borrow().as_str());
-            in_motion.set(false);
-        }) as Rc<dyn Fn()>
-    };
-
-    motion_parts.motion_btn.connect_clicked({
-        let window = window.clone();
-        let confirm = motion_parts.confirm_overlay.clone();
-        let state = state.clone();
-        let session = motion_session.clone();
-        let enter_motion = enter_motion.clone();
-        move |_| {
-            motion_mode::request_enter_motion(
-                &window,
-                &confirm,
-                session.as_ref(),
-                &state,
-                empty_drop_zone,
-                enter_motion.clone(),
-            );
-        }
-    });
-    motion_parts.static_btn.connect_clicked({
-        let window = window.clone();
-        let confirm = motion_parts.confirm_overlay.clone();
-        let session = motion_session.clone();
-        let leave_motion = leave_motion.clone();
-        move |_| {
-            motion_mode::request_leave_motion(
-                &window,
-                &confirm,
-                session.as_ref(),
-                leave_motion.clone(),
-            );
-        }
+    motion_host.install(motion_host::MotionHostInstallInputs {
+        window: &window,
+        root_overlay: &root_overlay,
+        canvas_stack: &canvas_stack,
+        window_chrome,
+        inspector_tabs: &inspector_tabs,
+        motion_tabs: &motion_tabs,
+        inspector_stack: &inspector_stack,
+        motion_tab_btn: &motion_tab_btn,
+        appearance_tab_btn: &appearance_tab_btn,
+        watermark_tab_btn: &watermark_tab_btn,
+        state: &state,
+        empty_drop_zone,
     });
 
     if empty_drop_zone {
-        empty_state::install_empty_drop_zone(app, &window, &canvas_with_toolbar, &root_overlay);
+        let initial_image_path = path.is_file().then_some(path.clone());
+        empty_state::install_empty_drop_zone(
+            app,
+            &window,
+            &canvas_with_toolbar,
+            &root_overlay,
+            initial_image_path,
+        );
     }
 
     window.set_child(Some(&root_overlay));
@@ -2437,11 +2457,7 @@ fn setup_editor_window_full(
         stroke_size_button: stroke_size_button.clone(),
         stroke_size_list: line_inspector_list.clone(),
         in_motion: in_motion.clone(),
-        export_motion: Rc::new({
-            let session = motion_session.clone();
-            let path = path.clone();
-            move || session.export_mp4(&path)
-        }),
+        export_motion: motion_host.export_callback(path.clone()),
     });
 
     window.present();
@@ -2971,17 +2987,18 @@ mod tests {
     fn motion_mode_is_wired_in_the_same_window() {
         let source = include_str!("mod.rs");
         let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let motion_host = include_str!("motion_host.rs");
         assert!(
-            production.contains("mod motion_mode;")
-                && production.contains("motion_mode::build_motion_mode")
+            production.contains("mod motion_host;")
+                && production.contains("MotionHost::new")
                 && production
                     .contains("canvas_stack.add_named(&canvas, Some(motion_mode::STATIC_PAGE));")
-                && production.contains(
-                    "canvas_stack.add_named(&motion_parts.page, Some(motion_mode::MOTION_PAGE));"
-                )
-                && production.contains("motion_mode::request_enter_motion")
-                && production.contains("motion_mode::request_leave_motion")
-                && production.contains("session.capture_snapshot")
+                && production.contains("&motion_host.parts.shell.page")
+                && production.contains("Some(motion_mode::MOTION_PAGE)")
+                && motion_host.contains("motion_mode::build_motion_mode")
+                && motion_host.contains("motion_mode::request_enter_motion")
+                && motion_host.contains("motion_mode::request_leave_motion")
+                && motion_host.contains("session.capture_snapshot")
                 && !production.contains("open_recording_editor"),
             "Motion must swap the image-editor body in-process, not open the video editor"
         );

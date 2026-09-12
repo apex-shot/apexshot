@@ -1,7 +1,11 @@
 #[test]
 fn packaged_desktop_identity_matches_primary_ui_application_id() {
     let cargo_toml = include_str!("../Cargo.toml");
-    let capture_overlay_source = include_str!("../src/capture_overlay.rs");
+    let capture_overlay_source = concat!(
+        include_str!("../src/capture_overlay.rs"),
+        include_str!("../src/capture_overlay/process.rs"),
+        include_str!("../src/capture_overlay/worker.rs"),
+    );
     let settings_source = include_str!("../src/settings/mod.rs");
     let onboarding_source = include_str!("../src/onboarding/mod.rs");
     let packaged_desktop = include_str!("../packaging/io.github.codegoddy.apexshot.desktop");

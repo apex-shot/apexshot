@@ -260,10 +260,12 @@ async fn async_main(args: Vec<String>) {
             }
             // Try to delegate to the running daemon first (instant, no GTK cold-start).
             let daemon_action = cli::handlers::capture_daemon_action(args[2].as_str());
-            if let Some(action) = daemon_action {
-                if trigger_daemon_action(action).await {
-                    // Daemon handled it — exit this short-lived subprocess immediately.
-                    return;
+            if std::env::var_os("APEXSHOT_PREVIEW_RUST_CAPTURE_MENU").is_none() {
+                if let Some(action) = daemon_action {
+                    if trigger_daemon_action(action).await {
+                        // Daemon handled it — exit this short-lived subprocess immediately.
+                        return;
+                    }
                 }
             }
             // Daemon not running — do the capture in-process as before.
@@ -585,7 +587,7 @@ pub(crate) fn print_usage() {
     println!("  daemon           Run hotkey daemon (Wayland-friendly via portal)");
     println!("  hotkeys <sub>    Setup no-daemon desktop keybindings");
     println!("  capture <type>    Capture a screenshot");
-    println!("  record <type>     Record video (MP4/GIF)");
+    println!("  record <type>     Record video (MP4)");
     println!("  ocr <image>       Extract text from an image");
     println!("  edit <image>      Open image editor window");
     println!("  show-last-preview Reopen the last capture preview via daemon");
@@ -616,9 +618,8 @@ pub(crate) fn print_usage() {
     println!("  uninstall                   Remove desktop keybindings installed by ApexShot");
     println!();
     println!("Capture types:");
+    println!("  menu              Open Quick Capture for screenshots and recording");
     println!("  screen            Capture the entire screen");
-    println!("  area              Capture a selected area (Wayland: interactive)");
-    println!("  window            Capture a specific window (Wayland: interactive)");
     println!("  crosshair         Capture around a precise point (crosshair mode)");
     println!();
     println!("Capture options:");
@@ -630,13 +631,10 @@ pub(crate) fn print_usage() {
     println!();
     println!("Recording types:");
     println!("  screen            Record the full screen");
-    println!("  area              Record a selected area");
-    println!("  ui                Open the recording configuration UI");
     println!("  stop              Stop and save the active recording (requires daemon)");
     println!();
     println!("Recording options:");
     println!("  --output <path>   Save to specific path (default: ~/Videos/output.mp4)");
-    println!("  --gif             Record as GIF and copy to clipboard");
     println!("  --overlay-stop    Show a small window to stop recording (Esc/Stop button)");
     println!();
     println!("Recording control (requires daemon):");
@@ -751,6 +749,8 @@ mod tests {
 
     #[test]
     fn supported_capture_types_map_to_expected_daemon_actions() {
+        assert_eq!(capture_daemon_action("menu"), Some("quick_capture"));
+        assert_eq!(capture_daemon_action("quick"), Some("quick_capture"));
         assert_eq!(capture_daemon_action("area"), Some("capture_area"));
         assert_eq!(capture_daemon_action("screen"), Some("capture_screen"));
         assert_eq!(capture_daemon_action("window"), Some("capture_window"));

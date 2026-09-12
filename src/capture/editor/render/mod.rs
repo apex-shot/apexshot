@@ -931,6 +931,45 @@ pub fn cairo_argb_to_rgba_image(width: u32, height: u32, stride: usize, data: &[
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dump_checkerboard_for_artifact_debug() {
+        let mut surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 560, 300)
+            .expect("surface");
+        let context = gtk4::cairo::Context::new(&surface).expect("context");
+        draw_canvas_checkerboard_background(&context, 560, 300, None, false);
+        surface.flush();
+        drop(context);
+        // analyze: count pixels differing from the two expected tile colors
+        let stride = surface.stride() as usize;
+        let data = surface.data().expect("data");
+        let mut unexpected = 0usize;
+        for y in 0..300usize {
+            let row = &data[(y * stride)..];
+            for x in 0..560usize {
+                let b = row[x * 4] as i32;
+                let g = row[x * 4 + 1] as i32;
+                let r = row[x * 4 + 2] as i32;
+                let is_base = (r - 20).abs() <= 2 && (g - 20).abs() <= 2 && (b - 20).abs() <= 2;
+                let is_tile = (r - 29).abs() <= 2 && (g - 29).abs() <= 2 && (b - 29).abs() <= 2;
+                if !is_base && !is_tile {
+                    unexpected += 1;
+                }
+            }
+        }
+        let png = crate::capture::editor::render::cairo_argb_to_rgba_image(560, 300, stride, &data);
+        let _ = image::save_buffer(
+            "/tmp/checker_test.png",
+            &png,
+            560,
+            300,
+            image::ColorType::Rgba8,
+        );
+        assert_eq!(
+            unexpected, 0,
+            "checkerboard produced non-tile pixels: {unexpected}"
+        );
+    }
+
     use super::*;
 
     #[test]

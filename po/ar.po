@@ -2226,3 +2226,84 @@ msgstr "عنوان"
 
 msgid "Drag on the preview to place the title"
 msgstr "اسحب على المعاينة لوضع العنوان"
+
+msgid "Anchor X"
+msgstr "مرساة X"
+msgid "Anchor Y"
+msgstr "مرساة Y"
+msgid "Blur shutter"
+msgstr "غالق التمويه"
+msgid "Blur trail"
+msgstr "أثر التمويه"
+msgid "Ease X1"
+msgstr "تيسير X1"
+msgid "Ease X2"
+msgstr "تيسير X2"
+msgid "Ease Y1"
+msgstr "تيسير Y1"
+msgid "Ease Y2"
+msgstr "تيسير Y2"
+msgid "Scope"
+msgstr "النطاق"
+msgid "Unpin"
+msgstr "إلغاء التثبيت"
+
+msgid "Appearance"
+msgstr "المظهر"
+
+msgid "Border Color"
+msgstr "لون الحدود"
+
+msgid "Choose"
+msgstr "اختر"
+
+msgid "Choose Watermark Image"
+msgstr "اختر صورة العلامة المائية"
+
+msgid "Choose…"
+msgstr "اختر…"
+
+msgid "Hex color"
+msgstr "لون سداسي عشري"
+
+msgid "No image selected"
+msgstr "لم تُحدد صورة"
+
+msgid "Remove"
+msgstr "إزالة"
+
+msgid "Show all wallpapers"
+msgstr "عرض كل الخلفيات"
+
+msgid "Wallpapers"
+msgstr "الخلفيات"
+
+msgid "Watermark"
+msgstr "علامة مائية"
+
+msgid "Double-click to add motion"
+msgstr "انقر نقرًا مزدوجًا لإضافة حركة"
+
+msgid "Double-click to add text"
+msgstr "انقر نقرًا مزدوجًا لإضافة نص"
+
+msgid "Show all gradients"
+msgstr "عرض كل التدرجات"
+
+msgid "Instagram"
+msgstr "إنستغرام"
+
+msgid "YouTube"
+msgstr "يوتيوب"
+
+msgid "Original canvas aspect"
+msgstr "نسبة أبعاد اللوحة الأصلية"
+
+msgid "Square 1:1 output"
+msgstr "إخراج مربع 1:1"
+
+msgid "Widescreen 16:9 output"
+msgstr "إخراج عريض 16:9"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "إخراج بطاقة روابط X (تويتر) 1.91:1"

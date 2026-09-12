@@ -1,0 +1,130 @@
+            .settings-toast {
+                padding: 8px 14px;
+                border-radius: 8px;
+                border: 1px solid alpha(white, 0.10);
+                background: #1d1d1d;
+                color: alpha(white, 0.88);
+                font-size: 12px;
+                font-weight: 600;
+                box-shadow: 0 10px 28px alpha(black, 0.36);
+            }
+
+            .settings-toast-success {
+                color: alpha(white, 0.88);
+            }
+
+            .settings-toast-error {
+                color: #f0a09a;
+            }
+
+            .editor-theme-light .settings-toast,
+            .editor-root.editor-theme-light .settings-toast {
+                background: #ffffff;
+                color: alpha(#1d2129, 0.82);
+                border: 1px solid alpha(#111827, 0.10);
+                box-shadow: 0 10px 28px alpha(#111827, 0.16);
+            }
+
+            .editor-theme-light .settings-toast-success,
+            .editor-root.editor-theme-light .settings-toast-success {
+                color: alpha(#1d2129, 0.82);
+            }
+
+            .editor-theme-light .settings-toast-error,
+            .editor-root.editor-theme-light .settings-toast-error {
+                color: #8a2822;
+            }
+
+            .settings-page-title {
+                font-size: 14px;
+                font-weight: 600;
+                letter-spacing: -0.1px;
+                opacity: 0.85;
+            }
+
+            .settings-group-title {
+                font-size: 11px;
+                font-weight: 600;
+                opacity: 0.45;
+                margin-top: 18px;
+                margin-bottom: 4px;
+                letter-spacing: 0.5px;
+            }
+
+            .settings-sub-option {
+                font-size: 12px;
+                opacity: 0.64;
+            }
+
+            .editor-root.editor-theme-light .settings-sub-option {
+                color: alpha(#1d2129, 0.64);
+            }
+
+            .settings-scale-caption {
+                font-size: 13px;
+                font-weight: 700;
+                opacity: 0.94;
+            }
+
+            .settings-table-header {
+                font-size: 13px;
+                font-weight: 700;
+            }
+
+            .settings-table-frame {
+                border-radius: 10px;
+                border: none;
+                background-color: alpha(white, 0.04);
+            }
+
+            .editor-root.editor-theme-light .settings-table-frame {
+                border: none;
+                background-color: alpha(#111827, 0.04);
+            }
+
+            .settings-table-row {
+                padding: 8px 14px;
+            }
+
+            .settings-table-row-muted {
+                background-color: transparent;
+            }
+
+            .editor-root.editor-theme-light .settings-table-row-muted {
+                background-color: transparent;
+            }
+
+            .editor-canvas-frame {
+                border-radius: 0;
+                border: none;
+                background-color: transparent;
+                padding: 0;
+            }
+
+            .editor-footer {
+                padding: 6px 12px;
+                background-color: #141414;
+                border-top: 1px solid alpha(white, 0.08);
+                border-radius: 0 0 10px 10px;
+            }
+
+            .editor-root.editor-theme-light .editor-footer {
+                background-color: #f6f7fb;
+                border-top-color: alpha(#111827, 0.08);
+            }
+
+            button.settings-select {
+                min-width: 180px;
+                min-height: 32px;
+                padding: 6px 10px;
+                border-radius: 8px;
+            }
+
+            button.settings-select label {
+                font-size: 13px;
+                font-weight: 500;
+            }
+
+            button.settings-select .settings-select-arrow {
+                opacity: 0.55;
+            }

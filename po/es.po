@@ -2251,3 +2251,84 @@ msgstr "Título"
 
 msgid "Drag on the preview to place the title"
 msgstr "Arrastra en la vista previa para colocar el título"
+
+msgid "Anchor X"
+msgstr "Ancla X"
+msgid "Anchor Y"
+msgstr "Ancla Y"
+msgid "Blur shutter"
+msgstr "Obturador de desenfoque"
+msgid "Blur trail"
+msgstr "Estela de desenfoque"
+msgid "Ease X1"
+msgstr "Suavizado X1"
+msgid "Ease X2"
+msgstr "Suavizado X2"
+msgid "Ease Y1"
+msgstr "Suavizado Y1"
+msgid "Ease Y2"
+msgstr "Suavizado Y2"
+msgid "Scope"
+msgstr "Ámbito"
+msgid "Unpin"
+msgstr "Desanclar"
+
+msgid "Appearance"
+msgstr "Apariencia"
+
+msgid "Border Color"
+msgstr "Color del borde"
+
+msgid "Choose"
+msgstr "Elegir"
+
+msgid "Choose Watermark Image"
+msgstr "Elegir imagen de marca de agua"
+
+msgid "Choose…"
+msgstr "Elegir…"
+
+msgid "Hex color"
+msgstr "Color hexadecimal"
+
+msgid "No image selected"
+msgstr "No se ha seleccionado ninguna imagen"
+
+msgid "Remove"
+msgstr "Eliminar"
+
+msgid "Show all wallpapers"
+msgstr "Mostrar todos los fondos de pantalla"
+
+msgid "Wallpapers"
+msgstr "Fondos de pantalla"
+
+msgid "Watermark"
+msgstr "Marca de agua"
+
+msgid "Double-click to add motion"
+msgstr "Doble clic para añadir movimiento"
+
+msgid "Double-click to add text"
+msgstr "Doble clic para añadir texto"
+
+msgid "Show all gradients"
+msgstr "Mostrar todos los degradados"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "Relación de aspecto del lienzo original"
+
+msgid "Square 1:1 output"
+msgstr "Salida cuadrada 1:1"
+
+msgid "Widescreen 16:9 output"
+msgstr "Salida panorámica 16:9"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "Salida de tarjeta de enlace de X (Twitter) 1.91:1"

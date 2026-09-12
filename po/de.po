@@ -2256,3 +2256,84 @@ msgstr "Titel"
 
 msgid "Drag on the preview to place the title"
 msgstr "Ziehe auf der Vorschau, um den Titel zu platzieren"
+
+msgid "Anchor X"
+msgstr "Anker X"
+msgid "Anchor Y"
+msgstr "Anker Y"
+msgid "Blur shutter"
+msgstr "Unschärfeverschluss"
+msgid "Blur trail"
+msgstr "Unschärfespur"
+msgid "Ease X1"
+msgstr "Weichzeichnen X1"
+msgid "Ease X2"
+msgstr "Weichzeichnen X2"
+msgid "Ease Y1"
+msgstr "Weichzeichnen Y1"
+msgid "Ease Y2"
+msgstr "Weichzeichnen Y2"
+msgid "Scope"
+msgstr "Bereich"
+msgid "Unpin"
+msgstr "Lösen"
+
+msgid "Appearance"
+msgstr "Erscheinungsbild"
+
+msgid "Border Color"
+msgstr "Randfarbe"
+
+msgid "Choose"
+msgstr "Auswählen"
+
+msgid "Choose Watermark Image"
+msgstr "Wasserzeichenbild auswählen"
+
+msgid "Choose…"
+msgstr "Auswählen…"
+
+msgid "Hex color"
+msgstr "Hexadezimalfarbe"
+
+msgid "No image selected"
+msgstr "Kein Bild ausgewählt"
+
+msgid "Remove"
+msgstr "Entfernen"
+
+msgid "Show all wallpapers"
+msgstr "Alle Hintergrundbilder anzeigen"
+
+msgid "Wallpapers"
+msgstr "Hintergrundbilder"
+
+msgid "Watermark"
+msgstr "Wasserzeichen"
+
+msgid "Double-click to add motion"
+msgstr "Doppelklicken, um eine Bewegung hinzuzufügen"
+
+msgid "Double-click to add text"
+msgstr "Doppelklicken, um Text hinzuzufügen"
+
+msgid "Show all gradients"
+msgstr "Alle Farbverläufe anzeigen"
+
+msgid "Instagram"
+msgstr "Instagram"
+
+msgid "YouTube"
+msgstr "YouTube"
+
+msgid "Original canvas aspect"
+msgstr "Originales Seitenverhältnis der Leinwand"
+
+msgid "Square 1:1 output"
+msgstr "Quadratische 1:1-Ausgabe"
+
+msgid "Widescreen 16:9 output"
+msgstr "Breitbild-16:9-Ausgabe"
+
+msgid "X (Twitter) link-card 1.91:1 output"
+msgstr "X-(Twitter-)Link-Karten-Ausgabe 1.91:1"

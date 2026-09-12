@@ -1,0 +1,48 @@
+            .editor-tools-divider {
+                min-width: 1px;
+                margin: 4px 6px;
+                background-color: alpha(white, 0.10);
+                border-radius: 2px;
+            }
+
+            /* Flat tool buttons — settings-nav-item style: no borders, subtle alpha bg states. */
+            button.editor-tool-button,
+            button.standalone-tool {
+                min-width: 26px;
+                min-height: 22px;
+                border-radius: 5px;
+                padding: 0;
+                margin: 0;
+                color: rgba(255, 255, 255, 0.78);
+                background-color: transparent;
+                background-image: none;
+                border: none;
+                outline: none;
+                box-shadow: none;
+                transition: background-color 120ms ease, color 120ms ease;
+            }
+
+            button.editor-tool-button:hover,
+            button.standalone-tool:hover {
+                color: #ffffff;
+                background-color: alpha(white, 0.06);
+                border: none;
+            }
+
+            button.editor-tool-button:active,
+            button.standalone-tool:active {
+                background-color: alpha(white, 0.10);
+                border: none;
+            }
+
+            /* Active tool: flat alpha(white, 0.14) bg - matches settings-nav-item-selected pattern. */
+            button.editor-tool-button.active-tool {
+                background-color: alpha(white, 0.14);
+                color: #ffffff;
+                border: none;
+                box-shadow: none;
+            }
+
+            button.editor-tool-button.active-tool:hover {
+                background-color: alpha(white, 0.18);
+            }

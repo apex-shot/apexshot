@@ -230,6 +230,19 @@ fn should_open_recording_editor(open_editor: bool) -> bool {
     open_editor
 }
 
+fn validate_saved_recording(path: &Path) -> anyhow::Result<()> {
+    let metadata = std::fs::metadata(path).map_err(|err| {
+        anyhow::anyhow!(
+            "recording output was not created at {}: {err}",
+            path.display()
+        )
+    })?;
+    if !metadata.is_file() || metadata.len() == 0 {
+        anyhow::bail!("recording output is empty at {}", path.display());
+    }
+    Ok(())
+}
+
 #[derive(Debug)]
 pub struct PreparedOverlayRecordingRequest {
     pub updated_app_config: AppConfig,
@@ -859,6 +872,8 @@ pub fn run_overlay_recording_request_with_gtk(
                 return Ok(path);
             }
 
+            validate_saved_recording(&path)?;
+
             let file_name = path
                 .file_name()
                 .and_then(|n| n.to_str())
@@ -941,6 +956,23 @@ mod tests {
     fn recording_editor_launch_respects_the_open_editor_setting() {
         assert!(should_open_recording_editor(true));
         assert!(!should_open_recording_editor(false));
+    }
+
+    #[test]
+    fn saved_recording_must_exist_and_be_non_empty() {
+        let path = std::env::temp_dir().join(format!(
+            "apexshot-saved-recording-validation-{}.mp4",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+
+        assert!(validate_saved_recording(&path).is_err());
+        std::fs::write(&path, []).unwrap();
+        assert!(validate_saved_recording(&path).is_err());
+        std::fs::write(&path, b"video").unwrap();
+        assert!(validate_saved_recording(&path).is_ok());
+
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

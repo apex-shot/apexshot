@@ -77,17 +77,18 @@ pub(in crate::overlay::window) fn wire_selection_drag(
             let rect = current_selection_rect(&st);
 
             // Suppress drag when clicking toolbar tools, size/crop panels
-            if toolbar_item_at(
-                rect.left,
-                rect.top,
-                rect.width(),
-                rect.height(),
-                screen_width as f64,
-                screen_height as f64,
-                start_x,
-                start_y,
-            )
-            .is_some()
+            if !st.capture_menu_area_mode
+                && toolbar_item_at(
+                    rect.left,
+                    rect.top,
+                    rect.width(),
+                    rect.height(),
+                    screen_width as f64,
+                    screen_height as f64,
+                    start_x,
+                    start_y,
+                )
+                .is_some()
             {
                 st.is_dragging = false;
                 st.drag_mode = None;

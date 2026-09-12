@@ -133,7 +133,21 @@ pub fn prefers_reduced_transparency() -> bool {
     false
 }
 
-const EDITOR_CSS: &str = include_str!("editor.css");
+const EDITOR_CSS: &str = concat!(
+    include_str!("css/01-shell-toolbar.css"),
+    include_str!("css/02-crop-controls.css"),
+    include_str!("css/03-tools.css"),
+    include_str!("css/04-color-palette.css"),
+    include_str!("css/05-color-picker.css"),
+    include_str!("css/06-text-actions.css"),
+    include_str!("css/07-footer-floating.css"),
+    include_str!("css/08-zoom-popup.css"),
+    include_str!("css/09-theme-overrides.css"),
+    include_str!("css/10-canvas-inspector.css"),
+    include_str!("css/11-background-sidebar.css"),
+    include_str!("css/12-background-choices.css"),
+    include_str!("css/13-text-modal.css"),
+);
 
 pub fn install_editor_css() {
     if let Some(display) = gdk::Display::default() {

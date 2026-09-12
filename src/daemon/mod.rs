@@ -44,6 +44,7 @@ pub use recording_handlers::{
 pub enum DaemonAction {
     UpdateAvailable(crate::update::UpdateInfo),
     OpenUpdate(String),
+    QuickCapture,
     CaptureArea,
     CaptureCrosshair,
     CaptureScreen,
@@ -77,11 +78,10 @@ impl From<TrayAction> for DaemonAction {
     fn from(action: TrayAction) -> Self {
         match action {
             TrayAction::OpenUpdate(url) => Self::OpenUpdate(url),
-            TrayAction::CaptureArea => Self::CaptureArea,
+            TrayAction::QuickCapture => Self::QuickCapture,
             TrayAction::CaptureCrosshair => Self::CaptureCrosshair,
             TrayAction::CaptureScreen => Self::CaptureScreen,
             TrayAction::CaptureWindow => Self::CaptureWindow,
-            TrayAction::OpenRecordingUi => Self::OpenRecordingUi,
             TrayAction::OpenVideoEditor => Self::OpenVideoEditor,
             TrayAction::OpenImageEditor => Self::OpenImageEditor,
             TrayAction::RecordScreen => Self::RecordScreen,
@@ -702,6 +702,7 @@ impl DaemonIpc {
 /// module paths. Keep names stable across internal refactors.
 pub(super) fn parse_trigger_action(action: &str) -> Option<DaemonAction> {
     match action {
+        "quick_capture" | "capture_menu" => Some(DaemonAction::QuickCapture),
         "capture_area" => Some(DaemonAction::CaptureArea),
         "capture_crosshair" => Some(DaemonAction::CaptureCrosshair),
         "capture_screen" => Some(DaemonAction::CaptureScreen),
@@ -877,6 +878,24 @@ mod tests {
         assert_eq!(
             binding_to_daemon_action(&open_recording_ui),
             Some(super::DaemonAction::OpenRecordingUi)
+        );
+    }
+
+    #[test]
+    fn binding_to_daemon_action_maps_quick_capture_hotkey() {
+        let quick_capture = crate::hotkeys::HotkeyBinding {
+            accelerator: "SHIFT+SUPER+5".into(),
+            args: vec!["capture".into(), "menu".into()],
+            name: Some("quick_capture".into()),
+        };
+
+        assert_eq!(
+            binding_to_daemon_action(&quick_capture),
+            Some(super::DaemonAction::QuickCapture)
+        );
+        assert_eq!(
+            parse_trigger_action("quick_capture"),
+            Some(super::DaemonAction::QuickCapture)
         );
     }
 

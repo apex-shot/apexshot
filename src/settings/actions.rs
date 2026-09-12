@@ -46,6 +46,13 @@ pub struct SaveInputs {
     pub video_export_location: Entry,
     pub rec_filename_pattern: Entry,
     pub rec_remember_export_folder: CheckButton,
+    pub rec_controls: CheckButton,
+    pub rec_hidpi: CheckButton,
+    pub rec_notifications: CheckButton,
+    pub rec_countdown: CheckButton,
+    pub rec_video_max_res: SettingsSelect,
+    pub rec_video_fps: SettingsSelect,
+    pub rec_video_mono: CheckButton,
     pub screenshot_quick_access: CheckButton,
     pub screenshot_copy_to_clipboard: CheckButton,
     pub screenshot_save: CheckButton,
@@ -54,7 +61,6 @@ pub struct SaveInputs {
     pub rec_save: CheckButton,
     pub rec_open_video_editor: CheckButton,
     pub quick_access_position: SettingsSelect,
-    pub quick_access_multi_display: CheckButton,
     pub quick_access_overlay_size: Scale,
     pub quick_access_auto_close_enabled: CheckButton,
     pub quick_access_auto_close_action: SettingsSelect,
@@ -73,13 +79,12 @@ pub struct SaveInputs {
     pub shortcut_open_from_clipboard: Button,
     pub shortcut_restore_recently_closed: Button,
     pub shortcut_toggle_overlays: Button,
-    pub shortcut_capture_area: Button,
+    pub shortcut_capture_menu: Button,
     pub shortcut_capture_crosshair: Button,
     pub shortcut_capture_previous_area: Button,
     pub shortcut_capture_fullscreen: Button,
     pub shortcut_capture_window: Button,
     pub shortcut_show_last_preview: Button,
-    pub shortcut_open_recording_ui: Button,
     pub shortcut_record_screen: Button,
     pub shortcut_recording_stop_save: Button,
     pub adv_retina_suffix: CheckButton,
@@ -178,6 +183,21 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     config.video_export_location = inputs.video_export_location.text().to_string();
     config.rec_filename_pattern = inputs.rec_filename_pattern.text().to_string();
     config.rec_remember_export_folder = inputs.rec_remember_export_folder.is_active();
+    config.rec_controls = inputs.rec_controls.is_active();
+    config.rec_hidpi = inputs.rec_hidpi.is_active();
+    config.rec_notifications = inputs.rec_notifications.is_active();
+    config.rec_countdown = inputs.rec_countdown.is_active();
+    config.rec_video_max_res = inputs
+        .rec_video_max_res
+        .active_id()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    config.rec_video_fps = inputs
+        .rec_video_fps
+        .active_id()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1);
+    config.rec_video_mono = inputs.rec_video_mono.is_active();
 
     config.after_capture_show_quick_access = inputs.screenshot_quick_access.is_active();
     config.after_capture_copy_file_to_clipboard = inputs.screenshot_copy_to_clipboard.is_active();
@@ -187,7 +207,6 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     config.rec_after_capture_save = inputs.rec_save.is_active();
     config.rec_video_open_editor = inputs.rec_open_video_editor.is_active();
     config.quick_access_position = combo_value(&inputs.quick_access_position, "Left");
-    config.quick_access_multi_display = inputs.quick_access_multi_display.is_active();
     config.quick_access_overlay_size = inputs.quick_access_overlay_size.value();
     config.quick_access_auto_close_enabled = inputs.quick_access_auto_close_enabled.is_active();
     config.quick_access_auto_close_action =
@@ -224,7 +243,8 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     config.shortcut_restore_recently_closed =
         button_label_value(&inputs.shortcut_restore_recently_closed);
     config.shortcut_toggle_overlays = button_label_value(&inputs.shortcut_toggle_overlays);
-    config.shortcut_capture_area = button_label_value(&inputs.shortcut_capture_area);
+    config.shortcut_capture_menu = button_label_value(&inputs.shortcut_capture_menu);
+    config.shortcut_capture_area.clear();
     config.shortcut_capture_crosshair = button_label_value(&inputs.shortcut_capture_crosshair);
     config.shortcut_capture_previous_area =
         button_label_value(&inputs.shortcut_capture_previous_area);
@@ -232,7 +252,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     // Window capture discontinued — always persist empty.
     config.shortcut_capture_window.clear();
     config.shortcut_show_last_preview = button_label_value(&inputs.shortcut_show_last_preview);
-    config.shortcut_open_recording_ui = button_label_value(&inputs.shortcut_open_recording_ui);
+    config.shortcut_open_recording_ui.clear();
     config.shortcut_record_screen = button_label_value(&inputs.shortcut_record_screen);
     config.shortcut_recording_stop_save = button_label_value(&inputs.shortcut_recording_stop_save);
 
@@ -255,7 +275,6 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     let config = config.sanitized();
     let quick_access_runtime_changed = previous_config.quick_access_position
         != config.quick_access_position
-        || previous_config.quick_access_multi_display != config.quick_access_multi_display
         || (previous_config.quick_access_overlay_size - config.quick_access_overlay_size).abs()
             > f64::EPSILON
         || previous_config.quick_access_auto_close_enabled
@@ -278,6 +297,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
         || previous_config.shortcut_restore_recently_closed
             != config.shortcut_restore_recently_closed
         || previous_config.shortcut_toggle_overlays != config.shortcut_toggle_overlays
+        || previous_config.shortcut_capture_menu != config.shortcut_capture_menu
         || previous_config.shortcut_capture_area != config.shortcut_capture_area
         || previous_config.shortcut_capture_crosshair != config.shortcut_capture_crosshair
         || previous_config.shortcut_capture_previous_area != config.shortcut_capture_previous_area
@@ -396,6 +416,7 @@ mod tests {
             shortcut_open_from_clipboard: String::new(),
             shortcut_restore_recently_closed: String::new(),
             shortcut_toggle_overlays: String::new(),
+            shortcut_capture_menu: String::new(),
             shortcut_capture_area: String::new(),
             shortcut_capture_crosshair: String::new(),
             shortcut_capture_fullscreen: String::new(),

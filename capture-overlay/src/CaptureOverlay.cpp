@@ -244,6 +244,19 @@ void CaptureOverlay::setFreezeBackground(const QPixmap& freeze)
     update();
 }
 
+void CaptureOverlay::setCaptureMenuAreaMode(bool ocr, int timerSeconds)
+{
+    m_captureMenuAreaMode = true;
+    m_captureIntent = ocr ? CaptureIntent::Ocr : CaptureIntent::Area;
+    // Unified-menu timers run after this selector closes, allowing normal
+    // desktop interaction throughout the countdown.
+    m_timerCaptureEnabled = false;
+    m_timerDelayActive = false;
+    m_captureDelaySeconds = std::max(0, timerSeconds);
+    m_hoveredTool = -1;
+    update();
+}
+
 void CaptureOverlay::focusAndRaiseOverlay()
 {
     // Flameshot-style placement: pin to full screen geometry (including panel
@@ -355,6 +368,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_selectionCursorMode(QStringLiteral("Disabled"))
     , m_showZoomPreview(false)
     , m_freezeSelectionBackground(true)
+    , m_captureMenuAreaMode(false)
     , m_timerDelayActive(timerCaptureEnabled)
     , m_captureDelaySeconds(5)
     , m_countdownActive(false)
@@ -379,6 +393,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_selectionBeforeWindowMode()
     , m_hadSelectionBeforeWindowMode(false)
     , m_fullscreenBeforeWindowMode(false)
+    , m_windowSelectionCapture(false)
     , m_recordingPanelOpen(false)
     , m_recordingToolsHidden(false)
     , m_recordType(RecordType::None)

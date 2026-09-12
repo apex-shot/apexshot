@@ -6,7 +6,10 @@
 
 #include <QApplication>
 #include <QCloseEvent>
+#include <QCoreApplication>
 #include <QCursor>
+#include <QDBusConnection>
+#include <QDBusInterface>
 #include <QEvent>
 #include <QEventLoop>
 #include <QFocusEvent>
@@ -21,6 +24,7 @@
 #include <QPainterPath>
 #include <QScreen>
 #include <QThread>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QWindow>
@@ -32,9 +36,9 @@
 
 namespace {
 
-constexpr QColor kBgRoot(20, 20, 20); // #141414
-constexpr QColor kBgElevated(30, 31, 34);
-constexpr QColor kBorder(255, 255, 255, 28);
+constexpr QColor kBgRoot(5, 5, 7);
+constexpr QColor kBgElevated(25, 25, 28);
+constexpr QColor kBorder(255, 255, 255, 30);
 constexpr QColor kBorderHover(255, 102, 0, 200);
 constexpr QColor kAccent(255, 102, 0);
 constexpr QColor kTextPrimary(255, 255, 255, 240);
@@ -54,19 +58,19 @@ QPixmap displayGlyph()
 
     QPainterPath bg;
     bg.addRoundedRect(QRectF(0, 0, kPreviewW, kPreviewH), 10, 10);
-    p.fillPath(bg, QColor(18, 18, 22));
+    p.fillPath(bg, kBgRoot);
 
     const QRectF screen(26, 20, kPreviewW - 52, kPreviewH - 54);
     QPainterPath body;
     body.addRoundedRect(screen, 8, 8);
-    p.fillPath(body, QColor(28, 29, 34));
+    p.fillPath(body, kBgElevated);
     p.setPen(QPen(QColor(255, 255, 255, 30), 1.2));
     p.drawPath(body);
 
     const QRectF inner = screen.adjusted(8, 8, -8, -8);
     QLinearGradient g(inner.topLeft(), inner.bottomRight());
-    g.setColorAt(0, QColor(42, 44, 52));
-    g.setColorAt(1, QColor(32, 34, 40));
+    g.setColorAt(0, QColor(38, 38, 42));
+    g.setColorAt(1, QColor(24, 24, 27));
     p.fillRect(inner, g);
 
     p.fillRect(QRectF(inner.x() + 10, inner.y() + 14, inner.width() * 0.45, 8),
@@ -78,7 +82,7 @@ QPixmap displayGlyph()
 
     const qreal standTop = screen.bottom() + 4;
     p.setPen(Qt::NoPen);
-    p.setBrush(QColor(40, 42, 48));
+    p.setBrush(QColor(38, 38, 42));
     p.drawRoundedRect(QRectF(kPreviewW / 2.0 - 14, standTop, 28, 8), 2, 2);
     p.drawRoundedRect(QRectF(kPreviewW / 2.0 - 36, standTop + 8, 72, 5), 2, 2);
     return pm;
@@ -125,7 +129,7 @@ protected:
 
         QPainterPath body;
         body.addRoundedRect(outer, kRadius, kRadius);
-        p.fillPath(body, m_hovered ? QColor(36, 37, 42) : kBgElevated);
+        p.fillPath(body, m_hovered ? QColor(255, 102, 0, 210) : kBgElevated);
 
         const QColor border = (m_hovered || hasFocus()) ? kBorderHover : kBorder;
         p.setPen(QPen(border, m_hovered || hasFocus() ? 1.6 : 1.0));
@@ -265,7 +269,11 @@ class PickerPanel : public QWidget
 public:
     explicit PickerPanel(QEventLoop* loop, int* result)
         : QWidget(nullptr,
-                  Qt::Dialog | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint)
+                   Qt::Dialog | Qt::Tool | Qt::FramelessWindowHint
+                       | Qt::WindowStaysOnTopHint
+                       | (qEnvironmentVariableIsSet("WAYLAND_DISPLAY")
+                              ? Qt::BypassWindowManagerHint
+                              : Qt::WindowFlags()))
         , m_loop(loop)
         , m_result(result)
         , m_dismissing(false)
@@ -275,6 +283,7 @@ public:
         setAttribute(Qt::WA_DeleteOnClose, false);
         setFocusPolicy(Qt::StrongFocus);
         setMouseTracking(true);
+        setWindowTitle(QStringLiteral("ApexShot Display Picker"));
     }
 
     /// Unmap immediately and drain the event loop so the compositor drops the
@@ -478,6 +487,24 @@ int selectMonitorIndex(const QList<QScreen*>& screens)
     panel->show();
     panel->raise();
     panel->activateWindow();
+    if (panel->windowHandle()) {
+        panel->windowHandle()->requestActivate();
+    }
+    const auto requestShellFocus = []() {
+        QDBusInterface shellOverlay(
+          QStringLiteral("org.apexshot.ShellOverlay"),
+          QStringLiteral("/org/apexshot/ShellOverlay"),
+          QStringLiteral("org.apexshot.ShellOverlay"),
+          QDBusConnection::sessionBus());
+        if (shellOverlay.isValid()) {
+            shellOverlay.asyncCall(
+              QStringLiteral("FocusCaptureMenu"),
+              static_cast<qlonglong>(QCoreApplication::applicationPid()));
+        }
+    };
+    requestShellFocus();
+    QTimer::singleShot(100, panel.get(), requestShellFocus);
+    QTimer::singleShot(300, panel.get(), requestShellFocus);
     panel->setFocus(Qt::ActiveWindowFocusReason);
     if (firstCard) {
         firstCard->setFocus(Qt::TabFocusReason);
@@ -523,11 +550,11 @@ QScreen* selectTargetScreen()
                  "apexshot-capture: monitor picker selected index=%d name=%s "
                  "geom=%dx%d+%d+%d\n",
                  index,
-                 screens[index]->name().toLocal8Bit().constData(),
-                 screens[index]->geometry().width(),
-                 screens[index]->geometry().height(),
-                 screens[index]->geometry().x(),
-                 screens[index]->geometry().y());
+                  screens[index]->name().toLocal8Bit().constData(),
+                  screens[index]->geometry().width(),
+                  screens[index]->geometry().height(),
+                  screens[index]->geometry().x(),
+                  screens[index]->geometry().y());
     return screens[index];
 }
 
