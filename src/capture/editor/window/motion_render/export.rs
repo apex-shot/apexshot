@@ -76,6 +76,7 @@ pub fn export_motion_mp4(
                 false,
                 prefers_dark,
                 false,
+                1.0,
             );
         }
         surface.flush();

@@ -8,6 +8,7 @@ fn paint_motion_text(
     stage: MotionStage,
     motion: &MotionState,
     time: f64,
+    card_scale: f64,
 ) {
     let transform = motion.sample(time);
     let layout = CardLayout::with_padding(
@@ -31,7 +32,12 @@ fn paint_motion_text(
         if line.is_empty() {
             continue;
         }
-        let size = (layout.img_h * 0.060 * segment.size.clamp(0.5, 2.2)).clamp(14.0, 160.0);
+        // Size clamps are authored against the source card, so evaluate them
+        // in source pixels and scale the result into the (possibly
+        // downscaled) preview texture.
+        let size = (layout.img_h / card_scale.max(1e-6) * 0.060 * segment.size.clamp(0.5, 2.2))
+            .clamp(14.0, 160.0)
+            * card_scale;
         let anchor_x = segment.pos_x.clamp(0.05, 0.95) * layout.img_w;
         let anchor_y = segment.pos_y.clamp(0.05, 0.95) * layout.img_h;
         let Some(matrix) = layout.local_matrix(anchor_x, anchor_y) else {
@@ -57,7 +63,7 @@ fn paint_motion_text(
         let animated_offset = style.offset_y * layout.img_h / 1080.0;
         let y = anchor_y + animated_offset - ext.height() / 2.0 - ext.y_bearing();
         context.set_source_rgba(0.0, 0.0, 0.0, 0.42 * style.alpha);
-        context.move_to(x, y + 4.0);
+        context.move_to(x, y + 4.0 * card_scale);
         let _ = context.show_text(&line);
         context.set_source_rgba(1.0, 1.0, 1.0, style.alpha);
         context.move_to(x, y);

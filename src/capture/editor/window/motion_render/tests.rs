@@ -56,7 +56,7 @@ mod tests {
         {
             let context = Context::new(&frame).unwrap();
             draw_motion_frame(
-                &context, 128, 96, card, motion, None, None, 0.0, preview, true, false,
+                &context, 128, 96, card, motion, None, None, 0.0, preview, true, false, 1.0,
             );
         }
         frame.flush();
@@ -273,7 +273,7 @@ mod tests {
             {
                 let context = Context::new(&frame).unwrap();
                 draw_motion_frame(
-                    &context, 128, 96, &card, motion, None, None, 0.0, false, true, false,
+                    &context, 128, 96, &card, motion, None, None, 0.0, false, true, false, 1.0,
                 );
             }
             frame.flush();
@@ -346,6 +346,7 @@ mod tests {
                 false,
                 true,
                 false,
+                1.0,
             );
         }
         frame.flush();
@@ -424,6 +425,7 @@ mod tests {
                     true,
                     true,
                     live_preview,
+                    1.0,
                 );
             }
             frame.flush();
@@ -465,7 +467,7 @@ mod tests {
         {
             let context = Context::new(&direct).unwrap();
             draw_motion_frame(
-                &context, 160, 120, &card, &motion, None, None, time, true, true, true,
+                &context, 160, 120, &card, &motion, None, None, time, true, true, true, 1.0,
             );
         }
         direct.flush();
@@ -482,7 +484,9 @@ mod tests {
             let context = Context::new(&cached).unwrap();
             context.set_source_surface(&backdrop, 0.0, 0.0).unwrap();
             context.paint().unwrap();
-            draw_motion_foreground(&context, 160, 120, &card, &motion, None, time, true, true);
+            draw_motion_foreground(
+                &context, 160, 120, &card, &motion, None, time, true, true, 1.0,
+            );
         }
         cached.flush();
 
@@ -898,6 +902,66 @@ mod tests {
         assert!(
             gap > 8.0,
             "a 3-point affine would miss the fourth pitch corner by only {gap}"
+        );
+    }
+
+    #[test]
+    fn downscaled_preview_card_matches_the_full_resolution_composition() {
+        let card = ImageSurface::create(Format::ARgb32, 2560, 1440).unwrap();
+        {
+            let context = Context::new(&card).unwrap();
+            context.set_source_rgb(0.15, 0.45, 0.85);
+            context.paint().unwrap();
+            context.set_source_rgb(1.0, 1.0, 1.0);
+            context.rectangle(320.0, 180.0, 1920.0, 1080.0);
+            context.fill().unwrap();
+        }
+        card.flush();
+
+        let mut motion = motion_with_first_clip();
+        motion.appearance.border_radius = 32.0;
+        motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+        motion.appearance.background_color = [0.05, 0.05, 0.05, 1.0];
+        let _ = motion.add_text_at(0.0);
+
+        let render = |surface: &ImageSurface, card_scale: f64| {
+            let mut frame = ImageSurface::create(Format::ARgb32, 1280, 800).unwrap();
+            {
+                let context = Context::new(&frame).unwrap();
+                draw_motion_frame(
+                    &context,
+                    1280,
+                    800,
+                    surface,
+                    &motion,
+                    None,
+                    None,
+                    0.35,
+                    true,
+                    true,
+                    false,
+                    card_scale,
+                );
+            }
+            frame.flush();
+            let pixels = frame.data().unwrap().to_vec();
+            pixels
+        };
+
+        let full = render(&card, 1.0);
+        let (preview, scale) = super::scaled_card_preview(&card).expect("preview texture");
+        assert!(scale < 1.0);
+        let scaled = render(&preview, scale);
+
+        let mean = full
+            .iter()
+            .zip(scaled.iter())
+            .map(|(a, b)| (*a as i32 - *b as i32).unsigned_abs() as u64)
+            .sum::<u64>() as f64
+            / full.len() as f64;
+        assert!(
+            mean < 4.0,
+            "downscaled preview drifted from the full-resolution composition by {mean} mean channel levels"
         );
     }
 

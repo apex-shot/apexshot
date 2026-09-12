@@ -174,18 +174,17 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     playhead_handle.set_margin_top(PLAYHEAD_HANDLE_TOP as i32);
     let playhead_dragging = Rc::new(Cell::new(false));
     let playhead_hovered = Rc::new(Cell::new(false));
+    // Pure draw: never touch layout here. Mutating margin/width inside a
+    // draw invalidates layout, which re-queues a draw — one layout pass per
+    // frame the pointer moves. The handle is positioned from the redraw path
+    // (`sync_playhead_handle`) instead, so scrubbing is draw-only.
     playhead.set_draw_func({
         let runtime = runtime.clone();
-        let handle = playhead_handle.clone();
         let dragging = playhead_dragging.clone();
         let hovered = playhead_hovered.clone();
         move |_, cr, width, height| {
             let expanded = dragging.get() || hovered.get();
-            let (hx, pill_w) = draw_playhead(cr, width, height, &runtime, expanded);
-            if !dragging.get() {
-                handle.set_width_request(pill_w as i32);
-                handle.set_margin_start(hx.max(0.0) as i32);
-            }
+            draw_playhead(cr, width, height, &runtime, expanded);
         }
     });
     // Hover read-out: a red hairline under the playhead. It tracks the pointer
@@ -721,6 +720,36 @@ pub(in crate::capture::editor::window) fn playhead_head_hit(
     };
     pointer_y <= PLAYHEAD_HANDLE_TOP + PLAYHEAD_HANDLE_H + PLAYHEAD_HOVER_SLOP
         && (pointer_x - line_x).abs() <= half_w + PLAYHEAD_HOVER_SLOP
+}
+
+/// Position the grab handle from model state, outside any draw callback.
+/// The drawn capsule may clip at the board edge so its stem stays centered;
+/// the widget itself clamps into layout so it never gets a negative margin.
+pub(in crate::capture::editor::window) fn sync_playhead_handle(
+    handle: &DrawingArea,
+    runtime: &Rc<RefCell<MotionRuntime>>,
+    board_width: f64,
+    expanded: bool,
+) {
+    let (playhead, duration) = {
+        let runtime = runtime.borrow();
+        (runtime.motion.playhead, runtime.motion.duration.max(0.001))
+    };
+    let pill_w = if expanded {
+        PLAYHEAD_CLOCK_W
+    } else {
+        PLAYHEAD_HANDLE_W
+    };
+    let x = time_to_x(playhead, duration, board_width.max(1.0));
+    let margin = (x - pill_w / 2.0).max(0.0) as i32;
+    // Width/margin writes each invalidate layout, so skip no-ops: during a
+    // scrub this runs per pointer event and must stay allocation-free.
+    if handle.width_request() != pill_w as i32 {
+        handle.set_width_request(pill_w as i32);
+    }
+    if handle.margin_start() != margin {
+        handle.set_margin_start(margin);
+    }
 }
 
 /// Pointer read-out line. Unlike the playhead it has no capsule, so it can be

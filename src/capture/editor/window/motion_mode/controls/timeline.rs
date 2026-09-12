@@ -7,13 +7,19 @@ use std::rc::Rc;
 use super::super::{MotionHoverTrack, MotionModeParts, MotionRuntime, MotionSession};
 use super::Redraw;
 
-/// Which empty lane's add affordance should be painted for a pointer position
-/// inside `widget` (allocation is board-relative, like the interaction code
-/// already assumes for the playhead handle).
-fn hovered_lane(widget: &DrawingArea, pointer_y: f64) -> bool {
-    let allocation = widget.allocation();
-    let top = allocation.y() as f64;
-    pointer_y >= top && pointer_y <= top + allocation.height() as f64
+/// Whether a board-relative pointer height falls inside `lane`.
+/// The lane allocation is parent-relative, so it must be translated into
+/// board coordinates first: comparing it raw drops hover mid-lane whenever
+/// the tracks box sits below other card chrome, which snaps the hover preview
+/// back to the playhead frame and reads as a reset/flicker while scrubbing
+/// (forwards or backwards).
+fn pointer_in_lane(lane: &DrawingArea, board: &gtk4::Widget, pointer_y: f64) -> bool {
+    let height = lane.allocated_height() as f64;
+    let top = lane
+        .translate_coordinates(board, 0.0, 0.0)
+        .map(|(_, top)| top)
+        .unwrap_or_else(|| lane.allocation().y() as f64);
+    pointer_y >= top && pointer_y <= top + height
 }
 
 #[derive(Clone, Copy)]
@@ -73,8 +79,11 @@ pub(super) fn install(
                 .unwrap_or(1.0);
             let mut runtime = session.borrow_mut();
             let duration = runtime.motion.duration.max(0.001);
-            runtime.motion.playhead =
-                (((start_x + offset_x) / width) * duration).clamp(0.0, duration);
+            let next = (((start_x + offset_x) / width) * duration).clamp(0.0, duration);
+            if (next - runtime.motion.playhead).abs() < f64::EPSILON {
+                return;
+            }
+            runtime.motion.playhead = next;
             drop(runtime);
             redraw_playhead();
         }
@@ -479,37 +488,70 @@ pub(super) fn install(
     let playhead_drag = GestureDrag::new();
     playhead_drag.set_button(1);
     let playhead_start_x = Rc::new(Cell::new(0.0f64));
+    // Board width is stable for the duration of a drag; resolving the Overlay
+    // ancestor per motion event walks GObjects on the hot path for no gain.
+    let playhead_board_w = Rc::new(Cell::new(1.0f64));
     playhead_drag.connect_drag_begin({
         let session = session.runtime.clone();
         let handle = parts.timeline.playhead_handle.clone();
         let start_x = playhead_start_x.clone();
+        let board_w = playhead_board_w.clone();
         let dragging = parts.timeline.playhead_dragging.clone();
-        move |_, x, _| {
+        let hover_playhead = parts.timeline.hover_playhead.clone();
+        let motion_track = parts.timeline.motion_track.clone();
+        let text_track = parts.timeline.text_track.clone();
+        let preview = parts.shell.preview.clone();
+        move |gesture, x, _| {
             // Holding the handle pauses playback; otherwise the timer keeps
             // advancing the playhead the drag is trying to reposition.
-            let mut runtime = session.borrow_mut();
-            runtime.playing = false;
-            runtime.last_tick = None;
-            runtime.preview_end = None;
-            drop(runtime);
+            // A stale hover would otherwise keep driving the preview (hover
+            // scrub wins while idle), so drop it: the drag owns the preview
+            // until release.
+            let had_hover = {
+                let mut runtime = session.borrow_mut();
+                runtime.playing = false;
+                runtime.last_tick = None;
+                runtime.preview_end = None;
+                let had = runtime.hover_time.is_some() || runtime.hover_track.is_some();
+                runtime.hover_time = None;
+                runtime.hover_track = None;
+                had
+            };
             start_x.set(handle.allocation().x() as f64 + x);
+            board_w.set(
+                gesture
+                    .widget()
+                    .and_then(|widget| widget.ancestor(Overlay::static_type()))
+                    .map(|board| board.allocated_width().max(1) as f64)
+                    .unwrap_or(1.0),
+            );
             dragging.set(true);
+            if had_hover {
+                hover_playhead.queue_draw();
+                motion_track.queue_draw();
+                text_track.queue_draw();
+                preview.queue_draw();
+            }
         }
     });
     playhead_drag.connect_drag_update({
         let session = session.runtime.clone();
         let redraw_playhead = redraw_playhead.clone();
         let start_x = playhead_start_x.clone();
-        move |gesture, offset_x, _| {
-            let width = gesture
-                .widget()
-                .and_then(|widget| widget.ancestor(Overlay::static_type()))
-                .map(|board| board.allocated_width().max(1) as f64)
-                .unwrap_or(1.0);
+        let board_w = playhead_board_w.clone();
+        move |_, offset_x, _| {
+            let width = board_w.get().max(1.0);
             let pointer_board_x = start_x.get() + offset_x;
             let mut runtime = session.borrow_mut();
             let duration = runtime.motion.duration.max(0.001);
-            runtime.motion.playhead = (pointer_board_x / width * duration).clamp(0.0, duration);
+            let next = (pointer_board_x / width * duration).clamp(0.0, duration);
+            // Shoving against either end emits events with an identical
+            // clamped value; skip the redraw entirely instead of re-queuing
+            // a preview render that would paint the same frame.
+            if (next - runtime.motion.playhead).abs() < f64::EPSILON {
+                return;
+            }
+            runtime.motion.playhead = next;
             drop(runtime);
             redraw_playhead();
         }
@@ -545,29 +587,54 @@ pub(super) fn install(
             let hover_playhead = parts.timeline.hover_playhead.clone();
             let motion_track = parts.timeline.motion_track.clone();
             let text_track = parts.timeline.text_track.clone();
+            let preview = parts.shell.preview.clone();
             let redraw_playhead = redraw_playhead.clone();
             move |controller, x, y| {
-                let width = controller
-                    .widget()
+                let board = controller.widget();
+                let width = board
+                    .as_ref()
                     .map(|widget| widget.allocated_width().max(1) as f64)
                     .unwrap_or(1.0);
-                let near = {
+                // Hover time is directionless: scrubbing right-to-left drives
+                // the same hover frame as left-to-right, so clips also play
+                // backwards under the red line.
+                let (near, was_previewing, is_previewing) = {
                     let mut runtime = session.borrow_mut();
+                    let was = super::super::preview::hover_preview_frame(
+                        &runtime.motion,
+                        runtime.hover_time,
+                        runtime.hover_track,
+                        runtime.playing,
+                    )
+                    .is_some();
                     let duration = runtime.motion.duration.max(0.001);
                     runtime.hover_time = Some((x / width).clamp(0.0, 1.0) * duration);
                     let line_x = (runtime.motion.playhead / duration).clamp(0.0, 1.0) * width;
-                    runtime.hover_track = if hovered_lane(&motion_track, y) {
-                        Some(MotionHoverTrack::Motion)
-                    } else if hovered_lane(&text_track, y) {
-                        Some(MotionHoverTrack::Text)
-                    } else {
-                        None
+                    runtime.hover_track = match board.as_ref() {
+                        Some(board) if pointer_in_lane(&motion_track, board, y) => {
+                            Some(MotionHoverTrack::Motion)
+                        }
+                        Some(board) if pointer_in_lane(&text_track, board, y) => {
+                            Some(MotionHoverTrack::Text)
+                        }
+                        _ => None,
                     };
-                    super::super::super::motion_timeline::playhead_head_hit(
-                        x,
-                        y,
-                        line_x,
-                        hovered.get(),
+                    let is = super::super::preview::hover_preview_frame(
+                        &runtime.motion,
+                        runtime.hover_time,
+                        runtime.hover_track,
+                        runtime.playing,
+                    )
+                    .is_some();
+                    (
+                        super::super::super::motion_timeline::playhead_head_hit(
+                            x,
+                            y,
+                            line_x,
+                            hovered.get(),
+                        ),
+                        was,
+                        is,
                     )
                 };
                 // The add ghost is anchored to hover_time, so the lanes must
@@ -575,6 +642,12 @@ pub(super) fn install(
                 hover_playhead.queue_draw();
                 motion_track.queue_draw();
                 text_track.queue_draw();
+                // Hover scrub drives the preview (red line), never the
+                // playhead. Repaint when entering, scrubbing inside, or
+                // leaving a lane so the preview snaps back to the playhead.
+                if was_previewing || is_previewing {
+                    preview.queue_draw();
+                }
                 if hovered.replace(near) != near {
                     redraw_playhead();
                 }
@@ -586,19 +659,33 @@ pub(super) fn install(
             let hover_playhead = parts.timeline.hover_playhead.clone();
             let motion_track = parts.timeline.motion_track.clone();
             let text_track = parts.timeline.text_track.clone();
+            let preview = parts.shell.preview.clone();
             let redraw_playhead = redraw_playhead.clone();
             move |_| {
-                let lane_changed = {
+                let (lane_changed, was_previewing) = {
                     let mut runtime = session.borrow_mut();
+                    let was = super::super::preview::hover_preview_frame(
+                        &runtime.motion,
+                        runtime.hover_time,
+                        runtime.hover_track,
+                        runtime.playing,
+                    )
+                    .is_some();
                     runtime.hover_time = None;
                     let changed = runtime.hover_track.is_some();
                     runtime.hover_track = None;
-                    changed
+                    (changed, was)
                 };
                 hover_playhead.queue_draw();
                 if lane_changed {
                     motion_track.queue_draw();
                     text_track.queue_draw();
+                }
+                // Snap the preview back from the hover frame to the
+                // playhead frame, but only if it was showing a hover frame:
+                // leaving empty lane space changes nothing.
+                if was_previewing {
+                    preview.queue_draw();
                 }
                 if hovered.replace(false) {
                     redraw_playhead();

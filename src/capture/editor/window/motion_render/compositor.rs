@@ -6,6 +6,46 @@
 /// property being edited was timing.
 const CARD_MESH_DIVISIONS: usize = 8;
 
+/// Long-edge cap for the card texture the interactive preview samples from.
+/// The preview never draws the card larger than its scene panel, so sampling a
+/// multi-megapixel source down to that panel dominated scrub frame time.
+/// Export keeps the full-resolution card.
+pub const PREVIEW_CARD_MAX_EDGE: i32 = 1600;
+
+/// Build the downscaled card texture used by the editor preview. Returns the
+/// surface and the pixel scale applied to it; callers pass the scale through
+/// to the renderer so card-space values (corner radius, title size) stay
+/// visually identical to the full-resolution export.
+pub fn scaled_card_preview(card: &ImageSurface) -> Option<(ImageSurface, f64)> {
+    let (width, height) = (card.width(), card.height());
+    if width < 1 || height < 1 {
+        return None;
+    }
+    let long_edge = f64::from(width.max(height));
+    if long_edge <= f64::from(PREVIEW_CARD_MAX_EDGE) {
+        return None;
+    }
+    let factor = f64::from(PREVIEW_CARD_MAX_EDGE) / long_edge;
+    if f64::from(width.min(height)) * factor < 16.0 {
+        return None;
+    }
+    let preview_w = ((f64::from(width) * factor).round() as i32).max(1);
+    let preview_h = ((f64::from(height) * factor).round() as i32).max(1);
+    let surface = ImageSurface::create(Format::ARgb32, preview_w, preview_h).ok()?;
+    {
+        let context = Context::new(&surface).ok()?;
+        context.scale(
+            f64::from(preview_w) / f64::from(width),
+            f64::from(preview_h) / f64::from(height),
+        );
+        context.set_source_surface(card, 0.0, 0.0).ok()?;
+        context.source().set_filter(Filter::Good);
+        context.paint().ok()?;
+    }
+    surface.flush();
+    Some((surface, f64::from(preview_w) / f64::from(width)))
+}
+
 pub fn draw_motion_frame(
     context: &Context,
     width: i32,
@@ -18,6 +58,7 @@ pub fn draw_motion_frame(
     checkerboard: bool,
     prefers_dark: bool,
     live_preview: bool,
+    card_scale: f64,
 ) {
     draw_motion_backdrop(
         context,
@@ -38,6 +79,7 @@ pub fn draw_motion_frame(
         time,
         checkerboard,
         live_preview,
+        card_scale,
     );
 }
 
@@ -76,6 +118,7 @@ pub(super) fn draw_motion_foreground(
     time: f64,
     checkerboard: bool,
     live_preview: bool,
+    card_scale: f64,
 ) {
     // Padding, zoom, and titles all lay out against the background's
     // rectangle so the card can never sit outside the scene it belongs to.
@@ -132,6 +175,7 @@ pub(super) fn draw_motion_foreground(
                 &motion.appearance,
                 sample.opacity,
                 mesh_div,
+                card_scale,
             );
         }
     }
@@ -144,8 +188,9 @@ pub(super) fn draw_motion_foreground(
         &motion.appearance,
         1.0,
         mesh_div,
+        card_scale,
     );
-    paint_motion_text(context, surface, stage, motion, time);
+    paint_motion_text(context, surface, stage, motion, time, card_scale);
     // The overlay shadow pass shades the card and titles; the watermark
     // stays the topmost layer.
     paint_motion_scene_shadow(context, stage, motion, false);

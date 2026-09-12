@@ -30,6 +30,10 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
     // Playhead changes do not alter the inspector or track geometry. Updating
     // only the moving pieces avoids running every slider sync and a full
     // timeline repaint for each scrub event or animation frame.
+    // Fast path: this runs per pointer event during a scrub, so it must not
+    // allocate, hit i18n, or invalidate layout unless something visible
+    // actually changed. `queue_draw` coalesces to one frame; label/icon and
+    // ruler work are guarded to ~1Hz.
     let redraw_playhead: Redraw = {
         let session = session.runtime.clone();
         let preview = parts.shell.preview.clone();
@@ -37,25 +41,56 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
         let playhead_overlay = parts.timeline.playhead_overlay.clone();
         let playhead_clock = parts.timeline.playhead_clock.clone();
         let play_btn = parts.timeline.play_btn.clone();
+        let handle = parts.timeline.playhead_handle.clone();
+        let dragging = parts.timeline.playhead_dragging.clone();
+        let hovered = parts.timeline.playhead_hovered.clone();
+        let pause_text = t("Pause");
+        let play_text = t("Play");
+        let last_clock = Rc::new(RefCell::new(String::new()));
+        let last_playing = Rc::new(Cell::new(None::<bool>));
         Rc::new(move || {
-            let runtime = session.borrow();
-            let playhead = runtime.motion.playhead;
-            let playing = runtime.playing;
-            drop(runtime);
-            playhead_clock.set_text(&super::super::motion_timeline::format_clock(playhead));
-            play_btn.set_tooltip_text(Some(&if playing { t("Pause") } else { t("Play") }));
-            if let Some(image) = play_btn
-                .child()
-                .and_then(|child| child.downcast::<gtk4::Image>().ok())
-            {
-                image.set_icon_name(Some(if playing {
-                    "media-playback-pause-symbolic"
-                } else {
-                    "media-playback-start-symbolic"
-                }));
+            let (playhead, playing, is_dragging, is_hovered) = {
+                let runtime = session.borrow();
+                (
+                    runtime.motion.playhead,
+                    runtime.playing,
+                    dragging.get(),
+                    hovered.get(),
+                )
+            };
+            // Clock + ruler tick at 1Hz; the playhead line itself moves every
+            // event via the overlay draw below.
+            let clock = super::super::motion_timeline::format_clock(playhead);
+            if *last_clock.borrow() != clock {
+                *last_clock.borrow_mut() = clock.clone();
+                playhead_clock.set_text(&clock);
+                ruler.queue_draw();
+            }
+            if last_playing.get() != Some(playing) {
+                last_playing.set(Some(playing));
+                play_btn
+                    .set_tooltip_text(Some(if playing { &pause_text } else { &play_text }));
+                if let Some(image) = play_btn
+                    .child()
+                    .and_then(|child| child.downcast::<gtk4::Image>().ok())
+                {
+                    image.set_icon_name(Some(if playing {
+                        "media-playback-pause-symbolic"
+                    } else {
+                        "media-playback-start-symbolic"
+                    }));
+                }
+            }
+            if !is_dragging {
+                let board_w = playhead_overlay.allocated_width().max(1) as f64;
+                super::super::motion_timeline::sync_playhead_handle(
+                    &handle,
+                    &session,
+                    board_w,
+                    is_dragging || is_hovered,
+                );
             }
             preview.queue_draw();
-            ruler.queue_draw();
             playhead_overlay.queue_draw();
         })
     };

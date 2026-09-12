@@ -2,8 +2,8 @@ use gtk4::cairo::{Context, Format, ImageSurface};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::MotionRuntime;
-use crate::recording::editor::model::MotionAppearance;
+use super::{MotionHoverTrack, MotionRuntime};
+use crate::recording::editor::model::{MotionAppearance, MotionState};
 
 pub(super) fn draw_motion_preview(
     context: &Context,
@@ -30,11 +30,27 @@ pub(super) fn draw_motion_preview(
     // state. Avoid cloning the complete Motion state (and title strings) on
     // every playback frame.
     let runtime = runtime.borrow();
-    let card = runtime
-        .card
-        .as_ref()
-        .expect("Motion preview card was checked");
-    let time = runtime.motion.playhead;
+    let (card, card_scale) = match runtime.card_preview.as_ref() {
+        Some(preview) => (preview, runtime.card_scale),
+        None => (
+            runtime
+                .card
+                .as_ref()
+                .expect("Motion preview card was checked"),
+            1.0,
+        ),
+    };
+    // Hover scrub: the red hover line drives the preview only while the
+    // pointer is directly over a clip on its own lane and nothing is
+    // playing. The playhead itself never moves — it only advances on Play
+    // or a handle/ruler scrub.
+    let time = hover_preview_frame(
+        &runtime.motion,
+        runtime.hover_time,
+        runtime.hover_track,
+        runtime.playing,
+    )
+    .unwrap_or(runtime.motion.playhead);
     let live_preview = runtime.live_preview || runtime.playing;
 
     if let Some(backdrop) = backdrop {
@@ -50,6 +66,7 @@ pub(super) fn draw_motion_preview(
             time,
             true,
             live_preview,
+            card_scale,
         );
     } else {
         // Preserve a correct first frame while GTK is still assigning a
@@ -66,6 +83,7 @@ pub(super) fn draw_motion_preview(
             true,
             prefers_dark,
             live_preview,
+            card_scale,
         );
     }
 }
@@ -125,9 +143,60 @@ fn same_backdrop_appearance(a: &MotionAppearance, b: &MotionAppearance) -> bool 
         && a.background_noise == b.background_noise
 }
 
+/// Hover frame for the preview, or `None` to stay on the playhead.
+/// Motions play on their allocated clip span only: hovering empty lane space
+/// next to a clip (or the other lane's gap) never fakes a motion preview.
+pub(super) fn hover_preview_frame(
+    motion: &MotionState,
+    hover_time: Option<f64>,
+    hover_track: Option<MotionHoverTrack>,
+    playing: bool,
+) -> Option<f64> {
+    if playing {
+        return None;
+    }
+    let hover = hover_time?;
+    let over_clip = match hover_track? {
+        MotionHoverTrack::Motion => motion.segment_index_at(hover).is_some(),
+        MotionHoverTrack::Text => motion.text_index_at(hover).is_some(),
+    };
+    over_clip.then_some(hover)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hover_preview_only_plays_directly_over_a_clip() {
+        let mut motion = MotionState::default();
+        motion.add_segment_at(0.0).expect("motion clip");
+        // Directly over the motion clip: hover frame wins, playhead untouched.
+        assert_eq!(
+            hover_preview_frame(&motion, Some(0.5), Some(MotionHoverTrack::Motion), false),
+            Some(0.5)
+        );
+        // Empty lane space next to the clip: no fake motion preview.
+        assert_eq!(
+            hover_preview_frame(&motion, Some(3.0), Some(MotionHoverTrack::Motion), false),
+            None
+        );
+        // Playback always owns the preview.
+        assert_eq!(
+            hover_preview_frame(&motion, Some(0.5), Some(MotionHoverTrack::Motion), true),
+            None
+        );
+        // A motion time under a text-lane hover stays on the playhead.
+        assert_eq!(
+            hover_preview_frame(&motion, Some(0.5), Some(MotionHoverTrack::Text), false),
+            None
+        );
+        motion.add_text_at(4.0).expect("text clip");
+        assert_eq!(
+            hover_preview_frame(&motion, Some(4.5), Some(MotionHoverTrack::Text), false),
+            Some(4.5)
+        );
+    }
 
     #[test]
     fn card_styling_keeps_the_cached_backdrop_valid() {

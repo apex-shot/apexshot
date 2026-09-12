@@ -37,6 +37,12 @@ pub(in crate::capture::editor::window) enum MotionHoverTrack {
 pub(in crate::capture::editor::window) struct MotionRuntime {
     pub(in crate::capture::editor::window) snapshot: Option<RgbaImage>,
     pub(in crate::capture::editor::window) card: Option<gtk4::cairo::ImageSurface>,
+    /// Downscaled card texture built once per snapshot for the live preview.
+    /// Scrubbing samples the card on every pointer event; sampling the
+    /// full-resolution still dominated scrub frame time. Export keeps `card`.
+    pub(in crate::capture::editor::window) card_preview: Option<gtk4::cairo::ImageSurface>,
+    /// Pixel scale from `card` to `card_preview` (1.0 when no preview texture).
+    pub(in crate::capture::editor::window) card_scale: f64,
     pub(in crate::capture::editor::window) background_surface: Option<gtk4::cairo::ImageSurface>,
     pub(in crate::capture::editor::window) watermark_surface: Option<gtk4::cairo::ImageSurface>,
     pub(in crate::capture::editor::window) backdrop_cache: Option<MotionBackdropCache>,
@@ -68,6 +74,8 @@ impl MotionRuntime {
         Self {
             snapshot: None,
             card: None,
+            card_preview: None,
+            card_scale: 1.0,
             background_surface: None,
             watermark_surface: None,
             backdrop_cache: None,
@@ -199,6 +207,16 @@ impl MotionSession {
         let snapshot = state.to_final_image().ok();
         let mut runtime = self.runtime.borrow_mut();
         runtime.card = snapshot.as_ref().and_then(rgba_image_to_surface);
+        runtime.card_preview = None;
+        runtime.card_scale = 1.0;
+        if let Some(card) = runtime.card.as_ref() {
+            if let Some((preview, scale)) =
+                super::super::motion_render::scaled_card_preview(card)
+            {
+                runtime.card_preview = Some(preview);
+                runtime.card_scale = scale;
+            }
+        }
         runtime.refresh_motion_surfaces();
         runtime.snapshot = snapshot;
         runtime.motion.playhead = 0.0;
@@ -235,6 +253,8 @@ impl MotionSession {
         let mut runtime = self.runtime.borrow_mut();
         runtime.snapshot = None;
         runtime.card = None;
+        runtime.card_preview = None;
+        runtime.card_scale = 1.0;
         runtime.background_surface = None;
         runtime.watermark_surface = None;
         runtime.backdrop_cache = None;

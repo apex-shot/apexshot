@@ -15,6 +15,9 @@ const MOTION_PREVIEW_FRAME_INTERVAL: std::time::Duration = std::time::Duration::
 pub(super) fn install_primary(parts: &MotionModeParts, session: &MotionSession, redraw: Redraw) {
     parts.timeline.play_btn.connect_clicked({
         let session = session.runtime.clone();
+        let hover_playhead = parts.timeline.hover_playhead.clone();
+        let motion_track = parts.timeline.motion_track.clone();
+        let text_track = parts.timeline.text_track.clone();
         let redraw = redraw.clone();
         move |_| {
             {
@@ -25,15 +28,21 @@ pub(super) fn install_primary(parts: &MotionModeParts, session: &MotionSession, 
                 } else {
                     None
                 };
-                // Manual playback always runs the whole composition; only an
-                // edit-triggered preview stops early.
+                // Playback must win over a parked hover scrub; otherwise a
+                // pointer resting over a lane could keep the preview on its
+                // frozen hover frame while the playhead advances alone.
                 if runtime.playing {
                     runtime.preview_end = None;
+                    runtime.hover_time = None;
+                    runtime.hover_track = None;
                 }
                 if runtime.playing && runtime.motion.playhead >= runtime.motion.duration {
                     runtime.motion.playhead = 0.0;
                 }
             }
+            hover_playhead.queue_draw();
+            motion_track.queue_draw();
+            text_track.queue_draw();
             redraw();
         }
     });
@@ -73,6 +82,7 @@ pub(super) fn install_timer(
         let preview = parts.shell.preview.clone();
         let playhead_overlay = parts.timeline.playhead_overlay.clone();
         let playhead_clock = parts.timeline.playhead_clock.clone();
+        let last_clock = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
         let in_motion = in_motion.clone();
         move || {
             if !in_motion.get() {
@@ -109,9 +119,12 @@ pub(super) fn install_timer(
                 if stopped {
                     redraw();
                 } else {
-                    playhead_clock.set_text(&super::super::super::motion_timeline::format_clock(
-                        playhead,
-                    ));
+                    let clock =
+                        super::super::super::motion_timeline::format_clock(playhead);
+                    if *last_clock.borrow() != clock {
+                        *last_clock.borrow_mut() = clock.clone();
+                        playhead_clock.set_text(&clock);
+                    }
                     preview.queue_draw();
                     playhead_overlay.queue_draw();
                 }
