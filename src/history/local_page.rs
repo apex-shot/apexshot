@@ -435,6 +435,20 @@ fn build_card(state: &Rc<PageState>, id: u64, entry: &CaptureEntry, now: SystemT
         clickable.add_controller(gesture);
     }
 
+    // Drag the file out of the window to any app that accepts file drops
+    // (file manager, browser, chat app…). GDK converts the GdkFileList to
+    // text/uri-list for foreign drop targets automatically.
+    {
+        let entry = entry.clone();
+        let drag = gtk4::DragSource::new();
+        drag.set_actions(gtk4::gdk::DragAction::COPY);
+        let list = gtk4::gdk::FileList::from_array(&[gtk4::gio::File::for_path(&entry.path)]);
+        drag.set_content(Some(&gtk4::gdk::ContentProvider::for_value(
+            &list.to_value(),
+        )));
+        clickable.add_controller(drag);
+    }
+
     Card {
         id,
         root: child,
