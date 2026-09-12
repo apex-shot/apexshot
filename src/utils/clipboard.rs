@@ -269,12 +269,30 @@ fn normalize_to_png_bytes(image_data: &[u8]) -> Vec<u8> {
     }
 }
 
+/// True when the in-process GDK clipboard is usable: on the GTK main thread
+/// with a display, outside Flatpak's portal-only path.
+pub fn gdk_clipboard_available() -> bool {
+    !crate::app_identity::portal_only()
+        && on_gtk_main_thread()
+        && gtk4::gdk::Display::default().is_some()
+}
+
 /// Copy an image file to the clipboard as a PNG image.
 ///
 /// GUI callers get an image + file-reference union on GDK's clipboard, so both
 /// image editors and file managers can paste it. Background callers use
 /// `xclip`/`wl-copy`; portal-only uses in-process arboard.
 pub fn copy_image_to_clipboard(path: &Path) -> Result<(), String> {
+    copy_image_to_clipboard_inner(path, true)
+}
+
+/// Copy an image file as `image/png` only, with no file reference attached so
+/// paste targets cannot pick the URI instead of the bitmap.
+pub fn copy_image_only_to_clipboard(path: &Path) -> Result<(), String> {
+    copy_image_to_clipboard_inner(path, false)
+}
+
+fn copy_image_to_clipboard_inner(path: &Path, include_file_reference: bool) -> Result<(), String> {
     let image_data = std::fs::read(path).map_err(|e| format!("Failed to read image file: {e}"))?;
 
     if crate::app_identity::portal_only() {
@@ -283,13 +301,16 @@ pub fn copy_image_to_clipboard(path: &Path) -> Result<(), String> {
 
     let png_data = normalize_to_png_bytes(&image_data);
 
-    if on_gtk_main_thread() && gtk4::gdk::Display::default().is_some() {
+    if gdk_clipboard_available() {
         let image_provider =
             gtk4::gdk::ContentProvider::for_bytes("image/png", &gtk4::glib::Bytes::from(&png_data));
-        // Union with the file reference: pasting into an image editor yields
-        // the bitmap, pasting into a file manager yields the file.
-        let provider =
-            gtk4::gdk::ContentProvider::new_union(&[image_provider, gdk_file_provider(path)]);
+        let provider = if include_file_reference {
+            // Union with the file reference: pasting into an image editor yields
+            // the bitmap, pasting into a file manager yields the file.
+            gtk4::gdk::ContentProvider::new_union(&[image_provider, gdk_file_provider(path)])
+        } else {
+            image_provider
+        };
         if gtk_clipboard_set_provider(&provider) {
             return Ok(());
         }
@@ -300,6 +321,52 @@ pub fn copy_image_to_clipboard(path: &Path) -> Result<(), String> {
         &png_data,
         &["-selection", "clipboard", "-t", "image/png", "-i"],
     )
+}
+
+/// Settings → Screenshots → "Clipboard copy behavior".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScreenshotClipboardMode {
+    ImageOnly,
+    FilePathOnly,
+    Both,
+}
+
+impl ScreenshotClipboardMode {
+    pub fn from_config_value(value: &str) -> Self {
+        match value {
+            "Image Only" => Self::ImageOnly,
+            "File Path Only" => Self::FilePathOnly,
+            _ => Self::Both,
+        }
+    }
+
+    /// True when the mode puts the bitmap on the clipboard.
+    pub fn includes_image(self) -> bool {
+        matches!(self, Self::ImageOnly | Self::Both)
+    }
+}
+
+/// Copy a screenshot according to the configured clipboard mode.
+///
+/// "File & Image" offers both formats when GDK owns the selection in-process
+/// (the image provider is unioned with the file list). `xclip`/`wl-copy` can
+/// only own one format each, so there the file URI is copied last and owns the
+/// selection, matching the daemon's historical behavior.
+pub fn copy_screenshot_with_mode(path: &Path, mode: ScreenshotClipboardMode) -> Result<(), String> {
+    match mode {
+        ScreenshotClipboardMode::ImageOnly => copy_image_only_to_clipboard(path),
+        ScreenshotClipboardMode::FilePathOnly => copy_uri_to_clipboard(path),
+        ScreenshotClipboardMode::Both => {
+            if gdk_clipboard_available() {
+                // GDK's image provider already unions in the file reference.
+                copy_image_to_clipboard(path)
+            } else {
+                let image_result = copy_image_only_to_clipboard(path);
+                let uri_result = copy_uri_to_clipboard(path);
+                image_result.and(uri_result)
+            }
+        }
+    }
 }
 
 fn copy_image_bytes_via_arboard(image_data: &[u8]) -> Result<(), String> {
@@ -342,6 +409,25 @@ mod tests {
         let out = normalize_to_png_bytes(&jpeg);
         assert!(out.starts_with(b"\x89PNG\r\n\x1a\n"));
         assert!(image::load_from_memory(&out).is_ok());
+    }
+
+    #[test]
+    fn screenshot_clipboard_mode_maps_settings_values() {
+        use ScreenshotClipboardMode::{Both, FilePathOnly, ImageOnly};
+        for (value, expected) in [
+            ("Image Only", ImageOnly),
+            ("File Path Only", FilePathOnly),
+            ("File & Image (default)", Both),
+            ("unexpected", Both),
+        ] {
+            assert_eq!(
+                ScreenshotClipboardMode::from_config_value(value),
+                expected,
+                "config value {value:?}"
+            );
+        }
+        assert!(ImageOnly.includes_image() && Both.includes_image());
+        assert!(!FilePathOnly.includes_image());
     }
 
     #[test]

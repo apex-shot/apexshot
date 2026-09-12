@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    capture::{copy_capture_uri_to_clipboard, save_capture, save_existing_png, SaveConfig},
+    capture::{save_capture, save_existing_png, SaveConfig},
     capture_overlay::{
         begin_capture_session, capture_area_file_via_cpp, capture_crosshair_file_via_cpp,
         capture_screen_file_via_cpp, capture_still_via_portal, is_launch_blocked_error,
@@ -161,26 +161,11 @@ pub fn copy_screenshot_to_clipboard(path: &std::path::Path, config: &crate::conf
     if !config.after_capture_copy_file_to_clipboard {
         return;
     }
-    match config.adv_clipboard_mode.as_str() {
-        "Image Only" => {
-            if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(path) {
-                eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
-            }
-        }
-        "File Path Only" => {
-            if let Err(e) = copy_capture_uri_to_clipboard(path) {
-                eprintln!("[daemon] Failed to copy screenshot URI to clipboard: {e}");
-            }
-        }
-        _ => {
-            // "File & Image (default)" — copy both image and URI
-            if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(path) {
-                eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
-            }
-            if let Err(e) = copy_capture_uri_to_clipboard(path) {
-                eprintln!("[daemon] Failed to copy screenshot URI to clipboard: {e}");
-            }
-        }
+    let mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
+        &config.adv_clipboard_mode,
+    );
+    if let Err(e) = crate::utils::clipboard::copy_screenshot_with_mode(path, mode) {
+        eprintln!("[daemon] Failed to copy screenshot to clipboard: {e}");
     }
 }
 

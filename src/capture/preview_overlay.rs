@@ -1302,7 +1302,13 @@ fn file_uri(path: &Path) -> Result<String, CapturePreviewError> {
 }
 
 fn copy_screenshot_to_clipboard(path: &Path) -> Result<(), CapturePreviewError> {
-    crate::utils::clipboard::copy_image_to_clipboard(path).map_err(|e| {
+    // Live Settings value: the user may change the clipboard mode while the
+    // preview is open.
+    let config = load_config().sanitized();
+    let mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
+        &config.adv_clipboard_mode,
+    );
+    crate::utils::clipboard::copy_screenshot_with_mode(path, mode).map_err(|e| {
         if e.contains("not found") {
             CapturePreviewError::ClipboardToolNotFound
         } else {
