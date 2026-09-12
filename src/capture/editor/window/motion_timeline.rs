@@ -572,26 +572,27 @@ fn draw_motion_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
             cr.set_source_rgba(1.0, 1.0, 1.0, 0.45);
             cr.set_line_width(1.0);
             let _ = cr.stroke();
+
+            cr.set_source_rgba(0.72, 0.84, 1.0, 0.98);
+            rounded_rect(
+                cr,
+                x0 + 6.0,
+                y + (clip_h - (clip_h - 12.0).max(10.0)) / 2.0,
+                3.0,
+                (clip_h - 12.0).max(10.0),
+                2.0,
+            );
+            let _ = cr.fill();
+            rounded_rect(
+                cr,
+                x0 + clip_w - 9.0,
+                y + (clip_h - (clip_h - 12.0).max(10.0)) / 2.0,
+                3.0,
+                (clip_h - 12.0).max(10.0),
+                2.0,
+            );
+            let _ = cr.fill();
         }
-        cr.set_source_rgba(0.72, 0.84, 1.0, 0.98);
-        rounded_rect(
-            cr,
-            x0 + 6.0,
-            y + (clip_h - (clip_h - 12.0).max(10.0)) / 2.0,
-            3.0,
-            (clip_h - 12.0).max(10.0),
-            2.0,
-        );
-        let _ = cr.fill();
-        rounded_rect(
-            cr,
-            x0 + clip_w - 9.0,
-            y + (clip_h - (clip_h - 12.0).max(10.0)) / 2.0,
-            3.0,
-            (clip_h - 12.0).max(10.0),
-            2.0,
-        );
-        let _ = cr.fill();
         if clip_w > 40.0 {
             cr.set_source_rgba(1.0, 1.0, 1.0, 0.82);
             cr.select_font_face(
@@ -656,26 +657,27 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
             cr.set_source_rgba(1.0, 1.0, 1.0, 0.45);
             cr.set_line_width(1.0);
             let _ = cr.stroke();
+
+            cr.set_source_rgba(0.98, 0.78, 0.62, 0.98);
+            rounded_rect(
+                cr,
+                x0 + 6.0,
+                y + (clip_h - (clip_h - 10.0).max(8.0)) / 2.0,
+                3.0,
+                (clip_h - 10.0).max(8.0),
+                2.0,
+            );
+            let _ = cr.fill();
+            rounded_rect(
+                cr,
+                x0 + clip_w - 9.0,
+                y + (clip_h - (clip_h - 10.0).max(8.0)) / 2.0,
+                3.0,
+                (clip_h - 10.0).max(8.0),
+                2.0,
+            );
+            let _ = cr.fill();
         }
-        cr.set_source_rgba(0.98, 0.78, 0.62, 0.98);
-        rounded_rect(
-            cr,
-            x0 + 6.0,
-            y + (clip_h - (clip_h - 10.0).max(8.0)) / 2.0,
-            3.0,
-            (clip_h - 10.0).max(8.0),
-            2.0,
-        );
-        let _ = cr.fill();
-        rounded_rect(
-            cr,
-            x0 + clip_w - 9.0,
-            y + (clip_h - (clip_h - 10.0).max(8.0)) / 2.0,
-            3.0,
-            (clip_h - 10.0).max(8.0),
-            2.0,
-        );
-        let _ = cr.fill();
         if clip_w > 36.0 {
             cr.set_source_rgba(1.0, 1.0, 1.0, 0.86);
             cr.select_font_face(
