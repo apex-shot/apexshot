@@ -185,11 +185,11 @@
                 -gtk-icon-shadow: none;
             }
 
-            /* Video lanes total 234px (36 + 56 + 56 + 56 + 30 gaps); the
+            /* Video lanes total 226px (36 + 48 + 56 + 56 + 30 gaps); the
              * floor must sit at that exact height or empty space opens under
              * the hide track. */
             .recording-editor-card-board {
-                min-height: 234px;
+                min-height: 226px;
                 padding: 0 0 10px 0;
             }
 
@@ -204,7 +204,7 @@
             }
 
             .recording-editor-card-video-track {
-                min-height: 56px;
+                min-height: 48px;
             }
 
             .recording-editor-card-zoom-track {

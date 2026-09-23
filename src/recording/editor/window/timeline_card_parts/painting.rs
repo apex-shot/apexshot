@@ -238,8 +238,9 @@ pub fn draw_video_segment(
     filmstrip: &[gtk4::gdk_pixbuf::Pixbuf],
 ) {
     let clip_w = (x1 - x0).max(24.0);
-    let y = if lifted { 2.0 } else { 8.0 };
-    let height = h - 16.0;
+    // Inset matches the Motion source lane (6px top/bottom in a 48px lane).
+    let y = if lifted { 2.0 } else { 6.0 };
+    let height = h - 12.0;
     // While frames decode (or ffmpeg is unavailable) the body reads as an
     // empty media lane in Motion's source-lane tone, not an orange slab.
     let tone = if filmstrip.is_empty() {

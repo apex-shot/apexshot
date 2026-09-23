@@ -106,7 +106,7 @@ pub fn build_timeline_card(
     let video_track = DrawingArea::new();
     video_track.add_css_class("recording-editor-card-video-track");
     video_track.set_hexpand(true);
-    video_track.set_size_request(-1, 56);
+    video_track.set_size_request(-1, 48);
     video_track.set_draw_func({
         let state = state.clone();
         let hovered_video = hovered_video.clone();
