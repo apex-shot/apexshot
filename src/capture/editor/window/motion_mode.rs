@@ -12,6 +12,7 @@ mod parts;
 mod position_pad;
 mod preview;
 mod session;
+mod text_pad;
 mod transition;
 mod watermark;
 mod widgets;
@@ -24,10 +25,14 @@ use preview::draw_motion_preview;
 pub(super) use session::{MotionHoverTrack, MotionRuntime, MotionSession};
 pub(super) use transition::{
     apply_editor_mode, install_confirm_overlay, request_enter_motion, request_leave_motion,
-    MotionModeChrome,
+    show_motion_tool_page, MotionModeChrome,
 };
 pub(super) const MOTION_PAGE: &str = "motion";
 pub(super) const STATIC_PAGE: &str = "static";
+/// Inspector stack pages owned by the Motion tool notch, in notch order.
+pub(super) const TEXT_PAGE: &str = "motion-text";
+pub(super) const APPEARANCE_PAGE: &str = "motion-appearance";
+pub(super) const WATERMARK_PAGE: &str = "motion-watermark";
 
 #[cfg(test)]
 mod tests {
@@ -266,6 +271,73 @@ mod tests {
                 && sync.contains("position_pad.set_position(segment.to.pos_x, segment.to.pos_y)")
                 && controls.contains("position_pad.connect_value_changed"),
             "Position should keep the direct pad and 3D-unit X/Y sliders visibly grouped and synchronized"
+        );
+    }
+
+    /// Text placement is a 2D pad, not two percentage sliders: the pad is the
+    /// control the preview drag and the timeline selection both drive.
+    #[test]
+    fn text_placement_is_a_pad_rather_than_x_y_sliders() {
+        let build = include_str!("motion_mode/build.rs");
+        let controls = include_str!("motion_mode/controls/text.rs");
+        let sync = include_str!("motion_mode/controls/sync.rs");
+
+        assert!(
+            build.contains("let text_pos_pad = MotionTextPad::new()")
+                && build.contains("text_placement_section.append(&text_pos_pad.widget())")
+                && build.contains("motion_text_pos_readout")
+                && controls.contains("text_pos_pad.connect_value_changed")
+                && controls.contains("text_pos_pad.set_text_pos(pos_x, pos_y)")
+                && sync.contains("text_pos_pad.set_text_pos(segment.pos_x, segment.pos_y)")
+                && !build.contains("span_slider_row(\n        &t(\"X\")")
+                && !sync.contains("text_pos_x_slider"),
+            "Text placement should be one 2D pad with a readout, not X/Y sliders"
+        );
+    }
+
+    /// Text is its own Motion tool page. It used to be a section inside Move
+    /// that appeared only while a text clip was selected, which is what made
+    /// it hard to find.
+    #[test]
+    fn text_has_its_own_tool_page_beside_the_other_motion_tools() {
+        let host = include_str!("motion_host.rs");
+        let inspectors = include_str!("inspectors/mod.rs");
+        let build = include_str!("motion_mode/build.rs");
+        let transition = include_str!("motion_mode/transition.rs");
+
+        assert!(
+            inspectors.contains("let text_tab_btn = notch_btn(\"Text\",")
+                && inspectors.contains("motion_tabs.append(&text_tab_btn);")
+                && inspectors.contains("Some(\"motion-text\")")
+                && host.contains("(text_tab_btn.clone(), \"motion-text\")")
+                && build.contains("text_inspector: text_box.clone()")
+                && transition.contains("TEXT_PAGE")
+                && transition
+                    .contains("pub(in crate::capture::editor::window) fn show_motion_tool_page"),
+            "Text should be a notch page like Motion/Appearance/Watermark, not a Move sub-section"
+        );
+        // Reached the same way every other Motion tool is, so the highlighted
+        // notch and the visible panel cannot drift apart.
+        assert!(
+            host.contains("motion_mode::show_motion_tool_page(&chrome, page);")
+                || host.contains("show_motion_tool_page"),
+            "notch clicks should route through the shared page/active-state helper"
+        );
+    }
+
+    /// A text clip is its own tool page's content: selecting one reveals Text,
+    /// and the page never hides — with nothing selected it offers the add
+    /// action, which is why deselecting does not bounce the user elsewhere.
+    #[test]
+    fn selecting_a_text_clip_reveals_the_text_page_once() {
+        let sync = include_str!("motion_mode/controls/sync.rs");
+        assert!(
+            sync.contains("last_had_text.replace(has_text)")
+                && sync.contains("show_motion_tool_page(&chrome, super::super::TEXT_PAGE)")
+                && sync.contains("text_empty_box.set_visible(!has_text)")
+                && sync.contains("text_editor_box.set_visible(has_text)"),
+            "a text selection should reveal the Text page on the transition only, and the page \
+             should show an empty state instead of hiding"
         );
     }
 }

@@ -2,17 +2,52 @@ use gtk4::{prelude::*, GestureDrag};
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::recording::editor::model::{DEFAULT_MOTION_TEXT_POS_X, DEFAULT_MOTION_TEXT_POS_Y};
-
 use super::super::{MotionModeParts, MotionSession};
-use super::{RequestLivePreview, RequestTextTransitionPreview};
+use super::{Redraw, RequestLivePreview, RequestTextTransitionPreview};
 
 pub(super) fn install(
     parts: &MotionModeParts,
     session: &MotionSession,
+    redraw: Redraw,
     request_live_preview: RequestLivePreview,
     request_text_transition_preview: RequestTextTransitionPreview,
 ) {
+    // The Text page owns its own add/delete so it works with nothing
+    // selected, exactly like the timeline's add button.
+    parts.text.text_add_btn.connect_clicked({
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        let request_text_transition_preview = request_text_transition_preview.clone();
+        move |_| {
+            let new_text = {
+                let mut runtime = session.borrow_mut();
+                let playhead = runtime.motion.playhead;
+                runtime.begin_motion_edit();
+                runtime.motion.add_text_at(playhead).and_then(|index| {
+                    runtime
+                        .motion
+                        .text_segments
+                        .get(index)
+                        .map(|s| (s.start, s.typewriter_time))
+                })
+            };
+            redraw();
+            if let Some((start, typewriter_time)) = new_text {
+                request_text_transition_preview(start, typewriter_time);
+            }
+        }
+    });
+    parts.text.text_delete_btn.connect_clicked({
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        move |_| {
+            let mut runtime = session.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.remove_selected();
+            drop(runtime);
+            redraw();
+        }
+    });
     parts.text.text_entry.connect_changed({
         let session = session.runtime.clone();
         let request_live_preview = request_live_preview.clone();
@@ -90,53 +125,21 @@ pub(super) fn install(
         });
     }
 
-    parts.text.text_pos_x_slider.connect_value_changed({
+    parts.text.text_pos_pad.connect_value_changed({
         let session = session.runtime.clone();
-        let text_pos_x_value = parts.text.text_pos_x_value.clone();
+        let text_pos_readout = parts.text.text_pos_readout.clone();
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.shared.inspector_syncing.clone();
-        move |slider| {
+        move |pos_x, pos_y| {
             if syncing.get() {
                 return;
             }
-            let value = slider.value();
-            let pos_y = session
-                .borrow()
-                .motion
-                .selected_text_segment()
-                .map(|segment| segment.pos_y)
-                .unwrap_or(DEFAULT_MOTION_TEXT_POS_Y);
             {
                 let mut runtime = session.borrow_mut();
                 runtime.begin_motion_edit();
-                runtime.motion.set_selected_text_pos(value, pos_y);
+                runtime.motion.set_selected_text_pos(pos_x, pos_y);
             }
-            text_pos_x_value.set_label(&format!("{:.0}%", value * 100.0));
-            request_live_preview();
-        }
-    });
-    parts.text.text_pos_y_slider.connect_value_changed({
-        let session = session.runtime.clone();
-        let text_pos_y_value = parts.text.text_pos_y_value.clone();
-        let request_live_preview = request_live_preview.clone();
-        let syncing = parts.shared.inspector_syncing.clone();
-        move |slider| {
-            if syncing.get() {
-                return;
-            }
-            let value = slider.value();
-            let pos_x = session
-                .borrow()
-                .motion
-                .selected_text_segment()
-                .map(|segment| segment.pos_x)
-                .unwrap_or(DEFAULT_MOTION_TEXT_POS_X);
-            {
-                let mut runtime = session.borrow_mut();
-                runtime.begin_motion_edit();
-                runtime.motion.set_selected_text_pos(pos_x, value);
-            }
-            text_pos_y_value.set_label(&format!("{:.0}%", value * 100.0));
+            text_pos_readout.set_label(&super::super::build::motion_text_pos_readout(pos_x, pos_y));
             request_live_preview();
         }
     });
@@ -163,10 +166,8 @@ pub(super) fn install(
     let place_text = {
         let session = session.runtime.clone();
         let preview = parts.shell.preview.clone();
-        let text_pos_x_slider = parts.text.text_pos_x_slider.clone();
-        let text_pos_x_value = parts.text.text_pos_x_value.clone();
-        let text_pos_y_slider = parts.text.text_pos_y_slider.clone();
-        let text_pos_y_value = parts.text.text_pos_y_value.clone();
+        let text_pos_pad = parts.text.text_pos_pad.clone();
+        let text_pos_readout = parts.text.text_pos_readout.clone();
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.shared.inspector_syncing.clone();
         Rc::new(move |x: f64, y: f64| {
@@ -204,10 +205,8 @@ pub(super) fn install(
                 runtime.motion.set_selected_text_pos(pos_x, pos_y);
             }
             syncing.set(true);
-            text_pos_x_slider.set_value(pos_x);
-            text_pos_x_value.set_label(&format!("{:.0}%", pos_x * 100.0));
-            text_pos_y_slider.set_value(pos_y);
-            text_pos_y_value.set_label(&format!("{:.0}%", pos_y * 100.0));
+            text_pos_pad.set_text_pos(pos_x, pos_y);
+            text_pos_readout.set_label(&super::super::build::motion_text_pos_readout(pos_x, pos_y));
             syncing.set(false);
             request_live_preview();
         })

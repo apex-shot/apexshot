@@ -2475,3 +2475,12 @@ msgid ""
 "Wallpaper or color fills the canvas behind the video in preview and export"
 msgstr ""
 "Hintergrundbild oder Farbe füllt die Fläche hinter dem Video in Vorschau und Export"
+
+msgid "Select a text clip, or add one at the playhead"
+msgstr "Wähle einen Text-Clip oder füge einen an der Abspielposition hinzu"
+
+msgid "Add Text"
+msgstr "Text hinzufügen"
+
+msgid "Drag to place the title; double-click to reset"
+msgstr "Ziehe, um den Titel zu platzieren; Doppelklick zum Zurücksetzen"

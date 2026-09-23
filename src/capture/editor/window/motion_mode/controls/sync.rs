@@ -5,10 +5,14 @@ use crate::i18n::t;
 use crate::recording::editor::model::{MotionState, MotionTimingKind};
 
 use super::super::widgets::format_duration_label;
-use super::super::{MotionModeParts, MotionSession};
+use super::super::{MotionModeChrome, MotionModeParts, MotionSession};
 use super::{Redraw, RequestLivePreview};
 
-pub(super) fn make_redraw(parts: &MotionModeParts, session: &MotionSession) -> Redraw {
+pub(super) fn make_redraw(
+    parts: &MotionModeParts,
+    session: &MotionSession,
+    chrome: Rc<MotionModeChrome>,
+) -> Redraw {
     let preview = parts.shell.preview.clone();
     let ruler = parts.timeline.ruler.clone();
     let source_track = parts.timeline.source_track.clone();
@@ -26,12 +30,12 @@ pub(super) fn make_redraw(parts: &MotionModeParts, session: &MotionSession) -> R
     let blur_shutter_slider = parts.shared.blur_shutter_slider.clone();
     let blur_shutter_value = parts.shared.blur_shutter_value.clone();
     let clip_box = parts.transform.clip_box.clone();
-    let text_box = parts.text.text_box.clone();
+    let text_empty_box = parts.text.text_empty_box.clone();
+    let text_editor_box = parts.text.text_editor_box.clone();
+    let text_delete_btn = parts.text.text_delete_btn.clone();
     let text_entry = parts.text.text_entry.clone();
-    let text_pos_x_slider = parts.text.text_pos_x_slider.clone();
-    let text_pos_x_value = parts.text.text_pos_x_value.clone();
-    let text_pos_y_slider = parts.text.text_pos_y_slider.clone();
-    let text_pos_y_value = parts.text.text_pos_y_value.clone();
+    let text_pos_pad = parts.text.text_pos_pad.clone();
+    let text_pos_readout = parts.text.text_pos_readout.clone();
     let text_size_slider = parts.text.text_size_slider.clone();
     let text_size_value = parts.text.text_size_value.clone();
     let text_anim_buttons = parts.text.text_anim_buttons.clone();
@@ -72,6 +76,7 @@ pub(super) fn make_redraw(parts: &MotionModeParts, session: &MotionSession) -> R
     let easing_y2_value = parts.transform.easing_y2_value.clone();
     let delete_btn = parts.shared.delete_btn.clone();
     let syncing = parts.shared.inspector_syncing.clone();
+    let last_had_text = Rc::new(std::cell::Cell::new(false));
     Rc::new(move || {
         let runtime = session.borrow();
         playhead_clock.set_text(&super::super::super::motion_timeline::format_clock(
@@ -134,17 +139,34 @@ pub(super) fn make_redraw(parts: &MotionModeParts, session: &MotionSession) -> R
         spring_bounce_value.set_label(&format!("{:.0}%", transform_timing.spring_bounce * 100.0));
         let has_clip = selected.is_some();
         let has_text = selected_text.is_some();
+        // Selecting a text clip reveals the Text page, so clicking a title in
+        // the timeline lands on its controls instead of leaving the user to
+        // find the notch. Only the transition is acted on: the page is not
+        // re-asserted on every redraw, so a manual notch click still wins
+        // while that clip stays selected. Deselecting deliberately does not
+        // leave the page — its empty state offers the same add action the
+        // timeline does, which is exactly what an empty Text page is for.
+        let was_text = last_had_text.replace(has_text);
+        if has_text && !was_text {
+            super::super::show_motion_tool_page(&chrome, super::super::TEXT_PAGE);
+        }
         clip_box.set_visible(has_clip);
-        text_box.set_visible(has_text);
+        // Text is its own page now, so it shows its empty state instead of
+        // hiding: the panel is reachable with nothing selected, and a text
+        // clip selects it.
+        text_empty_box.set_visible(!has_text);
+        text_editor_box.set_visible(has_text);
+        text_delete_btn.set_sensitive(has_text);
         clip_hint.set_visible(!has_clip && !has_text);
         if let Some(segment) = selected_text {
             if !text_entry.has_focus() {
                 text_entry.set_text(&segment.text);
             }
-            text_pos_x_slider.set_value(segment.pos_x);
-            text_pos_x_value.set_label(&format!("{:.0}%", segment.pos_x * 100.0));
-            text_pos_y_slider.set_value(segment.pos_y);
-            text_pos_y_value.set_label(&format!("{:.0}%", segment.pos_y * 100.0));
+            text_pos_pad.set_text_pos(segment.pos_x, segment.pos_y);
+            text_pos_readout.set_label(&super::super::build::motion_text_pos_readout(
+                segment.pos_x,
+                segment.pos_y,
+            ));
             text_size_slider.set_value(segment.size);
             text_size_value.set_label(&format!("{:.0}%", segment.size * 100.0));
             for (animation, button) in &text_anim_buttons {

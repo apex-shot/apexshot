@@ -2463,3 +2463,12 @@ msgstr "ОБОИ"
 msgid ""
 "Wallpaper or color fills the canvas behind the video in preview and export"
 msgstr "Обои или цвет заполняют область за видео в предпросмотре и при экспорте"
+
+msgid "Select a text clip, or add one at the playhead"
+msgstr "Выберите текстовый клип или добавьте его на позицию воспроизведения"
+
+msgid "Add Text"
+msgstr "Добавить текст"
+
+msgid "Drag to place the title; double-click to reset"
+msgstr "Перетащите, чтобы разместить заголовок; двойной щелчок для сброса"

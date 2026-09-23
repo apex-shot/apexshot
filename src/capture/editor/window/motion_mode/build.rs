@@ -11,9 +11,8 @@ use crate::recording::editor::model::{
     MotionEffectTransformTiming, MotionTextAnimation, MotionTextScope, MotionTimingKind,
     DEFAULT_MOTION_DURATION_SECONDS, DEFAULT_MOTION_SPRING_BOUNCE, DEFAULT_MOTION_TEXT_POS_X,
     DEFAULT_MOTION_TEXT_POS_Y, DEFAULT_MOTION_TEXT_SIZE, DEFAULT_MOTION_ZOOM,
-    MAX_MOTION_DURATION_SECONDS, MAX_MOTION_SPRING_BOUNCE, MAX_MOTION_TEXT_POS,
-    MAX_MOTION_TEXT_SIZE, MAX_MOTION_YAW, MAX_MOTION_ZOOM, MAX_ZOOM_EASE_MS,
-    MIN_MOTION_DURATION_SECONDS, MIN_MOTION_SPRING_BOUNCE, MIN_MOTION_TEXT_POS,
+    MAX_MOTION_DURATION_SECONDS, MAX_MOTION_SPRING_BOUNCE, MAX_MOTION_TEXT_SIZE, MAX_MOTION_YAW,
+    MAX_MOTION_ZOOM, MAX_ZOOM_EASE_MS, MIN_MOTION_DURATION_SECONDS, MIN_MOTION_SPRING_BOUNCE,
     MIN_MOTION_TEXT_SIZE, MIN_MOTION_YAW, MIN_MOTION_ZOOM, MIN_ZOOM_EASE_MS,
 };
 use crate::recording::editor::window::tool_sidebar::FillSlider;
@@ -25,6 +24,7 @@ use super::parts::{
     MotionTextControlParts, MotionTimelineParts, MotionTransformControlParts,
 };
 use super::position_pad::MotionPositionPad;
+use super::text_pad::MotionTextPad;
 use super::watermark::build_motion_watermark_panel;
 use super::widgets::{
     angle_slider_row, ease_preset_timing, format_duration_label, position_slider_row,
@@ -295,36 +295,57 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
 
     inspector.append(&clip_box);
 
+    // Text is its own tool page rather than a section that appears inside
+    // Move: the panel used to swap between Move and Text depending on what
+    // the timeline had selected, which made the controls hard to find. As a
+    // sibling of Motion/Appearance/Watermark it is reachable whether or not
+    // anything is selected, and it is the page a text clip reveals.
     let text_box = GtkBox::new(Orientation::Vertical, 10);
+    text_box.add_css_class("editor-inspector-placeholder-shell");
+    text_box.add_css_class("editor-motion-inspector");
     text_box.set_hexpand(false);
-    text_box.set_visible(false);
+    text_box.set_vexpand(false);
     let text_title = Label::new(Some(&t("Text")));
     text_title.add_css_class("editor-inspector-title");
     text_title.set_xalign(0.0);
     text_box.append(&text_title);
+
+    // Empty state: the page is reachable with nothing selected, so it offers
+    // the same add action the timeline does instead of a blank panel.
+    let text_empty_box = GtkBox::new(Orientation::Vertical, 8);
+    let text_empty_hint = Label::new(Some(&t("Select a text clip, or add one at the playhead")));
+    text_empty_hint.add_css_class("editor-select-inspector-hint");
+    text_empty_hint.set_wrap(true);
+    text_empty_hint.set_xalign(0.0);
+    text_empty_hint.set_max_width_chars(22);
+    text_empty_box.append(&text_empty_hint);
+    let text_add_btn = Button::with_label(&t("Add Text"));
+    text_add_btn.set_has_frame(false);
+    text_add_btn.add_css_class("editor-sidebar-action-button");
+    text_empty_box.append(&text_add_btn);
+    text_box.append(&text_empty_box);
+
+    let text_editor_box = GtkBox::new(Orientation::Vertical, 10);
     let text_content_section = motion_settings_section("Content");
     let text_entry = Entry::new();
     text_entry.set_placeholder_text(Some(&t("Title")));
     text_entry.set_hexpand(true);
     text_content_section.append(&text_entry);
-    text_box.append(&text_content_section);
+    text_editor_box.append(&text_content_section);
     let text_placement_section = motion_settings_section("Placement");
-    let (text_pos_x_header, text_pos_x_value, text_pos_x_slider) = span_slider_row(
-        &t("X"),
+    // The pad replaces the old X/Y sliders: dragging the puck is the same
+    // gesture as dragging the title on the preview, so the panel and the
+    // canvas teach each other. The readout keeps the old percentages
+    // available for anyone who wants the exact value.
+    let text_pos_pad = MotionTextPad::new();
+    text_placement_section.append(&text_pos_pad.widget());
+    let text_pos_readout = Label::new(Some(&motion_text_pos_readout(
         DEFAULT_MOTION_TEXT_POS_X,
-        MIN_MOTION_TEXT_POS,
-        MAX_MOTION_TEXT_POS,
-    );
-    text_placement_section.append(&text_pos_x_header);
-    text_placement_section.append(&text_pos_x_slider.widget());
-    let (text_pos_y_header, text_pos_y_value, text_pos_y_slider) = span_slider_row(
-        &t("Y"),
         DEFAULT_MOTION_TEXT_POS_Y,
-        MIN_MOTION_TEXT_POS,
-        MAX_MOTION_TEXT_POS,
-    );
-    text_placement_section.append(&text_pos_y_header);
-    text_placement_section.append(&text_pos_y_slider.widget());
+    )));
+    text_pos_readout.add_css_class("recording-editor-zoom-kicker");
+    text_pos_readout.set_xalign(0.0);
+    text_placement_section.append(&text_pos_readout);
     let (text_size_header, text_size_value, text_size_slider) = span_slider_row(
         &t("Size"),
         DEFAULT_MOTION_TEXT_SIZE,
@@ -333,7 +354,7 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     );
     text_placement_section.append(&text_size_header);
     text_placement_section.append(&text_size_slider.widget());
-    text_box.append(&text_placement_section);
+    text_editor_box.append(&text_placement_section);
     let text_animation_section = motion_settings_section("Animation");
     let text_anim_grid = Grid::new();
     text_anim_grid.add_css_class("recording-editor-zoom-easing");
@@ -388,8 +409,15 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
         }
     }
     text_animation_section.append(&text_scope_row);
-    text_box.append(&text_animation_section);
-    inspector.append(&text_box);
+    text_editor_box.append(&text_animation_section);
+    // The page owns its Delete: the shared button lives on Move, so deleting
+    // the selected title must not require switching pages first.
+    let text_delete_btn = Button::with_label(&t("Delete"));
+    text_delete_btn.set_has_frame(false);
+    text_delete_btn.add_css_class("editor-sidebar-action-button");
+    text_editor_box.append(&text_delete_btn);
+    text_editor_box.set_visible(false);
+    text_box.append(&text_editor_box);
 
     let delete_btn = Button::with_label(&t("Delete"));
     delete_btn.set_has_frame(false);
@@ -452,6 +480,7 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
                 inspector,
                 appearance_inspector,
                 watermark_inspector,
+                text_inspector: text_box.clone(),
             },
             shared: MotionSharedControlParts {
                 duration_slider,
@@ -465,12 +494,13 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
                 inspector_syncing,
             },
             text: MotionTextControlParts {
-                text_box,
+                text_empty_box,
+                text_editor_box,
+                text_add_btn,
+                text_delete_btn,
                 text_entry,
-                text_pos_x_slider,
-                text_pos_x_value,
-                text_pos_y_slider,
-                text_pos_y_value,
+                text_pos_pad,
+                text_pos_readout,
                 text_size_slider,
                 text_size_value,
                 text_anim_buttons,
@@ -559,4 +589,11 @@ fn motion_settings_section(title: &str) -> GtkBox {
     heading.set_xalign(0.0);
     section.append(&heading);
     section
+}
+
+/// Placement read-out for the text pad. The pad is the control; this is the
+/// exact value it lands on, in the same percentages the X/Y sliders showed
+/// before they were replaced.
+pub(super) fn motion_text_pos_readout(pos_x: f64, pos_y: f64) -> String {
+    format!("X {:.0}%  ·  Y {:.0}%", pos_x * 100.0, pos_y * 100.0)
 }
