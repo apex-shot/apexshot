@@ -2500,3 +2500,9 @@ msgstr "{count} تعديلات حركة"
 
 msgid "{count} video edits"
 msgstr "{count} تعديلات فيديو"
+ 
+msgid "Freeze"
+msgstr "تجميد"
+
+msgid "Hold the last frame on screen"
+msgstr "أبقِ الإطار الأخير معروضًا على الشاشة"

@@ -2526,3 +2526,9 @@ msgstr "{count} ediciones de movimiento"
 
 msgid "{count} video edits"
 msgstr "{count} ediciones de vídeo"
+ 
+msgid "Freeze"
+msgstr "Congelar"
+
+msgid "Hold the last frame on screen"
+msgstr "Mantener el último fotograma en pantalla"

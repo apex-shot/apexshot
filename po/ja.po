@@ -2484,3 +2484,9 @@ msgstr "モーション編集 {count} 件"
 
 msgid "{count} video edits"
 msgstr "動画編集 {count} 件"
+ 
+msgid "Freeze"
+msgstr "フリーズ"
+
+msgid "Hold the last frame on screen"
+msgstr "最後のフレームを画面に保持"

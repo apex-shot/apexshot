@@ -2481,3 +2481,9 @@ msgstr "{count} 个动态编辑"
 
 msgid "{count} video edits"
 msgstr "{count} 个视频编辑"
+ 
+msgid "Freeze"
+msgstr "冻结"
+
+msgid "Hold the last frame on screen"
+msgstr "在屏幕上保持最后一帧"

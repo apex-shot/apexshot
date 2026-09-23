@@ -44,7 +44,84 @@ impl VideoEditState {
         } else {
             self.trim_start_seconds
         };
+        // Dragging the right handle past the source end starts (or grows) a
+        // hold on the last frame. It reaches real frames only once the hold is
+        // spent, so the handle never crosses into territory that does not
+        // exist. Callers pass an unclamped target, so this also covers the
+        // very first expansion.
+        if value > self.trim_end_seconds {
+            let tail = (value - self.trim_end_seconds).max(0.0);
+            if tail > f64::EPSILON {
+                // Name the segment the hold belongs to, the same way the
+                // freeze button does. Without this the seconds are stored but
+                // nothing applies them: the drawn clip, the hit box, the
+                // composition length and the export all ignore the tail.
+                if let Some(last) = self.segment_order.last().copied() {
+                    if self.segments_kept.get(last).copied().unwrap_or(true) {
+                        self.frozen_segment = Some(last);
+                    }
+                }
+            }
+            self.freeze_tail = tail;
+            return;
+        }
+        self.freeze_tail = 0.0;
         self.trim_end_seconds = value.clamp(min_end.min(duration), duration);
+    }
+
+    /// Held seconds after `trim_end_seconds`: the clip's last frame frozen on
+    /// screen. The source never contained these frames, so the composition is
+    /// longer than the media and the exporter pads them.
+    pub fn freeze_tail_seconds(&self) -> f64 {
+        self.freeze_tail
+    }
+
+    /// Composition end of the last segment: its own end, plus any freeze tail
+    /// the user added to that segment.
+    pub fn last_segment_end(&self) -> f64 {
+        let last = self.segment_order.last().copied().unwrap_or(0);
+        let end = self.segment_start(last) + self.segment_timeline_duration(last);
+        if self.freeze_applies_to(last) {
+            end + self.freeze_tail
+        } else {
+            end
+        }
+    }
+
+    /// Drop the held tail. Returns true when there was one.
+    pub fn clear_freeze_tail(&mut self) -> bool {
+        if self.freeze_tail <= f64::EPSILON {
+            return false;
+        }
+        self.freeze_tail = 0.0;
+        self.frozen_segment = None;
+        true
+    }
+
+    /// True when `index` is the final segment that carries the freeze hold.
+    pub fn freeze_applies_to_segment(&self, index: usize) -> bool {
+        self.freeze_applies_to(index)
+    }
+
+    fn freeze_applies_to(&self, index: usize) -> bool {
+        self.frozen_segment == Some(index) && self.segment_order.last() == Some(&index)
+    }
+
+    /// Hold the last frame on screen for `seconds`. Only the final segment
+    /// can freeze: a held frame with playable footage after it would be a
+    /// gap, and that is what `segment_starts` already models.
+    pub fn extend_last_segment(&mut self, seconds: f64) -> bool {
+        if self.video_locked || !seconds.is_finite() || seconds <= 0.0 {
+            return false;
+        }
+        let last = match self.segment_order.last().copied() {
+            Some(index) if self.segments_kept.get(index).copied().unwrap_or(true) => index,
+            _ => return false,
+        };
+        self.frozen_segment = Some(last);
+        self.freeze_tail += seconds;
+        self.clamp_timeline_scroll();
+        true
     }
 
     pub fn trim_duration(&self) -> f64 {

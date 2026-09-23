@@ -29,12 +29,3 @@ pub fn format_clock(seconds: f64) -> String {
     let total = seconds.max(0.0).floor() as u64;
     format!("{}:{:02}", total / 60, total % 60)
 }
-
-pub fn format_range(start: f64, end: f64) -> String {
-    format!("{} - {}", format_mmss(start), format_mmss(end))
-}
-
-pub fn format_mmss(seconds: f64) -> String {
-    let total = seconds.max(0.0).floor() as u64;
-    format!("{:02}:{:02}", total / 60, total % 60)
-}

@@ -2520,3 +2520,9 @@ msgstr "{count} правок Motion"
 
 msgid "{count} video edits"
 msgstr "{count} правок видео"
+ 
+msgid "Freeze"
+msgstr "Заморозка"
+
+msgid "Hold the last frame on screen"
+msgstr "Удерживать последний кадр на экране"

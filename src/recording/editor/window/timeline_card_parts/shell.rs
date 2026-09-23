@@ -1,6 +1,7 @@
 pub fn build_timeline_card(
     state: Arc<Mutex<VideoEditState>>,
     media: Rc<RefCell<Option<MediaFile>>>,
+    filmstrip: Rc<RefCell<Vec<gtk4::gdk_pixbuf::Pixbuf>>>,
     on_change: Rc<dyn Fn()>,
 ) -> (GtkBox, Rc<dyn Fn()>, Rc<dyn Fn()>) {
     let shell = GtkBox::new(Orientation::Vertical, 0);
@@ -31,6 +32,11 @@ pub fn build_timeline_card(
     let zoom = labeled_tool_button("zoom-fit-best-symbolic", &t("Zoom"), &t("Add zoom at playhead"));
     let hide = labeled_tool_button("view-conceal-symbolic", &t("Hide"), &t("Hide cursor at playhead"));
     let split = labeled_tool_button("edit-cut-symbolic", &t("Split"), &t("Split at playhead"));
+    let freeze = labeled_tool_button(
+        "media-record-symbolic",
+        &t("Freeze"),
+        &t("Hold the last frame on screen"),
+    );
     let detect = labeled_tool_button(
         icon_names::custom::WAND_SPARKLES_SYMBOLIC,
         &t("Detect"),
@@ -57,6 +63,7 @@ pub fn build_timeline_card(
     left.append(&zoom);
     left.append(&hide);
     left.append(&split);
+    left.append(&freeze);
     left.append(&detect);
 
     let center = GtkBox::new(Orientation::Horizontal, 8);
@@ -105,17 +112,23 @@ pub fn build_timeline_card(
     let video_track = DrawingArea::new();
     video_track.add_css_class("recording-editor-card-video-track");
     video_track.set_hexpand(true);
-    video_track.set_size_request(-1, 80);
+    // Motion's source lane is the reference for this clip, and it sits on the
+    // 56px `card-zoom-track` floor. Matching it is what makes the two editors
+    // line up, so this lane is 56px rather than a shorter 48px one.
+    video_track.set_size_request(-1, 56);
     video_track.set_draw_func({
         let state = state.clone();
         let hovered_video = hovered_video.clone();
         let dragging_video = dragging_video.clone();
+        let filmstrip = filmstrip.clone();
         move |area, cr, width, height| {
+            let frames = filmstrip.borrow();
             draw_video_clip(
                 &state,
                 hovered_video.get(),
                 dragging_video.get(),
                 widget_is_light(area),
+                &frames,
                 cr,
                 width,
                 height,
@@ -129,13 +142,11 @@ pub fn build_timeline_card(
     zoom_track.set_size_request(-1, 56);
     zoom_track.set_draw_func({
         let state = state.clone();
-        let hovered_zoom = hovered_zoom.clone();
         let hover_zoom_time = hover_zoom_time.clone();
         let dragging_zoom = dragging_zoom.clone();
         move |area, cr, width, height| {
             draw_zoom_clips(
                 &state,
-                hovered_zoom.get(),
                 hover_zoom_time.get(),
                 dragging_zoom.get(),
                 widget_is_light(area),
@@ -152,13 +163,11 @@ pub fn build_timeline_card(
     hide_track.set_size_request(-1, 56);
     hide_track.set_draw_func({
         let state = state.clone();
-        let hovered_hide = hovered_hide.clone();
         let hover_hide_time = hover_hide_time.clone();
         let dragging_hide = dragging_hide.clone();
         move |area, cr, width, height| {
             draw_cursor_hide_clips(
                 &state,
-                hovered_hide.get(),
                 hover_hide_time.get(),
                 dragging_hide.get(),
                 widget_is_light(area),
@@ -350,6 +359,22 @@ pub fn build_timeline_card(
         move |_| {
             let cut_at = state.lock().unwrap().source_playhead();
             state.lock().unwrap().add_cut(cut_at);
+            redraw();
+        }
+    });
+
+    freeze.connect_clicked({
+        let state = state.clone();
+        let redraw = redraw.clone();
+        move |_| {
+            let mut guard = state.lock().unwrap();
+            // Press once to hold, again to release. Each fresh press adds
+            // another second; holding a frame open is meant to be a few
+            // deliberate clicks, not a duration dialog.
+            if !guard.clear_freeze_tail() {
+                guard.extend_last_segment(1.0);
+            }
+            drop(guard);
             redraw();
         }
     });

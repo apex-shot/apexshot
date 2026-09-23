@@ -30,6 +30,11 @@ pub struct VideoProjectFile {
     pub trim_start_seconds: f64,
     pub trim_end_seconds: f64,
     pub cuts: Vec<f64>,
+    /// Held-last-frame tail. 0 = no freeze, so old projects load clean.
+    #[serde(default)]
+    pub freeze_tail: f64,
+    #[serde(default)]
+    pub frozen_segment: Option<usize>,
     pub segments_kept: Vec<bool>,
     pub segment_order: Vec<usize>,
     pub segment_starts: Vec<f64>,
@@ -692,6 +697,8 @@ impl VideoEditState {
             trim_start_seconds: self.trim_start_seconds,
             trim_end_seconds: self.trim_end_seconds,
             cuts: self.cuts.clone(),
+            freeze_tail: self.freeze_tail,
+            frozen_segment: self.frozen_segment,
             segments_kept: self.segments_kept.clone(),
             segment_order: self.segment_order.clone(),
             segment_starts: self.segment_starts.clone(),
@@ -747,6 +754,14 @@ impl VideoEditState {
         self.trim_start_seconds = file.trim_start_seconds;
         self.trim_end_seconds = file.trim_end_seconds;
         self.cuts = file.cuts;
+        // A tail is only meaningful with a final segment to hold; a project
+        // saved before a re-trim can name a segment that no longer exists.
+        self.frozen_segment = file.frozen_segment;
+        self.freeze_tail = if self.frozen_segment.is_some() {
+            file.freeze_tail.max(0.0)
+        } else {
+            0.0
+        };
         self.segments_kept = file.segments_kept;
         self.segment_order = file.segment_order;
         self.segment_starts = file.segment_starts;

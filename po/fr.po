@@ -2530,3 +2530,9 @@ msgstr "{count} modifications Motion"
 
 msgid "{count} video edits"
 msgstr "{count} modifications vidéo"
+ 
+msgid "Freeze"
+msgstr "Figer"
+
+msgid "Hold the last frame on screen"
+msgstr "Maintenir la dernière image à l'écran"
