@@ -156,11 +156,16 @@ impl VideoEditState {
         if self.video_locked || index >= self.segment_starts.len() {
             return;
         }
-        self.segment_starts[index] = if start.is_finite() {
+        // A lone clip cannot float: it is the whole composition, and a start
+        // past zero is dead time playback jumps over.
+        let start = if self.segment_order.len() <= 1 {
+            0.0
+        } else if start.is_finite() {
             start.max(0.0)
         } else {
             0.0
         };
+        self.segment_starts[index] = start;
         self.sync_offset_from_segments();
         self.clamp_timeline_scroll();
     }
@@ -225,8 +230,15 @@ impl VideoEditState {
         if self.video_locked {
             return;
         }
-        let next = if value.is_finite() {
-            value.max(0.0)
+        // A lone clip starts the composition, so sliding it right would leave
+        // dead time at the head that playback jumps straight over. Only a
+        // multi-segment arrangement has somewhere to move.
+        let next = if self.segment_order.len() > 1 {
+            if value.is_finite() {
+                value.max(0.0)
+            } else {
+                0.0
+            }
         } else {
             0.0
         };

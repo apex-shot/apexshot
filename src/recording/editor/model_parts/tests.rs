@@ -297,18 +297,35 @@ fn timeline_scale_zero_is_identity_mapping() {
 }
 
 #[test]
+fn a_lone_clip_cannot_be_slid_past_zero() {
+    let mut state = VideoEditState::new(metadata());
+    // A solo clip is the whole composition. Floating it would leave dead time
+    // at the head that playback just jumps over.
+    state.set_timeline_offset(5.0);
+    assert_eq!(state.timeline_offset_seconds, 0.0);
+    assert_eq!(state.segment_start(0), 0.0);
+    state.set_segment_start(0, 3.0);
+    assert_eq!(state.segment_start(0), 0.0);
+    assert_eq!(state.composition_duration(), 10.0);
+
+    // Once a cut makes an arrangement, moving a clip means something again.
+    state.add_cut(4.0);
+    state.set_segment_start(1, 6.0);
+    assert!((state.segment_start(1) - 6.0).abs() < 1e-9);
+    assert!(state.composition_duration() > state.source_duration());
+}
+
+#[test]
 fn timeline_offset_shifts_clip_and_extends_composition() {
     let mut state = VideoEditState::new(metadata());
     assert_eq!(state.composition_duration(), 10.0);
+    state.add_cut(4.0);
     state.playhead_seconds = 2.0;
     state.set_timeline_offset(5.0);
     assert!((state.composition_duration() - 15.0).abs() < 1e-9);
     // Moving a clip pans it on a fixed ruler. Zoom and playhead stay put.
     assert!((state.visible_span_seconds() - 10.0).abs() < 1e-9);
     assert!((state.playhead_seconds - 2.0).abs() < 1e-9);
-    assert!((state.source_to_x(0.0, 1000.0) - 500.0).abs() < 0.01);
-    assert!((state.source_to_x(10.0, 1000.0) - 1500.0).abs() < 0.01);
-    assert!((state.timeline_to_source(7.0) - 2.0).abs() < 1e-9);
     assert_eq!(state.timeline_scroll_seconds, 0.0);
     state.set_timeline_offset(-3.0);
     assert_eq!(state.timeline_offset_seconds, 0.0);
@@ -322,6 +339,7 @@ fn timeline_offset_shifts_clip_and_extends_composition() {
     state.reset_video_edits();
     assert_eq!(state.timeline_offset_seconds, 0.0);
     assert!(!state.video_has_edits());
+    state.add_cut(4.0);
     state.set_timeline_offset(2.0);
     assert!(state.video_has_edits());
     assert!(state.needs_reencode());
@@ -334,6 +352,7 @@ fn timeline_stays_open_past_the_clip() {
     state.timeline_scale = 100.0 / 7.0;
     state.set_timeline_scroll(10.0);
     assert!((state.x_to_time(0.0, 1000.0) - 10.0).abs() < 0.01);
+    state.add_cut(4.0);
     state.set_timeline_offset(240.0);
     state.follow_clip_on_timeline();
     assert!((state.timeline_offset_seconds - 240.0).abs() < 1e-9);
@@ -1286,6 +1305,8 @@ fn zoom_and_clip_moves_snap_start_to_playhead() {
     assert!((state.zoom_clips[index].start - 3.0).abs() < 1e-9);
     assert!((state.zoom_clips[index].duration() - duration).abs() < 1e-9);
 
+    // A lone clip cannot slide, so the snap is exercised on a cut arrangement.
+    state.add_cut(4.0);
     let offset = snap_range_to_target(2.94, state.trim_duration(), state.playhead_seconds, 0.12);
     state.set_timeline_offset(offset);
     assert!((state.timeline_offset_seconds - 3.0).abs() < 1e-9);
@@ -1981,6 +2002,28 @@ fn freeze_playhead_holds_the_last_source_frame() {
     // Past the source end the player seeks the last real frame and stops
     // there, so the preview shows the held frame instead of running out.
     assert!((state.source_playhead() - 10.0).abs() < 1e-6);
+}
+
+#[test]
+fn dragging_the_right_edge_past_the_end_opens_a_hold_that_applies() {
+    let mut state = VideoEditState::new(metadata());
+    // The tail has to name its segment, or nothing applies it: the composition
+    // would not lengthen and export would not pad.
+    state.set_trim_end(11.0);
+    assert!((state.freeze_tail_seconds() - 1.0).abs() < 1e-9);
+    assert!(
+        state.freeze_applies_to_segment(0),
+        "the hold must belong to the final segment"
+    );
+    assert!(
+        (state.composition_duration() - 11.0).abs() < 1e-9,
+        "the clip actually gets longer"
+    );
+    assert!(
+        (state.content_end_seconds() - 11.0).abs() < 1e-9,
+        "playback runs through the hold"
+    );
+    assert!(state.needs_reencode());
 }
 
 #[test]

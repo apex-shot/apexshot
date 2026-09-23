@@ -50,13 +50,17 @@ pub fn video_hit(state: &VideoEditState, width: f64, x: f64) -> VideoHit {
                 TrackCursor::ResizeEnd,
                 segment_edge_drag(state, seg_idx, false),
             ),
-            None if state.cuts.is_empty() => (
+            None if state.cuts.is_empty() && state.segment_order.len() > 1 => (
                 TrackCursor::Grab,
                 Some(ClipDrag::Move {
                     origin_offset: state.timeline_offset_seconds,
                     pixels_per_second: pixels_per_second(state, width),
                 }),
             ),
+            // The body of a lone clip is not a drag target: sliding it would
+            // only open a gap the player skips over. A cut arrangement is the
+            // case where moving a clip means something.
+            None if state.segment_order.len() <= 1 => (TrackCursor::None, None),
             None => (
                 TrackCursor::Grab,
                 Some(ClipDrag::Segment {
@@ -209,18 +213,25 @@ pub fn x_to_source(state: &VideoEditState, width: f64, x: f64) -> f64 {
 /// becomes held seconds beyond the source end — exactly what a freeze hold
 /// consumes. `x_to_source` cannot do this: it clamps at the source duration,
 /// which made expanding the right edge a no-op.
+///
+/// The overshoot is measured from where the clip's tail actually ends
+/// (its end plus any hold already on it), not from the composition's total
+/// length. Measuring from the total made the first drag past the end collapse
+/// on a multi-segment arrangement, and made a second drag right *shrink* a
+/// hold that was already open.
 pub fn edge_target_at(state: &VideoEditState, timeline_t: f64) -> f64 {
     let duration = state.metadata.duration_seconds.max(0.0);
     let source_t = state.timeline_to_source(timeline_t);
     if source_t > duration {
-        duration + (timeline_t - state.composition_duration()).max(0.0)
+        let tail_end = state.last_segment_end();
+        duration + (timeline_t - tail_end).max(0.0)
     } else {
         source_t.clamp(0.0, duration)
     }
 }
 
 pub fn x_to_timeline(state: &VideoEditState, width: f64, x: f64) -> f64 {
-    state.x_to_time(x.clamp(0.0, width), width).max(0.0)
+    state.x_to_time(x, width).max(0.0)
 }
 
 pub fn pixels_per_second(state: &VideoEditState, width: f64) -> f64 {

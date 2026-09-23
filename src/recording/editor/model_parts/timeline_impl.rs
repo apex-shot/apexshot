@@ -50,7 +50,19 @@ impl VideoEditState {
         // exist. Callers pass an unclamped target, so this also covers the
         // very first expansion.
         if value > self.trim_end_seconds {
-            self.freeze_tail = (value - self.trim_end_seconds).max(0.0);
+            let tail = (value - self.trim_end_seconds).max(0.0);
+            if tail > f64::EPSILON {
+                // Name the segment the hold belongs to, the same way the
+                // freeze button does. Without this the seconds are stored but
+                // nothing applies them: the drawn clip, the hit box, the
+                // composition length and the export all ignore the tail.
+                if let Some(last) = self.segment_order.last().copied() {
+                    if self.segments_kept.get(last).copied().unwrap_or(true) {
+                        self.frozen_segment = Some(last);
+                    }
+                }
+            }
+            self.freeze_tail = tail;
             return;
         }
         self.freeze_tail = 0.0;
