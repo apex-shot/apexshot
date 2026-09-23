@@ -456,21 +456,16 @@ fn wallpaper_file_name_from_background(background: &VideoBackground) -> Option<S
     }
 }
 
-/// A labelled numeric row: a name, an editable value in a pill with its
-/// unit, and a slider. The entry commits on activate and on focus-leave
-/// rather than per keystroke, matching the image editor's dimension pills.
+/// A labelled slider row. The filled slider draws its own name and value,
+/// so the row is just the track — no separate number field to keep in sync.
 #[derive(Clone)]
 struct BgValueRow {
     widget: GtkBox,
     scale: FillSlider,
-    entry: Entry,
     syncing: Rc<Cell<bool>>,
 }
 
 fn bg_value_row(label: &str) -> BgValueRow {
-    // One row, not two. The filled slider already draws its own name and
-    // value, so the editable number sits beside it rather than above it —
-    // stacking them printed every value twice and cost a line each.
     let row = GtkBox::new(Orientation::Horizontal, 8);
     row.add_css_class("recording-editor-bg-value-row");
     row.set_hexpand(true);
@@ -483,42 +478,23 @@ fn bg_value_row(label: &str) -> BgValueRow {
     track.set_size_request(-1, 32);
     row.append(&track);
 
-    let pill = GtkBox::new(Orientation::Horizontal, 4);
-    pill.add_css_class("recording-editor-bg-value-pill");
-    pill.set_valign(Align::Center);
-
-    // The slider already prints the value with its unit; the pill is just the
-    // typed-in form of the same number.
-    let entry = Entry::new();
-    entry.add_css_class("recording-editor-bg-value-entry");
-    entry.set_width_chars(3);
-    entry.set_max_width_chars(3);
-    entry.set_valign(Align::Center);
-    entry.set_tooltip_text(Some(&t("Type an exact value in pixels")));
-    gtk4::prelude::EntryExt::set_alignment(&entry, 1.0);
-    pill.append(&entry);
-
-    row.append(&pill);
-
     BgValueRow {
         widget: row,
         scale,
-        entry,
         syncing: Rc::new(Cell::new(false)),
     }
 }
 
 impl BgValueRow {
-    /// Push state into the widgets without re-entering the write path.
+    /// Push state into the widget without re-entering the write path.
     fn sync_value(&self, value: f64) {
         self.syncing.set(true);
         self.scale.set_value(value);
-        self.entry.set_text(&format!("{value:.0}"));
         self.syncing.set(false);
     }
 }
 
-/// Wire a row's slider, entry, and focus behaviour to one state field.
+/// Wire a row's slider to one state field.
 fn bind_bg_value(
     row: &BgValueRow,
     syncing: &Rc<Cell<bool>>,
@@ -530,51 +506,22 @@ fn bind_bg_value(
     let scale_state = state.clone();
     let scale_change = on_change.clone();
     let scale_syncing = syncing.clone();
-    let slider_write = write.clone();
+    let slider_write = write;
     row.scale.connect_value_changed(move |slider| {
         if scale_syncing.get() || scale_row.syncing.get() {
             return;
         }
         slider_write(&mut scale_state.lock().unwrap(), slider.value());
         scale_change();
-        // Keep the entry in step when the value came from the slider.
-        scale_row.entry.set_text(&format!("{:.0}", slider.value()));
     });
-
-    let commit = {
-        let row = row.clone();
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        let commit_write = write;
-        move |commit: bool| {
-            if !commit || row.syncing.get() {
-                return;
-            }
-            let Ok(parsed) = row.entry.text().trim().parse::<f64>() else {
-                // Reject anything unparseable by restoring the last good value.
-                row.sync_value(row.scale.value());
-                return;
-            };
-            syncing.set(true);
-            row.scale.set_value(parsed);
-            syncing.set(false);
-            row.entry.set_text(&format!("{parsed:.0}"));
-            commit_write(&mut state.lock().unwrap(), parsed);
-            on_change();
-        }
-    };
-    let commit_entry = commit.clone();
-    row.entry.connect_activate(move |_| commit_entry(true));
-    let focus = EventControllerFocus::new();
-    focus.connect_leave(move |_| commit(true));
-    row.entry.add_controller(focus);
 }
 
 struct BgSection {
     widget: GtkBox,
 }
 
+/// An expandable row with a "+" affordance. Stroke and Shadow ship this way:
+/// the control is there, but nothing renders it until it is implemented.
 fn bg_placeholder_section(label: &str) -> BgSection {
     let section = GtkBox::new(Orientation::Vertical, 0);
     section.add_css_class("recording-editor-bg-section");
@@ -603,8 +550,6 @@ fn bg_placeholder_section(label: &str) -> BgSection {
     header.append(&add);
     section.append(&header);
 
-    // Placeholder body: the control ships with the panel but has no effect
-    // until stroke and shadow are actually rendered.
     let body = GtkBox::new(Orientation::Vertical, 0);
     body.add_css_class("recording-editor-bg-section-body");
     let hint = Label::new(Some(&t("Coming soon")));

@@ -186,13 +186,34 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         }) as Rc<dyn Fn()>
     };
 
-    let workspace = GtkBox::new(Orientation::Horizontal, 8);
+    let workspace = GtkBox::new(Orientation::Horizontal, 0);
     workspace.add_css_class("recording-editor-workspace");
     workspace.set_hexpand(true);
     workspace.set_vexpand(true);
 
+    // Tools live on the left: a compact icon bar picks the tool, and the
+    // selected tool's controls stack directly beneath it.
     let tools = tool_section::build_tool_section(state.clone(), ping.clone());
-    workspace.append(&tools.widget);
+
+    let pause_playback_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let sidebar_pause_playback = {
+        let pause_playback_slot = pause_playback_slot.clone();
+        Rc::new(move || {
+            if let Some(pause_playback) = pause_playback_slot.borrow().as_ref() {
+                pause_playback();
+            }
+        }) as Rc<dyn Fn()>
+    };
+    let sidebar =
+        tool_sidebar::build_tool_sidebar(state.clone(), ping.clone(), sidebar_pause_playback);
+
+    let left = GtkBox::new(Orientation::Vertical, 0);
+    left.add_css_class("recording-editor-tools-column");
+    left.set_hexpand(false);
+    left.set_vexpand(true);
+    left.append(&tools.widget);
+    left.append(&sidebar.widget);
+    workspace.append(&left);
 
     let stage = GtkBox::new(Orientation::Vertical, 0);
     stage.add_css_class("recording-editor-stage");
@@ -211,19 +232,6 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         ping.clone(),
     ));
     workspace.append(&stage);
-
-    let pause_playback_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
-    let sidebar_pause_playback = {
-        let pause_playback_slot = pause_playback_slot.clone();
-        Rc::new(move || {
-            if let Some(pause_playback) = pause_playback_slot.borrow().as_ref() {
-                pause_playback();
-            }
-        }) as Rc<dyn Fn()>
-    };
-    let sidebar =
-        tool_sidebar::build_tool_sidebar(state.clone(), ping.clone(), sidebar_pause_playback);
-    workspace.append(&sidebar.widget);
     root.append(&workspace);
 
     let (timeline, paint, pause_playback) = timeline_card::build_timeline_card(
@@ -475,8 +483,14 @@ fn build_window_controls(
     bar.set_vexpand(false);
     bar.set_valign(Align::Start);
 
+    // The tools column moved to the left, so the title is offset by the same
+    // width on the left as the actions and traffic lights take on the right.
+    // Without this the title would sit optically off-centre.
     let left_balance = GtkBox::new(Orientation::Horizontal, 0);
-    left_balance.set_size_request(TRAFFIC_LIGHTS_WIDTH, -1);
+    left_balance.set_size_request(
+        tool_sidebar::TOOL_SIDEBAR_WIDTH + TRAFFIC_LIGHTS_WIDTH,
+        -1,
+    );
     bar.append(&left_balance);
 
     let title_text = state.lock().unwrap().title.clone();
@@ -505,7 +519,6 @@ fn build_window_controls(
     lights.set_halign(Align::End);
     lights.set_valign(Align::Center);
     let right_balance = GtkBox::new(Orientation::Horizontal, 16);
-    right_balance.set_size_request(tool_sidebar::TOOL_SIDEBAR_WIDTH + TRAFFIC_LIGHTS_WIDTH, -1);
     right_balance.set_hexpand(false);
     let right_spacer = GtkBox::new(Orientation::Horizontal, 0);
     right_spacer.set_hexpand(true);

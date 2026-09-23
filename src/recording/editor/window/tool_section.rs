@@ -11,48 +11,27 @@ pub(super) struct ToolSection {
     pub refresh: Rc<dyn Fn()>,
 }
 
+/// The tool bar that caps the left column: one icon per tool, with the
+/// selected tool's controls stacked directly beneath it.
+///
+/// Icons follow the reference — media, cursor, a frame grid, and a saved
+/// take — rather than one button per `EditorTool`. The tools a bare recording
+/// opens with (Cursor, Background) map onto the media and cursor icons; the
+/// timeline-driven panels (Zoom, Hide, Clip) are reached by selecting a clip
+/// in the timeline, and the fourth icon is the placeholder for the take
+/// library, which is not built yet.
 pub(super) fn build_tool_section(
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
 ) -> ToolSection {
-    let root = GtkBox::new(Orientation::Vertical, 8);
+    let root = GtkBox::new(Orientation::Horizontal, 4);
     root.add_css_class("recording-editor-tool-section");
     root.set_hexpand(false);
-    root.set_vexpand(true);
+    root.set_vexpand(false);
     root.set_halign(Align::Fill);
-    root.set_valign(Align::Fill);
 
-    let cursor = ToggleButton::new();
-    cursor.add_css_class("recording-editor-tool-section-btn");
-    cursor.set_has_frame(false);
-    cursor.set_tooltip_text(Some(&t("Cursor")));
-    cursor.set_halign(Align::Center);
-    let icon = Image::from_icon_name(icon_names::POINTER_PRIMARY_CLICK);
-    icon.set_pixel_size(18);
-    icon.set_halign(Align::Center);
-    icon.set_valign(Align::Center);
-    cursor.set_child(Some(&icon));
-    cursor.connect_clicked({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        move |button| {
-            state.lock().unwrap().selected_tool = EditorTool::Cursor;
-            button.set_active(true);
-            on_change();
-        }
-    });
-    root.append(&cursor);
-
-    let background = ToggleButton::new();
-    background.add_css_class("recording-editor-tool-section-btn");
-    background.set_has_frame(false);
+    let background = tool_icon_button(icon_names::custom::IMAGE_ALT_SYMBOLIC, &t("Background"));
     background.set_tooltip_text(Some(&t("Background")));
-    background.set_halign(Align::Center);
-    let bg_icon = Image::from_icon_name(icon_names::custom::IMAGE_ALT_SYMBOLIC);
-    bg_icon.set_pixel_size(18);
-    bg_icon.set_halign(Align::Center);
-    bg_icon.set_valign(Align::Center);
-    background.set_child(Some(&bg_icon));
     background.connect_clicked({
         let state = state.clone();
         let on_change = on_change.clone();
@@ -64,15 +43,55 @@ pub(super) fn build_tool_section(
     });
     root.append(&background);
 
+    let cursor = tool_icon_button(icon_names::POINTER_PRIMARY_CLICK, &t("Cursor"));
+    cursor.set_tooltip_text(Some(&t("Cursor")));
+    cursor.set_active(true);
+    cursor.connect_clicked({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        move |button| {
+            state.lock().unwrap().selected_tool = EditorTool::Cursor;
+            button.set_active(true);
+            on_change();
+        }
+    });
+    root.append(&cursor);
+
+    // Frame and motion tools. These drive the timeline rather than the
+    // sidebar, so selecting one hands the sidebar back to whatever the
+    // timeline currently has selected.
+    let frames = tool_icon_button("view-grid-symbolic", &t("Frames"));
+    frames.set_tooltip_text(Some(&t("Frames")));
+    frames.connect_clicked({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        move |button| {
+            let mut guard = state.lock().unwrap();
+            guard.selected_tool = EditorTool::Timeline;
+            drop(guard);
+            button.set_active(true);
+            on_change();
+        }
+    });
+    root.append(&frames);
+
+    // The take library is not built yet; the icon marks where it goes.
+    let takes = tool_icon_button("bookmark-symbolic", &t("Takes"));
+    takes.set_tooltip_text(Some(&t("Takes — coming soon")));
+    takes.set_sensitive(false);
+    root.append(&takes);
+
     let refresh = {
-        let cursor = cursor.clone();
         let background = background.clone();
+        let cursor = cursor.clone();
+        let frames = frames.clone();
         Rc::new(move || {
             let tool = state.lock().unwrap().selected_tool;
-            // Timeline tool has no rail button; both rail buttons go inactive
-            // while timeline selections drive the right panel.
-            cursor.set_active(tool == EditorTool::Cursor);
+            // Timeline has its own icon; the other two go inactive while a
+            // timeline selection drives the panel below.
             background.set_active(tool == EditorTool::Background);
+            cursor.set_active(tool == EditorTool::Cursor);
+            frames.set_active(tool == EditorTool::Timeline);
         }) as Rc<dyn Fn()>
     };
 
@@ -80,6 +99,20 @@ pub(super) fn build_tool_section(
         widget: root,
         refresh,
     }
+}
+
+fn tool_icon_button(icon_name: &str, label: &str) -> ToggleButton {
+    let button = ToggleButton::new();
+    button.add_css_class("recording-editor-tool-section-btn");
+    button.set_has_frame(false);
+    button.set_hexpand(true);
+    button.set_tooltip_text(Some(label));
+    let icon = Image::from_icon_name(icon_name);
+    icon.set_pixel_size(18);
+    icon.set_halign(Align::Center);
+    icon.set_valign(Align::Center);
+    button.set_child(Some(&icon));
+    button
 }
 
 #[cfg(test)]
@@ -99,5 +132,27 @@ mod tests {
             source.contains("IMAGE_ALT_SYMBOLIC"),
             "Background rail button should reuse the image-editor backdrop icon"
         );
+    }
+
+    #[test]
+    fn the_rail_is_a_horizontal_bar_of_icons() {
+        let source = include_str!("tool_section.rs");
+        // The bar caps the left column, so it lays its icons out across.
+        assert!(
+            source.contains("Orientation::Horizontal"),
+            "the tool bar lays its icons out in a row"
+        );
+        // Four icons, matching the reference bar.
+        for icon in [
+            "IMAGE_ALT_SYMBOLIC",
+            "POINTER_PRIMARY_CLICK",
+            "view-grid-symbolic",
+            "bookmark-symbolic",
+        ] {
+            assert!(
+                source.contains(icon),
+                "the tool bar must keep the {icon} icon"
+            );
+        }
     }
 }

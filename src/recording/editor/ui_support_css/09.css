@@ -43,35 +43,6 @@
                 margin: 0 0 4px 0;
             }
 
-            .recording-editor-bg-value-pill {
-                min-height: 28px;
-                padding: 0 8px;
-                border: none;
-                border-radius: 8px;
-                background: alpha(white, 0.06);
-            }
-
-            .recording-editor-bg-value-pill:focus-within {
-                background: alpha(white, 0.09);
-                box-shadow: inset 0 0 0 1px alpha(#b05c38, 0.55);
-            }
-
-            .recording-editor-bg-value-entry {
-                min-width: 28px;
-                min-height: 20px;
-                padding: 0;
-                border: none;
-                background: transparent;
-                background-image: none;
-                box-shadow: none;
-                outline: none;
-                color: rgba(255, 255, 255, 0.92);
-                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
-                font-size: 12px;
-                font-weight: 500;
-                font-variant-numeric: tabular-nums;
-            }
-
             /* Collapsible Stroke / Shadow rows. */
             .recording-editor-bg-section {
                 border-top: 1px solid alpha(white, 0.06);
@@ -175,19 +146,6 @@
                 color: alpha(#1d2129, 0.92);
             }
 
-            .editor-theme-light .recording-editor-bg-value-pill {
-                background: alpha(#111827, 0.05);
-            }
-
-            .editor-theme-light .recording-editor-bg-value-pill:focus-within {
-                background: alpha(#111827, 0.08);
-                box-shadow: inset 0 0 0 1px alpha(#b05c38, 0.55);
-            }
-
-            .editor-theme-light .recording-editor-bg-value-entry {
-                color: alpha(#1d2129, 0.92);
-            }
-
             .editor-theme-light .recording-editor-bg-section {
                 border-top-color: alpha(#111827, 0.10);
             }
@@ -220,4 +178,106 @@
             .editor-theme-light button.recording-editor-bg-custom-row:hover {
                 background: alpha(#111827, 0.08);
                 color: alpha(#1d2129, 0.96);
+            }
+
+            /* ── Left tool column: icon bar over the panel stack ──
+             * The column shares the timeline's near-black so the tools and
+             * the timeline read as one chrome, and only the video stage keeps
+             * its own surface. */
+
+            .recording-editor-tools-column {
+                min-width: 288px;
+                max-width: 288px;
+                background: #000000;
+            }
+
+            .recording-editor-tool-section {
+                min-width: 0;
+                max-width: none;
+                padding: 8px 10px;
+                background: transparent;
+                border-radius: 0;
+            }
+
+            button.recording-editor-tool-section-btn {
+                min-width: 40px;
+                min-height: 36px;
+                padding: 0;
+                border: none;
+                border-radius: 10px;
+                background: transparent;
+                color: alpha(white, 0.55);
+            }
+
+            button.recording-editor-tool-section-btn:hover {
+                background: alpha(white, 0.06);
+                color: alpha(white, 0.88);
+            }
+
+            /* The selected tool keeps the reference's filled pill. */
+            button.recording-editor-tool-section-btn:checked,
+            button.recording-editor-tool-section-btn:checked:hover {
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.96);
+            }
+
+            button.recording-editor-tool-section-btn:disabled {
+                opacity: 0.3;
+            }
+
+            /* The stack beneath the bar is a plain column, not a floating
+             * card, so it does not read as a separate surface. */
+            .recording-editor-tool-sidebar {
+                min-width: 0;
+                max-width: none;
+                background: transparent;
+                border-left: none;
+            }
+
+            .recording-editor-tools-column .recording-editor-zoom-panel {
+                background: transparent;
+                border-radius: 0;
+            }
+
+            .recording-editor-tools-column .recording-editor-zoom-header {
+                padding: 4px 14px 8px 14px;
+            }
+
+            .editor-theme-light .recording-editor-tools-column {
+                background: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-tool-section-btn {
+                color: alpha(#1d2129, 0.58);
+            }
+
+            .editor-theme-light .recording-editor-tool-section-btn:hover {
+                background: alpha(#111827, 0.06);
+                color: alpha(#1d2129, 0.88);
+            }
+
+            .editor-theme-light button.recording-editor-tool-section-btn:checked,
+            .editor-theme-light button.recording-editor-tool-section-btn:checked:hover {
+                background: alpha(#111827, 0.08);
+                color: alpha(#1d2129, 0.92);
+            }
+
+            /* The workspace is a plain two-column split now: tools and
+             * timeline on one near-black, the video stage on its own. */
+            .recording-editor-workspace {
+                padding: 0;
+                background: #000000;
+            }
+
+            .recording-editor-tools-column {
+                border-right: 1px solid alpha(white, 0.06);
+            }
+
+            .editor-theme-light .recording-editor-workspace {
+                padding: 0;
+                background: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-tools-column {
+                border-right-color: alpha(#111827, 0.10);
             }

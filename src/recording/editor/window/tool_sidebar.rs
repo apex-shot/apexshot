@@ -7,10 +7,10 @@ use crate::recording::editor::model::{
     ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
-    gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea, Entry,
-    EventControllerFocus, EventControllerMotion, GestureClick, GestureDrag, Grid, Image,
-    Label, Orientation, Overlay, PolicyType, Revealer, RevealerTransitionType, ScrolledWindow,
-    Switch, ToggleButton, Widget, Window,
+    gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
+    EventControllerMotion, GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay,
+    PolicyType, Revealer, RevealerTransitionType, ScrolledWindow, Switch, ToggleButton, Widget,
+    Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
