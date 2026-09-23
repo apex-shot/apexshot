@@ -144,26 +144,9 @@ pub fn draw_video_clip(
     let h = height as f64;
     let tiles = filmstrip_tile_spans(&state, w);
     let layout = video_layout(&state, w);
-    // A held tail lives past `trim_end`, so it draws as its own clip rather
-    // than stretching the last one: the frames never existed, and the filmstrip
-    // has nothing to show there.
-    if state.freeze_tail_seconds() > 0.001 {
-        let index = layout.len();
-        let x0 = state.time_to_x(state.trim_end_seconds, w);
-        let x1 = state.time_to_x(state.trim_end_seconds + state.freeze_tail_seconds(), w);
-        draw_video_segment(
-            cr,
-            x0,
-            x1,
-            h,
-            freeze_tone(light),
-            state.selected_segment == Some(index),
-            hovered == Some(index),
-            false,
-            &[],
-            &[],
-        );
-    }
+    // The hold is drawn inside the final segment (it repeats the last frame),
+    // so its width is the only new information the painter needs.
+    let pps = pixels_per_second(&state, w);
     let mut lifted = None;
     for &(_, seg_idx, x0, x1) in &layout {
         if dragging == Some(seg_idx) {
@@ -172,6 +155,12 @@ pub fn draw_video_clip(
         }
         let selected = state.selected_segment == Some(seg_idx);
         let faint = dragging.is_some() || (state.selected_segment.is_some() && !selected);
+        // Only the final segment can hold a frame open.
+        let hold = if state.freeze_applies_to_segment(seg_idx) {
+            state.freeze_tail_seconds()
+        } else {
+            0.0
+        };
         draw_video_segment(
             cr,
             x0,
@@ -179,13 +168,24 @@ pub fn draw_video_clip(
             h,
             clip_tone(selected, faint, light),
             selected,
-            hovered == Some(seg_idx),
+            selected || hovered == Some(seg_idx),
             false,
             &tiles,
             filmstrip,
+            hold,
+            pps,
         );
     }
     if let Some((x0, x1)) = lifted {
+        // A lifted clip is the one being dragged; if it is the last segment
+        // its hold rides along, otherwise it trims as plain footage.
+        let hold = if state.freeze_applies_to_segment(
+            state.segment_order.last().copied().unwrap_or(usize::MAX),
+        ) {
+            state.freeze_tail_seconds()
+        } else {
+            0.0
+        };
         draw_video_segment(
             cr,
             x0,
@@ -197,25 +197,9 @@ pub fn draw_video_clip(
             true,
             &tiles,
             filmstrip,
+            hold,
+            pps,
         );
-    }
-}
-
-/// A held-last-frame region: a flat still-toned clip, marked so it reads as a
-/// freeze rather than unrendered footage.
-fn freeze_tone(light: bool) -> ClipTone {
-    if light {
-        ClipTone {
-            fill: (0.16, 0.18, 0.22, 0.92),
-            edge: (0.30, 0.34, 0.40, 0.92),
-            handle: (0.30, 0.34, 0.40, 0.90),
-        }
-    } else {
-        ClipTone {
-            fill: (0.16, 0.17, 0.20, 0.92),
-            edge: (0.72, 0.78, 0.88, 0.92),
-            handle: (0.86, 0.90, 0.98, 0.90),
-        }
     }
 }
 
@@ -274,6 +258,8 @@ pub fn draw_video_segment(
     lifted: bool,
     tiles: &[(f64, f64)],
     filmstrip: &[gtk4::gdk_pixbuf::Pixbuf],
+    freeze: f64,
+    px_per_second: f64,
 ) {
     let clip_w = (x1 - x0).max(24.0);
     // Inset matches the Motion source lane (6px top/bottom in a 48px lane).
@@ -305,7 +291,41 @@ pub fn draw_video_segment(
             let tile_w = (span_end.min(x0 + clip_w) - tile_x).max(1.0);
             paint_cover_pixbuf(cr, pixbuf, tile_x, y, tile_w, height);
         }
+        // Past the last frame there is nothing to sample, so the hold repeats
+        // the final frame — that is what a freeze *is*, and it keeps the clip
+        // reading as footage instead of a black slab.
+        if freeze > 0.0 {
+            if let Some(last) = filmstrip.last() {
+                let hold_x0 = x0 + clip_w - freeze * px_per_second;
+                let mut tile_x = hold_x0;
+                let tile_w = (freeze * px_per_second / 3.0).max(8.0);
+                while tile_x < x0 + clip_w {
+                    paint_cover_pixbuf(
+                        cr,
+                        last,
+                        tile_x,
+                        y,
+                        tile_w.min(x0 + clip_w - tile_x),
+                        height,
+                    );
+                    tile_x += tile_w;
+                }
+            }
+        }
         let _ = cr.restore();
+    }
+    if freeze > 0.0 {
+        // Mark where the footage stops and the hold begins.
+        let mark = (x0 + clip_w - freeze * px_per_second).floor() + 0.5;
+        if mark > x0 + 1.0 && mark < x0 + clip_w - 1.0 {
+            cr.set_source_rgba(1.0, 1.0, 1.0, 0.35);
+            cr.set_line_width(1.0);
+            cr.set_dash(&[3.0, 3.0], 0.0);
+            cr.move_to(mark, y + 3.0);
+            cr.line_to(mark, y + height - 3.0);
+            let _ = cr.stroke();
+            cr.set_dash(&[], 0.0);
+        }
     }
     if selected {
         rounded_rect(cr, x0 + 0.5, y + 0.5, (clip_w - 1.0).max(0.0), (height - 1.0).max(0.0), 4.5);
