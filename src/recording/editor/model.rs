@@ -35,6 +35,11 @@ mod cursor_hide {
     include!("model_parts/cursor_hide_impl.rs");
 }
 
+pub mod background_render {
+    use super::*;
+    include!("model_parts/background_render.rs");
+}
+
 include!("model_parts/helpers.rs");
 
 #[cfg(test)]

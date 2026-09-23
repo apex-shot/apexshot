@@ -98,15 +98,31 @@ impl VideoGradient {
         }
     }
 
-    /// The stops in drawing order. Reversal is a view concern, so preview and
-    /// export both read the gradient through this and cannot disagree.
+    /// The stops in drawing order, always sorted by ascending position.
+    ///
+    /// Reversal mirrors the gradient rather than just reversing the list: each
+    /// stop's position is reflected around the midpoint as well, so the ramp
+    /// still runs left-to-right. Callers interpolate assuming ascending order,
+    /// so handing back a merely-reversed list would collapse the gradient to
+    /// its first color.
     pub fn draw_stops(&self) -> Vec<GradientStop> {
         let normalized = self.normalized();
-        if normalized.reversed {
-            normalized.stops.into_iter().rev().collect()
-        } else {
-            normalized.stops
+        if !normalized.reversed {
+            return normalized.stops;
         }
+        let count = normalized.stops.len();
+        // Walk from the end so the reflected positions come out ascending.
+        (0..count)
+            .map(|index| {
+                let source = normalized.stops[count - 1 - index];
+                GradientStop {
+                    position: 1.0 - source.position,
+                    r: source.r,
+                    g: source.g,
+                    b: source.b,
+                }
+            })
+            .collect()
     }
 
     /// Start and end points of the gradient line across a `width` x `height`
