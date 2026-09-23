@@ -120,7 +120,8 @@ support is improving over time.
 - **Daemon Mode** — Background service with system tray and global hotkeys for instant capture
 - **Settings** — Language, start at login, shutter sounds, shortcuts, recording, screenshots, annotation, and cloud
   ![ApexShot settings window](media/settings.png)
-- **History** — Browse screenshots, recordings, and cloud uploads from one window
+- **History** — Browse screenshots, recordings, saved Motion and video edits, and
+  cloud uploads from one window
   ![ApexShot history window](media/history.png)
 - **Display Support** — Ubuntu GNOME Wayland, Arch Linux GNOME Wayland, and Hyprland Wayland are the known-good targets. Other Wayland desktops and X11 paths are implemented but need more manual testing.
 - **Browser Integration** — Full-page scroll capture via Chrome/Chromium extension
@@ -485,7 +486,7 @@ apexshot video-editor <video>    # Open video editor with a specific video
 
 # Settings and cloud
 apexshot settings                # Open settings window
-apexshot history                 # Open capture history window (screenshots, recordings, cloud)
+apexshot history                 # Open capture history window (captures, edits, cloud)
 apexshot login                   # Sign in to ApexShot Cloud (device flow)
 apexshot logout                  # Sign out of ApexShot Cloud
 
