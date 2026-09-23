@@ -2,13 +2,24 @@
 
 Working agreement for LLM agents in this repository. `CONTRIBUTING.md` covers
 setup, the subsystem map, and code style; this file covers how work arrives here
-and what "done" means. Read both before changing anything.
+and what "done" means. Read this file every session; open `CONTRIBUTING.md`
+only when you actually need setup, the subsystem map, or style rules.
 
 ## The loop
 
 Most work starts as a *suspected* issue: the maintainer describes something that
 looks wrong. Move it through these states in order, and say which state you are
 in. Do not skip to step 2.
+
+**Fast path — direct requests.** When the maintainer already says what to
+change ("make it 48px", "match Motion", "drop the orange bar"), that
+instruction *is* the confirmation: skip step 1 and edit. Also skip subagent
+research, plan documents, and option-polling whenever one reading of the
+request is clearly the right one — pick it, say what you picked in one
+sentence, and keep moving. Step 1's diagnosis is for suspected bugs where the
+cause is not already named. The guardrails that actually matter are the
+branch, the narrow verify, and the no-CI-watching rules below; everything
+else is ceremony for a direct request.
 
 ### 1. Investigate and confirm, with no code changes
 
@@ -31,8 +42,8 @@ in. Do not skip to step 2.
 
 ### 2. Pick the lightest path that protects `main`
 
-Not every change needs a branch. A *confirmed* issue is what earns one; a typo
-does not.
+Not every change needs a branch. A *confirmed* issue or a direct instruction
+from the maintainer is what earns one; a typo does not.
 
 | Change | Path |
 | --- | --- |

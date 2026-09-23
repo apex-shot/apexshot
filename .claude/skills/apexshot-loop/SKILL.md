@@ -1,6 +1,6 @@
 ---
 name: apexshot-loop
-description: "ApexShot working agreement. Use on EVERY task in this repo: read AGENTS.md and CONTRIBUTING.md first, state the loop state (investigate / branch / verify / publish), and follow its verify, commit, and no-CI-watching rules."
+description: "ApexShot working agreement. Use on EVERY task in this repo: read AGENTS.md first, follow its fast path for direct requests (no investigation ceremony), state the loop state (investigate / branch / verify / publish), and follow its verify, commit, and no-CI-watching rules."
 ---
 
 # ApexShot loop
@@ -11,20 +11,25 @@ then watching slow CI. The fix is to load the agreement every time.
 
 ## Every conversation, before anything else
 
-1. Read `AGENTS.md` and `CONTRIBUTING.md` in the repo root.
+1. Read `AGENTS.md` in the repo root. Open `CONTRIBUTING.md` only when you
+   need its setup, subsystem map, or style rules.
 2. Say you did, with a link: `Per [AGENTS.md](AGENTS.md) — ...`.
 3. State which loop state you are in: **step 1 investigate** / **step 2 branch** /
    **step 3 verify** / **step 4 publish** / **step 5 after merge**.
-4. Do not skip step 1. Diagnosis and fix are separate steps; the maintainer
-   decides whether a fix proceeds.
+
+**Fast path:** when the maintainer says what to change, that instruction is
+the confirmation — skip step 1, skip subagent research, skip plan documents,
+skip option-polling. Pick the obvious reading, say what you picked in one
+sentence, edit. Step 1 is for suspected bugs where the cause is not already
+named.
 
 ## The rules that keep getting broken
 
-- **No code edits during step 1.** Restate the suspected issue, reproduce or
-  trace to `path/file.rs:123` with command + output, end with a verdict
+- **Step 1 applies to suspected bugs only** (see the fast path). Then: no
+  code edits while diagnosing, restate the issue, trace to
+  `path/file.rs:123` with command + output, end with a verdict
   (**confirmed** / **partly confirmed** / **not reproducible** /
-  **already fixed / by design**). Only a confirmed behaviour-changing issue
-  earns a branch.
+  **already fixed / by design**). A direct instruction needs no verdict.
 - **Step 2 path:** docs/typo/metadata-only small edits with no behaviour risk
   go straight to `main`; behaviour changes, multi-file fixes, features,
   refactors, packaging, and CI changes go on a branch + PR from `origin/main`.
