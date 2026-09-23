@@ -2090,3 +2090,104 @@ fn a_freeze_forces_reencode_because_stream_copy_cannot_hold_a_frame() {
     state.extend_last_segment(1.0);
     assert!(state.needs_reencode());
 }
+
+#[test]
+fn gradient_normalizes_stops_into_a_usable_shape() {
+    // Unsorted, out-of-range, and over the stop ceiling all at once.
+    let gradient = VideoGradient {
+        stops: (0..12)
+            .rev()
+            .map(|i| GradientStop::new(i as f64 / 4.0, i as u8, 0, 255 - i as u8))
+            .collect(),
+        angle_degrees: 45.0,
+        reversed: false,
+    }
+    .normalized();
+
+    assert_eq!(gradient.stops.len(), MAX_GRADIENT_STOPS);
+    // Sorted ascending, every position inside 0..=1.
+    for pair in gradient.stops.windows(2) {
+        assert!(pair[0].position <= pair[1].position);
+    }
+    assert!(gradient.stops.iter().all(|s| (0.0..=1.0).contains(&s.position)));
+}
+
+#[test]
+fn gradient_pads_a_single_stop_up_to_the_minimum() {
+    let gradient = VideoGradient {
+        stops: vec![GradientStop::new(0.5, 10, 20, 30)],
+        ..VideoGradient::default()
+    }
+    .normalized();
+    assert_eq!(gradient.stops.len(), MIN_GRADIENT_STOPS);
+}
+
+#[test]
+fn reversing_a_gradient_flips_draw_order_only() {
+    let gradient = VideoGradient {
+        stops: vec![
+            GradientStop::new(0.0, 255, 0, 0),
+            GradientStop::new(1.0, 0, 0, 255),
+        ],
+        angle_degrees: 30.0,
+        reversed: true,
+    };
+    let drawn = gradient.draw_stops();
+    assert_eq!(drawn[0].r, 0);
+    assert_eq!(drawn[0].b, 255);
+    assert_eq!(drawn[1].r, 255);
+    // Reversal is a view concern — the stored spec is untouched.
+    assert_eq!(gradient.stops[0].r, 255);
+    assert!(gradient.reversed);
+}
+
+#[test]
+fn gradient_endpoints_span_the_box_and_flip_with_the_angle() {
+    let gradient = VideoGradient {
+        angle_degrees: 0.0,
+        ..VideoGradient::default()
+    };
+    let ((x0, y0), (x1, y1)) = gradient.endpoints(400.0, 200.0);
+    // 0 degrees is left-to-right and centred vertically.
+    assert!(x0 < x1);
+    assert!((y0 - 100.0).abs() < 1e-6);
+    assert!((y1 - 100.0).abs() < 1e-6);
+
+    let vertical = VideoGradient {
+        angle_degrees: 90.0,
+        ..VideoGradient::default()
+    };
+    let ((vx0, vy0), (vx1, vy1)) = vertical.endpoints(400.0, 200.0);
+    assert!(vy0 < vy1);
+    assert!((vx0 - 200.0).abs() < 1e-6);
+}
+
+#[test]
+fn corner_radius_scales_like_padding_and_starts_square() {
+    let mut state = VideoEditState::new(metadata());
+    state.apply_aspect_ratio(1920, 1080);
+
+    // Fresh projects must not inherit the old inert 18.0 default.
+    assert_eq!(state.background_corner_radius, 0.0);
+    assert_eq!(state.background_corner_radius_px(), 0.0);
+    assert!(!state.has_corner_radius());
+    // No fill, no radius: nothing forces the composite graph.
+    assert!(!state.needs_composite());
+
+    state.background_corner_radius = 20.0;
+    // 20 slider units against a 1920px reference edge, same as padding.
+    assert!((state.background_corner_radius_px() - 96.0).abs() < 1e-9);
+    assert!(state.has_corner_radius());
+    // A radius with no background still needs the composite graph.
+    assert!(state.needs_composite());
+}
+
+#[test]
+fn a_negligible_corner_radius_does_not_force_a_composite() {
+    let mut state = VideoEditState::new(metadata());
+    state.apply_aspect_ratio(1920, 1080);
+    // Sub-pixel once scaled — not worth a mask.
+    state.background_corner_radius = 0.1;
+    assert!(!state.has_corner_radius());
+    assert!(!state.needs_composite());
+}

@@ -99,7 +99,13 @@ pub struct VideoEditState {
     pub selected_segment: Option<usize>,
     pub background: VideoBackground,
     pub background_padding: f64,
+    /// Rounded corners on the video card, in 400px-long-edge slider units.
+    /// 0 = square. Applied in both preview and export.
     pub background_corner_radius: f64,
+    /// Reserved for the Stroke row in the Background panel. Persisted so the
+    /// control has somewhere to write, but nothing renders it yet.
+    pub background_stroke: f64,
+    /// Reserved for the Shadow row. Like `background_stroke`, inert for now.
     pub background_shadow: f64,
     /// Static source crop in original video pixels. `None` keeps the full frame.
     pub crop: Option<CropSelection>,

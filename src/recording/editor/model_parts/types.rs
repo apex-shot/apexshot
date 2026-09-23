@@ -1,4 +1,5 @@
 include!("editor_types.rs");
+include!("background_types.rs");
 include!("cursor_types.rs");
 include!("zoom_types.rs");
 include!("motion_transform.rs");

@@ -11,11 +11,12 @@ use std::time::UNIX_EPOCH;
 
 use super::model::{
     AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorSettings, CursorTheme,
-    DimensionPreset, ExportQuality, ProjectMedia, ProjectMediaKind, VideoBackground,
-    VideoEditState, ZoomClip, ZoomEasing, ZoomMode, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS,
-    DEFAULT_CLICK_INTENSITY, DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS,
-    DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED,
-    DEFAULT_CURSOR_SWAY, DEFAULT_CURSOR_TILT, DEFAULT_CURSOR_TRAIL,
+    DimensionPreset, ExportQuality, GradientStop, ProjectMedia, ProjectMediaKind, VideoBackground,
+    VideoEditState, VideoGradient, ZoomClip, ZoomEasing, ZoomMode, DEFAULT_CLICK_COLOR,
+    DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY, DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE,
+    DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH,
+    DEFAULT_CURSOR_SPEED, DEFAULT_CURSOR_SWAY, DEFAULT_CURSOR_TILT, DEFAULT_CURSOR_TRAIL,
+    MIN_GRADIENT_STOPS,
 };
 
 pub const VIDEO_PROJECT_VERSION: u32 = 1;
@@ -50,7 +51,14 @@ pub struct VideoProjectFile {
     pub crop: Option<CropFile>,
     pub background: BackgroundFile,
     pub background_padding: f64,
+    // These three were persisted but never rendered, so older sidecars carry
+    // non-zero values that were never visible. They default to 0 rather than
+    // inheriting the old defaults, which would round every existing project.
+    #[serde(default)]
     pub background_corner_radius: f64,
+    #[serde(default)]
+    pub background_stroke: f64,
+    #[serde(default)]
     pub background_shadow: f64,
     pub dimension_preset: DimensionFile,
     pub custom_width: u32,
@@ -195,8 +203,33 @@ pub struct CropFile {
 pub enum BackgroundFile {
     None,
     Plain { r: u8, g: u8, b: u8 },
-    Gradient { index: usize },
+    /// Legacy preset reference. Gradients are drawn by hand now, so this is
+    /// only read — it deserializes to a default two-stop gradient.
+    Gradient {
+        #[serde(default)]
+        index: usize,
+    },
+    /// A hand-drawn gradient. `stops` carries the exact positions so a dragged
+    /// stop round-trips instead of snapping to an even distribution.
+    GradientSpec {
+        #[serde(default)]
+        stops: Vec<GradientStopFile>,
+        #[serde(default)]
+        angle_degrees: f64,
+        #[serde(default)]
+        reversed: bool,
+    },
     Wallpaper { path: PathBuf },
+}
+
+/// One gradient stop as stored on disk. `position` is 0..=1 along the line.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct GradientStopFile {
+    #[serde(default)]
+    pub position: f64,
+    pub r: u8,
+    pub g: u8,
+    pub b: u8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -464,33 +497,90 @@ fn background_to_file(bg: &VideoBackground) -> BackgroundFile {
             g: *g,
             b: *b,
         },
-        VideoBackground::Gradient(index) => BackgroundFile::Gradient { index: *index },
+        VideoBackground::Gradient(gradient) => {
+            let gradient = gradient.normalized();
+            BackgroundFile::GradientSpec {
+                stops: gradient
+                    .stops
+                    .iter()
+                    .map(|stop| GradientStopFile {
+                        position: stop.position,
+                        r: stop.r,
+                        g: stop.g,
+                        b: stop.b,
+                    })
+                    .collect(),
+                angle_degrees: gradient.angle_degrees,
+                reversed: gradient.reversed,
+            }
+        }
         VideoBackground::Wallpaper(path) => BackgroundFile::Wallpaper { path: path.clone() },
     }
+}
+
+/// True when `path` looks like a bundled wallpaper reference rather than a
+/// user-picked file. Bundled entries are stored as a bare file name with no
+/// directory, so anything carrying a parent is a real user path and must be
+/// left alone when it goes missing.
+fn bundled_wallpaper_name(path: &Path) -> Option<String> {
+    if path
+        .parent()
+        .is_some_and(|parent| !parent.as_os_str().is_empty())
+    {
+        return None;
+    }
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_owned())
 }
 
 fn background_from_file(bg: BackgroundFile) -> VideoBackground {
     match bg {
         BackgroundFile::None => VideoBackground::None,
         BackgroundFile::Plain { r, g, b } => VideoBackground::Plain { r, g, b },
-        BackgroundFile::Gradient { index } => VideoBackground::Gradient(index),
+        // Legacy preset references predating the hand-drawn gradient editor.
+        // There is no preset table any more, so they open as the default
+        // two-stop gradient rather than being dropped.
+        BackgroundFile::Gradient { .. } => VideoBackground::Gradient(VideoGradient::default()),
+        BackgroundFile::GradientSpec {
+            stops,
+            angle_degrees,
+            reversed,
+        } => VideoBackground::Gradient(
+            VideoGradient {
+                stops: stops
+                    .iter()
+                    .map(|stop| GradientStop::new(stop.position, stop.r, stop.g, stop.b))
+                    .collect(),
+                angle_degrees,
+                reversed,
+            }
+            .normalized(),
+        ),
         BackgroundFile::Wallpaper { path } => {
-            // Old projects stored gradients by index; new wallpaper entries
-            // resolve to the bundled asset when the file moved.
-            let resolved = if path.is_absolute() && path.is_file() {
+            // Bundled wallpapers are stored by bare file name and resolve
+            // against the asset directory. A user-picked image stores its real
+            // path, and must NOT be retried as a bundled name: if the user
+            // later moved or deleted it, that fallback would silently swap in
+            // an unrelated stock wallpaper. Those keep their path and fall
+            // through to the renderer's own missing-file handling instead.
+            let resolved = if path.is_file() {
                 path
-            } else if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                let candidate =
-                    crate::capture::editor::window::background_panel::background_gradient_asset_path(
-                        name,
-                    );
-                if candidate.is_file() {
-                    candidate
-                } else {
-                    path
-                }
             } else {
-                path
+                match bundled_wallpaper_name(&path) {
+                    Some(name) => {
+                        let candidate =
+                            crate::capture::editor::window::background_panel::background_gradient_asset_path(
+                                &name,
+                            );
+                        if candidate.is_file() {
+                            candidate
+                        } else {
+                            path
+                        }
+                    }
+                    None => path,
+                }
             };
             VideoBackground::Wallpaper(resolved)
         }
@@ -714,6 +804,7 @@ impl VideoEditState {
             background: background_to_file(&self.background),
             background_padding: self.background_padding,
             background_corner_radius: self.background_corner_radius,
+            background_stroke: self.background_stroke,
             background_shadow: self.background_shadow,
             dimension_preset: dimension_to_file(self.dimension_preset),
             custom_width: self.custom_width,
@@ -777,6 +868,7 @@ impl VideoEditState {
         self.background = background_from_file(file.background);
         self.background_padding = file.background_padding;
         self.background_corner_radius = file.background_corner_radius;
+        self.background_stroke = file.background_stroke;
         self.background_shadow = file.background_shadow;
         self.dimension_preset = dimension_from_file(file.dimension_preset);
         self.custom_width = file.custom_width;
@@ -1321,5 +1413,68 @@ mod tests {
 
         cleanup_project(&video);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hand_drawn_gradient_survives_the_json_round_trip() {
+        // Uneven stop positions are the whole point of the new type — an even
+        // distribution would not prove they are actually persisted.
+        let gradient = VideoGradient {
+            stops: vec![
+                GradientStop::new(0.0, 0x00, 0x90, 0xFF),
+                GradientStop::new(0.37, 0x12, 0x34, 0x56),
+                GradientStop::new(1.0, 0xFF, 0xFF, 0xFF),
+            ],
+            angle_degrees: 42.0,
+            reversed: true,
+        };
+        let file = background_to_file(&VideoBackground::Gradient(gradient.clone()));
+        let json = serde_json::to_string(&file).expect("gradient serializes");
+        let parsed: BackgroundFile = serde_json::from_str(&json).expect("gradient deserializes");
+        assert_eq!(background_from_file(parsed), VideoBackground::Gradient(gradient));
+    }
+
+    #[test]
+    fn a_legacy_gradient_index_still_loads() {
+        // Projects written before the gradient editor stored a preset index.
+        // There is no preset table any more, so it must open as a usable
+        // default rather than failing to deserialize.
+        let legacy: BackgroundFile =
+            serde_json::from_str(r#"{"type":"gradient","index":3}"#).expect("legacy gradient loads");
+        match background_from_file(legacy) {
+            VideoBackground::Gradient(gradient) => {
+                assert_eq!(gradient.stops.len(), MIN_GRADIENT_STOPS);
+            }
+            other => panic!("expected a gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_project_without_the_new_background_fields_defaults_them_to_zero() {
+        // Older sidecars predate stroke, and carry inert non-zero radius and
+        // shadow values. They must load as 0 so no existing project silently
+        // gains rounded corners the first time it is opened.
+        let project = VideoEditState::new(metadata_for(Path::new("/tmp/clip.mp4"), 8)).to_project();
+        let mut value = serde_json::to_value(&project).expect("project serializes");
+        let object = value.as_object_mut().expect("project is an object");
+        object.remove("background_corner_radius");
+        object.remove("background_stroke");
+        object.remove("background_shadow");
+
+        let restored: VideoProjectFile =
+            serde_json::from_value(value).expect("project without the new fields loads");
+        assert_eq!(restored.background_corner_radius, 0.0);
+        assert_eq!(restored.background_stroke, 0.0);
+        assert_eq!(restored.background_shadow, 0.0);
+    }
+
+    #[test]
+    fn a_missing_user_image_is_not_replaced_by_a_bundled_wallpaper() {
+        // Bundled wallpapers are stored as a bare file name; user-picked images
+        // keep a real path. Retrying a moved user image against the asset
+        // directory would silently swap in unrelated stock art.
+        let moved = PathBuf::from("/home/someone/Pictures/my-photo.jpg");
+        let resolved = background_from_file(BackgroundFile::Wallpaper { path: moved.clone() });
+        assert_eq!(resolved, VideoBackground::Wallpaper(moved));
     }
 }

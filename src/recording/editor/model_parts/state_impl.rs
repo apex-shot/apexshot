@@ -28,8 +28,13 @@ impl VideoEditState {
             selected_segment: None,
             background: VideoBackground::None,
             background_padding: 24.0,
-            background_corner_radius: 18.0,
-            background_shadow: 15.0,
+            // Both were previously non-zero but never read by any renderer, so
+            // the old values were invisible. They start at 0 now that the
+            // Background panel actually drives the radius — a non-zero default
+            // would silently round the corners of every existing project.
+            background_corner_radius: 0.0,
+            background_stroke: 0.0,
+            background_shadow: 0.0,
             crop: None,
             sidecar,
             cursor: CursorSettings::default(),

@@ -126,7 +126,11 @@ impl ExportQuality {
 pub enum VideoBackground {
     None,
     Plain { r: u8, g: u8, b: u8 },
-    Gradient(usize),
+    /// A user-drawn linear gradient. Holds its own stops rather than a preset
+    /// index so preview and export describe it identically.
+    Gradient(VideoGradient),
+    /// Any image behind the video: a bundled wallpaper or a file the user
+    /// picked. The path is the only identity — nothing here says which.
     Wallpaper(PathBuf),
 }
 

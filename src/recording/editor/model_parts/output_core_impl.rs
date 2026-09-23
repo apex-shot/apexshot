@@ -37,6 +37,27 @@ impl VideoEditState {
             * reference
     }
 
+    /// Corner radius on the video card, in canvas pixels. Uses the same
+    /// 400px-long-edge slider units as padding so the panel's number matches
+    /// what preview and export draw. Unlike padding this does not depend on a
+    /// fill being active — a rounded card over a black scene still reads as
+    /// rounded, so it stays live with `background: None`.
+    pub fn background_corner_radius_px(&self) -> f64 {
+        if !self.background_corner_radius.is_finite() || self.background_corner_radius <= 0.0 {
+            return 0.0;
+        }
+        let (canvas_w, canvas_h) = self.canvas_dimensions();
+        let reference = canvas_w.max(canvas_h) as f64 / 400.0;
+        self.background_corner_radius * reference
+    }
+
+    /// True when the corner radius is large enough to be worth masking. The
+    /// export and preview both skip the rounded-corner path below this, so a
+    /// fractional slider value near zero doesn't add a filter for nothing.
+    pub fn has_corner_radius(&self) -> bool {
+        self.background_corner_radius_px() > 0.5
+    }
+
     /// Export size. A fixed Frame is the output exactly (16:9 exports
     /// 1920x1080 whatever the recording is); `Original` has no ratio to hold,
     /// so a fill grows the canvas around the source, matching Auto sizing in
@@ -109,6 +130,9 @@ impl VideoEditState {
     pub fn needs_composite(&self) -> bool {
         (!self.zoom_clips.is_empty() && !self.zoom_hidden)
             || !self.background.is_none()
+            // A radius needs the composite graph even with no fill, otherwise
+            // the mask never reaches the encoder and the corners stay square.
+            || self.has_corner_radius()
             || self
                 .sidecar
                 .as_ref()
