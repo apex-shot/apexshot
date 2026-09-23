@@ -468,50 +468,37 @@ struct BgValueRow {
 }
 
 fn bg_value_row(label: &str) -> BgValueRow {
-    let row = GtkBox::new(Orientation::Vertical, 4);
+    // One row, not two. The filled slider already draws its own name and
+    // value, so the editable number sits beside it rather than above it —
+    // stacking them printed every value twice and cost a line each.
+    let row = GtkBox::new(Orientation::Horizontal, 8);
     row.add_css_class("recording-editor-bg-value-row");
     row.set_hexpand(true);
 
-    let top = GtkBox::new(Orientation::Horizontal, 8);
-    top.set_hexpand(true);
+    // `FillSlider::new` shows a 0-100 percentage, which would render a 24px
+    // padding on an 0-80 range as "30". Show the real value in px instead.
+    let scale = FillSlider::new_with_value_text(label, |value, _, _| format!("{value:.0}px"));
+    let track = scale.widget();
+    track.set_hexpand(true);
+    track.set_size_request(-1, 32);
+    row.append(&track);
 
-    let name = Label::new(Some(label));
-    name.add_css_class("recording-editor-zoom-classic-label");
-    name.set_xalign(0.0);
-    name.set_hexpand(true);
-    name.set_valign(Align::Center);
-    top.append(&name);
-
-    let pill = GtkBox::new(Orientation::Horizontal, 6);
+    let pill = GtkBox::new(Orientation::Horizontal, 4);
     pill.add_css_class("recording-editor-bg-value-pill");
     pill.set_valign(Align::Center);
 
+    // The slider already prints the value with its unit; the pill is just the
+    // typed-in form of the same number.
     let entry = Entry::new();
     entry.add_css_class("recording-editor-bg-value-entry");
     entry.set_width_chars(3);
     entry.set_max_width_chars(3);
     entry.set_valign(Align::Center);
-    // Entries have no xalign of their own; alignment rides on the editable
-    // text, so right-align it to sit next to the unit suffix.
+    entry.set_tooltip_text(Some(&t("Type an exact value in pixels")));
     gtk4::prelude::EntryExt::set_alignment(&entry, 1.0);
     pill.append(&entry);
 
-    let unit = Label::new(Some("px"));
-    unit.add_css_class("recording-editor-bg-value-unit");
-    unit.set_valign(Align::Center);
-    pill.append(&unit);
-
-    top.append(&pill);
-    row.append(&top);
-
-    // The slider carries the same value; the pill is a readout plus a way to
-    // type an exact number.
-    let scale = FillSlider::new_with_value_text("", |value, _, _| {
-        format!("{value:.0}")
-    });
-    let track = scale.widget();
-    track.add_css_class("recording-editor-bg-value-track");
-    row.append(&track);
+    row.append(&pill);
 
     BgValueRow {
         widget: row,
