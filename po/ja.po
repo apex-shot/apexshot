@@ -2437,6 +2437,54 @@ msgstr "テキストを追加"
 msgid "Drag to place the title; double-click to reset"
 msgstr "ドラッグしてタイトルを配置、ダブルクリックでリセット"
 
+msgid "Edited"
+msgstr "編集済み"
+
+msgid "Motion Edits"
+msgstr "モーション編集"
+
+msgid "Motion edit"
+msgstr "モーション編集"
+
+msgid "Video Edits"
+msgstr "動画編集"
+
+msgid "Video edit"
+msgstr "動画編集"
+
+msgid "Delete edit"
+msgstr "編集を削除"
+
+msgid "Removed the saved edit"
+msgstr "保存された編集を削除しました"
+
+msgid "Search motion edits"
+msgstr "モーション編集を検索"
+
+msgid "Search video edits"
+msgstr "動画編集を検索"
+
+msgid "No motion edits yet"
+msgstr "モーション編集はまだありません"
+
+msgid "No video edits yet"
+msgstr "動画編集はまだありません"
+
+msgid "Motion edits you make will show up here."
+msgstr "作成したモーション編集はここに表示されます。"
+
+msgid "Video edits you make will show up here."
+msgstr "作成した動画編集はここに表示されます。"
+
+msgid "This removes the saved edit and keeps the original file."
+msgstr "保存された編集を削除し、元のファイルは保持します。"
+
+msgid "{count} motion edits"
+msgstr "モーション編集 {count} 件"
+
+msgid "{count} video edits"
+msgstr "動画編集 {count} 件"
+ 
 msgid "Freeze"
 msgstr "フリーズ"
 

@@ -322,10 +322,11 @@ the C++ Qt5 overlay (`capture-overlay/`) handles area selection instead.
 ### History Module (`src/history/`)
 
 **Purpose:** GTK4 capture-history browser for reviewing past local captures
-(screenshots and recordings) and ApexShot Cloud uploads. The window is built as
-a visual sibling of the Settings window — it reuses the same chromeless shell,
-CSS vocabulary, sidebar/page-stack pattern, edge-drag resize, and window-drag
-helpers from `src/settings/` so the two windows look and behave consistently.
+(screenshots and recordings), saved Motion and video edits, and ApexShot Cloud
+uploads. The window is built as a visual sibling of the Settings window — it
+reuses the same chromeless shell, CSS vocabulary, sidebar/page-stack pattern,
+edge-drag resize, and window-drag helpers from `src/settings/` so the two
+windows look and behave consistently.
 
 **Submodules:**
 - `mod.rs` — Module root and `show_history_window()` entry point. Uses its own
@@ -336,6 +337,10 @@ helpers from `src/settings/` so the two windows look and behave consistently.
   `src/settings/mod.rs`
 - `local_page.rs` — Screenshots / Recordings grid pages with search, refresh,
   empty states, and per-item action popovers
+- `edits_page.rs` — Motion Edits / Video Edits pages listing *saved projects*
+  rather than files on disk, built from one `EditsKind`-parameterized builder.
+  A card opens its edit back up in the matching editor; "Delete edit" removes
+  only the project sidecar, never the source capture
 - `cloud_page.rs` — Cloud page state machine (signed-out / free / XBackBone /
   error / subscribed) and paged cloud upload grid
 - `scan.rs` — GUI-free local capture scanner (image/video, newest-first)

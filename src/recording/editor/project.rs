@@ -324,6 +324,50 @@ pub fn delete_project(path: &Path) {
     }
 }
 
+impl VideoProjectFile {
+    /// A display name for a History card: the persisted title, falling back
+    /// to the source file's stem.
+    pub fn display_name(&self) -> String {
+        let title = self.title.trim();
+        if !title.is_empty() {
+            return title.to_string();
+        }
+        self.source_path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+            .unwrap_or_default()
+    }
+
+    /// The source recording is still on disk and unchanged, so the edit still
+    /// applies to it.
+    pub fn source_is_current(&self) -> bool {
+        match source_fingerprint(&self.source_path) {
+            Some((size, mtime)) => size == self.source_size && mtime == self.source_mtime_secs,
+            None => false,
+        }
+    }
+}
+
+/// Every persisted video project, newest source first, for the History window.
+///
+/// Unreadable or corrupt files are skipped rather than failing the listing,
+/// and entries whose source recording is gone or changed are dropped: those
+/// edits can no longer be applied to anything.
+pub fn list_projects() -> Vec<VideoProjectFile> {
+    let Ok(read_dir) = std::fs::read_dir(video_projects_directory()) else {
+        return Vec::new();
+    };
+    let mut projects: Vec<VideoProjectFile> = read_dir
+        .flatten()
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "json"))
+        .filter_map(|entry| std::fs::read_to_string(entry.path()).ok())
+        .filter_map(|json| serde_json::from_str::<VideoProjectFile>(&json).ok())
+        .filter(VideoProjectFile::source_is_current)
+        .collect();
+    projects.sort_by(|a, b| b.source_mtime_secs.cmp(&a.source_mtime_secs));
+    projects
+}
+
 fn zoom_to_file(clip: &ZoomClip) -> ZoomClipFile {
     ZoomClipFile {
         start: clip.start,
@@ -1189,6 +1233,92 @@ mod tests {
         restored.apply_project(loaded);
         assert_eq!(restored.background, VideoBackground::Wallpaper(wallpaper));
         assert!((restored.background_padding - 40.0).abs() < 1e-12);
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn display_name_prefers_the_title_over_the_file_stem() {
+        let dir = scratch("display-name");
+        let video = write_video(&dir, "clip.mp4", 8);
+        let state = VideoEditState::new(metadata_for(&video, 8));
+        let mut project = state.to_project();
+
+        project.title = "My zoom".into();
+        assert_eq!(project.display_name(), "My zoom");
+
+        project.title = "   ".into();
+        assert_eq!(project.display_name(), "clip");
+
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_changed_source_is_not_current() {
+        let dir = scratch("source-current");
+        let video = write_video(&dir, "clip.mp4", 8);
+        let state = VideoEditState::new(metadata_for(&video, 8));
+        let project = state.to_project();
+        assert!(project.source_is_current());
+
+        fs::write(&video, vec![b'v'; 64]).unwrap();
+        let touched = SystemTime::now() + Duration::from_secs(2);
+        let _ = fs::File::options()
+            .write(true)
+            .open(&video)
+            .unwrap()
+            .set_modified(touched);
+        assert!(!project.source_is_current());
+
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_saved_project_appears_in_the_listing() {
+        let dir = scratch("listing");
+        let video = write_video(&dir, "clip.mp4", 8);
+        let mut state = VideoEditState::new(metadata_for(&video, 8));
+        state.trim_start_seconds = 1.0;
+        persist_video_session(&state);
+
+        let listed = list_projects();
+        assert!(
+            listed
+                .iter()
+                .any(|project| project.source_path == video.canonicalize().unwrap()),
+            "the saved project should be listed"
+        );
+
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_project_whose_source_changed_is_left_out_of_the_listing() {
+        let dir = scratch("listing-stale");
+        let video = write_video(&dir, "clip.mp4", 8);
+        let mut state = VideoEditState::new(metadata_for(&video, 8));
+        state.trim_start_seconds = 1.0;
+        persist_video_session(&state);
+
+        fs::write(&video, vec![b'v'; 64]).unwrap();
+        let touched = SystemTime::now() + Duration::from_secs(2);
+        let _ = fs::File::options()
+            .write(true)
+            .open(&video)
+            .unwrap()
+            .set_modified(touched);
+
+        let listed = list_projects();
+        assert!(
+            !listed
+                .iter()
+                .any(|project| project.source_path == video.canonicalize().unwrap()),
+            "an edit whose source changed can no longer be applied, so it must not be listed"
+        );
+
         cleanup_project(&video);
         let _ = fs::remove_dir_all(&dir);
     }

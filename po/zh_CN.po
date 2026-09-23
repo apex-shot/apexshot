@@ -2434,6 +2434,54 @@ msgstr "添加文字"
 msgid "Drag to place the title; double-click to reset"
 msgstr "拖动以放置标题；双击以重置"
 
+msgid "Edited"
+msgstr "已编辑"
+
+msgid "Motion Edits"
+msgstr "动态编辑"
+
+msgid "Motion edit"
+msgstr "动态编辑"
+
+msgid "Video Edits"
+msgstr "视频编辑"
+
+msgid "Video edit"
+msgstr "视频编辑"
+
+msgid "Delete edit"
+msgstr "删除编辑"
+
+msgid "Removed the saved edit"
+msgstr "已移除保存的编辑"
+
+msgid "Search motion edits"
+msgstr "搜索动态编辑"
+
+msgid "Search video edits"
+msgstr "搜索视频编辑"
+
+msgid "No motion edits yet"
+msgstr "还没有动态编辑"
+
+msgid "No video edits yet"
+msgstr "还没有视频编辑"
+
+msgid "Motion edits you make will show up here."
+msgstr "你制作的动态编辑将显示在这里。"
+
+msgid "Video edits you make will show up here."
+msgstr "你制作的视频编辑将显示在这里。"
+
+msgid "This removes the saved edit and keeps the original file."
+msgstr "这将移除保存的编辑并保留原始文件。"
+
+msgid "{count} motion edits"
+msgstr "{count} 个动态编辑"
+
+msgid "{count} video edits"
+msgstr "{count} 个视频编辑"
+ 
 msgid "Freeze"
 msgstr "冻结"
 

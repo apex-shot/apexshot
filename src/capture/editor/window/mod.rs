@@ -1269,6 +1269,15 @@ fn setup_editor_window_full(
             runtime.refresh_motion_surfaces();
         }
     }
+    // Restore persisted Motion edits last, so they win over the Static
+    // background import above: a saved zoom/text/appearance setup is the
+    // user's authored intent for this image, not a default to seed.
+    if !empty_drop_zone {
+        let session = motion_host.session();
+        let mut runtime = session.runtime.borrow_mut();
+        super::motion_project::restore_into(&mut runtime.motion, &path);
+        runtime.refresh_motion_surfaces();
+    }
     *background_fill_slot.borrow_mut() = Some(Rc::new({
         let session = motion_host.session();
         move |color: DrawColor| {
@@ -2588,6 +2597,7 @@ fn setup_editor_window_full(
     let state_prefs = state.clone();
     let session_alive_prefs = session_alive.clone();
     let path_persist = path.clone();
+    let motion_session_persist = motion_host.session();
     window.connect_close_request(move |_| {
         // Superseded session: don't save stale preferences on close.
         if !session_alive_prefs.get() {
@@ -2595,6 +2605,10 @@ fn setup_editor_window_full(
         }
         if !empty_drop_zone {
             persist_image_session_on_close(&path_persist, &state_prefs, &session_baseline);
+            // Motion edits live outside EditorState, so they persist
+            // separately. An untouched Motion session writes no sidecar.
+            let motion = motion_session_persist.runtime.borrow();
+            super::motion_project::persist_motion_session(&motion.motion, &path_persist);
         }
         crate::gnome_integration::emit_tracked_window_closed(&tracked_window_id);
         let prefs = {
