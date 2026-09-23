@@ -298,7 +298,7 @@ fn poster_frame_args(input: &Path, output: &Path, timestamp_seconds: f64) -> Vec
     ]
 }
 
-fn thumbnail_count(_duration_seconds: f64) -> usize {
+pub(crate) fn thumbnail_count(_duration_seconds: f64) -> usize {
     // Fixed for every clip: the timeline strip stretches its tiles to fill the
     // window width, so a variable count would change tile width per video. A
     // sub-1s clip sampled 12 times still yields distinct, valid frames because
@@ -310,7 +310,7 @@ fn thumbnail_count(_duration_seconds: f64) -> usize {
 ///
 /// Never seeks to exact EOF: ffprobe duration is often slightly past the last
 /// decodable frame, so `-ss duration` yields a blank/white last tile.
-fn thumbnail_timestamp(duration_seconds: f64, index: usize, count: usize) -> f64 {
+pub(crate) fn thumbnail_timestamp(duration_seconds: f64, index: usize, count: usize) -> f64 {
     if count == 0 || duration_seconds <= 0.0 || !duration_seconds.is_finite() {
         return 0.0;
     }

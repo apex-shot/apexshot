@@ -147,6 +147,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         InitialVideo::None => None,
     };
     let state = state.unwrap_or_else(|| Arc::new(Mutex::new(placeholder_edit_state())));
+    let filmstrip: Rc<RefCell<Vec<gtk4::gdk_pixbuf::Pixbuf>>> = Rc::new(RefCell::new(Vec::new()));
     let media = Rc::new(RefCell::new(match &initial_video {
         InitialVideo::AsyncLoad(path) => Some(MediaFile::for_filename(path)),
         InitialVideo::None => Some(MediaFile::new()),
@@ -225,10 +226,18 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     workspace.append(&sidebar.widget);
     root.append(&workspace);
 
-    let (timeline, paint, pause_playback) =
-        timeline_card::build_timeline_card(state.clone(), media.clone(), ping.clone());
+    let (timeline, paint, pause_playback) = timeline_card::build_timeline_card(
+        state.clone(),
+        media.clone(),
+        filmstrip.clone(),
+        ping.clone(),
+    );
     root.append(&timeline);
-    *paint_slot.borrow_mut() = Some(paint);
+    *paint_slot.borrow_mut() = Some(paint.clone());
+    if state.lock().unwrap().has_source_video() {
+        let metadata = state.lock().unwrap().metadata.clone();
+        spawn_filmstrip_job(metadata, filmstrip.clone(), state.clone(), paint);
+    }
     *pause_playback_slot.borrow_mut() = Some(pause_playback);
     *refresh_slot.borrow_mut() = Some({
         let refresh_tools = tools.refresh;
@@ -242,6 +251,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     drop_target.connect_drop({
         let state = state.clone();
         let media = media.clone();
+        let filmstrip = filmstrip.clone();
         let window = window.clone();
         let ping = ping.clone();
         move |_, value, _, _| {
@@ -251,7 +261,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
             let Some(path) = file.path() else {
                 return false;
             };
-            load_preview_video(path, &state, &media, &window, &ping)
+            load_preview_video(path, &state, &media, &filmstrip, &window, &ping)
         }
     });
     preview_widget.add_controller(drop_target);
@@ -261,13 +271,20 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     open_click.connect_released({
         let state = state.clone();
         let media = media.clone();
+        let filmstrip = filmstrip.clone();
         let window = window.clone();
         let ping = ping.clone();
         move |_, _, _, _| {
             if state.lock().unwrap().metadata.duration_seconds > 0.0 {
                 return;
             }
-            show_open_preview_video(&window, state.clone(), media.clone(), ping.clone());
+            show_open_preview_video(
+                &window,
+                state.clone(),
+                media.clone(),
+                filmstrip.clone(),
+                ping.clone(),
+            );
         }
     });
     preview_widget.add_controller(open_click);
@@ -335,15 +352,18 @@ fn load_preview_video(
     path: PathBuf,
     state: &Arc<Mutex<VideoEditState>>,
     media: &Rc<RefCell<Option<MediaFile>>>,
+    filmstrip: &Rc<RefCell<Vec<gtk4::gdk_pixbuf::Pixbuf>>>,
     window: &ApplicationWindow,
     ping: &Rc<dyn Fn()>,
 ) -> bool {
     let Ok(metadata) = ffmpeg::probe_metadata(&path) else {
         return false;
     };
-    let mut next = VideoEditState::new(metadata);
+    let mut next = VideoEditState::new(metadata.clone());
     project::restore_into(&mut next);
     *state.lock().unwrap() = next;
+    filmstrip.borrow_mut().clear();
+    spawn_filmstrip_job(metadata, filmstrip.clone(), state.clone(), ping.clone());
     let has_mouse_data = state.lock().unwrap().supports_auto_zoom();
     if let Some(player) = media.borrow().as_ref() {
         player.set_file(Some(&gio::File::for_path(&path)));
@@ -355,10 +375,51 @@ fn load_preview_video(
     true
 }
 
+/// Decodes the timeline filmstrip for `metadata` on a worker thread, then
+/// swaps the frames into `filmstrip` and repaints. A stale job (a newer video
+/// was loaded meanwhile) is discarded. On failure the slot keeps whatever it
+/// held — usually empty — and the clip still draws its orange fill.
+///
+/// Pixbufs cross into the UI on the main thread: `Pixbuf` is neither `Send`
+/// nor `Sync`, and the cache dir is keyed per source path, so a superseded
+/// job's files are either still equivalent tiles or gone — `from_file` failure
+/// just drops that tile.
+fn spawn_filmstrip_job(
+    metadata: VideoMetadata,
+    filmstrip: Rc<RefCell<Vec<gtk4::gdk_pixbuf::Pixbuf>>>,
+    state: Arc<Mutex<VideoEditState>>,
+    ping: Rc<dyn Fn()>,
+) {
+    let source = metadata.path.clone();
+    let (sender, receiver) = mpsc::channel::<Vec<PathBuf>>();
+    std::thread::spawn(move || {
+        let thumbnails = ffmpeg::generate_thumbnails(&metadata).unwrap_or_default();
+        let _ = sender.send(thumbnails);
+    });
+    glib::timeout_add_local(Duration::from_millis(100), move || {
+        match receiver.try_recv() {
+            Ok(thumbnails) => {
+                if state.lock().unwrap().metadata.path == source {
+                    let frames = thumbnails
+                        .iter()
+                        .filter_map(|thumb| gtk4::gdk_pixbuf::Pixbuf::from_file(thumb).ok())
+                        .collect();
+                    *filmstrip.borrow_mut() = frames;
+                    ping();
+                }
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        }
+    });
+}
+
 fn show_open_preview_video(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     media: Rc<RefCell<Option<MediaFile>>>,
+    filmstrip: Rc<RefCell<Vec<gtk4::gdk_pixbuf::Pixbuf>>>,
     ping: Rc<dyn Fn()>,
 ) {
     let title = t("Open video");
@@ -380,7 +441,7 @@ fn show_open_preview_video(
     chooser.connect_response(move |dialog, response| {
         if response == ResponseType::Accept {
             if let Some(path) = dialog.file().and_then(|file| file.path()) {
-                load_preview_video(path, &state, &media, &window, &ping);
+                load_preview_video(path, &state, &media, &filmstrip, &window, &ping);
             }
         }
         dialog.hide();
@@ -1096,8 +1157,16 @@ mod tests {
     fn light_theme_playhead_is_black_and_clips_have_no_lift_shadow() {
         let painting = include_str!("timeline_card_parts/painting.rs");
         assert!(
-            painting.contains("cr.set_source_rgba(0.07, 0.08, 0.09, alpha)"),
-            "Light-theme playhead must paint black"
+            painting.contains("(0.07, 0.08, 0.09)"),
+            "Light-theme playhead stem and capsule outline must paint black"
+        );
+        assert!(
+            painting.contains("cr.set_source_rgba(0.80, 0.22, 0.20, 0.95)"),
+            "Hover read-out must paint the Motion red hairline"
+        );
+        assert!(
+            !painting.contains("x - 5.0, 20.0"),
+            "Playhead head must be a capsule, not a triangle"
         );
         assert!(
             !painting.contains("0.0, 0.0, 0.0, 0.38"),
@@ -1106,6 +1175,27 @@ mod tests {
         assert!(
             painting.contains("fn widget_is_light"),
             "Timeline painting must detect the light theme"
+        );
+    }
+
+    #[test]
+    fn zoom_and_hide_clips_outline_only_the_selected_clip() {
+        let painting = include_str!("timeline_card_parts/painting.rs");
+        assert!(
+            painting.contains("edge: (f64, f64, f64, f64)"),
+            "ClipTone must carry a selection outline color like the Motion tones"
+        );
+        assert!(
+            painting.contains("let (r, g, b, a) = blue.edge;"),
+            "Selected zoom clips must stroke their outline"
+        );
+        assert!(
+            painting.contains("let (r, g, b, a) = rose.edge;"),
+            "Selected hide clips must stroke their outline"
+        );
+        assert!(
+            painting.contains("let (r, g, b, a) = tone.edge;"),
+            "Selected video clips must stroke their outline"
         );
     }
 }

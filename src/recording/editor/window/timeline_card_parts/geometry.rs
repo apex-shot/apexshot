@@ -200,6 +200,52 @@ pub fn pixels_per_second(state: &VideoEditState, width: f64) -> f64 {
     width.max(1.0) / state.visible_span_seconds().max(0.001)
 }
 
+/// Source-time spans for the filmstrip tiles painted across the video clip.
+///
+/// Tile `i` starts at the ffmpeg sample time the thumbnail was extracted at
+/// and extends to the next tile's start (the last tile extends one full step
+/// past its own start, capped at the usable end). Callers map the span ends
+/// through `source_to_x`, so cuts, per-segment speed, trim and scroll all
+/// apply without extra math here.
+pub fn filmstrip_tile_times(duration: f64, count: usize) -> Vec<(f64, f64)> {
+    use crate::recording::editor::ffmpeg::{thumbnail_count, thumbnail_timestamp};
+    let count = if count == 0 {
+        thumbnail_count(duration)
+    } else {
+        count
+    };
+    if count == 0 || !duration.is_finite() || duration <= 0.0 {
+        return vec![(0.0, 0.0); count];
+    }
+    let step = duration / count as f64;
+    (0..count)
+        .map(|index| {
+            let start = thumbnail_timestamp(duration, index, count).max(0.0);
+            let end = if index + 1 < count {
+                thumbnail_timestamp(duration, index + 1, count).max(start)
+            } else {
+                (start + step).min(duration).max(start)
+            };
+            (start, end)
+        })
+        .collect()
+}
+
+/// Pixel spans for each filmstrip tile in the current view.
+pub fn filmstrip_tile_spans(state: &VideoEditState, width: f64) -> Vec<(f64, f64)> {
+    let count =
+        crate::recording::editor::ffmpeg::thumbnail_count(state.metadata.duration_seconds);
+    filmstrip_tile_times(state.metadata.duration_seconds, count)
+        .into_iter()
+        .map(|(start, end)| {
+            (
+                state.source_to_x(start, width),
+                state.source_to_x(end, width).max(state.source_to_x(start, width)),
+            )
+        })
+        .collect()
+}
+
 pub fn playhead_snap_threshold(state: &VideoEditState, width: f64) -> f64 {
     PLAYHEAD_SNAP / pixels_per_second(state, width).max(1e-6)
 }
@@ -316,3 +362,48 @@ pub const HANDLE_WIDTH: f64 = 4.0;
 pub const HANDLE_HIT: f64 = 6.0;
 pub const PLAYHEAD_HIT: f64 = 6.0;
 pub const PLAYHEAD_SNAP: f64 = 12.0;
+
+#[cfg(test)]
+mod tests {
+    use super::filmstrip_tile_times;
+
+    #[test]
+    fn filmstrip_tiles_cover_duration_without_touching_eof() {
+        let duration = 10.0;
+        let tiles = filmstrip_tile_times(duration, 0);
+        assert_eq!(tiles.len(), 12);
+        assert!((tiles[0].0 - 0.0).abs() < 1e-9);
+        for window in tiles.windows(2) {
+            assert!(window[0].0 <= window[0].1);
+            assert!(window[1].0 >= window[0].0);
+            assert!((window[1].0 - window[0].1).abs() < 1e-9);
+        }
+        let last = tiles.last().unwrap();
+        assert!(last.0 < last.1);
+        assert!(last.0 < duration, "last tile must start from a pre-EOF sample");
+        assert!(last.1 <= duration, "last tile must not run past EOF");
+        assert!(last.1 > duration * 0.9, "last tile must still reach near the end");
+    }
+
+    #[test]
+    fn filmstrip_tiles_degrade_on_degenerate_durations() {
+        for duration in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+            let tiles = filmstrip_tile_times(duration, 0);
+            assert_eq!(tiles.len(), 12, "duration {duration}");
+            assert!(
+                tiles.iter().all(|&(start, end)| start == 0.0 && end == 0.0),
+                "duration {duration}: {tiles:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn filmstrip_tile_count_overrides_default() {
+        let tiles = filmstrip_tile_times(8.0, 4);
+        assert_eq!(tiles.len(), 4);
+        assert!((tiles[0].0 - 0.0).abs() < 1e-9);
+        let last = tiles.last().unwrap();
+        assert!(last.0 < 8.0);
+        assert!(last.1 <= 8.0);
+    }
+}

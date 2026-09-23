@@ -129,6 +129,7 @@ pub fn draw_video_clip(
     hovered: Option<usize>,
     dragging: Option<usize>,
     light: bool,
+    filmstrip: &[gtk4::gdk_pixbuf::Pixbuf],
     cr: &gtk4::cairo::Context,
     width: i32,
     height: i32,
@@ -136,27 +137,16 @@ pub fn draw_video_clip(
     let state = state.lock().unwrap();
     let w = width as f64;
     let h = height as f64;
-    let fallback_title = t("Screen Recording");
-    let title = if state.title.trim().is_empty() {
-        fallback_title.as_str()
-    } else {
-        state.title.as_str()
-    };
-    let bounds = state.segment_boundaries();
+    let tiles = filmstrip_tile_spans(&state, w);
     let layout = video_layout(&state, w);
     let mut lifted = None;
     for &(_, seg_idx, x0, x1) in &layout {
         if dragging == Some(seg_idx) {
-            lifted = Some((seg_idx, x0, x1));
+            lifted = Some((x0, x1));
             continue;
         }
         let selected = state.selected_segment == Some(seg_idx);
         let faint = dragging.is_some() || (state.selected_segment.is_some() && !selected);
-        let label = if selected || state.selected_segment.is_none() {
-            bounds.get(seg_idx).map(|&(start, end)| (title, start, end))
-        } else {
-            None
-        };
         draw_video_segment(
             cr,
             x0,
@@ -166,11 +156,11 @@ pub fn draw_video_clip(
             selected,
             hovered == Some(seg_idx),
             false,
-            light,
-            label,
+            &tiles,
+            filmstrip,
         );
     }
-    if let Some((seg_idx, x0, x1)) = lifted {
+    if let Some((x0, x1)) = lifted {
         draw_video_segment(
             cr,
             x0,
@@ -180,8 +170,8 @@ pub fn draw_video_clip(
             true,
             true,
             true,
-            light,
-            bounds.get(seg_idx).map(|&(start, end)| (title, start, end)),
+            &tiles,
+            filmstrip,
         );
     }
 }
@@ -191,16 +181,19 @@ pub fn clip_tone(selected: bool, faint: bool, light: bool) -> ClipTone {
         return if faint {
             ClipTone {
                 fill: (0.78, 0.52, 0.14, 0.16),
+                edge: (0.45, 0.25, 0.02, 0.92),
                 handle: (0.48, 0.28, 0.03, 0.38),
             }
         } else if selected {
             ClipTone {
                 fill: (0.78, 0.52, 0.14, 0.54),
+                edge: (0.45, 0.25, 0.02, 0.92),
                 handle: (0.48, 0.28, 0.03, 1.0),
             }
         } else {
             ClipTone {
                 fill: (0.78, 0.52, 0.14, 0.38),
+                edge: (0.45, 0.25, 0.02, 0.92),
                 handle: (0.48, 0.28, 0.03, 0.88),
             }
         };
@@ -209,16 +202,19 @@ pub fn clip_tone(selected: bool, faint: bool, light: bool) -> ClipTone {
     if faint {
         ClipTone {
             fill: (0.78, 0.58, 0.18, 0.10),
+            edge: (0.98, 0.86, 0.42, 0.88),
             handle: (0.98, 0.86, 0.42, 0.30),
         }
     } else if selected {
         ClipTone {
             fill: (0.78, 0.58, 0.18, 0.46),
+            edge: (0.98, 0.86, 0.42, 0.88),
             handle: (0.98, 0.86, 0.42, 1.0),
         }
     } else {
         ClipTone {
             fill: (0.78, 0.58, 0.18, 0.28),
+            edge: (0.98, 0.86, 0.42, 0.88),
             handle: (0.98, 0.86, 0.42, 0.96),
         }
     }
@@ -233,67 +229,64 @@ pub fn draw_video_segment(
     selected: bool,
     show_handles: bool,
     lifted: bool,
-    light: bool,
-    label: Option<(&str, f64, f64)>,
+    tiles: &[(f64, f64)],
+    filmstrip: &[gtk4::gdk_pixbuf::Pixbuf],
 ) {
     let clip_w = (x1 - x0).max(24.0);
     let y = if lifted { 2.0 } else { 8.0 };
     let height = h - 16.0;
     draw_translucent_clip(cr, x0, y, clip_w, height, tone, show_handles);
-    if selected {
+    if !filmstrip.is_empty() && !tiles.is_empty() {
+        let _ = cr.save();
         rounded_rect(cr, x0, y, clip_w, height, 5.0);
-        let (r, g, b, a) = if light {
-            (0.45, 0.25, 0.02, 0.92)
-        } else {
-            (0.98, 0.86, 0.42, 0.88)
-        };
+        cr.clip();
+        for (index, pixbuf) in filmstrip.iter().enumerate() {
+            let Some(&(span_start, span_end)) = tiles.get(index) else {
+                continue;
+            };
+            if span_end <= x0 || span_start >= x0 + clip_w {
+                continue;
+            }
+            let tile_x = span_start.max(x0);
+            let tile_w = (span_end.min(x0 + clip_w) - tile_x).max(1.0);
+            paint_cover_pixbuf(cr, pixbuf, tile_x, y, tile_w, height);
+        }
+        let _ = cr.restore();
+    }
+    if selected {
+        rounded_rect(cr, x0 + 0.5, y + 0.5, (clip_w - 1.0).max(0.0), (height - 1.0).max(0.0), 4.5);
+        let (r, g, b, a) = tone.edge;
         cr.set_source_rgba(r, g, b, a);
         cr.set_line_width(1.5);
         let _ = cr.stroke();
     }
+}
 
-    let Some((title, start, end)) = label else {
-        return;
-    };
-    let thumb = 28.0;
-    if clip_w > 86.0 {
-        rounded_rect(cr, x0 + 18.0, y + (height - thumb) / 2.0, thumb, thumb, 5.0);
-        if light {
-            cr.set_source_rgba(0.20, 0.12, 0.02, 0.24);
-        } else {
-            cr.set_source_rgba(0.08, 0.08, 0.08, 0.55);
-        }
-        let _ = cr.fill();
-    }
-    cr.select_font_face(
-        crate::typography::UI_FONT_FAMILY,
-        gtk4::cairo::FontSlant::Normal,
-        gtk4::cairo::FontWeight::Normal,
-    );
-    if light {
-        cr.set_source_rgba(0.16, 0.10, 0.02, 0.96);
-    } else {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.88);
-    }
-    cr.set_font_size(12.0);
-    let text_x = if clip_w > 86.0 { x0 + 54.0 } else { x0 + 18.0 };
-    if clip_w > 72.0 {
-        cr.move_to(text_x, y + height * 0.42);
-        let _ = cr.show_text(title);
-        cr.set_font_size(10.0);
-        if light {
-            cr.set_source_rgba(0.16, 0.10, 0.02, 0.70);
-        } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.48);
-        }
-        cr.move_to(text_x, y + height * 0.68);
-        let _ = cr.show_text(&format_range(start, end));
-    }
+fn paint_cover_pixbuf(
+    cr: &gtk4::cairo::Context,
+    pixbuf: &gtk4::gdk_pixbuf::Pixbuf,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) {
+    let src_w = f64::from(pixbuf.width()).max(1.0);
+    let src_h = f64::from(pixbuf.height()).max(1.0);
+    let scale = (width / src_w).max(height / src_h);
+    let painted_w = src_w * scale;
+    let painted_h = src_h * scale;
+    let _ = cr.save();
+    cr.rectangle(x, y, width, height);
+    cr.clip();
+    cr.translate(x + (width - painted_w) / 2.0, y + (height - painted_h) / 2.0);
+    cr.scale(scale, scale);
+    cr.set_source_pixbuf(pixbuf, 0.0, 0.0);
+    let _ = cr.paint();
+    let _ = cr.restore();
 }
 
 pub fn draw_zoom_clips(
     state: &Arc<Mutex<VideoEditState>>,
-    hovered: Option<usize>,
     hover_time: Option<f64>,
     dragging: Option<usize>,
     light: bool,
@@ -314,15 +307,11 @@ pub fn draw_zoom_clips(
         if dragging == Some(index) {
             continue;
         }
-        draw_one_zoom(
-            &state, cr, w, h, index, start, end, hovered, dragging, false, light,
-        );
+        draw_one_zoom(&state, cr, w, h, index, start, end, dragging, false, light);
     }
     if let Some(index) = dragging {
         if let Some(&(_, start, end)) = clips.iter().find(|(i, _, _)| *i == index) {
-            draw_one_zoom(
-                &state, cr, w, h, index, start, end, hovered, dragging, true, light,
-            );
+            draw_one_zoom(&state, cr, w, h, index, start, end, dragging, true, light);
         }
     }
     if let Some(start) = hover_time {
@@ -340,7 +329,6 @@ pub fn draw_one_zoom(
     index: usize,
     start: f64,
     end: f64,
-    hovered: Option<usize>,
     dragging: Option<usize>,
     lifted: bool,
     light: bool,
@@ -359,6 +347,7 @@ pub fn draw_one_zoom(
             } else {
                 (0.18, 0.37, 0.72, 0.36)
             },
+            edge: (0.10, 0.24, 0.52, 0.90),
             handle: (0.10, 0.24, 0.52, if faint { 0.34 } else { 0.94 }),
         }
     } else {
@@ -370,6 +359,7 @@ pub fn draw_one_zoom(
             } else {
                 (0.27, 0.43, 0.82, 0.26)
             },
+            edge: (0.72, 0.84, 1.0, 0.90),
             handle: (0.72, 0.84, 1.0, if faint { 0.30 } else { 0.98 }),
         }
     };
@@ -382,8 +372,15 @@ pub fn draw_one_zoom(
         clip_w,
         height,
         blue,
-        lifted || hovered == Some(index),
+        lifted || selected,
     );
+    if selected {
+        rounded_rect(cr, x0 + 0.5, y + 0.5, (clip_w - 1.0).max(0.0), (height - 1.0).max(0.0), 4.5);
+        let (r, g, b, a) = blue.edge;
+        cr.set_source_rgba(r, g, b, a);
+        cr.set_line_width(1.5);
+        let _ = cr.stroke();
+    }
     if clip_w > 40.0 {
         if light {
             cr.set_source_rgba(0.05, 0.13, 0.31, 0.96);
@@ -422,7 +419,6 @@ pub fn suggested_zoom_range(state: &VideoEditState, start: f64) -> Option<(f64, 
 
 pub fn draw_cursor_hide_clips(
     state: &Arc<Mutex<VideoEditState>>,
-    hovered: Option<usize>,
     hover_time: Option<f64>,
     dragging: Option<usize>,
     light: bool,
@@ -443,15 +439,11 @@ pub fn draw_cursor_hide_clips(
         if dragging == Some(index) {
             continue;
         }
-        draw_one_hide(
-            &state, cr, w, h, index, start, end, hovered, dragging, false, light,
-        );
+        draw_one_hide(&state, cr, w, h, index, start, end, dragging, false, light);
     }
     if let Some(index) = dragging {
         if let Some(&(_, start, end)) = clips.iter().find(|(i, _, _)| *i == index) {
-            draw_one_hide(
-                &state, cr, w, h, index, start, end, hovered, dragging, true, light,
-            );
+            draw_one_hide(&state, cr, w, h, index, start, end, dragging, true, light);
         }
     }
     if let Some(start) = hover_time {
@@ -469,7 +461,6 @@ pub fn draw_one_hide(
     index: usize,
     start: f64,
     end: f64,
-    hovered: Option<usize>,
     dragging: Option<usize>,
     lifted: bool,
     light: bool,
@@ -489,6 +480,7 @@ pub fn draw_one_hide(
             } else {
                 (0.66, 0.16, 0.23, 0.34)
             },
+            edge: (0.42, 0.05, 0.10, 0.90),
             handle: (0.42, 0.05, 0.10, if faint { 0.34 } else { 0.94 }),
         }
     } else {
@@ -500,6 +492,7 @@ pub fn draw_one_hide(
             } else {
                 (0.72, 0.28, 0.32, 0.26)
             },
+            edge: (1.0, 0.78, 0.80, 0.90),
             handle: (1.0, 0.78, 0.80, if faint { 0.30 } else { 0.98 }),
         }
     };
@@ -512,8 +505,15 @@ pub fn draw_one_hide(
         clip_w,
         height,
         rose,
-        lifted || hovered == Some(index),
+        lifted || selected,
     );
+    if selected {
+        rounded_rect(cr, x0 + 0.5, y + 0.5, (clip_w - 1.0).max(0.0), (height - 1.0).max(0.0), 4.5);
+        let (r, g, b, a) = rose.edge;
+        cr.set_source_rgba(r, g, b, a);
+        cr.set_line_width(1.5);
+        let _ = cr.stroke();
+    }
     if clip_w > 40.0 {
         if light {
             cr.set_source_rgba(0.30, 0.03, 0.07, 0.96);
@@ -641,6 +641,7 @@ pub fn draw_zoom_suggestion(
 #[derive(Clone, Copy)]
 pub struct ClipTone {
     fill: (f64, f64, f64, f64),
+    edge: (f64, f64, f64, f64),
     handle: (f64, f64, f64, f64),
 }
 
@@ -702,39 +703,51 @@ pub fn draw_playhead(
     if let Some(time) = hover_time {
         let hover_x = state.time_to_x(time, w);
         if (hover_x - state.time_to_x(state.playhead_seconds, w)).abs() > 1.0 {
-            paint_playhead_mark(cr, hover_x, h, light, 0.22);
+            paint_hover_line(cr, hover_x, h);
         }
     }
-    paint_playhead_mark(
-        cr,
-        state.time_to_x(state.playhead_seconds, w),
-        h,
-        light,
-        1.0,
-    );
+    paint_playhead_mark(cr, state.time_to_x(state.playhead_seconds, w), h, light);
 }
 
-pub fn paint_playhead_mark(cr: &gtk4::cairo::Context, x: f64, h: f64, light: bool, alpha: f64) {
+/// Pointer read-out line, matching the Motion timeline: a red hairline with no
+/// capsule, drawn under the playhead.
+pub fn paint_hover_line(cr: &gtk4::cairo::Context, x: f64, h: f64) {
     let x = x.floor() + 0.5;
-    if light {
-        cr.set_source_rgba(0.07, 0.08, 0.09, alpha);
-    } else {
-        cr.set_source_rgba(0.86, 0.90, 0.98, alpha);
-    }
-    cr.set_line_width(if alpha < 1.0 { 1.5 } else { 2.0 });
-    cr.move_to(x, 26.0);
+    cr.set_source_rgba(0.80, 0.22, 0.20, 0.95);
+    cr.set_line_width(2.0);
+    cr.move_to(x, 0.0);
     cr.line_to(x, h);
     let _ = cr.stroke();
-    if light {
-        cr.set_source_rgba(0.07, 0.08, 0.09, alpha);
+}
+
+pub fn paint_playhead_mark(cr: &gtk4::cairo::Context, x: f64, h: f64, light: bool) {
+    let x = x.floor() + 0.5;
+    let (stem_r, stem_g, stem_b) = if light {
+        (0.07, 0.08, 0.09)
     } else {
-        cr.set_source_rgba(0.86, 0.90, 0.98, alpha);
+        (0.86, 0.90, 0.98)
+    };
+    const HANDLE_W: f64 = 12.0;
+    const HANDLE_H: f64 = 26.0;
+    const HANDLE_TOP: f64 = 2.0;
+
+    cr.set_source_rgba(stem_r, stem_g, stem_b, 0.9);
+    cr.set_line_width(1.5);
+    cr.move_to(x, HANDLE_TOP + HANDLE_H);
+    cr.line_to(x, h);
+    let _ = cr.stroke();
+
+    let hx = x - HANDLE_W / 2.0;
+    rounded_rect(cr, hx, HANDLE_TOP, HANDLE_W, HANDLE_H, HANDLE_H / 2.0);
+    if light {
+        cr.set_source_rgba(0.94, 0.96, 1.0, 1.0);
+    } else {
+        cr.set_source_rgba(0.04, 0.05, 0.07, 1.0);
     }
-    cr.move_to(x - 5.0, 20.0);
-    cr.line_to(x + 5.0, 20.0);
-    cr.line_to(x, 29.0);
-    cr.close_path();
-    let _ = cr.fill();
+    let _ = cr.fill_preserve();
+    cr.set_source_rgba(stem_r, stem_g, stem_b, 1.0);
+    cr.set_line_width(1.5);
+    let _ = cr.stroke();
 }
 
 pub fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64) {

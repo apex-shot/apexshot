@@ -1,6 +1,7 @@
 pub fn build_timeline_card(
     state: Arc<Mutex<VideoEditState>>,
     media: Rc<RefCell<Option<MediaFile>>>,
+    filmstrip: Rc<RefCell<Vec<gtk4::gdk_pixbuf::Pixbuf>>>,
     on_change: Rc<dyn Fn()>,
 ) -> (GtkBox, Rc<dyn Fn()>, Rc<dyn Fn()>) {
     let shell = GtkBox::new(Orientation::Vertical, 0);
@@ -110,12 +111,15 @@ pub fn build_timeline_card(
         let state = state.clone();
         let hovered_video = hovered_video.clone();
         let dragging_video = dragging_video.clone();
+        let filmstrip = filmstrip.clone();
         move |area, cr, width, height| {
+            let frames = filmstrip.borrow();
             draw_video_clip(
                 &state,
                 hovered_video.get(),
                 dragging_video.get(),
                 widget_is_light(area),
+                &frames,
                 cr,
                 width,
                 height,
@@ -129,13 +133,11 @@ pub fn build_timeline_card(
     zoom_track.set_size_request(-1, 56);
     zoom_track.set_draw_func({
         let state = state.clone();
-        let hovered_zoom = hovered_zoom.clone();
         let hover_zoom_time = hover_zoom_time.clone();
         let dragging_zoom = dragging_zoom.clone();
         move |area, cr, width, height| {
             draw_zoom_clips(
                 &state,
-                hovered_zoom.get(),
                 hover_zoom_time.get(),
                 dragging_zoom.get(),
                 widget_is_light(area),
@@ -152,13 +154,11 @@ pub fn build_timeline_card(
     hide_track.set_size_request(-1, 56);
     hide_track.set_draw_func({
         let state = state.clone();
-        let hovered_hide = hovered_hide.clone();
         let hover_hide_time = hover_hide_time.clone();
         let dragging_hide = dragging_hide.clone();
         move |area, cr, width, height| {
             draw_cursor_hide_clips(
                 &state,
-                hovered_hide.get(),
                 hover_hide_time.get(),
                 dragging_hide.get(),
                 widget_is_light(area),
