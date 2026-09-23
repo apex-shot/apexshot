@@ -23,6 +23,7 @@ use crate::settings::windowing::{
 };
 
 use super::cloud_page::build_cloud_page;
+use super::edits_page::{build_edits_page, EditsKind};
 use super::local_page::build_local_page;
 use super::scan::MediaKind;
 
@@ -270,6 +271,8 @@ pub fn build_history_window(app: &Application) {
     let labels = [
         (t("Screenshots"), custom::SCREENSHOOTER_SYMBOLIC),
         (t("Recordings"), custom::RECORD_SCREEN_SYMBOLIC),
+        (t("Motion Edits"), custom::SCREENSHOOTER_SYMBOLIC),
+        (t("Video Edits"), custom::RECORD_SCREEN_SYMBOLIC),
         (t("Cloud"), custom::CLOUD_OUTLINE_THIN_SYMBOLIC),
     ];
 
@@ -350,6 +353,8 @@ pub fn build_history_window(app: &Application) {
     let pages = [
         build_local_page(MediaKind::Image, toast.clone(), &search),
         build_local_page(MediaKind::Video, toast.clone(), &search),
+        build_edits_page(EditsKind::Motion, toast.clone(), &search),
+        build_edits_page(EditsKind::Video, toast.clone(), &search),
         build_cloud_page(toast.clone()),
     ];
 
@@ -364,7 +369,9 @@ pub fn build_history_window(app: &Application) {
 
     stack.add_titled(&pages[0].widget, Some("0"), &t("Screenshots"));
     stack.add_titled(&pages[1].widget, Some("1"), &t("Recordings"));
-    stack.add_titled(&pages[2].widget, Some("2"), &t("Cloud"));
+    stack.add_titled(&pages[2].widget, Some("2"), &t("Motion Edits"));
+    stack.add_titled(&pages[3].widget, Some("3"), &t("Video Edits"));
+    stack.add_titled(&pages[4].widget, Some("4"), &t("Cloud"));
 
     {
         let stack = stack.clone();

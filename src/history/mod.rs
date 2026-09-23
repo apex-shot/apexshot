@@ -14,6 +14,7 @@
 
 pub mod actions;
 pub mod cloud_page;
+pub mod edits_page;
 pub mod local_page;
 pub mod scan;
 pub mod thumbnails;

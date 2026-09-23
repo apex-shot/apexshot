@@ -2452,3 +2452,51 @@ msgstr "إضافة نص"
 
 msgid "Drag to place the title; double-click to reset"
 msgstr "اسحب لوضع العنوان؛ انقر نقرًا مزدوجًا لإعادة التعيين"
+
+msgid "Edited"
+msgstr "مُعدَّل"
+
+msgid "Motion Edits"
+msgstr "تعديلات الحركة"
+
+msgid "Motion edit"
+msgstr "تعديل الحركة"
+
+msgid "Video Edits"
+msgstr "تعديلات الفيديو"
+
+msgid "Video edit"
+msgstr "تعديل الفيديو"
+
+msgid "Delete edit"
+msgstr "حذف التعديل"
+
+msgid "Removed the saved edit"
+msgstr "تمت إزالة التعديل المحفوظ"
+
+msgid "Search motion edits"
+msgstr "البحث في تعديلات الحركة"
+
+msgid "Search video edits"
+msgstr "البحث في تعديلات الفيديو"
+
+msgid "No motion edits yet"
+msgstr "لا توجد تعديلات حركة بعد"
+
+msgid "No video edits yet"
+msgstr "لا توجد تعديلات فيديو بعد"
+
+msgid "Motion edits you make will show up here."
+msgstr "ستظهر تعديلات الحركة التي تجريها هنا."
+
+msgid "Video edits you make will show up here."
+msgstr "ستظهر تعديلات الفيديو التي تجريها هنا."
+
+msgid "This removes the saved edit and keeps the original file."
+msgstr "يؤدي هذا إلى إزالة التعديل المحفوظ والاحتفاظ بالملف الأصلي."
+
+msgid "{count} motion edits"
+msgstr "{count} تعديلات حركة"
+
+msgid "{count} video edits"
+msgstr "{count} تعديلات فيديو"

@@ -2472,3 +2472,51 @@ msgstr "Добавить текст"
 
 msgid "Drag to place the title; double-click to reset"
 msgstr "Перетащите, чтобы разместить заголовок; двойной щелчок для сброса"
+
+msgid "Edited"
+msgstr "Изменено"
+
+msgid "Motion Edits"
+msgstr "Правки Motion"
+
+msgid "Motion edit"
+msgstr "Правка Motion"
+
+msgid "Video Edits"
+msgstr "Правки видео"
+
+msgid "Video edit"
+msgstr "Правка видео"
+
+msgid "Delete edit"
+msgstr "Удалить правку"
+
+msgid "Removed the saved edit"
+msgstr "Сохранённая правка удалена"
+
+msgid "Search motion edits"
+msgstr "Поиск правок Motion"
+
+msgid "Search video edits"
+msgstr "Поиск правок видео"
+
+msgid "No motion edits yet"
+msgstr "Правок Motion пока нет"
+
+msgid "No video edits yet"
+msgstr "Правок видео пока нет"
+
+msgid "Motion edits you make will show up here."
+msgstr "Созданные вами правки Motion появятся здесь."
+
+msgid "Video edits you make will show up here."
+msgstr "Созданные вами правки видео появятся здесь."
+
+msgid "This removes the saved edit and keeps the original file."
+msgstr "Это удалит сохранённую правку и сохранит исходный файл."
+
+msgid "{count} motion edits"
+msgstr "{count} правок Motion"
+
+msgid "{count} video edits"
+msgstr "{count} правок видео"

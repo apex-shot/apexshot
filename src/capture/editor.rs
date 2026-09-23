@@ -1,6 +1,7 @@
 mod color;
 pub(crate) mod composition;
 mod io_ops;
+pub mod motion_project;
 #[allow(dead_code)]
 pub mod numbering_style;
 #[allow(dead_code)]

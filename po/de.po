@@ -2484,3 +2484,51 @@ msgstr "Text hinzufügen"
 
 msgid "Drag to place the title; double-click to reset"
 msgstr "Ziehe, um den Titel zu platzieren; Doppelklick zum Zurücksetzen"
+
+msgid "Edited"
+msgstr "Bearbeitet"
+
+msgid "Motion Edits"
+msgstr "Motion-Bearbeitungen"
+
+msgid "Motion edit"
+msgstr "Motion-Bearbeitung"
+
+msgid "Video Edits"
+msgstr "Video-Bearbeitungen"
+
+msgid "Video edit"
+msgstr "Video-Bearbeitung"
+
+msgid "Delete edit"
+msgstr "Bearbeitung löschen"
+
+msgid "Removed the saved edit"
+msgstr "Gespeicherte Bearbeitung entfernt"
+
+msgid "Search motion edits"
+msgstr "Motion-Bearbeitungen suchen"
+
+msgid "Search video edits"
+msgstr "Video-Bearbeitungen suchen"
+
+msgid "No motion edits yet"
+msgstr "Noch keine Motion-Bearbeitungen"
+
+msgid "No video edits yet"
+msgstr "Noch keine Video-Bearbeitungen"
+
+msgid "Motion edits you make will show up here."
+msgstr "Motion-Bearbeitungen, die du erstellst, erscheinen hier."
+
+msgid "Video edits you make will show up here."
+msgstr "Video-Bearbeitungen, die du erstellst, erscheinen hier."
+
+msgid "This removes the saved edit and keeps the original file."
+msgstr "Dies entfernt die gespeicherte Bearbeitung und behält die Originaldatei."
+
+msgid "{count} motion edits"
+msgstr "{count} Motion-Bearbeitungen"
+
+msgid "{count} video edits"
+msgstr "{count} Video-Bearbeitungen"
