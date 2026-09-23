@@ -9,7 +9,7 @@ use crate::capture::editor::state::EditorState;
 use crate::config::{load_config, save_config};
 use crate::i18n::t;
 
-use super::{MotionSession, MOTION_PAGE, STATIC_PAGE};
+use super::{MotionSession, APPEARANCE_PAGE, MOTION_PAGE, STATIC_PAGE, TEXT_PAGE, WATERMARK_PAGE};
 
 pub(in crate::capture::editor::window) struct MotionModeChrome {
     pub mode_stack: Stack,
@@ -22,6 +22,7 @@ pub(in crate::capture::editor::window) struct MotionModeChrome {
     pub motion_tabs_revealer: Revealer,
     pub inspector_stack: Stack,
     pub motion_tab_btn: Button,
+    pub text_tab_btn: Button,
     pub appearance_tab_btn: Button,
     pub watermark_tab_btn: Button,
 }
@@ -43,12 +44,37 @@ pub(in crate::capture::editor::window) fn apply_editor_mode(
     if motion {
         chrome.inspector_stack.set_visible_child_name(MOTION_PAGE);
         chrome.motion_tab_btn.add_css_class("active-tool");
+        chrome.text_tab_btn.remove_css_class("active-tool");
         chrome.appearance_tab_btn.remove_css_class("active-tool");
         chrome.watermark_tab_btn.remove_css_class("active-tool");
     } else {
         chrome
             .inspector_stack
             .set_visible_child_name(last_inspector);
+    }
+}
+
+/// Show one Motion tool page and move the notch highlight to its button.
+///
+/// Every path that reveals a page goes through here — the notch buttons and
+/// the timeline selection that reveals Text — so the highlighted button and
+/// the visible panel can never disagree.
+pub(in crate::capture::editor::window) fn show_motion_tool_page(
+    chrome: &MotionModeChrome,
+    page: &str,
+) {
+    chrome.inspector_stack.set_visible_child_name(page);
+    for (button, button_page) in [
+        (&chrome.motion_tab_btn, MOTION_PAGE),
+        (&chrome.text_tab_btn, TEXT_PAGE),
+        (&chrome.appearance_tab_btn, APPEARANCE_PAGE),
+        (&chrome.watermark_tab_btn, WATERMARK_PAGE),
+    ] {
+        if button_page == page {
+            button.add_css_class("active-tool");
+        } else {
+            button.remove_css_class("active-tool");
+        }
     }
 }
 

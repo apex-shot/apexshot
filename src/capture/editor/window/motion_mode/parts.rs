@@ -7,6 +7,7 @@ use crate::recording::editor::window::tool_sidebar::FillSlider;
 
 use super::anchor_pad::MotionAnchorPad;
 use super::position_pad::MotionPositionPad;
+use super::text_pad::MotionTextPad;
 
 pub(in crate::capture::editor::window) struct MotionModeParts {
     pub shell: MotionModeShellParts,
@@ -53,6 +54,7 @@ pub(in crate::capture::editor::window) struct MotionPanelParts {
     pub inspector: GtkBox,
     pub appearance_inspector: GtkBox,
     pub watermark_inspector: GtkBox,
+    pub text_inspector: GtkBox,
 }
 
 pub(in crate::capture::editor::window) struct MotionSharedControlParts {
@@ -68,12 +70,13 @@ pub(in crate::capture::editor::window) struct MotionSharedControlParts {
 }
 
 pub(in crate::capture::editor::window) struct MotionTextControlParts {
-    pub text_box: GtkBox,
+    pub text_empty_box: GtkBox,
+    pub text_editor_box: GtkBox,
+    pub text_add_btn: Button,
+    pub text_delete_btn: Button,
     pub text_entry: Entry,
-    pub text_pos_x_slider: FillSlider,
-    pub text_pos_x_value: Label,
-    pub text_pos_y_slider: FillSlider,
-    pub text_pos_y_value: Label,
+    pub text_pos_pad: MotionTextPad,
+    pub text_pos_readout: Label,
     pub text_size_slider: FillSlider,
     pub text_size_value: Label,
     pub text_anim_buttons: Vec<(MotionTextAnimation, ToggleButton)>,

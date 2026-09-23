@@ -33,6 +33,7 @@ pub(super) struct MotionHostInstallInputs<'a> {
     pub motion_tabs: &'a GtkBox,
     pub inspector_stack: &'a Stack,
     pub motion_tab_btn: &'a Button,
+    pub text_tab_btn: &'a Button,
     pub appearance_tab_btn: &'a Button,
     pub watermark_tab_btn: &'a Button,
     pub state: &'a Arc<Mutex<EditorState>>,
@@ -92,6 +93,7 @@ impl MotionHost {
             motion_tabs,
             inspector_stack,
             motion_tab_btn,
+            text_tab_btn,
             appearance_tab_btn,
             watermark_tab_btn,
             state,
@@ -129,31 +131,23 @@ impl MotionHost {
             motion_tabs_revealer,
             inspector_stack: inspector_stack.clone(),
             motion_tab_btn: motion_tab_btn.clone(),
+            text_tab_btn: text_tab_btn.clone(),
             appearance_tab_btn: appearance_tab_btn.clone(),
             watermark_tab_btn: watermark_tab_btn.clone(),
         });
         // One notch button per Motion tool; the table keeps the next
         // tab (Cursor, Camera, Audio, Frame, …) to a one-line addition.
-        let tool_tabs: [(Button, &str); 3] = [
+        let tool_tabs: [(Button, &str); 4] = [
             (motion_tab_btn.clone(), "motion"),
+            (text_tab_btn.clone(), "motion-text"),
             (appearance_tab_btn.clone(), "motion-appearance"),
             (watermark_tab_btn.clone(), "motion-watermark"),
         ];
-        let peers: Vec<Button> = tool_tabs.iter().map(|(btn, _)| btn.clone()).collect();
         for (active_btn, page) in &tool_tabs {
-            let inspector_stack = inspector_stack.clone();
-            let peers = peers.clone();
-            let for_compare = active_btn.clone();
+            let chrome = motion_chrome.clone();
             let page = *page;
             active_btn.connect_clicked(move |_| {
-                inspector_stack.set_visible_child_name(page);
-                for peer in &peers {
-                    if *peer == for_compare {
-                        peer.add_css_class("active-tool");
-                    } else {
-                        peer.remove_css_class("active-tool");
-                    }
-                }
+                motion_mode::show_motion_tool_page(&chrome, page);
             });
         }
         motion_mode::wire_motion_controls(

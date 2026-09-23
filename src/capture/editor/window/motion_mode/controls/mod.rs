@@ -22,11 +22,11 @@ pub(super) type RequestTextTransitionPreview = Rc<dyn Fn(f64, f64)>;
 pub(in crate::capture::editor::window) fn wire_motion_controls(
     parts: &MotionModeParts,
     session: &MotionSession,
-    _chrome: Rc<MotionModeChrome>,
+    chrome: Rc<MotionModeChrome>,
     _last_inspector: Rc<RefCell<String>>,
     in_motion: Rc<Cell<bool>>,
 ) {
-    let redraw = sync::make_redraw(parts, session);
+    let redraw = sync::make_redraw(parts, session, chrome.clone());
     // Playhead changes do not alter the inspector or track geometry. Updating
     // only the moving pieces avoids running every slider sync and a full
     // timeline repaint for each scrub event or animation frame.
@@ -180,6 +180,7 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
     text::install(
         parts,
         session,
+        redraw.clone(),
         request_live_preview.clone(),
         request_text_transition_preview.clone(),
     );

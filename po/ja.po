@@ -2427,3 +2427,12 @@ msgstr "壁紙"
 msgid ""
 "Wallpaper or color fills the canvas behind the video in preview and export"
 msgstr "壁紙または色が、プレビューと書き出し時に動画の背後のキャンバスを塗りつぶします"
+
+msgid "Select a text clip, or add one at the playhead"
+msgstr "テキストクリップを選択、または再生位置に追加"
+
+msgid "Add Text"
+msgstr "テキストを追加"
+
+msgid "Drag to place the title; double-click to reset"
+msgstr "ドラッグしてタイトルを配置、ダブルクリックでリセット"

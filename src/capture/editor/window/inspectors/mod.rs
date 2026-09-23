@@ -31,6 +31,7 @@ pub(super) struct InspectorParts {
     pub inspector_tabs: GtkBox,
     pub motion_tabs: GtkBox,
     pub motion_tab_btn: Button,
+    pub text_tab_btn: Button,
     pub appearance_tab_btn: Button,
     pub watermark_tab_btn: Button,
     pub background_tab_btn: Button,
@@ -67,6 +68,7 @@ pub(super) struct InspectorContentInputs<'a> {
     pub motion_inspector: &'a GtkBox,
     pub motion_appearance_inspector: &'a GtkBox,
     pub motion_watermark_inspector: &'a GtkBox,
+    pub motion_text_inspector: &'a GtkBox,
     pub copy_btn: &'a Button,
     pub upload_btn: &'a Button,
     pub save_btn: &'a Button,
@@ -156,9 +158,11 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
         btn.add_css_class("editor-tool-button");
         btn
     };
+    let text_tab_btn = notch_btn("Text", icon_names::custom::FONT_X_GENERIC_SYMBOLIC);
     let appearance_tab_btn = notch_btn("Appearance", icon_names::custom::IMAGE_ALT_SYMBOLIC);
     let watermark_tab_btn = notch_btn("Watermark", icon_names::IMAGE_REGULAR);
     motion_tabs.append(&motion_tab_btn);
+    motion_tabs.append(&text_tab_btn);
     motion_tabs.append(&appearance_tab_btn);
     motion_tabs.append(&watermark_tab_btn);
 
@@ -204,6 +208,8 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     inspector_stack.add_named(input.motion_appearance_inspector, Some("motion-appearance"));
     input.motion_watermark_inspector.set_visible(true);
     inspector_stack.add_named(input.motion_watermark_inspector, Some("motion-watermark"));
+    input.motion_text_inspector.set_visible(true);
+    inspector_stack.add_named(input.motion_text_inspector, Some("motion-text"));
     inspector_stack.set_visible_child_name("placeholder");
 
     let scroll = ScrolledWindow::new();
@@ -232,6 +238,7 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
         inspector_tabs,
         motion_tabs,
         motion_tab_btn,
+        text_tab_btn,
         appearance_tab_btn,
         watermark_tab_btn,
         background_tab_btn,

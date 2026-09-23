@@ -2443,3 +2443,12 @@ msgstr "خلفية"
 msgid ""
 "Wallpaper or color fills the canvas behind the video in preview and export"
 msgstr "تملأ الخلفية أو اللون المساحة خلف الفيديو في المعاينة والتصدير"
+
+msgid "Select a text clip, or add one at the playhead"
+msgstr "اختر مقطع نص أو أضف واحدًا عند رأس التشغيل"
+
+msgid "Add Text"
+msgstr "إضافة نص"
+
+msgid "Drag to place the title; double-click to reset"
+msgstr "اسحب لوضع العنوان؛ انقر نقرًا مزدوجًا لإعادة التعيين"

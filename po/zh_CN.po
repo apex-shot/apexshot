@@ -2424,3 +2424,12 @@ msgstr "壁纸"
 msgid ""
 "Wallpaper or color fills the canvas behind the video in preview and export"
 msgstr "壁纸或颜色填充预览和导出时视频背后的画布"
+
+msgid "Select a text clip, or add one at the playhead"
+msgstr "选择文字片段，或在播放头添加一个"
+
+msgid "Add Text"
+msgstr "添加文字"
+
+msgid "Drag to place the title; double-click to reset"
+msgstr "拖动以放置标题；双击以重置"
