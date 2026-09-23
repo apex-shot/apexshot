@@ -135,6 +135,11 @@ pub fn draw_video_clip(
     height: i32,
 ) {
     let state = state.lock().unwrap();
+    if !state.has_source_video() {
+        // Before a video is loaded there is nothing to clip: an empty lane,
+        // not a 24px orange nub forced out of the zero-length placeholder.
+        return;
+    }
     let w = width as f64;
     let h = height as f64;
     let tiles = filmstrip_tile_spans(&state, w);
@@ -235,6 +240,16 @@ pub fn draw_video_segment(
     let clip_w = (x1 - x0).max(24.0);
     let y = if lifted { 2.0 } else { 8.0 };
     let height = h - 16.0;
+    // While frames decode (or ffmpeg is unavailable) the body reads as an
+    // empty media lane in Motion's source-lane tone, not an orange slab.
+    let tone = if filmstrip.is_empty() {
+        ClipTone {
+            fill: (0.10, 0.11, 0.13, 0.9),
+            ..tone
+        }
+    } else {
+        tone
+    };
     draw_translucent_clip(cr, x0, y, clip_w, height, tone, show_handles);
     if !filmstrip.is_empty() && !tiles.is_empty() {
         let _ = cr.save();

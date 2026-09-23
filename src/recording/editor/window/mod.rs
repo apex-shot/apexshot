@@ -1179,6 +1179,33 @@ mod tests {
     }
 
     #[test]
+    fn video_lane_is_empty_before_upload_and_dark_while_frames_load() {
+        let painting = include_str!("timeline_card_parts/painting.rs");
+        assert!(
+            painting.contains("if !state.has_source_video()"),
+            "no clip may be drawn before a video is loaded"
+        );
+        assert!(
+            painting.contains("fill: (0.10, 0.11, 0.13, 0.9)"),
+            "while frames load the lane must read as an empty media strip, not orange"
+        );
+        let shell = include_str!("timeline_card_parts/shell.rs");
+        assert!(
+            shell.contains("video_track.set_size_request(-1, 56)"),
+            "video track must match the 56px zoom/hide lanes"
+        );
+        let css = include_str!("../ui_support_css/07.css");
+        assert!(
+            css.contains(".recording-editor-card-video-track {\n                min-height: 56px;"),
+            "CSS floor must match the 56px video track"
+        );
+        assert!(
+            css.contains(".editor-motion-timeline-dock .recording-editor-card-board"),
+            "the Motion board must keep its own taller floor"
+        );
+    }
+
+    #[test]
     fn zoom_and_hide_clips_outline_only_the_selected_clip() {
         let painting = include_str!("timeline_card_parts/painting.rs");
         assert!(
