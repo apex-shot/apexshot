@@ -323,7 +323,8 @@ mod highlighter_bar;
 mod inspectors;
 mod motion_host;
 mod motion_mode;
-mod motion_render;
+// Scene Shadows painter is shared with the static preview/export paths.
+pub(crate) mod motion_render;
 mod motion_timeline;
 mod number_bar;
 mod obfuscate_bar;
@@ -2397,12 +2398,21 @@ fn setup_editor_window_full(
         let motion_session = motion_host.session();
         let state_sync = state.clone();
         drawing_area.add_tick_callback(move |_, _| {
-            let (appearance, frame) = {
+            let (appearance, frame, scene_shadow) = {
                 let rt = motion_session.runtime.borrow();
-                (rt.motion.appearance.clone(), rt.motion.frame.clone())
+                (
+                    rt.motion.appearance.clone(),
+                    rt.motion.frame.clone(),
+                    rt.motion.scene_shadow.clone(),
+                )
             };
             if let Ok(mut st) = state_sync.try_lock() {
-                background_panel::sync_motion_appearance_to_static(&appearance, &frame, &mut st);
+                background_panel::sync_motion_appearance_to_static(
+                    &appearance,
+                    &frame,
+                    &scene_shadow,
+                    &mut st,
+                );
             }
             glib::ControlFlow::Continue
         });

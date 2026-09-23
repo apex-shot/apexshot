@@ -3,7 +3,7 @@
 /// the bounded scene panel so padding can never push the card outside the
 /// background. Both rectangles share the viewport's center.
 #[derive(Clone, Copy)]
-pub(super) struct MotionStage {
+pub(crate) struct MotionStage {
     pub bounds_w: f64,
     pub bounds_h: f64,
     pub center_x: f64,
@@ -11,12 +11,23 @@ pub(super) struct MotionStage {
 }
 
 impl MotionStage {
-    pub(super) fn frame(width: f64, height: f64) -> Self {
+    pub(crate) fn frame(width: f64, height: f64) -> Self {
         Self {
             bounds_w: width,
             bounds_h: height,
             center_x: width / 2.0,
             center_y: height / 2.0,
+        }
+    }
+
+    /// A scene rectangle at an arbitrary origin: the static canvas is laid out
+    /// inside a padded viewport, so its fill is not anchored at (0, 0).
+    pub(crate) fn rect_at(x: f64, y: f64, width: f64, height: f64) -> Self {
+        Self {
+            bounds_w: width,
+            bounds_h: height,
+            center_x: x + width / 2.0,
+            center_y: y + height / 2.0,
         }
     }
 

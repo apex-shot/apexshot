@@ -124,14 +124,14 @@ fn paint_motion_watermark(
 /// Distinct overlay and underlay shadow render layers; the
 /// `underlay` pass draws beneath the card, the overlay pass above card and
 /// titles but below the watermark. Presets are procedural shading rather
-/// than image assets, so preview and export share this one painter.
-fn paint_motion_scene_shadow(
+/// than image assets, so Motion preview/export and the static
+/// preview/export all share this one painter.
+pub(crate) fn paint_motion_scene_shadow(
     context: &Context,
     stage: MotionStage,
-    motion: &MotionState,
+    shadow: &MotionSceneShadow,
     underlay: bool,
 ) {
-    let shadow = &motion.scene_shadow;
     if shadow.preset == MotionSceneShadowPreset::None {
         return;
     }

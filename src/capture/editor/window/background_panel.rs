@@ -520,6 +520,7 @@ pub(super) fn sync_static_appearance_to_motion(
 pub(super) fn sync_motion_appearance_to_static(
     motion: &MotionAppearance,
     frame: &crate::recording::editor::model::MotionFrame,
+    scene_shadow: &crate::recording::editor::model::MotionSceneShadow,
     state: &mut EditorState,
 ) {
     state.background_style = match &motion.background_fill_type {
@@ -558,6 +559,10 @@ pub(super) fn sync_motion_appearance_to_static(
     state.shadow_offset_y = motion.shadow_position.1;
     // Keep legacy single-value shadow driving current static render.
     state.background_shadow = (motion.shadow_opacity * 30.0).clamp(0.0, 60.0);
+    // Scene Shadows are an independent layer of their own; without this the
+    // shared Scene Shadows controls edit the Motion runtime only and the
+    // static preview/export show nothing.
+    state.scene_shadow = scene_shadow.clone();
     state.background_aspect_ratio = frame_preset_to_crop_ratio(frame);
 }
 
@@ -578,7 +583,58 @@ pub(super) fn build_shared_background_panel(
 
 #[cfg(test)]
 mod tests {
-    use super::{motion_wallpaper_preview_asset_path, MOTION_WALLPAPER_FILES};
+    use super::{motion_wallpaper_preview_asset_path, EditorState, MOTION_WALLPAPER_FILES};
+
+    /// The Scene Shadows controls live in the shared Appearance panel, so the
+    /// mirror into EditorState has to carry the layer or the static preview and
+    /// the still export silently show nothing while Motion does.
+    #[test]
+    fn scene_shadow_mirrors_into_the_static_still() {
+        use crate::recording::editor::model::{
+            MotionAppearance, MotionBackgroundFillType, MotionFrame, MotionSceneShadow,
+            MotionSceneShadowPlacement, MotionSceneShadowPreset,
+        };
+        let mut appearance = MotionAppearance::default();
+        appearance.background_fill_type = MotionBackgroundFillType::Color;
+        appearance.background_color = [1.0, 1.0, 1.0, 1.0];
+        // 200px source makes the composition's scale factor 0.5, so this is a
+        // 25px fill band: a real fill corner and a real card center to sample.
+        appearance.background_padding = 50.0;
+
+        let mut shadow = MotionSceneShadow::default();
+        shadow.preset = MotionSceneShadowPreset::Vignette;
+        shadow.opacity = 1.0;
+        shadow.placement = MotionSceneShadowPlacement::Underlay;
+
+        let mut state = EditorState::new(image::RgbaImage::from_pixel(
+            200,
+            200,
+            image::Rgba([255, 255, 255, 255]),
+        ));
+        super::sync_motion_appearance_to_static(
+            &appearance,
+            &MotionFrame::default(),
+            &shadow,
+            &mut state,
+        );
+        assert_eq!(
+            state.scene_shadow, shadow,
+            "the mirror must carry the layer"
+        );
+
+        let still = state.to_final_image().expect("final renders");
+        let corner = still.get_pixel(0, 0).0;
+        let center = still.get_pixel(still.width() / 2, still.height() / 2).0;
+        assert!(
+            corner[0] < 255,
+            "the static still must shade its fill like the Motion preview"
+        );
+        assert_eq!(
+            center,
+            [255, 255, 255, 255],
+            "an underlay stays under the card"
+        );
+    }
 
     #[test]
     fn background_gradient_assets_support_installed_runtime_paths() {
