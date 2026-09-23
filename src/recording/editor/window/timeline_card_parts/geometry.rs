@@ -14,7 +14,17 @@ pub fn video_layout(state: &VideoEditState, width: f64) -> Vec<(usize, usize, f6
         }
         let comp = state.segment_start(seg_idx);
         let x0 = state.time_to_x(comp, width);
-        let x1 = state.time_to_x(comp + state.segment_timeline_duration(seg_idx), width);
+        // The final segment's hit box covers its freeze hold, so the right
+        // handle stays grabbable once the clip has been held open.
+        let hold = if state.freeze_applies_to_segment(seg_idx) {
+            state.freeze_tail_seconds()
+        } else {
+            0.0
+        };
+        let x1 = state.time_to_x(
+            comp + state.segment_timeline_duration(seg_idx) + hold,
+            width,
+        );
         layout.push((order_pos, seg_idx, x0, x1.max(x0 + 8.0)));
     }
     layout
@@ -192,6 +202,23 @@ pub fn x_to_source(state: &VideoEditState, width: f64, x: f64) -> f64 {
         .clamp(0.0, state.metadata.duration_seconds.max(0.0))
 }
 
+/// Right-hand edge target for the end drag, from a composition time.
+///
+/// Inside the clip this is the same clamped source time as `x_to_source`.
+/// Past the last frame there is no source to map onto, so the overshoot
+/// becomes held seconds beyond the source end — exactly what a freeze hold
+/// consumes. `x_to_source` cannot do this: it clamps at the source duration,
+/// which made expanding the right edge a no-op.
+pub fn edge_target_at(state: &VideoEditState, timeline_t: f64) -> f64 {
+    let duration = state.metadata.duration_seconds.max(0.0);
+    let source_t = state.timeline_to_source(timeline_t);
+    if source_t > duration {
+        duration + (timeline_t - state.composition_duration()).max(0.0)
+    } else {
+        source_t.clamp(0.0, duration)
+    }
+}
+
 pub fn x_to_timeline(state: &VideoEditState, width: f64, x: f64) -> f64 {
     state.x_to_time(x.clamp(0.0, width), width).max(0.0)
 }
@@ -303,7 +330,7 @@ pub fn sync_scroll_adj(adj: &Adjustment, state: &VideoEditState, syncing: &Cell<
     syncing.set(false);
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClipDrag {
     Start,
     End,
@@ -405,5 +432,90 @@ mod tests {
         let last = tiles.last().unwrap();
         assert!(last.0 < 8.0);
         assert!(last.1 <= 8.0);
+    }
+}
+
+#[cfg(test)]
+mod freeze_edge_tests {
+    use super::{edge_target_at, video_hit, video_layout, ClipDrag};
+    use crate::recording::editor::model::{VideoEditState, VideoMetadata};
+    use std::path::PathBuf;
+
+    fn state() -> VideoEditState {
+        VideoEditState::new(VideoMetadata {
+            path: PathBuf::from("/tmp/input.mp4"),
+            duration_seconds: 10.0,
+            width: 1920,
+            height: 1080,
+            file_size_bytes: 1024,
+            has_audio: false,
+            frame_rate: 30.0,
+        })
+    }
+
+    /// The real bug: the right handle used to feed `set_trim_end` a value
+    /// already clamped to the source end, so the first expansion was a no-op.
+    #[test]
+    fn dragging_past_the_source_end_opens_a_freeze_hold() {
+        let mut state = state();
+        let width = 1000.0;
+        // The clip spans the full ruler at fit zoom; the handle sits at x1.
+        let (_, _, x0, x1) = video_layout(&state, width)[0];
+
+        // Grab the right edge and pull one second's worth of pixels right.
+        let hit = video_hit(&state, width, x1 - 1.0);
+        assert!(
+            hit.drag == Some(ClipDrag::End),
+            "the right edge must offer the End drag, got {:?}",
+            hit.drag
+        );
+
+        // The pointer now sits past the last frame.
+        let composition_t = state.x_to_time(x1 + 50.0, width);
+        let target = edge_target_at(&state, composition_t);
+        state.set_trim_end(target);
+
+        assert!(
+            state.freeze_tail_seconds() > 0.0,
+            "dragging right past the end must open a hold, tail was {}",
+            state.freeze_tail_seconds()
+        );
+        let _ = x0;
+    }
+
+    #[test]
+    fn the_hold_keeps_the_right_handle_grabbable() {
+        let mut state = state();
+        let width = 1000.0;
+        state.extend_last_segment(2.0);
+        let (_, _, x0, x1) = video_layout(&state, width)[0];
+        // The hit box must now extend to the end of the hold, so the handle
+        // is still reachable out where the clip is actually drawn.
+        assert!(x1 > 0.0 && x0 >= 0.0);
+        let hit = video_hit(&state, width, x1 - 1.0);
+        assert!(
+            hit.drag == Some(ClipDrag::End),
+            "the handle must remain grabbable at the held edge, got {:?}",
+            hit.drag
+        );
+    }
+
+    #[test]
+    fn an_edge_inside_the_clip_still_trims_real_frames() {
+        let mut state = state();
+        let width = 1000.0;
+        state.extend_last_segment(2.0);
+        let (_, _, _, x1) = video_layout(&state, width)[0];
+        // Pull the handle back inside the source: the hold gives way first,
+        // and only then does real footage start disappearing.
+        let inside = state.x_to_time(x1 - 300.0, width);
+        let target = edge_target_at(&state, inside);
+        state.set_trim_end(target);
+        assert_eq!(state.freeze_tail_seconds(), 0.0, "hold is spent first");
+        assert!(
+            state.trim_end_seconds < 10.0,
+            "then real frames trim, end was {}",
+            state.trim_end_seconds
+        );
     }
 }

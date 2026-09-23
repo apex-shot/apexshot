@@ -44,10 +44,12 @@ impl VideoEditState {
         } else {
             self.trim_start_seconds
         };
-        // The right handle sits at the end of the freeze tail once one
-        // exists, so a target past the source end resizes the hold. It only
-        // reaches real frames once the hold is spent.
-        if self.freeze_tail > 0.0 && value > self.trim_end_seconds {
+        // Dragging the right handle past the source end starts (or grows) a
+        // hold on the last frame. It reaches real frames only once the hold is
+        // spent, so the handle never crosses into territory that does not
+        // exist. Callers pass an unclamped target, so this also covers the
+        // very first expansion.
+        if value > self.trim_end_seconds {
             self.freeze_tail = (value - self.trim_end_seconds).max(0.0);
             return;
         }
@@ -82,6 +84,11 @@ impl VideoEditState {
         self.freeze_tail = 0.0;
         self.frozen_segment = None;
         true
+    }
+
+    /// True when `index` is the final segment that carries the freeze hold.
+    pub fn freeze_applies_to_segment(&self, index: usize) -> bool {
+        self.freeze_applies_to(index)
     }
 
     fn freeze_applies_to(&self, index: usize) -> bool {
