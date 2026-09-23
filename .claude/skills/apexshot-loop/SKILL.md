@@ -42,6 +42,9 @@ named.
   Red CI becomes a follow-up task, not a wait.
 - **Never launch, drive, or script the app.** Manual checks are the
   maintainer's; list them under "Not verified".
+- **Network via background Bash:** `git push`, `git fetch`, `gh …` run with
+  `run_in_background: true` and you read the output file. Never open a
+  terminal tab for them — the tab cap blocks work.
 - Never merge your own PR. No `reset --hard`, `clean`, force-push, or branch
   deletion unless the maintainer asks.
 

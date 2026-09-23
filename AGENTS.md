@@ -153,16 +153,15 @@ unrelated work to an already-merged branch or to an old long-lived one.
   record the phantom entries. `git commit -a` is safe (it only stages tracked
   files) but naming paths stays clearer. Trust `git diff` for content and the
   maintainer's terminal for what actually exists.
-- **Network egress is sandboxed:** the sandboxed Bash tool cannot reach GitHub.
-  Its proxy denies `github.com:22` (so an SSH remote fails with
-  `socat ... Forbidden` / `Could not read from remote repository`) and
-  `github.com:443` (`CONNECT tunnel failed, response 403`), and the allowlist
-  cannot be widened from inside the session — passing `allowed_domains` is
-  refused outright. So `git push`, `git fetch`, and `gh` all fail there. Run
-  every network command in the maintainer's real shell instead:
-  `run_in_terminal` opens a tab in their login shell, where SSH keys and `gh`
-  auth are present, and the push succeeds. Read the terminal output to confirm
-  the result; do not treat the sandboxed failure as "no network access exists".
+- **Network commands run in background Bash, not terminal tabs:** `git push`,
+  `git fetch`, `gh pr …` and other GitHub calls go to the Bash tool with
+  `run_in_background: true`, then read the task output file (or wait for the
+  completion notification). Do NOT open a terminal tab for these: the tab cap
+  is small, and a tab sitting on a pager or an unfinished command blocks
+  later work. If a background call fails with a proxy denial
+  (`github.com:22` / `github.com:443` blocked), the sandbox really is blocking
+  egress that run — retry once in the background, and only then fall back to
+  `run_in_terminal` for that one command.
 - **GTK tests:** GTK may only be initialized once per process, on one thread.
   Tests that need it must call `crate::test_support::with_gtk`, not
   `gtk4::init()`; a second init panics with "Attempted to initialize GTK from
