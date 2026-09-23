@@ -185,9 +185,18 @@
                 -gtk-icon-shadow: none;
             }
 
+            /* Video lanes total 226px (36 + 48 + 56 + 56 + 30 gaps); the
+             * floor must sit at that exact height or empty space opens under
+             * the hide track. */
             .recording-editor-card-board {
-                min-height: 258px;
+                min-height: 226px;
                 padding: 0 0 10px 0;
+            }
+
+            /* The Motion timeline reuses this board class with its own lanes
+             * and keeps the taller floor it shipped with. */
+            .editor-motion-timeline-dock .recording-editor-card-board {
+                min-height: 258px;
             }
 
             .recording-editor-card-ruler {
@@ -195,7 +204,7 @@
             }
 
             .recording-editor-card-video-track {
-                min-height: 80px;
+                min-height: 56px;
             }
 
             .recording-editor-card-zoom-track {

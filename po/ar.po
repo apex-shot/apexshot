@@ -2452,3 +2452,9 @@ msgstr "إضافة نص"
 
 msgid "Drag to place the title; double-click to reset"
 msgstr "اسحب لوضع العنوان؛ انقر نقرًا مزدوجًا لإعادة التعيين"
+
+msgid "Freeze"
+msgstr "تجميد"
+
+msgid "Hold the last frame on screen"
+msgstr "أبقِ الإطار الأخير معروضًا على الشاشة"

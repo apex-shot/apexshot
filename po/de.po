@@ -2484,3 +2484,9 @@ msgstr "Text hinzufügen"
 
 msgid "Drag to place the title; double-click to reset"
 msgstr "Ziehe, um den Titel zu platzieren; Doppelklick zum Zurücksetzen"
+
+msgid "Freeze"
+msgstr "Einfrieren"
+
+msgid "Hold the last frame on screen"
+msgstr "Letztes Bild auf dem Bildschirm halten"

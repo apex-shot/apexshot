@@ -2436,3 +2436,9 @@ msgstr "テキストを追加"
 
 msgid "Drag to place the title; double-click to reset"
 msgstr "ドラッグしてタイトルを配置、ダブルクリックでリセット"
+
+msgid "Freeze"
+msgstr "フリーズ"
+
+msgid "Hold the last frame on screen"
+msgstr "最後のフレームを画面に保持"

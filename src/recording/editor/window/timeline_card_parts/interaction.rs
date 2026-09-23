@@ -337,9 +337,16 @@ pub fn bind_video_clip(
                 }
                 Some(ClipDrag::End) => {
                     let mut guard = state.lock().unwrap();
-                    let seconds =
-                        snap_source_to_playhead(&guard, width, x_to_source(&guard, width, x));
-                    guard.set_trim_end(seconds);
+                    // The handle can live past the source end (a freeze
+                    // hold), so snap and convert in composition seconds
+                    // rather than through the source-clamped helper.
+                    let edge = snap_timeline_to_playhead(
+                        &guard,
+                        width,
+                        x_to_timeline(&guard, width, x),
+                    );
+                    let target = edge_target_at(&guard, edge);
+                    guard.set_trim_end(target);
                 }
                 Some(ClipDrag::Cut(index)) => {
                     let mut guard = state.lock().unwrap();

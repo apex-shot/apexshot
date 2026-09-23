@@ -2478,3 +2478,9 @@ msgstr "Añadir texto"
 
 msgid "Drag to place the title; double-click to reset"
 msgstr "Arrastra para colocar el título; doble clic para restablecer"
+
+msgid "Freeze"
+msgstr "Congelar"
+
+msgid "Hold the last frame on screen"
+msgstr "Mantener el último fotograma en pantalla"
