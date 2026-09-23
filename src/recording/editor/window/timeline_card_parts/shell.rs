@@ -112,7 +112,10 @@ pub fn build_timeline_card(
     let video_track = DrawingArea::new();
     video_track.add_css_class("recording-editor-card-video-track");
     video_track.set_hexpand(true);
-    video_track.set_size_request(-1, 48);
+    // Motion's source lane is the reference for this clip, and it sits on the
+    // 56px `card-zoom-track` floor. Matching it is what makes the two editors
+    // line up, so this lane is 56px rather than a shorter 48px one.
+    video_track.set_size_request(-1, 56);
     video_track.set_draw_func({
         let state = state.clone();
         let hovered_video = hovered_video.clone();
