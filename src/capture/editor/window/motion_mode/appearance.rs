@@ -2,7 +2,7 @@ use gtk4::cairo::Context;
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, DrawingArea, Entry,
     FileChooserAction, FileChooserNative, FileFilter, GestureClick, Grid, Label, Orientation,
-    Overlay, ResponseType, Revealer, Separator, Stack,
+    Overlay, ResponseType, Revealer, Separator, Stack, ToggleButton,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -1548,7 +1548,7 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
         let runtime = session.runtime.borrow();
         runtime.motion.scene_shadow.clone()
     };
-    let shadow_preset_buttons: Rc<RefCell<Vec<(MotionSceneShadowPreset, Button)>>> =
+    let shadow_preset_buttons: Rc<RefCell<Vec<(MotionSceneShadowPreset, ToggleButton)>>> =
         Rc::new(RefCell::new(Vec::new()));
     let shadow_preset_rows = GtkBox::new(Orientation::Vertical, 6);
     let mut shadow_row: Option<GtkBox> = None;
@@ -1559,19 +1559,19 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
             shadow_preset_rows.append(&row);
             shadow_row = Some(row);
         }
-        let button = Button::with_label(&t(preset.label()));
+        let button = ToggleButton::with_label(&t(preset.label()));
         button.set_has_frame(false);
         button.set_hexpand(true);
-        button.add_css_class("editor-background-option-button");
-        if initial_scene_shadow.preset == *preset {
-            button.add_css_class("active-background-option");
-        }
-        button.connect_clicked({
+        button.add_css_class("recording-editor-zoom-easing-btn");
+        button.set_active(initial_scene_shadow.preset == *preset);
+        button.connect_toggled({
             let runtime = session.runtime.clone();
             let preview = preview.clone();
-            let shadow_preset_buttons = shadow_preset_buttons.clone();
             let notify = notify_interact.clone();
-            move |_| {
+            move |button| {
+                if !button.is_active() {
+                    return;
+                }
                 notify();
                 {
                     let mut runtime = runtime.borrow_mut();
@@ -1579,15 +1579,11 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
                     runtime.motion.scene_shadow.preset = *preset;
                     preview.queue_draw();
                 }
-                for (candidate, button) in shadow_preset_buttons.borrow().iter() {
-                    if *candidate == *preset {
-                        button.add_css_class("active-background-option");
-                    } else {
-                        button.remove_css_class("active-background-option");
-                    }
-                }
             }
         });
+        if let Some((_, first)) = shadow_preset_buttons.borrow().first() {
+            button.set_group(Some(first));
+        }
         shadow_preset_buttons
             .borrow_mut()
             .push((*preset, button.clone()));
@@ -1618,7 +1614,7 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     });
     scene_shadow_section.append(&shadow_opacity.widget());
 
-    let shadow_placement_buttons: Rc<RefCell<Vec<(MotionSceneShadowPlacement, Button)>>> =
+    let shadow_placement_buttons: Rc<RefCell<Vec<(MotionSceneShadowPlacement, ToggleButton)>>> =
         Rc::new(RefCell::new(Vec::new()));
     let placement_row = GtkBox::new(Orientation::Horizontal, 6);
     placement_row.set_homogeneous(true);
@@ -1634,20 +1630,20 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
             t("Shade above the card"),
         ),
     ] {
-        let button = Button::with_label(&label);
+        let button = ToggleButton::with_label(&label);
         button.set_has_frame(false);
         button.set_hexpand(true);
-        button.add_css_class("editor-background-option-button");
+        button.add_css_class("recording-editor-zoom-easing-btn");
         button.set_tooltip_text(Some(&tooltip));
-        if initial_scene_shadow.placement == placement {
-            button.add_css_class("active-background-option");
-        }
-        button.connect_clicked({
+        button.set_active(initial_scene_shadow.placement == placement);
+        button.connect_toggled({
             let runtime = session.runtime.clone();
             let preview = preview.clone();
-            let shadow_placement_buttons = shadow_placement_buttons.clone();
             let notify = notify_interact.clone();
-            move |_| {
+            move |button| {
+                if !button.is_active() {
+                    return;
+                }
                 notify();
                 {
                     let mut runtime = runtime.borrow_mut();
@@ -1655,15 +1651,11 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
                     runtime.motion.scene_shadow.placement = placement;
                     preview.queue_draw();
                 }
-                for (candidate, button) in shadow_placement_buttons.borrow().iter() {
-                    if *candidate == placement {
-                        button.add_css_class("active-background-option");
-                    } else {
-                        button.remove_css_class("active-background-option");
-                    }
-                }
             }
         });
+        if let Some((_, first)) = shadow_placement_buttons.borrow().first() {
+            button.set_group(Some(first));
+        }
         shadow_placement_buttons
             .borrow_mut()
             .push((placement, button.clone()));
