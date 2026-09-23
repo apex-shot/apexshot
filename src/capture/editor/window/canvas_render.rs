@@ -32,6 +32,7 @@ use crate::capture::editor::{
 };
 
 use super::motion_mode::MotionRuntime;
+use super::motion_render::{paint_motion_scene_shadow, MotionStage};
 
 const MAX_PREVIEW_SHADOW_DIM: u32 = 1200;
 const PREVIEW_SHADOW_BLUR_PASSES: usize = 2;
@@ -144,6 +145,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             border_thickness,
             border_color,
             frame_style,
+            scene_shadow,
             selected_tool,
             selected_action,
             select_resize_handle,
@@ -178,6 +180,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 st.border_thickness,
                 st.border_color,
                 st.frame_style,
+                st.scene_shadow.clone(),
                 st.selected_tool,
                 st.selected_action().cloned(),
                 st.select_resize_handle,
@@ -293,6 +296,16 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         };
 
         let canvas_t = t;
+
+        // The rectangle the background fill covers is the static scene, the
+        // same rectangle the Motion stage bounds the card in. Scene Shadows
+        // shade it in both passes.
+        let scene_stage = MotionStage::rect_at(
+            canvas_t.offset_x,
+            canvas_t.offset_y,
+            virtual_w * canvas_t.scale,
+            virtual_h * canvas_t.scale,
+        );
 
         // Quality filter while the canvas rests, cheap one while a drag or draft is
         // repainting at pointer rate (see `editor_interactive_image_filter`).
@@ -506,6 +519,10 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                     virtual_h * canvas_t.scale,
                     background_noise,
                 );
+                // Scene Shadows underlay: over the fill, under the card, its
+                // backings and its drop shadow. No fill means no scene to read
+                // the shading against (the inspector says so), so it is skipped.
+                paint_motion_scene_shadow(&context, scene_stage, &scene_shadow, true);
             }
 
             if let Some(layout) = background_layout.as_ref() {
@@ -823,6 +840,18 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         if let Some(draft) = draft_action {
             draw_draft_action(context, &draft);
         }
+
+        // Scene Shadows overlay: above the card and its annotations, matching
+        // the Motion overlay pass. Handles and edit outlines are editor
+        // chrome, not content, so they must not dim under the shade: drop back
+        // to view space for the pass, then carry on in image space.
+        let _ = context.restore();
+        if has_background {
+            paint_motion_scene_shadow(&context, scene_stage, &scene_shadow, false);
+        }
+        let _ = context.save();
+        context.translate(t.offset_x, t.offset_y);
+        context.scale(t.scale, t.scale);
 
         // In Text tool mode: draw hover outline for the text action under the cursor.
         if selected_tool == Tool::Text && active_text_bounds.is_none() {

@@ -25,6 +25,7 @@ use super::types::{
     AnnotationAction, ArrowStyle, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
     EditorError, FrameStyle, MoveHandle, ObfuscateMethod, Point, Rect, TextEditBounds, Tool,
 };
+use crate::recording::editor::model::MotionSceneShadow;
 use gtk4;
 use image::RgbaImage;
 use std::sync::atomic::AtomicBool;
@@ -91,6 +92,8 @@ pub struct EditorState {
     pub shadow_blur: f64,
     pub shadow_offset_x: f64,
     pub shadow_offset_y: f64,
+    /// Scene Shadows overlay/underlay layer (not the card drop shadow above).
+    pub scene_shadow: MotionSceneShadow,
     pub active_text_drag_start_bounds: Option<Rect>,
     pub active_text_is_resizing: bool,
     pub hovered_text_action_index: Option<usize>,
@@ -269,6 +272,7 @@ impl EditorState {
             shadow_blur: 16.0,
             shadow_offset_x: 0.0,
             shadow_offset_y: 16.0,
+            scene_shadow: MotionSceneShadow::default(),
             active_text_drag_start_bounds: None,
             active_text_is_resizing: false,
             hovered_text_action_index: None,
