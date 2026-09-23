@@ -2472,3 +2472,9 @@ msgstr "Добавить текст"
 
 msgid "Drag to place the title; double-click to reset"
 msgstr "Перетащите, чтобы разместить заголовок; двойной щелчок для сброса"
+
+msgid "Freeze"
+msgstr "Заморозка"
+
+msgid "Hold the last frame on screen"
+msgstr "Удерживать последний кадр на экране"

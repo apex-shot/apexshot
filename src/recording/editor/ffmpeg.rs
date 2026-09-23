@@ -571,6 +571,10 @@ fn build_composite_convert_args(
         filter.push(',');
         filter.push_str(&pad);
     }
+    if let Some(pad) = freeze_tail_tpad(state) {
+        filter.push(',');
+        filter.push_str(&pad);
+    }
 
     let mut args = vec![
         "-y".into(),
@@ -656,6 +660,20 @@ fn lead_in_tpad(state: &VideoEditState) -> Option<String> {
     ))
 }
 
+/// Hold the clip's last frame for the freeze tail. Only the final segment can
+/// freeze, and it is the only one whose `-to` may exceed the source, so the
+/// tail pads the whole chain rather than one mid-clip segment.
+fn freeze_tail_tpad(state: &VideoEditState) -> Option<String> {
+    let tail = state.freeze_tail_seconds();
+    if tail <= 0.001 {
+        return None;
+    }
+    Some(format!(
+        "tpad=stop_mode=clone:stop_duration={}",
+        format_seconds(tail)
+    ))
+}
+
 fn convert_video_filter(state: &VideoEditState, speed: f64) -> Option<String> {
     let mut parts = Vec::new();
     if let Some(crop) = state.crop {
@@ -673,6 +691,9 @@ fn convert_video_filter(state: &VideoEditState, speed: f64) -> Option<String> {
     if let Some(pad) = lead_in_tpad(state) {
         parts.push(pad);
     }
+    if let Some(pad) = freeze_tail_tpad(state) {
+        parts.push(pad);
+    }
     if parts.is_empty() {
         None
     } else {
@@ -683,7 +704,9 @@ fn convert_video_filter(state: &VideoEditState, speed: f64) -> Option<String> {
 fn convert_audio_args(state: &VideoEditState, speed: f64, source_start: f64) -> Vec<String> {
     let offset = state.timeline_offset_seconds;
     let tempo = atempo_filter(speed);
-    let mode = if state.muted_for_source(source_start) {
+    // The freeze tail is video-only: the source has no audio past its end,
+    // and holding a frame silent is what every editor does by default.
+    let mode = if state.muted_for_source(source_start) || state.freeze_tail_seconds() > 0.001 {
         AudioMode::Muted
     } else {
         state.audio_mode
@@ -760,6 +783,7 @@ fn run_multi_segment_trim(
     let placed = state.ordered_placed_segments();
     let mut segment_files = Vec::new();
     let mut cursor = 0.0;
+    let last_index = placed.len().saturating_sub(1);
     for (i, &(comp, start, end)) in placed.iter().enumerate() {
         let seg_path = tmp_dir.join(format!("seg_{i:04}.mp4"));
         let mut segment_state = state.clone();
@@ -767,11 +791,22 @@ fn run_multi_segment_trim(
         if state.muted_for_source(start) {
             segment_state.audio_mode = AudioMode::Muted;
         }
-        cursor = comp + (end - start).max(0.0) / state.speed_for_source(start);
-        let args = if convert {
-            build_single_convert_args(&segment_state, start, end, &seg_path)
+        let mut seg_end = end;
+        let freeze = state.freeze_tail_seconds();
+        if i == last_index && freeze > 0.0 {
+            // Hold the last frame past the source's end.
+            seg_end += freeze;
         } else {
-            build_single_trim_args(&segment_state, start, end, &seg_path)
+            // Only the final segment may carry the hold; clearing it here
+            // also keeps the reused `segment_state` from padding mid-clip.
+            segment_state.freeze_tail = 0.0;
+            segment_state.frozen_segment = None;
+        }
+        cursor = comp + (seg_end - start).max(0.0) / state.speed_for_source(start);
+        let args = if convert {
+            build_single_convert_args(&segment_state, start, seg_end, &seg_path)
+        } else {
+            build_single_trim_args(&segment_state, start, seg_end, &seg_path)
         };
         run_ffmpeg(args, &seg_path).with_context(|| format!("failed to export segment {i}"))?;
         segment_files.push(seg_path);
@@ -1582,5 +1617,68 @@ mod tests {
         let _ = std::fs::remove_file(&source);
         let _ = std::fs::remove_file(&framed);
         let _ = std::fs::remove_file(&plain);
+    }
+}
+
+#[cfg(test)]
+mod freeze_tests {
+    use super::build_single_convert_args;
+    use crate::recording::editor::model::{VideoEditState, VideoMetadata};
+    use std::path::PathBuf;
+
+    fn state() -> VideoEditState {
+        VideoEditState::new(VideoMetadata {
+            path: PathBuf::from("/tmp/input.mp4"),
+            duration_seconds: 10.0,
+            width: 1920,
+            height: 1080,
+            file_size_bytes: 1024,
+            has_audio: true,
+            frame_rate: 30.0,
+        })
+    }
+
+    fn filter_of(args: &[String]) -> String {
+        args.windows(2)
+            .find(|pair| pair[0] == "-vf" || pair[0] == "-filter_complex")
+            .map(|pair| pair[1].clone())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_frozen_tail_pads_the_video_filter_with_a_cloned_stop() {
+        let mut state = state();
+        state.extend_last_segment(1.5);
+        let args =
+            build_single_convert_args(&state, 0.0, 10.0, std::path::Path::new("/tmp/out.mp4"));
+        let filter = filter_of(&args);
+        assert!(
+            filter.contains("tpad=stop_mode=clone:stop_duration=1.500"),
+            "held frames must be padded at the end: {filter}"
+        );
+    }
+
+    #[test]
+    fn a_frozen_tail_silences_the_audio() {
+        let mut state = state();
+        state.extend_last_segment(1.0);
+        let args =
+            build_single_convert_args(&state, 0.0, 10.0, std::path::Path::new("/tmp/out.mp4"));
+        assert!(
+            args.iter().any(|arg| arg == "-an"),
+            "the hold must not drag audio past the source end: {args:?}"
+        );
+    }
+
+    #[test]
+    fn without_a_freeze_no_stop_padding_is_emitted() {
+        let state = state();
+        let args =
+            build_single_convert_args(&state, 0.0, 10.0, std::path::Path::new("/tmp/out.mp4"));
+        let filter = filter_of(&args);
+        assert!(
+            !filter.contains("stop_mode=clone"),
+            "an ordinary export must stay untouched: {filter}"
+        );
     }
 }

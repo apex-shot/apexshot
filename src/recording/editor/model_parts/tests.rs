@@ -1955,3 +1955,95 @@ fn media_timestamp_zero_is_valid_once_seek_completes() {
     assert_eq!(usable_media_timestamp_seconds(0, true), None);
     assert_eq!(usable_media_timestamp_seconds(-1, false), None);
 }
+
+#[test]
+fn freeze_extends_the_composition_past_the_source_end() {
+    let mut state = VideoEditState::new(metadata());
+    assert_eq!(state.freeze_tail_seconds(), 0.0);
+    assert!(state.extend_last_segment(1.0));
+    assert!((state.freeze_tail_seconds() - 1.0).abs() < 1e-9);
+    assert!((state.trim_end_seconds - 10.0).abs() < 1e-9, "source end is untouched");
+    assert!(
+        (state.composition_duration() - 11.0).abs() < 1e-9,
+        "the held frame lengthens the composition"
+    );
+    assert!(
+        (state.content_end_seconds() - 11.0).abs() < 1e-9,
+        "playback runs through the hold"
+    );
+}
+
+#[test]
+fn freeze_playhead_holds_the_last_source_frame() {
+    let mut state = VideoEditState::new(metadata());
+    state.extend_last_segment(1.0);
+    state.playhead_seconds = 10.5;
+    // Past the source end the player seeks the last real frame and stops
+    // there, so the preview shows the held frame instead of running out.
+    assert!((state.source_playhead() - 10.0).abs() < 1e-6);
+}
+
+#[test]
+fn trimming_right_consumes_the_freeze_tail_first() {
+    let mut state = VideoEditState::new(metadata());
+    state.extend_last_segment(2.0);
+    state.set_trim_end(10.5);
+    assert!(
+        (state.freeze_tail_seconds() - 0.5).abs() < 1e-9,
+        "the hold gives way before real frames"
+    );
+    state.set_trim_end(9.0);
+    assert_eq!(state.freeze_tail_seconds(), 0.0, "the hold is spent first");
+    assert!((state.trim_end_seconds - 9.0).abs() < 1e-9);
+}
+
+#[test]
+fn clearing_the_freeze_tail_restores_the_original_end() {
+    let mut state = VideoEditState::new(metadata());
+    state.extend_last_segment(3.0);
+    assert!(state.clear_freeze_tail());
+    assert_eq!(state.freeze_tail_seconds(), 0.0);
+    assert!((state.trim_end_seconds - 10.0).abs() < 1e-9);
+    assert!(!state.clear_freeze_tail(), "clearing twice is a no-op");
+}
+
+#[test]
+fn freeze_needs_a_kept_final_segment() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(5.0);
+    // Removing the last segment leaves nothing on screen to hold.
+    state.toggle_segment(1);
+    assert!(!state.extend_last_segment(1.0));
+    assert_eq!(state.freeze_tail_seconds(), 0.0);
+}
+
+#[test]
+fn freeze_survives_a_project_roundtrip() {
+    let mut state = VideoEditState::new(metadata());
+    state.extend_last_segment(1.5);
+    let file = state.to_project();
+    let mut restored = VideoEditState::new(metadata());
+    restored.apply_project(file);
+    assert_eq!(restored.frozen_segment, state.frozen_segment);
+    assert!(
+        (restored.freeze_tail_seconds() - 1.5).abs() < 1e-9,
+        "the hold is restored on reload"
+    );
+}
+
+#[test]
+fn reset_video_edits_clears_the_freeze_tail() {
+    let mut state = VideoEditState::new(metadata());
+    state.extend_last_segment(2.0);
+    state.reset_video_edits();
+    assert_eq!(state.freeze_tail_seconds(), 0.0);
+    assert!((state.trim_end_seconds - 10.0).abs() < 1e-9);
+}
+
+#[test]
+fn a_freeze_forces_reencode_because_stream_copy_cannot_hold_a_frame() {
+    let mut state = VideoEditState::new(metadata());
+    assert!(!state.needs_reencode());
+    state.extend_last_segment(1.0);
+    assert!(state.needs_reencode());
+}

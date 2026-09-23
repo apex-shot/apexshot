@@ -75,6 +75,12 @@ pub struct VideoEditState {
     pub audio_mode: AudioMode,
     /// Sorted list of cut points (seconds) within the trim range.
     pub cuts: Vec<f64>,
+    /// Seconds the last segment holds its final frame on screen after
+    /// `trim_end_seconds`. The source has no frames there: the composition is
+    /// longer than the media and the exporter pads the tail.
+    pub freeze_tail: f64,
+    /// Which segment holds the frozen tail (only the final one can).
+    pub frozen_segment: Option<usize>,
     /// Whether each segment is kept (true) or removed (false).
     /// Length is always cuts.len() + 1.
     pub segments_kept: Vec<bool>,

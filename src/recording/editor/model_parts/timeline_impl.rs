@@ -44,7 +44,65 @@ impl VideoEditState {
         } else {
             self.trim_start_seconds
         };
+        // The right handle sits at the end of the freeze tail once one
+        // exists, so a target past the source end resizes the hold. It only
+        // reaches real frames once the hold is spent.
+        if self.freeze_tail > 0.0 && value > self.trim_end_seconds {
+            self.freeze_tail = (value - self.trim_end_seconds).max(0.0);
+            return;
+        }
+        self.freeze_tail = 0.0;
         self.trim_end_seconds = value.clamp(min_end.min(duration), duration);
+    }
+
+    /// Held seconds after `trim_end_seconds`: the clip's last frame frozen on
+    /// screen. The source never contained these frames, so the composition is
+    /// longer than the media and the exporter pads them.
+    pub fn freeze_tail_seconds(&self) -> f64 {
+        self.freeze_tail
+    }
+
+    /// Composition end of the last segment: its own end, plus any freeze tail
+    /// the user added to that segment.
+    pub fn last_segment_end(&self) -> f64 {
+        let last = self.segment_order.last().copied().unwrap_or(0);
+        let end = self.segment_start(last) + self.segment_timeline_duration(last);
+        if self.freeze_applies_to(last) {
+            end + self.freeze_tail
+        } else {
+            end
+        }
+    }
+
+    /// Drop the held tail. Returns true when there was one.
+    pub fn clear_freeze_tail(&mut self) -> bool {
+        if self.freeze_tail <= f64::EPSILON {
+            return false;
+        }
+        self.freeze_tail = 0.0;
+        self.frozen_segment = None;
+        true
+    }
+
+    fn freeze_applies_to(&self, index: usize) -> bool {
+        self.frozen_segment == Some(index) && self.segment_order.last() == Some(&index)
+    }
+
+    /// Hold the last frame on screen for `seconds`. Only the final segment
+    /// can freeze: a held frame with playable footage after it would be a
+    /// gap, and that is what `segment_starts` already models.
+    pub fn extend_last_segment(&mut self, seconds: f64) -> bool {
+        if self.video_locked || !seconds.is_finite() || seconds <= 0.0 {
+            return false;
+        }
+        let last = match self.segment_order.last().copied() {
+            Some(index) if self.segments_kept.get(index).copied().unwrap_or(true) => index,
+            _ => return false,
+        };
+        self.frozen_segment = Some(last);
+        self.freeze_tail += seconds;
+        self.clamp_timeline_scroll();
+        true
     }
 
     pub fn trim_duration(&self) -> f64 {

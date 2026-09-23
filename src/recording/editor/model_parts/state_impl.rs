@@ -14,6 +14,8 @@ impl VideoEditState {
             quality: ExportQuality::default(),
             audio_mode: AudioMode::Unchanged,
             cuts: Vec::new(),
+            freeze_tail: 0.0,
+            frozen_segment: None,
             segments_kept: vec![true],
             segment_order: vec![0],
             segment_starts: vec![0.0],
@@ -82,6 +84,7 @@ impl VideoEditState {
                     .map(|_| self.segment_start(i) + self.segment_timeline_duration(i))
             })
             .fold(0.0_f64, f64::max)
+            .max(self.last_segment_end())
     }
 
     pub fn visible_span_seconds(&self) -> f64 {
@@ -367,6 +370,8 @@ impl VideoEditState {
         }
         self.trim_start_seconds = 0.0;
         self.trim_end_seconds = self.metadata.duration_seconds;
+        self.freeze_tail = 0.0;
+        self.frozen_segment = None;
         self.timeline_offset_seconds = 0.0;
         self.timeline_scroll_seconds = 0.0;
         self.clear_cuts();

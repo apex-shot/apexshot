@@ -144,6 +144,26 @@ pub fn draw_video_clip(
     let h = height as f64;
     let tiles = filmstrip_tile_spans(&state, w);
     let layout = video_layout(&state, w);
+    // A held tail lives past `trim_end`, so it draws as its own clip rather
+    // than stretching the last one: the frames never existed, and the filmstrip
+    // has nothing to show there.
+    if state.freeze_tail_seconds() > 0.001 {
+        let index = layout.len();
+        let x0 = state.time_to_x(state.trim_end_seconds, w);
+        let x1 = state.time_to_x(state.trim_end_seconds + state.freeze_tail_seconds(), w);
+        draw_video_segment(
+            cr,
+            x0,
+            x1,
+            h,
+            freeze_tone(light),
+            state.selected_segment == Some(index),
+            hovered == Some(index),
+            false,
+            &[],
+            &[],
+        );
+    }
     let mut lifted = None;
     for &(_, seg_idx, x0, x1) in &layout {
         if dragging == Some(seg_idx) {
@@ -178,6 +198,24 @@ pub fn draw_video_clip(
             &tiles,
             filmstrip,
         );
+    }
+}
+
+/// A held-last-frame region: a flat still-toned clip, marked so it reads as a
+/// freeze rather than unrendered footage.
+fn freeze_tone(light: bool) -> ClipTone {
+    if light {
+        ClipTone {
+            fill: (0.16, 0.18, 0.22, 0.92),
+            edge: (0.30, 0.34, 0.40, 0.92),
+            handle: (0.30, 0.34, 0.40, 0.90),
+        }
+    } else {
+        ClipTone {
+            fill: (0.16, 0.17, 0.20, 0.92),
+            edge: (0.72, 0.78, 0.88, 0.92),
+            handle: (0.86, 0.90, 0.98, 0.90),
+        }
     }
 }
 
