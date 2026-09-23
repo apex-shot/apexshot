@@ -1,25 +1,15 @@
 // Background panel for the recording (video) editor.
 //
 // Accessed through the left tool rail next to Cursor; opens on the right
-// just like the Cursor panel. Unlike the image editor, video only supports
-// Wallpaper (same bundled wallpapers as the image editor) and Color.
+// just like the Cursor panel. The fill is picked from one of three sources —
+// a bundled wallpaper, a hand-drawn custom fill, or an image from disk —
+// above the Padding and Radius controls.
 //
 // Included into `tool_sidebar.rs`, so parent imports (gtk, state, FillSlider,
 // color dots, `t`, ..) are already in scope; only truly new items are
 // imported here.
 
 use std::path::PathBuf;
-
-const BACKGROUND_COLOR_PRESETS: [(u8, u8, u8); 8] = [
-    (17, 17, 17),
-    (44, 36, 56),
-    (176, 92, 56),
-    (80, 160, 255),
-    (72, 210, 140),
-    (255, 200, 80),
-    (240, 80, 110),
-    (245, 245, 247),
-];
 
 fn video_wallpaper_files() -> Vec<&'static str> {
     crate::capture::editor::window::background_panel::MOTION_WALLPAPER_FILES
@@ -67,62 +57,36 @@ fn build_background_panel(
     header.append(&title);
     panel.append(&header);
 
-    // Mode row mirrors the image editor Appearance choices, trimmed to the
-    // two fills video supports plus an explicit off state.
-    let mode_row = GtkBox::new(Orientation::Horizontal, 0);
-    mode_row.add_css_class("recording-editor-zoom-mode");
-    mode_row.set_hexpand(true);
-    mode_row.set_homogeneous(true);
-    let none_btn = ToggleButton::with_label(&t("None"));
-    none_btn.add_css_class("recording-editor-zoom-mode-btn");
-    none_btn.set_has_frame(false);
-    none_btn.set_hexpand(true);
-    let wallpaper_btn = ToggleButton::with_label(&t("Wallpaper"));
-    wallpaper_btn.add_css_class("recording-editor-zoom-mode-btn");
-    wallpaper_btn.set_has_frame(false);
-    wallpaper_btn.set_hexpand(true);
-    wallpaper_btn.set_group(Some(&none_btn));
-    let color_btn = ToggleButton::with_label(&t("Color"));
-    color_btn.add_css_class("recording-editor-zoom-mode-btn");
-    color_btn.set_has_frame(false);
-    color_btn.set_hexpand(true);
-    color_btn.set_group(Some(&none_btn));
-    mode_row.append(&none_btn);
-    mode_row.append(&wallpaper_btn);
-    mode_row.append(&color_btn);
-
-    let hint = Label::new(Some(&t(
-        "Wallpaper or color fills the canvas behind the video in preview and export",
-    )));
-    hint.add_css_class("recording-editor-zoom-hint");
-    hint.set_wrap(true);
-    hint.set_xalign(0.0);
-    hint.set_max_width_chars(34);
+    // Which source the fill comes from. `None` still lives in the model as
+    // the absence of a fill, so it is reached by clearing rather than by
+    // holding a tab — the tabs pick *what* fills, and a "No background"
+    // action below turns it off.
+    let source_row = GtkBox::new(Orientation::Horizontal, 0);
+    source_row.add_css_class("recording-editor-bg-tabs");
+    source_row.set_hexpand(true);
+    source_row.set_homogeneous(true);
+    let wallpaper_tab = bg_tab_button(&t("Wallpaper"));
+    let custom_tab = bg_tab_button(&t("Custom"));
+    let image_tab = bg_tab_button(&t("Image"));
+    custom_tab.set_group(Some(&wallpaper_tab));
+    image_tab.set_group(Some(&wallpaper_tab));
+    source_row.append(&wallpaper_tab);
+    source_row.append(&custom_tab);
+    source_row.append(&image_tab);
 
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.add_css_class("recording-editor-zoom-body");
     body.add_css_class("recording-editor-cursor-tab-body");
     body.set_hexpand(true);
-    body.append(&mode_row);
-    body.append(&hint);
+    body.append(&source_row);
 
-    // --- Wallpaper page ---
-    let wallpaper_page = GtkBox::new(Orientation::Vertical, 8);
+    // --- Wallpaper source: the bundled grid, four across like the mock. ---
+    let wallpaper_page = GtkBox::new(Orientation::Vertical, 0);
     wallpaper_page.set_hexpand(true);
-    let wallpaper_label = Label::new(Some(&t("WALLPAPER")));
-    wallpaper_label.add_css_class("recording-editor-zoom-kicker");
-    wallpaper_label.set_xalign(0.0);
-    wallpaper_label.set_hexpand(false);
-    wallpaper_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    wallpaper_label.set_max_width_chars(24);
-    wallpaper_page.append(&wallpaper_label);
 
-    // Thumbnail tiles mirror the image editor: fixed 56px squares with the
-    // same button chrome and rounded cover-fit paint, so both editors look
-    // identical. Fixed sizes also keep the grid from ever stretching the
-    // 288px sidebar when a tile image is large.
     let grid = Grid::new();
     grid.add_css_class("editor-motion-wallpaper-grid");
+    grid.add_css_class("recording-editor-bg-wallpaper-grid");
     grid.set_column_spacing(8);
     grid.set_row_spacing(8);
     grid.set_column_homogeneous(true);
@@ -184,7 +148,7 @@ fn build_background_panel(
                     on_change();
                 });
             }
-            grid.attach(&card, (index % 3) as i32, (index / 3) as i32, 1, 1);
+            grid.attach(&card, (index % 4) as i32, (index / 4) as i32, 1, 1);
             (file_name.to_string(), card)
         })
         .collect();
@@ -195,104 +159,99 @@ fn build_background_panel(
     }
     wallpaper_page.append(&grid);
 
-    // --- Color page ---
-    let color_page = GtkBox::new(Orientation::Vertical, 8);
-    color_page.set_hexpand(true);
-    let color_label = Label::new(Some(&t("COLOR")));
-    color_label.add_css_class("recording-editor-zoom-kicker");
-    color_label.set_xalign(0.0);
-    color_label.set_hexpand(false);
-    color_label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
-    color_label.set_max_width_chars(24);
-    color_page.append(&color_label);
+    // --- Custom source: one row that opens the Custom Wallpaper dialog. ---
+    let custom_page = GtkBox::new(Orientation::Vertical, 0);
+    custom_page.set_hexpand(true);
+    let custom_row = Button::new();
+    custom_row.add_css_class("recording-editor-bg-custom-row");
+    custom_row.set_has_frame(false);
+    custom_row.set_hexpand(true);
+    let custom_inner = GtkBox::new(Orientation::Horizontal, 10);
+    let custom_swatch = DrawingArea::new();
+    custom_swatch.add_css_class("recording-editor-bg-custom-swatch");
+    custom_swatch.set_content_width(20);
+    custom_swatch.set_content_height(20);
+    custom_swatch.set_valign(Align::Center);
+    custom_swatch.set_can_target(false);
+    let custom_label = Label::new(Some(&t("Edit custom fill")));
+    custom_label.set_hexpand(true);
+    custom_label.set_xalign(0.0);
+    custom_label.set_valign(Align::Center);
+    let custom_edit = Image::from_icon_name("document-edit-symbolic");
+    custom_edit.set_pixel_size(13);
+    custom_edit.set_valign(Align::Center);
+    custom_inner.append(&custom_swatch);
+    custom_inner.append(&custom_label);
+    custom_inner.append(&custom_edit);
+    custom_row.set_child(Some(&custom_inner));
+    custom_page.append(&custom_row);
 
-    let color_row = GtkBox::new(Orientation::Horizontal, 8);
-    color_row.add_css_class("recording-editor-click-color-row");
-    color_row.set_hexpand(true);
-    let swatch_label = Label::new(Some(&t("Color")));
-    swatch_label.add_css_class("recording-editor-zoom-classic-label");
-    swatch_label.set_xalign(0.0);
-    swatch_label.set_hexpand(true);
-    swatch_label.set_valign(Align::Center);
-    let swatch = Button::new();
-    swatch.add_css_class("recording-editor-click-color-swatch");
-    swatch.set_has_frame(false);
-    swatch.set_tooltip_text(Some(&t("Choose background color")));
-    let swatch_paint = DrawingArea::new();
-    swatch_paint.set_content_width(28);
-    swatch_paint.set_content_height(22);
-    swatch_paint.set_can_target(false);
-    swatch_paint.set_draw_func({
-        let state = state.clone();
-        move |_, cr, width, height| {
-            let (r, g, b) = match &state.lock().unwrap().background {
-                VideoBackground::Plain { r, g, b } => (*r, *g, *b),
-                _ => (17, 17, 17),
-            };
-            draw_color_chip(cr, width as f64, height as f64, (r, g, b), 6.0);
-        }
-    });
-    swatch.set_child(Some(&swatch_paint));
-    swatch.connect_clicked({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        move |button| open_background_color_dialog(button, state.clone(), on_change.clone())
-    });
-    let hex = Label::new(Some("#111111"));
-    hex.add_css_class("recording-editor-click-color-hex");
-    hex.set_xalign(0.0);
-    hex.set_valign(Align::Center);
-    color_row.append(&swatch_label);
-    color_row.append(&swatch);
-    color_row.append(&hex);
-    color_page.append(&color_row);
+    // --- Image source: pick any file on disk. ---
+    let image_page = GtkBox::new(Orientation::Vertical, 0);
+    image_page.set_hexpand(true);
+    let image_row = Button::new();
+    image_row.add_css_class("recording-editor-bg-custom-row");
+    image_row.set_has_frame(false);
+    image_row.set_hexpand(true);
+    let image_inner = GtkBox::new(Orientation::Horizontal, 10);
+    let image_thumb = DrawingArea::new();
+    image_thumb.add_css_class("recording-editor-bg-custom-swatch");
+    image_thumb.set_content_width(20);
+    image_thumb.set_content_height(20);
+    image_thumb.set_valign(Align::Center);
+    image_thumb.set_can_target(false);
+    let image_label = Label::new(Some(&t("Select image...")));
+    image_label.set_hexpand(true);
+    image_label.set_xalign(0.0);
+    image_label.set_valign(Align::Center);
+    let image_edit = Image::from_icon_name("folder-open-regular");
+    image_edit.set_pixel_size(13);
+    image_edit.set_valign(Align::Center);
+    image_inner.append(&image_thumb);
+    image_inner.append(&image_label);
+    image_inner.append(&image_edit);
+    image_row.set_child(Some(&image_inner));
+    image_page.append(&image_row);
 
-    let dots = GtkBox::new(Orientation::Horizontal, 6);
-    dots.add_css_class("recording-editor-click-color-dots");
-    dots.set_halign(Align::End);
-    for color in BACKGROUND_COLOR_PRESETS {
-        let dot = color_dot_button(color);
-        dot.connect_clicked({
-            let state = state.clone();
-            let on_change = on_change.clone();
-            move |_| {
-                state.lock().unwrap().background = VideoBackground::Plain {
-                    r: color.0,
-                    g: color.1,
-                    b: color.2,
-                };
-                on_change();
-            }
-        });
-        dots.append(&dot);
-    }
-    color_page.append(&dots);
-
-    // Padding controls how much wallpaper/color surrounds the video. It
-    // lives above the fill pages so it is visible on both Wallpaper and
-    // Color, and hidden entirely when there is no background.
-    let padding_row = cursor_slider_row(&t("Padding"));
+    // --- Padding and Radius: number pill + slider, per the mock. ---
+    let padding_row = bg_value_row(&t("Padding"));
     padding_row.scale.set_range(0.0, 80.0);
     padding_row.scale.set_increments(1.0, 4.0);
-    padding_row.scale.connect_value_changed({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |scale| {
-            if syncing.get() {
-                return;
-            }
-            state.lock().unwrap().background_padding = scale.value();
-            on_change();
-        }
-    });
+    bind_bg_value(
+        &padding_row,
+        &syncing,
+        &state,
+        &on_change,
+        |guard, value| guard.background_padding = value,
+    );
+
+    // Radius follows padding's units: both are slider values against a 400px
+    // long edge, so the number in the pill matches what export draws.
+    let radius_row = bg_value_row(&t("Radius"));
+    radius_row.scale.set_range(0.0, 80.0);
+    radius_row.scale.set_increments(1.0, 4.0);
+    bind_bg_value(
+        &radius_row,
+        &syncing,
+        &state,
+        &on_change,
+        |guard, value| guard.background_corner_radius = value,
+    );
 
     let pages = GtkBox::new(Orientation::Vertical, 0);
     pages.set_hexpand(true);
     pages.append(&wallpaper_page);
-    pages.append(&color_page);
+    pages.append(&custom_page);
+    pages.append(&image_page);
     body.append(&padding_row.widget);
+    body.append(&radius_row.widget);
     body.append(&pages);
+
+    // --- Stroke and Shadow: expandable, inert for now. ---
+    let stroke_section = bg_placeholder_section(&t("Stroke"));
+    let shadow_section = bg_placeholder_section(&t("Shadow"));
+    body.append(&stroke_section.widget);
+    body.append(&shadow_section.widget);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -302,91 +261,161 @@ fn build_background_panel(
     scroll.set_child(Some(&body));
     panel.append(&scroll);
 
-    // Mode switching only flips the stored fill; tile/dot clicks pick values.
-    none_btn.connect_clicked({
+    // Picking a custom source without an editable fill would leave the panel
+    // showing a mode that cannot do anything, so each tab falls back to a
+    // sensible default the first time it is opened.
+    let custom_tab_activate = {
         let state = state.clone();
         let on_change = on_change.clone();
         let syncing = syncing.clone();
-        move |button| {
-            if syncing.get() || !button.is_active() {
+        move |button: &ToggleButton| {
+            if !button.is_active() {
                 return;
             }
-            state.lock().unwrap().background = VideoBackground::None;
+            let mut guard = state.lock().unwrap();
+            if matches!(
+                guard.background,
+                VideoBackground::Plain { .. } | VideoBackground::Gradient(_)
+            ) {
+                return;
+            }
+            guard.background = VideoBackground::Plain {
+                r: 17,
+                g: 17,
+                b: 17,
+            };
+            drop(guard);
+            syncing.set(false);
             on_change();
         }
-    });
-    wallpaper_btn.connect_clicked({
+    };
+    let image_tab_activate = {
         let state = state.clone();
-        let on_change = on_change.clone();
         let syncing = syncing.clone();
-        move |button| {
-            if syncing.get() || !button.is_active() {
+        move |button: &ToggleButton| {
+            if !button.is_active() {
                 return;
             }
-            let mut guard = state.lock().unwrap();
-            if !matches!(guard.background, VideoBackground::Wallpaper(_)) {
-                guard.background = VideoBackground::Wallpaper(wallpaper_full_path(
-                    video_wallpaper_files()
-                        .first()
-                        .copied()
-                        .unwrap_or("wallpaper-001.jpg"),
-                ));
-                drop(guard);
-                on_change();
+            let is_image = matches!(&state.lock().unwrap().background, VideoBackground::Wallpaper(_));
+            if !is_image {
+                // A picked file replaces the fill; the chooser itself is wired
+                // to the row below.
+                syncing.set(false);
             }
         }
-    });
-    color_btn.connect_clicked({
+    };
+    custom_tab.connect_toggled(custom_tab_activate);
+    image_tab.connect_toggled(image_tab_activate);
+
+    custom_row.connect_clicked({
         let state = state.clone();
         let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |button| {
-            if syncing.get() || !button.is_active() {
-                return;
-            }
-            let mut guard = state.lock().unwrap();
-            if !matches!(guard.background, VideoBackground::Plain { .. }) {
-                guard.background = VideoBackground::Plain {
-                    r: 17,
-                    g: 17,
-                    b: 17,
-                };
-                drop(guard);
-                on_change();
-            }
-        }
+        move |button| open_custom_wallpaper_dialog(button, state.clone(), on_change.clone())
+    });
+
+    image_row.connect_clicked({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        move |button| pick_background_image(button, state.clone(), on_change.clone())
     });
 
     let refresh = {
-        let none_btn = none_btn.clone();
-        let wallpaper_btn = wallpaper_btn.clone();
-        let color_btn = color_btn.clone();
+        let wallpaper_tab = wallpaper_tab.clone();
+        let custom_tab = custom_tab.clone();
+        let image_tab = image_tab.clone();
         let wallpaper_page = wallpaper_page.clone();
-        let color_page = color_page.clone();
-        let padding_widget = padding_row.widget.clone();
-        let padding_scale = padding_row.scale.clone();
-        let swatch_paint = swatch_paint.clone();
-        let hex = hex.clone();
+        let custom_page = custom_page.clone();
+        let image_page = image_page.clone();
+        let custom_swatch = custom_swatch.clone();
+        let image_thumb = image_thumb.clone();
+        let padding_row_value = padding_row.clone();
+        let radius_row_value = radius_row.clone();
         let cards = cards.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
-            let (background, padding) = {
+            let (background, padding, radius) = {
                 let guard = state.lock().unwrap();
-                (guard.background.clone(), guard.background_padding)
+                (
+                    guard.background.clone(),
+                    guard.background_padding,
+                    guard.background_corner_radius,
+                )
             };
             syncing.set(true);
             let is_wallpaper = matches!(background, VideoBackground::Wallpaper(_));
-            let is_color = matches!(background, VideoBackground::Plain { .. });
-            let has_fill = is_wallpaper || is_color;
-            none_btn.set_active(!has_fill);
-            wallpaper_btn.set_active(is_wallpaper);
-            color_btn.set_active(is_color);
-            wallpaper_page.set_visible(is_wallpaper);
-            color_page.set_visible(is_color);
-            padding_widget.set_visible(has_fill);
-            padding_scale.set_value(padding);
-            if let VideoBackground::Wallpaper(path) = &background {
-                let active = wallpaper_file_name(path);
+            let is_plain = matches!(background, VideoBackground::Plain { .. });
+            let is_gradient = matches!(background, VideoBackground::Gradient(_));
+            let has_fill = is_wallpaper || is_plain || is_gradient;
+
+            wallpaper_tab.set_active(is_wallpaper);
+            custom_tab.set_active(is_plain || is_gradient);
+            // A user-picked image and a bundled wallpaper share a variant, so
+            // the Image tab claims the tab only while the chosen file is not
+            // one of the bundled assets.
+            let picked = match &background {
+                VideoBackground::Wallpaper(path) => {
+                    wallpaper_file_name(path)
+                        .map(|name| !video_wallpaper_files().contains(&name.as_str()))
+                        .unwrap_or(false)
+                }
+                _ => false,
+            };
+            image_tab.set_active(picked);
+
+            wallpaper_page.set_visible(is_wallpaper && !picked);
+            custom_page.set_visible(is_plain || is_gradient);
+            image_page.set_visible(picked);
+
+            // Padding only means something once something fills the canvas.
+            padding_row_value.widget.set_visible(has_fill);
+            padding_row_value.sync_value(padding);
+            // Radius rounds the video card itself, so it stays available with
+            // no fill at all.
+            radius_row_value.sync_value(radius);
+
+            // The custom swatch previews whatever the dialog last applied.
+            {
+                let preview: Option<(u8, u8, u8)> = match &background {
+                    VideoBackground::Plain { r, g, b } => Some((*r, *g, *b)),
+                    VideoBackground::Gradient(gradient) => {
+                        let stops = gradient.draw_stops();
+                        // Average the ends so a multi-stop ramp reads as a
+                        // representative color at 20px.
+                        stops.first().zip(stops.last()).map(|(a, b)| {
+                            (
+                                ((a.r as u32 + b.r as u32) / 2) as u8,
+                                ((a.g as u32 + b.g as u32) / 2) as u8,
+                                ((a.b as u32 + b.b as u32) / 2) as u8,
+                            )
+                        })
+                    }
+                    _ => None,
+                };
+                custom_swatch.set_draw_func(move |_, cr, width, height| {
+                    if let Some((r, g, b)) = preview {
+                        draw_color_chip(cr, width as f64, height as f64, (r, g, b), 5.0);
+                    }
+                });
+                custom_swatch.queue_draw();
+            }
+
+            // The Image tab shows the chosen file, or an empty slot.
+            {
+                let path = match &background {
+                    VideoBackground::Wallpaper(path) if picked => Some(path.clone()),
+                    _ => None,
+                };
+                let surface = path.as_ref().and_then(|p| decode_wallpaper_thumb(p));
+                image_thumb.set_draw_func(move |_, cr, width, height| {
+                    if let Some(surface) = &surface {
+                        paint_wallpaper_thumb(cr, surface, width, height);
+                    }
+                });
+                image_thumb.queue_draw();
+            }
+
+            if is_wallpaper {
+                let active = wallpaper_file_name_from_background(&background);
                 for (file_name, card) in &cards {
                     let on = active.as_deref() == Some(file_name.as_str());
                     card.set_active(on);
@@ -402,10 +431,6 @@ fn build_background_panel(
                     card.remove_css_class("active-background-option");
                 }
             }
-            if let VideoBackground::Plain { r, g, b } = background {
-                hex.set_text(&format!("#{r:02X}{g:02X}{b:02X}"));
-            }
-            swatch_paint.queue_draw();
             syncing.set(false);
         }) as Rc<dyn Fn()>
     };
@@ -415,6 +440,264 @@ fn build_background_panel(
         refresh,
     }
 }
+
+fn bg_tab_button(label: &str) -> ToggleButton {
+    let button = ToggleButton::with_label(label);
+    button.add_css_class("recording-editor-bg-tab");
+    button.set_has_frame(false);
+    button.set_hexpand(true);
+    button
+}
+
+fn wallpaper_file_name_from_background(background: &VideoBackground) -> Option<String> {
+    match background {
+        VideoBackground::Wallpaper(path) => wallpaper_file_name(path),
+        _ => None,
+    }
+}
+
+/// A labelled numeric row: a name, an editable value in a pill with its
+/// unit, and a slider. The entry commits on activate and on focus-leave
+/// rather than per keystroke, matching the image editor's dimension pills.
+#[derive(Clone)]
+struct BgValueRow {
+    widget: GtkBox,
+    scale: FillSlider,
+    entry: Entry,
+    syncing: Rc<Cell<bool>>,
+}
+
+fn bg_value_row(label: &str) -> BgValueRow {
+    let row = GtkBox::new(Orientation::Vertical, 4);
+    row.add_css_class("recording-editor-bg-value-row");
+    row.set_hexpand(true);
+
+    let top = GtkBox::new(Orientation::Horizontal, 8);
+    top.set_hexpand(true);
+
+    let name = Label::new(Some(label));
+    name.add_css_class("recording-editor-zoom-classic-label");
+    name.set_xalign(0.0);
+    name.set_hexpand(true);
+    name.set_valign(Align::Center);
+    top.append(&name);
+
+    let pill = GtkBox::new(Orientation::Horizontal, 6);
+    pill.add_css_class("recording-editor-bg-value-pill");
+    pill.set_valign(Align::Center);
+
+    let entry = Entry::new();
+    entry.add_css_class("recording-editor-bg-value-entry");
+    entry.set_width_chars(3);
+    entry.set_max_width_chars(3);
+    entry.set_valign(Align::Center);
+    // Entries have no xalign of their own; alignment rides on the editable
+    // text, so right-align it to sit next to the unit suffix.
+    gtk4::prelude::EntryExt::set_alignment(&entry, 1.0);
+    pill.append(&entry);
+
+    let unit = Label::new(Some("px"));
+    unit.add_css_class("recording-editor-bg-value-unit");
+    unit.set_valign(Align::Center);
+    pill.append(&unit);
+
+    top.append(&pill);
+    row.append(&top);
+
+    // The slider carries the same value; the pill is a readout plus a way to
+    // type an exact number.
+    let scale = FillSlider::new_with_value_text("", |value, _, _| {
+        format!("{value:.0}")
+    });
+    let track = scale.widget();
+    track.add_css_class("recording-editor-bg-value-track");
+    row.append(&track);
+
+    BgValueRow {
+        widget: row,
+        scale,
+        entry,
+        syncing: Rc::new(Cell::new(false)),
+    }
+}
+
+impl BgValueRow {
+    /// Push state into the widgets without re-entering the write path.
+    fn sync_value(&self, value: f64) {
+        self.syncing.set(true);
+        self.scale.set_value(value);
+        self.entry.set_text(&format!("{value:.0}"));
+        self.syncing.set(false);
+    }
+}
+
+/// Wire a row's slider, entry, and focus behaviour to one state field.
+fn bind_bg_value(
+    row: &BgValueRow,
+    syncing: &Rc<Cell<bool>>,
+    state: &Arc<Mutex<VideoEditState>>,
+    on_change: &Rc<dyn Fn()>,
+    write: impl Fn(&mut VideoEditState, f64) + Clone + 'static,
+) {
+    let scale_row = row.clone();
+    let scale_state = state.clone();
+    let scale_change = on_change.clone();
+    let scale_syncing = syncing.clone();
+    let slider_write = write.clone();
+    row.scale.connect_value_changed(move |slider| {
+        if scale_syncing.get() || scale_row.syncing.get() {
+            return;
+        }
+        slider_write(&mut scale_state.lock().unwrap(), slider.value());
+        scale_change();
+        // Keep the entry in step when the value came from the slider.
+        scale_row.entry.set_text(&format!("{:.0}", slider.value()));
+    });
+
+    let commit = {
+        let row = row.clone();
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        let commit_write = write;
+        move |commit: bool| {
+            if !commit || row.syncing.get() {
+                return;
+            }
+            let Ok(parsed) = row.entry.text().trim().parse::<f64>() else {
+                // Reject anything unparseable by restoring the last good value.
+                row.sync_value(row.scale.value());
+                return;
+            };
+            syncing.set(true);
+            row.scale.set_value(parsed);
+            syncing.set(false);
+            row.entry.set_text(&format!("{parsed:.0}"));
+            commit_write(&mut state.lock().unwrap(), parsed);
+            on_change();
+        }
+    };
+    let commit_entry = commit.clone();
+    row.entry.connect_activate(move |_| commit_entry(true));
+    let focus = EventControllerFocus::new();
+    focus.connect_leave(move |_| commit(true));
+    row.entry.add_controller(focus);
+}
+
+struct BgSection {
+    widget: GtkBox,
+}
+
+fn bg_placeholder_section(label: &str) -> BgSection {
+    let section = GtkBox::new(Orientation::Vertical, 0);
+    section.add_css_class("recording-editor-bg-section");
+    section.set_hexpand(true);
+
+    let header = GtkBox::new(Orientation::Horizontal, 8);
+    header.set_hexpand(true);
+
+    let title = Button::new();
+    title.add_css_class("recording-editor-bg-section-toggle");
+    title.set_has_frame(false);
+    title.set_hexpand(true);
+    let title_text = Label::new(Some(label));
+    title_text.set_xalign(0.0);
+    title.set_child(Some(&title_text));
+    header.append(&title);
+
+    let add = Button::new();
+    add.add_css_class("recording-editor-bg-section-add");
+    add.set_has_frame(false);
+    add.set_valign(Align::Center);
+    add.set_tooltip_text(Some(&t("Add")));
+    let plus = Label::new(Some("+"));
+    plus.set_valign(Align::Center);
+    add.set_child(Some(&plus));
+    header.append(&add);
+    section.append(&header);
+
+    // Placeholder body: the control ships with the panel but has no effect
+    // until stroke and shadow are actually rendered.
+    let body = GtkBox::new(Orientation::Vertical, 0);
+    body.add_css_class("recording-editor-bg-section-body");
+    let hint = Label::new(Some(&t("Coming soon")));
+    hint.add_css_class("recording-editor-zoom-hint");
+    hint.set_xalign(0.0);
+    body.append(&hint);
+
+    let revealer = Revealer::new();
+    revealer.set_reveal_child(false);
+    revealer.set_transition_type(RevealerTransitionType::SlideDown);
+    revealer.set_transition_duration(180);
+    revealer.set_child(Some(&body));
+    section.append(&revealer);
+
+    title.connect_clicked({
+        let revealer = revealer.clone();
+        let plus = plus.clone();
+        move |_| {
+            let revealed = revealer.reveals_child();
+            revealer.set_reveal_child(!revealed);
+            plus.set_text(if revealed { "+" } else { "\u{2212}" });
+        }
+    });
+
+    BgSection { widget: section }
+}
+
+/// Open the Custom Wallpaper dialog. The dialog itself lands with the
+/// gradient editor; until then the color path is the one that works.
+fn open_custom_wallpaper_dialog(
+    widget: &impl IsA<Widget>,
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+) {
+    open_background_color_dialog(widget, state, on_change)
+}
+
+/// Pick any image from disk to sit behind the video.
+fn pick_background_image(
+    widget: &impl IsA<Widget>,
+    state: Arc<Mutex<VideoEditState>>,
+    on_change: Rc<dyn Fn()>,
+) {
+    let Some(chooser) = pick_image_chooser(widget) else {
+        return;
+    };
+    chooser.connect_response(move |dialog, response| {
+        if response == gtk4::ResponseType::Accept {
+            if let Some(path) = dialog.file().and_then(|file| file.path()) {
+                state.lock().unwrap().background = VideoBackground::Wallpaper(path);
+                on_change();
+            }
+        }
+    });
+    chooser.show();
+}
+
+fn pick_image_chooser(widget: &impl IsA<Widget>) -> Option<gtk4::FileChooserNative> {
+    let root = widget.root()?;
+    let window = root.downcast::<Window>().ok();
+    let cancel = t("Cancel");
+    let chooser = gtk4::FileChooserNative::new(
+        Some(&t("Select background image")),
+        window.as_ref(),
+        gtk4::FileChooserAction::Open,
+        Some(&t("Select")),
+        Some(&cancel),
+    );
+    let filter = gtk4::FileFilter::new();
+    filter.set_name(Some(&t("Images")));
+    for mime in ["image/png", "image/jpeg", "image/webp"] {
+        filter.add_mime_type(mime);
+    }
+    for pattern in ["*.png", "*.jpg", "*.jpeg", "*.webp"] {
+        filter.add_pattern(pattern);
+    }
+    chooser.add_filter(&filter);
+    Some(chooser)
+}
+
 
 // Small bundled thumbs decode fast; a missing thumb leaves the tile empty
 // rather than decoding a multi-megapixel wallpaper on the UI thread.

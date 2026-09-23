@@ -16,7 +16,6 @@ use super::model::{
     DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY, DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE,
     DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH,
     DEFAULT_CURSOR_SPEED, DEFAULT_CURSOR_SWAY, DEFAULT_CURSOR_TILT, DEFAULT_CURSOR_TRAIL,
-    MIN_GRADIENT_STOPS,
 };
 
 pub const VIDEO_PROJECT_VERSION: u32 = 1;
@@ -960,6 +959,7 @@ pub fn persist_video_session(state: &VideoEditState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recording::editor::model::MIN_GRADIENT_STOPS;
     use crate::recording::editor::model::VideoMetadata;
     use std::fs;
     use std::time::{Duration, SystemTime};

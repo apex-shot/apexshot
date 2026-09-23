@@ -36,7 +36,6 @@ mod cursor_hide {
 }
 
 pub mod background_render {
-    use super::*;
     include!("model_parts/background_render.rs");
 }
 

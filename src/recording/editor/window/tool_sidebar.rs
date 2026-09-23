@@ -1,14 +1,16 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
     nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoBackground,
-    VideoEditState, ZoomEasing, ZoomMode, CLIP_SPEED_PRESETS, MAX_CLICK_DURATION_MS,
-    MAX_CLICK_SCALE, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLICK_DURATION_MS, MIN_CLICK_SCALE,
-    MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
+    VideoEditState, ZoomEasing, ZoomMode, CLIP_SPEED_PRESETS,
+    MAX_CLICK_DURATION_MS, MAX_CLICK_SCALE, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED,
+    MIN_CLICK_DURATION_MS, MIN_CLICK_SCALE, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED,
+    ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
-    gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
-    EventControllerMotion, GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay,
-    PolicyType, ScrolledWindow, Switch, ToggleButton, Widget, Window,
+    gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea, Entry,
+    EventControllerFocus, EventControllerMotion, GestureClick, GestureDrag, Grid, Image,
+    Label, Orientation, Overlay, PolicyType, Revealer, RevealerTransitionType, ScrolledWindow,
+    Switch, ToggleButton, Widget, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -710,10 +712,6 @@ mod tests {
         );
         let panel = include_str!("tool_sidebar_background.rs");
         assert!(
-            panel.contains("WALLPAPER"),
-            "Background panel must offer wallpapers"
-        );
-        assert!(
             panel.contains("VideoBackground::Wallpaper"),
             "wallpaper picks must store VideoBackground::Wallpaper"
         );
@@ -722,11 +720,11 @@ mod tests {
             "Background panel must offer solid colors"
         );
         assert!(
-            !panel.contains("VideoBackground::Gradient"),
-            "video Background supports wallpaper + color only, unlike the image editor"
+            panel.contains("VideoBackground::Gradient"),
+            "the Custom source must be able to hold a hand-drawn gradient"
         );
         assert!(
-            panel.contains("padding_widget.set_visible(has_fill)"),
+            panel.contains("padding_row_value.widget.set_visible(has_fill)"),
             "padding must hide on None instead of sitting there disabled"
         );
         assert!(
@@ -736,6 +734,18 @@ mod tests {
         assert!(
             panel.contains("set_content_width(56)"),
             "wallpaper tiles must be fixed-size so the grid never stretches the sidebar"
+        );
+        // The redesigned panel picks a fill source up front rather than
+        // offering a separate mode row.
+        for tab in ["Wallpaper", "Custom", "Image"] {
+            assert!(
+                panel.contains(&format!("bg_tab_button(&t(\"{tab}\"))")),
+                "Background panel must offer a {tab} source tab"
+            );
+        }
+        assert!(
+            panel.contains("background_corner_radius"),
+            "Radius must be wired to the corner-radius state"
         );
     }
 }

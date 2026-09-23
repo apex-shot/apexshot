@@ -10,6 +10,7 @@ const RECORDING_EDITOR_CSS: &str = concat!(
     include_str!("ui_support_css/06.css"),
     include_str!("ui_support_css/07.css"),
     include_str!("ui_support_css/08.css"),
+    include_str!("ui_support_css/09.css"),
 );
 
 pub fn install_recording_editor_css() {
