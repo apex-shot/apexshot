@@ -293,11 +293,21 @@
                 margin-right: 8px;
             }
 
-            /* Empty states carried their own surface when the panel was a
-             * floating card. In the tools column they are just text on the
-             * shared near-black. */
+            /* The "cursor unavailable" message is an overlay on top of the
+             * cursor tabs and theme grid. Left transparent, the tabs and
+             * cards behind it showed through and collided with the text, so
+             * it keeps an opaque surface and sits above the content. */
+            .recording-editor-tools-column .recording-editor-cursor-overlay {
+                background: #000000;
+            }
+
             .recording-editor-tools-column .recording-editor-cursor-unavailable {
-                background: transparent;
+                background: #000000;
+            }
+
+            .editor-theme-light .recording-editor-tools-column .recording-editor-cursor-overlay,
+            .editor-theme-light .recording-editor-tools-column .recording-editor-cursor-unavailable {
+                background: #ffffff;
             }
 
             .recording-editor-tools-column .recording-editor-zoom-scroll {
