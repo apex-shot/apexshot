@@ -278,64 +278,48 @@ fn build_background_panel(
     scroll.set_child(Some(&body));
     panel.append(&scroll);
 
-    // Picking a custom source without an editable fill would leave the panel
     // Which tab is open, independent of the fill the model holds. The pages
     // follow this, so opening Wallpaper shows the grid whether or not a
     // wallpaper happens to be picked yet.
     let active_page = Rc::new(Cell::new(BgPage::Wallpaper));
 
-    // Picking a source that has nothing behind it yet falls back to a
-    // sensible default rather than showing a page that cannot do anything.
-    let custom_tab_activate = {
-        let state = state.clone();
+    // A tab is purely a view change: record the page, then ask for a refresh
+    // so the pages actually follow. The Wallpaper handler used to only record
+    // the page, so going Custom and back left the custom page on screen — the
+    // Custom tab only appeared to work because writing a fill happened to
+    // refresh as a side effect.
+    //
+    // Browsing the tabs must not write a fill either. An earlier version did,
+    // which meant clicking past Custom silently changed what gets exported.
+    let set_page: Rc<dyn Fn(BgPage)> = {
+        let active_page = active_page.clone();
         let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        let active_page = active_page.clone();
-        move |button: &ToggleButton| {
-            if !button.is_active() {
-                return;
-            }
-            active_page.set(BgPage::Custom);
-            let mut guard = state.lock().unwrap();
-            if matches!(
-                guard.background,
-                VideoBackground::Plain { .. } | VideoBackground::Gradient(_)
-            ) {
-                return;
-            }
-            guard.background = VideoBackground::Plain {
-                r: 17,
-                g: 17,
-                b: 17,
-            };
-            drop(guard);
-            syncing.set(false);
+        Rc::new(move |page: BgPage| {
+            active_page.set(page);
             on_change();
-        }
-    };
-    let image_tab_activate = {
-        let state = state.clone();
-        let syncing = syncing.clone();
-        let active_page = active_page.clone();
-        move |button: &ToggleButton| {
-            if !button.is_active() {
-                return;
-            }
-            active_page.set(BgPage::Image);
-            let _ = &state;
-            let _ = &syncing;
-        }
+        })
     };
     wallpaper_tab.connect_toggled({
-        let active_page = active_page.clone();
-        move |button: &ToggleButton| {
+        let set_page = set_page.clone();
+        move |button| {
             if button.is_active() {
-                active_page.set(BgPage::Wallpaper);
+                set_page(BgPage::Wallpaper);
             }
         }
     });
-    custom_tab.connect_toggled(custom_tab_activate);
-    image_tab.connect_toggled(image_tab_activate);
+    custom_tab.connect_toggled({
+        let set_page = set_page.clone();
+        move |button| {
+            if button.is_active() {
+                set_page(BgPage::Custom);
+            }
+        }
+    });
+    image_tab.connect_toggled(move |button| {
+        if button.is_active() {
+            set_page(BgPage::Image);
+        }
+    });
 
     custom_row.connect_clicked({
         let state = state.clone();

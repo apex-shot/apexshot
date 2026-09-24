@@ -808,4 +808,31 @@ mod tests {
             "the panel frame must not show the value rows on every tab"
         );
     }
+
+    #[test]
+    fn every_source_tab_refreshes_the_pages() {
+        // The Wallpaper tab only recorded the open page and never asked for a
+        // refresh, so going Custom and back left the custom page on screen.
+        // Every tab must route through the same change + refresh path.
+        let panel = include_str!("tool_sidebar_background.rs");
+        assert!(
+            panel.contains("Rc::new(move |page: BgPage| {"),
+            "a tab switch must record the page and refresh"
+        );
+        for handler in [
+            "set_page(BgPage::Wallpaper)",
+            "set_page(BgPage::Custom)",
+            "set_page(BgPage::Image)",
+        ] {
+            assert!(
+                panel.contains(handler),
+                "every source tab must set its own page ({handler})"
+            );
+        }
+        // Browsing tabs must not quietly rewrite what gets exported.
+        assert!(
+            !panel.contains("guard.background = VideoBackground::Plain {\n                r: 17,"),
+            "switching tabs must not write a fill"
+        );
+    }
 }
