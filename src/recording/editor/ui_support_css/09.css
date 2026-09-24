@@ -314,6 +314,10 @@
 
             .recording-editor-custom-popover {
                 padding: 0;
+                /* The reference's popover is a fixed, fairly narrow panel —
+                 * wide enough for the plane to read, narrow enough not to
+                 * cover the video it is editing. */
+                min-width: 236px;
             }
 
             .recording-editor-custom-body {
@@ -321,7 +325,7 @@
             }
 
             .recording-editor-custom-header {
-                padding: 10px 12px 8px 12px;
+                padding: 10px 10px 8px 10px;
             }
 
             .recording-editor-custom-title {
@@ -343,18 +347,23 @@
                 background: alpha(white, 0.10);
             }
 
-            /* The color field, hue bar, and hex row are all Cairo-drawn, so
-             * they only need sizing here. */
+            /* The reference's picker has no side padding: the field, bar and
+             * hex row all run the popover's full width, with the tabs above
+             * them inset the same way. */
+            .recording-editor-custom-body > .recording-editor-bg-tabs {
+                margin: 0 10px 8px 10px;
+            }
+
             .recording-editor-custom-field {
-                margin: 0 12px 10px 12px;
+                margin: 0 0 8px 0;
             }
 
             .recording-editor-custom-spectrum {
-                margin: 0 12px 10px 12px;
+                margin: 0 10px 8px 10px;
             }
 
             .recording-editor-custom-value-row {
-                margin: 0 12px 12px 12px;
+                margin: 0 10px 10px 10px;
                 padding: 0 10px;
                 min-height: 34px;
                 border-radius: 8px;

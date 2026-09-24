@@ -94,10 +94,10 @@ fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f6
 }
 
 // ── Color model ──
-// The reference's picker is hue-driven: a full-saturation spectrum bar with a
-// round handle, and a hex readout. Saturation and value are held constant at
-// full so the bar is a pure hue sweep and the field is the pure color, which
-// is what picking on the bar means.
+// The reference picker is the standard three-part one: a saturation/value
+// plane for the current hue, a hue bar underneath, and a hex readout. Hue
+// comes from the bar, saturation from the plane's horizontal axis, and value
+// from its vertical axis.
 
 fn hsv_to_rgb(h: f64, s: f64, v: f64) -> (u8, u8, u8) {
     let h = h.rem_euclid(1.0) * 6.0;
@@ -340,10 +340,16 @@ fn build_color_page(
     let widget = GtkBox::new(Orientation::Vertical, 0);
     widget.set_hexpand(true);
 
-    // The large color field, as in the reference.
+    // The large saturation/value plane, as in the reference: the current hue
+    // washing to white on the right and darkening downward, with a handle
+    // showing where the live color sits on it.
     let field = DrawingArea::new();
     field.add_css_class("recording-editor-custom-field");
-    field.set_content_height(150);
+    // The reference's plane is the tallest thing in the popover, roughly
+    // square against the popover's width.
+    field.set_content_height(190);
+    field.set_hexpand(true);
+    field.set_cursor(gtk4::gdk::Cursor::from_name("crosshair", None).as_ref());
     widget.append(&field);
 
     // The rainbow hue bar with a round handle, matching the reference row.
@@ -419,8 +425,9 @@ fn build_color_page(
         hex.add_controller(focus);
     }
 
-    // Dragging the handle picks a hue. Full saturation and value, so the
-    // field shows exactly the color under the handle.
+    // Dragging inside the plane sets saturation (across) and value (down);
+    // dragging the bar sets the hue the plane is built from.
+    attach_plane_drag(&field, state.clone(), notify.clone());
     attach_hue_drag(&spectrum, state.clone(), notify.clone());
 
     let refresh: Rc<dyn Fn()> = {
@@ -432,16 +439,17 @@ fn build_color_page(
         let state = state.clone();
         Rc::new(move || {
             let color = current_flat_color(&state);
+            // The plane and the bar both draw from the hue of the live color,
+            // so a color that arrived from a project file or the hex entry
+            // still shows the right hue rather than a stale one.
+            let hsv = rgb_to_hsv(color.0, color.1, color.2);
             field.set_draw_func({
-                let color = color;
+                let hsv = hsv;
                 move |_, cr, width, height| {
-                    fill_rounded(cr, 0.0, 0.0, width as f64, height as f64, FIELD_RADIUS, color);
-                    stroke_rounded(cr, 0.0, 0.0, width as f64, height as f64, FIELD_RADIUS, false);
+                    draw_plane(cr, width as f64, height as f64, hsv);
                 }
             });
             field.queue_draw();
-            // The handle sits at the current color's hue, so the bar and the
-            // field always agree.
             spectrum.set_draw_func({
                 let color = color;
                 move |_, cr, width, height| {
@@ -463,6 +471,66 @@ fn build_color_page(
     };
 
     ColorPage { widget, repaint: refresh }
+}
+
+/// The saturation/value plane: the current hue across the top, washing to
+/// white on the right and blackening downward, with a handle on the live
+/// color. This is what makes the field a picker rather than a swatch — the
+/// reference's red-to-dark wash is this plane, not a flat fill.
+fn draw_plane(
+    cr: &gtk4::cairo::Context,
+    w: f64,
+    h: f64,
+    hsv: (f64, f64, f64),
+) {
+    if w < 2.0 || h < 2.0 {
+        return;
+    }
+    let (hue, saturation, value) = hsv;
+    let _ = cr.save();
+    rounded_rect(cr, 0.0, 0.0, w, h, FIELD_RADIUS);
+    let _ = cr.clip();
+
+    // The pure hue fills the left edge, then white overlays from the right.
+    let base = hsv_to_rgb(hue, 1.0, 1.0);
+    let white = gtk4::cairo::LinearGradient::new(0.0, 0.0, w, 0.0);
+    let _ = white.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, 0.0);
+    let _ = white.add_color_stop_rgba(1.0, 1.0, 1.0, 1.0, 1.0);
+    // Black overlays from the bottom.
+    let shade = gtk4::cairo::LinearGradient::new(0.0, 0.0, 0.0, h);
+    let _ = shade.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.0);
+    let _ = shade.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 1.0);
+
+    cr.set_source_rgb(
+        base.0 as f64 / 255.0,
+        base.1 as f64 / 255.0,
+        base.2 as f64 / 255.0,
+    );
+    cr.rectangle(0.0, 0.0, w, h);
+    let _ = cr.fill();
+    let _ = cr.set_source(&white);
+    cr.rectangle(0.0, 0.0, w, h);
+    let _ = cr.fill();
+    let _ = cr.set_source(&shade);
+    cr.rectangle(0.0, 0.0, w, h);
+    let _ = cr.fill();
+    let _ = cr.restore();
+
+    // The handle, ringed so it reads against any part of the plane.
+    let cx = saturation.clamp(0.0, 1.0) * w;
+    let cy = (1.0 - value.clamp(0.0, 1.0)) * h;
+    let r = 7.0;
+    cr.set_source_rgb(1.0, 1.0, 1.0);
+    cr.arc(cx, cy, r, 0.0, std::f64::consts::TAU);
+    let _ = cr.fill();
+    let color = hsv_to_rgb(hue, saturation, value);
+    cr.set_source_rgb(
+        color.0 as f64 / 255.0,
+        color.1 as f64 / 255.0,
+        color.2 as f64 / 255.0,
+    );
+    cr.arc(cx, cy, r - 2.0, 0.0, std::f64::consts::TAU);
+    let _ = cr.fill();
 }
 
 /// The rainbow hue bar with a round handle on the current color, matching the
@@ -561,6 +629,59 @@ fn apply_hue(
         (s, v)
     };
     set_flat_color(state, hsv_to_rgb(hue, s.max(0.0), v.max(0.0)));
+    notify();
+}
+
+/// Drag inside the plane: horizontal sets saturation, vertical sets value,
+/// both against the hue the bar currently holds.
+fn attach_plane_drag(
+    field: &DrawingArea,
+    state: Arc<Mutex<VideoEditState>>,
+    notify: Rc<dyn Fn()>,
+) {
+    let drag = GestureDrag::new();
+    drag.set_button(1);
+    drag.connect_drag_begin({
+        let state = state.clone();
+        let notify = notify.clone();
+        move |gesture, x, y| {
+            apply_plane(&gesture, x, y, &state, &notify);
+        }
+    });
+    drag.connect_drag_update({
+        let state = state.clone();
+        let notify = notify.clone();
+        move |gesture, dx, dy| {
+            let Some((start_x, start_y)) = gesture.start_point() else {
+                return;
+            };
+            let _ = (dx, dy);
+            apply_plane(&gesture, start_x, start_y, &state, &notify);
+        }
+    });
+    field.add_controller(drag);
+}
+
+fn apply_plane(
+    gesture: &GestureDrag,
+    x: f64,
+    y: f64,
+    state: &Arc<Mutex<VideoEditState>>,
+    notify: &Rc<dyn Fn()>,
+) {
+    let Some(widget) = gesture.widget() else {
+        return;
+    };
+    let width = widget.allocated_width().max(1) as f64;
+    let height = widget.allocated_height().max(1) as f64;
+    let saturation = (x / width).clamp(0.0, 1.0);
+    // The plane darkens downward, so the top is full value.
+    let value = (1.0 - y / height).clamp(0.0, 1.0);
+    let hue = {
+        let color = current_flat_color(state);
+        rgb_to_hue(color.0, color.1, color.2)
+    };
+    set_flat_color(state, hsv_to_rgb(hue, saturation, value));
     notify();
 }
 
@@ -1218,14 +1339,47 @@ mod tests {
 
     #[test]
     fn the_spectrum_bar_is_a_pure_hue_sweep() {
-        // Picker semantics: full saturation and value, so the bar spans the
-        // whole spectrum and the field shows the pure color.
+        // The bar sweeps hue at full saturation and value, so every hue is
+        // reachable by dragging it.
         let red = hsv_to_rgb(0.0, 1.0, 1.0);
         assert_eq!(red, (255, 0, 0));
         let green = hsv_to_rgb(1.0 / 3.0, 1.0, 1.0);
         assert_eq!(green, (0, 255, 0));
         let blue = hsv_to_rgb(2.0 / 3.0, 1.0, 1.0);
         assert_eq!(blue, (0, 0, 255));
+    }
+
+    #[test]
+    fn the_plane_covers_saturation_and_value() {
+        // The plane is what makes the big field a picker rather than a flat
+        // swatch: saturation runs left to right and value top to bottom, both
+        // against the hue the bar holds. The reference's red-to-dark wash is
+        // exactly this.
+        let hue = 0.0;
+        // Left edge is the pure hue, right edge washes to white.
+        assert_eq!(hsv_to_rgb(hue, 0.0, 1.0), (255, 255, 255));
+        assert_eq!(hsv_to_rgb(hue, 1.0, 1.0), (255, 0, 0));
+        // The top is full value, the bottom is black.
+        assert_eq!(hsv_to_rgb(hue, 1.0, 0.0), (0, 0, 0));
+    }
+
+    #[test]
+    fn a_color_survives_a_round_trip_through_hsv() {
+        // The plane's handle position is derived from the stored color, so
+        // picking a hue then a saturation then a value has to land back on
+        // the same color rather than drifting on each rebuild.
+        for (h, s, v) in [(0.0, 1.0, 1.0), (0.33, 0.5, 0.8), (0.72, 1.0, 0.25)] {
+            let color = hsv_to_rgb(h, s, v);
+            let (rh, rs, rv) = rgb_to_hsv(color.0, color.1, color.2);
+            let back = hsv_to_rgb(rh, rs, rv);
+            let within = |a: u8, b: u8| (a as i32 - b as i32).abs() <= 2;
+            assert!(
+                within(color.0, back.0)
+                    && within(color.1, back.1)
+                    && within(color.2, back.2),
+                "{color:?} came back as {back:?}"
+            );
+        }
     }
 
     #[test]

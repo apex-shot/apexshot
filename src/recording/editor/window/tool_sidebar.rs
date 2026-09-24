@@ -928,8 +928,42 @@ mod tests {
     }
 
     #[test]
-    fn the_custom_wallpaper_popover_has_color_and_gradient_only() {
-        // The reference's Image sub-tab is not built: the panel already has an
+    fn the_color_field_is_a_pickable_plane_not_a_flat_swatch() {
+        // The reference's big field is a saturation/value plane with a handle
+        // inside it — that red-to-dark wash. Drawing a flat fill there instead
+        // produced an empty black box with nothing to pick, so both halves of
+        // the picker have to exist and be draggable.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        assert!(
+            source.contains("fn draw_plane("),
+            "the field must be a saturation/value plane, not a flat fill"
+        );
+        assert!(
+            source.contains("fn attach_plane_drag("),
+            "the plane must be draggable, or there is no way to pick saturation or value"
+        );
+        // The plane's handle has to be drawn, or it is a gradient with no
+        // indication of where the live color sits on it.
+        assert!(
+            source.contains("let cx = saturation.clamp(0.0, 1.0) * w;"),
+            "the plane must draw a handle at the live color's position"
+        );
+        // A flat fill of the current color is what produced the black box.
+        let draw_plane = source
+            .find("fn draw_plane(")
+            .expect("draw_plane exists");
+        let end = source[draw_plane..]
+            .find("\nfn ")
+            .map(|at| draw_plane + at)
+            .expect("draw_plane is closed");
+        assert!(
+            !source[draw_plane..end].contains("fill_rounded(cr, 0.0, 0.0, w, h, FIELD_RADIUS, color)"),
+            "the field must not be a flat fill of the current color"
+        );
+    }
+
+    #[test]
+    fn the_custom_wallpaper_popover_has_color_and_gradient_only() {        // The reference's Image sub-tab is not built: the panel already has an
         // Image source tab, so a second one here would pick the same file twice.
         let source = include_str!("custom_wallpaper_popover.rs");
         for tab in ["t(\"Color\")", "t(\"Gradient\")"] {
@@ -998,16 +1032,32 @@ mod tests {
     fn the_gradient_editor_draws_through_the_shared_rasterizer() {
         // Preview and export both call render_gradient, so a stop dragged off
         // even spacing cannot show one position in the popover and export
-        // another. A separate Cairo gradient here would break that guarantee.
+        // another. A Cairo gradient would not honor stop positions, so the
+        // gradient drawing functions must not use one.
+        //
+        // The Color tab's saturation/value plane legitimately does use a
+        // Cairo gradient — it is a hue wash, not a gradient fill, and it is
+        // never exported. So the rule is scoped to the gradient editor's own
+        // draw functions rather than the whole file.
         let source = include_str!("custom_wallpaper_popover.rs");
         assert!(
             source.contains("render_gradient(gradient,"),
             "the popover must render gradients with the shared rasterizer"
         );
-        assert!(
-            !source.contains("LinearGradient::new"),
-            "a Cairo gradient would not honor stop positions and could drift from export"
-        );
+        for draw in ["fn draw_gradient_field(", "fn draw_stop_bar("] {
+            let start = source
+                .find(draw)
+                .unwrap_or_else(|| panic!("the popover must define {draw}"));
+            let end = source[start..]
+                .find("\nfn ")
+                .map(|at| start + at)
+                .unwrap_or(source.len());
+            assert!(
+                !source[start..end].contains("LinearGradient"),
+                "{draw} must use the shared rasterizer; a Cairo gradient would not \
+                 honor stop positions and could drift from export"
+            );
+        }
     }
 
     #[test]
