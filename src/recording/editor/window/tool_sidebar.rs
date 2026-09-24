@@ -908,8 +908,110 @@ mod tests {
     }
 
     #[test]
-    fn every_source_tab_refreshes_the_pages() {
-        // The Wallpaper tab only recorded the open page and never asked for a
+    fn the_custom_wallpaper_popover_opens_beside_the_sidebar() {
+        // Placement is the point of this UI: the popover anchors to the Edit
+        // pill and opens left, so it floats over the video stage instead of
+        // covering the sidebar row it is editing or centering on the window.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        assert!(
+            source.contains("popover.set_position(gtk4::PositionType::Left)"),
+            "the popover must open left of the sidebar, not centered on the window"
+        );
+        assert!(
+            source.contains("popover.set_parent(anchor)"),
+            "the popover must anchor to the Edit pill"
+        );
+        assert!(
+            source.contains("popover.set_has_arrow(false)"),
+            "the popover is a panel, not a tooltip"
+        );
+    }
+
+    #[test]
+    fn the_custom_wallpaper_popover_has_color_and_gradient_only() {
+        // The reference's Image sub-tab is not built: the panel already has an
+        // Image source tab, so a second one here would pick the same file twice.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        for tab in ["t(\"Color\")", "t(\"Gradient\")"] {
+            assert!(
+                source.contains(tab),
+                "the popover must offer a {tab} sub-tab"
+            );
+        }
+        assert!(
+            !source.contains("t(\"Image\")"),
+            "the popover must not duplicate the panel's Image tab"
+        );
+    }
+
+    #[test]
+    fn switching_popover_tabs_does_not_write_a_fill() {
+        // Opening Gradient must not replace a color the swatch is showing, so
+        // the tab switch is a pure view change: it only sets visibility and
+        // the active button, never the model.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let start = source
+            .find("Rc::new(move |is_gradient: bool| {")
+            .expect("the tab switch is a shared closure");
+        let end = source[start..]
+            .find("\n        })")
+            .map(|at| start + at)
+            .expect("the closure is closed");
+        let body = &source[start..end];
+        assert!(
+            !body.contains("VideoBackground::"),
+            "switching sub-tabs must not write to the background"
+        );
+        assert!(
+            !body.contains("notify()"),
+            "switching sub-tabs must not ping the editor"
+        );
+    }
+
+    #[test]
+    fn the_gradient_editor_is_wired_end_to_end() {
+        // Every control the reference gradient tab shows has to reach state.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        for (needle, why) in [
+            ("fn attach_stop_drag(", "stops must be draggable"),
+            ("fn add_stop(", "the Steps + button must add a stop"),
+            ("fn remove_stop(", "a stop must be removable"),
+            ("fn open_stop_color_picker(", "a stop's color must be editable"),
+            ("fn attach_angle_drag(", "the angle must be adjustable"),
+            ("g.reversed = !g.reversed", "reverse must toggle"),
+        ] {
+            assert!(source.contains(needle), "gradient editor: {why}");
+        }
+        // Stops are bounded, so the UI has to respect the same bounds the
+        // model normalizes to.
+        assert!(
+            source.contains("MAX_GRADIENT_STOPS"),
+            "adding a stop must stop at the model's maximum"
+        );
+        assert!(
+            source.contains("MIN_GRADIENT_STOPS"),
+            "removing a stop must stop at the model's minimum"
+        );
+    }
+
+    #[test]
+    fn the_gradient_editor_draws_through_the_shared_rasterizer() {
+        // Preview and export both call render_gradient, so a stop dragged off
+        // even spacing cannot show one position in the popover and export
+        // another. A separate Cairo gradient here would break that guarantee.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        assert!(
+            source.contains("render_gradient(gradient,"),
+            "the popover must render gradients with the shared rasterizer"
+        );
+        assert!(
+            !source.contains("LinearGradient::new"),
+            "a Cairo gradient would not honor stop positions and could drift from export"
+        );
+    }
+
+    #[test]
+    fn every_source_tab_refreshes_the_pages() {        // The Wallpaper tab only recorded the open page and never asked for a
         // refresh, so going Custom and back left the custom page on screen.
         // Every tab must route through the same change + refresh path.
         let panel = include_str!("tool_sidebar_background.rs");

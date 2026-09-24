@@ -1,5 +1,6 @@
 #[allow(dead_code)]
 mod crop_dialog;
+mod custom_wallpaper_popover;
 #[allow(dead_code)]
 mod dialogs;
 #[allow(dead_code)]

@@ -325,11 +325,15 @@ fn build_background_panel(
         }
     });
 
-    custom_edit.connect_clicked({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        move |button| open_custom_wallpaper_dialog(button, state.clone(), on_change.clone())
-    });
+    // Edit opens the Custom Wallpaper popover beside the sidebar rather than
+    // a centered dialog, so the row being edited and the video behind it both
+    // stay visible.
+    let popover = crate::recording::editor::window::custom_wallpaper_popover::build_custom_wallpaper_popover(
+        &custom_edit,
+        state.clone(),
+        on_change.clone(),
+    );
+    custom_edit.connect_clicked(move |_| popover.popup());
 
     image_row.connect_clicked({
         let state = state.clone();
@@ -546,16 +550,6 @@ fn bind_bg_value(
     });
 }
 
-/// Open the Custom Wallpaper dialog. The dialog itself lands with the
-/// gradient editor; until then the color path is the one that works.
-fn open_custom_wallpaper_dialog(
-    widget: &impl IsA<Widget>,
-    state: Arc<Mutex<VideoEditState>>,
-    on_change: Rc<dyn Fn()>,
-) {
-    open_background_color_dialog(widget, state, on_change)
-}
-
 /// Pick any image from disk to sit behind the video.
 fn pick_background_image(
     widget: &impl IsA<Widget>,
@@ -681,39 +675,4 @@ fn wallpaper_thumb_rounded_rect(
         3.0 * std::f64::consts::FRAC_PI_2,
     );
     cr.close_path();
-}
-
-fn open_background_color_dialog(
-    widget: &impl IsA<Widget>,
-    state: Arc<Mutex<VideoEditState>>,
-    on_change: Rc<dyn Fn()>,
-) {
-    let (r, g, b) = match &state.lock().unwrap().background {
-        VideoBackground::Plain { r, g, b } => (*r, *g, *b),
-        _ => (17, 17, 17),
-    };
-    let initial = gdk::RGBA::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0);
-    let parent = widget
-        .root()
-        .and_then(|root| root.downcast::<Window>().ok());
-    let dialog = ColorChooserDialog::new(Some(&t("Background color")), parent.as_ref());
-    dialog.set_modal(true);
-    dialog.set_use_alpha(false);
-    dialog.set_rgba(&initial);
-    // Custom colors in the chooser use the shared image-editor slots; video
-    // intentionally keeps only its own presets plus this dialog.
-    let _ = Image::from_icon_name("dialog-cancel-symbolic");
-    dialog.connect_response(move |dialog, response| {
-        if response == gtk4::ResponseType::Ok {
-            let color = dialog.rgba();
-            state.lock().unwrap().background = VideoBackground::Plain {
-                r: (color.red() * 255.0).round().clamp(0.0, 255.0) as u8,
-                g: (color.green() * 255.0).round().clamp(0.0, 255.0) as u8,
-                b: (color.blue() * 255.0).round().clamp(0.0, 255.0) as u8,
-            };
-            on_change();
-        }
-        dialog.close();
-    });
-    dialog.present();
 }
