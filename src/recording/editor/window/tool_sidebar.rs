@@ -788,4 +788,24 @@ mod tests {
             "refresh must not infer the page from the model's fill"
         );
     }
+
+    #[test]
+    fn the_value_rows_belong_to_the_custom_page() {
+        // Padding, Radius and the custom-fill row were appended to the panel
+        // body, so they rendered on the Wallpaper and Image tabs too and every
+        // tab looked like Custom. They must be appended to the Custom page.
+        let panel = include_str!("tool_sidebar_background.rs");
+        assert!(
+            panel.contains("custom_page.append(&padding_row.widget);"),
+            "Padding must live inside the Custom page, not the panel frame"
+        );
+        assert!(
+            panel.contains("custom_page.append(&radius_row.widget);"),
+            "Radius must live inside the Custom page, not the panel frame"
+        );
+        assert!(
+            !panel.contains("body.append(&padding_row.widget);"),
+            "the panel frame must not show the value rows on every tab"
+        );
+    }
 }

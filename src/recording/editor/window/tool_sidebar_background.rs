@@ -251,13 +251,17 @@ fn build_background_panel(
         |guard, value| guard.background_corner_radius = value,
     );
 
+    // Padding, Radius and the custom-fill row describe the fill itself, so
+    // they live inside the Custom page rather than the panel frame. Leaving
+    // them in the frame showed them on every tab.
+    custom_page.append(&padding_row.widget);
+    custom_page.append(&radius_row.widget);
+
     let pages = GtkBox::new(Orientation::Vertical, 0);
     pages.set_hexpand(true);
     pages.append(&wallpaper_page);
     pages.append(&custom_page);
     pages.append(&image_page);
-    body.append(&padding_row.widget);
-    body.append(&radius_row.widget);
     body.append(&pages);
 
     // --- Stroke and Shadow: expandable, inert for now. ---
