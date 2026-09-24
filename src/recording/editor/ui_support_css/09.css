@@ -73,9 +73,10 @@
             .recording-editor-bg-custom-row {
                 min-height: 40px;
                 padding: 0 6px 0 6px;
-                /* A pill, not a rounded rect. At 8px on a 40px row this read as
-                 * a button even though nothing on the row is clickable. */
-                border-radius: 999px;
+                /* Matches the FillSlider track, which draws its own corners at
+                 * 8px — the row sits directly under Padding and Radius and has
+                 * to share their radius to read as part of the same group. */
+                border-radius: 8px;
                 background: alpha(white, 0.06);
             }
 
@@ -97,7 +98,9 @@
                 min-height: 26px;
                 padding: 0 14px;
                 border: none;
-                border-radius: 999px;
+                /* The same 8px as the row it sits in, so the whole thing reads
+                 * as one group rather than a pill inside a rectangle. */
+                border-radius: 8px;
                 background: alpha(white, 0.10);
                 color: alpha(white, 0.72);
                 font-size: 12px;
