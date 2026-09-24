@@ -262,29 +262,37 @@
                 color: alpha(#1d2129, 0.92);
             }
 
-            /* The workspace is a plain two-column split: the video stage on
-             * its own surface, tools and timeline on one near-black. */
+            /* The workspace is a two-column split: the video stage on its
+             * own surface, tools and timeline on one near-black. The gap
+             * keeps the tool column from butting against the video — the
+             * reference shows clear space between them, not a hard seam. */
             .recording-editor-workspace {
-                padding: 0;
+                padding: 8px 10px;
                 background: #000000;
             }
 
             .recording-editor-tools-column {
-                border-left: 1px solid alpha(white, 0.06);
+                border-left: none;
+            }
+
+            /* Space between the video and the tool column, matching the
+             * workspace's own inset rather than drawing a divider. */
+            .recording-editor-stage {
+                margin-right: 8px;
             }
 
             .editor-theme-light .recording-editor-workspace {
-                padding: 0;
+                padding: 8px 10px;
                 background: #ffffff;
             }
 
-            .editor-theme-light .recording-editor-tools-column {
-                border-left-color: alpha(#111827, 0.10);
+            .editor-theme-light .recording-editor-stage {
+                margin-right: 8px;
             }
 
             /* Empty states carried their own surface when the panel was a
-             * floating card on the right. In the left column they are just
-             * text on the shared near-black. */
+             * floating card. In the tools column they are just text on the
+             * shared near-black. */
             .recording-editor-tools-column .recording-editor-cursor-unavailable {
                 background: transparent;
             }
