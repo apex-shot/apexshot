@@ -9,8 +9,7 @@ use crate::recording::editor::model::{
 use gtk4::{
     gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
     EventControllerMotion, GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay,
-    PolicyType, Revealer, RevealerTransitionType, ScrolledWindow, Switch, ToggleButton, Widget,
-    Window,
+    PolicyType, ScrolledWindow, Switch, ToggleButton, Widget, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -724,8 +723,8 @@ mod tests {
             "the Custom source must be able to hold a hand-drawn gradient"
         );
         assert!(
-            panel.contains("padding_row_value.widget.set_visible(has_fill)"),
-            "padding must hide on None instead of sitting there disabled"
+            !panel.contains("bg_placeholder_section"),
+            "stroke and shadow were never rendered, so the panel must not advertise them"
         );
         assert!(
             panel.contains("editor-motion-wallpaper-thumbnail"),
@@ -806,6 +805,42 @@ mod tests {
         assert!(
             !panel.contains("body.append(&padding_row.widget);"),
             "the panel frame must not show the value rows on every tab"
+        );
+    }
+
+    #[test]
+    fn the_custom_page_tunes_the_fill_before_offering_a_new_one() {
+        // The Custom page reads as a sequence: set the fill's size, round its
+        // corners, then pick a new fill. Pinning the order stops the rows from
+        // drifting apart as the page is edited.
+        let panel = include_str!("tool_sidebar_background.rs");
+        let order = [
+            "custom_page.append(&padding_row.widget);",
+            "custom_page.append(&radius_row.widget);",
+            "custom_page.append(&custom_row);",
+        ];
+        let mut cursor = 0;
+        for step in order {
+            let at = panel[cursor..]
+                .find(step)
+                .unwrap_or_else(|| panic!("Custom page must append {step}"));
+            cursor += at + step.len();
+        }
+    }
+
+    #[test]
+    fn padding_does_not_hide_until_a_fill_is_picked() {
+        // Padding used to hide itself with no fill, which left the Custom page
+        // showing only Radius. Scoped to Custom it is a plain fill control, and
+        // a value set before a fill exists has to stay visible to be adjusted.
+        let panel = include_str!("tool_sidebar_background.rs");
+        assert!(
+            !panel.contains("set_visible(has_fill)"),
+            "neither fill slider may gate itself on a fill being picked"
+        );
+        assert!(
+            panel.contains("padding_row_value.sync_value(padding);"),
+            "padding must still sync its stored value every refresh"
         );
     }
 

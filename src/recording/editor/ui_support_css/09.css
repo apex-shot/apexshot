@@ -43,56 +43,6 @@
                 margin: 0 0 4px 0;
             }
 
-            /* Collapsible Stroke / Shadow rows. */
-            .recording-editor-bg-section {
-                border-top: 1px solid alpha(white, 0.06);
-            }
-
-            button.recording-editor-bg-section-toggle {
-                min-height: 30px;
-                padding: 0 2px;
-                border: none;
-                background: transparent;
-                color: alpha(white, 0.62);
-                font-size: 12px;
-                font-weight: 500;
-            }
-
-            button.recording-editor-bg-section-toggle label {
-                color: inherit;
-                font-size: 12px;
-                font-weight: 500;
-            }
-
-            button.recording-editor-bg-section-toggle:hover {
-                background: transparent;
-                color: alpha(white, 0.92);
-            }
-
-            /* The "+" affordance reuses the panel-upload shape that was
-             * defined but never applied until now. */
-            button.recording-editor-bg-section-add {
-                min-width: 24px;
-                min-height: 24px;
-                padding: 0;
-                border: 1px solid alpha(white, 0.12);
-                border-radius: 6px;
-                background: alpha(white, 0.04);
-                color: alpha(white, 0.62);
-                font-size: 13px;
-                font-weight: 600;
-            }
-
-            button.recording-editor-bg-section-add:hover {
-                border-color: alpha(#b05c38, 0.72);
-                background: alpha(#b05c38, 0.14);
-                color: #d5794e;
-            }
-
-            .recording-editor-bg-section-body {
-                padding: 2px 0 10px 0;
-            }
-
             /* The row that opens the Custom Wallpaper dialog. */
             button.recording-editor-bg-custom-row {
                 min-height: 34px;
@@ -144,30 +94,6 @@
             .editor-theme-light button.recording-editor-bg-tab:checked:hover {
                 background: alpha(#111827, 0.08);
                 color: alpha(#1d2129, 0.92);
-            }
-
-            .editor-theme-light .recording-editor-bg-section {
-                border-top-color: alpha(#111827, 0.10);
-            }
-
-            .editor-theme-light button.recording-editor-bg-section-toggle {
-                color: alpha(#1d2129, 0.62);
-            }
-
-            .editor-theme-light button.recording-editor-bg-section-toggle:hover {
-                color: alpha(#1d2129, 0.88);
-            }
-
-            .editor-theme-light button.recording-editor-bg-section-add {
-                border-color: alpha(#111827, 0.14);
-                background: alpha(#111827, 0.04);
-                color: alpha(#1d2129, 0.62);
-            }
-
-            .editor-theme-light button.recording-editor-bg-section-add:hover {
-                border-color: alpha(#b05c38, 0.72);
-                background: alpha(#b05c38, 0.12);
-                color: #b05c38;
             }
 
             .editor-theme-light button.recording-editor-bg-custom-row {

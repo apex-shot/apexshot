@@ -50,15 +50,16 @@ pub struct VideoProjectFile {
     pub crop: Option<CropFile>,
     pub background: BackgroundFile,
     pub background_padding: f64,
-    // These three were persisted but never rendered, so older sidecars carry
-    // non-zero values that were never visible. They default to 0 rather than
-    // inheriting the old defaults, which would round every existing project.
+    // The radius was persisted but never rendered, so older sidecars carry
+    // non-zero values that were never visible. It defaults to 0 rather than
+    // inheriting the old default, which would round every existing project.
+    //
+    // `background_stroke` and `background_shadow` were in the same spot and
+    // are gone: nothing ever read them, and an inert control is worse than no
+    // control. Serde ignores unknown keys, so sidecars that still carry them
+    // load unchanged.
     #[serde(default)]
     pub background_corner_radius: f64,
-    #[serde(default)]
-    pub background_stroke: f64,
-    #[serde(default)]
-    pub background_shadow: f64,
     pub dimension_preset: DimensionFile,
     pub custom_width: u32,
     pub custom_height: u32,
@@ -803,8 +804,6 @@ impl VideoEditState {
             background: background_to_file(&self.background),
             background_padding: self.background_padding,
             background_corner_radius: self.background_corner_radius,
-            background_stroke: self.background_stroke,
-            background_shadow: self.background_shadow,
             dimension_preset: dimension_to_file(self.dimension_preset),
             custom_width: self.custom_width,
             custom_height: self.custom_height,
@@ -867,8 +866,6 @@ impl VideoEditState {
         self.background = background_from_file(file.background);
         self.background_padding = file.background_padding;
         self.background_corner_radius = file.background_corner_radius;
-        self.background_stroke = file.background_stroke;
-        self.background_shadow = file.background_shadow;
         self.dimension_preset = dimension_from_file(file.dimension_preset);
         self.custom_width = file.custom_width;
         self.custom_height = file.custom_height;
@@ -1451,21 +1448,32 @@ mod tests {
 
     #[test]
     fn a_project_without_the_new_background_fields_defaults_them_to_zero() {
-        // Older sidecars predate stroke, and carry inert non-zero radius and
-        // shadow values. They must load as 0 so no existing project silently
-        // gains rounded corners the first time it is opened.
+        // Older sidecars carry an inert non-zero radius. It must load as 0 so
+        // no existing project silently gains rounded corners the first time
+        // it is opened.
         let project = VideoEditState::new(metadata_for(Path::new("/tmp/clip.mp4"), 8)).to_project();
         let mut value = serde_json::to_value(&project).expect("project serializes");
         let object = value.as_object_mut().expect("project is an object");
         object.remove("background_corner_radius");
-        object.remove("background_stroke");
-        object.remove("background_shadow");
 
         let restored: VideoProjectFile =
             serde_json::from_value(value).expect("project without the new fields loads");
         assert_eq!(restored.background_corner_radius, 0.0);
-        assert_eq!(restored.background_stroke, 0.0);
-        assert_eq!(restored.background_shadow, 0.0);
+    }
+
+    #[test]
+    fn sidecars_carrying_the_removed_stroke_and_shadow_still_load() {
+        // Both fields were dropped once it was clear nothing rendered them.
+        // Every project written while they existed must keep opening, so the
+        // loader has to tolerate the keys rather than reject the file.
+        let project = VideoEditState::new(metadata_for(Path::new("/tmp/clip.mp4"), 8)).to_project();
+        let mut value = serde_json::to_value(&project).expect("project serializes");
+        let object = value.as_object_mut().expect("project is an object");
+        object.insert("background_stroke".into(), serde_json::json!(12.0));
+        object.insert("background_shadow".into(), serde_json::json!(15.0));
+
+        serde_json::from_value::<VideoProjectFile>(value)
+            .expect("a sidecar written with stroke and shadow still loads");
     }
 
     #[test]

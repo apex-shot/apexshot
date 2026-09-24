@@ -197,7 +197,6 @@ fn build_background_panel(
     custom_inner.append(&custom_label);
     custom_inner.append(&custom_edit);
     custom_row.set_child(Some(&custom_inner));
-    custom_page.append(&custom_row);
 
     // --- Image source: pick any file on disk. ---
     let image_page = GtkBox::new(Orientation::Vertical, 0);
@@ -254,8 +253,13 @@ fn build_background_panel(
     // Padding, Radius and the custom-fill row describe the fill itself, so
     // they live inside the Custom page rather than the panel frame. Leaving
     // them in the frame showed them on every tab.
+    //
+    // Order is padding, radius, then the row that opens the dialog: the two
+    // sliders tune the fill already in place, and picking a new one is the
+    // rarer action, so it reads as the closing step rather than the opener.
     custom_page.append(&padding_row.widget);
     custom_page.append(&radius_row.widget);
+    custom_page.append(&custom_row);
 
     let pages = GtkBox::new(Orientation::Vertical, 0);
     pages.set_hexpand(true);
@@ -263,12 +267,6 @@ fn build_background_panel(
     pages.append(&custom_page);
     pages.append(&image_page);
     body.append(&pages);
-
-    // --- Stroke and Shadow: expandable, inert for now. ---
-    let stroke_section = bg_placeholder_section(&t("Stroke"));
-    let shadow_section = bg_placeholder_section(&t("Shadow"));
-    body.append(&stroke_section.widget);
-    body.append(&shadow_section.widget);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -358,9 +356,6 @@ fn build_background_panel(
             };
             syncing.set(true);
             let is_wallpaper = matches!(background, VideoBackground::Wallpaper(_));
-            let is_plain = matches!(background, VideoBackground::Plain { .. });
-            let is_gradient = matches!(background, VideoBackground::Gradient(_));
-            let has_fill = is_wallpaper || is_plain || is_gradient;
 
             // A user-picked image and a bundled wallpaper share a variant, so
             // the Image tab is only implied when the chosen file is not one of
@@ -387,11 +382,12 @@ fn build_background_panel(
             custom_page.set_visible(matches!(active_page.get(), BgPage::Custom));
             image_page.set_visible(matches!(active_page.get(), BgPage::Image));
 
-            // Padding only means something once something fills the canvas.
-            padding_row_value.widget.set_visible(has_fill);
+            // Both sliders live on the Custom page and stay visible with it.
+            // Padding used to hide itself until a fill was picked, which only
+            // made sense while it shared the panel frame with every source;
+            // scoped to Custom it is simply one of the two fill controls, and
+            // a value set before any fill exists must survive being previewed.
             padding_row_value.sync_value(padding);
-            // Radius rounds the video card itself, so it stays available with
-            // no fill at all.
             radius_row_value.sync_value(radius);
 
             // The custom swatch previews whatever the dialog last applied.
@@ -535,67 +531,6 @@ fn bind_bg_value(
         slider_write(&mut scale_state.lock().unwrap(), slider.value());
         scale_change();
     });
-}
-
-struct BgSection {
-    widget: GtkBox,
-}
-
-/// An expandable row with a "+" affordance. Stroke and Shadow ship this way:
-/// the control is there, but nothing renders it until it is implemented.
-fn bg_placeholder_section(label: &str) -> BgSection {
-    let section = GtkBox::new(Orientation::Vertical, 0);
-    section.add_css_class("recording-editor-bg-section");
-    section.set_hexpand(true);
-
-    let header = GtkBox::new(Orientation::Horizontal, 8);
-    header.set_hexpand(true);
-
-    let title = Button::new();
-    title.add_css_class("recording-editor-bg-section-toggle");
-    title.set_has_frame(false);
-    title.set_hexpand(true);
-    let title_text = Label::new(Some(label));
-    title_text.set_xalign(0.0);
-    title.set_child(Some(&title_text));
-    header.append(&title);
-
-    let add = Button::new();
-    add.add_css_class("recording-editor-bg-section-add");
-    add.set_has_frame(false);
-    add.set_valign(Align::Center);
-    add.set_tooltip_text(Some(&t("Add")));
-    let plus = Label::new(Some("+"));
-    plus.set_valign(Align::Center);
-    add.set_child(Some(&plus));
-    header.append(&add);
-    section.append(&header);
-
-    let body = GtkBox::new(Orientation::Vertical, 0);
-    body.add_css_class("recording-editor-bg-section-body");
-    let hint = Label::new(Some(&t("Coming soon")));
-    hint.add_css_class("recording-editor-zoom-hint");
-    hint.set_xalign(0.0);
-    body.append(&hint);
-
-    let revealer = Revealer::new();
-    revealer.set_reveal_child(false);
-    revealer.set_transition_type(RevealerTransitionType::SlideDown);
-    revealer.set_transition_duration(180);
-    revealer.set_child(Some(&body));
-    section.append(&revealer);
-
-    title.connect_clicked({
-        let revealer = revealer.clone();
-        let plus = plus.clone();
-        move |_| {
-            let revealed = revealer.reveals_child();
-            revealer.set_reveal_child(!revealed);
-            plus.set_text(if revealed { "+" } else { "\u{2212}" });
-        }
-    });
-
-    BgSection { widget: section }
 }
 
 /// Open the Custom Wallpaper dialog. The dialog itself lands with the
