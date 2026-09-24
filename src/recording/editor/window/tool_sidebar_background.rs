@@ -40,6 +40,16 @@ struct BackgroundPanel {
     refresh: Rc<dyn Fn()>,
 }
 
+/// Which source page the panel is showing. This is view state, deliberately
+/// separate from the model's fill: picking the Wallpaper tab should reveal
+/// the grid even when no wallpaper is selected yet.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BgPage {
+    Wallpaper,
+    Custom,
+    Image,
+}
+
 fn build_background_panel(
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
@@ -72,6 +82,7 @@ fn build_background_panel(
     let image_tab = bg_tab_button(&t("Image"));
     custom_tab.set_group(Some(&wallpaper_tab));
     image_tab.set_group(Some(&wallpaper_tab));
+    wallpaper_tab.set_active(true);
     source_row.append(&wallpaper_tab);
     source_row.append(&custom_tab);
     source_row.append(&image_tab);
@@ -264,16 +275,23 @@ fn build_background_panel(
     panel.append(&scroll);
 
     // Picking a custom source without an editable fill would leave the panel
-    // showing a mode that cannot do anything, so each tab falls back to a
-    // sensible default the first time it is opened.
+    // Which tab is open, independent of the fill the model holds. The pages
+    // follow this, so opening Wallpaper shows the grid whether or not a
+    // wallpaper happens to be picked yet.
+    let active_page = Rc::new(Cell::new(BgPage::Wallpaper));
+
+    // Picking a source that has nothing behind it yet falls back to a
+    // sensible default rather than showing a page that cannot do anything.
     let custom_tab_activate = {
         let state = state.clone();
         let on_change = on_change.clone();
         let syncing = syncing.clone();
+        let active_page = active_page.clone();
         move |button: &ToggleButton| {
             if !button.is_active() {
                 return;
             }
+            active_page.set(BgPage::Custom);
             let mut guard = state.lock().unwrap();
             if matches!(
                 guard.background,
@@ -294,18 +312,24 @@ fn build_background_panel(
     let image_tab_activate = {
         let state = state.clone();
         let syncing = syncing.clone();
+        let active_page = active_page.clone();
         move |button: &ToggleButton| {
             if !button.is_active() {
                 return;
             }
-            let is_image = matches!(&state.lock().unwrap().background, VideoBackground::Wallpaper(_));
-            if !is_image {
-                // A picked file replaces the fill; the chooser itself is wired
-                // to the row below.
-                syncing.set(false);
-            }
+            active_page.set(BgPage::Image);
+            let _ = &state;
+            let _ = &syncing;
         }
     };
+    wallpaper_tab.connect_toggled({
+        let active_page = active_page.clone();
+        move |button: &ToggleButton| {
+            if button.is_active() {
+                active_page.set(BgPage::Wallpaper);
+            }
+        }
+    });
     custom_tab.connect_toggled(custom_tab_activate);
     image_tab.connect_toggled(image_tab_activate);
 
@@ -334,6 +358,7 @@ fn build_background_panel(
         let radius_row_value = radius_row.clone();
         let cards = cards.clone();
         let syncing = syncing.clone();
+        let active_page = active_page.clone();
         Rc::new(move || {
             let (background, padding, radius) = {
                 let guard = state.lock().unwrap();
@@ -349,24 +374,35 @@ fn build_background_panel(
             let is_gradient = matches!(background, VideoBackground::Gradient(_));
             let has_fill = is_wallpaper || is_plain || is_gradient;
 
-            wallpaper_tab.set_active(is_wallpaper);
-            custom_tab.set_active(is_plain || is_gradient);
             // A user-picked image and a bundled wallpaper share a variant, so
-            // the Image tab claims the tab only while the chosen file is not
-            // one of the bundled assets.
+            // the Image tab is only implied when the chosen file is not one of
+            // the bundled assets. The open page otherwise stays wherever the
+            // user left it, so the wallpaper grid is not blank on first open.
             let picked = match &background {
-                VideoBackground::Wallpaper(path) => {
-                    wallpaper_file_name(path)
-                        .map(|name| !video_wallpaper_files().contains(&name.as_str()))
-                        .unwrap_or(false)
-                }
+                VideoBackground::Wallpaper(path) => wallpaper_file_name(path)
+                    .map(|name| !video_wallpaper_files().contains(&name.as_str()))
+                    .unwrap_or(false),
                 _ => false,
             };
-            image_tab.set_active(picked);
+            // Selecting a bundled wallpaper or a plain fill from elsewhere
+            // pulls the matching page forward; otherwise respect the tab.
+            if (is_wallpaper && !picked) || is_plain || is_gradient {
+                active_page.set(match (&background, is_plain || is_gradient) {
+                    (_, true) => BgPage::Custom,
+                    _ => BgPage::Wallpaper,
+                });
+            } else if picked {
+                active_page.set(BgPage::Image);
+            }
+            match active_page.get() {
+                BgPage::Wallpaper => wallpaper_tab.set_active(true),
+                BgPage::Custom => custom_tab.set_active(true),
+                BgPage::Image => image_tab.set_active(true),
+            }
 
-            wallpaper_page.set_visible(is_wallpaper && !picked);
-            custom_page.set_visible(is_plain || is_gradient);
-            image_page.set_visible(picked);
+            wallpaper_page.set_visible(matches!(active_page.get(), BgPage::Wallpaper));
+            custom_page.set_visible(matches!(active_page.get(), BgPage::Custom));
+            image_page.set_visible(matches!(active_page.get(), BgPage::Image));
 
             // Padding only means something once something fills the canvas.
             padding_row_value.widget.set_visible(has_fill);

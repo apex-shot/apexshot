@@ -748,4 +748,29 @@ mod tests {
             "Radius must be wired to the corner-radius state"
         );
     }
+
+    #[test]
+    fn the_wallpaper_grid_is_not_gated_behind_a_picked_fill() {
+        // The grid used to show only once a wallpaper was already selected, so
+        // the Wallpaper tab opened on an empty page. The open page is view
+        // state and defaults to Wallpaper whatever the model's fill holds.
+        assert!(
+            include_str!("tool_sidebar_background.rs")
+                .contains("Rc::new(Cell::new(BgPage::Wallpaper))"),
+            "the panel must open on the wallpaper page by default"
+        );
+    }
+
+    #[test]
+    fn wallpaper_tiles_come_from_the_image_editor_assets() {
+        let panel = include_str!("tool_sidebar_background.rs");
+        assert!(
+            panel.contains("MOTION_WALLPAPER_FILES"),
+            "wallpaper tiles must reuse the image editor's bundled wallpapers"
+        );
+        assert!(
+            panel.contains("editor-motion-wallpaper-thumbnail"),
+            "wallpaper tiles must reuse the image editor's tile chrome"
+        );
+    }
 }
