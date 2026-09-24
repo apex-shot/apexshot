@@ -384,16 +384,11 @@ fn build_background_panel(
                     .unwrap_or(false),
                 _ => false,
             };
-            // Selecting a bundled wallpaper or a plain fill from elsewhere
-            // pulls the matching page forward; otherwise respect the tab.
-            if (is_wallpaper && !picked) || is_plain || is_gradient {
-                active_page.set(match (&background, is_plain || is_gradient) {
-                    (_, true) => BgPage::Custom,
-                    _ => BgPage::Wallpaper,
-                });
-            } else if picked {
-                active_page.set(BgPage::Image);
-            }
+            // The open tab wins. An earlier version inferred the page from
+            // the fill, which fought the user: switching to Custom wrote a
+            // plain fill, refresh then pinned the page to Custom, and
+            // returning to Wallpaper snapped straight back. The open tab is
+            // the only thing that moves the page now; the fill follows it.
             match active_page.get() {
                 BgPage::Wallpaper => wallpaper_tab.set_active(true),
                 BgPage::Custom => custom_tab.set_active(true),

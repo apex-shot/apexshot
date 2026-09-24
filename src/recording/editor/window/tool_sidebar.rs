@@ -773,4 +773,19 @@ mod tests {
             "wallpaper tiles must reuse the image editor's tile chrome"
         );
     }
+
+    #[test]
+    fn the_open_tab_is_not_overridden_by_the_current_fill() {
+        // refresh used to infer the page from the fill, so switching to
+        // Custom wrote a plain fill and then pinned the page there — going
+        // back to Wallpaper snapped away again. The tab must be the only
+        // thing that moves the page.
+        let panel = include_str!("tool_sidebar_background.rs");
+        let refresh_start = panel.find("Rc::new(move || {").unwrap();
+        let refresh = &panel[refresh_start..];
+        assert!(
+            !refresh.contains("active_page.set(match (&background"),
+            "refresh must not infer the page from the model's fill"
+        );
+    }
 }
