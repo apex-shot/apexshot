@@ -43,9 +43,10 @@
                 margin: 0 0 4px 0;
             }
 
-            /* The row that opens the Custom Wallpaper dialog. */
-            button.recording-editor-bg-custom-row {
-                min-height: 34px;
+            /* The Image tab's chooser, which is a button across its full width
+             * rather than a box with a trailing Edit pill. */
+            button.recording-editor-bg-image-row {
+                min-height: 40px;
                 padding: 0 10px;
                 border: none;
                 border-radius: 8px;
@@ -55,21 +56,65 @@
                 font-weight: 500;
             }
 
-            button.recording-editor-bg-custom-row:hover {
+            button.recording-editor-bg-image-row:hover {
                 background: alpha(white, 0.10);
                 color: alpha(white, 0.96);
             }
 
-            button.recording-editor-bg-custom-row label {
+            button.recording-editor-bg-image-row label {
                 color: inherit;
                 font-size: 12px;
                 font-weight: 500;
             }
 
+            /* The row that summarizes the current custom fill. It is a plain
+             * box — the Edit pill inside it carries the click, because GTK
+             * will not nest one button in another. */
+            .recording-editor-bg-custom-row {
+                min-height: 40px;
+                padding: 0 6px 0 6px;
+                border-radius: 8px;
+                background: alpha(white, 0.06);
+            }
+
+            .recording-editor-bg-custom-row label {
+                color: alpha(white, 0.78);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
             .recording-editor-bg-custom-swatch {
-                min-width: 20px;
-                min-height: 20px;
-                border-radius: 5px;
+                min-width: 28px;
+                min-height: 28px;
+                border-radius: 7px;
+            }
+
+            /* Trailing Edit affordance, sitting on its own slightly raised
+             * fill so it reads as a separate action inside the row. */
+            button.recording-editor-bg-custom-edit {
+                min-height: 26px;
+                padding: 0 12px;
+                border: none;
+                border-radius: 6px;
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.72);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-bg-custom-edit:hover {
+                background: alpha(white, 0.16);
+                color: alpha(white, 0.96);
+            }
+
+            button.recording-editor-bg-custom-edit:active {
+                background: alpha(white, 0.20);
+            }
+
+            button.recording-editor-bg-custom-edit label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
             }
 
             /* Four columns of wallpapers, matching the reference grid. */
@@ -96,13 +141,31 @@
                 color: alpha(#1d2129, 0.92);
             }
 
-            .editor-theme-light button.recording-editor-bg-custom-row {
+            .editor-theme-light button.recording-editor-bg-image-row {
                 background: alpha(#111827, 0.05);
                 color: alpha(#1d2129, 0.78);
             }
 
-            .editor-theme-light button.recording-editor-bg-custom-row:hover {
+            .editor-theme-light button.recording-editor-bg-image-row:hover {
                 background: alpha(#111827, 0.08);
+                color: alpha(#1d2129, 0.96);
+            }
+
+            .editor-theme-light .recording-editor-bg-custom-row {
+                background: alpha(#111827, 0.05);
+            }
+
+            .editor-theme-light .recording-editor-bg-custom-row label {
+                color: alpha(#1d2129, 0.78);
+            }
+
+            .editor-theme-light button.recording-editor-bg-custom-edit {
+                background: alpha(#111827, 0.07);
+                color: alpha(#1d2129, 0.72);
+            }
+
+            .editor-theme-light button.recording-editor-bg-custom-edit:hover {
+                background: alpha(#111827, 0.12);
                 color: alpha(#1d2129, 0.96);
             }
 

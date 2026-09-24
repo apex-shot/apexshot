@@ -172,44 +172,50 @@ fn build_background_panel(
     }
     wallpaper_page.append(&grid);
 
-    // --- Custom source: one row that opens the Custom Wallpaper dialog. ---
+    // --- Custom source: a summary row that opens the Custom Wallpaper dialog. ---
     let custom_page = GtkBox::new(Orientation::Vertical, 0);
     custom_page.set_hexpand(true);
-    let custom_row = Button::new();
+    // A plain box, not a button: GTK does not nest one button inside another,
+    // and the reference puts the affordance on a trailing Edit pill rather than
+    // on the whole row.
+    let custom_row = GtkBox::new(Orientation::Horizontal, 10);
     custom_row.add_css_class("recording-editor-bg-custom-row");
-    custom_row.set_has_frame(false);
     custom_row.set_hexpand(true);
-    let custom_inner = GtkBox::new(Orientation::Horizontal, 10);
     let custom_swatch = DrawingArea::new();
     custom_swatch.add_css_class("recording-editor-bg-custom-swatch");
-    custom_swatch.set_content_width(20);
-    custom_swatch.set_content_height(20);
+    custom_swatch.set_content_width(28);
+    custom_swatch.set_content_height(28);
     custom_swatch.set_valign(Align::Center);
     custom_swatch.set_can_target(false);
-    let custom_label = Label::new(Some(&t("Edit custom fill")));
+    // Named for the fill the row is showing, so the row reads as a summary of
+    // the current fill rather than as a command.
+    let custom_label = Label::new(Some(&t("Color")));
     custom_label.set_hexpand(true);
     custom_label.set_xalign(0.0);
     custom_label.set_valign(Align::Center);
-    let custom_edit = Image::from_icon_name("document-edit-symbolic");
-    custom_edit.set_pixel_size(13);
+    let custom_edit = Button::with_label(&t("Edit"));
+    custom_edit.add_css_class("recording-editor-bg-custom-edit");
+    custom_edit.set_has_frame(false);
     custom_edit.set_valign(Align::Center);
-    custom_inner.append(&custom_swatch);
-    custom_inner.append(&custom_label);
-    custom_inner.append(&custom_edit);
-    custom_row.set_child(Some(&custom_inner));
+    custom_edit.set_tooltip_text(Some(&t("Edit custom fill")));
+    custom_row.append(&custom_swatch);
+    custom_row.append(&custom_label);
+    custom_row.append(&custom_edit);
 
     // --- Image source: pick any file on disk. ---
     let image_page = GtkBox::new(Orientation::Vertical, 0);
     image_page.set_hexpand(true);
     let image_row = Button::new();
-    image_row.add_css_class("recording-editor-bg-custom-row");
+    // Its own class rather than the Custom row's: that one is a plain box now,
+    // and this row is still a single full-width button.
+    image_row.add_css_class("recording-editor-bg-image-row");
     image_row.set_has_frame(false);
     image_row.set_hexpand(true);
     let image_inner = GtkBox::new(Orientation::Horizontal, 10);
     let image_thumb = DrawingArea::new();
     image_thumb.add_css_class("recording-editor-bg-custom-swatch");
-    image_thumb.set_content_width(20);
-    image_thumb.set_content_height(20);
+    image_thumb.set_content_width(28);
+    image_thumb.set_content_height(28);
     image_thumb.set_valign(Align::Center);
     image_thumb.set_can_target(false);
     let image_label = Label::new(Some(&t("Select image...")));
@@ -319,7 +325,7 @@ fn build_background_panel(
         }
     });
 
-    custom_row.connect_clicked({
+    custom_edit.connect_clicked({
         let state = state.clone();
         let on_change = on_change.clone();
         move |button| open_custom_wallpaper_dialog(button, state.clone(), on_change.clone())
@@ -339,6 +345,7 @@ fn build_background_panel(
         let custom_page = custom_page.clone();
         let image_page = image_page.clone();
         let custom_swatch = custom_swatch.clone();
+        let custom_label = custom_label.clone();
         let image_thumb = image_thumb.clone();
         let padding_row_value = padding_row.clone();
         let radius_row_value = radius_row.clone();
@@ -390,27 +397,33 @@ fn build_background_panel(
             padding_row_value.sync_value(padding);
             radius_row_value.sync_value(radius);
 
-            // The custom swatch previews whatever the dialog last applied.
+            // The custom swatch previews whatever the dialog last applied, and
+            // the name says what kind of fill it is.
             {
-                let preview: Option<(u8, u8, u8)> = match &background {
-                    VideoBackground::Plain { r, g, b } => Some((*r, *g, *b)),
+                let (preview, kind) = match &background {
+                    VideoBackground::Plain { r, g, b } => (Some((*r, *g, *b)), t("Color")),
                     VideoBackground::Gradient(gradient) => {
                         let stops = gradient.draw_stops();
                         // Average the ends so a multi-stop ramp reads as a
-                        // representative color at 20px.
-                        stops.first().zip(stops.last()).map(|(a, b)| {
+                        // representative color at 28px.
+                        let color = stops.first().zip(stops.last()).map(|(a, b)| {
                             (
                                 ((a.r as u32 + b.r as u32) / 2) as u8,
                                 ((a.g as u32 + b.g as u32) / 2) as u8,
                                 ((a.b as u32 + b.b as u32) / 2) as u8,
                             )
-                        })
+                        });
+                        (color, t("Gradient"))
                     }
-                    _ => None,
+                    // No custom fill chosen yet. The name stays "Color" because
+                    // that is what Edit opens today; the empty swatch is the
+                    // signal that nothing is set.
+                    _ => (None, t("Color")),
                 };
+                custom_label.set_text(&kind);
                 custom_swatch.set_draw_func(move |_, cr, width, height| {
                     if let Some((r, g, b)) = preview {
-                        draw_color_chip(cr, width as f64, height as f64, (r, g, b), 5.0);
+                        draw_color_chip(cr, width as f64, height as f64, (r, g, b), 7.0);
                     }
                 });
                 custom_swatch.queue_draw();

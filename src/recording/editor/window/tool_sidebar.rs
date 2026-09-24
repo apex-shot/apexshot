@@ -845,6 +845,42 @@ mod tests {
     }
 
     #[test]
+    fn the_custom_row_summarizes_the_fill_and_its_edit_opens_the_dialog() {
+        // The row reads as a swatch, the fill's name, and an Edit pill. GTK
+        // will not nest one button inside another, so the row itself must be a
+        // plain box with the click living on the Edit button — a Button row
+        // would have to be the whole click target again.
+        let panel = include_str!("tool_sidebar_background.rs");
+        assert!(
+            panel.contains("let custom_row = GtkBox::new(Orientation::Horizontal, 10);"),
+            "the custom row must be a box, not a button, to hold the Edit pill"
+        );
+        assert!(
+            panel.contains("let custom_edit = Button::with_label(&t(\"Edit\"));"),
+            "the row needs its own Edit button"
+        );
+        assert!(
+            panel.contains("custom_edit.connect_clicked("),
+            "Edit, not the whole row, is what opens the Custom Wallpaper dialog"
+        );
+        assert!(
+            !panel.contains("custom_row.connect_clicked("),
+            "the row must not also be a button, or Edit would sit inside a button"
+        );
+        // The name tracks the fill so the row summarizes rather than commands.
+        assert!(
+            panel.contains("custom_label.set_text(&kind);"),
+            "the row must name whichever custom fill is active"
+        );
+        for name in ["t(\"Color\")", "t(\"Gradient\")"] {
+            assert!(
+                panel.contains(name),
+                "the custom row must be able to show {name}"
+            );
+        }
+    }
+
+    #[test]
     fn every_source_tab_refreshes_the_pages() {
         // The Wallpaper tab only recorded the open page and never asked for a
         // refresh, so going Custom and back left the custom page on screen.
