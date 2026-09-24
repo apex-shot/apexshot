@@ -73,7 +73,9 @@
             .recording-editor-bg-custom-row {
                 min-height: 40px;
                 padding: 0 6px 0 6px;
-                border-radius: 8px;
+                /* A pill, not a rounded rect. At 8px on a 40px row this read as
+                 * a button even though nothing on the row is clickable. */
+                border-radius: 999px;
                 background: alpha(white, 0.06);
             }
 
@@ -93,9 +95,9 @@
              * fill so it reads as a separate action inside the row. */
             button.recording-editor-bg-custom-edit {
                 min-height: 26px;
-                padding: 0 12px;
+                padding: 0 14px;
                 border: none;
-                border-radius: 6px;
+                border-radius: 999px;
                 background: alpha(white, 0.10);
                 color: alpha(white, 0.72);
                 font-size: 12px;

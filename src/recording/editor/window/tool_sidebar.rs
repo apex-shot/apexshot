@@ -881,6 +881,26 @@ mod tests {
     }
 
     #[test]
+    fn only_the_edit_pill_looks_clickable_on_the_custom_row() {
+        // Nothing on the row is clickable but Edit, so nothing on it may look
+        // clickable either. An 8px radius on a 40px row still read as a
+        // button; both halves are pills now.
+        let css = include_str!("../ui_support_css/09.css");
+        for class in [
+            ".recording-editor-bg-custom-row {",
+            "button.recording-editor-bg-custom-edit {",
+        ] {
+            let start = css.find(class).unwrap_or_else(|| panic!("09.css must define {class}"));
+            let block = &css[start..];
+            let end = block.find('}').expect("the rule is closed");
+            assert!(
+                block[..end].contains("border-radius: 999px;"),
+                "{class} must be a pill, or the row reads as a button"
+            );
+        }
+    }
+
+    #[test]
     fn every_source_tab_refreshes_the_pages() {
         // The Wallpaper tab only recorded the open page and never asked for a
         // refresh, so going Custom and back left the custom page on screen.
