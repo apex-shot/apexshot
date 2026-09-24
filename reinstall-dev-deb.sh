@@ -37,10 +37,18 @@ if ! command -v cargo-clippy >/dev/null 2>&1 || ! command -v cargo-fmt >/dev/nul
   sudo apt-get install -y "$CLIPPY_PKG" rustfmt
 fi
 
-export CARGO_INCREMENTAL=1
+# Incremental is deliberately off for release builds. `.cargo/config.toml`
+# only sets it off for [profile.dev], and forcing it on here lets rustc reuse
+# codegen units that a later build already dropped, so the final link fails
+# with a wall of `undefined reference to core::ptr::drop_in_place<...>` out of
+# tokio/zbus — nothing to do with the code that changed. It only surfaced now
+# because the release rlib had just been rebuilt after a source change.
+# Delete the stale release artifacts (not the whole target/) if the link
+# fails anyway, or just let cargo rebuild the crate.
+unset CARGO_INCREMENTAL
 
 echo "Building ApexShot .deb..."
-echo "→ incremental cargo release"
+echo "→ cargo release (non-incremental; see note above)"
 cargo build --release
 
 if [[ ! -x "$ROOT_DIR/target/release/apexshot" ]]; then
