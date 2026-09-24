@@ -191,33 +191,36 @@
                 background: #000000;
             }
 
+            /* The bar is a rounded container the selected tool sits inside —
+             * a pill on a tray, rather than a pill floating on the page. */
             .recording-editor-tool-section {
                 min-width: 0;
                 max-width: none;
-                padding: 8px 10px;
-                background: transparent;
-                border-radius: 0;
+                margin: 10px 10px 2px 10px;
+                padding: 3px;
+                border-radius: 12px;
+                background: alpha(white, 0.06);
             }
 
             button.recording-editor-tool-section-btn {
                 min-width: 40px;
-                min-height: 36px;
+                min-height: 34px;
                 padding: 0;
                 border: none;
-                border-radius: 10px;
+                border-radius: 9px;
                 background: transparent;
                 color: alpha(white, 0.55);
             }
 
             button.recording-editor-tool-section-btn:hover {
-                background: alpha(white, 0.06);
+                background: alpha(white, 0.08);
                 color: alpha(white, 0.88);
             }
 
-            /* The selected tool keeps the reference's filled pill. */
+            /* The selected tool fills its slot inside the tray. */
             button.recording-editor-tool-section-btn:checked,
             button.recording-editor-tool-section-btn:checked:hover {
-                background: alpha(white, 0.10);
+                background: alpha(white, 0.12);
                 color: alpha(white, 0.96);
             }
 
@@ -258,7 +261,7 @@
 
             .editor-theme-light button.recording-editor-tool-section-btn:checked,
             .editor-theme-light button.recording-editor-tool-section-btn:checked:hover {
-                background: alpha(#111827, 0.08);
+                background: alpha(#111827, 0.10);
                 color: alpha(#1d2129, 0.92);
             }
 
