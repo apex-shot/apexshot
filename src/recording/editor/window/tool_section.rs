@@ -60,7 +60,7 @@ pub(super) fn build_tool_section(
     // Frame and motion tools. These drive the timeline rather than the
     // sidebar, so selecting one hands the sidebar back to whatever the
     // timeline currently has selected.
-    let frames = tool_icon_button("view-grid-symbolic", &t("Frames"));
+    let frames = tool_icon_button(icon_names::custom::OVERLAPPING_WINDOWS_SYMBOLIC, &t("Frames"));
     frames.set_tooltip_text(Some(&t("Frames")));
     frames.connect_clicked({
         let state = state.clone();
@@ -76,7 +76,7 @@ pub(super) fn build_tool_section(
     root.append(&frames);
 
     // The take library is not built yet; the icon marks where it goes.
-    let takes = tool_icon_button("bookmark-symbolic", &t("Takes"));
+    let takes = tool_icon_button(icon_names::custom::MARKER_SYMBOLIC, &t("Takes"));
     takes.set_tooltip_text(Some(&t("Takes — coming soon")));
     takes.set_sensitive(false);
     root.append(&takes);
@@ -146,8 +146,8 @@ mod tests {
         for icon in [
             "IMAGE_ALT_SYMBOLIC",
             "POINTER_PRIMARY_CLICK",
-            "view-grid-symbolic",
-            "bookmark-symbolic",
+            "OVERLAPPING_WINDOWS_SYMBOLIC",
+            "MARKER_SYMBOLIC",
         ] {
             assert!(
                 source.contains(icon),

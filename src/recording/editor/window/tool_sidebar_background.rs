@@ -11,6 +11,8 @@
 
 use std::path::PathBuf;
 
+use crate::capture::editor::window::icon_names;
+
 fn video_wallpaper_files() -> Vec<&'static str> {
     crate::capture::editor::window::background_panel::MOTION_WALLPAPER_FILES
         .iter()
@@ -204,7 +206,7 @@ fn build_background_panel(
     image_label.set_hexpand(true);
     image_label.set_xalign(0.0);
     image_label.set_valign(Align::Center);
-    let image_edit = Image::from_icon_name("folder-open-regular");
+    let image_edit = Image::from_icon_name(icon_names::shipped::FOLDER_OPEN_REGULAR);
     image_edit.set_pixel_size(13);
     image_edit.set_valign(Align::Center);
     image_inner.append(&image_thumb);

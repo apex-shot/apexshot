@@ -180,7 +180,7 @@
                 color: alpha(#1d2129, 0.96);
             }
 
-            /* ── Left tool column: icon bar over the panel stack ──
+            /* ── Right tool column: icon bar over the panel stack ──
              * The column shares the timeline's near-black so the tools and
              * the timeline read as one chrome, and only the video stage keeps
              * its own surface. */
@@ -262,15 +262,15 @@
                 color: alpha(#1d2129, 0.92);
             }
 
-            /* The workspace is a plain two-column split now: tools and
-             * timeline on one near-black, the video stage on its own. */
+            /* The workspace is a plain two-column split: the video stage on
+             * its own surface, tools and timeline on one near-black. */
             .recording-editor-workspace {
                 padding: 0;
                 background: #000000;
             }
 
             .recording-editor-tools-column {
-                border-right: 1px solid alpha(white, 0.06);
+                border-left: 1px solid alpha(white, 0.06);
             }
 
             .editor-theme-light .recording-editor-workspace {
@@ -279,5 +279,16 @@
             }
 
             .editor-theme-light .recording-editor-tools-column {
-                border-right-color: alpha(#111827, 0.10);
+                border-left-color: alpha(#111827, 0.10);
+            }
+
+            /* Empty states carried their own surface when the panel was a
+             * floating card on the right. In the left column they are just
+             * text on the shared near-black. */
+            .recording-editor-tools-column .recording-editor-cursor-unavailable {
+                background: transparent;
+            }
+
+            .recording-editor-tools-column .recording-editor-zoom-scroll {
+                background: transparent;
             }
