@@ -104,15 +104,15 @@
             }
 
             .editor-theme-light .recording-editor-workspace {
-                background: #ffffff;
+                background: @recording-editor-surface-light;
             }
 
             .editor-theme-light .recording-editor-stage {
-                background: #f0f1f4;
+                background: @recording-editor-video-surface-light;
             }
 
             .editor-theme-light .recording-editor-timeline-dock {
-                background: #ffffff;
+                background: @recording-editor-surface-light;
             }
 
             .editor-theme-light .recording-editor-timeline-dock {

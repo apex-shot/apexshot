@@ -32,10 +32,10 @@ mod tests {
     #[test]
     fn light_theme_chrome_matches_timeline() {
         assert!(RECORDING_EDITOR_CSS.contains(
-            ".editor-theme-light .recording-editor-window-controls {\n                background: #ffffff;"
+            ".editor-theme-light .recording-editor-window-controls {\n                background: @recording-editor-surface-light;"
         ));
         assert!(RECORDING_EDITOR_CSS.contains(
-            ".editor-theme-light.recording-editor-shell {\n                background: #ffffff;\n                border: 1px solid alpha(#111827, 0.18);"
+            ".editor-theme-light.recording-editor-shell {\n                background: @recording-editor-surface-light;\n                border: 1px solid alpha(#111827, 0.18);"
         ));
         assert!(RECORDING_EDITOR_CSS
             .contains(".recording-editor-root scale slider {\n                min-width: 12px;"));
@@ -47,6 +47,33 @@ mod tests {
         ));
         assert!(RECORDING_EDITOR_CSS.contains(
             ".recording-editor-root scrollbar slider {\n                background-color: alpha(white, 0.18);\n                border-radius: 999px;\n                min-width: 5px;"
+        ));
+    }
+
+    #[test]
+    fn chrome_and_video_surfaces_are_two_single_source_tokens() {
+        // The editor is skinned by exactly two surfaces per theme: the shared
+        // chrome (title bar, workspace inset, timeline, tool column,
+        // inspector) and the video play area. Pin that each raw value lives
+        // only in its @define-color line, so a future colour change edits the
+        // token and not a dozen rules someone has to hunt down.
+        assert_eq!(
+            RECORDING_EDITOR_CSS.matches("#0f0f0f").count(),
+            1,
+            "chrome surfaces must reference @recording-editor-surface, not a literal"
+        );
+        assert!(RECORDING_EDITOR_CSS.contains("@define-color recording-editor-surface #0f0f0f;"));
+        assert!(
+            RECORDING_EDITOR_CSS.contains("@define-color recording-editor-video-surface #000000;")
+        );
+        assert!(
+            RECORDING_EDITOR_CSS.contains("@define-color recording-editor-surface-light #ffffff;")
+        );
+        assert!(RECORDING_EDITOR_CSS
+            .contains("@define-color recording-editor-video-surface-light #f0f1f4;"));
+        assert!(RECORDING_EDITOR_CSS.contains("background: @recording-editor-video-surface;"));
+        assert!(RECORDING_EDITOR_CSS.contains(
+            ".editor-theme-light .recording-editor-stage {\n                background: @recording-editor-video-surface-light;"
         ));
     }
 

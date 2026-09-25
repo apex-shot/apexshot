@@ -933,7 +933,8 @@ fn apply_preview_background(
             None,
         ),
         VideoBackground::None => (
-            ".recording-editor-preview-bg { background: #000000; }".to_string(),
+            ".recording-editor-preview-bg { background: @recording-editor-video-surface; }"
+                .to_string(),
             None,
         ),
         VideoBackground::Plain { r, g, b } => (
@@ -941,7 +942,8 @@ fn apply_preview_background(
             None,
         ),
         VideoBackground::Gradient(gradient) => (
-            ".recording-editor-preview-bg { background: #000000; }".to_string(),
+            ".recording-editor-preview-bg { background: @recording-editor-video-surface; }"
+                .to_string(),
             Some(PreviewFill::Gradient(gradient)),
         ),
         VideoBackground::Wallpaper(path) => (
@@ -1231,8 +1233,10 @@ mod tests {
             "stage must carry the export canvas aspect"
         );
         assert!(
-            source.contains(".recording-editor-preview-bg { background: #000000; }"),
-            "no fill must still paint the black scene behind the video"
+            source.contains(
+                ".recording-editor-preview-bg { background: @recording-editor-video-surface; }"
+            ),
+            "no fill must still paint the video-play-area scene behind the video"
         );
     }
 }

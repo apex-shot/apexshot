@@ -175,14 +175,12 @@
             }
 
             /* ── Right tool column: icon bar over the panel stack ──
-             * The column shares the timeline's near-black so the tools and
-             * the timeline read as one chrome, and only the video stage keeps
-             * its own surface. */
+             * Sized here; its surface is the shared chrome, set with the
+             * other chrome rules further down. */
 
             .recording-editor-tools-column {
                 min-width: 288px;
                 max-width: 288px;
-                background: #000000;
             }
 
             /* The bar is a rounded container the selected tool sits inside —
@@ -222,13 +220,18 @@
                 opacity: 0.3;
             }
 
-            /* The stack beneath the bar is a plain column, not a floating
-             * card, so it does not read as a separate surface. */
+            /* The stack paints the shared chrome surface (@recording-editor-surface, same as
+             * the settings sidebar) so the right column reads as one zone
+             * with the timeline. */
             .recording-editor-tool-sidebar {
                 min-width: 0;
                 max-width: none;
-                background: transparent;
+                background: @recording-editor-surface;
                 border-left: none;
+            }
+
+            .recording-editor-tools-column {
+                background: @recording-editor-surface;
             }
 
             .recording-editor-tools-column .recording-editor-zoom-panel {
@@ -241,7 +244,7 @@
             }
 
             .editor-theme-light .recording-editor-tools-column {
-                background: #ffffff;
+                background: @recording-editor-surface-light;
             }
 
             .editor-theme-light .recording-editor-tool-section-btn {
@@ -259,13 +262,13 @@
                 color: alpha(#1d2129, 0.92);
             }
 
-            /* The workspace is a two-column split: the video stage on its
-             * own surface, tools and timeline on one near-black. The gap
-             * keeps the tool column from butting against the video — the
-             * reference shows clear space between them, not a hard seam. */
+            /* Chrome, not a surface of its own: the inset around the video
+             * stage (and the 8px gap left of the tool column) is the same
+             * pane the title bar and timeline paint, so the editor reads as
+             * one window with a single lifted play area. */
             .recording-editor-workspace {
                 padding: 8px 10px;
-                background: #000000;
+                background: @recording-editor-surface;
             }
 
             .recording-editor-tools-column {
@@ -280,7 +283,7 @@
 
             .editor-theme-light .recording-editor-workspace {
                 padding: 8px 10px;
-                background: #ffffff;
+                background: @recording-editor-surface-light;
             }
 
             .editor-theme-light .recording-editor-stage {
@@ -290,18 +293,20 @@
             /* The "cursor unavailable" message is an overlay on top of the
              * cursor tabs and theme grid. Left transparent, the tabs and
              * cards behind it showed through and collided with the text, so
-             * it keeps an opaque surface and sits above the content. */
+             * it keeps an opaque surface and sits above the content. That
+             * surface is the column's own chrome, so the overlay does not
+             * read as a second panel. */
             .recording-editor-tools-column .recording-editor-cursor-overlay {
-                background: #000000;
+                background: @recording-editor-surface;
             }
 
             .recording-editor-tools-column .recording-editor-cursor-unavailable {
-                background: #000000;
+                background: @recording-editor-surface;
             }
 
             .editor-theme-light .recording-editor-tools-column .recording-editor-cursor-overlay,
             .editor-theme-light .recording-editor-tools-column .recording-editor-cursor-unavailable {
-                background: #ffffff;
+                background: @recording-editor-surface-light;
             }
 
             .recording-editor-tools-column .recording-editor-zoom-scroll {

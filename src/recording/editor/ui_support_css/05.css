@@ -33,11 +33,11 @@
                 color: #ffffff;
             }
 
-            /* Light-theme counterpart of the darker controls band: one step
-               off the white top, still clearly lighter than the timeline card
-               and strip that sit on it. */
+            /* Same pane as the rest of the chrome: the controls band is not
+               its own zone, so it takes the chrome white rather than a step
+               off it. */
             .editor-theme-light .recording-editor-bottom-tools {
-                background-color: #f0f1f4;
+                background-color: @recording-editor-surface-light;
             }
 
             .editor-theme-light button.recording-editor-tool-icon {
@@ -248,7 +248,7 @@
             }
 
             .editor-theme-light.recording-editor-shell {
-                background: #ffffff;
+                background: @recording-editor-surface-light;
                 border: 1px solid alpha(#111827, 0.18);
             }
 
@@ -345,7 +345,9 @@
             .recording-editor-workspace {
                 min-height: 0;
                 padding: 8px 10px 8px 10px;
-                background: #000000;
+                /* Chrome, not a surface of its own: the inset around the
+                 * video stage is the same pane the timeline sits on. */
+                background: @recording-editor-surface;
             }
 
             .recording-editor-tool-rail,

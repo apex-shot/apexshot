@@ -180,7 +180,7 @@
             .editor-theme-light .recording-editor-inspector .recording-editor-panels,
             .editor-theme-light .recording-editor-inspector .recording-editor-panel,
             .editor-theme-light .recording-editor-inspector .recording-editor-panel-body {
-                background: #ffffff;
+                background: @recording-editor-surface-light;
             }
 
             .editor-theme-light .recording-editor-inspector {
@@ -269,6 +269,9 @@
                 padding: 6px;
             }
 
+            /* The inspector is the loaded window's right column, so it takes the
+               shared chrome surface rather than a tone of its own; the divider
+               below is what separates it from the video. */
             .recording-editor-inspector,
             .recording-editor-inspector scrolledwindow,
             .recording-editor-inspector viewport,
@@ -276,7 +279,7 @@
             .recording-editor-inspector .recording-editor-panels,
             .recording-editor-inspector .recording-editor-panel,
             .recording-editor-inspector .recording-editor-panel-body {
-                background: #111111;
+                background: @recording-editor-surface;
             }
 
             .recording-editor-inspector {

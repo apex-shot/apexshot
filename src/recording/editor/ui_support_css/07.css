@@ -8,7 +8,11 @@
 
             .recording-editor-stage {
                 min-height: 0;
-                background: #111111;
+                /* The video play area is the one surface that is not the
+                 * chrome: it stays black so it matches the preview scene
+                 * once a video loads (`recording-editor-preview-bg`, which
+                 * uses this same token) and the export's fill-less backdrop. */
+                background: @recording-editor-video-surface;
                 border-radius: 12px;
             }
 
@@ -84,7 +88,8 @@
 
             .recording-editor-timeline-dock {
                 padding: 2px 12px 8px 12px;
-                background: #000000;
+                /* Same surface as the settings sidebar (@recording-editor-surface). */
+                background: @recording-editor-surface;
                 border-top: 1px solid alpha(white, 0.08);
                 border-radius: 0 0 10px 10px;
                 overflow: hidden;

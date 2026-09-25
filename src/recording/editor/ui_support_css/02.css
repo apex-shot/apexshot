@@ -103,15 +103,13 @@
             }
 
             /* ── Bottom tools ── */
-            /* A third, deeper black than the #111111 preview/top so the
-               controls band reads as its own zone without a divider line.
-               The timeline card and strip paint translucent white on top of
-               it, so they lift back above it (~#141414 / ~#1d1d1d) and stay
-               visibly distinct from both this band and the top. */
+            /* Chrome, same as the title bar, timeline and tool column: the
+               controls band is part of the one pane and is not separated by
+               a divider or a differently-toned black. */
             .recording-editor-bottom-tools {
                 padding: 0;
                 margin: 0;
-                background-color: #0c0c0c;
+                background-color: @recording-editor-surface;
                 border: none;
                 border-radius: 0 0 10px 10px;
             }
@@ -120,7 +118,7 @@
             .recording-editor-timeline {
                 min-height: 48px;
                 padding: 0;
-                background: #000000;
+                background: @recording-editor-surface;
                 border-top: 1px solid alpha(white, 0.06);
             }
 

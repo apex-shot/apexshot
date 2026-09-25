@@ -315,7 +315,9 @@
             .recording-editor-shell {
                 border-radius: 10px;
                 overflow: hidden;
-                background: #000000;
+                /* Same chrome surface as the root: the window reads as one
+                 * pane, with only the video stage lifted off it. */
+                background: @recording-editor-surface;
             }
 
             window.fullscreen .recording-editor-shell,
