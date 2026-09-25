@@ -72,7 +72,20 @@ const POPOVER_SIDEBAR_GAP: i32 = 8;
 /// How far clear of the popover's own edge the stop picker's card sits. Applied
 /// as a popover layout offset, i.e. on top of the position GTK computes, so it
 /// cannot move the card into a different coordinate space.
+///
+/// Widening this does not buy visible air: the compositor constrains a popup to
+/// its parent surface, and the card already sits against that edge — seats of 10
+/// through 18px all landed on the same pixel (measured in
+/// `the_card_hangs_clear_of_the_popover_beside_it`), and past 8px GTK also
+/// stopped fitting the card's height inside the popover and pinned it to the
+/// surface's top. The visible gap comes from `PICKER_CARD_GUTTER` instead.
 const PICKER_CARD_GAP: i32 = 8;
+/// Transparent air between the card's own painted edge and the popover it hangs
+/// off. Part of the gap visually but not geometrically: it is taken *inside* the
+/// card's surface, so the compositor cannot clamp it away the way it clamps the
+/// seat. Without it the two surfaces — each carrying the app's 32px-blur
+/// floating-card shadow — read as one panel with a seam down it.
+const PICKER_CARD_GUTTER: i32 = 6;
 
 /// Paints `rounded_rect` and clips to it.
 fn fill_rounded(
@@ -1357,6 +1370,9 @@ fn build_gradient_page(
         .add_css_class("recording-editor-gradient-picker");
     let card = GtkBox::new(Orientation::Vertical, 0);
     card.add_css_class("recording-editor-gradient-picker-card");
+    // The card's painted box stops short of its own surface on the popover side,
+    // which is where the visible gap between the two cards comes from.
+    card.set_margin_end(PICKER_CARD_GUTTER);
     let card_header = GtkBox::new(Orientation::Horizontal, 0);
     card_header.add_css_class("recording-editor-gradient-picker-header");
     let card_spacer = GtkBox::new(Orientation::Horizontal, 0);
@@ -2647,15 +2663,22 @@ mod tests {
             body.set_size_request(236, 300);
             host.set_child(Some(&body));
 
-            let card = Popover::new();
-            card.set_has_arrow(false);
-            card.set_position(gtk4::PositionType::Left);
-            card.set_autohide(false);
-            card.set_valign(Align::Start);
-            card.set_parent(&body);
+            let card_popover = Popover::new();
+            card_popover.set_has_arrow(false);
+            card_popover.set_position(gtk4::PositionType::Left);
+            card_popover.set_autohide(false);
+            card_popover.set_valign(Align::Start);
+            card_popover.set_parent(&body);
+            // Built as production builds it, gutter included: the painted box is
+            // what the checks below measure, not the transparent surface around
+            // it.
+            let card_box = GtkBox::new(Orientation::Vertical, 0);
+            card_box.add_css_class("recording-editor-gradient-picker-card");
+            card_box.set_margin_end(PICKER_CARD_GUTTER);
             let card_body = GtkBox::new(Orientation::Vertical, 0);
             card_body.set_size_request(240, 290);
-            card.set_child(Some(&card_body));
+            card_box.append(&card_body);
+            card_popover.set_child(Some(&card_box));
 
             window.present();
             // Surfaces are positioned by the compositor, so the loop has to run
@@ -2674,61 +2697,96 @@ mod tests {
             host.popup();
             pump();
 
-            card.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+            card_popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
                 -PICKER_CARD_GAP,
                 0,
                 1,
                 card_body.height().max(1),
             )));
-            card.popup();
+            card_popover.popup();
             pump();
 
-            let surface = card.surface().expect("the card has a surface");
+            let surface = card_popover.surface().expect("the card has a surface");
             let popup = surface
                 .downcast::<gtk4::gdk::Popup>()
                 .expect("a popover's surface is a popup");
             let (card_x, card_y) = (popup.position_x(), popup.position_y());
-            let (card_w, card_h) = (popup.width(), popup.height());
+            let (surface_w, surface_h) = (popup.width(), popup.height());
             let body_rect = body.compute_bounds(&host);
-            card.popdown();
+            // The painted box, in the card popover's own space. Read here rather
+            // than off the surface: the surface is transparent past the gutter.
+            let painted = card_box.compute_bounds(&card_popover);
+            card_popover.popdown();
             pump();
-            card.unparent();
+            card_popover.unparent();
             host.popdown();
             host.unparent();
             window.destroy();
 
-            if card_w < 100 || card_h < 100 {
+            if surface_w < 100 || surface_h < 100 {
                 eprintln!("skipping: the compositor did not position the surfaces");
                 return;
             }
-            let Some(body_rect) = body_rect else {
-                eprintln!("skipping: the body has no bounds");
+            let (Some(body_rect), Some(painted)) = (body_rect, painted) else {
+                eprintln!("skipping: the widgets have no bounds");
                 return;
             };
 
-            // `position_x/y` is relative to the popover surface this card is a
-            // child of, which is the space the body's bounds are read in. The
-            // gap is asserted as a range, not a number: the host theme's own
-            // popover margins are in play here, while the app's CSS strips them
-            // and leaves the exact PICKER_CARD_GAP. What matters is that the
-            // card is clear of the popover's edge and not flung off somewhere
-            // else in the window.
-            let gap = body_rect.x() as i32 - (card_x + card_w);
+            // Where the compositor puts the card is the compositor's call — it
+            // clamps a popup to its parent surface, so seats of 10 to 18px all
+            // measured the same pixel — hence a range here: the card must hang
+            // clear of the popover's edge rather than overlap it or land
+            // somewhere else in the window. The rest of the gap is the gutter on
+            // the painted box, pinned by
+            // `the_picker_card_takes_its_air_inside_its_own_surface`.
+            let gap = body_rect.x() as i32 - (card_x + surface_w);
             assert!(
-                (0..=24).contains(&gap),
-                "the card must sit just clear of the popover's edge, not {gap}px away"
+                (0..=32).contains(&gap),
+                "the card must hang clear of the popover's edge, not {gap}px away"
             );
             // The failure this guards is vertical: a centred rect put the
             // card's corner where its centre belonged, ~150px up, which is the
             // "card over the video" the seat kept producing.
+            let painted_top = card_y + painted.y() as i32;
             let body_top = body_rect.y() as i32;
             assert!(
-                (card_y - body_top).abs() <= 10,
-                "the card must be level with the popover: card top {card_y} vs body top {body_top}"
+                (painted_top - body_top).abs() <= 10,
+                "the card must be level with the popover: card top {painted_top} vs body top {body_top}"
             );
         }) else {
             eprintln!("skipping: no display available");
             return;
         };
+    }
+
+    #[test]
+    fn the_picker_card_takes_its_air_inside_its_own_surface() {
+        // The gap between the card and the popover it hangs off cannot come from
+        // the seat: the compositor clamps a popup to its parent surface, and
+        // seats of 10 to 18px all landed on the same pixel (see the seat test).
+        // It comes from a transparent gutter on the card's own painted box
+        // instead — layout rather than placement, so nothing can clamp it away.
+        // Dropping it puts the two surfaces back to touching, and with both
+        // carrying the app's 32px-blur shadow they read as one panel with a seam.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let production = &source[..source.find("\n#[cfg(test)]").expect("tests module")];
+        let start = production
+            .find("fn build_gradient_page(")
+            .expect("the gradient page builds the card");
+        let end = production[start..]
+            .find("\nfn ")
+            .map(|at| start + at)
+            .unwrap_or(production.len());
+        let body = &production[start..end];
+        let painted = body
+            .find("card.add_css_class(\"recording-editor-gradient-picker-card\")")
+            .expect("the card's painted box is the box the gutter belongs on");
+        let gutter = body
+            .find("card.set_margin_end(PICKER_CARD_GUTTER)")
+            .expect("the painted box must stop short of its surface by the gutter");
+        assert!(
+            gutter > painted,
+            "the gutter belongs on the painted box itself, not on something inside it"
+        );
     }
 }
