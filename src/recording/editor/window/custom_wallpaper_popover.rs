@@ -232,6 +232,27 @@ fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f64, f64, f64) {
     (hue, delta / max, max)
 }
 
+/// The HSV a picker keeps for the color it just read back.
+///
+/// `held` is the picker's own triple and `last_written` the RGB it last
+/// committed. When those agree the color is the picker's own, so the triple
+/// stands even where RGB cannot describe it: a drag that reached black commits
+/// `#000000`, which carries neither hue nor saturation, and re-deriving from it
+/// would drop the handle into the corner and reset the plane mid-drag. Any
+/// other color — a project file, the hex entry, another gradient stop — is
+/// adopted as itself.
+fn reconciled_hsv(
+    held: (f64, f64, f64),
+    last_written: Option<(u8, u8, u8)>,
+    color: (u8, u8, u8),
+) -> (f64, f64, f64) {
+    if last_written == Some(color) {
+        held
+    } else {
+        rgb_to_hsv(color.0, color.1, color.2)
+    }
+}
+
 // ── Popover ──
 
 pub(super) fn build_custom_wallpaper_popover(
@@ -482,30 +503,72 @@ fn build_color_picker(
     // and re-commit the value we just set.
     let syncing = Rc::new(Cell::new(false));
 
+    // The picker's own HSV, kept between frames instead of re-derived from the
+    // committed RGB.
+    //
+    // RGB cannot round-trip the triple: black carries neither hue nor
+    // saturation and white carries no hue, so re-deriving HSV from the stored
+    // color threw away the axis the user had just zeroed. Dragging to the
+    // plane's bottom edge collapsed the handle into the bottom-left corner —
+    // black reads as saturation 0 — and reset the plane's hue to red.
+    //
+    // `synced` remembers the exact RGB this picker last wrote, which is how
+    // `refresh` tells its own writes from a color that arrived from a project
+    // file, the hex entry, or another gradient stop.
+    let hsv = Rc::new(Cell::new((0.0, 0.0, 0.0)));
+    let synced: Rc<Cell<Option<(u8, u8, u8)>>> = Rc::new(Cell::new(None));
+
+    // Every edit goes through here: the triple is what the plane and the bar
+    // edit, and the RGB is what the model stores.
+    let set_hsv: Rc<dyn Fn(f64, f64, f64)> = {
+        let set = set.clone();
+        let notify = notify.clone();
+        let hsv = hsv.clone();
+        let synced = synced.clone();
+        Rc::new(move |h, s, v| {
+            hsv.set((h, s, v));
+            let color = hsv_to_rgb(h, s, v);
+            synced.set(Some(color));
+            set(color);
+            notify();
+        })
+    };
+
+    // A typed hex carries no hue of its own, so it is adopted wholesale rather
+    // than layered onto the triple the plane was holding.
+    let adopt_rgb: Rc<dyn Fn((u8, u8, u8))> = {
+        let set = set.clone();
+        let notify = notify.clone();
+        let hsv = hsv.clone();
+        let synced = synced.clone();
+        Rc::new(move |color: (u8, u8, u8)| {
+            hsv.set(rgb_to_hsv(color.0, color.1, color.2));
+            synced.set(Some(color));
+            set(color);
+            notify();
+        })
+    };
+
     // Commit the typed hex on Enter or focus-out, matching the image editor's
     // commit-on-activate pattern rather than validating per keystroke.
     {
-        let set = set.clone();
-        let notify = notify.clone();
+        let adopt = adopt_rgb.clone();
         let syncing = syncing.clone();
         hex.connect_activate({
-            let set = set.clone();
-            let notify = notify.clone();
+            let adopt = adopt.clone();
             let syncing = syncing.clone();
             move |entry| {
                 if syncing.get() {
                     return;
                 }
                 if let Some(color) = parse_hex(&entry.text()) {
-                    set(color);
-                    notify();
+                    adopt(color);
                 }
             }
         });
         let focus = gtk4::EventControllerFocus::new();
         focus.connect_leave({
-            let set = set.clone();
-            let notify = notify.clone();
+            let adopt = adopt.clone();
             let syncing = syncing.clone();
             move |controller| {
                 if syncing.get() {
@@ -516,8 +579,7 @@ fn build_color_picker(
                     return;
                 };
                 if let Some(color) = parse_hex(&entry.text()) {
-                    set(color);
-                    notify();
+                    adopt(color);
                 }
             }
         });
@@ -526,8 +588,8 @@ fn build_color_picker(
 
     // Dragging inside the plane sets saturation (across) and value (down);
     // dragging the bar sets the hue the plane is built from.
-    attach_plane_drag(&field, get.clone(), set.clone(), notify.clone());
-    attach_hue_drag(&spectrum, get.clone(), set.clone(), notify.clone());
+    attach_plane_drag(&field, hsv.clone(), set_hsv.clone());
+    attach_hue_drag(&spectrum, hsv.clone(), set_hsv.clone());
 
     let refresh: Rc<dyn Fn()> = {
         let field = field.clone();
@@ -536,23 +598,29 @@ fn build_color_picker(
         let hex = hex.clone();
         let syncing = syncing.clone();
         let get = get.clone();
+        let hsv = hsv.clone();
+        let synced = synced.clone();
         Rc::new(move || {
             let color = get();
-            // The plane and the bar both draw from the hue of the live color,
-            // so a color that arrived from a project file or the hex entry
-            // still shows the right hue rather than a stale one.
-            let hsv = rgb_to_hsv(color.0, color.1, color.2);
+            // Adopt a color that changed outside this picker — a project load,
+            // the hex entry, another gradient stop. Our own writes are already
+            // the triple we hold, and re-deriving it would discard whichever of
+            // hue and saturation a black or white commit cannot carry back.
+            let (hue, saturation, value) = reconciled_hsv(hsv.get(), synced.get(), color);
+            hsv.set((hue, saturation, value));
+            synced.set(Some(color));
+            let plane_hsv = (hue, saturation, value);
             field.set_draw_func({
-                let hsv = hsv;
+                let plane_hsv = plane_hsv;
                 move |_, cr, width, height| {
-                    draw_plane(cr, width as f64, height as f64, hsv);
+                    draw_plane(cr, width as f64, height as f64, plane_hsv);
                 }
             });
             field.queue_draw();
             spectrum.set_draw_func({
                 let color = color;
                 move |_, cr, width, height| {
-                    draw_spectrum(cr, width as f64, height as f64, color);
+                    draw_spectrum(cr, width as f64, height as f64, hue, color);
                 }
             });
             spectrum.queue_draw();
@@ -593,6 +661,32 @@ fn build_color_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -
 }
 
 /// The saturation/value plane: the current hue across the top, washing to
+/// Saturation and value at a point inside the plane's drawn box.
+///
+/// Saturation runs *backwards* along x, because that is the way the plane is
+/// painted: the pure hue fills the left edge and the white overlay grows toward
+/// the right, so the right edge is saturation 0. Reading it as if saturation
+/// grew to the right is what made a drag commit the mirror of the color under
+/// the cursor — the top-right corner, painted white, committed a fully
+/// saturated color. Value runs top to bottom, full value at the top.
+fn plane_sv_at(x: f64, y: f64, width: f64, height: f64) -> (f64, f64) {
+    (
+        (1.0 - x / width.max(1.0)).clamp(0.0, 1.0),
+        (1.0 - y / height.max(1.0)).clamp(0.0, 1.0),
+    )
+}
+
+/// Where the plane draws its handle for a saturation and value.
+///
+/// The exact inverse of `plane_sv_at`, so the dot stays under the cursor that
+/// put it there instead of drifting to the mirrored side.
+fn plane_handle(saturation: f64, value: f64, width: f64, height: f64) -> (f64, f64) {
+    (
+        (1.0 - saturation.clamp(0.0, 1.0)) * width,
+        (1.0 - value.clamp(0.0, 1.0)) * height,
+    )
+}
+
 /// white on the right and blackening downward, with a handle on the live
 /// color. This is what makes the field a picker rather than a swatch — the
 /// reference's red-to-dark wash is this plane, not a flat fill.
@@ -631,8 +725,7 @@ fn draw_plane(cr: &gtk4::cairo::Context, w: f64, h: f64, hsv: (f64, f64, f64)) {
     let _ = cr.restore();
 
     // The handle, ringed so it reads against any part of the plane.
-    let cx = saturation.clamp(0.0, 1.0) * w;
-    let cy = (1.0 - value.clamp(0.0, 1.0)) * h;
+    let (cx, cy) = plane_handle(saturation, value, w, h);
     let r = 7.0;
     cr.set_source_rgb(1.0, 1.0, 1.0);
     cr.arc(cx, cy, r, 0.0, std::f64::consts::TAU);
@@ -662,7 +755,11 @@ fn spectrum_handle_x(hue: f64, w: f64, r: f64) -> f64 {
 /// The rainbow hue bar with a round handle on the current color, matching the
 /// reference picker row. The bar is a full-saturation sweep, so dragging the
 /// handle sets the field to the pure color under it.
-fn draw_spectrum(cr: &gtk4::cairo::Context, w: f64, h: f64, color: (u8, u8, u8)) {
+///
+/// `hue` is passed in rather than recovered from `color`: a white or black
+/// color has no hue to recover, and reading one back would park the handle on
+/// red while the picker was really holding, say, green.
+fn draw_spectrum(cr: &gtk4::cairo::Context, w: f64, h: f64, hue: f64, color: (u8, u8, u8)) {
     if w < 2.0 || h < 2.0 {
         return;
     }
@@ -684,7 +781,6 @@ fn draw_spectrum(cr: &gtk4::cairo::Context, w: f64, h: f64, color: (u8, u8, u8))
 
     // The handle, ringed in white so it reads against any hue. It keeps its
     // grabbable size and straddles the slim rail rather than shrinking into it.
-    let hue = rgb_to_hue(color.0, color.1, color.2);
     let r = HANDLE_RADIUS;
     let cx = spectrum_handle_x(hue, w, r);
     let cy = h / 2.0;
@@ -741,49 +837,44 @@ fn drawn_size(widget: &Widget) -> (f64, f64) {
     (widget.width().max(1) as f64, widget.height().max(1) as f64)
 }
 
-/// The color a hue drag commits for `hue`: the current color's saturation and
-/// value, rescued when they are degenerate.
+/// The saturation and value a hue drag keeps: the picker's own, rescued when
+/// they are degenerate.
 ///
 /// From gray, white, or black (saturation ~0) every hue is the same shade, so
 /// keeping saturation would make the rainbow bar a visible no-op until the
 /// plane is touched first. Snap saturation to full in that case — and value
 /// too when it is so dark no hue could read anyway.
-fn hue_adjusted_color(current: (u8, u8, u8), hue: f64) -> (u8, u8, u8) {
-    let (_, s, v) = rgb_to_hsv(current.0, current.1, current.2);
-    let (s, v) = if s < 0.02 {
-        (1.0, if v < 0.2 { 1.0 } else { v })
+fn hue_adjusted_sv(saturation: f64, value: f64) -> (f64, f64) {
+    if saturation < 0.02 {
+        (1.0, if value < 0.2 { 1.0 } else { value })
     } else {
-        (s, v)
-    };
-    hsv_to_rgb(hue, s, v)
+        (saturation, value)
+    }
 }
 
 fn attach_hue_drag(
     spectrum: &DrawingArea,
-    get: Rc<dyn Fn() -> (u8, u8, u8)>,
-    set: Rc<dyn Fn((u8, u8, u8))>,
-    notify: Rc<dyn Fn()>,
+    hsv: Rc<Cell<(f64, f64, f64)>>,
+    set_hsv: Rc<dyn Fn(f64, f64, f64)>,
 ) {
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
-        let get = get.clone();
-        let set = set.clone();
-        let notify = notify.clone();
+        let hsv = hsv.clone();
+        let set_hsv = set_hsv.clone();
         move |gesture, x, _| {
-            apply_hue(&gesture, x, &get, &set, &notify);
+            apply_hue(&gesture, x, &hsv, &set_hsv);
         }
     });
     drag.connect_drag_update({
-        let get = get.clone();
-        let set = set.clone();
-        let notify = notify.clone();
+        let hsv = hsv.clone();
+        let set_hsv = set_hsv.clone();
         move |gesture, offset_x, _| {
             let Some(start) = gesture.start_point() else {
                 return;
             };
             let (x, _) = resolve_drag_position(start, (offset_x, 0.0));
-            apply_hue(&gesture, x, &get, &set, &notify);
+            apply_hue(&gesture, x, &hsv, &set_hsv);
         }
     });
     spectrum.add_controller(drag);
@@ -792,47 +883,44 @@ fn attach_hue_drag(
 fn apply_hue(
     gesture: &GestureDrag,
     x: f64,
-    get: &Rc<dyn Fn() -> (u8, u8, u8)>,
-    set: &Rc<dyn Fn((u8, u8, u8))>,
-    notify: &Rc<dyn Fn()>,
+    hsv: &Rc<Cell<(f64, f64, f64)>>,
+    set_hsv: &Rc<dyn Fn(f64, f64, f64)>,
 ) {
     let Some(widget) = gesture.widget() else {
         return;
     };
     let (width, _) = drawn_size(&widget);
-    let hue = (x / width).clamp(0.0, 1.0);
-    set(hue_adjusted_color(get(), hue));
-    notify();
+    let hue = (x / width.max(1.0)).clamp(0.0, 1.0);
+    let (_, saturation, value) = hsv.get();
+    let (saturation, value) = hue_adjusted_sv(saturation, value);
+    set_hsv(hue, saturation, value);
 }
 
 /// Drag inside the plane: horizontal sets saturation, vertical sets value,
-/// both against the hue the bar currently holds.
+/// both against the hue the picker currently holds.
 fn attach_plane_drag(
     field: &DrawingArea,
-    get: Rc<dyn Fn() -> (u8, u8, u8)>,
-    set: Rc<dyn Fn((u8, u8, u8))>,
-    notify: Rc<dyn Fn()>,
+    hsv: Rc<Cell<(f64, f64, f64)>>,
+    set_hsv: Rc<dyn Fn(f64, f64, f64)>,
 ) {
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
-        let get = get.clone();
-        let set = set.clone();
-        let notify = notify.clone();
+        let hsv = hsv.clone();
+        let set_hsv = set_hsv.clone();
         move |gesture, x, y| {
-            apply_plane(&gesture, x, y, &get, &set, &notify);
+            apply_plane(&gesture, x, y, &hsv, &set_hsv);
         }
     });
     drag.connect_drag_update({
-        let get = get.clone();
-        let set = set.clone();
-        let notify = notify.clone();
+        let hsv = hsv.clone();
+        let set_hsv = set_hsv.clone();
         move |gesture, offset_x, offset_y| {
             let Some(start) = gesture.start_point() else {
                 return;
             };
             let (x, y) = resolve_drag_position(start, (offset_x, offset_y));
-            apply_plane(&gesture, x, y, &get, &set, &notify);
+            apply_plane(&gesture, x, y, &hsv, &set_hsv);
         }
     });
     field.add_controller(drag);
@@ -842,23 +930,20 @@ fn apply_plane(
     gesture: &GestureDrag,
     x: f64,
     y: f64,
-    get: &Rc<dyn Fn() -> (u8, u8, u8)>,
-    set: &Rc<dyn Fn((u8, u8, u8))>,
-    notify: &Rc<dyn Fn()>,
+    hsv: &Rc<Cell<(f64, f64, f64)>>,
+    set_hsv: &Rc<dyn Fn(f64, f64, f64)>,
 ) {
     let Some(widget) = gesture.widget() else {
         return;
     };
     let (width, height) = drawn_size(&widget);
-    let saturation = (x / width).clamp(0.0, 1.0);
-    // The plane darkens downward, so the top is full value.
-    let value = (1.0 - y / height).clamp(0.0, 1.0);
-    let hue = {
-        let color = get();
-        rgb_to_hue(color.0, color.1, color.2)
-    };
-    set(hsv_to_rgb(hue, saturation, value));
-    notify();
+    let (saturation, value) = plane_sv_at(x, y, width, height);
+    // The hue rides along from the picker's own triple rather than from the
+    // committed RGB: black has no hue to recover, so deriving it here reset the
+    // plane to red — and the handle to a corner — the moment a drag reached the
+    // bottom edge.
+    let (hue, _, _) = hsv.get();
+    set_hsv(hue, saturation, value);
 }
 
 // ── Gradient page ──
@@ -2050,13 +2135,156 @@ mod tests {
         // black — every hue is the same shade there, which is why the bar only
         // worked after the plane was touched first. From those it must snap to
         // the vivid hue instead.
-        assert_eq!(hue_adjusted_color((255, 255, 255), 0.0), (255, 0, 0));
-        assert_eq!(hue_adjusted_color((128, 128, 128), 1.0 / 3.0), (0, 128, 0));
+        let from = |color: (u8, u8, u8), hue: f64| {
+            let (_, saturation, value) = rgb_to_hsv(color.0, color.1, color.2);
+            let (saturation, value) = hue_adjusted_sv(saturation, value);
+            hsv_to_rgb(hue, saturation, value)
+        };
+        assert_eq!(from((255, 255, 255), 0.0), (255, 0, 0));
+        assert_eq!(from((128, 128, 128), 1.0 / 3.0), (0, 128, 0));
         // Near-black also recovers value, or no hue could read anyway.
-        assert_eq!(hue_adjusted_color((17, 17, 17), 2.0 / 3.0), (0, 0, 255));
+        assert_eq!(from((17, 17, 17), 2.0 / 3.0), (0, 0, 255));
         // A real color keeps its own saturation and value — only hue moves.
-        let kept = hue_adjusted_color((255, 128, 128), 1.0 / 3.0);
-        assert_eq!(kept, (128, 255, 128));
+        assert_eq!(from((255, 128, 128), 1.0 / 3.0), (128, 255, 128));
+    }
+
+    #[test]
+    fn the_plane_maps_the_pointer_to_the_color_under_it() {
+        // The reported bug: the plane paints the pure hue down its left edge and
+        // washes it to white on the right, but the drag mapping read saturation
+        // as if it grew to the right. The color committed was the mirror of the
+        // one under the cursor — the top-right corner, painted white, committed
+        // a fully saturated color.
+        let (w, h) = (400.0, 200.0);
+        assert_eq!(plane_sv_at(w, 0.0, w, h), (0.0, 1.0), "top right is white");
+        assert_eq!(
+            plane_sv_at(0.0, 0.0, w, h),
+            (1.0, 1.0),
+            "top left is the hue"
+        );
+        assert_eq!(
+            plane_sv_at(0.0, h, w, h),
+            (1.0, 0.0),
+            "bottom left is black"
+        );
+        // A point outside the box clamps instead of picking past the ends.
+        assert_eq!(plane_sv_at(w + 50.0, -50.0, w, h), (0.0, 1.0));
+        // The handle is the exact inverse, or the dot drifts away from the
+        // cursor that placed it.
+        for (saturation, value) in [(0.0, 1.0), (1.0, 1.0), (0.25, 0.5), (0.5, 0.75), (1.0, 0.0)] {
+            let (x, y) = plane_handle(saturation, value, w, h);
+            let (read_s, read_v) = plane_sv_at(x, y, w, h);
+            assert!(
+                (read_s - saturation).abs() < 1e-9 && (read_v - value).abs() < 1e-9,
+                "({saturation}, {value}) drew at ({x}, {y}) and read back as ({read_s}, {read_v})"
+            );
+        }
+        // Both halves have to go through these helpers, or one can be corrected
+        // without the other and the mirror comes back.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let production = &source[..source.find("\n#[cfg(test)]").expect("tests module")];
+        let body = |name: &str| {
+            let start = production
+                .find(name)
+                .unwrap_or_else(|| panic!("{name} exists"));
+            let end = production[start..]
+                .find("\nfn ")
+                .map(|at| start + at)
+                .unwrap_or(production.len());
+            &production[start..end]
+        };
+        assert!(
+            body("fn apply_plane(").contains("plane_sv_at(x, y, width, height)"),
+            "the plane drag must map the pointer through plane_sv_at"
+        );
+        assert!(
+            body("fn draw_plane(").contains("plane_handle(saturation, value, w, h)"),
+            "the plane must draw its handle through plane_handle"
+        );
+        // Neither the drag nor the bar may re-derive a hue from RGB: white and
+        // black have none, so doing that parks the handle on red.
+        for name in ["fn apply_plane(", "fn draw_spectrum("] {
+            assert!(
+                !body(name).contains("rgb_to_hue"),
+                "{name} must take the hue the picker holds, not recover one from RGB"
+            );
+        }
+    }
+
+    #[test]
+    fn the_plane_paints_the_color_the_pointer_would_pick() {
+        // The paint and the mapping are two halves of one contract: the pixel
+        // under the handle has to be the color a drag there commits. Rendering
+        // the plane offscreen holds the two halves against each other instead of
+        // against the gradient code's own arithmetic — and it pins the
+        // orientation the reference shows, with the hue at the left edge and
+        // white at the right, not the mirror of it.
+        let (w, h) = (120.0, 90.0);
+        let hue = 0.0;
+        let mut surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::Rgb24, 120, 90)
+            .expect("plane surface");
+        let cr = gtk4::cairo::Context::new(&surface).expect("cairo context");
+        // A mid saturation and value parks the handle in the middle, well clear
+        // of the pixels sampled below.
+        draw_plane(&cr, w, h, (hue, 0.5, 0.5));
+        drop(cr);
+        surface.flush();
+
+        let stride = surface.stride() as usize;
+        let data = surface.data().expect("plane pixels");
+        for (x, y) in [(10.0, 10.0), (110.0, 10.0), (60.0, 80.0), (30.0, 45.0)] {
+            let (saturation, value) = plane_sv_at(x, y, w, h);
+            let expected = hsv_to_rgb(hue, saturation, value);
+            // Cairo's Rgb24 is B, G, R, padding on the little-endian hosts we
+            // ship, matching `bitmap_to_surface`.
+            let at = y as usize * stride + x as usize * 4;
+            let painted = (data[at + 2], data[at + 1], data[at]);
+            for (channel, painted, expected) in [
+                ("r", painted.0, expected.0),
+                ("g", painted.1, expected.1),
+                ("b", painted.2, expected.2),
+            ] {
+                assert!(
+                    (painted as i32 - expected as i32).abs() <= 6,
+                    "at ({x}, {y}) the plane paints {channel}={painted}, but a drag \
+                     there picks {channel}={expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_drag_to_black_keeps_its_hue_and_saturation() {
+        // The second reported bug: dragging the handle to the plane's bottom
+        // edge commits black, and black carries no hue or saturation. Deriving
+        // the triple back from it collapsed the handle into the bottom-left
+        // corner and reset the plane to red at speed. The picker's own triple
+        // has to survive its own writes.
+        let green = 1.0 / 3.0;
+        let held = (green, 0.8, 0.0);
+        let black = hsv_to_rgb(green, 0.8, 0.0);
+        assert_eq!(black, (0, 0, 0), "the bottom edge is black");
+        assert_eq!(
+            reconciled_hsv(held, Some(black), black),
+            held,
+            "the triple must survive a commit that cannot carry it"
+        );
+        // White loses only the hue, and the saturation the plane was holding
+        // still has to stay off the corner.
+        let held = (green, 0.0, 1.0);
+        let white = hsv_to_rgb(green, 0.0, 1.0);
+        assert_eq!(reconciled_hsv(held, Some(white), white), held);
+        // A color this picker did not write — a project file, the hex entry,
+        // another stop — is adopted as itself.
+        assert_eq!(
+            reconciled_hsv(held, Some(black), (0x00, 0x90, 0xFF)),
+            rgb_to_hsv(0x00, 0x90, 0xFF)
+        );
+        // Before the first write there is nothing of ours to keep.
+        assert_eq!(
+            reconciled_hsv((0.0, 0.0, 0.0), None, (0xFF, 0xFF, 0xFF)),
+            (0.0, 0.0, 1.0)
+        );
     }
 
     #[test]
@@ -2287,7 +2515,7 @@ mod tests {
     #[test]
     fn the_plane_covers_saturation_and_value() {
         // The plane is what makes the big field a picker rather than a flat
-        // swatch: saturation runs left to right and value top to bottom, both
+        // swatch: saturation runs right to left and value top to bottom, both
         // against the hue the bar holds. The reference's red-to-dark wash is
         // exactly this.
         let hue = 0.0;

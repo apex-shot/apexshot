@@ -1115,7 +1115,7 @@ mod tests {
         // The plane's handle has to be drawn, or it is a gradient with no
         // indication of where the live color sits on it.
         assert!(
-            source.contains("let cx = saturation.clamp(0.0, 1.0) * w;"),
+            source.contains("let (cx, cy) = plane_handle(saturation, value, w, h);"),
             "the plane must draw a handle at the live color's position"
         );
         // A flat fill of the current color is what produced the black box.
