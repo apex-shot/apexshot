@@ -12,6 +12,9 @@
 use std::path::PathBuf;
 
 use crate::capture::editor::window::icon_names;
+use crate::recording::editor::model::background_render::render_gradient;
+use crate::recording::editor::model::VideoGradient;
+use crate::recording::editor::window::custom_wallpaper_popover::bitmap_to_surface;
 
 fn video_wallpaper_files() -> Vec<&'static str> {
     crate::capture::editor::window::background_panel::MOTION_WALLPAPER_FILES
@@ -48,6 +51,15 @@ enum BgPage {
     Wallpaper,
     Custom,
     Image,
+}
+
+/// What the Custom row's chip is previewing. The fill decides: a flat color is
+/// drawn as itself, a gradient is rasterized so its ramp shows, and an unset
+/// fill leaves the chip empty.
+enum FillPreview {
+    Empty,
+    Color((u8, u8, u8)),
+    Gradient(VideoGradient),
 }
 
 fn build_background_panel(
@@ -406,29 +418,33 @@ fn build_background_panel(
             // the name says what kind of fill it is.
             {
                 let (preview, kind) = match &background {
-                    VideoBackground::Plain { r, g, b } => (Some((*r, *g, *b)), t("Color")),
+                    VideoBackground::Plain { r, g, b } => {
+                        (FillPreview::Color((*r, *g, *b)), t("Color"))
+                    }
                     VideoBackground::Gradient(gradient) => {
-                        let stops = gradient.draw_stops();
-                        // Average the ends so a multi-stop ramp reads as a
-                        // representative color at 28px.
-                        let color = stops.first().zip(stops.last()).map(|(a, b)| {
-                            (
-                                ((a.r as u32 + b.r as u32) / 2) as u8,
-                                ((a.g as u32 + b.g as u32) / 2) as u8,
-                                ((a.b as u32 + b.b as u32) / 2) as u8,
-                            )
-                        });
-                        (color, t("Gradient"))
+                        (FillPreview::Gradient(gradient.clone()), t("Gradient"))
                     }
                     // No custom fill chosen yet. The name stays "Color" because
                     // that is what Edit opens today; the empty swatch is the
                     // signal that nothing is set.
-                    _ => (None, t("Color")),
+                    _ => (FillPreview::Empty, t("Color")),
                 };
                 custom_label.set_text(&kind);
                 custom_swatch.set_draw_func(move |_, cr, width, height| {
-                    if let Some((r, g, b)) = preview {
-                        draw_color_chip(cr, width as f64, height as f64, (r, g, b), 7.0);
+                    let (width, height) = (width as f64, height as f64);
+                    match &preview {
+                        FillPreview::Color(color) => {
+                            draw_color_chip(cr, width, height, *color, 7.0);
+                        }
+                        // A gradient has to show its ramp: the chip used to
+                        // draw the average of the end stops, which flattened
+                        // every gradient to a color neither the preview nor the
+                        // export ever draws. Rasterizing through the shared
+                        // renderer keeps the chip identical to both.
+                        FillPreview::Gradient(gradient) => {
+                            draw_gradient_chip(cr, width, height, gradient, 7.0);
+                        }
+                        FillPreview::Empty => {}
                     }
                 });
                 custom_swatch.queue_draw();
@@ -489,6 +505,47 @@ fn wallpaper_file_name_from_background(background: &VideoBackground) -> Option<S
         VideoBackground::Wallpaper(path) => wallpaper_file_name(path),
         _ => None,
     }
+}
+
+/// Paint a real gradient into the Custom row's chip.
+///
+/// The raster comes from the same renderer the live preview and the exported
+/// still use, so stop positions, kind, angle, reversal and alpha all agree with
+/// what the user set — a Cairo gradient here would be a second description of
+/// the same fill and could drift. Half resolution is finer than a 28px chip can
+/// show and keeps a redraw on every drag step cheap, matching the stop bar in
+/// the Custom Wallpaper popover.
+fn draw_gradient_chip(
+    cr: &gtk4::cairo::Context,
+    width: f64,
+    height: f64,
+    gradient: &VideoGradient,
+    radius: f64,
+) {
+    // The chip's frame is inset by the hairline below, exactly as the flat
+    // color chip's is, so both fills sit in the same box.
+    let w = (width - 1.0).max(1.0);
+    let h = (height - 1.0).max(1.0);
+    let bitmap = render_gradient(
+        gradient,
+        ((w * 0.5).round() as u32).max(1),
+        ((h * 0.5).round() as u32).max(1),
+    );
+    let surface = bitmap_to_surface(&bitmap);
+    let _ = cr.save();
+    fill_slider_rounded_rect(cr, 0.5, 0.5, w, h, radius);
+    cr.clip();
+    cr.translate(0.5, 0.5);
+    // Scale the half-resolution raster back up over the chip's box.
+    cr.scale(w / bitmap.width as f64, h / bitmap.height as f64);
+    let _ = cr.set_source_surface(&surface, 0.0, 0.0);
+    let _ = cr.paint();
+    let _ = cr.restore();
+
+    fill_slider_rounded_rect(cr, 0.5, 0.5, w, h, radius);
+    cr.set_source_rgba(0.0, 0.0, 0.0, 0.28);
+    cr.set_line_width(1.0);
+    let _ = cr.stroke();
 }
 
 /// A labelled slider row. The filled slider draws its own name and value,

@@ -907,6 +907,91 @@ mod tests {
     }
 
     #[test]
+    fn the_fill_chip_shows_a_gradient_rather_than_a_flat_average() {
+        // The chip averaged a gradient's end stops, so every gradient previewed
+        // as one flat color that neither the live preview nor the exported still
+        // ever draws. It has to rasterize through the same renderer those two
+        // use, or the row becomes a third opinion about the fill.
+        let panel = include_str!("tool_sidebar_background.rs");
+        assert!(
+            panel.contains("FillPreview::Gradient(gradient.clone())"),
+            "the Custom row's chip must be told when the fill is a gradient"
+        );
+        assert!(
+            !panel.contains("stops.first().zip(stops.last())"),
+            "the chip must not flatten a gradient to the average of its ends"
+        );
+        assert!(
+            panel.contains("draw_color_chip(cr, width, height, *color, 7.0);"),
+            "a flat fill must still draw its exact color"
+        );
+        let start = panel
+            .find("fn draw_gradient_chip(")
+            .expect("the chip needs a gradient draw function");
+        let end = panel[start..]
+            .find("\nfn ")
+            .map(|at| start + at)
+            .unwrap_or(panel.len());
+        let body = &panel[start..end];
+        assert!(
+            body.contains("render_gradient("),
+            "the chip must rasterize through the shared gradient renderer"
+        );
+        assert!(
+            !body.contains("LinearGradient") && !body.contains("RadialGradient"),
+            "a Cairo gradient here would be a second description of the fill and could drift"
+        );
+        assert!(
+            body.contains("fill_slider_rounded_rect("),
+            "the chip must keep the flat color chip's rounded frame"
+        );
+    }
+
+    #[test]
+    fn the_fill_chip_paints_a_gradient_ramp() {
+        // The behavioral half of the test above: a chip handed a red-to-blue
+        // gradient must paint both stops at their own ends. Averaging them —
+        // what the chip used to do — filled every pixel with one mid purple.
+        // Cairo needs no display, so the real draw function renders offscreen.
+        use crate::recording::editor::model::{GradientKind, GradientStop, VideoGradient};
+
+        let gradient = VideoGradient {
+            kind: GradientKind::Linear,
+            stops: vec![
+                GradientStop::new(0.0, 0xFF, 0x00, 0x00),
+                GradientStop::new(1.0, 0x00, 0x00, 0xFF),
+            ],
+            angle_degrees: 0.0,
+            reversed: false,
+        };
+        let mut surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::Rgb24, 28, 28)
+            .expect("chip surface");
+        let cr = gtk4::cairo::Context::new(&surface).expect("cairo context");
+        super::draw_gradient_chip(&cr, 28.0, 28.0, &gradient, 7.0);
+        drop(cr);
+        surface.flush();
+
+        let stride = surface.stride() as usize;
+        let data = surface.data().expect("chip pixels");
+        // Cairo's Rgb24 is B, G, R, padding in memory on the little-endian
+        // hosts we ship, as `bitmap_to_surface` lays it out.
+        let rgb = |x: usize, y: usize| {
+            let at = y * stride + x * 4;
+            (data[at + 2], data[at + 1], data[at])
+        };
+        let (left_r, _, left_b) = rgb(2, 14);
+        let (right_r, _, right_b) = rgb(25, 14);
+        assert!(
+            left_r > 200 && left_b < 60,
+            "the start stop must paint at the left edge, got r={left_r} b={left_b}"
+        );
+        assert!(
+            right_r < 60 && right_b > 200,
+            "the end stop must paint at the right edge, got r={right_r} b={right_b}"
+        );
+    }
+
+    #[test]
     fn the_custom_wallpaper_picker_draws_its_own_surface() {
         // The app ships no libadwaita, so an unstyled popover falls through to
         // the host desktop's GTK theme and the card stops matching the editor.

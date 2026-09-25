@@ -1506,7 +1506,11 @@ fn find_stop_at(state: &Arc<Mutex<VideoEditState>>, position: f64) -> usize {
         .unwrap_or(0)
 }
 
-fn bitmap_to_surface(
+/// Blit a rendered gradient into a Cairo surface.
+///
+/// Shared with the Background panel's fill chip, which previews the same fill
+/// and so has to convert the rasterizer's RGB exactly the same way.
+pub(super) fn bitmap_to_surface(
     bitmap: &crate::recording::editor::model::background_render::GradientBitmap,
 ) -> gtk4::cairo::ImageSurface {
     let width = bitmap.width;
