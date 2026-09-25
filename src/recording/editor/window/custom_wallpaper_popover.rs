@@ -677,6 +677,19 @@ fn resolve_drag_position(start: (f64, f64), offset: (f64, f64)) -> (f64, f64) {
     (start.0 + offset.0, start.1 + offset.1)
 }
 
+/// A widget's drawn size, in the same space as a `GestureDrag`'s x/y and the
+/// draw function's width/height.
+///
+/// GTK's `allocated_width()`/`allocated_height()` are the *margin* box, not the
+/// drawn box: the bars here carry 10-12px CSS margins, so the allocation is up
+/// to 24px wider than what is painted. Hit-testing against it searches right of
+/// the handle — the right-hand gradient pin could only be grabbed by its right
+/// edge — and drag mapping lands the handle off the cursor. Always measure with
+/// this instead.
+fn drawn_size(widget: &Widget) -> (f64, f64) {
+    (widget.width().max(1) as f64, widget.height().max(1) as f64)
+}
+
 /// The color a hue drag commits for `hue`: the current color's saturation and
 /// value, rescued when they are degenerate.
 ///
@@ -731,7 +744,7 @@ fn apply_hue(
     let Some(widget) = gesture.widget() else {
         return;
     };
-    let width = widget.allocated_width().max(1) as f64;
+    let (width, _) = drawn_size(&widget);
     let hue = (x / width).clamp(0.0, 1.0);
     set_flat_color(state, hue_adjusted_color(current_flat_color(state), hue));
     notify();
@@ -773,8 +786,7 @@ fn apply_plane(
     let Some(widget) = gesture.widget() else {
         return;
     };
-    let width = widget.allocated_width().max(1) as f64;
-    let height = widget.allocated_height().max(1) as f64;
+    let (width, height) = drawn_size(&widget);
     let saturation = (x / width).clamp(0.0, 1.0);
     // The plane darkens downward, so the top is full value.
     let value = (1.0 - y / height).clamp(0.0, 1.0);
@@ -1674,7 +1686,7 @@ fn attach_stop_drag(
             let Some(widget) = gesture.widget() else {
                 return;
             };
-            let width = widget.allocated_width().max(1) as f64;
+            let (width, _) = drawn_size(&widget);
             let gradient = current_gradient(&state);
 
             // Distance is measured along the bar only: the handle sits on the
@@ -1731,7 +1743,7 @@ fn attach_stop_drag(
             let Some((start, _)) = gesture.start_point() else {
                 return;
             };
-            let width = widget.allocated_width().max(1) as f64;
+            let (width, _) = drawn_size(&widget);
             // The handle centre keeps the press's offset from the cursor, and
             // the position comes from the inverse of the handle placement, so
             // the drag tracks what was drawn.
@@ -1930,6 +1942,27 @@ mod tests {
         // the ramp still picks up the stop sitting there.
         assert!(gradient_pin_x(0.0, w) - GRADIENT_GRAB_RADIUS <= 0.0);
         assert!(gradient_pin_x(1.0, w) + GRADIENT_GRAB_RADIUS >= w);
+    }
+
+    #[test]
+    fn drag_hit_tests_measure_the_drawn_box_not_the_margin_box() {
+        // The bars carry 10-12px CSS margins. GTK's `allocated_width()` returns
+        // the margin box (+20-24px), while the draw function and a gesture's
+        // x/y use the drawn box, so the right pin was hit-tested 24px right of
+        // where it was painted and only its right edge could be grabbed. Every
+        // drag must go through `drawn_size`.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let production = &source[..source.find("\n#[cfg(test)]").expect("tests module")];
+        let drags = &production[production.find("fn apply_hue").expect("hue drag")..];
+        assert!(
+            !drags.contains("allocated_width") && !drags.contains("allocated_height"),
+            "allocated_* is the margin box; measure the drawn box"
+        );
+        assert_eq!(
+            drags.matches("drawn_size(&widget)").count(),
+            4,
+            "hue, plane, and both stop-drag sites must measure through drawn_size"
+        );
     }
 
     #[test]
