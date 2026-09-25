@@ -23,7 +23,7 @@ pub fn build_timeline(
 
     // Create buttons and modes first
     let cut_button = icon_tool_button(
-        "edit-cut-symbolic",
+        icon_names::custom::SQUARE_SPLIT_HORIZONTAL_SYMBOLIC,
         &t("Cut mode — click timeline to place cuts"),
     );
     let cut_mode = Rc::new(Cell::new(false));

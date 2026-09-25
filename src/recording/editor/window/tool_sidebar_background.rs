@@ -325,15 +325,16 @@ fn build_background_panel(
         }
     });
 
-    // Edit opens the Custom Wallpaper popover beside the sidebar rather than
-    // a centered dialog, so the row being edited and the video behind it both
-    // stay visible.
-    let popover = crate::recording::editor::window::custom_wallpaper_popover::build_custom_wallpaper_popover(
+    // Edit opens the Custom Wallpaper popover off the panel's left edge
+    // rather than as a centered dialog, so the row being edited and the video
+    // behind it both stay visible. The popover wires its own click: it needs
+    // the Edit row's bounds to seat the card level with it after a scroll.
+    crate::recording::editor::window::custom_wallpaper_popover::build_custom_wallpaper_popover(
+        &panel,
         &custom_edit,
         state.clone(),
         on_change.clone(),
     );
-    custom_edit.connect_clicked(move |_| popover.popup());
 
     image_row.connect_clicked({
         let state = state.clone();

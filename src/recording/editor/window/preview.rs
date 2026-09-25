@@ -1,14 +1,15 @@
 use super::{crop_dialog, footer};
+use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::model::{
     even_crop_rect, format_timecode, source_to_zoomed_point, view_to_source, zoom_camera_transform,
-    CursorSettings, ExportQuality, VideoBackground, VideoEditState, ZoomClip, ZoomMode,
-    FRAME_ASPECT_RATIOS,
+    CursorSettings, ExportQuality, VideoBackground, VideoEditState, VideoGradient, ZoomClip,
+    ZoomMode, FRAME_ASPECT_RATIOS,
 };
 use crate::recording::editor::sidecar::CursorMotion;
 use gtk4::{
-    glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, CssProvider,
-    DrawingArea, GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture, Popover,
-    Separator,
+    gdk, glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button,
+    CssProvider, DrawingArea, GestureDrag, Image, Label, MediaFile, Orientation, Overlay, Picture,
+    Popover, Separator,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -219,6 +220,7 @@ fn build_preview_inner(
         let last_zoom_css = Rc::new(RefCell::new(String::new()));
         let last_bg_css = Rc::new(RefCell::new(String::new()));
         let last_wallpaper = Rc::new(RefCell::new(String::new()));
+        let last_gradient = Rc::new(RefCell::new(String::new()));
         let last_margins = Rc::new(RefCell::new((i32::MIN, 0, 0, 0)));
         glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
             let playing = media_tick.is_playing();
@@ -289,8 +291,10 @@ fn build_preview_inner(
                 &bg_picture,
                 &last_bg_css,
                 &last_wallpaper,
+                &last_gradient,
                 &background,
                 duration > 0.0,
+                dims,
             );
             cursor_layer.queue_draw();
             glib::ControlFlow::Continue
@@ -898,20 +902,32 @@ fn apply_preview_view(
     }
 }
 
+/// What the preview's image layer is showing. Wallpapers load from disk;
+/// gradients are rasterized through the same renderer the export will use, so
+/// the live preview cannot drift from the final still.
+enum PreviewFill<'a> {
+    Wallpaper(&'a std::path::PathBuf),
+    Gradient(&'a VideoGradient),
+}
+
 fn apply_preview_background(
     provider: &CssProvider,
     picture: &Picture,
     last_css: &RefCell<String>,
     last_wallpaper: &RefCell<String>,
+    last_gradient: &RefCell<String>,
     background: &VideoBackground,
     has_video: bool,
+    dims: (u32, u32),
 ) {
     // Solid fills go through CSS on the stage box; wallpapers use a Cover-fit
     // Picture so bundled JPGs render without a Cairo decode on this path.
+    // Gradients stay under a black backdrop: their dots can carry alpha, so
+    // the CSS layer is what a faded stop composites onto.
     // With no fill the canvas stays black, matching the export's unset-fill
     // scene (and the image editor's black export backdrop); the empty editor
     // keeps a transparent stage so the drop hint sits on the workspace.
-    let (css, wallpaper) = match background {
+    let (css, fill) = match background {
         VideoBackground::None if !has_video => (
             ".recording-editor-preview-bg { background: transparent; }".to_string(),
             None,
@@ -924,35 +940,71 @@ fn apply_preview_background(
             format!(".recording-editor-preview-bg {{ background: rgb({r},{g},{b}); }}"),
             None,
         ),
-        VideoBackground::Gradient(_) => (
-            ".recording-editor-preview-bg { background: linear-gradient(135deg, #2e3857 0%, #6b2f47 100%); }".to_string(),
-            None,
+        VideoBackground::Gradient(gradient) => (
+            ".recording-editor-preview-bg { background: #000000; }".to_string(),
+            Some(PreviewFill::Gradient(gradient)),
         ),
         VideoBackground::Wallpaper(path) => (
             ".recording-editor-preview-bg { background: #111111; }".to_string(),
-            Some(path.to_string_lossy().into_owned()),
+            Some(PreviewFill::Wallpaper(path)),
         ),
     };
     if *last_css.borrow() != css {
         provider.load_from_data(&css);
         last_css.replace(css);
     }
-    match wallpaper {
-        Some(path) if path != *last_wallpaper.borrow() => {
-            if std::path::Path::new(&path).is_file() {
-                picture.set_filename(Some(std::path::Path::new(&path)));
+    match fill {
+        Some(PreviewFill::Wallpaper(path)) => {
+            last_gradient.borrow_mut().clear();
+            let path = path.to_string_lossy().into_owned();
+            if path != *last_wallpaper.borrow() {
+                if std::path::Path::new(&path).is_file() {
+                    picture.set_filename(Some(std::path::Path::new(&path)));
+                }
+                picture.set_visible(std::path::Path::new(&path).is_file());
+                last_wallpaper.replace(path);
+            } else {
+                picture.set_visible(true);
             }
-            picture.set_visible(std::path::Path::new(&path).is_file());
-            last_wallpaper.replace(path);
         }
-        Some(_) => {
+        Some(PreviewFill::Gradient(gradient)) => {
+            last_wallpaper.replace(String::new());
+            let gradient = gradient.normalized();
+            let key = format!("{gradient:?}");
+            if key != *last_gradient.borrow() {
+                let texture = gradient_texture(&gradient, dims);
+                picture.set_filename(None::<&std::path::Path>);
+                picture.set_paintable(Some(&texture));
+                last_gradient.replace(key);
+            }
             picture.set_visible(true);
         }
         None => {
             picture.set_visible(false);
             last_wallpaper.replace(String::new());
+            last_gradient.borrow_mut().clear();
         }
     }
+}
+
+/// Rasterize a gradient for the preview's image layer.
+///
+/// The texture is deliberately small — the canvas aspect at ~480px wide — and
+/// scaled up by the Cover-fit picture; a drag repaints it every frame, so
+/// rendering at canvas resolution would buy nothing.
+fn gradient_texture(gradient: &VideoGradient, dims: (u32, u32)) -> gdk::MemoryTexture {
+    let width = 480u32;
+    let aspect = dims.1 as f64 / dims.0.max(1) as f64;
+    let height = ((width as f64 * aspect).round() as u32).clamp(1, 960);
+    let bitmap = render_gradient(gradient, width, height);
+    let bytes = glib::Bytes::from_owned(bitmap.pixels);
+    gdk::MemoryTexture::new(
+        width as i32,
+        height as i32,
+        gdk::MemoryFormat::R8g8b8,
+        &bytes,
+        (width * 3) as usize,
+    )
 }
 
 fn draw_preview_overlays(
@@ -1119,6 +1171,10 @@ mod tests {
         assert!(
             source.contains("VideoBackground::Wallpaper"),
             "preview must handle wallpaper backgrounds"
+        );
+        assert!(
+            source.contains("fn gradient_texture") && source.contains("render_gradient(gradient"),
+            "a custom gradient must preview through the shared renderer, not a stand-in"
         );
     }
 

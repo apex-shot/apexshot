@@ -2095,6 +2095,7 @@ fn a_freeze_forces_reencode_because_stream_copy_cannot_hold_a_frame() {
 fn gradient_normalizes_stops_into_a_usable_shape() {
     // Unsorted, out-of-range, and over the stop ceiling all at once.
     let gradient = VideoGradient {
+        kind: GradientKind::Linear,
         stops: (0..12)
             .rev()
             .map(|i| GradientStop::new(i as f64 / 4.0, i as u8, 0, 255 - i as u8))
@@ -2125,6 +2126,7 @@ fn gradient_pads_a_single_stop_up_to_the_minimum() {
 #[test]
 fn reversing_a_gradient_flips_draw_order_only() {
     let gradient = VideoGradient {
+        kind: GradientKind::Linear,
         stops: vec![
             GradientStop::new(0.0, 255, 0, 0),
             GradientStop::new(1.0, 0, 0, 255),

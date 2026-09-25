@@ -1,9 +1,10 @@
 // The Custom Wallpaper popover.
 //
-// Reached from the Edit pill on the Background panel's Custom page. It opens
-// beside the sidebar rather than centered on the window: the controls belong
-// next to the row that summarizes the fill, and a centered dialog would hide
-// both that row and the video being changed.
+// Reached from the Edit pill on the Background panel's Custom page. The card
+// hangs off the panel's left edge, level with the row that summarizes the
+// fill, so it floats over the video stage instead of covering the sidebar it
+// belongs to — a centered dialog would hide both that row and the video
+// being changed.
 //
 // Two sub-tabs. Color is the field / hue bar / hex row from the reference.
 // Gradient is the full multi-stop editor. Both write straight into
@@ -12,26 +13,62 @@
 
 use std::cell::Cell;
 use std::cell::RefCell;
+use std::f64::consts::{FRAC_PI_2, PI};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea, Entry, Grid,
-    GestureClick, GestureDrag, Image, Label, Orientation, Popover, ToggleButton, Widget, Window,
+    prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea, Entry, GestureClick,
+    GestureDrag, Grid, Image, Label, Orientation, Popover, ToggleButton, Widget, Window,
 };
 
 use crate::i18n::t;
-use crate::recording::editor::model::background_render::render_gradient;
+use crate::recording::editor::model::background_render::{render_gradient, sample_color_at};
 use crate::recording::editor::model::{
-    GradientStop, VideoBackground, VideoEditState, VideoGradient, MAX_GRADIENT_STOPS,
-    MIN_GRADIENT_STOPS,
+    GradientKind, GradientStop, VideoBackground, VideoEditState, VideoGradient, MAX_GRADIENT_STOPS,
 };
 
 /// Corner radius shared by the color field, the hue bar, and the hex row, so
 /// the popover reads as one set of stacked surfaces.
 const FIELD_RADIUS: f64 = 8.0;
-/// Radius of a hue-bar handle and a gradient stop handle.
+/// Radius of a hue-bar handle.
 const HANDLE_RADIUS: f64 = 8.0;
+/// Widget height for the hue bar: room for the overlapping thumb plus padding.
+const SPECTRUM_CONTENT_HEIGHT: i32 = 22;
+/// Thickness of the rainbow rail itself, centered in the widget. Deliberately
+/// slimmer than the thumb so the handle straddles the bar.
+const SPECTRUM_BAR_THICKNESS: f64 = 10.0;
+/// Height of the gradient bar widget: the ramp's track with a stop handle
+/// straddling it.
+const GRADIENT_BAR_HEIGHT: i32 = 30;
+/// Side of a stop's square handle.
+const GRADIENT_PIN_SIZE: f64 = 20.0;
+/// Thickness of the ramp's track.
+const GRADIENT_BAR_TRACK: f64 = 14.0;
+/// How far the selected handle's ring reaches past the handle. The handles are
+/// inset by this much so an end stop's ring is never clipped by the bar's
+/// edge.
+const GRADIENT_PIN_RING: f64 = 3.0;
+/// How far from a handle's centre a press still grabs it. Deliberately roomier
+/// than the handle: the stop at either end has the whole ramp beside it, and
+/// that is where a press naturally lands.
+const GRADIENT_GRAB_RADIUS: f64 = 22.0;
+/// Degrees added per press of the gradient's rotate control. Figma's rotate
+/// button turns the gradient a quarter turn at a time.
+const GRADIENT_ROTATE_STEP: f64 = 90.0;
+/// Side of the square the header's glyphs are drawn in. Lucide's artwork is a
+/// 24x24 box, so the stroke is scaled from there and the glyph keeps its
+/// proportions however the button is sized.
+const GRADIENT_ICON_SIZE: i32 = 16;
+/// Side of a stop row's color chip.
+const STEP_CHIP_SIZE: i32 = 26;
+/// Corner radius of a stop row's color chip.
+const STEP_CHIP_RADIUS: f64 = 8.0;
+/// How far left of the panel's edge the card is anchored. Without it the
+/// card's right edge lands on the panel's edge — the gap you see is only the
+/// panel's own padding — which reads as butted up against the controls. The
+/// reference keeps a clear ~23px between the card and the panel's content.
+const POPOVER_SIDEBAR_GAP: i32 = 8;
 
 /// Paints `rounded_rect` and clips to it.
 fn fill_rounded(
@@ -52,16 +89,15 @@ fn fill_rounded(
     let _ = cr.fill();
 }
 
-fn stroke_rounded(
-    cr: &gtk4::cairo::Context,
-    x: f64,
-    y: f64,
-    w: f64,
-    h: f64,
-    r: f64,
-    light: bool,
-) {
-    rounded_rect(cr, x + 0.5, y + 0.5, (w - 1.0).max(1.0), (h - 1.0).max(1.0), r);
+fn stroke_rounded(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r: f64, light: bool) {
+    rounded_rect(
+        cr,
+        x + 0.5,
+        y + 0.5,
+        (w - 1.0).max(1.0),
+        (h - 1.0).max(1.0),
+        r,
+    );
     if light {
         cr.set_source_rgba(0.11, 0.13, 0.16, 0.20);
     } else {
@@ -195,7 +231,8 @@ fn rgb_to_hsv(r: u8, g: u8, b: u8) -> (f64, f64, f64) {
 // ── Popover ──
 
 pub(super) fn build_custom_wallpaper_popover(
-    anchor: &Button,
+    sidebar: &GtkBox,
+    edit: &Button,
     state: Arc<Mutex<VideoEditState>>,
     on_change: Rc<dyn Fn()>,
 ) -> Popover {
@@ -203,10 +240,11 @@ pub(super) fn build_custom_wallpaper_popover(
     popover.add_css_class("recording-editor-custom-popover");
     popover.set_has_arrow(false);
     popover.set_autohide(true);
-    // Opens to the left of the Edit pill, so it floats over the video stage
-    // and never covers the sidebar row it is editing.
+    // The card belongs to the side panel, not to the Edit pill: it opens off
+    // the panel's left edge, so it floats over the video stage instead of
+    // covering the panel and the row it is editing.
     popover.set_position(gtk4::PositionType::Left);
-    popover.set_parent(anchor);
+    popover.set_parent(sidebar);
 
     // A single "tell everyone to redraw" hook. Mutations call `notify`, which
     // pings the editor and then repaints both popover pages, so the Color tab
@@ -290,6 +328,10 @@ pub(super) fn build_custom_wallpaper_popover(
             gradient_tab.set_active(is_gradient);
         })
     };
+    // Both pages are appended visible, so sync them to the active tab before
+    // the handlers exist. Without this the popover opens showing the Color and
+    // Gradient editors stacked until the user clicks a tab.
+    set_page(false);
     color_tab.connect_toggled({
         let set_page = set_page.clone();
         move |b| {
@@ -321,6 +363,30 @@ pub(super) fn build_custom_wallpaper_popover(
         move |_| refresh()
     });
 
+    // The Edit pill only sets the card's vertical seat: point at the panel's
+    // left edge at that row's height. Pointing at the row itself would park
+    // the card back over the panel. Bounds are read on every open so the card
+    // still tracks the row when the panel has scrolled.
+    edit.connect_clicked({
+        let popover = popover.clone();
+        let sidebar = sidebar.clone();
+        let edit = edit.clone();
+        move |_| {
+            if let Some(bounds) = edit.compute_bounds(&sidebar) {
+                // Anchor `POPOVER_SIDEBAR_GAP` left of the panel's edge so the
+                // card opens with the reference's breathing room instead of
+                // butting against the panel's controls.
+                popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+                    -POPOVER_SIDEBAR_GAP,
+                    bounds.y() as i32,
+                    1,
+                    bounds.height() as i32,
+                )));
+            }
+            popover.popup();
+        }
+    });
+
     popover.set_child(Some(&root));
     popover
 }
@@ -333,10 +399,7 @@ struct ColorPage {
     repaint: Rc<dyn Fn()>,
 }
 
-fn build_color_page(
-    state: &Arc<Mutex<VideoEditState>>,
-    notify: &Rc<dyn Fn()>,
-) -> ColorPage {
+fn build_color_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -> ColorPage {
     let widget = GtkBox::new(Orientation::Vertical, 0);
     widget.set_hexpand(true);
 
@@ -353,9 +416,11 @@ fn build_color_page(
     widget.append(&field);
 
     // The rainbow hue bar with a round handle, matching the reference row.
+    // The rail is slim but the widget stays thumb-tall, so the handle keeps
+    // its size and straddles the bar rather than shrinking into it.
     let spectrum = DrawingArea::new();
     spectrum.add_css_class("recording-editor-custom-spectrum");
-    spectrum.set_content_height(26);
+    spectrum.set_content_height(SPECTRUM_CONTENT_HEIGHT);
     widget.append(&spectrum);
 
     // Swatch + hex + "rgb", on one rounded bar.
@@ -470,19 +535,17 @@ fn build_color_page(
         }) as Rc<dyn Fn()>
     };
 
-    ColorPage { widget, repaint: refresh }
+    ColorPage {
+        widget,
+        repaint: refresh,
+    }
 }
 
 /// The saturation/value plane: the current hue across the top, washing to
 /// white on the right and blackening downward, with a handle on the live
 /// color. This is what makes the field a picker rather than a swatch — the
 /// reference's red-to-dark wash is this plane, not a flat fill.
-fn draw_plane(
-    cr: &gtk4::cairo::Context,
-    w: f64,
-    h: f64,
-    hsv: (f64, f64, f64),
-) {
+fn draw_plane(cr: &gtk4::cairo::Context, w: f64, h: f64, hsv: (f64, f64, f64)) {
     if w < 2.0 || h < 2.0 {
         return;
     }
@@ -533,6 +596,18 @@ fn draw_plane(
     let _ = cr.fill();
 }
 
+/// Where the hue bar's handle sits for a given hue, kept fully on the bar.
+///
+/// The handle is drawn at the live color's hue, but a raw `hue * w` parks a
+/// red (hue 0) handle at x=0, where half the circle falls off the pill and the
+/// round end reads as a clipped crescent rather than a handle. Clamping to the
+/// handle's own radius is a nudge, not a lie: the rainbow sweep does start at
+/// red, so hue 0 belongs at the left end — it just has to be drawn on top of
+/// the bar instead of hanging off it.
+fn spectrum_handle_x(hue: f64, w: f64, r: f64) -> f64 {
+    (hue * w).clamp(r, (w - r).max(r))
+}
+
 /// The rainbow hue bar with a round handle on the current color, matching the
 /// reference picker row. The bar is a full-saturation sweep, so dragging the
 /// handle sets the field to the pure color under it.
@@ -540,24 +615,28 @@ fn draw_spectrum(cr: &gtk4::cairo::Context, w: f64, h: f64, color: (u8, u8, u8))
     if w < 2.0 || h < 2.0 {
         return;
     }
-    // One column per pixel, clipped to a pill so the bar's ends round off.
+    // A slim rail centered in the widget: one column per pixel, clipped to a
+    // pill so the bar's ends round off, with the tall thumb straddling it.
+    let bar_h = SPECTRUM_BAR_THICKNESS.min(h);
+    let bar_y = (h - bar_h) / 2.0;
     let _ = cr.save();
-    rounded_rect(cr, 0.0, 0.0, w, h, h / 2.0);
+    rounded_rect(cr, 0.0, bar_y, w, bar_h, bar_h / 2.0);
     let _ = cr.clip();
     for x in 0..w as i32 {
         let hue = x as f64 / w;
         let (r, g, b) = hsv_to_rgb(hue, 1.0, 1.0);
         cr.set_source_rgb(r as f64 / 255.0, g as f64 / 255.0, b as f64 / 255.0);
-        cr.rectangle(x as f64, 0.0, 1.0, h);
+        cr.rectangle(x as f64, bar_y, 1.0, bar_h);
         let _ = cr.fill();
     }
     let _ = cr.restore();
 
-    // The handle, ringed in white so it reads against any hue.
+    // The handle, ringed in white so it reads against any hue. It keeps its
+    // grabbable size and straddles the slim rail rather than shrinking into it.
     let hue = rgb_to_hue(color.0, color.1, color.2);
-    let cx = hue * w;
+    let r = HANDLE_RADIUS;
+    let cx = spectrum_handle_x(hue, w, r);
     let cy = h / 2.0;
-    let r = (h * 0.42).min(11.0);
     cr.set_source_rgb(1.0, 1.0, 1.0);
     cr.arc(cx, cy, r, 0.0, std::f64::consts::TAU);
     let _ = cr.fill();
@@ -566,11 +645,12 @@ fn draw_spectrum(cr: &gtk4::cairo::Context, w: f64, h: f64, color: (u8, u8, u8))
         color.1 as f64 / 255.0,
         color.2 as f64 / 255.0,
     );
-    cr.arc(cx, cy, (r - 2.0).max(1.0), 0.0, std::f64::consts::TAU);
+    cr.arc(cx, cy, (r - 2.5).max(1.0), 0.0, std::f64::consts::TAU);
     let _ = cr.fill();
 }
 
-fn current_flat_color(state: &Arc<Mutex<VideoEditState>>) -> (u8, u8, u8) {    match &state.lock().unwrap().background {
+fn current_flat_color(state: &Arc<Mutex<VideoEditState>>) -> (u8, u8, u8) {
+    match &state.lock().unwrap().background {
         VideoBackground::Plain { r, g, b } => (*r, *g, *b),
         _ => (17, 17, 17),
     }
@@ -582,6 +662,36 @@ fn set_flat_color(state: &Arc<Mutex<VideoEditState>>, color: (u8, u8, u8)) {
         g: color.1,
         b: color.2,
     };
+}
+
+/// Resolve the pointer's live position mid-drag: the press point plus the
+/// drag's total offset.
+///
+/// `drag-update` reports the *total* offset from the press, not a per-frame
+/// delta, so each update must be resolved fresh from `start_point()` (which
+/// never moves during the drag). Folding updates into an accumulator sums
+/// totals on top of totals and flings the handle to the edges instead of
+/// following the cursor. This is the same `start + offset` pattern the
+/// FillSlider, preview, and timeline drags all use.
+fn resolve_drag_position(start: (f64, f64), offset: (f64, f64)) -> (f64, f64) {
+    (start.0 + offset.0, start.1 + offset.1)
+}
+
+/// The color a hue drag commits for `hue`: the current color's saturation and
+/// value, rescued when they are degenerate.
+///
+/// From gray, white, or black (saturation ~0) every hue is the same shade, so
+/// keeping saturation would make the rainbow bar a visible no-op until the
+/// plane is touched first. Snap saturation to full in that case — and value
+/// too when it is so dark no hue could read anyway.
+fn hue_adjusted_color(current: (u8, u8, u8), hue: f64) -> (u8, u8, u8) {
+    let (_, s, v) = rgb_to_hsv(current.0, current.1, current.2);
+    let (s, v) = if s < 0.02 {
+        (1.0, if v < 0.2 { 1.0 } else { v })
+    } else {
+        (s, v)
+    };
+    hsv_to_rgb(hue, s, v)
 }
 
 fn attach_hue_drag(
@@ -601,12 +711,12 @@ fn attach_hue_drag(
     drag.connect_drag_update({
         let state = state.clone();
         let notify = notify.clone();
-        move |gesture, dx, _| {
-            let Some((start, _)) = gesture.start_point() else {
+        move |gesture, offset_x, _| {
+            let Some(start) = gesture.start_point() else {
                 return;
             };
-            let _ = dx;
-            apply_hue(&gesture, start, &state, &notify);
+            let (x, _) = resolve_drag_position(start, (offset_x, 0.0));
+            apply_hue(&gesture, x, &state, &notify);
         }
     });
     spectrum.add_controller(drag);
@@ -623,22 +733,13 @@ fn apply_hue(
     };
     let width = widget.allocated_width().max(1) as f64;
     let hue = (x / width).clamp(0.0, 1.0);
-    let (s, v) = {
-        let color = current_flat_color(state);
-        let (_, s, v) = rgb_to_hsv(color.0, color.1, color.2);
-        (s, v)
-    };
-    set_flat_color(state, hsv_to_rgb(hue, s.max(0.0), v.max(0.0)));
+    set_flat_color(state, hue_adjusted_color(current_flat_color(state), hue));
     notify();
 }
 
 /// Drag inside the plane: horizontal sets saturation, vertical sets value,
 /// both against the hue the bar currently holds.
-fn attach_plane_drag(
-    field: &DrawingArea,
-    state: Arc<Mutex<VideoEditState>>,
-    notify: Rc<dyn Fn()>,
-) {
+fn attach_plane_drag(field: &DrawingArea, state: Arc<Mutex<VideoEditState>>, notify: Rc<dyn Fn()>) {
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
@@ -651,12 +752,12 @@ fn attach_plane_drag(
     drag.connect_drag_update({
         let state = state.clone();
         let notify = notify.clone();
-        move |gesture, dx, dy| {
-            let Some((start_x, start_y)) = gesture.start_point() else {
+        move |gesture, offset_x, offset_y| {
+            let Some(start) = gesture.start_point() else {
                 return;
             };
-            let _ = (dx, dy);
-            apply_plane(&gesture, start_x, start_y, &state, &notify);
+            let (x, y) = resolve_drag_position(start, (offset_x, offset_y));
+            apply_plane(&gesture, x, y, &state, &notify);
         }
     });
     field.add_controller(drag);
@@ -693,56 +794,302 @@ struct GradientPage {
     repaint: Rc<dyn Fn()>,
 }
 
-fn build_gradient_page(
-    state: &Arc<Mutex<VideoEditState>>,
-    notify: &Rc<dyn Fn()>,
-) -> GradientPage {
+/// The two glyphs the gradient header draws itself.
+///
+/// Transcribed from Lucide's `arrow-left-right` and `rotate-cw-square` (ISC
+/// licensed, <https://lucide.dev>) instead of naming symbolic icons: a theme
+/// icon resolves to whatever the host desktop ships, so the flip and rotate
+/// controls changed shape between Adwaita and every other icon set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GradientIcon {
+    /// Lucide `arrow-left-right` — the flip control.
+    ArrowLeftRight,
+    /// Lucide `rotate-cw-square` — the rotate control.
+    RotateCwSquare,
+}
+
+/// One stroke of a glyph, in Lucide's 24x24 coordinate space.
+///
+/// The SVGs' relative commands are folded into absolute points, and their
+/// `a`/`A` corners are quarter-turn arcs: SVG's `sweep-flag 0` sweeps the
+/// same direction Cairo calls `arc_negative`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum IconSegment {
+    Move(f64, f64),
+    Line(f64, f64),
+    /// A rounded corner: centre, radius, and the angles it sweeps between.
+    Corner {
+        cx: f64,
+        cy: f64,
+        r: f64,
+        from: f64,
+        to: f64,
+    },
+}
+
+/// The path data of `icon`. Lucide draws these with `fill="none"
+/// stroke-width="2"` and round caps and joins; `draw_gradient_icon` sets the
+/// same.
+fn gradient_icon_path(icon: GradientIcon) -> &'static [IconSegment] {
+    match icon {
+        // <path d="M8 3 4 7l4 4"/><path d="M4 7h16"/>
+        // <path d="m16 21 4-4-4-4"/><path d="M20 17H4"/>
+        GradientIcon::ArrowLeftRight => &[
+            IconSegment::Move(8.0, 3.0),
+            IconSegment::Line(4.0, 7.0),
+            IconSegment::Line(8.0, 11.0),
+            IconSegment::Move(4.0, 7.0),
+            IconSegment::Line(20.0, 7.0),
+            IconSegment::Move(16.0, 21.0),
+            IconSegment::Line(20.0, 17.0),
+            IconSegment::Line(16.0, 13.0),
+            IconSegment::Move(20.0, 17.0),
+            IconSegment::Line(4.0, 17.0),
+        ],
+        // <path d="M12 5H6a2 2 0 0 0-2 2v3"/><path d="m9 8 3-3-3-3"/>
+        // <path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+        GradientIcon::RotateCwSquare => &[
+            IconSegment::Move(12.0, 5.0),
+            IconSegment::Line(6.0, 5.0),
+            IconSegment::Corner {
+                cx: 6.0,
+                cy: 7.0,
+                r: 2.0,
+                from: -FRAC_PI_2,
+                to: -PI,
+            },
+            IconSegment::Line(4.0, 10.0),
+            IconSegment::Move(4.0, 14.0),
+            IconSegment::Line(4.0, 18.0),
+            IconSegment::Corner {
+                cx: 6.0,
+                cy: 18.0,
+                r: 2.0,
+                from: PI,
+                to: FRAC_PI_2,
+            },
+            IconSegment::Line(18.0, 20.0),
+            IconSegment::Corner {
+                cx: 18.0,
+                cy: 18.0,
+                r: 2.0,
+                from: FRAC_PI_2,
+                to: 0.0,
+            },
+            IconSegment::Line(20.0, 7.0),
+            IconSegment::Corner {
+                cx: 18.0,
+                cy: 7.0,
+                r: 2.0,
+                from: 0.0,
+                to: -FRAC_PI_2,
+            },
+            IconSegment::Line(16.0, 5.0),
+            // The arrow head on the square's open top-right corner.
+            IconSegment::Move(9.0, 8.0),
+            IconSegment::Line(12.0, 5.0),
+            IconSegment::Line(9.0, 2.0),
+        ],
+    }
+}
+
+/// Strokes a glyph into `cr`, scaled out of Lucide's 24x24 box and painted in
+/// `color` — the SVG's `currentColor`, so the light theme and the disabled
+/// rotate control need no rules of their own.
+fn draw_gradient_icon(
+    cr: &gtk4::cairo::Context,
+    width: f64,
+    height: f64,
+    icon: GradientIcon,
+    color: gtk4::gdk::RGBA,
+) {
+    let size = width.min(height).max(1.0);
+    let _ = cr.save();
+    cr.translate((width - size) / 2.0, (height - size) / 2.0);
+    cr.scale(size / 24.0, size / 24.0);
+    cr.set_line_width(2.0);
+    cr.set_line_cap(gtk4::cairo::LineCap::Round);
+    cr.set_line_join(gtk4::cairo::LineJoin::Round);
+    cr.set_source_rgba(
+        color.red().into(),
+        color.green().into(),
+        color.blue().into(),
+        color.alpha().into(),
+    );
+    for segment in gradient_icon_path(icon) {
+        match *segment {
+            IconSegment::Move(x, y) => cr.move_to(x, y),
+            IconSegment::Line(x, y) => cr.line_to(x, y),
+            IconSegment::Corner {
+                cx,
+                cy,
+                r,
+                from,
+                to,
+            } => cr.arc_negative(cx, cy, r, from, to),
+        }
+    }
+    let _ = cr.stroke();
+    let _ = cr.restore();
+}
+
+/// A flat icon button for the gradient header.
+fn gradient_icon_button(icon: GradientIcon, tooltip: &str) -> Button {
+    let button = Button::new();
+    button.add_css_class("recording-editor-gradient-icon");
+    button.set_has_frame(false);
+    button.set_valign(Align::Center);
+    button.set_tooltip_text(Some(tooltip));
+    let glyph = DrawingArea::new();
+    glyph.set_content_width(GRADIENT_ICON_SIZE);
+    glyph.set_content_height(GRADIENT_ICON_SIZE);
+    glyph.set_halign(Align::Center);
+    glyph.set_valign(Align::Center);
+    // Clicks — and the hover state behind them — belong to the button.
+    glyph.set_can_target(false);
+    glyph.set_draw_func(move |glyph, cr, width, height| {
+        let color = glyph.style_context().color();
+        draw_gradient_icon(cr, f64::from(width), f64::from(height), icon, color);
+    });
+    button.set_child(Some(&glyph));
+    button
+}
+
+fn kind_label(kind: GradientKind) -> String {
+    match kind {
+        GradientKind::Linear => t("Linear"),
+        GradientKind::Radial => t("Radial"),
+        GradientKind::Angular => t("Angular"),
+        GradientKind::Diamond => t("Diamond"),
+    }
+}
+
+fn build_gradient_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -> GradientPage {
     let widget = GtkBox::new(Orientation::Vertical, 0);
     widget.set_hexpand(true);
 
-    let preview = DrawingArea::new();
-    preview.add_css_class("recording-editor-custom-field");
-    preview.set_content_height(120);
-    preview.set_can_target(false);
-    widget.append(&preview);
+    // The selected stop: its pin carries a ring and its row a highlight.
+    // `usize::MAX` means nothing is selected yet; the first refresh picks the
+    // last stop, like a freshly opened gradient editor.
+    let selected = Rc::new(Cell::new(usize::MAX));
+    // True while the Steps list is being torn down. Entries in that list
+    // commit on focus-out, and a destroyed entry must not write through a
+    // stale row index.
+    let rebuilding = Rc::new(Cell::new(false));
 
-    // Angle + reverse, on one row under the preview.
-    let controls = GtkBox::new(Orientation::Horizontal, 8);
-    controls.add_css_class("recording-editor-gradient-controls");
-    let angle = DrawingArea::new();
-    angle.add_css_class("recording-editor-gradient-angle");
-    angle.set_content_height(28);
-    angle.set_hexpand(true);
-    let reverse = Button::new();
-    reverse.add_css_class("recording-editor-gradient-reverse");
-    reverse.set_has_frame(false);
-    reverse.set_valign(Align::Center);
-    reverse.set_tooltip_text(Some(&t("Reverse")));
-    let reverse_icon = Image::from_icon_name("view-refresh-symbolic");
-    reverse_icon.set_pixel_size(14);
-    reverse.set_child(Some(&reverse_icon));
+    // ── Header: type dropdown, flip, rotate — Figma's compact control row. ──
+    let header = GtkBox::new(Orientation::Horizontal, 6);
+    header.add_css_class("recording-editor-gradient-header");
+
+    // The type picker is the app's own dropdown (button + styled popover),
+    // not a stock GTK one, so its menu matches the editor rather than picking
+    // up the desktop theme. The active type carries a check, like Figma's.
+    let type_button = Button::new();
+    type_button.set_has_frame(false);
+    type_button.add_css_class("recording-editor-dropdown");
+    type_button.add_css_class("recording-editor-gradient-type");
+    type_button.set_valign(Align::Center);
+    let type_row = GtkBox::new(Orientation::Horizontal, 6);
+    type_row.set_halign(Align::Start);
+    let type_label = Label::new(Some(&kind_label(GradientKind::Linear)));
+    type_label.add_css_class("recording-editor-dropdown-label");
+    type_row.append(&type_label);
+    let type_arrow = Image::from_icon_name("pan-down-symbolic");
+    type_arrow.add_css_class("recording-editor-dropdown-arrow");
+    type_arrow.set_pixel_size(10);
+    type_row.append(&type_arrow);
+    type_button.set_child(Some(&type_row));
+
+    let type_popover = Popover::new();
+    type_popover.set_has_arrow(false);
+    type_popover.add_css_class("recording-editor-dropdown-popover");
+    let type_list = GtkBox::new(Orientation::Vertical, 0);
+    type_list.add_css_class("recording-editor-dropdown-list");
+    type_popover.set_child(Some(&type_list));
+    type_popover.set_parent(&type_button);
+    {
+        let popover = type_popover.clone();
+        type_button.connect_clicked(move |_| popover.popup());
+    }
+
+    let mut type_checks: Vec<(GradientKind, Image)> = Vec::new();
+    for kind in [
+        GradientKind::Linear,
+        GradientKind::Radial,
+        GradientKind::Angular,
+        GradientKind::Diamond,
+    ] {
+        let item = Button::new();
+        item.set_has_frame(false);
+        item.add_css_class("recording-editor-dropdown-item");
+        let row = GtkBox::new(Orientation::Horizontal, 8);
+        let check = Image::from_icon_name("object-select-symbolic");
+        check.set_pixel_size(12);
+        // Hidden with opacity rather than visibility so every label starts at
+        // the same x, checked or not.
+        check.set_opacity(0.0);
+        let label = Label::new(Some(&kind_label(kind)));
+        label.set_xalign(0.0);
+        row.append(&check);
+        row.append(&label);
+        item.set_child(Some(&row));
+        {
+            let state = state.clone();
+            let notify = notify.clone();
+            let popover = type_popover.clone();
+            item.connect_clicked(move |_| {
+                with_gradient(&state, |gradient| gradient.kind = kind);
+                notify();
+                popover.popdown();
+            });
+        }
+        type_list.append(&item);
+        type_checks.push((kind, check));
+    }
+
+    // Flip reverses the stop order; rotate turns the gradient a quarter turn.
+    let flip = gradient_icon_button(GradientIcon::ArrowLeftRight, &t("Flip gradient"));
     {
         let state = state.clone();
         let notify = notify.clone();
-        reverse.connect_clicked(move |_| {
-            with_gradient(&state, |g| g.reversed = !g.reversed);
+        flip.connect_clicked(move |_| {
+            with_gradient(&state, |gradient| gradient.reversed = !gradient.reversed);
             notify();
         });
     }
-    controls.append(&angle);
-    controls.append(&reverse);
-    widget.append(&controls);
+    let rotate = gradient_icon_button(GradientIcon::RotateCwSquare, &t("Rotate gradient"));
+    {
+        let state = state.clone();
+        let notify = notify.clone();
+        rotate.connect_clicked(move |_| {
+            with_gradient(&state, |gradient| {
+                gradient.angle_degrees =
+                    (gradient.angle_degrees + GRADIENT_ROTATE_STEP).rem_euclid(360.0);
+            });
+            notify();
+        });
+    }
 
-    // The stop bar: drag a handle to move a stop, click empty track to add.
+    header.append(&type_button);
+    // A compact chip on the left, icon controls pushed to the right.
+    let spacer = GtkBox::new(Orientation::Horizontal, 0);
+    spacer.set_hexpand(true);
+    header.append(&spacer);
+    header.append(&flip);
+    header.append(&rotate);
+    widget.append(&header);
+
+    // ── The stop bar: the ramp itself with a pin per stop. ──
+    // Drag a pin to move its stop; the Stops + button is how a stop is added.
     let bar = DrawingArea::new();
     bar.add_css_class("recording-editor-gradient-bar");
-    bar.set_content_height(40);
+    bar.set_content_height(GRADIENT_BAR_HEIGHT);
     widget.append(&bar);
 
-    // Steps header + list.
+    // ── Stops header + list. ──
     let steps_header = GtkBox::new(Orientation::Horizontal, 8);
     steps_header.add_css_class("recording-editor-gradient-steps-header");
-    let steps_title = Label::new(Some(&t("Steps")));
+    let steps_title = Label::new(Some(&t("Stops")));
     steps_title.set_xalign(0.0);
     steps_title.set_hexpand(true);
     let add = Button::new();
@@ -755,8 +1102,10 @@ fn build_gradient_page(
     {
         let state = state.clone();
         let notify = notify.clone();
+        let selected = selected.clone();
         add.connect_clicked(move |_| {
-            add_stop(state.clone(), notify.clone());
+            selected.set(add_stop(&state));
+            notify();
         });
     }
     steps_header.append(&steps_title);
@@ -766,66 +1115,76 @@ fn build_gradient_page(
     let steps = Grid::new();
     steps.add_css_class("recording-editor-gradient-steps");
     steps.set_column_spacing(8);
-    steps.set_row_spacing(4);
+    steps.set_row_spacing(6);
     steps.set_hexpand(true);
     widget.append(&steps);
 
-    attach_angle_drag(&angle, state.clone(), notify.clone());
-    attach_stop_drag(&bar, state.clone(), notify.clone());
+    attach_stop_drag(&bar, state.clone(), notify.clone(), selected.clone());
 
     let refresh: Rc<dyn Fn()> = {
-        let preview = preview.clone();
-        let angle = angle.clone();
         let bar = bar.clone();
         let steps = steps.clone();
-        let steps_title = steps_title.clone();
         let add = add.clone();
-        let reverse = reverse.clone();
+        let rotate = rotate.clone();
+        let type_label = type_label.clone();
+        let type_checks = type_checks.clone();
+        let selected = selected.clone();
+        let rebuilding = rebuilding.clone();
         let state = state.clone();
         let notify = notify.clone();
         Rc::new(move || {
             let gradient = current_gradient(&state);
-            preview.set_draw_func({
-                let gradient = gradient.clone();
-                move |_, cr, width, height| {
-                    draw_gradient_field(cr, width as f64, height as f64, &gradient);
-                }
-            });
-            preview.queue_draw();
+            let normalized = gradient.normalized();
+            let count = normalized.stops.len();
+            // Selection rides along with edits and removals.
+            if selected.get() >= count {
+                selected.set(count.saturating_sub(1));
+            }
+            let selected_index = selected.get();
 
             bar.set_draw_func({
                 let gradient = gradient.clone();
                 move |_, cr, width, height| {
-                    draw_stop_bar(cr, width as f64, height as f64, &gradient);
+                    draw_stop_bar(cr, width as f64, height as f64, &gradient, selected_index);
                 }
             });
             bar.queue_draw();
 
-            angle.set_draw_func({
-                let gradient = gradient.clone();
-                move |_, cr, width, height| {
-                    draw_angle(cr, width as f64, height as f64, &gradient);
-                }
-            });
-            angle.queue_draw();
+            type_label.set_text(&kind_label(gradient.kind));
+            for (kind, check) in &type_checks {
+                check.set_opacity(if *kind == gradient.kind { 1.0 } else { 0.0 });
+            }
+            // A radial or diamond gradient has no direction to rotate.
+            rotate.set_sensitive(matches!(
+                gradient.kind,
+                GradientKind::Linear | GradientKind::Angular
+            ));
+            rotate.set_tooltip_text(Some(&format!(
+                "{} ({}°)",
+                t("Rotate gradient"),
+                gradient.angle_degrees.round() as i64
+            )));
 
             // The Steps list is tiny (2..=8 rows), so rebuilding it is cheaper
             // and far less error-prone than tracking per-row widget state.
+            rebuilding.set(true);
             while let Some(child) = steps.first_child() {
                 steps.remove(&child);
             }
-            let normalized = gradient.normalized();
-            steps_title.set_text(&format!("{} ({})", t("Steps"), normalized.stops.len()));
-            add.set_sensitive(normalized.stops.len() < MAX_GRADIENT_STOPS);
-            reverse.set_sensitive(normalized.stops.len() >= MIN_GRADIENT_STOPS);
-            for (row, stop) in normalized.stops.iter().enumerate() {
-                let row_widget = build_stop_row(stop, row, normalized.stops.len(), &state, &notify);
-                steps.attach(&row_widget, 0, row as i32, 1, 1);
+            add.set_sensitive(count < MAX_GRADIENT_STOPS);
+            for (index, stop) in normalized.stops.iter().enumerate() {
+                let row_widget =
+                    build_stop_row(stop, index, selected_index, &state, &notify, &rebuilding);
+                steps.attach(&row_widget, 0, index as i32, 1, 1);
             }
+            rebuilding.set(false);
         }) as Rc<dyn Fn()>
     };
 
-    GradientPage { widget, repaint: refresh }
+    GradientPage {
+        widget,
+        repaint: refresh,
+    }
 }
 
 fn current_gradient(state: &Arc<Mutex<VideoEditState>>) -> VideoGradient {
@@ -859,14 +1218,17 @@ fn with_gradient(state: &Arc<Mutex<VideoEditState>>, edit: impl FnOnce(&mut Vide
     }
 }
 
-fn add_stop(state: Arc<Mutex<VideoEditState>>, notify: Rc<dyn Fn()>) {
-    with_gradient(&state, |gradient| {
+/// Append a stop in the widest gap and return its index in the normalized
+/// list, so the caller can select it. Adding over a full gradient is a no-op
+/// that reports the last stop.
+fn add_stop(state: &Arc<Mutex<VideoEditState>>) -> usize {
+    let mut position = 0.5;
+    with_gradient(state, |gradient| {
         if gradient.stops.len() >= MAX_GRADIENT_STOPS {
             return;
         }
         // Insert into the widest gap so the new stop is visible and editable
         // rather than landing on top of an existing one.
-        let mut position = 0.5;
         let mut widest: f64 = -1.0;
         for pair in gradient.stops.windows(2) {
             let gap = pair[1].position - pair[0].position;
@@ -878,32 +1240,29 @@ fn add_stop(state: Arc<Mutex<VideoEditState>>, notify: Rc<dyn Fn()>) {
         if widest <= f64::EPSILON {
             position = 0.5;
         }
-        let color = sample_color(gradient, position);
+        // The ramp is mirrored when the gradient is flipped, so sample the
+        // position the new stop will actually display at.
+        let display = if gradient.reversed {
+            1.0 - position
+        } else {
+            position
+        };
+        let color = sample_color_at(gradient, display);
         gradient
             .stops
             .push(GradientStop::new(position, color.0, color.1, color.2));
     });
-    notify();
+    find_stop_at(state, position)
 }
 
-fn remove_stop(state: Arc<Mutex<VideoEditState>>, notify: Rc<dyn Fn()>, index: usize) {
-    with_gradient(&state, |gradient| {
-        // Two stops is a gradient's floor; removing past it would leave a
-        // single color with no direction.
-        if gradient.stops.len() <= MIN_GRADIENT_STOPS || index >= gradient.stops.len() {
-            return;
-        }
-        gradient.stops.remove(index);
-    });
-    notify();
-}
-
-/// The color the gradient shows at `position`, used to seed a new stop with
-/// the color already under it so adding one is a visible no-op until dragged.
-fn sample_color(gradient: &VideoGradient, position: f64) -> (u8, u8, u8) {
-    let bitmap = render_gradient(gradient, 256, 1);
-    let x = (position * 255.0).round().clamp(0.0, 255.0) as u32;
-    bitmap.pixel(x, 0)
+/// The model index of the stop sitting at `position`, for reselecting after a
+/// list re-sort.
+fn find_stop_at(state: &Arc<Mutex<VideoEditState>>, position: f64) -> usize {
+    current_gradient(state)
+        .stops
+        .iter()
+        .position(|stop| (stop.position - position).abs() < 1e-6)
+        .unwrap_or(0)
 }
 
 fn bitmap_to_surface(
@@ -938,27 +1297,150 @@ fn bitmap_to_surface(
     .expect("gradient surface allocates")
 }
 
-fn draw_gradient_field(
-    cr: &gtk4::cairo::Context,
-    w: f64,
-    h: f64,
-    gradient: &VideoGradient,
-) {
-    if w < 2.0 || h < 2.0 {
-        return;
+/// The gradient bar's handles in display order: `(position along the bar,
+/// index into the model's normalized stops, stop)`.
+///
+/// Reversal mirrors the bar, so the leftmost pin is the last model stop when
+/// the gradient is flipped; each pin keeps the model index a write has to
+/// target.
+fn bar_handles(gradient: &VideoGradient) -> Vec<(f64, usize, GradientStop)> {
+    let normalized = gradient.normalized();
+    let mut handles: Vec<(f64, usize, GradientStop)> = normalized
+        .stops
+        .iter()
+        .enumerate()
+        .map(|(index, stop)| {
+            let position = if normalized.reversed {
+                1.0 - stop.position
+            } else {
+                stop.position
+            };
+            (position, index, *stop)
+        })
+        .collect();
+    handles.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    handles
+}
+
+/// The y of the ramp's track inside the bar widget.
+fn gradient_track_top() -> f64 {
+    (GRADIENT_BAR_HEIGHT as f64 - GRADIENT_BAR_TRACK) / 2.0
+}
+
+/// The y a handle is centred on: the middle of the track, so the handle
+/// straddles the ramp instead of floating above it.
+fn gradient_pin_center_y() -> f64 {
+    gradient_track_top() + GRADIENT_BAR_TRACK / 2.0
+}
+
+/// How far a handle's centre stays from the bar's ends. A handle at either end
+/// has to leave room for the selection ring (and the stroke's half-width) or
+/// the ring is clipped, which read as the handle being boxed into the ramp.
+fn gradient_pin_inset() -> f64 {
+    GRADIENT_PIN_SIZE / 2.0 + GRADIENT_PIN_RING + 1.0
+}
+
+/// x of the handle for `position` along the bar.
+fn gradient_pin_x(position: f64, w: f64) -> f64 {
+    let inset = gradient_pin_inset();
+    let span = (w - inset * 2.0).max(1.0);
+    inset + position * span
+}
+
+/// The stop position a handle centre at `x` stands for — the inverse of
+/// `gradient_pin_x`, so a drag maps the cursor back onto the same scale the
+/// ramp was drawn with.
+fn gradient_position_at(x: f64, w: f64) -> f64 {
+    let inset = gradient_pin_inset();
+    let span = (w - inset * 2.0).max(1.0);
+    ((x - inset) / span).clamp(0.0, 1.0)
+}
+
+/// Border color that keeps a handle readable on the ramp: a light stop gets a
+/// dark border, everything else the white one.
+fn handle_ring_color(color: (u8, u8, u8)) -> (f64, f64, f64) {
+    let luminance =
+        (0.2126 * color.0 as f64 + 0.7152 * color.1 as f64 + 0.0722 * color.2 as f64) / 255.0;
+    if luminance > 0.6 {
+        (0.09, 0.09, 0.11)
+    } else {
+        (0.97, 0.97, 0.97)
     }
-    // Half resolution is finer than the widget can show and keeps a redraw on
-    // every drag step cheap.
-    let bitmap = render_gradient(gradient, (w * 0.5) as u32, (h * 0.5) as u32);
-    let surface = bitmap_to_surface(&bitmap);
+}
+
+/// A stop handle: a rounded square in the stop's colour, centred on the ramp
+/// so it sits on the track like a chip. The selected handle wears a ring,
+/// which `gradient_pin_inset` leaves room for at the bar's ends.
+fn draw_stop_pin(cr: &gtk4::cairo::Context, cx: f64, stop: &GradientStop, selected: bool) {
+    let (border_r, border_g, border_b) = handle_ring_color((stop.r, stop.g, stop.b));
+    let size = GRADIENT_PIN_SIZE;
+    let top = gradient_pin_center_y() - size / 2.0;
+    let left = cx - size / 2.0;
+    let radius = 6.0;
+
     let _ = cr.save();
-    rounded_rect(cr, 0.0, 0.0, w, h, FIELD_RADIUS);
-    cr.clip();
-    cr.scale(2.0, 2.0);
-    let _ = cr.set_source_surface(&surface, 0.0, 0.0);
-    let _ = cr.paint();
+    // The ring goes down first so the handle's own border sits over its
+    // inner edge rather than the other way around.
+    if selected {
+        rounded_rect(
+            cr,
+            left - GRADIENT_PIN_RING,
+            top - GRADIENT_PIN_RING,
+            size + GRADIENT_PIN_RING * 2.0,
+            size + GRADIENT_PIN_RING * 2.0,
+            radius + GRADIENT_PIN_RING,
+        );
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.95);
+        cr.set_line_width(2.0);
+        let _ = cr.stroke();
+    }
+
+    rounded_rect(cr, left, top, size, size, radius);
+    cr.set_source_rgba(
+        stop.r as f64 / 255.0,
+        stop.g as f64 / 255.0,
+        stop.b as f64 / 255.0,
+        stop.a as f64 / 255.0,
+    );
+    let _ = cr.fill_preserve();
+    cr.set_source_rgb(border_r, border_g, border_b);
+    cr.set_line_width(1.5);
+    let _ = cr.stroke();
     let _ = cr.restore();
-    stroke_rounded(cr, 0.0, 0.0, w, h, FIELD_RADIUS, false);
+}
+
+/// The stop's color chip. A lowered opacity shows over a checkerboard so the
+/// row reflects it rather than always painting the pure color.
+fn draw_stop_chip(cr: &gtk4::cairo::Context, w: f64, h: f64, color: (u8, u8, u8, u8)) {
+    let _ = cr.save();
+    rounded_rect(cr, 0.0, 0.0, w, h, STEP_CHIP_RADIUS);
+    cr.clip();
+    if color.3 < u8::MAX {
+        let cell = 6.0;
+        let mut y = 0.0;
+        while y < h {
+            let mut x = 0.0;
+            while x < w {
+                let dark = ((x / cell) as i32 + (y / cell) as i32) % 2 == 0;
+                let value = if dark { 0.34 } else { 0.22 };
+                cr.set_source_rgba(value, value, value, 1.0);
+                cr.rectangle(x, y, cell.min(w - x), cell.min(h - y));
+                let _ = cr.fill();
+                x += cell;
+            }
+            y += cell;
+        }
+    }
+    cr.set_source_rgba(
+        color.0 as f64 / 255.0,
+        color.1 as f64 / 255.0,
+        color.2 as f64 / 255.0,
+        color.3 as f64 / 255.0,
+    );
+    cr.rectangle(0.0, 0.0, w, h);
+    let _ = cr.fill();
+    let _ = cr.restore();
+    stroke_rounded(cr, 0.0, 0.0, w, h, STEP_CHIP_RADIUS, false);
 }
 
 fn draw_stop_bar(
@@ -966,93 +1448,104 @@ fn draw_stop_bar(
     w: f64,
     h: f64,
     gradient: &VideoGradient,
+    selected: usize,
 ) {
     if w < 2.0 || h < 2.0 {
         return;
     }
-    let bitmap = render_gradient(gradient, (w * 0.5) as u32, (h * 0.5) as u32);
+    // The bar is the stop editor, so it always runs left-to-right: kind and
+    // angle belong to the canvas, and applying them here would slide the pins
+    // off the stops they belong to. Reversal does apply — it is a property of
+    // the stop order itself.
+    let mut flat = gradient.clone();
+    flat.kind = GradientKind::Linear;
+    flat.angle_degrees = 0.0;
+    let track_top = gradient_track_top();
+    let track_h = GRADIENT_BAR_TRACK.min(h - track_top).max(1.0);
+    // Half resolution is finer than the widget can show and keeps a redraw on
+    // every drag step cheap.
+    let bitmap = render_gradient(&flat, (w * 0.5) as u32, (track_h * 0.5) as u32);
     let surface = bitmap_to_surface(&bitmap);
+    let radius = track_h / 2.0;
     let _ = cr.save();
-    rounded_rect(cr, 0.0, 0.0, w, h, 6.0);
+    rounded_rect(cr, 0.0, track_top, w, track_h, radius);
     cr.clip();
+    cr.translate(0.0, track_top);
     cr.scale(2.0, 2.0);
     let _ = cr.set_source_surface(&surface, 0.0, 0.0);
     let _ = cr.paint();
     let _ = cr.restore();
 
-    // Handles are drawn outside the clip so the end stops stay fully visible
-    // at the very edges of the bar.
-    let inset = HANDLE_RADIUS;
-    let span = (w - inset * 2.0).max(1.0);
-    let cy = h / 2.0;
-    for stop in &gradient.normalized().stops {
-        let cx = inset + stop.position * span;
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.96);
-        cr.arc(cx, cy, HANDLE_RADIUS, 0.0, std::f64::consts::TAU);
-        let _ = cr.fill();
-        cr.set_source_rgb(
-            stop.r as f64 / 255.0,
-            stop.g as f64 / 255.0,
-            stop.b as f64 / 255.0,
-        );
-        cr.arc(cx, cy, HANDLE_RADIUS - 2.5, 0.0, std::f64::consts::TAU);
-        let _ = cr.fill();
+    // Handles are drawn outside the track's clip so end stops stay whole.
+    for (position, index, stop) in bar_handles(gradient) {
+        draw_stop_pin(cr, gradient_pin_x(position, w), &stop, index == selected);
     }
+    stroke_rounded(cr, 0.0, track_top, w, track_h, radius, false);
 }
 
-fn draw_angle(
-    cr: &gtk4::cairo::Context,
-    w: f64,
-    h: f64,
-    gradient: &VideoGradient,
-) {
-    let light = false;
-    fill_rounded(cr, 0.0, 0.0, w, h, 6.0, (30, 30, 30));
-    if light {
-        let _ = light;
-    }
-    rounded_rect(cr, 0.0, 0.0, w, h, 6.0);
-    if gradient.angle_degrees > f64::EPSILON {
-        cr.set_source_rgba(1.0, 1.0, 1.0, 0.12);
-        let _ = cr.fill();
-    } else {
-        cr.set_source_rgba(0.0, 0.0, 0.0, 0.18);
-        let _ = cr.fill();
-    }
-    cr.select_font_face(
-        crate::typography::UI_FONT_FAMILY,
-        gtk4::cairo::FontSlant::Normal,
-        gtk4::cairo::FontWeight::Normal,
-    );
-    cr.set_font_size(11.0);
-    cr.set_source_rgba(1.0, 1.0, 1.0, 0.72);
-    cr.move_to(10.0, h * 0.68);
-    let _ = cr.show_text(&format!("{}°", gradient.angle_degrees.round() as i64));
-    let _ = w;
+/// Commit an entry on Enter or focus-out, like the Color tab's hex field.
+///
+/// Rows are rebuilt on every refresh, so a commit arriving from an entry that
+/// is being torn down is ignored rather than writing through a stale index.
+fn commit_entry(entry: &Entry, rebuilding: &Rc<Cell<bool>>, apply: impl Fn(&str) + 'static) {
+    let apply = Rc::new(apply);
+    entry.connect_activate({
+        let apply = apply.clone();
+        let rebuilding = rebuilding.clone();
+        move |entry| {
+            if !rebuilding.get() {
+                apply(&entry.text());
+            }
+        }
+    });
+    let focus = gtk4::EventControllerFocus::new();
+    focus.connect_leave({
+        let apply = apply.clone();
+        let rebuilding = rebuilding.clone();
+        move |controller| {
+            if rebuilding.get() {
+                return;
+            }
+            let Some(entry) = controller.widget().and_then(|w| w.downcast::<Entry>().ok()) else {
+                return;
+            };
+            apply(&entry.text());
+        }
+    });
+    entry.add_controller(focus);
 }
 
+/// A stop row: the color chip and its hex, and nothing else.
+///
+/// Position and opacity are deliberately not shown. A stop's position is the
+/// pin on the bar above — the row would only be a second, disagreeing place to
+/// type the same number — and alpha is not something the reference's gradient
+/// editor exposes per stop.
 fn build_stop_row(
     stop: &GradientStop,
     index: usize,
-    count: usize,
+    selected: usize,
     state: &Arc<Mutex<VideoEditState>>,
     notify: &Rc<dyn Fn()>,
+    rebuilding: &Rc<Cell<bool>>,
 ) -> GtkBox {
     let row = GtkBox::new(Orientation::Horizontal, 8);
     row.add_css_class("recording-editor-gradient-step");
+    if index == selected {
+        row.add_css_class("selected");
+    }
+    row.set_hexpand(true);
 
+    // The color chip: click opens the stop's color chooser.
     let swatch = DrawingArea::new();
     swatch.add_css_class("recording-editor-gradient-step-swatch");
-    swatch.set_content_width(20);
-    swatch.set_content_height(20);
+    swatch.set_content_width(STEP_CHIP_SIZE);
+    swatch.set_content_height(STEP_CHIP_SIZE);
     swatch.set_valign(Align::Center);
-    swatch.set_can_target(false);
-    let color = (stop.r, stop.g, stop.b);
+    let color = (stop.r, stop.g, stop.b, stop.a);
     swatch.set_draw_func(move |_, cr, width, height| {
-        fill_rounded(cr, 0.0, 0.0, width as f64, height as f64, 5.0, color);
+        draw_stop_chip(cr, width as f64, height as f64, color);
     });
-    // A click gesture rather than a button so the swatch stays a pure chip;
-    // the release handler opens the per-stop color chooser.
     {
         let gesture = GestureClick::new();
         let anchor = swatch.clone();
@@ -1064,31 +1557,31 @@ fn build_stop_row(
         swatch.add_controller(gesture);
     }
 
-    let label = Label::new(Some(&hex_string((stop.r, stop.g, stop.b))));
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
-    label.set_valign(Align::Center);
-
-    let remove = Button::new();
-    remove.add_css_class("recording-editor-gradient-step-remove");
-    remove.set_has_frame(false);
-    remove.set_valign(Align::Center);
-    // Two stops is a hard floor, so the control says so instead of silently
-    // ignoring the click.
-    remove.set_sensitive(count > MIN_GRADIENT_STOPS);
-    remove.set_tooltip_text(Some(&t("Remove stop")));
-    let remove_icon = Image::from_icon_name("user-trash-symbolic");
-    remove_icon.set_pixel_size(13);
-    remove.set_child(Some(&remove_icon));
+    let hex = Entry::new();
+    hex.add_css_class("recording-editor-gradient-step-hex");
+    hex.set_valign(Align::Center);
+    hex.set_hexpand(true);
+    hex.set_text(&hex_string((stop.r, stop.g, stop.b)));
     {
         let state = state.clone();
         let notify = notify.clone();
-        remove.connect_clicked(move |_| remove_stop(state.clone(), notify.clone(), index));
+        commit_entry(&hex, rebuilding, move |text| {
+            let Some((r, g, b)) = parse_hex(text) else {
+                return;
+            };
+            with_gradient(&state, |gradient| {
+                if let Some(stop) = gradient.stops.get_mut(index) {
+                    stop.r = r;
+                    stop.g = g;
+                    stop.b = b;
+                }
+            });
+            notify();
+        });
     }
 
     row.append(&swatch);
-    row.append(&label);
-    row.append(&remove);
+    row.append(&hex);
     row
 }
 
@@ -1117,7 +1610,9 @@ fn open_stop_color_picker(
     // Parented to the editor window so the dialog centers on the editor
     // rather than the screen. A swatch is a DrawingArea, so its root reaches
     // the window through the popover.
-    let parent = anchor.root().and_then(|root| root.downcast::<Window>().ok());
+    let parent = anchor
+        .root()
+        .and_then(|root| root.downcast::<Window>().ok());
     let dialog = ColorChooserDialog::new(Some(&t("Stop color")), parent.as_ref());
     dialog.set_modal(true);
     dialog.set_use_alpha(false);
@@ -1144,121 +1639,87 @@ fn open_stop_color_picker(
     dialog.present();
 }
 
-fn attach_angle_drag(
-    angle: &DrawingArea,
-    state: Arc<Mutex<VideoEditState>>,
-    notify: Rc<dyn Fn()>,
-) {
-    let drag = GestureDrag::new();
-    drag.set_button(1);
-    drag.connect_drag_begin({
-        let state = state.clone();
-        let notify = notify.clone();
-        move |gesture, x, _| {
-            apply_angle(&gesture, x, &state, &notify);
-        }
-    });
-    drag.connect_drag_update({
-        let state = state.clone();
-        let notify = notify.clone();
-        move |gesture, dx, _| {
-            let Some((start, _)) = gesture.start_point() else {
-                return;
-            };
-            let _ = dx;
-            apply_angle(&gesture, start, &state, &notify);
-        }
-    });
-    angle.add_controller(drag);
-}
-
-fn apply_angle(
-    gesture: &GestureDrag,
-    x: f64,
-    state: &Arc<Mutex<VideoEditState>>,
-    notify: &Rc<dyn Fn()>,
-) {
-    let Some(widget) = gesture.widget() else {
-        return;
-    };
-    let width = widget.allocated_width().max(1) as f64;
-    // The first ~40px is the label gutter, so the track starts after it.
-    let gutter = 40.0;
-    let t = ((x - gutter) / (width - gutter).max(1.0)).clamp(0.0, 1.0);
-    let degrees = t * 360.0;
-    with_gradient(state, |gradient| gradient.angle_degrees = degrees);
-    notify();
-}
-
 /// Drag a stop along the bar. The nearest handle within a grab radius wins; a
-/// drag starting on empty track adds a stop there and moves that one instead.
+/// press on empty track does nothing, because the only way to add a stop is
+/// the Stops + button.
 fn attach_stop_drag(
     bar: &DrawingArea,
     state: Arc<Mutex<VideoEditState>>,
     notify: Rc<dyn Fn()>,
+    selected: Rc<Cell<usize>>,
 ) {
-    // The index of the stop being moved. It is re-resolved after every write
-    // because `normalized()` re-sorts by position, so a stop dragged past
-    // another changes index mid-drag.
+    // The model index of the stop being moved. It is re-resolved after every
+    // write because `normalized()` re-sorts by position, so a stop dragged
+    // past another changes index mid-drag.
     let dragging = Rc::new(Cell::new(usize::MAX));
+    // Where inside the handle the press landed. The handle keeps this offset
+    // from the cursor for the whole drag, so grabbing it off-centre does not
+    // make it jump under the pointer.
+    let grab_offset = Rc::new(Cell::new(0.0));
     let drag = GestureDrag::new();
     drag.set_button(1);
+    // Keep the sequence even when the pointer strays off the popover's own
+    // surface. The event-controller default is `SameNative`, which drops the
+    // drag the instant the cursor crosses onto the window beneath — easy to
+    // do when the stop being dragged sits near the card's edge, which is why
+    // the far handle felt like something was stealing the press.
+    drag.set_propagation_limit(gtk4::PropagationLimit::None);
     drag.connect_drag_begin({
         let state = state.clone();
         let notify = notify.clone();
         let dragging = dragging.clone();
-        move |gesture, x, y| {
+        let selected = selected.clone();
+        let grab_offset = grab_offset.clone();
+        move |gesture, x, _| {
             let Some(widget) = gesture.widget() else {
                 return;
             };
             let width = widget.allocated_width().max(1) as f64;
-            let height = widget.allocated_height().max(1) as f64;
-            let inset = HANDLE_RADIUS;
-            let span = (width - inset * 2.0).max(1.0);
-            let cy = height / 2.0;
-            let stops = current_gradient(&state).normalized().stops;
+            let gradient = current_gradient(&state);
 
+            // Distance is measured along the bar only: the handle sits on the
+            // track, so a press at either end of the ramp still belongs to it.
             let mut best = usize::MAX;
             let mut best_distance = f64::MAX;
-            for (index, stop) in stops.iter().enumerate() {
-                let cx = inset + stop.position * span;
-                let distance = (cx - x).hypot(cy - y);
+            let mut best_x = 0.0;
+            for (position, index, _) in bar_handles(&gradient) {
+                let cx = gradient_pin_x(position, width);
+                let distance = (cx - x).abs();
                 if distance < best_distance {
                     best_distance = distance;
+                    best_x = cx;
                     best = index;
                 }
             }
-            if best_distance <= HANDLE_RADIUS * 2.5 {
+            // Empty track: nothing to grab, so there is nothing to move. A
+            // press here must not create a stop — the + button owns that, so
+            // a stray click on the ramp cannot silently rewrite the gradient.
+            if best_distance <= GRADIENT_GRAB_RADIUS {
                 dragging.set(best);
+                grab_offset.set(x - best_x);
+                if selected.get() != best {
+                    selected.set(best);
+                    // Repaint the ring at once, but keep the full refresh out
+                    // of `drag-begin`. Running the editor ping and the Stops
+                    // rebuild inside the signal cost the gesture its sequence:
+                    // the first press on an unselected handle selected it and
+                    // then dropped the drag, so it took another press to move.
+                    if let Some(widget) = gesture.widget() {
+                        widget.queue_draw();
+                    }
+                    let notify = notify.clone();
+                    gtk4::glib::idle_add_local_once(move || notify());
+                }
                 return;
             }
-            // Empty track: add a stop at the click, then drag that one.
-            let position = ((x - inset) / span).clamp(0.0, 1.0);
-            let color = sample_color(&current_gradient(&state), position);
-            with_gradient(&state, |gradient| {
-                if gradient.stops.len() >= MAX_GRADIENT_STOPS {
-                    return;
-                }
-                gradient
-                    .stops
-                    .push(GradientStop::new(position, color.0, color.1, color.2));
-            });
-            notify();
-            // The list is now sorted, so find where the new stop landed.
-            dragging.set(
-                current_gradient(&state)
-                    .normalized()
-                    .stops
-                    .iter()
-                    .position(|stop| (stop.position - position).abs() < 1e-6)
-                    .unwrap_or(usize::MAX),
-            );
+            dragging.set(usize::MAX);
         }
     });
     drag.connect_drag_update({
         let state = state.clone();
         let notify = notify.clone();
         let dragging = dragging.clone();
+        let selected = selected.clone();
         move |gesture, dx, _| {
             let index = dragging.get();
             if index == usize::MAX {
@@ -1271,32 +1732,23 @@ fn attach_stop_drag(
                 return;
             };
             let width = widget.allocated_width().max(1) as f64;
-            let inset = HANDLE_RADIUS;
-            let span = (width - inset * 2.0).max(1.0);
-            let position = (((start + dx) - inset) / span).clamp(0.0, 1.0);
-            // Capture the position being moved so it can be found again after
-            // the list re-sorts.
-            let before = current_gradient(&state)
-                .normalized()
-                .stops
-                .get(index)
-                .map(|s| s.position);
+            // The handle centre keeps the press's offset from the cursor, and
+            // the position comes from the inverse of the handle placement, so
+            // the drag tracks what was drawn.
+            let center = (start + dx) - grab_offset.get();
+            let display = gradient_position_at(center, width);
+            let reversed = current_gradient(&state).reversed;
+            let position = if reversed { 1.0 - display } else { display };
             with_gradient(&state, |gradient| {
                 if let Some(stop) = gradient.stops.get_mut(index) {
                     stop.position = position;
                 }
             });
-            let _ = before;
-            notify();
             // Re-resolve: the stop that was at `index` may now be elsewhere.
-            dragging.set(
-                current_gradient(&state)
-                    .normalized()
-                    .stops
-                    .iter()
-                    .position(|stop| (stop.position - position).abs() < 1e-9)
-                    .unwrap_or(usize::MAX),
-            );
+            let index = find_stop_at(&state, position);
+            dragging.set(index);
+            selected.set(index);
+            notify();
         }
     });
     drag.connect_drag_end({
@@ -1350,6 +1802,161 @@ mod tests {
     }
 
     #[test]
+    fn the_rail_is_slimmer_than_the_thumb() {
+        // The rail is the slim strip; the thumb straddles it. Shrinking the
+        // thumb into the rail killed its grabbability, so pin the split: a
+        // thin rail, a full-size handle.
+        assert!(
+            SPECTRUM_BAR_THICKNESS < HANDLE_RADIUS * 2.0,
+            "the rail ({}) must be slimmer than the thumb ({})",
+            SPECTRUM_BAR_THICKNESS,
+            HANDLE_RADIUS * 2.0
+        );
+        // The widget must be tall enough for the whole thumb to show.
+        assert!(
+            f64::from(SPECTRUM_CONTENT_HEIGHT) >= HANDLE_RADIUS * 2.0,
+            "the widget must fit the full thumb"
+        );
+    }
+
+    #[test]
+    fn a_drag_update_is_a_total_offset_not_a_delta() {
+        // `drag-update` reports the total offset from the press, so the live
+        // position is the press point plus that offset, resolved fresh on every
+        // update. Summing updates into an accumulator adds totals on top of
+        // totals, which flung the plane's handle to the edges instead of
+        // following the cursor.
+        assert_eq!(
+            resolve_drag_position((100.0, 40.0), (7.0, 0.0)),
+            (107.0, 40.0)
+        );
+        // The same update repeated is the same position, not further travel.
+        assert_eq!(
+            resolve_drag_position((100.0, 40.0), (7.0, 0.0)),
+            (107.0, 40.0)
+        );
+        assert_eq!(
+            resolve_drag_position((100.0, 40.0), (10.0, -10.0)),
+            (110.0, 30.0)
+        );
+    }
+
+    #[test]
+    fn the_hue_bar_wakes_up_from_gray() {
+        // Keeping saturation makes the rainbow a no-op from gray, white, or
+        // black — every hue is the same shade there, which is why the bar only
+        // worked after the plane was touched first. From those it must snap to
+        // the vivid hue instead.
+        assert_eq!(hue_adjusted_color((255, 255, 255), 0.0), (255, 0, 0));
+        assert_eq!(hue_adjusted_color((128, 128, 128), 1.0 / 3.0), (0, 128, 0));
+        // Near-black also recovers value, or no hue could read anyway.
+        assert_eq!(hue_adjusted_color((17, 17, 17), 2.0 / 3.0), (0, 0, 255));
+        // A real color keeps its own saturation and value — only hue moves.
+        let kept = hue_adjusted_color((255, 128, 128), 1.0 / 3.0);
+        assert_eq!(kept, (128, 255, 128));
+    }
+
+    #[test]
+    fn the_hue_handle_stays_on_the_bar() {
+        // A handle centered at x=0 with radius r extends r pixels off the
+        // left end, which rendered the red end of the bar as a clipped
+        // crescent. It has to be fully on the bar at every hue.
+        let w = 400.0;
+        let r = 11.0;
+        for hue in [0.0, 0.25, 0.5, 0.75, 1.0] {
+            let x = spectrum_handle_x(hue, w, r);
+            assert!(
+                x >= r && x <= w - r,
+                "hue {hue} put the handle at {x}, outside [{r}, {}]",
+                w - r
+            );
+        }
+        // A mid-bar hue is untouched, so the clamp only moves the ends.
+        assert_eq!(spectrum_handle_x(0.5, w, r), 200.0);
+        // A bar narrower than the handle must not produce an inverted range.
+        assert!(spectrum_handle_x(0.0, 10.0, 11.0).is_finite());
+    }
+
+    #[test]
+    fn flipping_the_gradient_mirrors_the_bar_handles() {
+        let forward = VideoGradient::default();
+        let flipped = VideoGradient {
+            reversed: true,
+            ..VideoGradient::default()
+        };
+        let a = bar_handles(&forward);
+        let b = bar_handles(&flipped);
+        // Forward: blue at the left, white at the right.
+        assert_eq!(a[0].0, 0.0);
+        assert_eq!((a[0].2.r, a[0].2.g, a[0].2.b), (0x00, 0x90, 0xFF));
+        assert_eq!(a[1].0, 1.0);
+        // Flipped: the same model stops are drawn white-first.
+        assert_eq!(b[0].0, 0.0);
+        assert_eq!((b[0].2.r, b[0].2.g, b[0].2.b), (0xFF, 0xFF, 0xFF));
+        assert_eq!((b[1].2.r, b[1].2.g, b[1].2.b), (0x00, 0x90, 0xFF));
+        // A write aimed at the left pin of a flipped bar has to target the
+        // white stop (model index 1), not the blue one at index 0.
+        assert_eq!(b[0].1, 1);
+        assert_eq!(b[1].1, 0);
+    }
+
+    #[test]
+    fn a_stop_handle_stays_clear_of_the_bar_ends() {
+        // The reported bug: an end stop sat flush against the widget edge, so
+        // its selection ring was clipped and the handle read as boxed into the
+        // ramp. The travel has to leave room for the whole ring.
+        let w = 220.0;
+        let reach = GRADIENT_PIN_SIZE / 2.0 + GRADIENT_PIN_RING + 1.0;
+        for position in [0.0, 0.5, 1.0] {
+            let cx = gradient_pin_x(position, w);
+            assert!(
+                cx - reach >= 0.0 && cx + reach <= w,
+                "handle at {position} leaves the bar at {cx}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_end_stops_are_grab_wide() {
+        // The other half of the bug: the far stop has no track to its right,
+        // so the grab zone has to reach across the whole handle and the ramp
+        // beside it, and the drag has to invert the drawn placement so an
+        // off-centre grab does not fling the handle.
+        let w = 220.0;
+        assert_eq!(gradient_position_at(gradient_pin_x(0.0, w), w), 0.0);
+        assert_eq!(gradient_position_at(gradient_pin_x(1.0, w), w), 1.0);
+        assert!((gradient_position_at(gradient_pin_x(0.5, w), w) - 0.5).abs() < 1e-9);
+        // The zones reach past the bar's ends, so a press on the very end of
+        // the ramp still picks up the stop sitting there.
+        assert!(gradient_pin_x(0.0, w) - GRADIENT_GRAB_RADIUS <= 0.0);
+        assert!(gradient_pin_x(1.0, w) + GRADIENT_GRAB_RADIUS >= w);
+    }
+
+    #[test]
+    fn every_kind_names_itself() {
+        // The picker label and the model must agree; a mismatch would show one
+        // type's name while rendering another.
+        assert_eq!(kind_label(GradientKind::Linear), t("Linear"));
+        assert_eq!(kind_label(GradientKind::Radial), t("Radial"));
+        assert_eq!(kind_label(GradientKind::Angular), t("Angular"));
+        assert_eq!(kind_label(GradientKind::Diamond), t("Diamond"));
+    }
+
+    #[test]
+    fn light_stops_get_a_dark_handle_ring() {
+        let ring = handle_ring_color((0x00, 0x90, 0xFF));
+        assert!(
+            ring.0 > 0.9 && ring.1 > 0.9 && ring.2 > 0.9,
+            "blue keeps the light ring"
+        );
+        let dark = handle_ring_color((0xFF, 0xFF, 0xFF));
+        assert!(
+            dark.0 < 0.2 && dark.1 < 0.2 && dark.2 < 0.2,
+            "a white stop with a white ring would vanish into the ramp's end"
+        );
+    }
+
+    #[test]
     fn the_plane_covers_saturation_and_value() {
         // The plane is what makes the big field a picker rather than a flat
         // swatch: saturation runs left to right and value top to bottom, both
@@ -1374,9 +1981,7 @@ mod tests {
             let back = hsv_to_rgb(rh, rs, rv);
             let within = |a: u8, b: u8| (a as i32 - b as i32).abs() <= 2;
             assert!(
-                within(color.0, back.0)
-                    && within(color.1, back.1)
-                    && within(color.2, back.2),
+                within(color.0, back.0) && within(color.1, back.1) && within(color.2, back.2),
                 "{color:?} came back as {back:?}"
             );
         }
@@ -1394,6 +1999,67 @@ mod tests {
                 (recovered - hue).abs() < 0.02 || (recovered - hue).abs() > 0.98,
                 "hue {hue} came back as {recovered}"
             );
+        }
+    }
+
+    #[test]
+    fn every_gradient_icon_stroke_stays_inside_the_lucide_box() {
+        // Both glyphs are transcribed from Lucide's 24x24 artwork and drawn
+        // into a square the button would clip. A coordinate outside the box
+        // silently loses an arrow head, and a corner that bulges past it
+        // loses a rounded corner, so the whole path is kept inside.
+        for icon in [GradientIcon::ArrowLeftRight, GradientIcon::RotateCwSquare] {
+            for segment in gradient_icon_path(icon) {
+                match *segment {
+                    IconSegment::Move(x, y) | IconSegment::Line(x, y) => assert!(
+                        (0.0..=24.0).contains(&x) && (0.0..=24.0).contains(&y),
+                        "{icon:?} leaves Lucide's box at ({x}, {y})"
+                    ),
+                    IconSegment::Corner { cx, cy, r, .. } => assert!(
+                        cx - r >= 0.0 && cx + r <= 24.0 && cy - r >= 0.0 && cy + r <= 24.0,
+                        "{icon:?}'s corner at ({cx}, {cy}) sweeps outside the box"
+                    ),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_rounded_corner_meets_the_stroke_before_it() {
+        // An SVG `a` corner starts wherever the previous command ended, while
+        // Cairo joins the current point straight to the arc's start. A
+        // mistyped angle would show up as a chamfered corner, so each arc has
+        // to begin exactly on the stroke that hands over to it. The angles
+        // also have to stay a quarter turn: swapping them keeps the endpoints
+        // but sweeps three quarters the wrong way, which would paint over the
+        // square's inside.
+        for icon in [GradientIcon::ArrowLeftRight, GradientIcon::RotateCwSquare] {
+            let mut current: Option<(f64, f64)> = None;
+            for segment in gradient_icon_path(icon) {
+                match *segment {
+                    IconSegment::Move(x, y) | IconSegment::Line(x, y) => current = Some((x, y)),
+                    IconSegment::Corner {
+                        cx,
+                        cy,
+                        r,
+                        from,
+                        to,
+                    } => {
+                        let (px, py) = current.expect("a corner follows a stroke");
+                        let start = (cx + r * from.cos(), cy + r * from.sin());
+                        assert!(
+                            (start.0 - px).abs() < 1e-9 && (start.1 - py).abs() < 1e-9,
+                            "{icon:?}: corner starts at {start:?}, stroke ends at ({px:?}, {py:?})"
+                        );
+                        let sweep = (from - to).rem_euclid(2.0 * PI);
+                        assert!(
+                            sweep <= PI + 1e-9,
+                            "{icon:?}: corner at ({cx}, {cy}) sweeps {sweep} rad the long way"
+                        );
+                        current = Some((cx + r * to.cos(), cy + r * to.sin()));
+                    }
+                }
+            }
         }
     }
 }

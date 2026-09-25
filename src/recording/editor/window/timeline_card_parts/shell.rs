@@ -31,7 +31,11 @@ pub fn build_timeline_card(
 
     let zoom = labeled_tool_button("zoom-fit-best-symbolic", &t("Zoom"), &t("Add zoom at playhead"));
     let hide = labeled_tool_button("view-conceal-symbolic", &t("Hide"), &t("Hide cursor at playhead"));
-    let split = labeled_tool_button("edit-cut-symbolic", &t("Split"), &t("Split at playhead"));
+    let split = labeled_tool_button(
+        icon_names::custom::SQUARE_SPLIT_HORIZONTAL_SYMBOLIC,
+        &t("Split"),
+        &t("Split at playhead"),
+    );
     let freeze = labeled_tool_button(
         "media-record-symbolic",
         &t("Freeze"),

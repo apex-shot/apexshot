@@ -1,10 +1,9 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
     nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoBackground,
-    VideoEditState, ZoomEasing, ZoomMode, CLIP_SPEED_PRESETS,
-    MAX_CLICK_DURATION_MS, MAX_CLICK_SCALE, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED,
-    MIN_CLICK_DURATION_MS, MIN_CLICK_SCALE, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED,
-    ZOOM_SCALE_PRESETS,
+    VideoEditState, ZoomEasing, ZoomMode, CLIP_SPEED_PRESETS, MAX_CLICK_DURATION_MS,
+    MAX_CLICK_SCALE, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLICK_DURATION_MS, MIN_CLICK_SCALE,
+    MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
     gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
@@ -860,7 +859,7 @@ mod tests {
             "the row needs its own Edit button"
         );
         assert!(
-            panel.contains("custom_edit.connect_clicked("),
+            panel.contains("build_custom_wallpaper_popover(") && panel.contains("&custom_edit,"),
             "Edit, not the whole row, is what opens the Custom Wallpaper dialog"
         );
         assert!(
@@ -908,18 +907,104 @@ mod tests {
     }
 
     #[test]
+    fn the_custom_wallpaper_picker_draws_its_own_surface() {
+        // The app ships no libadwaita, so an unstyled popover falls through to
+        // the host desktop's GTK theme and the card stops matching the editor.
+        // Both halves of the strip-then-paint pattern have to stay: the popover
+        // node gives up the theme's surface, the body draws ours. Dropping
+        // either one silently reintroduces the mismatch, so pin both.
+        let css = include_str!("../ui_support_css/09.css");
+        let strip = css
+            .find("popover.recording-editor-custom-popover,")
+            .expect("09.css must strip the inherited GTK popover surface");
+        let strip_end = css[strip..].find('}').expect("the rule is closed") + strip;
+        for property in [
+            "background: transparent;",
+            "border: none;",
+            "box-shadow: none;",
+        ] {
+            assert!(
+                css[strip..strip_end].contains(property),
+                "the popover must give up the desktop theme's surface ({property})"
+            );
+        }
+
+        let body = css
+            .find(".recording-editor-custom-body {")
+            .expect("09.css must define the picker surface");
+        let body_end = css[body..].find('}').expect("the rule is closed") + body;
+        for property in [
+            "background: #1d1d1d;",
+            "border-radius: 12px;",
+            "border: 1px solid alpha(white, 0.10);",
+            "box-shadow: 0 12px 32px alpha(black, 0.45);",
+        ] {
+            assert!(
+                css[body..body_end].contains(property),
+                "the picker body must paint the app's own card ({property})"
+            );
+        }
+
+        // The light theme needs its own surface or the dark card shows through.
+        assert!(
+            css.contains(".editor-theme-light .recording-editor-custom-body {"),
+            "the picker surface needs a light-theme counterpart"
+        );
+    }
+
+    #[test]
+    fn the_picker_value_row_is_one_pill_not_a_box_in_a_box() {
+        // The value row already carries the pill surface, so the entry inside
+        // it has to be flat. `.recording-editor-root entry` in 01.css paints a
+        // 6px radius, alpha(white, 0.06) fill, and a border, and it outranks a
+        // bare `.recording-editor-custom-hex` — so the reset has to match that
+        // specificity or the hex reads as a second box nested in the first.
+        let css = include_str!("../ui_support_css/09.css");
+        let class = ".recording-editor-custom-value-row .recording-editor-custom-hex {";
+        let start = css
+            .find(class)
+            .unwrap_or_else(|| panic!("09.css must define {class}"));
+        let block = &css[start..];
+        let end = block.find('}').expect("the rule is closed");
+        for property in [
+            "background: transparent;",
+            "background-image: none;",
+            "border: none;",
+            "box-shadow: none;",
+        ] {
+            assert!(
+                block[..end].contains(property),
+                "the hex entry must sit flat inside the value row ({property})"
+            );
+        }
+    }
+
+    #[test]
     fn the_custom_wallpaper_popover_opens_beside_the_sidebar() {
-        // Placement is the point of this UI: the popover anchors to the Edit
-        // pill and opens left, so it floats over the video stage instead of
-        // covering the sidebar row it is editing or centering on the window.
+        // Placement is the point of this UI: the card is parented to the side
+        // panel and points at the panel's left edge, so it floats over the
+        // video stage instead of covering the panel it is editing or centering
+        // on the window. The Edit pill only seats it level with the row.
         let source = include_str!("custom_wallpaper_popover.rs");
         assert!(
             source.contains("popover.set_position(gtk4::PositionType::Left)"),
             "the popover must open left of the sidebar, not centered on the window"
         );
         assert!(
-            source.contains("popover.set_parent(anchor)"),
-            "the popover must anchor to the Edit pill"
+            source.contains("popover.set_parent(sidebar)"),
+            "the popover must be parented to the side panel"
+        );
+        assert!(
+            source.contains("edit.compute_bounds(&sidebar)"),
+            "the card must read the Edit row's bounds so it tracks the panel's scroll"
+        );
+        assert!(
+            source.contains("popover.set_pointing_to("),
+            "the card must point at the panel's left edge, not at the row inside the panel"
+        );
+        assert!(
+            source.contains("-POPOVER_SIDEBAR_GAP"),
+            "the card must be anchored clear of the panel's edge so it does not butt against the controls"
         );
         assert!(
             source.contains("popover.set_has_arrow(false)"),
@@ -949,21 +1034,21 @@ mod tests {
             "the plane must draw a handle at the live color's position"
         );
         // A flat fill of the current color is what produced the black box.
-        let draw_plane = source
-            .find("fn draw_plane(")
-            .expect("draw_plane exists");
+        let draw_plane = source.find("fn draw_plane(").expect("draw_plane exists");
         let end = source[draw_plane..]
             .find("\nfn ")
             .map(|at| draw_plane + at)
             .expect("draw_plane is closed");
         assert!(
-            !source[draw_plane..end].contains("fill_rounded(cr, 0.0, 0.0, w, h, FIELD_RADIUS, color)"),
+            !source[draw_plane..end]
+                .contains("fill_rounded(cr, 0.0, 0.0, w, h, FIELD_RADIUS, color)"),
             "the field must not be a flat fill of the current color"
         );
     }
 
     #[test]
-    fn the_custom_wallpaper_popover_has_color_and_gradient_only() {        // The reference's Image sub-tab is not built: the panel already has an
+    fn the_custom_wallpaper_popover_has_color_and_gradient_only() {
+        // The reference's Image sub-tab is not built: the panel already has an
         // Image source tab, so a second one here would pick the same file twice.
         let source = include_str!("custom_wallpaper_popover.rs");
         for tab in ["t(\"Color\")", "t(\"Gradient\")"] {
@@ -1003,18 +1088,77 @@ mod tests {
     }
 
     #[test]
+    fn the_popover_opens_showing_only_the_active_page() {
+        // Both pages are appended visible and the tab handlers only run once a
+        // tab is toggled, so without an explicit initial sync the popover
+        // opened with the Color and Gradient editors stacked on top of each
+        // other until the user clicked a tab.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let handlers = source
+            .find("color_tab.connect_toggled")
+            .expect("the Color tab has a toggle handler");
+        let initial_sync = source
+            .find("set_page(false);")
+            .expect("the popover syncs the pages to the active tab");
+        assert!(
+            initial_sync < handlers,
+            "the active page must be selected before the tab handlers are wired, \
+             or both pages show on open"
+        );
+    }
+
+    #[test]
     fn the_gradient_editor_is_wired_end_to_end() {
         // Every control the reference gradient tab shows has to reach state.
         let source = include_str!("custom_wallpaper_popover.rs");
         for (needle, why) in [
             ("fn attach_stop_drag(", "stops must be draggable"),
             ("fn add_stop(", "the Steps + button must add a stop"),
-            ("fn remove_stop(", "a stop must be removable"),
-            ("fn open_stop_color_picker(", "a stop's color must be editable"),
-            ("fn attach_angle_drag(", "the angle must be adjustable"),
-            ("g.reversed = !g.reversed", "reverse must toggle"),
+            (
+                "fn open_stop_color_picker(",
+                "a stop's color must be editable",
+            ),
+            (
+                "GradientIcon::RotateCwSquare",
+                "the angle must be rotatable, through Lucide's rotate-cw-square",
+            ),
+            (
+                "fn draw_gradient_icon(",
+                "the header glyphs must be drawn from the reference's own path data",
+            ),
+            (
+                "GRADIENT_ROTATE_STEP",
+                "the rotate control must step the angle",
+            ),
+            (
+                "GradientIcon::ArrowLeftRight",
+                "the flip control must use Lucide's arrow-left-right, not a theme icon",
+            ),
+            (
+                "gradient.reversed = !gradient.reversed",
+                "reverse must toggle",
+            ),
+            (
+                "recording-editor-gradient-type",
+                "the type picker must carry the reference's compact chip styling",
+            ),
+            (
+                "recording-editor-dropdown-item",
+                "the type picker must be the app's own dropdown pattern",
+            ),
+            (
+                "object-select-symbolic",
+                "the active type must be checked in the menu",
+            ),
         ] {
             assert!(source.contains(needle), "gradient editor: {why}");
+        }
+        // Figma's four gradient shapes all have to be offered by the picker.
+        for kind in ["Linear", "Radial", "Angular", "Diamond"] {
+            assert!(
+                source.contains(&format!("t(\"{kind}\")")),
+                "the type picker must offer {kind}"
+            );
         }
         // Stops are bounded, so the UI has to respect the same bounds the
         // model normalizes to.
@@ -1022,9 +1166,41 @@ mod tests {
             source.contains("MAX_GRADIENT_STOPS"),
             "adding a stop must stop at the model's maximum"
         );
+    }
+
+    #[test]
+    fn a_stop_row_is_a_chip_and_a_hex_and_nothing_else() {
+        // The row deliberately does not repeat position or opacity as
+        // percentages. Position is the pin on the bar above, and a row that
+        // also typed it would be a second, disagreeing source for the same
+        // number; alpha is not part of this editor's per-stop surface.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        for dropped in [
+            "recording-editor-gradient-step-position",
+            "recording-editor-gradient-step-opacity",
+            "recording-editor-gradient-step-remove",
+        ] {
+            assert!(
+                !source.contains(dropped),
+                "{dropped} was dropped from the stop row and must not come back"
+            );
+        }
+        let css = include_str!("../ui_support_css/09.css");
+        for stale in [
+            ".recording-editor-gradient-step-position",
+            ".recording-editor-gradient-step-opacity",
+            ".recording-editor-gradient-step-remove",
+        ] {
+            assert!(
+                !css.contains(stale),
+                "{stale} has no widget left and must not linger in the stylesheet"
+            );
+        }
+        // The hex still has to be editable, or a stop's color could only be
+        // changed through the chooser dialog.
         assert!(
-            source.contains("MIN_GRADIENT_STOPS"),
-            "removing a stop must stop at the model's minimum"
+            source.contains("recording-editor-gradient-step-hex"),
+            "the stop row must still carry an editable hex"
         );
     }
 
@@ -1041,10 +1217,10 @@ mod tests {
         // draw functions rather than the whole file.
         let source = include_str!("custom_wallpaper_popover.rs");
         assert!(
-            source.contains("render_gradient(gradient,"),
+            source.contains("render_gradient(&flat,"),
             "the popover must render gradients with the shared rasterizer"
         );
-        for draw in ["fn draw_gradient_field(", "fn draw_stop_bar("] {
+        for draw in ["fn draw_stop_bar("] {
             let start = source
                 .find(draw)
                 .unwrap_or_else(|| panic!("the popover must define {draw}"));
@@ -1061,7 +1237,68 @@ mod tests {
     }
 
     #[test]
-    fn every_source_tab_refreshes_the_pages() {        // The Wallpaper tab only recorded the open page and never asked for a
+    fn the_gradient_bar_edits_stops_flat() {
+        // The bar is where handles are dragged onto stops, so it always renders
+        // left-to-right: the angle is a canvas/export property, and applying it
+        // here would slide handles off the stops they belong to. Reversal does
+        // apply, because it is a property of the stop order.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let start = source
+            .find("fn draw_stop_bar(")
+            .expect("the gradient bar has a draw function");
+        let end = source[start..]
+            .find("\nfn ")
+            .map(|at| start + at)
+            .unwrap_or(source.len());
+        let body = &source[start..end];
+        assert!(
+            body.contains("angle_degrees = 0.0"),
+            "the bar must flatten the angle so pins stay on their stops"
+        );
+        assert!(
+            body.contains("flat.kind = GradientKind::Linear"),
+            "the bar must flatten the kind too, or a radial's pins lose their stops"
+        );
+        assert!(
+            body.contains("bar_handles(gradient)"),
+            "the bar must place pins through the reversal-aware helper"
+        );
+    }
+
+    #[test]
+    fn only_the_stops_button_adds_a_stop() {
+        // The bar is a drag surface for the pins already there. It used to
+        // create a stop where the press landed, so any stray click on the
+        // ramp added a stop the user never asked for. Adding belongs to the
+        // Stops + button and nowhere else.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let start = source
+            .find("fn attach_stop_drag(")
+            .expect("the bar has a drag handler");
+        let end = source[start..]
+            .find("\n#[cfg(test)]")
+            .map(|at| start + at)
+            .unwrap_or(source.len());
+        let body = &source[start..end];
+        assert!(
+            !body.contains("GradientStop::new("),
+            "the bar's drag handler must not create stops; the + button does"
+        );
+        assert!(
+            !body.contains("sample_color_at("),
+            "the drag handler must not sample a new stop's color"
+        );
+        // A press that grabs no pin must leave nothing dragged, or the update
+        // handler would move whatever stop happened to be at the stale index.
+        assert!(
+            body.contains("dragging.set(usize::MAX);"),
+            "a press on empty track must clear the drag target"
+        );
+    }
+
+    #[test]
+    fn every_source_tab_refreshes_the_pages() {
+        // The Wallpaper tab only recorded the open page and never asked for a
         // refresh, so going Custom and back left the custom page on screen.
         // Every tab must route through the same change + refresh path.
         let panel = include_str!("tool_sidebar_background.rs");

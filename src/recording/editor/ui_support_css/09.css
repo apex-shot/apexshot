@@ -312,16 +312,36 @@
              * Opens beside the sidebar (PositionType::Left) so it floats over
              * the video stage and never covers the row it is editing. */
 
-            .recording-editor-custom-popover {
+            /* Strip the desktop GTK theme's own popover surface first. The app
+             * ships no libadwaita, so `popover > contents` otherwise picks up
+             * whatever the host theme paints and the card stops matching the
+             * editor's chrome. This is the same two-step strip-then-paint
+             * pattern every other popover here uses (03.css:152, 03.css:183,
+             * 04-color-palette.css:163). */
+            popover.recording-editor-custom-popover,
+            popover.recording-editor-custom-popover > contents {
+                background: transparent;
+                border: none;
+                box-shadow: none;
                 padding: 0;
+            }
+
+            .recording-editor-custom-popover {
                 /* The reference's popover is a fixed, fairly narrow panel —
                  * wide enough for the plane to read, narrow enough not to
                  * cover the video it is editing. */
                 min-width: 236px;
             }
 
+            /* The real surface. Values follow the app's floating-card
+             * convention (#1d1d1d, 1px alpha(white, 0.10) border, 12px
+             * radius); the light counterpart is below. */
             .recording-editor-custom-body {
                 padding: 0;
+                background: #1d1d1d;
+                border-radius: 12px;
+                border: 1px solid alpha(white, 0.10);
+                box-shadow: 0 12px 32px alpha(black, 0.45);
             }
 
             .recording-editor-custom-header {
@@ -354,8 +374,11 @@
                 margin: 0 10px 8px 10px;
             }
 
+            /* Inset so the plane's own 8px radius (FIELD_RADIUS, drawn in
+             * Cairo) sits inside the card's 12px instead of poking through
+             * its corners. */
             .recording-editor-custom-field {
-                margin: 0 0 8px 0;
+                margin: 0 10px 8px 10px;
             }
 
             .recording-editor-custom-spectrum {
@@ -370,11 +393,20 @@
                 background: alpha(white, 0.06);
             }
 
-            .recording-editor-custom-hex {
+            /* The value row is already the pill, so the entry inside it must be
+             * flat — otherwise its own 6px radius and alpha(white, 0.06) fill
+             * read as a box-in-a-box. `.recording-editor-root entry` in 01.css
+             * wins on specificity, so the reset needs the same prefix. */
+            .recording-editor-custom-value-row .recording-editor-custom-hex {
                 min-width: 0;
                 padding: 0 2px;
                 font-size: 12px;
                 color: alpha(white, 0.78);
+                background: transparent;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                min-height: 0;
             }
 
             .recording-editor-custom-unit {
@@ -382,27 +414,45 @@
                 font-size: 11px;
             }
 
+            /* The swatch's fill is drawn in Cairo at a 5px radius (see
+             * build_color_page), so the widget itself must stay undecorated —
+             * the desktop theme's own background would otherwise sit under the
+             * drawn chip. */
+            .recording-editor-custom-swatch {
+                border-radius: 5px;
+                background: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
             /* ── Gradient editor ── */
 
-            .recording-editor-gradient-controls {
+            .recording-editor-gradient-header {
                 margin: 0 12px 8px 12px;
             }
 
-            .recording-editor-gradient-angle {
-                min-width: 0;
+            /* The type picker reuses the app's own dropdown chrome (03.css for
+             * the dark chip, 05.css for the light one); this only sizes it so
+             * it sits level with the icon buttons beside it. */
+            button.recording-editor-gradient-type {
+                min-width: 96px;
             }
 
-            button.recording-editor-gradient-reverse {
-                min-width: 30px;
+            button.recording-editor-gradient-icon {
+                min-width: 28px;
                 min-height: 28px;
                 padding: 0;
                 border: none;
-                border-radius: 6px;
-                background: alpha(white, 0.06);
+                border-radius: 7px;
+                background: alpha(white, 0.07);
             }
 
-            button.recording-editor-gradient-reverse:hover {
+            button.recording-editor-gradient-icon:hover {
                 background: alpha(white, 0.12);
+            }
+
+            button.recording-editor-gradient-icon:disabled {
+                opacity: 0.35;
             }
 
             .recording-editor-gradient-bar {
@@ -410,7 +460,7 @@
             }
 
             .recording-editor-gradient-steps-header {
-                margin: 0 16px 6px 12px;
+                margin: 0 12px 6px 12px;
             }
 
             .recording-editor-gradient-steps-header label {
@@ -444,33 +494,50 @@
                 margin: 0 12px 12px 12px;
             }
 
+            /* Full-width stop cards: a color chip and its hex. The selected
+             * stop mirrors the ringed pin on the bar. */
             .recording-editor-gradient-step {
-                min-height: 26px;
+                min-height: 48px;
+                padding: 0 5px;
+                border-radius: 10px;
+                background: alpha(white, 0.05);
             }
 
-            .recording-editor-gradient-step label {
-                color: alpha(white, 0.72);
-                font-size: 12px;
+            .recording-editor-gradient-step.selected {
+                background: alpha(white, 0.12);
             }
 
-            button.recording-editor-gradient-step-remove {
-                min-width: 24px;
-                min-height: 22px;
-                padding: 0;
-                border: none;
-                border-radius: 6px;
+            /* The chip's fill and radius are drawn in Cairo (draw_stop_chip), so
+             * the widget itself must stay undecorated — the desktop theme's own
+             * background would otherwise sit under the drawn chip. */
+            .recording-editor-gradient-step-swatch {
+                border-radius: 8px;
                 background: transparent;
+                border: none;
+                box-shadow: none;
             }
 
-            button.recording-editor-gradient-step-remove:hover {
-                background: alpha(white, 0.10);
-            }
-
-            button.recording-editor-gradient-step-remove:disabled {
-                opacity: 0.28;
+            /* The hex is a flat field inside the card. Two classes are needed to
+             * outrank `.recording-editor-root entry` in 01.css. */
+            .recording-editor-gradient-step .recording-editor-gradient-step-hex {
+                min-height: 34px;
+                padding: 0 10px;
+                font-size: 12px;
+                color: alpha(white, 0.85);
+                background: alpha(white, 0.06);
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                border-radius: 8px;
             }
 
             /* ── Light theme ── */
+
+            .editor-theme-light .recording-editor-custom-body {
+                background: #ffffff;
+                border-color: alpha(#111827, 0.08);
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+            }
 
             .editor-theme-light .recording-editor-custom-title {
                 color: alpha(#1d2129, 0.92);
@@ -488,11 +555,11 @@
                 color: alpha(#1d2129, 0.42);
             }
 
-            .editor-theme-light button.recording-editor-gradient-reverse {
+            .editor-theme-light button.recording-editor-gradient-icon {
                 background: alpha(#111827, 0.06);
             }
 
-            .editor-theme-light button.recording-editor-gradient-reverse:hover {
+            .editor-theme-light button.recording-editor-gradient-icon:hover {
                 background: alpha(#111827, 0.12);
             }
 
@@ -510,6 +577,17 @@
                 color: alpha(#1d2129, 0.96);
             }
 
-            .editor-theme-light .recording-editor-gradient-step label {
-                color: alpha(#1d2129, 0.72);
+            .editor-theme-light .recording-editor-gradient-step {
+                background: alpha(#111827, 0.05);
+            }
+
+            .editor-theme-light .recording-editor-gradient-step.selected {
+                background: alpha(#111827, 0.12);
+            }
+
+            .editor-theme-light
+                .recording-editor-gradient-step
+                .recording-editor-gradient-step-hex {
+                color: alpha(#1d2129, 0.85);
+                background: alpha(#111827, 0.05);
             }

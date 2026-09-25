@@ -11,11 +11,12 @@ use std::time::UNIX_EPOCH;
 
 use super::model::{
     AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorSettings, CursorTheme,
-    DimensionPreset, ExportQuality, GradientStop, ProjectMedia, ProjectMediaKind, VideoBackground,
-    VideoEditState, VideoGradient, ZoomClip, ZoomEasing, ZoomMode, DEFAULT_CLICK_COLOR,
-    DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY, DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE,
-    DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH,
-    DEFAULT_CURSOR_SPEED, DEFAULT_CURSOR_SWAY, DEFAULT_CURSOR_TILT, DEFAULT_CURSOR_TRAIL,
+    DimensionPreset, ExportQuality, GradientKind, GradientStop, ProjectMedia, ProjectMediaKind,
+    VideoBackground, VideoEditState, VideoGradient, ZoomClip, ZoomEasing, ZoomMode,
+    DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY, DEFAULT_CLICK_OPACITY,
+    DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE,
+    DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED, DEFAULT_CURSOR_SWAY, DEFAULT_CURSOR_TILT,
+    DEFAULT_CURSOR_TRAIL,
 };
 
 pub const VIDEO_PROJECT_VERSION: u32 = 1;
@@ -202,7 +203,11 @@ pub struct CropFile {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BackgroundFile {
     None,
-    Plain { r: u8, g: u8, b: u8 },
+    Plain {
+        r: u8,
+        g: u8,
+        b: u8,
+    },
     /// Legacy preset reference. Gradients are drawn by hand now, so this is
     /// only read — it deserializes to a default two-stop gradient.
     Gradient {
@@ -218,11 +223,17 @@ pub enum BackgroundFile {
         angle_degrees: f64,
         #[serde(default)]
         reversed: bool,
+        /// Added after the first hand-drawn gradients shipped, so older files
+        /// default to linear.
+        #[serde(default)]
+        kind: GradientKindFile,
     },
-    Wallpaper { path: PathBuf },
+    Wallpaper {
+        path: PathBuf,
+    },
 }
 
-/// One gradient stop as stored on disk. `position` is 0..=1 along the line.
+/// One gradient stop as stored on disk. `position` is 0..=1 along the ramp.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct GradientStopFile {
     #[serde(default)]
@@ -230,6 +241,47 @@ pub struct GradientStopFile {
     pub r: u8,
     pub g: u8,
     pub b: u8,
+    /// Straight alpha. Files written before per-stop opacity existed have no
+    /// alpha and must stay fully opaque.
+    #[serde(default = "opaque_alpha")]
+    pub a: u8,
+}
+
+fn opaque_alpha() -> u8 {
+    u8::MAX
+}
+
+/// How a hand-drawn gradient travels, mirroring the model's `GradientKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GradientKindFile {
+    #[default]
+    Linear,
+    Radial,
+    Angular,
+    Diamond,
+}
+
+impl From<GradientKind> for GradientKindFile {
+    fn from(kind: GradientKind) -> Self {
+        match kind {
+            GradientKind::Linear => Self::Linear,
+            GradientKind::Radial => Self::Radial,
+            GradientKind::Angular => Self::Angular,
+            GradientKind::Diamond => Self::Diamond,
+        }
+    }
+}
+
+impl From<GradientKindFile> for GradientKind {
+    fn from(kind: GradientKindFile) -> Self {
+        match kind {
+            GradientKindFile::Linear => Self::Linear,
+            GradientKindFile::Radial => Self::Radial,
+            GradientKindFile::Angular => Self::Angular,
+            GradientKindFile::Diamond => Self::Diamond,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -508,10 +560,12 @@ fn background_to_file(bg: &VideoBackground) -> BackgroundFile {
                         r: stop.r,
                         g: stop.g,
                         b: stop.b,
+                        a: stop.a,
                     })
                     .collect(),
                 angle_degrees: gradient.angle_degrees,
                 reversed: gradient.reversed,
+                kind: gradient.kind.into(),
             }
         }
         VideoBackground::Wallpaper(path) => BackgroundFile::Wallpaper { path: path.clone() },
@@ -546,11 +600,13 @@ fn background_from_file(bg: BackgroundFile) -> VideoBackground {
             stops,
             angle_degrees,
             reversed,
+            kind,
         } => VideoBackground::Gradient(
             VideoGradient {
+                kind: kind.into(),
                 stops: stops
                     .iter()
-                    .map(|stop| GradientStop::new(stop.position, stop.r, stop.g, stop.b))
+                    .map(|stop| GradientStop::rgba(stop.position, stop.r, stop.g, stop.b, stop.a))
                     .collect(),
                 angle_degrees,
                 reversed,
@@ -956,8 +1012,8 @@ pub fn persist_video_session(state: &VideoEditState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recording::editor::model::MIN_GRADIENT_STOPS;
     use crate::recording::editor::model::VideoMetadata;
+    use crate::recording::editor::model::MIN_GRADIENT_STOPS;
     use std::fs;
     use std::time::{Duration, SystemTime};
 
@@ -1417,9 +1473,10 @@ mod tests {
         // Uneven stop positions are the whole point of the new type — an even
         // distribution would not prove they are actually persisted.
         let gradient = VideoGradient {
+            kind: GradientKind::Diamond,
             stops: vec![
                 GradientStop::new(0.0, 0x00, 0x90, 0xFF),
-                GradientStop::new(0.37, 0x12, 0x34, 0x56),
+                GradientStop::rgba(0.37, 0x12, 0x34, 0x56, 0x80),
                 GradientStop::new(1.0, 0xFF, 0xFF, 0xFF),
             ],
             angle_degrees: 42.0,
@@ -1428,7 +1485,10 @@ mod tests {
         let file = background_to_file(&VideoBackground::Gradient(gradient.clone()));
         let json = serde_json::to_string(&file).expect("gradient serializes");
         let parsed: BackgroundFile = serde_json::from_str(&json).expect("gradient deserializes");
-        assert_eq!(background_from_file(parsed), VideoBackground::Gradient(gradient));
+        assert_eq!(
+            background_from_file(parsed),
+            VideoBackground::Gradient(gradient)
+        );
     }
 
     #[test]
@@ -1436,11 +1496,27 @@ mod tests {
         // Projects written before the gradient editor stored a preset index.
         // There is no preset table any more, so it must open as a usable
         // default rather than failing to deserialize.
-        let legacy: BackgroundFile =
-            serde_json::from_str(r#"{"type":"gradient","index":3}"#).expect("legacy gradient loads");
+        let legacy: BackgroundFile = serde_json::from_str(r#"{"type":"gradient","index":3}"#)
+            .expect("legacy gradient loads");
         match background_from_file(legacy) {
             VideoBackground::Gradient(gradient) => {
                 assert_eq!(gradient.stops.len(), MIN_GRADIENT_STOPS);
+            }
+            other => panic!("expected a gradient, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_gradient_without_a_kind_loads_as_linear() {
+        // `kind` arrived after the first hand-drawn gradients, so a sidecar
+        // that predates it must keep opening as the linear gradient it was.
+        let legacy: BackgroundFile = serde_json::from_str(
+            r#"{"type":"gradient_spec","stops":[{"position":0.0,"r":0,"g":144,"b":255},{"position":1.0,"r":255,"g":255,"b":255}],"angle_degrees":0.0,"reversed":false}"#,
+        )
+        .expect("a spec without kind loads");
+        match background_from_file(legacy) {
+            VideoBackground::Gradient(gradient) => {
+                assert_eq!(gradient.kind, GradientKind::Linear)
             }
             other => panic!("expected a gradient, got {other:?}"),
         }
@@ -1482,7 +1558,9 @@ mod tests {
         // keep a real path. Retrying a moved user image against the asset
         // directory would silently swap in unrelated stock art.
         let moved = PathBuf::from("/home/someone/Pictures/my-photo.jpg");
-        let resolved = background_from_file(BackgroundFile::Wallpaper { path: moved.clone() });
+        let resolved = background_from_file(BackgroundFile::Wallpaper {
+            path: moved.clone(),
+        });
         assert_eq!(resolved, VideoBackground::Wallpaper(moved));
     }
 }

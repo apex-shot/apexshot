@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="16px" height="16px" viewBox="0 0 24 24">
+  <!-- Lucide "square-split-horizontal" (ISC, see LICENSE-LUCIDE.txt), converted to
+       filled paths: GTK symbolic icons recolor fill and drop strokes. -->
+  <path fill="#222222" d="M 13 2 A 1 1 0 0 0 11 2 L 11 22 A 1 1 0 0 0 13 22 Z"/>
+  <path fill="#222222" d="M 16 2 A 1 1 0 0 0 16 4 L 19 4 A 1 1 0 0 1 20 5 L 20 19 A 1 1 0 0 1 19 20 L 16 20 A 1 1 0 0 0 16 22 L 19 22 A 3 3 0 0 0 22 19 L 22 5 A 3 3 0 0 0 19 2 Z"/>
+  <path fill="#222222" d="M 8 22 A 1 1 0 0 0 8 20 L 5 20 A 1 1 0 0 1 4 19 L 4 5 A 1 1 0 0 1 5 4 L 8 4 A 1 1 0 0 0 8 2 L 5 2 A 3 3 0 0 0 2 5 L 2 19 A 3 3 0 0 0 5 22 Z"/>
+</svg>

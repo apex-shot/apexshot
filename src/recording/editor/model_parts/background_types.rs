@@ -1,11 +1,13 @@
 // Background fill types for the video editor.
 //
 // `VideoBackground` is the single source of truth for what sits behind the
-// video: nothing, a solid color, a user-drawn linear gradient, or an image
-// (bundled wallpaper or a file the user picked). The gradient is a real
-// multi-stop spec rather than a preset index so preview and export can share
-// one description of it — ffmpeg's `gradients` filter distributes stops evenly
-// and animates by default, so the export renders a generated still instead.
+// video: nothing, a solid color, a user-drawn gradient, or an image (bundled
+// wallpaper or a file the user picked). The gradient is a real multi-stop spec
+// rather than a preset index so preview and export can share one description
+// of it — ffmpeg's `gradients` filter distributes stops evenly and animates by
+// default, so the export renders a generated still instead. Gradients come in
+// Figma's four shapes (linear, radial, angular, diamond) and stops carry their
+// own alpha.
 
 /// Hard ceiling on gradient stops. The editor clamps to this rather than
 /// silently dropping stops the user added.
@@ -21,24 +23,50 @@ pub struct GradientStop {
     pub r: u8,
     pub g: u8,
     pub b: u8,
+    /// Straight alpha, 255 = opaque. Semi-transparent stops composite over the
+    /// canvas's black backdrop, so a gradient can fade out at an edge.
+    pub a: u8,
 }
 
 impl GradientStop {
     pub fn new(position: f64, r: u8, g: u8, b: u8) -> Self {
+        Self::rgba(position, r, g, b, u8::MAX)
+    }
+
+    pub fn rgba(position: f64, r: u8, g: u8, b: u8, a: u8) -> Self {
         Self {
             position,
             r,
             g,
             b,
+            a,
         }
     }
 }
 
+/// How a gradient's colors travel away from its stops.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum GradientKind {
+    /// Colors blend along a line set by `angle_degrees`.
+    #[default]
+    Linear,
+    /// Colors ripple outward from the centre; the angle is unused.
+    Radial,
+    /// Colors sweep around the centre starting from the angle.
+    Angular,
+    /// Colors spread out in axis-aligned squares (Figma's diamond metric:
+    /// distance is `max(|dx|, |dy|)`, not the radial circle). The angle is
+    /// unused.
+    Diamond,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct VideoGradient {
+    pub kind: GradientKind,
     pub stops: Vec<GradientStop>,
-    /// 0° runs left-to-right, increasing clockwise. The preview and the
-    /// exported still both derive their endpoints from this.
+    /// 0° runs left-to-right, increasing clockwise. Linear gradients run along
+    /// this; angular gradients start their sweep here. The preview and the
+    /// exported still both derive their sampling from it.
     pub angle_degrees: f64,
     pub reversed: bool,
 }
@@ -46,6 +74,7 @@ pub struct VideoGradient {
 impl Default for VideoGradient {
     fn default() -> Self {
         Self {
+            kind: GradientKind::Linear,
             stops: vec![
                 GradientStop::new(0.0, 0x00, 0x90, 0xFF),
                 GradientStop::new(1.0, 0xFF, 0xFF, 0xFF),
@@ -82,12 +111,15 @@ impl VideoGradient {
             // Pad by extending the nearer end so a 1-stop gradient still has
             // a direction rather than collapsing to a flat fill.
             let (position, color) = match stops.last() {
-                Some(last) => (1.0, (last.r, last.g, last.b)),
-                None => (1.0, (0xFF, 0xFF, 0xFF)),
+                Some(last) => (1.0, (last.r, last.g, last.b, last.a)),
+                None => (1.0, (0xFF, 0xFF, 0xFF, 0xFF)),
             };
-            stops.push(GradientStop::new(position, color.0, color.1, color.2));
+            stops.push(GradientStop::rgba(
+                position, color.0, color.1, color.2, color.3,
+            ));
         }
         Self {
+            kind: self.kind,
             stops,
             angle_degrees: if self.angle_degrees.is_finite() {
                 self.angle_degrees.rem_euclid(360.0)
@@ -120,6 +152,7 @@ impl VideoGradient {
                     r: source.r,
                     g: source.g,
                     b: source.b,
+                    a: source.a,
                 }
             })
             .collect()

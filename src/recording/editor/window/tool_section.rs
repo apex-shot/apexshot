@@ -60,7 +60,10 @@ pub(super) fn build_tool_section(
     // Frame and motion tools. These drive the timeline rather than the
     // sidebar, so selecting one hands the sidebar back to whatever the
     // timeline currently has selected.
-    let frames = tool_icon_button(icon_names::custom::OVERLAPPING_WINDOWS_SYMBOLIC, &t("Frames"));
+    let frames = tool_icon_button(
+        icon_names::custom::OVERLAPPING_WINDOWS_SYMBOLIC,
+        &t("Frames"),
+    );
     frames.set_tooltip_text(Some(&t("Frames")));
     frames.connect_clicked({
         let state = state.clone();
