@@ -18,8 +18,8 @@ use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea, Entry, GestureClick,
-    GestureDrag, Grid, Image, Label, Orientation, Popover, ToggleButton, Widget, Window,
+    prelude::*, Align, Box as GtkBox, Button, DrawingArea, Entry, GestureClick, GestureDrag, Grid,
+    Image, Label, Orientation, Popover, ToggleButton, Widget,
 };
 
 use crate::i18n::t;
@@ -69,6 +69,10 @@ const STEP_CHIP_RADIUS: f64 = 8.0;
 /// panel's own padding — which reads as butted up against the controls. The
 /// reference keeps a clear ~23px between the card and the panel's content.
 const POPOVER_SIDEBAR_GAP: i32 = 8;
+/// How far clear of the popover's own edge the stop picker's card sits. Applied
+/// as a popover layout offset, i.e. on top of the position GTK computes, so it
+/// cannot move the card into a different coordinate space.
+const PICKER_CARD_GAP: i32 = 8;
 
 /// Paints `rounded_rect` and clips to it.
 fn fill_rounded(
@@ -310,7 +314,7 @@ pub(super) fn build_custom_wallpaper_popover(
     root.append(&pages);
 
     let color_page = build_color_page(&state, &notify);
-    let gradient_page = build_gradient_page(&state, &notify);
+    let gradient_page = build_gradient_page(&state, &notify, &root);
     pages.append(&color_page.widget);
     pages.append(&gradient_page.widget);
 
@@ -322,6 +326,12 @@ pub(super) fn build_custom_wallpaper_popover(
         let color_tab = color_tab.clone();
         let gradient_tab = gradient_tab.clone();
         Rc::new(move |is_gradient: bool| {
+            // Leaving Gradient takes the stop picker's mini card with it: the
+            // card is parented to the Gradient page, and one floating beside a
+            // hidden page would read as a stray panel.
+            if !is_gradient {
+                (gradient_page.dismiss)();
+            }
             color_page.widget.set_visible(!is_gradient);
             gradient_page.widget.set_visible(is_gradient);
             color_tab.set_active(!is_gradient);
@@ -363,6 +373,13 @@ pub(super) fn build_custom_wallpaper_popover(
         move |_| refresh()
     });
 
+    // The stop picker's card is parented to the Gradient page, so it goes down
+    // with the popover rather than staying afloat over a closed editor.
+    popover.connect_closed({
+        let gradient_page = gradient_page.clone();
+        move |_| (gradient_page.dismiss)()
+    });
+
     // The Edit pill only sets the card's vertical seat: point at the panel's
     // left edge at that row's height. Pointing at the row itself would park
     // the card back over the panel. Bounds are read on every open so the card
@@ -399,7 +416,24 @@ struct ColorPage {
     repaint: Rc<dyn Fn()>,
 }
 
-fn build_color_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -> ColorPage {
+/// The picker itself: saturation/value plane, hue rail, swatch + hex row.
+///
+/// Shared between the Color tab (editing the flat fill) and the Gradient tab's
+/// side panel (editing the selected stop), so it reads and writes through
+/// closures instead of reaching into `background` directly. The Gradient use
+/// deliberately has no Color/Gradient tab row of its own — those tabs stay the
+/// popover's, and this is just the picker.
+#[derive(Clone)]
+struct ColorPicker {
+    widget: GtkBox,
+    repaint: Rc<dyn Fn()>,
+}
+
+fn build_color_picker(
+    get: Rc<dyn Fn() -> (u8, u8, u8)>,
+    set: Rc<dyn Fn((u8, u8, u8))>,
+    notify: Rc<dyn Fn()>,
+) -> ColorPicker {
     let widget = GtkBox::new(Orientation::Vertical, 0);
     widget.set_hexpand(true);
 
@@ -451,11 +485,11 @@ fn build_color_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -
     // Commit the typed hex on Enter or focus-out, matching the image editor's
     // commit-on-activate pattern rather than validating per keystroke.
     {
-        let state = state.clone();
+        let set = set.clone();
         let notify = notify.clone();
         let syncing = syncing.clone();
         hex.connect_activate({
-            let state = state.clone();
+            let set = set.clone();
             let notify = notify.clone();
             let syncing = syncing.clone();
             move |entry| {
@@ -463,14 +497,14 @@ fn build_color_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -
                     return;
                 }
                 if let Some(color) = parse_hex(&entry.text()) {
-                    set_flat_color(&state, color);
+                    set(color);
                     notify();
                 }
             }
         });
         let focus = gtk4::EventControllerFocus::new();
         focus.connect_leave({
-            let state = state.clone();
+            let set = set.clone();
             let notify = notify.clone();
             let syncing = syncing.clone();
             move |controller| {
@@ -482,7 +516,7 @@ fn build_color_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -
                     return;
                 };
                 if let Some(color) = parse_hex(&entry.text()) {
-                    set_flat_color(&state, color);
+                    set(color);
                     notify();
                 }
             }
@@ -492,8 +526,8 @@ fn build_color_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -
 
     // Dragging inside the plane sets saturation (across) and value (down);
     // dragging the bar sets the hue the plane is built from.
-    attach_plane_drag(&field, state.clone(), notify.clone());
-    attach_hue_drag(&spectrum, state.clone(), notify.clone());
+    attach_plane_drag(&field, get.clone(), set.clone(), notify.clone());
+    attach_hue_drag(&spectrum, get.clone(), set.clone(), notify.clone());
 
     let refresh: Rc<dyn Fn()> = {
         let field = field.clone();
@@ -501,9 +535,9 @@ fn build_color_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -
         let swatch = swatch.clone();
         let hex = hex.clone();
         let syncing = syncing.clone();
-        let state = state.clone();
+        let get = get.clone();
         Rc::new(move || {
-            let color = current_flat_color(&state);
+            let color = get();
             // The plane and the bar both draw from the hue of the live color,
             // so a color that arrived from a project file or the hex entry
             // still shows the right hue rather than a stale one.
@@ -535,9 +569,26 @@ fn build_color_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -
         }) as Rc<dyn Fn()>
     };
 
-    ColorPage {
+    ColorPicker {
         widget,
         repaint: refresh,
+    }
+}
+
+/// The Color tab: the shared picker bound to the flat background fill.
+fn build_color_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -> ColorPage {
+    let get: Rc<dyn Fn() -> (u8, u8, u8)> = {
+        let state = state.clone();
+        Rc::new(move || current_flat_color(&state))
+    };
+    let set: Rc<dyn Fn((u8, u8, u8))> = {
+        let state = state.clone();
+        Rc::new(move |color| set_flat_color(&state, color))
+    };
+    let picker = build_color_picker(get, set, notify.clone());
+    ColorPage {
+        widget: picker.widget,
+        repaint: picker.repaint,
     }
 }
 
@@ -709,27 +760,30 @@ fn hue_adjusted_color(current: (u8, u8, u8), hue: f64) -> (u8, u8, u8) {
 
 fn attach_hue_drag(
     spectrum: &DrawingArea,
-    state: Arc<Mutex<VideoEditState>>,
+    get: Rc<dyn Fn() -> (u8, u8, u8)>,
+    set: Rc<dyn Fn((u8, u8, u8))>,
     notify: Rc<dyn Fn()>,
 ) {
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
-        let state = state.clone();
+        let get = get.clone();
+        let set = set.clone();
         let notify = notify.clone();
         move |gesture, x, _| {
-            apply_hue(&gesture, x, &state, &notify);
+            apply_hue(&gesture, x, &get, &set, &notify);
         }
     });
     drag.connect_drag_update({
-        let state = state.clone();
+        let get = get.clone();
+        let set = set.clone();
         let notify = notify.clone();
         move |gesture, offset_x, _| {
             let Some(start) = gesture.start_point() else {
                 return;
             };
             let (x, _) = resolve_drag_position(start, (offset_x, 0.0));
-            apply_hue(&gesture, x, &state, &notify);
+            apply_hue(&gesture, x, &get, &set, &notify);
         }
     });
     spectrum.add_controller(drag);
@@ -738,7 +792,8 @@ fn attach_hue_drag(
 fn apply_hue(
     gesture: &GestureDrag,
     x: f64,
-    state: &Arc<Mutex<VideoEditState>>,
+    get: &Rc<dyn Fn() -> (u8, u8, u8)>,
+    set: &Rc<dyn Fn((u8, u8, u8))>,
     notify: &Rc<dyn Fn()>,
 ) {
     let Some(widget) = gesture.widget() else {
@@ -746,31 +801,38 @@ fn apply_hue(
     };
     let (width, _) = drawn_size(&widget);
     let hue = (x / width).clamp(0.0, 1.0);
-    set_flat_color(state, hue_adjusted_color(current_flat_color(state), hue));
+    set(hue_adjusted_color(get(), hue));
     notify();
 }
 
 /// Drag inside the plane: horizontal sets saturation, vertical sets value,
 /// both against the hue the bar currently holds.
-fn attach_plane_drag(field: &DrawingArea, state: Arc<Mutex<VideoEditState>>, notify: Rc<dyn Fn()>) {
+fn attach_plane_drag(
+    field: &DrawingArea,
+    get: Rc<dyn Fn() -> (u8, u8, u8)>,
+    set: Rc<dyn Fn((u8, u8, u8))>,
+    notify: Rc<dyn Fn()>,
+) {
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
-        let state = state.clone();
+        let get = get.clone();
+        let set = set.clone();
         let notify = notify.clone();
         move |gesture, x, y| {
-            apply_plane(&gesture, x, y, &state, &notify);
+            apply_plane(&gesture, x, y, &get, &set, &notify);
         }
     });
     drag.connect_drag_update({
-        let state = state.clone();
+        let get = get.clone();
+        let set = set.clone();
         let notify = notify.clone();
         move |gesture, offset_x, offset_y| {
             let Some(start) = gesture.start_point() else {
                 return;
             };
             let (x, y) = resolve_drag_position(start, (offset_x, offset_y));
-            apply_plane(&gesture, x, y, &state, &notify);
+            apply_plane(&gesture, x, y, &get, &set, &notify);
         }
     });
     field.add_controller(drag);
@@ -780,7 +842,8 @@ fn apply_plane(
     gesture: &GestureDrag,
     x: f64,
     y: f64,
-    state: &Arc<Mutex<VideoEditState>>,
+    get: &Rc<dyn Fn() -> (u8, u8, u8)>,
+    set: &Rc<dyn Fn((u8, u8, u8))>,
     notify: &Rc<dyn Fn()>,
 ) {
     let Some(widget) = gesture.widget() else {
@@ -791,10 +854,10 @@ fn apply_plane(
     // The plane darkens downward, so the top is full value.
     let value = (1.0 - y / height).clamp(0.0, 1.0);
     let hue = {
-        let color = current_flat_color(state);
+        let color = get();
         rgb_to_hue(color.0, color.1, color.2)
     };
-    set_flat_color(state, hsv_to_rgb(hue, saturation, value));
+    set(hsv_to_rgb(hue, saturation, value));
     notify();
 }
 
@@ -804,6 +867,10 @@ fn apply_plane(
 struct GradientPage {
     widget: GtkBox,
     repaint: Rc<dyn Fn()>,
+    /// Closes the stop picker's mini card. The popover that owns this page
+    /// calls it on hide and when the Color tab takes over, so the card never
+    /// outlives the surface it was opened from.
+    dismiss: Rc<dyn Fn()>,
 }
 
 /// The two glyphs the gradient header draws itself.
@@ -976,7 +1043,19 @@ fn kind_label(kind: GradientKind) -> String {
     }
 }
 
-fn build_gradient_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -> GradientPage {
+/// The popover's own body: the card the Gradient page is painted on.
+///
+/// The stop picker is hung off *this* widget rather than off the page, and
+/// with no pointing rect, so GTK points the picker at its parent's whole area —
+/// a rect it measures itself. Every hand-built rect here landed in the wrong
+/// space: a popover hung off a widget inside another popover has its rect
+/// measured into that popover's surface, so the card kept opening up over the
+/// video no matter which box the rect was taken from.
+fn build_gradient_page(
+    state: &Arc<Mutex<VideoEditState>>,
+    notify: &Rc<dyn Fn()>,
+    card_body: &GtkBox,
+) -> GradientPage {
     let widget = GtkBox::new(Orientation::Vertical, 0);
     widget.set_hexpand(true);
 
@@ -1131,6 +1210,144 @@ fn build_gradient_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>
     steps.set_hexpand(true);
     widget.append(&steps);
 
+    // ── The stop picker: the Color tab's picker in its own mini card. ──
+    // The card is a popover of its own, opened clear of the popover's left
+    // edge, so the Gradient tab stays the Color tab's width instead of growing
+    // a second column that widens the whole popover. It carries no
+    // Color/Gradient tabs of its own — those are the popover's — and it edits
+    // whichever stop the last tile click selected, which is why it reads and
+    // writes through closures instead of reaching into `background` directly.
+    let picker_popover = Popover::new();
+    picker_popover.add_css_class("recording-editor-gradient-picker-popover");
+    picker_popover.set_has_arrow(false);
+    picker_popover.set_position(gtk4::PositionType::Left);
+    // An inspector, not a menu: it stays put while the ramp, the type chip and
+    // the other tiles are used. An autohiding card would also eat the first
+    // click on the next tile while closing itself, so the card never opens on
+    // the second try.
+    picker_popover.set_autohide(false);
+    // Top-aligned rather than centred: GTK anchors a left-positioned popover's
+    // corner to the pointing rect's origin, not to the edge's centre, so a
+    // centred rect is what kept parking the card ~150px high. With START the
+    // card's top-right corner lands on the rect's top-left corner — a seat
+    // stated in the body's own coordinates and nothing else.
+    picker_popover.set_valign(Align::Start);
+    picker_popover.set_parent(card_body);
+
+    let stop_picker = {
+        let get: Rc<dyn Fn() -> (u8, u8, u8)> = {
+            let state = state.clone();
+            let selected = selected.clone();
+            Rc::new(move || {
+                let guard = state.lock().unwrap();
+                if let VideoBackground::Gradient(gradient) = &guard.background {
+                    if let Some(stop) = gradient.normalized().stops.get(selected.get()) {
+                        return (stop.r, stop.g, stop.b);
+                    }
+                }
+                (0xFF, 0xFF, 0xFF)
+            })
+        };
+        let set: Rc<dyn Fn((u8, u8, u8))> = {
+            let state = state.clone();
+            let selected = selected.clone();
+            Rc::new(move |color| {
+                let index = selected.get();
+                with_gradient(&state, |gradient| {
+                    if let Some(stop) = gradient.stops.get_mut(index) {
+                        stop.r = color.0;
+                        stop.g = color.1;
+                        stop.b = color.2;
+                    }
+                });
+            })
+        };
+        build_color_picker(get, set, notify.clone())
+    };
+    // The card is the picker's own surface: a header carrying its close, above
+    // the picker. The picker keeps the Color tab's margins, so the two read as
+    // the same picker.
+    stop_picker
+        .widget
+        .add_css_class("recording-editor-gradient-picker");
+    let card = GtkBox::new(Orientation::Vertical, 0);
+    card.add_css_class("recording-editor-gradient-picker-card");
+    let card_header = GtkBox::new(Orientation::Horizontal, 0);
+    card_header.add_css_class("recording-editor-gradient-picker-header");
+    let card_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    card_spacer.set_hexpand(true);
+    // The popover behind the card stays open while the card is up, so the card
+    // needs a close of its own: clicking the same tile again also closes it,
+    // but that is not something the card can advertise.
+    let card_close = Button::new();
+    card_close.add_css_class("recording-editor-gradient-picker-close");
+    card_close.set_has_frame(false);
+    card_close.set_tooltip_text(Some(&t("Close")));
+    let card_close_icon = Image::from_icon_name("window-close-symbolic");
+    card_close_icon.set_pixel_size(13);
+    card_close.set_child(Some(&card_close_icon));
+    card_header.append(&card_spacer);
+    card_header.append(&card_close);
+    card.append(&card_header);
+    card.append(&stop_picker.widget);
+    picker_popover.set_child(Some(&card));
+    widget.add_css_class("recording-editor-gradient-editor");
+
+    // Whether the card is currently up. Tracked here rather than read back off
+    // the popover: `is_visible()` also reports the ancestors' visibility, so
+    // it reads false the moment the Gradient page is hidden, which is exactly
+    // when the card still has to be popped down.
+    let card_up = Rc::new(Cell::new(false));
+    picker_popover.connect_closed({
+        let card_up = card_up.clone();
+        move |_| card_up.set(false)
+    });
+
+    // Show the card. The rect is in the body's own coordinate space — the space
+    // GTK measures a popover's rect in, and the space this card's parent lives
+    // in — and with `valign` START it is read as a corner, so the seat is
+    // simply "the card's top-right corner PICKER_CARD_GAP left of the body's
+    // top-left corner". That is measured, not derived: see
+    // `the_card_hangs_clear_of_the_popover_beside_it`. Seats built from any
+    // other box (the page's, the popover's surface) landed the card up over the
+    // video, because a popover hung inside another popover has its rect measured
+    // through that popover's surface.
+    // `was_selected` lets a second click on the same tile close the card
+    // instead of leaving it up.
+    let open_picker: Rc<dyn Fn(bool)> = {
+        let picker_popover = picker_popover.clone();
+        let card_body = card_body.clone();
+        let card_up = card_up.clone();
+        Rc::new(move |was_selected: bool| {
+            if was_selected && card_up.get() {
+                card_up.set(false);
+                picker_popover.popdown();
+                return;
+            }
+            picker_popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+                -PICKER_CARD_GAP,
+                0,
+                1,
+                card_body.height().max(1),
+            )));
+            card_up.set(true);
+            picker_popover.popup();
+        })
+    };
+
+    let dismiss: Rc<dyn Fn()> = {
+        let picker_popover = picker_popover.clone();
+        Rc::new(move || {
+            if card_up.replace(false) {
+                picker_popover.popdown();
+            }
+        })
+    };
+    card_close.connect_clicked({
+        let dismiss = dismiss.clone();
+        move |_| dismiss()
+    });
+
     attach_stop_drag(&bar, state.clone(), notify.clone(), selected.clone());
 
     let refresh: Rc<dyn Fn()> = {
@@ -1144,6 +1361,7 @@ fn build_gradient_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>
         let rebuilding = rebuilding.clone();
         let state = state.clone();
         let notify = notify.clone();
+        let picker_repaint = stop_picker.repaint.clone();
         Rc::new(move || {
             let gradient = current_gradient(&state);
             let normalized = gradient.normalized();
@@ -1185,17 +1403,28 @@ fn build_gradient_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>
             }
             add.set_sensitive(count < MAX_GRADIENT_STOPS);
             for (index, stop) in normalized.stops.iter().enumerate() {
-                let row_widget =
-                    build_stop_row(stop, index, selected_index, &state, &notify, &rebuilding);
+                let row_widget = build_stop_row(
+                    stop,
+                    index,
+                    &selected,
+                    &state,
+                    &notify,
+                    &rebuilding,
+                    &open_picker,
+                );
                 steps.attach(&row_widget, 0, index as i32, 1, 1);
             }
             rebuilding.set(false);
+            // The mini card follows the selection, so it repaints last: the
+            // selected index is already clamped to the current stop count.
+            picker_repaint();
         }) as Rc<dyn Fn()>
     };
 
     GradientPage {
         widget,
         repaint: refresh,
+        dismiss,
     }
 }
 
@@ -1536,19 +1765,22 @@ fn commit_entry(entry: &Entry, rebuilding: &Rc<Cell<bool>>, apply: impl Fn(&str)
 fn build_stop_row(
     stop: &GradientStop,
     index: usize,
-    selected: usize,
+    selected: &Rc<Cell<usize>>,
     state: &Arc<Mutex<VideoEditState>>,
     notify: &Rc<dyn Fn()>,
     rebuilding: &Rc<Cell<bool>>,
+    open_picker: &Rc<dyn Fn(bool)>,
 ) -> GtkBox {
     let row = GtkBox::new(Orientation::Horizontal, 8);
     row.add_css_class("recording-editor-gradient-step");
-    if index == selected {
+    if selected.get() == index {
         row.add_css_class("selected");
     }
     row.set_hexpand(true);
 
-    // The color chip: click opens the stop's color chooser.
+    // The color chip: clicking it selects this stop and opens the picker's
+    // mini card. There is deliberately no modal chooser — the card is the one
+    // editing surface, and it edits the stop the click just selected.
     let swatch = DrawingArea::new();
     swatch.add_css_class("recording-editor-gradient-step-swatch");
     swatch.set_content_width(STEP_CHIP_SIZE);
@@ -1560,11 +1792,20 @@ fn build_stop_row(
     });
     {
         let gesture = GestureClick::new();
-        let anchor = swatch.clone();
-        let state = state.clone();
+        let selected = selected.clone();
         let notify = notify.clone();
+        let open_picker = open_picker.clone();
         gesture.connect_released(move |_, _, _, _| {
-            open_stop_color_picker(&anchor, index, state.clone(), notify.clone());
+            // A tile that already carries the card closes it on a second
+            // click; any other tile moves the selection and opens it.
+            let was_selected = selected.get() == index;
+            if !was_selected {
+                selected.set(index);
+            }
+            open_picker(was_selected);
+            if !was_selected {
+                notify();
+            }
         });
         swatch.add_controller(gesture);
     }
@@ -1595,60 +1836,6 @@ fn build_stop_row(
     row.append(&swatch);
     row.append(&hex);
     row
-}
-
-fn open_stop_color_picker(
-    anchor: &impl IsA<Widget>,
-    index: usize,
-    state: Arc<Mutex<VideoEditState>>,
-    notify: Rc<dyn Fn()>,
-) {
-    let color = {
-        let VideoBackground::Gradient(gradient) = &state.lock().unwrap().background else {
-            return;
-        };
-        let normalized = gradient.normalized();
-        let Some(stop) = normalized.stops.get(index) else {
-            return;
-        };
-        (stop.r, stop.g, stop.b)
-    };
-    let initial = gtk4::gdk::RGBA::new(
-        color.0 as f32 / 255.0,
-        color.1 as f32 / 255.0,
-        color.2 as f32 / 255.0,
-        1.0,
-    );
-    // Parented to the editor window so the dialog centers on the editor
-    // rather than the screen. A swatch is a DrawingArea, so its root reaches
-    // the window through the popover.
-    let parent = anchor
-        .root()
-        .and_then(|root| root.downcast::<Window>().ok());
-    let dialog = ColorChooserDialog::new(Some(&t("Stop color")), parent.as_ref());
-    dialog.set_modal(true);
-    dialog.set_use_alpha(false);
-    dialog.set_rgba(&initial);
-    dialog.connect_response(move |dialog, response| {
-        if response == gtk4::ResponseType::Ok {
-            let c = dialog.rgba();
-            let rgb = (
-                (c.red() * 255.0).round().clamp(0.0, 255.0) as u8,
-                (c.green() * 255.0).round().clamp(0.0, 255.0) as u8,
-                (c.blue() * 255.0).round().clamp(0.0, 255.0) as u8,
-            );
-            with_gradient(&state, |gradient| {
-                if let Some(stop) = gradient.stops.get_mut(index) {
-                    stop.r = rgb.0;
-                    stop.g = rgb.1;
-                    stop.b = rgb.2;
-                }
-            });
-            notify();
-        }
-        dialog.close();
-    });
-    dialog.present();
 }
 
 /// Drag a stop along the bar. The nearest handle within a grab radius wins; a
@@ -1990,6 +2177,110 @@ mod tests {
     }
 
     #[test]
+    fn the_stop_picker_is_a_mini_card_not_a_second_column() {
+        // The Gradient tab has to stay the Color tab's width. It used to grow
+        // a second column — the picker beside the ramp — which widened the
+        // whole popover the moment the tab was opened. The picker is its own
+        // mini card now, opened left of the tile that was clicked; this test
+        // builds the real tree, because the card has to parent cleanly beside
+        // the page rather than reusing a widget that already has a parent.
+        let Some(()) = crate::test_support::with_gtk(|| {
+            use crate::recording::editor::model::VideoMetadata;
+
+            fn find(widget: &Widget, class: &str) -> Option<Widget> {
+                if widget.has_css_class(class) {
+                    return Some(widget.clone());
+                }
+                let mut child = widget.first_child();
+                while let Some(current) = child {
+                    if let Some(found) = find(&current, class) {
+                        return Some(found);
+                    }
+                    child = current.next_sibling();
+                }
+                None
+            }
+
+            let state = Arc::new(Mutex::new(VideoEditState::new(VideoMetadata {
+                path: std::path::PathBuf::from("/tmp/input.mp4"),
+                duration_seconds: 10.0,
+                width: 1920,
+                height: 1080,
+                file_size_bytes: 1024,
+                has_audio: false,
+                frame_rate: 30.0,
+            })));
+            let sidebar = GtkBox::new(Orientation::Vertical, 0);
+            let edit = Button::new();
+            let popover = build_custom_wallpaper_popover(&sidebar, &edit, state, Rc::new(|| {}));
+            let root = popover.child().expect("the popover has a body");
+
+            assert!(
+                find(&root, "recording-editor-gradient-columns").is_none(),
+                "the gradient tab must not lay out as columns, or it widens the popover"
+            );
+            let editor = find(&root, "recording-editor-gradient-editor")
+                .expect("the gradient page is the stop editor");
+            assert!(
+                find(&editor, "recording-editor-gradient-bar").is_some(),
+                "the stop editor must carry the ramp"
+            );
+            // The card hangs off the popover's body, not off the page, so it is
+            // found from the body rather than from the stop editor.
+            let picker = find(&root, "recording-editor-gradient-picker")
+                .expect("the picker is the stop editor's mini card");
+            assert!(
+                find(&picker, "recording-editor-custom-field").is_some(),
+                "the mini card must carry the reused saturation/value plane"
+            );
+            // GTK wraps a popover's child in an internal `contents` widget, so
+            // the card is the nearest ancestor carrying the card's class rather
+            // than the picker's direct parent.
+            let mut ancestor = picker.parent();
+            let card = loop {
+                let Some(widget) = ancestor else {
+                    panic!("the picker is not inside a card popover");
+                };
+                if widget.has_css_class("recording-editor-gradient-picker-popover") {
+                    break widget
+                        .downcast::<Popover>()
+                        .expect("the card class belongs to a popover");
+                }
+                ancestor = widget.parent();
+            };
+            assert_eq!(
+                card.position(),
+                gtk4::PositionType::Left,
+                "the card opens left of the stop editor, not over it"
+            );
+            assert!(
+                card.parent().is_some_and(|parent| parent == root),
+                "the card hangs off the popover's own body, whose box GTK measures for it"
+            );
+            // The seat is anchored by the card's corner, which is what GTK
+            // actually uses for a left-positioned popover: with the default
+            // centring the card's corner landed where its centre belonged, i.e.
+            // ~150px up, over the video.
+            assert_eq!(
+                card.valign(),
+                gtk4::Align::Start,
+                "a centred card is what opened up over the video"
+            );
+            assert!(
+                find(
+                    card.upcast_ref::<Widget>(),
+                    "recording-editor-gradient-picker-close"
+                )
+                .is_some(),
+                "the card needs its own close, or the tile toggle is the only way out"
+            );
+            popover.unparent();
+        }) else {
+            return;
+        };
+    }
+
+    #[test]
     fn the_plane_covers_saturation_and_value() {
         // The plane is what makes the big field a picker rather than a flat
         // swatch: saturation runs left to right and value top to bottom, both
@@ -2094,5 +2385,118 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The seat, measured rather than derived.
+    ///
+    /// This is the test that would have caught every wrong seat: the card is
+    /// built exactly as the real one is (hung off the popover's body, pointing
+    /// at a rect in that body's own space) and its surface position is read back
+    /// from GDK, relative to the popover surface it is a child of. Getting the
+    /// space wrong moved the card by ~150px — up over the video — so the bounds
+    /// below are wide enough for the host theme's popover margins and shadow and
+    /// nowhere near wide enough to pass a wrong seat.
+    #[test]
+    fn the_card_hangs_clear_of_the_popover_beside_it() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            use gtk4::gdk::prelude::PopupExt;
+
+            let window = gtk4::Window::new();
+            window.set_default_size(1200, 800);
+            let root = GtkBox::new(Orientation::Vertical, 0);
+            window.set_child(Some(&root));
+
+            let host = Popover::new();
+            host.set_has_arrow(false);
+            host.set_autohide(true);
+            host.set_position(gtk4::PositionType::Left);
+            host.set_parent(&root);
+            let body = GtkBox::new(Orientation::Vertical, 0);
+            body.set_size_request(236, 300);
+            host.set_child(Some(&body));
+
+            let card = Popover::new();
+            card.set_has_arrow(false);
+            card.set_position(gtk4::PositionType::Left);
+            card.set_autohide(false);
+            card.set_valign(Align::Start);
+            card.set_parent(&body);
+            let card_body = GtkBox::new(Orientation::Vertical, 0);
+            card_body.set_size_request(240, 290);
+            card.set_child(Some(&card_body));
+
+            window.present();
+            // Surfaces are positioned by the compositor, so the loop has to run
+            // in real time: spinning the context without waiting reads the
+            // popup's position before Wayland has answered.
+            let pump = || {
+                let ctx = gtk4::glib::MainContext::default();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+                while std::time::Instant::now() < deadline {
+                    while ctx.iteration(false) {}
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            };
+            pump();
+            host.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(300, 100, 1, 200)));
+            host.popup();
+            pump();
+
+            card.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+                -PICKER_CARD_GAP,
+                0,
+                1,
+                card_body.height().max(1),
+            )));
+            card.popup();
+            pump();
+
+            let surface = card.surface().expect("the card has a surface");
+            let popup = surface
+                .downcast::<gtk4::gdk::Popup>()
+                .expect("a popover's surface is a popup");
+            let (card_x, card_y) = (popup.position_x(), popup.position_y());
+            let (card_w, card_h) = (popup.width(), popup.height());
+            let body_rect = body.compute_bounds(&host);
+            card.popdown();
+            pump();
+            card.unparent();
+            host.popdown();
+            host.unparent();
+            window.destroy();
+
+            if card_w < 100 || card_h < 100 {
+                eprintln!("skipping: the compositor did not position the surfaces");
+                return;
+            }
+            let Some(body_rect) = body_rect else {
+                eprintln!("skipping: the body has no bounds");
+                return;
+            };
+
+            // `position_x/y` is relative to the popover surface this card is a
+            // child of, which is the space the body's bounds are read in. The
+            // gap is asserted as a range, not a number: the host theme's own
+            // popover margins are in play here, while the app's CSS strips them
+            // and leaves the exact PICKER_CARD_GAP. What matters is that the
+            // card is clear of the popover's edge and not flung off somewhere
+            // else in the window.
+            let gap = body_rect.x() as i32 - (card_x + card_w);
+            assert!(
+                (0..=24).contains(&gap),
+                "the card must sit just clear of the popover's edge, not {gap}px away"
+            );
+            // The failure this guards is vertical: a centred rect put the
+            // card's corner where its centre belonged, ~150px up, which is the
+            // "card over the video" the seat kept producing.
+            let body_top = body_rect.y() as i32;
+            assert!(
+                (card_y - body_top).abs() <= 10,
+                "the card must be level with the popover: card top {card_y} vs body top {body_top}"
+            );
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
     }
 }

@@ -1115,8 +1115,12 @@ mod tests {
             ("fn attach_stop_drag(", "stops must be draggable"),
             ("fn add_stop(", "the Steps + button must add a stop"),
             (
-                "fn open_stop_color_picker(",
-                "a stop's color must be editable",
+                "fn build_color_picker(",
+                "a stop's color must be editable through the shared picker",
+            ),
+            (
+                "recording-editor-gradient-picker",
+                "the picker must be the stop editor's own mini card, not a dialog",
             ),
             (
                 "GradientIcon::RotateCwSquare",
@@ -1197,10 +1201,152 @@ mod tests {
             );
         }
         // The hex still has to be editable, or a stop's color could only be
-        // changed through the chooser dialog.
+        // changed through the picker card.
         assert!(
             source.contains("recording-editor-gradient-step-hex"),
             "the stop row must still carry an editable hex"
+        );
+    }
+
+    #[test]
+    fn a_stop_tile_opens_the_picker_card_for_that_stop() {
+        // Editing a stop color used to open a modal chooser from inside the
+        // popover, which hung the editor; then it became a second column
+        // beside the ramp, which widened the whole popover. The tile now opens
+        // the picker's own mini card beside it, and a tile click still moves
+        // the selection the card edits.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        assert!(
+            !source.contains("ColorChooserDialog"),
+            "a stop's color must be edited inline, never by a modal chooser"
+        );
+        let start = source
+            .find("fn build_stop_row(")
+            .expect("the stop row exists");
+        let end = source[start..]
+            .find("\nfn ")
+            .map(|at| start + at)
+            .unwrap_or(source.len());
+        let body = &source[start..end];
+        assert!(
+            body.contains("selected.set(index);"),
+            "clicking a stop's tile must select that stop"
+        );
+        assert!(
+            body.contains("open_picker("),
+            "clicking a stop's tile must open the picker card for it"
+        );
+        assert!(
+            !body.contains("dialog") && !body.contains("RGBA"),
+            "the row must not open a color chooser of its own"
+        );
+    }
+
+    #[test]
+    fn the_gradient_tab_keeps_the_popover_width() {
+        // Opening the Gradient tab must not resize the popover. It used to
+        // grow a picker column beside the stop editor, which widened the card
+        // to roughly twice the Color tab's width. Nothing on the gradient page
+        // may lay out horizontally against the editor now: the picker is a
+        // separate mini card, opened from a stop tile.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        // The popover file's own tests name the layout they forbid, so only the
+        // production half of the file is inspected.
+        let production = &source[..source
+            .find("\n#[cfg(test)]")
+            .expect("the popover has a tests module")];
+        assert!(
+            !production.contains("recording-editor-gradient-columns"),
+            "the gradient page must not lay out as columns, or the tab widens the popover"
+        );
+        assert!(
+            production.contains("recording-editor-gradient-picker-popover"),
+            "the picker must be a popover of its own, not a column of the page"
+        );
+        assert!(
+            production.contains("picker_popover.set_parent(card_body)"),
+            "the mini card must hang off the popover's body, not the page"
+        );
+        let css = include_str!("../ui_support_css/09.css");
+        assert!(
+            !css.contains(".recording-editor-gradient-columns"),
+            "the columns rule is dead and must not linger in the stylesheet"
+        );
+        assert!(
+            css.contains("popover.recording-editor-gradient-picker-popover"),
+            "the mini card needs its own surface, or the host theme paints it"
+        );
+    }
+
+    #[test]
+    fn the_picker_card_sits_clear_of_the_popover_and_can_close_itself() {
+        // What the card's seat got wrong before it landed, in order. Seated on
+        // the clicked tile, its right edge landed on the Gradient page's own
+        // 12px inset — tucked under the popover — so its right-hand controls
+        // were clipped. Then hand-built rects in the page's space and in the
+        // popover's surface space each came out ~150px high, because GTK anchors
+        // a left-positioned popover by the *corner* of the pointing rect rather
+        // than the centre of its edge, and because a popover hung inside another
+        // popover has its rect measured through that popover's surface. The seat
+        // is now stated in the popover body's own space, with the card
+        // top-aligned so the anchoring corner is the one being reasoned about.
+        // The geometry itself is asserted by measurement in
+        // `the_card_hangs_clear_of_the_popover_beside_it`; this test pins the
+        // wiring that measurement depends on. And because the popover behind the
+        // card stays open, the card needs a close of its own rather than relying
+        // on a second click on the tile.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let production = &source[..source
+            .find("\n#[cfg(test)]")
+            .expect("the popover has a tests module")];
+        assert!(
+            production.contains("picker_popover.set_parent(card_body)"),
+            "the card must hang off the popover's body: that body's space is the seat's space"
+        );
+        assert!(
+            production.contains("picker_popover.set_valign(Align::Start)"),
+            "GTK anchors this popover by the rect's corner, so the card must be top-aligned"
+        );
+        let start = production
+            .find("let open_picker: Rc<dyn Fn(bool)>")
+            .expect("the card has an opener");
+        let end = production[start..]
+            .find("\n    };")
+            .map(|at| start + at)
+            .expect("the opener is closed");
+        let opener = &production[start..end];
+        assert!(
+            opener.contains("picker_popover.set_pointing_to"),
+            "the card needs its seat, stated in the body's own coordinates"
+        );
+        assert!(
+            opener.contains("card_body.height()"),
+            "the seat must be taken from the popover's body, not from the page or a tile"
+        );
+        assert!(
+            !opener.contains("compute_bounds"),
+            "a tile-relative seat is what tucked the card under the popover"
+        );
+        assert!(
+            !production.contains("fn host_popover("),
+            "the host-popover walk is not needed once the seat is in the body's space"
+        );
+        assert!(
+            production.contains("recording-editor-gradient-picker-close"),
+            "the card must carry its own close control"
+        );
+        assert!(
+            production.contains("card_close.connect_clicked"),
+            "the card's close must actually pop the card down"
+        );
+        assert!(
+            production.contains("window-close-symbolic"),
+            "the close should be the app's own glyph, as the popover's is"
+        );
+        let css = include_str!("../ui_support_css/09.css");
+        assert!(
+            css.contains("button.recording-editor-gradient-picker-close"),
+            "the close button needs chrome, or it shows the host theme's button"
         );
     }
 

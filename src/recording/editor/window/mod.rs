@@ -29,7 +29,8 @@ use super::ui_support::install_recording_editor_css;
 use gtk4::{
     gdk, gio, glib, prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button,
     DrawingArea, DropTarget, FileChooserAction, FileChooserNative, FileFilter, GestureClick, Image,
-    Label, MediaFile, Orientation, Overlay, ResponseType, Revealer, Scale, Spinner,
+    Label, MediaFile, Orientation, Overlay, Popover, ResponseType, Revealer, Scale, Spinner,
+    Widget,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -320,8 +321,66 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     crate::capture::editor::ui_support::install_edge_resize(&shell, &window);
     window.set_child(Some(&shell));
     wire_close_persist(&window, state.clone(), exporting.clone());
+    sweep_popovers_on_deactivate(&window);
     window.present();
     crate::update_ui::present_if_needed(&shell);
+}
+
+/// Pop down `window`'s popovers when it stops being the active window.
+///
+/// A popover must not outlive its window's activation. GTK leaves that to the
+/// app, and an autohiding popover holds a grab for as long as it is up: leave
+/// the Custom Wallpaper popover open while another window takes focus — a
+/// screenshot overlay, say — and that grab is still live while the overlay
+/// tries to take the pointer. See `popdown_popovers`.
+///
+/// The decision is deferred to the main loop's idle, because `is-active` does
+/// not mean what it says at the moment it notifies. Mapping an autohiding
+/// popover takes its grab, and GTK blips the toplevel inactive and back while
+/// that grab lands — measured on the Edit pill's click: `is-active` ran false,
+/// true, false, true inside a single dispatch, ~100µs apart. Sweeping on the
+/// blip took the popover down in the same breath as it opened, so clicking
+/// Edit looked like a dead button. Re-checking at idle reads the settled
+/// value instead: the blip is long over, while a real deactivation — the
+/// capture overlay taking focus — is not.
+fn sweep_popovers_on_deactivate(window: &(impl IsA<gtk4::Window> + IsA<Widget>)) {
+    window.connect_is_active_notify(|window| {
+        if window.is_active() {
+            return;
+        }
+        let window = window.clone();
+        glib::idle_add_local_once(move || {
+            if !window.is_active() {
+                popdown_popovers(&window);
+            }
+        });
+    });
+}
+
+/// Pop down every popover in `root`'s tree that is still up.
+///
+/// Popovers are widgets in the tree, so a plain walk finds them, nested ones
+/// included. This runs when the editor window's loss of activation has
+/// settled: an autohiding popover holds a grab until it is dismissed, and
+/// dismissing it is what GTK expects the app to do on focus-out (`GtkWindow`
+/// does not do it for you). Leaving one up while a capture overlay takes focus
+/// is how a popover ends up fighting the overlay for the pointer — on Wayland
+/// that lands as a protocol error, and a protocol error takes the whole
+/// connection down with it, this window included.
+fn popdown_popovers(root: &impl IsA<Widget>) {
+    let mut stack = vec![root.clone().upcast::<Widget>()];
+    while let Some(widget) = stack.pop() {
+        if let Ok(popover) = widget.clone().downcast::<Popover>() {
+            if popover.is_visible() {
+                popover.popdown();
+            }
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            stack.push(current.clone());
+            child = current.next_sibling();
+        }
+    }
 }
 
 fn wire_close_persist(
@@ -1142,6 +1201,154 @@ fn is_supported_video_path(path: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_window_takes_its_popovers_down_when_it_deactivates() {
+        // A popover that stays up past its window's activation keeps a live
+        // pointer grab, which is what let an open Custom Wallpaper popover fight
+        // a capture overlay for the pointer — and a Wayland protocol error there
+        // kills the whole connection, this window included. Both the wiring and
+        // the walk (it has to find nested popovers too) are pinned here.
+        let source = include_str!("mod.rs");
+        let production = &source[..source.find("\n#[cfg(test)]").expect("tests module")];
+        assert!(
+            production.contains("connect_is_active_notify"),
+            "the editor must react to its own activation"
+        );
+        assert!(
+            production.contains("!window.is_active()"),
+            "popovers must come down when the window loses activation"
+        );
+        assert!(
+            production.contains("popdown_popovers(&window)"),
+            "the window must sweep its popovers on focus-out"
+        );
+        assert!(
+            production.contains("idle_add_local_once"),
+            "the sweep must read settled activation: mapping a popover blips is-active off and back"
+        );
+
+        let Some(count) = crate::test_support::with_gtk(|| {
+            use gtk4::prelude::*;
+            use gtk4::{glib as gtk_glib, Box as GtkBox, Orientation, Popover};
+
+            let window = gtk4::Window::new();
+            let root = GtkBox::new(Orientation::Vertical, 0);
+            window.set_child(Some(&root));
+
+            let outer = Popover::new();
+            outer.set_has_arrow(false);
+            outer.set_parent(&root);
+            let body = GtkBox::new(Orientation::Vertical, 0);
+            outer.set_child(Some(&body));
+
+            let nested = Popover::new();
+            nested.set_has_arrow(false);
+            nested.set_parent(&body);
+            let nested_body = GtkBox::new(Orientation::Vertical, 0);
+            nested.set_child(Some(&nested_body));
+
+            // Surfaces are positioned by the compositor, so the loop has to run
+            // in real time before visibility means anything.
+            window.present();
+            let pump = || {
+                let ctx = gtk_glib::MainContext::default();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(150);
+                while std::time::Instant::now() < deadline {
+                    while ctx.iteration(false) {}
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            };
+            pump();
+            outer.popup();
+            nested.popup();
+            pump();
+            let up = usize::from(outer.is_visible()) + usize::from(nested.is_visible());
+            super::popdown_popovers(&window);
+            pump();
+            let down = usize::from(outer.is_visible()) + usize::from(nested.is_visible());
+
+            nested.unparent();
+            outer.unparent();
+            window.destroy();
+            (up, down)
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+
+        assert_eq!(count.0, 2, "both popovers must be up before the sweep");
+        assert_eq!(count.1, 0, "the sweep must take nested popovers down too");
+    }
+
+    #[test]
+    fn clicking_edit_opens_the_custom_wallpaper_popover() {
+        // The regression this pins: the popover's own opener was fine, but the
+        // deactivation sweep ate the card in the same breath it opened. Mapping
+        // an autohiding popover takes its grab, and GTK blips the toplevel's
+        // `is-active` off and back while the grab lands — measured on this very
+        // click: false, true, false, true inside one dispatch, ~100µs apart.
+        // The sweep read that blip as "the window lost activation", popped the
+        // card straight back down, and from the Background panel the Edit pill
+        // looked like a dead button. Built through the real opener and the real
+        // sweep wiring, so the settle the wiring depends on is in play: the card
+        // must still be up once the blip has passed.
+        use crate::recording::editor::model::{VideoEditState, VideoMetadata};
+        use crate::recording::editor::window::custom_wallpaper_popover::build_custom_wallpaper_popover;
+        use gtk4::prelude::*;
+        use gtk4::{glib as gtk_glib, Box as GtkBox, Button, Orientation};
+        use std::path::PathBuf;
+        use std::rc::Rc;
+        use std::sync::{Arc, Mutex};
+
+        let Some(opened) = crate::test_support::with_gtk(|| {
+            let state = Arc::new(Mutex::new(VideoEditState::new(VideoMetadata {
+                path: PathBuf::from("/tmp/input.mp4"),
+                duration_seconds: 10.0,
+                width: 1920,
+                height: 1080,
+                file_size_bytes: 1024,
+                has_audio: false,
+                frame_rate: 30.0,
+            })));
+            let window = gtk4::Window::new();
+            window.set_default_size(1200, 800);
+            let sidebar = GtkBox::new(Orientation::Vertical, 0);
+            window.set_child(Some(&sidebar));
+            let edit = Button::with_label("Edit");
+            sidebar.append(&edit);
+            let popover = build_custom_wallpaper_popover(&sidebar, &edit, state, Rc::new(|| {}));
+            super::sweep_popovers_on_deactivate(&window);
+
+            // Surfaces are positioned by the compositor, so the loop has to run
+            // in real time before visibility means anything.
+            window.present();
+            let pump = || {
+                let ctx = gtk_glib::MainContext::default();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+                while std::time::Instant::now() < deadline {
+                    while ctx.iteration(false) {}
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            };
+            pump();
+            edit.emit_clicked();
+            pump();
+            let opened = popover.is_visible();
+            popover.popdown();
+            popover.unparent();
+            window.destroy();
+            opened
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+
+        assert!(
+            opened,
+            "clicking Edit must open the Custom Wallpaper popover and leave it up"
+        );
+    }
+
     #[test]
     fn close_persists_project_and_does_not_export() {
         let source = include_str!("mod.rs");

@@ -432,6 +432,56 @@
 
             /* ── Gradient editor ── */
 
+            /* The stop picker is its own mini card, opened clear of the
+             * popover's left edge when a stop tile is clicked. It is
+             * deliberately not a second column: a column beside the stop
+             * editor widened this whole popover the moment the Gradient tab
+             * was opened. The Gradient tab is now just the stop editor, at the
+             * Color tab's width.
+             *
+             * The card gets the same strip-then-paint treatment as the popover
+             * above: this app ships no libadwaita, so `popover > contents`
+             * would otherwise pick up the host theme's surface. */
+            popover.recording-editor-gradient-picker-popover,
+            popover.recording-editor-gradient-picker-popover > contents {
+                background: transparent;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+            }
+
+            .recording-editor-gradient-picker-popover .recording-editor-gradient-picker-card {
+                min-width: 200px;
+                background: #1d1d1d;
+                border-radius: 12px;
+                border: 1px solid alpha(white, 0.10);
+                box-shadow: 0 12px 32px alpha(black, 0.45);
+            }
+
+            /* The card's own header: just its close, pushed right. The picker's
+             * children carry 10px side margins of their own, so the header is
+             * what insets the card's top and the field below it. */
+            .recording-editor-gradient-picker-header {
+                padding: 8px 8px 6px 8px;
+            }
+
+            button.recording-editor-gradient-picker-close {
+                min-width: 24px;
+                min-height: 24px;
+                padding: 0;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+            }
+
+            button.recording-editor-gradient-picker-close:hover {
+                background: alpha(white, 0.10);
+            }
+
+            .recording-editor-gradient-editor {
+                min-width: 236px;
+            }
+
             .recording-editor-gradient-header {
                 margin: 0 12px 8px 12px;
             }
@@ -566,6 +616,19 @@
 
             .editor-theme-light button.recording-editor-gradient-icon:hover {
                 background: alpha(#111827, 0.12);
+            }
+
+            .editor-theme-light
+                .recording-editor-gradient-picker-popover
+                .recording-editor-gradient-picker-card {
+                background: #ffffff;
+                border-color: alpha(#111827, 0.08);
+                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+            }
+
+            .editor-theme-light
+                button.recording-editor-gradient-picker-close:hover {
+                background: alpha(#111827, 0.10);
             }
 
             .editor-theme-light .recording-editor-gradient-steps-header label {
