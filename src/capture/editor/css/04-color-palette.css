@@ -174,9 +174,7 @@
                 background: #1d1d1d;
                 background-image: none;
                 border: 1px solid rgba(255, 255, 255, 0.10);
-                box-shadow:
-                    0 14px 32px rgba(0, 0, 0, 0.55),
-                    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+                box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
             }
 
             .editor-color-swatches-side {

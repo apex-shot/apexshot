@@ -332,25 +332,31 @@
             }
 
             .recording-editor-custom-popover {
-                /* The reference's popover is a fixed, fairly narrow panel —
-                 * wide enough for the plane to read, narrow enough not to
-                 * cover the video it is editing. */
-                min-width: 236px;
+                /* A fixed, deliberately modest panel: 212px plus the 1px
+                 * border each side lands the card at ~214px, the width the
+                 * reference keeps. Wide enough for the plane to read, narrow
+                 * enough not to cover the video it is editing. */
+                min-width: 212px;
             }
 
-            /* The real surface. Values follow the app's floating-card
-             * convention (#1d1d1d, 1px alpha(white, 0.10) border, 12px
-             * radius); the light counterpart is below. */
+            /* The real surface, in the app's floating-card convention:
+             * #1d1d1d inside a 1px alpha(white, 0.10) hairline, a 14px radius,
+             * and a 1px top highlight that the capture editor's color popover
+             * already paints (04-color-palette.css:171). The rounder corner and
+             * the highlight are what stop the card reading as a stock GTK
+             * popover frame. Deliberately no drop shadow: a popover sits on the
+             * video, and the blur reads as a dark halo rather than lift. The
+             * light counterpart is below. */
             .recording-editor-custom-body {
                 padding: 0;
                 background: #1d1d1d;
-                border-radius: 12px;
+                border-radius: 14px;
                 border: 1px solid alpha(white, 0.10);
-                box-shadow: 0 12px 32px alpha(black, 0.45);
+                box-shadow: inset 0 1px 0 alpha(white, 0.04);
             }
 
             .recording-editor-custom-header {
-                padding: 10px 10px 8px 10px;
+                padding: 8px 8px 6px 8px;
             }
 
             .recording-editor-custom-title {
@@ -374,24 +380,25 @@
 
             /* The reference's picker has no side padding: the field, bar and
              * hex row all run the popover's full width, with the tabs above
-             * them inset the same way. */
+             * them inset the same way. 8px is the card's one inset, so the
+             * Color page and the Gradient page lay out to the same width. */
             .recording-editor-custom-body > .recording-editor-bg-tabs {
-                margin: 0 10px 8px 10px;
+                margin: 0 8px 8px 8px;
             }
 
             /* Inset so the plane's own 8px radius (FIELD_RADIUS, drawn in
-             * Cairo) sits inside the card's 12px instead of poking through
+             * Cairo) sits inside the card's 14px instead of poking through
              * its corners. */
             .recording-editor-custom-field {
-                margin: 0 10px 8px 10px;
+                margin: 0 8px 8px 8px;
             }
 
             .recording-editor-custom-spectrum {
-                margin: 0 10px 8px 10px;
+                margin: 0 8px 8px 8px;
             }
 
             .recording-editor-custom-value-row {
-                margin: 0 10px 10px 10px;
+                margin: 0 8px 10px 8px;
                 padding: 0 10px;
                 min-height: 34px;
                 border-radius: 8px;
@@ -450,16 +457,20 @@
                 padding: 0;
             }
 
+            /* Same surface as the popover above, at the picker's slightly
+             * narrower width: the two cards sit side by side, so a different
+             * radius or highlight between them would read as a seam. No drop
+             * shadow, matching the popover above. */
             .recording-editor-gradient-picker-popover .recording-editor-gradient-picker-card {
-                min-width: 200px;
+                min-width: 190px;
                 background: #1d1d1d;
-                border-radius: 12px;
+                border-radius: 14px;
                 border: 1px solid alpha(white, 0.10);
-                box-shadow: 0 12px 32px alpha(black, 0.45);
+                box-shadow: inset 0 1px 0 alpha(white, 0.04);
             }
 
             /* The card's own header: just its close, pushed right. The picker's
-             * children carry 10px side margins of their own, so the header is
+             * children carry 8px side margins of their own, so the header is
              * what insets the card's top and the field below it. */
             .recording-editor-gradient-picker-header {
                 padding: 8px 8px 6px 8px;
@@ -479,11 +490,11 @@
             }
 
             .recording-editor-gradient-editor {
-                min-width: 236px;
+                min-width: 212px;
             }
 
             .recording-editor-gradient-header {
-                margin: 0 12px 8px 12px;
+                margin: 0 8px 8px 8px;
             }
 
             /* The type picker reuses the app's own dropdown chrome (03.css for
@@ -511,11 +522,11 @@
             }
 
             .recording-editor-gradient-bar {
-                margin: 0 12px 10px 12px;
+                margin: 0 8px 10px 8px;
             }
 
             .recording-editor-gradient-steps-header {
-                margin: 0 12px 6px 12px;
+                margin: 0 8px 6px 8px;
             }
 
             .recording-editor-gradient-steps-header label {
@@ -546,7 +557,7 @@
             }
 
             .recording-editor-gradient-steps {
-                margin: 0 12px 12px 12px;
+                margin: 0 8px 10px 8px;
             }
 
             /* Full-width stop cards: a color chip and its hex. The selected
@@ -573,13 +584,15 @@
             }
 
             /* The hex is a flat field inside the card. Two classes are needed to
-             * outrank `.recording-editor-root entry` in 01.css. */
+             * outrank `.recording-editor-root entry` in 01.css. It carries no
+             * fill of its own: the row's card is the one surface, so the code
+             * does not sit in a second, nested box. */
             .recording-editor-gradient-step .recording-editor-gradient-step-hex {
                 min-height: 34px;
                 padding: 0 10px;
                 font-size: 12px;
                 color: alpha(white, 0.85);
-                background: alpha(white, 0.06);
+                background: transparent;
                 background-image: none;
                 border: none;
                 box-shadow: none;
@@ -591,7 +604,10 @@
             .editor-theme-light .recording-editor-custom-body {
                 background: #ffffff;
                 border-color: alpha(#111827, 0.08);
-                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+                /* No top highlight on the light card: a white inset over a
+                 * white surface is invisible. No drop shadow either, matching
+                 * the dark card. */
+                box-shadow: none;
             }
 
             .editor-theme-light .recording-editor-custom-title {
@@ -623,7 +639,7 @@
                 .recording-editor-gradient-picker-card {
                 background: #ffffff;
                 border-color: alpha(#111827, 0.08);
-                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+                box-shadow: none;
             }
 
             .editor-theme-light
@@ -657,5 +673,5 @@
                 .recording-editor-gradient-step
                 .recording-editor-gradient-step-hex {
                 color: alpha(#1d2129, 0.85);
-                background: alpha(#111827, 0.05);
+                background: transparent;
             }

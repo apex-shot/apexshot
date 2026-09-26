@@ -1020,20 +1020,94 @@ mod tests {
         let body_end = css[body..].find('}').expect("the rule is closed") + body;
         for property in [
             "background: #1d1d1d;",
-            "border-radius: 12px;",
+            "border-radius: 14px;",
             "border: 1px solid alpha(white, 0.10);",
-            "box-shadow: 0 12px 32px alpha(black, 0.45);",
+            "inset 0 1px 0 alpha(white, 0.04);",
         ] {
             assert!(
                 css[body..body_end].contains(property),
                 "the picker body must paint the app's own card ({property})"
             );
         }
+        // Popovers cast no drop shadow: the card lifts off the video with its
+        // hairline and top highlight alone, not a dark halo behind it.
+        assert!(
+            !css[body..body_end].contains("0 14px 32px"),
+            "the picker body must not paint a drop shadow"
+        );
+
+        // The card is deliberately modest, not the wide panel it started as:
+        // 212px plus its 1px borders lands it near the reference's 214px.
+        // A wider min-width pads the popover back out over the video stage.
+        let popover_rule = css
+            .find(".recording-editor-custom-popover {")
+            .expect("09.css must size the popover");
+        let popover_rule_end =
+            css[popover_rule..].find('}').expect("the rule is closed") + popover_rule;
+        assert!(
+            css[popover_rule..popover_rule_end].contains("min-width: 212px;"),
+            "the card must stay at the modest width it was reduced to"
+        );
 
         // The light theme needs its own surface or the dark card shows through.
         assert!(
             css.contains(".editor-theme-light .recording-editor-custom-body {"),
             "the picker surface needs a light-theme counterpart"
+        );
+    }
+
+    #[test]
+    fn every_floating_popover_paints_the_same_card() {
+        // One floating-card recipe for the whole app, so a popover in the
+        // recording editor and one in the capture editor read as the same
+        // surface rather than one of them reading as a panel from the host
+        // toolkit. The capture editor's color popover is where the recipe is
+        // stated (04-color-palette.css:171); the recording editor's card is its
+        // copy. A rounder corner here or a highlight there is exactly the
+        // drift that made the two editors disagree, so pin the shared half in
+        // both files at once. Neither paints a drop shadow: a floating popover
+        // sits directly on the video, and the blur reads as a dark halo.
+        let recording = include_str!("../ui_support_css/09.css");
+        let capture = include_str!("../../../capture/editor/css/04-color-palette.css");
+        let body = recording
+            .find(".recording-editor-custom-body {")
+            .expect("09.css must define the picker surface");
+        let body_end = recording[body..].find('}').expect("the rule is closed") + body;
+        for shared in ["border-radius: 14px;", "inset 0 1px 0"] {
+            assert!(
+                capture.contains(shared),
+                "the capture editor's popover left the shared floating-card recipe ({shared})"
+            );
+            assert!(
+                recording[body..body_end].contains(shared),
+                "the recording editor's card must keep the shared floating-card recipe ({shared})"
+            );
+        }
+        assert!(
+            !capture.contains("0 14px 32px") && !recording[body..body_end].contains("0 14px 32px"),
+            "the shared floating-card recipe must not carry a drop shadow"
+        );
+
+        // The stop picker's mini card sits beside the main one, so it has to
+        // paint the same card at its own narrower width.
+        let card = recording
+            .find(".recording-editor-gradient-picker-card {")
+            .expect("09.css must define the picker card's surface");
+        let card_end = recording[card..].find('}').expect("the rule is closed") + card;
+        for property in [
+            "background: #1d1d1d;",
+            "border-radius: 14px;",
+            "border: 1px solid alpha(white, 0.10);",
+            "inset 0 1px 0 alpha(white, 0.04);",
+        ] {
+            assert!(
+                recording[card..card_end].contains(property),
+                "the mini card must paint the same card as the popover ({property})"
+            );
+        }
+        assert!(
+            !recording[card..card_end].contains("0 14px 32px"),
+            "the mini card must not paint a drop shadow"
         );
     }
 
@@ -1349,8 +1423,8 @@ mod tests {
             "the picker must be a popover of its own, not a column of the page"
         );
         assert!(
-            production.contains("picker_popover.set_parent(card_body)"),
-            "the mini card must hang off the popover's body, not the page"
+            production.contains("picker_popover.set_parent(popover_host)"),
+            "the mini card must hang off the panel beside the popover, not inside it"
         );
         let css = include_str!("../ui_support_css/09.css");
         assert!(
@@ -1364,6 +1438,82 @@ mod tests {
     }
 
     #[test]
+    fn the_picker_card_is_never_nested_inside_the_popover() {
+        // The crash this pins: the card used to be parented to a widget inside
+        // the Custom Wallpaper popover, which made it a nested xdg_popup.
+        // xdg-shell only allows destroying the topmost nested popup, and the
+        // card cannot take a grab of its own (a grabbing card eats the click
+        // that moves the selection to the next tile), so when the window lost
+        // focus the compositor dismissed the parent popup while the card was
+        // still mapped. That is `xdg_wm_base` error 2, "destroyed popup not top
+        // most popup", and a protocol error takes the whole window down with
+        // it: one click outside the editor and the editor closed itself.
+        // Parented to the panel, the card and the popover are siblings under
+        // the toplevel, and either can go down without the other.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let production = &source[..source
+            .find("\n#[cfg(test)]")
+            .expect("the popover has a tests module")];
+        assert!(
+            production.contains("picker_popover.set_parent(popover_host)"),
+            "the card must hang off the panel beside the popover"
+        );
+        assert!(
+            !production.contains("picker_popover.set_parent(card_body)"),
+            "a card parented inside the popover is a nested popup and kills the window on focus-out"
+        );
+    }
+
+    #[test]
+    fn the_popover_dismisses_without_the_modal_grab() {
+        // The other half of the sibling card. The card moved out to the panel,
+        // but the popover still held the modal grab — the thing autohide
+        // creates at surface-creation time — and a grab's click-outside rule
+        // is the compositor's: a press on a sibling surface is outside the
+        // grab's surface tree, so the compositor answered popup_done, the
+        // popover came down, and its `closed` handler took the card with it.
+        // That was the "clicking a color tile's picker card closes both
+        // popovers" bug. The grab cannot be dropped while the card is up
+        // (gtk_popover_set_autohide unrealizes the popover, which closes it),
+        // so the popover is created without the grab and dismissal is
+        // reproduced by hand: a capture-phase controller on the toplevel, the
+        // only place whose events are guaranteed to be outside both popovers,
+        // because a popup surface's events never reach the window.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let production = &source[..source
+            .find("\n#[cfg(test)]")
+            .expect("the popover has a tests module")];
+        assert!(
+            production.contains("popover.set_autohide(false)"),
+            "the popover must be born without the grab, or a press on the card's surface dismisses it"
+        );
+        assert!(
+            !production.contains("popover.set_autohide(true)"),
+            "set_autohide back to true would unrealize the popover and close it mid-edit"
+        );
+        assert!(
+            production.contains("dismissal.set_propagation_phase(gtk4::PropagationPhase::Capture)"),
+            "dismissal must be decided before any widget under the press acts on it"
+        );
+        assert!(
+            production.contains("EventSequenceState::Claimed"),
+            "the dismissing press must be swallowed, not acted on behind the closing popovers"
+        );
+        assert!(
+            production.contains("if !popover.is_visible()"),
+            "the controller is seated once and must be inert while the popover is down"
+        );
+        assert!(
+            production.contains("popover.connect_map("),
+            "a popover without the grab is never walked into by GTK, so focus has to be moved by hand"
+        );
+        assert!(
+            production.contains("type_popover.set_autohide(false)"),
+            "a grabbing dropdown under a grabless popover is a protocol error: xdg-shell requires the parent of a grabbing popup to hold a grab of its own"
+        );
+    }
+
+    #[test]
     fn the_picker_card_sits_clear_of_the_popover_and_can_close_itself() {
         // What the card's seat got wrong before it landed, in order. Seated on
         // the clicked tile, its right edge landed on the Gradient page's own
@@ -1371,11 +1521,11 @@ mod tests {
         // were clipped. Then hand-built rects in the page's space and in the
         // popover's surface space each came out ~150px high, because GTK anchors
         // a left-positioned popover by the *corner* of the pointing rect rather
-        // than the centre of its edge, and because a popover hung inside another
-        // popover has its rect measured through that popover's surface. The seat
-        // is now stated in the popover body's own space, with the card
-        // top-aligned so the anchoring corner is the one being reasoned about.
-        // The geometry itself is asserted by measurement in
+        // than the centre of its edge, and because a rect stated in a space the
+        // parent does not live in is measured through the wrong surface. The seat
+        // is now the popover body's box read in the panel's own space, with the
+        // card top-aligned so the anchoring corner is the one being reasoned
+        // about. The geometry itself is asserted by measurement in
         // `the_card_hangs_clear_of_the_popover_beside_it`; this test pins the
         // wiring that measurement depends on. And because the popover behind the
         // card stays open, the card needs a close of its own rather than relying
@@ -1385,8 +1535,8 @@ mod tests {
             .find("\n#[cfg(test)]")
             .expect("the popover has a tests module")];
         assert!(
-            production.contains("picker_popover.set_parent(card_body)"),
-            "the card must hang off the popover's body: that body's space is the seat's space"
+            production.contains("picker_popover.set_parent(popover_host)"),
+            "the card must hang off the panel: that panel's space is the seat's space"
         );
         assert!(
             production.contains("picker_popover.set_valign(Align::Start)"),
@@ -1402,19 +1552,19 @@ mod tests {
         let opener = &production[start..end];
         assert!(
             opener.contains("picker_popover.set_pointing_to"),
-            "the card needs its seat, stated in the body's own coordinates"
+            "the card needs its seat, stated in the panel's own coordinates"
         );
         assert!(
-            opener.contains("card_body.height()"),
+            opener.contains("card_body.compute_bounds(&popover_host)"),
+            "the seat must be the popover body's box read in the panel's space"
+        );
+        assert!(
+            opener.contains("body.height()"),
             "the seat must be taken from the popover's body, not from the page or a tile"
         );
         assert!(
-            !opener.contains("compute_bounds"),
-            "a tile-relative seat is what tucked the card under the popover"
-        );
-        assert!(
             !production.contains("fn host_popover("),
-            "the host-popover walk is not needed once the seat is in the body's space"
+            "the host-popover walk is not needed once the seat is in the panel's space"
         );
         assert!(
             production.contains("recording-editor-gradient-picker-close"),

@@ -162,7 +162,7 @@
                 border-radius: 8px;
                 background: #1a1a1a;
                 border: 1px solid alpha(white, 0.08);
-                box-shadow: 0 8px 24px alpha(black, 0.45);
+                box-shadow: none;
             }
 
             button.recording-editor-dropdown-item {
@@ -196,7 +196,7 @@
                 border: none;
                 outline: none;
                 background: #1a1a1a;
-                box-shadow: 0 8px 20px alpha(black, 0.4);
+                box-shadow: none;
             }
 
             button.recording-editor-aspect-item {

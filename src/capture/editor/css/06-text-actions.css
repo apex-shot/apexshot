@@ -57,7 +57,7 @@
                 border-radius: 12px;
                 padding: 6px 10px;
                 border: 1px solid rgba(255, 255, 255, 0.08);
-                box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+                box-shadow: none;
             }
 
             .editor-obfuscate-slider-bar {
@@ -168,7 +168,7 @@
                 border: 1px solid alpha(white, 0.12);
                 border-radius: 12px;
                 padding: 6px;
-                box-shadow: 0 12px 32px alpha(black, 0.45);
+                box-shadow: none;
             }
 
             button.editor-popover-list-item {
