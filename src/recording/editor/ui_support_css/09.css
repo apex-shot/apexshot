@@ -699,18 +699,16 @@
                 border-radius: 0;
             }
 
-            /* Exactly the stage aspect dropdown the editor already ships
-             * (`recording-editor-stage-aspect-list`, 07.css): flat #1c1c1c,
-             * a 4px radius, and no border or shadow. The menu used to round
-             * its corners further and draw a 1px hairline; GTK strokes a
-             * rounded border against the fill and the two arcs do not line
-             * up, which is the doubled outline that was showing at each
-             * corner. Matching the existing dropdown drops both. */
+            /* The same floating surface as the wallpaper popover: #1c1c1c
+             * inside the editor window's thin hairline at its 10px radius
+             * (`recording-editor-shell`, 03.css). No drop shadow: a menu sits
+             * on the timeline, and the blur reads as a dark halo rather than
+             * lift. */
             .recording-editor-clip-menu {
                 padding: 4px;
                 background: #1c1c1c;
-                border-radius: 4px;
-                border: none;
+                border-radius: 10px;
+                border: 1px solid alpha(white, 0.10);
                 outline: none;
                 box-shadow: none;
             }
@@ -752,11 +750,11 @@
                 background: alpha(white, 0.10);
             }
 
-            /* Light theme: the same panel in ink, matching the light
-             * stage-aspect dropdown in 05.css. */
+            /* Light theme: the same panel in ink, with the light editor
+             * window's own hairline (`recording-editor-shell`, 05.css). */
             .editor-theme-light .recording-editor-clip-menu {
                 background: #ffffff;
-                border: none;
+                border: 1px solid alpha(#111827, 0.18);
                 box-shadow: none;
             }
 
