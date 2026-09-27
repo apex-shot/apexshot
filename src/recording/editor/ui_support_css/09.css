@@ -327,32 +327,34 @@
             popover.recording-editor-custom-popover > contents {
                 background: transparent;
                 border: none;
+                outline: none;
                 box-shadow: none;
                 padding: 0;
+                border-radius: 0;
             }
 
             .recording-editor-custom-popover {
-                /* A fixed, deliberately modest panel: 212px plus the 1px
-                 * border each side lands the card at ~214px, the width the
+                /* A fixed, deliberately modest panel: 212px, the width the
                  * reference keeps. Wide enough for the plane to read, narrow
                  * enough not to cover the video it is editing. */
                 min-width: 212px;
             }
 
-            /* The real surface, in the app's floating-card convention:
-             * #1d1d1d inside a 1px alpha(white, 0.10) hairline, a 14px radius,
-             * and a 1px top highlight that the capture editor's color popover
-             * already paints (04-color-palette.css:171). The rounder corner and
-             * the highlight are what stop the card reading as a stock GTK
-             * popover frame. Deliberately no drop shadow: a popover sits on the
-             * video, and the blur reads as a dark halo rather than lift. The
-             * light counterpart is below. */
+            /* The app's floating surface, matching the main editor window
+             * (`recording-editor-shell`, 03.css): #1c1c1c inside a 1px
+             * hairline at the window's 10px radius. The card used to round to
+             * 14px, where GTK's rounded border arc stopped matching the fill's
+             * at the corner; the window's 10px is the radius that lines up.
+             * No drop shadow: a popover sits on the video, and the blur reads
+             * as a dark halo rather than lift. The light counterpart is
+             * below. */
             .recording-editor-custom-body {
                 padding: 0;
-                background: #1d1d1d;
-                border-radius: 14px;
+                background: #1c1c1c;
+                border-radius: 10px;
                 border: 1px solid alpha(white, 0.10);
-                box-shadow: inset 0 1px 0 alpha(white, 0.04);
+                outline: none;
+                box-shadow: none;
             }
 
             .recording-editor-custom-header {
@@ -387,7 +389,7 @@
             }
 
             /* Inset so the plane's own 8px radius (FIELD_RADIUS, drawn in
-             * Cairo) sits inside the card's 14px instead of poking through
+             * Cairo) sits clear of the card's edge instead of poking through
              * its corners. */
             .recording-editor-custom-field {
                 margin: 0 8px 8px 8px;
@@ -453,20 +455,23 @@
             popover.recording-editor-gradient-picker-popover > contents {
                 background: transparent;
                 border: none;
+                outline: none;
                 box-shadow: none;
                 padding: 0;
+                border-radius: 0;
             }
 
             /* Same surface as the popover above, at the picker's slightly
              * narrower width: the two cards sit side by side, so a different
-             * radius or highlight between them would read as a seam. No drop
-             * shadow, matching the popover above. */
+             * radius between them would read as a seam. No drop shadow,
+             * matching the popover above. */
             .recording-editor-gradient-picker-popover .recording-editor-gradient-picker-card {
                 min-width: 190px;
-                background: #1d1d1d;
-                border-radius: 14px;
+                background: #1c1c1c;
+                border-radius: 10px;
                 border: 1px solid alpha(white, 0.10);
-                box-shadow: inset 0 1px 0 alpha(white, 0.04);
+                outline: none;
+                box-shadow: none;
             }
 
             /* The card's own header: just its close, pushed right. The picker's
@@ -603,10 +608,10 @@
 
             .editor-theme-light .recording-editor-custom-body {
                 background: #ffffff;
-                border-color: alpha(#111827, 0.08);
-                /* No top highlight on the light card: a white inset over a
-                 * white surface is invisible. No drop shadow either, matching
-                 * the dark card. */
+                /* The same hairline the light editor window itself draws
+                 * (`recording-editor-shell`, 05.css), so the card's edge reads
+                 * like the window's. No drop shadow, matching the dark card. */
+                border: 1px solid alpha(#111827, 0.18);
                 box-shadow: none;
             }
 
@@ -638,7 +643,7 @@
                 .recording-editor-gradient-picker-popover
                 .recording-editor-gradient-picker-card {
                 background: #ffffff;
-                border-color: alpha(#111827, 0.08);
+                border: 1px solid alpha(#111827, 0.18);
                 box-shadow: none;
             }
 
@@ -688,41 +693,47 @@
             popover.recording-editor-clip-menu-popover > contents {
                 background: transparent;
                 border: none;
+                outline: none;
                 box-shadow: none;
                 padding: 0;
+                border-radius: 0;
             }
 
-            /* The floating-card convention the rest of the editor uses:
-             * #1d1d1d inside a 1px hairline, with a top highlight. The radius
-             * is 10px rather than 14 — this card is small, and the popover
-             * radius reads as a pill at menu scale. */
+            /* Exactly the stage aspect dropdown the editor already ships
+             * (`recording-editor-stage-aspect-list`, 07.css): flat #1c1c1c,
+             * a 4px radius, and no border or shadow. The menu used to round
+             * its corners further and draw a 1px hairline; GTK strokes a
+             * rounded border against the fill and the two arcs do not line
+             * up, which is the doubled outline that was showing at each
+             * corner. Matching the existing dropdown drops both. */
             .recording-editor-clip-menu {
-                padding: 5px;
-                background: #1d1d1d;
-                border-radius: 10px;
-                border: 1px solid alpha(white, 0.10);
-                box-shadow: inset 0 1px 0 alpha(white, 0.04);
+                padding: 4px;
+                background: #1c1c1c;
+                border-radius: 4px;
+                border: none;
+                outline: none;
+                box-shadow: none;
             }
 
             button.recording-editor-clip-menu-row {
-                min-height: 30px;
-                padding: 0 8px;
+                min-height: 26px;
+                padding: 0 10px;
                 border: none;
-                border-radius: 6px;
+                border-radius: 4px;
                 background: transparent;
-                color: alpha(white, 0.92);
+                color: alpha(white, 0.78);
+                box-shadow: none;
             }
 
             button.recording-editor-clip-menu-row:hover {
                 background: alpha(white, 0.08);
-                color: white;
+                color: alpha(white, 0.96);
             }
 
             button.recording-editor-clip-menu-row label,
             button.recording-editor-clip-menu-row image {
                 color: inherit;
-                font-size: 13px;
-                font-weight: 500;
+                font-size: 12px;
             }
 
             button.recording-editor-clip-menu-row-danger,
@@ -741,12 +752,12 @@
                 background: alpha(white, 0.10);
             }
 
-            /* Light theme: the same card in ink, so the menu does not stay
-             * dark over a white editor. */
+            /* Light theme: the same panel in ink, matching the light
+             * stage-aspect dropdown in 05.css. */
             .editor-theme-light .recording-editor-clip-menu {
-                background: #f4f5f7;
-                border: 1px solid alpha(#111827, 0.14);
-                box-shadow: inset 0 1px 0 alpha(white, 0.9);
+                background: #ffffff;
+                border: none;
+                box-shadow: none;
             }
 
             .editor-theme-light button.recording-editor-clip-menu-row {

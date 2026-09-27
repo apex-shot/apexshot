@@ -80,6 +80,18 @@ fn build_preview_inner(
         );
     }
 
+    // The card's corner radius follows the Background panel's slider. It has
+    // to be written at the preview's own scale, so it gets its own provider
+    // rather than riding along with the zoom transform.
+    let radius_css = CssProvider::new();
+    if let Some(display) = gtk4::gdk::Display::default() {
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &radius_css,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 3,
+        );
+    }
+
     let clip = Overlay::new();
     clip.add_css_class("recording-editor-preview-clip");
     clip.set_overflow(gtk4::Overflow::Hidden);
@@ -206,6 +218,7 @@ fn build_preview_inner(
         let picture = picture.clone();
         let clip = clip.clone();
         let zoom_css = zoom_css.clone();
+        let radius_css = radius_css.clone();
         let bg_css = bg_css.clone();
         let bg_picture = bg_picture.clone();
         let overlay_tick = overlay.clone();
@@ -218,13 +231,14 @@ fn build_preview_inner(
         let cursor_layer_tick = cursor_layer.clone();
         let empty_hint = empty_hint.clone();
         let last_zoom_css = Rc::new(RefCell::new(String::new()));
+        let last_radius_css = Rc::new(RefCell::new(String::new()));
         let last_bg_css = Rc::new(RefCell::new(String::new()));
         let last_wallpaper = Rc::new(RefCell::new(String::new()));
         let last_gradient = Rc::new(RefCell::new(String::new()));
         let last_margins = Rc::new(RefCell::new((i32::MIN, 0, 0, 0)));
         glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
             let playing = media_tick.is_playing();
-            let (dims, video, zoom, playhead, duration, hidden, label, placing, background) = {
+            let (dims, video, zoom, playhead, duration, hidden, label, placing, radius, background) = {
                 let s = state.lock().unwrap();
                 let source_t = s.source_playhead();
                 let (scale, _) = s.eval_zoom(source_t);
@@ -237,6 +251,7 @@ fn build_preview_inner(
                     s.video_hidden,
                     s.canvas_label(),
                     placing_manual(&s, playing),
+                    s.background_corner_radius_px(),
                     s.background.clone(),
                 )
             };
@@ -277,6 +292,7 @@ fn build_preview_inner(
                 dims,
                 &last_margins,
             );
+            apply_preview_radius(&clip, &radius_css, &last_radius_css, video, radius);
             apply_preview_view(
                 &state,
                 &picture,
@@ -822,6 +838,30 @@ fn apply_preview_clip(
     cursor_layer.set_margin_end(me);
     cursor_layer.set_margin_top(mt);
     cursor_layer.set_margin_bottom(mb);
+}
+
+// Round the video card's corners. The state stores the radius against the
+// output canvas, so it is rescaled to the preview's allocated width; without
+// that the corner would look tighter or rounder than the export.
+fn apply_preview_radius(
+    clip: &Overlay,
+    provider: &CssProvider,
+    last_css: &RefCell<String>,
+    video: (u32, u32),
+    radius_px: f64,
+) {
+    let clip_w = clip.allocated_width().max(0) as f64;
+    let video_w = video.0.max(1) as f64;
+    let radius = if radius_px > 0.5 && clip_w > 1.0 {
+        (radius_px * clip_w / video_w).round().max(0.0)
+    } else {
+        0.0
+    };
+    let css = format!(".recording-editor-preview-clip {{ border-radius: {radius:.0}px; }}");
+    if *last_css.borrow() != css {
+        provider.load_from_data(&css);
+        last_css.replace(css);
+    }
 }
 
 fn visible_source_view(

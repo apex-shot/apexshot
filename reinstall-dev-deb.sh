@@ -8,6 +8,7 @@ set -euo pipefail
 
 PACKAGE_NAME="apexshot"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+START_SECONDS=$SECONDS
 
 cd "$ROOT_DIR"
 
@@ -47,9 +48,32 @@ fi
 # fails anyway, or just let cargo rebuild the crate.
 unset CARGO_INCREMENTAL
 
+# Cargo's committed config pins `jobs = 4` to keep memory in check, and cargo
+# hands those same tokens to rustc, which caps how many codegen units the
+# compiler may build in parallel. For a single-crate release build that cap is
+# the whole bill: measured ~185s at 4 tokens vs ~135s at 20 on this machine.
+# Scale it to the machine, with a RAM ceiling so a cold build can't OOM.
+# CARGO_BUILD_JOBS from the environment still wins if you set it.
+default_cargo_jobs() {
+  local cpus mem_jobs jobs
+  cpus="$(nproc 2>/dev/null || echo 4)"
+  mem_jobs="$(awk '/^MemAvailable:/ { printf "%d", $2 / 1024 / 1024 / 2 }' /proc/meminfo 2>/dev/null || echo 4)"
+  [[ "$mem_jobs" =~ ^[0-9]+$ ]] || mem_jobs=4
+  jobs=$((cpus < mem_jobs ? cpus : mem_jobs))
+  if ((jobs < 4)); then jobs=4; fi
+  if ((jobs > 16)); then jobs=16; fi
+  printf '%s\n' "$jobs"
+}
+cargo_jobs_args=()
+if [[ -z "${CARGO_BUILD_JOBS:-}" ]]; then
+  cargo_jobs_args=(-j "$(default_cargo_jobs)")
+fi
+
 echo "Building ApexShot .deb..."
 echo "→ cargo release (non-incremental; see note above)"
-cargo build --release
+build_start=$SECONDS
+cargo build --release "${cargo_jobs_args[@]}"
+build_seconds=$((SECONDS - build_start))
 
 if [[ ! -x "$ROOT_DIR/target/release/apexshot" ]]; then
   echo "error: target/release/apexshot is missing after build" >&2
@@ -66,7 +90,11 @@ cp "$ROOT_DIR/target/release/apexshot-capture" "$ROOT_DIR/packaging/deb/apexshot
 cmp "$ROOT_DIR/target/release/apexshot-capture" "$ROOT_DIR/packaging/deb/apexshot-capture"
 
 echo "→ cargo-deb (reuse existing release binaries)"
-cargo deb --no-build
+deb_start=$SECONDS
+# `--fast` trades .deb size for speed; this package is for local testing, and
+# xz at the default level is ~1/6 of the run's remaining wall clock.
+cargo deb --no-build --fast
+deb_seconds=$((SECONDS - deb_start))
 
 shopt -s nullglob
 deb_files=("$ROOT_DIR"/target/debian/apexshot_*.deb)
@@ -100,6 +128,7 @@ wait_for_apexshot_exit() {
 }
 
 echo "Stopping running ApexShot processes..."
+install_start=$SECONDS
 pkill -x apexshot 2>/dev/null || true
 # Linux truncates the helper's process name to 15 characters.
 pkill -x apexshot-captur 2>/dev/null || true
@@ -152,6 +181,7 @@ install -m 0644 "$newest_deb" "$apt_deb"
 sudo apt install -y --reinstall --allow-downgrades "$apt_deb"
 rm -f "$apt_deb"
 trap - EXIT
+install_seconds=$((SECONDS - install_start))
 
 echo "Verifying installed binaries..."
 cmp "$ROOT_DIR/target/release/apexshot" /usr/bin/apexshot
@@ -184,3 +214,4 @@ if command -v gnome-extensions >/dev/null 2>&1; then
 fi
 
 echo "Installed $PACKAGE_NAME from $newest_deb"
+echo "Timings: total $((SECONDS - START_SECONDS))s | build ${build_seconds}s | package ${deb_seconds}s | install ${install_seconds}s"

@@ -982,25 +982,30 @@ mod tests {
             .expect("09.css must define the picker surface");
         let body_end = css[body..].find('}').expect("the rule is closed") + body;
         for property in [
-            "background: #1d1d1d;",
-            "border-radius: 14px;",
+            "background: #1c1c1c;",
+            "border-radius: 10px;",
             "border: 1px solid alpha(white, 0.10);",
-            "inset 0 1px 0 alpha(white, 0.04);",
         ] {
             assert!(
                 css[body..body_end].contains(property),
                 "the picker body must paint the app's own card ({property})"
             );
         }
-        // Popovers cast no drop shadow: the card lifts off the video with its
-        // hairline and top highlight alone, not a dark halo behind it.
+        // The card matches the editor window's edge: a thin hairline at the
+        // window's own 10px radius, which is what keeps the corner arcs lining
+        // up. Only the top highlight stays off.
+        assert!(
+            !css[body..body_end].contains("inset 0 1px 0"),
+            "the picker body must not paint a top highlight"
+        );
+        // Popovers cast no drop shadow: a floating card sits directly on the
+        // video, and the blur reads as a dark halo rather than lift.
         assert!(
             !css[body..body_end].contains("0 14px 32px"),
             "the picker body must not paint a drop shadow"
         );
 
-        // The card is deliberately modest, not the wide panel it started as:
-        // 212px plus its 1px borders lands it near the reference's 214px.
+        // The card is deliberately modest, not the wide panel it started as.
         // A wider min-width pads the popover back out over the video stage.
         let popover_rule = css
             .find(".recording-editor-custom-popover {")
@@ -1024,30 +1029,28 @@ mod tests {
         // One floating-card recipe for the whole app, so a popover in the
         // recording editor and one in the capture editor read as the same
         // surface rather than one of them reading as a panel from the host
-        // toolkit. The capture editor's color popover is where the recipe is
-        // stated (04-color-palette.css:171); the recording editor's card is its
-        // copy. A rounder corner here or a highlight there is exactly the
-        // drift that made the two editors disagree, so pin the shared half in
-        // both files at once. Neither paints a drop shadow: a floating popover
-        // sits directly on the video, and the blur reads as a dark halo.
+        // toolkit. The recording editor's card matches the main editor window
+        // (`recording-editor-shell`, 03.css): #1c1c1c inside a thin hairline at
+        // the window's 10px radius, no top highlight. Neither paints a drop
+        // shadow: a floating popover sits directly on the video, and the blur
+        // reads as a dark halo.
         let recording = include_str!("../ui_support_css/09.css");
-        let capture = include_str!("../../../capture/editor/css/04-color-palette.css");
         let body = recording
             .find(".recording-editor-custom-body {")
             .expect("09.css must define the picker surface");
         let body_end = recording[body..].find('}').expect("the rule is closed") + body;
-        for shared in ["border-radius: 14px;", "inset 0 1px 0"] {
-            assert!(
-                capture.contains(shared),
-                "the capture editor's popover left the shared floating-card recipe ({shared})"
-            );
+        for shared in [
+            "background: #1c1c1c;",
+            "border-radius: 10px;",
+            "border: 1px solid alpha(white, 0.10);",
+        ] {
             assert!(
                 recording[body..body_end].contains(shared),
-                "the recording editor's card must keep the shared floating-card recipe ({shared})"
+                "the recording editor's card must keep the shared dropdown recipe ({shared})"
             );
         }
         assert!(
-            !capture.contains("0 14px 32px") && !recording[body..body_end].contains("0 14px 32px"),
+            !recording[body..body_end].contains("0 14px 32px"),
             "the shared floating-card recipe must not carry a drop shadow"
         );
 
@@ -1058,10 +1061,9 @@ mod tests {
             .expect("09.css must define the picker card's surface");
         let card_end = recording[card..].find('}').expect("the rule is closed") + card;
         for property in [
-            "background: #1d1d1d;",
-            "border-radius: 14px;",
+            "background: #1c1c1c;",
+            "border-radius: 10px;",
             "border: 1px solid alpha(white, 0.10);",
-            "inset 0 1px 0 alpha(white, 0.04);",
         ] {
             assert!(
                 recording[card..card_end].contains(property),
