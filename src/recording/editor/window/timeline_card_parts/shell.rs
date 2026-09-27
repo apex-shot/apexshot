@@ -151,7 +151,23 @@ pub fn build_timeline_card(
                 cr,
                 width,
                 height,
-            )
+            );
+            // The ghost draws on top of the lane: it previews what a click
+            // would place, so it has to read over whatever is already there.
+            if let Some(start) = hover_zoom_time.get() {
+                if dragging_zoom.get().is_none() {
+                    let guard = state.lock().unwrap();
+                    draw_clipboard_ghost(
+                        &guard,
+                        cr,
+                        width as f64,
+                        height as f64,
+                        start,
+                        widget_is_light(area),
+                        true,
+                    );
+                }
+            }
         }
     });
 
@@ -172,7 +188,22 @@ pub fn build_timeline_card(
                 cr,
                 width,
                 height,
-            )
+            );
+            // Same copied-clip preview as the Zoom lane above.
+            if let Some(start) = hover_hide_time.get() {
+                if dragging_hide.get().is_none() {
+                    let guard = state.lock().unwrap();
+                    draw_clipboard_ghost(
+                        &guard,
+                        cr,
+                        width as f64,
+                        height as f64,
+                        start,
+                        widget_is_light(area),
+                        false,
+                    );
+                }
+            }
         }
     });
 
@@ -606,5 +637,6 @@ pub fn build_timeline_card(
     card.append(&board);
     card.append(&well);
     shell.append(&card);
+
     (shell, paint, pause)
 }

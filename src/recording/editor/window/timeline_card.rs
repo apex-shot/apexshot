@@ -9,7 +9,7 @@ use gtk4::glib;
 use gtk4::{
     prelude::*, Adjustment, Align, Box as GtkBox, Button, DrawingArea, EventControllerMotion,
     EventControllerScroll, EventControllerScrollFlags, GestureClick, GestureDrag, Image, Label,
-    MediaFile, Orientation, Overlay, Scale, Scrollbar, Widget,
+    MediaFile, Orientation, Overlay, Popover, PositionType, Scale, Scrollbar, Widget,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -37,7 +37,16 @@ mod painting {
     use super::*;
     include!("timeline_card_parts/painting.rs");
 }
-
+mod clip_menu {
+    use super::*;
+    include!("timeline_card_parts/clip_menu.rs");
+}
+mod clip_ghost {
+    use super::*;
+    include!("timeline_card_parts/clip_ghost.rs");
+}
+pub(super) use clip_ghost::*;
+pub(super) use clip_menu::*;
 pub(super) use format::*;
 pub(super) use geometry::*;
 pub(super) use interaction::*;

@@ -26,6 +26,7 @@ impl VideoEditState {
             cursor_hide_clips: Vec::new(),
             selected_cursor_hide: None,
             selected_segment: None,
+            clipboard: None,
             background: VideoBackground::None,
             background_padding: 24.0,
             // The radius was previously non-zero but never read by any

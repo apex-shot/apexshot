@@ -675,3 +675,89 @@
                 color: alpha(#1d2129, 0.85);
                 background: transparent;
             }
+
+            /* ── Clip context menu ──
+             * The menu a clip opens on right-click. It replaces the sidebar's
+             * footer Delete button, so it is the destructive path for a clip
+             * and has to read as a surface rather than a stock GTK popover. */
+
+            /* Same strip-then-paint step as the popovers above: the app ships
+             * no libadwaita, so `popover > contents` would otherwise inherit
+             * the desktop theme's own frame. */
+            popover.recording-editor-clip-menu-popover,
+            popover.recording-editor-clip-menu-popover > contents {
+                background: transparent;
+                border: none;
+                box-shadow: none;
+                padding: 0;
+            }
+
+            /* The floating-card convention the rest of the editor uses:
+             * #1d1d1d inside a 1px hairline, with a top highlight. The radius
+             * is 10px rather than 14 — this card is small, and the popover
+             * radius reads as a pill at menu scale. */
+            .recording-editor-clip-menu {
+                padding: 5px;
+                background: #1d1d1d;
+                border-radius: 10px;
+                border: 1px solid alpha(white, 0.10);
+                box-shadow: inset 0 1px 0 alpha(white, 0.04);
+            }
+
+            button.recording-editor-clip-menu-row {
+                min-height: 30px;
+                padding: 0 8px;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+                color: alpha(white, 0.92);
+            }
+
+            button.recording-editor-clip-menu-row:hover {
+                background: alpha(white, 0.08);
+                color: white;
+            }
+
+            button.recording-editor-clip-menu-row label,
+            button.recording-editor-clip-menu-row image {
+                color: inherit;
+                font-size: 13px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-clip-menu-row-danger,
+            button.recording-editor-clip-menu-row-danger label,
+            button.recording-editor-clip-menu-row-danger image {
+                color: #F87171;
+            }
+
+            button.recording-editor-clip-menu-row-danger:hover {
+                background: alpha(#F87171, 0.14);
+                color: #FCA5A5;
+            }
+
+            .recording-editor-clip-menu-separator {
+                margin: 4px 6px;
+                background: alpha(white, 0.10);
+            }
+
+            /* Light theme: the same card in ink, so the menu does not stay
+             * dark over a white editor. */
+            .editor-theme-light .recording-editor-clip-menu {
+                background: #f4f5f7;
+                border: 1px solid alpha(#111827, 0.14);
+                box-shadow: inset 0 1px 0 alpha(white, 0.9);
+            }
+
+            .editor-theme-light button.recording-editor-clip-menu-row {
+                color: alpha(#1d2129, 0.92);
+            }
+
+            .editor-theme-light button.recording-editor-clip-menu-row:hover {
+                background: alpha(#111827, 0.09);
+                color: #1d2129;
+            }
+
+            .editor-theme-light .recording-editor-clip-menu-separator {
+                background: alpha(#111827, 0.10);
+            }

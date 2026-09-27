@@ -446,7 +446,10 @@ pub fn bind_zoom_track(
                 select_zoom(&mut guard, Some(index));
             } else {
                 let at = snap_timeline_to_playhead(&guard, width, x_to_timeline(&guard, width, x));
-                if guard.add_zoom_at(at).is_none() {
+                // A copied clip takes the click; otherwise the click adds a
+                // clip the way it always has. Place first, so a click that
+                // lands the ghost never leaves an extra clip behind.
+                if guard.paste_clipboard_at(at).is_none() && guard.add_zoom_at(at).is_none() {
                     select_zoom(&mut guard, None);
                 }
             }
@@ -583,6 +586,49 @@ pub fn bind_zoom_track(
         hover,
         hover_time,
     );
+
+    // Right-click a clip to act on it in place. This is the only way to delete
+    // a clip now, so a click that misses every clip opens nothing rather than
+    // silently acting on whatever happened to be selected.
+    let menu = GestureClick::new();
+    menu.set_button(3);
+    menu.connect_pressed({
+        let state = state.clone();
+        let redraw = redraw.clone();
+        move |gesture, _, x, y| {
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            let index = {
+                let guard = state.lock().unwrap();
+                zoom_clip_at(&guard, width, x)
+            };
+            let Some(index) = index else {
+                return;
+            };
+            {
+                let mut guard = state.lock().unwrap();
+                select_zoom(&mut guard, Some(index));
+            }
+            redraw();
+            let Some(area) = gesture
+                .widget()
+                .and_then(|widget| widget.downcast::<DrawingArea>().ok())
+            else {
+                return;
+            };
+            show_clip_menu(
+                &area,
+                ClipMenuTarget::Zoom(index),
+                x,
+                y,
+                state.clone(),
+                redraw.clone(),
+            );
+        }
+    });
+    area.add_controller(menu);
 }
 
 pub fn bind_hide_track(
@@ -612,7 +658,9 @@ pub fn bind_hide_track(
                 select_cursor_hide(&mut guard, Some(index));
             } else {
                 let at = snap_timeline_to_playhead(&guard, width, x_to_timeline(&guard, width, x));
-                if guard.add_cursor_hide_at(at).is_none() {
+                // Same copy-takes-the-click rule as the Zoom track.
+                if guard.paste_clipboard_at(at).is_none() && guard.add_cursor_hide_at(at).is_none()
+                {
                     select_cursor_hide(&mut guard, None);
                 }
             }
@@ -749,6 +797,47 @@ pub fn bind_hide_track(
         hover,
         hover_time,
     );
+
+    // Same in-place menu as the Zoom track; see the comment there.
+    let menu = GestureClick::new();
+    menu.set_button(3);
+    menu.connect_pressed({
+        let state = state.clone();
+        let redraw = redraw.clone();
+        move |gesture, _, x, y| {
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            let index = {
+                let guard = state.lock().unwrap();
+                cursor_hide_clip_at(&guard, width, x)
+            };
+            let Some(index) = index else {
+                return;
+            };
+            {
+                let mut guard = state.lock().unwrap();
+                select_cursor_hide(&mut guard, Some(index));
+            }
+            redraw();
+            let Some(area) = gesture
+                .widget()
+                .and_then(|widget| widget.downcast::<DrawingArea>().ok())
+            else {
+                return;
+            };
+            show_clip_menu(
+                &area,
+                ClipMenuTarget::Hide(index),
+                x,
+                y,
+                state.clone(),
+                redraw.clone(),
+            );
+        }
+    });
+    area.add_controller(menu);
 }
 
 pub fn bind_track_cursor(

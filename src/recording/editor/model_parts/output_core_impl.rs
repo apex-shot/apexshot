@@ -128,7 +128,10 @@ impl VideoEditState {
     }
 
     pub fn needs_composite(&self) -> bool {
-        (!self.zoom_clips.is_empty() && !self.zoom_hidden)
+        // A clip that is hidden still exists on the timeline, but it changes
+        // nothing in the output, so it must not drag the exporter into the
+        // composite graph on its own.
+        (self.zoom_clips.iter().any(|clip| !clip.hidden) && !self.zoom_hidden)
             || !self.background.is_none()
             // A radius needs the composite graph even with no fill, otherwise
             // the mask never reaches the encoder and the corners stay square.

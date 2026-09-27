@@ -390,8 +390,15 @@ pub fn draw_zoom_clips(
         }
     }
     if let Some(start) = hover_time {
-        if let Some((start, end)) = suggested_zoom_range(&state, start) {
-            draw_zoom_suggestion(&state, cr, w, h, start, end, light);
+        // A hovering pointer previews the next click. With a clip on the
+        // clipboard that click pastes, so the "add a clip here" box would be
+        // describing the wrong action — and at 1.8s it is narrower than most
+        // pasted spans, so its dashed edge showed through the ghost as a stray
+        // vertical line.
+        if state.clipboard_duration_for(true).is_none() {
+            if let Some((start, end)) = suggested_zoom_range(&state, start) {
+                draw_zoom_suggestion(&state, cr, w, h, start, end, light);
+            }
         }
     }
 }
@@ -421,8 +428,17 @@ pub fn draw_one_zoom(
     } else {
         (1.0, 1.0, 1.0)
     };
+    // A clip disabled from its context menu keeps its place on the timeline but
+    // no longer feeds the preview, so it is drawn hollow: the ring and handles
+    // stay, and the fill drops to a hint. That is the difference between "this
+    // clip is not the selection" (a faded solid) and "this clip is off".
+    let disabled = state.zoom_clips[index].hidden;
     let blue = ClipTone {
-        fill: (0.0, 0.0, 1.0, if faint { 0.55 } else { 1.0 }),
+        fill: if disabled {
+            (0.0, 0.0, 1.0, 0.12)
+        } else {
+            (0.0, 0.0, 1.0, if faint { 0.55 } else { 1.0 })
+        },
         edge: (ring.0, ring.1, ring.2, 0.95),
         handle: (ring.0, ring.1, ring.2, if faint { 0.40 } else { 0.95 }),
     };
@@ -506,8 +522,12 @@ pub fn draw_cursor_hide_clips(
         }
     }
     if let Some(start) = hover_time {
-        if let Some((start, end)) = suggested_hide_range(&state, start) {
-            draw_hide_suggestion(&state, cr, w, h, start, end, light);
+        // Same rule as the Zoom lane: with a clip held for this track the click
+        // pastes, so the add-a-hide preview must stand down.
+        if state.clipboard_duration_for(false).is_none() {
+            if let Some((start, end)) = suggested_hide_range(&state, start) {
+                draw_hide_suggestion(&state, cr, w, h, start, end, light);
+            }
         }
     }
 }
@@ -537,8 +557,15 @@ pub fn draw_one_hide(
     } else {
         (1.0, 0.80, 0.90)
     };
+    // Same hollow treatment as a disabled zoom clip: the pill keeps its span
+    // and its handles, and only the fill drops away.
+    let disabled = state.cursor_hide_clips[index].hidden;
     let rose = ClipTone {
-        fill: (0.4, 0.0, 0.2, if faint { 0.55 } else { 1.0 }),
+        fill: if disabled {
+            (0.4, 0.0, 0.2, 0.12)
+        } else {
+            (0.4, 0.0, 0.2, if faint { 0.55 } else { 1.0 })
+        },
         edge: (ring.0, ring.1, ring.2, 0.95),
         handle: (ring.0, ring.1, ring.2, if faint { 0.40 } else { 0.95 }),
     };
@@ -887,6 +914,7 @@ mod tests {
         state.cursor_hide_clips.push(CursorHideClip {
             start: 1.0,
             end: 4.0,
+            hidden: false,
         });
         state.selected_cursor_hide = Some(0);
 

@@ -116,6 +116,8 @@ pub struct VideoProjectFile {
 pub struct CursorHideClipFile {
     pub start: f64,
     pub end: f64,
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -136,6 +138,8 @@ pub struct ZoomClipFile {
     pub rotation_z: f64,
     #[serde(default)]
     pub perspective: f64,
+    #[serde(default)]
+    pub hidden: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -469,6 +473,7 @@ fn zoom_to_file(clip: &ZoomClip) -> ZoomClipFile {
         rotation_y: clip.rotation_y,
         rotation_z: clip.rotation_z,
         perspective: clip.perspective,
+        hidden: clip.hidden,
     }
 }
 
@@ -476,6 +481,7 @@ fn hide_to_file(clip: &CursorHideClip) -> CursorHideClipFile {
     CursorHideClipFile {
         start: clip.start,
         end: clip.end,
+        hidden: clip.hidden,
     }
 }
 
@@ -483,6 +489,7 @@ fn hide_from_file(clip: &CursorHideClipFile) -> CursorHideClip {
     CursorHideClip {
         start: clip.start,
         end: clip.end,
+        hidden: clip.hidden,
     }
 }
 
@@ -502,6 +509,7 @@ fn zoom_from_file(clip: &ZoomClipFile) -> ZoomClip {
         rotation_y: clip.rotation_y,
         rotation_z: clip.rotation_z,
         perspective: clip.perspective,
+        hidden: clip.hidden,
     }
 }
 
@@ -1112,6 +1120,7 @@ mod tests {
         state.cursor_hide_clips.push(CursorHideClip {
             start: 4.0,
             end: 5.5,
+            hidden: false,
         });
         state.add_project_media(ProjectMedia {
             path: extra.clone(),

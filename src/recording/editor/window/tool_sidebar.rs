@@ -39,7 +39,7 @@ pub(super) fn build_tool_sidebar(
     let cursor_panel = build_cursor_panel(state.clone(), on_change.clone(), pause_playback.clone());
     let background_panel = build_background_panel(state.clone(), on_change.clone());
     let zoom_panel = build_zoom_panel(state.clone(), on_change.clone(), pause_playback.clone());
-    let hide_panel = build_hide_panel(state.clone(), on_change.clone());
+    let hide_panel = build_hide_panel();
     let clip_panel = build_clip_panel(state.clone(), on_change, pause_playback);
     root.append(&cursor_panel.widget);
     root.append(&background_panel.widget);
@@ -263,7 +263,6 @@ fn build_zoom_panel(
             button.set_group(Some(&first_easing));
         }
     }
-    let footer_delete = delete_tool_button(&t("Delete zoom"));
 
     body.append(&mode_row);
     body.append(&mode_hint);
@@ -280,14 +279,8 @@ fn build_zoom_panel(
     scroll.set_hexpand(true);
     scroll.set_child(Some(&body));
 
-    let footer = GtkBox::new(Orientation::Horizontal, 6);
-    footer.add_css_class("recording-editor-zoom-footer");
-    footer.set_hexpand(true);
-    footer.append(&footer_delete);
-
     panel.append(&header);
     panel.append(&scroll);
-    panel.append(&footer);
 
     auto_btn.connect_toggled({
         let state = state.clone();
@@ -341,19 +334,6 @@ fn build_zoom_panel(
             on_change();
         }
     });
-    let delete = {
-        let state = state.clone();
-        let on_change = on_change.clone();
-        Rc::new(move || {
-            state.lock().unwrap().remove_selected_zoom();
-            on_change();
-        })
-    };
-    footer_delete.connect_clicked({
-        let delete = delete.clone();
-        move |_| delete()
-    });
-
     let refresh = {
         let panel = panel.clone();
         let auto_btn = auto_btn.clone();
@@ -366,7 +346,6 @@ fn build_zoom_panel(
         let easing_row = easing_row.clone();
         let easing_label = easing_label.clone();
         let reset = reset.clone();
-        let footer_delete = footer_delete.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
@@ -382,7 +361,6 @@ fn build_zoom_panel(
             reset.set_sensitive(can_edit);
             easing_row.set_sensitive(can_edit);
             easing_label.set_sensitive(can_edit);
-            footer_delete.set_sensitive(can_edit);
             if let Some(clip) = &selected {
                 let mode = if clip.mode == ZoomMode::Auto && auto_available {
                     ZoomMode::Auto
@@ -614,7 +592,7 @@ struct HidePanel {
     refresh: Rc<dyn Fn()>,
 }
 
-fn build_hide_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) -> HidePanel {
+fn build_hide_panel() -> HidePanel {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
@@ -648,23 +626,8 @@ fn build_hide_panel(state: Arc<Mutex<VideoEditState>>, on_change: Rc<dyn Fn()>) 
     scroll.set_hexpand(true);
     scroll.set_child(Some(&body));
 
-    let footer_delete = delete_tool_button(&t("Delete hide"));
-    footer_delete.connect_clicked({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        move |_| {
-            state.lock().unwrap().remove_selected_cursor_hide();
-            on_change();
-        }
-    });
-    let footer = GtkBox::new(Orientation::Horizontal, 6);
-    footer.add_css_class("recording-editor-zoom-footer");
-    footer.set_hexpand(true);
-    footer.append(&footer_delete);
-
     panel.append(&header);
     panel.append(&scroll);
-    panel.append(&footer);
 
     let refresh = {
         let panel = panel.clone();

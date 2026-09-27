@@ -2193,3 +2193,402 @@ fn a_negligible_corner_radius_does_not_force_a_composite() {
     assert!(!state.has_corner_radius());
     assert!(!state.needs_composite());
 }
+
+fn zoom_clip_at(start: f64, end: f64) -> ZoomClip {
+    ZoomClip {
+        start,
+        end,
+        scale: 1.8,
+        center: (960.0, 540.0),
+        mode: ZoomMode::Manual,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_hidden_zoom_stops_framing_the_preview_but_keeps_its_span() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.8));
+    let zoomed = state.eval_zoom(1.9);
+    assert!(zoomed.0 > 1.01, "the clip frames the preview while it is on");
+
+    state.set_zoom_hidden(0, true);
+    let flat = state.eval_zoom(1.9);
+    assert!(
+        (flat.0 - 1.0).abs() < 1e-9,
+        "a hidden clip must not scale the frame",
+    );
+    // The span survives, which is the whole point of hiding rather than
+    // deleting: the user can turn it back on.
+    assert_eq!(state.zoom_clips.len(), 1);
+    assert!((state.zoom_clips[0].start - 1.0).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 2.8).abs() < 1e-9);
+
+    state.set_zoom_hidden(0, false);
+    assert!(
+        state.eval_zoom(1.9).0 > 1.01,
+        "showing a clip again must restore its framing",
+    );
+}
+
+#[test]
+fn a_hidden_clip_does_not_force_a_composite_on_its_own() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.8));
+    assert!(state.needs_composite());
+
+    state.set_zoom_hidden(0, true);
+    assert!(
+        !state.needs_composite(),
+        "a clip that changes nothing in the output must not drag in the \
+         composite graph",
+    );
+}
+
+#[test]
+fn a_hidden_hide_stops_hiding_the_cursor() {
+    let mut state = VideoEditState::new(metadata());
+    state.cursor_hide_clips.push(CursorHideClip {
+        start: 1.0,
+        end: 2.8,
+        hidden: false,
+    });
+    assert_eq!(state.cursor_hide_alpha(1.9), 0.0);
+
+    state.set_cursor_hide_hidden(0, true);
+    assert_eq!(
+        state.cursor_hide_alpha(1.9),
+        1.0,
+        "a disabled hide must leave the cursor visible",
+    );
+}
+
+#[test]
+fn duplicating_a_clip_lands_it_right_after_its_source() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    state.selected_zoom = Some(0);
+
+    let new_index = state.duplicate_selected_clip().expect("duplicate lands");
+    assert_eq!(new_index, 1);
+    assert_eq!(state.zoom_clips.len(), 2);
+    assert!((state.zoom_clips[1].start - 2.0).abs() < 1e-9);
+    assert!((state.zoom_clips[1].end - 3.0).abs() < 1e-9);
+    // The copy is the selection, so the panel edits what was just made.
+    assert_eq!(state.selected_zoom, Some(1));
+}
+
+#[test]
+fn duplicating_refuses_to_overlap_an_existing_clip() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    // The neighbour sits exactly where the copy would land.
+    state.zoom_clips.push(zoom_clip_at(2.0, 3.0));
+
+    assert!(
+        state.duplicate_zoom_clip(0, 2.0).is_none(),
+        "a duplicate that would overlap must be refused",
+    );
+    assert_eq!(state.zoom_clips.len(), 2);
+}
+
+#[test]
+fn cut_then_paste_moves_a_clip_to_the_playhead() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+
+    assert!(state.cut_zoom_clip(0));
+    assert!(
+        state.zoom_clips.is_empty(),
+        "cut must take the clip off the timeline",
+    );
+    // The span is on the clipboard, so the paste has something to restore.
+    let span = match state.clipboard_clip().expect("cut fills the clipboard") {
+        ClipClipboard::Zoom(clip) => clip.duration(),
+        ClipClipboard::Hide(_) => panic!("a zoom was cut, so the clipboard holds a zoom"),
+    };
+    assert!((span - 1.0).abs() < 1e-9);
+
+    state.playhead_seconds = 5.0;
+    state.timeline_offset_seconds = 0.0;
+    let pasted = state.paste_clipboard_at_playhead().expect("paste lands");
+    assert_eq!(pasted, 0);
+    let clip = &state.zoom_clips[0];
+    assert!((clip.start - 5.0).abs() < 1e-9, "paste lands at the playhead");
+    assert!((clip.end - 6.0).abs() < 1e-9);
+}
+
+#[test]
+fn copy_leaves_the_source_clip_in_place() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+
+    assert!(state.copy_zoom_clip(0));
+    assert_eq!(state.zoom_clips.len(), 1, "copy must not remove the source");
+    assert!(state.clipboard_clip().is_some());
+
+    state.clear_clipboard();
+    assert!(state.clipboard_clip().is_none());
+    assert!(state.paste_clipboard_at_playhead().is_none());
+}
+
+#[test]
+fn a_paste_that_would_overlap_is_refused_and_changes_nothing() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    state.copy_zoom_clip(0);
+
+    // The playhead sits on the clip that was just copied.
+    state.playhead_seconds = 1.5;
+    state.timeline_offset_seconds = 0.0;
+    assert!(state.paste_clipboard_at_playhead().is_none());
+    assert_eq!(state.zoom_clips.len(), 1, "a refused paste must be a no-op");
+}
+
+#[test]
+fn the_clipboard_remembers_which_track_the_clip_came_from() {
+    let mut state = VideoEditState::new(metadata());
+    state.cursor_hide_clips.push(CursorHideClip {
+        start: 1.0,
+        end: 2.0,
+        hidden: false,
+    });
+
+    assert!(state.copy_cursor_hide_clip(0));
+    state.playhead_seconds = 4.0;
+    state.paste_clipboard_at_playhead().expect("hide paste lands");
+
+    assert!(
+        state.zoom_clips.is_empty(),
+        "a copied hide must not paste as a zoom",
+    );
+    assert_eq!(state.cursor_hide_clips.len(), 2);
+    assert!((state.cursor_hide_clips[1].start - 4.0).abs() < 1e-9);
+}
+
+#[test]
+fn the_context_menu_delete_drops_the_clip_it_was_opened_on() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    state.zoom_clips.push(zoom_clip_at(3.0, 4.0));
+    // The selection is on the *other* clip, which is the case the old
+    // select-then-delete flow got wrong.
+    state.selected_zoom = Some(1);
+
+    state.remove_zoom_clip(0);
+
+    assert_eq!(state.zoom_clips.len(), 1);
+    assert!(
+        (state.zoom_clips[0].start - 3.0).abs() < 1e-9,
+        "the clip the menu was opened on must be the one that goes",
+    );
+    assert_eq!(
+        state.selected_zoom,
+        Some(0),
+        "the selection follows the shift instead of pointing past the end",
+    );
+}
+
+#[test]
+fn hiding_a_zoom_leaves_its_neighbour_morphing_on_its_own() {
+    // Two auto zooms close enough to morph. Disabling the first must not let
+    // the second keep framing the gap as if the first were still there.
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(ZoomClip {
+        start: 1.0,
+        end: 2.0,
+        scale: 2.0,
+        mode: ZoomMode::Auto,
+        ..Default::default()
+    });
+    state.zoom_clips.push(ZoomClip {
+        start: 2.1,
+        end: 3.1,
+        scale: 2.0,
+        mode: ZoomMode::Auto,
+        ..Default::default()
+    });
+
+    state.set_zoom_hidden(1, true);
+    let (scale_in_gap, _) = state.eval_zoom(2.05);
+    assert!(
+        (scale_in_gap - 1.0).abs() < 1e-9,
+        "with the second clip off there is no neighbour to morph into, so the \
+         gap must show the full frame",
+    );
+}
+
+#[test]
+fn paste_places_the_clip_at_the_playhead_on_the_timeline_clock() {
+    // Clip spans are composition times, the same space `add_zoom_at` writes.
+    // A paste placed from the *source* clock would land somewhere else as soon
+    // as the composition is trimmed, so this pins the two together: a trim
+    // must not shift where a paste lands.
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    state.copy_zoom_clip(0);
+
+    state.trim_start_seconds = 3.0;
+    state.playhead_seconds = 4.0;
+    state.paste_clipboard_at_playhead().expect("paste lands");
+
+    let pasted = state.zoom_clips.last().expect("a clip was pasted");
+    assert!(
+        (pasted.start - 4.0).abs() < 1e-9,
+        "the paste must land on the playhead's timeline position, got {}",
+        pasted.start,
+    );
+}
+
+#[test]
+fn paste_is_offered_only_when_it_would_land() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    // Nothing copied yet, so there is nothing to paste.
+    assert!(!state.can_paste_clipboard_at_playhead());
+
+    state.copy_zoom_clip(0);
+    // The playhead sits on the clip that was copied, so a paste would collide.
+    state.playhead_seconds = 1.5;
+    assert!(
+        !state.can_paste_clipboard_at_playhead(),
+        "a paste that would overlap must not be offered",
+    );
+
+    state.playhead_seconds = 5.0;
+    assert!(
+        state.can_paste_clipboard_at_playhead(),
+        "a clear spot under the playhead must offer a paste",
+    );
+    // Offering it and doing it must agree.
+    assert!(state.paste_clipboard_at_playhead().is_some());
+}
+
+#[test]
+fn cut_always_leaves_something_to_paste_back() {
+    // Cut is destructive on the timeline, so the clipboard is the only way to
+    // undo it. This pins that a cut always fills the slot a paste reads.
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    state.cut_zoom_clip(0);
+
+    assert!(
+        state.clipboard_clip().is_some(),
+        "a cut that left the clipboard empty would strand the clip",
+    );
+    state.playhead_seconds = 6.0;
+    assert!(state.can_paste_clipboard_at_playhead());
+    assert!(state.paste_clipboard_at_playhead().is_some());
+    assert_eq!(state.zoom_clips.len(), 1, "the cut clip came back");
+}
+
+#[test]
+fn the_ghost_only_shows_on_the_track_the_clip_came_from() {
+    // A zoom copied off the Zoom track must not offer a ghost on the Hide
+    // lane, or a click there would place a zoom into a hide.
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    state.copy_zoom_clip(0);
+
+    assert_eq!(state.clipboard_duration_for(true), Some(1.0));
+    assert_eq!(
+        state.clipboard_duration_for(false),
+        None,
+        "a copied zoom must not ghost on the Hide track",
+    );
+
+    state.cursor_hide_clips.push(CursorHideClip {
+        start: 5.0,
+        end: 6.5,
+        hidden: false,
+    });
+    state.copy_cursor_hide_clip(0);
+    assert_eq!(state.clipboard_duration_for(false), Some(1.5));
+    assert_eq!(state.clipboard_duration_for(true), None);
+}
+
+#[test]
+fn click_to_place_pastes_at_the_pointer_and_leaves_the_playhead_alone() {
+    // The ghost previews a paste at the pointer, so the click has to land
+    // exactly there — and it must not drag the playhead along, or the first
+    // place would move the second one's destination.
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    state.copy_zoom_clip(0);
+    state.playhead_seconds = 8.0;
+
+    let placed = state
+        .paste_clipboard_at(4.0)
+        .expect("a free spot takes the paste");
+    let clip = &state.zoom_clips[placed];
+    assert!((clip.start - 4.0).abs() < 1e-9, "the paste lands on the pointer");
+    assert!((clip.end - 5.0).abs() < 1e-9);
+    assert!(
+        (state.playhead_seconds - 8.0).abs() < 1e-9,
+        "click-to-place must not move the playhead",
+    );
+}
+
+#[test]
+fn the_ghost_reports_an_occupied_spot_before_the_click() {
+    // The painter asks this to decide filled versus hollow, so it has to agree
+    // with what the paste would actually do.
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    state.copy_zoom_clip(0);
+
+    assert!(
+        !state.paste_spot_is_free(1.5, 1.0, true),
+        "a spot under an existing clip is not free",
+    );
+    assert!(state.paste_spot_is_free(4.0, 1.0, true));
+    // Offered and refused must match the paste itself.
+    assert!(state.paste_clipboard_at(1.5).is_none());
+    assert!(state.paste_clipboard_at(4.0).is_some());
+}
+
+#[test]
+fn placing_a_clip_ends_the_copy_state() {
+    // The editor dims while a clip is held. If a paste left the clipboard
+    // filled, the window would stay dimmed and the ghost would stay on the
+    // lane, so the next click would place another copy instead of going back
+    // to normal editing.
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    state.copy_zoom_clip(0);
+    assert!(state.is_pasting_clip(), "a copy holds the clip");
+    assert_eq!(state.clipboard_duration_for(true), Some(1.0));
+
+    state.paste_clipboard_at(4.0).expect("the paste lands");
+
+    assert!(
+        !state.is_pasting_clip(),
+        "a successful paste must finish the copy",
+    );
+    assert_eq!(
+        state.clipboard_duration_for(true),
+        None,
+        "the ghost must go away once the clip is placed",
+    );
+    // Nothing left to paste, so the menu stops offering it.
+    assert!(!state.can_paste_clipboard_at_playhead());
+}
+
+#[test]
+fn a_refused_paste_keeps_the_clip_for_another_try() {
+    // A click on an occupied spot has to leave the copy alone: the user is
+    // still placing it, and dropping the clipboard there would lose it.
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(1.0, 2.0));
+    state.copy_zoom_clip(0);
+
+    assert!(state.paste_clipboard_at(1.5).is_none(), "occupied");
+    assert!(
+        state.is_pasting_clip(),
+        "a refused paste must keep the clip on the clipboard",
+    );
+
+    // And it still places once a free spot is clicked.
+    assert!(state.paste_clipboard_at(5.0).is_some());
+    assert!(!state.is_pasting_clip());
+}
