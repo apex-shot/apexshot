@@ -413,30 +413,18 @@ pub fn draw_one_zoom(
     let clip_w = (x1 - x0).max(22.0);
     let selected = lifted || state.selected_zoom == Some(index);
     let faint = !lifted && (dragging.is_some() || (state.selected_zoom.is_some() && !selected));
-    let blue = if light {
-        ClipTone {
-            fill: if faint {
-                (0.18, 0.37, 0.72, 0.14)
-            } else if selected {
-                (0.18, 0.37, 0.72, 0.54)
-            } else {
-                (0.18, 0.37, 0.72, 0.36)
-            },
-            edge: (0.10, 0.24, 0.52, 0.90),
-            handle: (0.10, 0.24, 0.52, if faint { 0.34 } else { 0.94 }),
-        }
+    // Solid #0000FF body, opaque in both themes. Only unselected clips recede,
+    // and they do it by fading the same solid fill rather than lightening the
+    // hue, so every pill stays the same blue.
+    let ring = if light {
+        (0.0, 0.0, 0.45)
     } else {
-        ClipTone {
-            fill: if faint {
-                (0.27, 0.43, 0.82, 0.10)
-            } else if selected {
-                (0.30, 0.48, 0.86, 0.36)
-            } else {
-                (0.27, 0.43, 0.82, 0.26)
-            },
-            edge: (0.72, 0.84, 1.0, 0.90),
-            handle: (0.72, 0.84, 1.0, if faint { 0.30 } else { 0.98 }),
-        }
+        (1.0, 1.0, 1.0)
+    };
+    let blue = ClipTone {
+        fill: (0.0, 0.0, 1.0, if faint { 0.55 } else { 1.0 }),
+        edge: (ring.0, ring.1, ring.2, 0.95),
+        handle: (ring.0, ring.1, ring.2, if faint { 0.40 } else { 0.95 }),
     };
     let y = if lifted { 1.0 } else { 7.0 };
     let height = h - 14.0;
@@ -457,11 +445,7 @@ pub fn draw_one_zoom(
         let _ = cr.stroke();
     }
     if clip_w > 40.0 {
-        if light {
-            cr.set_source_rgba(0.05, 0.13, 0.31, 0.96);
-        } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.82);
-        }
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.92);
         cr.select_font_face(
             crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
@@ -546,30 +530,17 @@ pub fn draw_one_hide(
     let selected = lifted || state.selected_cursor_hide == Some(index);
     let faint =
         !lifted && (dragging.is_some() || (state.selected_cursor_hide.is_some() && !selected));
-    let rose = if light {
-        ClipTone {
-            fill: if faint {
-                (0.66, 0.16, 0.23, 0.14)
-            } else if selected {
-                (0.66, 0.16, 0.23, 0.52)
-            } else {
-                (0.66, 0.16, 0.23, 0.34)
-            },
-            edge: (0.42, 0.05, 0.10, 0.90),
-            handle: (0.42, 0.05, 0.10, if faint { 0.34 } else { 0.94 }),
-        }
+    // Solid #660033, opaque in both themes. Unselected clips recede by fading
+    // that same fill, so the hue never shifts between states.
+    let ring = if light {
+        (0.20, 0.0, 0.10)
     } else {
-        ClipTone {
-            fill: if faint {
-                (0.72, 0.28, 0.32, 0.10)
-            } else if selected {
-                (0.78, 0.32, 0.36, 0.36)
-            } else {
-                (0.72, 0.28, 0.32, 0.26)
-            },
-            edge: (1.0, 0.78, 0.80, 0.90),
-            handle: (1.0, 0.78, 0.80, if faint { 0.30 } else { 0.98 }),
-        }
+        (1.0, 0.80, 0.90)
+    };
+    let rose = ClipTone {
+        fill: (0.4, 0.0, 0.2, if faint { 0.55 } else { 1.0 }),
+        edge: (ring.0, ring.1, ring.2, 0.95),
+        handle: (ring.0, ring.1, ring.2, if faint { 0.40 } else { 0.95 }),
     };
     let y = if lifted { 1.0 } else { 7.0 };
     let height = h - 14.0;
@@ -590,11 +561,7 @@ pub fn draw_one_hide(
         let _ = cr.stroke();
     }
     if clip_w > 40.0 {
-        if light {
-            cr.set_source_rgba(0.30, 0.03, 0.07, 0.96);
-        } else {
-            cr.set_source_rgba(1.0, 1.0, 1.0, 0.82);
-        }
+        cr.set_source_rgba(1.0, 1.0, 1.0, 0.92);
         cr.select_font_face(
             crate::typography::UI_FONT_FAMILY,
             gtk4::cairo::FontSlant::Normal,
@@ -845,4 +812,113 @@ pub fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r
         1.5 * std::f64::consts::PI,
     );
     cr.close_path();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::recording::editor::model::{
+        CursorHideClip, VideoEditState, VideoMetadata, ZoomClip, ZoomMode,
+    };
+    use gtk4::cairo::{Context, Format, ImageSurface};
+    use std::path::PathBuf;
+
+    fn metadata() -> VideoMetadata {
+        VideoMetadata {
+            path: PathBuf::from("/tmp/input.mp4"),
+            duration_seconds: 10.0,
+            width: 1920,
+            height: 1080,
+            file_size_bytes: 100 * 1024 * 1024,
+            has_audio: true,
+            frame_rate: 30.0,
+        }
+    }
+
+    /// ARgb32 stores each pixel as one native-endian u32; the top byte is the
+    /// alpha channel, so the RGB below is premultiplied by it.
+    fn zoom_pill_pixel(light: bool) -> [u8; 4] {
+        let mut state = VideoEditState::new(metadata());
+        state.timeline_scale = 0.0;
+        state.zoom_clips.push(ZoomClip {
+            start: 1.0,
+            end: 4.0,
+            scale: 1.5,
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        });
+        state.selected_zoom = Some(0);
+
+        let mut surface = ImageSurface::create(Format::ARgb32, 400, 56).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            draw_one_zoom(&state, &cr, 400.0, 56.0, 0, 1.0, 4.0, None, false, light);
+        }
+        surface.flush();
+
+        let width = surface.width() as usize;
+        let x = state.time_to_x(2.0, 400.0).round() as usize;
+        let data = surface.data().unwrap();
+        let offset = (28 * width + x) * 4;
+        [
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]
+    }
+
+    #[test]
+    fn zoom_pills_are_solid_blue_in_both_themes() {
+        for light in [false, true] {
+            let [b, g, r, a] = zoom_pill_pixel(light);
+            assert_eq!(a, 255, "the pill body must be opaque (light: {light})");
+            assert_eq!(
+                (r, g, b),
+                (0, 0, 255),
+                "the pill body must be solid #0000FF, not a translucent tint",
+            );
+        }
+    }
+
+    fn hide_pill_pixel(light: bool) -> [u8; 4] {
+        let mut state = VideoEditState::new(metadata());
+        state.timeline_scale = 0.0;
+        state.cursor_hide_clips.push(CursorHideClip {
+            start: 1.0,
+            end: 4.0,
+        });
+        state.selected_cursor_hide = Some(0);
+
+        let mut surface = ImageSurface::create(Format::ARgb32, 400, 56).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            draw_one_hide(&state, &cr, 400.0, 56.0, 0, 1.0, 4.0, None, false, light);
+        }
+        surface.flush();
+
+        let width = surface.width() as usize;
+        let x = state.time_to_x(2.0, 400.0).round() as usize;
+        let data = surface.data().unwrap();
+        let offset = (28 * width + x) * 4;
+        [
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]
+    }
+
+    #[test]
+    fn hide_pills_are_solid_maroon_in_both_themes() {
+        for light in [false, true] {
+            let [b, g, r, a] = hide_pill_pixel(light);
+            assert_eq!(a, 255, "the pill body must be opaque (light: {light})");
+            assert_eq!(
+                (r, g, b),
+                (102, 0, 51),
+                "the pill body must be solid #660033, not a translucent tint",
+            );
+        }
+    }
 }
