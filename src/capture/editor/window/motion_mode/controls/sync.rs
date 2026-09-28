@@ -77,6 +77,7 @@ pub(super) fn make_redraw(
     let delete_btn = parts.shared.delete_btn.clone();
     let syncing = parts.shared.inspector_syncing.clone();
     let last_had_text = Rc::new(std::cell::Cell::new(false));
+    let last_had_clip = Rc::new(std::cell::Cell::new(false));
     Rc::new(move || {
         let runtime = session.borrow();
         playhead_clock.set_text(&super::super::super::motion_timeline::format_clock(
@@ -139,16 +140,19 @@ pub(super) fn make_redraw(
         spring_bounce_value.set_label(&format!("{:.0}%", transform_timing.spring_bounce * 100.0));
         let has_clip = selected.is_some();
         let has_text = selected_text.is_some();
-        // Selecting a text clip reveals the Text page, so clicking a title in
-        // the timeline lands on its controls instead of leaving the user to
-        // find the notch. Only the transition is acted on: the page is not
-        // re-asserted on every redraw, so a manual notch click still wins
-        // while that clip stays selected. Deselecting deliberately does not
-        // leave the page — its empty state offers the same add action the
-        // timeline does, which is exactly what an empty Text page is for.
+        // Selecting a clip reveals its page, so clicking a title or a motion
+        // segment in the timeline lands on the matching controls instead of
+        // leaving the user to find the notch. Only the transition is acted on:
+        // the page is not re-asserted on every redraw, so a manual notch click
+        // still wins while that clip stays selected. Deselecting deliberately
+        // does not leave the page — the Text page's empty state offers the same
+        // add action the timeline does.
         let was_text = last_had_text.replace(has_text);
+        let was_clip = last_had_clip.replace(has_clip);
         if has_text && !was_text {
             super::super::show_motion_tool_page(&chrome, super::super::TEXT_PAGE);
+        } else if has_clip && !was_clip {
+            super::super::show_motion_tool_page(&chrome, super::super::MOTION_PAGE);
         }
         clip_box.set_visible(has_clip);
         // Text is its own page now, so it shows its empty state instead of

@@ -340,4 +340,17 @@ mod tests {
              should show an empty state instead of hiding"
         );
     }
+
+    /// Selecting a motion segment reveals the Motion page the same way a text
+    /// clip reveals Text, so clicking a clip in the timeline lands on its own
+    /// controls instead of staying on whichever page was open.
+    #[test]
+    fn selecting_a_motion_clip_reveals_the_motion_page_once() {
+        let sync = include_str!("motion_mode/controls/sync.rs");
+        assert!(
+            sync.contains("last_had_clip.replace(has_clip)")
+                && sync.contains("show_motion_tool_page(&chrome, super::super::MOTION_PAGE)"),
+            "a motion selection should reveal the Motion page on the transition only"
+        );
+    }
 }
