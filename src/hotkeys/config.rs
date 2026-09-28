@@ -119,6 +119,11 @@ pub(super) fn default_hotkey_bindings() -> Vec<HotkeyBinding> {
             args: vec!["capture".into(), "menu".into()],
         },
         HotkeyBinding {
+            name: Some("capture_area".into()),
+            accelerator: "SHIFT+SUPER+4".into(),
+            args: vec!["capture".into(), "area".into()],
+        },
+        HotkeyBinding {
             name: Some("capture_crosshair".into()),
             accelerator: "CTRL+ALT+X".into(),
             args: vec!["capture".into(), "crosshair".into()],
@@ -146,7 +151,7 @@ pub(super) fn accelerator_key(accel: &str) -> String {
 }
 
 pub(super) fn merge_missing_default_hotkeys(cfg: &mut HotkeyConfig) -> bool {
-    const RETIRED_ACTIONS: &[&str] = &["capture_area", "record_area", "open_recording_ui"];
+    const RETIRED_ACTIONS: &[&str] = &["record_area", "open_recording_ui"];
     let previous_len = cfg.bindings.len();
     cfg.bindings.retain(|binding| {
         !binding
@@ -266,6 +271,12 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
         "quick_capture",
         &app_config.shortcut_capture_menu,
         &["capture", "menu"],
+    );
+    push_binding(
+        &mut bindings,
+        "capture_area",
+        &app_config.shortcut_capture_area,
+        &["capture", "area"],
     );
     push_binding(
         &mut bindings,

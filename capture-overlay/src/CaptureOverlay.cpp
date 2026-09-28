@@ -257,6 +257,15 @@ void CaptureOverlay::setCaptureMenuAreaMode(bool ocr, int timerSeconds)
     update();
 }
 
+void CaptureOverlay::suppressLegacyToolRail()
+{
+    // Same presentation as a quick-access Area selection, but the caller has
+    // already fixed the capture intent and timer policy.
+    m_captureMenuAreaMode = true;
+    m_hoveredTool = -1;
+    update();
+}
+
 void CaptureOverlay::focusAndRaiseOverlay()
 {
     // Pin to full screen geometry (including panel regions), then request

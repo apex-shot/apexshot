@@ -573,6 +573,7 @@ fn build_settings_window(app: &Application) {
         shortcut_restore_recently_closed: shortcuts.restore_file_btn.clone(),
         shortcut_toggle_overlays: shortcuts.toggle_overlays_btn.clone(),
         shortcut_capture_menu: shortcuts.quick_capture_btn.clone(),
+        shortcut_capture_area: shortcuts.capture_area_btn.clone(),
         shortcut_capture_crosshair: shortcuts.capture_crosshair_btn.clone(),
         shortcut_capture_previous_area: shortcuts.capture_prev_btn.clone(),
         shortcut_capture_fullscreen: shortcuts.capture_fullscreen_btn.clone(),
@@ -804,6 +805,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_shortcut_btn(&inputs.shortcut_restore_recently_closed);
     wire_shortcut_btn(&inputs.shortcut_toggle_overlays);
     wire_shortcut_btn(&inputs.shortcut_capture_menu);
+    wire_shortcut_btn(&inputs.shortcut_capture_area);
     wire_shortcut_btn(&inputs.shortcut_capture_crosshair);
     wire_shortcut_btn(&inputs.shortcut_capture_previous_area);
     wire_shortcut_btn(&inputs.shortcut_capture_fullscreen);

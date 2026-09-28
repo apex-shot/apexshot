@@ -82,6 +82,7 @@ pub struct SaveInputs {
     pub shortcut_restore_recently_closed: Button,
     pub shortcut_toggle_overlays: Button,
     pub shortcut_capture_menu: Button,
+    pub shortcut_capture_area: Button,
     pub shortcut_capture_crosshair: Button,
     pub shortcut_capture_previous_area: Button,
     pub shortcut_capture_fullscreen: Button,
@@ -257,7 +258,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
         button_label_value(&inputs.shortcut_restore_recently_closed);
     config.shortcut_toggle_overlays = button_label_value(&inputs.shortcut_toggle_overlays);
     config.shortcut_capture_menu = button_label_value(&inputs.shortcut_capture_menu);
-    config.shortcut_capture_area.clear();
+    config.shortcut_capture_area = button_label_value(&inputs.shortcut_capture_area);
     config.shortcut_capture_crosshair = button_label_value(&inputs.shortcut_capture_crosshair);
     config.shortcut_capture_previous_area =
         button_label_value(&inputs.shortcut_capture_previous_area);

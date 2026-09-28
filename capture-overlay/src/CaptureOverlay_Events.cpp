@@ -1285,7 +1285,9 @@ void CaptureOverlay::mouseDoubleClickEvent(QMouseEvent* event)
             height(),
             m_captureIntent == CaptureIntent::Scroll
         );
-        bool clickedToolbar = layout.leftToolsPanel.contains(pos);
+        // The rail can be suppressed, so its rect must not stay interactive.
+        bool clickedToolbar =
+            !m_captureMenuAreaMode && layout.leftToolsPanel.contains(pos);
         if (clickedToolbar) {
             for (int i = 0; i < NUM_TOOLS; ++i) {
                 if (layout.toolCells[i].contains(pos)) {

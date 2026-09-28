@@ -46,3 +46,13 @@
             button.editor-tool-button.active-tool:hover {
                 background-color: alpha(white, 0.18);
             }
+
+            /* Primary tool rail: square tiles rather than the content-sized
+               buttons used by the trailing dropdown triggers. */
+            button.editor-tool-button.editor-toolbar-tool {
+                min-width: 28px;
+                min-height: 28px;
+                padding: 0;
+                margin: 0;
+                border-radius: 6px;
+            }

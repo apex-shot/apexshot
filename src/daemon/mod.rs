@@ -79,6 +79,7 @@ impl From<TrayAction> for DaemonAction {
         match action {
             TrayAction::OpenUpdate(url) => Self::OpenUpdate(url),
             TrayAction::QuickCapture => Self::QuickCapture,
+            TrayAction::CaptureArea => Self::CaptureArea,
             TrayAction::CaptureCrosshair => Self::CaptureCrosshair,
             TrayAction::CaptureScreen => Self::CaptureScreen,
             TrayAction::CaptureWindow => Self::CaptureWindow,

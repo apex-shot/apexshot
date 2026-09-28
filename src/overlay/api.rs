@@ -119,6 +119,17 @@ impl AreaSelector {
         selector
     }
 
+    /// Selector for a direct area capture (tray, CLI, or hotkey).
+    ///
+    /// Matches CaptureOverlay::suppressLegacyToolRail(): the capture mode was
+    /// chosen outside the overlay, so it opens the same rail-free selector the
+    /// quick-access Area choice uses.
+    fn new_area_capture() -> Self {
+        let selector = Self::new();
+        selector.state.lock().unwrap().capture_menu_area_mode = true;
+        selector
+    }
+
     /// Run the area selection dialog
     ///
     /// Returns `Ok(Some(area))` if user selected an area
@@ -222,7 +233,7 @@ pub fn select_area() -> SelectionResult {
         }
     }
     // GTK4 fallback
-    let selector = AreaSelector::new();
+    let selector = AreaSelector::new_area_capture();
     selector.run()
 }
 
@@ -249,7 +260,7 @@ pub fn select_area_from_image(image: &RgbaImage) -> SelectionResult {
         }
     }
     // GTK4 fallback
-    let selector = AreaSelector::new();
+    let selector = AreaSelector::new_area_capture();
     let background = background_frame_from_image(image)?;
     selector.run_with_background(Some(background))
 }
@@ -325,7 +336,7 @@ pub fn select_area_from_capture(capture: &CaptureData) -> SelectionResult {
     }
 
     // GTK4 fallback
-    let selector = AreaSelector::new();
+    let selector = AreaSelector::new_area_capture();
     let background = background_frame_from_capture(capture)?;
     selector.run_with_background(Some(background))
 }
@@ -342,7 +353,7 @@ pub fn select_area_from_capture_with_gtk_on_monitor(
     capture: &CaptureData,
     preselected: Option<MonitorChoice>,
 ) -> SelectionResult {
-    let selector = AreaSelector::new();
+    let selector = AreaSelector::new_area_capture();
     let background = background_frame_from_capture(capture)?;
     selector.run_with_background_on_monitor(Some(background), preselected)
 }
@@ -376,4 +387,36 @@ pub fn select_window_from_capture_with_gtk(capture: &CaptureData) -> SelectionRe
     let selector = AreaSelector::new_window_picker();
     let background = background_frame_from_capture(capture)?;
     selector.run_with_background(Some(background))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::overlay::capture_menu::CaptureMenuAction;
+
+    #[test]
+    fn direct_area_capture_selector_never_opens_the_legacy_rail() {
+        let selector = AreaSelector::new_area_capture();
+        let state = selector.state.lock().unwrap();
+        assert!(state.capture_menu_area_mode);
+        assert!(matches!(state.intent, OverlayIntent::Area));
+        assert!(!state.timer_delay_active);
+    }
+
+    #[test]
+    fn quick_access_area_keeps_its_ocr_intent_and_timer() {
+        let selector = AreaSelector::new_with_capture_menu_result(CaptureMenuResult {
+            action: CaptureMenuAction::Area,
+            recording: false,
+            ocr: true,
+            timer_seconds: 3,
+            microphone: false,
+            speaker: false,
+        });
+        let state = selector.state.lock().unwrap();
+        assert!(state.capture_menu_area_mode);
+        assert!(matches!(state.intent, OverlayIntent::Ocr));
+        assert!(state.timer_delay_active);
+        assert_eq!(state.capture_delay_seconds, 3);
+    }
 }

@@ -252,7 +252,7 @@ impl Default for AppConfig {
             shortcut_pin_to_screen: String::new(),
             shortcut_restore_recently_closed: String::new(),
             shortcut_toggle_overlays: String::new(),
-            shortcut_capture_area: String::new(),
+            shortcut_capture_area: "Shift+Super+4".to_string(),
             shortcut_capture_crosshair: "Ctrl+Alt+X".to_string(),
             shortcut_capture_previous_area: String::new(),
             shortcut_capture_fullscreen: "Shift+Super+3".to_string(),
@@ -463,10 +463,6 @@ fn migrate_legacy_capture_shortcuts(config: &mut AppConfig) -> bool {
             config.shortcut_capture_menu = replacement;
             changed = true;
         }
-    }
-    if !config.shortcut_capture_area.is_empty() {
-        config.shortcut_capture_area.clear();
-        changed = true;
     }
     if !config.shortcut_open_recording_ui.is_empty() {
         config.shortcut_open_recording_ui.clear();
@@ -1178,7 +1174,7 @@ quick_access_overlay_size: 0.5
     fn shortcut_defaults_include_quick_capture_and_recording_stop() {
         let cfg = AppConfig::default();
         assert_eq!(cfg.shortcut_capture_menu, "Shift+Super+5");
-        assert_eq!(cfg.shortcut_capture_area, "");
+        assert_eq!(cfg.shortcut_capture_area, "Shift+Super+4");
         assert_eq!(cfg.shortcut_open_recording_ui, "");
         assert_eq!(cfg.shortcut_record_screen, "");
         assert_eq!(cfg.shortcut_recording_stop_save, "Ctrl+Alt+Shift+S");
@@ -1195,7 +1191,7 @@ quick_access_overlay_size: 0.5
 
         assert!(migrate_legacy_capture_shortcuts(&mut cfg));
         assert_eq!(cfg.shortcut_capture_menu, "Ctrl+Alt+A");
-        assert!(cfg.shortcut_capture_area.is_empty());
+        assert_eq!(cfg.shortcut_capture_area, "Ctrl+Alt+A");
         assert!(cfg.shortcut_open_recording_ui.is_empty());
     }
 

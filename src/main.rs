@@ -618,6 +618,7 @@ pub(crate) fn print_usage() {
     println!();
     println!("Capture types:");
     println!("  menu              Open Quick Capture for screenshots and recording");
+    println!("  area              Drag to select an area (area capture mode)");
     println!("  screen            Capture the entire screen");
     println!("  crosshair         Capture around a precise point (crosshair mode)");
     println!();

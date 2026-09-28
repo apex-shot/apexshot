@@ -4,6 +4,7 @@ use std::sync::mpsc::Sender;
 pub enum TrayAction {
     OpenUpdate(String),
     QuickCapture,
+    CaptureArea,
     CaptureCrosshair,
     CaptureScreen,
     CaptureWindow,
@@ -191,6 +192,11 @@ impl ksni::Tray for ApexShotTray {
                 &crate::i18n::t("Quick Capture"),
                 idle,
                 TrayAction::QuickCapture
+            ),
+            item!(
+                &crate::i18n::t("Capture Area"),
+                idle,
+                TrayAction::CaptureArea
             ),
             item!(
                 &crate::i18n::t("Crosshair Capture"),

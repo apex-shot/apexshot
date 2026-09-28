@@ -81,6 +81,10 @@ public:
     /// Configure the selector launched from the unified pre-capture toolbar.
     /// It keeps the Frame controls but suppresses the legacy side tool rail.
     void setCaptureMenuAreaMode(bool ocr, int timerSeconds);
+    /// Suppress the legacy side tool rail without touching capture intent or
+    /// timer state — used when the capture mode was chosen outside the overlay
+    /// (tray, CLI, or hotkey), matching the quick-access Area selection.
+    void suppressLegacyToolRail();
     /// Enter the in-overlay window picker (used by Window tool and --window-capture).
     void openWindowPickerMode();
     /// Full window-surface PNG written when a card was selected (may be empty).
