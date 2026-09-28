@@ -9,7 +9,7 @@
 // color dots, `t`, ..) are already in scope; only truly new items are
 // imported here.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::capture::editor::window::icon_names;
 use crate::recording::editor::model::background_render::render_gradient;
@@ -32,7 +32,7 @@ fn wallpaper_thumb_path(file_name: &str) -> PathBuf {
     crate::capture::editor::window::background_panel::motion_wallpaper_preview_asset_path(file_name)
 }
 
-fn wallpaper_file_name(path: &PathBuf) -> Option<String> {
+fn wallpaper_file_name(path: &Path) -> Option<String> {
     path.file_name()
         .and_then(|name| name.to_str())
         .map(|name| name.to_owned())
@@ -456,7 +456,9 @@ fn build_background_panel(
                     VideoBackground::Wallpaper(path) if picked => Some(path.clone()),
                     _ => None,
                 };
-                let surface = path.as_ref().and_then(|p| decode_wallpaper_thumb(p));
+                let surface = path
+                    .as_deref()
+                    .and_then(decode_wallpaper_thumb);
                 image_thumb.set_draw_func(move |_, cr, width, height| {
                     if let Some(surface) = &surface {
                         paint_wallpaper_thumb(cr, surface, width, height);
@@ -654,7 +656,7 @@ fn pick_image_chooser(widget: &impl IsA<Widget>) -> Option<gtk4::FileChooserNati
 
 // Small bundled thumbs decode fast; a missing thumb leaves the tile empty
 // rather than decoding a multi-megapixel wallpaper on the UI thread.
-fn decode_wallpaper_thumb(path: &PathBuf) -> Option<gtk4::cairo::ImageSurface> {
+fn decode_wallpaper_thumb(path: &Path) -> Option<gtk4::cairo::ImageSurface> {
     let image = image::open(path).ok()?.into_rgba8();
     let (width, height) = image.dimensions();
     if width == 0 || height == 0 {

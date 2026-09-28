@@ -2162,6 +2162,7 @@ fn gradient_endpoints_span_the_box_and_flip_with_the_angle() {
     let ((vx0, vy0), (vx1, vy1)) = vertical.endpoints(400.0, 200.0);
     assert!(vy0 < vy1);
     assert!((vx0 - 200.0).abs() < 1e-6);
+    assert!((vx1 - 200.0).abs() < 1e-6);
 }
 
 #[test]

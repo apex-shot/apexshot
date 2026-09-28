@@ -1566,20 +1566,19 @@ mod tests {
             source.contains("render_gradient(&flat,"),
             "the popover must render gradients with the shared rasterizer"
         );
-        for draw in ["fn draw_stop_bar("] {
-            let start = source
-                .find(draw)
-                .unwrap_or_else(|| panic!("the popover must define {draw}"));
-            let end = source[start..]
-                .find("\nfn ")
-                .map(|at| start + at)
-                .unwrap_or(source.len());
-            assert!(
-                !source[start..end].contains("LinearGradient"),
-                "{draw} must use the shared rasterizer; a Cairo gradient would not \
-                 honor stop positions and could drift from export"
-            );
-        }
+        let draw = "fn draw_stop_bar(";
+        let start = source
+            .find(draw)
+            .unwrap_or_else(|| panic!("the popover must define {draw}"));
+        let end = source[start..]
+            .find("\nfn ")
+            .map(|at| start + at)
+            .unwrap_or(source.len());
+        assert!(
+            !source[start..end].contains("LinearGradient"),
+            "{draw} must use the shared rasterizer; a Cairo gradient would not \
+             honor stop positions and could drift from export"
+        );
     }
 
     #[test]

@@ -216,14 +216,9 @@ fn parse_hex(text: &str) -> Option<(u8, u8, u8)> {
         6 => {
             let bytes = digits.as_bytes();
             let mut out = [0u8; 3];
-            for slot in 0..3 {
-                let i = slot * 2;
-                let Some(hi) = nibble(bytes[i] as char) else {
-                    return None;
-                };
-                let Some(lo) = nibble(bytes[i + 1] as char) else {
-                    return None;
-                };
+            for (slot, pair) in bytes.chunks_exact(2).enumerate() {
+                let hi = nibble(pair[0] as char)?;
+                let lo = nibble(pair[1] as char)?;
                 out[slot] = hi * 16 + lo;
             }
             Some((out[0], out[1], out[2]))
@@ -697,21 +692,18 @@ fn build_color_picker(
             synced.set(Some(color));
             let plane_hsv = (hue, saturation, value);
             field.set_draw_func({
-                let plane_hsv = plane_hsv;
                 move |_, cr, width, height| {
                     draw_plane(cr, width as f64, height as f64, plane_hsv);
                 }
             });
             field.queue_draw();
             spectrum.set_draw_func({
-                let color = color;
                 move |_, cr, width, height| {
                     draw_spectrum(cr, width as f64, height as f64, hue, color);
                 }
             });
             spectrum.queue_draw();
             swatch.set_draw_func({
-                let color = color;
                 move |_, cr, width, height| {
                     fill_rounded(cr, 0.0, 0.0, width as f64, height as f64, 5.0, color);
                 }
@@ -783,17 +775,17 @@ fn draw_plane(cr: &gtk4::cairo::Context, w: f64, h: f64, hsv: (f64, f64, f64)) {
     let (hue, saturation, value) = hsv;
     let _ = cr.save();
     rounded_rect(cr, 0.0, 0.0, w, h, FIELD_RADIUS);
-    let _ = cr.clip();
+    cr.clip();
 
     // The pure hue fills the left edge, then white overlays from the right.
     let base = hsv_to_rgb(hue, 1.0, 1.0);
     let white = gtk4::cairo::LinearGradient::new(0.0, 0.0, w, 0.0);
-    let _ = white.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, 0.0);
-    let _ = white.add_color_stop_rgba(1.0, 1.0, 1.0, 1.0, 1.0);
+    white.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, 0.0);
+    white.add_color_stop_rgba(1.0, 1.0, 1.0, 1.0, 1.0);
     // Black overlays from the bottom.
     let shade = gtk4::cairo::LinearGradient::new(0.0, 0.0, 0.0, h);
-    let _ = shade.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.0);
-    let _ = shade.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 1.0);
+    shade.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, 0.0);
+    shade.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 1.0);
 
     cr.set_source_rgb(
         base.0 as f64 / 255.0,
@@ -855,7 +847,7 @@ fn draw_spectrum(cr: &gtk4::cairo::Context, w: f64, h: f64, hue: f64, color: (u8
     let bar_y = (h - bar_h) / 2.0;
     let _ = cr.save();
     rounded_rect(cr, 0.0, bar_y, w, bar_h, bar_h / 2.0);
-    let _ = cr.clip();
+    cr.clip();
     for x in 0..w as i32 {
         let hue = x as f64 / w;
         let (r, g, b) = hsv_to_rgb(hue, 1.0, 1.0);
@@ -949,7 +941,7 @@ fn attach_hue_drag(
         let hsv = hsv.clone();
         let set_hsv = set_hsv.clone();
         move |gesture, x, _| {
-            apply_hue(&gesture, x, &hsv, &set_hsv);
+            apply_hue(gesture, x, &hsv, &set_hsv);
         }
     });
     drag.connect_drag_update({
@@ -960,7 +952,7 @@ fn attach_hue_drag(
                 return;
             };
             let (x, _) = resolve_drag_position(start, (offset_x, 0.0));
-            apply_hue(&gesture, x, &hsv, &set_hsv);
+            apply_hue(gesture, x, &hsv, &set_hsv);
         }
     });
     spectrum.add_controller(drag);
@@ -995,7 +987,7 @@ fn attach_plane_drag(
         let hsv = hsv.clone();
         let set_hsv = set_hsv.clone();
         move |gesture, x, y| {
-            apply_plane(&gesture, x, y, &hsv, &set_hsv);
+            apply_plane(gesture, x, y, &hsv, &set_hsv);
         }
     });
     drag.connect_drag_update({
@@ -1006,7 +998,7 @@ fn attach_plane_drag(
                 return;
             };
             let (x, y) = resolve_drag_position(start, (offset_x, offset_y));
-            apply_plane(&gesture, x, y, &hsv, &set_hsv);
+            apply_plane(gesture, x, y, &hsv, &set_hsv);
         }
     });
     field.add_controller(drag);
@@ -2228,12 +2220,7 @@ mod tests {
         // The rail is the slim strip; the thumb straddles it. Shrinking the
         // thumb into the rail killed its grabbability, so pin the split: a
         // thin rail, a full-size handle.
-        assert!(
-            SPECTRUM_BAR_THICKNESS < HANDLE_RADIUS * 2.0,
-            "the rail ({}) must be slimmer than the thumb ({})",
-            SPECTRUM_BAR_THICKNESS,
-            HANDLE_RADIUS * 2.0
-        );
+        const _: () = assert!(SPECTRUM_BAR_THICKNESS < HANDLE_RADIUS * 2.0);
         // The widget must be tall enough for the whole thumb to show.
         assert!(
             f64::from(SPECTRUM_CONTENT_HEIGHT) >= HANDLE_RADIUS * 2.0,

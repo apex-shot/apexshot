@@ -1,7 +1,7 @@
+use super::model::background_render::render_rounded_mask;
 use super::model::{
     even_crop_rect, AudioMode, VideoBackground, VideoEditState, VideoMetadata, DEFAULT_FRAME_RATE,
 };
-use super::model::background_render::render_rounded_mask;
 use anyhow::{anyhow, Context};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -532,14 +532,9 @@ fn build_composite_convert_args(
         .has_corner_radius()
         .then(|| {
             let path = work_dir.join("radius.png");
-            write_rounded_mask(
-                &path,
-                video_w,
-                video_h,
-                state.background_corner_radius_px(),
-            )
-            .ok()
-            .map(|_| path)
+            write_rounded_mask(&path, video_w, video_h, state.background_corner_radius_px())
+                .ok()
+                .map(|_| path)
         })
         .flatten();
     let mask_index = 1 + usize::from(draw_cursor) + usize::from(use_wallpaper);
