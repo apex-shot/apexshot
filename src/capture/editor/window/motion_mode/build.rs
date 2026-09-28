@@ -473,7 +473,6 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
                 text_track: timeline.text_track,
                 playhead_overlay: timeline.playhead,
                 hover_playhead: timeline.hover_playhead,
-                playhead_dragging: timeline.playhead_dragging,
                 playhead_hovered: timeline.playhead_hovered,
             },
             panels: MotionPanelParts {

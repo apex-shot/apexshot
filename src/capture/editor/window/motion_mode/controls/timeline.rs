@@ -73,7 +73,6 @@ pub(super) fn install(
     ruler_drag.set_button(1);
     ruler_drag.connect_drag_begin({
         let session = session.runtime.clone();
-        let dragging = parts.timeline.playhead_dragging.clone();
         let hover_playhead = parts.timeline.hover_playhead.clone();
         let motion_track = parts.timeline.motion_track.clone();
         let text_track = parts.timeline.text_track.clone();
@@ -97,7 +96,6 @@ pub(super) fn install(
                 runtime.hover_track = None;
                 had
             };
-            dragging.set(true);
             if had_hover {
                 hover_playhead.queue_draw();
                 motion_track.queue_draw();
@@ -134,16 +132,10 @@ pub(super) fn install(
     });
     ruler_drag.connect_drag_end({
         let session = session.runtime.clone();
-        let dragging = parts.timeline.playhead_dragging.clone();
         let hovered = parts.timeline.playhead_hovered.clone();
         let preview = parts.shell.preview.clone();
         let redraw_playhead = redraw_playhead.clone();
         move |_, _, _| {
-            dragging.set(false);
-            // Pointer grabs suppress board motion events, so the pre-drag
-            // hover value can survive a drag that ends away from the head and
-            // leave the clock pill stuck open. Collapse until motion proves
-            // the pointer is back on the capsule.
             hovered.set(false);
             // Drop back to paused quality: the next paint schedules the
             // sharp (Good-filter) worker for the landed frame.
@@ -582,7 +574,6 @@ pub(super) fn install(
             let motion_track = parts.timeline.motion_track.clone();
             let text_track = parts.timeline.text_track.clone();
             let preview = parts.shell.preview.clone();
-            let redraw_playhead = redraw_playhead.clone();
             move |controller, x, y| {
                 let board = controller.widget();
                 let width = board
@@ -623,12 +614,7 @@ pub(super) fn install(
                     )
                     .is_some();
                     (
-                        super::super::super::motion_timeline::playhead_head_hit(
-                            x,
-                            y,
-                            line_x,
-                            hovered.get(),
-                        ),
+                        super::super::super::motion_timeline::playhead_head_hit(x, y, line_x),
                         was,
                         is,
                         prev_track,
@@ -672,7 +658,6 @@ pub(super) fn install(
                             .flatten();
                         widget.set_cursor(cursor.as_ref());
                     }
-                    redraw_playhead();
                 }
             }
         });
@@ -683,7 +668,6 @@ pub(super) fn install(
             let motion_track = parts.timeline.motion_track.clone();
             let text_track = parts.timeline.text_track.clone();
             let preview = parts.shell.preview.clone();
-            let redraw_playhead = redraw_playhead.clone();
             move |controller| {
                 let (lane_changed, was_previewing) = {
                     let mut runtime = session.borrow_mut();
@@ -713,9 +697,7 @@ pub(super) fn install(
                 if let Some(widget) = controller.widget() {
                     widget.set_cursor(None);
                 }
-                if hovered.replace(false) {
-                    redraw_playhead();
-                }
+                hovered.set(false);
             }
         });
         board.add_controller(hover);

@@ -31,7 +31,6 @@ pub(super) struct MotionTimeline {
     pub text_track: DrawingArea,
     pub playhead: DrawingArea,
     pub hover_playhead: DrawingArea,
-    pub playhead_dragging: Rc<Cell<bool>>,
     pub playhead_hovered: Rc<Cell<bool>>,
 }
 
@@ -159,7 +158,6 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     playhead.set_vexpand(true);
     playhead.set_can_target(false);
 
-    let playhead_dragging = Rc::new(Cell::new(false));
     let playhead_hovered = Rc::new(Cell::new(false));
     // Pure draw: the playhead is painted in this static overlay and follows
     // model state, so a scrub never writes widget geometry or invalidates
@@ -168,11 +166,8 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     // (`playhead_head_hit`) instead of a positioned handle widget.
     playhead.set_draw_func({
         let runtime = runtime.clone();
-        let dragging = playhead_dragging.clone();
-        let hovered = playhead_hovered.clone();
         move |_, cr, width, height| {
-            let expanded = dragging.get() || hovered.get();
-            draw_playhead(cr, width, height, &runtime, expanded);
+            draw_playhead(cr, width, height, &runtime);
         }
     });
     // Hover read-out: a red hairline under the playhead. It tracks the pointer
@@ -210,7 +205,6 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
         text_track,
         playhead,
         hover_playhead,
-        playhead_dragging,
         playhead_hovered,
     }
 }
@@ -719,25 +713,16 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
 const PLAYHEAD_HANDLE_W: f64 = 12.0;
 const PLAYHEAD_HANDLE_H: f64 = 26.0;
 const PLAYHEAD_HANDLE_TOP: f64 = 2.0;
-// Hovered/dragged handle: a wide pill that shows the playhead clock, because
-// the thumb covers the ruler ticks users would otherwise read.
-const PLAYHEAD_CLOCK_W: f64 = 58.0;
 const PLAYHEAD_HOVER_SLOP: f64 = 6.0;
 
 /// Hit-test for the playhead *head* (the capsule) only. The stem below it must
-/// not expand the capsule; and once expanded the pointer may roam the wide
-/// pill without it collapsing.
+/// not count as grabbing the head.
 pub(in crate::capture::editor::window) fn playhead_head_hit(
     pointer_x: f64,
     pointer_y: f64,
     line_x: f64,
-    expanded: bool,
 ) -> bool {
-    let half_w = if expanded {
-        PLAYHEAD_CLOCK_W / 2.0
-    } else {
-        PLAYHEAD_HANDLE_W / 2.0
-    };
+    let half_w = PLAYHEAD_HANDLE_W / 2.0;
     pointer_y <= PLAYHEAD_HANDLE_TOP + PLAYHEAD_HANDLE_H + PLAYHEAD_HOVER_SLOP
         && (pointer_x - line_x).abs() <= half_w + PLAYHEAD_HOVER_SLOP
 }
@@ -764,13 +749,7 @@ fn draw_hover_playhead(
     let _ = cr.stroke();
 }
 
-fn draw_playhead(
-    cr: &Context,
-    width: i32,
-    height: i32,
-    runtime: &Rc<RefCell<MotionRuntime>>,
-    expanded: bool,
-) -> (f64, f64) {
+fn draw_playhead(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<MotionRuntime>>) {
     let runtime = runtime.borrow();
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
@@ -783,43 +762,25 @@ fn draw_playhead(
     cr.line_to(x, h);
     let _ = cr.stroke();
 
-    let (pill_w, pill_h) = if expanded {
-        (PLAYHEAD_CLOCK_W, PLAYHEAD_HANDLE_H)
-    } else {
-        (PLAYHEAD_HANDLE_W, PLAYHEAD_HANDLE_H)
-    };
     // The stem must pierce the capsule's center even on the first/last frame.
     // Clamping the capsule into the board pushed it off the stem, so let it
     // clip at the edge instead, like the video editor's playhead mark.
-    let hx = x - pill_w / 2.0;
+    let hx = x - PLAYHEAD_HANDLE_W / 2.0;
 
-    // Handle: dark capsule with a light outline; expanded it carries the clock.
-    rounded_rect(cr, hx, PLAYHEAD_HANDLE_TOP, pill_w, pill_h, pill_h / 2.0);
+    // Handle: dark capsule with a light outline.
+    rounded_rect(
+        cr,
+        hx,
+        PLAYHEAD_HANDLE_TOP,
+        PLAYHEAD_HANDLE_W,
+        PLAYHEAD_HANDLE_H,
+        PLAYHEAD_HANDLE_H / 2.0,
+    );
     cr.set_source_rgba(0.04, 0.05, 0.07, 1.0);
     let _ = cr.fill_preserve();
     cr.set_source_rgba(0.86, 0.90, 0.98, 1.0);
     cr.set_line_width(1.5);
     let _ = cr.stroke();
-
-    if expanded {
-        cr.select_font_face(
-            UI_FONT_FAMILY,
-            gtk4::cairo::FontSlant::Normal,
-            gtk4::cairo::FontWeight::Bold,
-        );
-        cr.set_font_size(13.0);
-        let label = format_clock(runtime.motion.playhead);
-        if let Ok(ext) = cr.text_extents(&label) {
-            cr.set_source_rgba(0.94, 0.96, 1.0, 1.0);
-            cr.move_to(
-                hx + (pill_w - ext.width()) / 2.0 - ext.x_bearing(),
-                PLAYHEAD_HANDLE_TOP + pill_h / 2.0 - ext.y_bearing() - ext.height() / 2.0,
-            );
-            let _ = cr.show_text(&label);
-        }
-    }
-
-    (hx, pill_w)
 }
 
 fn rounded_rect(cr: &Context, x: f64, y: f64, w: f64, h: f64, r: f64) {
