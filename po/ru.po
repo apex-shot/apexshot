@@ -2526,3 +2526,63 @@ msgstr "Заморозка"
 
 msgid "Hold the last frame on screen"
 msgstr "Удерживать последний кадр на экране"
+
+msgid "Add stop"
+msgstr "Добавить точку"
+
+msgid "Angular"
+msgstr "Угловой"
+
+msgid "Custom Wallpaper"
+msgstr "Пользовательский фон"
+
+msgid "Cut"
+msgstr "Вырезать"
+
+msgid "Diamond"
+msgstr "Ромб"
+
+msgid "Duplicate"
+msgstr "Дублировать"
+
+msgid "Edit custom fill"
+msgstr "Изменить свою заливку"
+
+msgid "Flip gradient"
+msgstr "Отразить градиент"
+
+msgid "Frames"
+msgstr "Кадры"
+
+msgid "Occupied"
+msgstr "Занято"
+
+msgid "Paste"
+msgstr "Вставить"
+
+msgid "Radial"
+msgstr "Радиальный"
+
+msgid "Radius"
+msgstr "Радиус"
+
+msgid "Rotate gradient"
+msgstr "Повернуть градиент"
+
+msgid "Select background image"
+msgstr "Выбрать фоновое изображение"
+
+msgid "Select image..."
+msgstr "Выбрать изображение..."
+
+msgid "Stops"
+msgstr "Точки"
+
+msgid "Takes"
+msgstr "Дубли"
+
+msgid "Takes — coming soon"
+msgstr "Дубли — скоро"
+
+msgid "rgb"
+msgstr "rgb"
