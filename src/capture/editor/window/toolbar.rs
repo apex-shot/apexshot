@@ -159,6 +159,28 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
     let obfuscate_btn = icon_tool_button(icon_names.obfuscate, &t("Obfuscate"));
     let focus_btn = icon_tool_button(icon_names.focus, &t("Focus"));
 
+    // The primary tool rail is a row of square tiles; the dropdown triggers
+    // below keep the content-sized `.editor-tool-button` look.
+    for btn in [
+        &select_btn,
+        &background_btn,
+        &draw_btn,
+        &arrow_btn,
+        &line_btn,
+        &box_btn,
+        &circle_btn,
+        &text_btn,
+        &number_btn,
+        &highlighter_btn,
+        &obfuscate_btn,
+        &focus_btn,
+    ] {
+        btn.add_css_class("editor-toolbar-tool");
+        // Square tiles: the row is taller than the button, so pin each tile to
+        // the middle and let the fixed min-size define the box.
+        btn.set_valign(Align::Center);
+    }
+
     let sep_1 = GtkBox::new(Orientation::Vertical, 0);
     sep_1.add_css_class("editor-tools-divider");
     sep_1.set_vexpand(true);
