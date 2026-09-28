@@ -2536,3 +2536,63 @@ msgstr "Figer"
 
 msgid "Hold the last frame on screen"
 msgstr "Maintenir la dernière image à l'écran"
+
+msgid "Add stop"
+msgstr "Ajouter un arrêt"
+
+msgid "Angular"
+msgstr "Angulaire"
+
+msgid "Custom Wallpaper"
+msgstr "Fond personnalisé"
+
+msgid "Cut"
+msgstr "Couper"
+
+msgid "Diamond"
+msgstr "Losange"
+
+msgid "Duplicate"
+msgstr "Dupliquer"
+
+msgid "Edit custom fill"
+msgstr "Modifier le remplissage personnalisé"
+
+msgid "Flip gradient"
+msgstr "Inverser le dégradé"
+
+msgid "Frames"
+msgstr "Images"
+
+msgid "Occupied"
+msgstr "Occupé"
+
+msgid "Paste"
+msgstr "Coller"
+
+msgid "Radial"
+msgstr "Radial"
+
+msgid "Radius"
+msgstr "Rayon"
+
+msgid "Rotate gradient"
+msgstr "Pivoter le dégradé"
+
+msgid "Select background image"
+msgstr "Sélectionner une image de fond"
+
+msgid "Select image..."
+msgstr "Sélectionner une image..."
+
+msgid "Stops"
+msgstr "Arrêts"
+
+msgid "Takes"
+msgstr "Prises"
+
+msgid "Takes — coming soon"
+msgstr "Prises — bientôt disponible"
+
+msgid "rgb"
+msgstr "rgb"

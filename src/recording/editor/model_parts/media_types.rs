@@ -2,6 +2,19 @@
 pub struct CursorHideClip {
     pub start: f64,
     pub end: f64,
+    /// Disabled from the clip's context menu: the clip stays on the timeline
+    /// but stops hiding the cursor, so a hide can be muted without losing its
+    /// span.
+    pub hidden: bool,
+}
+
+/// One copied or cut timeline clip, held until it is pasted at the playhead.
+/// The two track kinds share a single slot so Cut then Paste behaves like the
+/// menu suggests on either one.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ClipClipboard {
+    Zoom(ZoomClip),
+    Hide(CursorHideClip),
 }
 
 impl CursorHideClip {
@@ -97,10 +110,15 @@ pub struct VideoEditState {
     pub cursor_hide_clips: Vec<CursorHideClip>,
     pub selected_cursor_hide: Option<usize>,
     pub selected_segment: Option<usize>,
+    /// Session-only clip clipboard for the timeline's context menu. Never
+    /// persisted: a paste target is the live playhead, which has no meaning in
+    /// a saved project.
+    pub clipboard: Option<ClipClipboard>,
     pub background: VideoBackground,
     pub background_padding: f64,
+    /// Rounded corners on the video card, in 400px-long-edge slider units.
+    /// 0 = square. Applied in both preview and export.
     pub background_corner_radius: f64,
-    pub background_shadow: f64,
     /// Static source crop in original video pixels. `None` keeps the full frame.
     pub crop: Option<CropSelection>,
     pub sidecar: Option<PointerSidecar>,

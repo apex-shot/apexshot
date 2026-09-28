@@ -162,7 +162,7 @@
                 border-radius: 8px;
                 background: #1a1a1a;
                 border: 1px solid alpha(white, 0.08);
-                box-shadow: 0 8px 24px alpha(black, 0.45);
+                box-shadow: none;
             }
 
             button.recording-editor-dropdown-item {
@@ -196,7 +196,7 @@
                 border: none;
                 outline: none;
                 background: #1a1a1a;
-                box-shadow: 0 8px 20px alpha(black, 0.4);
+                box-shadow: none;
             }
 
             button.recording-editor-aspect-item {
@@ -315,7 +315,9 @@
             .recording-editor-shell {
                 border-radius: 10px;
                 overflow: hidden;
-                background: #000000;
+                /* Same chrome surface as the root: the window reads as one
+                 * pane, with only the video stage lifted off it. */
+                background: @recording-editor-surface;
             }
 
             window.fullscreen .recording-editor-shell,

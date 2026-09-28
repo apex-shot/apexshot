@@ -580,7 +580,7 @@
             .editor-root.editor-theme-light .editor-crop-type-popover-body {
                 background: #ffffff;
                 border: 1px solid alpha(#111827, 0.10);
-                box-shadow: 0 14px 32px rgba(0, 0, 0, 0.15);
+                box-shadow: none;
             }
             .editor-root.editor-theme-light button.editor-crop-type-option {
                 background: transparent;

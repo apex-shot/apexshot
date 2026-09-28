@@ -20,7 +20,9 @@ rustflags = ["-C", "debuginfo=line-tables-only"]
 [profile.dev]
 # Reduce memory usage during dev builds
 debug = "line-tables-only"
-# Disable incremental compilation to save ~50% target/ space
+# Disable incremental compilation to save ~50% target/ space.
+# Release is left alone on purpose: forcing incremental on for a release build
+# can produce a link with unresolved drop_in_place symbols out of tokio/zbus.
 incremental = false
 
 [profile.test]

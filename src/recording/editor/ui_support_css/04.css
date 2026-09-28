@@ -191,7 +191,7 @@
             /* ── Light theme overrides ── */
             .editor-theme-light.recording-editor-root {
                 color: #1d2129;
-                background: #ffffff;
+                background: @recording-editor-surface-light;
             }
 
             .editor-theme-light.recording-editor-root entry {
@@ -304,7 +304,7 @@
             }
 
             .editor-theme-light .recording-editor-window-controls {
-                background: #ffffff;
+                background: @recording-editor-surface-light;
                 border-bottom: none;
             }
 

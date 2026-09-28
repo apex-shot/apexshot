@@ -2506,3 +2506,63 @@ msgstr "تجميد"
 
 msgid "Hold the last frame on screen"
 msgstr "أبقِ الإطار الأخير معروضًا على الشاشة"
+
+msgid "Add stop"
+msgstr "إضافة محطة"
+
+msgid "Angular"
+msgstr "زاوي"
+
+msgid "Custom Wallpaper"
+msgstr "خلفية مخصصة"
+
+msgid "Cut"
+msgstr "قص"
+
+msgid "Diamond"
+msgstr "معيّن"
+
+msgid "Duplicate"
+msgstr "تكرار"
+
+msgid "Edit custom fill"
+msgstr "تعديل التعبئة المخصصة"
+
+msgid "Flip gradient"
+msgstr "قلب التدرّج"
+
+msgid "Frames"
+msgstr "الإطارات"
+
+msgid "Occupied"
+msgstr "مشغول"
+
+msgid "Paste"
+msgstr "لصق"
+
+msgid "Radial"
+msgstr "شعاعي"
+
+msgid "Radius"
+msgstr "نصف القطر"
+
+msgid "Rotate gradient"
+msgstr "تدوير التدرّج"
+
+msgid "Select background image"
+msgstr "اختر صورة الخلفية"
+
+msgid "Select image..."
+msgstr "اختر صورة..."
+
+msgid "Stops"
+msgstr "المحطات"
+
+msgid "Takes"
+msgstr "اللقطات"
+
+msgid "Takes — coming soon"
+msgstr "اللقطات — قريبًا"
+
+msgid "rgb"
+msgstr "rgb"

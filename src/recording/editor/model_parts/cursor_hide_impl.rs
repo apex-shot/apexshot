@@ -16,7 +16,11 @@ impl VideoEditState {
         {
             return None;
         }
-        self.cursor_hide_clips.push(CursorHideClip { start, end });
+        self.cursor_hide_clips.push(CursorHideClip {
+            start,
+            end,
+            hidden: false,
+        });
         self.cursor_hide_clips
             .sort_by(|a, b| a.start.total_cmp(&b.start));
         let index = self
@@ -98,7 +102,7 @@ impl VideoEditState {
         if self
             .cursor_hide_clips
             .iter()
-            .any(|clip| clip.contains(timeline_t))
+            .any(|clip| !clip.hidden && clip.contains(timeline_t))
         {
             0.0
         } else {

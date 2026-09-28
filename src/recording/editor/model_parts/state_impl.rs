@@ -26,10 +26,15 @@ impl VideoEditState {
             cursor_hide_clips: Vec::new(),
             selected_cursor_hide: None,
             selected_segment: None,
+            clipboard: None,
             background: VideoBackground::None,
             background_padding: 24.0,
-            background_corner_radius: 18.0,
-            background_shadow: 15.0,
+            // The radius was previously non-zero but never read by any
+            // renderer, so the old value was invisible. It starts at 0 now
+            // that the Background panel actually drives it — a non-zero
+            // default would silently round the corners of every existing
+            // project the first time it was opened.
+            background_corner_radius: 0.0,
             crop: None,
             sidecar,
             cursor: CursorSettings::default(),

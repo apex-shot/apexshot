@@ -2538,3 +2538,63 @@ msgstr "Einfrieren"
 
 msgid "Hold the last frame on screen"
 msgstr "Letztes Bild auf dem Bildschirm halten"
+
+msgid "Add stop"
+msgstr "Stopp hinzufügen"
+
+msgid "Angular"
+msgstr "Winkel"
+
+msgid "Custom Wallpaper"
+msgstr "Eigener Hintergrund"
+
+msgid "Cut"
+msgstr "Ausschneiden"
+
+msgid "Diamond"
+msgstr "Raute"
+
+msgid "Duplicate"
+msgstr "Duplizieren"
+
+msgid "Edit custom fill"
+msgstr "Eigene Füllung bearbeiten"
+
+msgid "Flip gradient"
+msgstr "Verlauf umkehren"
+
+msgid "Frames"
+msgstr "Einzelbilder"
+
+msgid "Occupied"
+msgstr "Belegt"
+
+msgid "Paste"
+msgstr "Einfügen"
+
+msgid "Radial"
+msgstr "Radial"
+
+msgid "Radius"
+msgstr "Radius"
+
+msgid "Rotate gradient"
+msgstr "Verlauf drehen"
+
+msgid "Select background image"
+msgstr "Hintergrundbild auswählen"
+
+msgid "Select image..."
+msgstr "Bild auswählen..."
+
+msgid "Stops"
+msgstr "Stopps"
+
+msgid "Takes"
+msgstr "Aufnahmen"
+
+msgid "Takes — coming soon"
+msgstr "Aufnahmen — bald verfügbar"
+
+msgid "rgb"
+msgstr "rgb"

@@ -1,3 +1,4 @@
+use super::model::background_render::render_rounded_mask;
 use super::model::{
     even_crop_rect, AudioMode, VideoBackground, VideoEditState, VideoMetadata, DEFAULT_FRAME_RATE,
 };
@@ -522,6 +523,22 @@ fn build_composite_convert_args(
         .is_ok();
     let use_wallpaper = wallpaper_path.is_some() && (out_w != video_w || out_h != video_h);
     let wallpaper_index = if draw_cursor { 2 } else { 1 };
+
+    // A radius masks the card so the fill shows through the corners. The mask
+    // is rasterized at the video rect because `alphamerge` copies its luma
+    // into the frame's alpha and needs the two to be the same size. A failed
+    // write just leaves the corners square rather than failing the export.
+    let rounded_mask = state
+        .has_corner_radius()
+        .then(|| {
+            let path = work_dir.join("radius.png");
+            write_rounded_mask(&path, video_w, video_h, state.background_corner_radius_px())
+                .ok()
+                .map(|_| path)
+        })
+        .flatten();
+    let mask_index = 1 + usize::from(draw_cursor) + usize::from(use_wallpaper);
+
     let mut filter = format!(
         "[0:v]sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1",
         escape_filter_path(&cmd_path),
@@ -529,39 +546,46 @@ fn build_composite_convert_args(
         src_w = eff_w.max(2),
         src_h = eff_h.max(2),
     );
-    if use_wallpaper {
-        // Label the prepared video frame so it can be overlaid onto the
-        // wallpaper canvas. Cursor stays on the video, not the background.
-        if draw_cursor {
-            // Blend the RGBA cursor track in the video's own 4:2:0 space. An RGB
-            // working format (what `format=auto` resolves to for an RGBA overlay)
-            // round-trips the frame through RGB, which shifts chroma on every
-            // cropped frame — the purple cast through zooms — and makes the
-            // encoder write 4:4:4 output.
-            filter.push_str(
-                "[video];[video][1:v]overlay=0:0:eof_action=pass:shortest=0:format=yuv420[vbase];",
-            );
-        } else {
-            filter.push_str("[video];");
-        }
-        let video_label = if draw_cursor { "vbase" } else { "video" };
+    // The cursor stays on the video, not the background. It is blended in the
+    // video's own 4:2:0 space: an RGB working format (what `format=auto`
+    // resolves to for an RGBA overlay) round-trips the frame through RGB,
+    // which shifts chroma on every cropped frame — the purple cast through
+    // zooms — and makes the encoder write 4:4:4 output.
+    if draw_cursor {
+        filter.push_str("[vc0];[vc0][1:v]overlay=0:0:eof_action=pass:shortest=0:format=yuv420");
+    }
+    // Turn the prepared video layer into a rounded card. The mask's luma
+    // becomes the frame's alpha, so the fill behind it shows at the corners.
+    if rounded_mask.is_some() {
         filter.push_str(&format!(
-            "[{wallpaper_index}:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},setsar=1[bg];[bg][{video_label}]overlay=(W-w)/2:(H-h)/2:format=yuv420"
+            "[vcard0];[vcard0][{mask_index}:v]alphamerge,format=yuva420p"
         ));
-    } else {
-        if draw_cursor {
-            // Blend the RGBA cursor track in the video's own 4:2:0 space. An RGB
-            // working format (what `format=auto` resolves to for an RGBA overlay)
-            // round-trips the frame through RGB, which shifts chroma on every
-            // cropped frame — the purple cast through zooms — and makes the
-            // encoder write 4:4:4 output.
-            filter.push_str(
-                "[video];[video][1:v]overlay=0:0:eof_action=pass:shortest=0:format=yuv420",
-            );
+    }
+    if use_wallpaper {
+        if rounded_mask.is_some() {
+            // `format=auto` keeps the alpha so the rounded card blends into
+            // the wallpaper; the trailing `yuv420p` flattens it back for the
+            // encoder, whose profile has no alpha.
+            filter.push_str(&format!(
+                "[vcard];[{wallpaper_index}:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},setsar=1[bg];[bg][vcard]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p"
+            ));
+        } else {
+            // Label the prepared video frame so it can be overlaid onto the
+            // wallpaper canvas.
+            filter.push_str("[video];");
+            filter.push_str(&format!(
+                "[{wallpaper_index}:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},setsar=1[bg];[bg][video]overlay=(W-w)/2:(H-h)/2:format=yuv420"
+            ));
         }
-        if out_w != video_w || out_h != video_h {
-            filter.push_str(&format!(",pad={out_w}:{out_h}:{pad_x}:{pad_y}:{bg}"));
-        }
+    } else if rounded_mask.is_some() {
+        // Compositing onto a solid canvas instead of `pad` keeps the card's
+        // alpha meaningful: `pad` fills the surrounding ring but leaves the
+        // rounded corners transparent, and the encoder drops that alpha.
+        filter.push_str(&format!(
+            "[vcard];color=c={bg}:s={out_w}x{out_h}[bgc];[bgc][vcard]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p"
+        ));
+    } else if out_w != video_w || out_h != video_h {
+        filter.push_str(&format!(",pad={out_w}:{out_h}:{pad_x}:{pad_y}:{bg}"));
     }
     let speed = state.speed_for_source(start);
     if (speed - 1.0).abs() > 1e-6 {
@@ -607,6 +631,16 @@ fn build_composite_convert_args(
             wallpaper.to_string_lossy().into_owned(),
         ]);
     }
+    // The mask loops like the wallpaper still so it is available for every
+    // frame `alphamerge` touches; `-loop 1` keeps feeding it to the graph.
+    if let Some(mask) = rounded_mask.as_ref() {
+        args.extend([
+            "-loop".into(),
+            "1".into(),
+            "-i".into(),
+            mask.to_string_lossy().into_owned(),
+        ]);
+    }
     args.extend(["-filter_complex".into(), filter]);
     args.extend([
         "-c:v".into(),
@@ -619,6 +653,18 @@ fn build_composite_convert_args(
     args.extend(convert_audio_args(state, speed, start));
     args.push(output_path.to_string_lossy().into_owned());
     args
+}
+
+/// Write the rounded-corner alpha mask the composite graph blends the card
+/// through. Grayscale, because `alphamerge` reads the mask's luma as alpha.
+fn write_rounded_mask(path: &Path, width: u32, height: u32, radius: f64) -> anyhow::Result<()> {
+    let mask = render_rounded_mask(width, height, radius);
+    let luma: Vec<u8> = mask.pixels.chunks_exact(3).map(|pixel| pixel[0]).collect();
+    let gray = image::GrayImage::from_raw(mask.width, mask.height, luma)
+        .ok_or_else(|| anyhow!("rounded mask buffer size mismatch"))?;
+    gray.save_with_format(path, image::ImageFormat::Png)
+        .context("failed to write the rounded-corner mask")?;
+    Ok(())
 }
 
 /// `crop=w:h:x:y,` prepended before zoom cropping, or empty when uncropped.
@@ -1250,6 +1296,46 @@ mod tests {
         let mut reencode = s.clone();
         reencode.quality = crate::recording::editor::model::ExportQuality::Ultra;
         assert!(reencode.needs_reencode());
+    }
+
+    #[test]
+    fn a_corner_radius_masks_the_card_onto_the_fill() {
+        // A radius needs the composite graph and has to blend the rounded card
+        // onto the fill; `pad` would leave the corners clear and the encoder
+        // would drop that alpha, so the export has to overlay instead.
+        let mut s = state();
+        s.background = VideoBackground::Plain {
+            r: 220,
+            g: 30,
+            b: 40,
+        };
+        s.background_corner_radius = 24.0;
+        assert!(s.has_corner_radius());
+        assert!(s.needs_composite());
+
+        let args = build_single_convert_args(
+            &s,
+            s.trim_start_seconds,
+            s.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        let graph = args
+            .windows(2)
+            .find(|pair| pair[0] == "-filter_complex")
+            .map(|pair| pair[1].as_str())
+            .expect("a radius exports through the composite graph");
+        assert!(
+            graph.contains("alphamerge"),
+            "the card must take the mask's alpha: {graph}"
+        );
+        assert!(
+            graph.contains("overlay=(W-w)/2:(H-h)/2:format=auto"),
+            "the rounded card must blend onto the fill instead of padding: {graph}"
+        );
+        assert!(
+            args.windows(2).any(|pair| pair == ["-loop", "1"]),
+            "the mask must loop as an ffmpeg input: {args:?}"
+        );
     }
 
     #[test]

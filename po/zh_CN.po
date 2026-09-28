@@ -2487,3 +2487,63 @@ msgstr "冻结"
 
 msgid "Hold the last frame on screen"
 msgstr "在屏幕上保持最后一帧"
+
+msgid "Add stop"
+msgstr "添加色标"
+
+msgid "Angular"
+msgstr "角度"
+
+msgid "Custom Wallpaper"
+msgstr "自定义壁纸"
+
+msgid "Cut"
+msgstr "剪切"
+
+msgid "Diamond"
+msgstr "菱形"
+
+msgid "Duplicate"
+msgstr "创建副本"
+
+msgid "Edit custom fill"
+msgstr "编辑自定义填充"
+
+msgid "Flip gradient"
+msgstr "翻转渐变"
+
+msgid "Frames"
+msgstr "帧"
+
+msgid "Occupied"
+msgstr "已占用"
+
+msgid "Paste"
+msgstr "粘贴"
+
+msgid "Radial"
+msgstr "径向"
+
+msgid "Radius"
+msgstr "圆角"
+
+msgid "Rotate gradient"
+msgstr "旋转渐变"
+
+msgid "Select background image"
+msgstr "选择背景图片"
+
+msgid "Select image..."
+msgstr "选择图片..."
+
+msgid "Stops"
+msgstr "色标"
+
+msgid "Takes"
+msgstr "镜头"
+
+msgid "Takes — coming soon"
+msgstr "镜头 — 即将推出"
+
+msgid "rgb"
+msgstr "rgb"

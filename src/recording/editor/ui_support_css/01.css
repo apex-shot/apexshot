@@ -1,10 +1,25 @@
+            /* ── Editor surfaces ──
+             * The editor paints exactly two backgrounds. Every chrome surface
+             * — title bar, workspace inset, stage frame, timeline, tool column
+             * and inspector — uses @recording-editor-surface; only the video
+             * play area uses @recording-editor-video-surface. Each has its
+             * light-theme value beside it, so re-skinning the window means
+             * editing the two values of the active theme, never the dozens of
+             * rules that consume them. */
+            @define-color recording-editor-surface #0f0f0f;
+            @define-color recording-editor-video-surface #000000;
+            @define-color recording-editor-surface-light #ffffff;
+            @define-color recording-editor-video-surface-light #f0f1f4;
+
             .recording-editor-root {
                 padding: 0;
                 color: #F1F1F3;
                 font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
                 min-width: 900px;
                 min-height: 640px;
-                background: #000000;
+                /* One chrome surface for the whole window; only the video
+                 * stage (07.css) paints its own. */
+                background: @recording-editor-surface;
             }
 
             /* ── Strip native Adwaita/Ubuntu chrome from all descendants ── */
@@ -223,7 +238,8 @@
             .recording-editor-window-controls {
                 min-height: 32px;
                 padding: 2px 8px 2px 10px;
-                background: #000000;
+                /* Same chrome surface as the settings sidebar (@recording-editor-surface). */
+                background: @recording-editor-surface;
                 border-bottom: none;
                 border-radius: 10px 10px 0 0;
                 overflow: hidden;

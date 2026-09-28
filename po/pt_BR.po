@@ -2527,3 +2527,63 @@ msgstr "Congelar"
 
 msgid "Hold the last frame on screen"
 msgstr "Manter o último quadro na tela"
+
+msgid "Add stop"
+msgstr "Adicionar parada"
+
+msgid "Angular"
+msgstr "Angular"
+
+msgid "Custom Wallpaper"
+msgstr "Fundo personalizado"
+
+msgid "Cut"
+msgstr "Recortar"
+
+msgid "Diamond"
+msgstr "Losango"
+
+msgid "Duplicate"
+msgstr "Duplicar"
+
+msgid "Edit custom fill"
+msgstr "Editar preenchimento personalizado"
+
+msgid "Flip gradient"
+msgstr "Inverter gradiente"
+
+msgid "Frames"
+msgstr "Quadros"
+
+msgid "Occupied"
+msgstr "Ocupado"
+
+msgid "Paste"
+msgstr "Colar"
+
+msgid "Radial"
+msgstr "Radial"
+
+msgid "Radius"
+msgstr "Raio"
+
+msgid "Rotate gradient"
+msgstr "Girar gradiente"
+
+msgid "Select background image"
+msgstr "Selecionar imagem de fundo"
+
+msgid "Select image..."
+msgstr "Selecionar imagem..."
+
+msgid "Stops"
+msgstr "Paradas"
+
+msgid "Takes"
+msgstr "Tomadas"
+
+msgid "Takes — coming soon"
+msgstr "Tomadas — em breve"
+
+msgid "rgb"
+msgstr "rgb"

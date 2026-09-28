@@ -31,11 +31,10 @@ pub fn build_timeline_card(
 
     let zoom = labeled_tool_button("zoom-fit-best-symbolic", &t("Zoom"), &t("Add zoom at playhead"));
     let hide = labeled_tool_button("view-conceal-symbolic", &t("Hide"), &t("Hide cursor at playhead"));
-    let split = labeled_tool_button("edit-cut-symbolic", &t("Split"), &t("Split at playhead"));
-    let freeze = labeled_tool_button(
-        "media-record-symbolic",
-        &t("Freeze"),
-        &t("Hold the last frame on screen"),
+    let split = labeled_tool_button(
+        icon_names::custom::SQUARE_SPLIT_HORIZONTAL_SYMBOLIC,
+        &t("Split"),
+        &t("Split at playhead"),
     );
     let detect = labeled_tool_button(
         icon_names::custom::WAND_SPARKLES_SYMBOLIC,
@@ -63,7 +62,6 @@ pub fn build_timeline_card(
     left.append(&zoom);
     left.append(&hide);
     left.append(&split);
-    left.append(&freeze);
     left.append(&detect);
 
     let center = GtkBox::new(Orientation::Horizontal, 8);
@@ -153,7 +151,23 @@ pub fn build_timeline_card(
                 cr,
                 width,
                 height,
-            )
+            );
+            // The ghost draws on top of the lane: it previews what a click
+            // would place, so it has to read over whatever is already there.
+            if let Some(start) = hover_zoom_time.get() {
+                if dragging_zoom.get().is_none() {
+                    let guard = state.lock().unwrap();
+                    draw_clipboard_ghost(
+                        &guard,
+                        cr,
+                        width as f64,
+                        height as f64,
+                        start,
+                        widget_is_light(area),
+                        true,
+                    );
+                }
+            }
         }
     });
 
@@ -174,7 +188,22 @@ pub fn build_timeline_card(
                 cr,
                 width,
                 height,
-            )
+            );
+            // Same copied-clip preview as the Zoom lane above.
+            if let Some(start) = hover_hide_time.get() {
+                if dragging_hide.get().is_none() {
+                    let guard = state.lock().unwrap();
+                    draw_clipboard_ghost(
+                        &guard,
+                        cr,
+                        width as f64,
+                        height as f64,
+                        start,
+                        widget_is_light(area),
+                        false,
+                    );
+                }
+            }
         }
     });
 
@@ -359,22 +388,6 @@ pub fn build_timeline_card(
         move |_| {
             let cut_at = state.lock().unwrap().source_playhead();
             state.lock().unwrap().add_cut(cut_at);
-            redraw();
-        }
-    });
-
-    freeze.connect_clicked({
-        let state = state.clone();
-        let redraw = redraw.clone();
-        move |_| {
-            let mut guard = state.lock().unwrap();
-            // Press once to hold, again to release. Each fresh press adds
-            // another second; holding a frame open is meant to be a few
-            // deliberate clicks, not a duration dialog.
-            if !guard.clear_freeze_tail() {
-                guard.extend_last_segment(1.0);
-            }
-            drop(guard);
             redraw();
         }
     });
@@ -624,5 +637,6 @@ pub fn build_timeline_card(
     card.append(&board);
     card.append(&well);
     shell.append(&card);
+
     (shell, paint, pause)
 }

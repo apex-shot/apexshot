@@ -56,7 +56,7 @@ pub fn eval_zoom(
     let frame_center = (frame_width / 2.0, frame_height / 2.0);
     let Some(index) = clips
         .iter()
-        .position(|clip| t >= clip.start && t <= clip.end)
+        .position(|clip| !clip.hidden && t >= clip.start && t <= clip.end)
     else {
         // Hold the earlier framing across a morph gap so the next auto zoom
         // continues from it instead of flashing the full frame between them.
@@ -125,9 +125,11 @@ fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
 fn morphs_into_neighbour(clips: &[ZoomClip], index: usize) -> bool {
     let clip = &clips[index];
     clip.mode == ZoomMode::Auto
+        && !clip.hidden
         && clips.iter().enumerate().any(|(other, next)| {
             other != index
                 && next.mode == ZoomMode::Auto
+                && !next.hidden
                 && next.start >= clip.end
                 && next.start - clip.end <= ZOOM_MORPH_GAP_SECONDS
         })
@@ -140,6 +142,7 @@ fn morph_gap_predecessor(clips: &[ZoomClip], t: f64) -> Option<usize> {
         .enumerate()
         .filter(|(_, clip)| {
             clip.mode == ZoomMode::Auto
+                && !clip.hidden
                 && clip.end <= t
                 && t - clip.end <= ZOOM_MORPH_GAP_SECONDS
         })

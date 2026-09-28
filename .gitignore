@@ -100,6 +100,8 @@ webcut/
 /Recordly/
 .antigravitycli/
 reinstall-dev-deb.sh
+.tmp-inspect/
+tiny.png
 # Agent local memory
 .agents/
 .kilo/

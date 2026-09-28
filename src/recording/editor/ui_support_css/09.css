@@ -1,0 +1,772 @@
+            /* ── Background panel: source tabs, value rows, collapsibles ──
+             * Appended last so it wins ties without reformatting 01-08,
+             * which the ui_support string-match test pins byte for byte. */
+
+            .recording-editor-bg-tabs {
+                margin: 0 0 12px 0;
+                padding: 3px;
+                border-radius: 8px;
+                background: alpha(white, 0.06);
+            }
+
+            button.recording-editor-bg-tab {
+                min-height: 26px;
+                padding: 0 6px;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+                color: alpha(white, 0.52);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-bg-tab label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-bg-tab:hover {
+                background: transparent;
+                color: alpha(white, 0.92);
+            }
+
+            button.recording-editor-bg-tab:checked,
+            button.recording-editor-bg-tab:checked:hover {
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.96);
+            }
+
+            /* Filled slider with an editable value beside it. The slider
+             * keeps the app's existing look — this only lays the row out. */
+            .recording-editor-bg-value-row {
+                margin: 0 0 4px 0;
+            }
+
+            /* The Image tab's chooser, which is a button across its full width
+             * rather than a box with a trailing Edit pill. */
+            button.recording-editor-bg-image-row {
+                min-height: 40px;
+                padding: 0 10px;
+                border: none;
+                border-radius: 8px;
+                background: alpha(white, 0.06);
+                color: alpha(white, 0.78);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-bg-image-row:hover {
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.96);
+            }
+
+            button.recording-editor-bg-image-row label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            /* The row that summarizes the current custom fill. It is a plain
+             * box — the Edit pill inside it carries the click, because GTK
+             * will not nest one button in another. */
+            .recording-editor-bg-custom-row {
+                min-height: 40px;
+                padding: 0 6px 0 6px;
+                /* Matches the FillSlider track, which draws its own corners at
+                 * 8px — the row sits directly under Padding and Radius and has
+                 * to share their radius to read as part of the same group. */
+                border-radius: 8px;
+                background: alpha(white, 0.06);
+            }
+
+            .recording-editor-bg-custom-row label {
+                color: alpha(white, 0.78);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            .recording-editor-bg-custom-swatch {
+                min-width: 28px;
+                min-height: 28px;
+                border-radius: 7px;
+            }
+
+            /* Trailing Edit affordance, sitting on its own slightly raised
+             * fill so it reads as a separate action inside the row. */
+            button.recording-editor-bg-custom-edit {
+                min-height: 26px;
+                padding: 0 14px;
+                border: none;
+                /* The same 8px as the row it sits in, so the whole thing reads
+                 * as one group rather than a pill inside a rectangle. */
+                border-radius: 8px;
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.72);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-bg-custom-edit:hover {
+                background: alpha(white, 0.16);
+                color: alpha(white, 0.96);
+            }
+
+            button.recording-editor-bg-custom-edit:active {
+                background: alpha(white, 0.20);
+            }
+
+            button.recording-editor-bg-custom-edit label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            /* Four columns of wallpapers, matching the reference grid. */
+            .recording-editor-bg-wallpaper-grid {
+                margin: 0 0 12px 0;
+            }
+
+            /* ── Light theme ── */
+            .editor-theme-light .recording-editor-bg-tabs {
+                background: alpha(#111827, 0.06);
+            }
+
+            .editor-theme-light button.recording-editor-bg-tab {
+                color: alpha(#1d2129, 0.52);
+            }
+
+            .editor-theme-light button.recording-editor-bg-tab:hover {
+                color: alpha(#1d2129, 0.88);
+            }
+
+            .editor-theme-light button.recording-editor-bg-tab:checked,
+            .editor-theme-light button.recording-editor-bg-tab:checked:hover {
+                background: alpha(#111827, 0.08);
+                color: alpha(#1d2129, 0.92);
+            }
+
+            .editor-theme-light button.recording-editor-bg-image-row {
+                background: alpha(#111827, 0.05);
+                color: alpha(#1d2129, 0.78);
+            }
+
+            .editor-theme-light button.recording-editor-bg-image-row:hover {
+                background: alpha(#111827, 0.08);
+                color: alpha(#1d2129, 0.96);
+            }
+
+            .editor-theme-light .recording-editor-bg-custom-row {
+                background: alpha(#111827, 0.05);
+            }
+
+            .editor-theme-light .recording-editor-bg-custom-row label {
+                color: alpha(#1d2129, 0.78);
+            }
+
+            .editor-theme-light button.recording-editor-bg-custom-edit {
+                background: alpha(#111827, 0.07);
+                color: alpha(#1d2129, 0.72);
+            }
+
+            .editor-theme-light button.recording-editor-bg-custom-edit:hover {
+                background: alpha(#111827, 0.12);
+                color: alpha(#1d2129, 0.96);
+            }
+
+            /* ── Right tool column: icon bar over the panel stack ──
+             * Sized here; its surface is the shared chrome, set with the
+             * other chrome rules further down. */
+
+            .recording-editor-tools-column {
+                min-width: 288px;
+                max-width: 288px;
+            }
+
+            /* The bar is a rounded container the selected tool sits inside —
+             * a pill on a tray, rather than a pill floating on the page. */
+            .recording-editor-tool-section {
+                min-width: 0;
+                max-width: none;
+                margin: 10px 10px 2px 10px;
+                padding: 3px;
+                border-radius: 12px;
+                background: alpha(white, 0.06);
+            }
+
+            button.recording-editor-tool-section-btn {
+                min-width: 40px;
+                min-height: 34px;
+                padding: 0;
+                border: none;
+                border-radius: 9px;
+                background: transparent;
+                color: alpha(white, 0.55);
+            }
+
+            button.recording-editor-tool-section-btn:hover {
+                background: alpha(white, 0.08);
+                color: alpha(white, 0.88);
+            }
+
+            /* The selected tool fills its slot inside the tray. */
+            button.recording-editor-tool-section-btn:checked,
+            button.recording-editor-tool-section-btn:checked:hover {
+                background: alpha(white, 0.12);
+                color: alpha(white, 0.96);
+            }
+
+            button.recording-editor-tool-section-btn:disabled {
+                opacity: 0.3;
+            }
+
+            /* The stack paints the shared chrome surface (@recording-editor-surface, same as
+             * the settings sidebar) so the right column reads as one zone
+             * with the timeline. */
+            .recording-editor-tool-sidebar {
+                min-width: 0;
+                max-width: none;
+                background: @recording-editor-surface;
+                border-left: none;
+            }
+
+            .recording-editor-tools-column {
+                background: @recording-editor-surface;
+            }
+
+            .recording-editor-tools-column .recording-editor-zoom-panel {
+                background: transparent;
+                border-radius: 0;
+            }
+
+            .recording-editor-tools-column .recording-editor-zoom-header {
+                padding: 4px 14px 8px 14px;
+            }
+
+            .editor-theme-light .recording-editor-tools-column {
+                background: @recording-editor-surface-light;
+            }
+
+            .editor-theme-light .recording-editor-tool-section-btn {
+                color: alpha(#1d2129, 0.58);
+            }
+
+            .editor-theme-light .recording-editor-tool-section-btn:hover {
+                background: alpha(#111827, 0.06);
+                color: alpha(#1d2129, 0.88);
+            }
+
+            .editor-theme-light button.recording-editor-tool-section-btn:checked,
+            .editor-theme-light button.recording-editor-tool-section-btn:checked:hover {
+                background: alpha(#111827, 0.10);
+                color: alpha(#1d2129, 0.92);
+            }
+
+            /* Chrome, not a surface of its own: the inset around the video
+             * stage (and the 8px gap left of the tool column) is the same
+             * pane the title bar and timeline paint, so the editor reads as
+             * one window with a single lifted play area. */
+            .recording-editor-workspace {
+                padding: 8px 10px;
+                background: @recording-editor-surface;
+            }
+
+            .recording-editor-tools-column {
+                border-left: none;
+            }
+
+            /* Space between the video and the tool column, matching the
+             * workspace's own inset rather than drawing a divider. */
+            .recording-editor-stage {
+                margin-right: 8px;
+            }
+
+            .editor-theme-light .recording-editor-workspace {
+                padding: 8px 10px;
+                background: @recording-editor-surface-light;
+            }
+
+            .editor-theme-light .recording-editor-stage {
+                margin-right: 8px;
+            }
+
+            /* The "cursor unavailable" message is an overlay on top of the
+             * cursor tabs and theme grid. Left transparent, the tabs and
+             * cards behind it showed through and collided with the text, so
+             * it keeps an opaque surface and sits above the content. That
+             * surface is the column's own chrome, so the overlay does not
+             * read as a second panel. */
+            .recording-editor-tools-column .recording-editor-cursor-overlay {
+                background: @recording-editor-surface;
+            }
+
+            .recording-editor-tools-column .recording-editor-cursor-unavailable {
+                background: @recording-editor-surface;
+            }
+
+            .editor-theme-light .recording-editor-tools-column .recording-editor-cursor-overlay,
+            .editor-theme-light .recording-editor-tools-column .recording-editor-cursor-unavailable {
+                background: @recording-editor-surface-light;
+            }
+
+            .recording-editor-tools-column .recording-editor-zoom-scroll {
+                background: transparent;
+            }
+
+            /* ── Custom Wallpaper popover ──
+             * Opens beside the sidebar (PositionType::Left) so it floats over
+             * the video stage and never covers the row it is editing. */
+
+            /* Strip the desktop GTK theme's own popover surface first. The app
+             * ships no libadwaita, so `popover > contents` otherwise picks up
+             * whatever the host theme paints and the card stops matching the
+             * editor's chrome. This is the same two-step strip-then-paint
+             * pattern every other popover here uses (03.css:152, 03.css:183,
+             * 04-color-palette.css:163). */
+            popover.recording-editor-custom-popover,
+            popover.recording-editor-custom-popover > contents {
+                background: transparent;
+                border: none;
+                outline: none;
+                box-shadow: none;
+                padding: 0;
+                border-radius: 0;
+            }
+
+            .recording-editor-custom-popover {
+                /* A fixed, deliberately modest panel: 212px, the width the
+                 * reference keeps. Wide enough for the plane to read, narrow
+                 * enough not to cover the video it is editing. */
+                min-width: 212px;
+            }
+
+            /* The app's floating surface, matching the main editor window
+             * (`recording-editor-shell`, 03.css): #1c1c1c inside a 1px
+             * hairline at the window's 10px radius. The card used to round to
+             * 14px, where GTK's rounded border arc stopped matching the fill's
+             * at the corner; the window's 10px is the radius that lines up.
+             * No drop shadow: a popover sits on the video, and the blur reads
+             * as a dark halo rather than lift. The light counterpart is
+             * below. */
+            .recording-editor-custom-body {
+                padding: 0;
+                background: #1c1c1c;
+                border-radius: 10px;
+                border: 1px solid alpha(white, 0.10);
+                outline: none;
+                box-shadow: none;
+            }
+
+            .recording-editor-custom-header {
+                padding: 8px 8px 6px 8px;
+            }
+
+            .recording-editor-custom-title {
+                color: alpha(white, 0.92);
+                font-size: 13px;
+                font-weight: 600;
+            }
+
+            button.recording-editor-custom-close {
+                min-width: 24px;
+                min-height: 24px;
+                padding: 0;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+            }
+
+            button.recording-editor-custom-close:hover {
+                background: alpha(white, 0.10);
+            }
+
+            /* The reference's picker has no side padding: the field, bar and
+             * hex row all run the popover's full width, with the tabs above
+             * them inset the same way. 8px is the card's one inset, so the
+             * Color page and the Gradient page lay out to the same width. */
+            .recording-editor-custom-body > .recording-editor-bg-tabs {
+                margin: 0 8px 8px 8px;
+            }
+
+            /* Inset so the plane's own 8px radius (FIELD_RADIUS, drawn in
+             * Cairo) sits clear of the card's edge instead of poking through
+             * its corners. */
+            .recording-editor-custom-field {
+                margin: 0 8px 8px 8px;
+            }
+
+            .recording-editor-custom-spectrum {
+                margin: 0 8px 8px 8px;
+            }
+
+            .recording-editor-custom-value-row {
+                margin: 0 8px 10px 8px;
+                padding: 0 10px;
+                min-height: 34px;
+                border-radius: 8px;
+                background: alpha(white, 0.06);
+            }
+
+            /* The value row is already the pill, so the entry inside it must be
+             * flat — otherwise its own 6px radius and alpha(white, 0.06) fill
+             * read as a box-in-a-box. `.recording-editor-root entry` in 01.css
+             * wins on specificity, so the reset needs the same prefix. */
+            .recording-editor-custom-value-row .recording-editor-custom-hex {
+                min-width: 0;
+                padding: 0 2px;
+                font-size: 12px;
+                color: alpha(white, 0.78);
+                background: transparent;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                min-height: 0;
+            }
+
+            .recording-editor-custom-unit {
+                color: alpha(white, 0.42);
+                font-size: 11px;
+            }
+
+            /* The swatch's fill is drawn in Cairo at a 5px radius (see
+             * build_color_page), so the widget itself must stay undecorated —
+             * the desktop theme's own background would otherwise sit under the
+             * drawn chip. */
+            .recording-editor-custom-swatch {
+                border-radius: 5px;
+                background: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
+            /* ── Gradient editor ── */
+
+            /* The stop picker is its own mini card, opened clear of the
+             * popover's left edge when a stop tile is clicked. It is
+             * deliberately not a second column: a column beside the stop
+             * editor widened this whole popover the moment the Gradient tab
+             * was opened. The Gradient tab is now just the stop editor, at the
+             * Color tab's width.
+             *
+             * The card gets the same strip-then-paint treatment as the popover
+             * above: this app ships no libadwaita, so `popover > contents`
+             * would otherwise pick up the host theme's surface. */
+            popover.recording-editor-gradient-picker-popover,
+            popover.recording-editor-gradient-picker-popover > contents {
+                background: transparent;
+                border: none;
+                outline: none;
+                box-shadow: none;
+                padding: 0;
+                border-radius: 0;
+            }
+
+            /* Same surface as the popover above, at the picker's slightly
+             * narrower width: the two cards sit side by side, so a different
+             * radius between them would read as a seam. No drop shadow,
+             * matching the popover above. */
+            .recording-editor-gradient-picker-popover .recording-editor-gradient-picker-card {
+                min-width: 190px;
+                background: #1c1c1c;
+                border-radius: 10px;
+                border: 1px solid alpha(white, 0.10);
+                outline: none;
+                box-shadow: none;
+            }
+
+            /* The card's own header: just its close, pushed right. The picker's
+             * children carry 8px side margins of their own, so the header is
+             * what insets the card's top and the field below it. */
+            .recording-editor-gradient-picker-header {
+                padding: 8px 8px 6px 8px;
+            }
+
+            button.recording-editor-gradient-picker-close {
+                min-width: 24px;
+                min-height: 24px;
+                padding: 0;
+                border: none;
+                border-radius: 6px;
+                background: transparent;
+            }
+
+            button.recording-editor-gradient-picker-close:hover {
+                background: alpha(white, 0.10);
+            }
+
+            .recording-editor-gradient-editor {
+                min-width: 212px;
+            }
+
+            .recording-editor-gradient-header {
+                margin: 0 8px 8px 8px;
+            }
+
+            /* The type picker reuses the app's own dropdown chrome (03.css for
+             * the dark chip, 05.css for the light one); this only sizes it so
+             * it sits level with the icon buttons beside it. */
+            button.recording-editor-gradient-type {
+                min-width: 96px;
+            }
+
+            button.recording-editor-gradient-icon {
+                min-width: 28px;
+                min-height: 28px;
+                padding: 0;
+                border: none;
+                border-radius: 7px;
+                background: alpha(white, 0.07);
+            }
+
+            button.recording-editor-gradient-icon:hover {
+                background: alpha(white, 0.12);
+            }
+
+            button.recording-editor-gradient-icon:disabled {
+                opacity: 0.35;
+            }
+
+            .recording-editor-gradient-bar {
+                margin: 0 8px 10px 8px;
+            }
+
+            .recording-editor-gradient-steps-header {
+                margin: 0 8px 6px 8px;
+            }
+
+            .recording-editor-gradient-steps-header label {
+                color: alpha(white, 0.62);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-gradient-add {
+                min-width: 24px;
+                min-height: 22px;
+                padding: 0;
+                border: none;
+                border-radius: 6px;
+                background: alpha(white, 0.06);
+                color: alpha(white, 0.62);
+                font-size: 13px;
+                font-weight: 600;
+            }
+
+            button.recording-editor-gradient-add:hover {
+                background: alpha(white, 0.12);
+                color: alpha(white, 0.96);
+            }
+
+            button.recording-editor-gradient-add:disabled {
+                opacity: 0.35;
+            }
+
+            .recording-editor-gradient-steps {
+                margin: 0 8px 10px 8px;
+            }
+
+            /* Full-width stop cards: a color chip and its hex. The selected
+             * stop mirrors the ringed pin on the bar. */
+            .recording-editor-gradient-step {
+                min-height: 48px;
+                padding: 0 5px;
+                border-radius: 10px;
+                background: alpha(white, 0.05);
+            }
+
+            .recording-editor-gradient-step.selected {
+                background: alpha(white, 0.12);
+            }
+
+            /* The chip's fill and radius are drawn in Cairo (draw_stop_chip), so
+             * the widget itself must stay undecorated — the desktop theme's own
+             * background would otherwise sit under the drawn chip. */
+            .recording-editor-gradient-step-swatch {
+                border-radius: 8px;
+                background: transparent;
+                border: none;
+                box-shadow: none;
+            }
+
+            /* The hex is a flat field inside the card. Two classes are needed to
+             * outrank `.recording-editor-root entry` in 01.css. It carries no
+             * fill of its own: the row's card is the one surface, so the code
+             * does not sit in a second, nested box. */
+            .recording-editor-gradient-step .recording-editor-gradient-step-hex {
+                min-height: 34px;
+                padding: 0 10px;
+                font-size: 12px;
+                color: alpha(white, 0.85);
+                background: transparent;
+                background-image: none;
+                border: none;
+                box-shadow: none;
+                border-radius: 8px;
+            }
+
+            /* ── Light theme ── */
+
+            .editor-theme-light .recording-editor-custom-body {
+                background: #ffffff;
+                /* The same hairline the light editor window itself draws
+                 * (`recording-editor-shell`, 05.css), so the card's edge reads
+                 * like the window's. No drop shadow, matching the dark card. */
+                border: 1px solid alpha(#111827, 0.18);
+                box-shadow: none;
+            }
+
+            .editor-theme-light .recording-editor-custom-title {
+                color: alpha(#1d2129, 0.92);
+            }
+
+            .editor-theme-light .recording-editor-custom-value-row {
+                background: alpha(#111827, 0.05);
+            }
+
+            .editor-theme-light .recording-editor-custom-hex {
+                color: alpha(#1d2129, 0.78);
+            }
+
+            .editor-theme-light .recording-editor-custom-unit {
+                color: alpha(#1d2129, 0.42);
+            }
+
+            .editor-theme-light button.recording-editor-gradient-icon {
+                background: alpha(#111827, 0.06);
+            }
+
+            .editor-theme-light button.recording-editor-gradient-icon:hover {
+                background: alpha(#111827, 0.12);
+            }
+
+            .editor-theme-light
+                .recording-editor-gradient-picker-popover
+                .recording-editor-gradient-picker-card {
+                background: #ffffff;
+                border: 1px solid alpha(#111827, 0.18);
+                box-shadow: none;
+            }
+
+            .editor-theme-light
+                button.recording-editor-gradient-picker-close:hover {
+                background: alpha(#111827, 0.10);
+            }
+
+            .editor-theme-light .recording-editor-gradient-steps-header label {
+                color: alpha(#1d2129, 0.62);
+            }
+
+            .editor-theme-light button.recording-editor-gradient-add {
+                background: alpha(#111827, 0.06);
+                color: alpha(#1d2129, 0.62);
+            }
+
+            .editor-theme-light button.recording-editor-gradient-add:hover {
+                background: alpha(#111827, 0.12);
+                color: alpha(#1d2129, 0.96);
+            }
+
+            .editor-theme-light .recording-editor-gradient-step {
+                background: alpha(#111827, 0.05);
+            }
+
+            .editor-theme-light .recording-editor-gradient-step.selected {
+                background: alpha(#111827, 0.12);
+            }
+
+            .editor-theme-light
+                .recording-editor-gradient-step
+                .recording-editor-gradient-step-hex {
+                color: alpha(#1d2129, 0.85);
+                background: transparent;
+            }
+
+            /* ── Clip context menu ──
+             * The menu a clip opens on right-click. It replaces the sidebar's
+             * footer Delete button, so it is the destructive path for a clip
+             * and has to read as a surface rather than a stock GTK popover. */
+
+            /* Same strip-then-paint step as the popovers above: the app ships
+             * no libadwaita, so `popover > contents` would otherwise inherit
+             * the desktop theme's own frame. */
+            popover.recording-editor-clip-menu-popover,
+            popover.recording-editor-clip-menu-popover > contents {
+                background: transparent;
+                border: none;
+                outline: none;
+                box-shadow: none;
+                padding: 0;
+                border-radius: 0;
+            }
+
+            /* The same floating surface as the wallpaper popover: #1c1c1c
+             * inside the editor window's thin hairline at its 10px radius
+             * (`recording-editor-shell`, 03.css). No drop shadow: a menu sits
+             * on the timeline, and the blur reads as a dark halo rather than
+             * lift. */
+            .recording-editor-clip-menu {
+                padding: 4px;
+                background: #1c1c1c;
+                border-radius: 10px;
+                border: 1px solid alpha(white, 0.10);
+                outline: none;
+                box-shadow: none;
+            }
+
+            button.recording-editor-clip-menu-row {
+                min-height: 26px;
+                padding: 0 10px;
+                border: none;
+                border-radius: 4px;
+                background: transparent;
+                color: alpha(white, 0.78);
+                box-shadow: none;
+            }
+
+            button.recording-editor-clip-menu-row:hover {
+                background: alpha(white, 0.08);
+                color: alpha(white, 0.96);
+            }
+
+            button.recording-editor-clip-menu-row label,
+            button.recording-editor-clip-menu-row image {
+                color: inherit;
+                font-size: 12px;
+            }
+
+            button.recording-editor-clip-menu-row-danger,
+            button.recording-editor-clip-menu-row-danger label,
+            button.recording-editor-clip-menu-row-danger image {
+                color: #F87171;
+            }
+
+            button.recording-editor-clip-menu-row-danger:hover {
+                background: alpha(#F87171, 0.14);
+                color: #FCA5A5;
+            }
+
+            .recording-editor-clip-menu-separator {
+                margin: 4px 6px;
+                background: alpha(white, 0.10);
+            }
+
+            /* Light theme: the same panel in ink, with the light editor
+             * window's own hairline (`recording-editor-shell`, 05.css). */
+            .editor-theme-light .recording-editor-clip-menu {
+                background: #ffffff;
+                border: 1px solid alpha(#111827, 0.18);
+                box-shadow: none;
+            }
+
+            .editor-theme-light button.recording-editor-clip-menu-row {
+                color: alpha(#1d2129, 0.92);
+            }
+
+            .editor-theme-light button.recording-editor-clip-menu-row:hover {
+                background: alpha(#111827, 0.09);
+                color: #1d2129;
+            }
+
+            .editor-theme-light .recording-editor-clip-menu-separator {
+                background: alpha(#111827, 0.10);
+            }

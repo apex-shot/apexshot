@@ -2490,3 +2490,63 @@ msgstr "フリーズ"
 
 msgid "Hold the last frame on screen"
 msgstr "最後のフレームを画面に保持"
+
+msgid "Add stop"
+msgstr "ストップを追加"
+
+msgid "Angular"
+msgstr "角度"
+
+msgid "Custom Wallpaper"
+msgstr "カスタム壁紙"
+
+msgid "Cut"
+msgstr "切り取り"
+
+msgid "Diamond"
+msgstr "ダイヤ"
+
+msgid "Duplicate"
+msgstr "複製"
+
+msgid "Edit custom fill"
+msgstr "カスタム塗りつぶしを編集"
+
+msgid "Flip gradient"
+msgstr "グラデーションを反転"
+
+msgid "Frames"
+msgstr "フレーム"
+
+msgid "Occupied"
+msgstr "使用中"
+
+msgid "Paste"
+msgstr "貼り付け"
+
+msgid "Radial"
+msgstr "放射状"
+
+msgid "Radius"
+msgstr "角丸"
+
+msgid "Rotate gradient"
+msgstr "グラデーションを回転"
+
+msgid "Select background image"
+msgstr "背景画像を選択"
+
+msgid "Select image..."
+msgstr "画像を選択..."
+
+msgid "Stops"
+msgstr "ストップ"
+
+msgid "Takes"
+msgstr "テイク"
+
+msgid "Takes — coming soon"
+msgstr "テイク — 近日公開"
+
+msgid "rgb"
+msgstr "rgb"

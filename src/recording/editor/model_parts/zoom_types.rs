@@ -11,6 +11,10 @@ pub struct ZoomClip {
     pub rotation_y: f64,
     pub rotation_z: f64,
     pub perspective: f64,
+    /// Disabled from the clip's context menu. A hidden clip keeps its place on
+    /// the timeline but stops feeding the preview and the export, so the work
+    /// behind it survives a temporary mute.
+    pub hidden: bool,
 }
 
 impl Default for ZoomClip {
@@ -27,6 +31,7 @@ impl Default for ZoomClip {
             rotation_y: 0.0,
             rotation_z: 0.0,
             perspective: 0.0,
+            hidden: false,
         }
     }
 }
