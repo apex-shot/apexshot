@@ -1063,6 +1063,11 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         if (captureMenuMode) {
             overlayWindow->setCaptureMenuAreaMode(captureMenuResult.ocr,
                                                   captureMenuResult.timerSeconds);
+        } else if (areaInitMode && !openRecordingUiMode) {
+            // Tray / CLI / hotkey area capture goes straight into the selector,
+            // so drop the retired left tool rail the same way the quick-access
+            // capture menu's Area choice does.
+            overlayWindow->suppressLegacyToolRail();
         }
         overlayWindows.push_back(std::move(overlayWindow));
     }

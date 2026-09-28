@@ -323,6 +323,7 @@ pub fn install_shortcut_editors(widgets: &ShortcutSettingsWidgets, parent: &Appl
         &widgets.restore_file_btn,
         &widgets.toggle_overlays_btn,
         &widgets.quick_capture_btn,
+        &widgets.capture_area_btn,
         &widgets.capture_crosshair_btn,
         &widgets.capture_prev_btn,
         &widgets.capture_fullscreen_btn,
@@ -342,6 +343,7 @@ pub struct ShortcutSettingsWidgets {
     pub restore_file_btn: Button,
     pub toggle_overlays_btn: Button,
     pub quick_capture_btn: Button,
+    pub capture_area_btn: Button,
     pub capture_crosshair_btn: Button,
     pub capture_prev_btn: Button,
     pub capture_fullscreen_btn: Button,
@@ -488,6 +490,13 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         &config.shortcut_capture_menu,
         false,
     );
+    let capture_area_btn = create_row(
+        &screenshots_frame,
+        "Capture Area:",
+        Some("Drag to select an area of the screen"),
+        &config.shortcut_capture_area,
+        true,
+    );
     let capture_crosshair_btn = create_row(
         &screenshots_frame,
         "Crosshair Capture:",
@@ -547,6 +556,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         restore_file_btn,
         toggle_overlays_btn,
         quick_capture_btn,
+        capture_area_btn,
         capture_crosshair_btn,
         capture_prev_btn,
         capture_fullscreen_btn,
@@ -656,7 +666,7 @@ mod tests {
             .any(|label| label == "Restore Recently Closed File:"));
         assert!(labels.iter().any(|label| label == "Hide/Show Overlays:"));
         assert!(labels.iter().any(|label| label == "Quick Capture:"));
-        assert!(!labels.iter().any(|label| label == "Capture Area:"));
+        assert!(labels.iter().any(|label| label == "Capture Area:"));
         assert!(!labels.iter().any(|label| label == "Open Recording UI:"));
     }
 
