@@ -753,17 +753,21 @@ mod tests {
     #[test]
     fn the_value_rows_are_shared_across_every_source_tab() {
         // Padding and Radius describe the fill, not the source, so every tab
-        // offers them. Scoped to the Custom page they vanished on Wallpaper and
-        // Image; hung under the scrolling pages they show on all three, and the
-        // wallpaper grid scrolls beneath them instead of pushing them away.
+        // offers them. They follow the open page inside the scroll rather than
+        // pinning to the panel's bottom edge, which left a field of empty space
+        // between a short Custom or Image page and the sliders.
         let panel = include_str!("tool_sidebar_background.rs");
         assert!(
-            panel.contains("options_footer.append(&padding_row.widget);"),
-            "Padding must live in the shared footer, not one page"
+            panel.contains("options.append(&padding_row.widget);"),
+            "Padding must be a shared control every tab shows"
         );
         assert!(
-            panel.contains("options_footer.append(&radius_row.widget);"),
-            "Radius must live in the shared footer, not one page"
+            panel.contains("options.append(&radius_row.widget);"),
+            "Radius must be a shared control every tab shows"
+        );
+        assert!(
+            panel.contains("body.append(&options);"),
+            "the shared rows must follow the pages inside the scroll"
         );
         assert!(
             !panel.contains("custom_page.append(&padding_row.widget);"),
@@ -776,19 +780,19 @@ mod tests {
     }
 
     #[test]
-    fn the_custom_page_opens_with_the_fill_row_above_the_shared_footer() {
-        // The Custom page reads as: summarize the fill already in place, then
-        // tune it from the shared Padding and Radius footer, which hangs below
-        // the scrolling pages so every source tab gets it.
+    fn the_shared_rows_follow_the_pages_inside_the_scroll() {
+        // The Custom page opens with its fill row; the shared Padding and
+        // Radius rows then follow the whole pages stack, inside the scroll, so
+        // a short page is not stretched to reach them.
         let panel = include_str!("tool_sidebar_background.rs");
         let order = [
             "custom_page.append(&custom_row);",
             "body.append(&pages);",
+            "options.append(&padding_row.widget);",
+            "options.append(&radius_row.widget);",
+            "body.append(&options);",
             "scroll.set_child(Some(&body));",
             "panel.append(&scroll);",
-            "options_footer.append(&padding_row.widget);",
-            "options_footer.append(&radius_row.widget);",
-            "panel.append(&options_footer);",
         ];
         let mut cursor = 0;
         for step in order {
@@ -800,10 +804,35 @@ mod tests {
     }
 
     #[test]
+    fn the_wallpaper_grid_scrolls_inside_its_own_capped_viewport() {
+        // The 60-tile catalog is taller than the panel, so the grid gets its
+        // own scroller with a content cap. Without the cap it would push the
+        // shared rows off screen; without its own scroller those rows would
+        // have to be chased past every tile.
+        let panel = include_str!("tool_sidebar_background.rs");
+        assert!(
+            panel.contains("grid_scroll.set_max_content_height("),
+            "the grid viewport must cap its content height"
+        );
+        assert!(
+            panel.contains("grid_scroll.set_propagate_natural_height(true)"),
+            "the viewport must size itself to the catalog up to the cap"
+        );
+        assert!(
+            panel.contains("grid_scroll.set_child(Some(&grid));"),
+            "the grid, not the page, is what scrolls"
+        );
+        assert!(
+            !panel.contains("wallpaper_page.append(&grid);"),
+            "the grid must not sit bare in the page"
+        );
+    }
+
+    #[test]
     fn padding_does_not_hide_until_a_fill_is_picked() {
         // Padding used to hide itself with no fill, which left the Custom page
-        // showing only Radius. Scoped to Custom it is a plain fill control, and
-        // a value set before a fill exists has to stay visible to be adjusted.
+        // showing only Radius. As a plain fill control it must keep a value set
+        // before any fill exists visible, so it can still be adjusted.
         let panel = include_str!("tool_sidebar_background.rs");
         assert!(
             !panel.contains("set_visible(has_fill)"),

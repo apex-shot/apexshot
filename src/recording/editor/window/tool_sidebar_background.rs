@@ -16,6 +16,11 @@ use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::model::VideoGradient;
 use crate::recording::editor::window::custom_wallpaper_popover::bitmap_to_surface;
 
+/// Tallest the Wallpaper tab's grid viewport grows before it scrolls. About
+/// four rows of 56px tiles plus their spacing, which keeps the shared Padding
+/// and Radius rows in view under the grid on a normal window.
+const BACKGROUND_WALLPAPER_GRID_MAX_HEIGHT: i32 = 320;
+
 fn video_wallpaper_files() -> Vec<&'static str> {
     crate::capture::editor::window::background_panel::MOTION_WALLPAPER_FILES
         .iter()
@@ -182,7 +187,17 @@ fn build_background_panel(
             card.set_group(Some(&first));
         }
     }
-    wallpaper_page.append(&grid);
+    // The grid lives in its own capped viewport. `max_content_height` grows it
+    // with its content up to the cap and scrolls past it, so the shared Padding
+    // and Radius rows below stay in reach without a short catalog leaving a gap.
+    let grid_scroll = ScrolledWindow::new();
+    grid_scroll.add_css_class("recording-editor-bg-wallpaper-scroll");
+    grid_scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    grid_scroll.set_propagate_natural_height(true);
+    grid_scroll.set_max_content_height(BACKGROUND_WALLPAPER_GRID_MAX_HEIGHT);
+    grid_scroll.set_hexpand(true);
+    grid_scroll.set_child(Some(&grid));
+    wallpaper_page.append(&grid_scroll);
 
     // --- Custom source: a summary row that opens the Custom Wallpaper dialog. ---
     let custom_page = GtkBox::new(Orientation::Vertical, 0);
@@ -270,7 +285,7 @@ fn build_background_panel(
 
     // The Custom page opens with the fill row that summarizes it: picking a
     // new fill is the rarer action, so it heads the page rather than closing
-    // it, and the shared footer below tunes whatever is in place.
+    // it, and the shared rows below tune whatever is in place.
     custom_page.append(&custom_row);
 
     let pages = GtkBox::new(Orientation::Vertical, 0);
@@ -280,6 +295,19 @@ fn build_background_panel(
     pages.append(&image_page);
     body.append(&pages);
 
+    // Padding and Radius describe the fill, not the source, so every tab gets
+    // them. They follow the pages inside the scroll rather than pinning to the
+    // panel's bottom edge: a pinned footer left a tall field of empty space
+    // between a short Custom or Image page and the sliders. Here they sit
+    // right under whichever page is open, and the wallpaper grid scrolls in
+    // its own capped viewport above them so 60 tiles never push them away.
+    let options = GtkBox::new(Orientation::Vertical, 6);
+    options.add_css_class("recording-editor-bg-options");
+    options.set_hexpand(true);
+    options.append(&padding_row.widget);
+    options.append(&radius_row.widget);
+    body.append(&options);
+
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
     scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
@@ -287,18 +315,6 @@ fn build_background_panel(
     scroll.set_hexpand(true);
     scroll.set_child(Some(&body));
     panel.append(&scroll);
-
-    // Padding and Radius describe the fill, not the source, so every tab gets
-    // them. They hang below the scroll rather than inside a page — the way the
-    // Clip panel pins its Delete footer — so the Wallpaper tab's full 60-tile
-    // grid scrolls underneath them instead of stretching the page until they
-    // fall out of reach.
-    let options_footer = GtkBox::new(Orientation::Vertical, 6);
-    options_footer.add_css_class("recording-editor-bg-options-footer");
-    options_footer.set_hexpand(true);
-    options_footer.append(&padding_row.widget);
-    options_footer.append(&radius_row.widget);
-    panel.append(&options_footer);
 
     // Which tab is open, independent of the fill the model holds. The pages
     // follow this, so opening Wallpaper shows the grid whether or not a
