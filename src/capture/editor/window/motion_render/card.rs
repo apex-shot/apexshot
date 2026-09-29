@@ -36,7 +36,15 @@ fn draw_transformed_card(
     let (cx, cy) = motion_card_center(img_w, img_h, fit, stage, transform, zoom_anchor);
     let corners = project_card_corners(img_w, img_h, fit, transform, cx, cy);
     if alpha >= 0.99 {
-        paint_card_shadow(context, stage, corners, appearance, transform.perspective);
+        paint_card_shadow(
+            context,
+            stage,
+            corners,
+            card_radius,
+            appearance.shadow_opacity,
+            appearance.shadow_blur,
+            appearance.shadow_position,
+        );
     }
 
     // Stack presets: flat backing sheets behind the card, offset up-left
@@ -323,26 +331,35 @@ fn rounded_motion_surface(surface: &ImageSurface, radius: f64) -> Option<ImageSu
     Some(rounded)
 }
 
-fn paint_card_shadow(
+/// Paint the card's drop shadow: the offset silhouette blurred across the
+/// stage. Shared by the Motion preview/export and the Static preview so the
+/// Appearance Shadow controls (opacity, blur, position) render identically in
+/// both. `opacity`, `blur` and `position` are passed through unchanged, so each
+/// caller draws them in its own drawing space: Motion in stage pixels, the
+/// static canvas in view pixels. The two previews therefore show the same
+/// number of on-screen pixels of blur and offset at any window size.
+/// `radius` is the card's own corner radius in that same space, so the
+/// silhouette follows the rounded card instead of showing square corners.
+pub(crate) fn paint_card_shadow(
     context: &Context,
     stage: MotionStage,
     corners: [(f64, f64); 4],
-    appearance: &MotionAppearance,
-    perspective: f64,
+    radius: f64,
+    opacity: f64,
+    blur: f64,
+    position: (f64, f64),
 ) {
-    let blur = appearance.shadow_blur.max(0.0);
-    let opacity = appearance.shadow_opacity.clamp(0.0, 1.0);
+    let blur = blur.max(0.0);
+    let opacity = opacity.clamp(0.0, 1.0);
     if opacity <= 0.001 {
         return;
     }
 
-    let base_x = appearance.shadow_position.0;
     // No perspective lift: the corners are already projected, and any extra
     // offset here would shift the shadow away from the Static canvas position
     // even when the card is flat. Shadow matches Static; tilt shows through
     // the projected quad itself.
-    let base_y = appearance.shadow_position.1;
-    let _ = perspective;
+    let (base_x, base_y) = position;
 
     let scene_x = stage.center_x - stage.bounds_w * 0.5;
     let scene_y = stage.center_y - stage.bounds_h * 0.5;
@@ -352,11 +369,14 @@ fn paint_card_shadow(
 
     if blur < 0.5 {
         context.set_source_rgba(0.0, 0.0, 0.0, opacity);
-        context.move_to(corners[0].0 + base_x, corners[0].1 + base_y);
-        for corner in &corners[1..] {
-            context.line_to(corner.0 + base_x, corner.1 + base_y);
-        }
-        context.close_path();
+        trace_rounded_quad(
+            context,
+            corners,
+            radius,
+            (base_x, base_y),
+            1.0,
+            (0.0, 0.0),
+        );
         context.fill().ok();
         context.restore().ok();
         return;
@@ -373,17 +393,14 @@ fn paint_card_shadow(
         {
             let mask_context = Context::new(&mask).ok()?;
             mask_context.set_source_rgba(0.0, 0.0, 0.0, opacity);
-            mask_context.move_to(
-                (corners[0].0 + base_x - scene_x) * render_scale,
-                (corners[0].1 + base_y - scene_y) * render_scale,
+            trace_rounded_quad(
+                &mask_context,
+                corners,
+                radius,
+                (base_x, base_y),
+                render_scale,
+                (scene_x, scene_y),
             );
-            for corner in &corners[1..] {
-                mask_context.line_to(
-                    (corner.0 + base_x - scene_x) * render_scale,
-                    (corner.1 + base_y - scene_y) * render_scale,
-                );
-            }
-            mask_context.close_path();
             mask_context.fill().ok()?;
         }
         mask.flush();
@@ -425,6 +442,78 @@ fn paint_card_shadow(
         context.paint().ok();
     }
     context.restore().ok();
+}
+
+/// Trace the card silhouette as a rounded quad so the shadow follows the
+/// card's border radius (`rounded_rect_path` uses a superellipse; a cubic per
+/// corner is visually identical once the shadow is blurred). Works for the
+/// flat static rect and the projected Motion quad: each corner is cut back by
+/// `radius` along its two edges and bridged with a curve through the vertex.
+/// Points are offset, scaled into mask space, and shifted by the scene origin.
+fn trace_rounded_quad(
+    context: &Context,
+    corners: [(f64, f64); 4],
+    radius: f64,
+    offset: (f64, f64),
+    scale: f64,
+    origin: (f64, f64),
+) {
+    let points: [(f64, f64); 4] = corners.map(|(x, y)| {
+        (
+            (x + offset.0 - origin.0) * scale,
+            (y + offset.1 - origin.1) * scale,
+        )
+    });
+    // Each corner consumes `radius` on both of its edges, so the shortest edge
+    // bounds it: half an edge keeps neighbouring corner arcs from overlapping.
+    let mut shortest = f64::INFINITY;
+    for index in 0..4 {
+        let a = points[index];
+        let b = points[(index + 1) % 4];
+        shortest = shortest.min((b.0 - a.0).hypot(b.1 - a.1));
+    }
+    let radius = (radius * scale).clamp(0.0, shortest / 2.0);
+    if radius <= 0.5 {
+        context.move_to(points[0].0, points[0].1);
+        for point in &points[1..] {
+            context.line_to(point.0, point.1);
+        }
+        context.close_path();
+        return;
+    }
+    let direction = |a: (f64, f64), b: (f64, f64)| {
+        let dx = b.0 - a.0;
+        let dy = b.1 - a.1;
+        let length = (dx * dx + dy * dy).sqrt().max(1e-6);
+        (dx / length, dy / length)
+    };
+    let mut first = true;
+    for index in 0..4 {
+        let previous = points[(index + 3) % 4];
+        let corner = points[index];
+        let next = points[(index + 1) % 4];
+        let incoming = direction(previous, corner);
+        let outgoing = direction(corner, next);
+        let start = (corner.0 - incoming.0 * radius, corner.1 - incoming.1 * radius);
+        let end = (corner.0 + outgoing.0 * radius, corner.1 + outgoing.1 * radius);
+        if first {
+            context.move_to(start.0, start.1);
+            first = false;
+        } else {
+            context.line_to(start.0, start.1);
+        }
+        // Cubic equivalent of a quadratic through the corner vertex.
+        let control_1 = (
+            start.0 + (corner.0 - start.0) * (2.0 / 3.0),
+            start.1 + (corner.1 - start.1) * (2.0 / 3.0),
+        );
+        let control_2 = (
+            end.0 + (corner.0 - end.0) * (2.0 / 3.0),
+            end.1 + (corner.1 - end.1) * (2.0 / 3.0),
+        );
+        context.curve_to(control_1.0, control_1.1, control_2.0, control_2.1, end.0, end.1);
+    }
+    context.close_path();
 }
 
 fn paint_perspective_card(

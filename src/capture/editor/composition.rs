@@ -353,6 +353,13 @@ impl BackgroundComposition {
             }
         }
 
+        // The drop shadow is intentionally NOT contained here. Growing the
+        // canvas to fit it moved the card (the canvas is centered in the
+        // preview, so one-sided growth shifted everything) and made the exported
+        // PNG change size as the blur slider moved. The shadow is painted by
+        // `paint_card_shadow`, which clips it to the scene like the Motion
+        // preview, so it can spill past the padding without moving the card.
+
         let _ = self.corner_radius;
 
         CompositionLayout {
@@ -488,6 +495,32 @@ mod tests {
         assert!((shadow.offset_x - 24.0).abs() < 1e-6, "{}", shadow.offset_x);
         assert!((shadow.offset_y + 36.0).abs() < 1e-6, "{}", shadow.offset_y);
         assert!((shadow.blur - 48.0).abs() < 1e-6, "{}", shadow.blur);
+    }
+
+    /// The canvas must not grow to chase the shadow: the preview centers the
+    /// canvas, so any one-sided growth shifts the card while the blur slider
+    /// moves, and the exported PNG would change size with blur too.
+    #[test]
+    fn shadow_blur_does_not_move_the_card_or_resize_the_canvas() {
+        let base = BackgroundComposition::new(800.0, 600.0)
+            .with_style(BackgroundStyle::PlainColor(DrawColor::new(
+                1.0, 1.0, 1.0, 1.0,
+            )))
+            .with_padding(24.0)
+            .with_shadow_profile(0.8, 0.0, 0.0, 20.0)
+            .compute();
+        let blurred = BackgroundComposition::new(800.0, 600.0)
+            .with_style(BackgroundStyle::PlainColor(DrawColor::new(
+                1.0, 1.0, 1.0, 1.0,
+            )))
+            .with_padding(24.0)
+            .with_shadow_profile(0.8, 40.0, 0.0, 20.0)
+            .compute();
+
+        assert_eq!(blurred.canvas_width, base.canvas_width);
+        assert_eq!(blurred.canvas_height, base.canvas_height);
+        assert_eq!(blurred.image_rect.x, base.image_rect.x);
+        assert_eq!(blurred.image_rect.y, base.image_rect.y);
     }
 
     #[test]

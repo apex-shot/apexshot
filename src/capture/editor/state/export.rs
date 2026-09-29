@@ -689,30 +689,13 @@ impl EditorState {
         }
 
         if let Some(shadow) = layout.shadow {
-            let mut shadow_layer = render_shadow_layer(
+            let shadow_layer = render_shadow_layer(
                 final_screenshot.width(),
                 final_screenshot.height(),
                 shadow.blur,
                 shadow.opacity,
                 self.background_corner_radius * layout.scale_factor * layout.draw_scale,
             )?;
-            if shadow.blur > 0.0 {
-                let shadow_width = shadow_layer.width() as i32;
-                let shadow_height = shadow_layer.height() as i32;
-                let blur_rect = Rect {
-                    x: 0,
-                    y: 0,
-                    width: shadow_width,
-                    height: shadow_height,
-                };
-                // Apply 3 passes of box blur to approximate Gaussian blur.
-                // A single pass produces harsh edges; multiple passes create
-                // the smooth falloff expected of a realistic shadow.
-                let pass_radius = (shadow.blur / 2.0).max(1.0);
-                for _ in 0..3 {
-                    apply_blur_rect(&mut shadow_layer, blur_rect, pass_radius, true);
-                }
-            }
             image::imageops::overlay(
                 &mut canvas,
                 &shadow_layer,
@@ -790,12 +773,30 @@ pub(super) fn render_shadow_layer(
     let data = surface
         .data()
         .map_err(|e| EditorError::ImageSave(e.to_string()))?;
-    Ok(cairo_argb_to_rgba_image(
+    let mut layer = cairo_argb_to_rgba_image(
         shadow_width as u32,
         shadow_height as u32,
         stride as usize,
         data.as_ref(),
-    ))
+    );
+    // The still export shares the Motion card shadow's recipe (3 passes at
+    // 0.4x blur). The 1.35x margin contains the 1.2x spread, so the falloff
+    // never clips into a hard edge. The on-screen preview no longer rasterizes
+    // here: it paints through the shared `paint_card_shadow` so Static and
+    // Motion show the same shadow, so this path serves the still PNG only.
+    if blur > 0.0 {
+        let blur_rect = Rect {
+            x: 0,
+            y: 0,
+            width: layer.width() as i32,
+            height: layer.height() as i32,
+        };
+        let pass_radius = (blur * 0.4).max(1.0);
+        for _ in 0..3 {
+            apply_blur_rect(&mut layer, blur_rect, pass_radius, true);
+        }
+    }
+    Ok(layer)
 }
 
 fn draw_rounded_rect_path(
@@ -863,7 +864,7 @@ fn apply_corner_radius(image: &mut RgbaImage, radius: f64) {
 mod tests {
     use image::RgbaImage;
 
-    use super::apply_corner_radius;
+    use super::{apply_corner_radius, render_shadow_layer};
 
     #[test]
     fn corner_radius_antialiases_top_right_edge() {
@@ -884,5 +885,18 @@ mod tests {
         );
         assert_eq!(image.get_pixel(39, 0)[3], 0);
         assert_eq!(image.get_pixel(20, 20)[3], 255);
+    }
+
+    #[test]
+    fn shadow_sheet_blurs_and_contains_its_falloff() {
+        let layer = render_shadow_layer(64, 64, 20.0, 0.8, 8.0).expect("shadow layer");
+        assert_eq!((layer.width(), layer.height()), (118, 118));
+        // Solid core survives the blur.
+        assert!(layer.get_pixel(59, 59)[3] > 180);
+        // Falloff exists just outside the card: the blur really ran.
+        let fringe = layer.get_pixel(96, 59)[3];
+        assert!(fringe > 0 && fringe < 200, "fringe alpha {fringe}");
+        // Falloff fits inside the sheet: no clipped hard edge at the border.
+        assert!(layer.get_pixel(59, 0)[3] < 16);
     }
 }

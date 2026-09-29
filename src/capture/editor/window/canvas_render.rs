@@ -1,6 +1,6 @@
 //! Canvas draw function and render caches (PR 10.19).
 //!
-//! Owns working-image / background / shadow surface caches and the
+//! Owns working-image / background surface caches and the
 //! `DrawingArea::set_draw_func` body. Snapshot `EditorState` under the lock,
 //! then release before Cairo work. Session/bootstrap entry points stay in
 //! `window/mod.rs`.
@@ -26,7 +26,7 @@ use crate::capture::editor::{
         BACKGROUND_BLUR_MAX_RADIUS,
     },
     selection::{action_bounds_with_padding, action_resize_handles},
-    state::{render_shadow_layer, EditorState},
+    state::EditorState,
     types::{frame_needs_canvas, AnnotationAction, BackgroundStyle, Rect, Tool, ViewTransform},
     ui_support::{DockedBarInset, EDITOR_TOP_CHROME_HEIGHT},
 };
@@ -34,16 +34,8 @@ use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::window::custom_wallpaper_popover::bitmap_to_surface;
 
 use super::motion_mode::MotionRuntime;
-use super::motion_render::{paint_motion_scene_shadow, MotionStage};
+use super::motion_render::{paint_card_shadow, paint_motion_scene_shadow, MotionStage};
 
-/// Long edge of the preview's shadow raster. The shadow is a soft blob, so it
-/// is rasterized small (card plus the blur's spread, bounded here) and painted
-/// scaled over the card; a near-full-size layer made every shadow edit stutter.
-const MAX_PREVIEW_SHADOW_DIM: u32 = 768;
-/// Shadow raster bound while an Appearance burst is live. Same trade as the
-/// fill blur: softer while dragging, one crisp sheet once the edits stop.
-const MAX_BURST_SHADOW_DIM: u32 = 320;
-const PREVIEW_SHADOW_BLUR_PASSES: usize = 2;
 /// Working width for the on-screen gradient fill. A gradient is smooth, so the
 /// paint stretches this across the canvas; matching the video editor's preview
 /// texture keeps a stop drag cheap, and a drag rebuilds it every frame.
@@ -57,7 +49,7 @@ const GRADIENT_PREVIEW_WIDTH: u32 = 480;
 /// a burst can bake a cheap blur without invalidating an already-crisp surface.
 type BackgroundSignature = (BackgroundStyle, Option<u64>, u64, Option<(bool, i32, i32)>);
 
-/// Surface caches shared by the canvas draw path (working image, background, shadow).
+/// Surface caches shared by the canvas draw path (working image, background).
 #[derive(Clone)]
 pub(super) struct CanvasRenderCaches {
     pub working_surface: Rc<RefCell<Option<ImageSurface>>>,
@@ -68,11 +60,6 @@ pub(super) struct CanvasRenderCaches {
     /// marks a full-resolution/unblurred surface. A burst only upgrades it, so
     /// a drag never re-blurs a surface that is already crisp enough.
     pub background_edge: Rc<Cell<f64>>,
-    pub shadow_surface: Rc<RefCell<Option<ImageSurface>>>,
-    pub shadow_signature: Rc<Cell<Option<(u64, u64, u64, u64, u64)>>>,
-    /// Raster budget the cached shadow sheet was built at, so a live burst only
-    /// ever upgrades it and an unrelated drag never rebuilds it.
-    pub shadow_edge: Rc<Cell<f64>>,
 }
 
 impl CanvasRenderCaches {
@@ -83,9 +70,6 @@ impl CanvasRenderCaches {
             background_surface: Rc::new(RefCell::new(None)),
             background_signature: Rc::new(RefCell::new(None)),
             background_edge: Rc::new(Cell::new(f64::INFINITY)),
-            shadow_surface: Rc::new(RefCell::new(None)),
-            shadow_signature: Rc::new(Cell::new(None)),
-            shadow_edge: Rc::new(Cell::new(f64::INFINITY)),
         }
     }
 }
@@ -231,9 +215,6 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
     let background_surface = caches.background_surface.clone();
     let background_signature_cache = caches.background_signature.clone();
     let background_edge = caches.background_edge.clone();
-    let shadow_surface = caches.shadow_surface.clone();
-    let shadow_signature_cache = caches.shadow_signature.clone();
-    let shadow_edge_cache = caches.shadow_edge.clone();
     let canvas_padding_draw = canvas_padding as f64;
     let interactive_preview = interactive_preview.clone();
     let wallpaper_cache = wallpaper_cache.clone();
@@ -749,94 +730,32 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                     }
                 }
 
-                if let Some(shadow) = layout.shadow {
-                    let mut shadow_surface_cache = shadow_surface.borrow_mut();
-                    let base_blur = shadow.blur.max(1.0);
-                    let base_corner = background_corner_radius * layout.scale_factor;
-                    // Bound the whole layer, card plus the blur's spread, so a
-                    // large shadow blur cannot blow up the per-edit raster.
-                    let layer_span =
-                        image_width.max(image_height).max(1.0) + base_blur * 1.35 * 2.0;
-                    // Same tiering as the fill blur: a live burst rasters the
-                    // shadow small, and the burst tail lands one crisp sheet.
-                    let shadow_budget = if interactive_frame {
-                        MAX_BURST_SHADOW_DIM as f64
-                    } else {
-                        MAX_PREVIEW_SHADOW_DIM as f64
-                    };
-                    let preview_scale = (shadow_budget / layer_span).min(1.0);
-                    let preview_width = (image_width * preview_scale).round().max(1.0) as u32;
-                    let preview_height = (image_height * preview_scale).round().max(1.0) as u32;
-                    let preview_blur = (base_blur * preview_scale).max(1.0);
-                    let preview_corner = base_corner * preview_scale;
-                    // Key on the shadow's own values, not the raster budget:
-                    // dragging an unrelated control (padding, radius) must not
-                    // re-raster the shadow just because its burst is live. The
-                    // budget the sheet was built at is tracked separately, so a
-                    // burst only ever upgrades it.
-                    let shadow_signature = (
-                        image_width.to_bits(),
-                        image_height.to_bits(),
-                        base_blur.to_bits(),
-                        shadow.opacity.to_bits(),
-                        base_corner.to_bits(),
+                if layout.shadow.is_some() {
+                    // Shared with the Motion preview/export: one painter, and
+                    // the Appearance Shadow controls are stage/screen pixels in
+                    // both, so the card drop shadow looks the same in either
+                    // mode. The static canvas draws at canvas resolution and
+                    // scales to the view, so the card corners are converted to
+                    // view space here instead of rasterizing the shadow at
+                    // canvas resolution and scaling it down with everything
+                    // else (which is what made the two previews diverge).
+                    let card_w = image_width * t.scale;
+                    let card_h = image_height * t.scale;
+                    let corners = [
+                        (t.offset_x, t.offset_y),
+                        (t.offset_x + card_w, t.offset_y),
+                        (t.offset_x + card_w, t.offset_y + card_h),
+                        (t.offset_x, t.offset_y + card_h),
+                    ];
+                    paint_card_shadow(
+                        context,
+                        scene_stage,
+                        corners,
+                        background_corner_radius * background_scale_factor * t.scale,
+                        shadow_opacity,
+                        shadow_blur,
+                        (shadow_offset_x, shadow_offset_y),
                     );
-                    let budget_upgrade = shadow_budget > shadow_edge_cache.get() + 0.5;
-                    let needs_recompute = shadow_signature_cache.get() != Some(shadow_signature)
-                        || shadow_surface_cache.is_none()
-                        || budget_upgrade;
-
-                    if needs_recompute {
-                        if let Ok(mut shadow_image) = render_shadow_layer(
-                            preview_width,
-                            preview_height,
-                            preview_blur,
-                            shadow.opacity,
-                            preview_corner,
-                        ) {
-                            let blur_rect = Rect {
-                                x: 0,
-                                y: 0,
-                                width: shadow_image.width() as i32,
-                                height: shadow_image.height() as i32,
-                            };
-                            let pass_radius = (preview_blur / 2.0).max(1.0);
-                            for _ in 0..PREVIEW_SHADOW_BLUR_PASSES {
-                                crate::capture::editor::render::apply_blur_rect(
-                                    &mut shadow_image,
-                                    blur_rect,
-                                    pass_radius,
-                                    true,
-                                );
-                            }
-                            *shadow_surface_cache = rgba_image_to_surface(&shadow_image);
-                            shadow_signature_cache.set(Some(shadow_signature));
-                            shadow_edge_cache.set(shadow_budget);
-                        }
-                    }
-
-                    if let Some(surface) = shadow_surface_cache.as_ref() {
-                        let sw = surface.width() as f64;
-                        let sh = surface.height() as f64;
-                        let shadow_scale = t.scale;
-                        let target_w = image_width * shadow_scale;
-                        let target_h = image_height * shadow_scale;
-                        let spread_px = (shadow.blur * 1.35).ceil().max(0.0);
-                        let sx = (target_w + spread_px * 2.0) / sw;
-                        let sy = (target_h + spread_px * 2.0) / sh;
-                        let _ = context.save();
-                        context.translate(
-                            canvas_t.offset_x + shadow.rect.x * canvas_t.scale,
-                            canvas_t.offset_y + shadow.rect.y * canvas_t.scale,
-                        );
-                        context.scale(sx, sy);
-                        context.set_source_surface(surface, 0.0, 0.0).unwrap();
-                        context
-                            .source()
-                            .set_filter(pick_image_filter(canvas_t.scale));
-                        let _ = context.paint();
-                        let _ = context.restore();
-                    }
                 }
             } else {
                 t.scale = canvas_t.scale * draw_scale_factor;
@@ -1303,7 +1222,7 @@ mod tests {
                 && production.contains("draw_arrow_control_handles")
                 && production.contains("AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }")
                 && production.contains("0.0")
-                && production.contains("MAX_PREVIEW_SHADOW_DIM")
+                && production.contains("paint_card_shadow(")
                 && production.contains("fn draw_rounded_rect_path"),
             "canvas_render.rs must own render caches, set_draw_func, lock-release snapshot, and rounded-rect helper"
         );
@@ -1350,22 +1269,24 @@ mod tests {
         );
     }
 
-    /// The shadow sheet is a soft blob, so it rasters small and is painted
-    /// scaled; a near-full-size layer made every shadow edit stutter. The
-    /// budget must ride its own tracked edge, not the cache key, or dragging an
-    /// unrelated control (padding, radius) would re-raster the shadow too.
+    /// The card drop shadow is one painter shared with the Motion preview, so
+    /// the Appearance Shadow controls look the same in both modes. Rasterizing
+    /// the static shadow at canvas resolution and scaling it down was what made
+    /// the two previews diverge; the static path must go through the shared
+    /// painter in view space.
     #[test]
-    fn shadow_sheet_is_raster_bound_and_tiered_by_a_tracked_budget() {
+    fn static_canvas_uses_the_shared_motion_card_shadow() {
         let source = include_str!("canvas_render.rs");
         let production = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production.contains("const MAX_PREVIEW_SHADOW_DIM: u32 = 768;")
-                && production.contains("const MAX_BURST_SHADOW_DIM: u32 = 320;")
+            production.contains("paint_card_shadow(")
+                && production.contains("scene_stage")
+                && production.contains("image_width * t.scale")
                 && production
-                    .contains("let preview_scale = (shadow_budget / layer_span).min(1.0);")
-                && production.contains("shadow_budget > shadow_edge_cache.get() + 0.5")
-                && production.contains("shadow_edge_cache.set(shadow_budget);"),
-            "the shadow sheet must be bounded and upgrade by a tracked budget, not its cache key",
+                    .contains("background_corner_radius * background_scale_factor * t.scale,")
+                && !production.contains("render_shadow_layer("),
+            "the static preview must paint its card shadow with the same painter Motion uses, \
+             passing the card's corner radius so the shadow is rounded too",
         );
     }
 
