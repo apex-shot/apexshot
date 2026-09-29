@@ -1,6 +1,6 @@
 #[allow(dead_code)]
 mod crop_dialog;
-mod custom_wallpaper_popover;
+pub(crate) mod custom_wallpaper_popover;
 #[allow(dead_code)]
 mod dialogs;
 #[allow(dead_code)]
@@ -338,7 +338,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
 /// Edit looked like a dead button. Re-checking at idle reads the settled
 /// value instead: the blip is long over, while a real deactivation — the
 /// capture overlay taking focus — is not.
-fn sweep_popovers_on_deactivate(window: &(impl IsA<gtk4::Window> + IsA<Widget>)) {
+pub(crate) fn sweep_popovers_on_deactivate(window: &(impl IsA<gtk4::Window> + IsA<Widget>)) {
     window.connect_is_active_notify(|window| {
         if window.is_active() {
             return;
@@ -677,7 +677,9 @@ mod tests {
         // sweep wiring, so the settle the wiring depends on is in play: the card
         // must still be up once the blip has passed.
         use crate::recording::editor::model::{VideoEditState, VideoMetadata};
-        use crate::recording::editor::window::custom_wallpaper_popover::build_custom_wallpaper_popover;
+        use crate::recording::editor::window::custom_wallpaper_popover::{
+            build_custom_fill_popover, FillOps,
+        };
         use gtk4::prelude::*;
         use gtk4::{glib as gtk_glib, Box as GtkBox, Button, Orientation};
         use std::path::PathBuf;
@@ -700,7 +702,13 @@ mod tests {
             window.set_child(Some(&sidebar));
             let edit = Button::with_label("Edit");
             sidebar.append(&edit);
-            let popover = build_custom_wallpaper_popover(&sidebar, &edit, state, Rc::new(|| {}));
+            let popover = build_custom_fill_popover(
+                &sidebar,
+                &edit,
+                "Custom Wallpaper",
+                FillOps::for_video(state),
+                Rc::new(|| {}),
+            );
             super::sweep_popovers_on_deactivate(&window);
 
             // Surfaces are positioned by the compositor, so the loop has to run

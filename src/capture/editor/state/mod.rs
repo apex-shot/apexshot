@@ -23,7 +23,7 @@ use super::text_detect::{BackgroundTextDetection, TextDetector};
 use super::types::SizeControlMode;
 use super::types::{
     AnnotationAction, ArrowStyle, BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor,
-    EditorError, FrameStyle, MoveHandle, ObfuscateMethod, Point, Rect, TextEditBounds, Tool,
+    FrameStyle, MoveHandle, ObfuscateMethod, Point, Rect, TextEditBounds, Tool,
 };
 use crate::recording::editor::model::MotionSceneShadow;
 use gtk4;
@@ -354,6 +354,12 @@ impl EditorState {
             .with_style(self.background_style.clone())
             .with_padding(self.background_padding)
             .with_shadow(self.background_shadow)
+            .with_shadow_profile(
+                self.shadow_opacity,
+                self.shadow_blur,
+                self.shadow_offset_x,
+                self.shadow_offset_y,
+            )
             .with_insert(self.background_insert)
             .with_alignment(self.background_alignment)
             .with_corner_radius(self.background_corner_radius)
@@ -404,16 +410,6 @@ impl EditorState {
 
 pub fn apply_effect_actions(image: &mut RgbaImage, actions: &[AnnotationAction]) {
     effects::apply_effect_actions(image, actions);
-}
-
-pub(crate) fn render_shadow_layer(
-    width: u32,
-    height: u32,
-    blur: f64,
-    opacity: f64,
-    corner_radius: f64,
-) -> Result<RgbaImage, EditorError> {
-    export::render_shadow_layer(width, height, blur, opacity, corner_radius)
 }
 
 #[cfg(test)]

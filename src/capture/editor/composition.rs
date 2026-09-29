@@ -55,6 +55,11 @@ pub struct BackgroundComposition {
     aspect_ratio: CropAspectRatio,
     frame_style: FrameStyle,
     frame_border_thickness: f64,
+    /// Explicit drop-shadow from the shared Appearance panel, in the same
+    /// 400px reference units as `corner_radius`: (opacity, blur, offset_x,
+    /// offset_y). When set it replaces the legacy single-strength `shadow`
+    /// profile, so Static and Motion read the same controls.
+    shadow_profile: Option<(f64, f64, f64, f64)>,
 }
 
 impl BackgroundComposition {
@@ -71,6 +76,7 @@ impl BackgroundComposition {
             aspect_ratio: CropAspectRatio::Original,
             frame_style: FrameStyle::Default,
             frame_border_thickness: 0.0,
+            shadow_profile: None,
         }
     }
 
@@ -86,6 +92,20 @@ impl BackgroundComposition {
 
     pub fn with_shadow(mut self, shadow: f64) -> Self {
         self.shadow = shadow;
+        self
+    }
+
+    /// Drive the drop shadow from the shared Appearance controls instead of the
+    /// legacy strength scalar. Values are in the 400px reference space
+    /// (opacity 0-1, blur and offsets in reference px).
+    pub fn with_shadow_profile(
+        mut self,
+        opacity: f64,
+        blur: f64,
+        offset_x: f64,
+        offset_y: f64,
+    ) -> Self {
+        self.shadow_profile = Some((opacity, blur, offset_x, offset_y));
         self
     }
 
@@ -245,13 +265,34 @@ impl BackgroundComposition {
             height: draw_height,
         };
 
-        let mut shadow = if self.style != BackgroundStyle::None && self.shadow > 0.0 {
+        // Appearance drives the shadow when it is set (Static and Motion share
+        // the panel); otherwise the legacy single-strength scalar still applies.
+        let params = if self.style == BackgroundStyle::None {
+            None
+        } else if let Some((opacity, blur, offset_x, offset_y)) = self.shadow_profile {
+            (opacity > 0.0).then(|| {
+                let unit = scale_factor * draw_scale;
+                (
+                    offset_x * unit,
+                    offset_y * unit,
+                    (blur * unit).max(0.0),
+                    opacity.clamp(0.0, 1.0),
+                )
+            })
+        } else if self.shadow > 0.0 {
             let shadow_strength = (self.shadow / 100.0).clamp(0.0, 1.0);
             let size_scale = (ref_size / 1200.0).sqrt().clamp(0.85, 1.8);
-            let offset_x = 0.0;
-            let offset_y = (6.0 + shadow_strength * 10.0) * size_scale * draw_scale;
-            let blur = (16.0 + shadow_strength * 18.0) * size_scale * draw_scale;
-            let opacity = 0.16 + shadow_strength * 0.12;
+            Some((
+                0.0,
+                (6.0 + shadow_strength * 10.0) * size_scale * draw_scale,
+                (16.0 + shadow_strength * 18.0) * size_scale * draw_scale,
+                0.16 + shadow_strength * 0.12,
+            ))
+        } else {
+            None
+        };
+
+        let mut shadow = params.map(|(offset_x, offset_y, blur, opacity)| {
             let spread = blur * 1.2;
             let rect = FloatRect {
                 x: image_rect.x + offset_x - spread,
@@ -259,16 +300,14 @@ impl BackgroundComposition {
                 width: image_rect.width + spread * 2.0,
                 height: image_rect.height + spread * 2.0,
             };
-            Some(ShadowSpec {
+            ShadowSpec {
                 offset_x,
                 offset_y,
                 blur,
                 opacity,
                 rect,
-            })
-        } else {
-            None
-        };
+            }
+        });
 
         // Contain the frame (outside border, accent strokes, backing sheets)
         // inside the canvas and center the whole framed stack per alignment,
@@ -313,6 +352,13 @@ impl BackgroundComposition {
                 shadow.rect.y += shift_y;
             }
         }
+
+        // The drop shadow is intentionally NOT contained here. Growing the
+        // canvas to fit it moved the card (the canvas is centered in the
+        // preview, so one-sided growth shifted everything) and made the exported
+        // PNG change size as the blur slider moved. The shadow is painted by
+        // `paint_card_shadow`, which clips it to the scene like the Motion
+        // preview, so it can spill past the padding without moving the card.
 
         let _ = self.corner_radius;
 
@@ -429,6 +475,68 @@ mod tests {
         assert!(x0 >= -0.5 && y0 >= -0.5);
         assert!(x1 <= stacked.canvas_width + 0.5);
         assert!(y1 <= stacked.canvas_height + 0.5);
+    }
+
+    /// The shared Appearance panel drives the drop shadow through the profile,
+    /// in 400px reference units (like Border Radius), so Static matches Motion
+    /// and scales with the screenshot instead of the legacy strength scalar.
+    #[test]
+    fn appearance_shadow_profile_drives_the_drop_shadow() {
+        let layout = BackgroundComposition::new(800.0, 600.0)
+            .with_style(BackgroundStyle::PlainColor(DrawColor::new(
+                1.0, 1.0, 1.0, 1.0,
+            )))
+            .with_shadow_profile(0.6, 24.0, 12.0, -18.0)
+            .compute();
+
+        let shadow = layout.shadow.expect("shadow");
+        assert!((shadow.opacity - 0.6).abs() < 1e-9);
+        // 800px long edge -> scale_factor 2.0, so reference px double.
+        assert!((shadow.offset_x - 24.0).abs() < 1e-6, "{}", shadow.offset_x);
+        assert!((shadow.offset_y + 36.0).abs() < 1e-6, "{}", shadow.offset_y);
+        assert!((shadow.blur - 48.0).abs() < 1e-6, "{}", shadow.blur);
+    }
+
+    /// The canvas must not grow to chase the shadow: the preview centers the
+    /// canvas, so any one-sided growth shifts the card while the blur slider
+    /// moves, and the exported PNG would change size with blur too.
+    #[test]
+    fn shadow_blur_does_not_move_the_card_or_resize_the_canvas() {
+        let base = BackgroundComposition::new(800.0, 600.0)
+            .with_style(BackgroundStyle::PlainColor(DrawColor::new(
+                1.0, 1.0, 1.0, 1.0,
+            )))
+            .with_padding(24.0)
+            .with_shadow_profile(0.8, 0.0, 0.0, 20.0)
+            .compute();
+        let blurred = BackgroundComposition::new(800.0, 600.0)
+            .with_style(BackgroundStyle::PlainColor(DrawColor::new(
+                1.0, 1.0, 1.0, 1.0,
+            )))
+            .with_padding(24.0)
+            .with_shadow_profile(0.8, 40.0, 0.0, 20.0)
+            .compute();
+
+        assert_eq!(blurred.canvas_width, base.canvas_width);
+        assert_eq!(blurred.canvas_height, base.canvas_height);
+        assert_eq!(blurred.image_rect.x, base.image_rect.x);
+        assert_eq!(blurred.image_rect.y, base.image_rect.y);
+    }
+
+    #[test]
+    fn an_off_appearance_shadow_draws_nothing() {
+        let layout = BackgroundComposition::new(800.0, 600.0)
+            .with_style(BackgroundStyle::PlainColor(DrawColor::new(
+                1.0, 1.0, 1.0, 1.0,
+            )))
+            .with_shadow(50.0)
+            .with_shadow_profile(0.0, 24.0, 0.0, 20.0)
+            .compute();
+
+        assert!(
+            layout.shadow.is_none(),
+            "a zero-opacity Appearance shadow must override the legacy strength",
+        );
     }
 
     #[test]

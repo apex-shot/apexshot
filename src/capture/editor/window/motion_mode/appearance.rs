@@ -1,8 +1,9 @@
-use gtk4::cairo::Context;
+use gtk4::cairo::{Context, Format, ImageSurface};
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, DrawingArea, Entry,
-    FileChooserAction, FileChooserNative, FileFilter, GestureClick, Grid, Label, Orientation,
-    Overlay, ResponseType, Revealer, Separator, Stack, ToggleButton,
+    FileChooserAction, FileChooserNative, FileFilter, GestureClick, Grid, Image, Label,
+    Orientation, PickFlags, PolicyType, ResponseType, Revealer, RevealerTransitionType,
+    ScrolledWindow, Separator, Stack, ToggleButton,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -12,146 +13,21 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use crate::capture::editor::types::FrameStyle;
+use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
 use crate::recording::editor::model::{
-    MotionBackgroundFillType, MotionFrame, MotionFramePreset, MotionSceneShadowPlacement,
-    MotionSceneShadowPreset,
+    GradientStop, MotionBackgroundFillType, MotionFrame, MotionFramePreset,
+    MotionSceneShadowPlacement, MotionSceneShadowPreset, VideoGradient,
+};
+use crate::recording::editor::window::custom_wallpaper_popover::{
+    build_custom_fill_popover, FillOps,
 };
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
 use super::widgets::{
-    motion_appearance_slider, motion_color_control, motion_gradient_color_control,
-    motion_reference_percent_slider, motion_rgba,
+    motion_appearance_slider, motion_reference_percent_slider, motion_rgb888, motion_rgba,
 };
 use super::MotionSession;
-
-/// Two-stop gradient presets for Motion backgrounds. Selecting one
-/// copies its stops into the editable gradient colors.
-const MOTION_GRADIENT_PRESETS: [(&str, [f64; 4], [f64; 4]); 8] = [
-    ("Dusk", [0.10, 0.14, 0.30, 1.0], [0.45, 0.22, 0.55, 1.0]),
-    ("Sunset", [0.98, 0.55, 0.30, 1.0], [0.88, 0.28, 0.48, 1.0]),
-    ("Ocean", [0.13, 0.62, 0.65, 1.0], [0.07, 0.22, 0.47, 1.0]),
-    ("Forest", [0.20, 0.55, 0.34, 1.0], [0.05, 0.25, 0.18, 1.0]),
-    ("Ember", [0.85, 0.25, 0.21, 1.0], [0.30, 0.07, 0.10, 1.0]),
-    ("Slate", [0.55, 0.58, 0.64, 1.0], [0.16, 0.18, 0.22, 1.0]),
-    ("Peach", [1.00, 0.85, 0.72, 1.0], [0.98, 0.55, 0.55, 1.0]),
-    ("Violet", [0.58, 0.36, 0.90, 1.0], [0.20, 0.16, 0.50, 1.0]),
-];
-
-/// One gradient preset swatch, sized and styled exactly like the wallpaper
-/// thumbnails so both catalogs fill the inspector width the same way.
-fn motion_gradient_preset_button(
-    index: usize,
-    start: [f64; 4],
-    end: [f64; 4],
-    session: &MotionSession,
-    preview: &DrawingArea,
-    none_button: &Button,
-    apply_gradient_colors: &Rc<dyn Fn(gtk4::gdk::RGBA, gtk4::gdk::RGBA)>,
-    selection_buttons: &Rc<RefCell<Vec<(usize, Button)>>>,
-    on_interact: &Rc<dyn Fn()>,
-) -> Button {
-    let button = Button::new();
-    button.set_has_frame(false);
-    button.set_size_request(56, 56);
-    button.add_css_class("editor-background-gradient-button");
-    button.add_css_class("editor-background-preview-size-regular");
-    button.add_css_class("editor-motion-gradient-preset");
-    button.set_tooltip_text(Some(&t(MOTION_GRADIENT_PRESETS[index].0)));
-    button.set_child(Some(&motion_gradient_preset_area(start, end)));
-    selection_buttons.borrow_mut().push((index, button.clone()));
-    button.connect_clicked({
-        let runtime = session.runtime.clone();
-        let preview = preview.clone();
-        let none_button = none_button.clone();
-        let selection_buttons = selection_buttons.clone();
-        let apply_gradient_colors = apply_gradient_colors.clone();
-        let on_interact = on_interact.clone();
-        move |_| {
-            on_interact();
-            {
-                let mut runtime = runtime.borrow_mut();
-                runtime.begin_motion_edit();
-                runtime.motion.appearance.gradient_color_1 = start;
-                runtime.motion.appearance.gradient_color_2 = end;
-                runtime.motion.appearance.selected_gradient_preset_index = Some(index);
-                runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
-                runtime.backdrop_cache = None;
-                runtime.preview_frame = None;
-                none_button.remove_css_class("active-background-option");
-                preview.queue_draw();
-            }
-            let [r1, g1, b1, a1] = start;
-            let [r2, g2, b2, a2] = end;
-            apply_gradient_colors(
-                gtk4::gdk::RGBA::new(r1 as f32, g1 as f32, b1 as f32, a1 as f32),
-                gtk4::gdk::RGBA::new(r2 as f32, g2 as f32, b2 as f32, a2 as f32),
-            );
-            for (candidate_index, candidate) in selection_buttons.borrow().iter() {
-                if *candidate_index == index {
-                    candidate.add_css_class("active-background-option");
-                } else {
-                    candidate.remove_css_class("active-background-option");
-                }
-            }
-        }
-    });
-    button
-}
-
-/// The compact strip's expand affordance: a fifth preset rendered like a
-/// wallpaper thumbnail with the catalog's stack glyph, opening the full grid.
-fn motion_gradient_expand_tile(
-    start: [f64; 4],
-    end: [f64; 4],
-    stack: &Stack,
-    on_interact: &Rc<dyn Fn()>,
-) -> Button {
-    let button = Button::new();
-    button.set_has_frame(false);
-    button.set_size_request(56, 56);
-    button.add_css_class("editor-background-gradient-button");
-    button.add_css_class("editor-background-preview-size-regular");
-    button.add_css_class("editor-motion-gradient-preset");
-    button.set_tooltip_text(Some(&t("Show all gradients")));
-    let overlay = Overlay::new();
-    overlay.set_child(Some(&motion_gradient_preset_area(start, end)));
-    let expand = Label::new(Some("⌄"));
-    expand.set_halign(Align::Center);
-    expand.set_valign(Align::End);
-    expand.set_can_target(false);
-    expand.add_css_class("editor-motion-wallpaper-stack-glyph");
-    overlay.add_overlay(&expand);
-    button.set_child(Some(&overlay));
-    button.connect_clicked({
-        let stack = stack.clone();
-        let on_interact = on_interact.clone();
-        move |_| {
-            on_interact();
-            stack.set_visible_child_name("all")
-        }
-    });
-    button
-}
-
-fn motion_gradient_preset_area(start: [f64; 4], end: [f64; 4]) -> DrawingArea {
-    let area = DrawingArea::new();
-    area.set_content_width(56);
-    area.set_content_height(56);
-    area.set_can_target(false);
-    area.set_draw_func(move |_, cr, width, height| {
-        let gradient =
-            gtk4::cairo::LinearGradient::new(0.0, 0.0, f64::from(width), f64::from(height));
-        let [r1, g1, b1, a1] = start;
-        let [r2, g2, b2, a2] = end;
-        gradient.add_color_stop_rgba(0.0, r1, g1, b1, a1);
-        gradient.add_color_stop_rgba(1.0, r2, g2, b2, a2);
-        cr.set_source(&gradient).ok();
-        motion_thumbnail_rounded_rectangle(cr, 0.0, 0.0, f64::from(width), f64::from(height), 11.0);
-        cr.fill().ok();
-    });
-    area
-}
 
 /// Motion appearance is a scene-level inspector rather than an
 /// Mini preview for one frame-style preset: gray card with the preset's
@@ -165,111 +41,143 @@ fn frame_style_preset_area(style: FrameStyle) -> DrawingArea {
     area.set_hexpand(false);
     area.set_halign(Align::Center);
     area.set_valign(Align::Center);
+    // Each swatch runs a whole frame preview (backings, liquid gradient, border
+    // strokes). The Style disclosure slides open by re-snapshotting its tiles
+    // every frame, so render a swatch once per size and blit it after that
+    // instead of re-running that cairo mid-animation, which is what made the
+    // reveal stutter.
+    let cache: Rc<RefCell<Option<(i32, i32, ImageSurface)>>> = Rc::new(RefCell::new(None));
     area.set_draw_func(move |_, cr, width, height| {
-        let w = f64::from(width);
-        let h = f64::from(height);
-        // No tile backdrop: the chromeless button shows the panel behind the
-        // preview, so the style swatch itself is the tile.
-        let spec = style.spec();
-        let card_w = 34.0;
-        let card_h = 22.0;
-        let card_x = (w - card_w) / 2.0;
-        let card_y = (h - card_h) / 2.0;
-        let card_r = 5.0;
-        for backing in [spec.backing1, spec.backing2].into_iter().flatten() {
-            let _ = cr.save();
-            if backing.center_pivot {
-                cr.translate(
-                    card_x + card_w / 2.0 + backing.offset_x * 0.32,
-                    card_y + card_h / 2.0 + backing.offset_y * 0.32,
-                );
-                cr.rotate(backing.rotation_deg.to_radians());
-                cr.translate(-card_w / 2.0, -card_h / 2.0);
-            } else {
-                cr.translate(
-                    card_x + backing.offset_x * 0.32 + card_w,
-                    card_y + backing.offset_y * 0.32 + card_h,
-                );
-                cr.rotate(backing.rotation_deg.to_radians());
-                cr.translate(-card_w, -card_h);
+        let surface = {
+            let mut cache = cache.borrow_mut();
+            let stale = !matches!(cache.as_ref(), Some((w, h, _)) if *w == width && *h == height);
+            if stale {
+                *cache = render_frame_style_swatch(style, width, height)
+                    .map(|surface| (width, height, surface));
             }
-            cr.set_source_rgba(
-                backing.color.r,
-                backing.color.g,
-                backing.color.b,
-                backing.color.a,
-            );
-            motion_thumbnail_rounded_rectangle(cr, 0.0, 0.0, card_w, card_h, card_r);
-            cr.fill().ok();
-            cr.restore().ok();
-        }
-        cr.set_source_rgba(0.82, 0.82, 0.84, 1.0);
-        motion_thumbnail_rounded_rectangle(cr, card_x, card_y, card_w, card_h, card_r);
-        cr.fill().ok();
-        // Glass presets: same band + rim recipe as the renderers, scaled
-        // down to the tile.
-        if let Some(liquid) =
-            crate::capture::editor::render::LiquidFrame::resolve(&spec, spec.border_thickness, 0.45)
-        {
-            let path = |path_context: &gtk4::cairo::Context, expand: f64| {
-                crate::capture::editor::render::rounded_rect_path(
-                    path_context,
-                    card_x - expand,
-                    card_y - expand,
-                    card_w + expand * 2.0,
-                    card_h + expand * 2.0,
-                    if card_r <= 0.0 { 0.0 } else { card_r + expand },
-                );
-            };
-            liquid.paint(cr, card_y, card_y + card_h, path);
-        }
-        let mut expand = 0.0;
-        let draw_stroke = |thickness: f64, r: f64, g: f64, b: f64, a: f64, extra: f64| {
-            let t = (thickness * 0.32).max(1.0);
-            let e = extra + t / 2.0;
-            cr.set_source_rgba(r, g, b, a);
-            cr.set_line_width(t);
-            motion_thumbnail_rounded_rectangle(
-                cr,
-                card_x - e,
-                card_y - e,
-                card_w + e * 2.0,
-                card_h + e * 2.0,
-                card_r + e,
-            );
-            cr.stroke().ok();
-            e + t / 2.0
+            cache.as_ref().map(|(_, _, surface)| surface.clone())
         };
-        if !spec.liquid && spec.border_thickness > 0.0 && !spec.inset_border {
-            let c = spec.border_color;
-            expand = draw_stroke(spec.border_thickness, c.r, c.g, c.b, c.a, expand);
-        }
-        if !spec.liquid && spec.inset_border && spec.border_thickness > 0.0 {
-            let t = (spec.border_thickness * 0.32).max(1.0);
-            let c = spec.border_color;
-            cr.set_source_rgba(c.r, c.g, c.b, c.a);
-            cr.set_line_width(t);
-            motion_thumbnail_rounded_rectangle(
-                cr,
-                card_x + t / 2.0,
-                card_y + t / 2.0,
-                (card_w - t).max(1.0),
-                (card_h - t).max(1.0),
-                (card_r - t / 2.0).max(0.0),
-            );
-            cr.stroke().ok();
-        }
-        for outer in [spec.outer1, spec.outer2]
-            .into_iter()
-            .flatten()
-            .filter(|_| !spec.liquid)
-        {
-            expand += outer.gap * 0.32;
-            let c = outer.color;
-            expand = draw_stroke(outer.thickness, c.r, c.g, c.b, c.a, expand);
+        if let Some(surface) = surface {
+            let _ = cr.set_source_surface(&surface, 0.0, 0.0);
+            let _ = cr.paint();
         }
     });
     area
+}
+
+/// Render one frame-style swatch at `width`x`height` into a fresh surface, so
+/// the draw func only ever blits it.
+fn render_frame_style_swatch(style: FrameStyle, width: i32, height: i32) -> Option<ImageSurface> {
+    let surface = ImageSurface::create(Format::ARgb32, width.max(1), height.max(1)).ok()?;
+    let cr = Context::new(&surface).ok()?;
+    paint_frame_style_swatch(&cr, style, f64::from(width), f64::from(height));
+    surface.flush();
+    Some(surface)
+}
+
+/// Swatch body: a gray card with the preset's backings, liquid rim and
+/// outside/inset border strokes, scaled to the tile.
+fn paint_frame_style_swatch(cr: &Context, style: FrameStyle, w: f64, h: f64) {
+    // No tile backdrop: the chromeless button shows the panel behind the
+    // preview, so the style swatch itself is the tile.
+    let spec = style.spec();
+    let card_w = 34.0;
+    let card_h = 22.0;
+    let card_x = (w - card_w) / 2.0;
+    let card_y = (h - card_h) / 2.0;
+    let card_r = 5.0;
+    for backing in [spec.backing1, spec.backing2].into_iter().flatten() {
+        let _ = cr.save();
+        if backing.center_pivot {
+            cr.translate(
+                card_x + card_w / 2.0 + backing.offset_x * 0.32,
+                card_y + card_h / 2.0 + backing.offset_y * 0.32,
+            );
+            cr.rotate(backing.rotation_deg.to_radians());
+            cr.translate(-card_w / 2.0, -card_h / 2.0);
+        } else {
+            cr.translate(
+                card_x + backing.offset_x * 0.32 + card_w,
+                card_y + backing.offset_y * 0.32 + card_h,
+            );
+            cr.rotate(backing.rotation_deg.to_radians());
+            cr.translate(-card_w, -card_h);
+        }
+        cr.set_source_rgba(
+            backing.color.r,
+            backing.color.g,
+            backing.color.b,
+            backing.color.a,
+        );
+        motion_thumbnail_rounded_rectangle(cr, 0.0, 0.0, card_w, card_h, card_r);
+        cr.fill().ok();
+        cr.restore().ok();
+    }
+    cr.set_source_rgba(0.82, 0.82, 0.84, 1.0);
+    motion_thumbnail_rounded_rectangle(cr, card_x, card_y, card_w, card_h, card_r);
+    cr.fill().ok();
+    // Glass presets: same band + rim recipe as the renderers, scaled
+    // down to the tile.
+    if let Some(liquid) =
+        crate::capture::editor::render::LiquidFrame::resolve(&spec, spec.border_thickness, 0.45)
+    {
+        let path = |path_context: &gtk4::cairo::Context, expand: f64| {
+            crate::capture::editor::render::rounded_rect_path(
+                path_context,
+                card_x - expand,
+                card_y - expand,
+                card_w + expand * 2.0,
+                card_h + expand * 2.0,
+                if card_r <= 0.0 { 0.0 } else { card_r + expand },
+            );
+        };
+        liquid.paint(cr, card_y, card_y + card_h, path);
+    }
+    let mut expand = 0.0;
+    let draw_stroke = |thickness: f64, r: f64, g: f64, b: f64, a: f64, extra: f64| {
+        let t = (thickness * 0.32).max(1.0);
+        let e = extra + t / 2.0;
+        cr.set_source_rgba(r, g, b, a);
+        cr.set_line_width(t);
+        motion_thumbnail_rounded_rectangle(
+            cr,
+            card_x - e,
+            card_y - e,
+            card_w + e * 2.0,
+            card_h + e * 2.0,
+            card_r + e,
+        );
+        cr.stroke().ok();
+        e + t / 2.0
+    };
+    if !spec.liquid && spec.border_thickness > 0.0 && !spec.inset_border {
+        let c = spec.border_color;
+        expand = draw_stroke(spec.border_thickness, c.r, c.g, c.b, c.a, expand);
+    }
+    if !spec.liquid && spec.inset_border && spec.border_thickness > 0.0 {
+        let t = (spec.border_thickness * 0.32).max(1.0);
+        let c = spec.border_color;
+        cr.set_source_rgba(c.r, c.g, c.b, c.a);
+        cr.set_line_width(t);
+        motion_thumbnail_rounded_rectangle(
+            cr,
+            card_x + t / 2.0,
+            card_y + t / 2.0,
+            (card_w - t).max(1.0),
+            (card_h - t).max(1.0),
+            (card_r - t / 2.0).max(0.0),
+        );
+        cr.stroke().ok();
+    }
+    for outer in [spec.outer1, spec.outer2]
+        .into_iter()
+        .flatten()
+        .filter(|_| !spec.liquid)
+    {
+        expand += outer.gap * 0.32;
+        let c = outer.color;
+        expand = draw_stroke(outer.thickness, c.r, c.g, c.b, c.a, expand);
+    }
 }
 
 /// animation clip. The five fill controls map one-to-one to the
@@ -285,9 +193,6 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     // Pen/Arrow/etc. Motion callers pass None (no static toolbar to sync).
     let notify_interact: Rc<dyn Fn()> = on_interact.unwrap_or_else(|| Rc::new(|| {}));
     let (
-        initial_background_color,
-        initial_gradient_start,
-        initial_gradient_end,
         initial_frame_style,
         initial_shadow_opacity,
         initial_shadow_blur,
@@ -301,9 +206,6 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
         let runtime = session.runtime.borrow();
         let appearance = &runtime.motion.appearance;
         (
-            motion_rgba(appearance.background_color),
-            motion_rgba(appearance.gradient_color_1),
-            motion_rgba(appearance.gradient_color_2),
             appearance.frame_style,
             appearance.shadow_opacity,
             appearance.shadow_blur,
@@ -325,9 +227,19 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     // notify_interact explicitly so keyboard/popover edits are covered.
     {
         let notify = notify_interact.clone();
+        let root_for_pick = root.clone();
         let capture = GestureClick::new();
         capture.set_propagation_phase(gtk4::PropagationPhase::Capture);
-        capture.connect_pressed(move |_, _, _, _| notify());
+        capture.connect_pressed(move |_, _, x, y| {
+            // Disclosure headers only expand or collapse; they change no
+            // appearance value, so they must not arm the tool or mark the
+            // canvas interactive. That mark schedules a full-quality canvas
+            // repaint mid-slide, which is a hitch right when the reveal is
+            // animating.
+            if !press_is_disclosure_header(&root_for_pick, x, y) {
+                notify();
+            }
+        });
         root.add_controller(capture);
     }
 
@@ -336,13 +248,96 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     title.set_xalign(0.0);
     root.append(&title);
 
-    let fill_section = GtkBox::new(Orientation::Vertical, 0);
-    fill_section.add_css_class("editor-motion-background-picker");
+    // Fill-source tabs, matching the video editor's Background sidebar: one
+    // pill tray that swaps the whole fill UI instead of stacking every source
+    // into a single long scroll. Wired once the source stack exists below.
+    let source_tabs = GtkBox::new(Orientation::Horizontal, 0);
+    source_tabs.add_css_class("recording-editor-bg-tabs");
+    source_tabs.set_hexpand(true);
+    source_tabs.set_homogeneous(true);
+    let wallpapers_tab = motion_source_tab("Wallpapers");
+    let custom_tab = motion_source_tab("Custom");
+    let image_tab = motion_source_tab("Image");
+    custom_tab.set_group(Some(&wallpapers_tab));
+    image_tab.set_group(Some(&wallpapers_tab));
+    wallpapers_tab.set_active(true);
+    source_tabs.append(&wallpapers_tab);
+    source_tabs.append(&custom_tab);
+    source_tabs.append(&image_tab);
+
+    // The Custom tab's summary: a swatch of the current fill plus its kind, the
+    // same "Color — Edit" row the video editor shows. The editors themselves
+    // live in the video editor's Custom Wallpaper popover, opened by the Edit
+    // pill, so this row only ever summarizes.
+    let summary_label = Label::new(Some(&t(
+        if initial_fill_type == MotionBackgroundFillType::Gradient {
+            "Gradient"
+        } else {
+            "Color"
+        },
+    )));
+    let summary_swatch = DrawingArea::new();
+    summary_swatch.add_css_class("recording-editor-bg-custom-swatch");
+    summary_swatch.set_content_width(28);
+    summary_swatch.set_content_height(28);
+    summary_swatch.set_valign(Align::Center);
+    summary_swatch.set_can_target(false);
+    // Redraw the summary chip from the stored fill: a ramp for a gradient, the
+    // flat color otherwise, plus the row's label. The popover calls this on
+    // every change, so the row stays current while the card is open.
+    let redraw_summary: Rc<dyn Fn()> = {
+        let swatch = summary_swatch.clone();
+        let label = summary_label.clone();
+        let runtime = session.runtime.clone();
+        Rc::new(move || {
+            let (is_gradient, solid, gradient) = {
+                let runtime = runtime.borrow();
+                let appearance = &runtime.motion.appearance;
+                (
+                    appearance.background_fill_type == MotionBackgroundFillType::Gradient,
+                    appearance.background_color,
+                    appearance.gradient.clone(),
+                )
+            };
+            label.set_text(&t(if is_gradient { "Gradient" } else { "Color" }));
+            swatch.set_draw_func(move |_, cr, width, height| {
+                let (w, h) = (f64::from(width), f64::from(height));
+                motion_thumbnail_rounded_rectangle(cr, 0.5, 0.5, w - 1.0, h - 1.0, 7.0);
+                if is_gradient {
+                    let stops = gradient.draw_stops();
+                    let ramp = gtk4::cairo::LinearGradient::new(0.0, 0.0, 0.0, h);
+                    if let (Some(first), Some(last)) = (stops.first(), stops.last()) {
+                        let rgba = |stop: &GradientStop| {
+                            (
+                                f64::from(stop.r) / 255.0,
+                                f64::from(stop.g) / 255.0,
+                                f64::from(stop.b) / 255.0,
+                                f64::from(stop.a) / 255.0,
+                            )
+                        };
+                        let (r, g, b, a) = rgba(first);
+                        ramp.add_color_stop_rgba(0.0, r, g, b, a);
+                        let (r, g, b, a) = rgba(last);
+                        ramp.add_color_stop_rgba(1.0, r, g, b, a);
+                    }
+                    cr.set_source(&ramp).ok();
+                } else {
+                    cr.set_source_rgba(solid[0], solid[1], solid[2], solid[3]);
+                }
+                cr.fill_preserve().ok();
+                cr.set_source_rgba(0.0, 0.0, 0.0, 0.28);
+                cr.set_line_width(1.0);
+                cr.stroke().ok();
+            });
+            swatch.queue_draw();
+        })
+    };
+
     let background_section = motion_appearance_section("Background");
     let none_button = Button::with_label(&t("None"));
     none_button.set_has_frame(false);
-    none_button.set_hexpand(true);
-    none_button.add_css_class("editor-background-option-button");
+    none_button.set_halign(Align::Start);
+    none_button.add_css_class("editor-background-section-action-button");
     if initial_fill_type == MotionBackgroundFillType::None {
         none_button.add_css_class("active-background-option");
     }
@@ -362,307 +357,73 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    fill_section.append(&none_button);
-
-    let color_section = GtkBox::new(Orientation::Vertical, 6);
-    let color_title = Label::new(Some(&t("Color")));
-    color_title.add_css_class("editor-background-section-title");
-    color_title.set_xalign(0.0);
-    let color = motion_color_control(initial_background_color, "Background color", true, {
-        let runtime = session.runtime.clone();
-        let preview = preview.clone();
-        let none_button = none_button.clone();
-        let notify = notify_interact.clone();
-        move |rgba| {
-            notify();
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.appearance.background_color = [
-                rgba.red().into(),
-                rgba.green().into(),
-                rgba.blue().into(),
-                rgba.alpha().into(),
-            ];
-            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
-            runtime.backdrop_cache = None;
-            runtime.preview_frame = None;
-            none_button.remove_css_class("active-background-option");
-            preview.queue_draw();
-        }
-    });
-    color_section.append(&color_title);
-    color_section.append(&color);
-
-    let gradient_section = GtkBox::new(Orientation::Vertical, 6);
-    let gradient_title = Label::new(Some(&t("Gradient")));
-    gradient_title.add_css_class("editor-background-section-title");
-    gradient_title.set_xalign(0.0);
-    let preset_buttons: Rc<RefCell<Vec<(usize, Button)>>> = Rc::new(RefCell::new(Vec::new()));
-    let (gradient, apply_gradient_colors) =
-        motion_gradient_color_control(initial_gradient_start, initial_gradient_end, {
+    // The Custom fill's Color and Gradient pages are the video editor's Custom
+    // Wallpaper popover, backed by Motion's own appearance fields through these
+    // four closures.
+    let fill_ops = FillOps {
+        get_color: {
             let runtime = session.runtime.clone();
-            let preview = preview.clone();
-            let none_button = none_button.clone();
-            let preset_buttons = preset_buttons.clone();
-            let notify = notify_interact.clone();
-            move |stop, rgba| {
-                notify();
+            Rc::new(move || {
+                motion_rgb888(motion_rgba(
+                    runtime.borrow().motion.appearance.background_color,
+                ))
+            })
+        },
+        set_color: {
+            let runtime = session.runtime.clone();
+            Rc::new(move |color: (u8, u8, u8)| {
                 let mut runtime = runtime.borrow_mut();
                 runtime.begin_motion_edit();
-                let color = [
-                    rgba.red().into(),
-                    rgba.green().into(),
-                    rgba.blue().into(),
-                    rgba.alpha().into(),
+                let alpha = runtime.motion.appearance.background_color[3];
+                runtime.motion.appearance.background_color = [
+                    f64::from(color.0) / 255.0,
+                    f64::from(color.1) / 255.0,
+                    f64::from(color.2) / 255.0,
+                    alpha,
                 ];
-                if stop == 0 {
-                    runtime.motion.appearance.gradient_color_1 = color;
-                } else {
-                    runtime.motion.appearance.gradient_color_2 = color;
-                }
-                runtime.motion.appearance.selected_gradient_preset_index = None;
+                runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+                runtime.motion.appearance.wallpaper_image_name = None;
+                runtime.motion.appearance.custom_background_image = None;
+                runtime.backdrop_cache = None;
+                runtime.preview_frame = None;
+            })
+        },
+        get_gradient: {
+            let runtime = session.runtime.clone();
+            Rc::new(move || runtime.borrow().motion.appearance.gradient.clone())
+        },
+        set_gradient: {
+            let runtime = session.runtime.clone();
+            Rc::new(move |gradient: VideoGradient| {
+                let mut runtime = runtime.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.appearance.gradient = gradient.normalized();
                 runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
-                none_button.remove_css_class("active-background-option");
-                for (_, button) in preset_buttons.borrow().iter() {
-                    button.remove_css_class("active-background-option");
-                }
-                preview.queue_draw();
-            }
-        });
-    gradient_section.append(&gradient_title);
-    gradient_section.append(&gradient);
-
-    // Presets follow the wallpaper catalog's compact-strip → full-grid
-    // progression, with swatches much smaller than wallpaper thumbnails so
-    // the inspector width never grows.
-    let initial_gradient_preset = {
-        let runtime = session.runtime.borrow();
-        runtime.motion.appearance.selected_gradient_preset_index
+                runtime.motion.appearance.wallpaper_image_name = None;
+                runtime.motion.appearance.custom_background_image = None;
+                runtime.backdrop_cache = None;
+                runtime.preview_frame = None;
+            })
+        },
     };
-    let presets_section = GtkBox::new(Orientation::Vertical, 5);
-    let presets_stack = Stack::new();
-    presets_stack.set_hhomogeneous(false);
-    presets_stack.set_vhomogeneous(false);
-    presets_section.append(&presets_stack);
-    let compact_row = GtkBox::new(Orientation::Horizontal, 5);
-    compact_row.add_css_class("editor-motion-gradient-presets");
-    presets_stack.add_named(&compact_row, Some("compact"));
-    let all_view = GtkBox::new(Orientation::Vertical, 5);
-    let show_less = Button::with_label(&t("Show less"));
-    show_less.set_has_frame(false);
-    show_less.set_halign(Align::End);
-    show_less.add_css_class("editor-background-section-action-button");
-    all_view.append(&show_less);
-    presets_stack.add_named(&all_view, Some("all"));
-
-    let add_preset_button = |index: usize,
-                             start: [f64; 4],
-                             end: [f64; 4],
-                             target: &GtkBox,
-                             initial_active: Option<usize>| {
-        let button = motion_gradient_preset_button(
-            index,
-            start,
-            end,
-            session,
-            preview,
-            &none_button,
-            &apply_gradient_colors,
-            &preset_buttons,
-            &notify_interact,
-        );
-        if initial_active == Some(index) {
-            button.add_css_class("active-background-option");
-        }
-        target.append(&button);
-    };
-    let expand_preset = &MOTION_GRADIENT_PRESETS[3];
-    for (index, (_, start, end)) in MOTION_GRADIENT_PRESETS.iter().enumerate().take(3) {
-        add_preset_button(index, *start, *end, &compact_row, initial_gradient_preset);
-    }
-    compact_row.append(&motion_gradient_expand_tile(
-        expand_preset.1,
-        expand_preset.2,
-        &presets_stack,
-        &notify_interact,
-    ));
-    for row_start in (0..MOTION_GRADIENT_PRESETS.len()).step_by(4) {
-        let row = GtkBox::new(Orientation::Horizontal, 5);
-        row.add_css_class("editor-motion-gradient-presets");
-        for (index, (_, start, end)) in MOTION_GRADIENT_PRESETS
-            .iter()
-            .enumerate()
-            .skip(row_start)
-            .take(4)
-        {
-            add_preset_button(index, *start, *end, &row, initial_gradient_preset);
-        }
-        all_view.append(&row);
-    }
-    show_less.connect_clicked({
-        let stack = presets_stack.clone();
+    // Every edit repaints the preview and refreshes the summary row.
+    let fill_changed: Rc<dyn Fn()> = {
         let notify = notify_interact.clone();
-        move |_| {
+        let preview = preview.clone();
+        let none_button = none_button.clone();
+        let redraw_summary = redraw_summary.clone();
+        Rc::new(move || {
             notify();
-            stack.set_visible_child_name("compact")
-        }
-    });
-    presets_stack.set_visible_child_name("compact");
-    gradient_section.append(&presets_section);
-    let (wallpaper_catalog, activate_wallpaper_catalog) =
+            none_button.remove_css_class("active-background-option");
+            preview.queue_draw();
+            redraw_summary();
+        })
+    };
+
+    let wallpaper_catalog =
         motion_wallpaper_catalog_section(session, preview, &none_button, &notify_interact);
-    let image_section = motion_image_section(
-        "Image",
-        "Choose Background Image",
-        MotionBackgroundFillType::Image,
-        window,
-        session,
-        preview,
-        &none_button,
-        &notify_interact,
-    );
-
-    // Choices remain visible inside one background card. Clicking a choice
-    // expands its controls below the list instead of replacing the picker.
-    let selection_stack = Stack::new();
-    selection_stack.set_hhomogeneous(false);
-    selection_stack.set_vhomogeneous(false);
-    let color_choice = Button::with_label(&t("Color"));
-    let gradient_choice = Button::with_label(&t("Gradient"));
-    let wallpapers_choice = Button::with_label(&t("Wallpapers"));
-    let image_choice = Button::with_label(&t("Image"));
-    for button in [
-        &color_choice,
-        &gradient_choice,
-        &wallpapers_choice,
-        &image_choice,
-    ] {
-        button.set_has_frame(false);
-        button.set_halign(Align::Fill);
-        button.set_hexpand(true);
-        button.add_css_class("editor-background-option-button");
-        fill_section.append(button);
-    }
-    let empty_selection = GtkBox::new(Orientation::Vertical, 0);
-    selection_stack.add_named(&empty_selection, Some("empty"));
-    selection_stack.add_named(&color_section, Some("color"));
-    selection_stack.add_named(&gradient_section, Some("gradient"));
-    selection_stack.add_named(&wallpaper_catalog, Some("wallpapers"));
-    selection_stack.add_named(&image_section, Some("image"));
-    selection_stack.set_visible_child_name("empty");
-    fill_section.append(&selection_stack);
-    // The Motion default selects a wallpaper before this panel is built, so
-    // reflect it: Wallpapers active with its catalog already open.
-    if initial_fill_type == MotionBackgroundFillType::Wallpaper {
-        none_button.remove_css_class("active-background-option");
-        wallpapers_choice.add_css_class("active-background-option");
-        selection_stack.set_visible_child_name("wallpapers");
-    }
-    color_choice.connect_clicked({
-        let selection_stack = selection_stack.clone();
-        let runtime = session.runtime.clone();
-        let preview = preview.clone();
-        let none_button = none_button.clone();
-        let color_choice = color_choice.clone();
-        let gradient_choice = gradient_choice.clone();
-        let wallpapers_choice = wallpapers_choice.clone();
-        let image_choice = image_choice.clone();
-        let notify = notify_interact.clone();
-        move |_| {
-            notify();
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
-            none_button.remove_css_class("active-background-option");
-            color_choice.add_css_class("active-background-option");
-            gradient_choice.remove_css_class("active-background-option");
-            wallpapers_choice.remove_css_class("active-background-option");
-            image_choice.remove_css_class("active-background-option");
-            selection_stack.set_visible_child_name("color");
-            preview.queue_draw();
-        }
-    });
-    gradient_choice.connect_clicked({
-        let selection_stack = selection_stack.clone();
-        let runtime = session.runtime.clone();
-        let preview = preview.clone();
-        let none_button = none_button.clone();
-        let color_choice = color_choice.clone();
-        let gradient_choice = gradient_choice.clone();
-        let wallpapers_choice = wallpapers_choice.clone();
-        let image_choice = image_choice.clone();
-        let notify = notify_interact.clone();
-        move |_| {
-            notify();
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
-            none_button.remove_css_class("active-background-option");
-            color_choice.remove_css_class("active-background-option");
-            gradient_choice.add_css_class("active-background-option");
-            wallpapers_choice.remove_css_class("active-background-option");
-            image_choice.remove_css_class("active-background-option");
-            selection_stack.set_visible_child_name("gradient");
-            preview.queue_draw();
-        }
-    });
-    wallpapers_choice.connect_clicked({
-        let selection_stack = selection_stack.clone();
-        let activate_wallpaper_catalog = activate_wallpaper_catalog.clone();
-        let none_button = none_button.clone();
-        let color_choice = color_choice.clone();
-        let gradient_choice = gradient_choice.clone();
-        let wallpapers_choice = wallpapers_choice.clone();
-        let image_choice = image_choice.clone();
-        let notify = notify_interact.clone();
-        move |_| {
-            notify();
-            activate_wallpaper_catalog();
-            none_button.remove_css_class("active-background-option");
-            color_choice.remove_css_class("active-background-option");
-            gradient_choice.remove_css_class("active-background-option");
-            wallpapers_choice.add_css_class("active-background-option");
-            image_choice.remove_css_class("active-background-option");
-            selection_stack.set_visible_child_name("wallpapers");
-        }
-    });
-    image_choice.connect_clicked({
-        let selection_stack = selection_stack.clone();
-        let none_button = none_button.clone();
-        let color_choice = color_choice.clone();
-        let gradient_choice = gradient_choice.clone();
-        let wallpapers_choice = wallpapers_choice.clone();
-        let image_choice = image_choice.clone();
-        let notify = notify_interact.clone();
-        move |_| {
-            notify();
-            none_button.remove_css_class("active-background-option");
-            color_choice.remove_css_class("active-background-option");
-            gradient_choice.remove_css_class("active-background-option");
-            wallpapers_choice.remove_css_class("active-background-option");
-            image_choice.add_css_class("active-background-option");
-            selection_stack.set_visible_child_name("image");
-        }
-    });
-    none_button.connect_clicked({
-        let selection_stack = selection_stack.clone();
-        let color_choice = color_choice.clone();
-        let gradient_choice = gradient_choice.clone();
-        let wallpapers_choice = wallpapers_choice.clone();
-        let image_choice = image_choice.clone();
-        let none_button = none_button.clone();
-        let notify = notify_interact.clone();
-        move |_| {
-            notify();
-            none_button.add_css_class("active-background-option");
-            color_choice.remove_css_class("active-background-option");
-            gradient_choice.remove_css_class("active-background-option");
-            wallpapers_choice.remove_css_class("active-background-option");
-            image_choice.remove_css_class("active-background-option");
-            selection_stack.set_visible_child_name("empty");
-        }
-    });
-    background_section.append(&fill_section);
+    let image_section =
+        motion_image_section(window, session, preview, &none_button, &notify_interact);
 
     let padding = motion_reference_percent_slider("Padding", 0.0, 200.0, initial_padding);
     padding.connect_value_changed({
@@ -678,8 +439,6 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    background_section.append(&padding.widget());
-
     let blur = motion_appearance_slider("Background blur", 0.0, 1.0, initial_background_blur, "%");
     blur.connect_value_changed({
         let runtime = session.runtime.clone();
@@ -695,8 +454,6 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
-    background_section.append(&blur.widget());
-
     let noise =
         motion_appearance_slider("Background noise", 0.0, 1.0, initial_background_noise, "%");
     noise.connect_value_changed({
@@ -713,10 +470,115 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
             preview.queue_draw();
         }
     });
+    // The wallpaper catalog is its own page so 70 thumbnails never push the
+    // sliders (or the other tools below) off the bottom of the sidebar.
+    let wallpaper_page = GtkBox::new(Orientation::Vertical, 0);
+    wallpaper_page.set_hexpand(true);
+    wallpaper_page.append(
+        &ScrolledWindow::builder()
+            .hscrollbar_policy(PolicyType::Never)
+            .vscrollbar_policy(PolicyType::Automatic)
+            .propagate_natural_width(false)
+            .propagate_natural_height(false)
+            .height_request(WALLPAPER_PAGE_HEIGHT)
+            .child(&wallpaper_catalog)
+            .build(),
+    );
+
+    // One source at a time, chosen by the tab tray. This mirrors the video
+    // editor's Background panel: tabs pick the fill source, and Padding/Radius
+    // plus the tool groups below stay shared on every tab.
+    let source_stack = Stack::new();
+    source_stack.set_hhomogeneous(false);
+    source_stack.set_vhomogeneous(false);
+
+    // The Custom tab is a summary row, not the editors: Color/Gradient move
+    // into a popover behind the Edit pill, so this panel stays as short as the
+    // video editor's.
+    let custom_page = GtkBox::new(Orientation::Vertical, 0);
+    custom_page.set_hexpand(true);
+    let custom_row = GtkBox::new(Orientation::Horizontal, 10);
+    custom_row.add_css_class("recording-editor-bg-custom-row");
+    custom_row.set_hexpand(true);
+    summary_label.set_hexpand(true);
+    summary_label.set_xalign(0.0);
+    summary_label.set_valign(Align::Center);
+    let custom_edit = Button::with_label(&t("Edit"));
+    custom_edit.add_css_class("recording-editor-bg-custom-edit");
+    custom_edit.set_has_frame(false);
+    custom_edit.set_valign(Align::Center);
+    custom_edit.set_tooltip_text(Some(&t("Edit custom fill")));
+    custom_row.append(&summary_swatch);
+    custom_row.append(&summary_label);
+    custom_row.append(&custom_edit);
+    custom_page.append(&custom_row);
+
+    // The Edit pill opens the video editor's Custom Wallpaper popover, so the
+    // two editors share one card, one Color page, and one Gradient editor.
+    // Motion's fields sit behind the shared fill closures.
+    build_custom_fill_popover(
+        &custom_page,
+        &custom_edit,
+        &t("Custom"),
+        fill_ops,
+        fill_changed,
+    );
+
+    let image_page = GtkBox::new(Orientation::Vertical, 6);
+    image_page.append(&image_section);
+    source_stack.add_named(&wallpaper_page, Some("wallpapers"));
+    source_stack.add_named(&custom_page, Some("custom"));
+    source_stack.add_named(&image_page, Some("image"));
+
+    let show_source: Rc<dyn Fn(&str)> = {
+        let source_stack = source_stack.clone();
+        Rc::new(move |name| source_stack.set_visible_child_name(name))
+    };
+    for (tab, page) in [
+        (&wallpapers_tab, "wallpapers"),
+        (&custom_tab, "custom"),
+        (&image_tab, "image"),
+    ] {
+        let show = show_source.clone();
+        tab.connect_toggled(move |button| {
+            if button.is_active() {
+                show(page);
+            }
+        });
+    }
+    background_section.append(&source_tabs);
+    background_section.append(&none_button);
+    background_section.append(&source_stack);
+    background_section.append(&padding.widget());
+    background_section.append(&blur.widget());
+    // The radius rounds the captured image card itself; the background scene
+    // stays a full rectangle. It applies on top of the Style preset.
+    // Late-bound handle so picking Liquid can also lift a sharp-corner card
+    // onto a radius the glass highlights can play on (the Style tiles below
+    // read it back on click).
+    let radius_slider_slot: Rc<RefCell<Option<FillSlider>>> = Rc::new(RefCell::new(None));
+    let radius = motion_reference_percent_slider("Border Radius", 0.0, 40.0, initial_border_radius);
+    *radius_slider_slot.borrow_mut() = Some(radius.clone());
+    radius.connect_value_changed({
+        let runtime = session.runtime.clone();
+        let preview = preview.clone();
+        let notify = notify_interact.clone();
+        move |slider| {
+            notify();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.border_radius = slider.value();
+            runtime.preview_frame = None;
+            preview.queue_draw();
+        }
+    });
+    background_section.append(&radius.widget());
     background_section.append(&noise.widget());
+    // Paint the Custom summary chip once so it is correct before any edit.
+    redraw_summary();
     root.append(&background_section);
 
-    let shadow_section = motion_appearance_section("Shadow");
+    let shadow_section = motion_appearance_body();
     let shadow_opacity =
         motion_appearance_slider("Shadow opacity", 0.0, 1.0, initial_shadow_opacity, "%");
     shadow_opacity.connect_value_changed({
@@ -794,9 +656,9 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
         }
     });
     shadow_section.append(&shadow_y.widget());
-    root.append(&shadow_section);
+    root.append(&motion_disclosure_row("Shadow", &shadow_section));
 
-    let border_section = motion_appearance_section("Style");
+    let border_section = motion_appearance_body();
     let style_grid = Grid::new();
     style_grid.set_column_homogeneous(true);
     style_grid.set_column_spacing(6);
@@ -804,10 +666,6 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     style_grid.set_hexpand(false);
     style_grid.set_halign(Align::Fill);
     let style_buttons: Rc<RefCell<Vec<(FrameStyle, Button)>>> = Rc::new(RefCell::new(Vec::new()));
-    // Late-bound handle so picking Liquid can also lift a sharp-corner card
-    // onto a radius the glass highlights can play on (filled in below, after
-    // the radius slider exists).
-    let radius_slider_slot: Rc<RefCell<Option<FillSlider>>> = Rc::new(RefCell::new(None));
     {
         let style_buttons = style_buttons.clone();
         let radius_slider_slot = radius_slider_slot.clone();
@@ -886,26 +744,7 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
         }
     }
     border_section.append(&style_grid);
-
-    // The radius rounds the captured image card itself; the background
-    // scene stays a full rectangle. It applies on top of the Style preset.
-    let radius = motion_reference_percent_slider("Border Radius", 0.0, 40.0, initial_border_radius);
-    *radius_slider_slot.borrow_mut() = Some(radius.clone());
-    radius.connect_value_changed({
-        let runtime = session.runtime.clone();
-        let preview = preview.clone();
-        let notify = notify_interact.clone();
-        move |slider| {
-            notify();
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.appearance.border_radius = slider.value();
-            runtime.preview_frame = None;
-            preview.queue_draw();
-        }
-    });
-    border_section.append(&radius.widget());
-    root.append(&border_section);
+    root.append(&motion_disclosure_row("Style", &border_section));
 
     // Frame section: collapsed W/H inputs plus an expandable ratio grid.
     // Collapsed shows the current canvas size (original dims for Standard,
@@ -950,9 +789,7 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
         });
         area
     }
-    let frame_section = motion_appearance_section("Frame");
-    frame_section.set_hexpand(false);
-    frame_section.set_halign(Align::Fill);
+    let frame_section = motion_appearance_body();
     // Original canvas size backs Standard: W/H show the source image, not a
     // fixed export default, so there is no separate Original button.
     let (orig_w, orig_h) = {
@@ -1203,7 +1040,7 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     let frame_revealer = Revealer::new();
     frame_revealer.set_reveal_child(false);
     frame_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
-    frame_revealer.set_transition_duration(180);
+    frame_revealer.set_transition_duration(120);
     frame_revealer.set_hexpand(false);
     frame_revealer.set_halign(Align::Fill);
     let frame_expanded = GtkBox::new(Orientation::Vertical, 10);
@@ -1529,13 +1366,13 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     sync_frame_selection(&initial_frame);
     frame_section.append(&dim_row);
     frame_section.append(&frame_revealer);
-    root.append(&frame_section);
+    root.append(&motion_disclosure_row("Frame", &frame_section));
 
     // Scene Shadows: an independent overlay layer with its own
     // preset id, opacity, and above/below-card placement — deliberately not
     // the card's Border/Shadow drop shadow. The presets are procedural
     // shading.
-    let scene_shadow_section = motion_appearance_section("Scene Shadows");
+    let scene_shadow_section = motion_appearance_body();
     // Exports render an unset background fill as a solid black scene, so a
     // dark shadow over it cannot be seen. Say so instead of leaving users to
     // discover a missing effect in their MP4.
@@ -1662,7 +1499,10 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
         placement_row.append(&button);
     }
     scene_shadow_section.append(&placement_row);
-    root.append(&scene_shadow_section);
+    root.append(&motion_disclosure_row(
+        "Scene Shadows",
+        &scene_shadow_section,
+    ));
     root
 }
 
@@ -1674,6 +1514,79 @@ fn motion_appearance_section(title: &str) -> GtkBox {
     heading.set_xalign(0.0);
     section.append(&heading);
     section
+}
+
+/// One pill in the fill-source tray. Reuses the video editor's Background
+/// tab classes so the two sidebars read identically.
+fn motion_source_tab(label: &str) -> ToggleButton {
+    let button = ToggleButton::with_label(&t(label));
+    button.add_css_class("recording-editor-bg-tab");
+    button.set_has_frame(false);
+    button.set_hexpand(true);
+    button
+}
+
+/// Body of a disclosure row. The row draws the section title, so the body is
+/// bare spacing only — no second heading, no nested card surface.
+fn motion_appearance_body() -> GtkBox {
+    let body = GtkBox::new(Orientation::Vertical, 8);
+    body.set_hexpand(false);
+    body.set_halign(Align::Fill);
+    body
+}
+
+/// A tool group below the fill tabs: a clickable header row (title + chevron)
+/// over a revealer, collapsed by default. The fill tabs own the top of the
+/// panel; everything else opens on demand so the sidebar never becomes one
+/// long scroll. The heading stays in the row the revealer wraps.
+/// Whether a press at `(x, y)` in `root` landed on a disclosure header.
+/// Disclosure toggles are view-only, so the panel's press notifier skips them.
+fn press_is_disclosure_header(root: &GtkBox, x: f64, y: f64) -> bool {
+    let mut node = root.pick(x, y, PickFlags::DEFAULT);
+    while let Some(widget) = node {
+        if widget.has_css_class("editor-disclosure-header") {
+            return true;
+        }
+        node = widget.parent();
+    }
+    false
+}
+
+fn motion_disclosure_row(title: &str, body: &GtkBox) -> GtkBox {
+    let row = GtkBox::new(Orientation::Vertical, 8);
+    row.add_css_class("editor-motion-settings-section");
+    let header = Button::new();
+    header.set_has_frame(false);
+    header.add_css_class("editor-disclosure-header");
+    header.set_hexpand(true);
+    let header_inner = GtkBox::new(Orientation::Horizontal, 8);
+    header_inner.set_hexpand(true);
+    let heading = Label::new(Some(&t(title)));
+    heading.add_css_class("editor-background-section-title");
+    heading.set_xalign(0.0);
+    heading.set_hexpand(true);
+    let chevron = Label::new(Some("\u{203A}"));
+    chevron.add_css_class("editor-disclosure-chevron");
+    header_inner.append(&heading);
+    header_inner.append(&chevron);
+    header.set_child(Some(&header_inner));
+    row.append(&header);
+
+    let revealer = Revealer::new();
+    revealer.set_transition_type(RevealerTransitionType::SlideDown);
+    // Short enough that a dropped frame is barely perceptible and that fewer
+    // frames redraw the body while it slides.
+    revealer.set_transition_duration(120);
+    revealer.set_hexpand(false);
+    revealer.set_halign(Align::Fill);
+    revealer.set_child(Some(body));
+    row.append(&revealer);
+    header.connect_clicked(move |_| {
+        let revealed = revealer.reveals_child();
+        revealer.set_reveal_child(!revealed);
+        chevron.set_label(if revealed { "\u{203A}" } else { "\u{2304}" });
+    });
+    row
 }
 
 // Decoded wallpaper preview surfaces, shared by both Appearance panels
@@ -1688,6 +1601,11 @@ thread_local! {
 
 /// Bundled wallpaper thumbs are 256px wide; previews in the strip are 56px.
 const WALLPAPER_THUMB_MAX_EDGE: u32 = 256;
+
+/// Fixed height for the bounded wallpaper grid. Tall enough for a few rows of
+/// 56px thumbs (plus spacing), short enough that the tools below stay reachable
+/// without scrolling the whole sidebar.
+const WALLPAPER_PAGE_HEIGHT: i32 = 260;
 
 fn cached_wallpaper_preview_surface(path: &str) -> Option<gtk4::cairo::ImageSurface> {
     if let Some(hit) = WALLPAPER_PREVIEW_CACHE.with(|cache| cache.borrow().get(path).cloned()) {
@@ -1704,49 +1622,20 @@ fn cached_wallpaper_preview_surface(path: &str) -> Option<gtk4::cairo::ImageSurf
     Some(surface)
 }
 
-/// Motion uses the app's bundled background catalog rather than requiring a
-/// file chooser for the common Wallpaper path.  The picker intentionally
-/// progresses from a short strip → the full grid, keeping the inspector
-/// compact until someone asks to browse the catalog.
+/// Bundled wallpaper catalog for the Wallpapers tab. Rows are appended a few
+/// frames apart so opening the tab never blocks on 70 thumbnail decodes; the
+/// page scrolls inside its own frame (see the Background section) so the grid
+/// length never pushes Padding/Radius or the tools below off-screen.
 fn motion_wallpaper_catalog_section(
     session: &MotionSession,
     preview: &DrawingArea,
     none_button: &Button,
     on_interact: &Rc<dyn Fn()>,
-) -> (GtkBox, Rc<dyn Fn()>) {
+) -> GtkBox {
     let catalog = GtkBox::new(Orientation::Vertical, 6);
     catalog.add_css_class("editor-motion-wallpaper-catalog");
-    let stack = Stack::new();
-    stack.set_hhomogeneous(false);
-    stack.set_vhomogeneous(false);
-    catalog.append(&stack);
-
-    let compact = GtkBox::new(Orientation::Vertical, 6);
-    let compact_title = Label::new(Some(&t("Wallpapers")));
-    compact_title.add_css_class("editor-background-section-title");
-    compact_title.set_xalign(0.0);
-    compact.append(&compact_title);
-    let compact_row = GtkBox::new(Orientation::Horizontal, 8);
-    compact_row.add_css_class("editor-motion-wallpaper-row");
-    compact.append(&compact_row);
-    stack.add_named(&compact, Some("compact"));
-
-    let all = GtkBox::new(Orientation::Vertical, 6);
-    let all_header = GtkBox::new(Orientation::Horizontal, 6);
-    let all_title = Label::new(Some(&t("Wallpapers")));
-    all_title.add_css_class("editor-background-section-title");
-    all_title.set_xalign(0.0);
-    all_title.set_hexpand(true);
-    let show_less = Button::with_label(&t("Show less"));
-    show_less.set_has_frame(false);
-    show_less.add_css_class("editor-background-section-action-button");
-    all_header.append(&all_title);
-    all_header.append(&show_less);
-    all.append(&all_header);
-    let all_grid = GtkBox::new(Orientation::Vertical, 6);
-    all_grid.add_css_class("editor-motion-wallpaper-grid");
-    all.append(&all_grid);
-    stack.add_named(&all, Some("all"));
+    catalog.add_css_class("editor-motion-wallpaper-grid");
+    catalog.set_hexpand(true);
 
     let paths: Vec<(PathBuf, PathBuf)> =
         crate::capture::editor::window::background_panel::MOTION_WALLPAPER_FILES
@@ -1760,151 +1649,41 @@ fn motion_wallpaper_catalog_section(
             })
             .collect();
     let selection_buttons = Rc::new(RefCell::new(Vec::<(PathBuf, Button)>::new()));
-    for (path, preview_path) in paths.iter().take(3) {
-        compact_row.append(&motion_wallpaper_thumbnail(
-            path,
-            preview_path,
-            session,
-            preview,
-            none_button,
-            selection_buttons.clone(),
-            on_interact,
-        ));
-    }
-    // Keep the compact strip eager, then populate one small row per frame when
-    // expanded. This keeps the Show all click responsive even with a large
-    // bundled catalog.
-    let all_populated = Rc::new(Cell::new(false));
-    let populate_all: Rc<dyn Fn()> = Rc::new({
-        let all_grid = all_grid.clone();
+    let next_row = Rc::new(Cell::new(0usize));
+    glib::timeout_add_local(Duration::from_millis(12), {
+        let catalog = catalog.clone();
         let paths = paths.clone();
         let session = session.clone();
         let preview = preview.clone();
         let none_button = none_button.clone();
         let selection_buttons = selection_buttons.clone();
-        let all_populated = all_populated.clone();
+        let next_row = next_row.clone();
         let on_interact = on_interact.clone();
         move || {
-            if all_populated.replace(true) {
-                return;
+            let start = next_row.get();
+            if start >= paths.len() {
+                return glib::ControlFlow::Break;
             }
-            let next_row = Rc::new(Cell::new(0usize));
-            glib::timeout_add_local(Duration::from_millis(12), {
-                let all_grid = all_grid.clone();
-                let paths = paths.clone();
-                let session = session.clone();
-                let preview = preview.clone();
-                let none_button = none_button.clone();
-                let selection_buttons = selection_buttons.clone();
-                let next_row = next_row.clone();
-                let on_interact = on_interact.clone();
-                move || {
-                    let start = next_row.get();
-                    if start >= paths.len() {
-                        return glib::ControlFlow::Break;
-                    }
-                    let row_paths = &paths[start..(start + 4).min(paths.len())];
-                    next_row.set(start + row_paths.len());
-                    let row = GtkBox::new(Orientation::Horizontal, 6);
-                    row.add_css_class("editor-motion-wallpaper-row");
-                    for (path, preview_path) in row_paths {
-                        row.append(&motion_wallpaper_thumbnail(
-                            path,
-                            preview_path,
-                            &session,
-                            &preview,
-                            &none_button,
-                            selection_buttons.clone(),
-                            &on_interact,
-                        ));
-                    }
-                    all_grid.append(&row);
-                    glib::ControlFlow::Continue
-                }
-            });
+            let row_paths = &paths[start..(start + 4).min(paths.len())];
+            next_row.set(start + row_paths.len());
+            let row = GtkBox::new(Orientation::Horizontal, 6);
+            row.add_css_class("editor-motion-wallpaper-row");
+            for (path, preview_path) in row_paths {
+                row.append(&motion_wallpaper_thumbnail(
+                    path,
+                    preview_path,
+                    &session,
+                    &preview,
+                    &none_button,
+                    selection_buttons.clone(),
+                    &on_interact,
+                ));
+            }
+            catalog.append(&row);
+            glib::ControlFlow::Continue
         }
     });
-    if let Some((_, preview_path)) = paths.get(3) {
-        compact_row.append(&motion_wallpaper_stack_thumbnail(
-            preview_path,
-            &stack,
-            populate_all,
-            on_interact,
-        ));
-    }
-
-    show_less.connect_clicked({
-        let stack = stack.clone();
-        let notify = on_interact.clone();
-        move |_| {
-            notify();
-            stack.set_visible_child_name("compact")
-        }
-    });
-    stack.set_visible_child_name("compact");
-    let activate_catalog: Rc<dyn Fn()> = Rc::new({
-        let session = session.clone();
-        let preview = preview.clone();
-        let none_button = none_button.clone();
-        let selection_buttons = selection_buttons.clone();
-        let default_entry = paths.first().cloned();
-        let notify = on_interact.clone();
-        move || {
-            notify();
-            let Some((default_path, default_preview)) = default_entry.clone() else {
-                return;
-            };
-            let needs_switch = !matches!(
-                session
-                    .runtime
-                    .borrow()
-                    .motion
-                    .appearance
-                    .background_fill_type,
-                MotionBackgroundFillType::Wallpaper
-            );
-            if needs_switch {
-                {
-                    let mut runtime = session.runtime.borrow_mut();
-                    runtime.begin_motion_edit();
-                    runtime.motion.appearance.wallpaper_image_name =
-                        Some(default_path.to_string_lossy().into_owned());
-                    runtime.motion.appearance.background_fill_type =
-                        MotionBackgroundFillType::Wallpaper;
-                    runtime.motion.appearance.custom_background_image = None;
-                    // Cached thumb now (no decode jank), full image off-thread.
-                    // ponytail: never sync-decode full wallpaper on click.
-                    runtime.set_background_surface(
-                        Some(default_path.to_string_lossy().into_owned()),
-                        cached_wallpaper_preview_surface(&default_preview.to_string_lossy()),
-                        true,
-                    );
-                    none_button.remove_css_class("active-background-option");
-                    preview.queue_draw();
-                }
-                load_motion_wallpaper_asynchronously(
-                    default_path.clone(),
-                    session.clone(),
-                    preview.clone(),
-                );
-            }
-            let selected_path = session
-                .runtime
-                .borrow()
-                .motion
-                .appearance
-                .wallpaper_image_name
-                .clone();
-            for (path, button) in selection_buttons.borrow().iter() {
-                if Some(path.to_string_lossy().as_ref()) == selected_path.as_deref() {
-                    button.add_css_class("active-background-option");
-                } else {
-                    button.remove_css_class("active-background-option");
-                }
-            }
-        }
-    });
-    (catalog, activate_catalog)
+    catalog
 }
 
 fn motion_wallpaper_thumbnail(
@@ -2003,57 +1782,6 @@ fn motion_wallpaper_thumbnail(
             none_button.remove_css_class("active-background-option");
             preview.queue_draw();
             load_motion_wallpaper_asynchronously(path.clone(), session.clone(), preview.clone());
-        }
-    });
-    button
-}
-
-/// The fourth compact preview is the catalog's visual stack affordance.  It
-/// remains a wallpaper thumbnail, with a small overlay indicating that it
-/// opens the complete collection rather than selecting that particular image.
-fn motion_wallpaper_stack_thumbnail(
-    preview_path: &std::path::Path,
-    stack: &Stack,
-    populate_all: Rc<dyn Fn()>,
-    on_interact: &Rc<dyn Fn()>,
-) -> Button {
-    let button = Button::new();
-    button.set_has_frame(false);
-    button.set_size_request(56, 56);
-    button.add_css_class("editor-background-gradient-button");
-    button.add_css_class("editor-background-preview-size-regular");
-    button.add_css_class("editor-motion-wallpaper-thumbnail");
-    button.add_css_class("editor-motion-wallpaper-stack-thumbnail");
-    button.set_tooltip_text(Some(&t("Show all wallpapers")));
-    let thumbnail = motion_wallpaper_thumbnail_area(None);
-    {
-        let thumbnail = thumbnail.clone();
-        let key = preview_path.to_string_lossy().into_owned();
-        glib::idle_add_local_once(move || {
-            if let Some(surface) = cached_wallpaper_preview_surface(&key) {
-                thumbnail.set_draw_func(move |_, context, width, height| {
-                    paint_wallpaper_thumb(context, &surface, width, height);
-                });
-                thumbnail.queue_draw();
-            }
-        });
-    }
-    let overlay = Overlay::new();
-    overlay.set_child(Some(&thumbnail));
-    let expand = Label::new(Some("⌄"));
-    expand.set_halign(Align::Center);
-    expand.set_valign(Align::Center);
-    expand.set_can_target(false);
-    expand.add_css_class("editor-motion-wallpaper-stack-glyph");
-    overlay.add_overlay(&expand);
-    button.set_child(Some(&overlay));
-    button.connect_clicked({
-        let stack = stack.clone();
-        let notify = on_interact.clone();
-        move |_| {
-            notify();
-            populate_all();
-            stack.set_visible_child_name("all");
         }
     });
     button
@@ -2165,34 +1893,78 @@ fn motion_thumbnail_rounded_rectangle(
     crate::capture::editor::render::rounded_rect_path(context, x, y, width, height, radius);
 }
 
+/// The Image tab: one full-width row that opens the image chooser and shows
+/// the picked file as its leading chip, matching the video editor's Image
+/// page. The section title and "Choose…" button the page used to carry are
+/// gone — the tab's own label already names the page, and the row reads as
+/// the same single control the video editor shows.
 fn motion_image_section(
-    title: &str,
-    dialog_title: &str,
-    kind: MotionBackgroundFillType,
     window: &ApplicationWindow,
     session: &MotionSession,
     preview: &DrawingArea,
     none_button: &Button,
     on_interact: &Rc<dyn Fn()>,
 ) -> GtkBox {
-    let section = GtkBox::new(Orientation::Vertical, 6);
-    let label = Label::new(Some(&t(title)));
-    label.add_css_class("editor-background-section-title");
+    let page = GtkBox::new(Orientation::Vertical, 0);
+    page.set_hexpand(true);
+
+    let row = Button::new();
+    row.add_css_class("recording-editor-bg-image-row");
+    row.set_has_frame(false);
+    row.set_hexpand(true);
+    let inner = GtkBox::new(Orientation::Horizontal, 10);
+    let thumb = DrawingArea::new();
+    thumb.add_css_class("recording-editor-bg-custom-swatch");
+    thumb.set_content_width(28);
+    thumb.set_content_height(28);
+    thumb.set_valign(Align::Center);
+    thumb.set_can_target(false);
+    // The chip reads the runtime at draw time instead of capturing a surface:
+    // coming back to this tab after switching fills repaints it from whatever
+    // is current, rather than leaving the last pick frozen in the row.
+    thumb.set_draw_func({
+        let runtime = session.runtime.clone();
+        move |_, cr, width, height| {
+            let surface = {
+                let runtime = runtime.borrow();
+                if runtime.motion.appearance.background_fill_type == MotionBackgroundFillType::Image
+                {
+                    runtime.background_surface.clone()
+                } else {
+                    None
+                }
+            };
+            if let Some(surface) = surface.as_ref() {
+                paint_image_row_thumb(cr, surface, width, height);
+            }
+        }
+    });
+    let label = Label::new(Some(&t("Select image...")));
+    label.set_hexpand(true);
     label.set_xalign(0.0);
-    let choose = Button::with_label(&t("Choose…"));
-    choose.set_has_frame(false);
-    choose.add_css_class("editor-sidebar-action-button");
-    choose.connect_clicked({
+    label.set_valign(Align::Center);
+    let icon = Image::from_icon_name(icon_names::shipped::FOLDER_OPEN_REGULAR);
+    icon.set_pixel_size(13);
+    icon.set_valign(Align::Center);
+    inner.append(&thumb);
+    inner.append(&label);
+    inner.append(&icon);
+    row.set_child(Some(&inner));
+    page.append(&row);
+
+    // The picker writes the image fill and decodes its preview exactly as the
+    // old Choose… button did; only the row's chrome changed.
+    row.connect_clicked({
         let window = window.downgrade();
         let session = session.clone();
         let preview = preview.clone();
         let none_button = none_button.clone();
-        let dialog_title = dialog_title.to_string();
+        let thumb = thumb.clone();
         let notify = on_interact.clone();
         move |_| {
             notify();
             let chooser = FileChooserNative::new(
-                Some(&dialog_title),
+                Some(&t("Choose Background Image")),
                 window.upgrade().as_ref(),
                 FileChooserAction::Open,
                 Some(&t("Choose")),
@@ -2206,8 +1978,8 @@ fn motion_image_section(
             chooser.add_filter(&filter);
             let session = session.clone();
             let preview = preview.clone();
-            let kind = kind.clone();
             let none_button = none_button.clone();
+            let thumb = thumb.clone();
             let notify_response = notify.clone();
             chooser.connect_response(move |dialog, response| {
                 notify_response();
@@ -2220,53 +1992,88 @@ fn motion_image_section(
                 let path = path.to_string_lossy().into_owned();
                 let mut runtime = session.runtime.borrow_mut();
                 runtime.begin_motion_edit();
-                match kind {
-                    MotionBackgroundFillType::Wallpaper => {
-                        runtime.motion.appearance.wallpaper_image_name = Some(path);
-                        runtime.motion.appearance.custom_background_image = None;
-                    }
-                    MotionBackgroundFillType::Image => {
-                        runtime.motion.appearance.custom_background_image = Some(path);
-                        runtime.motion.appearance.wallpaper_image_name = None;
-                    }
-                    _ => return,
-                }
-                runtime.motion.appearance.background_fill_type = kind.clone();
-                let active_path = match kind {
-                    MotionBackgroundFillType::Wallpaper => runtime
-                        .motion
-                        .appearance
-                        .wallpaper_image_name
-                        .as_deref()
-                        .map(str::to_owned),
-                    MotionBackgroundFillType::Image => runtime
-                        .motion
-                        .appearance
-                        .custom_background_image
-                        .as_deref()
-                        .map(str::to_owned),
-                    _ => None,
-                };
-                let surface = active_path.as_deref().and_then(|path| {
-                    super::super::motion_render::load_motion_background_preview_surface(
-                        path,
-                        PREVIEW_WALLPAPER_MAX_EDGE,
-                    )
-                });
-                runtime.set_background_surface(active_path, surface, false);
+                runtime.motion.appearance.custom_background_image = Some(path.clone());
+                runtime.motion.appearance.wallpaper_image_name = None;
+                runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Image;
+                // Decode at the preview edge and hand the pixels to the shared
+                // runtime, so the canvas, this chip, and Motion all paint the
+                // same file.
+                let surface = super::super::motion_render::load_motion_background_preview_surface(
+                    &path,
+                    PREVIEW_WALLPAPER_MAX_EDGE,
+                );
+                runtime.set_background_surface(Some(path), surface, false);
+                drop(runtime);
                 none_button.remove_css_class("active-background-option");
+                thumb.queue_draw();
                 preview.queue_draw();
             });
             chooser.show();
         }
     });
-    section.append(&label);
-    section.append(&choose);
-    section
+    page
+}
+
+/// Paint the picked file into the Image row's chip: cover-cropped like the
+/// wallpaper cards, so a portrait shot still fills the square.
+fn paint_image_row_thumb(
+    cr: &gtk4::cairo::Context,
+    surface: &gtk4::cairo::ImageSurface,
+    width: i32,
+    height: i32,
+) {
+    let source_w = surface.width().max(1) as f64;
+    let source_h = surface.height().max(1) as f64;
+    let scale = (f64::from(width) / source_w).max(f64::from(height) / source_h);
+    let _ = cr.save();
+    motion_thumbnail_rounded_rectangle(cr, 0.0, 0.0, f64::from(width), f64::from(height), 7.0);
+    cr.clip();
+    cr.translate(
+        (f64::from(width) - source_w * scale) * 0.5,
+        (f64::from(height) - source_h * scale) * 0.5,
+    );
+    cr.scale(scale, scale);
+    let _ = cr.set_source_surface(surface, 0.0, 0.0);
+    let _ = cr.paint();
+    let _ = cr.restore();
 }
 
 #[cfg(test)]
 mod tests {
+    /// The Image tab is the video editor's Image page: one full-width row
+    /// carrying a leading chip, the label, and the folder glyph. The old
+    /// section title over a separate Choose… button read as two controls for
+    /// one action.
+    #[test]
+    fn image_tab_is_a_single_select_row() {
+        let source = include_str!("appearance.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("recording-editor-bg-image-row")
+                && production_source.contains("t(\"Select image...\")")
+                && production_source.contains("FOLDER_OPEN_REGULAR")
+                && production_source.contains("paint_image_row_thumb(")
+                && !production_source.contains("t(\"Choose…\")"),
+            "the Image tab must be the video editor's single Select image... row",
+        );
+    }
+
+    /// Every Background slider must be parented into the section that owns it.
+    /// The noise control was built and wired but never appended, so it silently
+    /// vanished from the Appearance panel while still mutating state.
+    #[test]
+    fn background_sliders_are_parented_into_the_background_section() {
+        let source = include_str!("appearance.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        for control in ["padding", "blur", "radius", "noise"] {
+            let needle = format!("background_section.append(&{control}.widget());");
+            assert!(
+                production_source.contains(&needle),
+                "Background {control} slider must be appended to the Background section",
+            );
+        }
+    }
+
     #[test]
     fn frame_picker_collapses_to_manual_dims_with_expandable_shape_grid() {
         let source = include_str!("appearance.rs");
@@ -2311,6 +2118,29 @@ mod tests {
                 && production_source.contains("EllipsizeMode::End")
                 && production_source.contains("set_hexpand(false)"),
             "ratio tiles must stay in a 3-column homogeneous grid with small capped shapes and ellipsized labels so expand never widens the panel",
+        );
+    }
+
+    /// The disclosure reveal re-snapshots its body every frame, so opening one
+    /// must not carry per-frame cairo or a mid-slide canvas repaint. The style
+    /// swatches are cached to a surface and blitted, and a header press is not
+    /// treated as an Appearance edit.
+    #[test]
+    fn disclosure_open_is_cheap_and_view_only() {
+        let source = include_str!("appearance.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("fn render_frame_style_swatch(")
+                && production_source.contains("fn paint_frame_style_swatch(")
+                && production_source.contains("set_source_surface(&surface, 0.0, 0.0)")
+                && production_source.contains("Some((w, h, _)) if *w == width && *h == height"),
+            "frame-style swatches must render once per size and blit during the reveal",
+        );
+        assert!(
+            production_source.contains("fn press_is_disclosure_header(")
+                && production_source.contains("has_css_class(\"editor-disclosure-header\")")
+                && production_source.contains("if !press_is_disclosure_header("),
+            "a disclosure header press must not arm the tool or mark the canvas interactive",
         );
     }
 
@@ -2378,11 +2208,26 @@ mod tests {
         assert!(
             production_source.contains("WALLPAPER_PREVIEW_CACHE")
                 && production_source.contains("cached_wallpaper_preview_surface")
-                && production_source.contains("idle_add_local_once")
+                && production_source.contains("glib::timeout_add_local")
                 && production_source.contains("load_motion_wallpaper_asynchronously(")
                 && production_source.contains("PREVIEW_WALLPAPER_MAX_EDGE")
                 && production_source.contains("already_selected"),
             "wallpaper thumbs must share one cache and never sync-decode full images on open/click",
+        );
+    }
+
+    /// The wallpaper grid is its own bounded page: 70 thumbnails must scroll
+    /// inside a fixed-height frame so Padding/Radius and the other tools stay
+    /// reachable without scrolling the whole sidebar.
+    #[test]
+    fn wallpaper_grid_scrolls_inside_its_own_page() {
+        let source = include_str!("appearance.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("WALLPAPER_PAGE_HEIGHT")
+                && production_source
+                    .contains("source_stack.add_named(&wallpaper_page, Some(\"wallpapers\"))"),
+            "the wallpaper catalog must live in a fixed-height page inside the source stack",
         );
     }
 }

@@ -19,8 +19,10 @@ pub struct MotionAppearance {
     pub background_padding: f64,
     pub background_fill_type: MotionBackgroundFillType,
     pub background_color: [f64; 4],
-    pub gradient_color_1: [f64; 4],
-    pub gradient_color_2: [f64; 4],
+    /// The background gradient, shared verbatim with the video editor's
+    /// Custom Wallpaper editor (stops, kind, angle, reverse) so both popovers
+    /// edit the same spec.
+    pub gradient: VideoGradient,
     pub selected_gradient_preset_index: Option<usize>,
     pub wallpaper_image_name: Option<String>,
     pub custom_background_image: Option<String>,
@@ -61,8 +63,13 @@ impl Default for MotionAppearance {
             background_padding: 96.0,
             background_fill_type: MotionBackgroundFillType::None,
             background_color: [0.0, 0.0, 0.0, 1.0],
-            gradient_color_1: [0.0, 0.0, 0.0, 1.0],
-            gradient_color_2: [0.0, 0.0, 0.0, 1.0],
+            gradient: VideoGradient {
+                stops: vec![
+                    GradientStop::new(0.0, 0, 0, 0),
+                    GradientStop::new(1.0, 0, 0, 0),
+                ],
+                ..VideoGradient::default()
+            },
             selected_gradient_preset_index: None,
             wallpaper_image_name: None,
             custom_background_image: None,

@@ -208,8 +208,10 @@ fn box_blur_buffer(buffer: &mut [[u8; 4]], width: usize, height: usize, radius: 
     }
 
     let mut temp = vec![[0u8; 4]; width * height];
-    let mut prefix = vec![[0u32; 4]; width.max(height) + 1];
+    let mut prefix = vec![[0u32; 4]; width + 1];
 
+    // Horizontal pass: a prefix sum per row, so both reads and writes are
+    // contiguous. (Rows are already the fast axis.)
     for y in 0..height {
         prefix[0] = [0; 4];
         let row_start = y * width;
@@ -236,28 +238,58 @@ fn box_blur_buffer(buffer: &mut [[u8; 4]], width: usize, height: usize, radius: 
         }
     }
 
-    for x in 0..width {
-        prefix[0] = [0; 4];
-        for y in 0..height {
-            let pixel = temp[y * width + x];
-            prefix[y + 1] = [
-                prefix[y][0] + pixel[0] as u32,
-                prefix[y][1] + pixel[1] as u32,
-                prefix[y][2] + pixel[2] as u32,
-                prefix[y][3] + pixel[3] as u32,
+    // Vertical pass: running column sums while advancing row by row. The old
+    // code walked one column at a time, so every pixel was a stride-`width`
+    // cache miss; this stays row-major and is an order of magnitude faster on
+    // the same result.
+    let mut column_sum = vec![[0u32; 4]; width];
+    let mut top = 0usize;
+    let mut bottom = radius.min(height - 1);
+    for y in 0..=bottom {
+        let row = &temp[y * width..(y + 1) * width];
+        for x in 0..width {
+            let pixel = row[x];
+            column_sum[x][0] += pixel[0] as u32;
+            column_sum[x][1] += pixel[1] as u32;
+            column_sum[x][2] += pixel[2] as u32;
+            column_sum[x][3] += pixel[3] as u32;
+        }
+    }
+    for y in 0..height {
+        let count = (bottom - top + 1) as u32;
+        let out = y * width;
+        for x in 0..width {
+            let sum = column_sum[x];
+            buffer[out + x] = [
+                (sum[0] / count) as u8,
+                (sum[1] / count) as u8,
+                (sum[2] / count) as u8,
+                (sum[3] / count) as u8,
             ];
         }
-
-        for y in 0..height {
-            let top = y.saturating_sub(radius);
-            let bottom = (y + radius + 1).min(height);
-            let count = (bottom - top) as u32;
-            buffer[y * width + x] = [
-                ((prefix[bottom][0] - prefix[top][0]) / count) as u8,
-                ((prefix[bottom][1] - prefix[top][1]) / count) as u8,
-                ((prefix[bottom][2] - prefix[top][2]) / count) as u8,
-                ((prefix[bottom][3] - prefix[top][3]) / count) as u8,
-            ];
+        let next_bottom = (y + 1 + radius).min(height - 1);
+        if next_bottom > bottom {
+            bottom = next_bottom;
+            let row = &temp[bottom * width..(bottom + 1) * width];
+            for x in 0..width {
+                let pixel = row[x];
+                column_sum[x][0] += pixel[0] as u32;
+                column_sum[x][1] += pixel[1] as u32;
+                column_sum[x][2] += pixel[2] as u32;
+                column_sum[x][3] += pixel[3] as u32;
+            }
+        }
+        let next_top = (y + 1).saturating_sub(radius);
+        if next_top > top {
+            let row = &temp[top * width..(top + 1) * width];
+            for x in 0..width {
+                let pixel = row[x];
+                column_sum[x][0] -= pixel[0] as u32;
+                column_sum[x][1] -= pixel[1] as u32;
+                column_sum[x][2] -= pixel[2] as u32;
+                column_sum[x][3] -= pixel[3] as u32;
+            }
+            top = next_top;
         }
     }
 }

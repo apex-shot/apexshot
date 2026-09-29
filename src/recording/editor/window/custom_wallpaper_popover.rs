@@ -86,6 +86,68 @@ const POPOVER_SIDEBAR_GAP: i32 = 8;
 /// this constant states.
 const PICKER_CARD_GAP: i32 = 6;
 
+/// The editable state behind the Custom fill popover, as four closures. Keeping
+/// it state-free is what lets the video editor (its `VideoBackground`) and the
+/// image editor's Motion Appearance (its own fields) share one popover.
+#[derive(Clone)]
+pub(crate) struct FillOps {
+    pub(crate) get_color: Rc<dyn Fn() -> (u8, u8, u8)>,
+    pub(crate) set_color: Rc<dyn Fn((u8, u8, u8))>,
+    pub(crate) get_gradient: Rc<dyn Fn() -> VideoGradient>,
+    pub(crate) set_gradient: Rc<dyn Fn(VideoGradient)>,
+}
+
+impl FillOps {
+    /// The video editor's background, as fill ops.
+    pub(crate) fn for_video(state: Arc<Mutex<VideoEditState>>) -> Self {
+        let get_color = {
+            let state = state.clone();
+            Rc::new(move || match &state.lock().unwrap().background {
+                VideoBackground::Plain { r, g, b } => (*r, *g, *b),
+                _ => (17, 17, 17),
+            }) as Rc<dyn Fn() -> (u8, u8, u8)>
+        };
+        let set_color = {
+            let state = state.clone();
+            Rc::new(move |color: (u8, u8, u8)| {
+                state.lock().unwrap().background = VideoBackground::Plain {
+                    r: color.0,
+                    g: color.1,
+                    b: color.2,
+                };
+            }) as Rc<dyn Fn((u8, u8, u8))>
+        };
+        let get_gradient = {
+            let state = state.clone();
+            Rc::new(move || match &state.lock().unwrap().background {
+                VideoBackground::Gradient(gradient) => gradient.normalized(),
+                // A flat fill promotes to a two-stop ramp of its own color, so
+                // opening Gradient after picking a color shows that color.
+                VideoBackground::Plain { r, g, b } => VideoGradient {
+                    stops: vec![
+                        GradientStop::new(0.0, *r, *g, *b),
+                        GradientStop::new(1.0, *r, *g, *b),
+                    ],
+                    ..VideoGradient::default()
+                },
+                _ => VideoGradient::default(),
+            }) as Rc<dyn Fn() -> VideoGradient>
+        };
+        let set_gradient = {
+            let state = state.clone();
+            Rc::new(move |gradient: VideoGradient| {
+                state.lock().unwrap().background = VideoBackground::Gradient(gradient.normalized());
+            }) as Rc<dyn Fn(VideoGradient)>
+        };
+        Self {
+            get_color,
+            set_color,
+            get_gradient,
+            set_gradient,
+        }
+    }
+}
+
 /// Paints `rounded_rect` and clips to it.
 fn fill_rounded(
     cr: &gtk4::cairo::Context,
@@ -262,10 +324,11 @@ fn reconciled_hsv(
 
 // ── Popover ──
 
-pub(super) fn build_custom_wallpaper_popover(
+pub(crate) fn build_custom_fill_popover(
     sidebar: &GtkBox,
     edit: &Button,
-    state: Arc<Mutex<VideoEditState>>,
+    title: &str,
+    fill: FillOps,
     on_change: Rc<dyn Fn()>,
 ) -> Popover {
     let popover = Popover::new();
@@ -310,10 +373,10 @@ pub(super) fn build_custom_wallpaper_popover(
     // ── Header: title + close, like the reference. ──
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("recording-editor-custom-header");
-    let title = Label::new(Some(&t("Custom Wallpaper")));
-    title.add_css_class("recording-editor-custom-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
+    let title_label = Label::new(Some(title));
+    title_label.add_css_class("recording-editor-custom-title");
+    title_label.set_xalign(0.0);
+    title_label.set_hexpand(true);
     let close = Button::new();
     close.add_css_class("recording-editor-custom-close");
     close.set_has_frame(false);
@@ -325,7 +388,7 @@ pub(super) fn build_custom_wallpaper_popover(
         let popover = popover.clone();
         close.connect_clicked(move |_| popover.popdown());
     }
-    header.append(&title);
+    header.append(&title_label);
     header.append(&close);
     root.append(&header);
 
@@ -352,8 +415,8 @@ pub(super) fn build_custom_wallpaper_popover(
     pages.set_hexpand(true);
     root.append(&pages);
 
-    let color_page = build_color_page(&state, &notify);
-    let gradient_page = build_gradient_page(&state, &notify, &root, sidebar);
+    let color_page = build_color_page(&fill, &notify);
+    let gradient_page = build_gradient_page(&fill, &notify, &root, sidebar);
     pages.append(&color_page.widget);
     pages.append(&gradient_page.widget);
 
@@ -519,13 +582,16 @@ struct ColorPage {
 /// closures instead of reaching into `background` directly. The Gradient use
 /// deliberately has no Color/Gradient tab row of its own — those tabs stay the
 /// popover's, and this is just the picker.
+///
+/// State-free, so the image editor's Motion Appearance popovers reuse it too
+/// rather than shipping a second saturation/value picker.
 #[derive(Clone)]
-struct ColorPicker {
-    widget: GtkBox,
-    repaint: Rc<dyn Fn()>,
+pub(crate) struct ColorPicker {
+    pub(crate) widget: GtkBox,
+    pub(crate) repaint: Rc<dyn Fn()>,
 }
 
-fn build_color_picker(
+pub(crate) fn build_color_picker(
     get: Rc<dyn Fn() -> (u8, u8, u8)>,
     set: Rc<dyn Fn((u8, u8, u8))>,
     notify: Rc<dyn Fn()>,
@@ -722,16 +788,12 @@ fn build_color_picker(
 }
 
 /// The Color tab: the shared picker bound to the flat background fill.
-fn build_color_page(state: &Arc<Mutex<VideoEditState>>, notify: &Rc<dyn Fn()>) -> ColorPage {
-    let get: Rc<dyn Fn() -> (u8, u8, u8)> = {
-        let state = state.clone();
-        Rc::new(move || current_flat_color(&state))
-    };
-    let set: Rc<dyn Fn((u8, u8, u8))> = {
-        let state = state.clone();
-        Rc::new(move |color| set_flat_color(&state, color))
-    };
-    let picker = build_color_picker(get, set, notify.clone());
+fn build_color_page(fill: &FillOps, notify: &Rc<dyn Fn()>) -> ColorPage {
+    let picker = build_color_picker(
+        fill.get_color.clone(),
+        fill.set_color.clone(),
+        notify.clone(),
+    );
     ColorPage {
         widget: picker.widget,
         repaint: picker.repaint,
@@ -872,21 +934,6 @@ fn draw_spectrum(cr: &gtk4::cairo::Context, w: f64, h: f64, hue: f64, color: (u8
     );
     cr.arc(cx, cy, (r - 2.5).max(1.0), 0.0, std::f64::consts::TAU);
     let _ = cr.fill();
-}
-
-fn current_flat_color(state: &Arc<Mutex<VideoEditState>>) -> (u8, u8, u8) {
-    match &state.lock().unwrap().background {
-        VideoBackground::Plain { r, g, b } => (*r, *g, *b),
-        _ => (17, 17, 17),
-    }
-}
-
-fn set_flat_color(state: &Arc<Mutex<VideoEditState>>, color: (u8, u8, u8)) {
-    state.lock().unwrap().background = VideoBackground::Plain {
-        r: color.0,
-        g: color.1,
-        b: color.2,
-    };
 }
 
 /// Resolve the pointer's live position mid-drag: the press point plus the
@@ -1215,7 +1262,7 @@ fn kind_label(kind: GradientKind) -> String {
 /// measured into that popover's surface, so the card kept opening up over the
 /// video no matter which box the rect was taken from.
 fn build_gradient_page(
-    state: &Arc<Mutex<VideoEditState>>,
+    fill: &FillOps,
     notify: &Rc<dyn Fn()>,
     card_body: &GtkBox,
     popover_host: &GtkBox,
@@ -1316,11 +1363,11 @@ fn build_gradient_page(
         row.append(&label);
         item.set_child(Some(&row));
         {
-            let state = state.clone();
+            let fill = fill.clone();
             let notify = notify.clone();
             let popover = type_popover.clone();
             item.connect_clicked(move |_| {
-                with_gradient(&state, |gradient| gradient.kind = kind);
+                with_gradient(&fill, |gradient| gradient.kind = kind);
                 notify();
                 popover.popdown();
             });
@@ -1332,19 +1379,19 @@ fn build_gradient_page(
     // Flip reverses the stop order; rotate turns the gradient a quarter turn.
     let flip = gradient_icon_button(GradientIcon::ArrowLeftRight, &t("Flip gradient"));
     {
-        let state = state.clone();
+        let fill = fill.clone();
         let notify = notify.clone();
         flip.connect_clicked(move |_| {
-            with_gradient(&state, |gradient| gradient.reversed = !gradient.reversed);
+            with_gradient(&fill, |gradient| gradient.reversed = !gradient.reversed);
             notify();
         });
     }
     let rotate = gradient_icon_button(GradientIcon::RotateCwSquare, &t("Rotate gradient"));
     {
-        let state = state.clone();
+        let fill = fill.clone();
         let notify = notify.clone();
         rotate.connect_clicked(move |_| {
-            with_gradient(&state, |gradient| {
+            with_gradient(&fill, |gradient| {
                 gradient.angle_degrees =
                     (gradient.angle_degrees + GRADIENT_ROTATE_STEP).rem_euclid(360.0);
             });
@@ -1382,11 +1429,11 @@ fn build_gradient_page(
     let add_label = Label::new(Some("+"));
     add.set_child(Some(&add_label));
     {
-        let state = state.clone();
+        let fill = fill.clone();
         let notify = notify.clone();
         let selected = selected.clone();
         add.connect_clicked(move |_| {
-            selected.set(add_stop(&state));
+            selected.set(add_stop(&fill));
             notify();
         });
     }
@@ -1439,24 +1486,21 @@ fn build_gradient_page(
 
     let stop_picker = {
         let get: Rc<dyn Fn() -> (u8, u8, u8)> = {
-            let state = state.clone();
+            let fill = fill.clone();
             let selected = selected.clone();
             Rc::new(move || {
-                let guard = state.lock().unwrap();
-                if let VideoBackground::Gradient(gradient) = &guard.background {
-                    if let Some(stop) = gradient.normalized().stops.get(selected.get()) {
-                        return (stop.r, stop.g, stop.b);
-                    }
+                if let Some(stop) = (fill.get_gradient)().normalized().stops.get(selected.get()) {
+                    return (stop.r, stop.g, stop.b);
                 }
                 (0xFF, 0xFF, 0xFF)
             })
         };
         let set: Rc<dyn Fn((u8, u8, u8))> = {
-            let state = state.clone();
+            let fill = fill.clone();
             let selected = selected.clone();
             Rc::new(move |color| {
                 let index = selected.get();
-                with_gradient(&state, |gradient| {
+                with_gradient(&fill, |gradient| {
                     if let Some(stop) = gradient.stops.get_mut(index) {
                         stop.r = color.0;
                         stop.g = color.1;
@@ -1555,7 +1599,7 @@ fn build_gradient_page(
         move |_| dismiss()
     });
 
-    attach_stop_drag(&bar, state.clone(), notify.clone(), selected.clone());
+    attach_stop_drag(&bar, fill.clone(), notify.clone(), selected.clone());
 
     let refresh: Rc<dyn Fn()> = {
         let bar = bar.clone();
@@ -1566,11 +1610,11 @@ fn build_gradient_page(
         let type_checks = type_checks.clone();
         let selected = selected.clone();
         let rebuilding = rebuilding.clone();
-        let state = state.clone();
+        let fill = fill.clone();
         let notify = notify.clone();
         let picker_repaint = stop_picker.repaint.clone();
         Rc::new(move || {
-            let gradient = current_gradient(&state);
+            let gradient = current_gradient(&fill);
             let normalized = gradient.normalized();
             let count = normalized.stops.len();
             // Selection rides along with edits and removals.
@@ -1614,7 +1658,7 @@ fn build_gradient_page(
                     stop,
                     index,
                     &selected,
-                    &state,
+                    &fill,
                     &notify,
                     &rebuilding,
                     &open_picker,
@@ -1635,43 +1679,25 @@ fn build_gradient_page(
     }
 }
 
-fn current_gradient(state: &Arc<Mutex<VideoEditState>>) -> VideoGradient {
-    match &state.lock().unwrap().background {
-        VideoBackground::Gradient(gradient) => gradient.normalized(),
-        _ => VideoGradient::default(),
-    }
+fn current_gradient(fill: &FillOps) -> VideoGradient {
+    (fill.get_gradient)().normalized()
 }
 
-/// Apply `edit` to the gradient, promoting a flat color or no-fill to a real
-/// gradient first so an edit on the Gradient tab is never dropped.
-fn with_gradient(state: &Arc<Mutex<VideoEditState>>, edit: impl FnOnce(&mut VideoGradient)) {
-    let mut guard = state.lock().unwrap();
-    if !matches!(guard.background, VideoBackground::Gradient(_)) {
-        let seed = match &guard.background {
-            VideoBackground::Plain { r, g, b } => VideoGradient {
-                stops: vec![
-                    GradientStop::new(0.0, *r, *g, *b),
-                    GradientStop::new(1.0, *r, *g, *b),
-                ],
-                ..VideoGradient::default()
-            },
-            _ => VideoGradient::default(),
-        };
-        guard.background = VideoBackground::Gradient(seed);
-    }
-    if let VideoBackground::Gradient(gradient) = &mut guard.background {
-        let mut normalized = gradient.normalized();
-        edit(&mut normalized);
-        *gradient = normalized.normalized();
-    }
+/// Apply `edit` to the gradient. The host's `get_gradient` already promotes a
+/// flat color to a ramp of its own color, so an edit on the Gradient tab is
+/// never dropped.
+fn with_gradient(fill: &FillOps, edit: impl FnOnce(&mut VideoGradient)) {
+    let mut gradient = (fill.get_gradient)().normalized();
+    edit(&mut gradient);
+    (fill.set_gradient)(gradient.normalized());
 }
 
 /// Append a stop in the widest gap and return its index in the normalized
 /// list, so the caller can select it. Adding over a full gradient is a no-op
 /// that reports the last stop.
-fn add_stop(state: &Arc<Mutex<VideoEditState>>) -> usize {
+fn add_stop(fill: &FillOps) -> usize {
     let mut position = 0.5;
-    with_gradient(state, |gradient| {
+    with_gradient(fill, |gradient| {
         if gradient.stops.len() >= MAX_GRADIENT_STOPS {
             return;
         }
@@ -1700,13 +1726,13 @@ fn add_stop(state: &Arc<Mutex<VideoEditState>>) -> usize {
             .stops
             .push(GradientStop::new(position, color.0, color.1, color.2));
     });
-    find_stop_at(state, position)
+    find_stop_at(fill, position)
 }
 
 /// The model index of the stop sitting at `position`, for reselecting after a
 /// list re-sort.
-fn find_stop_at(state: &Arc<Mutex<VideoEditState>>, position: f64) -> usize {
-    current_gradient(state)
+fn find_stop_at(fill: &FillOps, position: f64) -> usize {
+    current_gradient(fill)
         .stops
         .iter()
         .position(|stop| (stop.position - position).abs() < 1e-6)
@@ -1717,7 +1743,7 @@ fn find_stop_at(state: &Arc<Mutex<VideoEditState>>, position: f64) -> usize {
 ///
 /// Shared with the Background panel's fill chip, which previews the same fill
 /// and so has to convert the rasterizer's RGB exactly the same way.
-pub(super) fn bitmap_to_surface(
+pub(crate) fn bitmap_to_surface(
     bitmap: &crate::recording::editor::model::background_render::GradientBitmap,
 ) -> gtk4::cairo::ImageSurface {
     let width = bitmap.width;
@@ -1977,7 +2003,7 @@ fn build_stop_row(
     stop: &GradientStop,
     index: usize,
     selected: &Rc<Cell<usize>>,
-    state: &Arc<Mutex<VideoEditState>>,
+    fill: &FillOps,
     notify: &Rc<dyn Fn()>,
     rebuilding: &Rc<Cell<bool>>,
     open_picker: &Rc<dyn Fn(bool)>,
@@ -2031,13 +2057,13 @@ fn build_stop_row(
     hex.set_max_width_chars(7);
     hex.set_text(&hex_string((stop.r, stop.g, stop.b)));
     {
-        let state = state.clone();
+        let fill = fill.clone();
         let notify = notify.clone();
         commit_entry(&hex, rebuilding, move |text| {
             let Some((r, g, b)) = parse_hex(text) else {
                 return;
             };
-            with_gradient(&state, |gradient| {
+            with_gradient(&fill, |gradient| {
                 if let Some(stop) = gradient.stops.get_mut(index) {
                     stop.r = r;
                     stop.g = g;
@@ -2058,7 +2084,7 @@ fn build_stop_row(
 /// the Stops + button.
 fn attach_stop_drag(
     bar: &DrawingArea,
-    state: Arc<Mutex<VideoEditState>>,
+    fill: FillOps,
     notify: Rc<dyn Fn()>,
     selected: Rc<Cell<usize>>,
 ) {
@@ -2079,7 +2105,7 @@ fn attach_stop_drag(
     // the far handle felt like something was stealing the press.
     drag.set_propagation_limit(gtk4::PropagationLimit::None);
     drag.connect_drag_begin({
-        let state = state.clone();
+        let fill = fill.clone();
         let notify = notify.clone();
         let dragging = dragging.clone();
         let selected = selected.clone();
@@ -2089,7 +2115,7 @@ fn attach_stop_drag(
                 return;
             };
             let (width, _) = drawn_size(&widget);
-            let gradient = current_gradient(&state);
+            let gradient = current_gradient(&fill);
 
             // Distance is measured along the bar only: the handle sits on the
             // track, so a press at either end of the ramp still belongs to it.
@@ -2130,7 +2156,7 @@ fn attach_stop_drag(
         }
     });
     drag.connect_drag_update({
-        let state = state.clone();
+        let fill = fill.clone();
         let notify = notify.clone();
         let dragging = dragging.clone();
         let selected = selected.clone();
@@ -2151,15 +2177,15 @@ fn attach_stop_drag(
             // the drag tracks what was drawn.
             let center = (start + dx) - grab_offset.get();
             let display = gradient_position_at(center, width);
-            let reversed = current_gradient(&state).reversed;
+            let reversed = current_gradient(&fill).reversed;
             let position = if reversed { 1.0 - display } else { display };
-            with_gradient(&state, |gradient| {
+            with_gradient(&fill, |gradient| {
                 if let Some(stop) = gradient.stops.get_mut(index) {
                     stop.position = position;
                 }
             });
             // Re-resolve: the stop that was at `index` may now be elsewhere.
-            let index = find_stop_at(&state, position);
+            let index = find_stop_at(&fill, position);
             dragging.set(index);
             selected.set(index);
             notify();
@@ -2565,7 +2591,13 @@ mod tests {
             })));
             let sidebar = GtkBox::new(Orientation::Vertical, 0);
             let edit = Button::new();
-            let popover = build_custom_wallpaper_popover(&sidebar, &edit, state, Rc::new(|| {}));
+            let popover = build_custom_fill_popover(
+                &sidebar,
+                &edit,
+                "Custom Wallpaper",
+                FillOps::for_video(state),
+                Rc::new(|| {}),
+            );
             let root = popover.child().expect("the popover has a body");
 
             assert!(

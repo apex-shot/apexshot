@@ -494,7 +494,15 @@ mod tests {
             let context = Context::new(&frame).unwrap();
             context.set_source_rgb(1.0, 1.0, 1.0);
             context.paint().unwrap();
-            paint_card_shadow(&context, stage, corners, &appearance, 0.0);
+            paint_card_shadow(
+                &context,
+                stage,
+                corners,
+                0.0,
+                appearance.shadow_opacity,
+                appearance.shadow_blur,
+                appearance.shadow_position,
+            );
         }
         frame.flush();
         let data = frame.data().unwrap();
@@ -523,13 +531,62 @@ mod tests {
             let context = Context::new(&frame).unwrap();
             context.set_source_rgb(1.0, 1.0, 1.0);
             context.paint().unwrap();
-            paint_card_shadow(&context, stage, corners, &appearance, 0.0);
+            paint_card_shadow(
+                &context,
+                stage,
+                corners,
+                0.0,
+                appearance.shadow_opacity,
+                appearance.shadow_blur,
+                appearance.shadow_position,
+            );
         }
         frame.flush();
         let data = frame.data().unwrap();
         let channel = |x: usize, y: usize| data[(y * 100 + x) * 4];
         assert_eq!(channel(75, 40), 0);
         assert_eq!(channel(25, 40), 255);
+    }
+
+    /// The shadow is the card's silhouette, so it must follow the card's own
+    /// corner radius. With a hard (unblurred) shadow the extreme corner is the
+    /// clearest tell: sharp leaves it filled, rounded cuts it away.
+    #[test]
+    fn shadow_corner_follows_the_card_border_radius() {
+        let render = |radius: f64| -> Vec<u8> {
+            let mut frame = ImageSurface::create(Format::ARgb32, 100, 80).unwrap();
+            {
+                let context = Context::new(&frame).unwrap();
+                context.set_source_rgb(1.0, 1.0, 1.0);
+                context.paint().unwrap();
+                paint_card_shadow(
+                    &context,
+                    MotionStage::frame(100.0, 80.0),
+                    [(30.0, 20.0), (70.0, 20.0), (70.0, 60.0), (30.0, 60.0)],
+                    radius,
+                    1.0,
+                    0.0,
+                    (0.0, 0.0),
+                );
+            }
+            frame.flush();
+            let pixels = frame.data().unwrap().to_vec();
+            pixels
+        };
+        let channel = |pixels: &[u8], x: usize, y: usize| pixels[(y * 100 + x) * 4];
+
+        let sharp = render(0.0);
+        let rounded = render(12.0);
+        // Card center stays a solid shadow in both.
+        assert_eq!(channel(&sharp, 50, 40), 0);
+        assert_eq!(channel(&rounded, 50, 40), 0);
+        // The very corner is only filled when the silhouette is a sharp square.
+        assert_eq!(channel(&sharp, 30, 20), 0, "sharp shadow must fill the corner");
+        assert_eq!(
+            channel(&rounded, 30, 20),
+            255,
+            "rounded shadow must cut the corner"
+        );
     }
 
     #[test]
@@ -952,8 +1009,13 @@ mod tests {
 
         let mut motion = motion_with_first_clip();
         motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
-        motion.appearance.gradient_color_1 = [0.08, 0.12, 0.22, 1.0];
-        motion.appearance.gradient_color_2 = [0.42, 0.18, 0.54, 1.0];
+        motion.appearance.gradient = crate::recording::editor::model::VideoGradient {
+            stops: vec![
+                crate::recording::editor::model::GradientStop::new(0.0, 20, 31, 56),
+                crate::recording::editor::model::GradientStop::new(1.0, 107, 46, 138),
+            ],
+            ..crate::recording::editor::model::VideoGradient::default()
+        };
         motion.appearance.background_noise = 0.4;
         let time = 0.35;
 

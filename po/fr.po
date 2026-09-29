@@ -2585,6 +2585,9 @@ msgstr "Sélectionner une image de fond"
 msgid "Select image..."
 msgstr "Sélectionner une image..."
 
+msgid "Choose Background Image"
+msgstr "Choisir une image d'arrière-plan"
+
 msgid "Stops"
 msgstr "Arrêts"
 

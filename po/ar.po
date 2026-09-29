@@ -2555,6 +2555,9 @@ msgstr "اختر صورة الخلفية"
 msgid "Select image..."
 msgstr "اختر صورة..."
 
+msgid "Choose Background Image"
+msgstr "اختر صورة الخلفية"
+
 msgid "Stops"
 msgstr "المحطات"
 

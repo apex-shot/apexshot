@@ -6,6 +6,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::recording::editor::model::VideoGradient;
+
 /// Top-level annotation file structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnnotationFile {
@@ -68,10 +70,23 @@ impl Default for BackgroundSettings {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BackgroundStyle {
     None,
-    Gradient { index: usize },
-    Wallpaper { path: String },
-    Blurred { index: usize },
-    PlainColor { color: Color },
+    Gradient {
+        /// Preset index for files written before the fill became the shared
+        /// `VideoGradient` spec. New files carry `gradient` and write `0`.
+        index: usize,
+        /// The shared gradient spec. Absent in files written before it existed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        gradient: Option<VideoGradient>,
+    },
+    Wallpaper {
+        path: String,
+    },
+    Blurred {
+        index: usize,
+    },
+    PlainColor {
+        color: Color,
+    },
 }
 
 /// Serializable background alignment
@@ -396,7 +411,10 @@ mod tests {
             720,
         );
         file.background = BackgroundSettings {
-            style: BackgroundStyle::Gradient { index: 4 },
+            style: BackgroundStyle::Gradient {
+                index: 4,
+                gradient: None,
+            },
             padding: 42.0,
             shadow: 28.0,
             insert: 9.0,

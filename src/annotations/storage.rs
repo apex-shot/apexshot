@@ -153,7 +153,12 @@ pub fn save_annotations(
 pub fn background_style_from_serializable(style: &BackgroundStyle) -> EditorBackgroundStyle {
     match style {
         BackgroundStyle::None => EditorBackgroundStyle::None,
-        BackgroundStyle::Gradient { index } => EditorBackgroundStyle::Gradient(*index),
+        // A file written before the shared gradient spec carries only the
+        // preset index, which no longer names a fill; fall back to the model
+        // default rather than failing to open the image.
+        BackgroundStyle::Gradient { gradient, .. } => {
+            EditorBackgroundStyle::Gradient(gradient.clone().unwrap_or_default())
+        }
         BackgroundStyle::Wallpaper { path } => EditorBackgroundStyle::Wallpaper(path.into()),
         BackgroundStyle::Blurred { index } => EditorBackgroundStyle::Blurred(*index),
         BackgroundStyle::PlainColor { color } => {
@@ -607,7 +612,12 @@ fn color_from_serializable(c: super::schema::Color) -> DrawColor {
 fn background_style_to_serializable(style: &EditorBackgroundStyle) -> BackgroundStyle {
     match style {
         EditorBackgroundStyle::None => BackgroundStyle::None,
-        EditorBackgroundStyle::Gradient(index) => BackgroundStyle::Gradient { index: *index },
+        // `index` is kept for readers of the old schema; new files carry the
+        // spec itself, so the index is written as the preset default.
+        EditorBackgroundStyle::Gradient(gradient) => BackgroundStyle::Gradient {
+            index: 0,
+            gradient: Some(gradient.clone()),
+        },
         EditorBackgroundStyle::Wallpaper(path) => BackgroundStyle::Wallpaper {
             path: path.to_string_lossy().to_string(),
         },

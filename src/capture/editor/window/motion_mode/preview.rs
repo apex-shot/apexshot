@@ -532,8 +532,7 @@ fn cached_backdrop(
 fn same_backdrop_appearance(a: &MotionAppearance, b: &MotionAppearance) -> bool {
     a.background_fill_type == b.background_fill_type
         && a.background_color == b.background_color
-        && a.gradient_color_1 == b.gradient_color_1
-        && a.gradient_color_2 == b.gradient_color_2
+        && a.gradient == b.gradient
         && a.wallpaper_image_name == b.wallpaper_image_name
         && a.custom_background_image == b.custom_background_image
         && a.background_blur == b.background_blur

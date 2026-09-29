@@ -2536,6 +2536,9 @@ msgstr "选择背景图片"
 msgid "Select image..."
 msgstr "选择图片..."
 
+msgid "Choose Background Image"
+msgstr "选择背景图片"
+
 msgid "Stops"
 msgstr "色标"
 
