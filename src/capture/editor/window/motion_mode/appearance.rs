@@ -525,22 +525,22 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
         }
     });
     // The wallpaper catalog is its own page so 70 thumbnails never push the
-    // sliders (or the other tools below) off the bottom of the sidebar.
+    // sliders (or the other tools below) off the bottom of the sidebar. The
+    // frame keeps a fixed height: the tiles are attached a few frames apart, so
+    // a viewport that sized itself to its (initially empty) content would open
+    // one row tall and stay there.
     let wallpaper_page = GtkBox::new(Orientation::Vertical, 0);
     wallpaper_page.set_hexpand(true);
-    // The video editor's grid viewport: grow with the catalog up to the cap,
-    // then scroll. The class carries the same top inset, so the first row of
-    // tiles clears the tab strip in both panels.
-    let wallpaper_scroll = ScrolledWindow::builder()
-        .hscrollbar_policy(PolicyType::Never)
-        .vscrollbar_policy(PolicyType::Automatic)
-        .propagate_natural_width(false)
-        .propagate_natural_height(true)
-        .max_content_height(WALLPAPER_PAGE_HEIGHT)
-        .child(&wallpaper_catalog)
-        .build();
-    wallpaper_scroll.add_css_class("recording-editor-bg-wallpaper-scroll");
-    wallpaper_page.append(&wallpaper_scroll);
+    wallpaper_page.append(
+        &ScrolledWindow::builder()
+            .hscrollbar_policy(PolicyType::Never)
+            .vscrollbar_policy(PolicyType::Automatic)
+            .propagate_natural_width(false)
+            .propagate_natural_height(false)
+            .height_request(WALLPAPER_PAGE_HEIGHT)
+            .child(&wallpaper_catalog)
+            .build(),
+    );
 
     // One source at a time, chosen by the tab tray. This mirrors the video
     // editor's Background panel: tabs pick the fill source, and Padding/Radius
@@ -1770,6 +1770,12 @@ fn motion_wallpaper_thumbnail(
     button.add_css_class("editor-background-gradient-button");
     button.add_css_class("editor-background-preview-size-regular");
     button.add_css_class("editor-motion-wallpaper-thumbnail");
+    // Pinned to 56px and centred in its grid cell, exactly as the video
+    // editor's tiles are: without this a homogeneous column stretches the tile
+    // to fill the sidebar and the thumbnails stop matching.
+    button.set_hexpand(false);
+    button.set_halign(Align::Center);
+    button.set_valign(Align::Start);
     button.set_tooltip_text(path.file_stem().and_then(|name| name.to_str()));
     let path = path.to_path_buf();
     let preview_path = preview_path.to_path_buf();
@@ -2302,19 +2308,20 @@ mod tests {
     }
 
     /// The wallpaper grid is its own bounded page: 70 thumbnails must scroll
-    /// inside a capped viewport so Padding/Radius and the other tools stay
-    /// reachable without scrolling the whole sidebar. It is the video editor's
-    /// grid markup, so the two panels wrap and space their tiles identically.
+    /// inside a fixed-height frame so Padding/Radius and the other tools stay
+    /// reachable without scrolling the whole sidebar. The frame height is fixed
+    /// rather than content-sized because the tiles arrive a few frames apart —
+    /// a content-sized frame opens one row tall and stays there. The grid markup
+    /// itself is the video editor's.
     #[test]
     fn wallpaper_grid_scrolls_inside_its_own_page() {
         let source = include_str!("appearance.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            production_source.contains("WALLPAPER_PAGE_HEIGHT")
-                && production_source.contains(".max_content_height(WALLPAPER_PAGE_HEIGHT)")
+            production_source.contains(".height_request(WALLPAPER_PAGE_HEIGHT)")
                 && production_source
                     .contains("source_stack.add_named(&wallpaper_page, Some(\"wallpapers\"))"),
-            "the wallpaper catalog must live in a capped page inside the source stack",
+            "the wallpaper catalog must live in a fixed-height page inside the source stack",
         );
         assert!(
             production_source.contains("grid.set_column_spacing(8)")
@@ -2323,6 +2330,11 @@ mod tests {
                 && production_source
                     .contains("grid.add_css_class(\"recording-editor-bg-wallpaper-grid\")"),
             "the catalog must use the video editor's grid gaps and chrome",
+        );
+        assert!(
+            production_source.contains("button.set_hexpand(false)")
+                && production_source.contains("button.set_halign(Align::Center)"),
+            "tiles must stay 56px and centred in their cell, like the video editor's",
         );
     }
 
