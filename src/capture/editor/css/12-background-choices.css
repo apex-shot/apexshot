@@ -288,3 +288,41 @@
                 background: alpha(white, 0.10);
                 min-height: 1px;
             }
+
+            /* Fill-source tabs reuse the video editor's Background tab tray
+             * classes; only the label sizing needs the Motion heading look. */
+            .editor-motion-inspector .recording-editor-bg-tab label {
+                font-size: 11px;
+            }
+
+            /* The Edit popover holds the Color/Gradient sub-tabs over their
+             * editors, like the video editor's Custom Wallpaper card. */
+            .editor-motion-color-popover-body .recording-editor-bg-tabs {
+                margin: 0 0 10px 0;
+            }
+
+            /* Tool groups below the fill tabs: a clickable header row over a
+             * revealer. Collapsed by default so the sidebar is tabs + one
+             * open group, never a single long scroll. */
+            button.editor-disclosure-header {
+                min-height: 24px;
+                padding: 0;
+                border: none;
+                background: transparent;
+                box-shadow: none;
+            }
+
+            button.editor-disclosure-header:hover {
+                background: transparent;
+            }
+
+            button.editor-disclosure-header:hover .editor-background-section-title {
+                color: rgba(255, 255, 255, 0.72);
+            }
+
+            .editor-disclosure-chevron {
+                min-width: 12px;
+                color: rgba(255, 255, 255, 0.5);
+                font-size: 14px;
+                font-weight: 600;
+            }

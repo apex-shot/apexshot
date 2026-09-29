@@ -45,6 +45,15 @@
                 background: alpha(#111827, 0.025);
             }
 
+            .editor-root.editor-theme-light button.editor-disclosure-header:hover
+                .editor-background-section-title {
+                color: alpha(#1d2129, 0.72);
+            }
+
+            .editor-root.editor-theme-light .editor-disclosure-chevron {
+                color: alpha(#1d2129, 0.5);
+            }
+
             .editor-root.editor-theme-light .editor-footer {
                 background-color: #f6f7fb;
                 border-top-color: alpha(#111827, 0.06);

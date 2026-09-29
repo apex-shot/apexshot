@@ -23,29 +23,6 @@ pub(super) const MAX_BACKGROUND_DIMENSION: u32 = 2560;
 /// Long-edge bound for background surfaces drawn on screen. The canvas is
 /// screen-resolution; export reloads full resolution for itself.
 pub(super) const PREVIEW_BACKGROUND_MAX_EDGE: u32 = 1920;
-pub const BACKGROUND_GRADIENT_PREVIEW_FILES: [&str; 20] = [
-    "gradient-01.jpg",
-    "gradient-02.jpg",
-    "gradient-03.jpg",
-    "gradient-04.jpg",
-    "gradient-05.jpg",
-    "gradient-06.jpg",
-    "gradient-07.jpg",
-    "gradient-08.jpg",
-    "gradient-09.jpg",
-    "gradient-10.jpg",
-    "gradient-11.jpg",
-    "gradient-12.jpg",
-    "gradient-13.jpg",
-    "gradient-14.jpg",
-    "gradient-15.jpg",
-    "gradient-16.jpg",
-    "gradient-17.jpg",
-    "gradient-18.jpg",
-    "gradient-19.jpg",
-    "gradient-20.jpg",
-];
-
 /// Built-in Motion wallpaper catalog. The first ten entries preserve the
 /// existing ApexShot backgrounds; the remaining entries are the curated image
 /// collection.
@@ -474,12 +451,10 @@ pub(super) fn sync_static_appearance_to_motion(
             motion.background_fill_type = MotionBackgroundFillType::Color;
             motion.background_color = [color.r, color.g, color.b, color.a];
         }
-        BackgroundStyle::Gradient(idx) => {
-            let file =
-                BACKGROUND_GRADIENT_PREVIEW_FILES[*idx % BACKGROUND_GRADIENT_PREVIEW_FILES.len()];
-            let path = background_gradient_asset_path(file);
-            motion.background_fill_type = MotionBackgroundFillType::Wallpaper;
-            motion.wallpaper_image_name = Some(path.to_string_lossy().into_owned());
+        BackgroundStyle::Gradient(gradient) => {
+            motion.background_fill_type = MotionBackgroundFillType::Gradient;
+            motion.gradient = gradient.clone();
+            motion.wallpaper_image_name = None;
             motion.custom_background_image = None;
         }
         BackgroundStyle::Wallpaper(path) => {
@@ -529,11 +504,7 @@ pub(super) fn sync_motion_appearance_to_static(
             let [r, g, b, a] = motion.background_color;
             BackgroundStyle::PlainColor(DrawColor::new(r, g, b, a))
         }
-        MotionBackgroundFillType::Gradient => {
-            let idx = motion.selected_gradient_preset_index.unwrap_or(0)
-                % BACKGROUND_GRADIENT_PREVIEW_FILES.len();
-            BackgroundStyle::Gradient(idx)
-        }
+        MotionBackgroundFillType::Gradient => BackgroundStyle::Gradient(motion.gradient.clone()),
         MotionBackgroundFillType::Wallpaper => match &motion.wallpaper_image_name {
             Some(name) => BackgroundStyle::Wallpaper(PathBuf::from(name)),
             None => BackgroundStyle::None,

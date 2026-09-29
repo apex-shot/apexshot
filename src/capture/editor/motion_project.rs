@@ -21,11 +21,11 @@ use std::time::UNIX_EPOCH;
 
 use crate::capture::editor::types::FrameStyle;
 use crate::recording::editor::model::{
-    MotionAppearance, MotionBackgroundFillType, MotionBlurSettings, MotionEffectTransformTiming,
-    MotionFrame, MotionFramePreset, MotionSceneShadow, MotionSceneShadowPlacement,
-    MotionSceneShadowPreset, MotionSegment, MotionState, MotionTextAnimation,
-    MotionTextCoordinateSpace, MotionTextScope, MotionTextSegment, MotionTimingKind,
-    MotionTransform, MotionWatermark, MotionZoomMode,
+    GradientStop, MotionAppearance, MotionBackgroundFillType, MotionBlurSettings,
+    MotionEffectTransformTiming, MotionFrame, MotionFramePreset, MotionSceneShadow,
+    MotionSceneShadowPlacement, MotionSceneShadowPreset, MotionSegment, MotionState,
+    MotionTextAnimation, MotionTextCoordinateSpace, MotionTextScope, MotionTextSegment,
+    MotionTimingKind, MotionTransform, MotionWatermark, MotionZoomMode, VideoGradient,
 };
 
 pub const MOTION_PROJECT_VERSION: u32 = 1;
@@ -228,7 +228,15 @@ pub struct MotionAppearanceFile {
     pub background_padding: f64,
     pub background_fill_type: MotionBackgroundFillTypeFile,
     pub background_color: [f64; 4],
+    /// The background gradient, stored in the video editor's own shape so a
+    /// Motion fill and a Custom Wallpaper fill round-trip identically.
+    /// Files written before this shipped carry the two flat colors below
+    /// instead, so both are read and the flat pair is folded into stops.
+    #[serde(default)]
+    pub gradient: VideoGradient,
+    #[serde(default, skip_serializing)]
     pub gradient_color_1: [f64; 4],
+    #[serde(default, skip_serializing)]
     pub gradient_color_2: [f64; 4],
     pub selected_gradient_preset_index: Option<usize>,
     pub wallpaper_image_name: Option<String>,
@@ -562,8 +570,11 @@ impl From<&MotionAppearance> for MotionAppearanceFile {
             background_padding: value.background_padding,
             background_fill_type: (&value.background_fill_type).into(),
             background_color: value.background_color,
-            gradient_color_1: value.gradient_color_1,
-            gradient_color_2: value.gradient_color_2,
+            gradient: value.gradient.clone(),
+            // Skipped on write; the zeros match serde's default so a re-read
+            // still reads as "no legacy pair present".
+            gradient_color_1: [0.0, 0.0, 0.0, 0.0],
+            gradient_color_2: [0.0, 0.0, 0.0, 0.0],
             selected_gradient_preset_index: value.selected_gradient_preset_index,
             wallpaper_image_name: value.wallpaper_image_name.clone(),
             custom_background_image: value.custom_background_image.clone(),
@@ -582,12 +593,12 @@ impl From<&MotionAppearance> for MotionAppearanceFile {
 
 impl From<&MotionAppearanceFile> for MotionAppearance {
     fn from(value: &MotionAppearanceFile) -> Self {
+        let gradient = gradient_from_file(value);
         Self {
             background_padding: value.background_padding,
             background_fill_type: value.background_fill_type.into(),
             background_color: value.background_color,
-            gradient_color_1: value.gradient_color_1,
-            gradient_color_2: value.gradient_color_2,
+            gradient,
             selected_gradient_preset_index: value.selected_gradient_preset_index,
             wallpaper_image_name: value.wallpaper_image_name.clone(),
             custom_background_image: value.custom_background_image.clone(),
@@ -602,6 +613,37 @@ impl From<&MotionAppearanceFile> for MotionAppearance {
             shadow_position: value.shadow_position,
         }
     }
+}
+
+/// The file's gradient, or the legacy two-color pair folded into a two-stop
+/// ramp. `gradient` defaults to the model default when the field is absent, so
+/// a pre-migration file is recognized by its flat colors still being present.
+fn gradient_from_file(value: &MotionAppearanceFile) -> VideoGradient {
+    let untouched = value.gradient == VideoGradient::default();
+    // The legacy fields are all-zero when absent, so a non-zero pair is a real
+    // pre-migration gradient rather than the serde default.
+    let legacy_pair = value.gradient_color_1 != [0.0, 0.0, 0.0, 0.0]
+        || value.gradient_color_2 != [0.0, 0.0, 0.0, 0.0];
+    if untouched && legacy_pair {
+        let stop = |position: f64, color: [f64; 4]| {
+            let component = |channel: f64| (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
+            GradientStop::rgba(
+                position,
+                component(color[0]),
+                component(color[1]),
+                component(color[2]),
+                component(color[3]),
+            )
+        };
+        return VideoGradient {
+            stops: vec![
+                stop(0.0, value.gradient_color_1),
+                stop(1.0, value.gradient_color_2),
+            ],
+            ..VideoGradient::default()
+        };
+    }
+    value.gradient.clone()
 }
 
 impl From<&MotionWatermark> for MotionWatermarkFile {
@@ -1205,6 +1247,71 @@ mod tests {
         );
 
         delete_project(&source);
+    }
+
+    /// Sidecars written before Motion's gradient moved onto the shared
+    /// `VideoGradient` carry `gradient_color_1/2` and no `gradient` field. Those
+    /// files must keep loading, with the flat pair folded into a two-stop ramp
+    /// rather than silently reverting to the default blue-to-white gradient.
+    #[test]
+    fn a_legacy_two_color_gradient_file_migrates_to_stops() {
+        let json = serde_json::json!({
+            "background_padding": 12.0,
+            "background_fill_type": "gradient",
+            "background_color": [0.0, 0.0, 0.0, 1.0],
+            "gradient_color_1": [0.08, 0.12, 0.22, 1.0],
+            "gradient_color_2": [0.42, 0.18, 0.54, 1.0],
+            "selected_gradient_preset_index": null,
+            "wallpaper_image_name": null,
+            "custom_background_image": null,
+            "background_blur": 0.0,
+            "background_noise": 0.0,
+            "border_radius": 0.0,
+            "border_thickness": 0.0,
+            "border_fill_color": [1.0, 1.0, 1.0, 1.0],
+            "frame_style": "Default",
+            "shadow_blur": 0.0,
+            "shadow_opacity": 0.0,
+            "shadow_position": [0.0, 0.0]
+        });
+        let file: MotionAppearanceFile = serde_json::from_value(json).expect("legacy file parses");
+        let appearance: MotionAppearance = (&file).into();
+        assert_eq!(appearance.gradient.stops.len(), 2);
+        assert_eq!(appearance.gradient.stops[0].r, 20);
+        assert_eq!(appearance.gradient.stops[0].g, 31);
+        assert_eq!(appearance.gradient.stops[0].b, 56);
+        assert_eq!(appearance.gradient.stops[1].r, 107);
+        assert_eq!(appearance.gradient.stops[1].g, 46);
+        assert_eq!(appearance.gradient.stops[1].b, 138);
+    }
+
+    /// A file written after this change stores `gradient`; the folded legacy
+    /// pair is skipped, so the shared spec survives the round trip intact.
+    #[test]
+    fn the_shared_gradient_round_trips_and_omits_the_legacy_pair() {
+        let mut motion = MotionState::default();
+        motion.appearance.gradient = VideoGradient {
+            stops: vec![
+                GradientStop::rgba(0.0, 10, 20, 30, 128),
+                GradientStop::new(0.4, 200, 10, 10),
+                GradientStop::new(1.0, 0, 0, 255),
+            ],
+            angle_degrees: 135.0,
+            reversed: true,
+            ..VideoGradient::default()
+        };
+        let file = to_project(&motion, Path::new("/tmp/whatever.png"));
+        let json = serde_json::to_string(&file).expect("project serializes");
+        assert!(
+            !json.contains("gradient_color_1"),
+            "the legacy pair must not be written back"
+        );
+        let restored: MotionProjectFile = serde_json::from_str(&json).expect("project parses");
+        let appearance: MotionAppearance = (&restored.appearance).into();
+        assert_eq!(appearance.gradient.stops.len(), 3);
+        assert_eq!(appearance.gradient.stops[0].a, 128);
+        assert_eq!(appearance.gradient.angle_degrees, 135.0);
+        assert!(appearance.gradient.reversed);
     }
 
     #[test]

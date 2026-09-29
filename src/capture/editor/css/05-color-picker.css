@@ -189,16 +189,6 @@
                 border: 1px solid alpha(white, 0.16);
             }
 
-            /* Gradient presets reuse the wallpaper thumbnail size and chrome
-             * (editor-background-gradient-button + preview-size-regular); the
-             * only extra rule is the active outline, matching wallpapers. */
-            button.editor-motion-gradient-preset.active-background-option,
-            button.editor-motion-gradient-preset.active-background-option:hover,
-            button.editor-motion-gradient-preset.active-background-option:active {
-                border: 2px solid #c06540;
-                box-shadow: 0 0 0 1px #c06540;
-            }
-
             entry.editor-motion-color-hex-entry {
                 min-height: 42px;
                 min-width: 128px;
@@ -227,11 +217,13 @@
             }
 
             .editor-motion-color-popover-body {
-                /* Same surface treatment as the in-window updater card. */
+                /* The video editor's floating card (recording-editor-custom-body:
+                 * #1c1c1c inside a 1px hairline at the window's 10px radius), so
+                 * the Motion popovers and the Custom Wallpaper popover match. */
                 padding: 8px;
-                border-radius: 14px;
+                border-radius: 10px;
                 border: 1px solid alpha(white, 0.10);
-                background: #1d1d1d;
+                background: #1c1c1c;
                 box-shadow: none;
             }
 

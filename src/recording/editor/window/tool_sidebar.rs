@@ -822,7 +822,7 @@ mod tests {
             "the row needs its own Edit button"
         );
         assert!(
-            panel.contains("build_custom_wallpaper_popover(") && panel.contains("&custom_edit,"),
+            panel.contains("build_custom_fill_popover(") && panel.contains("&custom_edit,"),
             "Edit, not the whole row, is what opens the Custom Wallpaper dialog"
         );
         assert!(

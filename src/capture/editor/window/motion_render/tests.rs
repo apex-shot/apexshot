@@ -952,8 +952,13 @@ mod tests {
 
         let mut motion = motion_with_first_clip();
         motion.appearance.background_fill_type = MotionBackgroundFillType::Gradient;
-        motion.appearance.gradient_color_1 = [0.08, 0.12, 0.22, 1.0];
-        motion.appearance.gradient_color_2 = [0.42, 0.18, 0.54, 1.0];
+        motion.appearance.gradient = crate::recording::editor::model::VideoGradient {
+            stops: vec![
+                crate::recording::editor::model::GradientStop::new(0.0, 20, 31, 56),
+                crate::recording::editor::model::GradientStop::new(1.0, 107, 46, 138),
+            ],
+            ..crate::recording::editor::model::VideoGradient::default()
+        };
         motion.appearance.background_noise = 0.4;
         let time = 0.35;
 

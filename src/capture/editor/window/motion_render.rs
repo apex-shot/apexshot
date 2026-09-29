@@ -7,9 +7,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::recording::editor::model::{
-    affine_from_three_points as affine_components, card_depth, project_card_corners, project_point,
-    MotionAppearance, MotionBackgroundFillType, MotionBlurBudgetMode, MotionSceneShadow,
-    MotionSceneShadowPreset, MotionState, MotionTextSegment, MotionTransform, MOTION_EXPORT_FPS,
+    affine_from_three_points as affine_components, background_render::render_gradient, card_depth,
+    project_card_corners, project_point, MotionAppearance, MotionBackgroundFillType,
+    MotionBlurBudgetMode, MotionSceneShadow, MotionSceneShadowPreset, MotionState,
+    MotionTextSegment, MotionTransform, MOTION_EXPORT_FPS,
 };
 
 include!("motion_render/geometry.rs");

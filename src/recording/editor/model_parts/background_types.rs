@@ -15,7 +15,7 @@ pub const MAX_GRADIENT_STOPS: usize = 8;
 /// A gradient needs at least two stops to have a direction.
 pub const MIN_GRADIENT_STOPS: usize = 2;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct GradientStop {
     /// Where the stop sits along the gradient line, 0 = start, 1 = end.
     /// Stops need not be evenly spaced; export honors these exactly.
@@ -45,7 +45,7 @@ impl GradientStop {
 }
 
 /// How a gradient's colors travel away from its stops.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub enum GradientKind {
     /// Colors blend along a line set by `angle_degrees`.
     #[default]
@@ -60,7 +60,7 @@ pub enum GradientKind {
     Diamond,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VideoGradient {
     pub kind: GradientKind,
     pub stops: Vec<GradientStop>,

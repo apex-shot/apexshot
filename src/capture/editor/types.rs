@@ -1,4 +1,5 @@
 use super::numbering_style::{NumberSize, NumberingStyle};
+use crate::recording::editor::model::VideoGradient;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
@@ -18,7 +19,10 @@ pub enum EditorError {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BackgroundStyle {
     None,
-    Gradient(usize),
+    /// A gradient fill, carried as the shared `VideoGradient` spec (stops,
+    /// kind, angle) rather than a preset index, so the static preview and its
+    /// export describe the same fill the Motion side does.
+    Gradient(VideoGradient),
     Wallpaper(PathBuf),
     Blurred(usize),
     PlainColor(DrawColor),

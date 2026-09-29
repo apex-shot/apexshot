@@ -341,10 +341,13 @@ fn build_background_panel(
     // rather than as a centered dialog, so the row being edited and the video
     // behind it both stay visible. The popover wires its own click: it needs
     // the Edit row's bounds to seat the card level with it after a scroll.
-    crate::recording::editor::window::custom_wallpaper_popover::build_custom_wallpaper_popover(
+    crate::recording::editor::window::custom_wallpaper_popover::build_custom_fill_popover(
         &panel,
         &custom_edit,
-        state.clone(),
+        &t("Custom Wallpaper"),
+        crate::recording::editor::window::custom_wallpaper_popover::FillOps::for_video(
+            state.clone(),
+        ),
         on_change.clone(),
     );
 

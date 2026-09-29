@@ -213,30 +213,56 @@ mod tests {
     }
 
     #[test]
-    fn appearance_background_picker_keeps_choices_in_one_expanding_card() {
+    fn appearance_background_uses_source_tabs_instead_of_one_stacked_card() {
         let source = include_str!("motion_mode/appearance.rs")
             .split("#[cfg(test)]")
             .next()
             .unwrap();
         assert!(
-            source.contains("fill_section.add_css_class(\"editor-motion-background-picker\")")
-                && source.contains("fill_section.append(&selection_stack)")
-                && source.contains("selection_stack.set_visible_child_name(\"wallpapers\")")
+            source.contains("motion_source_tab(\"Wallpapers\")")
+                && source.contains("motion_source_tab(\"Custom\")")
+                && source.contains("motion_source_tab(\"Image\")")
+                && source.contains("source_tabs.add_css_class(\"recording-editor-bg-tabs\")")
+                && source.contains("source_stack.add_named(&wallpaper_page, Some(\"wallpapers\"))")
+                && !source.contains("selection_stack"),
+            "Background should pick its fill from the video editor's tab tray, not one stacked card"
         );
     }
 
+    /// The Custom tab is a summary row with an Edit pill, and the Color/Gradient
+    /// editors live in the video editor's own Custom Wallpaper popover behind
+    /// it — the video editor's Background pattern, so this panel never opens a
+    /// wall of inline editors and the two editors share one card.
     #[test]
-    fn gradient_background_uses_one_shared_color_input() {
+    fn custom_fill_is_a_summary_row_with_an_edit_popover() {
         let source = include_str!("motion_mode/appearance.rs")
             .split("#[cfg(test)]")
             .next()
             .unwrap();
         assert!(
-            source.contains(
-                "motion_gradient_color_control(initial_gradient_start, initial_gradient_end"
-            ) && !source.contains("let gradient_start = motion_color_control")
-                && !source.contains("let gradient_end = motion_color_control"),
-            "Motion gradients should use a shared hex input for both selectable stops"
+            source.contains("recording-editor-bg-custom-row")
+                && source.contains("recording-editor-bg-custom-edit")
+                && source.contains("build_custom_fill_popover(")
+                && source.contains("&custom_edit,")
+                && source.contains("FillOps {"),
+            "Custom must be a summary row whose Edit pill opens the shared color/gradient popover",
+        );
+    }
+
+    /// Motion's gradient is the video editor's `VideoGradient` behind the shared
+    /// fill ops, so both editors edit one gradient spec instead of two parallel
+    /// two-color controls.
+    #[test]
+    fn gradient_background_shares_the_video_editors_gradient_spec() {
+        let source = include_str!("motion_mode/appearance.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(
+            source.contains("get_gradient:")
+                && source.contains("set_gradient:")
+                && source.contains("motion.appearance.gradient"),
+            "Motion gradients must read and write the shared VideoGradient spec"
         );
     }
 

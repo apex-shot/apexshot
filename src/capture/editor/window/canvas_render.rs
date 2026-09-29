@@ -7,12 +7,12 @@
 
 use gtk4::cairo::ImageSurface;
 use gtk4::{prelude::*, Button, DrawingArea};
-use image::RgbaImage;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use crate::capture::editor::{
     color::selection_hit_padding_for_scale,
@@ -30,12 +30,32 @@ use crate::capture::editor::{
     types::{frame_needs_canvas, AnnotationAction, BackgroundStyle, Rect, Tool, ViewTransform},
     ui_support::{DockedBarInset, EDITOR_TOP_CHROME_HEIGHT},
 };
+use crate::recording::editor::model::background_render::render_gradient;
+use crate::recording::editor::window::custom_wallpaper_popover::bitmap_to_surface;
 
 use super::motion_mode::MotionRuntime;
 use super::motion_render::{paint_motion_scene_shadow, MotionStage};
 
-const MAX_PREVIEW_SHADOW_DIM: u32 = 1200;
+/// Long edge of the preview's shadow raster. The shadow is a soft blob, so it
+/// is rasterized small (card plus the blur's spread, bounded here) and painted
+/// scaled over the card; a near-full-size layer made every shadow edit stutter.
+const MAX_PREVIEW_SHADOW_DIM: u32 = 768;
+/// Shadow raster bound while an Appearance burst is live. Same trade as the
+/// fill blur: softer while dragging, one crisp sheet once the edits stop.
+const MAX_BURST_SHADOW_DIM: u32 = 320;
 const PREVIEW_SHADOW_BLUR_PASSES: usize = 2;
+/// Working width for the on-screen gradient fill. A gradient is smooth, so the
+/// paint stretches this across the canvas; matching the video editor's preview
+/// texture keeps a stop drag cheap, and a drag rebuilds it every frame.
+const GRADIENT_PREVIEW_WIDTH: u32 = 480;
+
+/// Cache key for the background surface: the fill style, the blurred-screenshot
+/// revision it was built from, the Appearance blur, and which wallpaper pixels
+/// the surface came from (thumbnail flag plus size), so a landed full-size
+/// decode rebuilds instead of leaving the thumbnail stretched. The blur's
+/// quality tier is tracked separately, as the edge the surface was built at, so
+/// a burst can bake a cheap blur without invalidating an already-crisp surface.
+type BackgroundSignature = (BackgroundStyle, Option<u64>, u64, Option<(bool, i32, i32)>);
 
 /// Surface caches shared by the canvas draw path (working image, background, shadow).
 #[derive(Clone)]
@@ -43,13 +63,16 @@ pub(super) struct CanvasRenderCaches {
     pub working_surface: Rc<RefCell<Option<ImageSurface>>>,
     pub working_revision: Rc<Cell<u64>>,
     pub background_surface: Rc<RefCell<Option<ImageSurface>>>,
-    /// Style, blurred-screenshot revision, Appearance blur, and which wallpaper
-    /// pixels the surface was built from (thumbnail flag plus size), so a landed
-    /// full-size decode rebuilds instead of leaving the thumbnail stretched.
-    pub background_signature:
-        Rc<RefCell<Option<(BackgroundStyle, Option<u64>, u64, Option<(bool, i32, i32)>)>>>,
+    pub background_signature: Rc<RefCell<Option<BackgroundSignature>>>,
+    /// Long edge the cached background surface was blurred at. `f64::INFINITY`
+    /// marks a full-resolution/unblurred surface. A burst only upgrades it, so
+    /// a drag never re-blurs a surface that is already crisp enough.
+    pub background_edge: Rc<Cell<f64>>,
     pub shadow_surface: Rc<RefCell<Option<ImageSurface>>>,
-    pub shadow_signature: Rc<Cell<Option<(u32, u32, u64, u64, u64)>>>,
+    pub shadow_signature: Rc<Cell<Option<(u64, u64, u64, u64, u64)>>>,
+    /// Raster budget the cached shadow sheet was built at, so a live burst only
+    /// ever upgrades it and an unrelated drag never rebuilds it.
+    pub shadow_edge: Rc<Cell<f64>>,
 }
 
 impl CanvasRenderCaches {
@@ -59,10 +82,100 @@ impl CanvasRenderCaches {
             working_revision: Rc::new(Cell::new(0)),
             background_surface: Rc::new(RefCell::new(None)),
             background_signature: Rc::new(RefCell::new(None)),
+            background_edge: Rc::new(Cell::new(f64::INFINITY)),
             shadow_surface: Rc::new(RefCell::new(None)),
             shadow_signature: Rc::new(Cell::new(None)),
+            shadow_edge: Rc::new(Cell::new(f64::INFINITY)),
         }
     }
+}
+
+/// How long the canvas keeps repainting with the cheap image filter after the
+/// last Appearance interaction. Long enough to cover the gaps between pointer
+/// events in a drag, short enough that the crisp resting frame lands
+/// immediately after the pointer stops.
+const INTERACTIVE_BURST_TAIL: Duration = Duration::from_millis(150);
+
+/// A burst of pointer-rate Appearance edits.
+///
+/// The canvas already paints with a cheap filter while a canvas drag is in
+/// flight (`EditorState`'s drag fields). A gradient-stop drag, an Appearance
+/// slider, or a preset click goes through the inspector instead, so nothing in
+/// `EditorState` moves and every repaint paid the quality resample of the
+/// working image — the same tens-of-milliseconds blit that made canvas drags
+/// stutter before the interactive filter existed. The burst counts those
+/// inspector edits: `touch` on every interaction keeps the cheap filter up,
+/// and one scheduled wake-up repaints once the edits stop, so the resting
+/// frame is crisp again.
+#[derive(Clone)]
+pub(super) struct InteractivePreview {
+    /// While this is in the future the canvas is interactive.
+    deadline: Rc<Cell<Option<Instant>>>,
+    /// One wake-up is in flight; further touches only push the deadline out.
+    scheduled: Rc<Cell<bool>>,
+    tail: Duration,
+    /// Runs the resting quality repaint when the burst goes quiet.
+    queue_draw: Rc<dyn Fn()>,
+}
+
+impl InteractivePreview {
+    pub(super) fn new(queue_draw: Rc<dyn Fn()>) -> Self {
+        Self::with_tail(INTERACTIVE_BURST_TAIL, queue_draw)
+    }
+
+    /// The testable seat: a short tail keeps the expiry test quick.
+    fn with_tail(tail: Duration, queue_draw: Rc<dyn Fn()>) -> Self {
+        Self {
+            deadline: Rc::new(Cell::new(None)),
+            scheduled: Rc::new(Cell::new(false)),
+            tail,
+            queue_draw,
+        }
+    }
+
+    /// Record an edit that repaints the preview. The caller still queues its
+    /// own draw; this only keeps that draw on the cheap filter and arranges
+    /// the quality repaint that follows.
+    pub(super) fn touch(&self) {
+        self.deadline.set(Some(Instant::now() + self.tail));
+        if !self.scheduled.replace(true) {
+            schedule_burst_tail(
+                self.deadline.clone(),
+                self.scheduled.clone(),
+                self.tail,
+                self.queue_draw.clone(),
+            );
+        }
+    }
+
+    /// Whether a burst is in flight. Read from the canvas draw function.
+    pub(super) fn active(&self) -> bool {
+        self.deadline.get().is_some_and(|at| at > Instant::now())
+    }
+}
+
+/// Wake up once the burst goes quiet. While edits keep arriving the deadline
+/// moves, so the callback re-arms instead of painting: during a drag the
+/// interaction itself is already queueing frames, and this timer only owes the
+/// one quality frame that follows the last edit.
+fn schedule_burst_tail(
+    deadline: Rc<Cell<Option<Instant>>>,
+    scheduled: Rc<Cell<bool>>,
+    tail: Duration,
+    queue_draw: Rc<dyn Fn()>,
+) {
+    gtk4::glib::timeout_add_local_once(tail, move || {
+        let now = Instant::now();
+        match deadline.get() {
+            Some(at) if at > now => {
+                schedule_burst_tail(deadline, scheduled, at - now, queue_draw);
+            }
+            _ => {
+                scheduled.set(false);
+                queue_draw();
+            }
+        }
+    });
 }
 
 /// Inputs for installing the canvas `set_draw_func`.
@@ -78,7 +191,9 @@ pub(super) struct CanvasDrawInputs<'a> {
     pub canvas_padding: i32,
     pub prefers_dark: bool,
     pub caches: &'a CanvasRenderCaches,
-    pub gradient_surfaces: &'a Rc<RefCell<Vec<Option<ImageSurface>>>>,
+    /// The Appearance burst: keeps pointer-rate inspector edits on the cheap
+    /// image filter, then repaints once they stop.
+    pub interactive_preview: &'a InteractivePreview,
     pub wallpaper_cache: &'a Rc<RefCell<HashMap<PathBuf, ImageSurface>>>,
     /// The shared Motion runtime; its `background_surface` is where the
     /// Appearance inspector already decoded the selected wallpaper.
@@ -99,7 +214,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         canvas_padding,
         prefers_dark,
         caches,
-        gradient_surfaces,
+        interactive_preview,
         wallpaper_cache,
         motion_runtime,
     } = input;
@@ -115,10 +230,12 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
     let working_revision = caches.working_revision.clone();
     let background_surface = caches.background_surface.clone();
     let background_signature_cache = caches.background_signature.clone();
+    let background_edge = caches.background_edge.clone();
     let shadow_surface = caches.shadow_surface.clone();
     let shadow_signature_cache = caches.shadow_signature.clone();
+    let shadow_edge_cache = caches.shadow_edge.clone();
     let canvas_padding_draw = canvas_padding as f64;
-    let gradient_surfaces = gradient_surfaces.clone();
+    let interactive_preview = interactive_preview.clone();
     let wallpaper_cache = wallpaper_cache.clone();
     let motion_runtime = motion_runtime.clone();
     drawing_area.set_draw_func(move |_, context, width, height| {
@@ -139,6 +256,10 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             background_insert,
             background_alignment,
             background_shadow,
+            shadow_opacity,
+            shadow_blur,
+            shadow_offset_x,
+            shadow_offset_y,
             background_corner_radius,
             background_noise,
             background_blur,
@@ -174,6 +295,10 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 st.background_insert,
                 st.background_alignment,
                 st.background_shadow,
+                st.shadow_opacity,
+                st.shadow_blur,
+                st.shadow_offset_x,
+                st.shadow_offset_y,
                 st.background_corner_radius,
                 st.background_noise,
                 st.background_blur,
@@ -192,11 +317,14 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 st.hovered_text_action_index,
                 st.arrow_editing_controls,
                 // A drag or draft is repainting at pointer rate: that frame has to
-                // stay cheap, so it cannot use the quality image resample.
+                // stay cheap, so it cannot use the quality image resample. An
+                // Appearance burst (a stop drag, a slider, a preset click) is
+                // the same kind of frame even though no canvas drag is running.
                 st.select_drag_anchor.is_some()
                     || st.drag_start.is_some()
                     || st.active_text_is_dragging
-                    || st.arrow_control_dragging.is_some(),
+                    || st.arrow_control_dragging.is_some()
+                    || interactive_preview.active(),
             )
         };
 
@@ -222,6 +350,12 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 .with_style(background_style.clone())
                 .with_padding(background_padding)
                 .with_shadow(background_shadow)
+                .with_shadow_profile(
+                    shadow_opacity,
+                    shadow_blur,
+                    shadow_offset_x,
+                    shadow_offset_y,
+                )
                 .with_insert(background_insert)
                 .with_alignment(background_alignment)
                 .with_corner_radius(background_corner_radius)
@@ -361,49 +495,71 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 );
                 // The blur is baked into the cached surface, so the working
                 // resolution only has to satisfy what the canvas shows on screen.
-                let blur_work_edge = (virtual_w * canvas_t.scale).clamp(256.0, 1280.0);
+                // It is also the one expensive step here: the box blur costs
+                // O(pixels) and the fill is then upscaled across the canvas, so
+                // the preview bounds it rather than paying the export's
+                // full-resolution cost on every edit. The burst bakes a small
+                // one; the resting frame a crisper one.
+                let canvas_edge = virtual_w * canvas_t.scale;
+                let blur_work_edge = if interactive_frame {
+                    canvas_edge.clamp(96.0, 128.0)
+                } else {
+                    canvas_edge.clamp(256.0, 512.0)
+                };
                 let needs_background_surface = !matches!(
                     current_style,
                     BackgroundStyle::None | BackgroundStyle::PlainColor(_)
                 );
+                // A burst may bake the blur smaller than the resting frame needs;
+                // the burst-tail repaint upgrades it. But a surface already crisp
+                // enough for this frame is never rebuilt, so dragging a control
+                // that does not touch the blur (padding, radius, noise) costs
+                // nothing here.
+                let background_edge_draw = background_edge.clone();
+                let blur_upgrade =
+                    needs_background_surface && blur_work_edge > background_edge_draw.get() + 0.5;
+                // Edge the surface we are about to build actually ends up at:
+                // the source's own long edge caps the blur, and a zero blur
+                // keeps the source as-is (full resolution, nothing to upgrade).
+                let edge_for = |source: &ImageSurface| -> f64 {
+                    if background_blur <= 0.001 {
+                        f64::INFINITY
+                    } else {
+                        blur_work_edge.min(f64::from(source.width().max(source.height())))
+                    }
+                };
+                let mut built_edge = background_edge_draw.get();
                 let mut bg_cache = background_surface.borrow_mut();
                 let mut bg_signature_cache = background_signature_cache.borrow_mut();
 
                 if bg_signature_cache.as_ref() != Some(&current_background_signature)
                     || (needs_background_surface && bg_cache.is_none())
+                    || blur_upgrade
                 {
                     // A Wallpaper whose pixels are not decoded yet keeps the
                     // previous surface and leaves the signature stale, so the next
                     // draw retries instead of caching a blank background.
                     let mut background_resolved = true;
-                    if let BackgroundStyle::Gradient(idx) = &current_style {
-                        let surfaces = gradient_surfaces.borrow();
-                        let source = match surfaces.get(*idx).and_then(|s| s.as_ref()) {
-                            Some(surface) => Some(surface.clone()),
-                            None => {
-                                let file_name =
-                                    super::background_panel::BACKGROUND_GRADIENT_PREVIEW_FILES
-                                        [*idx];
-                                let path = super::background_panel::background_gradient_asset_path(
-                                    file_name,
-                                );
-                                rgba_image_to_surface(
-                                    &super::background_panel::load_background_preview_image(
-                                        &path,
-                                        super::background_panel::PREVIEW_BACKGROUND_MAX_EDGE,
-                                    )
-                                    .unwrap_or_else(|| RgbaImage::new(1, 1)),
-                                )
-                            }
-                        };
-                        *bg_cache = source.map(|surface| {
-                            blurred_preview_background(
-                                &surface,
-                                background_blur,
-                                virtual_w,
-                                blur_work_edge,
-                            )
-                        });
+                    if let BackgroundStyle::Gradient(gradient) = &current_style {
+                        // Rasterize the shared spec, then blur it like any
+                        // other fill. The fill covers the whole scene, so the
+                        // raster takes the scene's aspect and the paint below
+                        // stretches it across the canvas.
+                        let aspect = virtual_h / virtual_w.max(1.0);
+                        let height = ((f64::from(GRADIENT_PREVIEW_WIDTH) * aspect).round() as u32)
+                            .clamp(1, 960);
+                        let surface = bitmap_to_surface(&render_gradient(
+                            gradient,
+                            GRADIENT_PREVIEW_WIDTH,
+                            height,
+                        ));
+                        *bg_cache = Some(blurred_preview_background(
+                            &surface,
+                            background_blur,
+                            virtual_w,
+                            blur_work_edge,
+                        ));
+                        built_edge = edge_for(&surface);
                     } else if let BackgroundStyle::Wallpaper(path) = &current_style {
                         // The Appearance inspector decoded this wallpaper for its
                         // own preview; reuse those pixels rather than running a
@@ -417,6 +573,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                                 virtual_w,
                                 blur_work_edge,
                             ));
+                            built_edge = edge_for(surface);
                         } else if let Some(surface) = wallpaper_cache.borrow().get(path) {
                             *bg_cache = Some(blurred_preview_background(
                                 surface,
@@ -424,6 +581,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                                 virtual_w,
                                 blur_work_edge,
                             ));
+                            built_edge = edge_for(surface);
                         } else {
                             // Still decoding off-thread; it queues a redraw when it
                             // lands. ponytail: never sync-decode on the UI thread.
@@ -431,6 +589,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                         }
                     } else if let BackgroundStyle::PlainColor(_color) = &current_style {
                         *bg_cache = None;
+                        built_edge = f64::INFINITY;
                     } else if let BackgroundStyle::Blurred(blur_idx) = &current_style {
                         let (bw, bh) = working_image.dimensions();
 
@@ -474,9 +633,12 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                             false,
                         );
                         *bg_cache = rgba_image_to_surface(&blurred_bg);
+                        // The screenshot blur is not tiered; treat it as crisp.
+                        built_edge = f64::INFINITY;
                     }
                     if background_resolved {
                         *bg_signature_cache = Some(current_background_signature);
+                        background_edge_draw.set(built_edge);
                     }
                 }
 
@@ -591,22 +753,38 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                     let mut shadow_surface_cache = shadow_surface.borrow_mut();
                     let base_blur = shadow.blur.max(1.0);
                     let base_corner = background_corner_radius * layout.scale_factor;
-                    let preview_scale = (MAX_PREVIEW_SHADOW_DIM as f64
-                        / image_width.max(image_height).max(1.0))
-                    .min(1.0);
+                    // Bound the whole layer, card plus the blur's spread, so a
+                    // large shadow blur cannot blow up the per-edit raster.
+                    let layer_span =
+                        image_width.max(image_height).max(1.0) + base_blur * 1.35 * 2.0;
+                    // Same tiering as the fill blur: a live burst rasters the
+                    // shadow small, and the burst tail lands one crisp sheet.
+                    let shadow_budget = if interactive_frame {
+                        MAX_BURST_SHADOW_DIM as f64
+                    } else {
+                        MAX_PREVIEW_SHADOW_DIM as f64
+                    };
+                    let preview_scale = (shadow_budget / layer_span).min(1.0);
                     let preview_width = (image_width * preview_scale).round().max(1.0) as u32;
                     let preview_height = (image_height * preview_scale).round().max(1.0) as u32;
                     let preview_blur = (base_blur * preview_scale).max(1.0);
                     let preview_corner = base_corner * preview_scale;
+                    // Key on the shadow's own values, not the raster budget:
+                    // dragging an unrelated control (padding, radius) must not
+                    // re-raster the shadow just because its burst is live. The
+                    // budget the sheet was built at is tracked separately, so a
+                    // burst only ever upgrades it.
                     let shadow_signature = (
-                        preview_width,
-                        preview_height,
-                        preview_blur.to_bits(),
+                        image_width.to_bits(),
+                        image_height.to_bits(),
+                        base_blur.to_bits(),
                         shadow.opacity.to_bits(),
-                        preview_corner.to_bits(),
+                        base_corner.to_bits(),
                     );
+                    let budget_upgrade = shadow_budget > shadow_edge_cache.get() + 0.5;
                     let needs_recompute = shadow_signature_cache.get() != Some(shadow_signature)
-                        || shadow_surface_cache.is_none();
+                        || shadow_surface_cache.is_none()
+                        || budget_upgrade;
 
                     if needs_recompute {
                         if let Ok(mut shadow_image) = render_shadow_layer(
@@ -633,6 +811,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                             }
                             *shadow_surface_cache = rgba_image_to_surface(&shadow_image);
                             shadow_signature_cache.set(Some(shadow_signature));
+                            shadow_edge_cache.set(shadow_budget);
                         }
                     }
 
@@ -1108,6 +1287,8 @@ fn draw_rounded_rect_path(
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn canvas_render_owns_draw_func_caches_and_lock_release() {
         let source = include_str!("canvas_render.rs");
@@ -1150,6 +1331,59 @@ mod tests {
         );
     }
 
+    /// Re-blurring the whole fill per slider tick stuttered next to the cheap
+    /// controls around it. A live burst bakes the blur small and the tail
+    /// upgrades it. The tier must ride the surface's edge, not the cache key, or
+    /// every unrelated slider drag (padding, radius, noise) would re-blur the
+    /// fill.
+    #[test]
+    fn background_blur_drops_resolution_during_a_live_burst() {
+        let source = include_str!("canvas_render.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("let blur_work_edge = if interactive_frame {")
+                && production.contains("canvas_edge.clamp(96.0, 128.0)")
+                && production.contains("canvas_edge.clamp(256.0, 512.0)")
+                && production.contains("blur_work_edge > background_edge_draw.get() + 0.5")
+                && production.contains("background_edge_draw.set(built_edge);"),
+            "the blur tier must ride the surface edge, not invalidate the cache key",
+        );
+    }
+
+    /// The shadow sheet is a soft blob, so it rasters small and is painted
+    /// scaled; a near-full-size layer made every shadow edit stutter. The
+    /// budget must ride its own tracked edge, not the cache key, or dragging an
+    /// unrelated control (padding, radius) would re-raster the shadow too.
+    #[test]
+    fn shadow_sheet_is_raster_bound_and_tiered_by_a_tracked_budget() {
+        let source = include_str!("canvas_render.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("const MAX_PREVIEW_SHADOW_DIM: u32 = 768;")
+                && production.contains("const MAX_BURST_SHADOW_DIM: u32 = 320;")
+                && production
+                    .contains("let preview_scale = (shadow_budget / layer_span).min(1.0);")
+                && production.contains("shadow_budget > shadow_edge_cache.get() + 0.5")
+                && production.contains("shadow_edge_cache.set(shadow_budget);"),
+            "the shadow sheet must be bounded and upgrade by a tracked budget, not its cache key",
+        );
+    }
+
+    /// A stop drag repaints the static preview every frame, so the gradient it
+    /// rasters must stay small. It carried the whole canvas edge to begin with,
+    /// and that is what made the drag stutter next to the video editor.
+    #[test]
+    fn static_canvas_rasters_the_gradient_at_the_video_editors_preview_size() {
+        let source = include_str!("canvas_render.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("const GRADIENT_PREVIEW_WIDTH: u32 = 480;")
+                && production.contains("render_gradient(")
+                && production.contains("GRADIENT_PREVIEW_WIDTH,"),
+            "the static gradient raster must be sized by GRADIENT_PREVIEW_WIDTH, matching the video editor's preview texture",
+        );
+    }
+
     #[test]
     fn interactive_drags_repaint_with_the_cheap_image_filter() {
         let source = include_str!("canvas_render.rs");
@@ -1159,11 +1393,36 @@ mod tests {
                 && production.contains("st.drag_start.is_some()")
                 && production.contains("st.active_text_is_dragging")
                 && production.contains("st.arrow_control_dragging.is_some()")
+                && production.contains("interactive_preview.active()")
                 && production.contains("editor_interactive_image_filter()")
                 && production.contains("editor_image_filter_for_scale(scale)")
                 && production.contains("pick_image_filter(canvas_t.scale)")
                 && production.contains("pick_image_filter(t.scale)"),
             "Pointer-rate frames must blit with the cheap image filter; the resting frame keeps the quality one"
         );
+    }
+
+    /// The Appearance burst is what keeps a stop drag cheap: no `EditorState`
+    /// drag field moves, so without it every drag frame paid the quality
+    /// resample the interactive filter exists to avoid.
+    #[test]
+    fn an_appearance_burst_keeps_frames_cheap_until_the_tail_expires() {
+        let draws = Rc::new(Cell::new(0));
+        let preview = InteractivePreview::with_tail(
+            Duration::from_millis(20),
+            Rc::new({
+                let draws = draws.clone();
+                move || draws.set(draws.get() + 1)
+            }),
+        );
+        assert!(!preview.active(), "a resting canvas is not interactive");
+        preview.touch();
+        assert!(preview.active(), "an interaction turns the burst on");
+        // The burst has expired on its own, and the one quality repaint it
+        // owes has landed.
+        std::thread::sleep(Duration::from_millis(60));
+        while gtk4::glib::MainContext::default().iteration(false) {}
+        assert!(!preview.active(), "the burst must expire on its own");
+        assert_eq!(draws.get(), 1, "the burst owes exactly one resting repaint");
     }
 }

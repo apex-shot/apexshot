@@ -78,8 +78,13 @@ fn final_image_background_shadow_visibly_darkens_pixels_below_card() {
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
     state.background_padding = 40.0;
     state.background_insert = 0.0;
-    state.background_shadow = 45.0;
     state.background_corner_radius = 18.0;
+    // The shared Appearance panel drives the still's shadow now; a raised
+    // opacity with a downward offset is what the panel produces.
+    state.shadow_opacity = 0.45;
+    state.shadow_blur = 40.0;
+    state.shadow_offset_x = 0.0;
+    state.shadow_offset_y = 24.0;
 
     let final_image = state.to_final_image().expect("final image");
     let shadow_pixel = *final_image.get_pixel(final_image.width() / 2, 290);
@@ -701,7 +706,16 @@ fn dump_liquid_glass_preview() {
     let image = RgbaImage::from_pixel(1373, 882, image::Rgba([150, 160, 175, 255]));
     let spec = FrameStyle::Liquid.spec();
     let cases: [(&str, BackgroundStyle); 3] = [
-        ("purple", BackgroundStyle::Gradient(7)),
+        (
+            "purple",
+            BackgroundStyle::Gradient(crate::recording::editor::model::VideoGradient {
+                stops: vec![
+                    crate::recording::editor::model::GradientStop::new(0.0, 0x4a, 0x1d, 0x8c),
+                    crate::recording::editor::model::GradientStop::new(1.0, 0xd8, 0xb4, 0xff),
+                ],
+                ..Default::default()
+            }),
+        ),
         (
             "wallpaper",
             BackgroundStyle::Wallpaper(
@@ -916,4 +930,40 @@ fn final_image_background_blur_softens_the_fill_and_keeps_grain_crisp() {
     );
 
     let _ = std::fs::remove_file(&path);
+}
+
+/// The static style carries the shared `VideoGradient` spec, so a custom
+/// gradient exports as itself instead of falling back to a bundled preset
+/// image (the bug this replaced).
+#[test]
+fn final_image_renders_a_gradient_background_from_its_spec() {
+    use crate::recording::editor::model::{GradientStop, VideoGradient};
+
+    let screenshot = RgbaImage::from_pixel(80, 60, image::Rgba([90, 90, 90, 255]));
+    let mut state = EditorState::new(screenshot);
+    state.background_style = BackgroundStyle::Gradient(VideoGradient {
+        stops: vec![
+            GradientStop::new(0.0, 255, 0, 0),
+            GradientStop::new(1.0, 0, 0, 255),
+        ],
+        ..Default::default()
+    });
+    state.background_padding = 30.0;
+    state.background_insert = 0.0;
+    state.background_shadow = 0.0;
+    state.background_corner_radius = 0.0;
+
+    let out = state.to_final_image().expect("final image");
+    // Row 2 is fill only (the top padding band). Angle 0 runs left-to-right,
+    // so the band's left edge is the first stop and its right edge the last.
+    let left = *out.get_pixel(1, 2);
+    let right = *out.get_pixel(out.width() - 2, 2);
+    assert!(
+        left[0] > 200 && left[2] < 60,
+        "the first stop should paint the left edge, got {left:?}",
+    );
+    assert!(
+        right[2] > 200 && right[0] < 60,
+        "the last stop should paint the right edge, got {right:?}",
+    );
 }

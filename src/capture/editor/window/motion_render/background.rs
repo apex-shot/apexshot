@@ -58,14 +58,23 @@ fn paint_backdrop(
             context.paint().ok();
         }
         MotionBackgroundFillType::Gradient => {
-            let [r1, g1, b1, a1] = appearance.gradient_color_1;
-            let [r2, g2, b2, a2] = appearance.gradient_color_2;
             let (x, y, w, h) = scene.unwrap_or((0.0, 0.0, f64::from(width), f64::from(height)));
-            let gradient = LinearGradient::new(x, y, x + w, y + h);
-            gradient.add_color_stop_rgba(0.0, r1, g1, b1, a1);
-            gradient.add_color_stop_rgba(1.0, r2, g2, b2, a2);
-            context.set_source(&gradient).ok();
+            // Rasterize through the video editor's shared renderer: a Cairo
+            // two-stop line would be a second description of the same fill and
+            // could not honor the stop positions, kind, angle, or reversal this
+            // spec carries. The raster is built once per draw, which is fine
+            // because the editor caches the whole backdrop layer.
+            let bitmap = render_gradient(
+                &appearance.gradient,
+                w.ceil().max(1.0) as u32,
+                h.ceil().max(1.0) as u32,
+            );
+            let surface = crate::recording::editor::window::custom_wallpaper_popover::bitmap_to_surface(&bitmap);
+            let _ = context.save();
+            context.translate(x, y);
+            context.set_source_surface(&surface, 0.0, 0.0).ok();
             context.paint().ok();
+            let _ = context.restore();
         }
         MotionBackgroundFillType::Wallpaper | MotionBackgroundFillType::Image => {
             let (x, y, scene_w, scene_h) =

@@ -354,6 +354,12 @@ impl EditorState {
             .with_style(self.background_style.clone())
             .with_padding(self.background_padding)
             .with_shadow(self.background_shadow)
+            .with_shadow_profile(
+                self.shadow_opacity,
+                self.shadow_blur,
+                self.shadow_offset_x,
+                self.shadow_offset_y,
+            )
             .with_insert(self.background_insert)
             .with_alignment(self.background_alignment)
             .with_corner_radius(self.background_corner_radius)

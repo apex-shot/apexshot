@@ -9,6 +9,7 @@ use super::super::types::{
 };
 use super::super::window::motion_render::{paint_motion_scene_shadow, MotionStage};
 use super::EditorState;
+use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::model::MotionSceneShadow;
 use image::RgbaImage;
 use std::path::Path;
@@ -504,6 +505,12 @@ impl EditorState {
             .with_style(self.background_style.clone())
             .with_padding(self.background_padding)
             .with_shadow(self.background_shadow)
+            .with_shadow_profile(
+                self.shadow_opacity,
+                self.shadow_blur,
+                self.shadow_offset_x,
+                self.shadow_offset_y,
+            )
             .with_insert(self.background_insert)
             .with_alignment(self.background_alignment)
             .with_corner_radius(self.background_corner_radius)
@@ -564,14 +571,20 @@ impl EditorState {
                     pixel,
                 )
             }
-            BackgroundStyle::Gradient(idx) => {
-                let file_name = crate::capture::editor::window::background_panel::BACKGROUND_GRADIENT_PREVIEW_FILES[*idx];
-                let path = crate::capture::editor::window::background_panel::background_gradient_asset_path(file_name);
-                self.load_and_resize_background(
-                    &path,
-                    layout.canvas_width as u32,
-                    layout.canvas_height as u32,
-                )?
+            BackgroundStyle::Gradient(gradient) => {
+                // Render the shared spec at export resolution so the still
+                // matches the Motion preview and export byte-for-byte.
+                let bitmap = render_gradient(
+                    gradient,
+                    layout.canvas_width.max(1.0) as u32,
+                    layout.canvas_height.max(1.0) as u32,
+                );
+                let mut rgba = Vec::with_capacity(bitmap.pixels.len() / 3 * 4);
+                for rgb in bitmap.pixels.chunks_exact(3) {
+                    rgba.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+                }
+                RgbaImage::from_raw(bitmap.width, bitmap.height, rgba)
+                    .expect("gradient raster matches its own dimensions")
             }
             BackgroundStyle::Wallpaper(path) => self.load_and_resize_background(
                 path,

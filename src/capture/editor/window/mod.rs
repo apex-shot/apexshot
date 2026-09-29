@@ -1312,16 +1312,22 @@ fn setup_editor_window_full(
 
     let render_caches = canvas_render::CanvasRenderCaches::new();
 
-    let BackgroundAssetCaches {
-        gradient_surfaces,
-        wallpaper_cache,
-    } = background_assets::install_background_asset_loading(&drawing_area);
+    let BackgroundAssetCaches { wallpaper_cache } =
+        background_assets::install_background_asset_loading(&drawing_area);
 
     // Async Effects Pipeline (channels, worker, polling, watchdog, rebuild callback).
     let rebuild_effects_async = effects::install_async_effects_pipeline(&state, &drawing_area);
 
     // Static Background shares Motion Appearance: same builder, same session,
     // same side-panel tools (Appearance). No crop here.
+    // Appearance edits repaint the canvas at pointer rate (a gradient-stop
+    // drag, a slider, a preset click) while no canvas drag is running, so the
+    // interactive burst is what keeps those frames on the cheap image filter
+    // and lands the crisp one when they stop.
+    let interactive_preview = canvas_render::InteractivePreview::new(Rc::new({
+        let drawing_area = drawing_area.clone();
+        move || drawing_area.queue_draw()
+    }));
     // Auto-select slot: filled once the toolbar wiring exists below. The panel
     // captures this forwarder now, so Appearance clicks (and Motion-leave
     // rebuilds) arm Background even though tool buttons don't exist yet.
@@ -1329,7 +1335,12 @@ fn setup_editor_window_full(
         Rc::new(RefCell::new(None));
     let background_interact_forwarder: Rc<dyn Fn()> = Rc::new({
         let slot = background_auto_select_slot.clone();
+        let interactive_preview = interactive_preview.clone();
         move || {
+            // Every interaction that reaches this forwarder repaints the
+            // preview, so the burst is marked before the tool switch: the
+            // switch's own early-return must not skip it.
+            interactive_preview.touch();
             if let Some(switch) = slot.borrow().as_ref() {
                 switch();
             }
@@ -2433,7 +2444,7 @@ fn setup_editor_window_full(
         prefers_dark,
         docked_inset: &docked_inset,
         caches: &render_caches,
-        gradient_surfaces: &gradient_surfaces,
+        interactive_preview: &interactive_preview,
         wallpaper_cache: &wallpaper_cache,
         motion_runtime: &motion_host.session().runtime,
     });
@@ -2592,6 +2603,11 @@ fn setup_editor_window_full(
         export_motion: motion_host.export_callback(path.clone()),
     });
 
+    // Share the video editor's focus-out net: the Motion Appearance popover is
+    // the shared Custom fill popover, which is deliberately grabless and
+    // non-autohiding, so it relies on this sweep to come down when another app
+    // takes focus. Without it the card stays up over whatever window you switch to.
+    crate::recording::editor::window::sweep_popovers_on_deactivate(&window);
     window.present();
     crate::update_ui::present_if_needed(&root_overlay);
     if annotate_config.always_on_top {
@@ -2889,6 +2905,22 @@ mod tests {
                 && production_source
                     .contains("*last_inspector.borrow_mut() = \"background\".to_string();"),
             "Static tool changes must pin the Appearance (Background) inspector and restore it after Motion",
+        );
+    }
+
+    /// The Appearance burst is seated on the forwarder because every
+    /// Appearance interaction already lands there — a gradient-stop drag, a
+    /// slider, or a preset click. Wiring it anywhere later (say, only in the
+    /// fill closures) would leave the other edits on the quality resample.
+    #[test]
+    fn appearance_interactions_mark_the_canvas_interactive() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("canvas_render::InteractivePreview::new(")
+                && production_source.contains("interactive_preview.touch();")
+                && production_source.contains("interactive_preview: &interactive_preview,"),
+            "Appearance edits must mark the canvas interactive and hand the burst to the draw function",
         );
     }
 
