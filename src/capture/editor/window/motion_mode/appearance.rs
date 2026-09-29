@@ -336,8 +336,12 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     let background_section = motion_appearance_section("Background");
     let none_button = Button::with_label(&t("None"));
     none_button.set_has_frame(false);
-    none_button.set_halign(Align::Start);
-    none_button.add_css_class("editor-background-section-action-button");
+    none_button.set_hexpand(true);
+    none_button.set_halign(Align::Fill);
+    // The video editor's None row, class and all. Both Background panels clear
+    // the fill from the same chrome, so the two editors stay in step and the
+    // rule only has to be kept in one place.
+    none_button.add_css_class("recording-editor-bg-none-row");
     if initial_fill_type == MotionBackgroundFillType::None {
         none_button.add_css_class("active-background-option");
     }
@@ -2055,6 +2059,29 @@ mod tests {
                 && production_source.contains("paint_image_row_thumb(")
                 && !production_source.contains("t(\"Choose…\")"),
             "the Image tab must be the video editor's single Select image... row",
+        );
+    }
+
+    /// The None row is the video editor's, shared by class rather than copied:
+    /// the recording stylesheet is installed in this window too, so both
+    /// Background panels clear the fill from one rule and one look.
+    #[test]
+    fn none_row_reuses_the_video_editor_chrome() {
+        let source = include_str!("appearance.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source
+                .contains("none_button.add_css_class(\"recording-editor-bg-none-row\")"),
+            "the None row must reuse the video editor's row chrome",
+        );
+        assert!(
+            !production_source
+                .contains("none_button.add_css_class(\"editor-background-section-action-button\")"),
+            "None must not fall back to the small uppercase section-action button",
+        );
+        assert!(
+            production_source.contains("background_section.append(&none_button);"),
+            "the None row must sit in the Background section, under the tabs",
         );
     }
 

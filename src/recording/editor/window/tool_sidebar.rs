@@ -863,6 +863,17 @@ mod tests {
             tab_position < none_position && none_position < pages_position,
             "the None row must sit under the strip and outside the pages"
         );
+        // The image editor reuses this class, so the rule has to exist here
+        // rather than being duplicated into the capture stylesheet.
+        let css = include_str!("../ui_support_css/09.css");
+        assert!(
+            css.contains("button.recording-editor-bg-none-row {"),
+            "the shared None row needs a resting rule"
+        );
+        assert!(
+            css.contains("button.recording-editor-bg-none-row.active-background-option,"),
+            "the shared None row needs its selected state"
+        );
     }
 
     #[test]
