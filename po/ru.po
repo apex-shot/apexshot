@@ -2575,6 +2575,9 @@ msgstr "Выбрать фоновое изображение"
 msgid "Select image..."
 msgstr "Выбрать изображение..."
 
+msgid "Choose Background Image"
+msgstr "Выбрать фоновое изображение"
+
 msgid "Stops"
 msgstr "Точки"
 
