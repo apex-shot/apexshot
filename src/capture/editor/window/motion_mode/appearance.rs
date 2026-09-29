@@ -1,9 +1,9 @@
-use gtk4::cairo::Context;
+use gtk4::cairo::{Context, Format, ImageSurface};
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, DrawingArea, Entry,
     FileChooserAction, FileChooserNative, FileFilter, GestureClick, Grid, Image, Label,
-    Orientation, PolicyType, ResponseType, Revealer, RevealerTransitionType, ScrolledWindow,
-    Separator, Stack, ToggleButton,
+    Orientation, PickFlags, PolicyType, ResponseType, Revealer, RevealerTransitionType,
+    ScrolledWindow, Separator, Stack, ToggleButton,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -41,111 +41,143 @@ fn frame_style_preset_area(style: FrameStyle) -> DrawingArea {
     area.set_hexpand(false);
     area.set_halign(Align::Center);
     area.set_valign(Align::Center);
+    // Each swatch runs a whole frame preview (backings, liquid gradient, border
+    // strokes). The Style disclosure slides open by re-snapshotting its tiles
+    // every frame, so render a swatch once per size and blit it after that
+    // instead of re-running that cairo mid-animation, which is what made the
+    // reveal stutter.
+    let cache: Rc<RefCell<Option<(i32, i32, ImageSurface)>>> = Rc::new(RefCell::new(None));
     area.set_draw_func(move |_, cr, width, height| {
-        let w = f64::from(width);
-        let h = f64::from(height);
-        // No tile backdrop: the chromeless button shows the panel behind the
-        // preview, so the style swatch itself is the tile.
-        let spec = style.spec();
-        let card_w = 34.0;
-        let card_h = 22.0;
-        let card_x = (w - card_w) / 2.0;
-        let card_y = (h - card_h) / 2.0;
-        let card_r = 5.0;
-        for backing in [spec.backing1, spec.backing2].into_iter().flatten() {
-            let _ = cr.save();
-            if backing.center_pivot {
-                cr.translate(
-                    card_x + card_w / 2.0 + backing.offset_x * 0.32,
-                    card_y + card_h / 2.0 + backing.offset_y * 0.32,
-                );
-                cr.rotate(backing.rotation_deg.to_radians());
-                cr.translate(-card_w / 2.0, -card_h / 2.0);
-            } else {
-                cr.translate(
-                    card_x + backing.offset_x * 0.32 + card_w,
-                    card_y + backing.offset_y * 0.32 + card_h,
-                );
-                cr.rotate(backing.rotation_deg.to_radians());
-                cr.translate(-card_w, -card_h);
+        let surface = {
+            let mut cache = cache.borrow_mut();
+            let stale = !matches!(cache.as_ref(), Some((w, h, _)) if *w == width && *h == height);
+            if stale {
+                *cache = render_frame_style_swatch(style, width, height)
+                    .map(|surface| (width, height, surface));
             }
-            cr.set_source_rgba(
-                backing.color.r,
-                backing.color.g,
-                backing.color.b,
-                backing.color.a,
-            );
-            motion_thumbnail_rounded_rectangle(cr, 0.0, 0.0, card_w, card_h, card_r);
-            cr.fill().ok();
-            cr.restore().ok();
-        }
-        cr.set_source_rgba(0.82, 0.82, 0.84, 1.0);
-        motion_thumbnail_rounded_rectangle(cr, card_x, card_y, card_w, card_h, card_r);
-        cr.fill().ok();
-        // Glass presets: same band + rim recipe as the renderers, scaled
-        // down to the tile.
-        if let Some(liquid) =
-            crate::capture::editor::render::LiquidFrame::resolve(&spec, spec.border_thickness, 0.45)
-        {
-            let path = |path_context: &gtk4::cairo::Context, expand: f64| {
-                crate::capture::editor::render::rounded_rect_path(
-                    path_context,
-                    card_x - expand,
-                    card_y - expand,
-                    card_w + expand * 2.0,
-                    card_h + expand * 2.0,
-                    if card_r <= 0.0 { 0.0 } else { card_r + expand },
-                );
-            };
-            liquid.paint(cr, card_y, card_y + card_h, path);
-        }
-        let mut expand = 0.0;
-        let draw_stroke = |thickness: f64, r: f64, g: f64, b: f64, a: f64, extra: f64| {
-            let t = (thickness * 0.32).max(1.0);
-            let e = extra + t / 2.0;
-            cr.set_source_rgba(r, g, b, a);
-            cr.set_line_width(t);
-            motion_thumbnail_rounded_rectangle(
-                cr,
-                card_x - e,
-                card_y - e,
-                card_w + e * 2.0,
-                card_h + e * 2.0,
-                card_r + e,
-            );
-            cr.stroke().ok();
-            e + t / 2.0
+            cache.as_ref().map(|(_, _, surface)| surface.clone())
         };
-        if !spec.liquid && spec.border_thickness > 0.0 && !spec.inset_border {
-            let c = spec.border_color;
-            expand = draw_stroke(spec.border_thickness, c.r, c.g, c.b, c.a, expand);
-        }
-        if !spec.liquid && spec.inset_border && spec.border_thickness > 0.0 {
-            let t = (spec.border_thickness * 0.32).max(1.0);
-            let c = spec.border_color;
-            cr.set_source_rgba(c.r, c.g, c.b, c.a);
-            cr.set_line_width(t);
-            motion_thumbnail_rounded_rectangle(
-                cr,
-                card_x + t / 2.0,
-                card_y + t / 2.0,
-                (card_w - t).max(1.0),
-                (card_h - t).max(1.0),
-                (card_r - t / 2.0).max(0.0),
-            );
-            cr.stroke().ok();
-        }
-        for outer in [spec.outer1, spec.outer2]
-            .into_iter()
-            .flatten()
-            .filter(|_| !spec.liquid)
-        {
-            expand += outer.gap * 0.32;
-            let c = outer.color;
-            expand = draw_stroke(outer.thickness, c.r, c.g, c.b, c.a, expand);
+        if let Some(surface) = surface {
+            let _ = cr.set_source_surface(&surface, 0.0, 0.0);
+            let _ = cr.paint();
         }
     });
     area
+}
+
+/// Render one frame-style swatch at `width`x`height` into a fresh surface, so
+/// the draw func only ever blits it.
+fn render_frame_style_swatch(style: FrameStyle, width: i32, height: i32) -> Option<ImageSurface> {
+    let surface = ImageSurface::create(Format::ARgb32, width.max(1), height.max(1)).ok()?;
+    let cr = Context::new(&surface).ok()?;
+    paint_frame_style_swatch(&cr, style, f64::from(width), f64::from(height));
+    surface.flush();
+    Some(surface)
+}
+
+/// Swatch body: a gray card with the preset's backings, liquid rim and
+/// outside/inset border strokes, scaled to the tile.
+fn paint_frame_style_swatch(cr: &Context, style: FrameStyle, w: f64, h: f64) {
+    // No tile backdrop: the chromeless button shows the panel behind the
+    // preview, so the style swatch itself is the tile.
+    let spec = style.spec();
+    let card_w = 34.0;
+    let card_h = 22.0;
+    let card_x = (w - card_w) / 2.0;
+    let card_y = (h - card_h) / 2.0;
+    let card_r = 5.0;
+    for backing in [spec.backing1, spec.backing2].into_iter().flatten() {
+        let _ = cr.save();
+        if backing.center_pivot {
+            cr.translate(
+                card_x + card_w / 2.0 + backing.offset_x * 0.32,
+                card_y + card_h / 2.0 + backing.offset_y * 0.32,
+            );
+            cr.rotate(backing.rotation_deg.to_radians());
+            cr.translate(-card_w / 2.0, -card_h / 2.0);
+        } else {
+            cr.translate(
+                card_x + backing.offset_x * 0.32 + card_w,
+                card_y + backing.offset_y * 0.32 + card_h,
+            );
+            cr.rotate(backing.rotation_deg.to_radians());
+            cr.translate(-card_w, -card_h);
+        }
+        cr.set_source_rgba(
+            backing.color.r,
+            backing.color.g,
+            backing.color.b,
+            backing.color.a,
+        );
+        motion_thumbnail_rounded_rectangle(cr, 0.0, 0.0, card_w, card_h, card_r);
+        cr.fill().ok();
+        cr.restore().ok();
+    }
+    cr.set_source_rgba(0.82, 0.82, 0.84, 1.0);
+    motion_thumbnail_rounded_rectangle(cr, card_x, card_y, card_w, card_h, card_r);
+    cr.fill().ok();
+    // Glass presets: same band + rim recipe as the renderers, scaled
+    // down to the tile.
+    if let Some(liquid) =
+        crate::capture::editor::render::LiquidFrame::resolve(&spec, spec.border_thickness, 0.45)
+    {
+        let path = |path_context: &gtk4::cairo::Context, expand: f64| {
+            crate::capture::editor::render::rounded_rect_path(
+                path_context,
+                card_x - expand,
+                card_y - expand,
+                card_w + expand * 2.0,
+                card_h + expand * 2.0,
+                if card_r <= 0.0 { 0.0 } else { card_r + expand },
+            );
+        };
+        liquid.paint(cr, card_y, card_y + card_h, path);
+    }
+    let mut expand = 0.0;
+    let draw_stroke = |thickness: f64, r: f64, g: f64, b: f64, a: f64, extra: f64| {
+        let t = (thickness * 0.32).max(1.0);
+        let e = extra + t / 2.0;
+        cr.set_source_rgba(r, g, b, a);
+        cr.set_line_width(t);
+        motion_thumbnail_rounded_rectangle(
+            cr,
+            card_x - e,
+            card_y - e,
+            card_w + e * 2.0,
+            card_h + e * 2.0,
+            card_r + e,
+        );
+        cr.stroke().ok();
+        e + t / 2.0
+    };
+    if !spec.liquid && spec.border_thickness > 0.0 && !spec.inset_border {
+        let c = spec.border_color;
+        expand = draw_stroke(spec.border_thickness, c.r, c.g, c.b, c.a, expand);
+    }
+    if !spec.liquid && spec.inset_border && spec.border_thickness > 0.0 {
+        let t = (spec.border_thickness * 0.32).max(1.0);
+        let c = spec.border_color;
+        cr.set_source_rgba(c.r, c.g, c.b, c.a);
+        cr.set_line_width(t);
+        motion_thumbnail_rounded_rectangle(
+            cr,
+            card_x + t / 2.0,
+            card_y + t / 2.0,
+            (card_w - t).max(1.0),
+            (card_h - t).max(1.0),
+            (card_r - t / 2.0).max(0.0),
+        );
+        cr.stroke().ok();
+    }
+    for outer in [spec.outer1, spec.outer2]
+        .into_iter()
+        .flatten()
+        .filter(|_| !spec.liquid)
+    {
+        expand += outer.gap * 0.32;
+        let c = outer.color;
+        expand = draw_stroke(outer.thickness, c.r, c.g, c.b, c.a, expand);
+    }
 }
 
 /// animation clip. The five fill controls map one-to-one to the
@@ -195,9 +227,19 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     // notify_interact explicitly so keyboard/popover edits are covered.
     {
         let notify = notify_interact.clone();
+        let root_for_pick = root.clone();
         let capture = GestureClick::new();
         capture.set_propagation_phase(gtk4::PropagationPhase::Capture);
-        capture.connect_pressed(move |_, _, _, _| notify());
+        capture.connect_pressed(move |_, _, x, y| {
+            // Disclosure headers only expand or collapse; they change no
+            // appearance value, so they must not arm the tool or mark the
+            // canvas interactive. That mark schedules a full-quality canvas
+            // repaint mid-slide, which is a hitch right when the reveal is
+            // animating.
+            if !press_is_disclosure_header(&root_for_pick, x, y) {
+                notify();
+            }
+        });
         root.add_controller(capture);
     }
 
@@ -998,7 +1040,7 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     let frame_revealer = Revealer::new();
     frame_revealer.set_reveal_child(false);
     frame_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
-    frame_revealer.set_transition_duration(180);
+    frame_revealer.set_transition_duration(120);
     frame_revealer.set_hexpand(false);
     frame_revealer.set_halign(Align::Fill);
     let frame_expanded = GtkBox::new(Orientation::Vertical, 10);
@@ -1497,6 +1539,19 @@ fn motion_appearance_body() -> GtkBox {
 /// over a revealer, collapsed by default. The fill tabs own the top of the
 /// panel; everything else opens on demand so the sidebar never becomes one
 /// long scroll. The heading stays in the row the revealer wraps.
+/// Whether a press at `(x, y)` in `root` landed on a disclosure header.
+/// Disclosure toggles are view-only, so the panel's press notifier skips them.
+fn press_is_disclosure_header(root: &GtkBox, x: f64, y: f64) -> bool {
+    let mut node = root.pick(x, y, PickFlags::DEFAULT);
+    while let Some(widget) = node {
+        if widget.has_css_class("editor-disclosure-header") {
+            return true;
+        }
+        node = widget.parent();
+    }
+    false
+}
+
 fn motion_disclosure_row(title: &str, body: &GtkBox) -> GtkBox {
     let row = GtkBox::new(Orientation::Vertical, 8);
     row.add_css_class("editor-motion-settings-section");
@@ -1519,7 +1574,9 @@ fn motion_disclosure_row(title: &str, body: &GtkBox) -> GtkBox {
 
     let revealer = Revealer::new();
     revealer.set_transition_type(RevealerTransitionType::SlideDown);
-    revealer.set_transition_duration(160);
+    // Short enough that a dropped frame is barely perceptible and that fewer
+    // frames redraw the body while it slides.
+    revealer.set_transition_duration(120);
     revealer.set_hexpand(false);
     revealer.set_halign(Align::Fill);
     revealer.set_child(Some(body));
@@ -2061,6 +2118,29 @@ mod tests {
                 && production_source.contains("EllipsizeMode::End")
                 && production_source.contains("set_hexpand(false)"),
             "ratio tiles must stay in a 3-column homogeneous grid with small capped shapes and ellipsized labels so expand never widens the panel",
+        );
+    }
+
+    /// The disclosure reveal re-snapshots its body every frame, so opening one
+    /// must not carry per-frame cairo or a mid-slide canvas repaint. The style
+    /// swatches are cached to a surface and blitted, and a header press is not
+    /// treated as an Appearance edit.
+    #[test]
+    fn disclosure_open_is_cheap_and_view_only() {
+        let source = include_str!("appearance.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("fn render_frame_style_swatch(")
+                && production_source.contains("fn paint_frame_style_swatch(")
+                && production_source.contains("set_source_surface(&surface, 0.0, 0.0)")
+                && production_source.contains("Some((w, h, _)) if *w == width && *h == height"),
+            "frame-style swatches must render once per size and blit during the reveal",
+        );
+        assert!(
+            production_source.contains("fn press_is_disclosure_header(")
+                && production_source.contains("has_css_class(\"editor-disclosure-header\")")
+                && production_source.contains("if !press_is_disclosure_header("),
+            "a disclosure header press must not arm the tool or mark the canvas interactive",
         );
     }
 
