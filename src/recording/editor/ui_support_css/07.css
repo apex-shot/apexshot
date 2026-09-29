@@ -151,43 +151,44 @@
             }
 
             .recording-editor-timeline-zoom-row {
-                min-width: 132px;
+                min-width: 150px;
             }
 
-            .recording-editor-root scale.recording-editor-timeline-zoom {
-                min-width: 88px;
-                min-height: 14px;
+            /* Timeline zoom: one pill, the magnifier at its left, a slim bar
+             * for the level — instead of a −/+ pair around a bare track.
+             *
+             * The scale behind the bar is drawn at zero opacity: it is kept
+             * only for the behaviour (click, drag, keyboard, scroll). A
+             * GtkScale paints a trough, a `highlight` and a `fill` that the
+             * theme colours in, and clearing all three from CSS did not hold —
+             * the theme's track kept showing through as a second, lighter
+             * pill inside this one. Drawing the bar here makes the pill a
+             * single flat surface. */
+            .recording-editor-root .recording-editor-timeline-zoom-pill {
+                min-width: 150px;
+                min-height: 26px;
+                padding: 0 10px;
+                border-radius: 13px;
+                background: alpha(white, 0.06);
+            }
+
+            .recording-editor-root .recording-editor-timeline-zoom-pill image {
+                color: alpha(white, 0.55);
+                margin: 0 12px 0 4px;
+            }
+
+            .recording-editor-root .recording-editor-timeline-zoom-bar {
+                min-width: 4px;
+                min-height: 18px;
+                border-radius: 0;
+                background: alpha(white, 0.45);
+            }
+
+            .recording-editor-root .recording-editor-timeline-zoom-pill scale.recording-editor-timeline-zoom {
+                opacity: 0;
+                min-width: 76px;
+                min-height: 26px;
                 padding: 0;
-            }
-
-            .recording-editor-root scale.recording-editor-timeline-zoom trough {
-                min-height: 3px;
-                background: alpha(white, 0.10);
-                box-shadow: none;
-                outline: none;
-                border: none;
-            }
-
-            .recording-editor-root scale.recording-editor-timeline-zoom highlight {
-                background: #b05c38;
-                box-shadow: none;
-                outline: none;
-            }
-
-            .recording-editor-root scale.recording-editor-timeline-zoom slider,
-            .recording-editor-root scale.recording-editor-timeline-zoom slider:hover,
-            .recording-editor-root scale.recording-editor-timeline-zoom slider:active,
-            .recording-editor-root scale.recording-editor-timeline-zoom:focus slider,
-            .recording-editor-root scale.recording-editor-timeline-zoom:focus-within slider {
-                min-width: 10px;
-                min-height: 10px;
-                margin: 0;
-                background: #b05c38;
-                background-image: none;
-                border: none;
-                box-shadow: none;
-                outline: none;
-                -gtk-icon-shadow: none;
             }
 
             /* Video lanes total 226px (36 + 48 + 56 + 56 + 30 gaps); the

@@ -45,14 +45,42 @@ pub fn build_timeline_card(
     );
     let analyzing = Rc::new(Cell::new(false));
 
-    let zoom_out = icon_button("zoom-out-symbolic", &t("Zoom out timeline"));
-    let zoom_in = icon_button("zoom-in-symbolic", &t("Zoom in timeline"));
     let zoom_scale = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 10.0);
     zoom_scale.add_css_class("recording-editor-timeline-zoom");
     zoom_scale.set_draw_value(false);
     zoom_scale.set_value(state.lock().unwrap().timeline_scale.clamp(0.0, 100.0));
-    zoom_scale.set_size_request(88, 16);
     zoom_scale.set_valign(Align::Center);
+    zoom_scale.set_tooltip_text(Some(&t("Zoom")));
+
+    // One control rather than a −/+ pair around a bare track: a pill, the
+    // magnifier at its left, and a slim bar for the level.
+    //
+    // The bar is drawn here rather than left to the scale. A GtkScale paints a
+    // trough, a `highlight` and a `fill` that the theme fills in with its own
+    // colours, and no combination of CSS reliably cleared all three — the
+    // theme's track kept showing through as a second, lighter pill inside this
+    // one. The scale is therefore drawn at zero opacity and kept only for the
+    // behaviour (click, drag, keyboard, scroll), sitting over the area the bar
+    // travels, so the pill reads as a single flat surface.
+    let zoom_level_bar = GtkBox::new(Orientation::Horizontal, 0);
+    zoom_level_bar.add_css_class("recording-editor-timeline-zoom-bar");
+    zoom_level_bar.set_valign(Align::Center);
+    let zoom_level_track = GtkBox::new(Orientation::Horizontal, 0);
+    zoom_level_track.set_hexpand(true);
+    zoom_level_track.append(&zoom_level_bar);
+
+    let zoom_area = Overlay::new();
+    zoom_area.set_hexpand(true);
+    zoom_area.set_child(Some(&zoom_level_track));
+    zoom_area.add_overlay(&zoom_scale);
+
+    let zoom_pill = GtkBox::new(Orientation::Horizontal, 0);
+    zoom_pill.add_css_class("recording-editor-timeline-zoom-pill");
+    let zoom_glyph = Image::from_icon_name("zoom-in-symbolic");
+    zoom_glyph.set_pixel_size(14);
+    zoom_glyph.set_can_target(false);
+    zoom_pill.append(&zoom_glyph);
+    zoom_pill.append(&zoom_area);
 
     let toolbar = GtkBox::new(Orientation::Horizontal, 0);
     toolbar.add_css_class("recording-editor-timeline-toolbar");
@@ -82,14 +110,12 @@ pub fn build_timeline_card(
     right.set_hexpand(true);
     // Leading spacer, widened once the first frame is laid out: it carries the
     // transport back onto the canvas axis (see
-    // `centre_transport_over_canvas`). It sits ahead of the zoom row so that
-    // row keeps hugging the window edge.
+    // `centre_transport_over_canvas`). It sits ahead of the zoom pill so that
+    // pill keeps hugging the window edge.
     let balance = GtkBox::new(Orientation::Horizontal, 0);
     balance.set_size_request(0, -1);
     right.append(&balance);
-    right.append(&zoom_out);
-    right.append(&zoom_scale);
-    right.append(&zoom_in);
+    right.append(&zoom_pill);
 
     toolbar.append(&left);
     toolbar.append(&center);
@@ -581,18 +607,14 @@ pub fn build_timeline_card(
     zoom_scale.connect_value_changed({
         let state = state.clone();
         let redraw = redraw.clone();
+        let zoom_level_track = zoom_level_track.clone();
+        let zoom_level_bar = zoom_level_bar.clone();
         move |scale| {
-            state.lock().unwrap().timeline_scale = scale.value().clamp(0.0, 100.0);
+            let value = scale.value().clamp(0.0, 100.0);
+            state.lock().unwrap().timeline_scale = value;
+            place_zoom_level_bar(&zoom_level_track, &zoom_level_bar, value / 100.0);
             redraw();
         }
-    });
-    zoom_out.connect_clicked({
-        let zoom_scale = zoom_scale.clone();
-        move |_| zoom_scale.set_value((zoom_scale.value() - 10.0).max(0.0))
-    });
-    zoom_in.connect_clicked({
-        let zoom_scale = zoom_scale.clone();
-        move |_| zoom_scale.set_value((zoom_scale.value() + 10.0).min(100.0))
     });
 
     bind_playhead_drag(&ruler, state.clone(), media.clone(), redraw.clone());
@@ -629,8 +651,14 @@ pub fn build_timeline_card(
         let playing = playing.clone();
         let play_button = play_button.clone();
         let redraw = redraw.clone();
+        let zoom_level_track = zoom_level_track.clone();
+        let zoom_level_bar = zoom_level_bar.clone();
+        let zoom_scale = zoom_scale.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
             tick_playback(&state, &media, &playing, &play_button, &redraw);
+            // The bar's travel follows the track, so a resize has to re-place
+            // it; `place_zoom_level_bar` is a no-op when nothing moved.
+            place_zoom_level_bar(&zoom_level_track, &zoom_level_bar, zoom_scale.value() / 100.0);
             glib::ControlFlow::Continue
         });
     }
@@ -708,6 +736,44 @@ fn centre_transport_over_canvas(
 fn balance_width(canvas_centre: f64, transport_centre: f64) -> Option<i32> {
     let drift = transport_centre - canvas_centre;
     (drift > 0.5).then(|| (drift * 2.0).round() as i32)
+}
+
+/// Width of the zoom pill's bar, in px. Mirrors
+/// `.recording-editor-timeline-zoom-bar` in 07.css, which is what gives the bar
+/// its size — the bar is a plain box, so the travel has to subtract it by hand.
+const ZOOM_BAR_WIDTH: i32 = 4;
+
+/// Put the zoom level bar at `fraction` (0..1) along the track.
+///
+/// Returns whether it moved. GTK4 dropped `GtkAlignment`, so nothing places a
+/// fixed-width child at an arbitrary fraction any more; the bar is offset by
+/// the distance it has left to travel, which is the track's width less the
+/// bar itself.
+///
+/// The bar is also grown to the track's full height here, so it meets the pill
+/// at the top and bottom instead of floating in the middle of it.
+fn place_zoom_level_bar(track: &GtkBox, bar: &GtkBox, fraction: f64) -> bool {
+    let width = track.allocated_width();
+    let height = track.allocated_height();
+    if height <= 0 {
+        // Not laid out yet; the caller's next tick will catch it.
+        return false;
+    }
+    let mut moved = false;
+    if bar.height() != height {
+        bar.set_size_request(-1, height);
+        moved = true;
+    }
+    if width <= ZOOM_BAR_WIDTH {
+        return moved;
+    }
+    let travel = (width - ZOOM_BAR_WIDTH) as f64 * fraction.clamp(0.0, 1.0);
+    let offset = travel.round() as i32;
+    if bar.margin_start() != offset {
+        bar.set_margin_start(offset);
+        moved = true;
+    }
+    moved
 }
 
 #[cfg(test)]

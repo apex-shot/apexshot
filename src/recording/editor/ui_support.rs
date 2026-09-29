@@ -39,8 +39,16 @@ mod tests {
         ));
         assert!(RECORDING_EDITOR_CSS
             .contains(".recording-editor-root scale slider {\n                min-width: 12px;"));
+        // The timeline zoom is one pill: the pill paints the surface, the bar
+        // is drawn by the app, and the scale behind it stays invisible so the
+        // theme's own track cannot show through as a second shape.
         assert!(RECORDING_EDITOR_CSS
-            .contains(".recording-editor-root scale.recording-editor-timeline-zoom slider"));
+            .contains(".recording-editor-root .recording-editor-timeline-zoom-pill {"));
+        assert!(RECORDING_EDITOR_CSS
+            .contains(".recording-editor-root .recording-editor-timeline-zoom-bar {"));
+        assert!(RECORDING_EDITOR_CSS.contains(
+            ".recording-editor-root .recording-editor-timeline-zoom-pill scale.recording-editor-timeline-zoom {\n                opacity: 0;"
+        ));
         assert!(RECORDING_EDITOR_CSS.contains("box-shadow: none;"));
         assert!(RECORDING_EDITOR_CSS.contains(
             ".recording-editor-root scrollbar.vertical {\n                min-width: 6px;"

@@ -393,23 +393,16 @@
                 color: #DC2626;
             }
 
-            .editor-theme-light.recording-editor-root scale.recording-editor-timeline-zoom trough {
-                background: alpha(#111827, 0.10);
-                box-shadow: none;
-                outline: none;
-                border: none;
+            /* The pill carries the surface in both themes; the bar is the only
+             * thing drawn inside it (see the dark-theme note in 07.css). */
+            .editor-theme-light.recording-editor-root .recording-editor-timeline-zoom-pill {
+                background: alpha(#111827, 0.06);
             }
 
-            .editor-theme-light.recording-editor-root scale.recording-editor-timeline-zoom highlight,
-            .editor-theme-light.recording-editor-root scale.recording-editor-timeline-zoom slider,
-            .editor-theme-light.recording-editor-root scale.recording-editor-timeline-zoom slider:hover,
-            .editor-theme-light.recording-editor-root scale.recording-editor-timeline-zoom slider:active,
-            .editor-theme-light.recording-editor-root scale.recording-editor-timeline-zoom:focus slider,
-            .editor-theme-light.recording-editor-root scale.recording-editor-timeline-zoom:focus-within slider {
-                background: #b05c38;
-                background-image: none;
-                border: none;
-                box-shadow: none;
-                outline: none;
-                -gtk-icon-shadow: none;
+            .editor-theme-light.recording-editor-root .recording-editor-timeline-zoom-pill image {
+                color: alpha(#111827, 0.55);
+            }
+
+            .editor-theme-light.recording-editor-root .recording-editor-timeline-zoom-bar {
+                background: alpha(#111827, 0.30);
             }
