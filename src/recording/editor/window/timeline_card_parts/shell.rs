@@ -3,6 +3,8 @@ pub fn build_timeline_card(
     media: Rc<RefCell<Option<MediaFile>>>,
     filmstrip: Rc<RefCell<Vec<gtk4::gdk_pixbuf::Pixbuf>>>,
     on_change: Rc<dyn Fn()>,
+    window: &impl IsA<Widget>,
+    canvas: &impl IsA<Widget>,
 ) -> (GtkBox, Rc<dyn Fn()>, Rc<dyn Fn()>) {
     let shell = GtkBox::new(Orientation::Vertical, 0);
     shell.add_css_class("recording-editor-timeline-dock");
@@ -78,6 +80,13 @@ pub fn build_timeline_card(
     right.add_css_class("recording-editor-timeline-zoom-row");
     right.set_halign(Align::End);
     right.set_hexpand(true);
+    // Leading spacer, widened once the first frame is laid out: it carries the
+    // transport back onto the canvas axis (see
+    // `centre_transport_over_canvas`). It sits ahead of the zoom row so that
+    // row keeps hugging the window edge.
+    let balance = GtkBox::new(Orientation::Horizontal, 0);
+    balance.set_size_request(0, -1);
+    right.append(&balance);
     right.append(&zoom_out);
     right.append(&zoom_scale);
     right.append(&zoom_in);
@@ -85,6 +94,7 @@ pub fn build_timeline_card(
     toolbar.append(&left);
     toolbar.append(&center);
     toolbar.append(&right);
+    centre_transport_over_canvas(window, canvas, &center, &balance);
 
     let ruler = DrawingArea::new();
     ruler.add_css_class("recording-editor-card-ruler");
@@ -639,4 +649,99 @@ pub fn build_timeline_card(
     shell.append(&card);
 
     (shell, paint, pause)
+}
+
+/// Line the transport up with the canvas, not with the dock it sits in.
+///
+/// The dock spans the window's whole width — the tool sidebar included — while
+/// the video lives in the stage column off to its left. A row centred inside
+/// the dock therefore lands half the sidebar to the right of the picture, so
+/// the play button floats off to the side of the chrome it belongs to instead
+/// of sitting under it, level with the `Original / Crop video / High` chips.
+///
+/// The zoom group carries a spacer (widened here) that pushes the transport
+/// back onto the canvas axis. Twice the drift, because the box then splits the
+/// leftover width evenly between the two groups flanking the transport.
+///
+/// The offset is a constant of the chrome, but it is measured off the first
+/// laid-out frame rather than hard-coded: a change to either column's padding
+/// or width then cannot quietly reintroduce the drift.
+fn centre_transport_over_canvas(
+    window: &impl IsA<Widget>,
+    canvas: &impl IsA<Widget>,
+    transport: &GtkBox,
+    balance: &GtkBox,
+) {
+    let window = window.clone().upcast::<Widget>();
+    let canvas = canvas.clone().upcast::<Widget>();
+    let transport = transport.clone();
+    let balance = balance.clone();
+    transport.clone().add_tick_callback(move |_, _| {
+        // Tick callbacks run before the frame is allocated, so the first
+        // reading of a freshly built card is the not-yet-laid-out one.
+        if canvas.allocated_width() <= 1 || transport.allocated_width() <= 1 {
+            return glib::ControlFlow::Continue;
+        }
+        let (Some(canvas_origin), Some(transport_origin)) = (
+            canvas.compute_point(&window, &gtk4::graphene::Point::new(0.0, 0.0)),
+            transport.compute_point(&window, &gtk4::graphene::Point::new(0.0, 0.0)),
+        ) else {
+            return glib::ControlFlow::Continue;
+        };
+        let canvas_centre = canvas_origin.x() as f64 + canvas.allocated_width() as f64 / 2.0;
+        let transport_centre = transport_origin.x() as f64 + transport.allocated_width() as f64 / 2.0;
+        if let Some(width) = balance_width(canvas_centre, transport_centre) {
+            balance.set_size_request(width, -1);
+        }
+        glib::ControlFlow::Break
+    });
+}
+
+/// Width for the spacer that pulls the transport onto the canvas axis.
+///
+/// The two arguments are window-space x coordinates for the middle of the
+/// canvas and of the transport. `None` means the transport already lines up
+/// (or sits left of the canvas), so the spacer stays out of the way. Twice
+/// the drift, because the toolbar splits the width it has left over evenly
+/// between the groups flanking the transport, so only half of the spacer
+/// moves it.
+fn balance_width(canvas_centre: f64, transport_centre: f64) -> Option<i32> {
+    let drift = transport_centre - canvas_centre;
+    (drift > 0.5).then(|| (drift * 2.0).round() as i32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::balance_width;
+    use crate::recording::editor::window::tool_sidebar::TOOL_SIDEBAR_WIDTH;
+
+    /// Measured on a 1400px-wide window: the canvas runs 14..1094 and the
+    /// transport, centred in the full-width dock, lands at 775.5. The spacer
+    /// below is what has to carry it back to the canvas centre.
+    #[test]
+    fn spacer_covers_twice_the_drift_from_the_canvas_axis() {
+        let canvas_centre = (14.0 + 1094.0) / 2.0;
+        let width = balance_width(canvas_centre, 775.5).expect("drifted transport");
+        assert_eq!(width, 443);
+        // Half of the spacer is what the transport actually travels.
+        assert!((canvas_centre + width as f64 / 2.0 - 775.5).abs() < 0.5);
+    }
+
+    #[test]
+    fn spacer_stays_out_of_the_way_when_already_centred() {
+        assert_eq!(balance_width(554.0, 554.0), None);
+        assert_eq!(balance_width(554.0, 553.0), None);
+        // Sub-pixel settling must not grow the spacer a pixel a frame.
+        assert_eq!(balance_width(554.0, 554.4), None);
+    }
+
+    /// The drift is what the dock adds on the sidebar's side of the canvas,
+    /// so it has to be at least half the sidebar; the rest is the tools group
+    /// being wider than the zoom group.
+    #[test]
+    fn drift_covers_the_sidebar_the_dock_spans() {
+        let drift = 775.5 - (14.0 + 1094.0) / 2.0;
+        assert!(drift >= TOOL_SIDEBAR_WIDTH as f64 / 2.0);
+        assert!(drift < TOOL_SIDEBAR_WIDTH as f64);
+    }
 }

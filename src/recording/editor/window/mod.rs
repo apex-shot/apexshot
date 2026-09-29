@@ -236,6 +236,8 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         media.clone(),
         filmstrip.clone(),
         ping.clone(),
+        &window,
+        &stage,
     );
     root.append(&timeline);
     *paint_slot.borrow_mut() = Some(paint.clone());
