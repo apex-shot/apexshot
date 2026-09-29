@@ -333,6 +333,36 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
         })
     };
 
+    // Every wallpaper tile built for the Wallpapers page, kept so one place can
+    // map the current fill onto the rings. The selected tile used to be
+    // highlighted on click and never un-highlighted, so a tile stayed ringed
+    // after the fill had moved to None, a custom fill, or an image. The video
+    // editor's panel re-syncs the same way on every refresh.
+    let wallpaper_tiles: Rc<RefCell<Vec<(PathBuf, Button)>>> = Rc::new(RefCell::new(Vec::new()));
+    let sync_wallpaper_tiles: Rc<dyn Fn()> = {
+        let tiles = wallpaper_tiles.clone();
+        let runtime = session.runtime.clone();
+        Rc::new(move || {
+            let selected = {
+                let runtime = runtime.borrow();
+                let appearance = &runtime.motion.appearance;
+                if appearance.background_fill_type == MotionBackgroundFillType::Wallpaper {
+                    appearance.wallpaper_image_name.clone()
+                } else {
+                    None
+                }
+            };
+            for (path, tile) in tiles.borrow().iter() {
+                let on = selected.as_deref() == Some(path.to_string_lossy().as_ref());
+                if on {
+                    tile.add_css_class("active-background-option");
+                } else {
+                    tile.remove_css_class("active-background-option");
+                }
+            }
+        })
+    };
+
     let background_section = motion_appearance_section("Background");
     let none_button = Button::with_label(&t("None"));
     none_button.set_has_frame(false);
@@ -350,14 +380,19 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
         let preview = preview.clone();
         let none_button = none_button.clone();
         let notify = notify_interact.clone();
+        let sync = sync_wallpaper_tiles.clone();
         move |_| {
             notify();
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::None;
-            runtime.backdrop_cache = None;
-            runtime.preview_frame = None;
+            {
+                let mut runtime = runtime.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::None;
+                runtime.backdrop_cache = None;
+                runtime.preview_frame = None;
+            }
             none_button.add_css_class("active-background-option");
+            // Clearing the fill takes the ring off whichever tile held it.
+            sync();
             preview.queue_draw();
         }
     });
@@ -416,18 +451,33 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
         let preview = preview.clone();
         let none_button = none_button.clone();
         let redraw_summary = redraw_summary.clone();
+        let sync = sync_wallpaper_tiles.clone();
         Rc::new(move || {
             notify();
             none_button.remove_css_class("active-background-option");
+            // A hand-drawn fill is not a wallpaper, so no tile may stay ringed.
+            sync();
             preview.queue_draw();
             redraw_summary();
         })
     };
 
-    let wallpaper_catalog =
-        motion_wallpaper_catalog_section(session, preview, &none_button, &notify_interact);
-    let image_section =
-        motion_image_section(window, session, preview, &none_button, &notify_interact);
+    let wallpaper_catalog = motion_wallpaper_catalog_section(
+        session,
+        preview,
+        &none_button,
+        wallpaper_tiles.clone(),
+        &sync_wallpaper_tiles,
+        &notify_interact,
+    );
+    let image_section = motion_image_section(
+        window,
+        session,
+        preview,
+        &none_button,
+        &sync_wallpaper_tiles,
+        &notify_interact,
+    );
 
     let padding = motion_reference_percent_slider("Padding", 0.0, 200.0, initial_padding);
     padding.connect_value_changed({
@@ -478,16 +528,19 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     // sliders (or the other tools below) off the bottom of the sidebar.
     let wallpaper_page = GtkBox::new(Orientation::Vertical, 0);
     wallpaper_page.set_hexpand(true);
-    wallpaper_page.append(
-        &ScrolledWindow::builder()
-            .hscrollbar_policy(PolicyType::Never)
-            .vscrollbar_policy(PolicyType::Automatic)
-            .propagate_natural_width(false)
-            .propagate_natural_height(false)
-            .height_request(WALLPAPER_PAGE_HEIGHT)
-            .child(&wallpaper_catalog)
-            .build(),
-    );
+    // The video editor's grid viewport: grow with the catalog up to the cap,
+    // then scroll. The class carries the same top inset, so the first row of
+    // tiles clears the tab strip in both panels.
+    let wallpaper_scroll = ScrolledWindow::builder()
+        .hscrollbar_policy(PolicyType::Never)
+        .vscrollbar_policy(PolicyType::Automatic)
+        .propagate_natural_width(false)
+        .propagate_natural_height(true)
+        .max_content_height(WALLPAPER_PAGE_HEIGHT)
+        .child(&wallpaper_catalog)
+        .build();
+    wallpaper_scroll.add_css_class("recording-editor-bg-wallpaper-scroll");
+    wallpaper_page.append(&wallpaper_scroll);
 
     // One source at a time, chosen by the tab tray. This mirrors the video
     // editor's Background panel: tabs pick the fill source, and Padding/Radius
@@ -1626,20 +1679,29 @@ fn cached_wallpaper_preview_surface(path: &str) -> Option<gtk4::cairo::ImageSurf
     Some(surface)
 }
 
-/// Bundled wallpaper catalog for the Wallpapers tab. Rows are appended a few
+/// Bundled wallpaper catalog for the Wallpapers tab. Tiles are attached a few
 /// frames apart so opening the tab never blocks on 70 thumbnail decodes; the
 /// page scrolls inside its own frame (see the Background section) so the grid
 /// length never pushes Padding/Radius or the tools below off-screen.
+///
+/// The grid is the video editor's, cell for cell: four homogeneous columns with
+/// the same gaps, so the two panels' wallpapers read and wrap identically.
 fn motion_wallpaper_catalog_section(
     session: &MotionSession,
     preview: &DrawingArea,
     none_button: &Button,
+    tiles: Rc<RefCell<Vec<(PathBuf, Button)>>>,
+    sync_tiles: &Rc<dyn Fn()>,
     on_interact: &Rc<dyn Fn()>,
-) -> GtkBox {
-    let catalog = GtkBox::new(Orientation::Vertical, 6);
-    catalog.add_css_class("editor-motion-wallpaper-catalog");
-    catalog.add_css_class("editor-motion-wallpaper-grid");
-    catalog.set_hexpand(true);
+) -> Grid {
+    let grid = Grid::new();
+    grid.add_css_class("editor-motion-wallpaper-grid");
+    grid.add_css_class("recording-editor-bg-wallpaper-grid");
+    grid.set_column_spacing(8);
+    grid.set_row_spacing(8);
+    grid.set_column_homogeneous(true);
+    grid.set_hexpand(false);
+    grid.set_halign(Align::Fill);
 
     let paths: Vec<(PathBuf, PathBuf)> =
         crate::capture::editor::window::background_panel::MOTION_WALLPAPER_FILES
@@ -1652,15 +1714,15 @@ fn motion_wallpaper_catalog_section(
                 })
             })
             .collect();
-    let selection_buttons = Rc::new(RefCell::new(Vec::<(PathBuf, Button)>::new()));
     let next_row = Rc::new(Cell::new(0usize));
     glib::timeout_add_local(Duration::from_millis(12), {
-        let catalog = catalog.clone();
+        let grid = grid.clone();
         let paths = paths.clone();
         let session = session.clone();
         let preview = preview.clone();
         let none_button = none_button.clone();
-        let selection_buttons = selection_buttons.clone();
+        let tiles = tiles.clone();
+        let sync_tiles = sync_tiles.clone();
         let next_row = next_row.clone();
         let on_interact = on_interact.clone();
         move || {
@@ -1668,26 +1730,28 @@ fn motion_wallpaper_catalog_section(
             if start >= paths.len() {
                 return glib::ControlFlow::Break;
             }
-            let row_paths = &paths[start..(start + 4).min(paths.len())];
-            next_row.set(start + row_paths.len());
-            let row = GtkBox::new(Orientation::Horizontal, 6);
-            row.add_css_class("editor-motion-wallpaper-row");
-            for (path, preview_path) in row_paths {
-                row.append(&motion_wallpaper_thumbnail(
+            let end = (start + 4).min(paths.len());
+            for (offset, (path, preview_path)) in paths[start..end].iter().enumerate() {
+                let index = start + offset;
+                let tile = motion_wallpaper_thumbnail(
                     path,
                     preview_path,
                     &session,
                     &preview,
                     &none_button,
-                    selection_buttons.clone(),
+                    tiles.clone(),
+                    &sync_tiles,
                     &on_interact,
-                ));
+                );
+                grid.attach(&tile, (index % 4) as i32, (index / 4) as i32, 1, 1);
             }
-            catalog.append(&row);
+            next_row.set(end);
+            // A tile that arrives after the fill was set still has to show it.
+            sync_tiles();
             glib::ControlFlow::Continue
         }
     });
-    catalog
+    grid
 }
 
 fn motion_wallpaper_thumbnail(
@@ -1696,7 +1760,8 @@ fn motion_wallpaper_thumbnail(
     session: &MotionSession,
     preview: &DrawingArea,
     none_button: &Button,
-    selection_buttons: Rc<RefCell<Vec<(PathBuf, Button)>>>,
+    tiles: Rc<RefCell<Vec<(PathBuf, Button)>>>,
+    sync_tiles: &Rc<dyn Fn()>,
     on_interact: &Rc<dyn Fn()>,
 ) -> Button {
     let button = Button::new();
@@ -1726,25 +1791,15 @@ fn motion_wallpaper_thumbnail(
         });
     }
 
-    if session
-        .runtime
-        .borrow()
-        .motion
-        .appearance
-        .wallpaper_image_name
-        .as_deref()
-        == Some(path.to_string_lossy().as_ref())
-    {
-        button.add_css_class("active-background-option");
-    }
-    selection_buttons
-        .borrow_mut()
-        .push((path.clone(), button.clone()));
+    // The ring is not set here: the caller syncs every tile against the fill
+    // once the row is attached, so a tile built late cannot claim a selection
+    // the model no longer holds.
+    tiles.borrow_mut().push((path.clone(), button.clone()));
     button.connect_clicked({
         let session = session.clone();
         let preview = preview.clone();
         let none_button = none_button.clone();
-        let selection_buttons = selection_buttons.clone();
+        let sync_tiles = sync_tiles.clone();
         let preview_path = preview_path.clone();
         let notify = on_interact.clone();
         move |_| {
@@ -1761,28 +1816,26 @@ fn motion_wallpaper_thumbnail(
             if already_selected {
                 return;
             }
-            let mut runtime = session.runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.appearance.wallpaper_image_name =
-                Some(path.to_string_lossy().into_owned());
-            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Wallpaper;
-            // Replace, never stack: the other image slot must not survive or a
-            // later round-trip can resurrect it behind the new fill.
-            runtime.motion.appearance.custom_background_image = None;
-            // The thumbnail is cached. Show it now, then replace it with the
-            // full wallpaper from a worker thread. ponytail: cache hit, no decode.
-            runtime.set_background_surface(
-                Some(path.to_string_lossy().into_owned()),
-                cached_wallpaper_preview_surface(&preview_path.to_string_lossy()),
-                true,
-            );
-            for (candidate_path, candidate) in selection_buttons.borrow().iter() {
-                if candidate_path == &path {
-                    candidate.add_css_class("active-background-option");
-                } else {
-                    candidate.remove_css_class("active-background-option");
-                }
+            {
+                let mut runtime = session.runtime.borrow_mut();
+                runtime.begin_motion_edit();
+                runtime.motion.appearance.wallpaper_image_name =
+                    Some(path.to_string_lossy().into_owned());
+                runtime.motion.appearance.background_fill_type =
+                    MotionBackgroundFillType::Wallpaper;
+                // Replace, never stack: the other image slot must not survive or
+                // a later round-trip can resurrect it behind the new fill.
+                runtime.motion.appearance.custom_background_image = None;
+                // The thumbnail is cached. Show it now, then replace it with the
+                // full wallpaper from a worker thread. ponytail: cache hit, no decode.
+                runtime.set_background_surface(
+                    Some(path.to_string_lossy().into_owned()),
+                    cached_wallpaper_preview_surface(&preview_path.to_string_lossy()),
+                    true,
+                );
             }
+            // One source of truth for the rings: this tile on, every other off.
+            sync_tiles();
             none_button.remove_css_class("active-background-option");
             preview.queue_draw();
             load_motion_wallpaper_asynchronously(path.clone(), session.clone(), preview.clone());
@@ -1907,6 +1960,7 @@ fn motion_image_section(
     session: &MotionSession,
     preview: &DrawingArea,
     none_button: &Button,
+    sync_tiles: &Rc<dyn Fn()>,
     on_interact: &Rc<dyn Fn()>,
 ) -> GtkBox {
     let page = GtkBox::new(Orientation::Vertical, 0);
@@ -1965,6 +2019,7 @@ fn motion_image_section(
         let none_button = none_button.clone();
         let thumb = thumb.clone();
         let notify = on_interact.clone();
+        let sync_tiles = sync_tiles.clone();
         move |_| {
             notify();
             let chooser = FileChooserNative::new(
@@ -1985,6 +2040,7 @@ fn motion_image_section(
             let none_button = none_button.clone();
             let thumb = thumb.clone();
             let notify_response = notify.clone();
+            let sync_tiles = sync_tiles.clone();
             chooser.connect_response(move |dialog, response| {
                 notify_response();
                 if response != ResponseType::Accept {
@@ -2009,6 +2065,8 @@ fn motion_image_section(
                 runtime.set_background_surface(Some(path), surface, false);
                 drop(runtime);
                 none_button.remove_css_class("active-background-option");
+                // An image is not a wallpaper, so no tile may stay ringed.
+                sync_tiles();
                 thumb.queue_draw();
                 preview.queue_draw();
             });
@@ -2244,17 +2302,56 @@ mod tests {
     }
 
     /// The wallpaper grid is its own bounded page: 70 thumbnails must scroll
-    /// inside a fixed-height frame so Padding/Radius and the other tools stay
-    /// reachable without scrolling the whole sidebar.
+    /// inside a capped viewport so Padding/Radius and the other tools stay
+    /// reachable without scrolling the whole sidebar. It is the video editor's
+    /// grid markup, so the two panels wrap and space their tiles identically.
     #[test]
     fn wallpaper_grid_scrolls_inside_its_own_page() {
         let source = include_str!("appearance.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains("WALLPAPER_PAGE_HEIGHT")
+                && production_source.contains(".max_content_height(WALLPAPER_PAGE_HEIGHT)")
                 && production_source
                     .contains("source_stack.add_named(&wallpaper_page, Some(\"wallpapers\"))"),
-            "the wallpaper catalog must live in a fixed-height page inside the source stack",
+            "the wallpaper catalog must live in a capped page inside the source stack",
+        );
+        assert!(
+            production_source.contains("grid.set_column_spacing(8)")
+                && production_source.contains("grid.set_row_spacing(8)")
+                && production_source.contains("grid.set_column_homogeneous(true)")
+                && production_source
+                    .contains("grid.add_css_class(\"recording-editor-bg-wallpaper-grid\")"),
+            "the catalog must use the video editor's grid gaps and chrome",
+        );
+    }
+
+    /// Selecting None, applying a custom fill, or picking an image has to drop
+    /// the ring from the wallpaper tile, exactly as the video editor's refresh
+    /// does. The ring used to be added on click and never taken off, so a tile
+    /// stayed highlighted after the fill had moved on.
+    #[test]
+    fn the_wallpaper_ring_follows_the_fill() {
+        let source = include_str!("appearance.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let sync_start = production_source
+            .find("let sync_wallpaper_tiles: Rc<dyn Fn()>")
+            .expect("the panel needs one place that maps the fill onto the tile rings");
+        let sync_body = &production_source[sync_start..];
+        assert!(
+            sync_body.contains("tile.add_css_class(\"active-background-option\")")
+                && sync_body.contains("tile.remove_css_class(\"active-background-option\")"),
+            "the sync must be able to both set and clear a ring",
+        );
+        // None and the custom fill route through the panel-level closure; the
+        // catalog's arriving tiles and the image picker route through theirs.
+        assert!(
+            production_source.matches("sync();").count() >= 2,
+            "None and the custom fill must resync the tile rings",
+        );
+        assert!(
+            production_source.matches("sync_tiles();").count() >= 2,
+            "the catalog and the image picker must resync the tile rings too",
         );
     }
 }
