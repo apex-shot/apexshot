@@ -38,15 +38,20 @@ if ! command -v cargo-clippy >/dev/null 2>&1 || ! command -v cargo-fmt >/dev/nul
   sudo apt-get install -y "$CLIPPY_PKG" rustfmt
 fi
 
-# Incremental is deliberately off for release builds. `.cargo/config.toml`
-# only sets it off for [profile.dev], and forcing it on here lets rustc reuse
-# codegen units that a later build already dropped, so the final link fails
-# with a wall of `undefined reference to core::ptr::drop_in_place<...>` out of
-# tokio/zbus — nothing to do with the code that changed. It only surfaced now
-# because the release rlib had just been rebuilt after a source change.
-# Delete the stale release artifacts (not the whole target/) if the link
-# fails anyway, or just let cargo rebuild the crate.
-unset CARGO_INCREMENTAL
+# Release incremental is ON here because this is the local dev loop. `apexshot`
+# is one big crate, so any source change otherwise recodes all ~536 units at
+# opt-level 3: minutes per run. Incremental reuses the previous codegen instead
+# (measured ~3m20s -> ~6s on this machine). It once tripped a rustc link bug
+# (`undefined reference to core::ptr::drop_in_place<...>` out of tokio/zbus)
+# when stale incremental units were reused after a source change; current rustc
+# no longer reproduces it. The build below still guards against it: on failure
+# it drops only the release incremental cache and rebuilds clean once. Set
+# APEXSHOT_RELEASE_INCREMENTAL=0 to force the old non-incremental behaviour.
+if [[ "${APEXSHOT_RELEASE_INCREMENTAL:-1}" != "0" ]]; then
+  export CARGO_INCREMENTAL=1
+else
+  export CARGO_INCREMENTAL=0
+fi
 
 # Cargo's committed config pins `jobs = 4` to keep memory in check, and cargo
 # hands those same tokens to rustc, which caps how many codegen units the
@@ -70,9 +75,20 @@ if [[ -z "${CARGO_BUILD_JOBS:-}" ]]; then
 fi
 
 echo "Building ApexShot .deb..."
-echo "→ cargo release (non-incremental; see note above)"
+if [[ "$CARGO_INCREMENTAL" == "1" ]]; then
+  echo "→ cargo release (incremental; see note above)"
+else
+  echo "→ cargo release (non-incremental, forced by APEXSHOT_RELEASE_INCREMENTAL=0)"
+fi
 build_start=$SECONDS
-cargo build --release "${cargo_jobs_args[@]}"
+if ! cargo build --release "${cargo_jobs_args[@]}"; then
+  # The historical failure mode: stale incremental units leave dangling
+  # `drop_in_place` symbols at link time. Drop just the release incremental
+  # cache (never the whole target/) and rebuild clean for this run.
+  echo "warning: release build failed; clearing the incremental cache and retrying clean..." >&2
+  rm -rf "$ROOT_DIR/target/release/incremental"
+  CARGO_INCREMENTAL=0 cargo build --release "${cargo_jobs_args[@]}"
+fi
 build_seconds=$((SECONDS - build_start))
 
 if [[ ! -x "$ROOT_DIR/target/release/apexshot" ]]; then
