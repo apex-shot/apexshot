@@ -16,6 +16,11 @@ use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::model::VideoGradient;
 use crate::recording::editor::window::custom_wallpaper_popover::bitmap_to_surface;
 
+/// Tallest the Wallpaper tab's grid viewport grows before it scrolls. About
+/// four rows of 56px tiles plus their spacing, which keeps the shared Padding
+/// and Radius rows in view under the grid on a normal window.
+const BACKGROUND_WALLPAPER_GRID_MAX_HEIGHT: i32 = 320;
+
 fn video_wallpaper_files() -> Vec<&'static str> {
     crate::capture::editor::window::background_panel::MOTION_WALLPAPER_FILES
         .iter()
@@ -81,10 +86,9 @@ fn build_background_panel(
     header.append(&title);
     panel.append(&header);
 
-    // Which source the fill comes from. `None` still lives in the model as
-    // the absence of a fill, so it is reached by clearing rather than by
-    // holding a tab — the tabs pick *what* fills, and a "No background"
-    // action below turns it off.
+    // Which source the fill comes from. `None` lives in the model as the
+    // absence of a fill, so it is reached by clearing rather than by holding a
+    // tab: the tabs pick *what* fills, and the None row below turns it off.
     let source_row = GtkBox::new(Orientation::Horizontal, 0);
     source_row.add_css_class("recording-editor-bg-tabs");
     source_row.set_hexpand(true);
@@ -104,6 +108,15 @@ fn build_background_panel(
     body.add_css_class("recording-editor-cursor-tab-body");
     body.set_hexpand(true);
     body.append(&source_row);
+
+    // "None" clears the fill. It is not a fourth source tab — the tabs pick
+    // *what* fills, this turns filling off — so it sits under the strip and
+    // belongs to every tab rather than to one page.
+    let none_row = Button::with_label(&t("None"));
+    none_row.add_css_class("recording-editor-bg-none-row");
+    none_row.set_has_frame(false);
+    none_row.set_hexpand(true);
+    body.append(&none_row);
 
     // --- Wallpaper source: the bundled grid, four across like the mock. ---
     let wallpaper_page = GtkBox::new(Orientation::Vertical, 0);
@@ -182,7 +195,17 @@ fn build_background_panel(
             card.set_group(Some(&first));
         }
     }
-    wallpaper_page.append(&grid);
+    // The grid lives in its own capped viewport. `max_content_height` grows it
+    // with its content up to the cap and scrolls past it, so the shared Padding
+    // and Radius rows below stay in reach without a short catalog leaving a gap.
+    let grid_scroll = ScrolledWindow::new();
+    grid_scroll.add_css_class("recording-editor-bg-wallpaper-scroll");
+    grid_scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    grid_scroll.set_propagate_natural_height(true);
+    grid_scroll.set_max_content_height(BACKGROUND_WALLPAPER_GRID_MAX_HEIGHT);
+    grid_scroll.set_hexpand(true);
+    grid_scroll.set_child(Some(&grid));
+    wallpaper_page.append(&grid_scroll);
 
     // --- Custom source: a summary row that opens the Custom Wallpaper dialog. ---
     let custom_page = GtkBox::new(Orientation::Vertical, 0);
@@ -268,15 +291,9 @@ fn build_background_panel(
         |guard, value| guard.background_corner_radius = value,
     );
 
-    // Padding, Radius and the custom-fill row describe the fill itself, so
-    // they live inside the Custom page rather than the panel frame. Leaving
-    // them in the frame showed them on every tab.
-    //
-    // Order is padding, radius, then the row that opens the dialog: the two
-    // sliders tune the fill already in place, and picking a new one is the
-    // rarer action, so it reads as the closing step rather than the opener.
-    custom_page.append(&padding_row.widget);
-    custom_page.append(&radius_row.widget);
+    // The Custom page opens with the fill row that summarizes it: picking a
+    // new fill is the rarer action, so it heads the page rather than closing
+    // it, and the shared rows below tune whatever is in place.
     custom_page.append(&custom_row);
 
     let pages = GtkBox::new(Orientation::Vertical, 0);
@@ -285,6 +302,19 @@ fn build_background_panel(
     pages.append(&custom_page);
     pages.append(&image_page);
     body.append(&pages);
+
+    // Padding and Radius describe the fill, not the source, so every tab gets
+    // them. They follow the pages inside the scroll rather than pinning to the
+    // panel's bottom edge: a pinned footer left a tall field of empty space
+    // between a short Custom or Image page and the sliders. Here they sit
+    // right under whichever page is open, and the wallpaper grid scrolls in
+    // its own capped viewport above them so 60 tiles never push them away.
+    let options = GtkBox::new(Orientation::Vertical, 6);
+    options.add_css_class("recording-editor-bg-options");
+    options.set_hexpand(true);
+    options.append(&padding_row.widget);
+    options.append(&radius_row.widget);
+    body.append(&options);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -337,6 +367,23 @@ fn build_background_panel(
         }
     });
 
+    // Clearing the fill is a write, unlike a tab switch: the row is an action,
+    // not a page. Re-clicking it while already empty must not churn the model.
+    none_row.connect_clicked({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        move |_| {
+            {
+                let mut guard = state.lock().unwrap();
+                if guard.background.is_none() {
+                    return;
+                }
+                guard.background = VideoBackground::None;
+            }
+            on_change();
+        }
+    });
+
     // Edit opens the Custom Wallpaper popover off the panel's left edge
     // rather than as a centered dialog, so the row being edited and the video
     // behind it both stay visible. The popover wires its own click: it needs
@@ -366,6 +413,7 @@ fn build_background_panel(
         let image_page = image_page.clone();
         let custom_swatch = custom_swatch.clone();
         let custom_label = custom_label.clone();
+        let none_row = none_row.clone();
         let image_thumb = image_thumb.clone();
         let padding_row_value = padding_row.clone();
         let radius_row_value = radius_row.clone();
@@ -409,11 +457,10 @@ fn build_background_panel(
             custom_page.set_visible(matches!(active_page.get(), BgPage::Custom));
             image_page.set_visible(matches!(active_page.get(), BgPage::Image));
 
-            // Both sliders live on the Custom page and stay visible with it.
-            // Padding used to hide itself until a fill was picked, which only
-            // made sense while it shared the panel frame with every source;
-            // scoped to Custom it is simply one of the two fill controls, and
-            // a value set before any fill exists must survive being previewed.
+            // Both sliders are shared footer controls, so they show on every
+            // source tab. Padding used to hide itself until a fill was picked;
+            // as a plain fill control it must keep showing a value that was set
+            // before any fill exists, or that value could never be adjusted.
             padding_row_value.sync_value(padding);
             radius_row_value.sync_value(radius);
 
@@ -468,6 +515,14 @@ fn build_background_panel(
                     }
                 });
                 image_thumb.queue_draw();
+            }
+
+            // "None" lights up whenever no fill is set, whichever tab is open:
+            // it is a state of the fill, not one of the source pages.
+            if background.is_none() {
+                none_row.add_css_class("active-background-option");
+            } else {
+                none_row.remove_css_class("active-background-option");
             }
 
             if is_wallpaper {

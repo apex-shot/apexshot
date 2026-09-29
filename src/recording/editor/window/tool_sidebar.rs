@@ -751,50 +751,136 @@ mod tests {
     }
 
     #[test]
-    fn the_value_rows_belong_to_the_custom_page() {
-        // Padding, Radius and the custom-fill row were appended to the panel
-        // body, so they rendered on the Wallpaper and Image tabs too and every
-        // tab looked like Custom. They must be appended to the Custom page.
+    fn the_value_rows_are_shared_across_every_source_tab() {
+        // Padding and Radius describe the fill, not the source, so every tab
+        // offers them. They follow the open page inside the scroll rather than
+        // pinning to the panel's bottom edge, which left a field of empty space
+        // between a short Custom or Image page and the sliders.
         let panel = include_str!("tool_sidebar_background.rs");
         assert!(
-            panel.contains("custom_page.append(&padding_row.widget);"),
-            "Padding must live inside the Custom page, not the panel frame"
+            panel.contains("options.append(&padding_row.widget);"),
+            "Padding must be a shared control every tab shows"
         );
         assert!(
-            panel.contains("custom_page.append(&radius_row.widget);"),
-            "Radius must live inside the Custom page, not the panel frame"
+            panel.contains("options.append(&radius_row.widget);"),
+            "Radius must be a shared control every tab shows"
         );
         assert!(
-            !panel.contains("body.append(&padding_row.widget);"),
-            "the panel frame must not show the value rows on every tab"
+            panel.contains("body.append(&options);"),
+            "the shared rows must follow the pages inside the scroll"
+        );
+        assert!(
+            !panel.contains("custom_page.append(&padding_row.widget);"),
+            "the value rows must not be scoped to the Custom page"
+        );
+        assert!(
+            !panel.contains("custom_page.append(&radius_row.widget);"),
+            "the value rows must not be scoped to the Custom page"
         );
     }
 
     #[test]
-    fn the_custom_page_tunes_the_fill_before_offering_a_new_one() {
-        // The Custom page reads as a sequence: set the fill's size, round its
-        // corners, then pick a new fill. Pinning the order stops the rows from
-        // drifting apart as the page is edited.
+    fn the_shared_rows_follow_the_pages_inside_the_scroll() {
+        // The Custom page opens with its fill row; the shared Padding and
+        // Radius rows then follow the whole pages stack, inside the scroll, so
+        // a short page is not stretched to reach them.
         let panel = include_str!("tool_sidebar_background.rs");
         let order = [
-            "custom_page.append(&padding_row.widget);",
-            "custom_page.append(&radius_row.widget);",
             "custom_page.append(&custom_row);",
+            "body.append(&pages);",
+            "options.append(&padding_row.widget);",
+            "options.append(&radius_row.widget);",
+            "body.append(&options);",
+            "scroll.set_child(Some(&body));",
+            "panel.append(&scroll);",
         ];
         let mut cursor = 0;
         for step in order {
             let at = panel[cursor..]
                 .find(step)
-                .unwrap_or_else(|| panic!("Custom page must append {step}"));
+                .unwrap_or_else(|| panic!("Background panel must order {step}"));
             cursor += at + step.len();
         }
     }
 
     #[test]
+    fn the_wallpaper_grid_scrolls_inside_its_own_capped_viewport() {
+        // The 60-tile catalog is taller than the panel, so the grid gets its
+        // own scroller with a content cap. Without the cap it would push the
+        // shared rows off screen; without its own scroller those rows would
+        // have to be chased past every tile.
+        let panel = include_str!("tool_sidebar_background.rs");
+        assert!(
+            panel.contains("grid_scroll.set_max_content_height("),
+            "the grid viewport must cap its content height"
+        );
+        assert!(
+            panel.contains("grid_scroll.set_propagate_natural_height(true)"),
+            "the viewport must size itself to the catalog up to the cap"
+        );
+        assert!(
+            panel.contains("grid_scroll.set_child(Some(&grid));"),
+            "the grid, not the page, is what scrolls"
+        );
+        assert!(
+            !panel.contains("wallpaper_page.append(&grid);"),
+            "the grid must not sit bare in the page"
+        );
+    }
+
+    #[test]
+    fn the_none_row_clears_the_fill_from_every_tab() {
+        // "None" is an action, not a fourth source page: it belongs to the
+        // panel frame under the strip so every tab shows it, and clicking it
+        // writes the model rather than only recording a view state.
+        let panel = include_str!("tool_sidebar_background.rs");
+        assert!(
+            panel.contains("let none_row = Button::with_label(&t(\"None\"));"),
+            "the panel must offer a None row"
+        );
+        assert!(
+            panel.contains("none_row.add_css_class(\"recording-editor-bg-none-row\");"),
+            "the None row needs its own chrome"
+        );
+        assert!(
+            panel.contains("guard.background = VideoBackground::None;"),
+            "the None row must clear the fill, not just the page"
+        );
+        assert!(
+            panel.contains("none_row.add_css_class(\"active-background-option\");"),
+            "None must read as selected while no fill is set"
+        );
+        let tab_position = panel
+            .find("body.append(&source_row);")
+            .expect("the strip is part of the frame");
+        let none_position = panel
+            .find("body.append(&none_row);")
+            .expect("the None row is part of the frame");
+        let pages_position = panel
+            .find("body.append(&pages);")
+            .expect("the pages follow the frame controls");
+        assert!(
+            tab_position < none_position && none_position < pages_position,
+            "the None row must sit under the strip and outside the pages"
+        );
+        // The image editor reuses this class, so the rule has to exist here
+        // rather than being duplicated into the capture stylesheet.
+        let css = include_str!("../ui_support_css/09.css");
+        assert!(
+            css.contains("button.recording-editor-bg-none-row {"),
+            "the shared None row needs a resting rule"
+        );
+        assert!(
+            css.contains("button.recording-editor-bg-none-row.active-background-option,"),
+            "the shared None row needs its selected state"
+        );
+    }
+
+    #[test]
     fn padding_does_not_hide_until_a_fill_is_picked() {
         // Padding used to hide itself with no fill, which left the Custom page
-        // showing only Radius. Scoped to Custom it is a plain fill control, and
-        // a value set before a fill exists has to stay visible to be adjusted.
+        // showing only Radius. As a plain fill control it must keep a value set
+        // before any fill exists visible, so it can still be adjusted.
         let panel = include_str!("tool_sidebar_background.rs");
         assert!(
             !panel.contains("set_visible(has_fill)"),

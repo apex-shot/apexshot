@@ -37,10 +37,59 @@
                 color: alpha(white, 0.96);
             }
 
+            /* "None" clears the fill outright. It is not a fourth source tab,
+             * so it sits under the strip on every tab rather than inside it. */
+            button.recording-editor-bg-none-row {
+                min-height: 32px;
+                margin: 0 0 12px 0;
+                padding: 0 10px;
+                border: none;
+                border-radius: 8px;
+                background: alpha(white, 0.06);
+                color: alpha(white, 0.72);
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-bg-none-row label {
+                color: inherit;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            button.recording-editor-bg-none-row:hover {
+                background: alpha(white, 0.10);
+                color: alpha(white, 0.96);
+            }
+
+            /* Selected the way the tile grid highlights a chosen wallpaper,
+             * but in the editor's own accent rather than the capture one. */
+            button.recording-editor-bg-none-row.active-background-option,
+            button.recording-editor-bg-none-row.active-background-option:hover {
+                background: alpha(#b05c38, 0.18);
+                color: #f0a07a;
+            }
+
             /* Filled slider with an editable value beside it. The slider
              * keeps the app's existing look — this only lays the row out. */
             .recording-editor-bg-value-row {
                 margin: 0 0 4px 0;
+            }
+
+            /* Padding and Radius are shared by every source tab. They sit
+             * inside the scroll, right under the open page, so a short Custom
+             * or Image page is not stretched into a field of empty space
+             * between its row and the sliders. */
+            .recording-editor-bg-options {
+                margin: 14px 0 0 0;
+            }
+
+            /* The Wallpaper tab's grid viewport. It grows with the catalog up
+             * to the cap set in code and scrolls past it, so the shared rows
+             * below stay in reach. The top inset keeps the first row of tiles
+             * off the tab strip. */
+            .recording-editor-bg-wallpaper-scroll {
+                margin: 4px 0 0 0;
             }
 
             /* The Image tab's chooser, which is a button across its full width
@@ -74,8 +123,8 @@
                 min-height: 40px;
                 padding: 0 6px 0 6px;
                 /* Matches the FillSlider track, which draws its own corners at
-                 * 8px — the row sits directly under Padding and Radius and has
-                 * to share their radius to read as part of the same group. */
+                 * 8px — the row reads as one group with the Padding/Radius
+                 * footer below it, so they share the same radius. */
                 border-radius: 8px;
                 background: alpha(white, 0.06);
             }
@@ -144,6 +193,22 @@
             .editor-theme-light button.recording-editor-bg-tab:checked:hover {
                 background: alpha(#111827, 0.08);
                 color: alpha(#1d2129, 0.92);
+            }
+
+            .editor-theme-light button.recording-editor-bg-none-row {
+                background: alpha(#111827, 0.05);
+                color: alpha(#1d2129, 0.72);
+            }
+
+            .editor-theme-light button.recording-editor-bg-none-row:hover {
+                background: alpha(#111827, 0.08);
+                color: alpha(#1d2129, 0.96);
+            }
+
+            .editor-theme-light button.recording-editor-bg-none-row.active-background-option,
+            .editor-theme-light button.recording-editor-bg-none-row.active-background-option:hover {
+                background: alpha(#b05c38, 0.18);
+                color: #b05c38;
             }
 
             .editor-theme-light button.recording-editor-bg-image-row {
