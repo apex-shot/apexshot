@@ -829,6 +829,43 @@ mod tests {
     }
 
     #[test]
+    fn the_none_row_clears_the_fill_from_every_tab() {
+        // "None" is an action, not a fourth source page: it belongs to the
+        // panel frame under the strip so every tab shows it, and clicking it
+        // writes the model rather than only recording a view state.
+        let panel = include_str!("tool_sidebar_background.rs");
+        assert!(
+            panel.contains("let none_row = Button::with_label(&t(\"None\"));"),
+            "the panel must offer a None row"
+        );
+        assert!(
+            panel.contains("none_row.add_css_class(\"recording-editor-bg-none-row\");"),
+            "the None row needs its own chrome"
+        );
+        assert!(
+            panel.contains("guard.background = VideoBackground::None;"),
+            "the None row must clear the fill, not just the page"
+        );
+        assert!(
+            panel.contains("none_row.add_css_class(\"active-background-option\");"),
+            "None must read as selected while no fill is set"
+        );
+        let tab_position = panel
+            .find("body.append(&source_row);")
+            .expect("the strip is part of the frame");
+        let none_position = panel
+            .find("body.append(&none_row);")
+            .expect("the None row is part of the frame");
+        let pages_position = panel
+            .find("body.append(&pages);")
+            .expect("the pages follow the frame controls");
+        assert!(
+            tab_position < none_position && none_position < pages_position,
+            "the None row must sit under the strip and outside the pages"
+        );
+    }
+
+    #[test]
     fn padding_does_not_hide_until_a_fill_is_picked() {
         // Padding used to hide itself with no fill, which left the Custom page
         // showing only Radius. As a plain fill control it must keep a value set

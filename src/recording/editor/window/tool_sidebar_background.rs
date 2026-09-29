@@ -86,10 +86,9 @@ fn build_background_panel(
     header.append(&title);
     panel.append(&header);
 
-    // Which source the fill comes from. `None` still lives in the model as
-    // the absence of a fill, so it is reached by clearing rather than by
-    // holding a tab — the tabs pick *what* fills, and a "No background"
-    // action below turns it off.
+    // Which source the fill comes from. `None` lives in the model as the
+    // absence of a fill, so it is reached by clearing rather than by holding a
+    // tab: the tabs pick *what* fills, and the None row below turns it off.
     let source_row = GtkBox::new(Orientation::Horizontal, 0);
     source_row.add_css_class("recording-editor-bg-tabs");
     source_row.set_hexpand(true);
@@ -109,6 +108,15 @@ fn build_background_panel(
     body.add_css_class("recording-editor-cursor-tab-body");
     body.set_hexpand(true);
     body.append(&source_row);
+
+    // "None" clears the fill. It is not a fourth source tab — the tabs pick
+    // *what* fills, this turns filling off — so it sits under the strip and
+    // belongs to every tab rather than to one page.
+    let none_row = Button::with_label(&t("None"));
+    none_row.add_css_class("recording-editor-bg-none-row");
+    none_row.set_has_frame(false);
+    none_row.set_hexpand(true);
+    body.append(&none_row);
 
     // --- Wallpaper source: the bundled grid, four across like the mock. ---
     let wallpaper_page = GtkBox::new(Orientation::Vertical, 0);
@@ -359,6 +367,23 @@ fn build_background_panel(
         }
     });
 
+    // Clearing the fill is a write, unlike a tab switch: the row is an action,
+    // not a page. Re-clicking it while already empty must not churn the model.
+    none_row.connect_clicked({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        move |_| {
+            {
+                let mut guard = state.lock().unwrap();
+                if guard.background.is_none() {
+                    return;
+                }
+                guard.background = VideoBackground::None;
+            }
+            on_change();
+        }
+    });
+
     // Edit opens the Custom Wallpaper popover off the panel's left edge
     // rather than as a centered dialog, so the row being edited and the video
     // behind it both stay visible. The popover wires its own click: it needs
@@ -388,6 +413,7 @@ fn build_background_panel(
         let image_page = image_page.clone();
         let custom_swatch = custom_swatch.clone();
         let custom_label = custom_label.clone();
+        let none_row = none_row.clone();
         let image_thumb = image_thumb.clone();
         let padding_row_value = padding_row.clone();
         let radius_row_value = radius_row.clone();
@@ -489,6 +515,14 @@ fn build_background_panel(
                     }
                 });
                 image_thumb.queue_draw();
+            }
+
+            // "None" lights up whenever no fill is set, whichever tab is open:
+            // it is a state of the fill, not one of the source pages.
+            if background.is_none() {
+                none_row.add_css_class("active-background-option");
+            } else {
+                none_row.remove_css_class("active-background-option");
             }
 
             if is_wallpaper {
