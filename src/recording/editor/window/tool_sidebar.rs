@@ -751,41 +751,50 @@ mod tests {
     }
 
     #[test]
-    fn the_value_rows_belong_to_the_custom_page() {
-        // Padding, Radius and the custom-fill row were appended to the panel
-        // body, so they rendered on the Wallpaper and Image tabs too and every
-        // tab looked like Custom. They must be appended to the Custom page.
+    fn the_value_rows_are_shared_across_every_source_tab() {
+        // Padding and Radius describe the fill, not the source, so every tab
+        // offers them. Scoped to the Custom page they vanished on Wallpaper and
+        // Image; hung under the scrolling pages they show on all three, and the
+        // wallpaper grid scrolls beneath them instead of pushing them away.
         let panel = include_str!("tool_sidebar_background.rs");
         assert!(
-            panel.contains("custom_page.append(&padding_row.widget);"),
-            "Padding must live inside the Custom page, not the panel frame"
+            panel.contains("options_footer.append(&padding_row.widget);"),
+            "Padding must live in the shared footer, not one page"
         );
         assert!(
-            panel.contains("custom_page.append(&radius_row.widget);"),
-            "Radius must live inside the Custom page, not the panel frame"
+            panel.contains("options_footer.append(&radius_row.widget);"),
+            "Radius must live in the shared footer, not one page"
         );
         assert!(
-            !panel.contains("body.append(&padding_row.widget);"),
-            "the panel frame must not show the value rows on every tab"
+            !panel.contains("custom_page.append(&padding_row.widget);"),
+            "the value rows must not be scoped to the Custom page"
+        );
+        assert!(
+            !panel.contains("custom_page.append(&radius_row.widget);"),
+            "the value rows must not be scoped to the Custom page"
         );
     }
 
     #[test]
-    fn the_custom_page_tunes_the_fill_before_offering_a_new_one() {
-        // The Custom page reads as a sequence: set the fill's size, round its
-        // corners, then pick a new fill. Pinning the order stops the rows from
-        // drifting apart as the page is edited.
+    fn the_custom_page_opens_with_the_fill_row_above_the_shared_footer() {
+        // The Custom page reads as: summarize the fill already in place, then
+        // tune it from the shared Padding and Radius footer, which hangs below
+        // the scrolling pages so every source tab gets it.
         let panel = include_str!("tool_sidebar_background.rs");
         let order = [
-            "custom_page.append(&padding_row.widget);",
-            "custom_page.append(&radius_row.widget);",
             "custom_page.append(&custom_row);",
+            "body.append(&pages);",
+            "scroll.set_child(Some(&body));",
+            "panel.append(&scroll);",
+            "options_footer.append(&padding_row.widget);",
+            "options_footer.append(&radius_row.widget);",
+            "panel.append(&options_footer);",
         ];
         let mut cursor = 0;
         for step in order {
             let at = panel[cursor..]
                 .find(step)
-                .unwrap_or_else(|| panic!("Custom page must append {step}"));
+                .unwrap_or_else(|| panic!("Background panel must order {step}"));
             cursor += at + step.len();
         }
     }

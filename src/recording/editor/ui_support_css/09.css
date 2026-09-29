@@ -43,6 +43,13 @@
                 margin: 0 0 4px 0;
             }
 
+            /* Padding and Radius are shared by every source tab, pinned below
+             * the scrolling pages. The 14px side inset matches the body's, so
+             * the sliders line up with the grid and the fill rows above them. */
+            .recording-editor-bg-options-footer {
+                padding: 2px 14px 10px 14px;
+            }
+
             /* The Image tab's chooser, which is a button across its full width
              * rather than a box with a trailing Edit pill. */
             button.recording-editor-bg-image-row {
@@ -74,8 +81,8 @@
                 min-height: 40px;
                 padding: 0 6px 0 6px;
                 /* Matches the FillSlider track, which draws its own corners at
-                 * 8px — the row sits directly under Padding and Radius and has
-                 * to share their radius to read as part of the same group. */
+                 * 8px — the row reads as one group with the Padding/Radius
+                 * footer below it, so they share the same radius. */
                 border-radius: 8px;
                 background: alpha(white, 0.06);
             }

@@ -268,15 +268,9 @@ fn build_background_panel(
         |guard, value| guard.background_corner_radius = value,
     );
 
-    // Padding, Radius and the custom-fill row describe the fill itself, so
-    // they live inside the Custom page rather than the panel frame. Leaving
-    // them in the frame showed them on every tab.
-    //
-    // Order is padding, radius, then the row that opens the dialog: the two
-    // sliders tune the fill already in place, and picking a new one is the
-    // rarer action, so it reads as the closing step rather than the opener.
-    custom_page.append(&padding_row.widget);
-    custom_page.append(&radius_row.widget);
+    // The Custom page opens with the fill row that summarizes it: picking a
+    // new fill is the rarer action, so it heads the page rather than closing
+    // it, and the shared footer below tunes whatever is in place.
     custom_page.append(&custom_row);
 
     let pages = GtkBox::new(Orientation::Vertical, 0);
@@ -293,6 +287,18 @@ fn build_background_panel(
     scroll.set_hexpand(true);
     scroll.set_child(Some(&body));
     panel.append(&scroll);
+
+    // Padding and Radius describe the fill, not the source, so every tab gets
+    // them. They hang below the scroll rather than inside a page — the way the
+    // Clip panel pins its Delete footer — so the Wallpaper tab's full 60-tile
+    // grid scrolls underneath them instead of stretching the page until they
+    // fall out of reach.
+    let options_footer = GtkBox::new(Orientation::Vertical, 6);
+    options_footer.add_css_class("recording-editor-bg-options-footer");
+    options_footer.set_hexpand(true);
+    options_footer.append(&padding_row.widget);
+    options_footer.append(&radius_row.widget);
+    panel.append(&options_footer);
 
     // Which tab is open, independent of the fill the model holds. The pages
     // follow this, so opening Wallpaper shows the grid whether or not a
@@ -409,11 +415,10 @@ fn build_background_panel(
             custom_page.set_visible(matches!(active_page.get(), BgPage::Custom));
             image_page.set_visible(matches!(active_page.get(), BgPage::Image));
 
-            // Both sliders live on the Custom page and stay visible with it.
-            // Padding used to hide itself until a fill was picked, which only
-            // made sense while it shared the panel frame with every source;
-            // scoped to Custom it is simply one of the two fill controls, and
-            // a value set before any fill exists must survive being previewed.
+            // Both sliders are shared footer controls, so they show on every
+            // source tab. Padding used to hide itself until a fill was picked;
+            // as a plain fill control it must keep showing a value that was set
+            // before any fill exists, or that value could never be adjusted.
             padding_row_value.sync_value(padding);
             radius_row_value.sync_value(radius);
 
