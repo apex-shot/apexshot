@@ -425,7 +425,9 @@ pub fn recommended_window_size_with_extra_width(
     let max_width = ((screen_width as f64) * 0.90).round() as i32;
     let max_height = ((screen_height as f64) * 0.85).round() as i32;
     let default_width = 1280 + extra_width.max(0);
-    let default_height = 820;
+    // Kept identical to the recording editor's default height so switching
+    // between the image and video editors doesn't resize the window.
+    let default_height = 900;
 
     (
         default_width.clamp(EDITOR_MIN_WINDOW_WIDTH.min(max_width), max_width.max(1)),
