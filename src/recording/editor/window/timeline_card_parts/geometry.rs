@@ -30,6 +30,16 @@ pub fn video_layout(state: &VideoEditState, width: f64) -> Vec<(usize, usize, f6
     layout
 }
 
+/// Right edge (x) of the drawn clip on the video lane, including any freeze
+/// hold. Everything from here to the lane's edge is the "extend duration"
+/// band, which is what the blurred affordance fills.
+pub fn video_end_x(state: &VideoEditState, width: f64) -> f64 {
+    video_layout(state, width)
+        .into_iter()
+        .map(|(_, _, _, x1)| x1)
+        .fold(0.0_f64, f64::max)
+}
+
 pub struct VideoHit {
     pub cursor: TrackCursor,
     pub segment: Option<usize>,
@@ -74,6 +84,27 @@ pub fn video_hit(state: &VideoEditState, width: f64, x: f64) -> VideoHit {
             cursor,
             segment: Some(seg_idx),
             drag,
+        };
+    }
+    // Past the clip the whole band is the extend handle: that is where the
+    // blurred "drag to adjust duration" affordance lives, so it has to be a
+    // real drag target rather than dead lane. It selects and resizes the last
+    // kept segment.
+    let end_x = video_end_x(state, width);
+    // `end_x > 0.0` keeps the band honest: if the clip's end has been scrolled
+    // off to the left, the whole lane is not one giant handle, it is just
+    // empty lane. The loop above already claims x up to the clip's edge.
+    if end_x > 0.0 && x > end_x {
+        let segment = state
+            .segment_order
+            .iter()
+            .rev()
+            .find(|&&index| state.segments_kept.get(index).copied().unwrap_or(true))
+            .copied();
+        return VideoHit {
+            cursor: TrackCursor::ResizeEnd,
+            segment,
+            drag: Some(ClipDrag::End),
         };
     }
     VideoHit {
@@ -214,17 +245,20 @@ pub fn x_to_source(state: &VideoEditState, width: f64, x: f64) -> f64 {
 /// consumes. `x_to_source` cannot do this: it clamps at the source duration,
 /// which made expanding the right edge a no-op.
 ///
-/// The overshoot is measured from where the clip's tail actually ends
-/// (its end plus any hold already on it), not from the composition's total
-/// length. Measuring from the total made the first drag past the end collapse
-/// on a multi-segment arrangement, and made a second drag right *shrink* a
-/// hold that was already open.
+/// The overshoot is measured from where the *footage* ends, never from the
+/// clip's drawn tail. `last_segment_end()` already includes the hold this drag
+/// is setting, so feeding it back made every update compute
+/// `new_hold = overshoot - old_hold`: the tail converged to half the drag while
+/// alternating frame to frame — a handle that followed only half way and
+/// flickered. `source_to_timeline(trim_end_seconds)` is the composition time of
+/// the last real frame and does not move with the hold, so the target is a
+/// fixed point for a fixed pointer.
 pub fn edge_target_at(state: &VideoEditState, timeline_t: f64) -> f64 {
     let duration = state.metadata.duration_seconds.max(0.0);
     let source_t = state.timeline_to_source(timeline_t);
     if source_t > duration {
-        let tail_end = state.last_segment_end();
-        duration + (timeline_t - tail_end).max(0.0)
+        let footage_end = state.source_to_timeline(state.trim_end_seconds);
+        state.trim_end_seconds + (timeline_t - footage_end).max(0.0)
     } else {
         source_t.clamp(0.0, duration)
     }
@@ -448,7 +482,7 @@ mod tests {
 
 #[cfg(test)]
 mod freeze_edge_tests {
-    use super::{edge_target_at, video_hit, video_layout, ClipDrag};
+    use super::{edge_target_at, video_hit, video_layout, ClipDrag, TrackCursor};
     use crate::recording::editor::model::{VideoEditState, VideoMetadata};
     use std::path::PathBuf;
 
@@ -528,5 +562,62 @@ mod freeze_edge_tests {
             "then real frames trim, end was {}",
             state.trim_end_seconds
         );
+    }
+
+    /// The handle must track the pointer, not settle at half the drag.
+    ///
+    /// `edge_target_at` used to measure the overshoot from `last_segment_end()`,
+    /// which already includes the hold being set, so each update computed
+    /// `new = overshoot - old`: the tail converged to half the drag while
+    /// oscillating frame to frame. Feeding the same absolute pointer in
+    /// repeatedly has to be a fixed point, and it has to hold the full
+    /// overshoot.
+    #[test]
+    fn the_drag_tracks_the_pointer_without_halving() {
+        let mut state = state();
+        let width = 1000.0;
+        let (_, _, _, x1) = video_layout(&state, width)[0];
+
+        // Three seconds of pixels past the source end.
+        let composition_t = state.x_to_time(x1 + 300.0, width);
+        let expected = composition_t - state.source_duration();
+
+        let mut previous = -1.0;
+        for _ in 0..5 {
+            let target = edge_target_at(&state, composition_t);
+            state.set_trim_end(target);
+            let held = state.freeze_tail_seconds();
+            assert!(
+                (held - expected).abs() < 1e-6,
+                "the tail must hold the full overshoot {expected}, got {held}",
+            );
+            assert!(
+                (held - previous).abs() < 1e-6 || previous < 0.0,
+                "repeating the same pointer must not oscillate: {previous} then {held}",
+            );
+            previous = held;
+        }
+    }
+
+    /// Everything to the right of the clip is the extend handle, so the
+    /// blurred band is draggable, not dead lane.
+    #[test]
+    fn the_trailing_band_offers_the_end_drag() {
+        let mut state = state();
+        let width = 1000.0;
+        // Trim two seconds in, leaving a visible trailing band at fit zoom.
+        state.set_trim_end(8.0);
+
+        let hit = video_hit(&state, width, 900.0);
+        assert_eq!(
+            hit.drag,
+            Some(ClipDrag::End),
+            "the band past the clip must offer the End drag",
+        );
+        assert!(
+            matches!(hit.cursor, TrackCursor::ResizeEnd),
+            "the band must show the resize cursor",
+        );
+        assert_eq!(hit.segment, Some(0), "the band belongs to the last clip");
     }
 }

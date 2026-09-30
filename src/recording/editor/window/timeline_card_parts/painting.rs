@@ -98,6 +98,20 @@ pub fn draw_ruler(
         }
         t += minor;
     }
+
+    // Dim the ruler past the clip, so the extend band reads as one region
+    // across the card instead of stopping at the lane seam.
+    let clip_end_x = video_end_x(&state, w);
+    if clip_end_x < w {
+        let (r, g, b, a) = if light {
+            (0.97, 0.98, 1.0, 0.55)
+        } else {
+            (0.03, 0.04, 0.06, 0.55)
+        };
+        cr.set_source_rgba(r, g, b, a);
+        cr.rectangle(clip_end_x, 0.0, w - clip_end_x, h);
+        let _ = cr.fill();
+    }
 }
 
 pub fn ruler_major_step(visible: f64) -> f64 {
@@ -200,6 +214,99 @@ pub fn draw_video_clip(
             hold,
             pps,
         );
+    }
+    // The extend marker: the clip's right edge divides real footage from the
+    // band you drag to grow it, so it stays visible whenever the clip is the
+    // thing in hand.
+    let end_x = layout
+        .iter()
+        .map(|&(_, _, _, x1)| x1)
+        .fold(0.0_f64, f64::max);
+    let last_kept = state
+        .segment_order
+        .iter()
+        .rev()
+        .find(|&&index| state.segments_kept.get(index).copied().unwrap_or(true))
+        .copied();
+    let show_hint = last_kept.is_some()
+        && (state.selected_segment == last_kept || hovered == last_kept);
+    draw_extend_band(end_x, w, h, light, show_hint, cr);
+}
+
+/// The "extend duration" band: everything on the video lane to the right of
+/// the clip.
+///
+/// Past the clip there is no footage, so the lane is scrimmed to read as
+/// frosted rather than usable, and the clip's edge gets a bright divider — the
+/// handle you drag to grow the clip. While the clip is selected (or hovered)
+/// the band carries its hint. Dragging it is `ClipDrag::End`, so the region is
+/// the affordance, not decoration.
+pub fn draw_extend_band(
+    end_x: f64,
+    width: f64,
+    height: f64,
+    light: bool,
+    show_hint: bool,
+    cr: &gtk4::cairo::Context,
+) {
+    let band = width - end_x;
+    if band < 1.0 {
+        return;
+    }
+
+    let (r, g, b, a) = if light {
+        (0.95, 0.96, 0.99, 0.55)
+    } else {
+        (0.03, 0.04, 0.06, 0.55)
+    };
+    let _ = cr.save();
+    rounded_rect(cr, end_x, 0.0, band, height, 4.0);
+    cr.clip();
+    cr.set_source_rgba(r, g, b, a);
+    let _ = cr.paint();
+    // Fade the scrim in from the divider, so the edge reads as frosted glass
+    // rather than a slab butted against the clip.
+    let fade = band.min(96.0);
+    let grad = gtk4::cairo::LinearGradient::new(end_x, 0.0, end_x + fade, 0.0);
+    grad.add_color_stop_rgba(0.0, r, g, b, a * 0.35);
+    grad.add_color_stop_rgba(1.0, r, g, b, 0.0);
+    let _ = cr.set_source(&grad);
+    let _ = cr.paint();
+    let _ = cr.restore();
+
+    // The divider: a bright full-height pill at the clip's edge.
+    let (dr, dg, db) = if light {
+        (0.07, 0.08, 0.09)
+    } else {
+        (0.86, 0.90, 0.98)
+    };
+    cr.set_source_rgba(dr, dg, db, 0.9);
+    rounded_rect(cr, end_x - 1.0, 2.0, 3.0, (height - 4.0).max(4.0), 1.5);
+    let _ = cr.fill();
+
+    if !show_hint {
+        return;
+    }
+    let label = crate::i18n::t("Drag to adjust duration");
+    cr.select_font_face(
+        crate::typography::UI_FONT_FAMILY,
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
+    cr.set_font_size(13.0);
+    if let Ok(ext) = cr.text_extents(&label) {
+        // Only spell it out when the band is wide enough for the words to sit
+        // clear of the divider instead of crowding it.
+        if band > ext.width() + 36.0 {
+            let (tr, tg, tb, ta) = if light {
+                (0.10, 0.12, 0.15, 0.60)
+            } else {
+                (1.0, 1.0, 1.0, 0.45)
+            };
+            cr.set_source_rgba(tr, tg, tb, ta);
+            cr.move_to(end_x + 16.0, (height + ext.height()) / 2.0 - 1.0);
+            let _ = cr.show_text(&label);
+        }
     }
 }
 
