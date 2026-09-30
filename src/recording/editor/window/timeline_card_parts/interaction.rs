@@ -97,18 +97,33 @@ pub fn tick_playback(
     // A freeze hold runs past the source, where the media has no frames left.
     // Keep the last frame on screen and walk the playhead to the real end,
     // instead of rewinding the moment the source runs out.
+    //
+    // The source has no frames after its final one, whose timestamp is usually
+    // one frame short of the container duration, so the playhead alone may
+    // never reach `footage_end` before the media reports end. Enter the hold
+    // when either the playhead crosses it or the source is exhausted.
     let freeze_tail = {
         let guard = state.lock().unwrap();
         let footage_end = guard.source_to_timeline(guard.trim_end_seconds);
-        (guard.freeze_tail_seconds() > 1e-9 && guard.playhead_seconds >= footage_end - 1e-9).then(
-            || {
-                (
-                    guard.trim_end_seconds,
-                    guard.content_end_seconds(),
-                    guard.playhead_seconds,
-                )
-            },
+        let media_done = media
+            .borrow()
+            .as_ref()
+            .is_some_and(|media| media.is_ended());
+        freeze_hold_active(
+            guard.freeze_tail_seconds(),
+            media_done,
+            guard.playhead_seconds,
+            footage_end,
         )
+        .then(|| {
+            (
+                guard.trim_end_seconds,
+                guard.content_end_seconds(),
+                // Begin the hold on the last real frame rather than the
+                // player's last reported timestamp, which can lag it.
+                guard.playhead_seconds.max(footage_end),
+            )
+        })
     };
     if let Some((trim_end, end, playhead)) = freeze_tail {
         if let Some(media_file) = media.borrow().as_ref() {

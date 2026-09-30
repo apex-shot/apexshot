@@ -2107,6 +2107,28 @@ fn freeze_extends_the_composition_past_the_source_end() {
 }
 
 #[test]
+fn a_freeze_hold_starts_when_the_media_ends_short_of_the_container() {
+    // The last decodable frame's timestamp sits one frame before the container
+    // duration, so the playhead never reaches `footage_end` on its own before
+    // the source runs out. The finished media must be enough to enter the hold,
+    // or the tail is skipped and playback stops at the source end.
+    assert!(
+        freeze_hold_active(1.0, true, 9.9667, 10.0),
+        "media end must open the hold even when the playhead is short"
+    );
+    // Crossing footage_end opens it too, with or without a media-end report.
+    assert!(freeze_hold_active(1.0, false, 10.0, 10.0));
+}
+
+#[test]
+fn no_hold_without_a_tail_or_before_the_source_is_exhausted() {
+    // No tail: nothing to hold, so the media end still stops playback.
+    assert!(!freeze_hold_active(0.0, true, 10.0, 10.0));
+    // Mid-clip playback must not leap into a hold.
+    assert!(!freeze_hold_active(1.0, false, 4.0, 10.0));
+}
+
+#[test]
 fn freeze_playhead_holds_the_last_source_frame() {
     let mut state = VideoEditState::new(metadata());
     state.extend_last_segment(1.0);
