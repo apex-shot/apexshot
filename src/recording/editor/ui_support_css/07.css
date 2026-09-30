@@ -154,40 +154,48 @@
                 min-width: 150px;
             }
 
-            /* Timeline zoom: one pill, the magnifier at its left, a slim bar
-             * for the level — instead of a −/+ pair around a bare track.
+            /* Timeline zoom: one pill, the magnifier at its left, a rounded
+             * thumb for the level — instead of a −/+ pair around a bare track.
              *
-             * The scale behind the bar is drawn at zero opacity: it is kept
+             * The scale behind the thumb is drawn at zero opacity: it is kept
              * only for the behaviour (click, drag, keyboard, scroll). A
              * GtkScale paints a trough, a `highlight` and a `fill` that the
              * theme colours in, and clearing all three from CSS did not hold —
              * the theme's track kept showing through as a second, lighter
-             * pill inside this one. Drawing the bar here makes the pill a
-             * single flat surface. */
+             * pill inside this one. Drawing the thumb here makes the pill a
+             * single flat surface.
+             *
+             * The glyph is the pill's base layer and the thumb rides above it
+             * (see `build_timeline_card`), so the travel starts at the pill's
+             * left edge and the thumb slides over the magnifier at the low end
+             * of the range. The glyph's inset is what lets the two overlap. */
             .recording-editor-root .recording-editor-timeline-zoom-pill {
-                min-width: 150px;
-                min-height: 26px;
-                padding: 0 10px;
-                border-radius: 13px;
-                background: alpha(white, 0.06);
+                min-width: 132px;
+                min-height: 24px;
+                padding: 0 6px;
+                border-radius: 999px;
+                background: alpha(white, 0.12);
+            }
+
+            .recording-editor-root .recording-editor-timeline-zoom-glyph {
+                margin: 0 0 0 4px;
             }
 
             .recording-editor-root .recording-editor-timeline-zoom-pill image {
-                color: alpha(white, 0.55);
-                margin: 0 12px 0 4px;
+                color: alpha(white, 0.62);
             }
 
             .recording-editor-root .recording-editor-timeline-zoom-bar {
-                min-width: 4px;
+                min-width: 6px;
                 min-height: 18px;
-                border-radius: 0;
-                background: alpha(white, 0.45);
+                border-radius: 3px;
+                background: alpha(white, 0.5);
             }
 
             .recording-editor-root .recording-editor-timeline-zoom-pill scale.recording-editor-timeline-zoom {
                 opacity: 0;
                 min-width: 76px;
-                min-height: 26px;
+                min-height: 24px;
                 padding: 0;
             }
 
