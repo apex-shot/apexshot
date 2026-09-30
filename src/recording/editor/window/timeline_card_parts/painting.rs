@@ -215,13 +215,31 @@ pub fn draw_video_clip(
             pps,
         );
     }
-    // The extend marker: the clip's right edge divides real footage from the
-    // band you drag to grow it, so it stays visible whenever the clip is the
-    // thing in hand.
-    let end_x = layout
-        .iter()
-        .map(|&(_, _, _, x1)| x1)
-        .fold(0.0_f64, f64::max);
+}
+
+/// The "extend duration" region across every lane below the ruler.
+///
+/// The band used to live inside the video lane alone, so it stopped at the
+/// lane seam while the ruler carried its own dim. Drawing it once, over the
+/// three lanes, makes the whole area past the clip read as one frosted region
+/// from the ruler to the bottom of the stack.
+pub fn draw_extend_region(
+    state: &Arc<Mutex<VideoEditState>>,
+    hovered: Option<usize>,
+    light: bool,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let state = state.lock().unwrap();
+    if !state.has_source_video() {
+        // Before a video is loaded there is no clip to extend past, so the
+        // lanes stay unfrosted rather than becoming one full-width band.
+        return;
+    }
+    let w = width as f64;
+    let h = height as f64;
+    let end_x = video_end_x(&state, w);
     let last_kept = state
         .segment_order
         .iter()
@@ -233,14 +251,14 @@ pub fn draw_video_clip(
     draw_extend_band(end_x, w, h, light, show_hint, cr);
 }
 
-/// The "extend duration" band: everything on the video lane to the right of
-/// the clip.
+/// The "extend duration" band: everything to the right of the clip, across the
+/// whole lane stack.
 ///
-/// Past the clip there is no footage, so the lane is scrimmed to read as
-/// frosted rather than usable, and the clip's edge gets a bright divider — the
-/// handle you drag to grow the clip. While the clip is selected (or hovered)
-/// the band carries its hint. Dragging it is `ClipDrag::End`, so the region is
-/// the affordance, not decoration.
+/// Past the clip there is no footage in any lane, so the region is scrimmed to
+/// read as frosted rather than usable, and the clip's edge gets a bright
+/// divider — the handle you drag to grow the clip. While the clip is selected
+/// (or hovered) the band carries its hint. Dragging it is `ClipDrag::End`, so
+/// the region is the affordance, not decoration.
 pub fn draw_extend_band(
     end_x: f64,
     width: f64,

@@ -253,13 +253,49 @@ pub fn build_timeline_card(
         }
     });
 
+    // The frosted extend region is one layer over the three lanes, so it spans
+    // the video, zoom and hide rows (and the gaps between them) instead of
+    // stopping at the video lane's seam.
+    let extend_layer = DrawingArea::new();
+    extend_layer.add_css_class("recording-editor-card-extend");
+    extend_layer.set_hexpand(true);
+    extend_layer.set_vexpand(true);
+    extend_layer.set_can_target(false);
+    extend_layer.set_draw_func({
+        let state = state.clone();
+        let hovered_video = hovered_video.clone();
+        move |area, cr, width, height| {
+            draw_extend_region(
+                &state,
+                hovered_video.get(),
+                widget_is_light(area),
+                cr,
+                width,
+                height,
+            )
+        }
+    });
+
+    let lanes = GtkBox::new(Orientation::Vertical, 10);
+    lanes.add_css_class("recording-editor-card-tracks");
+    lanes.set_hexpand(true);
+    lanes.append(&video_track);
+    lanes.append(&zoom_track);
+    lanes.append(&hide_track);
+
+    let lane_overlay = Overlay::new();
+    lane_overlay.set_hexpand(true);
+    lane_overlay.set_child(Some(&lanes));
+    // The band rides above the lanes: the space past the clip is empty in
+    // every lane, and sitting on top keeps the edge divider crisp against the
+    // clip instead of being covered by its rounded corner.
+    lane_overlay.add_overlay(&extend_layer);
+
     let tracks = GtkBox::new(Orientation::Vertical, 10);
     tracks.add_css_class("recording-editor-card-tracks");
     tracks.set_hexpand(true);
     tracks.append(&ruler);
-    tracks.append(&video_track);
-    tracks.append(&zoom_track);
-    tracks.append(&hide_track);
+    tracks.append(&lane_overlay);
 
     let board = Overlay::new();
     board.add_css_class("recording-editor-card-board");
@@ -297,6 +333,7 @@ pub fn build_timeline_card(
         let video_track = video_track.clone();
         let zoom_track = zoom_track.clone();
         let hide_track = hide_track.clone();
+        let extend_layer = extend_layer.clone();
         let playhead = playhead.clone();
         let playhead_clock = playhead_clock.clone();
         let duration_clock = duration_clock.clone();
@@ -328,6 +365,7 @@ pub fn build_timeline_card(
                 );
             }
             ruler.queue_draw();
+            extend_layer.queue_draw();
             video_track.queue_draw();
             zoom_track.queue_draw();
             hide_track.queue_draw();
