@@ -2113,19 +2113,34 @@ fn a_freeze_hold_starts_when_the_media_ends_short_of_the_container() {
     // the source runs out. The finished media must be enough to enter the hold,
     // or the tail is skipped and playback stops at the source end.
     assert!(
-        freeze_hold_active(1.0, true, 9.9667, 10.0),
+        freeze_hold_active(1.0, true, 9.9667, 10.0, 0.0),
         "media end must open the hold even when the playhead is short"
     );
-    // Crossing footage_end opens it too, with or without a media-end report.
-    assert!(freeze_hold_active(1.0, false, 10.0, 10.0));
+    // The one-frame lead starts it without waiting for the media to report
+    // end, so the playhead does not sit on the last frame at the handoff.
+    assert!(freeze_hold_active(
+        1.0,
+        false,
+        9.9667,
+        10.0,
+        freeze_hold_lead(30.0)
+    ));
+    // Crossing footage_end opens it too, with or without a lead.
+    assert!(freeze_hold_active(1.0, false, 10.0, 10.0, 0.0));
 }
 
 #[test]
 fn no_hold_without_a_tail_or_before_the_source_is_exhausted() {
     // No tail: nothing to hold, so the media end still stops playback.
-    assert!(!freeze_hold_active(0.0, true, 10.0, 10.0));
-    // Mid-clip playback must not leap into a hold.
-    assert!(!freeze_hold_active(1.0, false, 4.0, 10.0));
+    assert!(!freeze_hold_active(0.0, true, 10.0, 10.0, 0.0));
+    // Mid-clip playback must not leap into a hold, even with the lead.
+    assert!(!freeze_hold_active(
+        1.0,
+        false,
+        4.0,
+        10.0,
+        freeze_hold_lead(30.0)
+    ));
 }
 
 #[test]

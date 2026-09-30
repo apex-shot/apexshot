@@ -52,18 +52,35 @@ pub fn playhead_for_replay(playhead: f64, content_end: f64) -> f64 {
     }
 }
 
+/// How early a freeze hold may start before the playhead reaches `footage_end`.
+///
+/// The final decodable frame's timestamp is one frame short of the container
+/// duration, and the media can take a beat to report end, so without a lead the
+/// playhead parks on that last frame until EOS lands — a visible hitch at the
+/// handoff. One frame closes the gap without eating real footage. Falls back to
+/// the transport's tick when the frame rate is unknown.
+pub fn freeze_hold_lead(frame_rate: f64) -> f64 {
+    if frame_rate.is_finite() && frame_rate > 0.0 {
+        1.0 / frame_rate + 1e-3
+    } else {
+        0.05
+    }
+}
+
 /// Whether playback should enter a freeze hold: a tail exists and the source is
 /// exhausted. The source is exhausted when the media reports end, or the
-/// playhead has crossed `footage_end` — the last decodable frame's timestamp is
-/// usually one frame short of the container duration, so the playhead alone
-/// need not ever reach the exact end before the source runs out.
+/// playhead has come within `lead` of `footage_end` — the last decodable
+/// frame's timestamp is usually one frame short of the container duration, so
+/// the playhead alone need not ever reach the exact end before the source runs
+/// out.
 pub fn freeze_hold_active(
     freeze_tail: f64,
     media_done: bool,
     playhead: f64,
     footage_end: f64,
+    lead: f64,
 ) -> bool {
-    freeze_tail > 1e-9 && (media_done || playhead >= footage_end - 1e-9)
+    freeze_tail > 1e-9 && (media_done || playhead >= footage_end - lead.max(0.0) - 1e-9)
 }
 
 pub fn usable_media_timestamp_seconds(timestamp_us: i64, seeking: bool) -> Option<f64> {

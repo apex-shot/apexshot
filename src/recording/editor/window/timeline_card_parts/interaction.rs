@@ -87,24 +87,19 @@ pub fn tick_playback(
         return;
     }
 
-    if let Some(media_file) = media.borrow().as_ref() {
-        if media_file.is_seeking() {
-            redraw();
-            return;
-        }
-    }
-
     // A freeze hold runs past the source, where the media has no frames left.
     // Keep the last frame on screen and walk the playhead to the real end,
     // instead of rewinding the moment the source runs out.
     //
-    // The source has no frames after its final one, whose timestamp is usually
-    // one frame short of the container duration, so the playhead alone may
-    // never reach `footage_end` before the media reports end. Enter the hold
-    // when either the playhead crosses it or the source is exhausted.
+    // Decided before the seek guard: the hold advances the playhead from the
+    // timeline, not from the media, so pinning the last frame (a seek) must not
+    // park the playhead for the length of that seek. A one-frame lead starts
+    // the hold without waiting for the media to report end, which would
+    // otherwise leave the playhead sitting on the final frame for a beat.
     let freeze_tail = {
         let guard = state.lock().unwrap();
         let footage_end = guard.source_to_timeline(guard.trim_end_seconds);
+        let lead = freeze_hold_lead(guard.metadata.frame_rate);
         let media_done = media
             .borrow()
             .as_ref()
@@ -114,14 +109,17 @@ pub fn tick_playback(
             media_done,
             guard.playhead_seconds,
             footage_end,
+            lead,
         )
         .then(|| {
             (
                 guard.trim_end_seconds,
                 guard.content_end_seconds(),
-                // Begin the hold on the last real frame rather than the
-                // player's last reported timestamp, which can lag it.
-                guard.playhead_seconds.max(footage_end),
+                // Resume from where the playhead is rather than snapping it
+                // forward to the last frame — that snap is itself a visible
+                // jump. The floor keeps a lagging media-end report from
+                // starting the hold more than a lead behind the last frame.
+                guard.playhead_seconds.max(footage_end - lead),
             )
         })
     };
@@ -131,10 +129,14 @@ pub fn tick_playback(
                 media_file.pause();
             }
             // Pin the source to the held frame once; `timestamp` then matches,
-            // so the seek does not repeat every tick.
-            let at = media_file.timestamp() as f64 / 1_000_000.0;
-            if at < 0.0 || (at - trim_end).abs() > 0.05 {
-                media_file.seek((trim_end * 1_000_000.0) as i64);
+            // so the seek does not repeat every tick. Skip while an earlier
+            // seek is still settling — its timestamp is stale and would make
+            // this fire again every tick.
+            if !media_file.is_seeking() {
+                let at = media_file.timestamp() as f64 / 1_000_000.0;
+                if at < 0.0 || (at - trim_end).abs() > 0.05 {
+                    media_file.seek((trim_end * 1_000_000.0) as i64);
+                }
             }
         }
         let mut guard = state.lock().unwrap();
@@ -148,6 +150,13 @@ pub fn tick_playback(
             redraw();
         }
         return;
+    }
+
+    if let Some(media_file) = media.borrow().as_ref() {
+        if media_file.is_seeking() {
+            redraw();
+            return;
+        }
     }
 
     if let Some(media_file) = media.borrow().as_ref() {
