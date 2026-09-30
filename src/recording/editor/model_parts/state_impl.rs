@@ -276,6 +276,18 @@ impl VideoEditState {
         }
     }
 
+    /// Pan (without re-zooming) so the playhead sits inside the window. Used
+    /// while playback walks a freeze tail past the source, where the fixed fit
+    /// ruler would otherwise let the playhead run off the right edge.
+    pub fn follow_playhead_on_timeline(&mut self) {
+        let visible = self.visible_span_seconds();
+        let lead = visible * 0.9;
+        if self.playhead_seconds > self.timeline_scroll_seconds + lead {
+            self.timeline_scroll_seconds = self.playhead_seconds - lead;
+        }
+        self.clamp_timeline_scroll();
+    }
+
     pub fn set_timeline_scroll(&mut self, value: f64) {
         self.timeline_scroll_seconds = value;
         self.clamp_timeline_scroll();

@@ -406,7 +406,13 @@ pub fn draw_video_segment(
             if let Some(last) = filmstrip.last() {
                 let hold_x0 = x0 + clip_w - freeze * px_per_second;
                 let mut tile_x = hold_x0;
-                let tile_w = (freeze * px_per_second / 3.0).max(8.0);
+                // One held frame per natural frame-width, at the lane's height.
+                // Sizing the repeats to the hold instead (`freeze * pps / 3`)
+                // stretched each copy: `paint_cover_pixbuf` then cropped into a
+                // zoomed slice of the frame, which read as a smear.
+                let src_w = last.width().max(1) as f64;
+                let src_h = last.height().max(1) as f64;
+                let tile_w = (height * src_w / src_h).clamp(8.0, 240.0);
                 while tile_x < x0 + clip_w {
                     paint_cover_pixbuf(
                         cr,

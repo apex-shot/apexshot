@@ -124,6 +124,7 @@ pub fn tick_playback(
         }
         let mut guard = state.lock().unwrap();
         guard.playhead_seconds = (playhead + 0.05).min(end);
+        guard.follow_playhead_on_timeline();
         let reached = guard.playhead_seconds >= end - 1e-3;
         drop(guard);
         if reached {

@@ -2142,6 +2142,24 @@ fn a_freeze_after_a_trim_holds_the_trimmed_last_frame() {
 }
 
 #[test]
+fn follow_playhead_pans_the_freeze_tail_into_view() {
+    let mut state = VideoEditState::new(metadata());
+    state.extend_last_segment(6.0);
+    state.playhead_seconds = 15.0;
+    state.follow_playhead_on_timeline();
+    let visible = state.visible_span_seconds();
+    assert!(
+        state.timeline_scroll_seconds > 0.0,
+        "the tail past the source must be panned into view"
+    );
+    assert!(
+        state.playhead_seconds <= state.timeline_scroll_seconds + visible + 1e-9,
+        "the playhead must end up inside the window"
+    );
+    assert!(state.timeline_scroll_seconds <= state.max_timeline_scroll() + 1e-9);
+}
+
+#[test]
 fn dragging_the_right_edge_past_the_end_opens_a_hold_that_applies() {
     let mut state = VideoEditState::new(metadata());
     // The tail has to name its segment, or nothing applies it: the composition
