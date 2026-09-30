@@ -2,6 +2,48 @@ fn ranges_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> bool {
     a0 < b1 && b0 < a1
 }
 
+/// Shortest span an effect clip (zoom or cursor-hide) may occupy. Matches the
+/// minimum the timeline drags already enforce.
+const MIN_EFFECT_CLIP_SECONDS: f64 = 0.2;
+
+/// The longest an effect clip may run: the edited video's own length. The
+/// program never plays past its last frame, so a block sitting in the empty
+/// canvas beyond it could never do anything.
+pub(crate) fn effect_clip_limit(state: &VideoEditState) -> f64 {
+    state.composition_duration()
+}
+
+/// Clamp a requested clip span to the video's length, growing it to the
+/// minimum where there is still room. `None` when even the minimum would not
+/// fit — the caller must leave the clip unchanged rather than write a
+/// degenerate one.
+pub(crate) fn fit_effect_span(state: &VideoEditState, start: f64, end: f64) -> Option<(f64, f64)> {
+    let limit = effect_clip_limit(state);
+    let mut start = start.clamp(0.0, limit);
+    let mut end = end.clamp(0.0, limit);
+    if end < start {
+        std::mem::swap(&mut start, &mut end);
+    }
+    if end - start < MIN_EFFECT_CLIP_SECONDS {
+        end = (start + MIN_EFFECT_CLIP_SECONDS).min(limit);
+        if end - start < MIN_EFFECT_CLIP_SECONDS {
+            return None;
+        }
+    }
+    Some((start, end))
+}
+
+/// Move an effect clip without changing its length: pull it back so its end
+/// never passes the last frame.
+pub(crate) fn fit_effect_move(state: &VideoEditState, start: f64, duration: f64) -> (f64, f64) {
+    let limit = effect_clip_limit(state);
+    let duration = duration
+        .max(MIN_EFFECT_CLIP_SECONDS)
+        .min(limit.max(MIN_EFFECT_CLIP_SECONDS));
+    let start = start.max(0.0).min((limit - duration).max(0.0));
+    (start, (start + duration).min(limit))
+}
+
 pub fn playhead_for_replay(playhead: f64, content_end: f64) -> f64 {
     if playhead >= content_end - 0.05 {
         0.0

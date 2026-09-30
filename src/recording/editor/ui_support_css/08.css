@@ -393,16 +393,16 @@
                 color: #DC2626;
             }
 
-            /* The pill carries the surface in both themes; the bar is the only
-             * thing drawn inside it (see the dark-theme note in 07.css). */
+            /* The pill carries the surface in both themes; the thumb is the
+             * only thing drawn inside it (see the dark-theme note in 07.css). */
             .editor-theme-light.recording-editor-root .recording-editor-timeline-zoom-pill {
-                background: alpha(#111827, 0.06);
+                background: alpha(#111827, 0.08);
             }
 
             .editor-theme-light.recording-editor-root .recording-editor-timeline-zoom-pill image {
-                color: alpha(#111827, 0.55);
+                color: alpha(#111827, 0.62);
             }
 
             .editor-theme-light.recording-editor-root .recording-editor-timeline-zoom-bar {
-                background: alpha(#111827, 0.30);
+                background: alpha(#111827, 0.38);
             }

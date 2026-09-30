@@ -46,6 +46,8 @@ mod tests {
             .contains(".recording-editor-root .recording-editor-timeline-zoom-pill {"));
         assert!(RECORDING_EDITOR_CSS
             .contains(".recording-editor-root .recording-editor-timeline-zoom-bar {"));
+        assert!(RECORDING_EDITOR_CSS
+            .contains(".recording-editor-root .recording-editor-timeline-zoom-glyph {"));
         assert!(RECORDING_EDITOR_CSS.contains(
             ".recording-editor-root .recording-editor-timeline-zoom-pill scale.recording-editor-timeline-zoom {\n                opacity: 0;"
         ));

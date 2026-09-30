@@ -53,15 +53,15 @@ pub fn build_timeline_card(
     zoom_scale.set_tooltip_text(Some(&t("Zoom")));
 
     // One control rather than a −/+ pair around a bare track: a pill, the
-    // magnifier at its left, and a slim bar for the level.
+    // magnifier at its left, and a rounded thumb for the level.
     //
-    // The bar is drawn here rather than left to the scale. A GtkScale paints a
-    // trough, a `highlight` and a `fill` that the theme fills in with its own
+    // The thumb is drawn here rather than left to the scale. A GtkScale paints
+    // a trough, a `highlight` and a `fill` that the theme fills in with its own
     // colours, and no combination of CSS reliably cleared all three — the
     // theme's track kept showing through as a second, lighter pill inside this
     // one. The scale is therefore drawn at zero opacity and kept only for the
-    // behaviour (click, drag, keyboard, scroll), sitting over the area the bar
-    // travels, so the pill reads as a single flat surface.
+    // behaviour (click, drag, keyboard, scroll), sitting over the area the
+    // thumb travels, so the pill reads as a single flat surface.
     let zoom_level_bar = GtkBox::new(Orientation::Horizontal, 0);
     zoom_level_bar.add_css_class("recording-editor-timeline-zoom-bar");
     zoom_level_bar.set_valign(Align::Center);
@@ -69,17 +69,27 @@ pub fn build_timeline_card(
     zoom_level_track.set_hexpand(true);
     zoom_level_track.append(&zoom_level_bar);
 
+    // The magnifier is the pill's base layer and the track rides above it, so
+    // the thumb's travel starts at the pill's left edge and slides over the
+    // glyph at the low end of the range. Laying the two side by side instead
+    // would push the whole travel to the right of the icon.
+    let zoom_glyph = Image::from_icon_name("zoom-in-symbolic");
+    zoom_glyph.set_pixel_size(14);
+    zoom_glyph.set_can_target(false);
+    let zoom_glyph_slot = GtkBox::new(Orientation::Horizontal, 0);
+    zoom_glyph_slot.add_css_class("recording-editor-timeline-zoom-glyph");
+    zoom_glyph_slot.set_halign(Align::Start);
+    zoom_glyph_slot.set_valign(Align::Center);
+    zoom_glyph_slot.append(&zoom_glyph);
+
     let zoom_area = Overlay::new();
     zoom_area.set_hexpand(true);
-    zoom_area.set_child(Some(&zoom_level_track));
+    zoom_area.set_child(Some(&zoom_glyph_slot));
+    zoom_area.add_overlay(&zoom_level_track);
     zoom_area.add_overlay(&zoom_scale);
 
     let zoom_pill = GtkBox::new(Orientation::Horizontal, 0);
     zoom_pill.add_css_class("recording-editor-timeline-zoom-pill");
-    let zoom_glyph = Image::from_icon_name("zoom-in-symbolic");
-    zoom_glyph.set_pixel_size(14);
-    zoom_glyph.set_can_target(false);
-    zoom_pill.append(&zoom_glyph);
     zoom_pill.append(&zoom_area);
 
     let toolbar = GtkBox::new(Orientation::Horizontal, 0);
@@ -738,20 +748,37 @@ fn balance_width(canvas_centre: f64, transport_centre: f64) -> Option<i32> {
     (drift > 0.5).then(|| (drift * 2.0).round() as i32)
 }
 
-/// Width of the zoom pill's bar, in px. Mirrors
-/// `.recording-editor-timeline-zoom-bar` in 07.css, which is what gives the bar
-/// its size — the bar is a plain box, so the travel has to subtract it by hand.
-const ZOOM_BAR_WIDTH: i32 = 4;
+/// Width of the zoom pill's thumb, in px. Mirrors
+/// `.recording-editor-timeline-zoom-bar` in 07.css, which is what gives the
+/// thumb its size — the thumb is a plain box, so the travel has to subtract it
+/// by hand.
+const ZOOM_BAR_WIDTH: i32 = 6;
 
-/// Put the zoom level bar at `fraction` (0..1) along the track.
+/// Vertical inset of the thumb inside the track, in px. The thumb is a rounded
+/// handle that floats inside the pill, not a hairline that spans it top to
+/// bottom, so its height is the track's less this on each side.
+const ZOOM_BAR_INSET: i32 = 3;
+
+/// Floor for the thumb's height, in px. Mirrors the same declaration in 07.css:
+/// a track too short to inset must still show a full thumb rather than let CSS
+/// clamp the height out from under the travel maths below.
+const ZOOM_BAR_MIN_HEIGHT: i32 = 18;
+
+/// Height of the zoom thumb in a track `track_height` px tall.
+fn zoom_thumb_height(track_height: i32) -> i32 {
+    (track_height - ZOOM_BAR_INSET * 2).max(ZOOM_BAR_MIN_HEIGHT)
+}
+
+/// Put the zoom level thumb at `fraction` (0..1) along the track.
 ///
 /// Returns whether it moved. GTK4 dropped `GtkAlignment`, so nothing places a
-/// fixed-width child at an arbitrary fraction any more; the bar is offset by
+/// fixed-width child at an arbitrary fraction any more; the thumb is offset by
 /// the distance it has left to travel, which is the track's width less the
-/// bar itself.
+/// thumb itself.
 ///
-/// The bar is also grown to the track's full height here, so it meets the pill
-/// at the top and bottom instead of floating in the middle of it.
+/// The thumb's height is also re-derived from the track here (less
+/// [`ZOOM_BAR_INSET`] top and bottom), so it stays centred and inset through a
+/// resize instead of stretching back across the pill.
 fn place_zoom_level_bar(track: &GtkBox, bar: &GtkBox, fraction: f64) -> bool {
     let width = track.allocated_width();
     let height = track.allocated_height();
@@ -760,8 +787,9 @@ fn place_zoom_level_bar(track: &GtkBox, bar: &GtkBox, fraction: f64) -> bool {
         return false;
     }
     let mut moved = false;
-    if bar.height() != height {
-        bar.set_size_request(-1, height);
+    let thumb_height = zoom_thumb_height(height);
+    if bar.height() != thumb_height {
+        bar.set_size_request(-1, thumb_height);
         moved = true;
     }
     if width <= ZOOM_BAR_WIDTH {
@@ -778,7 +806,9 @@ fn place_zoom_level_bar(track: &GtkBox, bar: &GtkBox, fraction: f64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::balance_width;
+    use super::{
+        balance_width, zoom_thumb_height, ZOOM_BAR_INSET, ZOOM_BAR_MIN_HEIGHT, ZOOM_BAR_WIDTH,
+    };
     use crate::recording::editor::window::tool_sidebar::TOOL_SIDEBAR_WIDTH;
 
     /// Measured on a 1400px-wide window: the canvas runs 14..1094 and the
@@ -809,5 +839,51 @@ mod tests {
         let drift = 775.5 - (14.0 + 1094.0) / 2.0;
         assert!(drift >= TOOL_SIDEBAR_WIDTH as f64 / 2.0);
         assert!(drift < TOOL_SIDEBAR_WIDTH as f64);
+    }
+
+    /// The thumb's travel maths assumes the box is the size 07.css gives it, so
+    /// pin the two against each other: a stylesheet tweak that silently
+    /// desyncs them makes the thumb jump, stop short of the pill's end, or
+    /// stop reading as a handle at all.
+    #[test]
+    fn thumb_geometry_matches_the_stylesheet() {
+        let css = include_str!("../../ui_support_css/07.css");
+        let thumb = css_rule(css, ".recording-editor-root .recording-editor-timeline-zoom-bar");
+        assert!(thumb.contains(&format!("min-width: {ZOOM_BAR_WIDTH}px;")));
+        assert!(thumb.contains(&format!("min-height: {ZOOM_BAR_MIN_HEIGHT}px;")));
+        // Rounded ends: the radius is half the width, so the thumb reads as a
+        // handle rather than a bar with clipped corners.
+        assert!(thumb.contains(&format!("border-radius: {}px;", ZOOM_BAR_WIDTH / 2)));
+
+        let pill = css_rule(css, ".recording-editor-root .recording-editor-timeline-zoom-pill");
+        // The pill is the thumb plus its inset on each side, which is what
+        // makes the thumb float inside it instead of touching its edges.
+        assert!(pill.contains(&format!(
+            "min-height: {}px;",
+            ZOOM_BAR_MIN_HEIGHT + ZOOM_BAR_INSET * 2
+        )));
+    }
+
+    #[test]
+    fn zoom_thumb_floats_inside_the_pill() {
+        // At the stylesheet's pill height the thumb is inset, not edge to edge.
+        assert_eq!(
+            zoom_thumb_height(ZOOM_BAR_MIN_HEIGHT + ZOOM_BAR_INSET * 2),
+            ZOOM_BAR_MIN_HEIGHT
+        );
+        // A taller track keeps the inset all round rather than a fixed height.
+        assert_eq!(zoom_thumb_height(56), 50);
+        // Degenerate tracks clamp to the floor instead of pinching to nothing.
+        assert_eq!(zoom_thumb_height(4), ZOOM_BAR_MIN_HEIGHT);
+    }
+
+    /// Body of the first rule for `selector`, without its braces.
+    fn css_rule<'a>(css: &'a str, selector: &str) -> &'a str {
+        css.split(selector)
+            .nth(1)
+            .expect("rule for selector")
+            .split('}')
+            .next()
+            .expect("rule body")
     }
 }

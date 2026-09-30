@@ -1,8 +1,8 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
     nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoBackground,
-    VideoEditState, ZoomEasing, ZoomMode, CLIP_SPEED_PRESETS, MAX_CLICK_DURATION_MS,
-    MAX_CLICK_SCALE, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLICK_DURATION_MS, MIN_CLICK_SCALE,
+    VideoEditState, ZoomEasing, ZoomMode, MAX_CLICK_DURATION_MS, MAX_CLICK_SCALE, MAX_CLIP_SPEED,
+    MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLICK_DURATION_MS, MIN_CLICK_SCALE, MIN_CLIP_SPEED,
     MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
@@ -447,41 +447,32 @@ fn build_clip_panel(
     body.add_css_class("recording-editor-zoom-body");
     body.set_hexpand(true);
 
-    let speed_label = Label::new(Some(&t("Speed")));
-    speed_label.add_css_class("recording-editor-zoom-kicker");
-    speed_label.set_xalign(0.0);
-
-    let chips = Grid::new();
-    chips.add_css_class("recording-editor-zoom-chips");
-    chips.set_column_spacing(4);
-    chips.set_row_spacing(4);
-    chips.set_column_homogeneous(true);
-    chips.set_hexpand(true);
+    let speed_slider =
+        FillSlider::new_with_value_text(&t("Speed"), |value, _, _| format_clip_speed(value));
+    speed_slider.set_range(MIN_CLIP_SPEED, MAX_CLIP_SPEED);
+    speed_slider.set_increments(0.05, 0.25);
+    // Speed is multiplicative, so the track is logarithmic: a linear
+    // 0.25x-30x track would squeeze every slow-motion value into a few pixels
+    // at the left edge. Every editor that ships this control (Resolve,
+    // Premiere, Final Cut, CapCut, Screen Studio) lets the value be dragged to
+    // anything in range rather than forcing it to a preset.
+    speed_slider.set_logarithmic(true);
     let syncing = Rc::new(Cell::new(false));
-    let chip_buttons: Vec<Button> = CLIP_SPEED_PRESETS
-        .iter()
-        .enumerate()
-        .map(|(i, &(label, speed))| {
-            let chip = Button::with_label(label);
-            chip.add_css_class("recording-editor-zoom-chip");
-            chip.set_hexpand(true);
-            chip.set_has_frame(false);
-            chip.connect_clicked({
-                let state = state.clone();
-                let on_change = on_change.clone();
-                let syncing = syncing.clone();
-                move |_| {
-                    if syncing.get() {
-                        return;
-                    }
-                    state.lock().unwrap().set_selected_clip_speed(speed);
-                    on_change();
-                }
-            });
-            chips.attach(&chip, (i % 4) as i32, (i / 4) as i32, 1, 1);
-            chip
-        })
-        .collect();
+    speed_slider.connect_value_changed({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            state
+                .lock()
+                .unwrap()
+                .set_selected_clip_speed(slider.value());
+            on_change();
+        }
+    });
 
     let audio_header = GtkBox::new(Orientation::Horizontal, 8);
     audio_header.add_css_class("recording-editor-zoom-section-row");
@@ -506,8 +497,7 @@ fn build_clip_panel(
     mute_row.append(&mute_label);
     mute_row.append(&mute);
 
-    body.append(&speed_label);
-    body.append(&chips);
+    body.append(&speed_slider.widget());
     body.append(&audio_header);
     body.append(&mute_row);
 
@@ -554,7 +544,7 @@ fn build_clip_panel(
     let refresh = {
         let panel = panel.clone();
         let mute = mute.clone();
-        let chip_buttons = chip_buttons.clone();
+        let speed_slider = speed_slider.clone();
         let footer_delete = footer_delete.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
@@ -565,16 +555,11 @@ fn build_clip_panel(
             let can_edit = speed.is_some() && !guard.video_locked;
             let can_mute = can_edit && guard.has_audio_track() && !guard.audio_locked;
             syncing.set(true);
-            mute.set_active(muted);
-            for (chip, &(_, preset)) in chip_buttons.iter().zip(CLIP_SPEED_PRESETS.iter()) {
-                chip.set_sensitive(can_edit);
-                let active = speed.is_some_and(|value| (value - preset).abs() < 1e-6);
-                if active {
-                    chip.add_css_class("recording-editor-zoom-chip-active");
-                } else {
-                    chip.remove_css_class("recording-editor-zoom-chip-active");
-                }
+            if let Some(speed) = speed {
+                speed_slider.set_value(speed);
             }
+            mute.set_active(muted);
+            speed_slider.set_sensitive(can_edit);
             mute.set_sensitive(can_mute);
             footer_delete.set_sensitive(guard.selected_segment.is_some() && !guard.video_locked);
             syncing.set(false);
@@ -584,6 +569,20 @@ fn build_clip_panel(
     ClipPanel {
         widget: panel,
         refresh,
+    }
+}
+
+/// Format a clip speed for the slider's value label the way the old presets
+/// read: `0.5×`, `1×`, `1.5×`, `2.5×`, `30×`. Rounds to two decimals so a
+/// value dragged along the log track never prints a long float.
+fn format_clip_speed(value: f64) -> String {
+    let rounded = (value * 100.0).round() / 100.0;
+    if rounded.fract().abs() < 1e-9 {
+        format!("{}×", rounded.round() as i64)
+    } else if (rounded * 10.0).fract().abs() < 1e-9 {
+        format!("{rounded:.1}×")
+    } else {
+        format!("{rounded:.2}×")
     }
 }
 
@@ -1752,5 +1751,95 @@ mod tests {
             !panel.contains("guard.background = VideoBackground::Plain {\n                r: 17,"),
             "switching tabs must not write a fill"
         );
+    }
+
+    #[test]
+    fn clip_speed_is_a_filled_slider_not_a_preset_picker() {
+        // The Clip panel offered a 4x4 grid of speed chips. It is one filled
+        // slider now — the control every editor uses — so the chip grid and
+        // its presets must be gone from this panel (the Zoom panel keeps its
+        // own chips).
+        let source = include_str!("tool_sidebar.rs");
+        let start = source
+            .find("fn build_clip_panel(")
+            .expect("the Clip panel is built by build_clip_panel");
+        let end = source
+            .find("struct HidePanel")
+            .expect("the Hide panel follows the Clip panel");
+        let clip = &source[start..end];
+        assert!(
+            clip.contains("FillSlider::new_with_value_text(&t(\"Speed\")")
+                && clip.contains("speed_slider.set_range(MIN_CLIP_SPEED, MAX_CLIP_SPEED)")
+                && clip.contains("speed_slider.set_logarithmic(true)")
+                && clip.contains("body.append(&speed_slider.widget())")
+                && clip.contains("set_selected_clip_speed(slider.value())"),
+            "clip speed must be one filled slider wired to the selected clip"
+        );
+        assert!(
+            !clip.contains("recording-editor-zoom-chip") && !clip.contains("CLIP_SPEED_PRESETS"),
+            "the speed preset picker must be gone from the Clip panel"
+        );
+    }
+
+    #[test]
+    fn clip_speed_labels_read_like_the_old_presets() {
+        let cases = [
+            (0.25, "0.25×"),
+            (0.5, "0.5×"),
+            (1.0, "1×"),
+            (1.25, "1.25×"),
+            (1.5, "1.5×"),
+            (2.5, "2.5×"),
+            (3.0, "3×"),
+            (10.0, "10×"),
+            (30.0, "30×"),
+        ];
+        for (value, expected) in cases {
+            assert_eq!(
+                super::format_clip_speed(value),
+                expected,
+                "speed {value} must read as {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_logarithmic_fill_slider_spaces_ratios_evenly() {
+        // A 0.25x-30x range on a linear track puts the entire slow-motion half
+        // in a sliver at the left. The log mapping keeps 1x usable and puts
+        // the geometric midpoint dead centre.
+        let (min, max) = (0.25_f64, 30.0_f64);
+        let geometric_mid = (min * max).sqrt();
+        let log_mid = super::fill_slider_progress(geometric_mid, min, max, true);
+        assert!(
+            (log_mid - 0.5).abs() < 1e-6,
+            "the geometric midpoint must sit mid-track, got {log_mid}"
+        );
+        let linear_mid = super::fill_slider_progress(geometric_mid, min, max, false);
+        assert!(
+            linear_mid < 0.1,
+            "a linear track crushes the slow half to the left edge, got {linear_mid}"
+        );
+        let one_x = super::fill_slider_progress(1.0, min, max, true);
+        assert!(
+            (0.2..0.3).contains(&one_x),
+            "1x needs real track space, got {one_x}"
+        );
+    }
+
+    #[test]
+    fn fill_slider_value_from_t_inverts_progress() {
+        let (min, max, step) = (0.25_f64, 30.0_f64, 0.05_f64);
+        for target in [0.25, 0.5, 1.0, 2.5, 7.0, 30.0] {
+            let t = super::fill_slider_progress(target, min, max, true);
+            let back = super::fill_slider_value_from_t(t, min, max, true, step);
+            assert!(
+                (back - target).abs() < step,
+                "{target} must round-trip through the track, got {back}"
+            );
+        }
+        // The linear mapping the other sliders rely on is unchanged.
+        let t = super::fill_slider_progress(5.0, 0.0, 10.0, false);
+        assert!((t - 0.5).abs() < 1e-9, "linear progress must stay linear");
     }
 }
