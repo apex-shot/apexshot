@@ -949,6 +949,48 @@ pub fn cairo_argb_to_rgba_image(width: u32, height: u32, stride: usize, data: &[
     ImageBuffer::from_raw(width, height, out).unwrap_or_else(|| RgbaImage::new(width, height))
 }
 
+/// Exponent of the quarter-superellipse every rounded corner in the app uses.
+///
+/// Corners are superellipses (`|u/r|^n + |v/r|^n = 1`) with n = 4 — "squircles" —
+/// rather than circular arcs, so the edge leaves the straight side with zero
+/// curvature instead of the tangent break a circle has. [`rounded_rect_path`]
+/// draws this shape, and the video editor rasterizes the same one into its
+/// exported alpha mask via [`squircle_rounded_rect_contains`].
+pub const CORNER_SUPERELLIPSE_EXPONENT: f64 = 4.0;
+
+/// True when `(x, y)` lies inside a `width` x `height` rounded rectangle whose
+/// corners are quarter-superellipses ([`CORNER_SUPERELLIPSE_EXPONENT`]).
+///
+/// Top-left based coordinates. This is the implicit form of the shape
+/// [`rounded_rect_path`] draws, so callers that need to rasterize the corner
+/// (rather than stroke it) get the identical profile.
+pub fn squircle_rounded_rect_contains(
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    radius: f64,
+) -> bool {
+    if width <= 0.0 || height <= 0.0 {
+        return false;
+    }
+    let radius = radius.clamp(0.0, width.min(height) / 2.0);
+    let (hw, hh) = (width / 2.0, height / 2.0);
+    let dx = (x - hw).abs();
+    let dy = (y - hh).abs();
+    if dx > hw || dy > hh {
+        return false;
+    }
+    if radius <= 0.0 {
+        return true;
+    }
+    // Distance into the corner box per axis; zero along a straight side.
+    let ax = (dx - (hw - radius)).max(0.0) / radius;
+    let ay = (dy - (hh - radius)).max(0.0) / radius;
+    let n = CORNER_SUPERELLIPSE_EXPONENT;
+    ax.powf(n) + ay.powf(n) <= 1.0
+}
+
 /// Closed rounded-rectangle outline at absolute coordinates. Radius is clamped
 /// so an inward expansion (a frame band painted inside the card edge) can never
 /// hand cairo a negative radius, which would poison the context status.
@@ -956,9 +998,9 @@ pub fn cairo_argb_to_rgba_image(width: u32, height: u32, stride: usize, data: &[
 /// Corners are smooth continuous-curvature (squircle) blends, not circular
 /// arcs: a circle jumps from curvature 0 on the straight edge to 1/r at the
 /// tangent point, which reads as "a curve stuck onto straight lines". Each
-/// corner here is a quarter-superellipse that leaves the edge with zero
-/// curvature and peaks mid-corner, so the edge flows into the curve the way
-/// modern window frames do.
+/// corner here is a quarter-superellipse (see [`CORNER_SUPERELLIPSE_EXPONENT`])
+/// that leaves the edge with zero curvature and peaks mid-corner, so the edge
+/// flows into the curve the way modern window frames do.
 pub fn rounded_rect_path(
     context: &gtk4::cairo::Context,
     x: f64,
@@ -975,10 +1017,10 @@ pub fn rounded_rect_path(
         context.rectangle(x, y, width, height);
         return;
     }
-    // Quarter-superellipse per corner (exponent 4, so |cos|^0.5 shaping via
-    // sqrt, which is exact and cheaper than powf). Curvature is zero where the
-    // corner leaves the straight edge and maximal at 45 degrees: no tangent
-    // break, no "curve then straight line" step.
+    // Quarter-superellipse per corner: `|cos|^(2/n)` shaping via sqrt, which
+    // for the shared exponent (n = 4) is exact and cheaper than powf. Curvature
+    // is zero where the corner leaves the straight edge and maximal at 45
+    // degrees: no tangent break, no "curve then straight line" step.
     const SEGMENTS_PER_CORNER: usize = 16;
     let right = x + width;
     let bottom = y + height;

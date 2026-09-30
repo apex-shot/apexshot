@@ -2,7 +2,13 @@
     clippy::too_many_arguments,
     clippy::type_complexity,
     clippy::items_after_test_module,
-    clippy::arc_with_non_send_sync
+    clippy::arc_with_non_send_sync,
+    // The crate builds against GTK 4.10+ because the video preview masks the
+    // video card with `GtkSnapshot::push_mask` (4.10) to draw the editor's
+    // squircle corners. GTK 4.10 also deprecated the `FileChooserNative`,
+    // `MessageDialog`, and `StyleContext` APIs this codebase still uses;
+    // migrating them is separate follow-up work, not a radius change.
+    deprecated
 )]
 
 pub mod annotations;

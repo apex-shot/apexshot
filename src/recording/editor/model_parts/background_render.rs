@@ -145,34 +145,57 @@ fn over_black(stop: &GradientStop) -> (u8, u8, u8) {
     )
 }
 
-/// A grayscale rounded-rect mask, white inside and black outside, with a
-/// one-pixel anti-aliased edge.
+/// A grayscale rounded-rect mask, white inside and black outside, with
+/// anti-aliased corners.
 ///
-/// ffmpeg's `alphamerge` copies the mask's luma straight into the frame's
-/// alpha channel, and it errors outright if the mask is not exactly the
-/// frame's size — so this is always rendered at the video rect, never the
-/// canvas.
+/// Corners are the same quarter-superellipse ("squircle") the image editor's
+/// `rounded_rect_path` draws, so an exported video card matches an exported
+/// screenshot instead of using a circular arc. Coverage is supersampled because
+/// ffmpeg's `alphamerge` copies the mask's luma straight into the frame's alpha,
+/// and a hard-edged mask would stair-step on the arc.
+///
+/// `alphamerge` errors outright if the mask is not exactly the frame's size —
+/// so this is always rendered at the video rect, never the canvas.
 pub fn render_rounded_mask(width: u32, height: u32, radius: f64) -> GradientBitmap {
+    use crate::capture::editor::render::squircle_rounded_rect_contains;
+
     let width = width.max(1);
     let height = height.max(1);
     let radius = radius.clamp(0.0, width.min(height) as f64 / 2.0);
-    let (cx, cy) = (width as f64 / 2.0, height as f64 / 2.0);
-    let (hw, hh) = (width as f64 / 2.0, height as f64 / 2.0);
+    let (wf, hf) = (width as f64, height as f64);
+
+    // 4x4 subsamples per pixel. Most pixels resolve on the fully-inside test
+    // below; only the boundary ring pays for the supersampling.
+    const SUBSAMPLES: u32 = 4;
+    let offsets: Vec<f64> = (0..SUBSAMPLES)
+        .map(|s| (s as f64 + 0.5) / SUBSAMPLES as f64)
+        .collect();
+    let inv = 1.0 / (SUBSAMPLES * SUBSAMPLES) as f64;
 
     let mut pixels = vec![0u8; (width as usize) * (height as usize) * 3];
     for y in 0..height {
         for x in 0..width {
-            // Rounded-rect signed distance. `outside` measures the corner
-            // region only; the `min(max(..), 0)` term is what makes points
-            // *inside* the shape negative, so a zero radius stays fully
-            // opaque instead of collapsing to nothing.
-            let qx = (x as f64 + 0.5 - cx).abs() - (hw - radius);
-            let qy = (y as f64 + 0.5 - cy).abs() - (hh - radius);
-            let outside = qx.max(0.0).hypot(qy.max(0.0));
-            let distance = outside + qx.max(qy).min(0.0) - radius;
-            // Half-pixel feather so the arc does not stair-step.
-            let coverage = (0.5 - distance).clamp(0.0, 1.0);
-            let value = (coverage * 255.0).round() as u8;
+            let (x0, y0) = (x as f64, y as f64);
+            let (x1, y1) = (x0 + 1.0, y0 + 1.0);
+            // The shape is convex, so a pixel whose four corners are all inside
+            // is fully covered and needs no supersampling.
+            let fully_inside = squircle_rounded_rect_contains(x0, y0, wf, hf, radius)
+                && squircle_rounded_rect_contains(x1, y0, wf, hf, radius)
+                && squircle_rounded_rect_contains(x0, y1, wf, hf, radius)
+                && squircle_rounded_rect_contains(x1, y1, wf, hf, radius);
+            let value = if fully_inside {
+                255
+            } else {
+                let mut inside = 0u32;
+                for &oy in &offsets {
+                    for &ox in &offsets {
+                        if squircle_rounded_rect_contains(x0 + ox, y0 + oy, wf, hf, radius) {
+                            inside += 1;
+                        }
+                    }
+                }
+                (inside as f64 * inv * 255.0).round() as u8
+            };
             let index = ((y * width + x) * 3) as usize;
             pixels[index] = value;
             pixels[index + 1] = value;
@@ -359,6 +382,21 @@ mod tests {
     }
 
     #[test]
+    fn rounded_mask_corners_use_the_squircle_profile() {
+        // 64x64 card with a 20px corner. On the 45-degree diagonal the
+        // superellipse corner is fatter than a circular arc: the point 0.75r in
+        // from the corner centre sits inside the squircle but would fall
+        // outside a circle of the same radius. A green 255 here locks in the
+        // profile shared with the image editor rather than a circular arc.
+        let mask = render_rounded_mask(64, 64, 20.0);
+        assert_eq!(
+            mask.pixel(5, 5),
+            (255, 255, 255),
+            "0.75r along the corner diagonal must be covered by the squircle"
+        );
+    }
+
+    #[test]
     fn a_zero_radius_mask_is_fully_opaque() {
         let mask = render_rounded_mask(32, 32, 0.0);
         assert!(mask.pixels.iter().all(|byte| *byte == 255));
@@ -367,7 +405,7 @@ mod tests {
     #[test]
     fn a_radius_past_the_half_extent_is_clamped() {
         // A radius far larger than the card must not turn it inside out.
-        // Clamped to half the short edge, the shape becomes an ellipse that
+        // Clamped to half the short edge, the shape becomes a squircle that
         // still covers the centre and still feathers at the corners.
         let mask = render_rounded_mask(40, 20, 999.0);
         // Fully covered at the centre...

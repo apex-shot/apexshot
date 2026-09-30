@@ -13,6 +13,7 @@ mod media_library;
 mod preview;
 #[allow(dead_code)]
 mod rail;
+mod squircle_clip;
 mod timeline_card;
 mod tool_section;
 pub(crate) mod tool_sidebar;

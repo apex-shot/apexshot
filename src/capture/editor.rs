@@ -8,7 +8,7 @@ pub mod numbering_style;
 mod pen_weight;
 pub mod preferences;
 pub mod preprocess;
-mod render;
+pub(crate) mod render;
 mod selection;
 mod state;
 #[allow(dead_code)]
