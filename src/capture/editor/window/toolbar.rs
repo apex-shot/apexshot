@@ -5,6 +5,7 @@ use gtk4::{
 use std::rc::Rc;
 
 use super::super::{
+    color::{MAX_STROKE_SIZE, MIN_STROKE_SIZE},
     pen_weight::PenWeight,
     types::{ArrowStyle, ObfuscateMethod, Tool},
     ui_support::{
@@ -618,7 +619,12 @@ pub(super) fn build_toolbar_mode_controls(
     color_status.append(&color_status_label);
     color_group.append(&color_status);
 
-    let size_slider = Scale::with_range(Orientation::Horizontal, 1.0, 24.0, 1.0);
+    let size_slider = Scale::with_range(
+        Orientation::Horizontal,
+        MIN_STROKE_SIZE,
+        MAX_STROKE_SIZE,
+        1.0,
+    );
     size_slider.add_css_class("editor-toolbar-size-slider");
     size_slider.set_draw_value(false);
     size_slider.set_size_request(100, -1);

@@ -352,8 +352,8 @@ impl EditorState {
     /// Resize the selected highlighter stroke.
     ///
     /// Deliberately not routed through [`Self::set_selected_action_stroke_size`]:
-    /// that clamps to `MAX_STROKE_SIZE` (24), while highlighter presets run to 32
-    /// and text-aware strokes store the detected text height verbatim.
+    /// that clamps to `MAX_STROKE_SIZE`, while text-aware strokes store the
+    /// detected text height verbatim (which can exceed the slider's ceiling).
     pub fn set_selected_highlighter_stroke_size(&mut self, size: f64) -> bool {
         let size = super::super::color::highlighter_stroke_width(size);
         let Some(index) = self.selected_action_index else {

@@ -6,7 +6,11 @@ use std::path::PathBuf;
 pub const STROKE_WIDTH: f64 = 4.0;
 pub const HIGHLIGHTER_ALPHA_SCALE: f64 = 0.42;
 pub const MIN_STROKE_SIZE: f64 = 1.0;
-pub const MAX_STROKE_SIZE: f64 = 24.0;
+/// Shared ceiling for every stroke tool on the toolbar slider (pen, highlighter,
+/// line, arrow, box, circle). Sized so the highlighter can cover a line of text
+/// on HiDPI captures, matching comparable tools (Flameshot's marker tops out at
+/// 64px, kImageAnnotator's at 100px). The low end still allows thin strokes.
+pub const MAX_STROKE_SIZE: f64 = 64.0;
 pub const TEXT_SIZE: f64 = 32.0;
 pub const MIN_TEXT_SIZE: f64 = 10.0;
 pub const MAX_TEXT_SIZE: f64 = 120.0;
