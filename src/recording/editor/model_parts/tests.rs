@@ -2144,6 +2144,48 @@ fn no_hold_without_a_tail_or_before_the_source_is_exhausted() {
 }
 
 #[test]
+fn zoom_clips_keep_advancing_through_the_freeze_hold() {
+    let mut state = VideoEditState::new(metadata());
+    state.extend_last_segment(2.0);
+    assert!((state.composition_duration() - 12.0).abs() < 1e-9);
+    // The hold is part of the composition, so a zoom fits inside it.
+    let index = state
+        .add_zoom_at(10.5)
+        .expect("a zoom placed over the hold must fit");
+    state.zoom_clips[index].mode = ZoomMode::Manual;
+    state.playhead_seconds = 11.0;
+    let source_t = state.source_playhead();
+    assert!(
+        (source_t - 10.0).abs() < 1e-6,
+        "the source frame is pinned to the last real frame"
+    );
+    // Matching on the pinned source time would miss the clip entirely.
+    assert!(state.eval_zoom(source_t).0 <= 1.01);
+    // The composition time is what the hold advances through, so it finds it.
+    let (scale, _) = state.eval_zoom_at(state.playhead_seconds, source_t);
+    assert!(
+        scale > 1.01,
+        "the zoom must keep applying inside the hold, got {scale}"
+    );
+}
+
+#[test]
+fn cursor_hide_clips_keep_working_through_the_freeze_hold() {
+    let mut state = VideoEditState::new(metadata());
+    state.extend_last_segment(2.0);
+    let index = state
+        .add_cursor_hide_at(10.5)
+        .expect("a hide placed over the hold must fit");
+    assert!(state.cursor_hide_clips[index].end <= 12.0 + 1e-9);
+    state.playhead_seconds = 11.0;
+    let source_t = state.source_playhead();
+    // The pinned source time sits before the hide...
+    assert!((state.cursor_hide_alpha_for_source(source_t) - 1.0).abs() < 1e-12);
+    // ...but the composition time lands inside it.
+    assert!((state.cursor_hide_alpha(state.playhead_seconds) - 0.0).abs() < 1e-12);
+}
+
+#[test]
 fn freeze_playhead_holds_the_last_source_frame() {
     let mut state = VideoEditState::new(metadata());
     state.extend_last_segment(1.0);
