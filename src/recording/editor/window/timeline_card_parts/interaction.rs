@@ -350,11 +350,16 @@ pub fn bind_video_clip(
     area.add_controller(click);
 
     let drag_kind = Rc::new(Cell::new(None::<ClipDrag>));
+    // The clip end's x when the extend drag began. The mover is inset from the
+    // edge, so the drag tracks the pointer's travel from there instead of
+    // snapping the end to wherever the grab landed.
+    let end_origin = Rc::new(Cell::new(0.0));
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
         let state = state.clone();
         let drag_kind = drag_kind.clone();
+        let end_origin = end_origin.clone();
         let dragging = dragging.clone();
         move |gesture, x, _| {
             let width = gesture
@@ -368,6 +373,9 @@ pub fn bind_video_clip(
                 return;
             }
             let hit = video_hit(&guard, width, x);
+            if hit.drag == Some(ClipDrag::End) {
+                end_origin.set(video_end_x(&guard, width));
+            }
             if let Some(seg) = hit.segment {
                 select_video(&mut guard, Some(seg));
             }
@@ -383,6 +391,7 @@ pub fn bind_video_clip(
         let state = state.clone();
         let media = media.clone();
         let drag_kind = drag_kind.clone();
+        let end_origin = end_origin.clone();
         let redraw = redraw.clone();
         move |gesture, offset_x, _| {
             let Some((start_x, _)) = gesture.start_point() else {
@@ -404,14 +413,9 @@ pub fn bind_video_clip(
                     let mut guard = state.lock().unwrap();
                     // The handle can live past the source end (a freeze
                     // hold), so snap and convert in composition seconds
-                    // rather than through the source-clamped helper.
-                    let edge = snap_timeline_to_playhead(
-                        &guard,
-                        width,
-                        x_to_timeline(&guard, width, x),
-                    );
-                    let target = edge_target_at(&guard, edge);
-                    guard.set_trim_end(target);
+                    // rather than through the source-clamped helper. Travel
+                    // from the grab's origin, not the pointer's absolute x.
+                    apply_extend_drag(&mut guard, width, end_origin.get() + offset_x);
                 }
                 Some(ClipDrag::Cut(index)) => {
                     let mut guard = state.lock().unwrap();
@@ -509,7 +513,9 @@ pub fn bind_zoom_track(
             }
             if let Some(index) = zoom_clip_at(&guard, width, x) {
                 select_zoom(&mut guard, Some(index));
-            } else {
+            } else if !in_extend_band(&guard, width, x) {
+                // The band is the video's extend affordance, not the zoom
+                // lane: a click there must not add a zoom or clear selection.
                 let at = snap_timeline_to_playhead(&guard, width, x_to_timeline(&guard, width, x));
                 // A copied clip takes the click; otherwise the click adds a
                 // clip the way it always has. Place first, so a click that
@@ -525,11 +531,13 @@ pub fn bind_zoom_track(
     area.add_controller(click);
 
     let drag_kind = Rc::new(Cell::new(None::<ZoomDrag>));
+    let end_origin = Rc::new(Cell::new(0.0));
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
         let state = state.clone();
         let drag_kind = drag_kind.clone();
+        let end_origin = end_origin.clone();
         let dragging = dragging.clone();
         move |gesture, x, _| {
             let width = gesture
@@ -553,9 +561,16 @@ pub fn bind_zoom_track(
                     origin_start: clip.start,
                     pixels_per_second: pixels_per_second(&guard, width),
                 })
+            } else if in_extend_band(&guard, width, x) {
+                // The band owns the space past the clip, so a drag there
+                // extends the video even though it is over the zoom lane.
+                Some(ZoomDrag::Extend)
             } else {
                 None
             };
+            if matches!(kind, Some(ZoomDrag::Extend)) {
+                end_origin.set(video_end_x(&guard, width));
+            }
             dragging.set(match kind {
                 Some(ZoomDrag::Move { index, .. }) => Some(index),
                 _ => None,
@@ -567,6 +582,7 @@ pub fn bind_zoom_track(
         let state = state.clone();
         let media = media.clone();
         let drag_kind = drag_kind.clone();
+        let end_origin = end_origin.clone();
         let redraw = redraw.clone();
         move |gesture, offset_x, _| {
             let Some((start_x, _)) = gesture.start_point() else {
@@ -611,6 +627,10 @@ pub fn bind_zoom_track(
                 Some(ZoomDrag::Seek) => {
                     seek_to_x(&state, &media, width, start_x + offset_x);
                 }
+                Some(ZoomDrag::Extend) => {
+                    let mut guard = state.lock().unwrap();
+                    apply_extend_drag(&mut guard, width, end_origin.get() + offset_x);
+                }
                 None => {}
             }
             redraw();
@@ -639,6 +659,9 @@ pub fn bind_zoom_track(
                     Some((index, false)) => (TrackCursor::ResizeEnd, Some(index), None),
                     None => match zoom_clip_at(&guard, width, x) {
                         Some(index) => (TrackCursor::Grab, Some(index), None),
+                        None if in_extend_band(&guard, width, x) => {
+                            (TrackCursor::ResizeEnd, None, None)
+                        }
                         None => (
                             TrackCursor::None,
                             None,
@@ -721,7 +744,9 @@ pub fn bind_hide_track(
             }
             if let Some(index) = cursor_hide_clip_at(&guard, width, x) {
                 select_cursor_hide(&mut guard, Some(index));
-            } else {
+            } else if !in_extend_band(&guard, width, x) {
+                // The band is the video's extend affordance, not the hide
+                // lane: a click there must not add a hide or clear selection.
                 let at = snap_timeline_to_playhead(&guard, width, x_to_timeline(&guard, width, x));
                 // Same copy-takes-the-click rule as the Zoom track.
                 if guard.paste_clipboard_at(at).is_none() && guard.add_cursor_hide_at(at).is_none()
@@ -736,11 +761,13 @@ pub fn bind_hide_track(
     area.add_controller(click);
 
     let drag_kind = Rc::new(Cell::new(None::<HideDrag>));
+    let end_origin = Rc::new(Cell::new(0.0));
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
         let state = state.clone();
         let drag_kind = drag_kind.clone();
+        let end_origin = end_origin.clone();
         let dragging = dragging.clone();
         move |gesture, x, _| {
             let width = gesture
@@ -764,9 +791,15 @@ pub fn bind_hide_track(
                     origin_start: clip.start,
                     pixels_per_second: pixels_per_second(&guard, width),
                 })
+            } else if in_extend_band(&guard, width, x) {
+                // Same as the zoom lane: the band is the video's affordance.
+                Some(HideDrag::Extend)
             } else {
                 None
             };
+            if matches!(kind, Some(HideDrag::Extend)) {
+                end_origin.set(video_end_x(&guard, width));
+            }
             dragging.set(match kind {
                 Some(HideDrag::Move { index, .. }) => Some(index),
                 _ => None,
@@ -778,6 +811,7 @@ pub fn bind_hide_track(
         let state = state.clone();
         let media = media.clone();
         let drag_kind = drag_kind.clone();
+        let end_origin = end_origin.clone();
         let redraw = redraw.clone();
         move |gesture, offset_x, _| {
             let Some((start_x, _)) = gesture.start_point() else {
@@ -822,6 +856,10 @@ pub fn bind_hide_track(
                 Some(HideDrag::Seek) => {
                     seek_to_x(&state, &media, width, start_x + offset_x);
                 }
+                Some(HideDrag::Extend) => {
+                    let mut guard = state.lock().unwrap();
+                    apply_extend_drag(&mut guard, width, end_origin.get() + offset_x);
+                }
                 None => {}
             }
             redraw();
@@ -850,6 +888,9 @@ pub fn bind_hide_track(
                     Some((index, false)) => (TrackCursor::ResizeEnd, Some(index), None),
                     None => match cursor_hide_clip_at(&guard, width, x) {
                         Some(index) => (TrackCursor::Grab, Some(index), None),
+                        None if in_extend_band(&guard, width, x) => {
+                            (TrackCursor::ResizeEnd, None, None)
+                        }
                         None => (
                             TrackCursor::None,
                             None,

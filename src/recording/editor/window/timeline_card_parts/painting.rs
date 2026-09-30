@@ -251,14 +251,17 @@ pub fn draw_extend_region(
     draw_extend_band(end_x, w, h, light, show_hint, cr);
 }
 
+/// How far the white mover line sits inside the frosted panel's left edge.
+const EXTEND_MOVER_INSET: f64 = 10.0;
+
 /// The "extend duration" band: everything to the right of the clip, across the
 /// whole lane stack.
 ///
-/// Past the clip there is no footage in any lane, so the region is scrimmed to
-/// read as frosted rather than usable, and the clip's edge gets a bright
-/// divider — the handle you drag to grow the clip. While the clip is selected
-/// (or hovered) the band carries its hint. Dragging it is `ClipDrag::End`, so
-/// the region is the affordance, not decoration.
+/// The frosted panel starts at the clip's edge and is outlined in black. The
+/// white mover line sits inside it, just in from that edge — the handle you
+/// drag to grow the clip. While the clip is selected (or hovered) the band
+/// carries its hint. Dragging it is `ClipDrag::End`, so the region is the
+/// affordance, not decoration.
 pub fn draw_extend_band(
     end_x: f64,
     width: f64,
@@ -282,7 +285,7 @@ pub fn draw_extend_band(
     cr.clip();
     cr.set_source_rgba(r, g, b, a);
     let _ = cr.paint();
-    // Fade the scrim in from the divider, so the edge reads as frosted glass
+    // Fade the scrim in from the panel's edge, so it reads as frosted glass
     // rather than a slab butted against the clip.
     let fade = band.min(96.0);
     let grad = gtk4::cairo::LinearGradient::new(end_x, 0.0, end_x + fade, 0.0);
@@ -292,14 +295,37 @@ pub fn draw_extend_band(
     let _ = cr.paint();
     let _ = cr.restore();
 
-    // The divider: a bright full-height pill at the clip's edge.
-    let (dr, dg, db) = if light {
-        (0.07, 0.08, 0.09)
+    // The panel's border: a thin black outline. Black is only ever the border.
+    rounded_rect(
+        cr,
+        end_x + 0.5,
+        0.5,
+        (band - 1.0).max(0.0),
+        (height - 1.0).max(0.0),
+        4.0,
+    );
+    cr.set_source_rgba(0.0, 0.0, 0.0, 0.9);
+    cr.set_line_width(1.0);
+    let _ = cr.stroke();
+
+    // The mover: a short white line inside the panel, just in from its left
+    // edge. This is the grab point for extending the clip.
+    let (mr, mg, mb) = if light {
+        (0.10, 0.11, 0.13)
     } else {
-        (0.86, 0.90, 0.98)
+        (1.0, 1.0, 1.0)
     };
-    cr.set_source_rgba(dr, dg, db, 0.9);
-    rounded_rect(cr, end_x - 1.0, 2.0, 3.0, (height - 4.0).max(4.0), 1.5);
+    cr.set_source_rgba(mr, mg, mb, 0.9);
+    let mover_y = (height * 0.30).max(2.0);
+    let mover_h = (height * 0.40).max(6.0);
+    rounded_rect(
+        cr,
+        end_x + EXTEND_MOVER_INSET - 1.0,
+        mover_y,
+        2.0,
+        mover_h,
+        1.0,
+    );
     let _ = cr.fill();
 
     if !show_hint {
@@ -322,7 +348,10 @@ pub fn draw_extend_band(
                 (1.0, 1.0, 1.0, 0.45)
             };
             cr.set_source_rgba(tr, tg, tb, ta);
-            cr.move_to(end_x + 16.0, (height + ext.height()) / 2.0 - 1.0);
+            cr.move_to(
+                end_x + EXTEND_MOVER_INSET + 14.0,
+                (height + ext.height()) / 2.0 - 1.0,
+            );
             let _ = cr.show_text(&label);
         }
     }

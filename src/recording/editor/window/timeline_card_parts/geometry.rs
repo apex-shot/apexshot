@@ -47,7 +47,29 @@ pub struct VideoHit {
 }
 
 pub fn video_hit(state: &VideoEditState, width: f64, x: f64) -> VideoHit {
-    for &(_, seg_idx, x0, x1) in &video_layout(state, width) {
+    let layout = video_layout(state, width);
+    let end_x = layout
+        .iter()
+        .map(|&(_, _, _, x1)| x1)
+        .fold(0.0_f64, f64::max);
+    // The mover straddles the clip's right edge, so its hit region starts just
+    // before `end_x` and runs through the band. Claiming it first makes the
+    // handle the drag target even where the last segment's body or its inset
+    // edge handle would otherwise win.
+    if end_x > 0.0 && x >= end_x - EXTEND_HANDLE_HIT {
+        let segment = state
+            .segment_order
+            .iter()
+            .rev()
+            .find(|&&index| state.segments_kept.get(index).copied().unwrap_or(true))
+            .copied();
+        return VideoHit {
+            cursor: TrackCursor::ResizeEnd,
+            segment,
+            drag: Some(ClipDrag::End),
+        };
+    }
+    for &(_, seg_idx, x0, x1) in &layout {
         if x < x0 || x > x1 {
             continue;
         }
@@ -84,27 +106,6 @@ pub fn video_hit(state: &VideoEditState, width: f64, x: f64) -> VideoHit {
             cursor,
             segment: Some(seg_idx),
             drag,
-        };
-    }
-    // Past the clip the whole band is the extend handle: that is where the
-    // blurred "drag to adjust duration" affordance lives, so it has to be a
-    // real drag target rather than dead lane. It selects and resizes the last
-    // kept segment.
-    let end_x = video_end_x(state, width);
-    // `end_x > 0.0` keeps the band honest: if the clip's end has been scrolled
-    // off to the left, the whole lane is not one giant handle, it is just
-    // empty lane. The loop above already claims x up to the clip's edge.
-    if end_x > 0.0 && x > end_x {
-        let segment = state
-            .segment_order
-            .iter()
-            .rev()
-            .find(|&&index| state.segments_kept.get(index).copied().unwrap_or(true))
-            .copied();
-        return VideoHit {
-            cursor: TrackCursor::ResizeEnd,
-            segment,
-            drag: Some(ClipDrag::End),
         };
     }
     VideoHit {
@@ -268,6 +269,25 @@ pub fn x_to_timeline(state: &VideoEditState, width: f64, x: f64) -> f64 {
     state.x_to_time(x, width).max(0.0)
 }
 
+/// True when `x` is in the extend band: the mover at the clip's edge plus the
+/// frosted affordance past it.
+///
+/// The band spans every lane, so a drag here extends the clip whichever row
+/// the pointer is over — the user does not have to reach the main clip's own
+/// ending edge on the video row.
+pub fn in_extend_band(state: &VideoEditState, width: f64, x: f64) -> bool {
+    let end_x = video_end_x(state, width);
+    end_x > 0.0 && x >= end_x - EXTEND_HANDLE_HIT
+}
+
+/// Apply one pointer position to the clip's end while the extend mover is
+/// dragged: composition seconds in, a freeze hold or a trim out.
+pub fn apply_extend_drag(state: &mut VideoEditState, width: f64, x: f64) {
+    let edge = snap_timeline_to_playhead(state, width, x_to_timeline(state, width, x));
+    let target = edge_target_at(state, edge);
+    state.set_trim_end(target);
+}
+
 pub fn pixels_per_second(state: &VideoEditState, width: f64) -> f64 {
     width.max(1.0) / state.visible_span_seconds().max(0.001)
 }
@@ -404,6 +424,9 @@ pub enum ZoomDrag {
         pixels_per_second: f64,
     },
     Seek,
+    /// The pointer is in the extend band, so the drag resizes the clip's end
+    /// even though it is over the zoom lane.
+    Extend,
 }
 
 #[derive(Clone, Copy)]
@@ -418,6 +441,8 @@ pub enum HideDrag {
         pixels_per_second: f64,
     },
     Seek,
+    /// Same as `ZoomDrag::Extend`: the band spans every lane.
+    Extend,
 }
 
 #[derive(Clone, Copy)]
@@ -434,6 +459,9 @@ pub const HANDLE_WIDTH: f64 = 4.0;
 pub const HANDLE_HIT: f64 = 6.0;
 pub const PLAYHEAD_HIT: f64 = 6.0;
 pub const PLAYHEAD_SNAP: f64 = 12.0;
+/// Half the mover bar's width: the hit slop that makes the whole handle
+/// grabbable even though it straddles the clip's right edge.
+pub const EXTEND_HANDLE_HIT: f64 = 3.0;
 
 #[cfg(test)]
 mod tests {
@@ -482,7 +510,10 @@ mod tests {
 
 #[cfg(test)]
 mod freeze_edge_tests {
-    use super::{edge_target_at, video_hit, video_layout, ClipDrag, TrackCursor};
+    use super::{
+        edge_target_at, in_extend_band, video_end_x, video_hit, video_layout, ClipDrag,
+        TrackCursor,
+    };
     use crate::recording::editor::model::{VideoEditState, VideoMetadata};
     use std::path::PathBuf;
 
@@ -619,5 +650,38 @@ mod freeze_edge_tests {
             "the band must show the resize cursor",
         );
         assert_eq!(hit.segment, Some(0), "the band belongs to the last clip");
+    }
+
+    /// The mover straddles the clip's right edge, so its hit region has to
+    /// start slightly before `end_x` — otherwise the left half of the handle
+    /// is dead and the user has to find the exact pixel of the clip's edge.
+    #[test]
+    fn the_mover_is_grabbable_either_side_of_the_clip_edge() {
+        let mut state = state();
+        let width = 1000.0;
+        state.set_trim_end(8.0);
+        let end_x = video_end_x(&state, width);
+        for x in [end_x - 2.0, end_x, end_x + 2.0] {
+            let hit = video_hit(&state, width, x);
+            assert_eq!(hit.drag, Some(ClipDrag::End), "x={x}");
+            assert!(
+                matches!(hit.cursor, TrackCursor::ResizeEnd),
+                "x={x} must show the extend cursor"
+            );
+        }
+    }
+
+    /// The band and its mover are matched on every lane, so a drag over the
+    /// zoom or hide rows extends the clip instead of depending on the video
+    /// lane's own ending edge.
+    #[test]
+    fn the_extend_band_covers_the_mover_and_the_space_past_the_clip() {
+        let mut state = state();
+        let width = 1000.0;
+        state.set_trim_end(8.0);
+        let end_x = video_end_x(&state, width);
+        assert!(!in_extend_band(&state, width, end_x - 10.0));
+        assert!(in_extend_band(&state, width, end_x - 2.0), "left half of the mover");
+        assert!(in_extend_band(&state, width, end_x + 50.0), "past the clip");
     }
 }
