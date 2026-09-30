@@ -383,16 +383,17 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             * zoom_level_draw.get().max(0.1_f64);
         let draw_width = virtual_w * scale;
         let draw_height = virtual_h * scale;
-        // Center within the area below the toolbar strip; top_pad keeps image clear of tools.
-        let placement = super::canvas::initial_viewport_offset(
-            draw_width,
-            draw_height,
-            view_width,
-            view_height,
-            0.0,
-        );
-        let canvas_offset_x = side_pad + placement.offset_x + overflow_left;
-        let canvas_offset_y = top_pad + placement.offset_y + overflow_top;
+        // Centre the preview in the pane the user sees. `top_pad` is a floor it
+        // may not rise above, not the line it is centred on, so spare vertical
+        // space is split evenly instead of piling up between the toolbar and the
+        // image. Docked tool bars still push the image down, but only when it
+        // cannot stay centred without riding under them.
+        let canvas_offset_x = side_pad
+            + super::canvas::centred_viewport_x(draw_width, view_width, 0.0)
+            + overflow_left;
+        let canvas_offset_y =
+            super::canvas::centred_canvas_top(f64::from(height), draw_height, top_pad, side_pad)
+                + overflow_top;
         let mut t = ViewTransform {
             scale,
             offset_x: canvas_offset_x,
@@ -1225,6 +1226,23 @@ mod tests {
                 && production.contains("paint_card_shadow(")
                 && production.contains("fn draw_rounded_rect_path"),
             "canvas_render.rs must own render caches, set_draw_func, lock-release snapshot, and rounded-rect helper"
+        );
+    }
+
+    /// The preview centres in the pane, and the toolbar/dock strip is a floor
+    /// rather than the line it is centred on. Centring in the strip below the
+    /// chrome is what left the lopsided gap the taller image editor exposed.
+    #[test]
+    fn static_canvas_centres_the_preview_in_the_pane_not_under_the_chrome() {
+        let source = include_str!("canvas_render.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("super::canvas::centred_canvas_top(")
+                && production.contains("super::canvas::centred_viewport_x(")
+                && !production.contains("initial_viewport_offset(")
+                && !production.contains("canvas_offset_y = top_pad"),
+            "the static canvas must centre the preview in the pane, clamping only to the \
+             toolbar/dock floor",
         );
     }
 

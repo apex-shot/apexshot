@@ -11,30 +11,35 @@ use super::super::{
 pub(super) const CANVAS_PADDING: i32 = 24;
 pub(super) const EYEDROPPER_LOUPE_SIZE: i32 = 132;
 
-pub(super) struct InitialViewportPlacement {
-    pub offset_x: f64,
-    pub offset_y: f64,
+/// Horizontal origin that centres `content_w` inside `viewport_w`.
+///
+/// Content narrower than the viewport is centred; content wider (a zoomed
+/// image) is pinned to one padding so the scroll starts at a sane left edge.
+pub(super) fn centred_viewport_x(content_w: f64, viewport_w: f64, canvas_padding: f64) -> f64 {
+    ((viewport_w - content_w) / 2.0).max(canvas_padding)
 }
 
-pub(super) fn initial_viewport_offset(
-    content_w: f64,
-    content_h: f64,
-    viewport_w: f64,
-    viewport_h: f64,
-    canvas_padding: f64,
-) -> InitialViewportPlacement {
-    let centered_x = ((viewport_w - content_w) / 2.0).max(canvas_padding);
-    let centered_y = ((viewport_h - content_h) / 2.0).max(canvas_padding);
-    let top_aligned = content_h > viewport_h * 1.5;
-
-    InitialViewportPlacement {
-        offset_x: centered_x,
-        offset_y: if top_aligned {
-            canvas_padding
-        } else {
-            centered_y
-        },
-    }
+/// Vertical origin that centres the preview in the pane the user sees.
+///
+/// The strip under the floating toolbar is a *floor*, not the centre line: when
+/// the pane has room to spare the preview floats to the middle instead of
+/// sinking to sit just under the tools and leaving a lopsided gap. `top_clearance`
+/// keeps the toolbar and any docked tool bar above the image, and `bottom_pad`
+/// keeps it off the bottom edge.
+///
+/// A preview too tall to centre against that floor — zoomed in, or a pane that
+/// barely fits it — clamps to `top_clearance`, which is the old push-down
+/// behaviour: the image stays below the chrome and panning covers inspection.
+pub(super) fn centred_canvas_top(
+    pane_height: f64,
+    content_height: f64,
+    top_clearance: f64,
+    bottom_pad: f64,
+) -> f64 {
+    let centred = (pane_height - content_height) / 2.0;
+    // Farthest down the preview may sit while still clearing the bottom edge.
+    let lowest = (pane_height - content_height - bottom_pad).max(top_clearance);
+    centred.clamp(top_clearance, lowest)
 }
 const EYEDROPPER_LOUPE_GRID_SIZE: i32 = 15;
 const EYEDROPPER_LOUPE_PIXEL_SIZE: f64 = 8.0;
@@ -307,7 +312,7 @@ pub(super) fn draw_eyedropper_loupe(
 
 #[cfg(test)]
 mod tests {
-    use super::{crop_canvas_overflow, initial_viewport_offset};
+    use super::{centred_canvas_top, centred_viewport_x, crop_canvas_overflow};
     use crate::capture::editor::types::Rect;
 
     #[test]
@@ -383,15 +388,61 @@ mod tests {
         assert_eq!(huge, small);
     }
 
+    /// The pane the user sees, the toolbar/dock floor and the bottom padding
+    /// used by the tests below: a 900px canvas with the 56px chrome strip plus a
+    /// 24px canvas padding.
+    const PANE: f64 = 900.0;
+    const TOP_CLEARANCE: f64 = 24.0 + 56.0;
+    const BOTTOM_PAD: f64 = 24.0;
+
     #[test]
-    fn tall_images_start_top_aligned_instead_of_centered() {
-        let placement = initial_viewport_offset(1200.0, 6400.0, 900.0, 700.0, 1.0);
-        assert_eq!(placement.offset_y, 1.0);
+    fn short_preview_centres_in_the_pane_with_equal_gaps() {
+        // Plenty of room: the image floats to the middle of the pane, splitting
+        // the slack evenly above and below rather than sinking under the tools.
+        let top = centred_canvas_top(PANE, 400.0, TOP_CLEARANCE, BOTTOM_PAD);
+        assert_eq!(top, (PANE - 400.0) / 2.0);
+        assert_eq!(top, PANE - top - 400.0, "gaps above and below match");
     }
 
     #[test]
-    fn regular_images_remain_centered() {
-        let placement = initial_viewport_offset(700.0, 400.0, 900.0, 700.0, 1.0);
-        assert!(placement.offset_y > 1.0);
+    fn preview_only_pushed_down_when_the_floor_requires_it() {
+        // Not enough slack to centre: the preview sits on the toolbar floor
+        // instead of drifting under it, but no lower than it has to. 780px
+        // leaves only 60px above it, less than the 80px floor.
+        let top = centred_canvas_top(PANE, 780.0, TOP_CLEARANCE, BOTTOM_PAD);
+        assert_eq!(top, TOP_CLEARANCE);
+    }
+
+    #[test]
+    fn docked_bar_lifts_the_floor_only_when_centring_would_breach_it() {
+        // Room to spare: a docked bar raises the floor, but the centred preview
+        // already clears it, so it does not move.
+        let centred = centred_canvas_top(PANE, 400.0, TOP_CLEARANCE, BOTTOM_PAD);
+        let with_bar = centred_canvas_top(PANE, 400.0, TOP_CLEARANCE + 42.0, BOTTOM_PAD);
+        assert_eq!(with_bar, centred, "spare space absorbs the docked bar");
+
+        // Pressed for room: the same bar pushes the preview down to stay clear.
+        let tight = centred_canvas_top(PANE, 780.0, TOP_CLEARANCE, BOTTOM_PAD);
+        let tight_with_bar = centred_canvas_top(PANE, 780.0, TOP_CLEARANCE + 42.0, BOTTOM_PAD);
+        assert_eq!(tight_with_bar, TOP_CLEARANCE + 42.0);
+        assert_eq!(tight, TOP_CLEARANCE);
+    }
+
+    #[test]
+    fn preview_taller_than_the_pane_keeps_its_top_aligned_start() {
+        // Zoomed past the pane: there is no slack to centre, so the preview
+        // starts just below the chrome and the scroller covers inspection.
+        let top = centred_canvas_top(PANE, 1400.0, TOP_CLEARANCE + 42.0, BOTTOM_PAD);
+        assert_eq!(top, TOP_CLEARANCE + 42.0);
+        assert!(
+            top >= TOP_CLEARANCE && (PANE - 1400.0 - BOTTOM_PAD) < TOP_CLEARANCE,
+            "clamped to the floor when the content overflows"
+        );
+    }
+
+    #[test]
+    fn centred_viewport_x_keeps_the_left_padding_when_content_overflows() {
+        assert_eq!(centred_viewport_x(600.0, 1000.0, 24.0), 200.0);
+        assert_eq!(centred_viewport_x(1400.0, 1000.0, 24.0), 24.0);
     }
 }
