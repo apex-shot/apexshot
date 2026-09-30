@@ -1,3 +1,4 @@
+use super::squircle_clip::SquircleClip;
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::model::{
@@ -80,17 +81,15 @@ fn build_preview_inner(
         );
     }
 
-    // The card's corner radius follows the Background panel's slider. It has
-    // to be written at the preview's own scale, so it gets its own provider
-    // rather than riding along with the zoom transform.
-    let radius_css = CssProvider::new();
-    if let Some(display) = gtk4::gdk::Display::default() {
-        gtk4::style_context_add_provider_for_display(
-            &display,
-            &radius_css,
-            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 3,
-        );
-    }
+    // The card's corner radius follows the Background panel's slider. It is
+    // drawn with the image editor's squircle path via a mask, because CSS
+    // `border-radius` can only draw circular corners.
+    let squircle = SquircleClip::new();
+    squircle.set_hexpand(true);
+    squircle.set_vexpand(true);
+    squircle.set_halign(Align::Fill);
+    squircle.set_valign(Align::Fill);
+    squircle.append(&picture);
 
     let clip = Overlay::new();
     clip.add_css_class("recording-editor-preview-clip");
@@ -103,7 +102,7 @@ fn build_preview_inner(
     bounds.set_hexpand(true);
     bounds.set_vexpand(true);
     clip.set_child(Some(&bounds));
-    clip.add_overlay(&picture);
+    clip.add_overlay(&squircle);
 
     let overlay = Overlay::new();
     overlay.add_css_class("recording-editor-preview-canvas");
@@ -218,7 +217,7 @@ fn build_preview_inner(
         let picture = picture.clone();
         let clip = clip.clone();
         let zoom_css = zoom_css.clone();
-        let radius_css = radius_css.clone();
+        let squircle = squircle.clone();
         let bg_css = bg_css.clone();
         let bg_picture = bg_picture.clone();
         let overlay_tick = overlay.clone();
@@ -231,7 +230,6 @@ fn build_preview_inner(
         let cursor_layer_tick = cursor_layer.clone();
         let empty_hint = empty_hint.clone();
         let last_zoom_css = Rc::new(RefCell::new(String::new()));
-        let last_radius_css = Rc::new(RefCell::new(String::new()));
         let last_bg_css = Rc::new(RefCell::new(String::new()));
         let last_wallpaper = Rc::new(RefCell::new(String::new()));
         let last_gradient = Rc::new(RefCell::new(String::new()));
@@ -292,7 +290,7 @@ fn build_preview_inner(
                 dims,
                 &last_margins,
             );
-            apply_preview_radius(&clip, &radius_css, &last_radius_css, video, radius);
+            apply_preview_radius(&squircle, video, radius);
             apply_preview_view(
                 &state,
                 &picture,
@@ -842,26 +840,17 @@ fn apply_preview_clip(
 
 // Round the video card's corners. The state stores the radius against the
 // output canvas, so it is rescaled to the preview's allocated width; without
-// that the corner would look tighter or rounder than the export.
-fn apply_preview_radius(
-    clip: &Overlay,
-    provider: &CssProvider,
-    last_css: &RefCell<String>,
-    video: (u32, u32),
-    radius_px: f64,
-) {
-    let clip_w = clip.allocated_width().max(0) as f64;
+// that the corner would look tighter or rounder than the export. The mask is
+// the image editor's squircle path, so preview and export agree.
+fn apply_preview_radius(squircle: &SquircleClip, video: (u32, u32), radius_px: f64) {
+    let clip_w = squircle.allocated_width().max(0) as f64;
     let video_w = video.0.max(1) as f64;
     let radius = if radius_px > 0.5 && clip_w > 1.0 {
         (radius_px * clip_w / video_w).round().max(0.0)
     } else {
         0.0
     };
-    let css = format!(".recording-editor-preview-clip {{ border-radius: {radius:.0}px; }}");
-    if *last_css.borrow() != css {
-        provider.load_from_data(&css);
-        last_css.replace(css);
-    }
+    squircle.set_radius(radius);
 }
 
 fn visible_source_view(
@@ -1217,6 +1206,24 @@ mod tests {
         assert!(
             source.contains("fn gradient_texture") && source.contains("render_gradient(gradient"),
             "a custom gradient must preview through the shared renderer, not a stand-in"
+        );
+    }
+
+    #[test]
+    fn preview_masks_the_video_card_with_the_shared_squircle() {
+        let source = include_str!("preview.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("SquircleClip::new()")
+                && production.contains("squircle.append(&picture)")
+                && production.contains("clip.add_overlay(&squircle)")
+                && production.contains("fn apply_preview_radius(squircle: &SquircleClip")
+                && production.contains("squircle.set_radius(radius)"),
+            "the preview must round the video card with the shared squircle mask"
+        );
+        assert!(
+            !production.contains("border-radius: {radius:.0}px"),
+            "the circular CSS radius must be gone once the squircle mask is in place"
         );
     }
 

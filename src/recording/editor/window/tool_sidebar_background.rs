@@ -279,9 +279,11 @@ fn build_background_panel(
     );
 
     // Radius follows padding's units: both are slider values against a 400px
-    // long edge, so the number in the pill matches what export draws.
+    // long edge, so the number in the pill matches what export draws. The 0-40
+    // ceiling matches the image editor's Border Radius slider, and the mask
+    // uses the same squircle corner profile.
     let radius_row = bg_value_row(&t("Radius"));
-    radius_row.scale.set_range(0.0, 80.0);
+    radius_row.scale.set_range(0.0, 40.0);
     radius_row.scale.set_increments(1.0, 4.0);
     bind_bg_value(
         &radius_row,
