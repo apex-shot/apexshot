@@ -110,7 +110,7 @@ pub(super) fn build_upload_action(
     let icon = Image::from_icon_name(
         crate::capture::editor::window::icon_names::custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
     );
-    icon.set_pixel_size(16);
+    icon.set_pixel_size(20);
     button.set_child(Some(&icon));
 
     let spinner = Spinner::new();
@@ -144,16 +144,10 @@ pub(super) fn build_export_action(
     button.set_tooltip_text(Some(&t("Export the edited MP4")));
     button.set_valign(Align::Center);
 
-    let content = GtkBox::new(Orientation::Horizontal, 4);
-    content.set_halign(Align::Center);
-    content.set_valign(Align::Center);
-    let icon =
-        Image::from_icon_name(crate::capture::editor::window::icon_names::ARROW_EXPORT_UP_REGULAR);
-    icon.set_pixel_size(12);
     let label = Label::new(Some(&t("Export")));
-    content.append(&icon);
-    content.append(&label);
-    button.set_child(Some(&content));
+    label.set_halign(Align::Center);
+    label.set_valign(Align::Center);
+    button.set_child(Some(&label));
 
     let spinner = Spinner::new();
     spinner.set_size_request(12, 12);
