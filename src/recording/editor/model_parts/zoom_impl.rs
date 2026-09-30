@@ -8,10 +8,9 @@ impl VideoEditState {
             return None;
         }
         let start = start.max(0.0);
-        let end = start + DEFAULT_ZOOM_DURATION_SECONDS;
-        if end - start < 0.2 {
-            return None;
-        }
+        // A zoom may not run past the last frame of the video, so the default
+        // span is trimmed to the boundary and refused when too little is left.
+        let (start, end) = fit_effect_span(self, start, start + DEFAULT_ZOOM_DURATION_SECONDS)?;
         if self
             .zoom_clips
             .iter()
@@ -122,7 +121,7 @@ impl VideoEditState {
         }
         let clip = self.zoom_clips.get(index)?.clone();
         let start = start.max(0.0);
-        let end = start + clip.duration();
+        let (start, end) = fit_effect_move(self, start, clip.duration());
         if self
             .zoom_clips
             .iter()
@@ -150,7 +149,7 @@ impl VideoEditState {
     pub fn duplicate_cursor_hide_clip(&mut self, index: usize, start: f64) -> Option<usize> {
         let clip = self.cursor_hide_clips.get(index)?.clone();
         let start = start.max(0.0);
-        let end = start + clip.duration();
+        let (start, end) = fit_effect_move(self, start, clip.duration());
         if self
             .cursor_hide_clips
             .iter()
@@ -158,11 +157,8 @@ impl VideoEditState {
         {
             return None;
         }
-        self.cursor_hide_clips.push(CursorHideClip {
-            start,
-            end,
-            ..clip
-        });
+        self.cursor_hide_clips
+            .push(CursorHideClip { start, end, ..clip });
         self.cursor_hide_clips
             .sort_by(|a, b| a.start.total_cmp(&b.start));
         let new_index = self
@@ -228,17 +224,15 @@ impl VideoEditState {
         let at = self.playhead_seconds.max(0.0);
         let placed = match self.clipboard.clone()? {
             ClipClipboard::Zoom(clip) => {
-                let start = at.max(0.0);
-                if self.zoom_clips.iter().any(|other| {
-                    ranges_overlap(start, start + clip.duration(), other.start, other.end)
-                }) {
+                let (start, end) = fit_effect_span(self, at.max(0.0), at.max(0.0) + clip.duration())?;
+                if self
+                    .zoom_clips
+                    .iter()
+                    .any(|other| ranges_overlap(start, end, other.start, other.end))
+                {
                     return None;
                 }
-                self.zoom_clips.push(ZoomClip {
-                    start,
-                    end: start + clip.duration(),
-                    ..clip
-                });
+                self.zoom_clips.push(ZoomClip { start, end, ..clip });
                 self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
                 let index = self
                     .zoom_clips
@@ -251,17 +245,15 @@ impl VideoEditState {
                 Some(index)
             }
             ClipClipboard::Hide(clip) => {
-                let start = at.max(0.0);
-                if self.cursor_hide_clips.iter().any(|other| {
-                    ranges_overlap(start, start + clip.duration(), other.start, other.end)
-                }) {
+                let (start, end) = fit_effect_span(self, at.max(0.0), at.max(0.0) + clip.duration())?;
+                if self
+                    .cursor_hide_clips
+                    .iter()
+                    .any(|other| ranges_overlap(start, end, other.start, other.end))
+                {
                     return None;
                 }
-                self.cursor_hide_clips.push(CursorHideClip {
-                    start,
-                    end: start + clip.duration(),
-                    ..clip
-                });
+                self.cursor_hide_clips.push(CursorHideClip { start, end, ..clip });
                 self.cursor_hide_clips
                     .sort_by(|a, b| a.start.total_cmp(&b.start));
                 let index = self
@@ -332,6 +324,11 @@ impl VideoEditState {
     /// the clipboard is aimed at. The painter uses this to show a placeable
     /// ghost differently from one that would collide.
     pub fn paste_spot_is_free(&self, start: f64, duration: f64, is_zoom_track: bool) -> bool {
+        // A span that cannot fit before the video ends is not placeable, the
+        // same as one that would collide.
+        if fit_effect_span(self, start, start + duration).is_none() {
+            return false;
+        }
         let end = start + duration;
         match (self.clipboard.as_ref(), is_zoom_track) {
             (Some(ClipClipboard::Zoom(_)), true) => !self
@@ -356,12 +353,24 @@ impl VideoEditState {
         };
         let start = self.playhead_seconds.max(0.0);
         match clip {
-            ClipClipboard::Zoom(clip) => !self.zoom_clips.iter().any(|other| {
-                ranges_overlap(start, start + clip.duration(), other.start, other.end)
-            }),
-            ClipClipboard::Hide(clip) => !self.cursor_hide_clips.iter().any(|other| {
-                ranges_overlap(start, start + clip.duration(), other.start, other.end)
-            }),
+            ClipClipboard::Zoom(clip) => {
+                // A paste that cannot fit before the video ends is refused,
+                // just like one that would collide.
+                if fit_effect_span(self, start, start + clip.duration()).is_none() {
+                    return false;
+                }
+                !self.zoom_clips.iter().any(|other| {
+                    ranges_overlap(start, start + clip.duration(), other.start, other.end)
+                })
+            }
+            ClipClipboard::Hide(clip) => {
+                if fit_effect_span(self, start, start + clip.duration()).is_none() {
+                    return false;
+                }
+                !self.cursor_hide_clips.iter().any(|other| {
+                    ranges_overlap(start, start + clip.duration(), other.start, other.end)
+                })
+            }
         }
     }
 
@@ -759,9 +768,8 @@ impl VideoEditState {
         let Some(clip) = self.zoom_clips.get(index).cloned() else {
             return;
         };
-        let duration = clip.duration().max(0.2);
-        let start = start.max(0.0);
-        let end = start + duration;
+        // Keep the clip's length but pull it back inside the video.
+        let (start, end) = fit_effect_move(self, start, clip.duration());
         if self.zoom_clips.iter().enumerate().any(|(other, existing)| {
             other != index && ranges_overlap(start, end, existing.start, existing.end)
         }) {
@@ -780,14 +788,9 @@ impl VideoEditState {
         if self.zoom_clips.get(index).is_none() {
             return;
         }
-        let mut start = start.max(0.0);
-        let mut end = end.max(0.0);
-        if end < start {
-            std::mem::swap(&mut start, &mut end);
-        }
-        if end - start < 0.2 {
-            end = start + 0.2;
-        }
+        let Some((start, end)) = fit_effect_span(self, start, end) else {
+            return;
+        };
         if self.zoom_clips.iter().enumerate().any(|(other, existing)| {
             other != index && ranges_overlap(start, end, existing.start, existing.end)
         }) {

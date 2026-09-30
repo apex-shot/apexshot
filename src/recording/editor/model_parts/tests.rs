@@ -1341,6 +1341,118 @@ fn cursor_hide_clips_reject_overlap_and_zero_alpha_inside() {
 }
 
 #[test]
+fn effect_clip_spans_are_clamped_to_the_video() {
+    // The program is only as long as its media, so a zoom or hide block may
+    // never run into the empty canvas past the last frame.
+    let state = VideoEditState::new(metadata());
+    assert!((super::effect_clip_limit(&state) - 10.0).abs() < 1e-9);
+    assert_eq!(super::fit_effect_span(&state, 9.5, 12.0), Some((9.5, 10.0)));
+    assert_eq!(super::fit_effect_span(&state, -3.0, 1.0), Some((0.0, 1.0)));
+    assert_eq!(
+        super::fit_effect_span(&state, 9.95, 12.0),
+        None,
+        "less than the 0.2s minimum cannot be placed"
+    );
+    assert_eq!(super::fit_effect_move(&state, 9.9, 1.0), (9.0, 10.0));
+    assert_eq!(super::fit_effect_move(&state, -5.0, 1.0), (0.0, 1.0));
+}
+
+#[test]
+fn a_zoom_cannot_be_placed_past_the_video_end() {
+    let mut state = VideoEditState::new(metadata());
+    // The default span is trimmed to the boundary when it would overshoot...
+    let index = state.add_zoom_at(9.5).expect("a partial zoom still fits");
+    assert!((state.zoom_clips[index].end - 10.0).abs() < 1e-9);
+    assert!((state.zoom_clips[index].duration() - 0.5).abs() < 1e-9);
+
+    // ...and placement is refused when too little of it would fit.
+    assert!(state.add_zoom_at(9.95).is_none(), "0.05s is below the minimum");
+    assert!(state.add_zoom_at(10.5).is_none(), "nothing fits past the end");
+    assert!(state.add_zoom_at(30.0).is_none(), "nothing fits past the end");
+}
+
+#[test]
+fn a_cursor_hide_clip_cannot_be_placed_past_the_video_end() {
+    let mut state = VideoEditState::new(metadata());
+    let index = state.add_cursor_hide_at(9.5).expect("a partial hide fits");
+    assert!((state.cursor_hide_clips[index].end - 10.0).abs() < 1e-9);
+    assert!(state.add_cursor_hide_at(9.95).is_none());
+    assert!(state.add_cursor_hide_at(12.0).is_none());
+}
+
+#[test]
+fn moving_an_effect_clip_keeps_it_inside_the_video() {
+    let mut state = VideoEditState::new(metadata());
+    let zoom = state.add_zoom_at(0.0).unwrap();
+    let duration = state.zoom_clips[zoom].duration();
+    state.move_zoom_clip(zoom, 9.0);
+    assert!(
+        (state.zoom_clips[zoom].end - 10.0).abs() < 1e-9,
+        "the end stops at the last frame"
+    );
+    assert!(
+        (state.zoom_clips[zoom].duration() - duration).abs() < 1e-9,
+        "moving must not resize the clip"
+    );
+
+    let hide = state.add_cursor_hide_at(0.5).unwrap();
+    let hide_duration = state.cursor_hide_clips[hide].duration();
+    state.move_cursor_hide_clip(hide, 20.0);
+    assert!((state.cursor_hide_clips[hide].end - 10.0).abs() < 1e-9);
+    assert!((state.cursor_hide_clips[hide].duration() - hide_duration).abs() < 1e-9);
+}
+
+#[test]
+fn resizing_an_effect_clip_stops_at_the_video_end() {
+    let mut state = VideoEditState::new(metadata());
+    let zoom = state.add_zoom_at(0.0).unwrap();
+    state.set_zoom_range(zoom, 0.0, 25.0);
+    assert!((state.zoom_clips[zoom].start - 0.0).abs() < 1e-9);
+    assert!((state.zoom_clips[zoom].end - 10.0).abs() < 1e-9);
+
+    // Dragging the whole span past the end leaves it where it was rather than
+    // writing a degenerate zero-length clip.
+    state.set_zoom_range(zoom, 25.0, 30.0);
+    assert!((state.zoom_clips[zoom].start - 0.0).abs() < 1e-9);
+    assert!((state.zoom_clips[zoom].end - 10.0).abs() < 1e-9);
+}
+
+#[test]
+fn the_paste_ghost_and_paste_agree_past_the_video_end() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(0.0, 1.0));
+    state.copy_zoom_clip(0);
+
+    // A one-second clip at 9.9 leaves less than the minimum before the end.
+    state.playhead_seconds = 9.9;
+    assert!(
+        !state.paste_spot_is_free(9.9, 1.0, true),
+        "the ghost must read as unplaceable"
+    );
+    assert!(!state.can_paste_clipboard_at_playhead());
+    assert!(state.paste_clipboard_at(9.9).is_none());
+
+    // Further back it lands, trimmed to the boundary.
+    state.playhead_seconds = 9.5;
+    assert!(state.can_paste_clipboard_at_playhead());
+    let placed = state.paste_clipboard_at(9.5).expect("the paste fits");
+    assert!((state.zoom_clips[placed].start - 9.5).abs() < 1e-9);
+    assert!((state.zoom_clips[placed].end - 10.0).abs() < 1e-9);
+}
+
+#[test]
+fn duplicating_a_clip_at_the_end_has_nowhere_to_go() {
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(zoom_clip_at(9.0, 10.0));
+    state.selected_zoom = Some(0);
+    assert!(
+        state.duplicate_selected_clip().is_none(),
+        "the copy would have to overlap the original to stay inside the video"
+    );
+    assert_eq!(state.zoom_clips.len(), 1);
+}
+
+#[test]
 fn adding_cursor_hide_clears_zoom_selection() {
     let mut state = VideoEditState::new(metadata());
     assert!(state.add_zoom_at_playhead().is_some());

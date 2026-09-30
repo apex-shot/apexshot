@@ -5,10 +5,9 @@ impl VideoEditState {
 
     pub fn add_cursor_hide_at(&mut self, start: f64) -> Option<usize> {
         let start = start.max(0.0);
-        let end = start + DEFAULT_CURSOR_HIDE_DURATION_SECONDS;
-        if end - start < 0.2 {
-            return None;
-        }
+        // The hide block may not run past the video's last frame.
+        let (start, end) =
+            fit_effect_span(self, start, start + DEFAULT_CURSOR_HIDE_DURATION_SECONDS)?;
         if self
             .cursor_hide_clips
             .iter()
@@ -51,9 +50,8 @@ impl VideoEditState {
         let Some(clip) = self.cursor_hide_clips.get(index).cloned() else {
             return;
         };
-        let duration = clip.duration().max(0.2);
-        let start = start.max(0.0);
-        let end = start + duration;
+        // Keep the block's length but pull it back inside the video.
+        let (start, end) = fit_effect_move(self, start, clip.duration());
         if self
             .cursor_hide_clips
             .iter()
@@ -74,14 +72,9 @@ impl VideoEditState {
         if self.cursor_hide_clips.get(index).is_none() {
             return;
         }
-        let mut start = start.max(0.0);
-        let mut end = end.max(0.0);
-        if end < start {
-            std::mem::swap(&mut start, &mut end);
-        }
-        if end - start < 0.2 {
-            end = start + 0.2;
-        }
+        let Some((start, end)) = fit_effect_span(self, start, end) else {
+            return;
+        };
         if self
             .cursor_hide_clips
             .iter()
