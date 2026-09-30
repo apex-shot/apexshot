@@ -1055,6 +1055,7 @@ pub(crate) struct FillSlider {
     enabled: Rc<Cell<bool>>,
     hovered: Rc<Cell<bool>>,
     dragging: Rc<Cell<bool>>,
+    logarithmic: Rc<Cell<bool>>,
     listeners: Rc<RefCell<Vec<Rc<dyn Fn(&FillSlider)>>>>,
     value_text: Rc<dyn Fn(f64, f64, f64) -> String>,
 }
@@ -1083,6 +1084,7 @@ impl FillSlider {
             enabled: Rc::new(Cell::new(true)),
             hovered: Rc::new(Cell::new(false)),
             dragging: Rc::new(Cell::new(false)),
+            logarithmic: Rc::new(Cell::new(false)),
             listeners: Rc::new(RefCell::new(Vec::new())),
             value_text: Rc::new(value_text),
         };
@@ -1170,6 +1172,17 @@ impl FillSlider {
         self.step.set(step.max(0.0));
     }
 
+    /// Space the track logarithmically instead of linearly. Use it for
+    /// multiplicative quantities whose range spans an order of magnitude or
+    /// more (playback speed, for one): equal pixels then mean equal *ratios*,
+    /// so a 0.25x-30x range does not crush every slow-motion value into a few
+    /// pixels at the left edge. Call after [`Self::set_range`] so a positive
+    /// minimum is already in place.
+    pub(crate) fn set_logarithmic(&self, logarithmic: bool) {
+        self.logarithmic.set(logarithmic);
+        self.area.queue_draw();
+    }
+
     pub(crate) fn set_sensitive(&self, sensitive: bool) {
         self.enabled.set(sensitive);
         self.area.set_sensitive(sensitive);
@@ -1198,11 +1211,7 @@ impl FillSlider {
         let min = self.min.get();
         let max = self.max.get();
         let t = (x / width).clamp(0.0, 1.0);
-        let mut value = min + t * (max - min);
-        let step = self.step.get();
-        if step > 1e-9 {
-            value = ((value - min) / step).round() * step + min;
-        }
+        let value = fill_slider_value_from_t(t, min, max, self.logarithmic.get(), self.step.get());
         self.set_value(value);
     }
 
@@ -1225,7 +1234,7 @@ impl FillSlider {
         let active = self.enabled.get() && self.dragging.get();
         let min = self.min.get();
         let max = self.max.get();
-        let progress = ((self.value.get() - min) / (max - min).max(1e-9)).clamp(0.0, 1.0);
+        let progress = fill_slider_progress(self.value.get(), min, max, self.logarithmic.get());
         let radius = 8.0;
         let (track_a, fill_a, text_a, handle_a) = if light {
             if active {
@@ -1298,6 +1307,32 @@ impl FillSlider {
         cr.move_to(tick_x, h * 0.28);
         cr.line_to(tick_x, h * 0.72);
         let _ = cr.stroke();
+    }
+}
+
+/// Position of `value` along the track as 0..1. Logarithmic sliders space
+/// equal ratios evenly; linear sliders space equal differences evenly.
+fn fill_slider_progress(value: f64, min: f64, max: f64, logarithmic: bool) -> f64 {
+    if logarithmic && min > 0.0 && max > 0.0 {
+        let span = (max.ln() - min.ln()).abs().max(1e-9);
+        ((value.max(1e-9).ln() - min.ln()) / span).clamp(0.0, 1.0)
+    } else {
+        ((value - min) / (max - min).max(1e-9)).clamp(0.0, 1.0)
+    }
+}
+
+/// Value at track position `t` (0..1), snapped to `step` where one is set.
+fn fill_slider_value_from_t(t: f64, min: f64, max: f64, logarithmic: bool, step: f64) -> f64 {
+    let t = t.clamp(0.0, 1.0);
+    let value = if logarithmic && min > 0.0 && max > 0.0 {
+        (min.ln() + t * (max.ln() - min.ln())).exp()
+    } else {
+        min + t * (max - min)
+    };
+    if step > 1e-9 {
+        ((value - min) / step).round() * step + min
+    } else {
+        value
     }
 }
 
