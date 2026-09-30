@@ -236,7 +236,20 @@ fn build_preview_inner(
         let last_margins = Rc::new(RefCell::new((i32::MIN, 0, 0, 0)));
         glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
             let playing = media_tick.is_playing();
-            let (dims, video, zoom, playhead, duration, hidden, label, placing, radius, background) = {
+            let (
+                dims,
+                video,
+                zoom,
+                playhead,
+                duration,
+                clock_now,
+                clock_end,
+                hidden,
+                label,
+                placing,
+                radius,
+                background,
+            ) = {
                 let s = state.lock().unwrap();
                 let source_t = s.source_playhead();
                 let (scale, _) = s.eval_zoom(source_t);
@@ -246,6 +259,8 @@ fn build_preview_inner(
                     scale,
                     source_t,
                     s.metadata.duration_seconds,
+                    s.playhead_seconds,
+                    s.content_end_seconds(),
                     s.video_hidden,
                     s.canvas_label(),
                     placing_manual(&s, playing),
@@ -263,8 +278,8 @@ fn build_preview_inner(
             picture.set_opacity(if hidden { 0.0 } else { 1.0 });
             clock.set_text(&format!(
                 "{} / {}",
-                format_timecode(playhead),
-                format_timecode(duration)
+                format_timecode(clock_now),
+                format_timecode(clock_end)
             ));
             aspect_label.set_text(label);
             aspect_icon.set_icon_name(Some(aspect_ratio_icon(label)));

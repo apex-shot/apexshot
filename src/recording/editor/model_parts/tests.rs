@@ -2117,6 +2117,31 @@ fn freeze_playhead_holds_the_last_source_frame() {
 }
 
 #[test]
+fn a_freeze_after_a_trim_holds_the_trimmed_last_frame() {
+    let mut state = VideoEditState::new(metadata());
+    state.set_trim_end(8.0);
+    assert!(state.extend_last_segment(2.0));
+    // The composition runs 8..10s holding the frame at 8 — not the frames the
+    // trim cut away (9, 10).
+    state.playhead_seconds = 9.0;
+    assert!(
+        (state.source_playhead() - 8.0).abs() < 1e-6,
+        "the hold must freeze the trimmed end, got {}",
+        state.source_playhead()
+    );
+
+    // Drop the hold and the same playhead is back over the trimmed band, which
+    // still previews the frame a reveal would bring in.
+    assert!(state.clear_freeze_tail());
+    state.playhead_seconds = 9.0;
+    assert!(
+        (state.source_playhead() - 9.0).abs() < 1e-6,
+        "the trimmed band must preview the footage it would reveal, got {}",
+        state.source_playhead()
+    );
+}
+
+#[test]
 fn dragging_the_right_edge_past_the_end_opens_a_hold_that_applies() {
     let mut state = VideoEditState::new(metadata());
     // The tail has to name its segment, or nothing applies it: the composition

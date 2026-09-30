@@ -92,6 +92,49 @@ pub fn tick_playback(
             redraw();
             return;
         }
+    }
+
+    // A freeze hold runs past the source, where the media has no frames left.
+    // Keep the last frame on screen and walk the playhead to the real end,
+    // instead of rewinding the moment the source runs out.
+    let freeze_tail = {
+        let guard = state.lock().unwrap();
+        let footage_end = guard.source_to_timeline(guard.trim_end_seconds);
+        (guard.freeze_tail_seconds() > 1e-9 && guard.playhead_seconds >= footage_end - 1e-9).then(
+            || {
+                (
+                    guard.trim_end_seconds,
+                    guard.content_end_seconds(),
+                    guard.playhead_seconds,
+                )
+            },
+        )
+    };
+    if let Some((trim_end, end, playhead)) = freeze_tail {
+        if let Some(media_file) = media.borrow().as_ref() {
+            if media_file.is_playing() {
+                media_file.pause();
+            }
+            // Pin the source to the held frame once; `timestamp` then matches,
+            // so the seek does not repeat every tick.
+            let at = media_file.timestamp() as f64 / 1_000_000.0;
+            if at < 0.0 || (at - trim_end).abs() > 0.05 {
+                media_file.seek((trim_end * 1_000_000.0) as i64);
+            }
+        }
+        let mut guard = state.lock().unwrap();
+        guard.playhead_seconds = (playhead + 0.05).min(end);
+        let reached = guard.playhead_seconds >= end - 1e-3;
+        drop(guard);
+        if reached {
+            stop_playback_at_end(state, media, playing, play_button, redraw);
+        } else {
+            redraw();
+        }
+        return;
+    }
+
+    if let Some(media_file) = media.borrow().as_ref() {
         if media_file.is_ended() {
             stop_playback_at_end(state, media, playing, play_button, redraw);
             return;
@@ -156,21 +199,18 @@ pub fn tick_playback(
 }
 
 fn stop_playback_at_end(
-    state: &Arc<Mutex<VideoEditState>>,
+    _state: &Arc<Mutex<VideoEditState>>,
     media: &Rc<RefCell<Option<MediaFile>>>,
     playing: &Rc<Cell<bool>>,
     play_button: &Button,
     redraw: &Rc<dyn Fn()>,
 ) {
     playing.set(false);
-    let seek_to = {
-        let mut guard = state.lock().unwrap();
-        guard.playhead_seconds = 0.0;
-        guard.source_playhead()
-    };
+    // Leave the playhead at the end. Rewinding to zero here is what made the
+    // player look like it "never played the ending"; pressing play again
+    // restarts from the top through `playhead_for_replay` anyway.
     if let Some(media_file) = media.borrow().as_ref() {
         media_file.pause();
-        media_file.seek((seek_to * 1_000_000.0) as i64);
     }
     set_play_icon(play_button, "media-playback-start-symbolic");
     redraw();

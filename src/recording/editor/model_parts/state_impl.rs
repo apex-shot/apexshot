@@ -223,6 +223,15 @@ impl VideoEditState {
     }
 
     pub fn source_playhead(&self) -> f64 {
+        // A freeze hold runs past the last frame, so the displayed source time
+        // pins to the footage end rather than extrapolating into frames the
+        // composition does not play. A plain trim is different: the band past
+        // the clip has no hold, so it keeps mapping to the trimmed-away frames
+        // a reveal would add — scrubbing there has to preview them.
+        let footage_end = self.source_to_timeline(self.trim_end_seconds);
+        if self.freeze_tail > f64::EPSILON && self.playhead_seconds > footage_end + 1e-9 {
+            return self.trim_end_seconds.clamp(0.0, self.source_duration());
+        }
         self.timeline_to_source(self.playhead_seconds)
             .clamp(0.0, self.source_duration())
     }

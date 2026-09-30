@@ -21,7 +21,7 @@ pub fn build_timeline_card(
         let guard = state.lock().unwrap();
         let playhead_clock = Label::new(Some(&format_clock(guard.playhead_seconds)));
         playhead_clock.add_css_class("recording-editor-timeline-clock");
-        let duration_clock = Label::new(Some(&format_clock(guard.source_duration())));
+        let duration_clock = Label::new(Some(&format_clock(guard.content_end_seconds())));
         duration_clock.add_css_class("recording-editor-timeline-clock");
         (playhead_clock, duration_clock)
     };
@@ -311,7 +311,7 @@ pub fn build_timeline_card(
             {
                 let guard = state.lock().unwrap();
                 playhead_clock.set_text(&format_clock(guard.playhead_seconds));
-                duration_clock.set_text(&format_clock(guard.source_duration()));
+                duration_clock.set_text(&format_clock(guard.content_end_seconds()));
                 sync_scroll_adj(&scroll_adj, &guard, &scroll_syncing);
                 if guard.selected_zoom.is_some() {
                     zoom.add_css_class("recording-editor-timeline-tool-active");
