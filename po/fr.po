@@ -2602,3 +2602,29 @@ msgstr "rgb"
 
 msgid "Drag to adjust duration"
 msgstr "Faites glisser pour ajuster la durée"
+
+msgid "Detection"
+msgstr "Détection"
+
+msgid "Clicks"
+msgstr "Clics"
+
+msgid "Clicks + Hovers"
+msgstr "Clics + Pauses"
+
+msgid "Zoom only where the recording captured a click"
+msgstr "Zoom uniquement là où l'enregistrement a capturé un clic"
+
+msgid "Also zoom on a purposeful pointer pause that no click covers"
+msgstr ""
+"Zoomer aussi sur une pause intentionnelle du pointeur qu'aucun clic ne couvre"
+
+msgid "Applies the next time Detect runs"
+msgstr "S'applique à la prochaine exécution de Détecter"
+
+msgid "Detect uses recorded clicks only"
+msgstr "Détecter n'utilise que les clics enregistrés"
+
+msgid "Detect uses recorded clicks and purposeful pointer pauses"
+msgstr ""
+"Détecter utilise les clics enregistrés et les pauses intentionnelles du pointeur"

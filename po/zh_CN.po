@@ -2553,3 +2553,27 @@ msgstr "rgb"
 
 msgid "Drag to adjust duration"
 msgstr "拖动以调整时长"
+
+msgid "Detection"
+msgstr "检测"
+
+msgid "Clicks"
+msgstr "点击"
+
+msgid "Clicks + Hovers"
+msgstr "点击 + 光标暂停"
+
+msgid "Zoom only where the recording captured a click"
+msgstr "仅在录制到点击的位置缩放"
+
+msgid "Also zoom on a purposeful pointer pause that no click covers"
+msgstr "在没有点击覆盖的有意光标暂停处也缩放"
+
+msgid "Applies the next time Detect runs"
+msgstr "在下次运行检测时生效"
+
+msgid "Detect uses recorded clicks only"
+msgstr "检测仅使用录制的点击"
+
+msgid "Detect uses recorded clicks and purposeful pointer pauses"
+msgstr "检测使用录制的点击和有意的光标暂停"

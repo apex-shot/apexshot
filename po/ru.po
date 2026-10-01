@@ -2592,3 +2592,27 @@ msgstr "rgb"
 
 msgid "Drag to adjust duration"
 msgstr "Перетащите, чтобы изменить длительность"
+
+msgid "Detection"
+msgstr "Обнаружение"
+
+msgid "Clicks"
+msgstr "Щелчки"
+
+msgid "Clicks + Hovers"
+msgstr "Щелчки + паузы"
+
+msgid "Zoom only where the recording captured a click"
+msgstr "Приближать только там, где запись зафиксировала щелчок"
+
+msgid "Also zoom on a purposeful pointer pause that no click covers"
+msgstr "Приближать также при намеренной паузе курсора, не покрытой щелчком"
+
+msgid "Applies the next time Detect runs"
+msgstr "Применится при следующем запуске обнаружения"
+
+msgid "Detect uses recorded clicks only"
+msgstr "Обнаружить использует только записанные щелчки"
+
+msgid "Detect uses recorded clicks and purposeful pointer pauses"
+msgstr "Обнаружить использует записанные щелчки и намеренные паузы курсора"

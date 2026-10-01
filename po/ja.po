@@ -2556,3 +2556,27 @@ msgstr "rgb"
 
 msgid "Drag to adjust duration"
 msgstr "ドラッグして長さを調整"
+
+msgid "Detection"
+msgstr "検出"
+
+msgid "Clicks"
+msgstr "クリック"
+
+msgid "Clicks + Hovers"
+msgstr "クリック + ポインタの停止"
+
+msgid "Zoom only where the recording captured a click"
+msgstr "録画でクリックが記録された場所だけをズームします"
+
+msgid "Also zoom on a purposeful pointer pause that no click covers"
+msgstr "クリックでカバーされない意図的なポインタの停止でもズームします"
+
+msgid "Applies the next time Detect runs"
+msgstr "次回の検出時に適用されます"
+
+msgid "Detect uses recorded clicks only"
+msgstr "検出は記録されたクリックのみを使用します"
+
+msgid "Detect uses recorded clicks and purposeful pointer pauses"
+msgstr "検出は記録されたクリックと意図的なポインタの停止を使用します"
