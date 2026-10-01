@@ -54,6 +54,18 @@ const POST_ROLL_SECONDS: f64 = 1.1;
 // moves between controls. Auto zoom follows that movement with its dead zone.
 const CLICK_SESSION_GAP_SECONDS: f64 = 1.25;
 const MAX_CLICK_SESSION_SPAN_SECONDS: f64 = 4.5;
+// Clicks only stay one session while their targets remain close enough for a
+// single shot to hold them. Clicks on far-apart controls become separate
+// suggestions instead of one tighter zoom that cannot cover both.
+const CLICK_SESSION_RADIUS_DIAGONAL_FRACTION: f64 = 0.35;
+const MIN_CLICK_SESSION_RADIUS_PX: f64 = 160.0;
+const MAX_CLICK_SESSION_RADIUS_PX: f64 = 900.0;
+// Repeat clicks earn the tighter scale only while they land on essentially the
+// same target. A merged workflow that drifts across the screen is a moving
+// shot, so it keeps the single-interaction scale.
+const TIGHT_REPEAT_RADIUS_DIAGONAL_FRACTION: f64 = 0.06;
+const MIN_TIGHT_REPEAT_RADIUS_PX: f64 = 48.0;
+const MAX_TIGHT_REPEAT_RADIUS_PX: f64 = 180.0;
 const CLICK_SESSION_PRE_ROLL_SECONDS: f64 = 0.6;
 const CLICK_SESSION_POST_ROLL_SECONDS: f64 = 2.5;
 const MAX_CLICK_SESSION_SECONDS: f64 = 5.5;
@@ -162,6 +174,10 @@ pub fn suggest_zooms_with_evidence(
         .clamp(MIN_ARRIVAL_DISTANCE_PX, MAX_ARRIVAL_DISTANCE_PX);
     let cluster_radius = (diagonal * CLUSTER_RADIUS_DIAGONAL_FRACTION)
         .clamp(MIN_CLUSTER_RADIUS_PX, MAX_CLUSTER_RADIUS_PX);
+    let click_session_radius = (diagonal * CLICK_SESSION_RADIUS_DIAGONAL_FRACTION)
+        .clamp(MIN_CLICK_SESSION_RADIUS_PX, MAX_CLICK_SESSION_RADIUS_PX);
+    let tight_repeat_radius = (diagonal * TIGHT_REPEAT_RADIUS_DIAGONAL_FRACTION)
+        .clamp(MIN_TIGHT_REPEAT_RADIUS_PX, MAX_TIGHT_REPEAT_RADIUS_PX);
 
     let mut landings = select_landings(
         evidence,
@@ -172,10 +188,10 @@ pub fn suggest_zooms_with_evidence(
         cluster_radius,
     );
     landings.sort_by(|a, b| a.start.total_cmp(&b.start));
-    let clusters = cluster_landings(landings, cluster_radius);
+    let clusters = cluster_landings(landings, cluster_radius, click_session_radius);
     let mut suggestions: Vec<ScoredSuggestion> = clusters
         .into_iter()
-        .filter_map(|cluster| suggestion_for_cluster(cluster, total_seconds))
+        .filter_map(|cluster| suggestion_for_cluster(cluster, total_seconds, tight_repeat_radius))
         .collect();
 
     // Ranking happens after feasibility, so every candidate is returned and
@@ -435,7 +451,11 @@ fn detect_landings(
     landings
 }
 
-fn cluster_landings(landings: Vec<Landing>, cluster_radius: f64) -> Vec<LandingCluster> {
+fn cluster_landings(
+    landings: Vec<Landing>,
+    cluster_radius: f64,
+    click_session_radius: f64,
+) -> Vec<LandingCluster> {
     let mut clusters: Vec<LandingCluster> = Vec::new();
     for landing in landings {
         let should_merge = clusters.last().is_some_and(|cluster| {
@@ -444,11 +464,14 @@ fn cluster_landings(landings: Vec<Landing>, cluster_radius: f64) -> Vec<LandingC
             let click_session =
                 landing.is_click && cluster.landings.iter().all(|existing| existing.is_click);
             if click_session {
-                // Controls in one workflow can be far apart. The generated
-                // Auto clip follows the recorded pointer instead of holding a
-                // fixed focus point, so position is deliberately not a gate.
+                // A nearby control in the same workflow stays one session; the
+                // Auto camera follows the pointer between them. A target across
+                // the frame is a different shot, so the two are not deduplicated
+                // into a zoom that cannot hold both.
+                let center = median_landing_position(&cluster.landings);
                 landing.start - last.end <= CLICK_SESSION_GAP_SECONDS
                     && landing.end - first.start <= MAX_CLICK_SESSION_SPAN_SECONDS
+                    && point_distance(landing.center, center) <= click_session_radius
             } else {
                 let center = median_landing_position(&cluster.landings);
                 landing.start - last.end <= CLUSTER_MERGE_GAP_SECONDS
@@ -471,7 +494,11 @@ fn cluster_landings(landings: Vec<Landing>, cluster_radius: f64) -> Vec<LandingC
     clusters
 }
 
-fn suggestion_for_cluster(cluster: LandingCluster, total_seconds: f64) -> Option<ScoredSuggestion> {
+fn suggestion_for_cluster(
+    cluster: LandingCluster,
+    total_seconds: f64,
+    tight_repeat_radius: f64,
+) -> Option<ScoredSuggestion> {
     let first = cluster.landings.first()?;
     let last = cluster.landings.last()?;
     let clicks: Vec<_> = cluster
@@ -548,11 +575,10 @@ fn suggestion_for_cluster(cluster: LandingCluster, total_seconds: f64) -> Option
         median(covered.iter().map(|landing| landing.start).collect())
     };
 
-    let repeated = if clicks.is_empty() {
-        cluster.landings.len() > 1
-    } else {
-        clicks.len() > 1
-    };
+    let repeated = covered.len() > 1
+        && covered
+            .iter()
+            .all(|landing| point_distance(landing.center, center) <= tight_repeat_radius);
     let score = cluster
         .landings
         .iter()
@@ -801,7 +827,10 @@ mod tests {
     }
 
     #[test]
-    fn related_moving_clicks_create_one_cursor_following_session() {
+    fn distant_clicks_split_into_separate_shots() {
+        // Two clicks a second apart but on opposite sides of the screen. A
+        // click-only recording has no pointer track for the Auto camera to
+        // follow, so they must not be deduplicated into one tighter zoom.
         let mut data = sidecar();
         data.clicks.extend([
             click(1.466_893_129, 1_313.0, 296.0),
@@ -810,13 +839,52 @@ mod tests {
 
         let suggestions = suggest_zooms(&data, W, H, 12.0);
 
+        assert_eq!(suggestions.len(), 2);
+        assert!(suggestions
+            .iter()
+            .all(|suggestion| suggestion.scale == AUTO_ZOOM_SCALE));
+        assert!(suggestions
+            .iter()
+            .any(|suggestion| suggestion.center == (1_313.0, 296.0)));
+        assert!(suggestions
+            .iter()
+            .any(|suggestion| suggestion.center == (441.0, 91.0)));
+        assert!(suggestions[0].end <= suggestions[1].start);
+        assert!(suggestions.iter().all(
+            |suggestion| suggestion.end - suggestion.start >= MIN_SUGGESTED_ZOOM_SECONDS - 1e-9
+        ));
+    }
+
+    #[test]
+    fn nearby_workflow_clicks_merge_but_keep_the_wider_scale() {
+        // Close enough for one shot, but drifting, so it is a moving workflow
+        // rather than a repeated press on one target.
+        let mut data = sidecar();
+        data.clicks
+            .extend([click(2.0, 700.0, 450.0), click(2.6, 950.0, 600.0)]);
+
+        let suggestions = suggest_zooms(&data, W, H, 12.0);
+
         assert_eq!(suggestions.len(), 1);
-        assert!((suggestions[0].start - 0.866_893_129).abs() < 0.000_001);
-        assert!((suggestions[0].end - 5.052_951_679).abs() < 0.000_001);
-        // The zoom arrives framed on the first click instead of the point
-        // between the two controls; the Auto camera pans to the second one.
-        assert_eq!(suggestions[0].center, (1_313.0, 296.0));
-        assert_eq!(suggestions[0].scale, REPEATED_INTERACTION_ZOOM_SCALE);
+        assert_eq!(suggestions[0].center, (700.0, 450.0));
+        assert_eq!(suggestions[0].scale, AUTO_ZOOM_SCALE);
+    }
+
+    #[test]
+    fn opposite_edge_clicks_each_get_their_own_shot() {
+        // The targets span the whole effective crop; no single legal zoom can
+        // hold both, so each click becomes its own wide suggestion instead of
+        // one shot that cuts off a target.
+        let mut data = sidecar();
+        data.clicks
+            .extend([click(2.0, 60.0, 60.0), click(2.5, 1_860.0, 1_020.0)]);
+
+        let suggestions = suggest_zooms(&data, W, H, 12.0);
+
+        assert_eq!(suggestions.len(), 2);
+        assert!(suggestions
+            .iter()
+            .all(|suggestion| suggestion.scale == AUTO_ZOOM_SCALE));
     }
 
     #[test]
