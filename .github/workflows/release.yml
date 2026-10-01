@@ -79,9 +79,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/apt-debs
-          key: ${{ runner.os }}-apt-lint-${{ hashFiles('.github/workflows/release.yml') }}
+          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/release.yml') }}
           restore-keys: |
-            ${{ runner.os }}-apt-lint-
+            ${{ runner.os }}-apt-
 
       - name: Install system dependencies (clippy needs the same headers as build)
         run: |
@@ -165,9 +165,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/apt-debs
-          key: ${{ runner.os }}-apt-build-${{ hashFiles('.github/workflows/release.yml') }}
+          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/release.yml') }}
           restore-keys: |
-            ${{ runner.os }}-apt-build-
+            ${{ runner.os }}-apt-
 
       - name: Install system dependencies
         run: |
