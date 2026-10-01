@@ -12,7 +12,7 @@ use std::time::UNIX_EPOCH;
 use super::model::{
     AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorSettings, CursorTheme,
     DimensionPreset, ExportQuality, GradientKind, GradientStop, ProjectMedia, ProjectMediaKind,
-    VideoBackground, VideoEditState, VideoGradient, ZoomClip, ZoomEasing, ZoomMode,
+    VideoBackground, VideoEditState, VideoGradient, ZoomClip, ZoomEasing, ZoomMode, ZoomOrigin,
     DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY, DEFAULT_CLICK_OPACITY,
     DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE,
     DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED, DEFAULT_CURSOR_SWAY, DEFAULT_CURSOR_TILT,
@@ -144,6 +144,20 @@ pub struct ZoomClipFile {
     pub perspective: f64,
     #[serde(default)]
     pub hidden: bool,
+    /// Ownership. Missing in older projects, where it defaults to `legacy`:
+    /// an unknown clip is treated as the user's work, never safe to replace.
+    #[serde(default)]
+    pub origin: ZoomOriginFile,
+}
+
+/// Ownership of a zoom clip as written to disk. See `ZoomOrigin`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ZoomOriginFile {
+    Generated,
+    User,
+    #[default]
+    Legacy,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -478,6 +492,11 @@ fn zoom_to_file(clip: &ZoomClip) -> ZoomClipFile {
         rotation_z: clip.rotation_z,
         perspective: clip.perspective,
         hidden: clip.hidden,
+        origin: match clip.origin {
+            ZoomOrigin::Generated => ZoomOriginFile::Generated,
+            ZoomOrigin::User => ZoomOriginFile::User,
+            ZoomOrigin::Legacy => ZoomOriginFile::Legacy,
+        },
     }
 }
 
@@ -514,6 +533,11 @@ fn zoom_from_file(clip: &ZoomClipFile) -> ZoomClip {
         rotation_z: clip.rotation_z,
         perspective: clip.perspective,
         hidden: clip.hidden,
+        origin: match clip.origin {
+            ZoomOriginFile::Generated => ZoomOrigin::Generated,
+            ZoomOriginFile::User => ZoomOrigin::User,
+            ZoomOriginFile::Legacy => ZoomOrigin::Legacy,
+        },
     }
 }
 
@@ -1374,6 +1398,71 @@ mod tests {
         assert_eq!(restored.cursor.click_duration_ms, 800);
         assert_eq!(restored.zoom_clips[0].easing, ZoomEasing::Snappy);
         assert_eq!(restored.zoom_clips[0].ease_ms, 480);
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_project_json_without_zoom_origin_defaults_to_legacy() {
+        let dir = scratch("old-zoom-origin");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let mut state = VideoEditState::new(metadata_for(&video, 16));
+        state.zoom_clips.push(ZoomClip {
+            start: 0.5,
+            end: 2.3,
+            scale: 2.0,
+            center: (0.4, 0.6),
+            ease_ms: 480,
+            easing: ZoomEasing::Glide,
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        });
+        let mut json = serde_json::to_value(state.to_project()).unwrap();
+        for clip in json
+            .get_mut("zoom_clips")
+            .and_then(|value| value.as_array_mut())
+            .unwrap()
+        {
+            clip.as_object_mut().unwrap().remove("origin");
+        }
+        let file: VideoProjectFile = serde_json::from_value(json).unwrap();
+        assert_eq!(file.zoom_clips[0].origin, ZoomOriginFile::Legacy);
+
+        let mut restored = VideoEditState::new(metadata_for(&video, 16));
+        restored.apply_project(file);
+        assert_eq!(restored.zoom_clips[0].origin, ZoomOrigin::Legacy);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn roundtrip_preserves_zoom_origin() {
+        let dir = scratch("zoom-origin");
+        let video = write_video(&dir, "clip.mp4", 24);
+        let mut state = VideoEditState::new(metadata_for(&video, 24));
+        state.zoom_clips.push(ZoomClip {
+            start: 0.5,
+            end: 2.3,
+            scale: 1.5,
+            center: (0.4, 0.6),
+            mode: ZoomMode::Auto,
+            origin: ZoomOrigin::Generated,
+            ..Default::default()
+        });
+        state.zoom_clips.push(ZoomClip {
+            start: 3.0,
+            end: 4.8,
+            scale: 1.8,
+            center: (0.6, 0.4),
+            mode: ZoomMode::Auto,
+            origin: ZoomOrigin::User,
+            ..Default::default()
+        });
+        save_project(&video, &state.to_project()).unwrap();
+        let loaded = load_project(&video).expect("project should load");
+        let mut restored = VideoEditState::new(metadata_for(&video, 24));
+        restored.apply_project(loaded);
+        assert_eq!(restored.zoom_clips[0].origin, ZoomOrigin::Generated);
+        assert_eq!(restored.zoom_clips[1].origin, ZoomOrigin::User);
         cleanup_project(&video);
         let _ = fs::remove_dir_all(&dir);
     }

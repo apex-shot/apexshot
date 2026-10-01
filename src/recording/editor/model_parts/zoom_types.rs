@@ -1,3 +1,21 @@
+/// Where a zoom clip came from.
+///
+/// `mode` describes camera behavior — whether the clip follows the pointer.
+/// Origin describes ownership, which is what automatic generation acts on: it
+/// may replace only clips it created and nobody has touched since, so a
+/// user-added or edited Auto zoom survives a re-run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ZoomOrigin {
+    /// Placed by automatic suggestion and not edited since.
+    Generated,
+    /// Created or edited by the user.
+    User,
+    /// Loaded from a project written before origin existed. Treated as the
+    /// user's work — an unknown clip is never safe to replace.
+    #[default]
+    Legacy,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ZoomClip {
     pub start: f64,
@@ -15,6 +33,8 @@ pub struct ZoomClip {
     /// the timeline but stops feeding the preview and the export, so the work
     /// behind it survives a temporary mute.
     pub hidden: bool,
+    /// Ownership, separate from camera behavior. See [`ZoomOrigin`].
+    pub origin: ZoomOrigin,
 }
 
 impl Default for ZoomClip {
@@ -32,6 +52,7 @@ impl Default for ZoomClip {
             rotation_z: 0.0,
             perspective: 0.0,
             hidden: false,
+            origin: ZoomOrigin::default(),
         }
     }
 }
