@@ -1368,6 +1368,64 @@ fn suggest_zoom_clips_respects_zoom_lock() {
 }
 
 #[test]
+fn opening_a_fresh_recording_suggests_once() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    assert!(!state.zoom_suggestions_reviewed());
+    assert!(state.suggest_zooms_on_open());
+    assert_eq!(state.zoom_clips.len(), 1);
+    assert!(state.zoom_suggestions_reviewed());
+    // A second open must not stack another suggestion on top.
+    state.zoom_clips.clear();
+    assert!(!state.suggest_zooms_on_open());
+    assert!(state.zoom_clips.is_empty());
+}
+
+#[test]
+fn the_review_pass_runs_quietly_when_it_finds_nothing() {
+    // No sidecar means no suggestions, but the pass still counts as reviewed:
+    // the recording has been looked at.
+    let mut state = VideoEditState::new(metadata());
+    assert!(!state.suggest_zooms_on_open());
+    assert!(state.zoom_suggestions_reviewed());
+    assert!(state.zoom_clips.is_empty());
+}
+
+#[test]
+fn rejecting_every_suggestion_survives_reopening() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    assert!(state.suggest_zooms_on_open());
+    assert_eq!(state.zoom_clips.len(), 1);
+
+    // The user deletes the suggestion to reject it. The zoom list is now
+    // empty, but the review state is separate, so opening again stays quiet.
+    state.zoom_clips.clear();
+    assert!(!state.suggest_zooms_on_open());
+    assert!(state.zoom_clips.is_empty());
+}
+
+#[test]
+fn explicit_redetect_marks_the_recording_reviewed() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    assert!(state.redetect_zoom_clips());
+    assert!(state.zoom_suggestions_reviewed());
+}
+
+#[test]
+fn resetting_the_review_state_allows_the_pass_again() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    assert!(state.suggest_zooms_on_open());
+    state.zoom_clips.clear();
+    state.reset_zoom_suggestions_reviewed();
+    assert!(!state.zoom_suggestions_reviewed());
+    assert!(state.suggest_zooms_on_open());
+    assert_eq!(state.zoom_clips.len(), 1);
+}
+
+#[test]
 fn snap_to_target_uses_threshold() {
     assert!((snap_to_target(2.95, 3.0, 0.1) - 3.0).abs() < 1e-9);
     assert!((snap_to_target(2.8, 3.0, 0.1) - 2.8).abs() < 1e-9);
