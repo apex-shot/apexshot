@@ -8,6 +8,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  # A newer push supersedes the run it replaced instead of queueing behind it.
+  # Tags and main pushes are never cancelled.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -19,6 +25,7 @@ jobs:
   lint:
     name: Lint (rustfmt + clippy + JS + metadata)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,6 +34,34 @@ jobs:
         run: |
           rustup toolchain install stable --profile minimal --component rustfmt --component clippy
           rustup default stable
+
+      # The steps below need no system packages, so they run before the slow
+      # apt install and clippy: a formatting slip fails in seconds instead of
+      # waiting behind a multi-minute dependency install.
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: GNOME extension JS syntax check
+        run: |
+          # The GJS-targeted unit tests in gnome-extension/tests/ rely on
+          # GNOME globals (printerr, imports.gi …) and can't be run under
+          # plain Node, but `node --check` is a fast safety net for the
+          # extension source files themselves.
+          set -euo pipefail
+          for f in gnome-extension/*.js; do
+            echo "node --check $f"
+            node --check "$f"
+          done
+
+      - name: Reject nested gitlinks
+        run: |
+          set -euo pipefail
+          gitlinks=$(git ls-files -s | awk '$1=="160000"')
+          if [ -n "$gitlinks" ]; then
+            echo "Nested git repositories must not be committed. Add them to .gitignore instead:"
+            echo "$gitlinks"
+            exit 1
+          fi
 
       - name: Cache cargo dependencies
         uses: actions/cache@v4
@@ -40,8 +75,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-lint-
 
+      - name: Restore cached system packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/apt-debs
+          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/release.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
+
       - name: Install system dependencies (clippy needs the same headers as build)
         run: |
+          # apt keeps every downloaded package in its archive cache. Seed it
+          # from the previous run's cache so this install makes no downloads.
+          mkdir -p "$HOME/.cache/apt-debs"
+          sudo mkdir -p /var/cache/apt/archives/partial
+          sudo cp -n "$HOME"/.cache/apt-debs/*.deb /var/cache/apt/archives/ 2>/dev/null || true
           sudo apt-get update
           for i in 1 2 3; do
             sudo apt-get install -y --fix-missing \
@@ -63,6 +111,7 @@ jobs:
             sleep 10
             sudo apt-get update
           done
+          cp -n /var/cache/apt/archives/*.deb "$HOME/.cache/apt-debs/" 2>/dev/null || true
 
       - name: Build gtk4-layer-shell from source
         run: |
@@ -73,9 +122,6 @@ jobs:
           sudo ninja -C build install
           sudo ldconfig
 
-      - name: cargo fmt --check
-        run: cargo fmt --all -- --check
-
       - name: cargo clippy
         # The codebase still carries a backlog of pre-existing clippy
         # warnings (see issue tracker). We surface them on every CI run so
@@ -84,35 +130,16 @@ jobs:
         # this step should become `-- -D warnings`.
         run: cargo clippy --workspace --all-targets
 
-      - name: GNOME extension JS syntax check
-        run: |
-          # The GJS-targeted unit tests in gnome-extension/tests/ rely on
-          # GNOME globals (printerr, imports.gi …) and can't be run under
-          # plain Node, but `node --check` is a fast safety net for the
-          # extension source files themselves.
-          set -euo pipefail
-          for f in gnome-extension/*.js; do
-            echo "node --check $f"
-            node --check "$f"
-          done
-
       - name: Validate desktop + AppStream metadata
         run: scripts/validate-metadata.sh
-
-      - name: Reject nested gitlinks
-        run: |
-          set -euo pipefail
-          gitlinks=$(git ls-files -s | awk '$1=="160000"')
-          if [ -n "$gitlinks" ]; then
-            echo "Nested git repositories must not be committed. Add them to .gitignore instead:"
-            echo "$gitlinks"
-            exit 1
-          fi
 
   ci:
     name: Build & Test
     runs-on: ubuntu-latest
-    needs: [lint]
+    timeout-minutes: 45
+    # Deliberately no `needs: [lint]`. Clippy and the build are independent,
+    # and the build is the long pole, so gating it on lint added lint's whole
+    # duration (3 to 48 minutes depending on the runner queue) to every run.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -134,8 +161,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Restore cached system packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/apt-debs
+          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/release.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-apt-
+
       - name: Install system dependencies
         run: |
+          # apt keeps every downloaded package in its archive cache. Seed it
+          # from the previous run's cache so this install makes no downloads.
+          mkdir -p "$HOME/.cache/apt-debs"
+          sudo mkdir -p /var/cache/apt/archives/partial
+          sudo cp -n "$HOME"/.cache/apt-debs/*.deb /var/cache/apt/archives/ 2>/dev/null || true
           sudo apt-get update
           for i in 1 2 3; do
             sudo apt-get install -y --fix-missing \
@@ -163,6 +203,7 @@ jobs:
             sleep 10
             sudo apt-get update
           done
+          cp -n /var/cache/apt/archives/*.deb "$HOME/.cache/apt-debs/" 2>/dev/null || true
 
       - name: Build gtk4-layer-shell from source
         run: |
