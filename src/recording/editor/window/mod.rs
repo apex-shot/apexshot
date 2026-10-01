@@ -25,8 +25,8 @@ use super::project::{self, persist_video_session};
 use super::ui_support::install_recording_editor_css;
 use gtk4::{
     gdk, gio, glib, prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button,
-    DropTarget, FileChooserAction, FileChooserNative, FileFilter, GestureClick, Label, MediaFile,
-    Orientation, Overlay, Popover, ResponseType, Widget,
+    DropTarget, EventControllerKey, FileChooserAction, FileChooserNative, FileFilter, GestureClick,
+    Label, MediaFile, Orientation, Overlay, Popover, ResponseType, Widget,
 };
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -323,8 +323,69 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     window.set_child(Some(&shell));
     wire_close_persist(&window, state.clone(), exporting.clone());
     sweep_popovers_on_deactivate(&window);
+    window.add_controller(build_zoom_history_keys(state.clone(), ping.clone()));
     window.present();
     crate::update_ui::present_if_needed(&shell);
+}
+
+/// What a Ctrl+key combination asks the zoom track's history to do.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ZoomHistoryKey {
+    Undo,
+    Redo,
+}
+
+/// Map a key press to a zoom-history action.
+///
+/// The key is read through its Unicode value rather than the `gdk::Key`
+/// variant, so Ctrl+Shift+Z works whether the backend reports it as `z` or
+/// `Z`, and Ctrl+Y is accepted alongside it.
+fn zoom_history_key(key: gdk::Key, modifiers: gdk::ModifierType) -> Option<ZoomHistoryKey> {
+    if !modifiers.contains(gdk::ModifierType::CONTROL_MASK) {
+        return None;
+    }
+    let redo = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
+    match key.to_unicode().map(|c| c.to_ascii_lowercase()) {
+        Some('z') if redo => Some(ZoomHistoryKey::Redo),
+        Some('z') => Some(ZoomHistoryKey::Undo),
+        Some('y') => Some(ZoomHistoryKey::Redo),
+        _ => None,
+    }
+}
+
+/// Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y for the zoom track's undo history.
+///
+/// The zoom track is the one automatic generation rewrites, so taking a pass
+/// back has to work from anywhere in the editor. The controller sits on the
+/// window and runs in the bubble phase: a focused text entry keeps its own
+/// Ctrl+Z, because GTK offers the key to the focused widget's controllers
+/// first.
+fn build_zoom_history_keys(
+    state: Arc<Mutex<VideoEditState>>,
+    ping: Rc<dyn Fn()>,
+) -> EventControllerKey {
+    let keys = EventControllerKey::new();
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        let Some(action) = zoom_history_key(key, modifiers) else {
+            return glib::Propagation::Proceed;
+        };
+        let changed = {
+            let mut guard = state.lock().unwrap();
+            match action {
+                ZoomHistoryKey::Undo => guard.undo_zoom_edit(),
+                ZoomHistoryKey::Redo => guard.redo_zoom_edit(),
+            }
+        };
+        if changed {
+            ping();
+            glib::Propagation::Stop
+        } else {
+            // Nothing left to take back: let the key travel on rather than
+            // swallowing it for a handler that might have work to do.
+            glib::Propagation::Proceed
+        }
+    });
+    keys
 }
 
 /// Pop down `window`'s popovers when it stops being the active window.
@@ -591,6 +652,40 @@ fn build_window_controls(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ctrl_z_undoes_and_ctrl_shift_z_or_ctrl_y_redoes() {
+        use super::{zoom_history_key, ZoomHistoryKey};
+        use gtk4::gdk::{Key, ModifierType};
+        let ctrl = ModifierType::CONTROL_MASK;
+        let shift = ModifierType::SHIFT_MASK;
+
+        assert_eq!(zoom_history_key(Key::z, ctrl), Some(ZoomHistoryKey::Undo));
+        // Backends differ on whether Shift folds into the keyval, so both
+        // spellings of redo have to land on redo.
+        assert_eq!(
+            zoom_history_key(Key::z, ctrl | shift),
+            Some(ZoomHistoryKey::Redo)
+        );
+        assert_eq!(
+            zoom_history_key(Key::Z, ctrl | shift),
+            Some(ZoomHistoryKey::Redo)
+        );
+        assert_eq!(zoom_history_key(Key::y, ctrl), Some(ZoomHistoryKey::Redo));
+        // Without Ctrl the key belongs to whatever has focus, and an unrelated
+        // Ctrl shortcut is not ours either.
+        assert_eq!(zoom_history_key(Key::z, ModifierType::empty()), None);
+        assert_eq!(zoom_history_key(Key::Escape, ctrl), None);
+
+        // Nothing tests the controller's wiring by pressing a key, so pin the
+        // installation itself the way the popover sweep is pinned above.
+        let source = include_str!("mod.rs");
+        let production = &source[..source.find("\n#[cfg(test)]").expect("tests module")];
+        assert!(
+            production.contains("window.add_controller(build_zoom_history_keys"),
+            "the window must install the zoom history shortcut"
+        );
+    }
+
     #[test]
     fn the_window_takes_its_popovers_down_when_it_deactivates() {
         // A popover that stays up past its window's activation keeps a live

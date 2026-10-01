@@ -142,6 +142,9 @@ pub struct VideoEditState {
     /// Which recorded signals automatic generation may use. Defaults to
     /// click-first; mixed evidence keeps unrelated purposeful hovers.
     pub zoom_evidence: ZoomEvidence,
+    /// Undo/redo steps for the zoom track. Runtime-only: not written to the
+    /// project, so a reopened recording starts with nothing to undo.
+    pub zoom_history: ZoomHistory,
     /// Classic animation keeps a fixed focus point even when the clip is Auto.
     pub zoom_classic: bool,
     /// 0 = fit the whole clip, 100 = 8× time-axis zoom on the editor ruler.
