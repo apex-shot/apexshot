@@ -31,6 +31,9 @@ impl VideoEditState {
             } else {
                 ZoomMode::Manual
             },
+            // Placed by the user, so automatic generation must not replace it
+            // even though the camera may follow the pointer.
+            origin: ZoomOrigin::User,
             ..Default::default()
         });
         self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
@@ -103,11 +106,25 @@ impl VideoEditState {
         if let Some(clip) = self.zoom_clips.get_mut(index) {
             clip.hidden = hidden;
         }
+        // A hidden generated clip must survive regeneration: the mute is a
+        // deliberate edit, so it becomes the user's work.
+        self.protect_zoom_clip(index);
     }
 
     pub fn set_cursor_hide_hidden(&mut self, index: usize, hidden: bool) {
         if let Some(clip) = self.cursor_hide_clips.get_mut(index) {
             clip.hidden = hidden;
+        }
+    }
+
+    /// Promote a clip to the user's work so automatic generation leaves it
+    /// alone. Generated clips flip to `User` on the first edit; user and
+    /// legacy clips are already protected.
+    fn protect_zoom_clip(&mut self, index: usize) {
+        if let Some(clip) = self.zoom_clips.get_mut(index) {
+            if clip.origin == ZoomOrigin::Generated {
+                clip.origin = ZoomOrigin::User;
+            }
         }
     }
 
@@ -132,6 +149,7 @@ impl VideoEditState {
         self.zoom_clips.push(ZoomClip {
             start,
             end,
+            origin: ZoomOrigin::User,
             ..clip
         });
         self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
@@ -232,7 +250,12 @@ impl VideoEditState {
                 {
                     return None;
                 }
-                self.zoom_clips.push(ZoomClip { start, end, ..clip });
+                self.zoom_clips.push(ZoomClip {
+                    start,
+                    end,
+                    origin: ZoomOrigin::User,
+                    ..clip
+                });
                 self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
                 let index = self
                     .zoom_clips
@@ -631,6 +654,7 @@ impl VideoEditState {
                 // pulse snaps at both clip edges.
                 easing: ZoomEasing::Smooth,
                 mode,
+                origin: ZoomOrigin::Generated,
                 ..Default::default()
             });
             added += 1;
@@ -641,14 +665,20 @@ impl VideoEditState {
         added
     }
 
-    /// Drop previously auto-detected zooms and place new ones from this
-    /// recording's pointer path. Manual clips are kept.
+    /// Drop the zooms this generator placed and nobody has touched since, then
+    /// place new ones from this recording's pointer path.
+    ///
+    /// Ownership, not camera mode, decides what is replaced: a user-added Auto
+    /// clip and an edited or hidden generated one are both the user's work, so
+    /// they survive. Clips loaded from an older project have no origin and are
+    /// treated the same way rather than being replaced by default.
     pub fn redetect_zoom_clips(&mut self) -> bool {
         if self.zoom_locked {
             return false;
         }
         let before = self.zoom_clips.len();
-        self.zoom_clips.retain(|clip| clip.mode != ZoomMode::Auto);
+        self.zoom_clips
+            .retain(|clip| clip.origin != ZoomOrigin::Generated);
         let removed = before - self.zoom_clips.len();
         self.selected_zoom = None;
         let added = self.suggest_zoom_clips();
@@ -674,14 +704,14 @@ impl VideoEditState {
                 .is_some_and(|clip| clip.mode == ZoomMode::Auto))
         .then(|| self.eval_zoom_at(self.playhead_seconds, self.source_playhead()).1);
         let crop = self.crop_or_full();
-        if let Some(clip) = self
-            .selected_zoom
-            .and_then(|index| self.zoom_clips.get_mut(index))
-        {
-            if let Some(center) = visible_center {
-                clip.center = clamp_zoom_center(crop, clip.scale, center);
+        if let Some(index) = self.selected_zoom {
+            if let Some(clip) = self.zoom_clips.get_mut(index) {
+                if let Some(center) = visible_center {
+                    clip.center = clamp_zoom_center(crop, clip.scale, center);
+                }
+                clip.mode = mode;
             }
-            clip.mode = mode;
+            self.protect_zoom_clip(index);
         }
     }
 
@@ -689,11 +719,11 @@ impl VideoEditState {
         if self.zoom_locked {
             return;
         }
-        if let Some(clip) = self
-            .selected_zoom
-            .and_then(|index| self.zoom_clips.get_mut(index))
-        {
-            clip.scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+        if let Some(index) = self.selected_zoom {
+            if let Some(clip) = self.zoom_clips.get_mut(index) {
+                clip.scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+            }
+            self.protect_zoom_clip(index);
         }
     }
 
@@ -701,11 +731,11 @@ impl VideoEditState {
         if self.zoom_locked {
             return;
         }
-        if let Some(clip) = self
-            .selected_zoom
-            .and_then(|index| self.zoom_clips.get_mut(index))
-        {
-            clip.easing = easing;
+        if let Some(index) = self.selected_zoom {
+            if let Some(clip) = self.zoom_clips.get_mut(index) {
+                clip.easing = easing;
+            }
+            self.protect_zoom_clip(index);
         }
     }
 
@@ -713,11 +743,11 @@ impl VideoEditState {
         if self.zoom_locked {
             return;
         }
-        if let Some(clip) = self
-            .selected_zoom
-            .and_then(|index| self.zoom_clips.get_mut(index))
-        {
-            clip.ease_ms = ease_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
+        if let Some(index) = self.selected_zoom {
+            if let Some(clip) = self.zoom_clips.get_mut(index) {
+                clip.ease_ms = ease_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
+            }
+            self.protect_zoom_clip(index);
         }
     }
 
@@ -736,6 +766,7 @@ impl VideoEditState {
         if let Some(clip) = self.zoom_clips.get_mut(index) {
             clip.center = center;
         }
+        self.protect_zoom_clip(index);
     }
 
     pub fn reset_zoom_animation(&mut self) {
@@ -743,21 +774,21 @@ impl VideoEditState {
             return;
         }
         self.zoom_classic = false;
-        if let Some(clip) = self
-            .selected_zoom
-            .and_then(|index| self.zoom_clips.get_mut(index))
-        {
-            // Auto zooms are created with Smooth; Reset must not bring back
-            // the edge snap. Manual zooms keep the classic Glide default.
-            clip.easing = match clip.mode {
-                ZoomMode::Auto => ZoomEasing::Smooth,
-                ZoomMode::Manual => ZoomEasing::Glide,
-            };
-            clip.ease_ms = DEFAULT_ZOOM_EASE_MS;
-            clip.rotation_x = 0.0;
-            clip.rotation_y = 0.0;
-            clip.rotation_z = 0.0;
-            clip.perspective = 0.0;
+        if let Some(index) = self.selected_zoom {
+            if let Some(clip) = self.zoom_clips.get_mut(index) {
+                // Auto zooms are created with Smooth; Reset must not bring back
+                // the edge snap. Manual zooms keep the classic Glide default.
+                clip.easing = match clip.mode {
+                    ZoomMode::Auto => ZoomEasing::Smooth,
+                    ZoomMode::Manual => ZoomEasing::Glide,
+                };
+                clip.ease_ms = DEFAULT_ZOOM_EASE_MS;
+                clip.rotation_x = 0.0;
+                clip.rotation_y = 0.0;
+                clip.rotation_z = 0.0;
+                clip.perspective = 0.0;
+            }
+            self.protect_zoom_clip(index);
         }
     }
 
@@ -779,6 +810,7 @@ impl VideoEditState {
             clip.start = start;
             clip.end = end;
         }
+        self.protect_zoom_clip(index);
     }
 
     pub fn set_zoom_range(&mut self, index: usize, start: f64, end: f64) {
@@ -800,17 +832,18 @@ impl VideoEditState {
             clip.start = start;
             clip.end = end;
         }
+        self.protect_zoom_clip(index);
     }
 
     pub fn set_selected_zoom_yaw(&mut self, yaw: f64) {
         if self.zoom_locked {
             return;
         }
-        if let Some(clip) = self
-            .selected_zoom
-            .and_then(|index| self.zoom_clips.get_mut(index))
-        {
-            clip.rotation_y = yaw.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+        if let Some(index) = self.selected_zoom {
+            if let Some(clip) = self.zoom_clips.get_mut(index) {
+                clip.rotation_y = yaw.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+            }
+            self.protect_zoom_clip(index);
         }
     }
 
@@ -818,11 +851,11 @@ impl VideoEditState {
         if self.zoom_locked {
             return;
         }
-        if let Some(clip) = self
-            .selected_zoom
-            .and_then(|index| self.zoom_clips.get_mut(index))
-        {
-            clip.rotation_x = pitch.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+        if let Some(index) = self.selected_zoom {
+            if let Some(clip) = self.zoom_clips.get_mut(index) {
+                clip.rotation_x = pitch.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+            }
+            self.protect_zoom_clip(index);
         }
     }
 
@@ -830,11 +863,11 @@ impl VideoEditState {
         if self.zoom_locked {
             return;
         }
-        if let Some(clip) = self
-            .selected_zoom
-            .and_then(|index| self.zoom_clips.get_mut(index))
-        {
-            clip.rotation_z = roll.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+        if let Some(index) = self.selected_zoom {
+            if let Some(clip) = self.zoom_clips.get_mut(index) {
+                clip.rotation_z = roll.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
+            }
+            self.protect_zoom_clip(index);
         }
     }
 
@@ -842,11 +875,11 @@ impl VideoEditState {
         if self.zoom_locked {
             return;
         }
-        if let Some(clip) = self
-            .selected_zoom
-            .and_then(|index| self.zoom_clips.get_mut(index))
-        {
-            clip.perspective = perspective.clamp(0.0, 1.0);
+        if let Some(index) = self.selected_zoom {
+            if let Some(clip) = self.zoom_clips.get_mut(index) {
+                clip.perspective = perspective.clamp(0.0, 1.0);
+            }
+            self.protect_zoom_clip(index);
         }
     }
 

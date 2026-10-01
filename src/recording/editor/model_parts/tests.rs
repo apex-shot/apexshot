@@ -1257,17 +1257,90 @@ fn click_zoom_wins_when_its_region_overlaps_a_landing() {
 }
 
 #[test]
-fn redetect_zoom_clips_replaces_auto_zooms_for_this_video() {
+fn redetect_zoom_clips_replaces_generated_auto_zooms_for_this_video() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_clicks(&mut state, &[(9.4, 941.0, -215.0)]);
-    state.add_zoom_at(0.5);
-    assert_eq!(state.zoom_clips.len(), 1);
+    attach_sidecar_with_clicks(&mut state, &[(8.0, 800.0, 500.0)]);
+    assert_eq!(state.suggest_zoom_clips(), 1);
     assert_eq!(state.zoom_clips[0].mode, ZoomMode::Auto);
+    assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::Generated);
     attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
     assert!(state.redetect_zoom_clips());
     assert_eq!(state.zoom_clips.len(), 1);
+    assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::Generated);
     assert!((state.zoom_clips[0].start - 3.65).abs() < 1e-9);
     assert!((state.zoom_clips[0].end - 5.6).abs() < 1e-9);
+}
+
+#[test]
+fn redetect_keeps_a_user_added_auto_zoom() {
+    // add_zoom_at creates an Auto clip, but the user placed it, so a re-run
+    // must not treat it as disposable.
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    let index = state.add_zoom_at(0.0).unwrap();
+    assert_eq!(state.zoom_clips[index].mode, ZoomMode::Auto);
+    assert_eq!(state.zoom_clips[index].origin, ZoomOrigin::User);
+    let user_clip = state.zoom_clips[index].clone();
+
+    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    assert!(state.redetect_zoom_clips());
+    assert!(state.zoom_clips.contains(&user_clip));
+    assert!(state
+        .zoom_clips
+        .iter()
+        .any(|clip| clip.origin == ZoomOrigin::Generated));
+}
+
+#[test]
+fn editing_a_generated_zoom_protects_it_from_regeneration() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::Generated);
+    state.selected_zoom = Some(0);
+    state.set_selected_zoom_scale(2.0);
+    assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::User);
+    let edited = state.zoom_clips[0].clone();
+
+    attach_sidecar_with_landings(&mut state, &[(8.0, 1200.0, 600.0)]);
+    assert!(state.redetect_zoom_clips());
+    assert!(state.zoom_clips.contains(&edited));
+}
+
+#[test]
+fn hiding_a_generated_zoom_protects_it_from_regeneration() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    state.set_zoom_hidden(0, true);
+    assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::User);
+
+    attach_sidecar_with_landings(&mut state, &[(8.0, 1200.0, 600.0)]);
+    assert!(state.redetect_zoom_clips());
+    assert!(state.zoom_clips.iter().any(|clip| clip.hidden));
+}
+
+#[test]
+fn legacy_clips_are_never_replaced_by_regeneration() {
+    // A clip loaded from an older project has no origin; it defaults to the
+    // protected variant so an unknown clip is not silently thrown away.
+    let mut state = VideoEditState::new(metadata());
+    state.zoom_clips.push(ZoomClip {
+        start: 0.0,
+        end: 2.0,
+        scale: 2.0,
+        center: (960.0, 540.0),
+        mode: ZoomMode::Auto,
+        ..Default::default()
+    });
+    assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::Legacy);
+
+    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    assert!(state.redetect_zoom_clips());
+    assert!(state
+        .zoom_clips
+        .iter()
+        .any(|clip| clip.origin == ZoomOrigin::Legacy));
 }
 
 #[test]
