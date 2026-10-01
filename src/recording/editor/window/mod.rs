@@ -129,7 +129,10 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
             Ok(metadata) => {
                 let mut state = VideoEditState::new(metadata);
                 project::restore_into(&mut state);
-                if state.zoom_clips.is_empty() && state.suggest_zoom_clips() > 0 {
+                // Runs at most once per recording, and never again after the
+                // user has reviewed the result — including after deleting
+                // every suggestion.
+                if state.suggest_zooms_on_open() {
                     state.selected_tool = EditorTool::Timeline;
                 }
                 Some(Arc::new(Mutex::new(state)))
