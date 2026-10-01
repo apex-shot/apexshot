@@ -143,15 +143,19 @@ impl VideoEditState {
     }
 
     pub fn default_zoom_center(&self, at_seconds: f64) -> (f64, f64) {
+        let frame_w = self.metadata.width as f64;
+        let frame_h = self.metadata.height as f64;
         if let Some(sidecar) = &self.sidecar {
-            if let Some((x, y, _)) = sidecar.interpolated_at(at_seconds) {
+            // The pointer sidecar stores capture-local coordinates; map them
+            // into the encoded video before the center is stored, or an area
+            // recording opens its zoom on the wrong pixel.
+            if let Some((x, y)) =
+                sidecar.motion_position_in_video_at(at_seconds, 0.0, 1.0, frame_w, frame_h)
+            {
                 return (x, y);
             }
         }
-        (
-            self.metadata.width as f64 / 2.0,
-            self.metadata.height as f64 / 2.0,
-        )
+        (frame_w / 2.0, frame_h / 2.0)
     }
 
 }

@@ -735,9 +735,10 @@ fn manual_zooms_keep_independent_transitions() {
 #[test]
 fn auto_zoom_camera_feathers_edge_following() {
     let center = (960.0, 540.0);
+    let full = (0.0, 0.0, 1920.0, 1080.0);
     let inner_right = center.0 + 1920.0 / 2.0 / 2.0 - 1920.0 / 2.0 * 0.22;
     let barely_outside =
-        recenter_if_near_edge(center, (inner_right + 1.0, center.1), 2.0, 1920.0, 1080.0);
+        recenter_if_near_edge(center, (inner_right + 1.0, center.1), 2.0, full);
     assert!(barely_outside.0 > center.0);
     assert!(
         barely_outside.0 - center.0 < 0.01,
@@ -745,9 +746,96 @@ fn auto_zoom_camera_feathers_edge_following() {
     );
 
     let farther_outside =
-        recenter_if_near_edge(center, (inner_right + 57.6, center.1), 2.0, 1920.0, 1080.0);
+        recenter_if_near_edge(center, (inner_right + 57.6, center.1), 2.0, full);
     assert!(farther_outside.0 > barely_outside.0);
     assert!(farther_outside.0 - center.0 < 57.6);
+}
+
+#[test]
+fn auto_zoom_camera_keeps_its_viewport_inside_the_crop() {
+    // A 2x viewport is 400x300 inside this 800x600 crop. Following a cursor
+    // that sits at the crop's bottom-right corner must not push the viewport
+    // past the crop edge, or the export would show pixels the crop dropped.
+    let crop = (100.0, 50.0, 800.0, 600.0);
+    let center = (500.0, 350.0);
+    let followed = recenter_if_near_edge(center, (crop.0 + crop.2, crop.1 + crop.3), 2.0, crop);
+    let half_w = crop.2 / 2.0 / 2.0;
+    let half_h = crop.3 / 2.0 / 2.0;
+    assert!(followed.0 <= crop.0 + crop.2 - half_w + 1e-9);
+    assert!(followed.0 >= crop.0 + half_w - 1e-9);
+    assert!(followed.1 <= crop.1 + crop.3 - half_h + 1e-9);
+    assert!(followed.1 >= crop.1 + half_h - 1e-9);
+}
+
+#[test]
+fn default_zoom_center_maps_area_pointer_into_video_pixels() {
+    let mut state = VideoEditState::new(metadata());
+    // Half-scale capture region: capture-local (480, 270) is video (960, 540).
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 960,
+            h: 540,
+        },
+    );
+    sidecar
+        .pointer
+        .push(crate::recording::editor::sidecar::PointerSample {
+            t: 0.0,
+            x: 480.0,
+            y: 270.0,
+            kind: crate::recording::editor::sidecar::CursorKind::Default,
+        });
+    state.sidecar = Some(sidecar);
+
+    assert_eq!(state.default_zoom_center(0.0), (960.0, 540.0));
+}
+
+#[test]
+fn auto_zoom_follows_the_cursor_in_video_space() {
+    let mut state = VideoEditState::new(metadata());
+    // Half-scale capture region again: the raw sample sits at (700, 350), but
+    // in the encoded video the cursor is at the zoom's (1400, 700) center.
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 960,
+            h: 540,
+        },
+    );
+    for (t, x, y) in [(0.0, 700.0, 350.0), (1.0, 700.0, 350.0)] {
+        sidecar
+            .pointer
+            .push(crate::recording::editor::sidecar::PointerSample {
+                t,
+                x,
+                y,
+                kind: crate::recording::editor::sidecar::CursorKind::Default,
+            });
+    }
+    state.sidecar = Some(sidecar);
+    state.zoom_clips.push(ZoomClip {
+        start: 0.0,
+        end: 2.0,
+        scale: 2.0,
+        center: (1400.0, 700.0),
+        ease_ms: 0,
+        easing: ZoomEasing::Glide,
+        mode: ZoomMode::Auto,
+        ..Default::default()
+    });
+
+    let (_, camera_center) = state.eval_zoom(0.5);
+    // The cursor maps exactly onto the view center, so the camera stays put.
+    // Reading the raw capture-local point would drag it toward the top-left.
+    assert!(
+        (camera_center.0 - 1400.0).abs() < 1e-9 && (camera_center.1 - 700.0).abs() < 1e-9,
+        "camera should sit on the video-space cursor, got {camera_center:?}"
+    );
 }
 
 #[test]

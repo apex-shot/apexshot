@@ -355,6 +355,23 @@ impl PointerSidecar {
         }
     }
 
+    /// The smoothed cursor position mapped into the encoded video's pixel
+    /// space. Camera following and default focus use this so they evaluate the
+    /// same point the cursor overlay draws, instead of the capture-local
+    /// coordinates that only line up for unscaled full-screen recordings. See
+    /// [`Self::presented_in_video_at`] for why area recordings need this.
+    pub fn motion_position_in_video_at(
+        &self,
+        t: f64,
+        smooth: f64,
+        speed: f64,
+        video_width: f64,
+        video_height: f64,
+    ) -> Option<(f64, f64)> {
+        let (x, y) = self.motion_position_at(t, smooth, speed)?;
+        Some(self.map_to_video(x, y, video_width, video_height))
+    }
+
     fn velocity_at(&self, t: f64, smooth: f64, speed: f64) -> (f64, f64) {
         let dt = 0.04;
         let a = if smooth <= 0.01 {
@@ -630,6 +647,50 @@ mod tests {
 
         let ripples = sidecar.click_ripples_in_video_at(0.0, 0.32, 1920.0, 1080.0);
         assert_eq!(ripples, vec![(960.0, 540.0, 0.0)]);
+    }
+
+    #[test]
+    fn motion_position_in_video_scales_area_coordinates() {
+        let mut sidecar = PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 200,
+                y: 100,
+                w: 960,
+                h: 540,
+            },
+        );
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 480.0,
+            y: 270.0,
+            kind: CursorKind::Default,
+        });
+        assert_eq!(
+            sidecar.motion_position_in_video_at(0.0, 0.0, 1.0, 1920.0, 1080.0),
+            Some((960.0, 540.0))
+        );
+        // The raw capture-local accessor is intentionally left unscaled.
+        assert_eq!(
+            sidecar.motion_position_at(0.0, 0.0, 1.0),
+            Some((480.0, 270.0))
+        );
+    }
+
+    #[test]
+    fn motion_position_in_video_is_identity_without_an_area_capture() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 250.0,
+            y: 180.0,
+            kind: CursorKind::Default,
+        });
+        assert_eq!(
+            sidecar.motion_position_in_video_at(0.0, 0.0, 1.0, 1920.0, 1080.0),
+            Some((250.0, 180.0))
+        );
     }
 
     #[test]
