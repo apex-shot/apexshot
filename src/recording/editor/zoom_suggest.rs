@@ -4,6 +4,23 @@
 //! fallback for hover-driven interfaces and recordings without click samples.
 
 use crate::recording::editor::sidecar::PointerSidecar;
+use serde::{Deserialize, Serialize};
+
+/// Which recorded signals may seed automatic zooms.
+///
+/// Clicks are unambiguous intent, so the conservative default ignores purposeful
+/// pointer landings while any click exists. Mixed evidence keeps unrelated
+/// hovers eligible, but never frames the same interaction twice: a landing at a
+/// click's target around its time is absorbed by that click.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ZoomEvidence {
+    /// Recorded clicks only. Hover landings are ignored whenever a click exists.
+    #[default]
+    ClicksOnly,
+    /// Recorded clicks plus purposeful pointer landings.
+    ClicksAndHovers,
+}
 
 /// Zoom scale used for a single purposeful interaction.
 pub const AUTO_ZOOM_SCALE: f64 = 1.5;
@@ -84,17 +101,40 @@ struct ScoredSuggestion {
     suggestion: ZoomSuggestion,
 }
 
-/// Build conservative zoom suggestions from this recording's pointer interactions.
-///
-/// Area-recording sidecars store coordinates relative to the selected region,
-/// while the editor works in encoded-video pixels. Coordinates are scaled into
-/// that space before detection. If the X/Y scales disagree significantly, the
-/// recording and sidecar do not describe the same crop and no guesses are made.
+/// Build conservative zoom suggestions from this recording's pointer
+/// interactions using the default, click-first evidence mode.
 pub fn suggest_zooms(
     sidecar: &PointerSidecar,
     width: f64,
     height: f64,
     total_seconds: f64,
+) -> Vec<ZoomSuggestion> {
+    suggest_zooms_with_evidence(
+        sidecar,
+        width,
+        height,
+        total_seconds,
+        ZoomEvidence::default(),
+    )
+}
+
+/// Build zoom suggestions from this recording's pointer interactions.
+///
+/// Area-recording sidecars store coordinates relative to the selected region,
+/// while the editor works in encoded-video pixels. Coordinates are scaled into
+/// that space before detection. If the X/Y scales disagree significantly, the
+/// recording and sidecar do not describe the same crop and no guesses are made.
+///
+/// `evidence` decides what counts as an interaction. The default click-first
+/// mode suppresses every hover once a click exists; mixed evidence keeps an
+/// unrelated purposeful hover while absorbing the dwell that belongs to a click
+/// so the same moment is not framed twice.
+pub fn suggest_zooms_with_evidence(
+    sidecar: &PointerSidecar,
+    width: f64,
+    height: f64,
+    total_seconds: f64,
+    evidence: ZoomEvidence,
 ) -> Vec<ZoomSuggestion> {
     if !width.is_finite()
         || !height.is_finite()
@@ -123,13 +163,14 @@ pub fn suggest_zooms(
     let cluster_radius = (diagonal * CLUSTER_RADIUS_DIAGONAL_FRACTION)
         .clamp(MIN_CLUSTER_RADIUS_PX, MAX_CLUSTER_RADIUS_PX);
 
-    // Clicks are unambiguous user intent. When present, keep the detector from
-    // introducing unrelated hover landings into the same interaction session.
-    let mut landings = if clicks.is_empty() {
-        detect_landings(&samples, still_radius, arrival_distance)
-    } else {
-        clicks
-    };
+    let mut landings = select_landings(
+        evidence,
+        &samples,
+        clicks,
+        still_radius,
+        arrival_distance,
+        cluster_radius,
+    );
     landings.sort_by(|a, b| a.start.total_cmp(&b.start));
     let clusters = cluster_landings(landings, cluster_radius);
     let mut suggestions: Vec<ScoredSuggestion> = clusters
@@ -147,6 +188,72 @@ pub fn suggest_zooms(
         .into_iter()
         .map(|scored| scored.suggestion)
         .collect()
+}
+
+/// The landings a detection mode feeds into clustering.
+///
+/// Click-first returns the clicks alone when any exist, so a click suppresses
+/// every hover as it always has. Mixed evidence runs landing detection as well
+/// and fuses the two sets, keeping a hover that stands on its own.
+fn select_landings(
+    evidence: ZoomEvidence,
+    samples: &[FrameSample],
+    clicks: Vec<Landing>,
+    still_radius: f64,
+    arrival_distance: f64,
+    cluster_radius: f64,
+) -> Vec<Landing> {
+    match evidence {
+        ZoomEvidence::ClicksOnly => {
+            if clicks.is_empty() {
+                detect_landings(samples, still_radius, arrival_distance)
+            } else {
+                clicks
+            }
+        }
+        ZoomEvidence::ClicksAndHovers => {
+            let hovers = detect_landings(samples, still_radius, arrival_distance);
+            fuse_clicks_and_hovers(clicks, hovers, cluster_radius)
+        }
+    }
+}
+
+/// How far a landing may sit from a click in time and still be the same dwell.
+const CLICK_ABSORB_WINDOW_SECONDS: f64 = 0.45;
+
+/// Combine clicks with purposeful hovers without framing one moment twice.
+///
+/// A landing that describes the click's own dwell is dropped; a landing on an
+/// unrelated target stays and becomes its own suggestion. The surviving
+/// landings are then clustered, where a click and a hover only merge when they
+/// are close enough to be one interaction.
+fn fuse_clicks_and_hovers(
+    clicks: Vec<Landing>,
+    hovers: Vec<Landing>,
+    cluster_radius: f64,
+) -> Vec<Landing> {
+    let mut kept: Vec<Landing> = hovers
+        .into_iter()
+        .filter(|hover| {
+            !clicks
+                .iter()
+                .any(|click| click_absorbs_landing(click, hover, cluster_radius))
+        })
+        .collect();
+    kept.extend(clicks);
+    kept
+}
+
+/// Whether `click` is the interaction that produced `hover`.
+///
+/// Both a shared target and a shared moment are required: a click elsewhere, or
+/// a dwell on the same widget at another time, is a different interaction. The
+/// time padding covers a dwell that starts just after the press or ends just
+/// before it, which is how the detector brackets a click.
+fn click_absorbs_landing(click: &Landing, hover: &Landing, cluster_radius: f64) -> bool {
+    point_distance(click.center, hover.center) <= cluster_radius
+        && hover.start <= click.end + CLICK_ABSORB_WINDOW_SECONDS
+        && hover.end >= click.start - CLICK_ABSORB_WINDOW_SECONDS
 }
 
 /// Keep distinct interactions from causing one another to be discarded by
@@ -851,6 +958,48 @@ mod tests {
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].center, (801.0, 500.0));
         assert_eq!(suggestions[0].scale, AUTO_ZOOM_SCALE);
+    }
+
+    #[test]
+    fn mixed_evidence_keeps_an_unrelated_hover() {
+        let mut data = sidecar();
+        add_landing(&mut data, 1.5, (100.0, 100.0), (400.0, 300.0), 0.6);
+        data.clicks.push(click(4.5, 1500.0, 700.0));
+
+        // Click-first keeps its old rule: one click suppresses every landing.
+        let clicks_only = suggest_zooms(&data, W, H, 8.0);
+        assert_eq!(clicks_only.len(), 1);
+        assert_eq!(clicks_only[0].center, (1500.0, 700.0));
+
+        // Mixed evidence leaves the unrelated hover in the running.
+        let mixed = suggest_zooms_with_evidence(&data, W, H, 8.0, ZoomEvidence::ClicksAndHovers);
+        assert_eq!(mixed.len(), 2);
+        assert!(mixed
+            .iter()
+            .any(|suggestion| suggestion.center == (400.0, 300.0)));
+        assert!(mixed
+            .iter()
+            .any(|suggestion| suggestion.center == (1500.0, 700.0)));
+    }
+
+    #[test]
+    fn mixed_evidence_absorbs_the_dwell_belonging_to_a_click() {
+        let mut data = sidecar();
+        add_landing(&mut data, 3.0, (100.0, 100.0), (800.0, 500.0), 0.6);
+        data.clicks.push(click(3.05, 801.0, 500.0));
+
+        let mixed = suggest_zooms_with_evidence(&data, W, H, 10.0, ZoomEvidence::ClicksAndHovers);
+
+        // The dwell and the click are one interaction, not two suggestions, and
+        // the absorbed hover does not inflate the click to the repeated scale.
+        assert_eq!(mixed.len(), 1);
+        assert_eq!(mixed[0].center, (801.0, 500.0));
+        assert_eq!(mixed[0].scale, AUTO_ZOOM_SCALE);
+    }
+
+    #[test]
+    fn clicks_only_is_the_default_evidence_mode() {
+        assert_eq!(ZoomEvidence::default(), ZoomEvidence::ClicksOnly);
     }
 
     #[test]

@@ -572,11 +572,12 @@ impl VideoEditState {
         let Some(sidecar) = &self.sidecar else {
             return 0;
         };
-        let mut suggestions = zoom_suggest::suggest_zooms(
+        let mut suggestions = zoom_suggest::suggest_zooms_with_evidence(
             sidecar,
             self.metadata.width as f64,
             self.metadata.height as f64,
             self.source_duration(),
+            self.zoom_evidence,
         );
         if suggestions.is_empty() {
             return 0;
@@ -717,6 +718,17 @@ impl VideoEditState {
     /// regenerates without it.
     pub fn reset_zoom_suggestions_reviewed(&mut self) {
         self.zoom_suggestions_reviewed = false;
+    }
+
+    /// Which recorded signals automatic generation draws on.
+    pub fn zoom_evidence(&self) -> ZoomEvidence {
+        self.zoom_evidence
+    }
+
+    /// Choose the evidence automatic generation uses. This is a preference, not
+    /// an edit: it takes no undo step and only changes the next generation pass.
+    pub fn set_zoom_evidence(&mut self, evidence: ZoomEvidence) {
+        self.zoom_evidence = evidence;
     }
 
     /// Run the automatic zoom pass the first time the editor opens a

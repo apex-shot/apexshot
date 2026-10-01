@@ -1,9 +1,9 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
     nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoBackground,
-    VideoEditState, ZoomEasing, ZoomMode, MAX_CLICK_DURATION_MS, MAX_CLICK_SCALE, MAX_CLIP_SPEED,
-    MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLICK_DURATION_MS, MIN_CLICK_SCALE, MIN_CLIP_SPEED,
-    MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
+    VideoEditState, ZoomEasing, ZoomEvidence, ZoomMode, MAX_CLICK_DURATION_MS, MAX_CLICK_SCALE,
+    MAX_CLIP_SPEED, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLICK_DURATION_MS, MIN_CLICK_SCALE,
+    MIN_CLIP_SPEED, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
     gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
@@ -264,6 +264,50 @@ fn build_zoom_panel(
         }
     }
 
+    // Automatic generation reads recorded clicks by default. Mixed evidence
+    // also keeps a purposeful hover that no click covers; it lives beside the
+    // clip controls because it shapes the next Detect run, not the selection.
+    let detection_header = GtkBox::new(Orientation::Horizontal, 8);
+    detection_header.add_css_class("recording-editor-zoom-section-row");
+    detection_header.set_hexpand(true);
+    let detection_label = Label::new(Some(&t("Detection")));
+    detection_label.add_css_class("recording-editor-zoom-kicker");
+    detection_label.set_xalign(0.0);
+    detection_label.set_hexpand(true);
+    detection_header.append(&detection_label);
+
+    let detection_row = GtkBox::new(Orientation::Horizontal, 0);
+    detection_row.add_css_class("recording-editor-zoom-mode");
+    detection_row.set_hexpand(true);
+    detection_row.set_homogeneous(true);
+    let clicks_btn = ToggleButton::with_label(&t("Clicks"));
+    clicks_btn.add_css_class("recording-editor-zoom-mode-btn");
+    clicks_btn.set_has_frame(false);
+    clicks_btn.set_hexpand(true);
+    clicks_btn.set_tooltip_text(Some(&t("Zoom only where the recording captured a click")));
+    let hovers_btn = ToggleButton::with_label(&t("Clicks + Hovers"));
+    hovers_btn.add_css_class("recording-editor-zoom-mode-btn");
+    hovers_btn.set_has_frame(false);
+    hovers_btn.set_hexpand(true);
+    hovers_btn.set_tooltip_text(Some(&t(
+        "Also zoom on a purposeful pointer pause that no click covers",
+    )));
+    hovers_btn.set_group(Some(&clicks_btn));
+    detection_row.append(&clicks_btn);
+    detection_row.append(&hovers_btn);
+
+    let detection_hint = Label::new(Some(&t("Applies the next time Detect runs")));
+    detection_hint.add_css_class("recording-editor-zoom-hint");
+    detection_hint.set_wrap(true);
+    detection_hint.set_xalign(0.0);
+    detection_hint.set_max_width_chars(34);
+
+    let detection_section = GtkBox::new(Orientation::Vertical, 0);
+    detection_section.set_hexpand(true);
+    detection_section.append(&detection_header);
+    detection_section.append(&detection_row);
+    detection_section.append(&detection_hint);
+
     body.append(&mode_row);
     body.append(&mode_hint);
     body.append(&chips);
@@ -271,6 +315,7 @@ fn build_zoom_panel(
     body.append(&classic_row);
     body.append(&easing_label);
     body.append(&easing_row);
+    body.append(&detection_section);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -306,6 +351,36 @@ fn build_zoom_panel(
                 .lock()
                 .unwrap()
                 .set_selected_zoom_mode(ZoomMode::Manual);
+            on_change();
+        }
+    });
+    clicks_btn.connect_toggled({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |button| {
+            if syncing.get() || !button.is_active() {
+                return;
+            }
+            state
+                .lock()
+                .unwrap()
+                .set_zoom_evidence(ZoomEvidence::ClicksOnly);
+            on_change();
+        }
+    });
+    hovers_btn.connect_toggled({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |button| {
+            if syncing.get() || !button.is_active() {
+                return;
+            }
+            state
+                .lock()
+                .unwrap()
+                .set_zoom_evidence(ZoomEvidence::ClicksAndHovers);
             on_change();
         }
     });
@@ -346,6 +421,9 @@ fn build_zoom_panel(
         let easing_row = easing_row.clone();
         let easing_label = easing_label.clone();
         let reset = reset.clone();
+        let detection_section = detection_section.clone();
+        let clicks_btn = clicks_btn.clone();
+        let hovers_btn = hovers_btn.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
@@ -354,6 +432,7 @@ fn build_zoom_panel(
             let selected = guard.selected_zoom_clip().cloned();
             let has_clip = selected.is_some();
             let can_edit = has_clip && !guard.zoom_locked;
+            let evidence = guard.zoom_evidence();
             syncing.set(true);
             auto_btn.set_sensitive(auto_available && can_edit);
             manual_btn.set_sensitive(can_edit);
@@ -361,6 +440,12 @@ fn build_zoom_panel(
             reset.set_sensitive(can_edit);
             easing_row.set_sensitive(can_edit);
             easing_label.set_sensitive(can_edit);
+            clicks_btn.set_active(evidence == ZoomEvidence::ClicksOnly);
+            hovers_btn.set_active(evidence == ZoomEvidence::ClicksAndHovers);
+            let can_detect = auto_available && !guard.zoom_locked;
+            clicks_btn.set_sensitive(can_detect);
+            hovers_btn.set_sensitive(can_detect);
+            detection_section.set_visible(!has_clip && can_detect);
             if let Some(clip) = &selected {
                 let mode = if clip.mode == ZoomMode::Auto && auto_available {
                     ZoomMode::Auto
@@ -380,7 +465,12 @@ fn build_zoom_panel(
                 classic_row.set_visible(mode == ZoomMode::Auto);
             } else {
                 mode_hint.set_text(&if auto_available {
-                    t("Select a zoom to adjust it; timeline detection uses clicks and pointer pauses")
+                    match evidence {
+                        ZoomEvidence::ClicksAndHovers => {
+                            t("Detect uses recorded clicks and purposeful pointer pauses")
+                        }
+                        ZoomEvidence::ClicksOnly => t("Detect uses recorded clicks only"),
+                    }
                 } else {
                     t("Add a Manual zoom, or analyze visible cursor motion from the timeline")
                 });
