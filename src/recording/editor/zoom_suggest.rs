@@ -372,17 +372,6 @@ fn suggestion_for_cluster(cluster: LandingCluster, total_seconds: f64) -> Option
         .iter()
         .filter(|landing| landing.is_click)
         .collect();
-    let focus: Vec<_> = if clicks.is_empty() {
-        cluster.landings.iter().collect()
-    } else {
-        clicks.clone()
-    };
-    // Focus the session's first interaction: the zoom arrives framed on
-    // where the action starts, and the Auto camera follows the recorded
-    // pointer to the rest. A median of a moving session lands between
-    // controls where nothing happened.
-    let center = focus.first()?.center;
-    let center_time = median(focus.iter().map(|landing| landing.start).collect());
     let is_click_session = !clicks.is_empty();
     let pre_roll = if is_click_session {
         CLICK_SESSION_PRE_ROLL_SECONDS
@@ -408,13 +397,49 @@ fn suggestion_for_cluster(cluster: LandingCluster, total_seconds: f64) -> Option
         start = (end - desired_minimum).max(0.0);
     }
     if end - start > max_duration {
-        start = (center_time - pre_roll).max(0.0);
-        end = (start + max_duration).min(total_seconds);
-        start = (end - max_duration).max(0.0);
+        // Fit the interactions inside the window before spending the rest of
+        // the budget on roll. Re-centring on the median instead would drop the
+        // session's first actions while still framing the zoom on one of them.
+        let covered_span = (last.end - first.start).max(0.0);
+        if covered_span >= max_duration {
+            // The session is longer than one shot; keep its head. Splitting a
+            // long session into several zooms is a separate follow-up.
+            start = first.start;
+            end = (start + max_duration).min(total_seconds);
+        } else {
+            let mut budget = max_duration - covered_span;
+            let pre = pre_roll.min(budget);
+            budget -= pre;
+            let post = post_roll.min(budget);
+            start = (first.start - pre).max(0.0);
+            end = (last.end + post).min(total_seconds);
+        }
     }
     if end - start < MIN_SUGGESTED_ZOOM_SECONDS {
         return None;
     }
+
+    // Focus on the first interaction the final window actually covers, so a
+    // duration cap can never leave the zoom framed on an excluded action. The
+    // Auto camera follows the recorded pointer to the rest.
+    let focus: Vec<_> = if clicks.is_empty() {
+        cluster.landings.iter().collect()
+    } else {
+        clicks.clone()
+    };
+    let covered: Vec<_> = focus
+        .into_iter()
+        .filter(|landing| landing.start >= start - 1e-9 && landing.start <= end + 1e-9)
+        .collect();
+    let center = covered
+        .first()
+        .map(|landing| landing.center)
+        .unwrap_or(first.center);
+    let center_time = if covered.is_empty() {
+        first.start
+    } else {
+        median(covered.iter().map(|landing| landing.start).collect())
+    };
 
     let repeated = if clicks.is_empty() {
         cluster.landings.len() > 1
@@ -714,6 +739,60 @@ mod tests {
         assert!(suggestions
             .iter()
             .all(|suggestion| suggestion.end - suggestion.start >= MIN_SUGGESTED_ZOOM_SECONDS));
+    }
+
+    #[test]
+    fn long_click_session_keeps_its_first_interaction() {
+        let mut data = sidecar();
+        data.clicks.extend([
+            click(2.0, 200.0, 200.0),
+            click(3.0, 300.0, 300.0),
+            click(4.0, 400.0, 400.0),
+            click(5.0, 500.0, 500.0),
+            click(6.0, 600.0, 600.0),
+        ]);
+
+        let suggestions = suggest_zooms(&data, W, H, 12.0);
+
+        assert_eq!(suggestions.len(), 1);
+        let suggestion = &suggestions[0];
+        assert!(
+            suggestion.end - suggestion.start <= MAX_CLICK_SESSION_SECONDS + 1e-9,
+            "duration cap must hold"
+        );
+        // The cap trims roll, not the interaction it is framed on: the first
+        // click stays inside the window.
+        assert!(
+            suggestion.start <= 2.0,
+            "first interaction must be covered: {suggestion:?}"
+        );
+        assert_eq!(suggestion.center, (200.0, 200.0));
+        assert!(suggestion.center_time >= suggestion.start);
+        assert!(suggestion.center_time <= suggestion.end);
+    }
+
+    #[test]
+    fn trimming_roll_at_the_recording_start_keeps_the_head_covered() {
+        let mut data = sidecar();
+        data.clicks.extend([
+            click(0.5, 200.0, 200.0),
+            click(1.5, 300.0, 300.0),
+            click(2.5, 400.0, 400.0),
+            click(3.5, 500.0, 500.0),
+            click(4.5, 600.0, 600.0),
+        ]);
+
+        let suggestions = suggest_zooms(&data, W, H, 12.0);
+
+        assert_eq!(suggestions.len(), 1);
+        let suggestion = &suggestions[0];
+        assert!(suggestion.end - suggestion.start <= MAX_CLICK_SESSION_SECONDS + 1e-9);
+        // The pre-roll cannot go negative, so the window starts at 0 and still
+        // covers the whole session.
+        assert_eq!(suggestion.start, 0.0);
+        assert_eq!(suggestion.center, (200.0, 200.0));
+        assert!(suggestion.center_time >= suggestion.start);
+        assert!(suggestion.center_time <= suggestion.end);
     }
 
     #[test]
