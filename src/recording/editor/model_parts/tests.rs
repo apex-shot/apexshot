@@ -794,6 +794,57 @@ fn default_zoom_center_maps_area_pointer_into_video_pixels() {
 }
 
 #[test]
+fn default_zoom_center_converts_composition_time_to_source_time() {
+    let mut state = VideoEditState::new(metadata());
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+    );
+    for (t, x, y) in [(0.0, 100.0, 100.0), (3.0, 400.0, 300.0)] {
+        sidecar
+            .pointer
+            .push(crate::recording::editor::sidecar::PointerSample {
+                t,
+                x,
+                y,
+                kind: crate::recording::editor::sidecar::CursorKind::Default,
+            });
+    }
+    state.sidecar = Some(sidecar);
+    state.set_trim_start(2.0);
+
+    // Composition 1.0 is source 3.0 once the head is trimmed, where the
+    // pointer sits at (400, 300). Querying source time directly would read the
+    // interpolated (200, 200) at source 1.0.
+    assert_eq!(state.default_zoom_center(1.0), (400.0, 300.0));
+}
+
+#[test]
+fn default_zoom_center_accounts_for_clip_speed() {
+    let mut state = VideoEditState::new(metadata());
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+    );
+    for (t, x, y) in [(0.0, 100.0, 100.0), (2.0, 800.0, 600.0)] {
+        sidecar
+            .pointer
+            .push(crate::recording::editor::sidecar::PointerSample {
+                t,
+                x,
+                y,
+                kind: crate::recording::editor::sidecar::CursorKind::Default,
+            });
+    }
+    state.sidecar = Some(sidecar);
+    state.selected_segment = Some(0);
+    state.set_selected_clip_speed(2.0);
+
+    // At 2x, composition 1.0 is source 2.0, where the pointer is (800, 600).
+    assert_eq!(state.default_zoom_center(1.0), (800.0, 600.0));
+}
+
+#[test]
 fn auto_zoom_follows_the_cursor_in_video_space() {
     let mut state = VideoEditState::new(metadata());
     // Half-scale capture region again: the raw sample sits at (700, 350), but
