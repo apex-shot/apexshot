@@ -48,6 +48,10 @@ pub struct VideoProjectFile {
     pub zoom_classic: bool,
     pub zoom_hidden: bool,
     pub zoom_locked: bool,
+    /// Whether the automatic zoom pass has run. Persisted apart from the clip
+    /// list so an empty (rejected) timeline is not re-suggested on reopen.
+    #[serde(default)]
+    pub zoom_suggestions_reviewed: bool,
     pub crop: Option<CropFile>,
     pub background: BackgroundFile,
     pub background_padding: f64,
@@ -888,6 +892,7 @@ impl VideoEditState {
             zoom_classic: self.zoom_classic,
             zoom_hidden: self.zoom_hidden,
             zoom_locked: self.zoom_locked,
+            zoom_suggestions_reviewed: self.zoom_suggestions_reviewed,
             crop: self.crop.map(crop_to_file),
             background: background_to_file(&self.background),
             background_padding: self.background_padding,
@@ -950,6 +955,7 @@ impl VideoEditState {
         self.zoom_classic = file.zoom_classic;
         self.zoom_hidden = file.zoom_hidden;
         self.zoom_locked = file.zoom_locked;
+        self.zoom_suggestions_reviewed = file.zoom_suggestions_reviewed;
         self.crop = file.crop.map(crop_from_file);
         self.background = background_from_file(file.background);
         self.background_padding = file.background_padding;
@@ -1458,6 +1464,39 @@ mod tests {
         assert_eq!(restored.zoom_clips[0].origin, ZoomOrigin::Generated);
         assert_eq!(restored.zoom_clips[1].origin, ZoomOrigin::User);
         cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn roundtrip_preserves_zoom_suggestion_review() {
+        let dir = scratch("zoom-review");
+        let video = write_video(&dir, "clip.mp4", 24);
+        let mut state = VideoEditState::new(metadata_for(&video, 24));
+        state.mark_zoom_suggestions_reviewed();
+        save_project(&video, &state.to_project()).unwrap();
+        let loaded = load_project(&video).expect("project should load");
+        let mut restored = VideoEditState::new(metadata_for(&video, 24));
+        restored.apply_project(loaded);
+        assert!(restored.zoom_suggestions_reviewed());
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_project_json_without_zoom_suggestion_review_defaults_unreviewed() {
+        let dir = scratch("old-zoom-review");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let state = VideoEditState::new(metadata_for(&video, 16));
+        let mut json = serde_json::to_value(state.to_project()).unwrap();
+        json.as_object_mut()
+            .unwrap()
+            .remove("zoom_suggestions_reviewed");
+        let file: VideoProjectFile = serde_json::from_value(json).unwrap();
+        assert!(!file.zoom_suggestions_reviewed);
+
+        let mut restored = VideoEditState::new(metadata_for(&video, 16));
+        restored.apply_project(file);
+        assert!(!restored.zoom_suggestions_reviewed());
         let _ = fs::remove_dir_all(&dir);
     }
 

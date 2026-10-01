@@ -142,16 +142,30 @@ impl VideoEditState {
                 .is_some_and(|sidecar| sidecar.can_render_cursor_overlay())
     }
 
-    pub fn default_zoom_center(&self, at_seconds: f64) -> (f64, f64) {
-        if let Some(sidecar) = &self.sidecar {
-            if let Some((x, y, _)) = sidecar.interpolated_at(at_seconds) {
+    /// Default focus for a zoom placed at `timeline_seconds`.
+    ///
+    /// The argument is composition time — the space `add_zoom_at` fits clips
+    /// in — while the pointer sidecar is sampled in source time. Convert
+    /// through the same segment/speed mapping the playhead uses before asking
+    /// for the pointer, so a zoom added after a trim, cut, or speed change
+    /// opens on the frame the user actually clicked.
+    pub fn default_zoom_center(&self, timeline_seconds: f64) -> (f64, f64) {
+        let frame_w = self.metadata.width as f64;
+        let frame_h = self.metadata.height as f64;
+        if self.sidecar.is_some() {
+            let source_t = self
+                .timeline_to_source(timeline_seconds)
+                .clamp(0.0, self.source_duration());
+            // The pointer sidecar stores capture-local coordinates; map them
+            // into the encoded video before the center is stored, or an area
+            // recording opens its zoom on the wrong pixel.
+            if let Some((x, y)) = self.sidecar.as_ref().and_then(|sidecar| {
+                sidecar.motion_position_in_video_at(source_t, 0.0, 1.0, frame_w, frame_h)
+            }) {
                 return (x, y);
             }
         }
-        (
-            self.metadata.width as f64 / 2.0,
-            self.metadata.height as f64 / 2.0,
-        )
+        (frame_w / 2.0, frame_h / 2.0)
     }
 
 }

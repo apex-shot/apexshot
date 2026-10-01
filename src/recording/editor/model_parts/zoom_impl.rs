@@ -593,8 +593,16 @@ impl VideoEditState {
         };
         let crop = self.crop_or_full();
         let segments = self.ordered_placed_segments();
+        // The density budget counts candidates that actually land in the kept
+        // edit. Candidates the trim, crop, or an existing clip rejects do not
+        // spend it, so a lower-ranked valid suggestion can still be placed.
+        let limit =
+            ((self.source_duration() / zoom_suggest::SECONDS_PER_SUGGESTION).ceil() as usize).max(1);
         let mut added = 0;
         for suggestion in suggestions {
+            if added >= limit {
+                break;
+            }
             // At an exact cut both neighboring source ranges contain the
             // timestamp. Match segment_index_at_source by choosing the range
             // with the later source start rather than attaching the zoom to
@@ -676,6 +684,8 @@ impl VideoEditState {
         if self.zoom_locked {
             return false;
         }
+        // An explicit re-run is itself a review, so opening again stays quiet.
+        self.zoom_suggestions_reviewed = true;
         let before = self.zoom_clips.len();
         self.zoom_clips
             .retain(|clip| clip.origin != ZoomOrigin::Generated);
@@ -689,6 +699,44 @@ impl VideoEditState {
                 .position(|clip| clip.mode == ZoomMode::Auto);
         }
         removed > 0 || added > 0
+    }
+
+    /// Whether the automatic zoom pass has run for this recording.
+    pub fn zoom_suggestions_reviewed(&self) -> bool {
+        self.zoom_suggestions_reviewed
+    }
+
+    /// Record that the automatic pass has run, so it stays quiet on open until
+    /// [`Self::reset_zoom_suggestions_reviewed`].
+    pub fn mark_zoom_suggestions_reviewed(&mut self) {
+        self.zoom_suggestions_reviewed = true;
+    }
+
+    /// Re-enable the automatic pass on open. This is the escape hatch for a
+    /// user who wants the editor to propose again; the explicit Suggest action
+    /// regenerates without it.
+    pub fn reset_zoom_suggestions_reviewed(&mut self) {
+        self.zoom_suggestions_reviewed = false;
+    }
+
+    /// Run the automatic zoom pass the first time the editor opens a
+    /// recording. Returns true when suggestions were added.
+    ///
+    /// The pass runs once and is recorded even when it finds nothing: an empty
+    /// clip list is a legitimate result, not proof that the user has not been
+    /// asked. Recording it separately from `zoom_clips` is what makes rejecting
+    /// every suggestion — or deleting all of them — stick across reopen.
+    pub fn suggest_zooms_on_open(&mut self) -> bool {
+        if self.zoom_suggestions_reviewed {
+            return false;
+        }
+        self.zoom_suggestions_reviewed = true;
+        // A project that already carries clips has been through this pass;
+        // there is nothing to fill.
+        if !self.zoom_clips.is_empty() {
+            return false;
+        }
+        self.suggest_zoom_clips() > 0
     }
 
     pub fn set_selected_zoom_mode(&mut self, mode: ZoomMode) {
@@ -954,16 +1002,23 @@ impl VideoEditState {
             return (scale, center);
         }
         let cursor = self.cursor.clamped();
-        let Some((cursor_x, cursor_y)) = self
-            .sidecar
-            .as_ref()
-            .and_then(|sidecar| sidecar.motion_position_at(source_t, cursor.smooth, cursor.speed))
-        else {
+        let Some((cursor_x, cursor_y)) = self.sidecar.as_ref().and_then(|sidecar| {
+            // Evaluate the cursor in the encoded video's pixel space, the same
+            // as the overlay, and clamp the resulting viewport inside the
+            // editor crop rather than the full frame.
+            sidecar.motion_position_in_video_at(
+                source_t,
+                cursor.smooth,
+                cursor.speed,
+                frame_w,
+                frame_h,
+            )
+        }) else {
             return (scale, center);
         };
         (
             scale,
-            recenter_if_near_edge(center, (cursor_x, cursor_y), scale, frame_w, frame_h),
+            recenter_if_near_edge(center, (cursor_x, cursor_y), scale, self.crop_or_full()),
         )
     }
 }

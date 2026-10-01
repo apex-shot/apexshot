@@ -175,6 +175,9 @@ pub fn eval_zoom(
 }
 
 /// The closest earlier auto zoom that clip `index` can morph from.
+///
+/// A hidden clip never contributes, here or anywhere else: it is deliberately
+/// out of the output, so it must not shape a visible transition.
 fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
     let clip = &clips[index];
     if clip.mode != ZoomMode::Auto {
@@ -186,6 +189,7 @@ fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
         .filter(|(other, previous)| {
             *other != index
                 && previous.mode == ZoomMode::Auto
+                && !previous.hidden
                 && previous.end <= clip.start
                 && clip.start - previous.end <= ZOOM_MORPH_GAP_SECONDS
         })
@@ -223,21 +227,26 @@ fn morph_gap_predecessor(clips: &[ZoomClip], t: f64) -> Option<usize> {
         .map(|(previous, _)| previous)
 }
 
+/// `crop` is the `(x, y, w, h)` region that survives the editor crop. The
+/// viewport is sized from the crop, not the full frame, so a zoom cannot pan
+/// its framing outside the pixels the export actually keeps.
 fn recenter_if_near_edge(
     view_center: (f64, f64),
     cursor: (f64, f64),
     scale: f64,
-    frame_w: f64,
-    frame_h: f64,
+    crop: (f64, f64, f64, f64),
 ) -> (f64, f64) {
-    let crop_w = (frame_w / scale.max(1.0)).min(frame_w);
-    let crop_h = (frame_h / scale.max(1.0)).min(frame_h);
-    let half_w = crop_w / 2.0;
-    let half_h = crop_h / 2.0;
-    let margin_x = crop_w * 0.22;
-    let margin_y = crop_h * 0.22;
-    let feather_x = crop_w * 0.12;
-    let feather_y = crop_h * 0.12;
+    let (crop_x, crop_y, crop_w, crop_h) = crop;
+    let crop_w = crop_w.max(1.0);
+    let crop_h = crop_h.max(1.0);
+    let view_w = (crop_w / scale.max(1.0)).min(crop_w);
+    let view_h = (crop_h / scale.max(1.0)).min(crop_h);
+    let half_w = view_w / 2.0;
+    let half_h = view_h / 2.0;
+    let margin_x = view_w * 0.22;
+    let margin_y = view_h * 0.22;
+    let feather_x = view_w * 0.12;
+    let feather_y = view_h * 0.12;
     let left = view_center.0 - half_w;
     let right = view_center.0 + half_w;
     let top = view_center.1 - half_h;
@@ -260,8 +269,14 @@ fn recenter_if_near_edge(
         cy += feathered_camera_offset(offset, feather_y);
     }
     (
-        cx.clamp(half_w, (frame_w - half_w).max(half_w)),
-        cy.clamp(half_h, (frame_h - half_h).max(half_h)),
+        cx.clamp(
+            crop_x + half_w,
+            (crop_x + crop_w - half_w).max(crop_x + half_w),
+        ),
+        cy.clamp(
+            crop_y + half_h,
+            (crop_y + crop_h - half_h).max(crop_y + half_h),
+        ),
     )
 }
 

@@ -133,6 +133,10 @@ pub struct VideoEditState {
     pub audio_removed: bool,
     pub zoom_locked: bool,
     pub zoom_hidden: bool,
+    /// Whether the automatic zoom pass has run for this recording. Persisted
+    /// on its own, apart from `zoom_clips`, so a user who rejected every
+    /// suggestion — or disabled generation — is not asked again on reopen.
+    pub zoom_suggestions_reviewed: bool,
     /// Classic animation keeps a fixed focus point even when the clip is Auto.
     pub zoom_classic: bool,
     /// 0 = fit the whole clip, 100 = 8× time-axis zoom on the editor ruler.

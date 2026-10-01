@@ -696,6 +696,49 @@ fn zoom_gaps_hold_the_framing_for_the_next_auto_zoom() {
 }
 
 #[test]
+fn hidden_zooms_do_not_drive_the_next_transition() {
+    let clips = [
+        ZoomClip {
+            start: 0.0,
+            end: 2.0,
+            scale: 2.5,
+            center: (200.0, 200.0),
+            ease_ms: 600,
+            easing: ZoomEasing::Smooth,
+            mode: ZoomMode::Auto,
+            hidden: true,
+            ..Default::default()
+        },
+        ZoomClip {
+            start: 2.3,
+            end: 4.3,
+            scale: 1.5,
+            center: (1_500.0, 800.0),
+            ease_ms: 600,
+            easing: ZoomEasing::Smooth,
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        },
+    ];
+
+    // The gap holds the full frame: the hidden clip contributes nothing.
+    let (gap_scale, gap_center) = eval_zoom(&clips, 2.15, 1920.0, 1080.0);
+    assert!((gap_scale - 1.0).abs() < 1e-9);
+    assert!((gap_center.0 - 960.0).abs() < 1e-9);
+
+    // The visible clip opens around its own focus, not the hidden framing.
+    let (in_scale, in_center) = eval_zoom(&clips, 2.6, 1920.0, 1080.0);
+    assert!(
+        in_scale > 1.0 && in_scale < 1.5,
+        "should ease in from the full frame, got {in_scale}"
+    );
+    assert!(
+        (in_center.0 - 1_500.0).abs() < 1e-9,
+        "should open on its own focus, got {in_center:?}"
+    );
+}
+
+#[test]
 fn manual_zooms_keep_independent_transitions() {
     let clips = [
         ZoomClip {
@@ -735,9 +778,10 @@ fn manual_zooms_keep_independent_transitions() {
 #[test]
 fn auto_zoom_camera_feathers_edge_following() {
     let center = (960.0, 540.0);
+    let full = (0.0, 0.0, 1920.0, 1080.0);
     let inner_right = center.0 + 1920.0 / 2.0 / 2.0 - 1920.0 / 2.0 * 0.22;
     let barely_outside =
-        recenter_if_near_edge(center, (inner_right + 1.0, center.1), 2.0, 1920.0, 1080.0);
+        recenter_if_near_edge(center, (inner_right + 1.0, center.1), 2.0, full);
     assert!(barely_outside.0 > center.0);
     assert!(
         barely_outside.0 - center.0 < 0.01,
@@ -745,9 +789,147 @@ fn auto_zoom_camera_feathers_edge_following() {
     );
 
     let farther_outside =
-        recenter_if_near_edge(center, (inner_right + 57.6, center.1), 2.0, 1920.0, 1080.0);
+        recenter_if_near_edge(center, (inner_right + 57.6, center.1), 2.0, full);
     assert!(farther_outside.0 > barely_outside.0);
     assert!(farther_outside.0 - center.0 < 57.6);
+}
+
+#[test]
+fn auto_zoom_camera_keeps_its_viewport_inside_the_crop() {
+    // A 2x viewport is 400x300 inside this 800x600 crop. Following a cursor
+    // that sits at the crop's bottom-right corner must not push the viewport
+    // past the crop edge, or the export would show pixels the crop dropped.
+    let crop = (100.0, 50.0, 800.0, 600.0);
+    let center = (500.0, 350.0);
+    let followed = recenter_if_near_edge(center, (crop.0 + crop.2, crop.1 + crop.3), 2.0, crop);
+    let half_w = crop.2 / 2.0 / 2.0;
+    let half_h = crop.3 / 2.0 / 2.0;
+    assert!(followed.0 <= crop.0 + crop.2 - half_w + 1e-9);
+    assert!(followed.0 >= crop.0 + half_w - 1e-9);
+    assert!(followed.1 <= crop.1 + crop.3 - half_h + 1e-9);
+    assert!(followed.1 >= crop.1 + half_h - 1e-9);
+}
+
+#[test]
+fn default_zoom_center_maps_area_pointer_into_video_pixels() {
+    let mut state = VideoEditState::new(metadata());
+    // Half-scale capture region: capture-local (480, 270) is video (960, 540).
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 960,
+            h: 540,
+        },
+    );
+    sidecar
+        .pointer
+        .push(crate::recording::editor::sidecar::PointerSample {
+            t: 0.0,
+            x: 480.0,
+            y: 270.0,
+            kind: crate::recording::editor::sidecar::CursorKind::Default,
+        });
+    state.sidecar = Some(sidecar);
+
+    assert_eq!(state.default_zoom_center(0.0), (960.0, 540.0));
+}
+
+#[test]
+fn default_zoom_center_converts_composition_time_to_source_time() {
+    let mut state = VideoEditState::new(metadata());
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+    );
+    for (t, x, y) in [(0.0, 100.0, 100.0), (3.0, 400.0, 300.0)] {
+        sidecar
+            .pointer
+            .push(crate::recording::editor::sidecar::PointerSample {
+                t,
+                x,
+                y,
+                kind: crate::recording::editor::sidecar::CursorKind::Default,
+            });
+    }
+    state.sidecar = Some(sidecar);
+    state.set_trim_start(2.0);
+
+    // Composition 1.0 is source 3.0 once the head is trimmed, where the
+    // pointer sits at (400, 300). Querying source time directly would read the
+    // interpolated (200, 200) at source 1.0.
+    assert_eq!(state.default_zoom_center(1.0), (400.0, 300.0));
+}
+
+#[test]
+fn default_zoom_center_accounts_for_clip_speed() {
+    let mut state = VideoEditState::new(metadata());
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+    );
+    for (t, x, y) in [(0.0, 100.0, 100.0), (2.0, 800.0, 600.0)] {
+        sidecar
+            .pointer
+            .push(crate::recording::editor::sidecar::PointerSample {
+                t,
+                x,
+                y,
+                kind: crate::recording::editor::sidecar::CursorKind::Default,
+            });
+    }
+    state.sidecar = Some(sidecar);
+    state.selected_segment = Some(0);
+    state.set_selected_clip_speed(2.0);
+
+    // At 2x, composition 1.0 is source 2.0, where the pointer is (800, 600).
+    assert_eq!(state.default_zoom_center(1.0), (800.0, 600.0));
+}
+
+#[test]
+fn auto_zoom_follows_the_cursor_in_video_space() {
+    let mut state = VideoEditState::new(metadata());
+    // Half-scale capture region again: the raw sample sits at (700, 350), but
+    // in the encoded video the cursor is at the zoom's (1400, 700) center.
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 960,
+            h: 540,
+        },
+    );
+    for (t, x, y) in [(0.0, 700.0, 350.0), (1.0, 700.0, 350.0)] {
+        sidecar
+            .pointer
+            .push(crate::recording::editor::sidecar::PointerSample {
+                t,
+                x,
+                y,
+                kind: crate::recording::editor::sidecar::CursorKind::Default,
+            });
+    }
+    state.sidecar = Some(sidecar);
+    state.zoom_clips.push(ZoomClip {
+        start: 0.0,
+        end: 2.0,
+        scale: 2.0,
+        center: (1400.0, 700.0),
+        ease_ms: 0,
+        easing: ZoomEasing::Glide,
+        mode: ZoomMode::Auto,
+        ..Default::default()
+    });
+
+    let (_, camera_center) = state.eval_zoom(0.5);
+    // The cursor maps exactly onto the view center, so the camera stays put.
+    // Reading the raw capture-local point would drag it toward the top-left.
+    assert!(
+        (camera_center.0 - 1400.0).abs() < 1e-9 && (camera_center.1 - 700.0).abs() < 1e-9,
+        "camera should sit on the video-space cursor, got {camera_center:?}"
+    );
 }
 
 #[test]
@@ -1169,6 +1351,83 @@ fn suggest_zoom_clips_skips_landings_outside_kept_segments() {
 }
 
 #[test]
+fn suggest_zoom_clips_applies_the_density_budget_after_placement() {
+    let mut long = metadata();
+    long.duration_seconds = 30.0;
+    let mut state = VideoEditState::new(long);
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for index in 0..10 {
+        let t = 1.0 + index as f64 * 2.9;
+        let target = if index % 2 == 0 {
+            (300.0, 300.0)
+        } else {
+            (1500.0, 700.0)
+        };
+        let from = if index % 2 == 0 {
+            (1500.0, 700.0)
+        } else {
+            (300.0, 300.0)
+        };
+        for (offset, x, y) in [
+            (-0.6, from.0, from.1),
+            (-0.25, (from.0 + target.0) * 0.5, (from.1 + target.1) * 0.5),
+            (0.0, target.0, target.1),
+            (0.15, target.0 + 1.0, target.1),
+            (0.45, target.0, target.1 + 1.0),
+        ] {
+            sidecar
+                .pointer
+                .push(crate::recording::editor::sidecar::PointerSample {
+                    t: t + offset,
+                    x,
+                    y,
+                    kind: crate::recording::editor::sidecar::CursorKind::Default,
+                });
+        }
+    }
+    state.sidecar = Some(sidecar);
+
+    // Ten useful clusters, but `ceil(30 / 6) = 5` fit the recording.
+    assert_eq!(state.suggest_zoom_clips(), 5);
+}
+
+#[test]
+fn removed_high_score_suggestions_do_not_starve_valid_ones() {
+    let mut bare = metadata();
+    bare.duration_seconds = 12.0;
+    let mut state = VideoEditState::new(bare);
+    // Three repeated-click sessions in the removed head, one click in the
+    // kept tail. The removed sessions score higher, so ranking before
+    // feasibility would spend the whole budget on them and place nothing.
+    attach_sidecar_with_clicks(
+        &mut state,
+        &[
+            (1.0, 100.0, 100.0),
+            (1.2, 120.0, 120.0),
+            (3.0, 200.0, 200.0),
+            (3.2, 220.0, 220.0),
+            (5.0, 300.0, 300.0),
+            (5.2, 320.0, 320.0),
+            (9.0, 1200.0, 600.0),
+        ],
+    );
+    state.add_cut(6.0);
+    state.toggle_segment(0);
+
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    assert!((state.zoom_clips[0].center.0 - 1200.0).abs() < 1.0);
+    assert!((state.zoom_clips[0].center.1 - 600.0).abs() < 1.0);
+}
+
+#[test]
 fn suggest_zoom_clips_requires_a_purposeful_landing() {
     let mut state = VideoEditState::new(metadata());
     attach_pointer(&mut state, 960.0, 540.0);
@@ -1350,6 +1609,64 @@ fn suggest_zoom_clips_respects_zoom_lock() {
     state.zoom_locked = true;
     assert_eq!(state.suggest_zoom_clips(), 0);
     assert!(state.zoom_clips.is_empty());
+}
+
+#[test]
+fn opening_a_fresh_recording_suggests_once() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    assert!(!state.zoom_suggestions_reviewed());
+    assert!(state.suggest_zooms_on_open());
+    assert_eq!(state.zoom_clips.len(), 1);
+    assert!(state.zoom_suggestions_reviewed());
+    // A second open must not stack another suggestion on top.
+    state.zoom_clips.clear();
+    assert!(!state.suggest_zooms_on_open());
+    assert!(state.zoom_clips.is_empty());
+}
+
+#[test]
+fn the_review_pass_runs_quietly_when_it_finds_nothing() {
+    // No sidecar means no suggestions, but the pass still counts as reviewed:
+    // the recording has been looked at.
+    let mut state = VideoEditState::new(metadata());
+    assert!(!state.suggest_zooms_on_open());
+    assert!(state.zoom_suggestions_reviewed());
+    assert!(state.zoom_clips.is_empty());
+}
+
+#[test]
+fn rejecting_every_suggestion_survives_reopening() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    assert!(state.suggest_zooms_on_open());
+    assert_eq!(state.zoom_clips.len(), 1);
+
+    // The user deletes the suggestion to reject it. The zoom list is now
+    // empty, but the review state is separate, so opening again stays quiet.
+    state.zoom_clips.clear();
+    assert!(!state.suggest_zooms_on_open());
+    assert!(state.zoom_clips.is_empty());
+}
+
+#[test]
+fn explicit_redetect_marks_the_recording_reviewed() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    assert!(state.redetect_zoom_clips());
+    assert!(state.zoom_suggestions_reviewed());
+}
+
+#[test]
+fn resetting_the_review_state_allows_the_pass_again() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    assert!(state.suggest_zooms_on_open());
+    state.zoom_clips.clear();
+    state.reset_zoom_suggestions_reviewed();
+    assert!(!state.zoom_suggestions_reviewed());
+    assert!(state.suggest_zooms_on_open());
+    assert_eq!(state.zoom_clips.len(), 1);
 }
 
 #[test]
