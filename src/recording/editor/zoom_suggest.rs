@@ -82,7 +82,6 @@ struct LandingCluster {
 #[derive(Debug)]
 struct ScoredSuggestion {
     suggestion: ZoomSuggestion,
-    score: f64,
 }
 
 /// Build conservative zoom suggestions from this recording's pointer interactions.
@@ -441,7 +440,6 @@ fn suggestion_for_cluster(cluster: LandingCluster, total_seconds: f64) -> Option
             },
             priority: score,
         },
-        score,
     })
 }
 
