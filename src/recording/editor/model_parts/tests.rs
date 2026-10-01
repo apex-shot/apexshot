@@ -1300,6 +1300,83 @@ fn suggest_zoom_clips_skips_landings_outside_kept_segments() {
 }
 
 #[test]
+fn suggest_zoom_clips_applies_the_density_budget_after_placement() {
+    let mut long = metadata();
+    long.duration_seconds = 30.0;
+    let mut state = VideoEditState::new(long);
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for index in 0..10 {
+        let t = 1.0 + index as f64 * 2.9;
+        let target = if index % 2 == 0 {
+            (300.0, 300.0)
+        } else {
+            (1500.0, 700.0)
+        };
+        let from = if index % 2 == 0 {
+            (1500.0, 700.0)
+        } else {
+            (300.0, 300.0)
+        };
+        for (offset, x, y) in [
+            (-0.6, from.0, from.1),
+            (-0.25, (from.0 + target.0) * 0.5, (from.1 + target.1) * 0.5),
+            (0.0, target.0, target.1),
+            (0.15, target.0 + 1.0, target.1),
+            (0.45, target.0, target.1 + 1.0),
+        ] {
+            sidecar
+                .pointer
+                .push(crate::recording::editor::sidecar::PointerSample {
+                    t: t + offset,
+                    x,
+                    y,
+                    kind: crate::recording::editor::sidecar::CursorKind::Default,
+                });
+        }
+    }
+    state.sidecar = Some(sidecar);
+
+    // Ten useful clusters, but `ceil(30 / 6) = 5` fit the recording.
+    assert_eq!(state.suggest_zoom_clips(), 5);
+}
+
+#[test]
+fn removed_high_score_suggestions_do_not_starve_valid_ones() {
+    let mut bare = metadata();
+    bare.duration_seconds = 12.0;
+    let mut state = VideoEditState::new(bare);
+    // Three repeated-click sessions in the removed head, one click in the
+    // kept tail. The removed sessions score higher, so ranking before
+    // feasibility would spend the whole budget on them and place nothing.
+    attach_sidecar_with_clicks(
+        &mut state,
+        &[
+            (1.0, 100.0, 100.0),
+            (1.2, 120.0, 120.0),
+            (3.0, 200.0, 200.0),
+            (3.2, 220.0, 220.0),
+            (5.0, 300.0, 300.0),
+            (5.2, 320.0, 320.0),
+            (9.0, 1200.0, 600.0),
+        ],
+    );
+    state.add_cut(6.0);
+    state.toggle_segment(0);
+
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    assert!((state.zoom_clips[0].center.0 - 1200.0).abs() < 1.0);
+    assert!((state.zoom_clips[0].center.1 - 600.0).abs() < 1.0);
+}
+
+#[test]
 fn suggest_zoom_clips_requires_a_purposeful_landing() {
     let mut state = VideoEditState::new(metadata());
     attach_pointer(&mut state, 960.0, 540.0);

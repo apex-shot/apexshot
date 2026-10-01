@@ -570,8 +570,16 @@ impl VideoEditState {
         };
         let crop = self.crop_or_full();
         let segments = self.ordered_placed_segments();
+        // The density budget counts candidates that actually land in the kept
+        // edit. Candidates the trim, crop, or an existing clip rejects do not
+        // spend it, so a lower-ranked valid suggestion can still be placed.
+        let limit =
+            ((self.source_duration() / zoom_suggest::SECONDS_PER_SUGGESTION).ceil() as usize).max(1);
         let mut added = 0;
         for suggestion in suggestions {
+            if added >= limit {
+                break;
+            }
             // At an exact cut both neighboring source ranges contain the
             // timestamp. Match segment_index_at_source by choosing the range
             // with the later source start rather than attaching the zoom to
