@@ -48,6 +48,7 @@ impl VideoEditState {
             zoom_locked: false,
             zoom_hidden: false,
             zoom_suggestions_reviewed: false,
+            zoom_evidence: ZoomEvidence::default(),
             zoom_classic: false,
             timeline_scale: 0.0,
             timeline_offset_seconds: 0.0,

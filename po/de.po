@@ -2604,3 +2604,27 @@ msgstr "rgb"
 
 msgid "Drag to adjust duration"
 msgstr "Ziehen, um die Dauer anzupassen"
+
+msgid "Detection"
+msgstr "Erkennung"
+
+msgid "Clicks"
+msgstr "Klicks"
+
+msgid "Clicks + Hovers"
+msgstr "Klicks + Zeigerpausen"
+
+msgid "Zoom only where the recording captured a click"
+msgstr "Nur zoomen, wo die Aufnahme einen Klick festgehalten hat"
+
+msgid "Also zoom on a purposeful pointer pause that no click covers"
+msgstr "Auch bei einer beabsichtigten Zeigerpause zoomen, die kein Klick abdeckt"
+
+msgid "Applies the next time Detect runs"
+msgstr "Wird beim nächsten Erkennen angewendet"
+
+msgid "Detect uses recorded clicks only"
+msgstr "Erkennen verwendet nur aufgezeichnete Klicks"
+
+msgid "Detect uses recorded clicks and purposeful pointer pauses"
+msgstr "Erkennen verwendet aufgezeichnete Klicks und beabsichtigte Zeigerpausen"

@@ -1477,6 +1477,43 @@ fn click_only_sidecar_supports_auto_zoom_suggestions() {
 }
 
 #[test]
+fn zoom_evidence_controls_whether_unrelated_hovers_survive() {
+    let mut state = VideoEditState::new(metadata());
+    // A purposeful hover at ~3s, and a click far away at ~8s. Both focus
+    // points sit inside the 1.5x viewport so the clamp leaves them untouched.
+    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    state
+        .sidecar
+        .as_mut()
+        .unwrap()
+        .clicks
+        .push(crate::recording::editor::sidecar::ClickSample {
+            t: 8.0,
+            x: 800.0,
+            y: 500.0,
+            button: 1,
+        });
+
+    // Click-first is the default and drops the unrelated hover.
+    assert_eq!(state.zoom_evidence(), ZoomEvidence::ClicksOnly);
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    assert!((state.zoom_clips[0].center.0 - 800.0).abs() < 1e-9);
+
+    // Opting into mixed evidence keeps both interactions.
+    state.zoom_clips.clear();
+    state.set_zoom_evidence(ZoomEvidence::ClicksAndHovers);
+    assert_eq!(state.suggest_zoom_clips(), 2);
+    assert!(state
+        .zoom_clips
+        .iter()
+        .any(|clip| (clip.center.0 - 960.0).abs() < 1e-9));
+    assert!(state
+        .zoom_clips
+        .iter()
+        .any(|clip| (clip.center.0 - 800.0).abs() < 1e-9));
+}
+
+#[test]
 fn click_redetection_preserves_manual_zoom_clips() {
     let mut state = VideoEditState::new(metadata());
     attach_pointer(&mut state, 960.0, 540.0);

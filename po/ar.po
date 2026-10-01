@@ -2572,3 +2572,27 @@ msgstr "rgb"
 
 msgid "Drag to adjust duration"
 msgstr "اسحب لضبط المدة"
+
+msgid "Detection"
+msgstr "الكشف"
+
+msgid "Clicks"
+msgstr "النقرات"
+
+msgid "Clicks + Hovers"
+msgstr "النقرات + التوقفات"
+
+msgid "Zoom only where the recording captured a click"
+msgstr "كبّر فقط حيث سجّل التسجيل نقرة"
+
+msgid "Also zoom on a purposeful pointer pause that no click covers"
+msgstr "كبّر أيضًا عند توقف مقصود للمؤشر لا يغطيه أي نقر"
+
+msgid "Applies the next time Detect runs"
+msgstr "يُطبَّق في المرة التالية التي يعمل فيها الكشف"
+
+msgid "Detect uses recorded clicks only"
+msgstr "يستخدم الكشف النقرات المسجّلة فقط"
+
+msgid "Detect uses recorded clicks and purposeful pointer pauses"
+msgstr "يستخدم الكشف النقرات المسجّلة وتوقفات المؤشر المقصودة"
