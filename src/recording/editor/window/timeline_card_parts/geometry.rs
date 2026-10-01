@@ -30,6 +30,16 @@ pub fn video_layout(state: &VideoEditState, width: f64) -> Vec<(usize, usize, f6
     layout
 }
 
+/// Right edge (x) of the drawn clip on the video lane, including any freeze
+/// hold. Everything from here to the lane's edge is the "extend duration"
+/// band, which is what the blurred affordance fills.
+pub fn video_end_x(state: &VideoEditState, width: f64) -> f64 {
+    video_layout(state, width)
+        .into_iter()
+        .map(|(_, _, _, x1)| x1)
+        .fold(0.0_f64, f64::max)
+}
+
 pub struct VideoHit {
     pub cursor: TrackCursor,
     pub segment: Option<usize>,
@@ -37,7 +47,29 @@ pub struct VideoHit {
 }
 
 pub fn video_hit(state: &VideoEditState, width: f64, x: f64) -> VideoHit {
-    for &(_, seg_idx, x0, x1) in &video_layout(state, width) {
+    let layout = video_layout(state, width);
+    let end_x = layout
+        .iter()
+        .map(|&(_, _, _, x1)| x1)
+        .fold(0.0_f64, f64::max);
+    // The mover straddles the clip's right edge, so its hit region starts just
+    // before `end_x` and runs through the band. Claiming it first makes the
+    // handle the drag target even where the last segment's body or its inset
+    // edge handle would otherwise win.
+    if end_x > 0.0 && x >= end_x - EXTEND_HANDLE_HIT {
+        let segment = state
+            .segment_order
+            .iter()
+            .rev()
+            .find(|&&index| state.segments_kept.get(index).copied().unwrap_or(true))
+            .copied();
+        return VideoHit {
+            cursor: TrackCursor::ResizeEnd,
+            segment,
+            drag: Some(ClipDrag::End),
+        };
+    }
+    for &(_, seg_idx, x0, x1) in &layout {
         if x < x0 || x > x1 {
             continue;
         }
@@ -214,17 +246,20 @@ pub fn x_to_source(state: &VideoEditState, width: f64, x: f64) -> f64 {
 /// consumes. `x_to_source` cannot do this: it clamps at the source duration,
 /// which made expanding the right edge a no-op.
 ///
-/// The overshoot is measured from where the clip's tail actually ends
-/// (its end plus any hold already on it), not from the composition's total
-/// length. Measuring from the total made the first drag past the end collapse
-/// on a multi-segment arrangement, and made a second drag right *shrink* a
-/// hold that was already open.
+/// The overshoot is measured from where the *footage* ends, never from the
+/// clip's drawn tail. `last_segment_end()` already includes the hold this drag
+/// is setting, so feeding it back made every update compute
+/// `new_hold = overshoot - old_hold`: the tail converged to half the drag while
+/// alternating frame to frame — a handle that followed only half way and
+/// flickered. `source_to_timeline(trim_end_seconds)` is the composition time of
+/// the last real frame and does not move with the hold, so the target is a
+/// fixed point for a fixed pointer.
 pub fn edge_target_at(state: &VideoEditState, timeline_t: f64) -> f64 {
     let duration = state.metadata.duration_seconds.max(0.0);
     let source_t = state.timeline_to_source(timeline_t);
     if source_t > duration {
-        let tail_end = state.last_segment_end();
-        duration + (timeline_t - tail_end).max(0.0)
+        let footage_end = state.source_to_timeline(state.trim_end_seconds);
+        state.trim_end_seconds + (timeline_t - footage_end).max(0.0)
     } else {
         source_t.clamp(0.0, duration)
     }
@@ -232,6 +267,25 @@ pub fn edge_target_at(state: &VideoEditState, timeline_t: f64) -> f64 {
 
 pub fn x_to_timeline(state: &VideoEditState, width: f64, x: f64) -> f64 {
     state.x_to_time(x, width).max(0.0)
+}
+
+/// True when `x` is in the extend band: the mover at the clip's edge plus the
+/// frosted affordance past it.
+///
+/// The band spans every lane, so a drag here extends the clip whichever row
+/// the pointer is over — the user does not have to reach the main clip's own
+/// ending edge on the video row.
+pub fn in_extend_band(state: &VideoEditState, width: f64, x: f64) -> bool {
+    let end_x = video_end_x(state, width);
+    end_x > 0.0 && x >= end_x - EXTEND_HANDLE_HIT
+}
+
+/// Apply one pointer position to the clip's end while the extend mover is
+/// dragged: composition seconds in, a freeze hold or a trim out.
+pub fn apply_extend_drag(state: &mut VideoEditState, width: f64, x: f64) {
+    let edge = snap_timeline_to_playhead(state, width, x_to_timeline(state, width, x));
+    let target = edge_target_at(state, edge);
+    state.set_trim_end(target);
 }
 
 pub fn pixels_per_second(state: &VideoEditState, width: f64) -> f64 {
@@ -370,6 +424,9 @@ pub enum ZoomDrag {
         pixels_per_second: f64,
     },
     Seek,
+    /// The pointer is in the extend band, so the drag resizes the clip's end
+    /// even though it is over the zoom lane.
+    Extend,
 }
 
 #[derive(Clone, Copy)]
@@ -384,6 +441,8 @@ pub enum HideDrag {
         pixels_per_second: f64,
     },
     Seek,
+    /// Same as `ZoomDrag::Extend`: the band spans every lane.
+    Extend,
 }
 
 #[derive(Clone, Copy)]
@@ -400,6 +459,9 @@ pub const HANDLE_WIDTH: f64 = 4.0;
 pub const HANDLE_HIT: f64 = 6.0;
 pub const PLAYHEAD_HIT: f64 = 6.0;
 pub const PLAYHEAD_SNAP: f64 = 12.0;
+/// Half the mover bar's width: the hit slop that makes the whole handle
+/// grabbable even though it straddles the clip's right edge.
+pub const EXTEND_HANDLE_HIT: f64 = 3.0;
 
 #[cfg(test)]
 mod tests {
@@ -448,7 +510,10 @@ mod tests {
 
 #[cfg(test)]
 mod freeze_edge_tests {
-    use super::{edge_target_at, video_hit, video_layout, ClipDrag};
+    use super::{
+        edge_target_at, in_extend_band, video_end_x, video_hit, video_layout, ClipDrag,
+        TrackCursor,
+    };
     use crate::recording::editor::model::{VideoEditState, VideoMetadata};
     use std::path::PathBuf;
 
@@ -528,5 +593,95 @@ mod freeze_edge_tests {
             "then real frames trim, end was {}",
             state.trim_end_seconds
         );
+    }
+
+    /// The handle must track the pointer, not settle at half the drag.
+    ///
+    /// `edge_target_at` used to measure the overshoot from `last_segment_end()`,
+    /// which already includes the hold being set, so each update computed
+    /// `new = overshoot - old`: the tail converged to half the drag while
+    /// oscillating frame to frame. Feeding the same absolute pointer in
+    /// repeatedly has to be a fixed point, and it has to hold the full
+    /// overshoot.
+    #[test]
+    fn the_drag_tracks_the_pointer_without_halving() {
+        let mut state = state();
+        let width = 1000.0;
+        let (_, _, _, x1) = video_layout(&state, width)[0];
+
+        // Three seconds of pixels past the source end.
+        let composition_t = state.x_to_time(x1 + 300.0, width);
+        let expected = composition_t - state.source_duration();
+
+        let mut previous = -1.0;
+        for _ in 0..5 {
+            let target = edge_target_at(&state, composition_t);
+            state.set_trim_end(target);
+            let held = state.freeze_tail_seconds();
+            assert!(
+                (held - expected).abs() < 1e-6,
+                "the tail must hold the full overshoot {expected}, got {held}",
+            );
+            assert!(
+                (held - previous).abs() < 1e-6 || previous < 0.0,
+                "repeating the same pointer must not oscillate: {previous} then {held}",
+            );
+            previous = held;
+        }
+    }
+
+    /// Everything to the right of the clip is the extend handle, so the
+    /// blurred band is draggable, not dead lane.
+    #[test]
+    fn the_trailing_band_offers_the_end_drag() {
+        let mut state = state();
+        let width = 1000.0;
+        // Trim two seconds in, leaving a visible trailing band at fit zoom.
+        state.set_trim_end(8.0);
+
+        let hit = video_hit(&state, width, 900.0);
+        assert_eq!(
+            hit.drag,
+            Some(ClipDrag::End),
+            "the band past the clip must offer the End drag",
+        );
+        assert!(
+            matches!(hit.cursor, TrackCursor::ResizeEnd),
+            "the band must show the resize cursor",
+        );
+        assert_eq!(hit.segment, Some(0), "the band belongs to the last clip");
+    }
+
+    /// The mover straddles the clip's right edge, so its hit region has to
+    /// start slightly before `end_x` — otherwise the left half of the handle
+    /// is dead and the user has to find the exact pixel of the clip's edge.
+    #[test]
+    fn the_mover_is_grabbable_either_side_of_the_clip_edge() {
+        let mut state = state();
+        let width = 1000.0;
+        state.set_trim_end(8.0);
+        let end_x = video_end_x(&state, width);
+        for x in [end_x - 2.0, end_x, end_x + 2.0] {
+            let hit = video_hit(&state, width, x);
+            assert_eq!(hit.drag, Some(ClipDrag::End), "x={x}");
+            assert!(
+                matches!(hit.cursor, TrackCursor::ResizeEnd),
+                "x={x} must show the extend cursor"
+            );
+        }
+    }
+
+    /// The band and its mover are matched on every lane, so a drag over the
+    /// zoom or hide rows extends the clip instead of depending on the video
+    /// lane's own ending edge.
+    #[test]
+    fn the_extend_band_covers_the_mover_and_the_space_past_the_clip() {
+        let mut state = state();
+        let width = 1000.0;
+        state.set_trim_end(8.0);
+        let end_x = video_end_x(&state, width);
+        assert!(!in_extend_band(&state, width, end_x - 10.0));
+        assert!(in_extend_band(&state, width, end_x - 2.0), "left half of the mover");
+        assert!(in_extend_band(&state, width, end_x + 50.0), "past the clip");
     }
 }

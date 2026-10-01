@@ -2601,3 +2601,6 @@ msgstr "Aufnahmen — bald verfügbar"
 
 msgid "rgb"
 msgstr "rgb"
+
+msgid "Drag to adjust duration"
+msgstr "Ziehen, um die Dauer anzupassen"

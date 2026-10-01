@@ -203,6 +203,139 @@ pub fn draw_video_clip(
     }
 }
 
+/// The "extend duration" region across every lane below the ruler.
+///
+/// The band used to live inside the video lane alone, so it stopped at the
+/// lane seam while the ruler carried its own dim. Drawing it once, over the
+/// three lanes, makes the whole area past the clip read as one frosted region
+/// from the ruler to the bottom of the stack.
+pub fn draw_extend_region(
+    state: &Arc<Mutex<VideoEditState>>,
+    hovered: bool,
+    light: bool,
+    cr: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+) {
+    let state = state.lock().unwrap();
+    if !state.has_source_video() {
+        // Before a video is loaded there is no clip to extend past, so the
+        // lanes stay unfrosted rather than becoming one full-width band.
+        return;
+    }
+    let w = width as f64;
+    let h = height as f64;
+    // The hint belongs to the frosted region itself: it shows while the
+    // pointer is over the band, not merely because a clip is selected.
+    draw_extend_band(video_end_x(&state, w), w, h, light, hovered, cr);
+}
+
+/// How far the white mover line sits inside the frosted panel's left edge.
+const EXTEND_MOVER_INSET: f64 = 10.0;
+
+/// The "extend duration" band: everything to the right of the clip, across the
+/// whole lane stack.
+///
+/// The frosted panel starts at the clip's edge and is outlined in black. The
+/// white mover line sits inside it, just in from that edge — the handle you
+/// drag to grow the clip. While the clip is selected (or hovered) the band
+/// carries its hint. Dragging it is `ClipDrag::End`, so the region is the
+/// affordance, not decoration.
+pub fn draw_extend_band(
+    end_x: f64,
+    width: f64,
+    height: f64,
+    light: bool,
+    show_hint: bool,
+    cr: &gtk4::cairo::Context,
+) {
+    let band = width - end_x;
+    if band < 1.0 {
+        return;
+    }
+
+    let (r, g, b, a) = if light {
+        (0.95, 0.96, 0.99, 0.55)
+    } else {
+        (0.03, 0.04, 0.06, 0.55)
+    };
+    let _ = cr.save();
+    rounded_rect(cr, end_x, 0.0, band, height, 4.0);
+    cr.clip();
+    cr.set_source_rgba(r, g, b, a);
+    let _ = cr.paint();
+    // Fade the scrim in from the panel's edge, so it reads as frosted glass
+    // rather than a slab butted against the clip.
+    let fade = band.min(96.0);
+    let grad = gtk4::cairo::LinearGradient::new(end_x, 0.0, end_x + fade, 0.0);
+    grad.add_color_stop_rgba(0.0, r, g, b, a * 0.35);
+    grad.add_color_stop_rgba(1.0, r, g, b, 0.0);
+    let _ = cr.set_source(&grad);
+    let _ = cr.paint();
+    let _ = cr.restore();
+
+    // The panel's border: a thin black outline. Black is only ever the border.
+    rounded_rect(
+        cr,
+        end_x + 0.5,
+        0.5,
+        (band - 1.0).max(0.0),
+        (height - 1.0).max(0.0),
+        4.0,
+    );
+    cr.set_source_rgba(0.0, 0.0, 0.0, 0.9);
+    cr.set_line_width(1.0);
+    let _ = cr.stroke();
+
+    // The mover: a short white line inside the panel, just in from its left
+    // edge. This is the grab point for extending the clip.
+    let (mr, mg, mb) = if light {
+        (0.10, 0.11, 0.13)
+    } else {
+        (1.0, 1.0, 1.0)
+    };
+    cr.set_source_rgba(mr, mg, mb, 0.9);
+    let mover_y = (height * 0.30).max(2.0);
+    let mover_h = (height * 0.40).max(6.0);
+    rounded_rect(
+        cr,
+        end_x + EXTEND_MOVER_INSET - 1.0,
+        mover_y,
+        2.0,
+        mover_h,
+        1.0,
+    );
+    let _ = cr.fill();
+
+    if !show_hint {
+        return;
+    }
+    let label = crate::i18n::t("Drag to adjust duration");
+    cr.select_font_face(
+        crate::typography::UI_FONT_FAMILY,
+        gtk4::cairo::FontSlant::Normal,
+        gtk4::cairo::FontWeight::Normal,
+    );
+    cr.set_font_size(13.0);
+    if let Ok(ext) = cr.text_extents(&label) {
+        // Only spell it out when the band is wide enough for the words to sit
+        // clear of the divider instead of crowding it.
+        if band > ext.width() + 36.0 {
+            let (tr, tg, tb, ta) = if light {
+                (0.10, 0.12, 0.15, 0.60)
+            } else {
+                (1.0, 1.0, 1.0, 0.45)
+            };
+            cr.set_source_rgba(tr, tg, tb, ta);
+            cr.move_to(
+                end_x + EXTEND_MOVER_INSET + 14.0,
+                (height + ext.height()) / 2.0 - 1.0,
+            );
+            let _ = cr.show_text(&label);
+        }
+    }
+}
+
 pub fn clip_tone(selected: bool, faint: bool, light: bool) -> ClipTone {
     if light {
         return if faint {
@@ -299,7 +432,13 @@ pub fn draw_video_segment(
             if let Some(last) = filmstrip.last() {
                 let hold_x0 = x0 + clip_w - freeze * px_per_second;
                 let mut tile_x = hold_x0;
-                let tile_w = (freeze * px_per_second / 3.0).max(8.0);
+                // One held frame per natural frame-width, at the lane's height.
+                // Sizing the repeats to the hold instead (`freeze * pps / 3`)
+                // stretched each copy: `paint_cover_pixbuf` then cropped into a
+                // zoomed slice of the frame, which read as a smear.
+                let src_w = last.width().max(1) as f64;
+                let src_h = last.height().max(1) as f64;
+                let tile_w = (height * src_w / src_h).clamp(8.0, 240.0);
                 while tile_x < x0 + clip_w {
                     paint_cover_pixbuf(
                         cr,

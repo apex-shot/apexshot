@@ -223,6 +223,15 @@ impl VideoEditState {
     }
 
     pub fn source_playhead(&self) -> f64 {
+        // A freeze hold runs past the last frame, so the displayed source time
+        // pins to the footage end rather than extrapolating into frames the
+        // composition does not play. A plain trim is different: the band past
+        // the clip has no hold, so it keeps mapping to the trimmed-away frames
+        // a reveal would add — scrubbing there has to preview them.
+        let footage_end = self.source_to_timeline(self.trim_end_seconds);
+        if self.freeze_tail > f64::EPSILON && self.playhead_seconds > footage_end + 1e-9 {
+            return self.trim_end_seconds.clamp(0.0, self.source_duration());
+        }
         self.timeline_to_source(self.playhead_seconds)
             .clamp(0.0, self.source_duration())
     }
@@ -265,6 +274,18 @@ impl VideoEditState {
         if let Some(min) = self.segment_starts.iter().copied().reduce(f64::min) {
             self.timeline_offset_seconds = min.max(0.0);
         }
+    }
+
+    /// Pan (without re-zooming) so the playhead sits inside the window. Used
+    /// while playback walks a freeze tail past the source, where the fixed fit
+    /// ruler would otherwise let the playhead run off the right edge.
+    pub fn follow_playhead_on_timeline(&mut self) {
+        let visible = self.visible_span_seconds();
+        let lead = visible * 0.9;
+        if self.playhead_seconds > self.timeline_scroll_seconds + lead {
+            self.timeline_scroll_seconds = self.playhead_seconds - lead;
+        }
+        self.clamp_timeline_scroll();
     }
 
     pub fn set_timeline_scroll(&mut self, value: f64) {

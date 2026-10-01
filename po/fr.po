@@ -2599,3 +2599,6 @@ msgstr "Prises — bientôt disponible"
 
 msgid "rgb"
 msgstr "rgb"
+
+msgid "Drag to adjust duration"
+msgstr "Faites glisser pour ajuster la durée"

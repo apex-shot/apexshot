@@ -2595,3 +2595,6 @@ msgstr "Tomas — próximamente"
 
 msgid "rgb"
 msgstr "rgb"
+
+msgid "Drag to adjust duration"
+msgstr "Arrastra para ajustar la duración"

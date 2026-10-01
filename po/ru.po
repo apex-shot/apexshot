@@ -2589,3 +2589,6 @@ msgstr "Дубли — скоро"
 
 msgid "rgb"
 msgstr "rgb"
+
+msgid "Drag to adjust duration"
+msgstr "Перетащите, чтобы изменить длительность"

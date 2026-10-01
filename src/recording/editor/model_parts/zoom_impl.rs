@@ -672,7 +672,7 @@ impl VideoEditState {
             && self
                 .selected_zoom_clip()
                 .is_some_and(|clip| clip.mode == ZoomMode::Auto))
-        .then(|| self.eval_zoom(self.source_playhead()).1);
+        .then(|| self.eval_zoom_at(self.playhead_seconds, self.source_playhead()).1);
         let crop = self.crop_or_full();
         if let Some(clip) = self
             .selected_zoom
@@ -851,10 +851,18 @@ impl VideoEditState {
     }
 
     pub fn eval_zoom_pose(&self, t: f64) -> MotionTransform {
+        self.eval_zoom_pose_at(self.source_to_timeline(t))
+    }
+
+    /// `eval_zoom_pose` for a caller that already holds the composition time.
+    ///
+    /// Zoom clips live on the timeline, so a freeze hold is matched by the
+    /// playhead's composition position — the pinned source frame would keep the
+    /// clip stuck at `footage_end` for the whole hold.
+    pub fn eval_zoom_pose_at(&self, timeline_t: f64) -> MotionTransform {
         if self.zoom_hidden {
             return MotionTransform::default();
         }
-        let timeline_t = self.source_to_timeline(t);
         let Some(clip) = self
             .zoom_clips
             .iter()
@@ -883,12 +891,21 @@ impl VideoEditState {
     }
 
     pub fn eval_zoom(&self, t: f64) -> (f64, (f64, f64)) {
+        self.eval_zoom_at(self.source_to_timeline(t), t)
+    }
+
+    /// `eval_zoom` for a caller that already holds both times.
+    ///
+    /// `timeline_t` matches the clip — zoom clips are placed in composition
+    /// seconds and must keep advancing through a freeze hold. `source_t`
+    /// locates the cursor for auto-zoom recentering, which inside a hold stays
+    /// pinned to the last real frame.
+    pub fn eval_zoom_at(&self, timeline_t: f64, source_t: f64) -> (f64, (f64, f64)) {
         let frame_w = self.metadata.width as f64;
         let frame_h = self.metadata.height as f64;
         if self.zoom_hidden {
             return (1.0, (frame_w / 2.0, frame_h / 2.0));
         }
-        let timeline_t = self.source_to_timeline(t);
         let (scale, center) = eval_zoom(&self.zoom_clips, timeline_t, frame_w, frame_h);
         if self.zoom_classic || scale <= 1.01 {
             return (scale, center);
@@ -907,7 +924,7 @@ impl VideoEditState {
         let Some((cursor_x, cursor_y)) = self
             .sidecar
             .as_ref()
-            .and_then(|sidecar| sidecar.motion_position_at(t, cursor.smooth, cursor.speed))
+            .and_then(|sidecar| sidecar.motion_position_at(source_t, cursor.smooth, cursor.speed))
         else {
             return (scale, center);
         };

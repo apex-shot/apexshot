@@ -21,7 +21,7 @@ pub fn build_timeline_card(
         let guard = state.lock().unwrap();
         let playhead_clock = Label::new(Some(&format_clock(guard.playhead_seconds)));
         playhead_clock.add_css_class("recording-editor-timeline-clock");
-        let duration_clock = Label::new(Some(&format_clock(guard.source_duration())));
+        let duration_clock = Label::new(Some(&format_clock(guard.content_end_seconds())));
         duration_clock.add_css_class("recording-editor-timeline-clock");
         (playhead_clock, duration_clock)
     };
@@ -144,6 +144,7 @@ pub fn build_timeline_card(
     });
 
     let hovered_video = Rc::new(Cell::new(None::<usize>));
+    let hovered_extend = Rc::new(Cell::new(false));
     let hovered_zoom = Rc::new(Cell::new(None::<usize>));
     let hovered_hide = Rc::new(Cell::new(None::<usize>));
     let hover_time = Rc::new(Cell::new(None::<f64>));
@@ -253,13 +254,62 @@ pub fn build_timeline_card(
         }
     });
 
+    // The frosted extend region is one layer over the three lanes, so it spans
+    // the video, zoom and hide rows (and the gaps between them) instead of
+    // stopping at the video lane's seam.
+    let extend_layer = DrawingArea::new();
+    extend_layer.add_css_class("recording-editor-card-extend");
+    extend_layer.set_hexpand(true);
+    extend_layer.set_vexpand(true);
+    extend_layer.set_can_target(false);
+    extend_layer.set_draw_func({
+        let state = state.clone();
+        let hovered_extend = hovered_extend.clone();
+        move |area, cr, width, height| {
+            draw_extend_region(
+                &state,
+                hovered_extend.get(),
+                widget_is_light(area),
+                cr,
+                width,
+                height,
+            )
+        }
+    });
+
+    // The band is its own widget, so a hover change has to repaint it too —
+    // the lane that caught the motion only queues its own draw.
+    let set_band_hover: Rc<dyn Fn(bool)> = {
+        let hovered_extend = hovered_extend.clone();
+        let extend_layer = extend_layer.clone();
+        Rc::new(move |on| {
+            if hovered_extend.get() != on {
+                hovered_extend.set(on);
+                extend_layer.queue_draw();
+            }
+        })
+    };
+
+    let lanes = GtkBox::new(Orientation::Vertical, 10);
+    lanes.add_css_class("recording-editor-card-tracks");
+    lanes.set_hexpand(true);
+    lanes.append(&video_track);
+    lanes.append(&zoom_track);
+    lanes.append(&hide_track);
+
+    let lane_overlay = Overlay::new();
+    lane_overlay.set_hexpand(true);
+    lane_overlay.set_child(Some(&lanes));
+    // The band rides above the lanes: the space past the clip is empty in
+    // every lane, and sitting on top keeps the edge divider crisp against the
+    // clip instead of being covered by its rounded corner.
+    lane_overlay.add_overlay(&extend_layer);
+
     let tracks = GtkBox::new(Orientation::Vertical, 10);
     tracks.add_css_class("recording-editor-card-tracks");
     tracks.set_hexpand(true);
     tracks.append(&ruler);
-    tracks.append(&video_track);
-    tracks.append(&zoom_track);
-    tracks.append(&hide_track);
+    tracks.append(&lane_overlay);
 
     let board = Overlay::new();
     board.add_css_class("recording-editor-card-board");
@@ -297,6 +347,7 @@ pub fn build_timeline_card(
         let video_track = video_track.clone();
         let zoom_track = zoom_track.clone();
         let hide_track = hide_track.clone();
+        let extend_layer = extend_layer.clone();
         let playhead = playhead.clone();
         let playhead_clock = playhead_clock.clone();
         let duration_clock = duration_clock.clone();
@@ -311,7 +362,7 @@ pub fn build_timeline_card(
             {
                 let guard = state.lock().unwrap();
                 playhead_clock.set_text(&format_clock(guard.playhead_seconds));
-                duration_clock.set_text(&format_clock(guard.source_duration()));
+                duration_clock.set_text(&format_clock(guard.content_end_seconds()));
                 sync_scroll_adj(&scroll_adj, &guard, &scroll_syncing);
                 if guard.selected_zoom.is_some() {
                     zoom.add_css_class("recording-editor-timeline-tool-active");
@@ -328,6 +379,7 @@ pub fn build_timeline_card(
                 );
             }
             ruler.queue_draw();
+            extend_layer.queue_draw();
             video_track.queue_draw();
             zoom_track.queue_draw();
             hide_track.queue_draw();
@@ -633,6 +685,7 @@ pub fn build_timeline_card(
         state.clone(),
         media.clone(),
         hovered_video.clone(),
+        set_band_hover.clone(),
         dragging_video.clone(),
         redraw.clone(),
     );
@@ -642,6 +695,7 @@ pub fn build_timeline_card(
         media.clone(),
         hovered_zoom.clone(),
         hover_zoom_time.clone(),
+        set_band_hover.clone(),
         dragging_zoom.clone(),
         redraw.clone(),
     );
@@ -651,6 +705,7 @@ pub fn build_timeline_card(
         media.clone(),
         hovered_hide.clone(),
         hover_hide_time.clone(),
+        set_band_hover.clone(),
         dragging_hide.clone(),
         redraw.clone(),
     );

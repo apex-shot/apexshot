@@ -2107,6 +2107,85 @@ fn freeze_extends_the_composition_past_the_source_end() {
 }
 
 #[test]
+fn a_freeze_hold_starts_when_the_media_ends_short_of_the_container() {
+    // The last decodable frame's timestamp sits one frame before the container
+    // duration, so the playhead never reaches `footage_end` on its own before
+    // the source runs out. The finished media must be enough to enter the hold,
+    // or the tail is skipped and playback stops at the source end.
+    assert!(
+        freeze_hold_active(1.0, true, 9.9667, 10.0, 0.0),
+        "media end must open the hold even when the playhead is short"
+    );
+    // The one-frame lead starts it without waiting for the media to report
+    // end, so the playhead does not sit on the last frame at the handoff.
+    assert!(freeze_hold_active(
+        1.0,
+        false,
+        9.9667,
+        10.0,
+        freeze_hold_lead(30.0)
+    ));
+    // Crossing footage_end opens it too, with or without a lead.
+    assert!(freeze_hold_active(1.0, false, 10.0, 10.0, 0.0));
+}
+
+#[test]
+fn no_hold_without_a_tail_or_before_the_source_is_exhausted() {
+    // No tail: nothing to hold, so the media end still stops playback.
+    assert!(!freeze_hold_active(0.0, true, 10.0, 10.0, 0.0));
+    // Mid-clip playback must not leap into a hold, even with the lead.
+    assert!(!freeze_hold_active(
+        1.0,
+        false,
+        4.0,
+        10.0,
+        freeze_hold_lead(30.0)
+    ));
+}
+
+#[test]
+fn zoom_clips_keep_advancing_through_the_freeze_hold() {
+    let mut state = VideoEditState::new(metadata());
+    state.extend_last_segment(2.0);
+    assert!((state.composition_duration() - 12.0).abs() < 1e-9);
+    // The hold is part of the composition, so a zoom fits inside it.
+    let index = state
+        .add_zoom_at(10.5)
+        .expect("a zoom placed over the hold must fit");
+    state.zoom_clips[index].mode = ZoomMode::Manual;
+    state.playhead_seconds = 11.0;
+    let source_t = state.source_playhead();
+    assert!(
+        (source_t - 10.0).abs() < 1e-6,
+        "the source frame is pinned to the last real frame"
+    );
+    // Matching on the pinned source time would miss the clip entirely.
+    assert!(state.eval_zoom(source_t).0 <= 1.01);
+    // The composition time is what the hold advances through, so it finds it.
+    let (scale, _) = state.eval_zoom_at(state.playhead_seconds, source_t);
+    assert!(
+        scale > 1.01,
+        "the zoom must keep applying inside the hold, got {scale}"
+    );
+}
+
+#[test]
+fn cursor_hide_clips_keep_working_through_the_freeze_hold() {
+    let mut state = VideoEditState::new(metadata());
+    state.extend_last_segment(2.0);
+    let index = state
+        .add_cursor_hide_at(10.5)
+        .expect("a hide placed over the hold must fit");
+    assert!(state.cursor_hide_clips[index].end <= 12.0 + 1e-9);
+    state.playhead_seconds = 11.0;
+    let source_t = state.source_playhead();
+    // The pinned source time sits before the hide...
+    assert!((state.cursor_hide_alpha_for_source(source_t) - 1.0).abs() < 1e-12);
+    // ...but the composition time lands inside it.
+    assert!((state.cursor_hide_alpha(state.playhead_seconds) - 0.0).abs() < 1e-12);
+}
+
+#[test]
 fn freeze_playhead_holds_the_last_source_frame() {
     let mut state = VideoEditState::new(metadata());
     state.extend_last_segment(1.0);
@@ -2114,6 +2193,49 @@ fn freeze_playhead_holds_the_last_source_frame() {
     // Past the source end the player seeks the last real frame and stops
     // there, so the preview shows the held frame instead of running out.
     assert!((state.source_playhead() - 10.0).abs() < 1e-6);
+}
+
+#[test]
+fn a_freeze_after_a_trim_holds_the_trimmed_last_frame() {
+    let mut state = VideoEditState::new(metadata());
+    state.set_trim_end(8.0);
+    assert!(state.extend_last_segment(2.0));
+    // The composition runs 8..10s holding the frame at 8 — not the frames the
+    // trim cut away (9, 10).
+    state.playhead_seconds = 9.0;
+    assert!(
+        (state.source_playhead() - 8.0).abs() < 1e-6,
+        "the hold must freeze the trimmed end, got {}",
+        state.source_playhead()
+    );
+
+    // Drop the hold and the same playhead is back over the trimmed band, which
+    // still previews the frame a reveal would bring in.
+    assert!(state.clear_freeze_tail());
+    state.playhead_seconds = 9.0;
+    assert!(
+        (state.source_playhead() - 9.0).abs() < 1e-6,
+        "the trimmed band must preview the footage it would reveal, got {}",
+        state.source_playhead()
+    );
+}
+
+#[test]
+fn follow_playhead_pans_the_freeze_tail_into_view() {
+    let mut state = VideoEditState::new(metadata());
+    state.extend_last_segment(6.0);
+    state.playhead_seconds = 15.0;
+    state.follow_playhead_on_timeline();
+    let visible = state.visible_span_seconds();
+    assert!(
+        state.timeline_scroll_seconds > 0.0,
+        "the tail past the source must be panned into view"
+    );
+    assert!(
+        state.playhead_seconds <= state.timeline_scroll_seconds + visible + 1e-9,
+        "the playhead must end up inside the window"
+    );
+    assert!(state.timeline_scroll_seconds <= state.max_timeline_scroll() + 1e-9);
 }
 
 #[test]

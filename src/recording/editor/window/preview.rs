@@ -236,16 +236,35 @@ fn build_preview_inner(
         let last_margins = Rc::new(RefCell::new((i32::MIN, 0, 0, 0)));
         glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
             let playing = media_tick.is_playing();
-            let (dims, video, zoom, playhead, duration, hidden, label, placing, radius, background) = {
+            let (
+                dims,
+                video,
+                zoom,
+                playhead,
+                duration,
+                clock_now,
+                clock_end,
+                hidden,
+                label,
+                placing,
+                radius,
+                background,
+            ) = {
                 let s = state.lock().unwrap();
                 let source_t = s.source_playhead();
-                let (scale, _) = s.eval_zoom(source_t);
+                // Zoom/hide clips are placed in composition seconds, so match
+                // them on the playhead's timeline position: during a freeze
+                // hold the source playhead is pinned and would freeze them.
+                let timeline_t = s.playhead_seconds;
+                let (scale, _) = s.eval_zoom_at(timeline_t, source_t);
                 (
                     s.output_dimensions(),
                     s.video_rect_dimensions(),
                     scale,
                     source_t,
                     s.metadata.duration_seconds,
+                    timeline_t,
+                    s.content_end_seconds(),
                     s.video_hidden,
                     s.canvas_label(),
                     placing_manual(&s, playing),
@@ -263,8 +282,8 @@ fn build_preview_inner(
             picture.set_opacity(if hidden { 0.0 } else { 1.0 });
             clock.set_text(&format!(
                 "{} / {}",
-                format_timecode(playhead),
-                format_timecode(duration)
+                format_timecode(clock_now),
+                format_timecode(clock_end)
             ));
             aspect_label.set_text(label);
             aspect_icon.set_icon_name(Some(aspect_ratio_icon(label)));
@@ -297,6 +316,7 @@ fn build_preview_inner(
                 &clip,
                 &zoom_css,
                 &last_zoom_css,
+                clock_now,
                 playhead,
                 placing,
             );
@@ -855,14 +875,15 @@ fn apply_preview_radius(squircle: &SquircleClip, video: (u32, u32), radius_px: f
 
 fn visible_source_view(
     state: &VideoEditState,
-    playhead: f64,
+    timeline_t: f64,
+    source_t: f64,
     placing: bool,
 ) -> (f64, f64, f64, f64) {
     let (cx, cy, cw, ch) = state.crop_or_full();
     if placing {
         return (cx, cy, cw, ch);
     }
-    let (scale, center) = state.eval_zoom(playhead);
+    let (scale, center) = state.eval_zoom_at(timeline_t, source_t);
     if scale <= 1.01 {
         return (cx, cy, cw, ch);
     }
@@ -888,7 +909,8 @@ fn apply_preview_view(
     clip: &Overlay,
     provider: &CssProvider,
     last_css: &RefCell<String>,
-    playhead: f64,
+    timeline_t: f64,
+    source_t: f64,
     placing: bool,
 ) {
     picture.set_hexpand(true);
@@ -908,7 +930,7 @@ fn apply_preview_view(
     let (view, src_w, src_h) = {
         let state = state.lock().unwrap();
         (
-            visible_source_view(&state, playhead, placing),
+            visible_source_view(&state, timeline_t, source_t, placing),
             state.metadata.width.max(1) as f64,
             state.metadata.height.max(1) as f64,
         )
@@ -1052,8 +1074,11 @@ fn draw_preview_overlays(
     // stays transparent so footage shows through and only cursors paint here.
 
     let source_t = state.source_playhead();
-    let view = visible_source_view(&state, source_t, placing);
-    let (zoom, _) = state.eval_zoom(source_t);
+    // Match zoom/hide clips on the composition playhead: through a freeze hold
+    // the source frame is pinned, but the effects still track the timeline.
+    let timeline_t = state.playhead_seconds;
+    let view = visible_source_view(&state, timeline_t, source_t, placing);
+    let (zoom, _) = state.eval_zoom_at(timeline_t, source_t);
 
     if let Some(sidecar) = state
         .sidecar
@@ -1066,7 +1091,7 @@ fn draw_preview_overlays(
             state.metadata.width as f64,
             state.metadata.height as f64,
         ) {
-            frame.alpha *= state.cursor_hide_alpha_for_source(source_t);
+            frame.alpha *= state.cursor_hide_alpha(timeline_t);
             let cursor = overlay_cursor(state.cursor, zoom);
             for (x, y, progress) in sidecar.click_ripples_in_video_at(
                 source_t,
@@ -1175,7 +1200,10 @@ mod tests {
         assert!(source.contains("recording-editor-cursor-layer"));
         assert!(source.contains("cursor_sprite::overlay_scale"));
         assert!(source.contains("source_to_zoomed_point"));
-        assert!(source.contains("cursor_hide_alpha_for_source"));
+        assert!(
+            source.contains("cursor_hide_alpha("),
+            "the cursor layer must scale its alpha by the timeline hide state"
+        );
         assert!(
             !source.contains("cursor_layer.add_css_class(\"recording-editor-video-zoom-live\")")
         );
