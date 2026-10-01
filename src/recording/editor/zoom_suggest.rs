@@ -40,7 +40,9 @@ const MAX_CLICK_SESSION_SPAN_SECONDS: f64 = 4.5;
 const CLICK_SESSION_PRE_ROLL_SECONDS: f64 = 0.6;
 const CLICK_SESSION_POST_ROLL_SECONDS: f64 = 2.5;
 const MAX_CLICK_SESSION_SECONDS: f64 = 5.5;
-const SECONDS_PER_SUGGESTION: f64 = 6.0;
+/// One suggestion is budgeted per this many seconds of source. The caller
+/// applies it after dropping candidates the kept edit cannot use.
+pub const SECONDS_PER_SUGGESTION: f64 = 6.0;
 const CLICK_CONFIDENCE: f64 = 100.0;
 
 /// A zoom region in source-time seconds with the pixel focus to zoom on.
@@ -136,11 +138,10 @@ pub fn suggest_zooms(
         .filter_map(|cluster| suggestion_for_cluster(cluster, total_seconds))
         .collect();
 
-    let limit = ((total_seconds / SECONDS_PER_SUGGESTION).ceil() as usize).max(1);
-    if suggestions.len() > limit {
-        suggestions.sort_by(|a, b| b.score.total_cmp(&a.score));
-        suggestions.truncate(limit);
-    }
+    // Ranking happens after feasibility, so every candidate is returned and
+    // the caller can drop the ones that fall outside the kept edit before
+    // applying the density budget. Truncating here let a high-scoring event in
+    // a removed segment crowd out a valid suggestion elsewhere.
     suggestions.sort_by(|a, b| a.suggestion.start.total_cmp(&b.suggestion.start));
     separate_overlapping_suggestions(&mut suggestions);
     suggestions
@@ -804,7 +805,7 @@ mod tests {
     }
 
     #[test]
-    fn suggestion_density_is_capped() {
+    fn suggestions_are_returned_uncapped_and_in_time_order() {
         let mut data = sidecar();
         for index in 0..10 {
             let t = 1.0 + index as f64 * 2.9;
@@ -820,8 +821,10 @@ mod tests {
             };
             add_landing(&mut data, t, from, target, 0.45);
         }
+        // The density budget is applied when candidates are placed in the kept
+        // edit, not here, so every detected cluster comes back in time order.
         let suggestions = suggest_zooms(&data, W, H, 30.0);
-        assert_eq!(suggestions.len(), 5);
+        assert_eq!(suggestions.len(), 10);
         assert!(suggestions
             .windows(2)
             .all(|pair| pair[0].start <= pair[1].start));
