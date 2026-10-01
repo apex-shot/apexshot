@@ -175,6 +175,9 @@ pub fn eval_zoom(
 }
 
 /// The closest earlier auto zoom that clip `index` can morph from.
+///
+/// A hidden clip never contributes, here or anywhere else: it is deliberately
+/// out of the output, so it must not shape a visible transition.
 fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
     let clip = &clips[index];
     if clip.mode != ZoomMode::Auto {
@@ -186,6 +189,7 @@ fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
         .filter(|(other, previous)| {
             *other != index
                 && previous.mode == ZoomMode::Auto
+                && !previous.hidden
                 && previous.end <= clip.start
                 && clip.start - previous.end <= ZOOM_MORPH_GAP_SECONDS
         })

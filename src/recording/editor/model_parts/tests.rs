@@ -696,6 +696,49 @@ fn zoom_gaps_hold_the_framing_for_the_next_auto_zoom() {
 }
 
 #[test]
+fn hidden_zooms_do_not_drive_the_next_transition() {
+    let clips = [
+        ZoomClip {
+            start: 0.0,
+            end: 2.0,
+            scale: 2.5,
+            center: (200.0, 200.0),
+            ease_ms: 600,
+            easing: ZoomEasing::Smooth,
+            mode: ZoomMode::Auto,
+            hidden: true,
+            ..Default::default()
+        },
+        ZoomClip {
+            start: 2.3,
+            end: 4.3,
+            scale: 1.5,
+            center: (1_500.0, 800.0),
+            ease_ms: 600,
+            easing: ZoomEasing::Smooth,
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        },
+    ];
+
+    // The gap holds the full frame: the hidden clip contributes nothing.
+    let (gap_scale, gap_center) = eval_zoom(&clips, 2.15, 1920.0, 1080.0);
+    assert!((gap_scale - 1.0).abs() < 1e-9);
+    assert!((gap_center.0 - 960.0).abs() < 1e-9);
+
+    // The visible clip opens around its own focus, not the hidden framing.
+    let (in_scale, in_center) = eval_zoom(&clips, 2.6, 1920.0, 1080.0);
+    assert!(
+        in_scale > 1.0 && in_scale < 1.5,
+        "should ease in from the full frame, got {in_scale}"
+    );
+    assert!(
+        (in_center.0 - 1_500.0).abs() < 1e-9,
+        "should open on its own focus, got {in_center:?}"
+    );
+}
+
+#[test]
 fn manual_zooms_keep_independent_transitions() {
     let clips = [
         ZoomClip {
