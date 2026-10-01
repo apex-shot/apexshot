@@ -98,20 +98,6 @@ pub fn draw_ruler(
         }
         t += minor;
     }
-
-    // Dim the ruler past the clip, so the extend band reads as one region
-    // across the card instead of stopping at the lane seam.
-    let clip_end_x = video_end_x(&state, w);
-    if clip_end_x < w {
-        let (r, g, b, a) = if light {
-            (0.97, 0.98, 1.0, 0.55)
-        } else {
-            (0.03, 0.04, 0.06, 0.55)
-        };
-        cr.set_source_rgba(r, g, b, a);
-        cr.rectangle(clip_end_x, 0.0, w - clip_end_x, h);
-        let _ = cr.fill();
-    }
 }
 
 pub fn ruler_major_step(visible: f64) -> f64 {
@@ -225,7 +211,7 @@ pub fn draw_video_clip(
 /// from the ruler to the bottom of the stack.
 pub fn draw_extend_region(
     state: &Arc<Mutex<VideoEditState>>,
-    hovered: Option<usize>,
+    hovered: bool,
     light: bool,
     cr: &gtk4::cairo::Context,
     width: i32,
@@ -239,16 +225,9 @@ pub fn draw_extend_region(
     }
     let w = width as f64;
     let h = height as f64;
-    let end_x = video_end_x(&state, w);
-    let last_kept = state
-        .segment_order
-        .iter()
-        .rev()
-        .find(|&&index| state.segments_kept.get(index).copied().unwrap_or(true))
-        .copied();
-    let show_hint = last_kept.is_some()
-        && (state.selected_segment == last_kept || hovered == last_kept);
-    draw_extend_band(end_x, w, h, light, show_hint, cr);
+    // The hint belongs to the frosted region itself: it shows while the
+    // pointer is over the band, not merely because a clip is selected.
+    draw_extend_band(video_end_x(&state, w), w, h, light, hovered, cr);
 }
 
 /// How far the white mover line sits inside the frosted panel's left edge.

@@ -144,6 +144,7 @@ pub fn build_timeline_card(
     });
 
     let hovered_video = Rc::new(Cell::new(None::<usize>));
+    let hovered_extend = Rc::new(Cell::new(false));
     let hovered_zoom = Rc::new(Cell::new(None::<usize>));
     let hovered_hide = Rc::new(Cell::new(None::<usize>));
     let hover_time = Rc::new(Cell::new(None::<f64>));
@@ -263,11 +264,11 @@ pub fn build_timeline_card(
     extend_layer.set_can_target(false);
     extend_layer.set_draw_func({
         let state = state.clone();
-        let hovered_video = hovered_video.clone();
+        let hovered_extend = hovered_extend.clone();
         move |area, cr, width, height| {
             draw_extend_region(
                 &state,
-                hovered_video.get(),
+                hovered_extend.get(),
                 widget_is_light(area),
                 cr,
                 width,
@@ -275,6 +276,19 @@ pub fn build_timeline_card(
             )
         }
     });
+
+    // The band is its own widget, so a hover change has to repaint it too —
+    // the lane that caught the motion only queues its own draw.
+    let set_band_hover: Rc<dyn Fn(bool)> = {
+        let hovered_extend = hovered_extend.clone();
+        let extend_layer = extend_layer.clone();
+        Rc::new(move |on| {
+            if hovered_extend.get() != on {
+                hovered_extend.set(on);
+                extend_layer.queue_draw();
+            }
+        })
+    };
 
     let lanes = GtkBox::new(Orientation::Vertical, 10);
     lanes.add_css_class("recording-editor-card-tracks");
@@ -671,6 +685,7 @@ pub fn build_timeline_card(
         state.clone(),
         media.clone(),
         hovered_video.clone(),
+        set_band_hover.clone(),
         dragging_video.clone(),
         redraw.clone(),
     );
@@ -680,6 +695,7 @@ pub fn build_timeline_card(
         media.clone(),
         hovered_zoom.clone(),
         hover_zoom_time.clone(),
+        set_band_hover.clone(),
         dragging_zoom.clone(),
         redraw.clone(),
     );
@@ -689,6 +705,7 @@ pub fn build_timeline_card(
         media.clone(),
         hovered_hide.clone(),
         hover_hide_time.clone(),
+        set_band_hover.clone(),
         dragging_hide.clone(),
         redraw.clone(),
     );

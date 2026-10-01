@@ -324,6 +324,7 @@ pub fn bind_video_clip(
     state: Arc<Mutex<VideoEditState>>,
     media: Rc<RefCell<Option<MediaFile>>>,
     hover: Rc<Cell<Option<usize>>>,
+    set_band_hover: Rc<dyn Fn(bool)>,
     dragging: Rc<Cell<Option<usize>>>,
     redraw: Rc<dyn Fn()>,
 ) {
@@ -474,17 +475,21 @@ pub fn bind_video_clip(
         area,
         {
             let state = state.clone();
+            let set_band_hover = set_band_hover.clone();
             Rc::new(move |width, x| {
                 let guard = state.lock().unwrap();
                 if near_playhead(&guard, width, x) {
+                    set_band_hover(false);
                     return (TrackCursor::Playhead, None, None);
                 }
+                set_band_hover(in_extend_band(&guard, width, x));
                 let hit = video_hit(&guard, width, x);
                 (hit.cursor, hit.segment, None)
             })
         },
         hover,
         Rc::new(Cell::new(None)),
+        set_band_hover,
     );
 }
 
@@ -494,6 +499,7 @@ pub fn bind_zoom_track(
     media: Rc<RefCell<Option<MediaFile>>>,
     hover: Rc<Cell<Option<usize>>>,
     hover_time: Rc<Cell<Option<f64>>>,
+    set_band_hover: Rc<dyn Fn(bool)>,
     dragging: Rc<Cell<Option<usize>>>,
     redraw: Rc<dyn Fn()>,
 ) {
@@ -649,11 +655,14 @@ pub fn bind_zoom_track(
         area,
         {
             let state = state.clone();
+            let set_band_hover = set_band_hover.clone();
             Rc::new(move |width, x| {
                 let guard = state.lock().unwrap();
                 if near_playhead(&guard, width, x) {
+                    set_band_hover(false);
                     return (TrackCursor::Playhead, None, None);
                 }
+                set_band_hover(in_extend_band(&guard, width, x));
                 match zoom_edge_at(&guard, width, x) {
                     Some((index, true)) => (TrackCursor::ResizeStart, Some(index), None),
                     Some((index, false)) => (TrackCursor::ResizeEnd, Some(index), None),
@@ -673,6 +682,7 @@ pub fn bind_zoom_track(
         },
         hover,
         hover_time,
+        set_band_hover,
     );
 
     // Right-click a clip to act on it in place. This is the only way to delete
@@ -725,6 +735,7 @@ pub fn bind_hide_track(
     media: Rc<RefCell<Option<MediaFile>>>,
     hover: Rc<Cell<Option<usize>>>,
     hover_time: Rc<Cell<Option<f64>>>,
+    set_band_hover: Rc<dyn Fn(bool)>,
     dragging: Rc<Cell<Option<usize>>>,
     redraw: Rc<dyn Fn()>,
 ) {
@@ -878,11 +889,14 @@ pub fn bind_hide_track(
         area,
         {
             let state = state.clone();
+            let set_band_hover = set_band_hover.clone();
             Rc::new(move |width, x| {
                 let guard = state.lock().unwrap();
                 if near_playhead(&guard, width, x) {
+                    set_band_hover(false);
                     return (TrackCursor::Playhead, None, None);
                 }
+                set_band_hover(in_extend_band(&guard, width, x));
                 match cursor_hide_edge_at(&guard, width, x) {
                     Some((index, true)) => (TrackCursor::ResizeStart, Some(index), None),
                     Some((index, false)) => (TrackCursor::ResizeEnd, Some(index), None),
@@ -902,6 +916,7 @@ pub fn bind_hide_track(
         },
         hover,
         hover_time,
+        set_band_hover,
     );
 
     // Same in-place menu as the Zoom track; see the comment there.
@@ -951,6 +966,7 @@ pub fn bind_track_cursor(
     hit: Rc<dyn Fn(f64, f64) -> (TrackCursor, Option<usize>, Option<f64>)>,
     hover: Rc<Cell<Option<usize>>>,
     hover_time: Rc<Cell<Option<f64>>>,
+    set_band_hover: Rc<dyn Fn(bool)>,
 ) {
     let motion = EventControllerMotion::new();
     motion.connect_motion({
@@ -980,9 +996,11 @@ pub fn bind_track_cursor(
         let hover = hover.clone();
         let hover_time = hover_time.clone();
         let area = area.clone();
+        let set_band_hover = set_band_hover.clone();
         move |controller| {
             hover.set(None);
             hover_time.set(None);
+            set_band_hover(false);
             area.queue_draw();
             if let Some(widget) = controller.widget() {
                 widget.set_cursor(None);
