@@ -921,16 +921,23 @@ impl VideoEditState {
             return (scale, center);
         }
         let cursor = self.cursor.clamped();
-        let Some((cursor_x, cursor_y)) = self
-            .sidecar
-            .as_ref()
-            .and_then(|sidecar| sidecar.motion_position_at(source_t, cursor.smooth, cursor.speed))
-        else {
+        let Some((cursor_x, cursor_y)) = self.sidecar.as_ref().and_then(|sidecar| {
+            // Evaluate the cursor in the encoded video's pixel space, the same
+            // as the overlay, and clamp the resulting viewport inside the
+            // editor crop rather than the full frame.
+            sidecar.motion_position_in_video_at(
+                source_t,
+                cursor.smooth,
+                cursor.speed,
+                frame_w,
+                frame_h,
+            )
+        }) else {
             return (scale, center);
         };
         (
             scale,
-            recenter_if_near_edge(center, (cursor_x, cursor_y), scale, frame_w, frame_h),
+            recenter_if_near_edge(center, (cursor_x, cursor_y), scale, self.crop_or_full()),
         )
     }
 }
