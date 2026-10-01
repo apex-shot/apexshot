@@ -2590,3 +2590,6 @@ msgstr "Tomadas — em breve"
 
 msgid "rgb"
 msgstr "rgb"
+
+msgid "Drag to adjust duration"
+msgstr "Arraste para ajustar a duração"

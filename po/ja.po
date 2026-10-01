@@ -2553,3 +2553,6 @@ msgstr "テイク — 近日公開"
 
 msgid "rgb"
 msgstr "rgb"
+
+msgid "Drag to adjust duration"
+msgstr "ドラッグして長さを調整"

@@ -2550,3 +2550,6 @@ msgstr "镜头 — 即将推出"
 
 msgid "rgb"
 msgstr "rgb"
+
+msgid "Drag to adjust duration"
+msgstr "拖动以调整时长"

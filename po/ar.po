@@ -2569,3 +2569,6 @@ msgstr "اللقطات — قريبًا"
 
 msgid "rgb"
 msgstr "rgb"
+
+msgid "Drag to adjust duration"
+msgstr "اسحب لضبط المدة"
