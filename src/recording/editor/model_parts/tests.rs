@@ -3567,4 +3567,173 @@ fn a_new_zoom_keeps_the_factory_style_until_a_zoom_is_edited() {
     let clip = &state.zoom_clips[index];
     assert!((clip.scale - DEFAULT_ZOOM_SCALE).abs() < 1e-9);
     assert_eq!(clip.easing, ZoomEasing::Glide);
+    assert!(!clip.instant);
+}
+
+#[test]
+fn an_instant_zoom_snaps_without_an_eased_ramp() {
+    let clips = [ZoomClip {
+        start: 1.0,
+        end: 2.8,
+        scale: 2.0,
+        center: (200.0, 100.0),
+        ease_ms: 600,
+        easing: ZoomEasing::Glide,
+        mode: ZoomMode::Auto,
+        instant: true,
+        ..Default::default()
+    }];
+    // Inside the ease window an animated zoom would still be ramping in;
+    // the instant zoom is already at full framing.
+    let (scale, center) = eval_zoom(&clips, 1.1, 1920.0, 1080.0);
+    assert!((scale - 2.0).abs() < 1e-9);
+    assert!((center.0 - 200.0).abs() < 1e-9);
+    assert!((center.1 - 100.0).abs() < 1e-9);
+    let (out_scale, out_center) = eval_zoom(&clips, 2.7, 1920.0, 1080.0);
+    assert!((out_scale - 2.0).abs() < 1e-9);
+    assert!((out_center.0 - 200.0).abs() < 1e-9);
+}
+
+#[test]
+fn an_instant_zoom_never_morphs_from_its_neighbour() {
+    let clips = [
+        ZoomClip {
+            start: 0.0,
+            end: 2.0,
+            scale: 1.5,
+            center: (400.0, 300.0),
+            ease_ms: 600,
+            easing: ZoomEasing::Smooth,
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        },
+        ZoomClip {
+            start: 2.0,
+            end: 4.0,
+            scale: 1.8,
+            center: (1_500.0, 800.0),
+            ease_ms: 600,
+            easing: ZoomEasing::Smooth,
+            mode: ZoomMode::Auto,
+            instant: true,
+            ..Default::default()
+        },
+    ];
+    // The second zoom snaps to its own framing instead of blending from
+    // the first.
+    let (scale, center) = eval_zoom(&clips, 2.3, 1920.0, 1080.0);
+    assert!((scale - 1.8).abs() < 1e-9);
+    assert!((center.0 - 1_500.0).abs() < 1e-9);
+    assert!((center.1 - 800.0).abs() < 1e-9);
+    // And the first zoom eases back out on its own: nothing morphs from an
+    // instant neighbour, so its framing is not held for one.
+    let (held_scale, _) = eval_zoom(&clips, 1.9, 1920.0, 1080.0);
+    assert!(held_scale < 1.5);
+}
+
+#[test]
+fn a_gap_after_an_instant_zoom_returns_to_full_frame() {
+    let clips = [
+        ZoomClip {
+            start: 0.0,
+            end: 2.0,
+            scale: 1.5,
+            center: (400.0, 300.0),
+            ease_ms: 600,
+            easing: ZoomEasing::Smooth,
+            mode: ZoomMode::Auto,
+            instant: true,
+            ..Default::default()
+        },
+        ZoomClip {
+            start: 2.3,
+            end: 4.3,
+            scale: 1.5,
+            center: (1_500.0, 800.0),
+            ease_ms: 600,
+            easing: ZoomEasing::Smooth,
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        },
+    ];
+    let (gap_scale, _) = eval_zoom(&clips, 2.15, 1920.0, 1080.0);
+    assert!((gap_scale - 1.0).abs() < 1e-9);
+}
+
+#[test]
+fn set_selected_zoom_instant_flips_the_flag_and_protects_the_clip() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    let index = state.add_zoom_at(0.5).expect("zoom fits");
+    state.selected_zoom = Some(index);
+    assert!(!state.selected_zoom_clip().unwrap().instant);
+    state.set_selected_zoom_instant(true);
+    let clip = state.selected_zoom_clip().unwrap();
+    assert!(clip.instant);
+    assert_eq!(clip.origin, ZoomOrigin::User);
+    state.set_selected_zoom_instant(false);
+    assert!(!state.selected_zoom_clip().unwrap().instant);
+}
+
+#[test]
+fn a_new_zoom_inherits_the_last_edited_instant_choice() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    let first = state.add_zoom_at(0.5).expect("first zoom fits");
+    state.selected_zoom = Some(first);
+    state.set_selected_zoom_instant(true);
+    let second = state.add_zoom_at(5.0).expect("second zoom fits");
+    assert!(state.zoom_clips[second].instant);
+}
+
+#[test]
+fn generated_zooms_open_animated_despite_an_instant_style() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(1.0, 400.0, 300.0)]);
+    let first = state.add_zoom_at(5.0).expect("zoom fits");
+    state.selected_zoom = Some(first);
+    state.set_selected_zoom_instant(true);
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    let generated = state
+        .zoom_clips
+        .iter()
+        .find(|clip| clip.origin == ZoomOrigin::Generated)
+        .expect("a generated zoom lands");
+    assert!(!generated.instant);
+}
+
+#[test]
+fn reset_zoom_animation_clears_the_instant_snap() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    let index = state.add_zoom_at(0.5).expect("zoom fits");
+    state.selected_zoom = Some(index);
+    state.set_selected_zoom_instant(true);
+    state.reset_zoom_animation();
+    assert!(!state.selected_zoom_clip().unwrap().instant);
+}
+
+#[test]
+fn eval_zoom_at_snaps_an_instant_zoom_to_the_movement_group_centre() {
+    let mut state = VideoEditState::new(metadata());
+    // A pointer parked at the right edge is the whole movement group, so an
+    // instant zoom snaps to it (clamped into the crop) while the animated
+    // spring is still travelling from the stored centre early in the clip.
+    attach_pointer(&mut state, 1900.0, 540.0);
+    let index = state.add_zoom_at(0.5).expect("zoom fits");
+    state.selected_zoom = Some(index);
+    state.zoom_clips[index].center = (960.0, 540.0);
+    state.zoom_clips[index].scale = 2.0;
+    let timeline_t = state.zoom_clips[index].start + 0.05;
+    let source_t = state.timeline_to_source(timeline_t);
+    let (_, animated) = state.eval_zoom_at(timeline_t, source_t);
+    assert!(
+        animated.0 > 960.0 && animated.0 < 1200.0,
+        "the animated spring should still be travelling, got {animated:?}"
+    );
+    state.set_selected_zoom_instant(true);
+    let (scale, snapped) = state.eval_zoom_at(timeline_t, source_t);
+    assert!((scale - 2.0).abs() < 1e-9);
+    assert!((snapped.0 - 1440.0).abs() < 1e-6);
+    assert!((snapped.1 - 540.0).abs() < 1e-6);
 }

@@ -26,6 +26,7 @@ impl VideoEditState {
             scale: DEFAULT_ZOOM_SCALE,
             easing: ZoomEasing::Glide,
             ease_ms: DEFAULT_ZOOM_EASE_MS,
+            instant: false,
         });
         self.zoom_clips.push(ZoomClip {
             start,
@@ -34,6 +35,7 @@ impl VideoEditState {
             center,
             ease_ms: style.ease_ms,
             easing: style.easing,
+            instant: style.instant,
             mode: if self.supports_auto_zoom() {
                 ZoomMode::Auto
             } else {
@@ -883,6 +885,25 @@ impl VideoEditState {
         }
     }
 
+    /// Flip the selected zoom between a snap and a glide.
+    ///
+    /// Animated is the follow camera; instant jumps to its target with no
+    /// eased scale ramp and no morph from a neighbour. The choice is
+    /// per-zoom and remembered like the rest of the style.
+    pub fn set_selected_zoom_instant(&mut self, instant: bool) {
+        if self.zoom_locked {
+            return;
+        }
+        if let Some(index) = self.selected_zoom {
+            self.record_zoom_command();
+            if let Some(clip) = self.zoom_clips.get_mut(index) {
+                clip.instant = instant;
+            }
+            self.protect_zoom_clip(index);
+            self.capture_zoom_style(index);
+        }
+    }
+
     pub fn set_selected_zoom_ease_ms(&mut self, ease_ms: u32) {
         if self.zoom_locked {
             return;
@@ -904,6 +925,7 @@ impl VideoEditState {
                 scale: clip.scale,
                 easing: clip.easing,
                 ease_ms: clip.ease_ms,
+                instant: clip.instant,
             });
         }
     }
@@ -937,6 +959,9 @@ impl VideoEditState {
             if let Some(clip) = self.zoom_clips.get_mut(index) {
                 // Auto zooms are created with Smooth; Reset must not bring back
                 // the edge snap. Manual zooms keep the classic Glide default.
+                // Either way the zoom returns to animated: instant is the
+                // opt-in snap, not the resting state.
+                clip.instant = false;
                 clip.easing = match clip.mode {
                     ZoomMode::Auto => ZoomEasing::Smooth,
                     ZoomMode::Manual => ZoomEasing::Glide,

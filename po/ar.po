@@ -2635,3 +2635,9 @@ msgstr "افتح Zoom واختر Detect لوضع التكبير من النقر�
 
 msgid "This video has no recorded clicks, so there is nothing to zoom on."
 msgstr "لا يحتوي هذا الفيديو على نقرات مسجّلة، لذا لا يوجد ما يمكن تكبيره."
+
+msgid "Instant animation"
+msgstr "Instant animation"
+
+msgid "If enabled, the zoom will be applied instantly without any animation."
+msgstr "If enabled, the zoom will be applied instantly without any animation."

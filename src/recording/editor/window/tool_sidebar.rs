@@ -212,19 +212,22 @@ fn build_zoom_panel(
     animation_header.append(&animation_label);
     animation_header.append(&reset);
 
-    let classic_row = GtkBox::new(Orientation::Horizontal, 8);
-    classic_row.add_css_class("recording-editor-zoom-classic");
-    classic_row.set_hexpand(true);
-    let classic_label = Label::new(Some(&t("Classic Animation")));
-    classic_label.add_css_class("recording-editor-zoom-classic-label");
-    classic_label.set_xalign(0.0);
-    classic_label.set_hexpand(true);
-    let classic = Switch::new();
-    classic.add_css_class("recording-editor-zoom-switch");
-    classic.set_valign(Align::Center);
-    classic.set_halign(Align::End);
-    classic_row.append(&classic_label);
-    classic_row.append(&classic);
+    let instant_row = GtkBox::new(Orientation::Horizontal, 8);
+    instant_row.add_css_class("recording-editor-zoom-classic");
+    instant_row.set_hexpand(true);
+    let instant_label = Label::new(Some(&t("Instant animation")));
+    instant_label.add_css_class("recording-editor-zoom-classic-label");
+    instant_label.set_xalign(0.0);
+    instant_label.set_hexpand(true);
+    let instant = Switch::new();
+    instant.add_css_class("recording-editor-zoom-switch");
+    instant.set_valign(Align::Center);
+    instant.set_halign(Align::End);
+    instant.set_tooltip_text(Some(&t(
+        "If enabled, the zoom will be applied instantly without any animation.",
+    )));
+    instant_row.append(&instant_label);
+    instant_row.append(&instant);
 
     let easing_label = Label::new(Some(&t("Easing")));
     easing_label.add_css_class("recording-editor-zoom-kicker");
@@ -270,7 +273,7 @@ fn build_zoom_panel(
     body.append(&mode_hint);
     body.append(&chips);
     body.append(&animation_header);
-    body.append(&classic_row);
+    body.append(&instant_row);
     body.append(&easing_label);
     body.append(&easing_row);
 
@@ -311,23 +314,6 @@ fn build_zoom_panel(
             on_change();
         }
     });
-    classic.connect_state_set({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |_, active| {
-            if !syncing.get() {
-                pause_playback();
-                let mut guard = state.lock().unwrap();
-                if !guard.zoom_locked {
-                    guard.zoom_classic = active;
-                    drop(guard);
-                    on_change();
-                }
-            }
-            gtk4::glib::Propagation::Proceed
-        }
-    });
     reset.connect_clicked({
         let state = state.clone();
         let on_change = on_change.clone();
@@ -336,13 +322,27 @@ fn build_zoom_panel(
             on_change();
         }
     });
+    instant.connect_state_set({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let pause_playback = pause_playback.clone();
+        let syncing = syncing.clone();
+        move |_, active| {
+            if !syncing.get() {
+                pause_playback();
+                state.lock().unwrap().set_selected_zoom_instant(active);
+                on_change();
+            }
+            gtk4::glib::Propagation::Proceed
+        }
+    });
     let refresh = {
         let panel = panel.clone();
         let auto_btn = auto_btn.clone();
         let manual_btn = manual_btn.clone();
         let mode_hint = mode_hint.clone();
-        let classic = classic.clone();
-        let classic_row = classic_row.clone();
+        let instant = instant.clone();
+        let instant_row = instant_row.clone();
         let chip_buttons = chip_buttons.clone();
         let easing_buttons = easing_buttons.clone();
         let easing_row = easing_row.clone();
@@ -359,7 +359,7 @@ fn build_zoom_panel(
             syncing.set(true);
             auto_btn.set_sensitive(auto_available && can_edit);
             manual_btn.set_sensitive(can_edit);
-            classic.set_sensitive(can_edit);
+            instant.set_sensitive(can_edit);
             reset.set_sensitive(can_edit);
             easing_row.set_sensitive(can_edit);
             easing_label.set_sensitive(can_edit);
@@ -379,7 +379,12 @@ fn build_zoom_panel(
                     ZoomMode::Auto => auto_btn.set_active(true),
                     ZoomMode::Manual => manual_btn.set_active(true),
                 }
-                classic_row.set_visible(mode == ZoomMode::Auto);
+                // Automatic motion is the follow camera: animated chases it,
+                // instant jumps. Manual motion stays on the easing presets,
+                // which have no counterpart in the studied behaviour.
+                instant_row.set_visible(mode == ZoomMode::Auto);
+                easing_row.set_visible(mode == ZoomMode::Manual);
+                easing_label.set_visible(mode == ZoomMode::Manual);
             } else {
                 mode_hint.set_text(&if auto_available {
                     t("Detect uses recorded clicks")
@@ -389,9 +394,11 @@ fn build_zoom_panel(
                 if !auto_available {
                     manual_btn.set_active(true);
                 }
-                classic_row.set_visible(false);
+                instant_row.set_visible(false);
+                easing_row.set_visible(true);
+                easing_label.set_visible(true);
             }
-            classic.set_active(guard.zoom_classic);
+            instant.set_active(selected.as_ref().is_some_and(|clip| clip.instant));
             let selected_easing = selected
                 .as_ref()
                 .map(|clip| clip.easing)

@@ -141,7 +141,8 @@ pub fn eval_zoom(
     let clip = &clips[index];
     let to_scale = clip.scale.max(1.0);
     // An instant zoom snaps: no eased scale ramp and no morph from a
-    // neighbour. The follow camera (see `eval_zoom_at`) snaps the same way,
+    // neighbour. The studied lead-in returns no animation window for such
+    // zooms, and the follow camera (see `eval_zoom_at`) snaps the same way,
     // so scale and position stay in step instead of one gliding while the
     // other jumps.
     if clip.instant {

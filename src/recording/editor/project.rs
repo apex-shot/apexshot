@@ -138,12 +138,12 @@ pub struct ZoomClipFile {
     pub rotation_z: f64,
     #[serde(default)]
     pub perspective: f64,
-    #[serde(default)]
-    pub hidden: bool,
     /// Per-zoom instant snap. Missing in older projects, where it defaults to
     /// `false` so existing zooms keep their eased motion.
     #[serde(default)]
     pub instant: bool,
+    #[serde(default)]
+    pub hidden: bool,
     /// Ownership. Missing in older projects, where it defaults to `legacy`:
     /// an unknown clip is treated as the user's work, never safe to replace.
     #[serde(default)]
@@ -188,6 +188,10 @@ pub struct ZoomStyleFile {
     #[serde(default)]
     pub easing: ZoomEasingFile,
     pub ease_ms: u32,
+    /// Remembered snap choice. Missing in older projects, where it defaults
+    /// to animated.
+    #[serde(default)]
+    pub instant: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -511,8 +515,8 @@ fn zoom_to_file(clip: &ZoomClip) -> ZoomClipFile {
         rotation_y: clip.rotation_y,
         rotation_z: clip.rotation_z,
         perspective: clip.perspective,
-        hidden: clip.hidden,
         instant: clip.instant,
+        hidden: clip.hidden,
         origin: match clip.origin {
             ZoomOrigin::Generated => ZoomOriginFile::Generated,
             ZoomOrigin::User => ZoomOriginFile::User,
@@ -557,8 +561,8 @@ fn zoom_from_file(clip: &ZoomClipFile) -> ZoomClip {
         rotation_y: clip.rotation_y,
         rotation_z: clip.rotation_z,
         perspective: clip.perspective,
-        hidden: clip.hidden,
         instant: clip.instant,
+        hidden: clip.hidden,
         origin: match clip.origin {
             ZoomOriginFile::Generated => ZoomOrigin::Generated,
             ZoomOriginFile::User => ZoomOrigin::User,
@@ -594,6 +598,7 @@ fn zoom_style_to_file(style: ZoomStyle) -> ZoomStyleFile {
         scale: style.scale,
         easing: zoom_easing_to_file(style.easing),
         ease_ms: style.ease_ms,
+        instant: style.instant,
     }
 }
 
@@ -602,6 +607,7 @@ fn zoom_style_from_file(style: ZoomStyleFile) -> ZoomStyle {
         scale: style.scale,
         easing: zoom_easing_from_file(style.easing),
         ease_ms: style.ease_ms,
+        instant: style.instant,
     }
 }
 
@@ -1637,6 +1643,7 @@ mod tests {
         let index = state.add_zoom_at(1.0).expect("zoom fits");
         state.selected_zoom = Some(index);
         state.set_selected_zoom_scale(2.2);
+        state.set_selected_zoom_instant(true);
         save_project(&video, &state.to_project()).unwrap();
         let loaded = load_project(&video).expect("project should load");
         let mut restored = VideoEditState::new(metadata_for(&video, 8));
@@ -1645,6 +1652,7 @@ mod tests {
             .last_edited_zoom_style
             .expect("the edited style is remembered");
         assert!((style.scale - 2.2).abs() < 1e-9);
+        assert!(style.instant);
         cleanup_project(&video);
         let _ = fs::remove_dir_all(&dir);
     }

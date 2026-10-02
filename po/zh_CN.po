@@ -2616,3 +2616,9 @@ msgstr "打开“缩放”并选择“检测”，根据录制的点击放置缩
 
 msgid "This video has no recorded clicks, so there is nothing to zoom on."
 msgstr "此视频没有录制的点击，因此没有可缩放的内容。"
+
+msgid "Instant animation"
+msgstr "Instant animation"
+
+msgid "If enabled, the zoom will be applied instantly without any animation."
+msgstr "If enabled, the zoom will be applied instantly without any animation."

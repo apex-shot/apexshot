@@ -2655,3 +2655,9 @@ msgstr "Откройте Zoom и выберите «Определить», чт
 
 msgid "This video has no recorded clicks, so there is nothing to zoom on."
 msgstr "В этом видео нет записанных щелчков, поэтому приближать нечего."
+
+msgid "Instant animation"
+msgstr "Instant animation"
+
+msgid "If enabled, the zoom will be applied instantly without any animation."
+msgstr "If enabled, the zoom will be applied instantly without any animation."
