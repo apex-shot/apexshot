@@ -1321,6 +1321,105 @@ fn suggest_zoom_clips_refits_click_near_trim_boundary() {
 }
 
 #[test]
+fn a_generated_zoom_follows_its_footage_through_a_head_trim() {
+    // The pass runs, then the head is trimmed. The click's footage moves
+    // earlier, so a clip that only remembered its composition time would be
+    // left framing whatever now sits at that spot.
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);
+    state.set_trim_end(6.0);
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    assert!((state.zoom_clips[0].start - 4.6).abs() < 1e-9);
+
+    state.set_trim_start(2.0);
+
+    assert!((state.zoom_clips[0].start - 2.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 4.0).abs() < 1e-9);
+}
+
+#[test]
+fn a_generated_zoom_keeps_its_footage_when_the_clip_is_retimed() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);
+    state.set_trim_end(6.0);
+    state.suggest_zoom_clips();
+
+    // Same 1.4 source seconds, played twice as fast.
+    state.set_selected_clip_speed(2.0);
+    assert!((state.zoom_clips[0].start - 2.3).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 3.0).abs() < 1e-9);
+
+    // And stretched to a quarter speed, which is 5.6 composition seconds.
+    state.set_selected_clip_speed(0.25);
+    assert!((state.zoom_clips[0].start - 18.4).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 24.0).abs() < 1e-9);
+}
+
+#[test]
+fn a_cut_inside_a_generated_zoom_leaves_it_with_the_piece_that_owns_its_start() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);
+    state.set_trim_end(6.0);
+    state.suggest_zoom_clips();
+    assert!((state.zoom_clips[0].start - 4.6).abs() < 1e-9);
+
+    state.add_cut(5.0);
+
+    assert_eq!(state.zoom_clips.len(), 1);
+    assert!((state.zoom_clips[0].start - 4.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 5.0).abs() < 1e-9);
+}
+
+#[test]
+fn a_generated_zoom_goes_when_its_footage_leaves_the_composition() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(2.0, 800.0, 500.0), (8.0, 800.0, 500.0)]);
+    assert_eq!(state.suggest_zoom_clips(), 2);
+    state.add_cut(5.0);
+
+    state.selected_segment = Some(0);
+    state.remove_selected_clip();
+
+    // The clip over the dropped segment has nothing left to frame; the one
+    // over the kept tail stays on its click.
+    assert_eq!(state.zoom_clips.len(), 1);
+    assert!((state.zoom_clips[0].start - 7.4).abs() < 1e-9);
+}
+
+#[test]
+fn a_zoom_the_user_moves_keeps_the_time_they_gave_it() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);
+    state.set_trim_end(6.0);
+    state.suggest_zoom_clips();
+
+    state.set_zoom_range(0, 3.0, 4.0);
+    state.set_trim_start(2.0);
+
+    assert!(state.zoom_clips[0].anchor.is_none());
+    assert!((state.zoom_clips[0].start - 3.0).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 4.0).abs() < 1e-9);
+}
+
+#[test]
+fn a_duplicated_generated_zoom_is_not_anchored_to_the_original() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);
+    state.set_trim_end(6.0);
+    state.suggest_zoom_clips();
+
+    assert_eq!(state.duplicate_zoom_clip(0, 0.0), Some(0));
+
+    state.set_trim_start(2.0);
+
+    // The copy sits where it was dropped; only the clip the generator placed
+    // follows the footage.
+    assert!((state.zoom_clips[0].start - 0.0).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 1.4).abs() < 1e-9);
+    assert!((state.zoom_clips[1].start - 2.6).abs() < 1e-9);
+}
+
+#[test]
 fn suggest_zoom_clips_assigns_exact_cut_click_to_following_segment() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(4.0, 800.0, 500.0)]);

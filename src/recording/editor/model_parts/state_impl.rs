@@ -174,6 +174,7 @@ impl VideoEditState {
         };
         self.segment_starts[index] = start;
         self.sync_offset_from_segments();
+        self.reproject_anchored_zooms();
         self.clamp_timeline_scroll();
     }
 
@@ -183,6 +184,7 @@ impl VideoEditState {
         }
         self.segment_starts[index] = self.unoverlap_segment_start(index, self.segment_start(index));
         self.sync_offset_from_segments();
+        self.reproject_anchored_zooms();
         self.clamp_timeline_scroll();
     }
 
@@ -269,6 +271,7 @@ impl VideoEditState {
                 *start = (*start + delta).max(0.0);
             }
         }
+        self.reproject_anchored_zooms();
         self.clamp_timeline_scroll();
     }
 

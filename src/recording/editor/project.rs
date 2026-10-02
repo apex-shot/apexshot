@@ -12,8 +12,8 @@ use std::time::UNIX_EPOCH;
 use super::model::{
     AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorSettings, CursorTheme,
     DimensionPreset, ExportQuality, GradientKind, GradientStop, ProjectMedia, ProjectMediaKind,
-    VideoBackground, VideoEditState, VideoGradient, ZoomClip, ZoomEasing, ZoomEvidence, ZoomMode,
-    ZoomOrigin, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY,
+    VideoBackground, VideoEditState, VideoGradient, ZoomAnchor, ZoomClip, ZoomEasing, ZoomEvidence,
+    ZoomMode, ZoomOrigin, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY,
     DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW,
     DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED, DEFAULT_CURSOR_SWAY,
     DEFAULT_CURSOR_TILT, DEFAULT_CURSOR_TRAIL,
@@ -152,6 +152,17 @@ pub struct ZoomClipFile {
     /// an unknown clip is treated as the user's work, never safe to replace.
     #[serde(default)]
     pub origin: ZoomOriginFile,
+    /// Footage the clip follows. Missing in older projects and absent for a
+    /// clip the user placed, both of which keep the span they were saved at.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<ZoomAnchorFile>,
+}
+
+/// The footage a clip is anchored to, as written to disk. See `ZoomAnchor`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ZoomAnchorFile {
+    pub source_start: f64,
+    pub source_end: f64,
 }
 
 /// Ownership of a zoom clip as written to disk. See `ZoomOrigin`.
@@ -501,6 +512,10 @@ fn zoom_to_file(clip: &ZoomClip) -> ZoomClipFile {
             ZoomOrigin::User => ZoomOriginFile::User,
             ZoomOrigin::Legacy => ZoomOriginFile::Legacy,
         },
+        anchor: clip.anchor.map(|anchor| ZoomAnchorFile {
+            source_start: anchor.source_start,
+            source_end: anchor.source_end,
+        }),
     }
 }
 
@@ -542,6 +557,10 @@ fn zoom_from_file(clip: &ZoomClipFile) -> ZoomClip {
             ZoomOriginFile::User => ZoomOrigin::User,
             ZoomOriginFile::Legacy => ZoomOrigin::Legacy,
         },
+        anchor: clip.anchor.map(|anchor| ZoomAnchor {
+            source_start: anchor.source_start,
+            source_end: anchor.source_end,
+        }),
     }
 }
 
@@ -1440,6 +1459,71 @@ mod tests {
         let mut restored = VideoEditState::new(metadata_for(&video, 16));
         restored.apply_project(file);
         assert_eq!(restored.zoom_clips[0].origin, ZoomOrigin::Legacy);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn roundtrip_preserves_a_generated_zoom_anchor() {
+        let dir = scratch("zoom-anchor");
+        let video = write_video(&dir, "clip.mp4", 24);
+        let mut state = VideoEditState::new(metadata_for(&video, 24));
+        state.zoom_clips.push(ZoomClip {
+            start: 0.5,
+            end: 2.3,
+            scale: 1.5,
+            center: (0.4, 0.6),
+            mode: ZoomMode::Auto,
+            origin: ZoomOrigin::Generated,
+            anchor: Some(ZoomAnchor {
+                source_start: 1.25,
+                source_end: 3.05,
+            }),
+            ..Default::default()
+        });
+        save_project(&video, &state.to_project()).unwrap();
+        let loaded = load_project(&video).expect("project should load");
+        let mut restored = VideoEditState::new(metadata_for(&video, 24));
+        restored.apply_project(loaded);
+        assert_eq!(
+            restored.zoom_clips[0].anchor,
+            Some(ZoomAnchor {
+                source_start: 1.25,
+                source_end: 3.05,
+            })
+        );
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_zoom_without_an_anchor_writes_no_anchor_field() {
+        // Existing projects must not gain a key for clips that have no anchor,
+        // and a project written before anchors existed reads back unanchored:
+        // its span is the composition time it was saved with.
+        let dir = scratch("no-zoom-anchor");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let mut state = VideoEditState::new(metadata_for(&video, 16));
+        state.zoom_clips.push(ZoomClip {
+            start: 0.5,
+            end: 2.3,
+            scale: 2.0,
+            center: (0.4, 0.6),
+            mode: ZoomMode::Manual,
+            ..Default::default()
+        });
+        let json = serde_json::to_value(state.to_project()).unwrap();
+        let clip = json
+            .get("zoom_clips")
+            .and_then(|value| value.as_array())
+            .and_then(|clips| clips.first())
+            .expect("the clip is serialized");
+        assert!(clip.get("anchor").is_none());
+
+        let file: VideoProjectFile = serde_json::from_value(json).unwrap();
+        assert!(file.zoom_clips[0].anchor.is_none());
+        let mut restored = VideoEditState::new(metadata_for(&video, 16));
+        restored.apply_project(file);
+        assert!(restored.zoom_clips[0].anchor.is_none());
         let _ = fs::remove_dir_all(&dir);
     }
 
