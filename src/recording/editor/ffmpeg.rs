@@ -6,6 +6,21 @@ use anyhow::{anyhow, Context};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Distinguishes concurrent exports' scratch directories. The process id and
+/// start time are not enough: two exports that start at the same time (the
+/// test suite, or two editor windows) would otherwise share one `zoom.cmd`.
+static EXPORT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+fn unique_export_dir(kind: &str, start: f64) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "apexshot-{kind}-{}-{}-{}",
+        std::process::id(),
+        (start * 1000.0) as u64,
+        EXPORT_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ))
+}
 
 pub fn ensure_tools_available() -> anyhow::Result<()> {
     ensure_tool("ffmpeg")?;
@@ -477,15 +492,15 @@ fn build_composite_convert_args(
     end: f64,
     output_path: &Path,
 ) -> Vec<String> {
-    let work_dir = std::env::temp_dir().join(format!(
-        "apexshot-export-{}-{}",
-        std::process::id(),
-        (start * 1000.0) as u64
-    ));
+    let work_dir = unique_export_dir("export", start);
     let _ = std::fs::create_dir_all(&work_dir);
     let cmd_path = work_dir.join("zoom.cmd");
     let cursor_path = work_dir.join("cursor.rgba");
-    let _ = std::fs::write(&cmd_path, build_sendcmd(state, start, end));
+    // The held tail is part of the composition, so the camera command file has
+    // to cover it too: preview keeps moving the zoom through a freeze, and the
+    // export must match.
+    let freeze = state.freeze_tail_seconds();
+    let _ = std::fs::write(&cmd_path, build_sendcmd(state, start, end + freeze));
 
     // The video is the fitted rect inside the output canvas; a fixed Frame
     // insets it with the background padding, and the fill (or the black
@@ -539,8 +554,14 @@ fn build_composite_convert_args(
         .flatten();
     let mask_index = 1 + usize::from(draw_cursor) + usize::from(use_wallpaper);
 
+    // The freeze hold pads the source *before* the zoom crop. Cloning after
+    // the crop would replay one already-composited frame for the whole tail
+    // and the camera would sit still while the preview keeps moving.
     let mut filter = format!(
-        "[0:v]sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1",
+        "[0:v]{}sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1",
+        freeze_tail_tpad(state)
+            .map(|pad| format!("{pad},"))
+            .unwrap_or_default(),
         escape_filter_path(&cmd_path),
         static_crop_prefix(state),
         src_w = eff_w.max(2),
@@ -592,10 +613,6 @@ fn build_composite_convert_args(
         filter.push_str(&format!(",setpts=PTS/{speed}"));
     }
     if let Some(pad) = lead_in_tpad(state) {
-        filter.push(',');
-        filter.push_str(&pad);
-    }
-    if let Some(pad) = freeze_tail_tpad(state) {
         filter.push(',');
         filter.push_str(&pad);
     }
@@ -823,7 +840,7 @@ fn run_multi_segment_trim(
     output_path: &Path,
     convert: bool,
 ) -> anyhow::Result<()> {
-    let tmp_dir = std::env::temp_dir().join(format!("apexshot-segments-{}", std::process::id()));
+    let tmp_dir = unique_export_dir("segments", 0.0);
     std::fs::create_dir_all(&tmp_dir)?;
 
     let placed = state.ordered_placed_segments();
@@ -840,7 +857,9 @@ fn run_multi_segment_trim(
         let mut seg_end = end;
         let freeze = state.freeze_tail_seconds();
         if i == last_index && freeze > 0.0 {
-            // Hold the last frame past the source's end.
+            // Hold the last frame past the source's end. The builders add the
+            // hold themselves, so they get the real source end; `seg_end`
+            // only tracks how long the finished segment will run.
             seg_end += freeze;
         } else {
             // Only the final segment may carry the hold; clearing it here
@@ -850,9 +869,9 @@ fn run_multi_segment_trim(
         }
         cursor = comp + (seg_end - start).max(0.0) / state.speed_for_source(start);
         let args = if convert {
-            build_single_convert_args(&segment_state, start, seg_end, &seg_path)
+            build_single_convert_args(&segment_state, start, end, &seg_path)
         } else {
-            build_single_trim_args(&segment_state, start, seg_end, &seg_path)
+            build_single_trim_args(&segment_state, start, end, &seg_path)
         };
         run_ffmpeg(args, &seg_path).with_context(|| format!("failed to export segment {i}"))?;
         segment_files.push(seg_path);
@@ -1634,6 +1653,35 @@ mod tests {
         (output.stdout[0], output.stdout[1], output.stdout[2])
     }
 
+    /// RGB of pixel (`x`, `y`) at `t` seconds into `path`.
+    fn pixel_at(path: &Path, t: f64, x: u32, y: u32) -> (u8, u8, u8) {
+        let output = Command::new("ffmpeg")
+            .args([
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-ss",
+                &format!("{t:.3}"),
+                "-i",
+                path.to_str().unwrap(),
+                "-vf",
+                &format!("crop=2:2:{x}:{y}"),
+                "-frames:v",
+                "1",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgb24",
+                "-",
+            ])
+            .output()
+            .expect("ffmpeg pixel dump");
+        assert!(output.status.success(), "pixel dump failed");
+        assert!(output.stdout.len() >= 3, "pixel dump returned no bytes");
+        (output.stdout[0], output.stdout[1], output.stdout[2])
+    }
+
     #[test]
     fn framed_export_fills_the_letterbox_end_to_end() {
         if Command::new("ffmpeg").arg("-version").output().is_err() {
@@ -1704,6 +1752,88 @@ mod tests {
         let _ = std::fs::remove_file(&framed);
         let _ = std::fs::remove_file(&plain);
     }
+
+    #[test]
+    fn a_zoom_advances_through_the_frozen_tail_in_the_export() {
+        if Command::new("ffmpeg").arg("-version").output().is_err() {
+            return;
+        }
+        let dir = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("test-fixtures");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join(format!(
+            "apexshot-freeze-zoom-source-{}.mp4",
+            std::process::id()
+        ));
+        let frozen = dir.join(format!(
+            "apexshot-freeze-zoom-out-{}.mp4",
+            std::process::id()
+        ));
+
+        // One second, left half black and right half white, so a crop that
+        // pans right changes what a fixed output pixel samples.
+        let created = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=320x240:r=30:d=1",
+                "-vf",
+                "drawbox=x=160:y=0:w=160:h=240:color=white:t=fill",
+                "-pix_fmt",
+                "yuv420p",
+                source.to_str().unwrap(),
+            ])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if !created {
+            return;
+        }
+
+        let metadata = probe_metadata(&source).expect("probe the fixture");
+        let mut state = VideoEditState::new(metadata);
+        assert!(state.extend_last_segment(1.0), "the hold must take");
+        // The zoom lives entirely in the hold and pans onto the white half, so
+        // it only reaches its framing *after* the source's last frame.
+        state
+            .zoom_clips
+            .push(crate::recording::editor::model::ZoomClip {
+                start: 1.0,
+                end: 2.0,
+                scale: 2.0,
+                center: (240.0, 120.0),
+                ease_ms: 0,
+                easing: crate::recording::editor::model::ZoomEasing::Smooth,
+                mode: crate::recording::editor::model::ZoomMode::Manual,
+                ..Default::default()
+            });
+        export_edited_to(&state, frozen.clone()).expect("export the held tail");
+
+        // Real footage, before the zoom: the top-left pixel is the black half.
+        let (r0, g0, b0) = pixel_at(&frozen, 0.3, 10, 10);
+        assert!(
+            r0 < 60 && g0 < 60 && b0 < 60,
+            "real frames before the zoom stay black, got ({r0},{g0},{b0})"
+        );
+        // Deep in the hold the camera has panned right, so the same output
+        // pixel now samples the white half instead of a frozen, un-zoomed copy.
+        let (r1, g1, b1) = pixel_at(&frozen, 1.7, 10, 10);
+        assert!(
+            r1 > 180 && g1 > 180 && b1 > 180,
+            "the held tail must be re-cropped by the advancing zoom, got ({r1},{g1},{b1})"
+        );
+
+        let _ = std::fs::remove_file(&source);
+        let _ = std::fs::remove_file(&frozen);
+    }
 }
 
 #[cfg(test)]
@@ -1753,6 +1883,37 @@ mod freeze_tests {
         assert!(
             args.iter().any(|arg| arg == "-an"),
             "the hold must not drag audio past the source end: {args:?}"
+        );
+    }
+
+    #[test]
+    fn a_frozen_tail_clones_before_the_zoom_crop() {
+        let mut state = state();
+        state.extend_last_segment(1.0);
+        state
+            .zoom_clips
+            .push(crate::recording::editor::model::ZoomClip {
+                start: 9.0,
+                end: 10.5,
+                scale: 2.0,
+                center: (1400.0, 700.0),
+                ease_ms: 600,
+                easing: crate::recording::editor::model::ZoomEasing::Smooth,
+                mode: crate::recording::editor::model::ZoomMode::Manual,
+                ..Default::default()
+            });
+        let args =
+            build_single_convert_args(&state, 0.0, 10.0, std::path::Path::new("/tmp/out.mp4"));
+        let filter = filter_of(&args);
+        let freeze = filter
+            .find("tpad=stop_mode=clone")
+            .expect("the hold must pad the filter graph");
+        let sendcmd = filter
+            .find("sendcmd=")
+            .expect("a zoom must drive the crop through sendcmd");
+        assert!(
+            freeze < sendcmd,
+            "the hold must clone frames before the zoom crop so the tail is re-cropped: {filter}"
         );
     }
 
