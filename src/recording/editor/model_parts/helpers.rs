@@ -256,12 +256,12 @@ fn morph_gap_predecessor(clips: &[ZoomClip], t: f64) -> Option<usize> {
 /// target, click-proximity stiffness, and a per-zoom instant snap.
 ///
 /// Deliberately omitted: drag/release stiffness and typing suppression. The
-/// sidecar records pointer samples `(t, x, y)` and clicks `(t, x, y, button)`
-/// only — press/drag state was never recorded and keystroke capture was
-/// deliberately removed. Faking either from cursor speed would invent a
-/// signal the recording never had, and collecting key identities is out of
-/// scope. Where the studied camera would stiffen while dragging or hide while
-/// typing, this camera keeps following the movement groups.
+/// sidecar now records mouse press intervals `(down, up, button, dragged)`,
+/// so the drag signal exists; no drag spring is wired until its value is
+/// agreed. Keystroke capture was deliberately removed, so typing suppression
+/// has no signal and key identities are never collected. Where the studied
+/// camera would stiffen while dragging or hide while typing, this camera
+/// keeps following the movement groups.
 ///
 /// The evaluator is pure: every call simulates from the clip's source start
 /// to the evaluation time at a fixed step, starting at the clip's stored

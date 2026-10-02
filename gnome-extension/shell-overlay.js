@@ -8,6 +8,7 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {classifyCursorTracker} from './cursor-classifier.js';
+import {PressTracker} from './press-tracker.js';
 
 const DBUS_NAME = 'org.apexshot.ShellOverlay';
 const DBUS_PATH = '/org/apexshot/ShellOverlay';
@@ -56,6 +57,12 @@ const DBUS_INTERFACE = `
       <arg type="a(diis)" name="samples" direction="out"/>
       <arg type="a(diii)" name="clicks" direction="out"/>
     </method>
+    <method name="StopPointerTrackV2">
+      <arg type="x" name="t0" direction="out"/>
+      <arg type="a(diis)" name="samples" direction="out"/>
+      <arg type="a(diii)" name="clicks" direction="out"/>
+      <arg type="a(ddib)" name="presses" direction="out"/>
+    </method>
     <method name="GetPointerSnapshot">
       <arg type="i" name="x" direction="out"/>
       <arg type="i" name="y" direction="out"/>
@@ -103,6 +110,7 @@ export class ShellOverlayService {
         this._t0 = 0;
         this._samples = [];
         this._clicks = [];
+        this._pressTracker = new PressTracker();
         this._pollId = 0;
         this._tracker = null;
         this._cursorChangedId = 0;
@@ -321,6 +329,7 @@ export class ShellOverlayService {
         this._stopPointerTrackInternal(false);
         this._samples = [];
         this._clicks = [];
+        this._pressTracker = new PressTracker();
         this._t0 = GLib.get_monotonic_time();
         this._tracking = true;
         this._setupCursorTracking();
@@ -337,6 +346,11 @@ export class ShellOverlayService {
     }
 
     StopPointerTrack() {
+        const [t0, samples, clicks] = this._stopPointerTrackInternal(true);
+        return [t0, samples, clicks];
+    }
+
+    StopPointerTrackV2() {
         return this._stopPointerTrackInternal(true);
     }
 
@@ -383,15 +397,22 @@ export class ShellOverlayService {
                 if (!this._tracking)
                     return Clutter.EVENT_PROPAGATE;
                 try {
-                    if (event.type() !== Clutter.EventType.BUTTON_PRESS)
+                    const type = event.type();
+                    if (type !== Clutter.EventType.BUTTON_PRESS &&
+                        type !== Clutter.EventType.BUTTON_RELEASE)
                         return Clutter.EVENT_PROPAGATE;
                     const button = event.get_button();
                     if (button < 1 || button > 3)
                         return Clutter.EVENT_PROPAGATE;
-                    const [x, y] = event.get_coords();
                     const t = (GLib.get_monotonic_time() - this._t0) / 1_000_000;
-                    this._recordClick(t, Math.floor(x), Math.floor(y), button);
-                    this._buttonMask |= this._maskForButton(button);
+                    if (type === Clutter.EventType.BUTTON_PRESS) {
+                        const [x, y] = event.get_coords();
+                        this._notePress(t, Math.floor(x), Math.floor(y), button);
+                        this._buttonMask |= this._maskForButton(button);
+                    } else {
+                        this._noteRelease(t, button);
+                        this._buttonMask &= ~this._maskForButton(button);
+                    }
                 } catch (e) {
                     log(`ApexShot: click handler error: ${e.message}`);
                 }
@@ -430,6 +451,17 @@ export class ShellOverlayService {
         }, 0);
     }
 
+    /// Record a button going down: the click point and the press interval.
+    _notePress(t, x, y, button) {
+        this._recordClick(t, x, y, button);
+        this._pressTracker.press(button, t, x, y);
+    }
+
+    /// Record a button coming up, closing its press interval.
+    _noteRelease(t, button) {
+        this._pressTracker.release(button, t);
+    }
+
     _recordClick(t, x, y, button) {
         const last = this._clicks.length > 0 ? this._clicks[this._clicks.length - 1] : null;
         if (last && last[3] === button && Math.abs(t - last[0]) < 0.03 &&
@@ -443,15 +475,20 @@ export class ShellOverlayService {
     _sampleButtons(t) {
         const current = this._pressedButtonMask();
         const pressed = current & ~this._buttonMask;
+        const released = this._buttonMask & ~current;
         for (const button of [1, 2, 3]) {
-            if ((pressed & this._maskForButton(button)) !== 0)
-                this._recordClick(t, this._x, this._y, button);
+            const mask = this._maskForButton(button);
+            if ((pressed & mask) !== 0)
+                this._notePress(t, this._x, this._y, button);
+            if ((released & mask) !== 0)
+                this._noteRelease(t, button);
         }
         this._buttonMask = current;
     }
 
     _samplePointer(force) {
         this._readPointer();
+        this._pressTracker.move(this._x, this._y);
         const t = (GLib.get_monotonic_time() - this._t0) / 1_000_000;
         // Shell stage events do not include application windows on Wayland,
         // but the global pointer state includes button modifier masks.
@@ -477,8 +514,11 @@ export class ShellOverlayService {
     }
 
     _stopPointerTrackInternal(returnData) {
-        if (this._tracking)
+        if (this._tracking) {
             this._samplePointer(true);
+            const t = (GLib.get_monotonic_time() - this._t0) / 1_000_000;
+            this._pressTracker.closeAll(t);
+        }
         this._tracking = false;
         if (this._pollId) {
             GLib.source_remove(this._pollId);
@@ -500,14 +540,15 @@ export class ShellOverlayService {
         const t0 = this._t0;
         const samples = this._samples.slice();
         const clicks = this._clicks.slice();
+        const presses = this._pressTracker.take();
         this._samples = [];
         this._clicks = [];
         this._t0 = 0;
         this._modifiers = 0;
         this._buttonMask = 0;
         if (returnData)
-            return [t0, samples, clicks];
-        return [0, [], []];
+            return [t0, samples, clicks, presses];
+        return [0, [], [], []];
     }
 
     _redraw() {

@@ -2,9 +2,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
-pub const SIDECAR_VERSION: u32 = 1;
+pub const SIDECAR_VERSION: u32 = 2;
 pub const MAX_POINTER_SAMPLES: usize = 8_000;
 pub const MAX_CLICKS: usize = 500;
+pub const MAX_PRESSES: usize = 500;
 pub const CLICK_PULSE_WINDOW_SECONDS: f64 = 0.08;
 pub const CLICK_RIPPLE_WINDOW_SECONDS: f64 = 0.32;
 
@@ -113,12 +114,27 @@ pub struct PointerSample {
     pub kind: CursorKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ClickSample {
     pub t: f64,
     pub x: f64,
     pub y: f64,
     pub button: i32,
+}
+
+/// One mouse button held from `down` to `up` on the recording clock, in
+/// seconds. `dragged` is set when the pointer moved past a small threshold
+/// before the button came up, so a drag reads differently from a plain click.
+///
+/// Recorded from button state only: button identity and timing, never a key,
+/// a keycode, or a typed character.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PressSample {
+    pub down: f64,
+    pub up: f64,
+    pub button: i32,
+    #[serde(default)]
+    pub dragged: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -128,6 +144,10 @@ pub struct PointerSidecar {
     pub region: CaptureRegion,
     pub pointer: Vec<PointerSample>,
     pub clicks: Vec<ClickSample>,
+    /// Mouse press intervals. Absent in version-1 sidecars, which load as an
+    /// empty list and are otherwise unchanged.
+    #[serde(default)]
+    pub presses: Vec<PressSample>,
     #[serde(default)]
     pub source: PointerDataSource,
 }
@@ -140,6 +160,7 @@ impl PointerSidecar {
             region,
             pointer: Vec::new(),
             clicks: Vec::new(),
+            presses: Vec::new(),
             source: PointerDataSource::Recorded,
         }
     }
@@ -150,6 +171,21 @@ impl PointerSidecar {
 
     pub fn can_render_cursor_overlay(&self) -> bool {
         self.source == PointerDataSource::Recorded && !self.pointer.is_empty()
+    }
+
+    /// Whether a mouse button is held at `t` (the interval is half-open, so a
+    /// press is not held at the exact instant it comes up).
+    pub fn is_pressed_at(&self, t: f64) -> bool {
+        self.presses
+            .iter()
+            .any(|press| t >= press.down && t < press.up)
+    }
+
+    /// Whether the press covering `t` moved far enough to be a drag.
+    pub fn is_dragged_at(&self, t: f64) -> bool {
+        self.presses
+            .iter()
+            .any(|press| press.dragged && t >= press.down && t < press.up)
     }
 
     pub fn sidecar_path(video_path: &Path) -> PathBuf {
@@ -514,6 +550,43 @@ mod tests {
         }"#;
         let sidecar: PointerSidecar = serde_json::from_str(json).unwrap();
         assert_eq!(sidecar.source, PointerDataSource::Recorded);
+        assert!(sidecar.presses.is_empty());
+    }
+
+    #[test]
+    fn new_sidecars_are_version_two() {
+        let sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        assert_eq!(sidecar.version, 2);
+    }
+
+    #[test]
+    fn press_intervals_round_trip_and_report_press_and_drag() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.presses.push(PressSample {
+            down: 1.0,
+            up: 1.5,
+            button: 1,
+            dragged: true,
+        });
+        sidecar.presses.push(PressSample {
+            down: 2.0,
+            up: 2.2,
+            button: 1,
+            dragged: false,
+        });
+
+        let loaded: PointerSidecar =
+            serde_json::from_str(&serde_json::to_string(&sidecar).unwrap()).unwrap();
+        assert_eq!(loaded, sidecar);
+        assert!(loaded.is_pressed_at(1.2));
+        assert!(loaded.is_dragged_at(1.2));
+        assert!(loaded.is_pressed_at(2.1));
+        assert!(!loaded.is_dragged_at(2.1));
+        // The interval is half-open: past the release it is no longer pressed.
+        assert!(!loaded.is_pressed_at(1.5));
+        assert!(!loaded.is_pressed_at(1.9));
     }
 
     #[test]
