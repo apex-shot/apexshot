@@ -22,6 +22,100 @@ fn unique_export_dir(kind: &str, start: f64) -> PathBuf {
     ))
 }
 
+/// A scratch directory that deletes itself when dropped, so an export's
+/// intermediate files (`zoom.cmd`, `cursor.rgba`, the rounded mask) live
+/// exactly as long as the ffmpeg command that reads them — on success, on
+/// error, and on an early `?`. Without it a composite export leaked its
+/// multi-gigabyte `cursor.rgba` into the temp directory forever.
+#[derive(Debug)]
+struct ScratchDir {
+    path: PathBuf,
+}
+
+impl ScratchDir {
+    fn new(kind: &str, start: f64) -> Self {
+        let path = unique_export_dir(kind, start);
+        let _ = std::fs::create_dir_all(&path);
+        Self { path }
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+/// An ffmpeg argument list together with the scratch directory those arguments
+/// read from, kept alive until the command has run. Derefs to the argument
+/// vector so callers can inspect it directly.
+#[derive(Debug)]
+struct ConvertCommand {
+    args: Vec<String>,
+    /// Held only so its `Drop` deletes the scratch tree once the command has
+    /// run; not read directly in production builds.
+    #[allow(dead_code)]
+    scratch: Option<ScratchDir>,
+}
+
+impl std::ops::Deref for ConvertCommand {
+    type Target = Vec<String>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.args
+    }
+}
+
+/// Whether a process is still running. Configured conservatively off Linux:
+/// an unknown pid is treated as alive, so nothing is ever removed without a
+/// `/proc` entry to check.
+fn process_is_alive(pid: u32) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        Path::new("/proc").join(pid.to_string()).exists()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = pid;
+        true
+    }
+}
+
+/// Remove scratch directories left by exports whose process is gone.
+///
+/// Each name carries the creating pid (`apexshot-export-<pid>-...`), so a
+/// directory whose process no longer exists is stale — from a crash, a kill,
+/// or a power loss that skipped [`ScratchDir`]'s drop. The sweep runs before a
+/// new export so a leaked tree cannot accumulate, and never touches a live pid
+/// (this process or a concurrent export).
+pub(crate) fn sweep_stale_scratch_dirs() {
+    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+            continue;
+        };
+        let Some(rest) = name.strip_prefix("apexshot-") else {
+            continue;
+        };
+        // The first all-digit token after the prefix is the creating pid; the
+        // kind words that precede it never contain digits.
+        let Some(pid) = rest.split('-').find_map(|part| part.parse::<u32>().ok()) else {
+            continue;
+        };
+        if pid == std::process::id() || process_is_alive(pid) {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            let _ = std::fs::remove_dir_all(&path);
+        } else {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
+
 pub fn ensure_tools_available() -> anyhow::Result<()> {
     ensure_tool("ffmpeg")?;
     ensure_tool("ffprobe")?;
@@ -285,7 +379,7 @@ pub fn extract_poster_frame(
     }
 
     let args = poster_frame_args(input, output, timestamp_seconds);
-    run_ffmpeg(args, output)?;
+    run_ffmpeg(&args, output)?;
 
     // A seek past the end of a very short clip exits cleanly without writing
     // anything, so treat a missing file as a failure the caller can retry.
@@ -364,7 +458,7 @@ pub fn run_trim_only(state: &VideoEditState, output_path: PathBuf) -> anyhow::Re
     if kept.len() <= 1 {
         let (start, end) = kept.first().copied().unwrap();
         let args = build_single_trim_args(state, start, end, &output_path);
-        run_ffmpeg(args, &output_path)?;
+        run_ffmpeg(&args, &output_path)?;
     } else {
         run_multi_segment_trim(state, &kept, &output_path, false)?;
     }
@@ -378,8 +472,8 @@ pub fn run_convert(state: &VideoEditState, output_path: PathBuf) -> anyhow::Resu
     }
     if kept.len() <= 1 {
         let (start, end) = kept.first().copied().unwrap();
-        let args = build_single_convert_args(state, start, end, &output_path);
-        run_ffmpeg(args, &output_path)?;
+        let command = build_single_convert_args(state, start, end, &output_path);
+        run_ffmpeg(&command.args, &output_path)?;
     } else {
         run_multi_segment_trim(state, &kept, &output_path, true)?;
     }
@@ -394,6 +488,7 @@ pub fn export_edited(state: &VideoEditState) -> anyhow::Result<PathBuf> {
 }
 
 pub fn export_edited_to(state: &VideoEditState, output_path: PathBuf) -> anyhow::Result<PathBuf> {
+    sweep_stale_scratch_dirs();
     if state.needs_reencode() {
         return run_convert(state, output_path);
     }
@@ -455,7 +550,7 @@ fn build_single_convert_args(
     start: f64,
     end: f64,
     output_path: &Path,
-) -> Vec<String> {
+) -> ConvertCommand {
     if state.needs_composite() {
         return build_composite_convert_args(state, start, end, output_path);
     }
@@ -483,7 +578,10 @@ fn build_single_convert_args(
     ]);
     args.extend(convert_audio_args(state, speed, start));
     args.push(output_path.to_string_lossy().into_owned());
-    args
+    ConvertCommand {
+        args,
+        scratch: None,
+    }
 }
 
 fn build_composite_convert_args(
@@ -491,11 +589,10 @@ fn build_composite_convert_args(
     start: f64,
     end: f64,
     output_path: &Path,
-) -> Vec<String> {
-    let work_dir = unique_export_dir("export", start);
-    let _ = std::fs::create_dir_all(&work_dir);
-    let cmd_path = work_dir.join("zoom.cmd");
-    let cursor_path = work_dir.join("cursor.rgba");
+) -> ConvertCommand {
+    let scratch = ScratchDir::new("export", start);
+    let cmd_path = scratch.path.join("zoom.cmd");
+    let cursor_path = scratch.path.join("cursor.rgba");
     // The held tail is part of the composition, so the camera command file has
     // to cover it too: preview keeps moving the zoom through a freeze, and the
     // export must match.
@@ -546,7 +643,7 @@ fn build_composite_convert_args(
     let rounded_mask = state
         .has_corner_radius()
         .then(|| {
-            let path = work_dir.join("radius.png");
+            let path = scratch.path.join("radius.png");
             write_rounded_mask(&path, video_w, video_h, state.background_corner_radius_px())
                 .ok()
                 .map(|_| path)
@@ -669,7 +766,10 @@ fn build_composite_convert_args(
     ]);
     args.extend(convert_audio_args(state, speed, start));
     args.push(output_path.to_string_lossy().into_owned());
-    args
+    ConvertCommand {
+        args,
+        scratch: Some(scratch),
+    }
 }
 
 /// Write the rounded-corner alpha mask the composite graph blends the card
@@ -840,8 +940,8 @@ fn run_multi_segment_trim(
     output_path: &Path,
     convert: bool,
 ) -> anyhow::Result<()> {
-    let tmp_dir = unique_export_dir("segments", 0.0);
-    std::fs::create_dir_all(&tmp_dir)?;
+    let segments_scratch = ScratchDir::new("segments", 0.0);
+    let tmp_dir = &segments_scratch.path;
 
     let placed = state.ordered_placed_segments();
     let mut segment_files = Vec::new();
@@ -868,12 +968,16 @@ fn run_multi_segment_trim(
             segment_state.frozen_segment = None;
         }
         cursor = comp + (seg_end - start).max(0.0) / state.speed_for_source(start);
-        let args = if convert {
+        let command = if convert {
             build_single_convert_args(&segment_state, start, end, &seg_path)
         } else {
-            build_single_trim_args(&segment_state, start, end, &seg_path)
+            ConvertCommand {
+                args: build_single_trim_args(&segment_state, start, end, &seg_path),
+                scratch: None,
+            }
         };
-        run_ffmpeg(args, &seg_path).with_context(|| format!("failed to export segment {i}"))?;
+        run_ffmpeg(&command.args, &seg_path)
+            .with_context(|| format!("failed to export segment {i}"))?;
         segment_files.push(seg_path);
     }
 
@@ -899,16 +1003,14 @@ fn run_multi_segment_trim(
         "copy".into(),
         output_path.to_string_lossy().into_owned(),
     ];
-    run_ffmpeg(concat_args, output_path)?;
+    run_ffmpeg(&concat_args, output_path)?;
 
-    // Cleanup
-    let _ = std::fs::remove_dir_all(&tmp_dir);
     Ok(())
 }
 
-fn run_ffmpeg(args: Vec<String>, output_path: &Path) -> anyhow::Result<()> {
+fn run_ffmpeg(args: &[String], output_path: &Path) -> anyhow::Result<()> {
     let output = Command::new("ffmpeg")
-        .args(&args)
+        .args(args)
         .output()
         .context("failed to run ffmpeg")?;
 
@@ -2030,5 +2132,64 @@ mod freeze_tests {
             !filter.contains("stop_mode=clone"),
             "an ordinary export must stay untouched: {filter}"
         );
+    }
+
+    #[test]
+    fn a_composite_export_removes_its_scratch_dir_when_the_command_drops() {
+        // A zoom forces the composite graph, which writes `zoom.cmd` — and, for
+        // a real recording, a multi-gigabyte `cursor.rgba` — into a temp dir.
+        // The command owns that dir; dropping it must delete the whole tree so
+        // an export cannot leak its scratch into the user's temp directory.
+        let mut s = state();
+        s.zoom_clips
+            .push(crate::recording::editor::model::ZoomClip {
+                start: 1.5,
+                end: 3.3,
+                scale: 1.8,
+                center: (960.0, 540.0),
+                ..Default::default()
+            });
+        assert!(s.needs_composite());
+        let command = build_single_convert_args(
+            &s,
+            s.trim_start_seconds,
+            s.trim_end_seconds,
+            std::path::Path::new("/tmp/output.mp4"),
+        );
+        let scratch = command
+            .scratch
+            .as_ref()
+            .expect("a composite command must own a scratch dir")
+            .path
+            .clone();
+        assert!(
+            scratch.is_dir(),
+            "the scratch dir must exist while the command runs"
+        );
+        drop(command);
+        assert!(
+            !scratch.exists(),
+            "dropping the command must remove its scratch dir"
+        );
+    }
+
+    #[test]
+    fn the_sweep_removes_scratch_from_dead_processes_only() {
+        // A pid that cannot be running: the sweep must remove its tree, which
+        // is what a crashed or killed export would have left behind.
+        let stale = std::env::temp_dir().join(format!("apexshot-export-{}-7-0", u32::MAX - 3));
+        std::fs::create_dir_all(&stale).unwrap();
+        // Our own pid is live: the sweep must leave its tree alone.
+        let live = std::env::temp_dir().join(format!("apexshot-export-{}-7-0", std::process::id()));
+        std::fs::create_dir_all(&live).unwrap();
+
+        super::sweep_stale_scratch_dirs();
+
+        assert!(
+            !stale.exists(),
+            "stale scratch from a dead pid must be removed"
+        );
+        assert!(live.exists(), "live scratch must be kept");
+        let _ = std::fs::remove_dir_all(&live);
     }
 }
