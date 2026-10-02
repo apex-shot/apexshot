@@ -100,6 +100,10 @@ enum InitialVideo {
 }
 
 fn build_window(application: &Application, initial_video: InitialVideo) {
+    // Clear scratch left by an export that crashed, was killed, or lost power
+    // before its cleanup ran. Opening the editor is the earliest point a user
+    // would notice, and the sweep skips any live process's tree.
+    ffmpeg::sweep_stale_scratch_dirs();
     let window = ApplicationWindow::builder()
         .application(application)
         .title(t("ApexShot Recording Editor"))
