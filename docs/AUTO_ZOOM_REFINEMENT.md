@@ -1,0 +1,52 @@
+# Auto zoom refinement
+
+Replacing the multi-signal automatic zoom detector with a small, predictable
+model: **automatic zooms come from recorded clicks only.**
+
+## Target behaviour
+
+| Rule | Value |
+| --- | --- |
+| Window opens before the click | 0.3 s |
+| Window runs after the click | 2.5 s |
+| Clicks this close share one zoom | 2.5 s |
+| Clicks in the last | 1.0 s are ignored |
+| A zoom never reaches the last | 0.8 s of the recording |
+| Default zoom level | 2.0× |
+| Shortest window kept | 0.1 s |
+
+Clicks seed the windows. Pointer movement over a window decides where it looks
+(the middle of the range the pointer covered). Windows are merged while they
+are no further apart than the merge gap, so a burst of clicks becomes one shot
+and overlapping zooms cannot be produced. Each result is a source-time window
+with a pixel focus, so trimming, cutting, or retiming keeps the zoom on its
+footage.
+
+## Why this replaces the current detector
+
+The current detector blends click sessions, purposeful landings, spatial
+splits, priority scoring, and a region fit. Each rule needs its own constants
+and its own failure mode, and the interactions between them already produced
+overlapping candidates and a staged count that `Apply` could not honour. The
+click-window model removes the class of bug instead of patching it: windows
+merge before they are ever placed.
+
+The camera that follows inside a zoom is a separate concern and stays as it is
+until its own phase.
+
+## Phases
+
+1. **Window generator** — new `auto_zoom` module: click windows, merge, clamp,
+   focus, source anchoring. No behaviour change on its own. *This change.*
+2. **Wire in and remove the old detector** — placement uses the generator;
+   `zoom_suggest` and the clicks/hovers evidence choice are deleted.
+3. **Camera follow** — a per-zoom camera target and motion model that matches
+   the merged-window focus.
+4. **Style inheritance** — a new zoom opens with the level and style of the
+   last zoom the user edited.
+
+## Non-goals
+
+- No hover-only or inferred-motion automatic zooms.
+- No per-zoom region fit; the level is the model default (see phase 4 for
+  inheriting a user's edited level).
