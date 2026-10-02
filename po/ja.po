@@ -2578,6 +2578,9 @@ msgstr "次回の検出時に適用されます"
 msgid "Detect uses recorded clicks only"
 msgstr "検出は記録されたクリックのみを使用します"
 
+msgid "Detect uses recorded clicks"
+msgstr "検出は記録されたクリックを使用します"
+
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "検出は記録されたクリックと意図的なポインタの停止を使用します"
 
@@ -2595,3 +2598,21 @@ msgstr "準備されたズームを破棄します"
 
 msgid "{count} zoom suggestions ready to review"
 msgstr "確認待ちのズーム候補が{count}件あります"
+
+msgid "Add a Manual zoom from the timeline"
+msgstr "タイムラインから手動ズームを追加"
+
+msgid "Detect automatic zooms from recorded clicks"
+msgstr "記録されたクリックから自動ズームを検出"
+
+msgid "No clear clicks were found."
+msgstr "明確なクリックが見つかりませんでした。"
+
+msgid "No new zooms were added. Manual zooms are preserved."
+msgstr "新しいズームは追加されませんでした。手動ズームは保持されます。"
+
+msgid "Open Zoom and choose Detect to place zooms from the recorded clicks, or use Manual mode to place them yourself."
+msgstr "Zoom を開いて「検出」を選ぶと、記録されたクリックにズームを配置します。手動モードで自分で配置することもできます。"
+
+msgid "This video has no recorded clicks, so there is nothing to zoom on."
+msgstr "この動画には記録されたクリックがないため、ズームする対象がありません。"

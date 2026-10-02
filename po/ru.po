@@ -2614,6 +2614,9 @@ msgstr "Применится при следующем запуске обнар
 msgid "Detect uses recorded clicks only"
 msgstr "Обнаружить использует только записанные щелчки"
 
+msgid "Detect uses recorded clicks"
+msgstr "Обнаружение использует записанные щелчки"
+
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "Обнаружить использует записанные щелчки и намеренные паузы курсора"
 
@@ -2631,3 +2634,21 @@ msgstr "Отклонить подготовленные зумы"
 
 msgid "{count} zoom suggestions ready to review"
 msgstr "Зумов готово к проверке: {count}"
+
+msgid "Add a Manual zoom from the timeline"
+msgstr "Добавьте ручной зум на таймлайне"
+
+msgid "Detect automatic zooms from recorded clicks"
+msgstr "Определять автоматические зумы по записанным щелчкам"
+
+msgid "No clear clicks were found."
+msgstr "Чётких щелчков не найдено."
+
+msgid "No new zooms were added. Manual zooms are preserved."
+msgstr "Новые зумы не добавлены. Ручные зумы сохранены."
+
+msgid "Open Zoom and choose Detect to place zooms from the recorded clicks, or use Manual mode to place them yourself."
+msgstr "Откройте Zoom и выберите «Определить», чтобы расставить зумы по записанным щелчкам, или разместите их вручную в режиме Manual."
+
+msgid "This video has no recorded clicks, so there is nothing to zoom on."
+msgstr "В этом видео нет записанных щелчков, поэтому приближать нечего."

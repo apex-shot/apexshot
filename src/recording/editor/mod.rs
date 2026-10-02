@@ -1,3 +1,4 @@
+pub mod auto_zoom;
 pub mod cursor_export;
 pub mod cursor_sprite;
 pub mod ffmpeg;
@@ -7,7 +8,6 @@ pub mod project;
 pub mod sidecar;
 pub mod ui_support;
 pub(crate) mod window;
-pub mod zoom_suggest;
 
 use std::path::PathBuf;
 

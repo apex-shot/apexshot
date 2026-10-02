@@ -1,3 +1,5 @@
+use crate::recording::editor::auto_zoom;
+
 impl VideoEditState {
     pub fn add_zoom_at_playhead(&mut self) -> Option<usize> {
         self.add_zoom_at(self.playhead_seconds)
@@ -20,13 +22,18 @@ impl VideoEditState {
         }
         let center = self.default_zoom_center(start);
         self.record_zoom_command();
+        let style = self.last_edited_zoom_style.unwrap_or(ZoomStyle {
+            scale: DEFAULT_ZOOM_SCALE,
+            easing: ZoomEasing::Glide,
+            ease_ms: DEFAULT_ZOOM_EASE_MS,
+        });
         self.zoom_clips.push(ZoomClip {
             start,
             end,
-            scale: DEFAULT_ZOOM_SCALE,
+            scale: style.scale,
             center,
-            ease_ms: DEFAULT_ZOOM_EASE_MS,
-            easing: ZoomEasing::Glide,
+            ease_ms: style.ease_ms,
+            easing: style.easing,
             mode: if self.supports_auto_zoom() {
                 ZoomMode::Auto
             } else {
@@ -599,71 +606,44 @@ impl VideoEditState {
 
     /// Where a generation pass would put its zooms, without placing any.
     ///
-    /// The placement half of a pass: the trim, cut, crop, region, and overlap
-    /// rules all run here, so a caller can show the result before it becomes
-    /// clips. It records nothing itself — whoever commits the result takes the
-    /// one step for the whole pass.
+    /// The placement half of a pass: the trim, cut, crop, and overlap rules all
+    /// run here, so a caller can show the result before it becomes clips. It
+    /// records nothing itself — whoever commits the result takes the one step
+    /// for the whole pass.
     pub(super) fn placed_zoom_candidates(&self) -> Vec<ZoomCandidate> {
         let Some(sidecar) = &self.sidecar else {
             return Vec::new();
         };
-        let mut suggestions = zoom_suggest::suggest_zooms_with_evidence(
-            sidecar,
-            self.metadata.width as f64,
-            self.metadata.height as f64,
-            self.source_duration(),
-            self.zoom_evidence,
-        );
-        if suggestions.is_empty() {
+        let width = self.metadata.width as f64;
+        let height = self.metadata.height as f64;
+        let clicks = auto_zoom::clicks_from_sidecar(sidecar, width, height);
+        let pointer = auto_zoom::pointer_from_sidecar(sidecar, width, height);
+        let zooms = auto_zoom::automatic_zooms(&clicks, &pointer, self.source_duration());
+        if zooms.is_empty() {
             return Vec::new();
         }
-        suggestions.sort_by(|a, b| {
-            b.priority
-                .total_cmp(&a.priority)
-                .then_with(|| a.start.total_cmp(&b.start))
-        });
         let crop = self.crop_or_full();
         let segments = self.ordered_placed_segments();
-        // The density budget counts candidates that actually land in the kept
-        // edit. Candidates the trim, crop, or an existing clip rejects do not
-        // spend it, so a lower-ranked valid suggestion can still be placed.
-        let limit =
-            ((self.source_duration() / zoom_suggest::SECONDS_PER_SUGGESTION).ceil() as usize).max(1);
-        let mut candidates: Vec<ZoomCandidate> = Vec::with_capacity(limit);
-        for suggestion in suggestions {
-            if candidates.len() >= limit {
-                break;
-            }
-            // At an exact cut both neighboring source ranges contain the
-            // timestamp. Match segment_index_at_source by choosing the range
-            // with the later source start rather than attaching the zoom to
-            // the segment that just ended.
+        let mut candidates = Vec::with_capacity(zooms.len());
+        for zoom in zooms {
+            // A window belongs to the footage its interaction sits on; at an
+            // exact cut the later source range owns the timestamp, matching
+            // reprojection.
             let Some(&(composition_start, source_start, source_end)) = segments
                 .iter()
                 .filter(|&&(_, start, end)| {
-                    suggestion.center_time + 1e-9 >= start && suggestion.center_time <= end + 1e-9
+                    zoom.center_time + 1e-9 >= start && zoom.center_time <= end + 1e-9
                 })
                 .max_by(|a, b| a.1.total_cmp(&b.1))
             else {
                 continue;
             };
-            let mut start = suggestion.start.max(source_start);
-            let mut end = suggestion.end.min(source_end);
-            // A valid interaction close to a trim/cut boundary can lose most
-            // of its pre/post-roll. Refit the minimum useful duration inside
-            // the selected segment instead of dropping the detection.
-            if end - start < zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS
-                && source_end - source_start >= zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS
-            {
-                let half = zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS * 0.5;
-                start = (suggestion.center_time - half).max(source_start);
-                end = (start + zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS).min(source_end);
-                start = (end - zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS).max(source_start);
-            }
-            if end - start < zoom_suggest::MIN_SUGGESTED_ZOOM_SECONDS {
+            let start = zoom.start.max(source_start);
+            let end = zoom.end.min(source_end);
+            if end - start < auto_zoom::MIN_WINDOW_SECONDS {
                 continue;
             }
-            let speed = self.speed_for_source(suggestion.center_time);
+            let speed = self.speed_for_source(start);
             let timeline_start = composition_start + (start - source_start) / speed;
             let timeline_end = composition_start + (end - source_start) / speed;
             if self
@@ -674,26 +654,15 @@ impl VideoEditState {
                 continue;
             }
             let (crop_x, crop_y, crop_w, crop_h) = crop;
-            if suggestion.center.0 < crop_x
-                || suggestion.center.0 >= crop_x + crop_w
-                || suggestion.center.1 < crop_y
-                || suggestion.center.1 >= crop_y + crop_h
+            if zoom.center.0 < crop_x
+                || zoom.center.0 >= crop_x + crop_w
+                || zoom.center.1 < crop_y
+                || zoom.center.1 >= crop_y + crop_h
             {
                 continue;
             }
-            // The zoomed view is the crop at this scale, so it can only be as
-            // tight as the region the suggestion has to hold. A workflow wider
-            // than the crop can show at full strength loosens instead of
-            // cutting off a target, and one that would need less than the
-            // model's minimum zoom does not earn a zoom at all — clamping up
-            // from there would hide part of what the click was about.
-            let fit = (crop_w / (2.0 * suggestion.half_extent.0))
-                .min(crop_h / (2.0 * suggestion.half_extent.1));
-            if fit < MIN_ZOOM_SCALE {
-                continue;
-            }
-            let scale = suggestion.scale.min(fit).clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
-            let center = clamp_zoom_center(crop, scale, suggestion.center);
+            let scale = zoom.scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+            let center = clamp_zoom_center(crop, scale, zoom.center);
             candidates.push(ZoomCandidate {
                 start: timeline_start,
                 end: timeline_end,
@@ -727,12 +696,8 @@ impl VideoEditState {
     /// that owns its start rather than splitting in two.
     ///
     /// Clips the user placed or dragged carry no anchor and never move.
-    /// The composition moved under the clips: re-project the anchored ones and
-    /// drop a staged review, which was placed against the layout that just
-    /// changed.
     pub(crate) fn composition_changed(&mut self) {
         self.reproject_anchored_zooms();
-        self.zoom_candidates.clear();
     }
 
     pub(crate) fn reproject_anchored_zooms(&mut self) {
@@ -845,17 +810,6 @@ impl VideoEditState {
         self.zoom_suggestions_reviewed = false;
     }
 
-    /// Which recorded signals automatic generation draws on.
-    pub fn zoom_evidence(&self) -> ZoomEvidence {
-        self.zoom_evidence
-    }
-
-    /// Choose the evidence automatic generation uses. This is a preference, not
-    /// an edit: it takes no undo step and only changes the next generation pass.
-    pub fn set_zoom_evidence(&mut self, evidence: ZoomEvidence) {
-        self.zoom_evidence = evidence;
-    }
-
     /// Run the automatic zoom pass the first time the editor opens a
     /// recording. Returns true when suggestions were added.
     ///
@@ -911,6 +865,7 @@ impl VideoEditState {
                 clip.scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
             }
             self.protect_zoom_clip(index);
+            self.capture_zoom_style(index);
         }
     }
 
@@ -924,6 +879,7 @@ impl VideoEditState {
                 clip.easing = easing;
             }
             self.protect_zoom_clip(index);
+            self.capture_zoom_style(index);
         }
     }
 
@@ -937,6 +893,18 @@ impl VideoEditState {
                 clip.ease_ms = ease_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
             }
             self.protect_zoom_clip(index);
+            self.capture_zoom_style(index);
+        }
+    }
+
+    /// Remember a zoom's style so the next zoom the user adds opens with it.
+    fn capture_zoom_style(&mut self, index: usize) {
+        if let Some(clip) = self.zoom_clips.get(index) {
+            self.last_edited_zoom_style = Some(ZoomStyle {
+                scale: clip.scale,
+                easing: clip.easing,
+                ease_ms: clip.ease_ms,
+            });
         }
     }
 

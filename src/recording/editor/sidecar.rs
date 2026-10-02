@@ -534,7 +534,13 @@ impl PointerSidecar {
             .collect()
     }
 
-    fn map_to_video(&self, x: f64, y: f64, video_width: f64, video_height: f64) -> (f64, f64) {
+    pub(crate) fn map_to_video(
+        &self,
+        x: f64,
+        y: f64,
+        video_width: f64,
+        video_height: f64,
+    ) -> (f64, f64) {
         if !self.region.is_area() || video_width <= 0.0 || video_height <= 0.0 {
             return (x, y);
         }

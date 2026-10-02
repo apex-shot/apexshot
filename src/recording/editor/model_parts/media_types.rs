@@ -1,5 +1,3 @@
-pub use super::zoom_suggest::ZoomEvidence;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct CursorHideClip {
     pub start: f64,
@@ -139,15 +137,12 @@ pub struct VideoEditState {
     /// on its own, apart from `zoom_clips`, so a user who rejected every
     /// suggestion — or disabled generation — is not asked again on reopen.
     pub zoom_suggestions_reviewed: bool,
-    /// Which recorded signals automatic generation may use. Defaults to
-    /// click-first; mixed evidence keeps unrelated purposeful hovers.
-    pub zoom_evidence: ZoomEvidence,
+    /// Style the last zoom edit settled on, applied to new zooms. `None` until
+    /// the user edits a zoom.
+    pub last_edited_zoom_style: Option<ZoomStyle>,
     /// Undo/redo steps for the zoom track. Runtime-only: not written to the
     /// project, so a reopened recording starts with nothing to undo.
     pub zoom_history: ZoomHistory,
-    /// Suggestions staged for review. Not clips: they reach the preview, the
-    /// export, and the project only once they are applied.
-    pub zoom_candidates: Vec<ZoomCandidate>,
     /// Classic animation keeps a fixed focus point even when the clip is Auto.
     pub zoom_classic: bool,
     /// 0 = fit the whole clip, 100 = 8× time-axis zoom on the editor ruler.

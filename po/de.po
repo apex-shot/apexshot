@@ -2626,6 +2626,9 @@ msgstr "Wird beim nächsten Erkennen angewendet"
 msgid "Detect uses recorded clicks only"
 msgstr "Erkennen verwendet nur aufgezeichnete Klicks"
 
+msgid "Detect uses recorded clicks"
+msgstr "Erkennen verwendet aufgezeichnete Klicks"
+
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "Erkennen verwendet aufgezeichnete Klicks und beabsichtigte Zeigerpausen"
 
@@ -2643,3 +2646,21 @@ msgstr "Die bereitgestellten Zooms verwerfen"
 
 msgid "{count} zoom suggestions ready to review"
 msgstr "{count} Zoom-Vorschläge zur Überprüfung bereit"
+
+msgid "Add a Manual zoom from the timeline"
+msgstr "Füge einen manuellen Zoom über die Zeitleiste hinzu"
+
+msgid "Detect automatic zooms from recorded clicks"
+msgstr "Automatische Zooms aus aufgezeichneten Klicks erkennen"
+
+msgid "No clear clicks were found."
+msgstr "Es wurden keine eindeutigen Klicks gefunden."
+
+msgid "No new zooms were added. Manual zooms are preserved."
+msgstr "Es wurden keine neuen Zooms hinzugefügt. Manuelle Zooms bleiben erhalten."
+
+msgid "Open Zoom and choose Detect to place zooms from the recorded clicks, or use Manual mode to place them yourself."
+msgstr "Öffne Zoom und wähle Erkennen, um Zooms aus den aufgezeichneten Klicks zu setzen, oder platziere sie selbst im manuellen Modus."
+
+msgid "This video has no recorded clicks, so there is nothing to zoom on."
+msgstr "Dieses Video hat keine aufgezeichneten Klicks, es gibt also nichts zu zoomen."

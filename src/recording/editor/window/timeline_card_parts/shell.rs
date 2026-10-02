@@ -41,7 +41,7 @@ pub fn build_timeline_card(
     let detect = labeled_tool_button(
         icon_names::custom::WAND_SPARKLES_SYMBOLIC,
         &t("Detect"),
-        &t("Detect automatic zooms from clicks and cursor motion"),
+        &t("Detect automatic zooms from recorded clicks"),
     );
     let analyzing = Rc::new(Cell::new(false));
 
@@ -502,9 +502,14 @@ pub fn build_timeline_card(
             if guard.supports_auto_zoom() {
                 drop(guard);
                 let mut guard = state.lock().unwrap();
-                // The pass is staged for review: what it found shows on the
-                // lane, and the timeline keeps its clips until it is applied.
-                let staged = guard.stage_zoom_candidates();
+                // Detect applies what it finds: the generated clips land on
+                // the timeline directly, as one undo step.
+                guard.redetect_zoom_clips();
+                let auto_zooms = guard
+                    .zoom_clips
+                    .iter()
+                    .filter(|clip| clip.mode == ZoomMode::Auto)
+                    .count();
                 let manual_zooms = guard
                     .zoom_clips
                     .iter()
@@ -512,11 +517,11 @@ pub fn build_timeline_card(
                     .count();
                 drop(guard);
                 redraw();
-                if staged == 0 {
+                if auto_zooms == 0 {
                     let message = if manual_zooms > 0 {
-                        t("No Auto Zooms were added. Manual zooms are preserved, and overlapping detections are skipped.")
+                        t("No new zooms were added. Manual zooms are preserved.")
                     } else {
-                        t("No clear clicks or purposeful pointer pauses were found.")
+                        t("No clear clicks were found.")
                     };
                     crate::utils::notify::desktop_notification(&t("No Auto Zooms added"), &message);
                 }
@@ -557,32 +562,27 @@ pub fn build_timeline_card(
                         if guard.metadata.path != analyzed_path {
                             analyzing.set(false);
                             button.set_tooltip_text(Some(&t(
-                                "Detect automatic zooms from clicks and cursor motion",
+                                "Detect automatic zooms from recorded clicks",
                             )));
                             return glib::ControlFlow::Break;
                         }
                         guard.sidecar = Some(sidecar);
-                        let staged = guard.stage_zoom_candidates();
-                        let manual_zooms = guard
+                        guard.redetect_zoom_clips();
+                        let auto_zooms = guard
                             .zoom_clips
                             .iter()
-                            .filter(|clip| clip.mode == ZoomMode::Manual)
+                            .filter(|clip| clip.mode == ZoomMode::Auto)
                             .count();
                         drop(guard);
                         analyzing.set(false);
                         button.set_tooltip_text(Some(&t(
-                            "Detect automatic zooms from clicks and cursor motion",
+                            "Detect automatic zooms from recorded clicks",
                         )));
                         redraw();
-                        if staged == 0 {
-                            let message = if manual_zooms > 0 {
-                                t("Cursor motion was found, but Manual zooms already cover the detected moments.")
-                            } else {
-                                t("Cursor motion was found, but no purposeful pauses were clear enough to place zooms.")
-                            };
+                        if auto_zooms == 0 {
                             crate::utils::notify::desktop_notification(
                                 &t("No Auto Zooms added"),
-                                &message,
+                                &t("This video has no recorded clicks, so there is nothing to zoom on."),
                             );
                         }
                         glib::ControlFlow::Break
@@ -591,7 +591,7 @@ pub fn build_timeline_card(
                         analyzing.set(false);
                         button.set_sensitive(true);
                         button.set_tooltip_text(Some(&t(
-                            "Detect automatic zooms from clicks and cursor motion",
+                            "Detect automatic zooms from recorded clicks",
                         )));
                         crate::utils::notify::desktop_notification(
                             &t("Cursor analysis could not place Auto Zooms"),
@@ -604,7 +604,7 @@ pub fn build_timeline_card(
                         analyzing.set(false);
                         button.set_sensitive(true);
                         button.set_tooltip_text(Some(&t(
-                            "Detect automatic zooms from clicks and cursor motion",
+                            "Detect automatic zooms from recorded clicks",
                         )));
                         crate::utils::notify::desktop_notification(
                             &t("Cursor analysis stopped"),
