@@ -1321,6 +1321,27 @@ fn suggest_zoom_clips_refits_click_near_trim_boundary() {
 }
 
 #[test]
+fn staged_candidates_never_overlap() {
+    let mut state = VideoEditState::new(metadata());
+    // Two rapid clicks on different targets: separate sessions whose reels
+    // overlap, and too close together to split. The review must stage what
+    // Apply can actually add, not two ghosts on top of each other.
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 400.0, 300.0), (3.3, 1500.0, 700.0)]);
+    let staged = state.stage_zoom_candidates();
+    let candidates: Vec<_> = state.zoom_candidates().to_vec();
+    for (index, a) in candidates.iter().enumerate() {
+        for b in &candidates[index + 1..] {
+            assert!(
+                a.end <= b.start || b.end <= a.start,
+                "staged candidates overlap: {a:?} and {b:?}"
+            );
+        }
+    }
+    // The review must not promise more than Apply delivers.
+    assert_eq!(state.apply_zoom_candidates(), staged);
+}
+
+#[test]
 fn a_detect_pass_is_staged_until_it_is_applied() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(3.0, 800.0, 500.0)]);

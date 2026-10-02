@@ -673,6 +673,17 @@ impl VideoEditState {
             {
                 continue;
             }
+            // Two interactions can be too close to split — the separator only
+            // splits when both halves stay useful — so their windows can still
+            // overlap. Overlapping zooms have no defined blending and Apply
+            // would silently drop the later candidate, so the review must stage
+            // only the higher-priority one rather than promise two ghosts.
+            if candidates
+                .iter()
+                .any(|placed| ranges_overlap(timeline_start, timeline_end, placed.start, placed.end))
+            {
+                continue;
+            }
             let (crop_x, crop_y, crop_w, crop_h) = crop;
             if suggestion.center.0 < crop_x
                 || suggestion.center.0 >= crop_x + crop_w
