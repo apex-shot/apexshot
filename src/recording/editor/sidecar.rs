@@ -555,8 +555,7 @@ mod tests {
 
     #[test]
     fn new_sidecars_are_version_two() {
-        let sidecar =
-            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        let sidecar = PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
         assert_eq!(sidecar.version, 2);
     }
 
