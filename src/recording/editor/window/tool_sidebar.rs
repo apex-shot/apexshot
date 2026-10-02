@@ -264,27 +264,8 @@ fn build_zoom_panel(
         }
     }
 
-    // Automatic generation reads recorded clicks.
-    let detection_header = GtkBox::new(Orientation::Horizontal, 8);
-    detection_header.add_css_class("recording-editor-zoom-section-row");
-    detection_header.set_hexpand(true);
-    let detection_label = Label::new(Some(&t("Detection")));
-    detection_label.add_css_class("recording-editor-zoom-kicker");
-    detection_label.set_xalign(0.0);
-    detection_label.set_hexpand(true);
-    detection_header.append(&detection_label);
-
-    let detection_hint = Label::new(Some(&t("Applies the next time Detect runs")));
-    detection_hint.add_css_class("recording-editor-zoom-hint");
-    detection_hint.set_wrap(true);
-    detection_hint.set_xalign(0.0);
-    detection_hint.set_max_width_chars(34);
-
-    let detection_section = GtkBox::new(Orientation::Vertical, 0);
-    detection_section.set_hexpand(true);
-    detection_section.append(&detection_header);
-    detection_section.append(&detection_hint);
-
+    // Automatic generation reads recorded clicks; the mode hint above
+    // explains what Detect uses, so there is nothing to configure here.
     body.append(&mode_row);
     body.append(&mode_hint);
     body.append(&chips);
@@ -292,7 +273,6 @@ fn build_zoom_panel(
     body.append(&classic_row);
     body.append(&easing_label);
     body.append(&easing_row);
-    body.append(&detection_section);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -368,8 +348,6 @@ fn build_zoom_panel(
         let easing_row = easing_row.clone();
         let easing_label = easing_label.clone();
         let reset = reset.clone();
-        let detection_section = detection_section.clone();
-        let detection_hint = detection_hint.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
@@ -385,9 +363,6 @@ fn build_zoom_panel(
             reset.set_sensitive(can_edit);
             easing_row.set_sensitive(can_edit);
             easing_label.set_sensitive(can_edit);
-            let can_detect = auto_available && !guard.zoom_locked;
-            detection_section.set_visible(!has_clip && can_detect);
-            detection_hint.set_text(&t("Applies the next time Detect runs"));
             if let Some(clip) = &selected {
                 let mode = if clip.mode == ZoomMode::Auto && auto_available {
                     ZoomMode::Auto
