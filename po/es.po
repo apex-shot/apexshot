@@ -2660,3 +2660,9 @@ msgstr "Abre Zoom y elige Detectar para colocar zooms a partir de los clics regi
 
 msgid "This video has no recorded clicks, so there is nothing to zoom on."
 msgstr "Este vídeo no tiene clics registrados, así que no hay nada sobre lo que hacer zoom."
+
+msgid "Instant animation"
+msgstr "Instant animation"
+
+msgid "If enabled, the zoom will be applied instantly without any animation."
+msgstr "If enabled, the zoom will be applied instantly without any animation."

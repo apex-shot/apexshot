@@ -140,6 +140,13 @@ pub fn eval_zoom(
     };
     let clip = &clips[index];
     let to_scale = clip.scale.max(1.0);
+    // An instant zoom snaps: no eased scale ramp and no morph from a
+    // neighbour. The studied lead-in returns no animation window for such
+    // zooms, so scale and position stay in step instead of one gliding
+    // while the other jumps.
+    if clip.instant {
+        return (to_scale, clip.center);
+    }
     let ease = (clip.ease_ms as f64 / 1000.0).clamp(0.0, clip.duration() / 2.0);
     if ease <= f64::EPSILON {
         return (to_scale, clip.center);
@@ -175,10 +182,11 @@ pub fn eval_zoom(
 /// The closest earlier auto zoom that clip `index` can morph from.
 ///
 /// A hidden clip never contributes, here or anywhere else: it is deliberately
-/// out of the output, so it must not shape a visible transition.
+/// out of the output, so it must not shape a visible transition. An instant
+/// clip never morphs either: it snaps, so there is no lead-in to blend from.
 fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
     let clip = &clips[index];
-    if clip.mode != ZoomMode::Auto {
+    if clip.mode != ZoomMode::Auto || clip.instant {
         return None;
     }
     clips
@@ -188,6 +196,7 @@ fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
             *other != index
                 && previous.mode == ZoomMode::Auto
                 && !previous.hidden
+                && !previous.instant
                 && previous.end <= clip.start
                 && clip.start - previous.end <= ZOOM_MORPH_GAP_SECONDS
         })
@@ -201,10 +210,12 @@ fn morphs_into_neighbour(clips: &[ZoomClip], index: usize) -> bool {
     let clip = &clips[index];
     clip.mode == ZoomMode::Auto
         && !clip.hidden
+        && !clip.instant
         && clips.iter().enumerate().any(|(other, next)| {
             other != index
                 && next.mode == ZoomMode::Auto
                 && !next.hidden
+                && !next.instant
                 && next.start >= clip.end
                 && next.start - clip.end <= ZOOM_MORPH_GAP_SECONDS
         })

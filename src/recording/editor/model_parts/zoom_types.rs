@@ -39,12 +39,17 @@ pub struct ZoomAnchor {
 ///
 /// Captured from the last zoom the user edited, so a level or motion they
 /// settle on carries to the next zoom they add instead of resetting to the
-/// factory default every time.
+/// factory default every time. The studied editor's remembered style is the
+/// same shape: zoom level plus the instant-vs-animated flag (alongside its
+/// own presentation options, which have no counterpart here).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ZoomStyle {
     pub scale: f64,
     pub easing: ZoomEasing,
     pub ease_ms: u32,
+    /// Remembered snap choice. A generated zoom always opens animated; a
+    /// zoom the user adds inherits whatever the last edit settled on.
+    pub instant: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -60,6 +65,14 @@ pub struct ZoomClip {
     pub rotation_y: f64,
     pub rotation_z: f64,
     pub perspective: f64,
+    /// Whether the camera snaps instead of gliding.
+    ///
+    /// Ported from the studied editor's per-zoom instant flag: when set, the
+    /// zoom opens and closes without an eased scale ramp, never morphs from
+    /// a neighbour, and the follow camera jumps to its target instead of
+    /// chasing it. Older projects predate the flag and load it as `false`,
+    /// keeping their current eased motion.
+    pub instant: bool,
     /// Disabled from the clip's context menu. A hidden clip keeps its place on
     /// the timeline but stops feeding the preview and the export, so the work
     /// behind it survives a temporary mute.
@@ -85,6 +98,7 @@ impl Default for ZoomClip {
             rotation_y: 0.0,
             rotation_z: 0.0,
             perspective: 0.0,
+            instant: false,
             hidden: false,
             origin: ZoomOrigin::default(),
             anchor: None,

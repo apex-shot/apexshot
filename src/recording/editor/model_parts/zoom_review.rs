@@ -17,6 +17,10 @@ pub struct ZoomCandidate {
 
 impl ZoomCandidate {
     /// The generated clip this candidate becomes.
+    ///
+    /// Generated zooms always open animated: the studied generator stamps
+    /// its instant flag off, and the snap is an edit the user opts into
+    /// per-zoom afterwards. `Default` carries the `false`.
     fn into_clip(self, mode: ZoomMode) -> ZoomClip {
         ZoomClip {
             start: self.start,

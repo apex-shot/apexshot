@@ -145,6 +145,10 @@ pub struct ZoomClipFile {
     pub rotation_z: f64,
     #[serde(default)]
     pub perspective: f64,
+    /// Per-zoom instant snap. Missing in older projects, where it defaults to
+    /// `false` so existing zooms keep their eased motion.
+    #[serde(default)]
+    pub instant: bool,
     #[serde(default)]
     pub hidden: bool,
     /// Ownership. Missing in older projects, where it defaults to `legacy`:
@@ -191,6 +195,10 @@ pub struct ZoomStyleFile {
     #[serde(default)]
     pub easing: ZoomEasingFile,
     pub ease_ms: u32,
+    /// Remembered snap choice. Missing in older projects, where it defaults
+    /// to animated.
+    #[serde(default)]
+    pub instant: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -514,6 +522,7 @@ fn zoom_to_file(clip: &ZoomClip) -> ZoomClipFile {
         rotation_y: clip.rotation_y,
         rotation_z: clip.rotation_z,
         perspective: clip.perspective,
+        instant: clip.instant,
         hidden: clip.hidden,
         origin: match clip.origin {
             ZoomOrigin::Generated => ZoomOriginFile::Generated,
@@ -559,6 +568,7 @@ fn zoom_from_file(clip: &ZoomClipFile) -> ZoomClip {
         rotation_y: clip.rotation_y,
         rotation_z: clip.rotation_z,
         perspective: clip.perspective,
+        instant: clip.instant,
         hidden: clip.hidden,
         origin: match clip.origin {
             ZoomOriginFile::Generated => ZoomOrigin::Generated,
@@ -595,6 +605,7 @@ fn zoom_style_to_file(style: ZoomStyle) -> ZoomStyleFile {
         scale: style.scale,
         easing: zoom_easing_to_file(style.easing),
         ease_ms: style.ease_ms,
+        instant: style.instant,
     }
 }
 
@@ -603,6 +614,7 @@ fn zoom_style_from_file(style: ZoomStyleFile) -> ZoomStyle {
         scale: style.scale,
         easing: zoom_easing_from_file(style.easing),
         ease_ms: style.ease_ms,
+        instant: style.instant,
     }
 }
 
@@ -1605,6 +1617,7 @@ mod tests {
         let index = state.add_zoom_at(1.0).expect("zoom fits");
         state.selected_zoom = Some(index);
         state.set_selected_zoom_scale(2.2);
+        state.set_selected_zoom_instant(true);
         save_project(&video, &state.to_project()).unwrap();
         let loaded = load_project(&video).expect("project should load");
         let mut restored = VideoEditState::new(metadata_for(&video, 8));
@@ -1613,7 +1626,59 @@ mod tests {
             .last_edited_zoom_style
             .expect("the edited style is remembered");
         assert!((style.scale - 2.2).abs() < 1e-9);
+        assert!(style.instant);
         cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn roundtrip_preserves_zoom_instant_flag() {
+        let dir = scratch("zoom-instant");
+        let video = write_video(&dir, "clip.mp4", 24);
+        let mut state = VideoEditState::new(metadata_for(&video, 24));
+        state.zoom_clips.push(ZoomClip {
+            start: 0.5,
+            end: 2.3,
+            scale: 2.0,
+            center: (400.0, 300.0),
+            mode: ZoomMode::Auto,
+            instant: true,
+            ..Default::default()
+        });
+        save_project(&video, &state.to_project()).unwrap();
+        let loaded = load_project(&video).expect("project should load");
+        let mut restored = VideoEditState::new(metadata_for(&video, 24));
+        restored.apply_project(loaded);
+        assert!(restored.zoom_clips[0].instant);
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_project_json_without_zoom_instant_defaults_to_animated() {
+        let dir = scratch("old-zoom-instant");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let mut state = VideoEditState::new(metadata_for(&video, 16));
+        state.zoom_clips.push(ZoomClip {
+            start: 0.5,
+            end: 2.3,
+            scale: 2.0,
+            center: (400.0, 300.0),
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        });
+        let mut json = serde_json::to_value(state.to_project()).unwrap();
+        let clip = json
+            .get_mut("zoom_clips")
+            .and_then(|value| value.as_array_mut())
+            .and_then(|clips| clips.first_mut())
+            .expect("the clip is serialized");
+        clip.as_object_mut().unwrap().remove("instant");
+        let file: VideoProjectFile = serde_json::from_value(json).unwrap();
+        assert!(!file.zoom_clips[0].instant);
+        let mut restored = VideoEditState::new(metadata_for(&video, 16));
+        restored.apply_project(file);
+        assert!(!restored.zoom_clips[0].instant);
         let _ = fs::remove_dir_all(&dir);
     }
 

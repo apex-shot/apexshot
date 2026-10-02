@@ -47,6 +47,34 @@ until its own phase.
    the merged-window focus.
 4. **Style inheritance** — a new zoom opens with the level and style of the
    last zoom the user edited. Done.
+5. **Instant toggle** — each automatic zoom carries an instant-vs-animated
+   flag. Animated is the follow camera; instant snaps with no eased scale
+   ramp, no morph from a neighbour, and no follow recenter. Done.
+
+## Motion decisions
+
+The studied behaviour drives zoom motion with springs plus a per-zoom
+instant flag — there are no named easing presets. The port follows that
+split where the camera exists and keeps our own controls where it does
+not:
+
+- Automatic clips show an Instant switch instead of easing presets.
+  Animated chases the pointer (edge-feathered today, sprung once the
+  follow camera lands); instant jumps. The flag is stored per zoom,
+  inherited by newly added zooms, and always opens off for generated
+  zooms. Older projects load it as animated.
+- Manual clips keep the Glide/Smooth/Snappy/Linear presets. A manual zoom
+  is a fixed focus point, not a follow camera, so the presets remain its
+  motion control. This is a deliberate local divergence, not a studied
+  behaviour.
+
+## Loupe decision
+
+Explicitly skipped. The studied presentation pairs a screen-vs-bubble
+switch with per-zoom bubble options (radius, bevel, chromatic aberration,
+glass optics) and a dedicated composite. That is a new renderer plus panel
+plus translations for a look the current full-frame zoom already covers.
+If that changes, it ports as its own phase: model, composite, minimal UI.
 
 ## Non-goals
 

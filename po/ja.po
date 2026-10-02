@@ -2616,3 +2616,9 @@ msgstr "Zoom を開いて「検出」を選ぶと、記録されたクリック�
 
 msgid "This video has no recorded clicks, so there is nothing to zoom on."
 msgstr "この動画には記録されたクリックがないため、ズームする対象がありません。"
+
+msgid "Instant animation"
+msgstr "Instant animation"
+
+msgid "If enabled, the zoom will be applied instantly without any animation."
+msgstr "If enabled, the zoom will be applied instantly without any animation."
