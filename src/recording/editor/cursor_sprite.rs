@@ -142,49 +142,6 @@ pub fn draw(
     );
 }
 
-pub fn draw_tilted(
-    cr: &Context,
-    x: f64,
-    y: f64,
-    pulse: f64,
-    kind: &str,
-    settings: CursorSettings,
-    alpha: f64,
-    tilt: f64,
-) {
-    let alpha = alpha.clamp(0.0, 1.0);
-    if alpha < 0.02 {
-        return;
-    }
-    let settings = settings.clamped();
-    let scale = overlay_scale(settings.size, 1.0) * pulse.max(0.7);
-    if pulse > 1.02 {
-        cr.set_source_rgba(
-            1.0,
-            1.0,
-            1.0,
-            0.22 * ((pulse - 1.0) / 0.35).clamp(0.0, 1.0) * alpha,
-        );
-        cr.arc(x, y, 16.0 * scale, 0.0, TAU);
-        let _ = cr.fill();
-    }
-    let bitmap = bitmap(settings.theme, kind);
-    let surface = surface_from_rgba(bitmap);
-    let (hx, hy) = hotspot(settings.theme, kind);
-    paint_sprite(
-        cr,
-        &surface,
-        x,
-        y,
-        hx,
-        hy,
-        scale,
-        settings.shadow,
-        alpha,
-        tilt,
-    );
-}
-
 pub fn draw_click(
     cr: &Context,
     x: f64,

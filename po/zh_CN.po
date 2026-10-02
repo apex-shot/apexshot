@@ -1319,6 +1319,9 @@ msgstr "对焦背景亮度"
 
 msgid "Focused"
 msgstr "专注的"
+msgid "Follow"
+msgstr "Follow"
+
 
 msgid "Font"
 msgstr "字体"
