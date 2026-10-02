@@ -11,6 +11,10 @@ use crate::recording::editor::sidecar::PointerSidecar;
 
 /// How far before a click its zoom opens.
 pub const LEAD_SECONDS: f64 = 0.3;
+/// The earliest a zoom window may open. The studied detector floors the start
+/// at 1 ms rather than 0, so a click on the first frame still leaves a sliver
+/// of full-frame footage ahead of the zoom.
+pub const START_FLOOR_SECONDS: f64 = 0.001;
 /// How long a zoom keeps running after its click.
 pub const TAIL_SECONDS: f64 = 2.5;
 /// Windows no further apart than this merge into one zoom.
@@ -55,7 +59,7 @@ pub struct AutoZoom {
 /// The window one click contributes, clamped around the recording's bounds.
 fn window_for_click(time: f64, duration: f64) -> (f64, f64) {
     (
-        (time - LEAD_SECONDS).max(0.0),
+        (time - LEAD_SECONDS).max(START_FLOOR_SECONDS),
         (time + TAIL_SECONDS).min(duration - END_MARGIN_SECONDS),
     )
 }
@@ -119,7 +123,12 @@ pub fn automatic_zooms(clicks: &[Click], pointer: &[PointerPoint], duration: f64
     merge_windows(windows, MERGE_GAP_SECONDS)
         .into_iter()
         .filter_map(|(start, end)| {
-            let in_window = |time: f64| time + 1e-9 >= start && time - 1e-9 <= end;
+            // The start floor can open a window up to 1 ms after a click that
+            // sits on the first frame, so the focus lookup tolerates the same
+            // millisecond to keep the seeding click inside its own window.
+            let in_window = |time: f64| {
+                time + START_FLOOR_SECONDS >= start && time - START_FLOOR_SECONDS <= end
+            };
             let center = focus_within(
                 pointer
                     .iter()
@@ -243,6 +252,13 @@ mod tests {
         let zooms = automatic_zooms(&[click(18.5)], &[], 20.0);
         assert_eq!(zooms.len(), 1);
         assert!((zooms[0].end - 19.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_click_on_the_first_frame_opens_at_the_floor() {
+        let zooms = automatic_zooms(&[click(0.0)], &[], 20.0);
+        assert_eq!(zooms.len(), 1);
+        assert!((zooms[0].start - START_FLOOR_SECONDS).abs() < 1e-9);
     }
 
     #[test]
