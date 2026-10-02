@@ -137,6 +137,14 @@ pub struct PressSample {
     pub dragged: bool,
 }
 
+impl PressSample {
+    /// Whether `t` falls inside this press interval. The interval is
+    /// half-open, so a press is not held at the exact instant it comes up.
+    pub fn contains(&self, t: f64) -> bool {
+        t >= self.down && t < self.up
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PointerSidecar {
     pub version: u32,
@@ -176,16 +184,14 @@ impl PointerSidecar {
     /// Whether a mouse button is held at `t` (the interval is half-open, so a
     /// press is not held at the exact instant it comes up).
     pub fn is_pressed_at(&self, t: f64) -> bool {
-        self.presses
-            .iter()
-            .any(|press| t >= press.down && t < press.up)
+        self.presses.iter().any(|press| press.contains(t))
     }
 
     /// Whether the press covering `t` moved far enough to be a drag.
     pub fn is_dragged_at(&self, t: f64) -> bool {
         self.presses
             .iter()
-            .any(|press| press.dragged && t >= press.down && t < press.up)
+            .any(|press| press.dragged && press.contains(t))
     }
 
     pub fn sidecar_path(video_path: &Path) -> PathBuf {
