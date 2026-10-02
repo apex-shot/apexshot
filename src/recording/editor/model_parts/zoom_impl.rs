@@ -674,7 +674,6 @@ impl VideoEditState {
             {
                 continue;
             }
-            let scale = suggestion.scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
             let (crop_x, crop_y, crop_w, crop_h) = crop;
             if suggestion.center.0 < crop_x
                 || suggestion.center.0 >= crop_x + crop_w
@@ -683,6 +682,18 @@ impl VideoEditState {
             {
                 continue;
             }
+            // The zoomed view is the crop at this scale, so it can only be as
+            // tight as the region the suggestion has to hold. A workflow wider
+            // than the crop can show at full strength loosens instead of
+            // cutting off a target, and one that would need less than the
+            // model's minimum zoom does not earn a zoom at all — clamping up
+            // from there would hide part of what the click was about.
+            let fit = (crop_w / (2.0 * suggestion.half_extent.0))
+                .min(crop_h / (2.0 * suggestion.half_extent.1));
+            if fit < MIN_ZOOM_SCALE {
+                continue;
+            }
+            let scale = suggestion.scale.min(fit).clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
             let center = clamp_zoom_center(crop, scale, suggestion.center);
             self.zoom_clips.push(ZoomClip {
                 start: timeline_start,

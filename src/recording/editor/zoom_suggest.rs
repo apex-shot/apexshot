@@ -72,6 +72,12 @@ const MAX_CLICK_SESSION_SECONDS: f64 = 5.5;
 /// One suggestion is budgeted per this many seconds of source. The caller
 /// applies it after dropping candidates the kept edit cannot use.
 pub const SECONDS_PER_SUGGESTION: f64 = 6.0;
+// The least screen a zoom has to leave readable around its focus. A cursor
+// point cannot say how big the control under it is, so the floor is a share of
+// the frame rather than whatever the click happens to stand for.
+const MIN_CONTEXT_DIAGONAL_FRACTION: f64 = 0.10;
+const MIN_CONTEXT_PX: f64 = 96.0;
+const MAX_CONTEXT_PX: f64 = 480.0;
 const CLICK_CONFIDENCE: f64 = 100.0;
 
 /// A zoom region in source-time seconds with the pixel focus to zoom on.
@@ -83,6 +89,11 @@ pub struct ZoomSuggestion {
     pub center_time: f64,
     /// Focus point in encoded-video pixel coordinates.
     pub center: (f64, f64),
+    /// Distance from `center` the zoom has to keep visible on each axis: every
+    /// interaction it covers, padded, and at least a readable amount of the
+    /// surrounding screen. The caller fits the scale to it, because only the
+    /// caller knows the editor crop the zoom ends up framed against.
+    pub half_extent: (f64, f64),
     pub scale: f64,
     pub(crate) priority: f64,
 }
@@ -178,6 +189,11 @@ pub fn suggest_zooms_with_evidence(
         .clamp(MIN_CLICK_SESSION_RADIUS_PX, MAX_CLICK_SESSION_RADIUS_PX);
     let tight_repeat_radius = (diagonal * TIGHT_REPEAT_RADIUS_DIAGONAL_FRACTION)
         .clamp(MIN_TIGHT_REPEAT_RADIUS_PX, MAX_TIGHT_REPEAT_RADIUS_PX);
+    // The least context a zoom has to leave around its focus. The pad around
+    // each covered target is the cluster radius: the same distance the
+    // detector already treats as one target.
+    let min_context =
+        (diagonal * MIN_CONTEXT_DIAGONAL_FRACTION).clamp(MIN_CONTEXT_PX, MAX_CONTEXT_PX);
 
     let mut landings = select_landings(
         evidence,
@@ -191,7 +207,15 @@ pub fn suggest_zooms_with_evidence(
     let clusters = cluster_landings(landings, cluster_radius, click_session_radius);
     let mut suggestions: Vec<ScoredSuggestion> = clusters
         .into_iter()
-        .filter_map(|cluster| suggestion_for_cluster(cluster, total_seconds, tight_repeat_radius))
+        .filter_map(|cluster| {
+            suggestion_for_cluster(
+                cluster,
+                total_seconds,
+                tight_repeat_radius,
+                cluster_radius,
+                min_context,
+            )
+        })
         .collect();
 
     // Ranking happens after feasibility, so every candidate is returned and
@@ -498,6 +522,8 @@ fn suggestion_for_cluster(
     cluster: LandingCluster,
     total_seconds: f64,
     tight_repeat_radius: f64,
+    target_pad: f64,
+    min_context: f64,
 ) -> Option<ScoredSuggestion> {
     let first = cluster.landings.first()?;
     let last = cluster.landings.last()?;
@@ -575,6 +601,21 @@ fn suggestion_for_cluster(
         median(covered.iter().map(|landing| landing.start).collect())
     };
 
+    // Only the interactions the final window covers have to stay visible at
+    // the base framing; the Auto camera follows the pointer to any later one.
+    let half_extent = covered
+        .iter()
+        .fold((min_context, min_context), |extent, landing| {
+            (
+                extent
+                    .0
+                    .max((landing.center.0 - center.0).abs() + target_pad),
+                extent
+                    .1
+                    .max((landing.center.1 - center.1).abs() + target_pad),
+            )
+        });
+
     let repeated = covered.len() > 1
         && covered
             .iter()
@@ -591,6 +632,7 @@ fn suggestion_for_cluster(
             end,
             center_time,
             center,
+            half_extent,
             scale: if repeated {
                 REPEATED_INTERACTION_ZOOM_SCALE
             } else {
@@ -1010,6 +1052,50 @@ mod tests {
         assert_eq!(suggestions.len(), 1);
         assert_eq!(suggestions[0].center, (1500.0, 700.0));
         assert_eq!(suggestions[0].center_time, 4.5);
+    }
+
+    #[test]
+    fn a_single_target_keeps_a_readable_region_around_it() {
+        // A click cannot say how big the control under it is, so the region
+        // around it is the minimum context rather than whatever the click
+        // happens to be.
+        let mut data = sidecar();
+        data.clicks.push(click(3.0, 800.0, 500.0));
+
+        let suggestions = suggest_zooms(&data, W, H, 10.0);
+        assert_eq!(suggestions.len(), 1);
+        let context =
+            (W.hypot(H) * MIN_CONTEXT_DIAGONAL_FRACTION).clamp(MIN_CONTEXT_PX, MAX_CONTEXT_PX);
+        let suggestion = &suggestions[0];
+        assert!((suggestion.half_extent.0 - context).abs() < 1e-9);
+        assert!((suggestion.half_extent.1 - context).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_workflow_keeps_every_target_it_covers_in_its_region() {
+        let mut data = sidecar();
+        data.clicks
+            .extend([click(2.0, 400.0, 300.0), click(2.6, 950.0, 300.0)]);
+
+        let suggestions = suggest_zooms(&data, W, H, 12.0);
+        assert_eq!(suggestions.len(), 1);
+        let suggestion = &suggestions[0];
+        let pad = (W.hypot(H) * CLUSTER_RADIUS_DIAGONAL_FRACTION)
+            .clamp(MIN_CLUSTER_RADIUS_PX, MAX_CLUSTER_RADIUS_PX);
+        // Every covered interaction has to fit inside the region at the base
+        // framing; the Auto camera only follows the pointer from there.
+        for target in [(400.0, 300.0), (950.0, 300.0)] {
+            assert!(
+                suggestion.half_extent.0 + 1e-9 >= (target.0 - suggestion.center.0).abs() + pad,
+                "{target:?} is outside the region {:?}",
+                suggestion.half_extent
+            );
+            assert!(
+                suggestion.half_extent.1 + 1e-9 >= (target.1 - suggestion.center.1).abs() + pad,
+                "{target:?} is outside the region {:?}",
+                suggestion.half_extent
+            );
+        }
     }
 
     #[test]

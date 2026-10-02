@@ -1458,6 +1458,44 @@ fn suggest_zoom_clips_uses_cut_boundary_tolerance() {
 }
 
 #[test]
+fn a_zoom_loosens_to_hold_its_workflow_inside_a_cropped_edit() {
+    // Two clicks 250 px apart are a 1.5x shot on the full frame, but the same
+    // pair fills most of an 800 px crop: the zoom has to loosen to keep both
+    // controls in view.
+    let mut full_frame = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut full_frame, &[(2.0, 700.0, 500.0), (2.6, 950.0, 500.0)]);
+    assert_eq!(full_frame.suggest_zoom_clips(), 1);
+    assert!((full_frame.zoom_clips[0].scale - 1.5).abs() < 1e-9);
+
+    let mut cropped = VideoEditState::new(metadata());
+    cropped.set_crop(400.0, 200.0, 800.0, 700.0);
+    attach_sidecar_with_clicks(&mut cropped, &[(2.0, 700.0, 500.0), (2.6, 950.0, 500.0)]);
+
+    assert_eq!(cropped.suggest_zoom_clips(), 1);
+    let clip = &cropped.zoom_clips[0];
+    assert!(clip.scale < 1.5, "the crop must loosen the zoom: {clip:?}");
+    let view_w = 800.0 / clip.scale;
+    let view_h = 700.0 / clip.scale;
+    for target in [(700.0, 500.0), (950.0, 500.0)] {
+        assert!((target.0 - clip.center.0).abs() <= view_w / 2.0 + 1e-9);
+        assert!((target.1 - clip.center.1).abs() <= view_h / 2.0 + 1e-9);
+    }
+}
+
+#[test]
+fn a_workflow_wider_than_the_crop_does_not_earn_a_zoom() {
+    let mut state = VideoEditState::new(metadata());
+    state.set_crop(400.0, 200.0, 800.0, 700.0);
+    attach_sidecar_with_clicks(&mut state, &[(2.0, 500.0, 400.0), (2.6, 1000.0, 400.0)]);
+
+    // Both clicks are inside the crop, but no zoom at or above the model's
+    // minimum can hold targets that far apart. Leaving the shot alone beats
+    // zooming in far enough to hide one of them.
+    assert_eq!(state.suggest_zoom_clips(), 0);
+    assert!(state.zoom_clips.is_empty());
+}
+
+#[test]
 fn suggest_zoom_clips_skips_landings_outside_kept_segments() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0), (8.0, 960.0, 540.0)]);
