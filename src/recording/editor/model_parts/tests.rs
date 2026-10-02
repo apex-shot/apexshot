@@ -1248,80 +1248,10 @@ fn suggest_zoom_clips_clips_a_window_at_the_trim_boundary() {
     assert!((state.zoom_clips[0].end - 6.0).abs() < 1e-9);
 }
 
-#[test]
-fn a_detect_pass_is_staged_until_it_is_applied() {
-    let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_clicks(&mut state, &[(3.0, 800.0, 500.0)]);
 
-    assert_eq!(state.stage_zoom_candidates(), 1);
-    // A candidate is not a clip: the preview, the export, and the project are
-    // untouched until the review is applied.
-    assert!(state.has_zoom_candidates());
-    assert!(state.zoom_clips.is_empty());
-    assert_eq!(state.eval_zoom(3.0).0, 1.0);
-    assert!(state.to_project().zoom_clips.is_empty());
 
-    assert_eq!(state.apply_zoom_candidates(), 1);
-    assert!(!state.has_zoom_candidates());
-    assert_eq!(state.zoom_clips.len(), 1);
-    assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::Generated);
-    assert!(state.zoom_clips[0].anchor.is_some());
-    assert!(state.needs_reencode());
-}
 
-#[test]
-fn a_discarded_review_leaves_the_timeline_alone() {
-    let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_clicks(&mut state, &[(3.0, 800.0, 500.0)]);
-    state.stage_zoom_candidates();
 
-    assert!(state.discard_zoom_candidates());
-    assert!(!state.has_zoom_candidates());
-    assert!(state.zoom_clips.is_empty());
-    assert!(!state.discard_zoom_candidates());
-    // Discarding is the pass having run: opening again does not ask twice.
-    assert!(state.zoom_suggestions_reviewed());
-    assert!(!state.suggest_zooms_on_open());
-}
-
-#[test]
-fn an_applied_review_is_one_undo_step() {
-    let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_clicks(&mut state, &[(2.0, 400.0, 300.0), (8.0, 1500.0, 700.0)]);
-    assert_eq!(state.stage_zoom_candidates(), 2);
-
-    assert_eq!(state.apply_zoom_candidates(), 2);
-    assert_eq!(state.zoom_clips.len(), 2);
-    assert!(state.undo_zoom_edit());
-    assert!(state.zoom_clips.is_empty());
-}
-
-#[test]
-fn a_composition_edit_drops_a_staged_review() {
-    let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_clicks(&mut state, &[(3.0, 800.0, 500.0)]);
-    state.stage_zoom_candidates();
-
-    // The review was placed against the layout the cut just changed.
-    state.add_cut(4.0);
-
-    assert!(!state.has_zoom_candidates());
-}
-
-#[test]
-fn an_applied_review_skips_a_clip_placed_after_it_was_staged() {
-    let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_clicks(&mut state, &[(3.0, 800.0, 500.0)]);
-    state.stage_zoom_candidates();
-
-    // Overlapping zooms have no defined blending, so the clip the user added
-    // wins over the candidate that would overrun it.
-    state.add_zoom_at(1.0);
-    assert_eq!(state.zoom_clips.len(), 1);
-
-    assert_eq!(state.apply_zoom_candidates(), 0);
-    assert_eq!(state.zoom_clips.len(), 1);
-}
 
 #[test]
 fn a_generated_zoom_follows_its_footage_through_a_head_trim() {

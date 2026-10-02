@@ -2614,3 +2614,21 @@ msgstr "تجاهل التكبيرات المجهزة"
 
 msgid "{count} zoom suggestions ready to review"
 msgstr "{count} اقتراحات تكبير جاهزة للمراجعة"
+
+msgid "Add a Manual zoom from the timeline"
+msgstr "أضف تكبيرًا يدويًا من الخط الزمني"
+
+msgid "Detect automatic zooms from recorded clicks"
+msgstr "اكتشاف التكبير التلقائي من النقرات المسجّلة"
+
+msgid "No clear clicks were found."
+msgstr "لم يتم العثور على نقرات واضحة."
+
+msgid "No new zooms were added. Manual zooms are preserved."
+msgstr "لم تتم إضافة أي تكبير جديد. سيتم الحفاظ على التكبير اليدوي."
+
+msgid "Open Zoom and choose Detect to place zooms from the recorded clicks, or use Manual mode to place them yourself."
+msgstr "افتح Zoom واختر Detect لوضع التكبير من النقرات المسجّلة، أو استخدم الوضع اليدوي لوضعها بنفسك."
+
+msgid "This video has no recorded clicks, so there is nothing to zoom on."
+msgstr "لا يحتوي هذا الفيديو على نقرات مسجّلة، لذا لا يوجد ما يمكن تكبيره."

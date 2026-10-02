@@ -143,9 +143,6 @@ pub struct VideoEditState {
     /// Undo/redo steps for the zoom track. Runtime-only: not written to the
     /// project, so a reopened recording starts with nothing to undo.
     pub zoom_history: ZoomHistory,
-    /// Suggestions staged for review. Not clips: they reach the preview, the
-    /// export, and the project only once they are applied.
-    pub zoom_candidates: Vec<ZoomCandidate>,
     /// Classic animation keeps a fixed focus point even when the clip is Auto.
     pub zoom_classic: bool,
     /// 0 = fit the whole clip, 100 = 8× time-axis zoom on the editor ruler.

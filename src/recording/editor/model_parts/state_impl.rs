@@ -50,7 +50,6 @@ impl VideoEditState {
             zoom_suggestions_reviewed: false,
             last_edited_zoom_style: None,
             zoom_history: ZoomHistory::default(),
-            zoom_candidates: Vec::new(),
             zoom_classic: false,
             timeline_scale: 0.0,
             timeline_offset_seconds: 0.0,

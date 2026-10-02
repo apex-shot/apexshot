@@ -2595,3 +2595,21 @@ msgstr "丢弃待处理的缩放"
 
 msgid "{count} zoom suggestions ready to review"
 msgstr "有 {count} 条缩放建议待确认"
+
+msgid "Add a Manual zoom from the timeline"
+msgstr "在时间线上添加手动缩放"
+
+msgid "Detect automatic zooms from recorded clicks"
+msgstr "根据录制的点击检测自动缩放"
+
+msgid "No clear clicks were found."
+msgstr "未找到明确的点击。"
+
+msgid "No new zooms were added. Manual zooms are preserved."
+msgstr "未添加新的缩放。手动缩放将保留。"
+
+msgid "Open Zoom and choose Detect to place zooms from the recorded clicks, or use Manual mode to place them yourself."
+msgstr "打开“缩放”并选择“检测”，根据录制的点击放置缩放；或使用手动模式自行放置。"
+
+msgid "This video has no recorded clicks, so there is nothing to zoom on."
+msgstr "此视频没有录制的点击，因此没有可缩放的内容。"

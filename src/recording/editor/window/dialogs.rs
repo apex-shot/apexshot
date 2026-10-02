@@ -148,7 +148,7 @@ pub(super) fn show_manual_zoom_notice(parent: &ApplicationWindow) {
     title.add_css_class("recording-editor-dialog-title");
     title.set_xalign(0.0);
     let body = Label::new(Some(&t(
-        "Open Zoom and choose Detect to analyze visible cursor motion, or use Manual mode to place zooms yourself.",
+        "Open Zoom and choose Detect to place zooms from the recorded clicks, or use Manual mode to place them yourself.",
     )));
     body.add_css_class("recording-editor-dialog-body");
     body.set_xalign(0.0);

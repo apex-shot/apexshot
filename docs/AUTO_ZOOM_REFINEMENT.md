@@ -22,6 +22,9 @@ and overlapping zooms cannot be produced. Each result is a source-time window
 with a pixel focus, so trimming, cutting, or retiming keeps the zoom on its
 footage.
 
+A Detect pass acts on what it finds: the zooms land on the timeline directly,
+as one undo step. There is no separate review step.
+
 ## Why this replaces the current detector
 
 The current detector blends click sessions, purposeful landings, spatial

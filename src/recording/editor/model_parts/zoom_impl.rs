@@ -696,12 +696,8 @@ impl VideoEditState {
     /// that owns its start rather than splitting in two.
     ///
     /// Clips the user placed or dragged carry no anchor and never move.
-    /// The composition moved under the clips: re-project the anchored ones and
-    /// drop a staged review, which was placed against the layout that just
-    /// changed.
     pub(crate) fn composition_changed(&mut self) {
         self.reproject_anchored_zooms();
-        self.zoom_candidates.clear();
     }
 
     pub(crate) fn reproject_anchored_zooms(&mut self) {

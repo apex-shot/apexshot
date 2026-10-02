@@ -14,7 +14,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
-use crate::i18n::{t, tfmt};
+use crate::i18n::t;
 
 pub(super) const TOOL_SIDEBAR_WIDTH: i32 = 288;
 
@@ -280,31 +280,10 @@ fn build_zoom_panel(
     detection_hint.set_xalign(0.0);
     detection_hint.set_max_width_chars(34);
 
-    // A Detect pass stages what it found instead of writing the timeline, so
-    // the two ways to finish the pass live under the same header.
-    let review_row = GtkBox::new(Orientation::Horizontal, 0);
-    review_row.add_css_class("recording-editor-zoom-mode");
-    review_row.set_hexpand(true);
-    review_row.set_homogeneous(true);
-    let apply_btn = Button::with_label(&t("Apply"));
-    apply_btn.add_css_class("recording-editor-zoom-mode-btn");
-    apply_btn.set_has_frame(false);
-    apply_btn.set_hexpand(true);
-    apply_btn.set_tooltip_text(Some(&t("Add the staged zooms to the timeline")));
-    let discard_btn = Button::with_label(&t("Discard"));
-    discard_btn.add_css_class("recording-editor-zoom-mode-btn");
-    discard_btn.set_has_frame(false);
-    discard_btn.set_hexpand(true);
-    discard_btn.set_tooltip_text(Some(&t("Throw the staged zooms away")));
-    review_row.append(&apply_btn);
-    review_row.append(&discard_btn);
-    review_row.set_visible(false);
-
     let detection_section = GtkBox::new(Orientation::Vertical, 0);
     detection_section.set_hexpand(true);
     detection_section.append(&detection_header);
     detection_section.append(&detection_hint);
-    detection_section.append(&review_row);
 
     body.append(&mode_row);
     body.append(&mode_hint);
@@ -377,27 +356,6 @@ fn build_zoom_panel(
             on_change();
         }
     });
-    apply_btn.connect_clicked({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        move |_| {
-            let mut guard = state.lock().unwrap();
-            if guard.apply_zoom_candidates() > 0 {
-                crate::recording::editor::project::persist_video_session(&guard);
-            }
-            drop(guard);
-            on_change();
-        }
-    });
-    discard_btn.connect_clicked({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        move |_| {
-            if state.lock().unwrap().discard_zoom_candidates() {
-                on_change();
-            }
-        }
-    });
     let refresh = {
         let panel = panel.clone();
         let auto_btn = auto_btn.clone();
@@ -412,7 +370,6 @@ fn build_zoom_panel(
         let reset = reset.clone();
         let detection_section = detection_section.clone();
         let detection_hint = detection_hint.clone();
-        let review_row = review_row.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
@@ -430,16 +387,7 @@ fn build_zoom_panel(
             easing_label.set_sensitive(can_edit);
             let can_detect = auto_available && !guard.zoom_locked;
             detection_section.set_visible(!has_clip && can_detect);
-            let candidates = guard.zoom_candidates().len();
-            review_row.set_visible(candidates > 0);
-            detection_hint.set_text(&if candidates > 0 {
-                tfmt(
-                    "{count} zoom suggestions ready to review",
-                    &[("count", &candidates.to_string())],
-                )
-            } else {
-                t("Applies the next time Detect runs")
-            });
+            detection_hint.set_text(&t("Applies the next time Detect runs"));
             if let Some(clip) = &selected {
                 let mode = if clip.mode == ZoomMode::Auto && auto_available {
                     ZoomMode::Auto
@@ -461,7 +409,7 @@ fn build_zoom_panel(
                 mode_hint.set_text(&if auto_available {
                     t("Detect uses recorded clicks")
                 } else {
-                    t("Add a Manual zoom, or analyze visible cursor motion from the timeline")
+                    t("Add a Manual zoom from the timeline")
                 });
                 if !auto_available {
                     manual_btn.set_active(true);
@@ -738,25 +686,6 @@ fn delete_tool_button(label: &str) -> Button {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn the_panel_reviews_a_staged_detect_pass() {
-        // A Detect pass now waits in the panel before it reaches the timeline,
-        // so the panel has to offer both ways out of it and say how much is
-        // waiting.
-        let source = include_str!("tool_sidebar.rs");
-        let production = &source[..source.find("\n#[cfg(test)]").expect("tests module")];
-        for call in ["apply_zoom_candidates", "discard_zoom_candidates"] {
-            assert!(
-                production.contains(call),
-                "the panel must reach {call} to finish a staged pass"
-            );
-        }
-        assert!(
-            production.contains("{count} zoom suggestions ready to review"),
-            "the panel must say how many suggestions are waiting"
-        );
-    }
-
     #[test]
     fn background_panel_opens_like_cursor() {
         let source = include_str!("tool_sidebar.rs");

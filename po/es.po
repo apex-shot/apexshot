@@ -2642,3 +2642,21 @@ msgstr "Descartar los zooms preparados"
 
 msgid "{count} zoom suggestions ready to review"
 msgstr "{count} sugerencias de zoom listas para revisar"
+
+msgid "Add a Manual zoom from the timeline"
+msgstr "Añade un zoom manual desde la línea de tiempo"
+
+msgid "Detect automatic zooms from recorded clicks"
+msgstr "Detectar zooms automáticos a partir de los clics registrados"
+
+msgid "No clear clicks were found."
+msgstr "No se encontraron clics claros."
+
+msgid "No new zooms were added. Manual zooms are preserved."
+msgstr "No se añadieron zooms nuevos. Los zooms manuales se conservan."
+
+msgid "Open Zoom and choose Detect to place zooms from the recorded clicks, or use Manual mode to place them yourself."
+msgstr "Abre Zoom y elige Detectar para colocar zooms a partir de los clics registrados, o usa el modo Manual para colocarlos tú."
+
+msgid "This video has no recorded clicks, so there is nothing to zoom on."
+msgstr "Este vídeo no tiene clics registrados, así que no hay nada sobre lo que hacer zoom."
