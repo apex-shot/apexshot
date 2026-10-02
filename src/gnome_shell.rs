@@ -541,6 +541,10 @@ pub struct PointerTrackResult {
     pub t0_monotonic_us: i64,
     pub samples: Vec<(f64, i32, i32, String)>,
     pub clicks: Vec<(f64, i32, i32, i32)>,
+    /// Mouse press intervals `(down, up, button, dragged)` in recording
+    /// seconds. Empty when the installed extension predates the call that
+    /// carries them.
+    pub presses: Vec<(f64, f64, i32, bool)>,
 }
 
 pub fn should_use_pointer_track() -> bool {
@@ -603,6 +607,24 @@ pub fn start_pointer_track() -> anyhow::Result<()> {
 
 pub fn stop_pointer_track() -> anyhow::Result<PointerTrackResult> {
     with_shell_overlay_proxy(|proxy| {
+        // Prefer the call that also carries mouse press intervals. An
+        // extension that predates it has no such method, so fall back to the
+        // original call rather than losing the recording's pointer data.
+        if let Ok((t0_monotonic_us, samples, clicks, presses)) =
+            proxy.call::<_, _, (
+                i64,
+                Vec<(f64, i32, i32, String)>,
+                Vec<(f64, i32, i32, i32)>,
+                Vec<(f64, f64, i32, bool)>,
+            )>("StopPointerTrackV2", &())
+        {
+            return Ok(PointerTrackResult {
+                t0_monotonic_us,
+                samples,
+                clicks,
+                presses,
+            });
+        }
         let (t0_monotonic_us, samples, clicks) = proxy
             .call::<_, _, (i64, Vec<(f64, i32, i32, String)>, Vec<(f64, i32, i32, i32)>)>(
                 "StopPointerTrack",
@@ -613,6 +635,7 @@ pub fn stop_pointer_track() -> anyhow::Result<PointerTrackResult> {
             t0_monotonic_us,
             samples,
             clicks,
+            presses: Vec::new(),
         })
     })
 }

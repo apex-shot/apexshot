@@ -6,7 +6,7 @@ use crate::{
     config::{save_config, AppConfig},
     recording::editor::sidecar::{
         delete_recording_outputs, CaptureRegion, ClickSample, CursorKind, PointerSample,
-        PointerSidecar, MAX_CLICKS, MAX_POINTER_SAMPLES,
+        PointerSidecar, PressSample, MAX_CLICKS, MAX_POINTER_SAMPLES, MAX_PRESSES,
     },
 };
 use std::path::{Path, PathBuf};
@@ -167,6 +167,17 @@ impl PointerTrackSession {
                         x: x as f64,
                         y: y as f64,
                         button,
+                    })
+                    .collect();
+                sidecar.presses = result
+                    .presses
+                    .into_iter()
+                    .take(MAX_PRESSES)
+                    .map(|(down, up, button, dragged)| PressSample {
+                        down,
+                        up,
+                        button,
+                        dragged,
                     })
                     .collect();
                 sidecar.subtract_region();
@@ -996,6 +1007,7 @@ mod tests {
             t0_monotonic_us,
             samples: vec![(0.0, sample_x, 20, "default".into())],
             clicks: Vec::new(),
+            presses: Vec::new(),
         }
     }
 

@@ -1128,8 +1128,8 @@ impl VideoEditState {
     /// `source_t` on a damped spring, starting at the clip's stored centre.
     /// The evaluation is pure (no carried state), so random seeks match
     /// sequential playback. Drag stiffness and typing suppression are
-    /// intentionally absent: the sidecar holds pointer and click samples
-    /// only, and key identities are never collected.
+    /// intentionally absent: the sidecar records mouse press intervals but no
+    /// drag spring is wired yet, and key identities are never collected.
     pub fn eval_zoom_at(&self, timeline_t: f64, source_t: f64) -> (f64, (f64, f64)) {
         let frame_w = self.metadata.width as f64;
         let frame_h = self.metadata.height as f64;
