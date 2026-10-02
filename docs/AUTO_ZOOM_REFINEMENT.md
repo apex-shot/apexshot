@@ -44,12 +44,11 @@ on a spring (phase 3), replacing the earlier edge-feathering follow.
 2. **Wire in and remove the old detector** — placement uses the generator;
    the old multi-signal detector and the clicks/hovers choice are gone. Done.
 3. **Camera follow** — the follow camera chases the movement-group centre
-   active at the current time on a damped spring, stiffening near a click,
-   stiffening harder while the pointer is dragging, and snapping per zoom
-   when instant is set. Portable: group-centre target, click-proximity
-   stiffness, drag stiffness, per-zoom instant. Omitted: release stiffness
-   and typing suppression (release has no recorded signal; key identities
-   are never collected). Done.
+   active at the current time on the project's single screen spring, and
+   snaps per zoom when instant is set. The studied app drives the screen with
+   one project-level `screenMovementSpring`; its `mouseMovementSpring`
+   drag/click stiffening smooths the cursor sprite, not the camera, so it is
+   not applied here. Done.
 4. **Style inheritance** — a new zoom opens with the level and style of the
    last zoom the user edited. Done.
 5. **Instant toggle** — each automatic zoom carries an instant-vs-animated
@@ -64,8 +63,11 @@ split where the camera exists and keeps our own controls where it does
 not:
 
 - Automatic clips show an Instant switch instead of easing presets.
-  Animated chases the movement-group centre on the follow spring;
-  instant jumps to it. The flag is stored per zoom,
+  Animated chases the movement-group centre on the one screen spring;
+  instant jumps to it. The camera does not stiffen near a click or during a
+  recorded drag: in the studied app the `mouseMovementSpring` drag/click
+  changes smooth the cursor sprite, while the screen keeps its own spring.
+  The flag is stored per zoom,
   inherited by newly added zooms, and always opens off for generated
   zooms. Older projects load it as animated.
 - Manual clips keep the Glide/Smooth/Snappy/Linear presets. A manual zoom
