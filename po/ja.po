@@ -1321,6 +1321,9 @@ msgstr "フォーカスの背景輝度"
 
 msgid "Focused"
 msgstr "集中した"
+msgid "Follow"
+msgstr "Follow"
+
 
 msgid "Font"
 msgstr "フォント"

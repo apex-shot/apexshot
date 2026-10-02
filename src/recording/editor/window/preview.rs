@@ -1109,21 +1109,8 @@ fn draw_preview_overlays(
                     frame.alpha,
                 );
             }
-            for &(x, y, ghost) in &frame.trail {
-                let (px, py) = source_to_zoomed_point(x, y, view, w, h);
-                crate::recording::editor::cursor_sprite::draw_tilted(
-                    cr,
-                    px,
-                    py,
-                    1.0,
-                    frame.kind.as_str(),
-                    cursor,
-                    frame.alpha * ghost,
-                    frame.tilt,
-                );
-            }
             let (px, py) = source_to_zoomed_point(frame.x, frame.y, view, w, h);
-            crate::recording::editor::cursor_sprite::draw_tilted(
+            crate::recording::editor::cursor_sprite::draw(
                 cr,
                 px,
                 py,
@@ -1131,7 +1118,6 @@ fn draw_preview_overlays(
                 frame.kind.as_str(),
                 cursor,
                 frame.alpha,
-                frame.tilt,
             );
         }
     }
@@ -1161,9 +1147,6 @@ fn cursor_motion(cursor: CursorSettings) -> CursorMotion {
         smooth: cursor.smooth,
         hide_idle: cursor.hide_idle,
         idle_ms: cursor.idle_ms,
-        trail: cursor.trail,
-        tilt: cursor.tilt,
-        sway: cursor.sway,
         speed: cursor.speed,
     }
 }

@@ -1351,6 +1351,9 @@ msgstr "Intensité de l'arrière-plan de mise au point"
 
 msgid "Focused"
 msgstr "Ciblé"
+msgid "Follow"
+msgstr "Follow"
+
 
 msgid "Font"
 msgstr "Police"

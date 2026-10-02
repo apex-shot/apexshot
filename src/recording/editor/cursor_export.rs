@@ -32,9 +32,6 @@ pub fn write_rgba_track(
         smooth: cursor.smooth,
         hide_idle: cursor.hide_idle,
         idle_ms: cursor.idle_ms,
-        trail: cursor.trail,
-        tilt: cursor.tilt,
-        sway: cursor.sway,
         speed: cursor.speed,
     };
     let mut surface = ImageSurface::create(Format::ARgb32, width as i32, height as i32)?;
@@ -68,22 +65,9 @@ pub fn write_rgba_track(
                 let (px, py) = source_to_zoomed_point(x, y, view, width as f64, height as f64);
                 cursor_sprite::draw_click(&cr, px, py, progress, overlay_cursor, frame.alpha);
             }
-            for &(x, y, ghost) in &frame.trail {
-                let (px, py) = source_to_zoomed_point(x, y, view, width as f64, height as f64);
-                cursor_sprite::draw_tilted(
-                    &cr,
-                    px,
-                    py,
-                    1.0,
-                    frame.kind.as_str(),
-                    overlay_cursor,
-                    frame.alpha * ghost,
-                    frame.tilt,
-                );
-            }
             let (px, py) =
                 source_to_zoomed_point(frame.x, frame.y, view, width as f64, height as f64);
-            cursor_sprite::draw_tilted(
+            cursor_sprite::draw(
                 &cr,
                 px,
                 py,
@@ -91,7 +75,6 @@ pub fn write_rgba_track(
                 frame.kind.as_str(),
                 overlay_cursor,
                 frame.alpha,
-                frame.tilt,
             );
         }
         drop(cr);
@@ -171,8 +154,6 @@ mod tests {
             kind: CursorKind::Hand,
         });
         state.sidecar = Some(sidecar);
-        state.cursor.trail = 0.6;
-        state.cursor.tilt = 0.8;
         let dir = std::env::temp_dir().join(format!("apexshot-cursor-rgba-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("cursor.rgba");

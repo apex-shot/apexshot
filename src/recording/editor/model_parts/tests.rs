@@ -2405,7 +2405,7 @@ fn motion_preset_matching_is_derived_from_knobs() {
         settings.matching_motion_preset(),
         Some(CursorMotionStyle::Smooth)
     );
-    settings.trail = 0.12;
+    settings.smooth = 0.5;
     assert!(settings.matching_motion_preset().is_none());
 }
 
