@@ -15,7 +15,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::{mpsc, Arc, Mutex};
 
-use crate::i18n::{t, tfmt};
+use crate::i18n::t;
 
 mod shell {
     use super::*;

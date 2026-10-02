@@ -2580,3 +2580,18 @@ msgstr "検出は記録されたクリックのみを使用します"
 
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "検出は記録されたクリックと意図的なポインタの停止を使用します"
+
+msgid "Apply"
+msgstr "適用"
+
+msgid "Add the staged zooms to the timeline"
+msgstr "準備されたズームをタイムラインに追加します"
+
+msgid "Discard"
+msgstr "破棄"
+
+msgid "Throw the staged zooms away"
+msgstr "準備されたズームを破棄します"
+
+msgid "{count} zoom suggestions ready to review"
+msgstr "確認待ちのズーム候補が{count}件あります"

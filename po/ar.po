@@ -2596,3 +2596,18 @@ msgstr "يستخدم الكشف النقرات المسجّلة فقط"
 
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "يستخدم الكشف النقرات المسجّلة وتوقفات المؤشر المقصودة"
+
+msgid "Apply"
+msgstr "تطبيق"
+
+msgid "Add the staged zooms to the timeline"
+msgstr "إضافة التكبيرات المجهزة إلى الخط الزمني"
+
+msgid "Discard"
+msgstr "تجاهل"
+
+msgid "Throw the staged zooms away"
+msgstr "تجاهل التكبيرات المجهزة"
+
+msgid "{count} zoom suggestions ready to review"
+msgstr "{count} اقتراحات تكبير جاهزة للمراجعة"

@@ -502,25 +502,17 @@ pub fn build_timeline_card(
             if guard.supports_auto_zoom() {
                 drop(guard);
                 let mut guard = state.lock().unwrap();
-                let changed = guard.redetect_zoom_clips();
-                if changed {
-                    crate::recording::editor::project::persist_video_session(&guard);
-                }
-                let auto_zooms = guard
-                    .zoom_clips
-                    .iter()
-                    .filter(|clip| clip.mode == ZoomMode::Auto)
-                    .count();
+                // The pass is staged for review: what it found shows on the
+                // lane, and the timeline keeps its clips until it is applied.
+                let staged = guard.stage_zoom_candidates();
                 let manual_zooms = guard
                     .zoom_clips
                     .iter()
                     .filter(|clip| clip.mode == ZoomMode::Manual)
                     .count();
                 drop(guard);
-                if changed {
-                    redraw();
-                }
-                if auto_zooms == 0 {
+                redraw();
+                if staged == 0 {
                     let message = if manual_zooms > 0 {
                         t("No Auto Zooms were added. Manual zooms are preserved, and overlapping detections are skipped.")
                     } else {
@@ -569,16 +561,8 @@ pub fn build_timeline_card(
                             )));
                             return glib::ControlFlow::Break;
                         }
-                        let samples = sidecar.pointer.len();
                         guard.sidecar = Some(sidecar);
-                        if guard.redetect_zoom_clips() {
-                            crate::recording::editor::project::persist_video_session(&guard);
-                        }
-                        let auto_zooms = guard
-                            .zoom_clips
-                            .iter()
-                            .filter(|clip| clip.mode == ZoomMode::Auto)
-                            .count();
+                        let staged = guard.stage_zoom_candidates();
                         let manual_zooms = guard
                             .zoom_clips
                             .iter()
@@ -590,18 +574,7 @@ pub fn build_timeline_card(
                             "Detect automatic zooms from clicks and cursor motion",
                         )));
                         redraw();
-                        if auto_zooms > 0 {
-                            crate::utils::notify::desktop_notification(
-                                &t("Auto Zoom detection complete"),
-                                &tfmt(
-                                    "Added {auto_zooms} Auto Zooms from {samples} cursor-motion samples.",
-                                    &[
-                                        ("auto_zooms", &auto_zooms.to_string()),
-                                        ("samples", &samples.to_string()),
-                                    ],
-                                ),
-                            );
-                        } else {
+                        if staged == 0 {
                             let message = if manual_zooms > 0 {
                                 t("Cursor motion was found, but Manual zooms already cover the detected moments.")
                             } else {

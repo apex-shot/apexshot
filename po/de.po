@@ -2628,3 +2628,18 @@ msgstr "Erkennen verwendet nur aufgezeichnete Klicks"
 
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "Erkennen verwendet aufgezeichnete Klicks und beabsichtigte Zeigerpausen"
+
+msgid "Apply"
+msgstr "Übernehmen"
+
+msgid "Add the staged zooms to the timeline"
+msgstr "Die bereitgestellten Zooms zur Zeitleiste hinzufügen"
+
+msgid "Discard"
+msgstr "Verwerfen"
+
+msgid "Throw the staged zooms away"
+msgstr "Die bereitgestellten Zooms verwerfen"
+
+msgid "{count} zoom suggestions ready to review"
+msgstr "{count} Zoom-Vorschläge zur Überprüfung bereit"
