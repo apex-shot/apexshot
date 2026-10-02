@@ -1140,11 +1140,16 @@ impl VideoEditState {
         if self.zoom_classic || scale <= 1.01 {
             return (scale, center);
         }
-        let Some(clip) = self
+        // Inside a clip, follow its own framing. In a morph gap, keep following
+        // the clip the camera just left: `eval_zoom` holds that clip's stored
+        // framing, and recentering it here continues the camera from the
+        // evaluated endpoint instead of snapping back to the stored center.
+        let clip_index = self
             .zoom_clips
             .iter()
-            .find(|clip| !clip.hidden && timeline_t >= clip.start && timeline_t <= clip.end)
-        else {
+            .position(|clip| !clip.hidden && timeline_t >= clip.start && timeline_t <= clip.end)
+            .or_else(|| zoom_gap_hold_predecessor(&self.zoom_clips, timeline_t));
+        let Some(clip) = clip_index.map(|index| &self.zoom_clips[index]) else {
             return (scale, center);
         };
         if clip.mode != ZoomMode::Auto {

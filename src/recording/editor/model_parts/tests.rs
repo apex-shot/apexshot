@@ -696,6 +696,56 @@ fn zoom_gaps_hold_the_framing_for_the_next_auto_zoom() {
 }
 
 #[test]
+fn a_morph_gap_keeps_the_evaluated_camera_endpoint() {
+    use crate::recording::editor::sidecar::{CaptureRegion, CursorKind, PointerSample, PointerSidecar};
+
+    let mut state = VideoEditState::new(metadata());
+    // A pointer parked at the right edge pulls the first Auto zoom's camera
+    // away from its stored center, so its evaluated endpoint is off-center.
+    let mut sidecar = PointerSidecar::new(
+        0,
+        CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for t in [0.0, 0.5, 1.0, 1.5, 2.0, 2.15, 2.3, 2.6, 3.0] {
+        sidecar.pointer.push(PointerSample {
+            t,
+            x: 1900.0,
+            y: 300.0,
+            kind: CursorKind::Default,
+        });
+    }
+    state.sidecar = Some(sidecar);
+    state.cursor.smooth = 0.0;
+    for (start, end, center) in [(0.0, 2.0, (400.0, 300.0)), (2.3, 4.3, (1_500.0, 800.0))] {
+        state.zoom_clips.push(ZoomClip {
+            start,
+            end,
+            scale: 1.8,
+            center,
+            ease_ms: 600,
+            easing: ZoomEasing::Smooth,
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        });
+    }
+
+    let (_, at_end) = state.eval_zoom(2.0);
+    let (_, in_gap) = state.eval_zoom(2.15);
+    assert!(
+        (at_end.0 - in_gap.0).abs() < 20.0,
+        "the morph gap must hold the followed endpoint, not the stored center: \
+         end={at_end:?} gap={in_gap:?}"
+    );
+    // Sanity: the pointer did pull the camera right of the stored center.
+    assert!(at_end.0 > 500.0, "expected following at the clip edge, got {at_end:?}");
+}
+
+#[test]
 fn hidden_zooms_do_not_drive_the_next_transition() {
     let clips = [
         ZoomClip {
