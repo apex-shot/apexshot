@@ -67,6 +67,11 @@ not:
   is a fixed focus point, not a follow camera, so the presets remain its
   motion control. This is a deliberate local divergence, not a studied
   behaviour.
+- The Classic Animation switch is gone from the panel: no counterpart was
+  found in the studied behaviour, where the follow is simply always on.
+  The project-wide `zoom_classic` field is still honoured when an older
+  project carries it (new projects default it off and the switch cannot
+  turn it back on); Reset clears it, which is the migration path off.
 
 ## Loupe decision
 
