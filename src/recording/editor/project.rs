@@ -147,6 +147,10 @@ pub struct ZoomClipFile {
     pub perspective: f64,
     #[serde(default)]
     pub hidden: bool,
+    /// Per-zoom instant snap. Missing in older projects, where it defaults to
+    /// `false` so existing zooms keep their eased motion.
+    #[serde(default)]
+    pub instant: bool,
     /// Ownership. Missing in older projects, where it defaults to `legacy`:
     /// an unknown clip is treated as the user's work, never safe to replace.
     #[serde(default)]
@@ -515,6 +519,7 @@ fn zoom_to_file(clip: &ZoomClip) -> ZoomClipFile {
         rotation_z: clip.rotation_z,
         perspective: clip.perspective,
         hidden: clip.hidden,
+        instant: clip.instant,
         origin: match clip.origin {
             ZoomOrigin::Generated => ZoomOriginFile::Generated,
             ZoomOrigin::User => ZoomOriginFile::User,
@@ -560,6 +565,7 @@ fn zoom_from_file(clip: &ZoomClipFile) -> ZoomClip {
         rotation_z: clip.rotation_z,
         perspective: clip.perspective,
         hidden: clip.hidden,
+        instant: clip.instant,
         origin: match clip.origin {
             ZoomOriginFile::Generated => ZoomOrigin::Generated,
             ZoomOriginFile::User => ZoomOrigin::User,
@@ -1579,6 +1585,57 @@ mod tests {
         assert_eq!(restored.zoom_clips[0].origin, ZoomOrigin::Generated);
         assert_eq!(restored.zoom_clips[1].origin, ZoomOrigin::User);
         cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn roundtrip_preserves_zoom_instant_flag() {
+        let dir = scratch("zoom-instant");
+        let video = write_video(&dir, "clip.mp4", 24);
+        let mut state = VideoEditState::new(metadata_for(&video, 24));
+        state.zoom_clips.push(ZoomClip {
+            start: 0.5,
+            end: 2.3,
+            scale: 2.0,
+            center: (400.0, 300.0),
+            mode: ZoomMode::Auto,
+            instant: true,
+            ..Default::default()
+        });
+        save_project(&video, &state.to_project()).unwrap();
+        let loaded = load_project(&video).expect("project should load");
+        let mut restored = VideoEditState::new(metadata_for(&video, 24));
+        restored.apply_project(loaded);
+        assert!(restored.zoom_clips[0].instant);
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_project_json_without_zoom_instant_defaults_to_animated() {
+        let dir = scratch("old-zoom-instant");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let mut state = VideoEditState::new(metadata_for(&video, 16));
+        state.zoom_clips.push(ZoomClip {
+            start: 0.5,
+            end: 2.3,
+            scale: 2.0,
+            center: (400.0, 300.0),
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        });
+        let mut json = serde_json::to_value(state.to_project()).unwrap();
+        let clip = json
+            .get_mut("zoom_clips")
+            .and_then(|value| value.as_array_mut())
+            .and_then(|clips| clips.first_mut())
+            .expect("the clip is serialized");
+        clip.as_object_mut().unwrap().remove("instant");
+        let file: VideoProjectFile = serde_json::from_value(json).unwrap();
+        assert!(!file.zoom_clips[0].instant);
+        let mut restored = VideoEditState::new(metadata_for(&video, 16));
+        restored.apply_project(file);
+        assert!(!restored.zoom_clips[0].instant);
         let _ = fs::remove_dir_all(&dir);
     }
 

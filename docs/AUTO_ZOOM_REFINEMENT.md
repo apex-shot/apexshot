@@ -34,8 +34,8 @@ overlapping candidates and a staged count that `Apply` could not honour. The
 click-window model removes the class of bug instead of patching it: windows
 merge before they are ever placed.
 
-The camera that follows inside a zoom is a separate concern and stays as it is
-until its own phase.
+The camera that follows inside a zoom now chases the movement-group centre
+on a spring (phase 3), replacing the earlier edge-feathering follow.
 
 ## Phases
 
@@ -43,8 +43,12 @@ until its own phase.
    focus, source anchoring. Done.
 2. **Wire in and remove the old detector** — placement uses the generator;
    the old multi-signal detector and the clicks/hovers choice are gone. Done.
-3. **Camera follow** — a per-zoom camera target and motion model that matches
-   the merged-window focus.
+3. **Camera follow** — the follow camera chases the movement-group centre
+   active at the current time on a damped spring, stiffening near a click
+   and snapping per zoom when instant is set. Portable: group-centre target,
+   click-proximity stiffness, per-zoom instant. Omitted: drag/release
+   stiffness and typing suppression (the sidecar holds pointer and click
+   samples only; key identities are never collected). Done.
 4. **Style inheritance** — a new zoom opens with the level and style of the
    last zoom the user edited. Done.
 

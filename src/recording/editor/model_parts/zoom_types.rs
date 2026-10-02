@@ -60,6 +60,15 @@ pub struct ZoomClip {
     pub rotation_y: f64,
     pub rotation_z: f64,
     pub perspective: f64,
+    /// Whether the camera snaps to its target instead of gliding.
+    ///
+    /// Ported from the reference's per-zoom instant flag: when set, the zoom
+    /// opens and closes without an eased scale ramp and the follow camera
+    /// jumps to the movement-group centre instead of chasing it on a spring.
+    /// Older projects predate the flag and load it as `false`, keeping their
+    /// current eased motion. The checkbox UI for this arrives with the motion
+    /// controls alignment; for now it is model plus evaluator support.
+    pub instant: bool,
     /// Disabled from the clip's context menu. A hidden clip keeps its place on
     /// the timeline but stops feeding the preview and the export, so the work
     /// behind it survives a temporary mute.
@@ -85,6 +94,7 @@ impl Default for ZoomClip {
             rotation_y: 0.0,
             rotation_z: 0.0,
             perspective: 0.0,
+            instant: false,
             hidden: false,
             origin: ZoomOrigin::default(),
             anchor: None,
