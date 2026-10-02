@@ -2594,6 +2594,9 @@ msgstr "يُطبَّق في المرة التالية التي يعمل فيها
 msgid "Detect uses recorded clicks only"
 msgstr "يستخدم الكشف النقرات المسجّلة فقط"
 
+msgid "Detect uses recorded clicks"
+msgstr "يستخدم الكشف النقرات المسجّلة"
+
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "يستخدم الكشف النقرات المسجّلة وتوقفات المؤشر المقصودة"
 

@@ -2575,6 +2575,9 @@ msgstr "在下次运行检测时生效"
 msgid "Detect uses recorded clicks only"
 msgstr "检测仅使用录制的点击"
 
+msgid "Detect uses recorded clicks"
+msgstr "检测使用录制的点击"
+
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "检测使用录制的点击和有意的光标暂停"
 

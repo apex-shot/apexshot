@@ -7,6 +7,8 @@
 //! anchored in source time, so trimming, cutting, or retiming the composition
 //! leaves the zoom on the footage it was placed for.
 
+use crate::recording::editor::sidecar::PointerSidecar;
+
 /// How far before a click its zoom opens.
 pub const LEAD_SECONDS: f64 = 0.3;
 /// How long a zoom keeps running after its click.
@@ -42,6 +44,10 @@ pub struct PointerPoint {
 pub struct AutoZoom {
     pub start: f64,
     pub end: f64,
+    /// Source time of the interaction that seeded the window. Placement uses
+    /// this to decide which kept footage the zoom belongs to, so a click on a
+    /// cut still lands on the piece it happened over.
+    pub center_time: f64,
     pub center: (f64, f64),
     pub scale: f64,
 }
@@ -128,12 +134,55 @@ pub fn automatic_zooms(clicks: &[Click], pointer: &[PointerPoint], duration: f64
                         .map(|c| (c.time, c.position)),
                 )
             })?;
+            // The interactions in the merged group own the window; its centre
+            // in time is the footage placement attaches the zoom to, so a
+            // window that spans a cut still lands on the piece the activity is
+            // mostly over.
+            let mut first = f64::INFINITY;
+            let mut last = f64::NEG_INFINITY;
+            for click in clicks.iter().filter(|click| in_window(click.time)) {
+                first = first.min(click.time);
+                last = last.max(click.time);
+            }
+            if !first.is_finite() {
+                return None;
+            }
+            let center_time = (first + last) * 0.5;
             Some(AutoZoom {
                 start,
                 end,
+                center_time,
                 center,
                 scale: DEFAULT_SCALE,
             })
+        })
+        .collect()
+}
+
+/// Recorded clicks mapped into encoded-video pixels.
+pub fn clicks_from_sidecar(sidecar: &PointerSidecar, width: f64, height: f64) -> Vec<Click> {
+    sidecar
+        .clicks
+        .iter()
+        .map(|click| Click {
+            time: click.t,
+            position: sidecar.map_to_video(click.x, click.y, width, height),
+        })
+        .collect()
+}
+
+/// Recorded pointer samples mapped into encoded-video pixels.
+pub fn pointer_from_sidecar(
+    sidecar: &PointerSidecar,
+    width: f64,
+    height: f64,
+) -> Vec<PointerPoint> {
+    sidecar
+        .pointer
+        .iter()
+        .map(|point| PointerPoint {
+            time: point.t,
+            position: sidecar.map_to_video(point.x, point.y, width, height),
         })
         .collect()
 }

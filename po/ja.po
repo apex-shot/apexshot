@@ -2578,6 +2578,9 @@ msgstr "次回の検出時に適用されます"
 msgid "Detect uses recorded clicks only"
 msgstr "検出は記録されたクリックのみを使用します"
 
+msgid "Detect uses recorded clicks"
+msgstr "検出は記録されたクリックを使用します"
+
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "検出は記録されたクリックと意図的なポインタの停止を使用します"
 

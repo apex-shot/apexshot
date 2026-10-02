@@ -1,5 +1,4 @@
 use super::sidecar::PointerSidecar;
-use super::zoom_suggest;
 use std::path::{Path, PathBuf};
 
 mod types {

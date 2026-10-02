@@ -2614,6 +2614,9 @@ msgstr "Применится при следующем запуске обнар
 msgid "Detect uses recorded clicks only"
 msgstr "Обнаружить использует только записанные щелчки"
 
+msgid "Detect uses recorded clicks"
+msgstr "Обнаружение использует записанные щелчки"
+
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "Обнаружить использует записанные щелчки и намеренные паузы курсора"
 

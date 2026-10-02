@@ -550,7 +550,6 @@ fn fill_floors_padding_so_the_video_never_glues_to_the_edge() {
     assert!(w < 1080);
 }
 
-
 #[test]
 fn needs_reencode_when_dimensions_or_quality_change() {
     let mut state = VideoEditState::new(metadata());
@@ -1225,98 +1224,27 @@ fn attach_sidecar_with_clicks(state: &mut VideoEditState, clicks: &[(f64, f64, f
     state.sidecar = Some(sidecar);
 }
 
-fn attach_sidecar_with_landings(state: &mut VideoEditState, landings: &[(f64, f64, f64)]) {
-    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
-        0,
-        crate::recording::editor::sidecar::CaptureRegion {
-            x: 0,
-            y: 0,
-            w: 1920,
-            h: 1080,
-        },
-    );
-    for &(t, x, y) in landings {
-        sidecar.pointer.extend([
-            crate::recording::editor::sidecar::PointerSample {
-                t: t - 0.6,
-                x: x - 300.0,
-                y: y - 150.0,
-                kind: crate::recording::editor::sidecar::CursorKind::Default,
-            },
-            crate::recording::editor::sidecar::PointerSample {
-                t: t - 0.25,
-                x: x - 150.0,
-                y: y - 75.0,
-                kind: crate::recording::editor::sidecar::CursorKind::Default,
-            },
-            crate::recording::editor::sidecar::PointerSample {
-                t,
-                x,
-                y,
-                kind: crate::recording::editor::sidecar::CursorKind::Default,
-            },
-            crate::recording::editor::sidecar::PointerSample {
-                t: t + 0.15,
-                x: x + 1.0,
-                y,
-                kind: crate::recording::editor::sidecar::CursorKind::Default,
-            },
-            crate::recording::editor::sidecar::PointerSample {
-                t: t + 0.5,
-                x,
-                y: y + 1.0,
-                kind: crate::recording::editor::sidecar::CursorKind::Default,
-            },
-        ]);
-    }
-    state.sidecar = Some(sidecar);
-}
+
 
 #[test]
-fn suggest_zoom_clips_places_regions_at_pointer_landings() {
-    let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0), (8.0, 960.0, 540.0)]);
-    assert_eq!(state.suggest_zoom_clips(), 2);
-    assert_eq!(state.zoom_clips.len(), 2);
-    let first = &state.zoom_clips[0];
-    assert!((first.start - 2.65).abs() < 1e-9);
-    assert!((first.end - 4.6).abs() < 1e-9);
-    assert!((first.scale - 1.5).abs() < 1e-9);
-    assert_eq!(first.mode, ZoomMode::Auto);
-    assert!((first.center.0 - 960.0).abs() < 1e-9);
-    assert!((first.center.1 - 540.0).abs() < 1e-9);
-    assert!((state.zoom_clips[1].start - 7.65).abs() < 1e-9);
-    assert!((state.zoom_clips[1].end - 9.6).abs() < 1e-9);
-}
-
-#[test]
-fn suggest_zoom_clips_skips_regions_overlapping_existing_zooms() {
-    let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0), (8.0, 960.0, 540.0)]);
-    state.add_zoom_at(2.6);
-    assert_eq!(state.suggest_zoom_clips(), 1);
-    assert_eq!(state.zoom_clips.len(), 2);
-    assert!((state.zoom_clips[1].start - 7.65).abs() < 1e-9);
-}
-
-#[test]
-fn suggest_zoom_clips_keeps_adjacent_click_sessions() {
+fn suggest_zoom_clips_merges_nearby_clicks_into_one_shot() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(3.0, 400.0, 300.0), (4.3, 1500.0, 700.0)]);
 
-    assert_eq!(state.suggest_zoom_clips(), 2);
-    assert_eq!(state.zoom_clips.len(), 2);
-    assert!(state.zoom_clips[0].end <= state.zoom_clips[1].start);
+    // The two clicks are close enough that one shot holds both.
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    assert!((state.zoom_clips[0].start - 2.7).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 6.8).abs() < 1e-9);
 }
 
 #[test]
-fn suggest_zoom_clips_refits_click_near_trim_boundary() {
+fn suggest_zoom_clips_clips_a_window_at_the_trim_boundary() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);
     state.set_trim_end(6.0);
 
     assert_eq!(state.suggest_zoom_clips(), 1);
-    assert!((state.zoom_clips[0].start - 4.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].start - 5.6).abs() < 1e-9);
     assert!((state.zoom_clips[0].end - 6.0).abs() < 1e-9);
 }
 
@@ -1404,11 +1332,11 @@ fn a_generated_zoom_follows_its_footage_through_a_head_trim() {
     attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);
     state.set_trim_end(6.0);
     assert_eq!(state.suggest_zoom_clips(), 1);
-    assert!((state.zoom_clips[0].start - 4.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].start - 5.6).abs() < 1e-9);
 
     state.set_trim_start(2.0);
 
-    assert!((state.zoom_clips[0].start - 2.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].start - 3.6).abs() < 1e-9);
     assert!((state.zoom_clips[0].end - 4.0).abs() < 1e-9);
 }
 
@@ -1419,14 +1347,13 @@ fn a_generated_zoom_keeps_its_footage_when_the_clip_is_retimed() {
     state.set_trim_end(6.0);
     state.suggest_zoom_clips();
 
-    // Same 1.4 source seconds, played twice as fast.
     state.set_selected_clip_speed(2.0);
-    assert!((state.zoom_clips[0].start - 2.3).abs() < 1e-9);
+    assert!((state.zoom_clips[0].start - 2.8).abs() < 1e-9);
     assert!((state.zoom_clips[0].end - 3.0).abs() < 1e-9);
 
-    // And stretched to a quarter speed, which is 5.6 composition seconds.
+    // And stretched to a quarter speed.
     state.set_selected_clip_speed(0.25);
-    assert!((state.zoom_clips[0].start - 18.4).abs() < 1e-9);
+    assert!((state.zoom_clips[0].start - 22.4).abs() < 1e-9);
     assert!((state.zoom_clips[0].end - 24.0).abs() < 1e-9);
 }
 
@@ -1436,13 +1363,14 @@ fn a_cut_inside_a_generated_zoom_leaves_it_with_the_piece_that_owns_its_start() 
     attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);
     state.set_trim_end(6.0);
     state.suggest_zoom_clips();
-    assert!((state.zoom_clips[0].start - 4.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].start - 5.6).abs() < 1e-9);
 
     state.add_cut(5.0);
 
+    // The click sits after the cut, so the zoom stays with the tail.
     assert_eq!(state.zoom_clips.len(), 1);
-    assert!((state.zoom_clips[0].start - 4.6).abs() < 1e-9);
-    assert!((state.zoom_clips[0].end - 5.0).abs() < 1e-9);
+    assert!((state.zoom_clips[0].start - 5.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 6.0).abs() < 1e-9);
 }
 
 #[test]
@@ -1458,7 +1386,7 @@ fn a_generated_zoom_goes_when_its_footage_leaves_the_composition() {
     // The clip over the dropped segment has nothing left to frame; the one
     // over the kept tail stays on its click.
     assert_eq!(state.zoom_clips.len(), 1);
-    assert!((state.zoom_clips[0].start - 7.4).abs() < 1e-9);
+    assert!((state.zoom_clips[0].start - 7.7).abs() < 1e-9);
 }
 
 #[test]
@@ -1490,8 +1418,8 @@ fn a_duplicated_generated_zoom_is_not_anchored_to_the_original() {
     // The copy sits where it was dropped; only the clip the generator placed
     // follows the footage.
     assert!((state.zoom_clips[0].start - 0.0).abs() < 1e-9);
-    assert!((state.zoom_clips[0].end - 1.4).abs() < 1e-9);
-    assert!((state.zoom_clips[1].start - 2.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 0.4).abs() < 1e-9);
+    assert!((state.zoom_clips[1].start - 3.6).abs() < 1e-9);
 }
 
 #[test]
@@ -1508,7 +1436,7 @@ fn undoing_a_zoom_edit_keeps_the_clip_on_its_footage() {
 
     // Undo restores the clip the drag took over, and it lands on the footage
     // its anchor names rather than the composition slot it was captured at.
-    assert!((state.zoom_clips[0].start - 2.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].start - 3.6).abs() < 1e-9);
     assert!((state.zoom_clips[0].end - 4.0).abs() < 1e-9);
 }
 
@@ -1532,155 +1460,27 @@ fn suggest_zoom_clips_uses_cut_boundary_tolerance() {
     assert!((state.zoom_clips[0].start - 4.0).abs() < 1e-9);
 }
 
-#[test]
-fn a_zoom_loosens_to_hold_its_workflow_inside_a_cropped_edit() {
-    // Two clicks 250 px apart are a 1.5x shot on the full frame, but the same
-    // pair fills most of an 800 px crop: the zoom has to loosen to keep both
-    // controls in view.
-    let mut full_frame = VideoEditState::new(metadata());
-    attach_sidecar_with_clicks(&mut full_frame, &[(2.0, 700.0, 500.0), (2.6, 950.0, 500.0)]);
-    assert_eq!(full_frame.suggest_zoom_clips(), 1);
-    assert!((full_frame.zoom_clips[0].scale - 1.5).abs() < 1e-9);
 
-    let mut cropped = VideoEditState::new(metadata());
-    cropped.set_crop(400.0, 200.0, 800.0, 700.0);
-    attach_sidecar_with_clicks(&mut cropped, &[(2.0, 700.0, 500.0), (2.6, 950.0, 500.0)]);
-
-    assert_eq!(cropped.suggest_zoom_clips(), 1);
-    let clip = &cropped.zoom_clips[0];
-    assert!(clip.scale < 1.5, "the crop must loosen the zoom: {clip:?}");
-    let view_w = 800.0 / clip.scale;
-    let view_h = 700.0 / clip.scale;
-    for target in [(700.0, 500.0), (950.0, 500.0)] {
-        assert!((target.0 - clip.center.0).abs() <= view_w / 2.0 + 1e-9);
-        assert!((target.1 - clip.center.1).abs() <= view_h / 2.0 + 1e-9);
-    }
-}
 
 #[test]
-fn a_workflow_wider_than_the_crop_does_not_earn_a_zoom() {
+fn suggest_zoom_clips_skips_clicks_outside_kept_segments() {
     let mut state = VideoEditState::new(metadata());
-    state.set_crop(400.0, 200.0, 800.0, 700.0);
-    attach_sidecar_with_clicks(&mut state, &[(2.0, 500.0, 400.0), (2.6, 1000.0, 400.0)]);
-
-    // Both clicks are inside the crop, but no zoom at or above the model's
-    // minimum can hold targets that far apart. Leaving the shot alone beats
-    // zooming in far enough to hide one of them.
-    assert_eq!(state.suggest_zoom_clips(), 0);
-    assert!(state.zoom_clips.is_empty());
-}
-
-#[test]
-fn suggest_zoom_clips_skips_landings_outside_kept_segments() {
-    let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0), (8.0, 960.0, 540.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0), (8.5, 960.0, 540.0)]);
     state.set_trim_start(4.0);
+    // The head-trimmed click is gone; the one in the kept tail is reframed.
     assert_eq!(state.suggest_zoom_clips(), 1);
-    assert!((state.zoom_clips[0].start - 3.65).abs() < 1e-9);
-    assert!((state.zoom_clips[0].end - 5.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].start - 4.2).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 5.2).abs() < 1e-9);
 }
 
-#[test]
-fn suggest_zoom_clips_applies_the_density_budget_after_placement() {
-    let mut long = metadata();
-    long.duration_seconds = 30.0;
-    let mut state = VideoEditState::new(long);
-    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
-        0,
-        crate::recording::editor::sidecar::CaptureRegion {
-            x: 0,
-            y: 0,
-            w: 1920,
-            h: 1080,
-        },
-    );
-    for index in 0..10 {
-        let t = 1.0 + index as f64 * 2.9;
-        let target = if index % 2 == 0 {
-            (300.0, 300.0)
-        } else {
-            (1500.0, 700.0)
-        };
-        let from = if index % 2 == 0 {
-            (1500.0, 700.0)
-        } else {
-            (300.0, 300.0)
-        };
-        for (offset, x, y) in [
-            (-0.6, from.0, from.1),
-            (-0.25, (from.0 + target.0) * 0.5, (from.1 + target.1) * 0.5),
-            (0.0, target.0, target.1),
-            (0.15, target.0 + 1.0, target.1),
-            (0.45, target.0, target.1 + 1.0),
-        ] {
-            sidecar
-                .pointer
-                .push(crate::recording::editor::sidecar::PointerSample {
-                    t: t + offset,
-                    x,
-                    y,
-                    kind: crate::recording::editor::sidecar::CursorKind::Default,
-                });
-        }
-    }
-    state.sidecar = Some(sidecar);
 
-    // Ten useful clusters, but `ceil(30 / 6) = 5` fit the recording.
-    assert_eq!(state.suggest_zoom_clips(), 5);
-}
 
-#[test]
-fn removed_high_score_suggestions_do_not_starve_valid_ones() {
-    let mut bare = metadata();
-    bare.duration_seconds = 12.0;
-    let mut state = VideoEditState::new(bare);
-    // Three repeated-click sessions in the removed head, one click in the
-    // kept tail. The removed sessions score higher, so ranking before
-    // feasibility would spend the whole budget on them and place nothing.
-    attach_sidecar_with_clicks(
-        &mut state,
-        &[
-            (1.0, 100.0, 100.0),
-            (1.2, 120.0, 120.0),
-            (3.0, 200.0, 200.0),
-            (3.2, 220.0, 220.0),
-            (5.0, 300.0, 300.0),
-            (5.2, 320.0, 320.0),
-            (9.0, 1200.0, 600.0),
-        ],
-    );
-    state.add_cut(6.0);
-    state.toggle_segment(0);
 
-    assert_eq!(state.suggest_zoom_clips(), 1);
-    assert!((state.zoom_clips[0].center.0 - 1200.0).abs() < 1.0);
-    assert!((state.zoom_clips[0].center.1 - 600.0).abs() < 1.0);
-}
-
-#[test]
-fn suggest_zoom_clips_requires_a_purposeful_landing() {
-    let mut state = VideoEditState::new(metadata());
-    attach_pointer(&mut state, 960.0, 540.0);
-    assert_eq!(state.suggest_zoom_clips(), 0);
-    assert!(state.zoom_clips.is_empty());
-}
-
-#[test]
-fn suggest_zoom_clips_places_regions_on_pointer_landings() {
-    let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(2.0, 960.0, 540.0), (7.0, 1200.0, 600.0)]);
-    assert_eq!(state.suggest_zoom_clips(), 2);
-    assert!((state.zoom_clips[0].start - 1.65).abs() < 1e-9);
-    assert!((state.zoom_clips[0].end - 3.6).abs() < 1e-9);
-    assert!((state.zoom_clips[0].center.0 - 960.0).abs() < 1.0);
-    assert!((state.zoom_clips[1].start - 6.65).abs() < 1e-9);
-    assert!((state.zoom_clips[1].scale - 1.5).abs() < 1e-9);
-}
 
 #[test]
 fn suggest_zoom_clips_rejects_targets_outside_the_editor_crop() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 1600.0, 700.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 1600.0, 700.0)]);
     state.set_crop(0.0, 0.0, 900.0, 700.0);
     assert_eq!(state.suggest_zoom_clips(), 0);
     assert!(state.zoom_clips.is_empty());
@@ -1707,43 +1507,6 @@ fn click_only_sidecar_supports_auto_zoom_suggestions() {
 }
 
 #[test]
-fn zoom_evidence_controls_whether_unrelated_hovers_survive() {
-    let mut state = VideoEditState::new(metadata());
-    // A purposeful hover at ~3s, and a click far away at ~8s. Both focus
-    // points sit inside the 1.5x viewport so the clamp leaves them untouched.
-    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
-    state
-        .sidecar
-        .as_mut()
-        .unwrap()
-        .clicks
-        .push(crate::recording::editor::sidecar::ClickSample {
-            t: 8.0,
-            x: 800.0,
-            y: 500.0,
-            button: 1,
-        });
-
-    // Click-first is the default and drops the unrelated hover.
-    assert_eq!(state.zoom_evidence(), ZoomEvidence::ClicksOnly);
-    assert_eq!(state.suggest_zoom_clips(), 1);
-    assert!((state.zoom_clips[0].center.0 - 800.0).abs() < 1e-9);
-
-    // Opting into mixed evidence keeps both interactions.
-    state.zoom_clips.clear();
-    state.set_zoom_evidence(ZoomEvidence::ClicksAndHovers);
-    assert_eq!(state.suggest_zoom_clips(), 2);
-    assert!(state
-        .zoom_clips
-        .iter()
-        .any(|clip| (clip.center.0 - 960.0).abs() < 1e-9));
-    assert!(state
-        .zoom_clips
-        .iter()
-        .any(|clip| (clip.center.0 - 800.0).abs() < 1e-9));
-}
-
-#[test]
 fn click_redetection_preserves_manual_zoom_clips() {
     let mut state = VideoEditState::new(metadata());
     attach_pointer(&mut state, 960.0, 540.0);
@@ -1761,26 +1524,6 @@ fn click_redetection_preserves_manual_zoom_clips() {
         .any(|clip| clip.mode == ZoomMode::Auto));
 }
 
-#[test]
-fn click_zoom_wins_when_its_region_overlaps_a_landing() {
-    let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 400.0, 300.0)]);
-    state
-        .sidecar
-        .as_mut()
-        .unwrap()
-        .clicks
-        .push(crate::recording::editor::sidecar::ClickSample {
-            t: 4.0,
-            x: 1100.0,
-            y: 600.0,
-            button: 1,
-        });
-
-    assert_eq!(state.suggest_zoom_clips(), 1);
-    assert!((state.zoom_clips[0].center.0 - 1100.0).abs() < 1e-9);
-    assert!((state.zoom_clips[0].center.1 - 600.0).abs() < 1e-9);
-}
 
 #[test]
 fn redetect_zoom_clips_replaces_generated_auto_zooms_for_this_video() {
@@ -1789,12 +1532,12 @@ fn redetect_zoom_clips_replaces_generated_auto_zooms_for_this_video() {
     assert_eq!(state.suggest_zoom_clips(), 1);
     assert_eq!(state.zoom_clips[0].mode, ZoomMode::Auto);
     assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::Generated);
-    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(4.0, 500.0, 400.0)]);
     assert!(state.redetect_zoom_clips());
     assert_eq!(state.zoom_clips.len(), 1);
     assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::Generated);
-    assert!((state.zoom_clips[0].start - 3.65).abs() < 1e-9);
-    assert!((state.zoom_clips[0].end - 5.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].start - 3.7).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 6.5).abs() < 1e-9);
 }
 
 #[test]
@@ -1808,7 +1551,7 @@ fn redetect_keeps_a_user_added_auto_zoom() {
     assert_eq!(state.zoom_clips[index].origin, ZoomOrigin::User);
     let user_clip = state.zoom_clips[index].clone();
 
-    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(4.0, 500.0, 400.0)]);
     assert!(state.redetect_zoom_clips());
     assert!(state.zoom_clips.contains(&user_clip));
     assert!(state
@@ -1820,7 +1563,7 @@ fn redetect_keeps_a_user_added_auto_zoom() {
 #[test]
 fn editing_a_generated_zoom_protects_it_from_regeneration() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(4.0, 500.0, 400.0)]);
     assert_eq!(state.suggest_zoom_clips(), 1);
     assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::Generated);
     state.selected_zoom = Some(0);
@@ -1828,7 +1571,7 @@ fn editing_a_generated_zoom_protects_it_from_regeneration() {
     assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::User);
     let edited = state.zoom_clips[0].clone();
 
-    attach_sidecar_with_landings(&mut state, &[(8.0, 1200.0, 600.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(8.0, 1200.0, 600.0)]);
     assert!(state.redetect_zoom_clips());
     assert!(state.zoom_clips.contains(&edited));
 }
@@ -1836,12 +1579,12 @@ fn editing_a_generated_zoom_protects_it_from_regeneration() {
 #[test]
 fn hiding_a_generated_zoom_protects_it_from_regeneration() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(4.0, 500.0, 400.0)]);
     assert_eq!(state.suggest_zoom_clips(), 1);
     state.set_zoom_hidden(0, true);
     assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::User);
 
-    attach_sidecar_with_landings(&mut state, &[(8.0, 1200.0, 600.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(8.0, 1200.0, 600.0)]);
     assert!(state.redetect_zoom_clips());
     assert!(state.zoom_clips.iter().any(|clip| clip.hidden));
 }
@@ -1861,7 +1604,7 @@ fn legacy_clips_are_never_replaced_by_regeneration() {
     });
     assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::Legacy);
 
-    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(4.0, 500.0, 400.0)]);
     assert!(state.redetect_zoom_clips());
     assert!(state
         .zoom_clips
@@ -1874,7 +1617,7 @@ fn undo_takes_a_generation_pass_back_in_one_step() {
     // One Detect can add several clips; undoing has to put the track back the
     // way a single click found it, not clip by clip.
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_clicks(&mut state, &[(3.0, 800.0, 500.0), (8.0, 1200.0, 600.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 800.0, 500.0), (8.8, 1200.0, 600.0)]);
 
     assert!(state.redetect_zoom_clips());
     let added = state.zoom_clips.clone();
@@ -1931,7 +1674,7 @@ fn a_timeline_drag_is_one_undo_step() {
 #[test]
 fn a_command_after_a_sweep_keeps_its_own_step() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(4.0, 500.0, 400.0)]);
     assert_eq!(state.suggest_zoom_clips(), 1);
     state.selected_zoom = Some(0);
     let suggested = state.zoom_clips[0].scale;
@@ -1977,7 +1720,7 @@ fn undo_skips_a_command_that_changed_nothing() {
 #[test]
 fn zoom_history_keeps_a_bounded_number_of_steps() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(4.0, 500.0, 400.0)]);
     assert_eq!(state.suggest_zoom_clips(), 1);
     for step in 0..ZOOM_HISTORY_LIMIT + 8 {
         state.set_zoom_hidden(0, step % 2 == 0);
@@ -1996,7 +1739,7 @@ fn undo_takes_back_the_pass_that_ran_on_open() {
     // reviewed flag is not part of the step, so a reopened project asks again
     // — and the pass must not return.
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(4.0, 500.0, 400.0)]);
     assert!(state.suggest_zooms_on_open());
     assert_eq!(state.zoom_clips.len(), 1);
 
@@ -2012,7 +1755,7 @@ fn undo_takes_back_the_pass_that_ran_on_open() {
 
 #[test]
 fn a_reloaded_project_has_nothing_to_undo() {    let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(4.0, 500.0, 400.0)]);
     assert_eq!(state.suggest_zoom_clips(), 1);
     let saved = state.to_project();
 
@@ -2026,7 +1769,7 @@ fn a_reloaded_project_has_nothing_to_undo() {    let mut state = VideoEditState:
 #[test]
 fn suggest_zoom_clips_respects_zoom_lock() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
     state.zoom_locked = true;
     assert_eq!(state.suggest_zoom_clips(), 0);
     assert!(state.zoom_clips.is_empty());
@@ -2035,7 +1778,7 @@ fn suggest_zoom_clips_respects_zoom_lock() {
 #[test]
 fn opening_a_fresh_recording_suggests_once() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
     assert!(!state.zoom_suggestions_reviewed());
     assert!(state.suggest_zooms_on_open());
     assert_eq!(state.zoom_clips.len(), 1);
@@ -2059,7 +1802,7 @@ fn the_review_pass_runs_quietly_when_it_finds_nothing() {
 #[test]
 fn rejecting_every_suggestion_survives_reopening() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
     assert!(state.suggest_zooms_on_open());
     assert_eq!(state.zoom_clips.len(), 1);
 
@@ -2073,7 +1816,7 @@ fn rejecting_every_suggestion_survives_reopening() {
 #[test]
 fn explicit_redetect_marks_the_recording_reviewed() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
     assert!(state.redetect_zoom_clips());
     assert!(state.zoom_suggestions_reviewed());
 }
@@ -2081,7 +1824,7 @@ fn explicit_redetect_marks_the_recording_reviewed() {
 #[test]
 fn resetting_the_review_state_allows_the_pass_again() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
     assert!(state.suggest_zooms_on_open());
     state.zoom_clips.clear();
     state.reset_zoom_suggestions_reviewed();
@@ -2739,7 +2482,7 @@ fn zoom_scale_steps(clips: &[ZoomClip], start: f64, end: f64, samples: usize) ->
 #[test]
 fn suggest_zoom_clips_ease_in_and_out_at_rest() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
     assert_eq!(state.suggest_zoom_clips(), 1);
     let (start, end) = (state.zoom_clips[0].start, state.zoom_clips[0].end);
     assert_eq!(state.zoom_clips[0].easing, ZoomEasing::Smooth);
@@ -2772,7 +2515,7 @@ fn suggest_zoom_clips_ease_in_and_out_at_rest() {
 #[test]
 fn suggested_zoom_easing_can_be_overridden() {
     let mut state = VideoEditState::new(metadata());
-    attach_sidecar_with_landings(&mut state, &[(3.0, 960.0, 540.0)]);
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 960.0, 540.0)]);
     assert_eq!(state.suggest_zoom_clips(), 1);
     state.selected_zoom = Some(0);
     state.set_selected_zoom_easing(ZoomEasing::Glide);

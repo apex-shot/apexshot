@@ -1,5 +1,3 @@
-pub use super::zoom_suggest::ZoomEvidence;
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct CursorHideClip {
     pub start: f64,
@@ -139,9 +137,6 @@ pub struct VideoEditState {
     /// on its own, apart from `zoom_clips`, so a user who rejected every
     /// suggestion — or disabled generation — is not asked again on reopen.
     pub zoom_suggestions_reviewed: bool,
-    /// Which recorded signals automatic generation may use. Defaults to
-    /// click-first; mixed evidence keeps unrelated purposeful hovers.
-    pub zoom_evidence: ZoomEvidence,
     /// Undo/redo steps for the zoom track. Runtime-only: not written to the
     /// project, so a reopened recording starts with nothing to undo.
     pub zoom_history: ZoomHistory,

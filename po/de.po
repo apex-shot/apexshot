@@ -2626,6 +2626,9 @@ msgstr "Wird beim nächsten Erkennen angewendet"
 msgid "Detect uses recorded clicks only"
 msgstr "Erkennen verwendet nur aufgezeichnete Klicks"
 
+msgid "Detect uses recorded clicks"
+msgstr "Erkennen verwendet aufgezeichnete Klicks"
+
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "Erkennen verwendet aufgezeichnete Klicks und beabsichtigte Zeigerpausen"
 

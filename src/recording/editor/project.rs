@@ -12,8 +12,8 @@ use std::time::UNIX_EPOCH;
 use super::model::{
     AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorSettings, CursorTheme,
     DimensionPreset, ExportQuality, GradientKind, GradientStop, ProjectMedia, ProjectMediaKind,
-    VideoBackground, VideoEditState, VideoGradient, ZoomAnchor, ZoomClip, ZoomEasing, ZoomEvidence,
-    ZoomMode, ZoomOrigin, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY,
+    VideoBackground, VideoEditState, VideoGradient, ZoomAnchor, ZoomClip, ZoomEasing, ZoomMode,
+    ZoomOrigin, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY,
     DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW,
     DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED, DEFAULT_CURSOR_SWAY,
     DEFAULT_CURSOR_TILT, DEFAULT_CURSOR_TRAIL,
@@ -52,10 +52,6 @@ pub struct VideoProjectFile {
     /// list so an empty (rejected) timeline is not re-suggested on reopen.
     #[serde(default)]
     pub zoom_suggestions_reviewed: bool,
-    /// Which recorded signals automatic generation may use. Defaults to
-    /// click-first for projects written before the field existed.
-    #[serde(default)]
-    pub zoom_evidence: ZoomEvidence,
     pub crop: Option<CropFile>,
     pub background: BackgroundFile,
     pub background_padding: f64,
@@ -916,7 +912,6 @@ impl VideoEditState {
             zoom_hidden: self.zoom_hidden,
             zoom_locked: self.zoom_locked,
             zoom_suggestions_reviewed: self.zoom_suggestions_reviewed,
-            zoom_evidence: self.zoom_evidence,
             crop: self.crop.map(crop_to_file),
             background: background_to_file(&self.background),
             background_padding: self.background_padding,
@@ -980,7 +975,6 @@ impl VideoEditState {
         self.zoom_hidden = file.zoom_hidden;
         self.zoom_locked = file.zoom_locked;
         self.zoom_suggestions_reviewed = file.zoom_suggestions_reviewed;
-        self.zoom_evidence = file.zoom_evidence;
         self.crop = file.crop.map(crop_from_file);
         self.background = background_from_file(file.background);
         self.background_padding = file.background_padding;
@@ -1296,9 +1290,7 @@ mod tests {
         attach_dummy_pointer(&mut state);
         let json = serde_json::to_string(&state.to_project()).unwrap();
         assert!(!json.contains("pointer"));
-        // Match the sidecar's array key, not the word shape: the new
-        // `zoom_evidence` preference serializes as `"clicks_only"`, which is a
-        // preference rather than leaked click samples.
+        // Match the sidecar's array keys, not the word shapes.
         assert!(!json.contains("\"clicks\":"));
         assert!(!json.contains("t0_monotonic"));
         let _ = fs::remove_dir_all(&dir);
@@ -1590,37 +1582,6 @@ mod tests {
         let mut restored = VideoEditState::new(metadata_for(&video, 16));
         restored.apply_project(file);
         assert!(!restored.zoom_suggestions_reviewed());
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn roundtrip_preserves_zoom_evidence() {
-        let dir = scratch("zoom-evidence");
-        let video = write_video(&dir, "clip.mp4", 24);
-        let mut state = VideoEditState::new(metadata_for(&video, 24));
-        state.set_zoom_evidence(ZoomEvidence::ClicksAndHovers);
-        save_project(&video, &state.to_project()).unwrap();
-        let loaded = load_project(&video).expect("project should load");
-        let mut restored = VideoEditState::new(metadata_for(&video, 24));
-        restored.apply_project(loaded);
-        assert_eq!(restored.zoom_evidence(), ZoomEvidence::ClicksAndHovers);
-        cleanup_project(&video);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn old_project_json_without_zoom_evidence_defaults_to_clicks_only() {
-        let dir = scratch("old-zoom-evidence");
-        let video = write_video(&dir, "clip.mp4", 16);
-        let state = VideoEditState::new(metadata_for(&video, 16));
-        let mut json = serde_json::to_value(state.to_project()).unwrap();
-        json.as_object_mut().unwrap().remove("zoom_evidence");
-        let file: VideoProjectFile = serde_json::from_value(json).unwrap();
-        assert_eq!(file.zoom_evidence, ZoomEvidence::ClicksOnly);
-
-        let mut restored = VideoEditState::new(metadata_for(&video, 16));
-        restored.apply_project(file);
-        assert_eq!(restored.zoom_evidence(), ZoomEvidence::ClicksOnly);
         let _ = fs::remove_dir_all(&dir);
     }
 

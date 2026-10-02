@@ -648,22 +648,6 @@ mod tests {
 
         assert!(samples.len() >= 6);
         assert!(samples.last().unwrap().x > samples.first().unwrap().x);
-        let mut sidecar = PointerSidecar::new(
-            0,
-            CaptureRegion {
-                x: 0,
-                y: 0,
-                w: 64,
-                h: 48,
-            },
-        );
-        sidecar.pointer = samples;
-        sidecar.mark_inferred_from_video();
-        assert!(
-            !super::super::zoom_suggest::suggest_zooms(&sidecar, 64.0, 48.0, 1.8).is_empty(),
-            "samples: {:?}",
-            sidecar.pointer
-        );
     }
 
     #[test]

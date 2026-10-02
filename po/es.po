@@ -2621,6 +2621,9 @@ msgstr "Se aplica la próxima vez que se ejecute Detectar"
 msgid "Detect uses recorded clicks only"
 msgstr "Detectar usa solo los clics registrados"
 
+msgid "Detect uses recorded clicks"
+msgstr "Detectar usa los clics registrados"
+
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr ""
 "Detectar usa los clics registrados y las pausas intencionadas del puntero"

@@ -36,10 +36,10 @@ until its own phase.
 
 ## Phases
 
-1. **Window generator** — new `auto_zoom` module: click windows, merge, clamp,
-   focus, source anchoring. No behaviour change on its own. *This change.*
+1. **Window generator** — `auto_zoom` module: click windows, merge, clamp,
+   focus, source anchoring. Done.
 2. **Wire in and remove the old detector** — placement uses the generator;
-   `zoom_suggest` and the clicks/hovers evidence choice are deleted.
+   the old multi-signal detector and the clicks/hovers choice are gone. Done.
 3. **Camera follow** — a per-zoom camera target and motion model that matches
    the merged-window focus.
 4. **Style inheritance** — a new zoom opens with the level and style of the
