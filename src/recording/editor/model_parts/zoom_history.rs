@@ -137,6 +137,11 @@ impl VideoEditState {
             return false;
         };
         previous.restore(self);
+        // A composition edit since the step was taken has already moved the
+        // clips that are anchored to their footage, and the step is older than
+        // that edit. Re-projecting puts the restored clips on the footage
+        // their anchors name instead of where they sat when it was captured.
+        self.reproject_anchored_zooms();
         true
     }
 
@@ -147,6 +152,7 @@ impl VideoEditState {
             return false;
         };
         next.restore(self);
+        self.reproject_anchored_zooms();
         true
     }
 }

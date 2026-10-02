@@ -1420,6 +1420,24 @@ fn a_duplicated_generated_zoom_is_not_anchored_to_the_original() {
 }
 
 #[test]
+fn undoing_a_zoom_edit_keeps_the_clip_on_its_footage() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);
+    state.set_trim_end(6.0);
+    state.suggest_zoom_clips();
+    state.move_zoom_clip(0, 1.0);
+    // A composition edit after the step was taken moves the anchored clip.
+    state.set_trim_start(2.0);
+
+    assert!(state.undo_zoom_edit());
+
+    // Undo restores the clip the drag took over, and it lands on the footage
+    // its anchor names rather than the composition slot it was captured at.
+    assert!((state.zoom_clips[0].start - 2.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 4.0).abs() < 1e-9);
+}
+
+#[test]
 fn suggest_zoom_clips_assigns_exact_cut_click_to_following_segment() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(4.0, 800.0, 500.0)]);
