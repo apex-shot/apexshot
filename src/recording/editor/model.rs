@@ -1,4 +1,4 @@
-use super::sidecar::{PointerSidecar, PressSample};
+use super::sidecar::PointerSidecar;
 use std::path::{Path, PathBuf};
 
 mod types {

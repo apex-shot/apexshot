@@ -1,5 +1,3 @@
-use std::sync::LazyLock;
-
 fn ranges_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> bool {
     a0 < b1 && b0 < a1
 }
@@ -254,15 +252,15 @@ fn morph_gap_predecessor(clips: &[ZoomClip], t: f64) -> Option<usize> {
 /// The camera does not track the raw cursor and has no dead zone. Its target
 /// is the centre of the pointer-movement group active at the current source
 /// time, and a damped spring carries the framing toward that target. This is
-/// the portable half of the studied automatic-zoom camera: group-centre
-/// target, click-proximity stiffness, and a per-zoom instant snap.
+/// the studied automatic-zoom camera: the movement-group centre chased on
+/// the project's screen spring, with a per-zoom instant snap.
 ///
-/// Release stiffness and typing suppression are deliberately omitted. The
-/// drag spring is wired from the recorded press intervals; release stiffness
-/// has no recorded signal of its own, and keystroke capture was deliberately
-/// removed, so typing suppression has no signal and key identities are never
-/// collected. Where the studied camera would ease on release or hide while
-/// typing, this camera keeps following the movement groups.
+/// The studied screen is driven by one project-level spring
+/// (`screenMovementSpring`, our [`CAMERA_FOLLOW_SPRING`]). An earlier port
+/// also stiffened the camera near a click and while a mouse drag was
+/// recorded, but in the studied app those `mouseMovementSpring` changes
+/// smooth the *cursor sprite*, not the camera — the camera keeps its single
+/// screen spring. That stiffness is deliberately not applied here.
 ///
 /// The evaluator is pure: every call simulates from the clip's source start
 /// to the evaluation time at the studied adaptive step, starting at the
@@ -283,62 +281,12 @@ pub const CAMERA_FOLLOW_SPRING: CameraSpring = CameraSpring {
     mass: 1.5,
 };
 
-/// Stiffer spring selected while a click is near: the studied camera looks
-/// ahead for the next click within this window and tightens the follow so
-/// the framing lands as the click does.
-pub const CAMERA_CLICK_SPRING: CameraSpring = CameraSpring {
-    stiffness: 530.0,
-    damping: 40.0,
-    mass: 1.0,
-};
-
-/// How far ahead a click still stiffens the follow spring.
-pub const CAMERA_CLICK_WINDOW_SECONDS: f64 = 0.175;
-
-/// The studied instant spring: mass 0 so it snaps in a single step. The
-/// fit-to-duration helper returns it when a target is at most two frames.
-pub const CAMERA_INSTANT_SPRING: CameraSpring = CameraSpring {
-    stiffness: 1.0,
-    damping: 1.0,
-    mass: 0.0,
-};
-
-/// The base whose drag response is fit to a short duration. This is the
-/// stiffest named spring in the studied set.
-pub const CAMERA_DRAG_BASE_SPRING: CameraSpring = CameraSpring {
-    stiffness: 1000.0,
-    damping: 40.0,
-    mass: 1.0,
-};
-
-/// How quickly the drag spring should settle, in milliseconds. The studied
-/// drag spring is the base above fit to 40 ms.
-pub const CAMERA_DRAG_SETTLE_MS: f64 = 40.0;
-
-/// Spring selected while the pointer is dragging. Derived from the studied
-/// fit helper rather than hand-computed, so the derivation stays visible:
-/// `fit_spring_to_duration(40 ms, CAMERA_DRAG_BASE_SPRING)`.
-///
-/// A `static` rather than a `const` because the settle-time estimator needs
-/// `sqrt`, which is not const-stable, so the derivation runs once on first
-/// use.
-pub static CAMERA_DRAG_SPRING: LazyLock<CameraSpring> = LazyLock::new(|| {
-    fit_spring_to_duration(CAMERA_DRAG_SETTLE_MS, CAMERA_DRAG_BASE_SPRING)
-});
-
-/// Default precision for the settle-time estimator, matching the studied
-/// spring config's default.
-const SPRING_SETTLE_PRECISION: f64 = 0.002;
-
-/// Upper bound on the settle simulation, in milliseconds: the studied cap of
-/// `1000 * 20 ms` keeps a non-settling spring from looping forever.
-const SPRING_SETTLE_CAP_MS: f64 = 1000.0 * 20.0;
-
 /// Adaptive integration step in milliseconds, ported from the studied
 /// integrator. It returns the 1000/60 ms frame unless the frame time times
 /// the faster of the natural frequency and the damping rate exceeds half a
-/// step, in which case it returns 1 ms. The stiff click and drag springs take
-/// the 1 ms branch; the softer follow spring takes the frame branch.
+/// step, in which case it returns 1 ms. The soft follow spring takes the
+/// frame branch; a stiffer spring (a future cursor or transition spring)
+/// takes the 1 ms branch.
 pub fn spring_adaptive_step_ms(spring: CameraSpring) -> f64 {
     let frame_ms = 1000.0 / 60.0;
     let mass = spring.mass.max(f64::EPSILON);
@@ -348,114 +296,6 @@ pub fn spring_adaptive_step_ms(spring: CameraSpring) -> f64 {
         frame_ms
     } else {
         1.0
-    }
-}
-
-/// The studied precision threshold `X(0, 1000, precision)`: the settle
-/// simulation stops once both velocity and distance fall below it. With the
-/// default precision of 0.002 the threshold is 2.
-fn spring_settle_threshold(precision: f64) -> f64 {
-    let range = (0.0f64 - 1000.0).abs().max(1.0);
-    range.max(1.0) / (1.0 / precision)
-}
-
-/// One step of the studied settle estimator: semi-implicit Euler toward
-/// `target`, with the estimator's early stop when both velocity and distance
-/// fall under `precision`. Unlike [`spring_step`] the estimator does not
-/// apply the critical-damping clamp.
-fn spring_settle_step(
-    step_ms: f64,
-    value: f64,
-    velocity: f64,
-    target: f64,
-    spring: CameraSpring,
-    precision: f64,
-) -> (f64, f64) {
-    let dt = step_ms / 1000.0;
-    let acceleration =
-        (-(value - target) * spring.stiffness - velocity * spring.damping) / spring.mass;
-    let velocity = velocity + acceleration * dt;
-    let value = value + velocity * dt;
-    if velocity.abs() < precision && (value - target).abs() < precision {
-        (target, 0.0)
-    } else {
-        (value, velocity)
-    }
-}
-
-/// Simulated settle time in milliseconds, ported from the studied estimator:
-/// integrate a spring from rest toward 1000 at the adaptive step until both
-/// velocity and distance fall below a precision-scaled threshold, or the
-/// simulation cap is hit. A mass-0 spring settles instantly.
-pub fn spring_settle_time_ms(spring: CameraSpring) -> f64 {
-    if spring.mass == 0.0 {
-        return 0.0;
-    }
-    let threshold = spring_settle_threshold(SPRING_SETTLE_PRECISION);
-    let step = spring_adaptive_step_ms(spring);
-    let target = 1000.0f64;
-    let mut value = 0.0f64;
-    let mut velocity = 1e-6f64;
-    let mut elapsed = 0.0f64;
-    while value != target && velocity != 0.0 {
-        let (next_value, next_velocity) =
-            spring_settle_step(step, value, velocity, target, spring, threshold);
-        value = next_value;
-        velocity = next_velocity;
-        if !value.is_finite() || !velocity.is_finite() {
-            break;
-        }
-        elapsed += step;
-        if elapsed > SPRING_SETTLE_CAP_MS {
-            break;
-        }
-    }
-    elapsed
-}
-
-/// Fit a spring to settle within `target_ms`, ported from the studied helper:
-/// an already-fast-enough spring is returned unchanged, a target at or below
-/// two 60 fps frames yields the instant spring, and otherwise the damping
-/// ratio is preserved while the natural frequency scales by
-/// `settle / target`.
-pub fn fit_spring_to_duration(target_ms: f64, spring: CameraSpring) -> CameraSpring {
-    let settle = spring_settle_time_ms(spring);
-    if settle <= target_ms {
-        return spring;
-    }
-    if target_ms <= (1000.0 / 60.0) * 2.0 {
-        return CAMERA_INSTANT_SPRING;
-    }
-    let ratio = settle / target_ms;
-    CameraSpring {
-        stiffness: spring.stiffness * ratio * ratio,
-        damping: spring.damping * ratio,
-        mass: spring.mass,
-    }
-}
-
-/// Which spring drives the follow at source time `t`, following the studied
-/// priority: instant (handled by the caller), then drag, then click, then the
-/// default follow spring. A dragged press wins even when a click is inside
-/// the look-ahead window.
-pub fn camera_spring_for_time(
-    click_times: &[f64],
-    presses: &[PressSample],
-    t: f64,
-) -> CameraSpring {
-    if !t.is_finite() {
-        return CAMERA_FOLLOW_SPRING;
-    }
-    if presses.iter().any(|press| press.dragged && press.contains(t)) {
-        return *CAMERA_DRAG_SPRING;
-    }
-    let imminent = click_times.iter().any(|click| {
-        click.is_finite() && *click >= t && *click - t <= CAMERA_CLICK_WINDOW_SECONDS
-    });
-    if imminent {
-        CAMERA_CLICK_SPRING
-    } else {
-        CAMERA_FOLLOW_SPRING
     }
 }
 
@@ -591,8 +431,7 @@ pub fn movement_groups(
 /// Precompute each movement group's first sample time and dwell-weighted
 /// centre. The centre does not depend on the query time — only which group is
 /// active does — so the follow camera can index this once per evaluation
-/// instead of rebuilding every group on every integration step. That rebuild
-/// dominated the evaluation once the stiff drag spring forced the 1 ms step.
+/// instead of rebuilding every group on every integration step.
 fn movement_group_centers(
     points: &[(f64, f64, f64)],
     max_distance: (f64, f64),
@@ -669,10 +508,8 @@ pub fn movement_group_center_at(
 /// random seeks match sequential playback.
 ///
 /// The step is the studied adaptive step: 1000/60 ms for the soft follow
-/// spring, 1 ms for the stiff click and drag springs. At 1 ms the stiff drag
-/// spring is well inside semi-implicit Euler's stability limit (omega * dt is
-/// about 0.3, not the ~2 a fixed 1/120 s step would give), and the
-/// precomputed group centres keep the finer step affordable.
+/// spring, 1 ms for a spring stiff enough that the frame step would be
+/// unstable (omega * dt above the semi-implicit Euler limit).
 pub fn evaluate_spring_camera(
     start: (f64, f64),
     points: &[(f64, f64, f64)],

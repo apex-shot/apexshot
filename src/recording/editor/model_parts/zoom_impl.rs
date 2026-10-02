@@ -1125,12 +1125,10 @@ impl VideoEditState {
     /// pinned to the last real frame.
     ///
     /// The follow camera chases the movement-group centre active at
-    /// `source_t` on a damped spring, starting at the clip's stored centre.
-    /// The evaluation is pure (no carried state), so random seeks match
-    /// sequential playback. A recorded drag selects the stiff drag spring
-    /// ahead of the click spring; release stiffness and typing suppression
-    /// are intentionally absent, since neither has a recorded signal and key
-    /// identities are never collected.
+    /// `source_t` on the project's follow spring, starting at the clip's
+    /// stored centre. The evaluation is pure (no carried state), so random
+    /// seeks match sequential playback. Per-zoom `instant` snaps instead of
+    /// chasing.
     pub fn eval_zoom_at(&self, timeline_t: f64, source_t: f64) -> (f64, (f64, f64)) {
         let frame_w = self.metadata.width as f64;
         let frame_h = self.metadata.height as f64;
@@ -1174,7 +1172,6 @@ impl VideoEditState {
         if points.is_empty() {
             return (scale, center);
         }
-        let click_times: Vec<f64> = sidecar.clicks.iter().map(|click| click.t).collect();
         let crop = self.crop_or_full();
         let budget = movement_group_budget(crop, clip.scale);
         if clip.instant {
@@ -1184,18 +1181,20 @@ impl VideoEditState {
                 movement_group_center_at(&points, source_t, budget).unwrap_or(clip.center);
             return (scale, clamp_zoom_center(crop, scale, target));
         }
-        let spring = camera_spring_for_time(&click_times, &sidecar.presses, source_t);
         let from_source = self.timeline_to_source(clip.start);
         if !source_t.is_finite() || !from_source.is_finite() || source_t <= from_source {
             return (scale, clamp_zoom_center(crop, scale, clip.center));
         }
+        // The screen is driven by the one project-level follow spring. The
+        // studied `mouseMovementSpring` drag/click stiffening smooths the
+        // cursor sprite, not the camera, so it is not applied here.
         let followed = evaluate_spring_camera(
             clip.center,
             &points,
             from_source,
             source_t,
             budget,
-            spring,
+            CAMERA_FOLLOW_SPRING,
         );
         (scale, clamp_zoom_center(crop, scale, followed))
     }
