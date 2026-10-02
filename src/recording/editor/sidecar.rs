@@ -83,9 +83,6 @@ pub struct CursorMotion {
     pub smooth: f64,
     pub hide_idle: bool,
     pub idle_ms: f64,
-    pub trail: f64,
-    pub tilt: f64,
-    pub sway: f64,
     pub speed: f64,
 }
 
@@ -95,9 +92,6 @@ impl Default for CursorMotion {
             smooth: 0.0,
             hide_idle: false,
             idle_ms: 800.0,
-            trail: 0.0,
-            tilt: 0.0,
-            sway: 0.0,
             speed: 1.0,
         }
     }
@@ -109,8 +103,6 @@ pub struct CursorFrame {
     pub y: f64,
     pub kind: CursorKind,
     pub alpha: f64,
-    pub tilt: f64,
-    pub trail: Vec<(f64, f64, f64)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -284,40 +276,13 @@ impl PointerSidecar {
 
     pub fn presented_at(&self, t: f64, motion: CursorMotion) -> Option<CursorFrame> {
         let (_, _, kind) = self.interpolated_at(t)?;
-        let (mut x, mut y) = self.motion_position_at(t, motion.smooth, motion.speed)?;
-        let (vx, vy) = self.velocity_at(t, motion.smooth, motion.speed);
-        let travel = vx.hypot(vy);
-        let still = (1.0 - (travel / 90.0).clamp(0.0, 1.0)).powi(2);
-        if motion.sway > 0.01 {
-            x += (t * 5.1).sin() * 2.6 * motion.sway * still;
-            y += (t * 3.7).cos() * 1.8 * motion.sway * still;
-        }
-        let tilt = if motion.tilt <= 0.01 || travel < 28.0 {
-            0.0
-        } else {
-            // Signed deviation of the direction of travel from straight up, so a
-            // leftward move leans the sprite the opposite way from a rightward
-            // one. Wrapping with `atan2(vy, vx) + PI/2` instead sent leftward
-            // travel past 3*PI/2, where the clamp pinned it to the right lean.
-            let lean = vx
-                .atan2(-vy)
-                .clamp(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2);
-            (lean * motion.tilt * 0.28 * (travel / 220.0).clamp(0.0, 1.0)).clamp(-0.42, 0.42)
-        };
+        let (x, y) = self.motion_position_at(t, motion.smooth, motion.speed)?;
         let alpha = if motion.hide_idle {
             self.idle_alpha(t, motion.idle_ms)
         } else {
             1.0
         };
-        let trail = self.trail_at(t, motion);
-        Some(CursorFrame {
-            x,
-            y,
-            kind,
-            alpha,
-            tilt,
-            trail,
-        })
+        Some(CursorFrame { x, y, kind, alpha })
     }
 
     /// Return a pointer frame in the encoded video's pixel coordinate space.
@@ -336,15 +301,12 @@ impl PointerSidecar {
     ) -> Option<CursorFrame> {
         let mut frame = self.presented_at(t, motion)?;
         (frame.x, frame.y) = self.map_to_video(frame.x, frame.y, video_width, video_height);
-        for (x, y, _) in &mut frame.trail {
-            (*x, *y) = self.map_to_video(*x, *y, video_width, video_height);
-        }
         Some(frame)
     }
 
-    /// Cursor position after applying the configured motion smoothing, without
-    /// decorative effects such as sway. Camera tracking uses this same path so
-    /// the viewport and rendered cursor never react to different pointer data.
+    /// Cursor position after applying the configured smoothing. Camera tracking
+    /// uses this same path so the viewport and rendered cursor never react to
+    /// different pointer data.
     pub fn motion_position_at(&self, t: f64, smooth: f64, speed: f64) -> Option<(f64, f64)> {
         if smooth <= 0.01 {
             self.interpolated_at(t).map(|(x, y, _)| (x, y))
@@ -370,53 +332,6 @@ impl PointerSidecar {
     ) -> Option<(f64, f64)> {
         let (x, y) = self.motion_position_at(t, smooth, speed)?;
         Some(self.map_to_video(x, y, video_width, video_height))
-    }
-
-    fn velocity_at(&self, t: f64, smooth: f64, speed: f64) -> (f64, f64) {
-        let dt = 0.04;
-        let a = if smooth <= 0.01 {
-            self.interpolated_at((t - dt).max(0.0))
-                .map(|(x, y, _)| (x, y))
-        } else {
-            Some(self.smoothed_at((t - dt).max(0.0), smooth, speed))
-        };
-        let b = if smooth <= 0.01 {
-            self.interpolated_at(t).map(|(x, y, _)| (x, y))
-        } else {
-            Some(self.smoothed_at(t, smooth, speed))
-        };
-        match (a, b) {
-            (Some((ax, ay)), Some((bx, by))) => ((bx - ax) / dt, (by - ay) / dt),
-            _ => (0.0, 0.0),
-        }
-    }
-
-    fn trail_at(&self, t: f64, motion: CursorMotion) -> Vec<(f64, f64, f64)> {
-        if motion.trail <= 0.02 || self.pointer.is_empty() {
-            return Vec::new();
-        }
-        let count = ((motion.trail * 8.0).round() as usize).clamp(1, 8);
-        let mut trail = Vec::with_capacity(count);
-        for index in 1..=count {
-            let back = t - 0.024 * index as f64 * (0.55 + motion.trail);
-            if back < 0.0 {
-                break;
-            }
-            let (x, y) = if motion.smooth <= 0.01 {
-                match self.interpolated_at(back) {
-                    Some((x, y, _)) => (x, y),
-                    None => continue,
-                }
-            } else {
-                self.smoothed_at(back, motion.smooth, motion.speed)
-            };
-            let alpha =
-                motion.trail * (1.0 - index as f64 / (count as f64 + 0.35)).powf(1.35) * 0.42;
-            if alpha >= 0.03 {
-                trail.push((x, y, alpha));
-            }
-        }
-        trail
     }
 
     fn smoothed_at(&self, t: f64, smooth: f64, speed: f64) -> (f64, f64) {
@@ -649,7 +564,6 @@ mod tests {
             .presented_in_video_at(0.0, CursorMotion::default(), 1920.0, 1080.0)
             .unwrap();
         assert_eq!((frame.x, frame.y), (960.0, 540.0));
-        assert!(frame.trail.is_empty());
 
         let ripples = sidecar.click_ripples_in_video_at(0.0, 0.32, 1920.0, 1080.0);
         assert_eq!(ripples, vec![(960.0, 540.0, 0.0)]);
@@ -984,101 +898,6 @@ mod tests {
 
         assert!(short_delay.alpha < 0.05);
         assert!((long_delay.alpha - 1.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn sway_offsets_an_idle_cursor() {
-        let mut sidecar =
-            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
-        sidecar.pointer.push(PointerSample {
-            t: 0.0,
-            x: 10.0,
-            y: 10.0,
-            kind: CursorKind::Default,
-        });
-        let still = sidecar.presented_at(1.0, CursorMotion::default()).unwrap();
-        let swaying = sidecar
-            .presented_at(
-                1.0,
-                CursorMotion {
-                    sway: 1.0,
-                    ..CursorMotion::default()
-                },
-            )
-            .unwrap();
-
-        assert!((swaying.x - still.x).abs() > 0.1);
-        assert!((swaying.y - still.y).abs() > 0.1);
-    }
-
-    #[test]
-    fn presented_at_adds_trail_and_tilt_when_moving() {
-        let mut sidecar =
-            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
-        sidecar.pointer.push(PointerSample {
-            t: 0.0,
-            x: 0.0,
-            y: 0.0,
-            kind: CursorKind::Default,
-        });
-        sidecar.pointer.push(PointerSample {
-            t: 0.2,
-            x: 240.0,
-            y: 0.0,
-            kind: CursorKind::Default,
-        });
-        let frame = sidecar
-            .presented_at(
-                0.2,
-                CursorMotion {
-                    trail: 0.8,
-                    tilt: 1.0,
-                    ..CursorMotion::default()
-                },
-            )
-            .unwrap();
-        assert!(!frame.trail.is_empty());
-        assert!(frame.tilt.abs() > 0.02);
-    }
-
-    #[test]
-    fn presented_at_tilt_mirrors_leftward_and_rightward_travel() {
-        let moving = |from: f64, to: f64| {
-            let mut sidecar =
-                PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
-            sidecar.pointer.push(PointerSample {
-                t: 0.0,
-                x: from,
-                y: 100.0,
-                kind: CursorKind::Default,
-            });
-            sidecar.pointer.push(PointerSample {
-                t: 0.2,
-                x: to,
-                y: 100.0,
-                kind: CursorKind::Default,
-            });
-            sidecar
-        };
-        let motion = CursorMotion {
-            smooth: 0.0,
-            tilt: 1.0,
-            ..CursorMotion::default()
-        };
-        let right = moving(100.0, 340.0).presented_at(0.2, motion).unwrap().tilt;
-        let left = moving(340.0, 100.0).presented_at(0.2, motion).unwrap().tilt;
-        assert!(
-            right > 0.02,
-            "rightward travel should lean clockwise: {right}"
-        );
-        assert!(
-            left < -0.02,
-            "leftward travel should lean the other way: {left}"
-        );
-        assert!(
-            (right + left).abs() < 1e-9,
-            "left and right leans should mirror: {right} vs {left}"
-        );
     }
 
     #[test]

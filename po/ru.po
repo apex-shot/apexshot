@@ -1347,6 +1347,9 @@ msgstr "Настройка интенсивности фона"
 
 msgid "Focused"
 msgstr "Целенаправленный"
+msgid "Follow"
+msgstr "Follow"
+
 
 msgid "Font"
 msgstr "Шрифт"

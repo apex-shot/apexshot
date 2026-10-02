@@ -15,8 +15,7 @@ use super::model::{
     VideoBackground, VideoEditState, VideoGradient, ZoomAnchor, ZoomClip, ZoomEasing, ZoomMode,
     ZoomOrigin, ZoomStyle, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY,
     DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW,
-    DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED, DEFAULT_CURSOR_SWAY,
-    DEFAULT_CURSOR_TILT, DEFAULT_CURSOR_TRAIL,
+    DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED,
 };
 
 pub const VIDEO_PROJECT_VERSION: u32 = 1;
@@ -111,12 +110,6 @@ pub struct VideoProjectFile {
     pub cursor_click_opacity: f64,
     #[serde(default = "default_click_duration_ms")]
     pub cursor_click_duration_ms: u32,
-    #[serde(default = "default_cursor_trail")]
-    pub cursor_trail: f64,
-    #[serde(default = "default_cursor_tilt")]
-    pub cursor_tilt: f64,
-    #[serde(default = "default_cursor_sway")]
-    pub cursor_sway: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -826,18 +819,6 @@ fn default_click_duration_ms() -> u32 {
     DEFAULT_CLICK_DURATION_MS
 }
 
-fn default_cursor_trail() -> f64 {
-    DEFAULT_CURSOR_TRAIL
-}
-
-fn default_cursor_tilt() -> f64 {
-    DEFAULT_CURSOR_TILT
-}
-
-fn default_cursor_sway() -> f64 {
-    DEFAULT_CURSOR_SWAY
-}
-
 fn click_effect_to_file(effect: ClickEffect) -> ClickEffectFile {
     match effect {
         ClickEffect::None => ClickEffectFile::None,
@@ -985,9 +966,6 @@ impl VideoEditState {
             cursor_click_scale: self.cursor.click_scale,
             cursor_click_opacity: self.cursor.click_opacity,
             cursor_click_duration_ms: self.cursor.click_duration_ms,
-            cursor_trail: self.cursor.trail,
-            cursor_tilt: self.cursor.tilt,
-            cursor_sway: self.cursor.sway,
         }
     }
 
@@ -1053,9 +1031,6 @@ impl VideoEditState {
             click_scale: file.cursor_click_scale,
             click_opacity: file.cursor_click_opacity,
             click_duration_ms: file.cursor_click_duration_ms,
-            trail: file.cursor_trail,
-            tilt: file.cursor_tilt,
-            sway: file.cursor_sway,
         }
         .clamped();
         self.project_media
@@ -1595,43 +1570,6 @@ mod tests {
     }
 
     #[test]
-    fn roundtrip_preserves_zoom_suggestion_review() {
-        let dir = scratch("zoom-review");
-        let video = write_video(&dir, "clip.mp4", 24);
-        let mut state = VideoEditState::new(metadata_for(&video, 24));
-        state.mark_zoom_suggestions_reviewed();
-        save_project(&video, &state.to_project()).unwrap();
-        let loaded = load_project(&video).expect("project should load");
-        let mut restored = VideoEditState::new(metadata_for(&video, 24));
-        restored.apply_project(loaded);
-        assert!(restored.zoom_suggestions_reviewed());
-        cleanup_project(&video);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn roundtrip_preserves_the_last_edited_zoom_style() {
-        let dir = scratch("zoom-style");
-        let video = write_video(&dir, "clip.mp4", 8);
-        let mut state = VideoEditState::new(metadata_for(&video, 8));
-        let index = state.add_zoom_at(1.0).expect("zoom fits");
-        state.selected_zoom = Some(index);
-        state.set_selected_zoom_scale(2.2);
-        state.set_selected_zoom_instant(true);
-        save_project(&video, &state.to_project()).unwrap();
-        let loaded = load_project(&video).expect("project should load");
-        let mut restored = VideoEditState::new(metadata_for(&video, 8));
-        restored.apply_project(loaded);
-        let style = restored
-            .last_edited_zoom_style
-            .expect("the edited style is remembered");
-        assert!((style.scale - 2.2).abs() < 1e-9);
-        assert!(style.instant);
-        cleanup_project(&video);
-        let _ = fs::remove_dir_all(&dir);
-    }
-
-    #[test]
     fn roundtrip_preserves_zoom_instant_flag() {
         let dir = scratch("zoom-instant");
         let video = write_video(&dir, "clip.mp4", 24);
@@ -1679,6 +1617,43 @@ mod tests {
         let mut restored = VideoEditState::new(metadata_for(&video, 16));
         restored.apply_project(file);
         assert!(!restored.zoom_clips[0].instant);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn roundtrip_preserves_zoom_suggestion_review() {
+        let dir = scratch("zoom-review");
+        let video = write_video(&dir, "clip.mp4", 24);
+        let mut state = VideoEditState::new(metadata_for(&video, 24));
+        state.mark_zoom_suggestions_reviewed();
+        save_project(&video, &state.to_project()).unwrap();
+        let loaded = load_project(&video).expect("project should load");
+        let mut restored = VideoEditState::new(metadata_for(&video, 24));
+        restored.apply_project(loaded);
+        assert!(restored.zoom_suggestions_reviewed());
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn roundtrip_preserves_the_last_edited_zoom_style() {
+        let dir = scratch("zoom-style");
+        let video = write_video(&dir, "clip.mp4", 8);
+        let mut state = VideoEditState::new(metadata_for(&video, 8));
+        let index = state.add_zoom_at(1.0).expect("zoom fits");
+        state.selected_zoom = Some(index);
+        state.set_selected_zoom_scale(2.2);
+        state.set_selected_zoom_instant(true);
+        save_project(&video, &state.to_project()).unwrap();
+        let loaded = load_project(&video).expect("project should load");
+        let mut restored = VideoEditState::new(metadata_for(&video, 8));
+        restored.apply_project(loaded);
+        let style = restored
+            .last_edited_zoom_style
+            .expect("the edited style is remembered");
+        assert!((style.scale - 2.2).abs() < 1e-9);
+        assert!(style.instant);
+        cleanup_project(&video);
         let _ = fs::remove_dir_all(&dir);
     }
 

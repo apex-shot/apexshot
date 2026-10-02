@@ -1352,6 +1352,9 @@ msgstr "Intensidad del fondo de enfoque"
 
 msgid "Focused"
 msgstr "Centrado"
+msgid "Follow"
+msgstr "Follow"
+
 
 msgid "Font"
 msgstr "Fuente"

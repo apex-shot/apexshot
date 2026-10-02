@@ -1331,6 +1331,9 @@ msgstr "تركيز شدة الخلفية"
 
 msgid "Focused"
 msgstr "مركّز"
+msgid "Follow"
+msgstr "Follow"
+
 
 msgid "Font"
 msgstr "الخط"

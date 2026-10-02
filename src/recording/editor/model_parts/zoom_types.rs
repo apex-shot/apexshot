@@ -69,9 +69,9 @@ pub struct ZoomClip {
     ///
     /// Ported from the studied editor's per-zoom instant flag: when set, the
     /// zoom opens and closes without an eased scale ramp, never morphs from
-    /// a neighbour, and the follow camera jumps to its target instead of
-    /// chasing it. Older projects predate the flag and load it as `false`,
-    /// keeping their current eased motion.
+    /// a neighbour, and the follow camera jumps to the movement-group centre
+    /// instead of chasing it on a spring. Older projects predate the flag
+    /// and load it as `false`, keeping their current eased motion.
     pub instant: bool,
     /// Disabled from the clip's context menu. A hidden clip keeps its place on
     /// the timeline but stops feeding the preview and the export, so the work

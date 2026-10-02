@@ -1834,6 +1834,109 @@ mod tests {
         let _ = std::fs::remove_file(&source);
         let _ = std::fs::remove_file(&frozen);
     }
+
+    #[test]
+    fn auto_zoom_follow_camera_pans_to_the_pointer_in_the_export() {
+        if Command::new("ffmpeg").arg("-version").output().is_err() {
+            return;
+        }
+        let dir = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("test-fixtures");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join(format!("apexshot-follow-source-{}.mp4", std::process::id()));
+        let followed = dir.join(format!("apexshot-follow-out-{}.mp4", std::process::id()));
+        let snapped = dir.join(format!(
+            "apexshot-follow-instant-{}.mp4",
+            std::process::id()
+        ));
+
+        // Left half black, right half white: a camera that pans right turns a
+        // fixed output pixel from black to white.
+        let created = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=black:s=320x240:r=30:d=2",
+                "-vf",
+                "drawbox=x=160:y=0:w=160:h=240:color=white:t=fill",
+                "-pix_fmt",
+                "yuv420p",
+                source.to_str().unwrap(),
+            ])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if !created {
+            return;
+        }
+
+        let metadata = probe_metadata(&source).expect("probe the fixture");
+        let mut state = VideoEditState::new(metadata);
+        let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 320,
+                h: 240,
+            },
+        );
+        // Pointer parked on the white half for the whole clip.
+        for t in [0.0, 0.5, 1.0, 1.5, 2.0] {
+            sidecar
+                .pointer
+                .push(crate::recording::editor::sidecar::PointerSample {
+                    t,
+                    x: 240.0,
+                    y: 120.0,
+                    kind: crate::recording::editor::sidecar::CursorKind::Default,
+                });
+        }
+        state.sidecar = Some(sidecar);
+        // The stored framing starts on the black half; the follow camera must
+        // carry it onto the white half the pointer sits on.
+        state
+            .zoom_clips
+            .push(crate::recording::editor::model::ZoomClip {
+                start: 0.0,
+                end: 2.0,
+                scale: 2.0,
+                center: (80.0, 120.0),
+                ease_ms: 0,
+                easing: crate::recording::editor::model::ZoomEasing::Smooth,
+                mode: crate::recording::editor::model::ZoomMode::Auto,
+                ..Default::default()
+            });
+        export_edited_to(&state, followed.clone()).expect("export the follow");
+        // Late in the clip the spring has carried the viewport onto white.
+        let (r1, g1, b1) = pixel_at(&followed, 1.5, 10, 10);
+        assert!(
+            r1 > 180 && g1 > 180 && b1 > 180,
+            "the follow camera must pan onto the pointer, got ({r1},{g1},{b1})"
+        );
+
+        // An instant zoom snaps instead of chasing: early in the clip it
+        // already samples white while the animated follow is still travelling.
+        state.zoom_clips[0].instant = true;
+        export_edited_to(&state, snapped.clone()).expect("export the snap");
+        let (r0, g0, b0) = pixel_at(&snapped, 0.1, 10, 10);
+        assert!(
+            r0 > 180 && g0 > 180 && b0 > 180,
+            "an instant zoom should snap onto the pointer, got ({r0},{g0},{b0})"
+        );
+
+        let _ = std::fs::remove_file(&source);
+        let _ = std::fs::remove_file(&followed);
+        let _ = std::fs::remove_file(&snapped);
+    }
 }
 
 #[cfg(test)]

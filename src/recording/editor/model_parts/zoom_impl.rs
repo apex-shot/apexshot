@@ -1121,8 +1121,15 @@ impl VideoEditState {
     ///
     /// `timeline_t` matches the clip — zoom clips are placed in composition
     /// seconds and must keep advancing through a freeze hold. `source_t`
-    /// locates the cursor for auto-zoom recentering, which inside a hold stays
+    /// locates the pointer for the follow camera, which inside a hold stays
     /// pinned to the last real frame.
+    ///
+    /// The follow camera chases the movement-group centre active at
+    /// `source_t` on a damped spring, starting at the clip's stored centre.
+    /// The evaluation is pure (no carried state), so random seeks match
+    /// sequential playback. Drag stiffness and typing suppression are
+    /// intentionally absent: the sidecar holds pointer and click samples
+    /// only, and key identities are never collected.
     pub fn eval_zoom_at(&self, timeline_t: f64, source_t: f64) -> (f64, (f64, f64)) {
         let frame_w = self.metadata.width as f64;
         let frame_h = self.metadata.height as f64;
@@ -1145,34 +1152,50 @@ impl VideoEditState {
         let Some(clip) = clip_index.map(|index| &self.zoom_clips[index]) else {
             return (scale, center);
         };
-        // An instant zoom holds its stored framing: no eased ramp (handled
-        // above) and no follow recenter. The snap target is refined to the
-        // live movement-group centre once the sprung follow camera lands;
-        // until then the stored focus is the snap.
-        if clip.instant {
-            return (scale, center);
-        }
         if clip.mode != ZoomMode::Auto {
             return (scale, center);
         }
-        let cursor = self.cursor.clamped();
-        let Some((cursor_x, cursor_y)) = self.sidecar.as_ref().and_then(|sidecar| {
-            // Evaluate the cursor in the encoded video's pixel space, the same
-            // as the overlay, and clamp the resulting viewport inside the
-            // editor crop rather than the full frame.
-            sidecar.motion_position_in_video_at(
-                source_t,
-                cursor.smooth,
-                cursor.speed,
-                frame_w,
-                frame_h,
-            )
-        }) else {
+        let Some(sidecar) = self.sidecar.as_ref() else {
             return (scale, center);
         };
-        (
-            scale,
-            recenter_if_near_edge(center, (cursor_x, cursor_y), scale, self.crop_or_full()),
-        )
+        // Pointer and clicks in encoded-video pixels, the same space the
+        // cursor overlay draws in, so the camera and the cursor never react
+        // to different data. Area recordings need the video mapping; without
+        // it the follow would chase capture-local coordinates.
+        let points: Vec<(f64, f64, f64)> = sidecar
+            .pointer
+            .iter()
+            .map(|sample| {
+                let (x, y) = sidecar.map_to_video(sample.x, sample.y, frame_w, frame_h);
+                (sample.t, x, y)
+            })
+            .collect();
+        if points.is_empty() {
+            return (scale, center);
+        }
+        let click_times: Vec<f64> = sidecar.clicks.iter().map(|click| click.t).collect();
+        let crop = self.crop_or_full();
+        let budget = movement_group_budget(crop, clip.scale);
+        if clip.instant {
+            // An instant zoom snaps to the group centre instead of chasing
+            // it: same target, no spring.
+            let target =
+                movement_group_center_at(&points, source_t, budget).unwrap_or(clip.center);
+            return (scale, clamp_zoom_center(crop, scale, target));
+        }
+        let spring = camera_spring_for_time(&click_times, source_t);
+        let from_source = self.timeline_to_source(clip.start);
+        if !source_t.is_finite() || !from_source.is_finite() || source_t <= from_source {
+            return (scale, clamp_zoom_center(crop, scale, clip.center));
+        }
+        let followed = evaluate_spring_camera(
+            clip.center,
+            &points,
+            from_source,
+            source_t,
+            budget,
+            spring,
+        );
+        (scale, clamp_zoom_center(crop, scale, followed))
     }
 }

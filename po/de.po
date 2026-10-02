@@ -1354,6 +1354,9 @@ msgstr "Fokus-Hintergrundintensität"
 
 msgid "Focused"
 msgstr "Konzentriert"
+msgid "Follow"
+msgstr "Follow"
+
 
 msgid "Font"
 msgstr "Schriftart"

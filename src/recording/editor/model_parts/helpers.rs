@@ -142,8 +142,9 @@ pub fn eval_zoom(
     let to_scale = clip.scale.max(1.0);
     // An instant zoom snaps: no eased scale ramp and no morph from a
     // neighbour. The studied lead-in returns no animation window for such
-    // zooms, so scale and position stay in step instead of one gliding
-    // while the other jumps.
+    // zooms, and the follow camera (see `eval_zoom_at`) snaps the same way,
+    // so scale and position stay in step instead of one gliding while the
+    // other jumps.
     if clip.instant {
         return (to_scale, clip.center);
     }
@@ -246,63 +247,290 @@ fn morph_gap_predecessor(clips: &[ZoomClip], t: f64) -> Option<usize> {
         .map(|(previous, _)| previous)
 }
 
-/// `crop` is the `(x, y, w, h)` region that survives the editor crop. The
-/// viewport is sized from the crop, not the full frame, so a zoom cannot pan
-/// its framing outside the pixels the export actually keeps.
-fn recenter_if_near_edge(
-    view_center: (f64, f64),
-    cursor: (f64, f64),
-    scale: f64,
-    crop: (f64, f64, f64, f64),
-) -> (f64, f64) {
-    let (crop_x, crop_y, crop_w, crop_h) = crop;
-    let crop_w = crop_w.max(1.0);
-    let crop_h = crop_h.max(1.0);
-    let view_w = (crop_w / scale.max(1.0)).min(crop_w);
-    let view_h = (crop_h / scale.max(1.0)).min(crop_h);
-    let half_w = view_w / 2.0;
-    let half_h = view_h / 2.0;
-    let margin_x = view_w * 0.22;
-    let margin_y = view_h * 0.22;
-    let feather_x = view_w * 0.12;
-    let feather_y = view_h * 0.12;
-    let left = view_center.0 - half_w;
-    let right = view_center.0 + half_w;
-    let top = view_center.1 - half_h;
-    let bottom = view_center.1 + half_h;
+/// Follow camera: a spring chase toward the movement-group centre.
+///
+/// The camera does not track the raw cursor and has no dead zone. Its target
+/// is the centre of the pointer-movement group active at the current source
+/// time, and a damped spring carries the framing toward that target. This is
+/// the portable half of the studied automatic-zoom camera: group-centre
+/// target, click-proximity stiffness, and a per-zoom instant snap.
+///
+/// Deliberately omitted: drag/release stiffness and typing suppression. The
+/// sidecar records pointer samples `(t, x, y)` and clicks `(t, x, y, button)`
+/// only — press/drag state was never recorded and keystroke capture was
+/// deliberately removed. Faking either from cursor speed would invent a
+/// signal the recording never had, and collecting key identities is out of
+/// scope. Where the studied camera would stiffen while dragging or hide while
+/// typing, this camera keeps following the movement groups.
+///
+/// The evaluator is pure: every call simulates from the clip's source start
+/// to the evaluation time at a fixed step, starting at the clip's stored
+/// centre with zero velocity. There is no carried state, so a random seek
+/// lands exactly where sequential playback would be.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CameraSpring {
+    pub stiffness: f64,
+    pub damping: f64,
+    pub mass: f64,
+}
 
-    let mut cx = view_center.0;
-    let mut cy = view_center.1;
-    if cursor.0 < left + margin_x {
-        let offset = cursor.0 - (left + margin_x);
-        cx += feathered_camera_offset(offset, feather_x);
-    } else if cursor.0 > right - margin_x {
-        let offset = cursor.0 - (right - margin_x);
-        cx += feathered_camera_offset(offset, feather_x);
+/// Default follow spring, shared by the pointer and the screen in the
+/// studied defaults.
+pub const CAMERA_FOLLOW_SPRING: CameraSpring = CameraSpring {
+    stiffness: 125.0,
+    damping: 12.0,
+    mass: 1.5,
+};
+
+/// Stiffer spring selected while a click is near: the studied camera looks
+/// ahead for the next click within this window and tightens the follow so
+/// the framing lands as the click does.
+pub const CAMERA_CLICK_SPRING: CameraSpring = CameraSpring {
+    stiffness: 530.0,
+    damping: 40.0,
+    mass: 1.0,
+};
+
+/// How far ahead a click still stiffens the follow spring.
+pub const CAMERA_CLICK_WINDOW_SECONDS: f64 = 0.175;
+
+/// Fixed simulation step for the follow spring. The studied integrator runs
+/// per millisecond; 120 Hz is visually identical for a camera and keeps a
+/// full-window evaluation to a few hundred steps.
+pub const CAMERA_SPRING_STEP_SECONDS: f64 = 1.0 / 120.0;
+
+/// Which spring drives the follow at source time `t`: the stiff click spring
+/// while the next click is inside the look-ahead window, otherwise the
+/// default follow spring. The look-ahead matches the studied behaviour of
+/// tightening toward an imminent click.
+pub fn camera_spring_for_time(click_times: &[f64], t: f64) -> CameraSpring {
+    if !t.is_finite() {
+        return CAMERA_FOLLOW_SPRING;
     }
-    if cursor.1 < top + margin_y {
-        let offset = cursor.1 - (top + margin_y);
-        cy += feathered_camera_offset(offset, feather_y);
-    } else if cursor.1 > bottom - margin_y {
-        let offset = cursor.1 - (bottom - margin_y);
-        cy += feathered_camera_offset(offset, feather_y);
+    let imminent = click_times.iter().any(|click| {
+        click.is_finite() && *click >= t && *click - t <= CAMERA_CLICK_WINDOW_SECONDS
+    });
+    if imminent {
+        CAMERA_CLICK_SPRING
+    } else {
+        CAMERA_FOLLOW_SPRING
     }
+}
+
+/// One semi-implicit Euler step of a mass-spring-damper toward `target`.
+///
+/// Ports the studied integrator, including its clamp: when the mass is moving
+/// toward the target too fast to stop without overshooting, damping rises to
+/// critical (`2 * sqrt(stiffness * mass)`) for the step. The clamp keeps the
+/// camera from swinging past the pointer the way an unclamped spring would.
+pub fn spring_step(
+    value: f64,
+    velocity: f64,
+    target: f64,
+    spring: CameraSpring,
+    dt: f64,
+) -> (f64, f64) {
+    let dt = dt.max(0.0);
+    if dt <= 0.0 || !value.is_finite() || !velocity.is_finite() || !target.is_finite() {
+        return (value, velocity);
+    }
+    let stiffness = spring.stiffness.max(f64::EPSILON);
+    let mass = spring.mass.max(f64::EPSILON);
+    let mut damping = spring.damping.max(0.0);
+    let displacement = target - value;
+    if velocity * displacement > 0.0 {
+        let natural = (stiffness / mass).sqrt();
+        if velocity.abs() > displacement.abs() * natural {
+            damping = damping.max(2.0 * (mass * stiffness).sqrt());
+        }
+    }
+    let acceleration = (-(value - target) * stiffness - velocity * damping) / mass;
+    let velocity = velocity + acceleration * dt;
+    let value = value + velocity * dt;
+    (value, velocity)
+}
+
+/// Dwell-weighted centre of `points`: each sample holds until the next one
+/// (or `end_time`, or a 100 ms grace for a trailing sample), so a pause
+/// outweighs a fly-by. Ports the studied movement-group centre.
+///
+/// `points` holds `(time_seconds, x, y)` in video pixels. Returns `None`
+/// for no finite samples.
+pub fn time_weighted_center(
+    points: &[(f64, f64, f64)],
+    end_time: Option<f64>,
+) -> Option<(f64, f64)> {
+    let mut weight_sum = 0.0;
+    let mut x_sum = 0.0;
+    let mut y_sum = 0.0;
+    for (index, (t, x, y)) in points.iter().enumerate() {
+        if !t.is_finite() || !x.is_finite() || !y.is_finite() {
+            continue;
+        }
+        let next_t = points
+            .get(index + 1)
+            .map(|next| next.0)
+            .filter(|next| next.is_finite())
+            .or(end_time.filter(|end| end.is_finite()))
+            .unwrap_or(*t + 0.1);
+        let weight = (next_t - *t).max(0.0);
+        if weight <= 0.0 {
+            continue;
+        }
+        weight_sum += weight;
+        x_sum += *x * weight;
+        y_sum += *y * weight;
+    }
+    if weight_sum <= 0.0 {
+        None
+    } else {
+        Some((x_sum / weight_sum, y_sum / weight_sum))
+    }
+}
+
+/// Half the zoomed view: the movement-group budget at this scale.
+///
+/// The studied grouping breaks a run when its bounding box exceeds half the
+/// visible source; at our fixed per-clip scale the visible source is
+/// `crop / scale`, so the budget is half of that. A tighter zoom groups more
+/// finely, a wider one lets the pointer roam further before splitting.
+pub fn movement_group_budget(crop: (f64, f64, f64, f64), scale: f64) -> (f64, f64) {
+    let (_, _, crop_w, crop_h) = crop;
+    let scale = scale.max(1.0);
     (
-        cx.clamp(
-            crop_x + half_w,
-            (crop_x + crop_w - half_w).max(crop_x + half_w),
-        ),
-        cy.clamp(
-            crop_y + half_h,
-            (crop_y + crop_h - half_h).max(crop_y + half_h),
-        ),
+        (crop_w.max(1.0) / scale * 0.5).max(1.0),
+        (crop_h.max(1.0) / scale * 0.5).max(1.0),
     )
 }
 
-fn feathered_camera_offset(offset: f64, feather: f64) -> f64 {
-    let amount = (offset.abs() / feather.max(1.0)).clamp(0.0, 1.0);
-    let smoothstep = amount * amount * (3.0 - 2.0 * amount);
-    offset * smoothstep
+/// Split time-ordered pointer samples into movement groups.
+///
+/// A group keeps accepting samples while its bounding box (including the
+/// candidate) fits inside `max_distance`; the first sample that would burst
+/// the box opens a new group. Ports the studied grouping, which keys the
+/// active group by its first sample's time. `points` must be ordered by time
+/// (the sidecar appends in order); a single out-of-order sample only splits
+/// an extra group, it never panics.
+pub fn movement_groups(
+    points: &[(f64, f64, f64)],
+    max_distance: (f64, f64),
+) -> Vec<Vec<(f64, f64, f64)>> {
+    let mut groups: Vec<Vec<(f64, f64, f64)>> = Vec::new();
+    let mut min = (f64::INFINITY, f64::INFINITY);
+    let mut max = (f64::NEG_INFINITY, f64::NEG_INFINITY);
+    for &(t, x, y) in points {
+        if !t.is_finite() || !x.is_finite() || !y.is_finite() {
+            continue;
+        }
+        let fits = match groups.last() {
+            None => false,
+            Some(_) => {
+                let next_min = (min.0.min(x), min.1.min(y));
+                let next_max = (max.0.max(x), max.1.max(y));
+                next_max.0 - next_min.0 <= max_distance.0.max(0.0)
+                    && next_max.1 - next_min.1 <= max_distance.1.max(0.0)
+            }
+        };
+        if !fits {
+            groups.push(Vec::new());
+            min = (x, y);
+            max = (x, y);
+        } else {
+            min = (min.0.min(x), min.1.min(y));
+            max = (max.0.max(x), max.1.max(y));
+        }
+        if let Some(group) = groups.last_mut() {
+            group.push((t, x, y));
+        }
+    }
+    groups
+}
+
+/// Centre of the movement group active at source time `t`: the latest group
+/// whose first sample starts at or before `t`. Falls back to the first
+/// group when `t` predates every sample, and to `None` without samples.
+/// This is the follow target — the studied camera chases this centre, not
+/// the raw cursor.
+pub fn movement_group_center_at(
+    points: &[(f64, f64, f64)],
+    t: f64,
+    max_distance: (f64, f64),
+) -> Option<(f64, f64)> {
+    if points.is_empty() || !t.is_finite() {
+        return None;
+    }
+    let groups = movement_groups(points, max_distance);
+    if groups.is_empty() {
+        return None;
+    }
+    let mut active = 0;
+    for (index, group) in groups.iter().enumerate() {
+        let Some(&(first_t, _, _)) = group.first() else {
+            continue;
+        };
+        if first_t <= t {
+            active = index;
+        } else {
+            break;
+        }
+    }
+    let group = &groups[active];
+    let end_time = groups.get(active + 1).and_then(|next| next.first().map(|first| first.0));
+    // The studied centre weights by dwell, with the next group's start as
+    // the trailing sample's hold end so a pause at a control outweighs the
+    // travel that reached it.
+    time_weighted_center(group, end_time).or_else(|| {
+        let (mut sx, mut sy, mut count) = (0.0, 0.0, 0);
+        for &(_, x, y) in group {
+            sx += x;
+            sy += y;
+            count += 1;
+        }
+        (count > 0).then_some((sx / count as f64, sy / count as f64))
+    })
+}
+
+/// Chase the movement-group centre from `start` (at `from_source`) to
+/// `to_source` on `spring`, sampling the group target at each fixed step.
+/// Returns the camera centre at `to_source`, unclamped: the caller clamps it
+/// into the crop with [`clamp_zoom_center`]. Pure — same inputs, same output
+/// — so random seeks match sequential playback.
+pub fn evaluate_spring_camera(
+    start: (f64, f64),
+    points: &[(f64, f64, f64)],
+    from_source: f64,
+    to_source: f64,
+    max_distance: (f64, f64),
+    spring: CameraSpring,
+) -> (f64, f64) {
+    if !to_source.is_finite() || !from_source.is_finite() || to_source <= from_source {
+        return start;
+    }
+    // No movement to chase: hold the stored framing.
+    if points.is_empty() {
+        return start;
+    }
+    let mut x = start.0;
+    let mut y = start.1;
+    let mut vx = 0.0;
+    let mut vy = 0.0;
+    let mut s = from_source;
+    let mut guard = 0;
+    while s < to_source && guard < 20_000 {
+        let step = CAMERA_SPRING_STEP_SECONDS.min(to_source - s);
+        let sample_t = (s + step).min(to_source);
+        let target =
+            movement_group_center_at(points, sample_t, max_distance).unwrap_or(start);
+        let (nx, nvx) = spring_step(x, vx, target.0, spring, step);
+        let (ny, nvy) = spring_step(y, vy, target.1, spring, step);
+        x = nx;
+        y = ny;
+        vx = nvx;
+        vy = nvy;
+        s += step;
+        guard += 1;
+    }
+    (x, y)
 }
 
 fn lerp(from: f64, to: f64, alpha: f64) -> f64 {

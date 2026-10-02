@@ -37,7 +37,7 @@ fn build_cursor_panel(
     tabs.set_hexpand(true);
     tabs.set_homogeneous(true);
     let style_tab = cursor_tab_button(&t("Style"));
-    let motion_tab = cursor_tab_button(&t("Motion"));
+    let motion_tab = cursor_tab_button(&t("Follow"));
     let effects_tab = cursor_tab_button(&t("Effects"));
     motion_tab.set_group(Some(&style_tab));
     effects_tab.set_group(Some(&style_tab));
@@ -364,26 +364,14 @@ fn build_cursor_motion_tab(
 
     let smooth_row = cursor_slider_row(&t("Smoothing"));
     let speed_row = cursor_slider_row(&t("Speed"));
-    let trail_row = cursor_slider_row(&t("Trail"));
-    let tilt_row = cursor_slider_row(&t("Tilt"));
-    let sway_row = cursor_slider_row(&t("Sway"));
     smooth_row.scale.set_range(0.0, 1.0);
     smooth_row.scale.set_increments(0.05, 0.1);
     speed_row
         .scale
         .set_range(MIN_CURSOR_SPEED, MAX_CURSOR_SPEED);
     speed_row.scale.set_increments(0.05, 0.25);
-    trail_row.scale.set_range(0.0, 1.0);
-    trail_row.scale.set_increments(0.05, 0.1);
-    tilt_row.scale.set_range(0.0, 1.0);
-    tilt_row.scale.set_increments(0.05, 0.1);
-    sway_row.scale.set_range(0.0, 1.0);
-    sway_row.scale.set_increments(0.05, 0.1);
     body.append(&smooth_row.widget);
     body.append(&speed_row.widget);
-    body.append(&trail_row.widget);
-    body.append(&tilt_row.widget);
-    body.append(&sway_row.widget);
 
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");
@@ -453,27 +441,6 @@ fn build_cursor_motion_tab(
         |cursor, value| cursor.speed = value,
     );
     bind_cursor_f64(
-        &trail_row.scale,
-        syncing.clone(),
-        state.clone(),
-        on_change.clone(),
-        |cursor, value| cursor.trail = value,
-    );
-    bind_cursor_f64(
-        &tilt_row.scale,
-        syncing.clone(),
-        state.clone(),
-        on_change.clone(),
-        |cursor, value| cursor.tilt = value,
-    );
-    bind_cursor_f64(
-        &sway_row.scale,
-        syncing.clone(),
-        state.clone(),
-        on_change.clone(),
-        |cursor, value| cursor.sway = value,
-    );
-    bind_cursor_f64(
         &idle_delay_row.scale,
         syncing.clone(),
         state.clone(),
@@ -500,9 +467,6 @@ fn build_cursor_motion_tab(
         let smooth_btn = smooth_btn.clone();
         let smooth_scale = smooth_row.scale.clone();
         let speed_scale = speed_row.scale.clone();
-        let trail_scale = trail_row.scale.clone();
-        let tilt_scale = tilt_row.scale.clone();
-        let sway_scale = sway_row.scale.clone();
         let idle_switch = idle_switch.clone();
         let idle_delay_scale = idle_delay_row.scale.clone();
         let syncing = syncing.clone();
@@ -525,9 +489,6 @@ fn build_cursor_motion_tab(
             }
             smooth_scale.set_value(cursor.smooth);
             speed_scale.set_value(cursor.speed);
-            trail_scale.set_value(cursor.trail);
-            tilt_scale.set_value(cursor.tilt);
-            sway_scale.set_value(cursor.sway);
             idle_switch.set_active(cursor.hide_idle);
             idle_delay_scale.set_value(cursor.idle_ms);
             idle_delay_scale.set_sensitive(cursor.hide_idle);

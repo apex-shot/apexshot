@@ -825,38 +825,106 @@ fn manual_zooms_keep_independent_transitions() {
 }
 
 #[test]
-fn auto_zoom_camera_feathers_edge_following() {
-    let center = (960.0, 540.0);
-    let full = (0.0, 0.0, 1920.0, 1080.0);
-    let inner_right = center.0 + 1920.0 / 2.0 / 2.0 - 1920.0 / 2.0 * 0.22;
-    let barely_outside =
-        recenter_if_near_edge(center, (inner_right + 1.0, center.1), 2.0, full);
-    assert!(barely_outside.0 > center.0);
+fn follow_camera_starts_at_the_clip_and_chases_the_group() {
+    // A static pointer at the group centre leaves the camera where it
+    // started; a distant group pulls it away, but the spring lags behind the
+    // target instead of jumping to it in one step.
+    let points = vec![(0.0, 1900.0, 540.0), (0.5, 1900.0, 540.0)];
+    let budget = (480.0, 270.0);
+    let start = (960.0, 540.0);
+    let spring = CAMERA_FOLLOW_SPRING;
+    let early = evaluate_spring_camera(start, &points, 0.0, 0.05, budget, spring);
     assert!(
-        barely_outside.0 - center.0 < 0.01,
-        "camera should ease into following instead of matching cursor velocity immediately"
+        early.0 > start.0,
+        "the camera should move toward the group, got {early:?}"
     );
-
-    let farther_outside =
-        recenter_if_near_edge(center, (inner_right + 57.6, center.1), 2.0, full);
-    assert!(farther_outside.0 > barely_outside.0);
-    assert!(farther_outside.0 - center.0 < 57.6);
+    assert!(
+        early.0 < 1900.0,
+        "the spring should lag the target instead of snapping, got {early:?}"
+    );
+    let later = evaluate_spring_camera(start, &points, 0.0, 0.5, budget, spring);
+    assert!(
+        later.0 > early.0,
+        "more time should mean more travel, got {early:?} then {later:?}"
+    );
 }
 
 #[test]
-fn auto_zoom_camera_keeps_its_viewport_inside_the_crop() {
-    // A 2x viewport is 400x300 inside this 800x600 crop. Following a cursor
-    // that sits at the crop's bottom-right corner must not push the viewport
-    // past the crop edge, or the export would show pixels the crop dropped.
+fn follow_camera_keeps_its_viewport_inside_the_crop() {
+    // A 2x viewport is 400x300 inside this 800x600 crop. Chasing a group in
+    // the corner must not push the viewport past the crop edge, or the
+    // export would show pixels the crop dropped.
     let crop = (100.0, 50.0, 800.0, 600.0);
-    let center = (500.0, 350.0);
-    let followed = recenter_if_near_edge(center, (crop.0 + crop.2, crop.1 + crop.3), 2.0, crop);
+    let points = vec![(0.0, 900.0, 650.0), (1.0, 900.0, 650.0)];
+    let budget = movement_group_budget(crop, 2.0);
+    let followed = evaluate_spring_camera((500.0, 350.0), &points, 0.0, 1.0, budget, CAMERA_FOLLOW_SPRING);
+    let clamped = clamp_zoom_center(crop, 2.0, followed);
     let half_w = crop.2 / 2.0 / 2.0;
     let half_h = crop.3 / 2.0 / 2.0;
-    assert!(followed.0 <= crop.0 + crop.2 - half_w + 1e-9);
-    assert!(followed.0 >= crop.0 + half_w - 1e-9);
-    assert!(followed.1 <= crop.1 + crop.3 - half_h + 1e-9);
-    assert!(followed.1 >= crop.1 + half_h - 1e-9);
+    assert!(clamped.0 <= crop.0 + crop.2 - half_w + 1e-9);
+    assert!(clamped.0 >= crop.0 + half_w - 1e-9);
+    assert!(clamped.1 <= crop.1 + crop.3 - half_h + 1e-9);
+    assert!(clamped.1 >= crop.1 + half_h - 1e-9);
+}
+
+#[test]
+fn movement_group_center_is_dwell_weighted() {
+    // Two samples at the control, one quick pass through the corner: the
+    // dwell-weighted centre stays near the control instead of the midpoint.
+    let points = vec![
+        (0.0, 100.0, 100.0),
+        (1.0, 100.0, 100.0),
+        (1.1, 900.0, 700.0),
+        (1.2, 100.0, 100.0),
+    ];
+    let center = time_weighted_center(&points, Some(2.0)).unwrap();
+    assert!(
+        center.0 < 300.0 && center.1 < 300.0,
+        "dwell should outweigh the fly-by, got {center:?}"
+    );
+}
+
+#[test]
+fn movement_groups_split_when_the_pointer_roams_far() {
+    let points = vec![
+        (0.0, 100.0, 100.0),
+        (0.2, 120.0, 110.0),
+        (0.4, 1500.0, 800.0),
+        (0.6, 1520.0, 810.0),
+    ];
+    let groups = movement_groups(&points, (480.0, 270.0));
+    assert_eq!(groups.len(), 2, "far travel should open a new group: {groups:?}");
+    let first = movement_group_center_at(&points, 0.2, (480.0, 270.0)).unwrap();
+    let second = movement_group_center_at(&points, 0.5, (480.0, 270.0)).unwrap();
+    assert!(first.0 < 500.0, "early time follows the first group, got {first:?}");
+    assert!(second.0 > 1000.0, "later time follows the second group, got {second:?}");
+}
+
+#[test]
+fn camera_spring_stiffens_near_a_click() {
+    let clicks = vec![1.0];
+    assert_eq!(camera_spring_for_time(&clicks, 0.9), CAMERA_CLICK_SPRING);
+    assert_eq!(
+        camera_spring_for_time(&clicks, 0.5),
+        CAMERA_FOLLOW_SPRING,
+        "far from a click the default spring should drive"
+    );
+    // A click already past does not stiffen the follow.
+    assert_eq!(camera_spring_for_time(&clicks, 1.2), CAMERA_FOLLOW_SPRING);
+}
+
+#[test]
+fn spring_step_moves_toward_the_target() {
+    let spring = CAMERA_FOLLOW_SPRING;
+    let (value, velocity) = spring_step(0.0, 0.0, 100.0, spring, 1.0 / 120.0);
+    assert!(value > 0.0 && value < 100.0, "a step should advance, got {value}");
+    assert!(velocity > 0.0, "velocity should build toward the target");
+    // The clamp keeps a fast approach from swinging far past the target.
+    let (settled, _) = spring_step(99.0, 200.0, 100.0, spring, 1.0 / 120.0);
+    assert!(
+        settled <= 105.0,
+        "clamped damping should not fling far past the target, got {settled}"
+    );
 }
 
 #[test]
@@ -982,7 +1050,10 @@ fn auto_zoom_follows_the_cursor_in_video_space() {
 }
 
 #[test]
-fn auto_zoom_camera_tracks_the_smoothed_cursor_path() {
+fn auto_zoom_camera_lags_a_pointer_jump() {
+    // The follow camera chases the movement-group centre on a spring, not
+    // the raw cursor: a sudden jump splits the groups, and the spring needs
+    // time to travel, so the framing lags behind the pointer.
     let mut state = VideoEditState::new(metadata());
     let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
         0,
@@ -1004,8 +1075,6 @@ fn auto_zoom_camera_tracks_the_smoothed_cursor_path() {
             });
     }
     state.sidecar = Some(sidecar);
-    state.cursor.smooth = 1.0;
-    state.cursor.speed = MIN_CURSOR_SPEED;
     state.zoom_clips.push(ZoomClip {
         start: 0.0,
         end: 2.0,
@@ -1021,8 +1090,121 @@ fn auto_zoom_camera_tracks_the_smoothed_cursor_path() {
     assert!((scale - 2.0).abs() < 1e-9);
     assert!(
         camera_center.0 < 1000.0,
-        "camera must not race ahead on the unsmoothed pointer path: {camera_center:?}"
+        "camera must not race ahead on the jumped pointer path: {camera_center:?}"
     );
+}
+
+#[test]
+fn instant_zoom_snaps_to_the_group_centre() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 1500.0, 800.0);
+    state.zoom_clips.push(ZoomClip {
+        start: 0.0,
+        end: 2.0,
+        scale: 2.0,
+        center: (400.0, 300.0),
+        ease_ms: 600,
+        easing: ZoomEasing::Smooth,
+        mode: ZoomMode::Auto,
+        instant: true,
+        ..Default::default()
+    });
+
+    // Scale snaps (no ease ramp) and the camera jumps to the group centre
+    // instead of chasing it.
+    let (scale, center) = state.eval_zoom_at(0.1, 0.1);
+    assert!((scale - 2.0).abs() < 1e-9);
+    let crop = state.crop_or_full();
+    let expected = clamp_zoom_center(crop, 2.0, (1500.0, 800.0));
+    assert!(
+        (center.0 - expected.0).abs() < 1e-9 && (center.1 - expected.1).abs() < 1e-9,
+        "instant should snap to the group centre, got {center:?}"
+    );
+}
+
+#[test]
+fn instant_zooms_do_not_morph_across_a_gap() {
+    let clips = [
+        ZoomClip {
+            start: 0.0,
+            end: 2.0,
+            scale: 2.0,
+            center: (400.0, 300.0),
+            ease_ms: 600,
+            easing: ZoomEasing::Smooth,
+            mode: ZoomMode::Auto,
+            instant: true,
+            ..Default::default()
+        },
+        ZoomClip {
+            start: 2.3,
+            end: 4.3,
+            scale: 2.0,
+            center: (1_500.0, 800.0),
+            ease_ms: 600,
+            easing: ZoomEasing::Smooth,
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        },
+    ];
+    // An instant predecessor holds no framing across the gap: the gap shows
+    // the full frame instead of morphing.
+    let (gap_scale, gap_center) = eval_zoom(&clips, 2.15, 1920.0, 1080.0);
+    assert!((gap_scale - 1.0).abs() < 1e-9);
+    assert!((gap_center.0 - 960.0).abs() < 1e-9);
+}
+
+#[test]
+fn follow_camera_matches_across_random_and_sequential_seeks() {
+    // The evaluator carries no state: evaluating in playback order and in a
+    // shuffled order must agree exactly.
+    let mut state = VideoEditState::new(metadata());
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    for (t, x) in [(0.0, 400.0), (0.5, 800.0), (1.0, 1200.0), (1.5, 1600.0)] {
+        sidecar
+            .pointer
+            .push(crate::recording::editor::sidecar::PointerSample {
+                t,
+                x,
+                y: 540.0,
+                kind: crate::recording::editor::sidecar::CursorKind::Default,
+            });
+    }
+    state.sidecar = Some(sidecar);
+    state.zoom_clips.push(ZoomClip {
+        start: 0.0,
+        end: 2.0,
+        scale: 2.0,
+        center: (400.0, 300.0),
+        ease_ms: 0,
+        easing: ZoomEasing::Glide,
+        mode: ZoomMode::Auto,
+        ..Default::default()
+    });
+
+    let times = [0.0, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0];
+    let sequential: Vec<(f64, (f64, f64))> =
+        times.iter().map(|t| state.eval_zoom_at(*t, *t)).collect();
+    let mut shuffled = times;
+    shuffled.reverse();
+    for t in shuffled {
+        let evaluated = state.eval_zoom_at(t, t);
+        let expected = sequential[times.iter().position(|x| *x == t).unwrap()];
+        assert!(
+            (evaluated.0 - expected.0).abs() < 1e-12
+                && (evaluated.1.0 - expected.1.0).abs() < 1e-12
+                && (evaluated.1.1 - expected.1.1).abs() < 1e-12,
+            "seek to {t} should match sequential evaluation"
+        );
+    }
 }
 
 #[test]
@@ -2405,7 +2587,7 @@ fn motion_preset_matching_is_derived_from_knobs() {
         settings.matching_motion_preset(),
         Some(CursorMotionStyle::Smooth)
     );
-    settings.trail = 0.12;
+    settings.smooth = 0.5;
     assert!(settings.matching_motion_preset().is_none());
 }
 
@@ -3532,25 +3714,26 @@ fn reset_zoom_animation_clears_the_instant_snap() {
 }
 
 #[test]
-fn eval_zoom_at_holds_the_stored_framing_for_an_instant_zoom() {
+fn eval_zoom_at_snaps_an_instant_zoom_to_the_movement_group_centre() {
     let mut state = VideoEditState::new(metadata());
-    // A pointer parked at the right edge pulls an animated follow off its
-    // stored center.
+    // A pointer parked at the right edge is the whole movement group, so an
+    // instant zoom snaps to it (clamped into the crop) while the animated
+    // spring is still travelling from the stored centre early in the clip.
     attach_pointer(&mut state, 1900.0, 540.0);
     let index = state.add_zoom_at(0.5).expect("zoom fits");
     state.selected_zoom = Some(index);
     state.zoom_clips[index].center = (960.0, 540.0);
     state.zoom_clips[index].scale = 2.0;
-    let timeline_t = state.zoom_clips[index].start + 0.9;
+    let timeline_t = state.zoom_clips[index].start + 0.05;
     let source_t = state.timeline_to_source(timeline_t);
     let (_, animated) = state.eval_zoom_at(timeline_t, source_t);
     assert!(
-        (animated.0 - 960.0).abs() > 1.0,
-        "the animated follow should recenter toward the edge pointer, got {animated:?}"
+        animated.0 > 960.0 && animated.0 < 1200.0,
+        "the animated spring should still be travelling, got {animated:?}"
     );
     state.set_selected_zoom_instant(true);
     let (scale, snapped) = state.eval_zoom_at(timeline_t, source_t);
     assert!((scale - 2.0).abs() < 1e-9);
-    assert!((snapped.0 - 960.0).abs() < 1e-9);
-    assert!((snapped.1 - 540.0).abs() < 1e-9);
+    assert!((snapped.0 - 1440.0).abs() < 1e-6);
+    assert!((snapped.1 - 540.0).abs() < 1e-6);
 }
