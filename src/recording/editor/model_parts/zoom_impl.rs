@@ -22,13 +22,18 @@ impl VideoEditState {
         }
         let center = self.default_zoom_center(start);
         self.record_zoom_command();
+        let style = self.last_edited_zoom_style.unwrap_or(ZoomStyle {
+            scale: DEFAULT_ZOOM_SCALE,
+            easing: ZoomEasing::Glide,
+            ease_ms: DEFAULT_ZOOM_EASE_MS,
+        });
         self.zoom_clips.push(ZoomClip {
             start,
             end,
-            scale: DEFAULT_ZOOM_SCALE,
+            scale: style.scale,
             center,
-            ease_ms: DEFAULT_ZOOM_EASE_MS,
-            easing: ZoomEasing::Glide,
+            ease_ms: style.ease_ms,
+            easing: style.easing,
             mode: if self.supports_auto_zoom() {
                 ZoomMode::Auto
             } else {
@@ -864,6 +869,7 @@ impl VideoEditState {
                 clip.scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
             }
             self.protect_zoom_clip(index);
+            self.capture_zoom_style(index);
         }
     }
 
@@ -877,6 +883,7 @@ impl VideoEditState {
                 clip.easing = easing;
             }
             self.protect_zoom_clip(index);
+            self.capture_zoom_style(index);
         }
     }
 
@@ -890,6 +897,18 @@ impl VideoEditState {
                 clip.ease_ms = ease_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
             }
             self.protect_zoom_clip(index);
+            self.capture_zoom_style(index);
+        }
+    }
+
+    /// Remember a zoom's style so the next zoom the user adds opens with it.
+    fn capture_zoom_style(&mut self, index: usize) {
+        if let Some(clip) = self.zoom_clips.get(index) {
+            self.last_edited_zoom_style = Some(ZoomStyle {
+                scale: clip.scale,
+                easing: clip.easing,
+                ease_ms: clip.ease_ms,
+            });
         }
     }
 

@@ -13,7 +13,7 @@ use super::model::{
     AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorSettings, CursorTheme,
     DimensionPreset, ExportQuality, GradientKind, GradientStop, ProjectMedia, ProjectMediaKind,
     VideoBackground, VideoEditState, VideoGradient, ZoomAnchor, ZoomClip, ZoomEasing, ZoomMode,
-    ZoomOrigin, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY,
+    ZoomOrigin, ZoomStyle, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY,
     DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW,
     DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED, DEFAULT_CURSOR_SWAY,
     DEFAULT_CURSOR_TILT, DEFAULT_CURSOR_TRAIL,
@@ -52,6 +52,9 @@ pub struct VideoProjectFile {
     /// list so an empty (rejected) timeline is not re-suggested on reopen.
     #[serde(default)]
     pub zoom_suggestions_reviewed: bool,
+    /// Style the last zoom edit settled on, applied to new zooms.
+    #[serde(default)]
+    pub last_edited_zoom_style: Option<ZoomStyleFile>,
     pub crop: Option<CropFile>,
     pub background: BackgroundFile,
     pub background_padding: f64,
@@ -179,6 +182,15 @@ pub enum ZoomEasingFile {
     Smooth,
     Snappy,
     Linear,
+}
+
+/// The style a newly placed zoom opens with, remembered across sessions.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ZoomStyleFile {
+    pub scale: f64,
+    #[serde(default)]
+    pub easing: ZoomEasingFile,
+    pub ease_ms: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -578,6 +590,22 @@ fn zoom_easing_from_file(easing: ZoomEasingFile) -> ZoomEasing {
     }
 }
 
+fn zoom_style_to_file(style: ZoomStyle) -> ZoomStyleFile {
+    ZoomStyleFile {
+        scale: style.scale,
+        easing: zoom_easing_to_file(style.easing),
+        ease_ms: style.ease_ms,
+    }
+}
+
+fn zoom_style_from_file(style: ZoomStyleFile) -> ZoomStyle {
+    ZoomStyle {
+        scale: style.scale,
+        easing: zoom_easing_from_file(style.easing),
+        ease_ms: style.ease_ms,
+    }
+}
+
 fn crop_to_file(crop: CropSelection) -> CropFile {
     CropFile {
         x: crop.x,
@@ -912,6 +940,7 @@ impl VideoEditState {
             zoom_hidden: self.zoom_hidden,
             zoom_locked: self.zoom_locked,
             zoom_suggestions_reviewed: self.zoom_suggestions_reviewed,
+            last_edited_zoom_style: self.last_edited_zoom_style.map(zoom_style_to_file),
             crop: self.crop.map(crop_to_file),
             background: background_to_file(&self.background),
             background_padding: self.background_padding,
@@ -975,6 +1004,7 @@ impl VideoEditState {
         self.zoom_hidden = file.zoom_hidden;
         self.zoom_locked = file.zoom_locked;
         self.zoom_suggestions_reviewed = file.zoom_suggestions_reviewed;
+        self.last_edited_zoom_style = file.last_edited_zoom_style.map(zoom_style_from_file);
         self.crop = file.crop.map(crop_from_file);
         self.background = background_from_file(file.background);
         self.background_padding = file.background_padding;
@@ -1563,6 +1593,26 @@ mod tests {
         let mut restored = VideoEditState::new(metadata_for(&video, 24));
         restored.apply_project(loaded);
         assert!(restored.zoom_suggestions_reviewed());
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn roundtrip_preserves_the_last_edited_zoom_style() {
+        let dir = scratch("zoom-style");
+        let video = write_video(&dir, "clip.mp4", 8);
+        let mut state = VideoEditState::new(metadata_for(&video, 8));
+        let index = state.add_zoom_at(1.0).expect("zoom fits");
+        state.selected_zoom = Some(index);
+        state.set_selected_zoom_scale(2.2);
+        save_project(&video, &state.to_project()).unwrap();
+        let loaded = load_project(&video).expect("project should load");
+        let mut restored = VideoEditState::new(metadata_for(&video, 8));
+        restored.apply_project(loaded);
+        let style = restored
+            .last_edited_zoom_style
+            .expect("the edited style is remembered");
+        assert!((style.scale - 2.2).abs() < 1e-9);
         cleanup_project(&video);
         let _ = fs::remove_dir_all(&dir);
     }

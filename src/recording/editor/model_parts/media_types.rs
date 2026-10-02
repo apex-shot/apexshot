@@ -137,6 +137,9 @@ pub struct VideoEditState {
     /// on its own, apart from `zoom_clips`, so a user who rejected every
     /// suggestion — or disabled generation — is not asked again on reopen.
     pub zoom_suggestions_reviewed: bool,
+    /// Style the last zoom edit settled on, applied to new zooms. `None` until
+    /// the user edits a zoom.
+    pub last_edited_zoom_style: Option<ZoomStyle>,
     /// Undo/redo steps for the zoom track. Runtime-only: not written to the
     /// project, so a reopened recording starts with nothing to undo.
     pub zoom_history: ZoomHistory,

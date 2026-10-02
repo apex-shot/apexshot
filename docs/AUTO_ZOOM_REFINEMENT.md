@@ -43,7 +43,7 @@ until its own phase.
 3. **Camera follow** — a per-zoom camera target and motion model that matches
    the merged-window focus.
 4. **Style inheritance** — a new zoom opens with the level and style of the
-   last zoom the user edited.
+   last zoom the user edited. Done.
 
 ## Non-goals
 

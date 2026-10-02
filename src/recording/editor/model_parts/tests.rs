@@ -3381,3 +3381,28 @@ fn a_refused_paste_keeps_the_clip_for_another_try() {
     assert!(state.paste_clipboard_at(5.0).is_some());
     assert!(!state.is_pasting_clip());
 }
+
+#[test]
+fn a_new_zoom_opens_with_the_last_edited_style() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    let first = state.add_zoom_at(0.5).expect("first zoom fits");
+    state.selected_zoom = Some(first);
+    state.set_selected_zoom_scale(2.4);
+    state.set_selected_zoom_easing(ZoomEasing::Linear);
+
+    let second = state.add_zoom_at(5.0).expect("second zoom fits");
+    let clip = &state.zoom_clips[second];
+    assert!((clip.scale - 2.4).abs() < 1e-9);
+    assert_eq!(clip.easing, ZoomEasing::Linear);
+}
+
+#[test]
+fn a_new_zoom_keeps_the_factory_style_until_a_zoom_is_edited() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    let index = state.add_zoom_at(0.5).expect("zoom fits");
+    let clip = &state.zoom_clips[index];
+    assert!((clip.scale - DEFAULT_ZOOM_SCALE).abs() < 1e-9);
+    assert_eq!(clip.easing, ZoomEasing::Glide);
+}

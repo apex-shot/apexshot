@@ -35,6 +35,18 @@ pub struct ZoomAnchor {
     pub source_end: f64,
 }
 
+/// The style a newly placed zoom opens with.
+///
+/// Captured from the last zoom the user edited, so a level or motion they
+/// settle on carries to the next zoom they add instead of resetting to the
+/// factory default every time.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ZoomStyle {
+    pub scale: f64,
+    pub easing: ZoomEasing,
+    pub ease_ms: u32,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ZoomClip {
     pub start: f64,
