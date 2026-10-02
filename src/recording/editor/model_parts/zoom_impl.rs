@@ -19,6 +19,7 @@ impl VideoEditState {
             return None;
         }
         let center = self.default_zoom_center(start);
+        self.record_zoom_command();
         self.zoom_clips.push(ZoomClip {
             start,
             end,
@@ -49,13 +50,8 @@ impl VideoEditState {
     }
 
     pub fn remove_selected_zoom(&mut self) {
-        if self.zoom_locked {
-            return;
-        }
-        if let Some(index) = self.selected_zoom.take() {
-            if index < self.zoom_clips.len() {
-                self.zoom_clips.remove(index);
-            }
+        if let Some(index) = self.selected_zoom {
+            self.remove_zoom_clip(index);
         }
     }
 
@@ -72,6 +68,7 @@ impl VideoEditState {
         if self.zoom_locked || index >= self.zoom_clips.len() {
             return;
         }
+        self.record_zoom_command();
         self.zoom_clips.remove(index);
         self.selected_zoom = match self.selected_zoom {
             Some(selected) if selected == index => None,
@@ -103,6 +100,10 @@ impl VideoEditState {
     /// export. Both track kinds share the toggle so the menu reads the same on
     /// either.
     pub fn set_zoom_hidden(&mut self, index: usize, hidden: bool) {
+        if self.zoom_clips.get(index).is_none_or(|clip| clip.hidden == hidden) {
+            return;
+        }
+        self.record_zoom_command();
         if let Some(clip) = self.zoom_clips.get_mut(index) {
             clip.hidden = hidden;
         }
@@ -156,6 +157,7 @@ impl VideoEditState {
         {
             return None;
         }
+        self.record_zoom_command();
         self.zoom_clips.push(ZoomClip {
             start,
             end,
@@ -225,9 +227,13 @@ impl VideoEditState {
     }
 
     pub fn cut_zoom_clip(&mut self, index: usize) -> bool {
-        if !self.copy_zoom_clip(index) {
+        let Some(clip) = self.zoom_clips.get(index).cloned() else {
             return false;
-        }
+        };
+        // Recorded before the copy lands: the pending paste is part of the
+        // step, so undoing a cut has to drop the clipboard again.
+        self.record_zoom_command();
+        self.clipboard = Some(ClipClipboard::Zoom(clip));
         self.zoom_clips.remove(index);
         self.selected_zoom = None;
         true
@@ -263,6 +269,7 @@ impl VideoEditState {
                 {
                     return None;
                 }
+                self.record_zoom_command();
                 self.zoom_clips.push(ZoomClip {
                     start,
                     end,
@@ -585,6 +592,14 @@ impl VideoEditState {
         if self.zoom_locked {
             return 0;
         }
+        self.record_zoom_command();
+        self.place_zoom_suggestions()
+    }
+
+    /// The placement half of a generation pass. It takes no undo step of its
+    /// own: [`Self::redetect_zoom_clips`] runs it inside the step it already
+    /// took, so one Detect is one thing to undo.
+    fn place_zoom_suggestions(&mut self) -> usize {
         let Some(sidecar) = &self.sidecar else {
             return 0;
         };
@@ -788,12 +803,13 @@ impl VideoEditState {
         }
         // An explicit re-run is itself a review, so opening again stays quiet.
         self.zoom_suggestions_reviewed = true;
+        self.record_zoom_command();
         let before = self.zoom_clips.len();
         self.zoom_clips
             .retain(|clip| clip.origin != ZoomOrigin::Generated);
         let removed = before - self.zoom_clips.len();
         self.selected_zoom = None;
-        let added = self.suggest_zoom_clips();
+        let added = self.place_zoom_suggestions();
         if added > 0 {
             self.selected_zoom = self
                 .zoom_clips
@@ -866,6 +882,7 @@ impl VideoEditState {
         .then(|| self.eval_zoom_at(self.playhead_seconds, self.source_playhead()).1);
         let crop = self.crop_or_full();
         if let Some(index) = self.selected_zoom {
+            self.record_zoom_command();
             if let Some(clip) = self.zoom_clips.get_mut(index) {
                 if let Some(center) = visible_center {
                     clip.center = clamp_zoom_center(crop, clip.scale, center);
@@ -881,6 +898,7 @@ impl VideoEditState {
             return;
         }
         if let Some(index) = self.selected_zoom {
+            self.record_continuous_zoom_edit();
             if let Some(clip) = self.zoom_clips.get_mut(index) {
                 clip.scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
             }
@@ -893,6 +911,7 @@ impl VideoEditState {
             return;
         }
         if let Some(index) = self.selected_zoom {
+            self.record_zoom_command();
             if let Some(clip) = self.zoom_clips.get_mut(index) {
                 clip.easing = easing;
             }
@@ -905,6 +924,7 @@ impl VideoEditState {
             return;
         }
         if let Some(index) = self.selected_zoom {
+            self.record_continuous_zoom_edit();
             if let Some(clip) = self.zoom_clips.get_mut(index) {
                 clip.ease_ms = ease_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
             }
@@ -924,6 +944,7 @@ impl VideoEditState {
             _ => return,
         };
         let center = clamp_zoom_center(self.crop_or_full(), scale, center);
+        self.record_continuous_zoom_edit();
         if let Some(clip) = self.zoom_clips.get_mut(index) {
             clip.center = center;
         }
@@ -934,6 +955,7 @@ impl VideoEditState {
         if self.zoom_locked {
             return;
         }
+        self.record_zoom_command();
         self.zoom_classic = false;
         if let Some(index) = self.selected_zoom {
             if let Some(clip) = self.zoom_clips.get_mut(index) {
@@ -967,6 +989,7 @@ impl VideoEditState {
         }) {
             return;
         }
+        self.record_continuous_zoom_edit();
         if let Some(clip) = self.zoom_clips.get_mut(index) {
             clip.start = start;
             clip.end = end;
@@ -989,6 +1012,7 @@ impl VideoEditState {
         }) {
             return;
         }
+        self.record_continuous_zoom_edit();
         if let Some(clip) = self.zoom_clips.get_mut(index) {
             clip.start = start;
             clip.end = end;
@@ -1001,6 +1025,7 @@ impl VideoEditState {
             return;
         }
         if let Some(index) = self.selected_zoom {
+            self.record_continuous_zoom_edit();
             if let Some(clip) = self.zoom_clips.get_mut(index) {
                 clip.rotation_y = yaw.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
             }
@@ -1013,6 +1038,7 @@ impl VideoEditState {
             return;
         }
         if let Some(index) = self.selected_zoom {
+            self.record_continuous_zoom_edit();
             if let Some(clip) = self.zoom_clips.get_mut(index) {
                 clip.rotation_x = pitch.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
             }
@@ -1025,6 +1051,7 @@ impl VideoEditState {
             return;
         }
         if let Some(index) = self.selected_zoom {
+            self.record_continuous_zoom_edit();
             if let Some(clip) = self.zoom_clips.get_mut(index) {
                 clip.rotation_z = roll.clamp(MIN_MOTION_YAW, MAX_MOTION_YAW);
             }
@@ -1037,6 +1064,7 @@ impl VideoEditState {
             return;
         }
         if let Some(index) = self.selected_zoom {
+            self.record_continuous_zoom_edit();
             if let Some(clip) = self.zoom_clips.get_mut(index) {
                 clip.perspective = perspective.clamp(0.0, 1.0);
             }

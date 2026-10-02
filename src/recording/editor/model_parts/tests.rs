@@ -1420,6 +1420,24 @@ fn a_duplicated_generated_zoom_is_not_anchored_to_the_original() {
 }
 
 #[test]
+fn undoing_a_zoom_edit_keeps_the_clip_on_its_footage() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);
+    state.set_trim_end(6.0);
+    state.suggest_zoom_clips();
+    state.move_zoom_clip(0, 1.0);
+    // A composition edit after the step was taken moves the anchored clip.
+    state.set_trim_start(2.0);
+
+    assert!(state.undo_zoom_edit());
+
+    // Undo restores the clip the drag took over, and it lands on the footage
+    // its anchor names rather than the composition slot it was captured at.
+    assert!((state.zoom_clips[0].start - 2.6).abs() < 1e-9);
+    assert!((state.zoom_clips[0].end - 4.0).abs() < 1e-9);
+}
+
+#[test]
 fn suggest_zoom_clips_assigns_exact_cut_click_to_following_segment() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(4.0, 800.0, 500.0)]);
@@ -1736,6 +1754,160 @@ fn legacy_clips_are_never_replaced_by_regeneration() {
         .zoom_clips
         .iter()
         .any(|clip| clip.origin == ZoomOrigin::Legacy));
+}
+
+#[test]
+fn undo_takes_a_generation_pass_back_in_one_step() {
+    // One Detect can add several clips; undoing has to put the track back the
+    // way a single click found it, not clip by clip.
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 800.0, 500.0), (8.0, 1200.0, 600.0)]);
+
+    assert!(state.redetect_zoom_clips());
+    let added = state.zoom_clips.clone();
+    assert_eq!(added.len(), 2);
+
+    assert!(state.undo_zoom_edit());
+    assert!(state.zoom_clips.is_empty());
+
+    assert!(state.redo_zoom_edit());
+    assert_eq!(state.zoom_clips, added);
+}
+
+#[test]
+fn a_slider_sweep_is_one_undo_step() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    let index = state.add_zoom_at(1.0).unwrap();
+    state.selected_zoom = Some(index);
+    let original = state.zoom_clips[index].scale;
+
+    // A drag arrives as a stream of values; they must not each become a step.
+    for step in 1..=5 {
+        state.set_selected_zoom_scale(original + step as f64 * 0.1);
+    }
+    assert!((state.zoom_clips[index].scale - (original + 0.5)).abs() < 1e-9);
+
+    assert!(state.undo_zoom_edit());
+    assert!((state.zoom_clips[index].scale - original).abs() < 1e-9);
+
+    // The add itself is the step below the sweep, and nothing is left after it.
+    assert!(state.undo_zoom_edit());
+    assert!(state.zoom_clips.is_empty());
+    assert!(!state.undo_zoom_edit());
+}
+
+#[test]
+fn a_timeline_drag_is_one_undo_step() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    let index = state.add_zoom_at(1.0).unwrap();
+    let placed = state.zoom_clips[index].clone();
+
+    // A drag arrives as a stream of positions; one drag is one step, not one
+    // per pointer event.
+    for step in 1..=5 {
+        state.move_zoom_clip(index, 1.0 + step as f64 * 0.2);
+    }
+    assert!((state.zoom_clips[index].start - 2.0).abs() < 1e-9);
+
+    assert!(state.undo_zoom_edit());
+    assert_eq!(state.zoom_clips[index], placed);
+}
+
+#[test]
+fn a_command_after_a_sweep_keeps_its_own_step() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    state.selected_zoom = Some(0);
+    let suggested = state.zoom_clips[0].scale;
+    state.set_selected_zoom_scale(suggested + 0.5);
+    state.set_zoom_hidden(0, true);
+
+    assert!(state.undo_zoom_edit());
+    assert!(!state.zoom_clips[0].hidden);
+    assert!((state.zoom_clips[0].scale - (suggested + 0.5)).abs() < 1e-9);
+
+    // Undoing the sweep also puts the clip back in the generator's hands: the
+    // edit it made had promoted it to the user's work.
+    assert!(state.undo_zoom_edit());
+    assert!((state.zoom_clips[0].scale - suggested).abs() < 1e-9);
+    assert_eq!(state.zoom_clips[0].origin, ZoomOrigin::Generated);
+}
+
+#[test]
+fn undoing_a_cut_drops_the_pending_paste() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 960.0, 540.0);
+    state.add_zoom_at(1.0).unwrap();
+
+    assert!(state.cut_zoom_clip(0));
+    assert!(state.zoom_clips.is_empty());
+    assert!(state.is_pasting_clip());
+
+    assert!(state.undo_zoom_edit());
+    assert_eq!(state.zoom_clips.len(), 1);
+    // A clip back on the track with a paste still pending would leave the
+    // editor dimmed for an action the user just took back.
+    assert!(!state.is_pasting_clip());
+}
+
+#[test]
+fn undo_skips_a_command_that_changed_nothing() {
+    let mut state = VideoEditState::new(metadata());
+    // No recorded pointer data, so the pass can place nothing.
+    assert!(!state.redetect_zoom_clips());
+    assert!(!state.undo_zoom_edit());
+}
+
+#[test]
+fn zoom_history_keeps_a_bounded_number_of_steps() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    for step in 0..ZOOM_HISTORY_LIMIT + 8 {
+        state.set_zoom_hidden(0, step % 2 == 0);
+    }
+
+    let mut undone = 0;
+    while state.undo_zoom_edit() {
+        undone += 1;
+    }
+    assert_eq!(undone, ZOOM_HISTORY_LIMIT);
+}
+
+#[test]
+fn undo_takes_back_the_pass_that_ran_on_open() {
+    // Taking the automatic pass back is a rejection that has to stick: the
+    // reviewed flag is not part of the step, so a reopened project asks again
+    // — and the pass must not return.
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    assert!(state.suggest_zooms_on_open());
+    assert_eq!(state.zoom_clips.len(), 1);
+
+    assert!(state.undo_zoom_edit());
+    assert!(state.zoom_clips.is_empty());
+    let saved = state.to_project();
+
+    let mut reloaded = VideoEditState::new(metadata());
+    reloaded.apply_project(saved);
+    assert!(reloaded.zoom_clips.is_empty());
+    assert!(!reloaded.suggest_zooms_on_open());
+}
+
+#[test]
+fn a_reloaded_project_has_nothing_to_undo() {    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_landings(&mut state, &[(4.0, 500.0, 400.0)]);
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    let saved = state.to_project();
+
+    let mut reloaded = VideoEditState::new(metadata());
+    reloaded.apply_project(saved);
+    assert_eq!(reloaded.zoom_clips.len(), 1);
+    // The steps are runtime-only: a reopened recording starts clean.
+    assert!(!reloaded.undo_zoom_edit());
 }
 
 #[test]
