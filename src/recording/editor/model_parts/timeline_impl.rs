@@ -10,6 +10,7 @@ impl VideoEditState {
             self.trim_end_seconds
         };
         self.trim_start_seconds = value.clamp(0.0, max_start.max(0.0));
+        self.reproject_anchored_zooms();
     }
 
     pub fn shift_trim(&mut self, delta: f64) {
@@ -32,6 +33,7 @@ impl VideoEditState {
         for cut in &mut self.cuts {
             *cut += shift;
         }
+        self.reproject_anchored_zooms();
     }
 
     pub fn set_trim_end(&mut self, value: f64) {
@@ -67,6 +69,7 @@ impl VideoEditState {
         }
         self.freeze_tail = 0.0;
         self.trim_end_seconds = value.clamp(min_end.min(duration), duration);
+        self.reproject_anchored_zooms();
     }
 
     /// Held seconds after `trim_end_seconds`: the clip's last frame frozen on
@@ -197,6 +200,7 @@ impl VideoEditState {
         self.segment_starts.insert(insert_pos + 1, right_start);
         self.selected_segment = Some(insert_pos);
         self.selected_zoom = None;
+        self.reproject_anchored_zooms();
     }
 
     /// Remove a cut point by index.
@@ -242,6 +246,7 @@ impl VideoEditState {
                 Some(sel)
             };
         }
+        self.reproject_anchored_zooms();
     }
 
     /// Move a cut point without crossing its neighboring cuts.
@@ -267,6 +272,7 @@ impl VideoEditState {
         if min <= max {
             self.cuts[cut_index] = seconds.clamp(min, max);
         }
+        self.reproject_anchored_zooms();
     }
 
     /// Toggle keep/remove for a segment.
@@ -277,6 +283,7 @@ impl VideoEditState {
         if let Some(kept) = self.segments_kept.get_mut(segment_index) {
             *kept = !*kept;
         }
+        self.reproject_anchored_zooms();
     }
 
     /// Clear all cuts.
@@ -291,6 +298,7 @@ impl VideoEditState {
         self.segment_speeds = vec![1.0];
         self.segment_muted = vec![false];
         self.selected_segment = None;
+        self.reproject_anchored_zooms();
     }
 
     /// Move a segment from one position in the output order to another.
@@ -306,23 +314,36 @@ impl VideoEditState {
         }
         let seg = self.segment_order.remove(from_order_pos);
         self.segment_order.insert(to_order_pos, seg);
+        self.reproject_anchored_zooms();
     }
 
-    /// Kept segments as (composition_start, source_start, source_end), left-to-right.
-    pub fn ordered_placed_segments(&self) -> Vec<(f64, f64, f64)> {
+    /// Kept segments as `(index, composition start, source start, source end)`,
+    /// left-to-right. The index is what the per-segment settings — speed above
+    /// all — are read by.
+    pub fn placed_segment_slots(&self) -> Vec<(usize, f64, f64, f64)> {
         let boundaries = self.segment_boundaries();
-        let mut placed: Vec<(f64, f64, f64)> = self
+        let mut placed: Vec<(usize, f64, f64, f64)> = self
             .segment_order
             .iter()
             .filter(|&&i| self.segments_kept.get(i).copied().unwrap_or(true))
             .filter_map(|&i| {
                 boundaries
                     .get(i)
-                    .map(|(start, end)| (self.segment_start(i), *start, *end))
+                    .map(|(start, end)| (i, self.segment_start(i), *start, *end))
             })
             .collect();
-        placed.sort_by(|a, b| a.0.total_cmp(&b.0));
+        placed.sort_by(|a, b| a.1.total_cmp(&b.1));
         placed
+    }
+
+    /// Kept segments as (composition_start, source_start, source_end), left-to-right.
+    pub fn ordered_placed_segments(&self) -> Vec<(f64, f64, f64)> {
+        self.placed_segment_slots()
+            .into_iter()
+            .map(|(_, composition_start, source_start, source_end)| {
+                (composition_start, source_start, source_end)
+            })
+            .collect()
     }
 
     /// Returns kept segments in composition order (for export).

@@ -117,6 +117,16 @@ impl VideoEditState {
         }
     }
 
+    /// Take a clip off its source anchor and make it the user's work: they
+    /// have said where it belongs by dragging or resizing it, so no later
+    /// composition edit may pull it back to the footage the generator picked.
+    fn unanchor_zoom_clip(&mut self, index: usize) {
+        if let Some(clip) = self.zoom_clips.get_mut(index) {
+            clip.anchor = None;
+        }
+        self.protect_zoom_clip(index);
+    }
+
     /// Promote a clip to the user's work so automatic generation leaves it
     /// alone. Generated clips flip to `User` on the first edit; user and
     /// legacy clips are already protected.
@@ -150,6 +160,9 @@ impl VideoEditState {
             start,
             end,
             origin: ZoomOrigin::User,
+            // The copy sits where the user dropped it, not on the original's
+            // footage.
+            anchor: None,
             ..clip
         });
         self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
@@ -254,6 +267,7 @@ impl VideoEditState {
                     start,
                     end,
                     origin: ZoomOrigin::User,
+                    anchor: None,
                     ..clip
                 });
                 self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
@@ -479,6 +493,7 @@ impl VideoEditState {
             }
         }
         self.sync_offset_from_segments();
+        self.reproject_anchored_zooms();
         self.clamp_timeline_scroll();
     }
 
@@ -511,6 +526,7 @@ impl VideoEditState {
         if let Some(kept) = self.segments_kept.get_mut(index) {
             *kept = false;
         }
+        self.reproject_anchored_zooms();
     }
 
     pub fn segment_speed(&self, index: usize) -> f64 {
@@ -664,6 +680,13 @@ impl VideoEditState {
                 easing: ZoomEasing::Smooth,
                 mode,
                 origin: ZoomOrigin::Generated,
+                // The generator picked this footage, not this composition
+                // time: remember the source interval so the clip follows it
+                // through a trim, a re-cut, or a speed change.
+                anchor: Some(ZoomAnchor {
+                    source_start: start,
+                    source_end: end,
+                }),
                 ..Default::default()
             });
             added += 1;
@@ -672,6 +695,84 @@ impl VideoEditState {
             self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
         }
         added
+    }
+
+    /// Put every anchored clip back on the footage it was placed for.
+    ///
+    /// A clip span is a composition time, so an edit that changes which
+    /// footage plays where — trimming, cutting, unkeeping a segment, moving a
+    /// segment, or retiming one — would leave a generated zoom framing
+    /// whatever now sits at its old position. Re-deriving the span from the
+    /// anchor is what keeps "the zoom on the click" true after the edit.
+    ///
+    /// A clip whose footage the composition no longer plays is dropped: the
+    /// generator made it for a moment that is gone, and keeping it would frame
+    /// something else. It is still the clip's own start that owns the source
+    /// time at an exact cut, matching how placement resolves the same
+    /// timestamp. A clip that spans a newly added cut stays with the piece
+    /// that owns its start rather than splitting in two.
+    ///
+    /// Clips the user placed or dragged carry no anchor and never move.
+    pub(crate) fn reproject_anchored_zooms(&mut self) {
+        if self.zoom_clips.iter().all(|clip| clip.anchor.is_none()) {
+            return;
+        }
+        let segments = self.placed_segment_slots();
+        let speeds: Vec<f64> = (0..self.segment_speeds.len())
+            .map(|index| self.segment_speed(index))
+            .collect();
+        let mut reprojected: Vec<ZoomClip> = Vec::with_capacity(self.zoom_clips.len());
+        for clip in self.zoom_clips.drain(..) {
+            let Some(anchor) = clip.anchor else {
+                reprojected.push(clip);
+                continue;
+            };
+            // At an exact cut both neighboring ranges contain the timestamp;
+            // the later source start owns it, as in placement.
+            let Some(&(segment, composition_start, source_start, source_end)) = segments
+                .iter()
+                .filter(|&&(_, _, start, end)| {
+                    anchor.source_start + 1e-9 >= start && anchor.source_start <= end + 1e-9
+                })
+                .max_by(|a, b| a.2.total_cmp(&b.2))
+            else {
+                continue;
+            };
+            let speed = speeds.get(segment).copied().unwrap_or(1.0);
+            let start = anchor.source_start.max(source_start);
+            let end = anchor.source_end.min(source_end);
+            if end - start <= f64::EPSILON {
+                continue;
+            }
+            reprojected.push(ZoomClip {
+                start: composition_start + (start - source_start) / speed,
+                end: composition_start + (end - source_start) / speed,
+                ..clip
+            });
+        }
+        reprojected.sort_by(|a, b| a.start.total_cmp(&b.start));
+        // The move can land an anchored clip on one that did not move — a
+        // Manual zoom the user placed further along, say. Overlapping zooms
+        // have no defined blending, so the clip that moved gives way; a clip
+        // the user placed is never dropped by an edit.
+        let mut resolved: Vec<ZoomClip> = Vec::with_capacity(reprojected.len());
+        for clip in reprojected {
+            if let Some(previous) = resolved.last() {
+                if ranges_overlap(clip.start, clip.end, previous.start, previous.end) {
+                    if clip.anchor.is_some() {
+                        continue;
+                    }
+                    if previous.anchor.is_some() {
+                        resolved.pop();
+                    }
+                }
+            }
+            resolved.push(clip);
+        }
+        self.zoom_clips = resolved;
+        self.selected_zoom = self
+            .selected_zoom
+            .filter(|index| *index < self.zoom_clips.len());
     }
 
     /// Drop the zooms this generator placed and nobody has touched since, then
@@ -870,7 +971,7 @@ impl VideoEditState {
             clip.start = start;
             clip.end = end;
         }
-        self.protect_zoom_clip(index);
+        self.unanchor_zoom_clip(index);
     }
 
     pub fn set_zoom_range(&mut self, index: usize, start: f64, end: f64) {
@@ -892,7 +993,7 @@ impl VideoEditState {
             clip.start = start;
             clip.end = end;
         }
-        self.protect_zoom_clip(index);
+        self.unanchor_zoom_clip(index);
     }
 
     pub fn set_selected_zoom_yaw(&mut self, yaw: f64) {

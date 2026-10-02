@@ -16,6 +16,25 @@ pub enum ZoomOrigin {
     Legacy,
 }
 
+/// The footage a generated clip was placed to frame, in source seconds.
+///
+/// A clip's span is a composition time, so trimming the head, re-cutting,
+/// reordering, or retiming the video slides different footage under a clip that
+/// only remembers where it sits on the timeline. An anchor is the source
+/// interval the generator chose, which `reproject_anchored_zooms` turns back
+/// into a span whenever the composition changes. It holds the plain source
+/// interval rather than a segment identity: a clip follows its footage through
+/// a re-cut, and is dropped only when the composition no longer plays that
+/// footage at all.
+///
+/// `None` means the span is the user's own composition time — a clip they
+/// placed or dragged.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ZoomAnchor {
+    pub source_start: f64,
+    pub source_end: f64,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ZoomClip {
     pub start: f64,
@@ -35,6 +54,9 @@ pub struct ZoomClip {
     pub hidden: bool,
     /// Ownership, separate from camera behavior. See [`ZoomOrigin`].
     pub origin: ZoomOrigin,
+    /// Footage this clip follows through composition edits. `None` for a clip
+    /// the user placed or dragged. See [`ZoomAnchor`].
+    pub anchor: Option<ZoomAnchor>,
 }
 
 impl Default for ZoomClip {
@@ -53,6 +75,7 @@ impl Default for ZoomClip {
             perspective: 0.0,
             hidden: false,
             origin: ZoomOrigin::default(),
+            anchor: None,
         }
     }
 }
