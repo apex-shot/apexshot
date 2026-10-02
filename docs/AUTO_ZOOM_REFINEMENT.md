@@ -44,12 +44,12 @@ on a spring (phase 3), replacing the earlier edge-feathering follow.
 2. **Wire in and remove the old detector** — placement uses the generator;
    the old multi-signal detector and the clicks/hovers choice are gone. Done.
 3. **Camera follow** — the follow camera chases the movement-group centre
-   active at the current time on a damped spring, stiffening near a click
-   and snapping per zoom when instant is set. Portable: group-centre target,
-   click-proximity stiffness, per-zoom instant. Omitted: drag/release
-   stiffness and typing suppression (mouse press intervals are now recorded,
-   but no drag spring is wired until its value is agreed; key identities are
-   never collected). Done.
+   active at the current time on a damped spring, stiffening near a click,
+   stiffening harder while the pointer is dragging, and snapping per zoom
+   when instant is set. Portable: group-centre target, click-proximity
+   stiffness, drag stiffness, per-zoom instant. Omitted: release stiffness
+   and typing suppression (release has no recorded signal; key identities
+   are never collected). Done.
 4. **Style inheritance** — a new zoom opens with the level and style of the
    last zoom the user edited. Done.
 5. **Instant toggle** — each automatic zoom carries an instant-vs-animated
