@@ -1127,9 +1127,10 @@ impl VideoEditState {
     /// The follow camera chases the movement-group centre active at
     /// `source_t` on a damped spring, starting at the clip's stored centre.
     /// The evaluation is pure (no carried state), so random seeks match
-    /// sequential playback. Drag stiffness and typing suppression are
-    /// intentionally absent: the sidecar records mouse press intervals but no
-    /// drag spring is wired yet, and key identities are never collected.
+    /// sequential playback. A recorded drag selects the stiff drag spring
+    /// ahead of the click spring; release stiffness and typing suppression
+    /// are intentionally absent, since neither has a recorded signal and key
+    /// identities are never collected.
     pub fn eval_zoom_at(&self, timeline_t: f64, source_t: f64) -> (f64, (f64, f64)) {
         let frame_w = self.metadata.width as f64;
         let frame_h = self.metadata.height as f64;
@@ -1183,7 +1184,7 @@ impl VideoEditState {
                 movement_group_center_at(&points, source_t, budget).unwrap_or(clip.center);
             return (scale, clamp_zoom_center(crop, scale, target));
         }
-        let spring = camera_spring_for_time(&click_times, source_t);
+        let spring = camera_spring_for_time(&click_times, &sidecar.presses, source_t);
         let from_source = self.timeline_to_source(clip.start);
         if !source_t.is_finite() || !from_source.is_finite() || source_t <= from_source {
             return (scale, clamp_zoom_center(crop, scale, clip.center));

@@ -1,3 +1,5 @@
+use std::sync::LazyLock;
+
 fn ranges_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> bool {
     a0 < b1 && b0 < a1
 }
@@ -255,18 +257,17 @@ fn morph_gap_predecessor(clips: &[ZoomClip], t: f64) -> Option<usize> {
 /// the portable half of the studied automatic-zoom camera: group-centre
 /// target, click-proximity stiffness, and a per-zoom instant snap.
 ///
-/// Deliberately omitted: drag/release stiffness and typing suppression. The
-/// sidecar now records mouse press intervals `(down, up, button, dragged)`,
-/// so the drag signal exists; no drag spring is wired until its value is
-/// agreed. Keystroke capture was deliberately removed, so typing suppression
-/// has no signal and key identities are never collected. Where the studied
-/// camera would stiffen while dragging or hide while typing, this camera
-/// keeps following the movement groups.
+/// Release stiffness and typing suppression are deliberately omitted. The
+/// drag spring is wired from the recorded press intervals; release stiffness
+/// has no recorded signal of its own, and keystroke capture was deliberately
+/// removed, so typing suppression has no signal and key identities are never
+/// collected. Where the studied camera would ease on release or hide while
+/// typing, this camera keeps following the movement groups.
 ///
 /// The evaluator is pure: every call simulates from the clip's source start
-/// to the evaluation time at a fixed step, starting at the clip's stored
-/// centre with zero velocity. There is no carried state, so a random seek
-/// lands exactly where sequential playback would be.
+/// to the evaluation time at the studied adaptive step, starting at the
+/// clip's stored centre with zero velocity. There is no carried state, so a
+/// random seek lands exactly where sequential playback would be.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CameraSpring {
     pub stiffness: f64,
@@ -294,18 +295,159 @@ pub const CAMERA_CLICK_SPRING: CameraSpring = CameraSpring {
 /// How far ahead a click still stiffens the follow spring.
 pub const CAMERA_CLICK_WINDOW_SECONDS: f64 = 0.175;
 
-/// Fixed simulation step for the follow spring. The studied integrator runs
-/// per millisecond; 120 Hz is visually identical for a camera and keeps a
-/// full-window evaluation to a few hundred steps.
-pub const CAMERA_SPRING_STEP_SECONDS: f64 = 1.0 / 120.0;
+/// The studied instant spring: mass 0 so it snaps in a single step. The
+/// fit-to-duration helper returns it when a target is at most two frames.
+pub const CAMERA_INSTANT_SPRING: CameraSpring = CameraSpring {
+    stiffness: 1.0,
+    damping: 1.0,
+    mass: 0.0,
+};
 
-/// Which spring drives the follow at source time `t`: the stiff click spring
-/// while the next click is inside the look-ahead window, otherwise the
-/// default follow spring. The look-ahead matches the studied behaviour of
-/// tightening toward an imminent click.
-pub fn camera_spring_for_time(click_times: &[f64], t: f64) -> CameraSpring {
+/// The base whose drag response is fit to a short duration. This is the
+/// stiffest named spring in the studied set.
+pub const CAMERA_DRAG_BASE_SPRING: CameraSpring = CameraSpring {
+    stiffness: 1000.0,
+    damping: 40.0,
+    mass: 1.0,
+};
+
+/// How quickly the drag spring should settle, in milliseconds. The studied
+/// drag spring is the base above fit to 40 ms.
+pub const CAMERA_DRAG_SETTLE_MS: f64 = 40.0;
+
+/// Spring selected while the pointer is dragging. Derived from the studied
+/// fit helper rather than hand-computed, so the derivation stays visible:
+/// `fit_spring_to_duration(40 ms, CAMERA_DRAG_BASE_SPRING)`.
+///
+/// A `static` rather than a `const` because the settle-time estimator needs
+/// `sqrt`, which is not const-stable, so the derivation runs once on first
+/// use.
+pub static CAMERA_DRAG_SPRING: LazyLock<CameraSpring> = LazyLock::new(|| {
+    fit_spring_to_duration(CAMERA_DRAG_SETTLE_MS, CAMERA_DRAG_BASE_SPRING)
+});
+
+/// Default precision for the settle-time estimator, matching the studied
+/// spring config's default.
+const SPRING_SETTLE_PRECISION: f64 = 0.002;
+
+/// Upper bound on the settle simulation, in milliseconds: the studied cap of
+/// `1000 * 20 ms` keeps a non-settling spring from looping forever.
+const SPRING_SETTLE_CAP_MS: f64 = 1000.0 * 20.0;
+
+/// Adaptive integration step in milliseconds, ported from the studied
+/// integrator. It returns the 1000/60 ms frame unless the frame time times
+/// the faster of the natural frequency and the damping rate exceeds half a
+/// step, in which case it returns 1 ms. The stiff click and drag springs take
+/// the 1 ms branch; the softer follow spring takes the frame branch.
+pub fn spring_adaptive_step_ms(spring: CameraSpring) -> f64 {
+    let frame_ms = 1000.0 / 60.0;
+    let mass = spring.mass.max(f64::EPSILON);
+    let natural = (spring.stiffness / mass).sqrt();
+    let damping_rate = spring.damping / mass;
+    if frame_ms / 1000.0 * natural.max(damping_rate) <= 0.5 {
+        frame_ms
+    } else {
+        1.0
+    }
+}
+
+/// The studied precision threshold `X(0, 1000, precision)`: the settle
+/// simulation stops once both velocity and distance fall below it. With the
+/// default precision of 0.002 the threshold is 2.
+fn spring_settle_threshold(precision: f64) -> f64 {
+    let range = (0.0f64 - 1000.0).abs().max(1.0);
+    range.max(1.0) / (1.0 / precision)
+}
+
+/// One step of the studied settle estimator: semi-implicit Euler toward
+/// `target`, with the estimator's early stop when both velocity and distance
+/// fall under `precision`. Unlike [`spring_step`] the estimator does not
+/// apply the critical-damping clamp.
+fn spring_settle_step(
+    step_ms: f64,
+    value: f64,
+    velocity: f64,
+    target: f64,
+    spring: CameraSpring,
+    precision: f64,
+) -> (f64, f64) {
+    let dt = step_ms / 1000.0;
+    let acceleration =
+        (-(value - target) * spring.stiffness - velocity * spring.damping) / spring.mass;
+    let velocity = velocity + acceleration * dt;
+    let value = value + velocity * dt;
+    if velocity.abs() < precision && (value - target).abs() < precision {
+        (target, 0.0)
+    } else {
+        (value, velocity)
+    }
+}
+
+/// Simulated settle time in milliseconds, ported from the studied estimator:
+/// integrate a spring from rest toward 1000 at the adaptive step until both
+/// velocity and distance fall below a precision-scaled threshold, or the
+/// simulation cap is hit. A mass-0 spring settles instantly.
+pub fn spring_settle_time_ms(spring: CameraSpring) -> f64 {
+    if spring.mass == 0.0 {
+        return 0.0;
+    }
+    let threshold = spring_settle_threshold(SPRING_SETTLE_PRECISION);
+    let step = spring_adaptive_step_ms(spring);
+    let target = 1000.0f64;
+    let mut value = 0.0f64;
+    let mut velocity = 1e-6f64;
+    let mut elapsed = 0.0f64;
+    while value != target && velocity != 0.0 {
+        let (next_value, next_velocity) =
+            spring_settle_step(step, value, velocity, target, spring, threshold);
+        value = next_value;
+        velocity = next_velocity;
+        if !value.is_finite() || !velocity.is_finite() {
+            break;
+        }
+        elapsed += step;
+        if elapsed > SPRING_SETTLE_CAP_MS {
+            break;
+        }
+    }
+    elapsed
+}
+
+/// Fit a spring to settle within `target_ms`, ported from the studied helper:
+/// an already-fast-enough spring is returned unchanged, a target at or below
+/// two 60 fps frames yields the instant spring, and otherwise the damping
+/// ratio is preserved while the natural frequency scales by
+/// `settle / target`.
+pub fn fit_spring_to_duration(target_ms: f64, spring: CameraSpring) -> CameraSpring {
+    let settle = spring_settle_time_ms(spring);
+    if settle <= target_ms {
+        return spring;
+    }
+    if target_ms <= (1000.0 / 60.0) * 2.0 {
+        return CAMERA_INSTANT_SPRING;
+    }
+    let ratio = settle / target_ms;
+    CameraSpring {
+        stiffness: spring.stiffness * ratio * ratio,
+        damping: spring.damping * ratio,
+        mass: spring.mass,
+    }
+}
+
+/// Which spring drives the follow at source time `t`, following the studied
+/// priority: instant (handled by the caller), then drag, then click, then the
+/// default follow spring. A dragged press wins even when a click is inside
+/// the look-ahead window.
+pub fn camera_spring_for_time(
+    click_times: &[f64],
+    presses: &[PressSample],
+    t: f64,
+) -> CameraSpring {
     if !t.is_finite() {
         return CAMERA_FOLLOW_SPRING;
+    }
+    if presses.iter().any(|press| press.dragged && press.contains(t)) {
+        return *CAMERA_DRAG_SPRING;
     }
     let imminent = click_times.iter().any(|click| {
         click.is_finite() && *click >= t && *click - t <= CAMERA_CLICK_WINDOW_SECONDS
@@ -446,6 +588,63 @@ pub fn movement_groups(
     groups
 }
 
+/// Precompute each movement group's first sample time and dwell-weighted
+/// centre. The centre does not depend on the query time — only which group is
+/// active does — so the follow camera can index this once per evaluation
+/// instead of rebuilding every group on every integration step. That rebuild
+/// dominated the evaluation once the stiff drag spring forced the 1 ms step.
+fn movement_group_centers(
+    points: &[(f64, f64, f64)],
+    max_distance: (f64, f64),
+) -> Vec<(f64, (f64, f64))> {
+    let groups = movement_groups(points, max_distance);
+    groups
+        .iter()
+        .enumerate()
+        .filter_map(|(index, group)| {
+            let first_t = group.first()?.0;
+            let end_time = groups
+                .get(index + 1)
+                .and_then(|next| next.first().map(|first| first.0));
+            // The studied centre weights by dwell, with the next group's start
+            // as the trailing sample's hold end so a pause at a control
+            // outweighs the travel that reached it.
+            let center = time_weighted_center(group, end_time).or_else(|| {
+                let (mut sx, mut sy, mut count) = (0.0, 0.0, 0);
+                for &(_, x, y) in group {
+                    sx += x;
+                    sy += y;
+                    count += 1;
+                }
+                (count > 0).then_some((sx / count as f64, sy / count as f64))
+            })?;
+            Some((first_t, center))
+        })
+        .collect()
+}
+
+/// Centre of the movement group active at `t` from precomputed group centres:
+/// the latest group whose first sample starts at or before `t`. Falls back to
+/// the first group when `t` predates every sample, and to `None` without
+/// groups.
+fn movement_group_center_in(
+    centers: &[(f64, (f64, f64))],
+    t: f64,
+) -> Option<(f64, f64)> {
+    if centers.is_empty() || !t.is_finite() {
+        return None;
+    }
+    let mut active = 0;
+    for (index, (first_t, _)) in centers.iter().enumerate() {
+        if *first_t <= t {
+            active = index;
+        } else {
+            break;
+        }
+    }
+    Some(centers[active].1)
+}
+
 /// Centre of the movement group active at source time `t`: the latest group
 /// whose first sample starts at or before `t`. Falls back to the first
 /// group when `t` predates every sample, and to `None` without samples.
@@ -459,42 +658,21 @@ pub fn movement_group_center_at(
     if points.is_empty() || !t.is_finite() {
         return None;
     }
-    let groups = movement_groups(points, max_distance);
-    if groups.is_empty() {
-        return None;
-    }
-    let mut active = 0;
-    for (index, group) in groups.iter().enumerate() {
-        let Some(&(first_t, _, _)) = group.first() else {
-            continue;
-        };
-        if first_t <= t {
-            active = index;
-        } else {
-            break;
-        }
-    }
-    let group = &groups[active];
-    let end_time = groups.get(active + 1).and_then(|next| next.first().map(|first| first.0));
-    // The studied centre weights by dwell, with the next group's start as
-    // the trailing sample's hold end so a pause at a control outweighs the
-    // travel that reached it.
-    time_weighted_center(group, end_time).or_else(|| {
-        let (mut sx, mut sy, mut count) = (0.0, 0.0, 0);
-        for &(_, x, y) in group {
-            sx += x;
-            sy += y;
-            count += 1;
-        }
-        (count > 0).then_some((sx / count as f64, sy / count as f64))
-    })
+    let centers = movement_group_centers(points, max_distance);
+    movement_group_center_in(&centers, t)
 }
 
 /// Chase the movement-group centre from `start` (at `from_source`) to
-/// `to_source` on `spring`, sampling the group target at each fixed step.
-/// Returns the camera centre at `to_source`, unclamped: the caller clamps it
-/// into the crop with [`clamp_zoom_center`]. Pure — same inputs, same output
-/// — so random seeks match sequential playback.
+/// `to_source` on `spring`, sampling the group target at each step. Returns
+/// the camera centre at `to_source`, unclamped: the caller clamps it into the
+/// crop with [`clamp_zoom_center`]. Pure — same inputs, same output — so
+/// random seeks match sequential playback.
+///
+/// The step is the studied adaptive step: 1000/60 ms for the soft follow
+/// spring, 1 ms for the stiff click and drag springs. At 1 ms the stiff drag
+/// spring is well inside semi-implicit Euler's stability limit (omega * dt is
+/// about 0.3, not the ~2 a fixed 1/120 s step would give), and the
+/// precomputed group centres keep the finer step affordable.
 pub fn evaluate_spring_camera(
     start: (f64, f64),
     points: &[(f64, f64, f64)],
@@ -510,17 +688,25 @@ pub fn evaluate_spring_camera(
     if points.is_empty() {
         return start;
     }
+    let step_seconds = spring_adaptive_step_ms(spring) / 1000.0;
+    if !step_seconds.is_finite() || step_seconds <= 0.0 {
+        return start;
+    }
+    let centers = movement_group_centers(points, max_distance);
+    if centers.is_empty() {
+        return start;
+    }
     let mut x = start.0;
     let mut y = start.1;
     let mut vx = 0.0;
     let mut vy = 0.0;
     let mut s = from_source;
     let mut guard = 0;
-    while s < to_source && guard < 20_000 {
-        let step = CAMERA_SPRING_STEP_SECONDS.min(to_source - s);
+    let max_steps = ((to_source - from_source) / step_seconds).ceil() as usize + 2;
+    while s < to_source && guard < max_steps {
+        let step = step_seconds.min(to_source - s);
         let sample_t = (s + step).min(to_source);
-        let target =
-            movement_group_center_at(points, sample_t, max_distance).unwrap_or(start);
+        let target = movement_group_center_in(&centers, sample_t).unwrap_or(start);
         let (nx, nvx) = spring_step(x, vx, target.0, spring, step);
         let (ny, nvy) = spring_step(y, vy, target.1, spring, step);
         x = nx;
