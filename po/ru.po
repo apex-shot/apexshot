@@ -2616,3 +2616,18 @@ msgstr "Обнаружить использует только записанн�
 
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "Обнаружить использует записанные щелчки и намеренные паузы курсора"
+
+msgid "Apply"
+msgstr "Применить"
+
+msgid "Add the staged zooms to the timeline"
+msgstr "Добавить подготовленные зумы на таймлайн"
+
+msgid "Discard"
+msgstr "Отклонить"
+
+msgid "Throw the staged zooms away"
+msgstr "Отклонить подготовленные зумы"
+
+msgid "{count} zoom suggestions ready to review"
+msgstr "Зумов готово к проверке: {count}"

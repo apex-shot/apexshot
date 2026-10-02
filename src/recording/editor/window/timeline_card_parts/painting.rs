@@ -528,6 +528,14 @@ pub fn draw_zoom_clips(
             draw_one_zoom(&state, cr, w, h, index, start, end, dragging, true, light);
         }
     }
+    if state.has_zoom_candidates() {
+        // A staged candidate is not a clip yet: it is drawn where it would
+        // land, in the same box as the hover preview, so the review is about
+        // the shapes on the lane rather than a number in the panel.
+        for candidate in state.zoom_candidates() {
+            draw_zoom_suggestion(&state, cr, w, h, candidate.start, candidate.end, light);
+        }
+    }
     if let Some(start) = hover_time {
         // A hovering pointer previews the next click. With a clip on the
         // clipboard that click pastes, so the "add a clip here" box would be
@@ -984,7 +992,8 @@ pub fn rounded_rect(cr: &gtk4::cairo::Context, x: f64, y: f64, w: f64, h: f64, r
 mod tests {
     use super::*;
     use crate::recording::editor::model::{
-        CursorHideClip, VideoEditState, VideoMetadata, ZoomClip, ZoomMode,
+        CursorHideClip, VideoEditState, VideoMetadata, ZoomAnchor, ZoomCandidate, ZoomClip,
+        ZoomMode,
     };
     use gtk4::cairo::{Context, Format, ImageSurface};
     use std::path::PathBuf;
@@ -1045,6 +1054,52 @@ mod tests {
                 "the pill body must be solid #0000FF, not a translucent tint",
             );
         }
+    }
+
+    /// Where a zoom would land before it is applied: the lane has to show the
+    /// staged candidates, not just count them in the panel.
+    fn staged_candidate_pixel() -> [u8; 4] {
+        let mut state = VideoEditState::new(metadata());
+        state.timeline_scale = 0.0;
+        state.zoom_candidates.push(ZoomCandidate {
+            start: 1.0,
+            end: 4.0,
+            center: (960.0, 540.0),
+            scale: 1.5,
+            anchor: ZoomAnchor {
+                source_start: 1.0,
+                source_end: 4.0,
+            },
+        });
+        // Near the head of the box, clear of the label the ghost draws in its
+        // middle.
+        let x = state.time_to_x(1.3, 400.0).round() as usize;
+        let state = Arc::new(Mutex::new(state));
+
+        let mut surface = ImageSurface::create(Format::ARgb32, 400, 56).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            draw_zoom_clips(&state, None, None, false, &cr, 400, 56);
+        }
+        surface.flush();
+
+        let width = surface.width() as usize;
+        let data = surface.data().unwrap();
+        let offset = (28 * width + x) * 4;
+        [
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]
+    }
+
+    #[test]
+    fn a_staged_candidate_is_drawn_where_it_would_land() {
+        // No clip exists yet, so anything in the lane is the candidate.
+        let [b, _g, r, a] = staged_candidate_pixel();
+        assert!(a > 0, "a staged candidate must be visible on the lane");
+        assert!(b > r, "the ghost keeps the zoom lane's blue");
     }
 
     fn hide_pill_pixel(light: bool) -> [u8; 4] {

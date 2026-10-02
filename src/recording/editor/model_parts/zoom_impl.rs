@@ -500,7 +500,7 @@ impl VideoEditState {
             }
         }
         self.sync_offset_from_segments();
-        self.reproject_anchored_zooms();
+        self.composition_changed();
         self.clamp_timeline_scroll();
     }
 
@@ -533,7 +533,7 @@ impl VideoEditState {
         if let Some(kept) = self.segments_kept.get_mut(index) {
             *kept = false;
         }
-        self.reproject_anchored_zooms();
+        self.composition_changed();
     }
 
     pub fn segment_speed(&self, index: usize) -> f64 {
@@ -593,15 +593,19 @@ impl VideoEditState {
             return 0;
         }
         self.record_zoom_command();
-        self.place_zoom_suggestions()
+        let candidates = self.placed_zoom_candidates();
+        self.commit_zoom_candidates(candidates)
     }
 
-    /// The placement half of a generation pass. It takes no undo step of its
-    /// own: [`Self::redetect_zoom_clips`] runs it inside the step it already
-    /// took, so one Detect is one thing to undo.
-    fn place_zoom_suggestions(&mut self) -> usize {
+    /// Where a generation pass would put its zooms, without placing any.
+    ///
+    /// The placement half of a pass: the trim, cut, crop, region, and overlap
+    /// rules all run here, so a caller can show the result before it becomes
+    /// clips. It records nothing itself — whoever commits the result takes the
+    /// one step for the whole pass.
+    pub(super) fn placed_zoom_candidates(&self) -> Vec<ZoomCandidate> {
         let Some(sidecar) = &self.sidecar else {
-            return 0;
+            return Vec::new();
         };
         let mut suggestions = zoom_suggest::suggest_zooms_with_evidence(
             sidecar,
@@ -611,18 +615,13 @@ impl VideoEditState {
             self.zoom_evidence,
         );
         if suggestions.is_empty() {
-            return 0;
+            return Vec::new();
         }
         suggestions.sort_by(|a, b| {
             b.priority
                 .total_cmp(&a.priority)
                 .then_with(|| a.start.total_cmp(&b.start))
         });
-        let mode = if self.supports_auto_zoom() {
-            ZoomMode::Auto
-        } else {
-            ZoomMode::Manual
-        };
         let crop = self.crop_or_full();
         let segments = self.ordered_placed_segments();
         // The density budget counts candidates that actually land in the kept
@@ -630,9 +629,9 @@ impl VideoEditState {
         // spend it, so a lower-ranked valid suggestion can still be placed.
         let limit =
             ((self.source_duration() / zoom_suggest::SECONDS_PER_SUGGESTION).ceil() as usize).max(1);
-        let mut added = 0;
+        let mut candidates: Vec<ZoomCandidate> = Vec::with_capacity(limit);
         for suggestion in suggestions {
-            if added >= limit {
+            if candidates.len() >= limit {
                 break;
             }
             // At an exact cut both neighboring source ranges contain the
@@ -695,32 +694,21 @@ impl VideoEditState {
             }
             let scale = suggestion.scale.min(fit).clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
             let center = clamp_zoom_center(crop, scale, suggestion.center);
-            self.zoom_clips.push(ZoomClip {
+            candidates.push(ZoomCandidate {
                 start: timeline_start,
                 end: timeline_end,
                 scale,
                 center,
-                ease_ms: DEFAULT_ZOOM_EASE_MS,
-                // Auto zooms must launch and settle at zero velocity, or the
-                // pulse snaps at both clip edges.
-                easing: ZoomEasing::Smooth,
-                mode,
-                origin: ZoomOrigin::Generated,
                 // The generator picked this footage, not this composition
-                // time: remember the source interval so the clip follows it
-                // through a trim, a re-cut, or a speed change.
-                anchor: Some(ZoomAnchor {
+                // time, so the clip it becomes follows it through a trim, a
+                // re-cut, or a speed change.
+                anchor: ZoomAnchor {
                     source_start: start,
                     source_end: end,
-                }),
-                ..Default::default()
+                },
             });
-            added += 1;
         }
-        if added > 0 {
-            self.zoom_clips.sort_by(|a, b| a.start.total_cmp(&b.start));
-        }
-        added
+        candidates
     }
 
     /// Put every anchored clip back on the footage it was placed for.
@@ -739,6 +727,14 @@ impl VideoEditState {
     /// that owns its start rather than splitting in two.
     ///
     /// Clips the user placed or dragged carry no anchor and never move.
+    /// The composition moved under the clips: re-project the anchored ones and
+    /// drop a staged review, which was placed against the layout that just
+    /// changed.
+    pub(crate) fn composition_changed(&mut self) {
+        self.reproject_anchored_zooms();
+        self.zoom_candidates.clear();
+    }
+
     pub(crate) fn reproject_anchored_zooms(&mut self) {
         if self.zoom_clips.iter().all(|clip| clip.anchor.is_none()) {
             return;
@@ -820,7 +816,8 @@ impl VideoEditState {
             .retain(|clip| clip.origin != ZoomOrigin::Generated);
         let removed = before - self.zoom_clips.len();
         self.selected_zoom = None;
-        let added = self.place_zoom_suggestions();
+        let candidates = self.placed_zoom_candidates();
+        let added = self.commit_zoom_candidates(candidates);
         if added > 0 {
             self.selected_zoom = self
                 .zoom_clips

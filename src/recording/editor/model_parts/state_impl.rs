@@ -50,6 +50,7 @@ impl VideoEditState {
             zoom_suggestions_reviewed: false,
             zoom_evidence: ZoomEvidence::default(),
             zoom_history: ZoomHistory::default(),
+            zoom_candidates: Vec::new(),
             zoom_classic: false,
             timeline_scale: 0.0,
             timeline_offset_seconds: 0.0,
@@ -175,7 +176,7 @@ impl VideoEditState {
         };
         self.segment_starts[index] = start;
         self.sync_offset_from_segments();
-        self.reproject_anchored_zooms();
+        self.composition_changed();
         self.clamp_timeline_scroll();
     }
 
@@ -185,7 +186,7 @@ impl VideoEditState {
         }
         self.segment_starts[index] = self.unoverlap_segment_start(index, self.segment_start(index));
         self.sync_offset_from_segments();
-        self.reproject_anchored_zooms();
+        self.composition_changed();
         self.clamp_timeline_scroll();
     }
 
@@ -272,7 +273,7 @@ impl VideoEditState {
                 *start = (*start + delta).max(0.0);
             }
         }
-        self.reproject_anchored_zooms();
+        self.composition_changed();
         self.clamp_timeline_scroll();
     }
 

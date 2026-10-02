@@ -10,7 +10,7 @@ impl VideoEditState {
             self.trim_end_seconds
         };
         self.trim_start_seconds = value.clamp(0.0, max_start.max(0.0));
-        self.reproject_anchored_zooms();
+        self.composition_changed();
     }
 
     pub fn shift_trim(&mut self, delta: f64) {
@@ -33,7 +33,7 @@ impl VideoEditState {
         for cut in &mut self.cuts {
             *cut += shift;
         }
-        self.reproject_anchored_zooms();
+        self.composition_changed();
     }
 
     pub fn set_trim_end(&mut self, value: f64) {
@@ -69,7 +69,7 @@ impl VideoEditState {
         }
         self.freeze_tail = 0.0;
         self.trim_end_seconds = value.clamp(min_end.min(duration), duration);
-        self.reproject_anchored_zooms();
+        self.composition_changed();
     }
 
     /// Held seconds after `trim_end_seconds`: the clip's last frame frozen on
@@ -200,7 +200,7 @@ impl VideoEditState {
         self.segment_starts.insert(insert_pos + 1, right_start);
         self.selected_segment = Some(insert_pos);
         self.selected_zoom = None;
-        self.reproject_anchored_zooms();
+        self.composition_changed();
     }
 
     /// Remove a cut point by index.
@@ -246,7 +246,7 @@ impl VideoEditState {
                 Some(sel)
             };
         }
-        self.reproject_anchored_zooms();
+        self.composition_changed();
     }
 
     /// Move a cut point without crossing its neighboring cuts.
@@ -272,7 +272,7 @@ impl VideoEditState {
         if min <= max {
             self.cuts[cut_index] = seconds.clamp(min, max);
         }
-        self.reproject_anchored_zooms();
+        self.composition_changed();
     }
 
     /// Toggle keep/remove for a segment.
@@ -283,7 +283,7 @@ impl VideoEditState {
         if let Some(kept) = self.segments_kept.get_mut(segment_index) {
             *kept = !*kept;
         }
-        self.reproject_anchored_zooms();
+        self.composition_changed();
     }
 
     /// Clear all cuts.
@@ -298,7 +298,7 @@ impl VideoEditState {
         self.segment_speeds = vec![1.0];
         self.segment_muted = vec![false];
         self.selected_segment = None;
-        self.reproject_anchored_zooms();
+        self.composition_changed();
     }
 
     /// Move a segment from one position in the output order to another.
@@ -314,7 +314,7 @@ impl VideoEditState {
         }
         let seg = self.segment_order.remove(from_order_pos);
         self.segment_order.insert(to_order_pos, seg);
-        self.reproject_anchored_zooms();
+        self.composition_changed();
     }
 
     /// Kept segments as `(index, composition start, source start, source end)`,

@@ -2618,3 +2618,18 @@ msgstr "Detectar usa apenas os cliques gravados"
 
 msgid "Detect uses recorded clicks and purposeful pointer pauses"
 msgstr "Detectar usa os cliques gravados e as pausas intencionais do ponteiro"
+
+msgid "Apply"
+msgstr "Aplicar"
+
+msgid "Add the staged zooms to the timeline"
+msgstr "Adicionar os zooms preparados à linha do tempo"
+
+msgid "Discard"
+msgstr "Descartar"
+
+msgid "Throw the staged zooms away"
+msgstr "Descartar os zooms preparados"
+
+msgid "{count} zoom suggestions ready to review"
+msgstr "{count} sugestões de zoom prontas para revisão"
