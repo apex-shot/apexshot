@@ -100,11 +100,13 @@ pub fn hotspot(theme: CursorTheme, kind: &str) -> (f64, f64) {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     cr: &Context,
     x: f64,
     y: f64,
     pulse: f64,
+    press_scale: f64,
     kind: &str,
     settings: CursorSettings,
     alpha: f64,
@@ -114,7 +116,7 @@ pub fn draw(
         return;
     }
     let settings = settings.clamped();
-    let scale = overlay_scale(settings.size, 1.0) * pulse.max(0.7);
+    let scale = overlay_scale(settings.size, 1.0) * pulse.max(0.7) * press_scale.clamp(0.5, 1.5);
     if pulse > 1.02 {
         cr.set_source_rgba(
             1.0,
@@ -328,7 +330,7 @@ pub fn write_png(path: &Path, settings: CursorSettings, kind: &str) -> anyhow::R
     {
         let cr = Context::new(&surface)?;
         cr.set_antialias(Antialias::Best);
-        draw(&cr, out_hot.0, out_hot.1, 1.0, kind, settings, 1.0);
+        draw(&cr, out_hot.0, out_hot.1, 1.0, 1.0, kind, settings, 1.0);
     }
     surface.flush();
     let stride = surface.stride() as usize;
@@ -624,6 +626,10 @@ mod tests {
     }
 
     fn render_cursor(settings: CursorSettings) -> Vec<u8> {
+        render_cursor_with_scale(settings, 1.0)
+    }
+
+    fn render_cursor_with_scale(settings: CursorSettings, press_scale: f64) -> Vec<u8> {
         let mut surface =
             ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
         {
@@ -633,6 +639,7 @@ mod tests {
                 TEST_SURFACE_SIZE as f64 / 2.0,
                 TEST_SURFACE_SIZE as f64 / 2.0,
                 1.0,
+                press_scale,
                 "default",
                 settings,
                 1.0,
@@ -702,6 +709,24 @@ mod tests {
         assert!((overlay_scale(size, 1.0) - size).abs() < 1e-12);
         assert!((overlay_scale(size, 2.0) - overlay_scale(size, 1.0)).abs() < 1e-12);
         assert!((overlay_scale(size, 2.0) - size * 2.0).abs() > 0.5);
+    }
+
+    #[test]
+    fn a_held_button_draws_the_cursor_smaller() {
+        let plain = render_cursor(CursorSettings::default());
+        let pressed = render_cursor_with_scale(CursorSettings::default(), 0.9);
+        let (plain_min, plain_max) = {
+            let b = alpha_bounds(&plain).unwrap();
+            (b.2 - b.0, b.3 - b.1)
+        };
+        let (pressed_min, pressed_max) = {
+            let b = alpha_bounds(&pressed).unwrap();
+            (b.2 - b.0, b.3 - b.1)
+        };
+        assert!(
+            pressed_min < plain_min && pressed_max < plain_max,
+            "pressed {pressed_min}x{pressed_max} should be smaller than {plain_min}x{plain_max}"
+        );
     }
 
     #[test]
