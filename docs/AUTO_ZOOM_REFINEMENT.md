@@ -47,8 +47,9 @@ on a spring (phase 3), replacing the earlier edge-feathering follow.
    active at the current time on a damped spring, stiffening near a click
    and snapping per zoom when instant is set. Portable: group-centre target,
    click-proximity stiffness, per-zoom instant. Omitted: drag/release
-   stiffness and typing suppression (the sidecar holds pointer and click
-   samples only; key identities are never collected). Done.
+   stiffness and typing suppression (mouse press intervals are now recorded,
+   but no drag spring is wired until its value is agreed; key identities are
+   never collected). Done.
 4. **Style inheritance** — a new zoom opens with the level and style of the
    last zoom the user edited. Done.
 5. **Instant toggle** — each automatic zoom carries an instant-vs-animated
