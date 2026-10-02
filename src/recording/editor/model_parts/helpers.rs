@@ -133,9 +133,7 @@ pub fn eval_zoom(
     else {
         // Hold the earlier framing across a morph gap so the next auto zoom
         // continues from it instead of flashing the full frame between them.
-        return match morph_gap_predecessor(clips, t)
-            .filter(|&previous| morphs_into_neighbour(clips, previous))
-        {
+        return match zoom_gap_hold_predecessor(clips, t) {
             Some(previous) => (clips[previous].scale.max(1.0), clips[previous].center),
             None => (1.0, frame_center),
         };
@@ -213,6 +211,16 @@ fn morphs_into_neighbour(clips: &[ZoomClip], index: usize) -> bool {
 }
 
 /// The closest auto zoom whose framing is held while `t` sits in a gap.
+///
+/// This is the clip the camera has just left, so a caller evaluating the full
+/// camera can keep following the pointer from that clip's evaluated endpoint
+/// instead of snapping back to its stored center.
+pub(crate) fn zoom_gap_hold_predecessor(clips: &[ZoomClip], t: f64) -> Option<usize> {
+    morph_gap_predecessor(clips, t).filter(|&previous| morphs_into_neighbour(clips, previous))
+}
+
+/// The nearest earlier auto zoom to `t`, regardless of whether a later clip
+/// actually morphs from it.
 fn morph_gap_predecessor(clips: &[ZoomClip], t: f64) -> Option<usize> {
     clips
         .iter()
