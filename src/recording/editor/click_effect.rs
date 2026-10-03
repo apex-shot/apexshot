@@ -8,18 +8,19 @@
 //!
 //! The studied ripple is a footage *warp*: an outward pull along a decaying
 //! ring, a calm-zone fade, and a chromatic split. The pull is ported: the
-//! composite export rasterises a displacement map from [`ripple_pull_px`] and
-//! has ffmpeg sample the footage at `pixel - pull`, so the visible band *is*
-//! the displaced region. [`ripple_radius_fraction`] and [`ripple_opacity`]
-//! remain only as the drawn-ring fallback for paths that cannot run the warp
-//! (see `cursor_export`).
+//! composite export runs [`ripple_pull_px`]'s maths as a GPU fragment shader
+//! (see `gst_warp`) that samples the footage at `pixel - pull`, so the visible
+//! band *is* the displaced region and no per-frame map is materialised.
+//! [`ripple_radius_fraction`] and [`ripple_opacity`] remain only as the
+//! drawn-ring fallback for paths that cannot run the warp (see
+//! `cursor_export`).
 //!
 //! The chromatic split is **not** implemented. The studied `split` separates
-//! the colour channels along the ring; reproducing it through the ffmpeg
-//! `remap` pass would need a second and third full-resolution pass (one remap
-//! per channel), which is not worth the cost for a fringe the pull already
-//! carries. The split constants and formula are kept in [`ripple_split_px`] so
-//! the gap stays explicit rather than faked.
+//! the colour channels along the ring; reproducing it in the single shader
+//! pass would need a second and third full-resolution pass (one per channel),
+//! which is not worth the cost for a fringe the pull already carries. The
+//! split constants and formula are kept in [`ripple_split_px`] so the gap
+//! stays explicit rather than faked.
 
 /// Visible lifetime of the ripple, in milliseconds.
 pub const RIPPLE_VISIBLE_DURATION_MS: f64 = 1000.0;

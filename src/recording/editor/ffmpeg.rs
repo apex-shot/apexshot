@@ -1,7 +1,6 @@
 use super::model::background_render::render_rounded_mask;
 use super::model::{
-    even_crop_rect, AudioMode, ClickEffect, VideoBackground, VideoEditState, VideoMetadata,
-    DEFAULT_FRAME_RATE,
+    even_crop_rect, AudioMode, VideoBackground, VideoEditState, VideoMetadata, DEFAULT_FRAME_RATE,
 };
 use anyhow::{anyhow, Context};
 use serde::Deserialize;
@@ -57,6 +56,8 @@ struct ConvertCommand {
     /// run; not read directly in production builds.
     #[allow(dead_code)]
     scratch: Option<ScratchDir>,
+    /// The GPU warp feeding `-i pipe:3`, when the ripple is visible.
+    warp: Option<super::gst_warp::WarpSetup>,
 }
 
 impl std::ops::Deref for ConvertCommand {
@@ -474,7 +475,7 @@ pub fn run_convert(state: &VideoEditState, output_path: PathBuf) -> anyhow::Resu
     if kept.len() <= 1 {
         let (start, end) = kept.first().copied().unwrap();
         let command = build_single_convert_args(state, start, end, &output_path);
-        run_ffmpeg(&command.args, &output_path)?;
+        run_command(command, &output_path)?;
     } else {
         run_multi_segment_trim(state, &kept, &output_path, true)?;
     }
@@ -552,8 +553,20 @@ fn build_single_convert_args(
     end: f64,
     output_path: &Path,
 ) -> ConvertCommand {
+    let warp = super::gst_warp::WarpSetup::from_state(state, start, end)
+        .filter(|_| super::gst_warp::gl_warp_available());
+    build_single_convert_args_with(state, start, end, output_path, warp)
+}
+
+fn build_single_convert_args_with(
+    state: &VideoEditState,
+    start: f64,
+    end: f64,
+    output_path: &Path,
+    warp: Option<super::gst_warp::WarpSetup>,
+) -> ConvertCommand {
     if state.needs_composite() {
-        return build_composite_convert_args(state, start, end, output_path);
+        return build_composite_convert_args(state, start, end, output_path, warp);
     }
     let mut args = vec![
         "-y".into(),
@@ -582,6 +595,7 @@ fn build_single_convert_args(
     ConvertCommand {
         args,
         scratch: None,
+        warp: None,
     }
 }
 
@@ -590,6 +604,7 @@ fn build_composite_convert_args(
     start: f64,
     end: f64,
     output_path: &Path,
+    warp: Option<super::gst_warp::WarpSetup>,
 ) -> ConvertCommand {
     let scratch = ScratchDir::new("export", start);
     let cmd_path = scratch.path.join("zoom.cmd");
@@ -626,29 +641,9 @@ fn build_composite_convert_args(
         .as_ref()
         .is_some_and(|sidecar| sidecar.can_render_cursor_overlay());
     // The studied ripple's visible band is a footage displacement, not a drawn
-    // ring. Only pay for the warp when a click is actually inside the export
-    // window, and fall back to the drawn ring if the maps cannot be written.
-    let mut ripple_maps = None;
-    if can_draw_cursor
-        && state.cursor.click_effect == ClickEffect::Ripple
-        && super::ripple_warp::ripple_warp_active(state, start, end)
-    {
-        let x_path = scratch.path.join("ripple-x.raw");
-        let y_path = scratch.path.join("ripple-y.raw");
-        if super::ripple_warp::write_ripple_maps(
-            state,
-            start,
-            end,
-            state.metadata.width,
-            state.metadata.height,
-            &x_path,
-            &y_path,
-        )
-        .is_ok()
-        {
-            ripple_maps = Some((x_path, y_path));
-        }
-    }
+    // ring. When the GPU warp runs the overlay skips the ring; when it does
+    // not, the ring stays as the fallback.
+    let warp_requested = warp.is_some();
     let draw_cursor = can_draw_cursor
         && super::cursor_export::write_rgba_track(
             state,
@@ -656,19 +651,20 @@ fn build_composite_convert_args(
             end,
             video_w,
             video_h,
-            ripple_maps.is_some(),
+            warp_requested,
             &cursor_path,
         )
         .is_ok();
-    // A cursor track that failed leaves the maps with nothing to click; drop
+    // A cursor track that failed leaves the warp with nothing to click; drop
     // the warp so the export never silently displaces the footage.
-    if !draw_cursor {
-        ripple_maps = None;
-    }
-    let warp_ripple = ripple_maps.is_some();
-    let map_offset = if warp_ripple { 2 } else { 0 };
+    let warp = if draw_cursor { warp } else { None };
+    let warp_ripple = warp.is_some();
+    // The warp pipe adds an input ahead of the source, so every later input
+    // index shifts by one.
+    let input_offset = usize::from(warp_ripple);
+    let cursor_index = 1 + input_offset;
     let use_wallpaper = wallpaper_path.is_some() && (out_w != video_w || out_h != video_h);
-    let wallpaper_index = (if draw_cursor { 2 } else { 1 }) + map_offset;
+    let wallpaper_index = (if draw_cursor { 2 } else { 1 }) + input_offset;
 
     // A radius masks the card so the fill shows through the corners. The mask
     // is rasterized at the video rect because `alphamerge` copies its luma
@@ -683,24 +679,17 @@ fn build_composite_convert_args(
                 .map(|_| path)
         })
         .flatten();
-    let mask_index = 1 + usize::from(draw_cursor) + usize::from(use_wallpaper) + map_offset;
+    let mask_index = 1 + input_offset + usize::from(draw_cursor) + usize::from(use_wallpaper);
 
     // The freeze hold pads the source *before* the zoom crop. Cloning after
     // the crop would replay one already-composited frame for the whole tail
     // and the camera would sit still while the preview keeps moving.
     //
-    // The ripple warp sits before the crop too: it displaces the full source
-    // in video pixels, so the studied read margin is the whole source and the
-    // displacement scales with resolution under every zoom.
-    let head = if warp_ripple { "[rv]" } else { "[0:v]" };
-    let prefix = if warp_ripple {
-        let xmap_index = 1 + usize::from(draw_cursor);
-        format!("[0:v][{xmap_index}:v][{}:v]remap[rv];", xmap_index + 1)
-    } else {
-        String::new()
-    };
+    // When the warp runs, `[0:v]` is the raw warped frames from the GStreamer
+    // pipe; otherwise it is the source. Either way the crop/zoom/background
+    // path below is unchanged.
     let mut filter = format!(
-        "{prefix}{head}{}sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1",
+        "[0:v]{}sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1",
         freeze_tail_tpad(state)
             .map(|pad| format!("{pad},"))
             .unwrap_or_default(),
@@ -715,7 +704,9 @@ fn build_composite_convert_args(
     // which shifts chroma on every cropped frame — the purple cast through
     // zooms — and makes the encoder write 4:4:4 output.
     if draw_cursor {
-        filter.push_str("[vc0];[vc0][1:v]overlay=0:0:eof_action=pass:shortest=0:format=yuv420");
+        filter.push_str(&format!(
+            "[vc0];[vc0][{cursor_index}:v]overlay=0:0:eof_action=pass:shortest=0:format=yuv420"
+        ));
     }
     // Turn the prepared video layer into a rounded card. The mask's luma
     // becomes the frame's alpha, so the fill behind it shows at the corners.
@@ -759,15 +750,31 @@ fn build_composite_convert_args(
         filter.push_str(&pad);
     }
 
-    let mut args = vec![
-        "-y".into(),
+    let mut args = vec!["-y".into()];
+    if warp_ripple {
+        // The GPU warp feeds raw yuv420p frames over the inherited fd as
+        // input 0; the source follows as input 1 for its audio.
+        args.extend([
+            "-f".into(),
+            "rawvideo".into(),
+            "-pix_fmt".into(),
+            "yuv420p".into(),
+            "-video_size".into(),
+            format!("{}x{}", state.metadata.width, state.metadata.height),
+            "-framerate".into(),
+            format!("{:.6}", state.metadata.export_frame_rate()),
+            "-i".into(),
+            "pipe:3".into(),
+        ]);
+    }
+    args.extend([
         "-ss".into(),
         format_seconds(start),
         "-to".into(),
         format_seconds(end),
         "-i".into(),
         state.metadata.path.to_string_lossy().into_owned(),
-    ];
+    ]);
     if draw_cursor {
         args.extend([
             "-f".into(),
@@ -781,22 +788,6 @@ fn build_composite_convert_args(
             "-i".into(),
             cursor_path.to_string_lossy().into_owned(),
         ]);
-    }
-    if let Some((x_path, y_path)) = ripple_maps.as_ref() {
-        for map_path in [x_path, y_path] {
-            args.extend([
-                "-f".into(),
-                "rawvideo".into(),
-                "-pix_fmt".into(),
-                "gray16le".into(),
-                "-video_size".into(),
-                format!("{}x{}", state.metadata.width, state.metadata.height),
-                "-framerate".into(),
-                format!("{:.6}", state.metadata.export_frame_rate()),
-                "-i".into(),
-                map_path.to_string_lossy().into_owned(),
-            ]);
-        }
     }
     if let Some(wallpaper) = wallpaper_path.as_ref().filter(|_| use_wallpaper) {
         args.extend([
@@ -830,6 +821,7 @@ fn build_composite_convert_args(
     ConvertCommand {
         args,
         scratch: Some(scratch),
+        warp,
     }
 }
 
@@ -1035,10 +1027,10 @@ fn run_multi_segment_trim(
             ConvertCommand {
                 args: build_single_trim_args(&segment_state, start, end, &seg_path),
                 scratch: None,
+                warp: None,
             }
         };
-        run_ffmpeg(&command.args, &seg_path)
-            .with_context(|| format!("failed to export segment {i}"))?;
+        run_command(command, &seg_path).with_context(|| format!("failed to export segment {i}"))?;
         segment_files.push(seg_path);
     }
 
@@ -1067,6 +1059,60 @@ fn run_multi_segment_trim(
     run_ffmpeg(&concat_args, output_path)?;
 
     Ok(())
+}
+
+fn run_command(command: ConvertCommand, output_path: &Path) -> anyhow::Result<()> {
+    let ConvertCommand {
+        args,
+        scratch,
+        warp,
+    } = command;
+    // Hold the scratch tree until the command has finished reading it.
+    let _scratch = scratch;
+    match warp {
+        Some(setup) => run_ffmpeg_with_warp(&args, output_path, &setup),
+        None => run_ffmpeg(&args, output_path),
+    }
+}
+
+/// Run ffmpeg with the GPU warp feeding `-i pipe:3`.
+///
+/// The warp pipeline is started first (prebuffering its first frame), then
+/// ffmpeg inherits the pipe's read end as fd 3. The writer closes the pipe on
+/// EOS, so ffmpeg finalizes deterministically.
+fn run_ffmpeg_with_warp(
+    args: &[String],
+    output_path: &Path,
+    setup: &super::gst_warp::WarpSetup,
+) -> anyhow::Result<()> {
+    let mut warp = super::gst_warp::ActiveGstWarp::start(setup).map_err(|err| anyhow!(err))?;
+    let read_fd = warp
+        .take_read_fd()
+        .ok_or_else(|| anyhow!("warp pipeline has no pipe"))?;
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(args);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    crate::recording::backend::attach_audio_pipe_as_fd3(&mut cmd, read_fd);
+    let child = cmd.spawn().context("failed to run ffmpeg")?;
+    let output = child.wait_with_output()?;
+    let bus_error = warp.poll_bus_error();
+    if output.status.success() {
+        warp.stop();
+        return Ok(());
+    }
+    warp.abort();
+    let _ = std::fs::remove_file(output_path);
+    let detail = if let Some(bus_error) = bus_error {
+        format!("ffmpeg failed: {bus_error}")
+    } else {
+        format!(
+            "ffmpeg failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    };
+    Err(anyhow!(detail))
 }
 
 fn run_ffmpeg(args: &[String], output_path: &Path) -> anyhow::Result<()> {
@@ -1434,6 +1480,32 @@ mod tests {
             .expect("the cursor overlay exports through the composite graph")
     }
 
+    /// Build the command with a forced GPU warp, independent of whether the
+    /// test host has the GL plugins installed.
+    fn warp_args(state: &VideoEditState) -> Vec<String> {
+        let warp = crate::recording::editor::gst_warp::WarpSetup::from_state(
+            state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+        )
+        .expect("a visible ripple must build a warp");
+        build_single_convert_args_with(
+            state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+            Some(warp),
+        )
+        .args
+    }
+
+    fn graph_of(args: &[String]) -> &str {
+        args.windows(2)
+            .find(|pair| pair[0] == "-filter_complex")
+            .map(|pair| pair[1].as_str())
+            .expect("the cursor overlay exports through the composite graph")
+    }
+
     /// Drop the scratch directory's per-command sequence number, which is the
     /// only part of the graph that differs between two builds.
     fn normalized_graph(graph: &str) -> &str {
@@ -1455,33 +1527,24 @@ mod tests {
             y: 20.0,
             button: 1,
         });
-        let args = build_single_convert_args(
-            &state,
-            state.trim_start_seconds,
-            state.trim_end_seconds,
-            Path::new("/tmp/output.mp4"),
-        );
-        let graph = args
-            .windows(2)
-            .find(|pair| pair[0] == "-filter_complex")
-            .map(|pair| pair[1].as_str())
-            .unwrap();
-        // The warp reads the full source before the crop, so it is the first
-        // filter in the chain and feeds the existing crop/scale path.
+        let args = warp_args(&state);
+        let graph = graph_of(&args);
+        // The GPU warp feeds raw frames over the inherited pipe as input 0;
+        // the source follows as input 1, so the cursor overlay moves to 2.
         assert!(
-            graph.contains("[0:v][2:v][3:v]remap[rv];[rv]"),
-            "the ripple must remap the footage before the crop: {graph}"
+            args.windows(2).any(|pair| pair == ["-i", "pipe:3"]),
+            "the warp must enter through the inherited pipe: {args:?}"
         );
-        assert!(graph.contains("overlay=0:0:eof_action=pass:shortest=0:format=yuv420"));
-        // Two 16-bit single-channel map inputs join the cursor track.
-        assert_eq!(
-            args.windows(2)
-                .filter(|pair| pair == &["-pix_fmt", "gray16le"])
-                .count(),
-            2
+        assert!(args.windows(2).any(|pair| pair == ["-pix_fmt", "yuv420p"]));
+        assert!(graph.contains("[0:v]sendcmd="), "{graph}");
+        assert!(
+            graph.contains("[vc0];[vc0][2:v]overlay=0:0:eof_action=pass:shortest=0:format=yuv420"),
+            "the cursor overlay must follow the warp input: {graph}"
         );
-        assert!(args.iter().any(|arg| arg.ends_with("ripple-x.raw")));
-        assert!(args.iter().any(|arg| arg.ends_with("ripple-y.raw")));
+        assert!(
+            !graph.contains("remap"),
+            "the warp must not materialise maps: {graph}"
+        );
     }
 
     #[test]
@@ -1493,13 +1556,13 @@ mod tests {
         // regress.
         let ripple = cursor_composite_state(ClickEffect::Ripple);
         let off = cursor_composite_state(ClickEffect::None);
-        let ripple_graph = composite_graph(&ripple);
+        let graph = composite_graph(&ripple);
         assert_eq!(
-            normalized_graph(&ripple_graph),
+            normalized_graph(&graph),
             normalized_graph(&composite_graph(&off))
         );
-        assert!(!ripple_graph.contains("remap"));
-        assert!(ripple_graph.contains("[0:v]sendcmd="));
+        assert!(!graph.contains("remap"));
+        assert!(graph.contains("[0:v]sendcmd="));
 
         // A click on an effect that is not the ripple stays on the drawn path.
         use crate::recording::editor::sidecar::ClickSample;
@@ -1512,7 +1575,7 @@ mod tests {
         });
         assert_eq!(
             normalized_graph(&composite_graph(&circle)),
-            normalized_graph(&ripple_graph)
+            normalized_graph(&graph)
         );
     }
 
@@ -1537,16 +1600,20 @@ mod tests {
             y: 20.0,
             button: 1,
         });
-        let graph = composite_graph(&state);
-        // Input order is video, cursor, xmap, ymap, wallpaper, mask.
-        assert!(graph.contains("[0:v][2:v][3:v]remap[rv]"), "{graph}");
+        let args = warp_args(&state);
+        let graph = graph_of(&args);
+        // Input order is warp pipe, source, cursor, wallpaper, mask.
         assert!(
-            graph.contains("[4:v]scale="),
-            "wallpaper must be input 4: {graph}"
+            graph.contains("[vc0];[vc0][2:v]overlay="),
+            "cursor must be input 2: {graph}"
         );
         assert!(
-            graph.contains("[5:v]alphamerge"),
-            "mask must be input 5: {graph}"
+            graph.contains("[3:v]scale="),
+            "wallpaper must be input 3: {graph}"
+        );
+        assert!(
+            graph.contains("[4:v]alphamerge"),
+            "mask must be input 4: {graph}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
