@@ -13,8 +13,74 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// test suite, or two editor windows) would otherwise share one `zoom.cmd`.
 static EXPORT_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+/// Whether `path` sits on a RAM-backed filesystem.
+///
+/// `std::env::temp_dir()` is `/tmp`, and on most Linux desktops `/tmp` is a
+/// tmpfs — so scratch written there spends RAM, not disk. That matters because
+/// a composite export writes `cursor.rgba`, a full-canvas RGBA frame for every
+/// output frame: about 2.5 GB for 10 s of 1080p at 30 fps. On a small machine
+/// that is the difference between a slow export and an exhausted system.
+///
+/// Only Linux can be asked; elsewhere the scratch root is assumed to be a real
+/// filesystem.
+fn is_ram_backed(path: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        const TMPFS_MAGIC: i64 = 0x0102_1994;
+        let Ok(raw) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+            return false;
+        };
+        let mut buf: libc::statfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statfs(raw.as_ptr(), &mut buf) } != 0 {
+            return false;
+        }
+        buf.f_type as i64 == TMPFS_MAGIC
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = path;
+        false
+    }
+}
+
+/// Every directory that may hold an export's scratch tree, most preferred
+/// first.
+///
+/// The cache directory is where new trees go. The temp directory stays in the
+/// list so trees written by an older build — which always used it — are still
+/// swept.
+fn scratch_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(cache) = dirs::cache_dir() {
+        let dir = cache.join("apexshot").join("export-scratch");
+        if std::fs::create_dir_all(&dir).is_ok() {
+            roots.push(dir);
+        }
+    }
+    let temp = std::env::temp_dir();
+    if !roots.contains(&temp) {
+        roots.push(temp);
+    }
+    roots
+}
+
+/// The directory a new export's scratch tree is written to.
+///
+/// Prefers the cache directory, but never returns a RAM-backed one: an export
+/// big enough to matter has to spend disk, not memory. If every candidate is
+/// RAM-backed the temp directory is still used, because a working export beats
+/// a refused one — that case is the reason the cursor track is streamed rather
+/// than written at all in a later change.
+fn scratch_root() -> PathBuf {
+    scratch_roots()
+        .into_iter()
+        .find(|root| !is_ram_backed(root))
+        .unwrap_or_else(std::env::temp_dir)
+}
+
 fn unique_export_dir(kind: &str, start: f64) -> PathBuf {
-    std::env::temp_dir().join(format!(
+    scratch_root().join(format!(
         "apexshot-{kind}-{}-{}-{}",
         std::process::id(),
         (start * 1000.0) as u64,
@@ -91,7 +157,15 @@ fn process_is_alive(pid: u32) -> bool {
 /// new export so a leaked tree cannot accumulate, and never touches a live pid
 /// (this process or a concurrent export).
 pub(crate) fn sweep_stale_scratch_dirs() {
-    let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
+    for root in scratch_roots() {
+        sweep_scratch_root(&root);
+    }
+}
+
+/// Sweep one scratch root. Split out so the caller can cover every root a
+/// previous build may have written to, not just the one this build prefers.
+fn sweep_scratch_root(root: &Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
@@ -2479,5 +2553,40 @@ mod freeze_tests {
         );
         assert!(live.exists(), "live scratch must be kept");
         let _ = std::fs::remove_dir_all(&live);
+    }
+
+    #[test]
+    fn export_scratch_prefers_a_root_that_is_not_ram_backed() {
+        // A composite export writes a multi-gigabyte `cursor.rgba`. When any
+        // candidate root is on real disk that is the one to use, because `/tmp`
+        // is a tmpfs on most desktops and choosing it spends RAM instead.
+        let expected = super::scratch_roots()
+            .into_iter()
+            .find(|root| !super::is_ram_backed(root));
+        if let Some(expected) = expected {
+            assert_eq!(
+                super::scratch_root(),
+                expected,
+                "the scratch root must be the first candidate that is not RAM-backed"
+            );
+        }
+    }
+
+    #[test]
+    fn the_sweep_removes_a_stale_tree_from_the_preferred_scratch_root() {
+        // The sweep used to look only in the temp directory. New trees go to
+        // the cache directory, so it has to cover both — otherwise a crashed
+        // export leaves a multi-gigabyte tree where nothing ever looks.
+        let root = super::scratch_root();
+        let stale = root.join(format!("apexshot-export-{}-9-0", u32::MAX - 5));
+        std::fs::create_dir_all(&stale).unwrap();
+
+        super::sweep_stale_scratch_dirs();
+
+        assert!(
+            !stale.exists(),
+            "a stale tree in the scratch root ({}) must be swept",
+            root.display()
+        );
     }
 }
