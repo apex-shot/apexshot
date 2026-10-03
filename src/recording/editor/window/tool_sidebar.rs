@@ -461,9 +461,8 @@ fn build_clip_panel(
     speed_slider.set_increments(0.05, 0.25);
     // Speed is multiplicative, so the track is logarithmic: a linear
     // 0.25x-30x track would squeeze every slow-motion value into a few pixels
-    // at the left edge. Every editor that ships this control (Resolve,
-    // Premiere, Final Cut, CapCut, Screen Studio) lets the value be dragged to
-    // anything in range rather than forcing it to a preset.
+    // at the left edge. Editors that ship this control let the value be dragged
+    // to anything in range rather than forcing it to a preset.
     speed_slider.set_logarithmic(true);
     let syncing = Rc::new(Cell::new(false));
     speed_slider.connect_value_changed({

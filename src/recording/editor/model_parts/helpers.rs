@@ -1000,7 +1000,7 @@ pub fn format_size(bytes: u64) -> String {
 
 /// Frame picker sizes. Every ratio fits a 1920x1080 envelope with the short
 /// edge at 1080 where the ratio allows, so portrait picks export 1080x1920
-/// (the vertical standard Tella and Screen Studio use) instead of a 608px
+/// (the vertical standard short-form apps use) instead of a 608px
 /// wide letterbox, and 21:9 caps its long edge at 1920 like scope ratios do.
 /// Even values keep the MP4 encoder's yuv420p happy.
 pub const FRAME_ASPECT_RATIOS: [(&str, u32, u32); 6] = [
