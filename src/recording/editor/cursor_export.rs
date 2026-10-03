@@ -220,12 +220,7 @@ mod tests {
         // overlay must not double it with a ring.
         let mut warp = Vec::new();
         write_rgba_track(&state, 0.1, 0.2, 80, 60, true, &mut warp).unwrap();
-        let lit = |track: &[u8]| {
-            track
-                .chunks_exact(4)
-                .filter(|pixel| pixel[3] != 0)
-                .count()
-        };
+        let lit = |track: &[u8]| track.chunks_exact(4).filter(|pixel| pixel[3] != 0).count();
         assert!(
             lit(&ring) > lit(&warp),
             "the fallback must draw the ripple ring"

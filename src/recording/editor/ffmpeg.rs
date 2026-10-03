@@ -2135,9 +2135,18 @@ mod tests {
             .join("target")
             .join("test-fixtures");
         std::fs::create_dir_all(&dir).unwrap();
-        let source = dir.join(format!("apexshot-cursor-stream-source-{}.mp4", std::process::id()));
-        let with_cursor = dir.join(format!("apexshot-cursor-stream-on-{}.mp4", std::process::id()));
-        let without = dir.join(format!("apexshot-cursor-stream-off-{}.mp4", std::process::id()));
+        let source = dir.join(format!(
+            "apexshot-cursor-stream-source-{}.mp4",
+            std::process::id()
+        ));
+        let with_cursor = dir.join(format!(
+            "apexshot-cursor-stream-on-{}.mp4",
+            std::process::id()
+        ));
+        let without = dir.join(format!(
+            "apexshot-cursor-stream-off-{}.mp4",
+            std::process::id()
+        ));
 
         let created = Command::new("ffmpeg")
             .args([
@@ -2198,15 +2207,7 @@ mod tests {
         let output = Command::new("ffmpeg")
             .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-i"])
             .arg(path)
-            .args([
-                "-frames:v",
-                "1",
-                "-pix_fmt",
-                "rgba",
-                "-f",
-                "rawvideo",
-                "-",
-            ])
+            .args(["-frames:v", "1", "-pix_fmt", "rgba", "-f", "rawvideo", "-"])
             .output()
             .expect("decode a frame");
         output.stdout
