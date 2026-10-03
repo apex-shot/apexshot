@@ -34,6 +34,31 @@ fn attach_pointer(state: &mut VideoEditState, x: f64, y: f64) {
     state.sidecar = Some(sidecar);
 }
 
+fn press_sidecar(
+    down: f64,
+    up: f64,
+    dragged: bool,
+) -> crate::recording::editor::sidecar::PointerSidecar {
+    let mut sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    sidecar
+        .presses
+        .push(crate::recording::editor::sidecar::PressSample {
+            down,
+            up,
+            button: 1,
+            dragged,
+        });
+    sidecar
+}
+
 #[test]
 fn has_source_video_requires_duration() {
     let mut state = VideoEditState::new(metadata());
@@ -3723,4 +3748,92 @@ fn eval_zoom_at_snaps_an_instant_zoom_to_the_movement_group_centre() {
     assert!((scale - 2.0).abs() < 1e-9);
     assert!((snapped.0 - 1440.0).abs() < 1e-6);
     assert!((snapped.1 - 540.0).abs() < 1e-6);
+}
+
+#[test]
+fn the_pressed_cursor_scale_matches_the_studied_value() {
+    assert!((PRESSED_CURSOR_SCALE - 0.9).abs() < 1e-12);
+}
+
+#[test]
+fn cursor_spring_prefers_a_drag_over_an_imminent_click() {
+    let drag = crate::recording::editor::sidecar::PressSample {
+        down: 1.0,
+        up: 2.0,
+        button: 1,
+        dragged: true,
+    };
+    let clicks = vec![1.1];
+    // A recorded drag wins even though a click sits inside the look-ahead.
+    assert_eq!(
+        cursor_spring_for_time(&clicks, &[drag], 1.0),
+        CURSOR_DRAG_SPRING
+    );
+    // The same moment without a drag is the click spring.
+    assert_eq!(cursor_spring_for_time(&clicks, &[], 1.0), CURSOR_CLICK_SPRING);
+    // Past the look-ahead window it falls back to the follow spring.
+    assert_eq!(
+        cursor_spring_for_time(&clicks, &[], 2.0),
+        CAMERA_FOLLOW_SPRING
+    );
+}
+
+#[test]
+fn press_scale_is_one_without_recorded_presses() {
+    let sidecar = crate::recording::editor::sidecar::PointerSidecar::new(
+        0,
+        crate::recording::editor::sidecar::CaptureRegion {
+            x: 0,
+            y: 0,
+            w: 1920,
+            h: 1080,
+        },
+    );
+    assert!((press_cursor_scale(&sidecar, 1.0) - 1.0).abs() < 1e-12);
+}
+
+#[test]
+fn press_scale_eases_in_and_out_of_a_held_button() {
+    let sidecar = press_sidecar(1.0, 5.0, false);
+    // At the press start the scale has not moved yet.
+    assert!((press_cursor_scale(&sidecar, 1.0) - 1.0).abs() < 1e-9);
+    // Partway through the hold it sits between the two values.
+    let mid = press_cursor_scale(&sidecar, 1.1);
+    assert!(mid < 1.0 && mid > PRESSED_CURSOR_SCALE, "mid {mid}");
+    // Held long enough, it settles at the pressed scale.
+    assert!((press_cursor_scale(&sidecar, 4.0) - PRESSED_CURSOR_SCALE).abs() < 1e-6);
+    // At release it eases back out from the pressed scale.
+    assert!((press_cursor_scale(&sidecar, 5.0) - PRESSED_CURSOR_SCALE).abs() < 1e-9);
+    let released = press_cursor_scale(&sidecar, 5.1);
+    assert!(
+        released > PRESSED_CURSOR_SCALE && released < 1.0,
+        "released {released}"
+    );
+    // Long after release it is back to full size.
+    assert!((press_cursor_scale(&sidecar, 8.0) - 1.0).abs() < 1e-6);
+}
+
+#[test]
+fn a_dragged_press_eases_faster_than_a_plain_hold() {
+    let plain = press_sidecar(1.0, 2.0, false);
+    let dragged = press_sidecar(1.0, 2.0, true);
+    let plain_scale = press_cursor_scale(&plain, 1.05);
+    let dragged_scale = press_cursor_scale(&dragged, 1.05);
+    assert!(
+        dragged_scale < plain_scale,
+        "drag {dragged_scale} should track the press harder than plain {plain_scale}"
+    );
+}
+
+#[test]
+fn press_scale_is_the_same_on_a_random_seek() {
+    let sidecar = press_sidecar(1.0, 2.0, false);
+    let times = [0.5, 1.0, 1.2, 1.5, 2.0, 2.2, 3.0];
+    let sequential: Vec<f64> = times
+        .iter()
+        .map(|t| press_cursor_scale(&sidecar, *t))
+        .collect();
+    for (index, t) in times.iter().enumerate().rev() {
+        assert!((press_cursor_scale(&sidecar, *t) - sequential[index]).abs() < 1e-12);
+    }
 }

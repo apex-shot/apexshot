@@ -285,8 +285,7 @@ pub const CAMERA_FOLLOW_SPRING: CameraSpring = CameraSpring {
 /// integrator. It returns the 1000/60 ms frame unless the frame time times
 /// the faster of the natural frequency and the damping rate exceeds half a
 /// step, in which case it returns 1 ms. The soft follow spring takes the
-/// frame branch; a stiffer spring (a future cursor or transition spring)
-/// takes the 1 ms branch.
+/// frame branch; the stiff cursor drag spring takes the 1 ms branch.
 pub fn spring_adaptive_step_ms(spring: CameraSpring) -> f64 {
     let frame_ms = 1000.0 / 60.0;
     let mass = spring.mass.max(f64::EPSILON);
@@ -330,6 +329,152 @@ pub fn spring_step(
     let velocity = velocity + acceleration * dt;
     let value = value + velocity * dt;
     (value, velocity)
+}
+
+/// How much the drawn cursor shrinks while a mouse button is held.
+///
+/// Ports the studied `isPressed ? 0.9 : 1` cursor scale, so a click and a drag
+/// both read as a press.
+pub const PRESSED_CURSOR_SCALE: f64 = 0.9;
+
+/// The studied cursor-click spring: a click within the look-ahead window
+/// stiffens the cursor sprite so the press lands as the click does.
+pub const CURSOR_CLICK_SPRING: CameraSpring = CameraSpring {
+    stiffness: 530.0,
+    damping: 40.0,
+    mass: 1.0,
+};
+
+/// How far ahead a click still stiffens the cursor spring.
+pub const CURSOR_CLICK_WINDOW_SECONDS: f64 = 0.175;
+
+/// The studied cursor-drag spring: the drag base `{1000, 40, 1}` fit to settle
+/// in 40 ms. The fit scales stiffness by `ratio^2` and damping by `ratio`,
+/// which for the base's 379 ms settle is `ratio = 9.475`.
+pub const CURSOR_DRAG_SPRING: CameraSpring = CameraSpring {
+    stiffness: 89775.625,
+    damping: 379.0,
+    mass: 1.0,
+};
+
+/// Which spring drives the cursor sprite at source time `t`, following the
+/// studied priority: a recorded drag, then an imminent click, then the
+/// project's follow spring. The studied `mouseMovementSpring` drag/click
+/// stiffening smooths the cursor sprite, not the camera, so it lives here.
+pub fn cursor_spring_for_time(
+    click_times: &[f64],
+    presses: &[PressSample],
+    t: f64,
+) -> CameraSpring {
+    if !t.is_finite() {
+        return CAMERA_FOLLOW_SPRING;
+    }
+    if presses.iter().any(|press| press.dragged && press.contains(t)) {
+        return CURSOR_DRAG_SPRING;
+    }
+    let imminent = click_times.iter().any(|click| {
+        click.is_finite() && *click >= t && *click - t <= CURSOR_CLICK_WINDOW_SECONDS
+    });
+    if imminent {
+        CURSOR_CLICK_SPRING
+    } else {
+        CAMERA_FOLLOW_SPRING
+    }
+}
+
+/// The cursor scale at source time `t`, eased toward the held-button scale.
+///
+/// The target is [`PRESSED_CURSOR_SCALE`] while a recorded press covers `t`
+/// and `1.0` otherwise. The scale eases toward it on [`cursor_spring_for_time`],
+/// porting the studied `smooth(isPressed ? 0.9 : 1, movementSpring)`.
+///
+/// Pure: the spring restarts from the previous target at the latest held-state
+/// boundary, so a random seek lands exactly where sequential playback would.
+/// Overlapping presses are merged, so the target only steps when the held
+/// state actually changes.
+pub fn press_cursor_scale(sidecar: &PointerSidecar, t: f64) -> f64 {
+    if !t.is_finite() {
+        return 1.0;
+    }
+    let target = if sidecar.is_pressed_at(t) {
+        PRESSED_CURSOR_SCALE
+    } else {
+        1.0
+    };
+    let Some((boundary, from)) = latest_press_boundary(&sidecar.presses, t) else {
+        return target;
+    };
+    let click_times: Vec<f64> = sidecar.clicks.iter().map(|click| click.t).collect();
+    let spring = cursor_spring_for_time(&click_times, &sidecar.presses, t);
+    ease_scale(from, target, t - boundary, spring)
+}
+
+/// The latest held-state boundary at or before `t`, and the scale just before
+/// it: `1.0` at a press start, [`PRESSED_CURSOR_SCALE`] at a release. Press
+/// intervals are merged first so overlapping buttons step the target once.
+fn latest_press_boundary(presses: &[PressSample], t: f64) -> Option<(f64, f64)> {
+    let mut windows: Vec<(f64, f64)> = presses
+        .iter()
+        .filter(|press| press.down.is_finite() && press.up.is_finite() && press.up > press.down)
+        .map(|press| (press.down, press.up))
+        .collect();
+    windows.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut merged: Vec<(f64, f64)> = Vec::with_capacity(windows.len());
+    for (start, end) in windows {
+        match merged.last_mut() {
+            Some(last) if start <= last.1 => last.1 = last.1.max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    let mut boundary = f64::NEG_INFINITY;
+    let mut from = 1.0;
+    let mut found = false;
+    for (start, end) in merged {
+        if start <= t && start > boundary {
+            boundary = start;
+            from = 1.0;
+            found = true;
+        }
+        if end <= t && end > boundary {
+            boundary = end;
+            from = PRESSED_CURSOR_SCALE;
+            found = true;
+        }
+    }
+    found.then_some((boundary, from))
+}
+
+/// Integrate a scalar spring from `from` toward `target` over `seconds`.
+///
+/// Reuses the camera's integrator and adaptive step, and stops early once the
+/// value has settled so a long drag does not re-integrate its whole span on
+/// every frame.
+fn ease_scale(from: f64, target: f64, seconds: f64, spring: CameraSpring) -> f64 {
+    if !seconds.is_finite() || seconds <= 0.0 || (from - target).abs() < 1e-9 {
+        return from;
+    }
+    let step = spring_adaptive_step_ms(spring) / 1000.0;
+    if !step.is_finite() || step <= 0.0 {
+        return target;
+    }
+    let max_steps = (seconds / step).ceil() as usize + 2;
+    let mut value = from;
+    let mut velocity: f64 = 0.0;
+    let mut elapsed = 0.0;
+    for _ in 0..max_steps {
+        if elapsed >= seconds {
+            break;
+        }
+        if (value - target).abs() < 1e-4 && velocity.abs() < 1e-4 {
+            return target;
+        }
+        let dt = step.min(seconds - elapsed);
+        let (next, next_velocity) = spring_step(value, velocity, target, spring, dt);
+        value = next;
+        velocity = next_velocity;
+        elapsed += dt;
+    }
+    value
 }
 
 /// Dwell-weighted centre of `points`: each sample holds until the next one

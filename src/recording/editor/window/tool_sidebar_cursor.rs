@@ -903,7 +903,7 @@ fn draw_click_live_preview(
             1.0,
         );
     }
-    cursor_sprite::draw(cr, cx, cy, 1.0, "default", settings, 0.95);
+    cursor_sprite::draw(cr, cx, cy, 1.0, 1.0, "default", settings, 0.95);
 }
 
 struct CursorSliderRow {

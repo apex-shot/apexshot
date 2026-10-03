@@ -1115,6 +1115,7 @@ fn draw_preview_overlays(
                 px,
                 py,
                 1.0,
+                crate::recording::editor::model::press_cursor_scale(sidecar, source_t),
                 frame.kind.as_str(),
                 cursor,
                 frame.alpha,

@@ -1,5 +1,5 @@
 use super::cursor_sprite;
-use super::model::{even_crop_rect, source_to_zoomed_point, VideoEditState};
+use super::model::{even_crop_rect, press_cursor_scale, source_to_zoomed_point, VideoEditState};
 use super::sidecar::CursorMotion;
 use gtk4::cairo::{Context, Format, ImageSurface, Operator};
 use std::io::Write;
@@ -72,6 +72,7 @@ pub fn write_rgba_track(
                 px,
                 py,
                 1.0,
+                press_cursor_scale(sidecar, source_t),
                 frame.kind.as_str(),
                 overlay_cursor,
                 frame.alpha,
