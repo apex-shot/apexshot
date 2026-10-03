@@ -1093,6 +1093,9 @@ fn draw_preview_overlays(
         ) {
             frame.alpha *= state.cursor_hide_alpha(timeline_t);
             let cursor = overlay_cursor(state.cursor, zoom);
+            // Click effects are sized as fractions of the source video width,
+            // mapped into the same zoomed space the click points use.
+            let reference_width = state.metadata.width as f64 * w / view.2.max(1.0);
             for (x, y, progress) in sidecar.click_ripples_in_video_at(
                 source_t,
                 cursor.click_window_seconds(),
@@ -1107,6 +1110,7 @@ fn draw_preview_overlays(
                     progress,
                     cursor,
                     frame.alpha,
+                    reference_width,
                 );
             }
             let (px, py) = source_to_zoomed_point(frame.x, frame.y, view, w, h);

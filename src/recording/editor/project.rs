@@ -234,6 +234,7 @@ pub enum ClickEffectFile {
     Spotlight,
     #[default]
     Ripple,
+    Circle,
     Echo,
 }
 
@@ -824,6 +825,7 @@ fn click_effect_to_file(effect: ClickEffect) -> ClickEffectFile {
         ClickEffect::None => ClickEffectFile::None,
         ClickEffect::Spotlight => ClickEffectFile::Spotlight,
         ClickEffect::Ripple => ClickEffectFile::Ripple,
+        ClickEffect::Circle => ClickEffectFile::Circle,
         ClickEffect::Echo => ClickEffectFile::Echo,
     }
 }
@@ -833,6 +835,7 @@ fn click_effect_from_file(effect: ClickEffectFile) -> ClickEffect {
         ClickEffectFile::None => ClickEffect::None,
         ClickEffectFile::Spotlight => ClickEffect::Spotlight,
         ClickEffectFile::Ripple => ClickEffect::Ripple,
+        ClickEffectFile::Circle => ClickEffect::Circle,
         ClickEffectFile::Echo => ClickEffect::Echo,
     }
 }
@@ -1437,6 +1440,23 @@ mod tests {
         assert_eq!(restored.zoom_clips[0].ease_ms, 480);
         cleanup_project(&video);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn legacy_click_effect_files_load_and_persist_unchanged() {
+        for (effect, raw) in [
+            (ClickEffect::Spotlight, "\"spotlight\""),
+            (ClickEffect::Echo, "\"echo\""),
+        ] {
+            let file = click_effect_to_file(effect);
+            assert_eq!(serde_json::to_string(&file).unwrap(), raw);
+            let parsed: ClickEffectFile = serde_json::from_str(raw).unwrap();
+            assert_eq!(click_effect_from_file(parsed), effect);
+        }
+        assert_eq!(
+            serde_json::to_string(&click_effect_to_file(ClickEffect::Circle)).unwrap(),
+            "\"circle\""
+        );
     }
 
     #[test]

@@ -579,15 +579,23 @@ fn build_cursor_effects_tab(
     click_row.set_hexpand(true);
     click_row.set_homogeneous(true);
     let none_btn = click_effect_card(ClickEffect::None);
-    let spotlight_btn = click_effect_card(ClickEffect::Spotlight);
     let ripple_btn = click_effect_card(ClickEffect::Ripple);
+    let circle_btn = click_effect_card(ClickEffect::Circle);
+    // Legacy projects can still carry Spotlight or Echo. Those cards appear
+    // only while one of them is the active value, so an existing project is
+    // never silently swapped to a different effect.
+    let spotlight_btn = click_effect_card(ClickEffect::Spotlight);
     let echo_btn = click_effect_card(ClickEffect::Echo);
-    spotlight_btn.set_group(Some(&none_btn));
+    spotlight_btn.set_visible(false);
+    echo_btn.set_visible(false);
     ripple_btn.set_group(Some(&none_btn));
+    circle_btn.set_group(Some(&none_btn));
+    spotlight_btn.set_group(Some(&none_btn));
     echo_btn.set_group(Some(&none_btn));
     click_row.append(&none_btn);
-    click_row.append(&spotlight_btn);
     click_row.append(&ripple_btn);
+    click_row.append(&circle_btn);
+    click_row.append(&spotlight_btn);
     click_row.append(&echo_btn);
     body.append(&click_row);
 
@@ -648,21 +656,15 @@ fn build_cursor_effects_tab(
 
     let size_row = cursor_slider_row(&t("Size"));
     let opacity_row = cursor_slider_row(&t("Opacity"));
-    let duration_row = cursor_slider_row(&t("Duration"));
     let intensity_row = cursor_slider_row(&t("Intensity"));
     size_row.scale.set_range(MIN_CLICK_SCALE, MAX_CLICK_SCALE);
     size_row.scale.set_increments(0.05, 0.1);
     opacity_row.scale.set_range(0.0, 1.0);
     opacity_row.scale.set_increments(0.05, 0.1);
-    duration_row
-        .scale
-        .set_range(MIN_CLICK_DURATION_MS as f64, MAX_CLICK_DURATION_MS as f64);
-    duration_row.scale.set_increments(20.0, 100.0);
     intensity_row.scale.set_range(0.0, 1.0);
     intensity_row.scale.set_increments(0.05, 0.1);
     body.append(&size_row.widget);
     body.append(&opacity_row.widget);
-    body.append(&duration_row.widget);
     body.append(&intensity_row.widget);
 
     let syncing = Rc::new(Cell::new(false));
@@ -702,6 +704,18 @@ fn build_cursor_effects_tab(
             on_change();
         }
     });
+    circle_btn.connect_toggled({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let syncing = syncing.clone();
+        move |button| {
+            if syncing.get() || !button.is_active() {
+                return;
+            }
+            state.lock().unwrap().cursor.click_effect = ClickEffect::Circle;
+            on_change();
+        }
+    });
     echo_btn.connect_toggled({
         let state = state.clone();
         let on_change = on_change.clone();
@@ -729,13 +743,6 @@ fn build_cursor_effects_tab(
         |cursor, value| cursor.click_opacity = value,
     );
     bind_cursor_f64(
-        &duration_row.scale,
-        syncing.clone(),
-        state.clone(),
-        on_change.clone(),
-        |cursor, value| cursor.click_duration_ms = value.round() as u32,
-    );
-    bind_cursor_f64(
         &intensity_row.scale,
         syncing.clone(),
         state.clone(),
@@ -750,10 +757,10 @@ fn build_cursor_effects_tab(
         let none_btn = none_btn.clone();
         let spotlight_btn = spotlight_btn.clone();
         let ripple_btn = ripple_btn.clone();
+        let circle_btn = circle_btn.clone();
         let echo_btn = echo_btn.clone();
         let size_scale = size_row.scale.clone();
         let opacity_scale = opacity_row.scale.clone();
-        let duration_scale = duration_row.scale.clone();
         let intensity_scale = intensity_row.scale.clone();
         let swatch = swatch.clone();
         let dots = dots.clone();
@@ -765,16 +772,17 @@ fn build_cursor_effects_tab(
                 ClickEffect::None => none_btn.set_active(true),
                 ClickEffect::Spotlight => spotlight_btn.set_active(true),
                 ClickEffect::Ripple => ripple_btn.set_active(true),
+                ClickEffect::Circle => circle_btn.set_active(true),
                 ClickEffect::Echo => echo_btn.set_active(true),
             }
+            spotlight_btn.set_visible(matches!(cursor.click_effect, ClickEffect::Spotlight));
+            echo_btn.set_visible(matches!(cursor.click_effect, ClickEffect::Echo));
             size_scale.set_value(cursor.click_scale);
             opacity_scale.set_value(cursor.click_opacity);
-            duration_scale.set_value(cursor.click_duration_ms as f64);
             intensity_scale.set_value(cursor.click_intensity);
             let enabled = cursor.click_effect != ClickEffect::None;
             size_scale.set_sensitive(enabled);
             opacity_scale.set_sensitive(enabled);
-            duration_scale.set_sensitive(enabled);
             intensity_scale.set_sensitive(enabled);
             swatch.set_sensitive(enabled);
             dots.set_sensitive(enabled);
@@ -901,6 +909,7 @@ fn draw_click_live_preview(
             (local / duration).clamp(0.0, 1.0),
             settings,
             1.0,
+            width,
         );
     }
     cursor_sprite::draw(cr, cx, cy, 1.0, 1.0, "default", settings, 0.95);
@@ -980,6 +989,15 @@ fn draw_click_effect_icon(
             cr.set_line_width(2.0 * s);
             cr.set_source_rgba(r, g, b, 0.72);
             cr.arc(cx, cy, 13.0 * s, 0.0, std::f64::consts::TAU);
+            let _ = cr.stroke();
+        }
+        ClickEffect::Circle => {
+            cr.set_source_rgba(r, g, b, 0.22);
+            cr.arc(cx, cy, 12.0 * s, 0.0, std::f64::consts::TAU);
+            let _ = cr.fill();
+            cr.set_line_width(1.6 * s);
+            cr.set_source_rgba(r, g, b, 0.72);
+            cr.arc(cx, cy, 12.0 * s, 0.0, std::f64::consts::TAU);
             let _ = cr.stroke();
         }
         ClickEffect::Echo => {

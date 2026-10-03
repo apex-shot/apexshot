@@ -7,7 +7,11 @@ pub const MAX_POINTER_SAMPLES: usize = 8_000;
 pub const MAX_CLICKS: usize = 500;
 pub const MAX_PRESSES: usize = 500;
 pub const CLICK_PULSE_WINDOW_SECONDS: f64 = 0.08;
-pub const CLICK_RIPPLE_WINDOW_SECONDS: f64 = 0.32;
+/// Visible lifetime of the studied ripple effect, in seconds.
+pub const CLICK_RIPPLE_WINDOW_SECONDS: f64 =
+    crate::recording::editor::click_effect::RIPPLE_VISIBLE_DURATION_MS / 1000.0;
+/// The studied recorder keeps at most this many recent clicks alive at once.
+pub const MAX_SIMULTANEOUS_CLICKS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -465,10 +469,16 @@ impl PointerSidecar {
         let mut ripples = Vec::new();
         for click in &self.clicks {
             let age = t - click.t;
-            if (0.0..=window).contains(&age) {
+            // The studied effect drops a click once its age reaches the
+            // visible duration, so the upper bound is exclusive.
+            if (0.0..window).contains(&age) {
                 let progress = (age / window).clamp(0.0, 1.0);
                 ripples.push((click.x, click.y, progress));
             }
+        }
+        if ripples.len() > MAX_SIMULTANEOUS_CLICKS {
+            let excess = ripples.len() - MAX_SIMULTANEOUS_CLICKS;
+            ripples.drain(0..excess);
         }
         ripples
     }
@@ -1127,8 +1137,14 @@ mod tests {
         assert_eq!(ripples.len(), 1);
         assert!((ripples[0].0 - 40.0).abs() < 1e-9);
         assert!(ripples[0].2 > 0.0 && ripples[0].2 < 1.0);
+        assert!(
+            sidecar
+                .click_ripples_at(1.5, CLICK_RIPPLE_WINDOW_SECONDS)
+                .len()
+                == 1
+        );
         assert!(sidecar
-            .click_ripples_at(1.5, CLICK_RIPPLE_WINDOW_SECONDS)
+            .click_ripples_at(2.0, CLICK_RIPPLE_WINDOW_SECONDS)
             .is_empty());
     }
 
@@ -1149,6 +1165,43 @@ mod tests {
         let short = sidecar.click_ripples_at(1.16, 0.32);
         assert_eq!(short.len(), 1);
         assert!((short[0].2 - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn click_ripples_drop_at_the_visible_duration_boundary() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.clicks.push(ClickSample {
+            t: 1.0,
+            x: 40.0,
+            y: 80.0,
+            button: 1,
+        });
+        // Age exactly equal to the visible duration is not drawn.
+        assert!(sidecar
+            .click_ripples_at(
+                1.0 + CLICK_RIPPLE_WINDOW_SECONDS,
+                CLICK_RIPPLE_WINDOW_SECONDS
+            )
+            .is_empty());
+    }
+
+    #[test]
+    fn click_ripples_keep_only_the_three_most_recent() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0..5 {
+            sidecar.clicks.push(ClickSample {
+                t: 1.0 + index as f64 * 0.01,
+                x: index as f64,
+                y: 0.0,
+                button: 1,
+            });
+        }
+        let ripples = sidecar.click_ripples_at(1.04, CLICK_RIPPLE_WINDOW_SECONDS);
+        assert_eq!(ripples.len(), MAX_SIMULTANEOUS_CLICKS);
+        assert_eq!(ripples[0].0, 2.0);
+        assert_eq!(ripples[2].0, 4.0);
     }
 
     #[test]

@@ -47,6 +47,9 @@ pub fn write_rgba_track(
         let center = (center.0 - crop_x, center.1 - crop_y);
         let (zx, zy, zw, zh) = even_crop_rect(scale, center, src_w, src_h);
         let view = (crop_x + zx as f64, crop_y + zy as f64, zw as f64, zh as f64);
+        // Click effects are sized as fractions of the source video width, so
+        // map that width into the same zoomed space the click points use.
+        let reference_width = state.metadata.width as f64 * width as f64 / zw.max(1) as f64;
         let mut overlay_cursor = cursor;
         overlay_cursor.size = cursor_sprite::overlay_scale(cursor.size, scale);
         if let Some(mut frame) = sidecar.presented_in_video_at(
@@ -63,7 +66,15 @@ pub fn write_rgba_track(
                 state.metadata.height as f64,
             ) {
                 let (px, py) = source_to_zoomed_point(x, y, view, width as f64, height as f64);
-                cursor_sprite::draw_click(&cr, px, py, progress, overlay_cursor, frame.alpha);
+                cursor_sprite::draw_click(
+                    &cr,
+                    px,
+                    py,
+                    progress,
+                    overlay_cursor,
+                    frame.alpha,
+                    reference_width,
+                );
             }
             let (px, py) =
                 source_to_zoomed_point(frame.x, frame.y, view, width as f64, height as f64);

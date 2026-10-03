@@ -1,9 +1,9 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
     nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoBackground,
-    VideoEditState, ZoomEasing, ZoomMode, MAX_CLICK_DURATION_MS, MAX_CLICK_SCALE, MAX_CLIP_SPEED,
-    MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLICK_DURATION_MS, MIN_CLICK_SCALE, MIN_CLIP_SPEED,
-    MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
+    VideoEditState, ZoomEasing, ZoomMode, MAX_CLICK_SCALE, MAX_CLIP_SPEED, MAX_CURSOR_SIZE,
+    MAX_CURSOR_SPEED, MIN_CLICK_SCALE, MIN_CLIP_SPEED, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED,
+    ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
     gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
