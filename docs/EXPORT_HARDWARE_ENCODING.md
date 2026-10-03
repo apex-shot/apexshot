@@ -23,10 +23,9 @@ filter graph. NVENC reads system-memory frames and needs neither.
   a constant quantizer (CQP). The probe passes the tier's CRF through as the QP —
   a starting point, not a validated equivalence. The same "High" export can be
   larger or softer on hardware.
-- **There is no Linux VideoToolbox.** Screen Studio gets one consistent hardware
-  encoder for free from macOS. On Linux, VA-API and NVENC differ from each other
-  and across driver generations, so the result depends on the machine, not just
-  on the quality tier the user picked.
+- **There is no single consistent hardware encoder.** On Linux, VA-API and NVENC
+  differ from each other and across driver generations, so the result depends on
+  the machine, not just on the quality tier the user picked.
 - **The user picked a tier, not an encoder.** Silently changing the final file
   based on the GPU is the kind of surprise that is hard to explain afterwards.
 

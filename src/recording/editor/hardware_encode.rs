@@ -12,9 +12,9 @@
 //! The editor export does **not** switch to hardware on its own. VA-API and
 //! NVENC do not share libx264's rate control: the same quality tier produces a
 //! different file — sometimes larger, sometimes softer — and the user picked a
-//! tier, not an encoder. Screen Studio gets a consistent hardware encoder for
-//! free from macOS VideoToolbox; Linux has no equivalent, so the difference is
-//! real and visible. Hardware is therefore used only when the user explicitly
+//! tier, not an encoder. Linux has no single consistent hardware encoder across
+//! GPUs and drivers, so the same tier can produce a different file. Hardware is
+//! therefore used only when the user explicitly
 //! asks for it with `APEXSHOT_EXPORT_HW_ENCODER` (`nvenc`, `vaapi`, or `auto`),
 //! and only after the probe succeeds. Every other case keeps libx264, so the
 //! default export is byte-for-byte what it was before this module existed.
