@@ -1328,52 +1328,6 @@ mod tests {
     }
 
     #[test]
-    fn a_vaapi_export_uploads_the_graph_and_nvenc_leaves_it_alone() {
-        // NVENC and libx264 read system-memory frames, so the graph is
-        // untouched; VA-API needs a trailing upload after the last filter.
-        assert_eq!(
-            with_hardware_upload(None, Some(HardwareEncoder::Nvenc)),
-            None
-        );
-        assert_eq!(with_hardware_upload(None, None), None);
-        assert_eq!(
-            with_hardware_upload(None, Some(HardwareEncoder::Vaapi)),
-            Some(hardware_encode::VAAPI_UPLOAD_FILTER.to_string())
-        );
-        assert_eq!(
-            with_hardware_upload(Some("scale=2:2".into()), Some(HardwareEncoder::Vaapi)),
-            Some(format!(
-                "scale=2:2,{}",
-                hardware_encode::VAAPI_UPLOAD_FILTER
-            ))
-        );
-        assert_eq!(
-            with_hardware_upload(Some("scale=2:2".into()), Some(HardwareEncoder::Nvenc)),
-            Some("scale=2:2".into())
-        );
-    }
-
-    #[test]
-    fn the_default_export_encoder_is_software() {
-        // No opt-in: the export must be exactly libx264 at the tier's CRF, so a
-        // machine with a GPU cannot change the file a user without one gets.
-        let args = export_video_args(None, ExportQuality::High);
-        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
-        assert!(args.windows(2).any(|pair| pair == ["-crf", "20"]));
-        assert!(!args.iter().any(|arg| arg == "-qp"));
-    }
-
-    #[test]
-    fn an_opted_in_hardware_encoder_replaces_software() {
-        let nvenc = export_video_args(Some(HardwareEncoder::Nvenc), ExportQuality::Ultra);
-        assert!(nvenc.windows(2).any(|pair| pair == ["-c:v", "h264_nvenc"]));
-        assert!(!nvenc.iter().any(|arg| arg == "libx264"));
-        // Ultra is CRF 16, which is the quantizer the hardware encoder gets.
-        assert!(nvenc.windows(2).any(|pair| pair == ["-qp", "16"]));
-        assert!(!nvenc.iter().any(|arg| arg == "-crf"));
-    }
-
-    #[test]
     fn audio_mode_builds_expected_ffmpeg_args() {
         assert_eq!(audio_args(AudioMode::Unchanged, true), ["-c:a", "copy"]);
         assert!(audio_args(AudioMode::Unchanged, false).is_empty());
@@ -2636,6 +2590,52 @@ mod tests {
         let _ = std::fs::remove_file(&source);
         let _ = std::fs::remove_file(&followed);
         let _ = std::fs::remove_file(&snapped);
+    }
+
+    #[test]
+    fn a_vaapi_export_uploads_the_graph_and_nvenc_leaves_it_alone() {
+        // NVENC and libx264 read system-memory frames, so the graph is
+        // untouched; VA-API needs a trailing upload after the last filter.
+        assert_eq!(
+            with_hardware_upload(None, Some(HardwareEncoder::Nvenc)),
+            None
+        );
+        assert_eq!(with_hardware_upload(None, None), None);
+        assert_eq!(
+            with_hardware_upload(None, Some(HardwareEncoder::Vaapi)),
+            Some(hardware_encode::VAAPI_UPLOAD_FILTER.to_string())
+        );
+        assert_eq!(
+            with_hardware_upload(Some("scale=2:2".into()), Some(HardwareEncoder::Vaapi)),
+            Some(format!(
+                "scale=2:2,{}",
+                hardware_encode::VAAPI_UPLOAD_FILTER
+            ))
+        );
+        assert_eq!(
+            with_hardware_upload(Some("scale=2:2".into()), Some(HardwareEncoder::Nvenc)),
+            Some("scale=2:2".into())
+        );
+    }
+
+    #[test]
+    fn the_default_export_encoder_is_software() {
+        // No opt-in: the export must be exactly libx264 at the tier's CRF, so a
+        // machine with a GPU cannot change the file a user without one gets.
+        let args = export_video_args(None, ExportQuality::High);
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
+        assert!(args.windows(2).any(|pair| pair == ["-crf", "20"]));
+        assert!(!args.iter().any(|arg| arg == "-qp"));
+    }
+
+    #[test]
+    fn an_opted_in_hardware_encoder_replaces_software() {
+        let nvenc = export_video_args(Some(HardwareEncoder::Nvenc), ExportQuality::Ultra);
+        assert!(nvenc.windows(2).any(|pair| pair == ["-c:v", "h264_nvenc"]));
+        assert!(!nvenc.iter().any(|arg| arg == "libx264"));
+        // Ultra is CRF 16, which is the quantizer the hardware encoder gets.
+        assert!(nvenc.windows(2).any(|pair| pair == ["-qp", "16"]));
+        assert!(!nvenc.iter().any(|arg| arg == "-crf"));
     }
 }
 
