@@ -1,6 +1,8 @@
+use super::hardware_encode::{self, HardwareEncoder};
 use super::model::background_render::render_rounded_mask;
 use super::model::{
-    even_crop_rect, AudioMode, VideoBackground, VideoEditState, VideoMetadata, DEFAULT_FRAME_RATE,
+    even_crop_rect, AudioMode, ExportQuality, VideoBackground, VideoEditState, VideoMetadata,
+    DEFAULT_FRAME_RATE,
 };
 use anyhow::{anyhow, Context};
 use serde::Deserialize;
@@ -623,6 +625,45 @@ fn build_single_trim_args(
     args
 }
 
+/// The video output arguments for `encoder`, or libx264 when it is `None`.
+///
+/// Hardware is only ever `Some` after an explicit opt-in and a passing runtime
+/// probe (see `super::hardware_encode`), so the software branch is the default
+/// and keeps the previous export byte-for-byte.
+fn export_video_args(encoder: Option<HardwareEncoder>, quality: ExportQuality) -> Vec<String> {
+    match encoder {
+        Some(encoder) => hardware_encode::hardware_video_args(
+            encoder,
+            hardware_encode::hardware_qp(quality.crf()),
+        ),
+        None => vec![
+            "-c:v".into(),
+            "libx264".into(),
+            "-preset".into(),
+            "veryfast".into(),
+            "-crf".into(),
+            quality.crf().to_string(),
+        ],
+    }
+}
+
+/// Append the VA-API upload to a filter graph when the chosen encoder needs it.
+///
+/// VA-API reads GPU frames, so the graph has to end with `hwupload`; NVENC and
+/// libx264 take system-memory frames and leave the filter untouched.
+fn with_hardware_upload(
+    filter: Option<String>,
+    encoder: Option<HardwareEncoder>,
+) -> Option<String> {
+    match hardware_encode::hardware_upload_suffix(encoder) {
+        Some(upload) => Some(match filter {
+            Some(filter) => format!("{filter},{upload}"),
+            None => upload.to_string(),
+        }),
+        None => filter,
+    }
+}
+
 fn build_single_convert_args(
     state: &VideoEditState,
     start: f64,
@@ -644,6 +685,7 @@ fn build_single_convert_args_with(
     if state.needs_composite() {
         return build_composite_convert_args(state, start, end, output_path, warp);
     }
+    let encoder = hardware_encode::selected_export_encoder();
     let mut args = vec![
         "-y".into(),
         "-ss".into(),
@@ -654,18 +696,17 @@ fn build_single_convert_args_with(
         state.metadata.path.to_string_lossy().into_owned(),
     ];
     let speed = state.speed_for_source(start);
-    if let Some(filter) = convert_video_filter(state, speed) {
+    // `-vaapi_device` is a global option and the `hwupload` in the filter graph
+    // resolves its device when the graph is parsed, so the device has to come
+    // first.
+    if let Some(encoder) = encoder {
+        args.extend(hardware_encode::hardware_input_args(encoder));
+    }
+    if let Some(filter) = with_hardware_upload(convert_video_filter(state, speed), encoder) {
         args.push("-vf".into());
         args.push(filter);
     }
-    args.extend([
-        "-c:v".into(),
-        "libx264".into(),
-        "-preset".into(),
-        "veryfast".into(),
-        "-crf".into(),
-        state.quality.crf().to_string(),
-    ]);
+    args.extend(export_video_args(encoder, state.quality));
     args.extend(convert_audio_args(state, speed, start));
     args.push(output_path.to_string_lossy().into_owned());
     ConvertCommand {
@@ -685,6 +726,10 @@ fn build_composite_convert_args(
 ) -> ConvertCommand {
     let scratch = ScratchDir::new("export", start);
     let cmd_path = scratch.path.join("zoom.cmd");
+    // An opt-in hardware encoder applies to the composite graph too. It is
+    // `None` (libx264) unless the user asked for hardware and the runtime
+    // probe passed, so the default composite export is unchanged.
+    let encoder = hardware_encode::selected_export_encoder();
     // The held tail is part of the composition, so the camera command file has
     // to cover it too: preview keeps moving the zoom through a freeze, and the
     // export must match.
@@ -835,6 +880,12 @@ fn build_composite_convert_args(
         filter.push(',');
         filter.push_str(&pad);
     }
+    // VA-API reads GPU frames, so its upload has to be the graph's last step,
+    // after every overlay, mask, and pad. NVENC and libx264 need nothing.
+    if let Some(upload) = hardware_encode::hardware_upload_suffix(encoder) {
+        filter.push(',');
+        filter.push_str(upload);
+    }
 
     let mut args = vec!["-y".into()];
     if warp_ripple {
@@ -893,15 +944,13 @@ fn build_composite_convert_args(
             mask.to_string_lossy().into_owned(),
         ]);
     }
+    // `-vaapi_device` has to be registered before the complex graph that uses
+    // `hwupload` is parsed.
+    if let Some(encoder) = encoder {
+        args.extend(hardware_encode::hardware_input_args(encoder));
+    }
     args.extend(["-filter_complex".into(), filter]);
-    args.extend([
-        "-c:v".into(),
-        "libx264".into(),
-        "-preset".into(),
-        "veryfast".into(),
-        "-crf".into(),
-        state.quality.crf().to_string(),
-    ]);
+    args.extend(export_video_args(encoder, state.quality));
     args.extend(convert_audio_args(state, speed, start));
     args.push(output_path.to_string_lossy().into_owned());
     ConvertCommand {
@@ -1276,6 +1325,52 @@ mod tests {
         state.trim_start_seconds = 1.25;
         state.trim_end_seconds = 8.5;
         state
+    }
+
+    #[test]
+    fn a_vaapi_export_uploads_the_graph_and_nvenc_leaves_it_alone() {
+        // NVENC and libx264 read system-memory frames, so the graph is
+        // untouched; VA-API needs a trailing upload after the last filter.
+        assert_eq!(
+            with_hardware_upload(None, Some(HardwareEncoder::Nvenc)),
+            None
+        );
+        assert_eq!(with_hardware_upload(None, None), None);
+        assert_eq!(
+            with_hardware_upload(None, Some(HardwareEncoder::Vaapi)),
+            Some(hardware_encode::VAAPI_UPLOAD_FILTER.to_string())
+        );
+        assert_eq!(
+            with_hardware_upload(Some("scale=2:2".into()), Some(HardwareEncoder::Vaapi)),
+            Some(format!(
+                "scale=2:2,{}",
+                hardware_encode::VAAPI_UPLOAD_FILTER
+            ))
+        );
+        assert_eq!(
+            with_hardware_upload(Some("scale=2:2".into()), Some(HardwareEncoder::Nvenc)),
+            Some("scale=2:2".into())
+        );
+    }
+
+    #[test]
+    fn the_default_export_encoder_is_software() {
+        // No opt-in: the export must be exactly libx264 at the tier's CRF, so a
+        // machine with a GPU cannot change the file a user without one gets.
+        let args = export_video_args(None, ExportQuality::High);
+        assert!(args.windows(2).any(|pair| pair == ["-c:v", "libx264"]));
+        assert!(args.windows(2).any(|pair| pair == ["-crf", "20"]));
+        assert!(!args.iter().any(|arg| arg == "-qp"));
+    }
+
+    #[test]
+    fn an_opted_in_hardware_encoder_replaces_software() {
+        let nvenc = export_video_args(Some(HardwareEncoder::Nvenc), ExportQuality::Ultra);
+        assert!(nvenc.windows(2).any(|pair| pair == ["-c:v", "h264_nvenc"]));
+        assert!(!nvenc.iter().any(|arg| arg == "libx264"));
+        // Ultra is CRF 16, which is the quantizer the hardware encoder gets.
+        assert!(nvenc.windows(2).any(|pair| pair == ["-qp", "16"]));
+        assert!(!nvenc.iter().any(|arg| arg == "-crf"));
     }
 
     #[test]
