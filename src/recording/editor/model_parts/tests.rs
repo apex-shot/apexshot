@@ -1482,6 +1482,40 @@ fn suggest_zoom_clips_merges_nearby_clicks_into_one_shot() {
 }
 
 #[test]
+fn suggest_zoom_clips_widens_a_spread_pair_to_hold_both_clicks() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 400.0, 300.0), (4.0, 1500.0, 700.0)]);
+
+    assert_eq!(state.suggest_zoom_clips(), 1);
+    let clip = &state.zoom_clips[0];
+    // One shot still covers the pair, but widening is what makes that true;
+    // the model default would frame the midpoint and cut both targets off.
+    assert!(clip.scale < crate::recording::editor::auto_zoom::DEFAULT_SCALE);
+    assert!(clip.scale >= MIN_ZOOM_SCALE);
+
+    let (x, y, w, h) = even_crop_rect(clip.scale, clip.center, 1920, 1080);
+    let inside = |px: f64, py: f64| {
+        px >= x as f64 - 1.0
+            && px <= (x + w) as f64 + 1.0
+            && py >= y as f64 - 1.0
+            && py <= (y + h) as f64 + 1.0
+    };
+    assert!(inside(400.0, 300.0), "first click fell outside the shot");
+    assert!(inside(1500.0, 700.0), "second click fell outside the shot");
+}
+
+#[test]
+fn suggest_zoom_clips_leaves_opposite_edge_clicks_at_full_frame() {
+    let mut state = VideoEditState::new(metadata());
+    attach_sidecar_with_clicks(&mut state, &[(3.0, 40.0, 40.0), (4.0, 1880.0, 1040.0)]);
+
+    // Holding both edges would need a scale the model does not allow, so the
+    // moment is left unzoomed rather than clamping tighter and cutting a
+    // target off.
+    assert_eq!(state.suggest_zoom_clips(), 0);
+}
+
+#[test]
 fn suggest_zoom_clips_clips_a_window_at_the_trim_boundary() {
     let mut state = VideoEditState::new(metadata());
     attach_sidecar_with_clicks(&mut state, &[(5.9, 800.0, 500.0)]);

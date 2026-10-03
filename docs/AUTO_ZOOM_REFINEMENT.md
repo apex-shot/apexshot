@@ -12,7 +12,7 @@ model: **automatic zooms come from recorded clicks only.**
 | Clicks this close share one zoom | 2.5 s |
 | Clicks in the last | 1.0 s are ignored |
 | A zoom never reaches the last | 0.8 s of the recording |
-| Default zoom level | 2.0× |
+| Zoom level | Up to 2.0×; widened to hold the covered targets |
 | Shortest window kept | 0.1 s |
 
 Clicks seed the windows. Pointer movement over a window decides where it looks
@@ -21,6 +21,14 @@ are no further apart than the merge gap, so a burst of clicks becomes one shot
 and overlapping zooms cannot be produced. Each result is a source-time window
 with a pixel focus, so trimming, cutting, or retiming keeps the zoom on its
 footage.
+
+A window also carries the bounding box of the clicks it covers. Placement fits
+the shot to that box against the effective crop, keeping a margin of context on
+every side: a tight target opens at the 2.0× default, a workflow spread across
+several controls opens wider so no covered control falls outside the shot, and
+a pair too far apart for even the 1.2× minimum leaves the moment unzoomed
+rather than clamping tighter and cutting a target off. A result with no zoom is
+a legitimate result.
 
 A Detect pass acts on what it finds: the zooms land on the timeline directly,
 as one undo step. There is no separate review step.
@@ -54,6 +62,9 @@ on a spring (phase 3), replacing the earlier edge-feathering follow.
 5. **Instant toggle** — each automatic zoom carries an instant-vs-animated
    flag. Animated is the follow camera; instant snaps with no eased scale
    ramp, no morph from a neighbour, and no follow recenter. Done.
+6. **Region fit** — each window fits its strength to the bounding box of the
+   targets it covers, widening from the default to hold them and abstaining
+   when even the minimum useful zoom cannot. Done.
 
 ## Motion decisions
 
@@ -91,5 +102,5 @@ If that changes, it ports as its own phase: model, composite, minimal UI.
 ## Non-goals
 
 - No hover-only or inferred-motion automatic zooms.
-- No per-zoom region fit; the level is the model default (see phase 4 for
-  inheriting a user's edited level).
+- No target detection beyond the recorded clicks; the region a shot has to hold
+  is the clicks' bounding box, not a recognised UI element.

@@ -7,6 +7,7 @@
 //! anchored in source time, so trimming, cutting, or retiming the composition
 //! leaves the zoom on the footage it was placed for.
 
+use crate::recording::editor::model::MIN_ZOOM_SCALE;
 use crate::recording::editor::sidecar::PointerSidecar;
 
 /// How far before a click its zoom opens.
@@ -24,10 +25,15 @@ pub const END_IGNORE_SECONDS: f64 = 1.0;
 /// A zoom never reaches the recording's final fraction of a second, where the
 /// last frames are the least reliable thing to hold on.
 pub const END_MARGIN_SECONDS: f64 = 0.8;
-/// Zoom level an automatic zoom opens at.
+/// Zoom level an automatic zoom opens at. Fitting only ever widens from here,
+/// so the model default stays the strongest automatic zoom.
 pub const DEFAULT_SCALE: f64 = 2.0;
 /// Windows shorter than this are not worth a shot.
 pub const MIN_WINDOW_SECONDS: f64 = 0.1;
+/// Context kept around the targets a window covers, as a fraction of the
+/// frame on each side. A single click still leaves a margin, and a workflow
+/// that spreads across controls needs a wider shot to hold every target.
+pub const TARGET_CONTEXT_FRACTION: f64 = 0.10;
 
 /// A recorded click in source time and encoded-video pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -54,6 +60,52 @@ pub struct AutoZoom {
     pub center_time: f64,
     pub center: (f64, f64),
     pub scale: f64,
+    /// Bounding box of the targets the window has to hold, in encoded-video
+    /// pixels: `(min_x, min_y, max_x, max_y)`. Placement fits the zoom's
+    /// strength to this rather than always opening at the model default, so a
+    /// workflow spread across several controls is not framed so tightly that
+    /// some of them fall outside the shot.
+    pub region: (f64, f64, f64, f64),
+}
+
+impl AutoZoom {
+    /// The scale that holds this window's covered targets inside an area
+    /// `bounds_w` by `bounds_h` (the effective crop), never stronger than the
+    /// level the window was generated at.
+    ///
+    /// Returns `None` when every target cannot be held at the minimum useful
+    /// zoom: the moment stays full-frame rather than clamping tighter and
+    /// cutting a target off. The studied guidance is explicit that a distant
+    /// pair should widen, pan, or split — never force a tighter shot.
+    pub fn fitted_scale(&self, bounds_w: f64, bounds_h: f64) -> Option<f64> {
+        // Fitting only ever widens, so the level the generator chose is the
+        // strongest this shot may open at.
+        let preferred = if self.scale.is_finite() && self.scale >= 1.0 {
+            self.scale
+        } else {
+            DEFAULT_SCALE
+        };
+        if !bounds_w.is_finite() || !bounds_h.is_finite() || bounds_w <= 0.0 || bounds_h <= 0.0 {
+            return Some(preferred);
+        }
+        let (min_x, min_y, max_x, max_y) = self.region;
+        let pad_x = bounds_w * TARGET_CONTEXT_FRACTION;
+        let pad_y = bounds_h * TARGET_CONTEXT_FRACTION;
+        // The shot opens centred on the focus, so what has to fit is the
+        // furthest target on each side of it, not the targets' total width.
+        let half_w = (self.center.0 - min_x).max(max_x - self.center.0).max(0.0) + pad_x;
+        let half_h = (self.center.1 - min_y).max(max_y - self.center.1).max(0.0) + pad_y;
+        let region_w = 2.0 * half_w;
+        let region_h = 2.0 * half_h;
+        if !region_w.is_finite() || !region_h.is_finite() || region_w <= 0.0 || region_h <= 0.0 {
+            return Some(preferred);
+        }
+        let fit = (bounds_w / region_w).min(bounds_h / region_h);
+        if fit < MIN_ZOOM_SCALE {
+            return None;
+        }
+        Some(fit.min(preferred))
+    }
 }
 
 /// The window one click contributes, clamped around the recording's bounds.
@@ -146,16 +198,32 @@ pub fn automatic_zooms(clicks: &[Click], pointer: &[PointerPoint], duration: f64
             // The interactions in the merged group own the window; its centre
             // in time is the footage placement attaches the zoom to, so a
             // window that spans a cut still lands on the piece the activity is
-            // mostly over.
+            // mostly over. Their bounding box is the region the shot has to
+            // hold around the focus it opens on.
             let mut first = f64::INFINITY;
             let mut last = f64::NEG_INFINITY;
+            let mut min_x = f64::INFINITY;
+            let mut min_y = f64::INFINITY;
+            let mut max_x = f64::NEG_INFINITY;
+            let mut max_y = f64::NEG_INFINITY;
             for click in clicks.iter().filter(|click| in_window(click.time)) {
                 first = first.min(click.time);
                 last = last.max(click.time);
+                if click.position.0.is_finite() && click.position.1.is_finite() {
+                    min_x = min_x.min(click.position.0);
+                    max_x = max_x.max(click.position.0);
+                    min_y = min_y.min(click.position.1);
+                    max_y = max_y.max(click.position.1);
+                }
             }
             if !first.is_finite() {
                 return None;
             }
+            let region = if min_x.is_finite() {
+                (min_x, min_y, max_x, max_y)
+            } else {
+                (center.0, center.1, center.0, center.1)
+            };
             let center_time = (first + last) * 0.5;
             Some(AutoZoom {
                 start,
@@ -163,6 +231,7 @@ pub fn automatic_zooms(clicks: &[Click], pointer: &[PointerPoint], duration: f64
                 center_time,
                 center,
                 scale: DEFAULT_SCALE,
+                region,
             })
         })
         .collect()
@@ -204,6 +273,13 @@ mod tests {
         Click {
             time,
             position: (640.0, 360.0),
+        }
+    }
+
+    fn click_at(time: f64, x: f64, y: f64) -> Click {
+        Click {
+            time,
+            position: (x, y),
         }
     }
 
@@ -311,5 +387,48 @@ mod tests {
         let zooms = automatic_zooms(&[click(3.0)], &[], 20.0);
         assert!((zooms[0].center.0 - 640.0).abs() < 1e-9);
         assert!((zooms[0].center.1 - 360.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_covered_region_is_the_bounding_box_of_the_clicks() {
+        let zooms = automatic_zooms(
+            &[click_at(3.0, 400.0, 300.0), click_at(4.0, 1500.0, 700.0)],
+            &[],
+            20.0,
+        );
+        assert_eq!(zooms.len(), 1);
+        assert_eq!(zooms[0].region, (400.0, 300.0, 1500.0, 700.0));
+    }
+
+    #[test]
+    fn a_tight_target_keeps_the_model_default() {
+        let zooms = automatic_zooms(&[click(3.0)], &[], 20.0);
+        assert!((zooms[0].fitted_scale(1920.0, 1080.0).unwrap() - DEFAULT_SCALE).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_spread_pair_widens_to_hold_both_targets() {
+        let zooms = automatic_zooms(
+            &[click_at(3.0, 400.0, 300.0), click_at(4.0, 1500.0, 700.0)],
+            &[],
+            20.0,
+        );
+        let scale = zooms[0].fitted_scale(1920.0, 1080.0).unwrap();
+        assert!(scale < DEFAULT_SCALE, "expected a wider shot, got {scale}");
+        assert!(
+            scale >= MIN_ZOOM_SCALE,
+            "expected a usable shot, got {scale}"
+        );
+    }
+
+    #[test]
+    fn targets_at_opposite_edges_force_a_full_frame() {
+        let zooms = automatic_zooms(
+            &[click_at(3.0, 40.0, 40.0), click_at(4.0, 1880.0, 1040.0)],
+            &[],
+            20.0,
+        );
+        // No legal zoom can hold both edges, so the moment stays full-frame.
+        assert_eq!(zooms[0].fitted_scale(1920.0, 1080.0), None);
     }
 }

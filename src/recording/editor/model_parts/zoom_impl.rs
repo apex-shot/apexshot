@@ -663,7 +663,14 @@ impl VideoEditState {
             {
                 continue;
             }
-            let scale = zoom.scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+            // Hold every target the window covers. A workflow spread across
+            // several controls widens the shot rather than staying at the
+            // default and clipping a control off; when even the minimum useful
+            // zoom cannot hold them, the moment stays full-frame instead.
+            let Some(fitted) = zoom.fitted_scale(crop_w, crop_h) else {
+                continue;
+            };
+            let scale = fitted.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
             let center = clamp_zoom_center(crop, scale, zoom.center);
             candidates.push(ZoomCandidate {
                 start: timeline_start,
