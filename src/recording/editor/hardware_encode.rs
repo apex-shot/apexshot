@@ -149,7 +149,13 @@ fn probe_args(encoder: HardwareEncoder, device: Option<&str>, qp: u32) -> Vec<St
         "-f".into(),
         "lavfi".into(),
         "-i".into(),
-        "color=c=black:s=64x64:r=25:d=0.2".into(),
+        // The probe frame must exceed every hardware encoder's minimum
+        // dimension, or a driver that refuses small frames turns a working
+        // encoder into a false negative. 64x64 was too small: NVENC on a
+        // 595.91 driver rejects anything under 256, so every export fell back
+        // to libx264. 256x256 is accepted by NVENC and VA-API and is still
+        // cheap to encode.
+        "color=c=black:s=256x256:r=25:d=0.2".into(),
     ]);
     if encoder.needs_hwupload() {
         args.extend(["-vf".into(), VAAPI_UPLOAD_FILTER.to_string()]);
@@ -332,6 +338,21 @@ mod tests {
         assert!(
             !nvenc.iter().any(|arg| arg == VAAPI_UPLOAD_FILTER),
             "NVENC reads system-memory frames directly"
+        );
+    }
+
+    #[test]
+    fn the_probe_frame_is_large_enough_for_hardware_encoders() {
+        // A probe frame below an encoder's minimum dimension makes a working
+        // encoder look absent, which disables the whole opt-in path.
+        let nvenc = probe_args(HardwareEncoder::Nvenc, None, 25);
+        let source = nvenc
+            .iter()
+            .find(|arg| arg.starts_with("color=c=black:s="))
+            .expect("the probe names its lavfi source");
+        assert_eq!(
+            source, "color=c=black:s=256x256:r=25:d=0.2",
+            "the probe frame must be large enough for hardware encoders"
         );
     }
 
