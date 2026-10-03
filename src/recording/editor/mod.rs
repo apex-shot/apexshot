@@ -5,6 +5,7 @@ pub mod cursor_sprite;
 pub mod cursor_track;
 pub mod ffmpeg;
 pub mod gst_warp;
+pub(crate) mod hardware_encode;
 pub mod imported_pointer;
 pub mod model;
 pub mod project;
