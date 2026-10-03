@@ -1281,23 +1281,23 @@ mod tests {
     }
 
     #[test]
-    fn the_cursor_click_colour_opens_the_shared_fill_card_without_gradient() {
-        // The click colour is flat, so it reuses the editor's fill card for the
-        // picker chrome but hides the Gradient tab. A separate centred dialog
-        // would not match the rest of the editor.
+    fn the_cursor_click_effect_tab_offers_only_the_effect_picker() {
+        // The studied click effect has no size, opacity, intensity, or colour
+        // controls; the tab is the effect cards alone. The colour field stays
+        // in the model so legacy Spotlight/Echo projects still render.
         let source = include_str!("tool_sidebar_cursor.rs");
-        assert!(
-            source.contains("FillOps::for_click_color("),
-            "the click colour must use the shared fill card's colour ops"
-        );
-        assert!(
-            source.contains("&t(\"Click color\")"),
-            "the card must be titled for the click effect, not Custom Wallpaper"
-        );
-        assert!(
-            !source.contains("open_click_color_dialog"),
-            "the old centered colour dialog must be gone"
-        );
+        for removed in [
+            "CLICK_COLOR_PRESETS",
+            "open_click_color_dialog",
+            "FillOps::for_click_color(",
+            "cursor_slider_row(&t(\"Intensity\"))",
+            "cursor_slider_row(&t(\"Opacity\"))",
+        ] {
+            assert!(
+                !source.contains(removed),
+                "the click effect tab must not offer {removed}"
+            );
+        }
     }
 
     #[test]

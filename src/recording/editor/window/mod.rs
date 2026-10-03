@@ -813,7 +813,6 @@ mod tests {
                 "Custom Wallpaper",
                 FillOps::for_video(state),
                 Rc::new(|| {}),
-                true,
             );
             super::sweep_popovers_on_deactivate(&window);
 

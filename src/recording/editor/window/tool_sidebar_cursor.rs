@@ -1,13 +1,3 @@
-const CLICK_COLOR_PRESETS: [(u8, u8, u8); 7] = [
-    (255, 255, 255),
-    (24, 24, 28),
-    (176, 92, 56),
-    (80, 160, 255),
-    (72, 210, 140),
-    (255, 200, 80),
-    (240, 80, 110),
-];
-
 struct CursorPanel {
     widget: GtkBox,
     refresh: Rc<dyn Fn()>,
@@ -599,70 +589,6 @@ fn build_cursor_effects_tab(
     click_row.append(&echo_btn);
     body.append(&click_row);
 
-    let color_row = GtkBox::new(Orientation::Horizontal, 8);
-    color_row.add_css_class("recording-editor-click-color-row");
-    color_row.set_hexpand(true);
-    let color_label = Label::new(Some(&t("Color")));
-    color_label.add_css_class("recording-editor-zoom-classic-label");
-    color_label.set_xalign(0.0);
-    color_label.set_hexpand(true);
-    color_label.set_valign(Align::Center);
-    let swatch = Button::new();
-    swatch.add_css_class("recording-editor-click-color-swatch");
-    swatch.set_has_frame(false);
-    swatch.set_tooltip_text(Some(&t("Choose click color")));
-    let swatch_paint = DrawingArea::new();
-    swatch_paint.set_content_width(28);
-    swatch_paint.set_content_height(22);
-    swatch_paint.set_can_target(false);
-    swatch_paint.set_draw_func({
-        let state = state.clone();
-        move |_, cr, width, height| {
-            let (r, g, b) = state.lock().unwrap().cursor.click_color;
-            draw_color_chip(cr, width as f64, height as f64, (r, g, b), 6.0);
-        }
-    });
-    swatch.set_child(Some(&swatch_paint));
-    let hex = Label::new(Some("#FFFFFF"));
-    hex.add_css_class("recording-editor-click-color-hex");
-    hex.set_xalign(0.0);
-    hex.set_valign(Align::Center);
-    color_row.append(&color_label);
-    color_row.append(&swatch);
-    color_row.append(&hex);
-    body.append(&color_row);
-
-    // The click colour opens the editor's own fill card, titled for the click
-    // effect, instead of a separate centered colour dialog. The click colour
-    // is flat, so the Gradient tab is hidden.
-    crate::recording::editor::window::custom_wallpaper_popover::build_custom_fill_popover(
-        &body,
-        &swatch,
-        &t("Click color"),
-        crate::recording::editor::window::custom_wallpaper_popover::FillOps::for_click_color(
-            state.clone(),
-        ),
-        on_change.clone(),
-        false,
-    );
-
-    let dots = GtkBox::new(Orientation::Horizontal, 6);
-    dots.add_css_class("recording-editor-click-color-dots");
-    dots.set_halign(Align::End);
-    for color in CLICK_COLOR_PRESETS {
-        let dot = color_dot_button(color);
-        dot.connect_clicked({
-            let state = state.clone();
-            let on_change = on_change.clone();
-            move |_| {
-                state.lock().unwrap().cursor.click_color = color;
-                on_change();
-            }
-        });
-        dots.append(&dot);
-    }
-    body.append(&dots);
-
     let syncing = Rc::new(Cell::new(false));
     none_btn.connect_toggled({
         let state = state.clone();
@@ -727,15 +653,11 @@ fn build_cursor_effects_tab(
 
     let refresh = {
         let live = live.clone();
-        let swatch_paint = swatch_paint.clone();
-        let hex = hex.clone();
         let none_btn = none_btn.clone();
         let spotlight_btn = spotlight_btn.clone();
         let ripple_btn = ripple_btn.clone();
         let circle_btn = circle_btn.clone();
         let echo_btn = echo_btn.clone();
-        let swatch = swatch.clone();
-        let dots = dots.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let cursor = state.lock().unwrap().cursor;
@@ -749,17 +671,6 @@ fn build_cursor_effects_tab(
             }
             spotlight_btn.set_visible(matches!(cursor.click_effect, ClickEffect::Spotlight));
             echo_btn.set_visible(matches!(cursor.click_effect, ClickEffect::Echo));
-            let enabled = cursor.click_effect != ClickEffect::None;
-            // The studied circle has fixed greys and alphas, so colour does
-            // not apply to it.
-            let uses_colour = enabled && cursor.click_effect != ClickEffect::Circle;
-            swatch.set_sensitive(uses_colour);
-            dots.set_sensitive(uses_colour);
-            hex.set_text(&format!(
-                "#{:02X}{:02X}{:02X}",
-                cursor.click_color.0, cursor.click_color.1, cursor.click_color.2
-            ));
-            swatch_paint.queue_draw();
             live.queue_draw();
             syncing.set(false);
         }) as Rc<dyn Fn()>
@@ -769,29 +680,6 @@ fn build_cursor_effects_tab(
         widget: body,
         refresh,
     }
-}
-
-fn color_dot_button(color: (u8, u8, u8)) -> Button {
-    let button = Button::new();
-    button.add_css_class("recording-editor-click-color-dot");
-    button.set_has_frame(false);
-    let paint = DrawingArea::new();
-    paint.set_content_width(16);
-    paint.set_content_height(16);
-    paint.set_can_target(false);
-    paint.set_draw_func(move |_, cr, width, height| {
-        let cx = width as f64 / 2.0;
-        let cy = height as f64 / 2.0;
-        cr.set_source_rgb(
-            color.0 as f64 / 255.0,
-            color.1 as f64 / 255.0,
-            color.2 as f64 / 255.0,
-        );
-        cr.arc(cx, cy, 6.0, 0.0, std::f64::consts::TAU);
-        let _ = cr.fill();
-    });
-    button.set_child(Some(&paint));
-    button
 }
 
 fn draw_color_chip(

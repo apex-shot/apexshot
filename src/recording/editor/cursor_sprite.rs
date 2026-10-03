@@ -176,15 +176,7 @@ pub fn draw_click(
             settings.click_color,
             settings.click_scale,
         ),
-        ClickEffect::Ripple => draw_ripple(
-            cr,
-            x,
-            y,
-            progress,
-            frame_alpha,
-            settings.click_color,
-            reference_width,
-        ),
+        ClickEffect::Ripple => draw_ripple(cr, x, y, progress, frame_alpha, reference_width),
         ClickEffect::Circle => draw_circle(cr, x, y, progress, frame_alpha, reference_width),
         ClickEffect::Echo => draw_echo(
             cr,
@@ -205,27 +197,18 @@ pub fn draw_click(
 /// The studied ripple is a footage warp; this is a drawn stand-in that carries
 /// the studied lifetime, band, and outward travel but does not pull or split
 /// the video pixels. The warp itself is not ported. The studied effect has a
-/// fixed size and opacity, so the local size/opacity/intensity knobs do not
-/// apply; the ring keeps the user's click colour.
-pub fn draw_ripple(
-    cr: &Context,
-    x: f64,
-    y: f64,
-    progress: f64,
-    alpha: f64,
-    color: (u8, u8, u8),
-    reference_width: f64,
-) {
+/// fixed size, opacity, and no colour, so the local size/opacity/intensity and
+/// colour knobs do not apply; the ring is drawn in a neutral white.
+pub fn draw_ripple(cr: &Context, x: f64, y: f64, progress: f64, alpha: f64, reference_width: f64) {
     let progress = progress.clamp(0.0, 1.0);
     let amount = ripple_opacity(progress) * alpha.clamp(0.0, 1.0);
     if amount < 0.02 || reference_width <= 0.0 {
         return;
     }
-    let (r, g, b) = click_rgb(color);
     let radius = reference_width * ripple_radius_fraction(progress);
     let band = (reference_width * RIPPLE_BAND_01).max(1.0);
     cr.set_line_width(band);
-    cr.set_source_rgba(r, g, b, 0.82 * amount);
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.82 * amount);
     cr.arc(x, y, radius, 0.0, TAU);
     let _ = cr.stroke();
 }
@@ -953,7 +936,7 @@ mod tests {
     }
 
     #[test]
-    fn click_colour_affects_the_drawn_effects_but_not_the_studied_circle() {
+    fn click_colour_affects_only_the_legacy_effects() {
         let render = |effect, color| {
             render_click(CursorSettings {
                 click_effect: effect,
@@ -961,21 +944,19 @@ mod tests {
                 ..CursorSettings::default()
             })
         };
-        for effect in [
-            ClickEffect::Ripple,
-            ClickEffect::Spotlight,
-            ClickEffect::Echo,
-        ] {
+        for effect in [ClickEffect::Spotlight, ClickEffect::Echo] {
             assert_ne!(
                 render(effect, (255, 255, 255)),
                 render(effect, (255, 0, 0)),
                 "colour should affect {effect:?}"
             );
         }
-        assert_eq!(
-            render(ClickEffect::Circle, (255, 255, 255)),
-            render(ClickEffect::Circle, (255, 0, 0)),
-            "the studied circle uses fixed greys"
-        );
+        for effect in [ClickEffect::Ripple, ClickEffect::Circle] {
+            assert_eq!(
+                render(effect, (255, 255, 255)),
+                render(effect, (255, 0, 0)),
+                "the studied {effect:?} has no colour knob"
+            );
+        }
     }
 }

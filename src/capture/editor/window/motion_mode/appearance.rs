@@ -579,7 +579,6 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
         &t("Custom"),
         fill_ops,
         fill_changed,
-        true,
     );
 
     let image_page = GtkBox::new(Orientation::Vertical, 6);

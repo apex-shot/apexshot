@@ -98,28 +98,6 @@ pub(crate) struct FillOps {
 }
 
 impl FillOps {
-    /// The cursor click colour, as fill ops. The click effect is a flat colour,
-    /// so the gradient half is inert; callers hide the Gradient tab.
-    pub(crate) fn for_click_color(state: Arc<Mutex<VideoEditState>>) -> Self {
-        let get_color = {
-            let state = state.clone();
-            Rc::new(move || state.lock().unwrap().cursor.click_color)
-                as Rc<dyn Fn() -> (u8, u8, u8)>
-        };
-        let set_color = {
-            let state = state.clone();
-            Rc::new(move |color: (u8, u8, u8)| {
-                state.lock().unwrap().cursor.click_color = color;
-            }) as Rc<dyn Fn((u8, u8, u8))>
-        };
-        Self {
-            get_color,
-            set_color,
-            get_gradient: Rc::new(VideoGradient::default),
-            set_gradient: Rc::new(|_| {}),
-        }
-    }
-
     /// The video editor's background, as fill ops.
     pub(crate) fn for_video(state: Arc<Mutex<VideoEditState>>) -> Self {
         let get_color = {
@@ -352,7 +330,6 @@ pub(crate) fn build_custom_fill_popover(
     title: &str,
     fill: FillOps,
     on_change: Rc<dyn Fn()>,
-    show_gradient: bool,
 ) -> Popover {
     let popover = Popover::new();
     popover.add_css_class("recording-editor-custom-popover");
@@ -428,9 +405,6 @@ pub(crate) fn build_custom_fill_popover(
     };
     let color_tab = make_tab(&t("Color"));
     let gradient_tab = make_tab(&t("Gradient"));
-    // Callers that only edit a flat colour (the cursor click colour) hide the
-    // Gradient tab rather than offering a gradient that goes nowhere.
-    gradient_tab.set_visible(show_gradient);
     color_tab.set_group(Some(&gradient_tab));
     color_tab.set_active(true);
     tabs.append(&color_tab);
@@ -2623,7 +2597,6 @@ mod tests {
                 "Custom Wallpaper",
                 FillOps::for_video(state),
                 Rc::new(|| {}),
-                true,
             );
             let root = popover.child().expect("the popover has a body");
 
