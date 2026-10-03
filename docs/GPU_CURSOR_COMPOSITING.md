@@ -6,10 +6,11 @@ deliberately.
 
 ## The parity gap
 
-Screen Studio draws the cursor as part of the final composite: the capture
-carries no pointer, the recorder stores a compact position/kind track, and the
-compositor draws a sharp sprite at the output resolution with a shadow and a
-motion trail. ApexShot already stores the same kind of track (`PointerSidecar`),
+A compositor-drawn cursor — the target here — is drawn as part of the final
+composite: the capture carries no pointer, the recorder stores a compact
+position/kind track, and the compositor draws a sharp sprite at the output
+resolution with a shadow and a motion trail. ApexShot already stores the same
+kind of track (`PointerSidecar`),
 but composes the cursor on the CPU: one full-canvas RGBA frame per output frame,
 rendered with Cairo and streamed to ffmpeg (`cursor_track.rs` →
 `cursor_export.rs::write_rgba_track`), then blended with `overlay=0:0`
@@ -50,9 +51,9 @@ already uses (`build_sendcmd` / `zoom.cmd`).
   sprite bound is not always small. The win is best for the cursor-only case;
   the ring is transient.
 
-This stays a CPU path. It cuts cost but does not give Screen Studio's
-output-resolution sprite, because the sprite is still rasterized at one scale
-and overlaid.
+This stays a CPU path. It cuts cost but does not give the output-resolution
+sharpness of a compositor-drawn sprite, because the sprite is still rasterized
+at one scale and overlaid.
 
 ### B. Composite the sprite on the GPU
 
