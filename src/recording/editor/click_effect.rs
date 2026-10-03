@@ -7,11 +7,20 @@
 //! behaviour in our own terms.
 //!
 //! The studied ripple is a footage *warp*: an outward pull along a decaying
-//! ring, a calm-zone fade, and a chromatic split. Our cursor overlay is a
-//! transparent surface drawn on top of the video and never samples its pixels,
-//! so [`ripple_radius_fraction`] and [`ripple_opacity`] can only stand in for
-//! that warp as a drawn ring. This module does not claim parity with the warp;
-//! the pull and split constants are kept so the gap stays explicit.
+//! ring, a calm-zone fade, and a chromatic split. The pull is ported: the
+//! composite export runs [`ripple_pull_px`]'s maths as a GPU fragment shader
+//! (see `gst_warp`) that samples the footage at `pixel - pull`, so the visible
+//! band *is* the displaced region and no per-frame map is materialised.
+//! [`ripple_radius_fraction`] and [`ripple_opacity`] remain only as the
+//! drawn-ring fallback for paths that cannot run the warp (see
+//! `cursor_export`).
+//!
+//! The chromatic split is **not** implemented. The studied `split` separates
+//! the colour channels along the ring; reproducing it in the single shader
+//! pass would need a second and third full-resolution pass (one per channel),
+//! which is not worth the cost for a fringe the pull already carries. The
+//! split constants and formula are kept in [`ripple_split_px`] so the gap
+//! stays explicit rather than faked.
 
 /// Visible lifetime of the ripple, in milliseconds.
 pub const RIPPLE_VISIBLE_DURATION_MS: f64 = 1000.0;
@@ -121,6 +130,154 @@ pub fn ripple_opacity(progress: f64) -> f64 {
     ripple_bounce(progress).abs()
 }
 
+/// Signed displacement envelope at `age_ms` into the ripple's life.
+///
+/// The studied state function is `exp(-(age/1000) * 3) *
+/// sin((age/1000) * 9.4)`, and it is zero outside `0..=1000` ms. This is the
+/// same curve as [`ripple_bounce`], addressed in milliseconds so the warp can
+/// use the studied time base directly.
+pub fn ripple_bounce_at_ms(age_ms: f64) -> f64 {
+    if !(0.0..=RIPPLE_VISIBLE_DURATION_MS).contains(&age_ms) {
+        return 0.0;
+    }
+    let progress = age_ms / RIPPLE_VISIBLE_DURATION_MS;
+    (-RIPPLE_DECAY * progress).exp() * (RIPPLE_FREQUENCY * progress).sin()
+}
+
+/// Radius of the ripple ring at `age_ms`, in video pixels.
+///
+/// The studied radius grows from `pullSize01 * videoWidth` by
+/// `(age/1000) * videoWidth * 0.2`, and is zero outside `0..=1000` ms.
+pub fn ripple_radius_px(age_ms: f64, pull_size_01: f64, video_width: f64) -> f64 {
+    if !(0.0..=RIPPLE_VISIBLE_DURATION_MS).contains(&age_ms) {
+        return 0.0;
+    }
+    let progress = age_ms / RIPPLE_VISIBLE_DURATION_MS;
+    (pull_size_01 + progress * RIPPLE_RADIUS_GROWTH_01) * video_width
+}
+
+/// Ring envelope of the studied ripple: `exp(-((distance - radius)/band)^2 *
+/// 4)`, where `band = videoWidth * 0.05`. The caller skips pixels further than
+/// `band * 3` from the ring, so this is only evaluated on the band.
+pub fn ripple_ring(distance: f64, radius: f64, band: f64) -> f64 {
+    let ring_distance = (distance - radius) / band;
+    (-(ring_distance * ring_distance) * 4.0).exp()
+}
+
+/// Calm-zone fade of the studied ripple.
+///
+/// When the calm-zone radius (`pullSize01 * videoWidth`) is larger than half a
+/// pixel, the displacement fades out over the inner 35% of that radius; below
+/// half a pixel there is no calm zone and the fade is 1.
+pub fn ripple_calm_zone(distance: f64, pull_size_px: f64) -> f64 {
+    if pull_size_px > 0.5 {
+        smoothstep(pull_size_px * 0.35, pull_size_px, distance)
+    } else {
+        1.0
+    }
+}
+
+/// Shared terms of the studied per-pixel displacement.
+///
+/// Returns `(bounce, ring, calm_zone, direction_x, direction_y)` or `None`
+/// when the pixel is outside the band, sits exactly on the click, or the
+/// ripple is outside its visible window. Mirrors the studied shader's early
+/// returns.
+fn ripple_terms(
+    px: f64,
+    py: f64,
+    click_x: f64,
+    click_y: f64,
+    age_ms: f64,
+    pull_size_01: f64,
+    video_width: f64,
+) -> Option<(f64, f64, f64, f64, f64)> {
+    let bounce = ripple_bounce_at_ms(age_ms);
+    if bounce == 0.0 {
+        return None;
+    }
+    let radius = ripple_radius_px(age_ms, pull_size_01, video_width);
+    let band = video_width * RIPPLE_BAND_01;
+    let rel_x = px - click_x;
+    let rel_y = py - click_y;
+    let distance = (rel_x * rel_x + rel_y * rel_y).sqrt();
+    if (distance - radius).abs() > band * 3.0 {
+        return None;
+    }
+    let ring = ripple_ring(distance, radius, band);
+    if distance == 0.0 {
+        return None;
+    }
+    let calm_zone = ripple_calm_zone(distance, pull_size_01 * video_width);
+    Some((bounce, ring, calm_zone, rel_x / distance, rel_y / distance))
+}
+
+/// The studied footage pull at `age_ms` for a destination pixel, in video
+/// pixels.
+///
+/// The studied caller samples the footage at `pixel - pull`, so a remap map
+/// writes `x - pull_x` and `y - pull_y` as the source coordinate. The vector
+/// points along the ring's outward direction and its sign is the studied
+/// decaying bounce, so the displacement grows and reverses over the life of
+/// the effect.
+pub fn ripple_pull_px(
+    px: f64,
+    py: f64,
+    click_x: f64,
+    click_y: f64,
+    age_ms: f64,
+    pull_size_01: f64,
+    video_width: f64,
+) -> (f64, f64) {
+    match ripple_terms(px, py, click_x, click_y, age_ms, pull_size_01, video_width) {
+        Some((bounce, ring, calm_zone, dir_x, dir_y)) => {
+            let scalar = bounce * ring * video_width * RIPPLE_PULL_01 * calm_zone;
+            (dir_x * scalar, dir_y * scalar)
+        }
+        None => (0.0, 0.0),
+    }
+}
+
+/// The studied chromatic split at `age_ms` for a destination pixel, in video
+/// pixels.
+///
+/// Recorded for completeness only: the split is not applied by the export (see
+/// the module doc). The studied formula is `direction * |bounce| * ring *
+/// (1 - ring) * 4 * videoWidth * CHROMATIC_ABERRATION_01 * calmZoneFade`.
+pub fn ripple_split_px(
+    px: f64,
+    py: f64,
+    click_x: f64,
+    click_y: f64,
+    age_ms: f64,
+    pull_size_01: f64,
+    video_width: f64,
+) -> (f64, f64) {
+    match ripple_terms(px, py, click_x, click_y, age_ms, pull_size_01, video_width) {
+        Some((bounce, ring, calm_zone, dir_x, dir_y)) => {
+            let scalar = bounce.abs()
+                * ring
+                * (1.0 - ring)
+                * 4.0
+                * video_width
+                * RIPPLE_CHROMATIC_ABERRATION_01
+                * calm_zone;
+            (dir_x * scalar, dir_y * scalar)
+        }
+        None => (0.0, 0.0),
+    }
+}
+
+/// Read margin the studied renderer keeps around a warping effect, in video
+/// pixels: `ceil(max(videoWidth * readReach01, 16))`.
+///
+/// Our composite applies the warp to the full source frame before the crop and
+/// zoom, so the margin is the whole source rather than a padded texture; the
+/// value is recorded so the gap stays explicit.
+pub fn ripple_read_margin_px(video_width: f64) -> f64 {
+    (video_width * RIPPLE_READ_REACH_01).max(16.0).ceil()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,5 +369,151 @@ mod tests {
     #[test]
     fn ripple_read_reach_matches_the_studied_sum() {
         assert!(approx(RIPPLE_READ_REACH_01, 0.031));
+    }
+
+    #[test]
+    fn ripple_bounce_at_ms_matches_the_progress_curve_and_bounds() {
+        for step in 0..=20 {
+            let progress = step as f64 / 20.0;
+            assert!(approx(
+                ripple_bounce_at_ms(progress * RIPPLE_VISIBLE_DURATION_MS),
+                ripple_bounce(progress)
+            ));
+        }
+        // The studied state is defined on the closed window and zero outside.
+        assert!(approx(ripple_bounce_at_ms(-0.001), 0.0));
+        assert!(approx(ripple_bounce_at_ms(1000.001), 0.0));
+        // At the very start the sine is zero, so there is no displacement.
+        assert!(approx(ripple_bounce_at_ms(0.0), 0.0));
+        // The end of the closed window is the tail of the decaying sine, not
+        // an exact zero; the renderer drops the effect one tick earlier.
+        let end = ripple_bounce_at_ms(RIPPLE_VISIBLE_DURATION_MS);
+        assert!(end.abs() < 0.01 && end != 0.0);
+    }
+
+    #[test]
+    fn ripple_radius_px_grows_with_age_and_resolution() {
+        assert!(approx(ripple_radius_px(0.0, 0.04, 1000.0), 40.0));
+        assert!(approx(
+            ripple_radius_px(1000.0, 0.04, 1000.0),
+            (0.04 + RIPPLE_RADIUS_GROWTH_01) * 1000.0
+        ));
+        // The radius is in video pixels, so a wider video travels further.
+        assert!(approx(
+            ripple_radius_px(500.0, 0.04, 2000.0),
+            ripple_radius_px(500.0, 0.04, 1000.0) * 2.0
+        ));
+        assert_eq!(ripple_radius_px(-1.0, 0.04, 1000.0), 0.0);
+        assert_eq!(ripple_radius_px(1000.001, 0.04, 1000.0), 0.0);
+    }
+
+    #[test]
+    fn ripple_ring_peaks_on_the_ring_and_decays_with_the_band() {
+        let band = 50.0;
+        let radius = 60.0;
+        assert!(approx(ripple_ring(radius, radius, band), 1.0));
+        assert!(approx(
+            ripple_ring(radius + band, radius, band),
+            (-4.0_f64).exp()
+        ));
+        assert!(approx(
+            ripple_ring(radius - band, radius, band),
+            (-4.0_f64).exp()
+        ));
+        assert!(ripple_ring(radius + band * 3.0, radius, band) < 1e-15);
+    }
+
+    #[test]
+    fn ripple_calm_zone_fades_inside_the_pull_radius() {
+        // A calm-zone radius above half a pixel fades over its inner 35%.
+        assert!(approx(ripple_calm_zone(14.0, 40.0), 0.0));
+        assert!(approx(ripple_calm_zone(40.0, 40.0), 1.0));
+        assert!(ripple_calm_zone(27.0, 40.0) > 0.0);
+        assert!(ripple_calm_zone(27.0, 40.0) < 1.0);
+        // Below half a pixel the calm zone does not exist.
+        assert!(approx(ripple_calm_zone(0.0, 0.4), 1.0));
+    }
+
+    #[test]
+    fn ripple_pull_is_zero_at_the_click_outside_the_band_and_at_the_ends() {
+        let (w, pull_size) = (1000.0, 0.04);
+        // Exactly on the click the studied shader early-returns.
+        assert_eq!(
+            ripple_pull_px(100.0, 100.0, 100.0, 100.0, 100.0, pull_size, w),
+            (0.0, 0.0)
+        );
+        // Far outside the ring band there is no pull.
+        assert_eq!(
+            ripple_pull_px(900.0, 100.0, 100.0, 100.0, 100.0, pull_size, w),
+            (0.0, 0.0)
+        );
+        // At the click instant the bounce is zero.
+        assert_eq!(
+            ripple_pull_px(160.0, 100.0, 100.0, 100.0, 0.0, pull_size, w),
+            (0.0, 0.0)
+        );
+        // Past the visible lifetime there is no state at all.
+        assert_eq!(
+            ripple_pull_px(160.0, 100.0, 100.0, 100.0, 1000.001, pull_size, w),
+            (0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn ripple_pull_matches_the_studied_scalar_and_direction() {
+        let (w, pull_size) = (1000.0, 0.04);
+        let age = 100.0;
+        let radius = ripple_radius_px(age, pull_size, w);
+        let bounce = ripple_bounce_at_ms(age);
+        // A pixel directly to the right of the click, on the ring.
+        let (right_x, right_y) =
+            ripple_pull_px(100.0 + radius, 100.0, 100.0, 100.0, age, pull_size, w);
+        assert!(approx(right_x, bounce * w * RIPPLE_PULL_01));
+        assert!(approx(right_y, 0.0));
+        // A pixel above the click pulls upward instead.
+        let (up_x, up_y) = ripple_pull_px(100.0, 100.0 + radius, 100.0, 100.0, age, pull_size, w);
+        assert!(approx(up_x, 0.0));
+        assert!(approx(up_y, bounce * w * RIPPLE_PULL_01));
+        // Resolution scaling: the same fractional pull is twice the pixels.
+        let (wide, _) = ripple_pull_px(
+            200.0 + radius * 2.0,
+            200.0,
+            200.0,
+            200.0,
+            age,
+            pull_size,
+            2000.0,
+        );
+        assert!(approx(wide, right_x * 2.0));
+    }
+
+    #[test]
+    fn ripple_split_records_the_unapplied_chromatic_term() {
+        let (w, pull_size) = (1000.0, 0.04);
+        let age = 100.0;
+        let radius = ripple_radius_px(age, pull_size, w);
+        let band = w * RIPPLE_BAND_01;
+        // On the ring the split term is zero because ring * (1 - ring) is.
+        assert!(approx(
+            ripple_split_px(100.0 + radius, 100.0, 100.0, 100.0, age, pull_size, w).0,
+            0.0
+        ));
+        // Half a band off the ring the split is non-zero and chromatic.
+        let (split_x, _) = ripple_split_px(
+            100.0 + radius + band * 0.5,
+            100.0,
+            100.0,
+            100.0,
+            age,
+            pull_size,
+            w,
+        );
+        assert!(split_x > 0.0);
+    }
+
+    #[test]
+    fn ripple_read_margin_has_a_sixteen_pixel_floor() {
+        assert!(approx(ripple_read_margin_px(100.0), 16.0));
+        assert!(approx(ripple_read_margin_px(1000.0), 31.0));
     }
 }

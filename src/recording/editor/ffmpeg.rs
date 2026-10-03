@@ -56,6 +56,8 @@ struct ConvertCommand {
     /// run; not read directly in production builds.
     #[allow(dead_code)]
     scratch: Option<ScratchDir>,
+    /// The GPU warp feeding `-i pipe:3`, when the ripple is visible.
+    warp: Option<super::gst_warp::WarpSetup>,
 }
 
 impl std::ops::Deref for ConvertCommand {
@@ -473,7 +475,7 @@ pub fn run_convert(state: &VideoEditState, output_path: PathBuf) -> anyhow::Resu
     if kept.len() <= 1 {
         let (start, end) = kept.first().copied().unwrap();
         let command = build_single_convert_args(state, start, end, &output_path);
-        run_ffmpeg(&command.args, &output_path)?;
+        run_command(command, &output_path)?;
     } else {
         run_multi_segment_trim(state, &kept, &output_path, true)?;
     }
@@ -551,8 +553,20 @@ fn build_single_convert_args(
     end: f64,
     output_path: &Path,
 ) -> ConvertCommand {
+    let warp = super::gst_warp::WarpSetup::from_state(state, start, end)
+        .filter(|_| super::gst_warp::gl_warp_available());
+    build_single_convert_args_with(state, start, end, output_path, warp)
+}
+
+fn build_single_convert_args_with(
+    state: &VideoEditState,
+    start: f64,
+    end: f64,
+    output_path: &Path,
+    warp: Option<super::gst_warp::WarpSetup>,
+) -> ConvertCommand {
     if state.needs_composite() {
-        return build_composite_convert_args(state, start, end, output_path);
+        return build_composite_convert_args(state, start, end, output_path, warp);
     }
     let mut args = vec![
         "-y".into(),
@@ -581,6 +595,7 @@ fn build_single_convert_args(
     ConvertCommand {
         args,
         scratch: None,
+        warp: None,
     }
 }
 
@@ -589,6 +604,7 @@ fn build_composite_convert_args(
     start: f64,
     end: f64,
     output_path: &Path,
+    warp: Option<super::gst_warp::WarpSetup>,
 ) -> ConvertCommand {
     let scratch = ScratchDir::new("export", start);
     let cmd_path = scratch.path.join("zoom.cmd");
@@ -620,21 +636,35 @@ fn build_composite_convert_args(
     };
 
     let (eff_w, eff_h) = state.effective_source_dimensions();
-    let draw_cursor = state
+    let can_draw_cursor = state
         .sidecar
         .as_ref()
-        .is_some_and(|sidecar| sidecar.can_render_cursor_overlay())
+        .is_some_and(|sidecar| sidecar.can_render_cursor_overlay());
+    // The studied ripple's visible band is a footage displacement, not a drawn
+    // ring. When the GPU warp runs the overlay skips the ring; when it does
+    // not, the ring stays as the fallback.
+    let warp_requested = warp.is_some();
+    let draw_cursor = can_draw_cursor
         && super::cursor_export::write_rgba_track(
             state,
             start,
             end,
             video_w,
             video_h,
+            warp_requested,
             &cursor_path,
         )
         .is_ok();
+    // A cursor track that failed leaves the warp with nothing to click; drop
+    // the warp so the export never silently displaces the footage.
+    let warp = if draw_cursor { warp } else { None };
+    let warp_ripple = warp.is_some();
+    // The warp pipe adds an input ahead of the source, so every later input
+    // index shifts by one.
+    let input_offset = usize::from(warp_ripple);
+    let cursor_index = 1 + input_offset;
     let use_wallpaper = wallpaper_path.is_some() && (out_w != video_w || out_h != video_h);
-    let wallpaper_index = if draw_cursor { 2 } else { 1 };
+    let wallpaper_index = (if draw_cursor { 2 } else { 1 }) + input_offset;
 
     // A radius masks the card so the fill shows through the corners. The mask
     // is rasterized at the video rect because `alphamerge` copies its luma
@@ -649,11 +679,15 @@ fn build_composite_convert_args(
                 .map(|_| path)
         })
         .flatten();
-    let mask_index = 1 + usize::from(draw_cursor) + usize::from(use_wallpaper);
+    let mask_index = 1 + input_offset + usize::from(draw_cursor) + usize::from(use_wallpaper);
 
     // The freeze hold pads the source *before* the zoom crop. Cloning after
     // the crop would replay one already-composited frame for the whole tail
     // and the camera would sit still while the preview keeps moving.
+    //
+    // When the warp runs, `[0:v]` is the raw warped frames from the GStreamer
+    // pipe; otherwise it is the source. Either way the crop/zoom/background
+    // path below is unchanged.
     let mut filter = format!(
         "[0:v]{}sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1",
         freeze_tail_tpad(state)
@@ -670,7 +704,9 @@ fn build_composite_convert_args(
     // which shifts chroma on every cropped frame — the purple cast through
     // zooms — and makes the encoder write 4:4:4 output.
     if draw_cursor {
-        filter.push_str("[vc0];[vc0][1:v]overlay=0:0:eof_action=pass:shortest=0:format=yuv420");
+        filter.push_str(&format!(
+            "[vc0];[vc0][{cursor_index}:v]overlay=0:0:eof_action=pass:shortest=0:format=yuv420"
+        ));
     }
     // Turn the prepared video layer into a rounded card. The mask's luma
     // becomes the frame's alpha, so the fill behind it shows at the corners.
@@ -714,15 +750,31 @@ fn build_composite_convert_args(
         filter.push_str(&pad);
     }
 
-    let mut args = vec![
-        "-y".into(),
+    let mut args = vec!["-y".into()];
+    if warp_ripple {
+        // The GPU warp feeds raw yuv420p frames over the inherited fd as
+        // input 0; the source follows as input 1 for its audio.
+        args.extend([
+            "-f".into(),
+            "rawvideo".into(),
+            "-pix_fmt".into(),
+            "yuv420p".into(),
+            "-video_size".into(),
+            format!("{}x{}", state.metadata.width, state.metadata.height),
+            "-framerate".into(),
+            format!("{:.6}", state.metadata.export_frame_rate()),
+            "-i".into(),
+            "pipe:3".into(),
+        ]);
+    }
+    args.extend([
         "-ss".into(),
         format_seconds(start),
         "-to".into(),
         format_seconds(end),
         "-i".into(),
         state.metadata.path.to_string_lossy().into_owned(),
-    ];
+    ]);
     if draw_cursor {
         args.extend([
             "-f".into(),
@@ -769,6 +821,7 @@ fn build_composite_convert_args(
     ConvertCommand {
         args,
         scratch: Some(scratch),
+        warp,
     }
 }
 
@@ -974,10 +1027,10 @@ fn run_multi_segment_trim(
             ConvertCommand {
                 args: build_single_trim_args(&segment_state, start, end, &seg_path),
                 scratch: None,
+                warp: None,
             }
         };
-        run_ffmpeg(&command.args, &seg_path)
-            .with_context(|| format!("failed to export segment {i}"))?;
+        run_command(command, &seg_path).with_context(|| format!("failed to export segment {i}"))?;
         segment_files.push(seg_path);
     }
 
@@ -1006,6 +1059,60 @@ fn run_multi_segment_trim(
     run_ffmpeg(&concat_args, output_path)?;
 
     Ok(())
+}
+
+fn run_command(command: ConvertCommand, output_path: &Path) -> anyhow::Result<()> {
+    let ConvertCommand {
+        args,
+        scratch,
+        warp,
+    } = command;
+    // Hold the scratch tree until the command has finished reading it.
+    let _scratch = scratch;
+    match warp {
+        Some(setup) => run_ffmpeg_with_warp(&args, output_path, &setup),
+        None => run_ffmpeg(&args, output_path),
+    }
+}
+
+/// Run ffmpeg with the GPU warp feeding `-i pipe:3`.
+///
+/// The warp pipeline is started first (prebuffering its first frame), then
+/// ffmpeg inherits the pipe's read end as fd 3. The writer closes the pipe on
+/// EOS, so ffmpeg finalizes deterministically.
+fn run_ffmpeg_with_warp(
+    args: &[String],
+    output_path: &Path,
+    setup: &super::gst_warp::WarpSetup,
+) -> anyhow::Result<()> {
+    let mut warp = super::gst_warp::ActiveGstWarp::start(setup).map_err(|err| anyhow!(err))?;
+    let read_fd = warp
+        .take_read_fd()
+        .ok_or_else(|| anyhow!("warp pipeline has no pipe"))?;
+    let mut cmd = Command::new("ffmpeg");
+    cmd.args(args);
+    cmd.stdin(std::process::Stdio::null());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    crate::recording::backend::attach_audio_pipe_as_fd3(&mut cmd, read_fd);
+    let child = cmd.spawn().context("failed to run ffmpeg")?;
+    let output = child.wait_with_output()?;
+    let bus_error = warp.poll_bus_error();
+    if output.status.success() {
+        warp.stop();
+        return Ok(());
+    }
+    warp.abort();
+    let _ = std::fs::remove_file(output_path);
+    let detail = if let Some(bus_error) = bus_error {
+        format!("ffmpeg failed: {bus_error}")
+    } else {
+        format!(
+            "ffmpeg failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+    };
+    Err(anyhow!(detail))
 }
 
 fn run_ffmpeg(args: &[String], output_path: &Path) -> anyhow::Result<()> {
@@ -1328,6 +1435,187 @@ mod tests {
                 .any(|pair| pair == ["-framerate", "60.000000"]),
             "cursor track must enter at its generation rate: {args:?}"
         );
+    }
+
+    fn cursor_composite_state(
+        effect: crate::recording::editor::model::ClickEffect,
+    ) -> VideoEditState {
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+        };
+        let mut state = VideoEditState::new(VideoMetadata {
+            path: PathBuf::from("/tmp/input.mp4"),
+            duration_seconds: 10.0,
+            width: 64,
+            height: 48,
+            file_size_bytes: 100,
+            has_audio: false,
+            frame_rate: 30.0,
+        });
+        state.trim_start_seconds = 1.25;
+        state.trim_end_seconds = 1.6;
+        state.cursor.click_effect = effect;
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+        });
+        state.sidecar = Some(sidecar);
+        state
+    }
+
+    fn composite_graph(state: &VideoEditState) -> String {
+        let args = build_single_convert_args(
+            state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        args.windows(2)
+            .find(|pair| pair[0] == "-filter_complex")
+            .map(|pair| pair[1].clone())
+            .expect("the cursor overlay exports through the composite graph")
+    }
+
+    /// Build the command with a forced GPU warp, independent of whether the
+    /// test host has the GL plugins installed.
+    fn warp_args(state: &VideoEditState) -> Vec<String> {
+        let warp = crate::recording::editor::gst_warp::WarpSetup::from_state(
+            state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+        )
+        .expect("a visible ripple must build a warp");
+        build_single_convert_args_with(
+            state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+            Some(warp),
+        )
+        .args
+    }
+
+    fn graph_of(args: &[String]) -> &str {
+        args.windows(2)
+            .find(|pair| pair[0] == "-filter_complex")
+            .map(|pair| pair[1].as_str())
+            .expect("the cursor overlay exports through the composite graph")
+    }
+
+    /// Drop the scratch directory's per-command sequence number, which is the
+    /// only part of the graph that differs between two builds.
+    fn normalized_graph(graph: &str) -> &str {
+        graph
+            .split_once("zoom.cmd")
+            .map(|(_, rest)| rest)
+            .unwrap_or(graph)
+    }
+
+    #[test]
+    fn a_visible_ripple_displaces_the_footage_before_the_cursor_overlay() {
+        use crate::recording::editor::model::ClickEffect;
+        use crate::recording::editor::sidecar::ClickSample;
+
+        let mut state = cursor_composite_state(ClickEffect::Ripple);
+        state.sidecar.as_mut().unwrap().clicks.push(ClickSample {
+            t: 1.3,
+            x: 20.0,
+            y: 20.0,
+            button: 1,
+        });
+        let args = warp_args(&state);
+        let graph = graph_of(&args);
+        // The GPU warp feeds raw frames over the inherited pipe as input 0;
+        // the source follows as input 1, so the cursor overlay moves to 2.
+        assert!(
+            args.windows(2).any(|pair| pair == ["-i", "pipe:3"]),
+            "the warp must enter through the inherited pipe: {args:?}"
+        );
+        assert!(args.windows(2).any(|pair| pair == ["-pix_fmt", "yuv420p"]));
+        assert!(graph.contains("[0:v]sendcmd="), "{graph}");
+        assert!(
+            graph.contains("[vc0];[vc0][2:v]overlay=0:0:eof_action=pass:shortest=0:format=yuv420"),
+            "the cursor overlay must follow the warp input: {graph}"
+        );
+        assert!(
+            !graph.contains("remap"),
+            "the warp must not materialise maps: {graph}"
+        );
+    }
+
+    #[test]
+    fn a_clip_without_a_visible_ripple_keeps_the_plain_composite_graph() {
+        use crate::recording::editor::model::ClickEffect;
+
+        // Same sidecar and window, different effect and no clicks: the graph
+        // must be exactly the pre-warp graph, so the common path cannot
+        // regress.
+        let ripple = cursor_composite_state(ClickEffect::Ripple);
+        let off = cursor_composite_state(ClickEffect::None);
+        let graph = composite_graph(&ripple);
+        assert_eq!(
+            normalized_graph(&graph),
+            normalized_graph(&composite_graph(&off))
+        );
+        assert!(!graph.contains("remap"));
+        assert!(graph.contains("[0:v]sendcmd="));
+
+        // A click on an effect that is not the ripple stays on the drawn path.
+        use crate::recording::editor::sidecar::ClickSample;
+        let mut circle = cursor_composite_state(ClickEffect::Circle);
+        circle.sidecar.as_mut().unwrap().clicks.push(ClickSample {
+            t: 1.3,
+            x: 20.0,
+            y: 20.0,
+            button: 1,
+        });
+        assert_eq!(
+            normalized_graph(&composite_graph(&circle)),
+            normalized_graph(&graph)
+        );
+    }
+
+    #[test]
+    fn a_ripple_warp_keeps_the_wallpaper_and_mask_inputs_in_order() {
+        use crate::recording::editor::model::{ClickEffect, VideoBackground};
+        use crate::recording::editor::sidecar::ClickSample;
+
+        let dir =
+            std::env::temp_dir().join(format!("apexshot-ripple-wallpaper-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let wallpaper = dir.join("wallpaper.jpg");
+        std::fs::write(&wallpaper, b"fake-jpg").unwrap();
+
+        let mut state = cursor_composite_state(ClickEffect::Ripple);
+        state.background = VideoBackground::Wallpaper(wallpaper);
+        state.background_padding = 20.0;
+        state.background_corner_radius = 10.0;
+        state.sidecar.as_mut().unwrap().clicks.push(ClickSample {
+            t: 1.3,
+            x: 20.0,
+            y: 20.0,
+            button: 1,
+        });
+        let args = warp_args(&state);
+        let graph = graph_of(&args);
+        // Input order is warp pipe, source, cursor, wallpaper, mask.
+        assert!(
+            graph.contains("[vc0];[vc0][2:v]overlay="),
+            "cursor must be input 2: {graph}"
+        );
+        assert!(
+            graph.contains("[3:v]scale="),
+            "wallpaper must be input 3: {graph}"
+        );
+        assert!(
+            graph.contains("[4:v]alphamerge"),
+            "mask must be input 4: {graph}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
