@@ -110,23 +110,42 @@ fn deb_package_includes_background_gradient_assets() {
     );
 }
 
+/// Every `.js` module beside `shell-overlay.js` is part of the shipped
+/// extension and must reach the package.
+///
+/// The names are read from the directory instead of being written out here: a
+/// hand-maintained list is exactly how `press-tracker.js` was left out of every
+/// package while these tests stayed green.
+fn gnome_extension_js_files() -> Vec<String> {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("gnome-extension");
+    let mut files: Vec<String> = std::fs::read_dir(&dir)
+        .expect("gnome-extension directory must exist")
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+        .filter(|name| name.ends_with(".js"))
+        .collect();
+    files.sort();
+    assert!(
+        files.len() > 1,
+        "expected the GNOME extension modules in {dir:?}, found {files:?}"
+    );
+    files
+}
+
 #[test]
 fn deb_package_includes_gnome_extension() {
     let cargo_toml = include_str!("../Cargo.toml");
-    for file in [
-        "metadata.json",
-        "extension.js",
-        "cursor-classifier.js",
-        "shell-overlay.js",
-        "window-list.js",
-        "preview-stacking.js",
-    ] {
+    for file in gnome_extension_js_files() {
         let asset = format!("gnome-extension/{file}");
         assert!(
             cargo_toml.contains(&asset),
             "release .deb must include {asset}"
         );
     }
+    assert!(
+        cargo_toml.contains("gnome-extension/metadata.json"),
+        "release .deb must include the extension metadata"
+    );
     assert!(
         cargo_toml.contains(
             "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/"
@@ -138,16 +157,11 @@ fn deb_package_includes_gnome_extension() {
 #[test]
 fn dev_deb_reinstall_refreshes_gnome_extension() {
     let reinstall_script = include_str!("../reinstall-dev-deb.sh");
-    for file in [
-        "metadata.json",
-        "extension.js",
-        "cursor-classifier.js",
-        "shell-overlay.js",
-        "window-list.js",
-        "preview-stacking.js",
-    ] {
+    let mut expected = vec!["metadata.json".to_string()];
+    expected.extend(gnome_extension_js_files());
+    for file in expected {
         assert!(
-            reinstall_script.contains(file),
+            reinstall_script.contains(file.as_str()),
             "development .deb reinstall must refresh GNOME extension file {file}"
         );
     }
