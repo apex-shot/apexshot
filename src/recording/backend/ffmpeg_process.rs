@@ -5,15 +5,19 @@ use super::super::{
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-/// Give the ffmpeg child the audio pipe as fd 3 (`-i pipe:3`).
+/// Give the ffmpeg child `read_fd` as `target_fd` (`-i pipe:<target_fd>`).
 ///
 /// The `OwnedFd` is moved into the pre_exec closure so the parent keeps the
 /// read end open until after `spawn()` forks; the parent's copy then closes
-/// with the closure, leaving ffmpeg's fd 3 as the only reader (EOF propagates
-/// when the GStreamer writer thread exits).
+/// with the closure, leaving ffmpeg's `target_fd` as the only reader (EOF
+/// propagates when the writer thread exits).
+///
+/// Callers attach one pipe per stream: fd 3 carries the audio pipe and the GPU
+/// ripple warp, fd 4 carries the streamed cursor track.
 #[cfg(unix)]
-pub(in crate::recording) fn attach_audio_pipe_as_fd3(
+pub(in crate::recording) fn attach_pipe_as_fd(
     cmd: &mut std::process::Command,
+    target_fd: i32,
     read_fd: std::os::fd::OwnedFd,
 ) {
     use std::os::fd::AsRawFd;
@@ -21,18 +25,18 @@ pub(in crate::recording) fn attach_audio_pipe_as_fd3(
     unsafe {
         cmd.pre_exec(move || {
             let fd = read_fd.as_raw_fd();
-            if fd != 3 && libc::dup2(fd, 3) < 0 {
+            if fd != target_fd && libc::dup2(fd, target_fd) < 0 {
                 return Err(std::io::Error::last_os_error());
             }
             // dup2 clears CLOEXEC on its target, but dup2(x, x) is a no-op —
-            // clear it explicitly so fd 3 survives exec.
-            if libc::fcntl(3, libc::F_SETFD, 0) < 0 {
+            // clear it explicitly so the fd survives exec.
+            if libc::fcntl(target_fd, libc::F_SETFD, 0) < 0 {
                 return Err(std::io::Error::last_os_error());
             }
             // Drop the original read end so ffmpeg does not keep a second copy
             // of the pipe. Extra copies (especially a leftover write end) stop
             // EOF from ever arriving, so ffmpeg hangs after recording stops.
-            if fd != 3 && libc::close(fd) < 0 {
+            if fd != target_fd && libc::close(fd) < 0 {
                 return Err(std::io::Error::last_os_error());
             }
             Ok(())
@@ -40,12 +44,30 @@ pub(in crate::recording) fn attach_audio_pipe_as_fd3(
     }
 }
 
+/// Give the ffmpeg child the audio pipe as fd 3 (`-i pipe:3`).
+#[cfg(unix)]
+pub(in crate::recording) fn attach_audio_pipe_as_fd3(
+    cmd: &mut std::process::Command,
+    read_fd: std::os::fd::OwnedFd,
+) {
+    attach_pipe_as_fd(cmd, 3, read_fd);
+}
+
 #[cfg(not(unix))]
-pub(super) fn attach_audio_pipe_as_fd3(
+pub(in crate::recording) fn attach_pipe_as_fd(
     _cmd: &mut std::process::Command,
+    _target_fd: i32,
     read_fd: std::os::fd::OwnedFd,
 ) {
     drop(read_fd);
+}
+
+#[cfg(not(unix))]
+pub(in crate::recording) fn attach_audio_pipe_as_fd3(
+    cmd: &mut std::process::Command,
+    read_fd: std::os::fd::OwnedFd,
+) {
+    attach_pipe_as_fd(cmd, 3, read_fd);
 }
 
 pub(super) fn ffmpeg_error_detail(stderr: &str) -> String {

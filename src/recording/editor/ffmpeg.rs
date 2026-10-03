@@ -23,10 +23,10 @@ fn unique_export_dir(kind: &str, start: f64) -> PathBuf {
 }
 
 /// A scratch directory that deletes itself when dropped, so an export's
-/// intermediate files (`zoom.cmd`, `cursor.rgba`, the rounded mask) live
-/// exactly as long as the ffmpeg command that reads them — on success, on
-/// error, and on an early `?`. Without it a composite export leaked its
-/// multi-gigabyte `cursor.rgba` into the temp directory forever.
+/// intermediate files (`zoom.cmd`, the rounded mask) live exactly as long as
+/// the ffmpeg command that reads them — on success, on error, and on an early
+/// `?`. The cursor track no longer needs one: it is rendered straight into a
+/// pipe, so a multi-gigabyte `cursor.rgba` is never created.
 #[derive(Debug)]
 struct ScratchDir {
     path: PathBuf,
@@ -58,6 +58,8 @@ struct ConvertCommand {
     scratch: Option<ScratchDir>,
     /// The GPU warp feeding `-i pipe:3`, when the ripple is visible.
     warp: Option<super::gst_warp::WarpSetup>,
+    /// The cursor overlay track feeding `-i pipe:4`, when one is drawn.
+    cursor: Option<super::cursor_track::ActiveCursorTrack>,
 }
 
 impl std::ops::Deref for ConvertCommand {
@@ -596,6 +598,7 @@ fn build_single_convert_args_with(
         args,
         scratch: None,
         warp: None,
+        cursor: None,
     }
 }
 
@@ -608,7 +611,6 @@ fn build_composite_convert_args(
 ) -> ConvertCommand {
     let scratch = ScratchDir::new("export", start);
     let cmd_path = scratch.path.join("zoom.cmd");
-    let cursor_path = scratch.path.join("cursor.rgba");
     // The held tail is part of the composition, so the camera command file has
     // to cover it too: preview keeps moving the zoom through a freeze, and the
     // export must match.
@@ -644,19 +646,29 @@ fn build_composite_convert_args(
     // ring. When the GPU warp runs the overlay skips the ring; when it does
     // not, the ring stays as the fallback.
     let warp_requested = warp.is_some();
-    let draw_cursor = can_draw_cursor
-        && super::cursor_export::write_rgba_track(
+    // The track is streamed, so nothing is rendered until ffmpeg asks for it:
+    // starting the writer is what decides whether a cursor can be drawn at all.
+    let mut cursor_track = if can_draw_cursor {
+        match super::cursor_track::ActiveCursorTrack::start(
             state,
             start,
             end,
             video_w,
             video_h,
             warp_requested,
-            &cursor_path,
-        )
-        .is_ok();
-    // A cursor track that failed leaves the warp with nothing to click; drop
-    // the warp so the export never silently displaces the footage.
+        ) {
+            Ok(track) => Some(track),
+            Err(err) => {
+                eprintln!("[export] cursor track unavailable, exporting without it: {err}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+    let draw_cursor = cursor_track.is_some();
+    // A cursor track that could not start leaves the warp with nothing to
+    // click; drop the warp so the export never silently displaces the footage.
     let warp = if draw_cursor { warp } else { None };
     let warp_ripple = warp.is_some();
     // The warp pipe adds an input ahead of the source, so every later input
@@ -786,7 +798,7 @@ fn build_composite_convert_args(
             "-framerate".into(),
             format!("{:.6}", state.metadata.export_frame_rate()),
             "-i".into(),
-            cursor_path.to_string_lossy().into_owned(),
+            "pipe:4".into(),
         ]);
     }
     if let Some(wallpaper) = wallpaper_path.as_ref().filter(|_| use_wallpaper) {
@@ -822,6 +834,7 @@ fn build_composite_convert_args(
         args,
         scratch: Some(scratch),
         warp,
+        cursor: cursor_track.take(),
     }
 }
 
@@ -1028,6 +1041,7 @@ fn run_multi_segment_trim(
                 args: build_single_trim_args(&segment_state, start, end, &seg_path),
                 scratch: None,
                 warp: None,
+                cursor: None,
             }
         };
         run_command(command, &seg_path).with_context(|| format!("failed to export segment {i}"))?;
@@ -1066,51 +1080,79 @@ fn run_command(command: ConvertCommand, output_path: &Path) -> anyhow::Result<()
         args,
         scratch,
         warp,
+        cursor,
     } = command;
     // Hold the scratch tree until the command has finished reading it.
     let _scratch = scratch;
-    match warp {
-        Some(setup) => run_ffmpeg_with_warp(&args, output_path, &setup),
-        None => run_ffmpeg(&args, output_path),
+    if warp.is_none() && cursor.is_none() {
+        return run_ffmpeg(&args, output_path);
     }
+    run_ffmpeg_with_inputs(&args, output_path, warp, cursor)
 }
 
-/// Run ffmpeg with the GPU warp feeding `-i pipe:3`.
+/// Run ffmpeg with the GPU warp on `pipe:3` and the cursor track on `pipe:4`.
 ///
-/// The warp pipeline is started first (prebuffering its first frame), then
-/// ffmpeg inherits the pipe's read end as fd 3. The writer closes the pipe on
-/// EOS, so ffmpeg finalizes deterministically.
-fn run_ffmpeg_with_warp(
+/// Both writers are started before ffmpeg is spawned, and each closes its pipe
+/// at EOS, so ffmpeg finalizes deterministically instead of waiting on an input
+/// that never ends. Neither stream is materialised on disk: the export holds
+/// one frame in flight per input, which is what keeps a composite export's
+/// memory bounded instead of scaling with the clip's length.
+fn run_ffmpeg_with_inputs(
     args: &[String],
     output_path: &Path,
-    setup: &super::gst_warp::WarpSetup,
+    warp_setup: Option<super::gst_warp::WarpSetup>,
+    mut cursor: Option<super::cursor_track::ActiveCursorTrack>,
 ) -> anyhow::Result<()> {
-    let mut warp = super::gst_warp::ActiveGstWarp::start(setup).map_err(|err| anyhow!(err))?;
-    let read_fd = warp
-        .take_read_fd()
-        .ok_or_else(|| anyhow!("warp pipeline has no pipe"))?;
+    let mut warp = match warp_setup {
+        Some(setup) => {
+            Some(super::gst_warp::ActiveGstWarp::start(&setup).map_err(|err| anyhow!(err))?)
+        }
+        None => None,
+    };
+
     let mut cmd = Command::new("ffmpeg");
     cmd.args(args);
     cmd.stdin(std::process::Stdio::null());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
-    crate::recording::backend::attach_audio_pipe_as_fd3(&mut cmd, read_fd);
+    if let Some(active) = warp.as_mut() {
+        let read_fd = active
+            .take_read_fd()
+            .ok_or_else(|| anyhow!("warp pipeline has no pipe"))?;
+        crate::recording::backend::attach_pipe_as_fd(&mut cmd, 3, read_fd);
+    }
+    if let Some(active) = cursor.as_mut() {
+        let read_fd = active
+            .take_read_fd()
+            .ok_or_else(|| anyhow!("cursor track has no pipe"))?;
+        crate::recording::backend::attach_pipe_as_fd(&mut cmd, 4, read_fd);
+    }
+
     let child = cmd.spawn().context("failed to run ffmpeg")?;
     let output = child.wait_with_output()?;
-    let bus_error = warp.poll_bus_error();
+    // ffmpeg has exited, so the cursor writer has either finished or hit the
+    // closed pipe. Joining it here means the track never outlives the export.
+    if let Some(active) = cursor.as_mut() {
+        active.finish();
+    }
+    let bus_error = warp.as_ref().and_then(|active| active.poll_bus_error());
+
     if output.status.success() {
-        warp.stop();
+        if let Some(active) = warp.take() {
+            active.stop();
+        }
         return Ok(());
     }
-    warp.abort();
+    if let Some(active) = warp.as_mut() {
+        active.abort();
+    }
     let _ = std::fs::remove_file(output_path);
-    let detail = if let Some(bus_error) = bus_error {
-        format!("ffmpeg failed: {bus_error}")
-    } else {
-        format!(
+    let detail = match bus_error {
+        Some(bus_error) => format!("ffmpeg failed: {bus_error}"),
+        None => format!(
             "ffmpeg failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
-        )
+        ),
     };
     Err(anyhow!(detail))
 }
@@ -2072,6 +2114,104 @@ mod tests {
         (output.stdout[0], output.stdout[1], output.stdout[2])
     }
 
+    /// The cursor overlay is streamed into ffmpeg through a pipe rather than
+    /// written to a scratch file.
+    ///
+    /// This is the test that proves the pipe works end to end. If the fd
+    /// plumbing were wrong the export would hang, and if the stream arrived
+    /// empty `eof_action=pass` would hand back an output identical to one with
+    /// no cursor overlay at all — both of which this catches.
+    #[test]
+    fn a_composite_export_streams_the_cursor_track_into_the_output() {
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+        };
+
+        if Command::new("ffmpeg").arg("-version").output().is_err() {
+            return;
+        }
+        let dir = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("test-fixtures");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join(format!("apexshot-cursor-stream-source-{}.mp4", std::process::id()));
+        let with_cursor = dir.join(format!("apexshot-cursor-stream-on-{}.mp4", std::process::id()));
+        let without = dir.join(format!("apexshot-cursor-stream-off-{}.mp4", std::process::id()));
+
+        let created = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x240:rate=30:duration=1",
+                "-pix_fmt",
+                "yuv420p",
+                source.to_str().unwrap(),
+            ])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false);
+        if !created {
+            return;
+        }
+
+        // The same export twice: once with a pointer track, once without.
+        let plain = VideoEditState::new(probe_metadata(&source).expect("probe the fixture"));
+        export_edited_to(&plain, without.clone()).expect("export without a cursor");
+
+        let mut tracked = VideoEditState::new(probe_metadata(&source).expect("probe the fixture"));
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0..30 {
+            sidecar.pointer.push(PointerSample {
+                t: index as f64 / 30.0,
+                x: 160.0,
+                y: 120.0,
+                kind: CursorKind::Default,
+            });
+        }
+        tracked.sidecar = Some(sidecar);
+        export_edited_to(&tracked, with_cursor.clone()).expect("export with a cursor");
+
+        let plain_frame = first_frame_rgba(&without);
+        let cursor_frame = first_frame_rgba(&with_cursor);
+        assert!(!plain_frame.is_empty(), "the exported frames must decode");
+        assert_eq!(
+            plain_frame.len(),
+            cursor_frame.len(),
+            "both exports keep the same geometry"
+        );
+        assert_ne!(
+            plain_frame, cursor_frame,
+            "the streamed cursor track must change the exported pixels"
+        );
+    }
+
+    /// Decode frame 0 of `path` as RGBA so two exports can be compared.
+    fn first_frame_rgba(path: &Path) -> Vec<u8> {
+        let output = Command::new("ffmpeg")
+            .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-i"])
+            .arg(path)
+            .args([
+                "-frames:v",
+                "1",
+                "-pix_fmt",
+                "rgba",
+                "-f",
+                "rawvideo",
+                "-",
+            ])
+            .output()
+            .expect("decode a frame");
+        output.stdout
+    }
+
     #[test]
     fn framed_export_fills_the_letterbox_end_to_end() {
         if Command::new("ffmpeg").arg("-version").output().is_err() {
@@ -2424,10 +2564,9 @@ mod freeze_tests {
 
     #[test]
     fn a_composite_export_removes_its_scratch_dir_when_the_command_drops() {
-        // A zoom forces the composite graph, which writes `zoom.cmd` — and, for
-        // a real recording, a multi-gigabyte `cursor.rgba` — into a temp dir.
-        // The command owns that dir; dropping it must delete the whole tree so
-        // an export cannot leak its scratch into the user's temp directory.
+        // A zoom forces the composite graph, which writes `zoom.cmd` into a
+        // scratch dir. The command owns that dir; dropping it must delete the
+        // whole tree so an export cannot leak its scratch behind.
         let mut s = state();
         s.zoom_clips
             .push(crate::recording::editor::model::ZoomClip {

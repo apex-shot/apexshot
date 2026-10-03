@@ -5,16 +5,21 @@ use super::model::{
 use super::sidecar::CursorMotion;
 use gtk4::cairo::{Context, Format, ImageSurface, Operator};
 use std::io::Write;
-use std::path::Path;
 
-pub fn write_rgba_track(
+/// Render the cursor overlay as raw RGBA frames, one per output frame.
+///
+/// Frames go to `sink` rather than to a file: a composite export streams them
+/// into ffmpeg through a pipe (see [`super::cursor_track`]), so a track that
+/// runs to gigabytes never exists on disk. Callers that only want the bytes can
+/// pass a `Vec<u8>`.
+pub fn write_rgba_track<W: Write>(
     state: &VideoEditState,
     start: f64,
     end: f64,
     width: u32,
     height: u32,
     skip_ripple_ring: bool,
-    path: &Path,
+    sink: &mut W,
 ) -> anyhow::Result<()> {
     let Some(sidecar) = state.sidecar.as_ref() else {
         anyhow::bail!("no pointer sidecar");
@@ -38,7 +43,6 @@ pub fn write_rgba_track(
         speed: cursor.speed,
     };
     let mut surface = ImageSurface::create(Format::ARgb32, width as i32, height as i32)?;
-    let mut file = std::fs::File::create(path)?;
     let mut pixels = vec![0u8; (width * height * 4) as usize];
     for index in 0..frames {
         let source_t = start + index as f64 / frame_rate;
@@ -99,17 +103,17 @@ pub fn write_rgba_track(
         }
         drop(cr);
         surface.flush();
-        write_rgba_frame(&mut surface, width, height, &mut pixels, &mut file)?;
+        write_rgba_frame(&mut surface, width, height, &mut pixels, sink)?;
     }
     Ok(())
 }
 
-fn write_rgba_frame(
+fn write_rgba_frame<W: Write>(
     surface: &mut ImageSurface,
     width: u32,
     height: u32,
     rgba: &mut [u8],
-    file: &mut std::fs::File,
+    sink: &mut W,
 ) -> anyhow::Result<()> {
     let stride = surface.stride() as usize;
     let data = surface.data()?;
@@ -135,7 +139,7 @@ fn write_rgba_frame(
         }
     }
     drop(data);
-    file.write_all(rgba)?;
+    sink.write_all(rgba)?;
     Ok(())
 }
 
@@ -174,15 +178,11 @@ mod tests {
             kind: CursorKind::Hand,
         });
         state.sidecar = Some(sidecar);
-        let dir = std::env::temp_dir().join(format!("apexshot-cursor-rgba-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("cursor.rgba");
-        write_rgba_track(&state, 0.0, 0.2, 80, 60, false, &path).unwrap();
-        let bytes = std::fs::read(&path).unwrap();
+        let mut bytes = Vec::new();
+        write_rgba_track(&state, 0.0, 0.2, 80, 60, false, &mut bytes).unwrap();
         let frames = ((0.2 * state.metadata.export_frame_rate()).ceil() as usize).max(1);
         assert_eq!(bytes.len(), frames * 80 * 60 * 4);
         assert!(bytes.iter().any(|b| *b != 0));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -213,32 +213,24 @@ mod tests {
         state.sidecar = Some(sidecar);
         state.cursor.click_effect = ClickEffect::Ripple;
 
-        let dir =
-            std::env::temp_dir().join(format!("apexshot-cursor-rgba-ring-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let ring_path = dir.join("ring.rgba");
-        let warp_path = dir.join("warp.rgba");
         // `false` is the fallback: the warp is not running, so the ring draws.
-        write_rgba_track(&state, 0.1, 0.2, 80, 60, false, &ring_path).unwrap();
+        let mut ring = Vec::new();
+        write_rgba_track(&state, 0.1, 0.2, 80, 60, false, &mut ring).unwrap();
         // `true` is the composite: the displaced band is the ripple, so the
         // overlay must not double it with a ring.
-        write_rgba_track(&state, 0.1, 0.2, 80, 60, true, &warp_path).unwrap();
-        let lit = |path: &Path| {
-            std::fs::read(path)
-                .unwrap()
+        let mut warp = Vec::new();
+        write_rgba_track(&state, 0.1, 0.2, 80, 60, true, &mut warp).unwrap();
+        let lit = |track: &[u8]| {
+            track
                 .chunks_exact(4)
                 .filter(|pixel| pixel[3] != 0)
                 .count()
         };
         assert!(
-            lit(&ring_path) > lit(&warp_path),
+            lit(&ring) > lit(&warp),
             "the fallback must draw the ripple ring"
         );
-        assert!(
-            lit(&warp_path) > 0,
-            "the cursor must still render with the warp"
-        );
-        let _ = std::fs::remove_dir_all(&dir);
+        assert!(lit(&warp) > 0, "the cursor must still render with the warp");
     }
 
     #[test]
@@ -267,16 +259,11 @@ mod tests {
             kind: CursorKind::Default,
         });
         state.sidecar = Some(sidecar);
-        let dir =
-            std::env::temp_dir().join(format!("apexshot-cursor-rgba-fps-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let path = dir.join("cursor.rgba");
-        write_rgba_track(&state, 0.0, 0.2, 80, 60, false, &path).unwrap();
-        let bytes = std::fs::read(&path).unwrap();
+        let mut bytes = Vec::new();
+        write_rgba_track(&state, 0.0, 0.2, 80, 60, false, &mut bytes).unwrap();
         // 0.2 s at the source's 60 fps is 12 frames — twice the old fixed
         // 30 fps grid, so the cursor no longer steps in high-fps exports.
         assert_eq!(bytes.len(), 12 * 80 * 60 * 4);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -301,9 +288,9 @@ mod tests {
         sidecar.mark_inferred_from_video();
         state.sidecar = Some(sidecar);
 
-        let path = std::env::temp_dir().join("apexshot-inferred-cursor.rgba");
-        let error = write_rgba_track(&state, 0.0, 0.2, 80, 60, false, &path).unwrap_err();
+        let mut sink = Vec::new();
+        let error = write_rgba_track(&state, 0.0, 0.2, 80, 60, false, &mut sink).unwrap_err();
         assert!(error.to_string().contains("inferred"));
-        assert!(!path.exists());
+        assert!(sink.is_empty(), "a rejected track must write nothing");
     }
 }
