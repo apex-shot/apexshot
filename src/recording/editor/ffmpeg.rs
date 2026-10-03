@@ -558,6 +558,167 @@ pub fn run_convert(state: &VideoEditState, output_path: PathBuf) -> anyhow::Resu
     Ok(output_path)
 }
 
+/// Extra headroom on top of the estimated output size.
+///
+/// The estimate is deliberately generous. Refusing an export that would have
+/// fit costs the user one confusing error; starting one that cannot fit writes
+/// a truncated file and leaves the disk full. A stream copy writes roughly the
+/// source's bytes again, but a re-encode's CRF target is a quality setting, not
+/// a byte budget — busy footage can come out larger than the recording it came
+/// from — so the margin absorbs that instead of pretending to predict it.
+const EXPORT_SIZE_MARGIN: f64 = 1.5;
+
+/// The least free space an export is ever held to. Without it a very short
+/// clip could pass a check against a disk with a handful of megabytes left,
+/// which is not enough for the container, the audio, or the encoder's tail.
+const MIN_EXPORT_RESERVE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Free memory below which an encode is worth warning about. This is not a
+/// gate: ffmpeg streams its inputs, so memory stays flat no matter how long
+/// the clip is, and a machine with this much free memory will usually finish.
+/// It is a heads-up for the small-RAM case, not a refusal.
+const TIGHT_MEMORY_BYTES: u64 = 512 * 1024 * 1024;
+
+const BYTES_PER_GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+
+/// Whether `available` bytes of free space can hold a `needed`-byte export.
+///
+/// Pure so the decision can be tested without touching a filesystem: the
+/// interesting cases are all near the boundary, where a real disk is awkward
+/// to arrange.
+fn export_fits(available: u64, needed: u64) -> bool {
+    available >= needed
+}
+
+/// Estimate an export's size in bytes from the source's own bitrate, scaled to
+/// the length the export will actually have.
+///
+/// `output_seconds` is the composition length, so a trim, a cut, or a speed
+/// change shrinks the estimate the way it shrinks the file. The result never
+/// drops below [`MIN_EXPORT_RESERVE_BYTES`], and the margin on top is what
+/// makes the answer safe rather than exact.
+fn estimate_export_bytes(source_bytes: u64, source_seconds: f64, output_seconds: f64) -> u64 {
+    let source_seconds = source_seconds.max(0.001);
+    let output_seconds = output_seconds.max(0.0);
+    let bytes_per_second = source_bytes as f64 / source_seconds;
+    let scaled = bytes_per_second * output_seconds * EXPORT_SIZE_MARGIN;
+    // A float-to-int cast saturates, so an absurd source can never wrap to a
+    // tiny requirement and let the export through.
+    scaled.max(MIN_EXPORT_RESERVE_BYTES as f64) as u64
+}
+
+/// The deepest ancestor of `path` that exists.
+///
+/// The output file is normally created by ffmpeg, so it does not exist yet;
+/// its parent directory is what names the filesystem it will land on.
+fn existing_ancestor(path: &Path) -> Option<&Path> {
+    path.ancestors().find(|candidate| candidate.exists())
+}
+
+/// Free bytes on the filesystem holding `path`, or `None` when it cannot be
+/// interrogated.
+///
+/// A `None` must never block an export: a filesystem that will not answer is
+/// no evidence that the export does not fit, and refusing work the machine can
+/// actually do is worse than skipping the check.
+///
+/// The casts widen the counter fields to `u64`. On a 64-bit target they are
+/// already `u64`, so the cast is redundant there and clippy says so; keeping
+/// it makes the small-target build compile as well.
+#[allow(clippy::unnecessary_cast)]
+fn free_disk_bytes(path: &Path) -> Option<u64> {
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let probe = existing_ancestor(path)?;
+        let raw = std::ffi::CString::new(probe.as_os_str().as_bytes()).ok()?;
+        let mut buf: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statvfs(raw.as_ptr(), &mut buf) } != 0 {
+            return None;
+        }
+        // `f_frsize` is the fragment size the counters are expressed in, but
+        // some filesystems leave it zero; `f_bsize` is the sane fallback.
+        let block = if buf.f_frsize != 0 {
+            buf.f_frsize as u64
+        } else {
+            buf.f_bsize as u64
+        };
+        Some(buf.f_bavail as u64 * block)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = path;
+        None
+    }
+}
+
+/// `MemAvailable` from `/proc/meminfo` in bytes, or `None` where it is not
+/// available (non-Linux, or a kernel without the field).
+fn available_memory_bytes() -> Option<u64> {
+    let contents = std::fs::read_to_string("/proc/meminfo").ok()?;
+    parse_mem_available(&contents)
+}
+
+/// Parse `MemAvailable` out of `/proc/meminfo` contents. Pure so the parsing
+/// and the missing-field case can be tested directly.
+fn parse_mem_available(contents: &str) -> Option<u64> {
+    let line = contents
+        .lines()
+        .find(|line| line.starts_with("MemAvailable:"))?;
+    let kb: u64 = line.split_whitespace().nth(1)?.parse().ok()?;
+    Some(kb * 1024)
+}
+
+/// Whether `available` bytes of free memory is low enough to warn about.
+fn memory_is_tight(available: u64) -> bool {
+    available < TIGHT_MEMORY_BYTES
+}
+
+/// Refuse an export that cannot fit on the output's filesystem.
+///
+/// This runs before ffmpeg starts, so the user gets one clear sentence naming
+/// the required and available space instead of a cryptic encoder error and a
+/// half-written file. A filesystem that cannot be interrogated lets the export
+/// through.
+fn ensure_export_fits(state: &VideoEditState, output_path: &Path) -> anyhow::Result<()> {
+    let needed = estimate_export_bytes(
+        state.metadata.file_size_bytes,
+        state.metadata.duration_seconds,
+        state.composition_duration(),
+    );
+    let Some(available) = free_disk_bytes(output_path) else {
+        return Ok(());
+    };
+    if export_fits(available, needed) {
+        return Ok(());
+    }
+    let where_to = existing_ancestor(output_path).unwrap_or(output_path);
+    anyhow::bail!(
+        "not enough free disk space for this export: about {:.1} GB is needed but only {:.1} GB is free in {}",
+        needed as f64 / BYTES_PER_GIB,
+        available as f64 / BYTES_PER_GIB,
+        where_to.display(),
+    );
+}
+
+/// Surface a clear note when memory is short, without refusing the export.
+///
+/// The export streams, so it does not grow with the clip's length and a small
+/// machine can still finish. Warning rather than gating keeps a low-memory box
+/// usable while explaining why the encode might be slow or swap.
+fn warn_if_memory_is_tight() {
+    let Some(available) = available_memory_bytes() else {
+        return;
+    };
+    if !memory_is_tight(available) {
+        return;
+    }
+    eprintln!(
+        "[export] only {:.2} GB of memory is available; this export may be slow and can push the machine into swap",
+        available as f64 / BYTES_PER_GIB,
+    );
+}
+
 /// Export applying the user's editor settings (for Upload and shared export).
 /// Uses stream-copy when quality/dimensions are unchanged; otherwise re-encodes.
 /// Falls back to convert if trim-only fails (e.g. awkward codecs/containers).
@@ -567,6 +728,8 @@ pub fn export_edited(state: &VideoEditState) -> anyhow::Result<PathBuf> {
 
 pub fn export_edited_to(state: &VideoEditState, output_path: PathBuf) -> anyhow::Result<PathBuf> {
     sweep_stale_scratch_dirs();
+    ensure_export_fits(state, &output_path)?;
+    warn_if_memory_is_tight();
     if state.needs_reencode() {
         return run_convert(state, output_path);
     }
@@ -1276,6 +1439,99 @@ mod tests {
         state.trim_start_seconds = 1.25;
         state.trim_end_seconds = 8.5;
         state
+    }
+
+    #[test]
+    fn an_export_must_fit_in_the_free_space() {
+        // The boundary is inclusive: exactly enough fits, one byte short does not.
+        assert!(export_fits(1_000, 1_000));
+        assert!(export_fits(1_001, 1_000));
+        assert!(!export_fits(999, 1_000));
+    }
+
+    #[test]
+    fn the_size_estimate_scales_with_the_output_length() {
+        // 1 GiB source, one minute long. Both outputs are well clear of the
+        // floor, so the ratio between them is the source bitrate, not the
+        // floor.
+        let source = 1024 * 1024 * 1024;
+        let short = estimate_export_bytes(source, 60.0, 20.0);
+        let long = estimate_export_bytes(source, 60.0, 40.0);
+        assert!(long > short, "a longer export must need more space");
+        // Doubling the length doubles the estimate (within rounding).
+        let ratio = long as f64 / short as f64;
+        assert!(
+            (ratio - 2.0).abs() < 0.001,
+            "the estimate must scale linearly with output length, got {ratio}"
+        );
+    }
+
+    #[test]
+    fn the_size_estimate_never_asks_for_less_than_the_source() {
+        // A same-length export re-encodes footage of about the source's size,
+        // so the generous estimate is at least that size.
+        let source = 400 * 1024 * 1024;
+        assert!(estimate_export_bytes(source, 120.0, 120.0) >= source);
+        // A trimmed export asks for proportionally less.
+        let trimmed = estimate_export_bytes(source, 120.0, 60.0);
+        assert!(trimmed < estimate_export_bytes(source, 120.0, 120.0));
+    }
+
+    #[test]
+    fn the_size_estimate_honours_its_floor() {
+        // A tiny, very short clip still reserves the floor, so it cannot slip
+        // onto a disk with almost nothing free.
+        assert_eq!(
+            estimate_export_bytes(1, 1000.0, 0.001),
+            MIN_EXPORT_RESERVE_BYTES
+        );
+        assert_eq!(estimate_export_bytes(0, 0.0, 0.0), MIN_EXPORT_RESERVE_BYTES);
+        // A zero-length output with a real source still reserves the floor.
+        assert_eq!(
+            estimate_export_bytes(1 << 30, 60.0, 0.0),
+            MIN_EXPORT_RESERVE_BYTES
+        );
+    }
+
+    #[test]
+    fn a_zero_or_bogus_source_duration_cannot_shrink_the_estimate() {
+        // `file_size_bytes / duration_seconds` would divide by zero on a
+        // malformed probe; the guard must not turn that into a tiny number.
+        let estimate = estimate_export_bytes(1 << 30, 0.0, 30.0);
+        assert!(estimate >= MIN_EXPORT_RESERVE_BYTES);
+    }
+
+    #[test]
+    fn mem_available_is_parsed_in_bytes() {
+        let meminfo = "MemTotal:       4000000 kB\n\
+                       MemFree:         200000 kB\n\
+                       MemAvailable:    1500000 kB\n\
+                       Buffers:          10000 kB\n";
+        assert_eq!(parse_mem_available(meminfo), Some(1_500_000 * 1024));
+    }
+
+    #[test]
+    fn a_missing_mem_available_field_is_not_an_error() {
+        assert_eq!(parse_mem_available("MemTotal: 4000000 kB\n"), None);
+        assert_eq!(parse_mem_available("MemAvailable: bogus kB\n"), None);
+        assert_eq!(parse_mem_available(""), None);
+    }
+
+    #[test]
+    fn memory_is_tight_only_below_the_warning_threshold() {
+        assert!(memory_is_tight(TIGHT_MEMORY_BYTES - 1));
+        assert!(!memory_is_tight(TIGHT_MEMORY_BYTES));
+        assert!(!memory_is_tight(TIGHT_MEMORY_BYTES + 1));
+    }
+
+    #[test]
+    fn an_existing_ancestor_names_the_target_filesystem() {
+        // The output file does not exist yet; its parent is the existing
+        // directory the space check has to interrogate.
+        let dir = std::env::temp_dir();
+        let missing = dir.join("apexshot-does-not-exist-1234567").join("out.mp4");
+        assert_eq!(existing_ancestor(&missing), Some(dir.as_path()));
+        assert_eq!(existing_ancestor(Path::new("/")), Some(Path::new("/")));
     }
 
     #[test]
