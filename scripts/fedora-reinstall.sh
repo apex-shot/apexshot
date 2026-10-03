@@ -335,6 +335,7 @@ install_system_files() {
         metadata.json \
         extension.js \
         cursor-classifier.js \
+        press-tracker.js \
         shell-overlay.js \
         window-list.js \
         preview-stacking.js
