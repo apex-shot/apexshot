@@ -6,6 +6,7 @@ pub mod ffmpeg;
 pub mod imported_pointer;
 pub mod model;
 pub mod project;
+pub mod ripple_warp;
 pub mod sidecar;
 pub mod ui_support;
 pub(crate) mod window;

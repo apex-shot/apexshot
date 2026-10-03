@@ -1,6 +1,7 @@
 use super::model::background_render::render_rounded_mask;
 use super::model::{
-    even_crop_rect, AudioMode, VideoBackground, VideoEditState, VideoMetadata, DEFAULT_FRAME_RATE,
+    even_crop_rect, AudioMode, ClickEffect, VideoBackground, VideoEditState, VideoMetadata,
+    DEFAULT_FRAME_RATE,
 };
 use anyhow::{anyhow, Context};
 use serde::Deserialize;
@@ -620,21 +621,54 @@ fn build_composite_convert_args(
     };
 
     let (eff_w, eff_h) = state.effective_source_dimensions();
-    let draw_cursor = state
+    let can_draw_cursor = state
         .sidecar
         .as_ref()
-        .is_some_and(|sidecar| sidecar.can_render_cursor_overlay())
+        .is_some_and(|sidecar| sidecar.can_render_cursor_overlay());
+    // The studied ripple's visible band is a footage displacement, not a drawn
+    // ring. Only pay for the warp when a click is actually inside the export
+    // window, and fall back to the drawn ring if the maps cannot be written.
+    let mut ripple_maps = None;
+    if can_draw_cursor
+        && state.cursor.click_effect == ClickEffect::Ripple
+        && super::ripple_warp::ripple_warp_active(state, start, end)
+    {
+        let x_path = scratch.path.join("ripple-x.raw");
+        let y_path = scratch.path.join("ripple-y.raw");
+        if super::ripple_warp::write_ripple_maps(
+            state,
+            start,
+            end,
+            state.metadata.width,
+            state.metadata.height,
+            &x_path,
+            &y_path,
+        )
+        .is_ok()
+        {
+            ripple_maps = Some((x_path, y_path));
+        }
+    }
+    let draw_cursor = can_draw_cursor
         && super::cursor_export::write_rgba_track(
             state,
             start,
             end,
             video_w,
             video_h,
+            ripple_maps.is_some(),
             &cursor_path,
         )
         .is_ok();
+    // A cursor track that failed leaves the maps with nothing to click; drop
+    // the warp so the export never silently displaces the footage.
+    if !draw_cursor {
+        ripple_maps = None;
+    }
+    let warp_ripple = ripple_maps.is_some();
+    let map_offset = if warp_ripple { 2 } else { 0 };
     let use_wallpaper = wallpaper_path.is_some() && (out_w != video_w || out_h != video_h);
-    let wallpaper_index = if draw_cursor { 2 } else { 1 };
+    let wallpaper_index = (if draw_cursor { 2 } else { 1 }) + map_offset;
 
     // A radius masks the card so the fill shows through the corners. The mask
     // is rasterized at the video rect because `alphamerge` copies its luma
@@ -649,13 +683,24 @@ fn build_composite_convert_args(
                 .map(|_| path)
         })
         .flatten();
-    let mask_index = 1 + usize::from(draw_cursor) + usize::from(use_wallpaper);
+    let mask_index = 1 + usize::from(draw_cursor) + usize::from(use_wallpaper) + map_offset;
 
     // The freeze hold pads the source *before* the zoom crop. Cloning after
     // the crop would replay one already-composited frame for the whole tail
     // and the camera would sit still while the preview keeps moving.
+    //
+    // The ripple warp sits before the crop too: it displaces the full source
+    // in video pixels, so the studied read margin is the whole source and the
+    // displacement scales with resolution under every zoom.
+    let head = if warp_ripple { "[rv]" } else { "[0:v]" };
+    let prefix = if warp_ripple {
+        let xmap_index = 1 + usize::from(draw_cursor);
+        format!("[0:v][{xmap_index}:v][{}:v]remap[rv];", xmap_index + 1)
+    } else {
+        String::new()
+    };
     let mut filter = format!(
-        "[0:v]{}sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1",
+        "{prefix}{head}{}sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1",
         freeze_tail_tpad(state)
             .map(|pad| format!("{pad},"))
             .unwrap_or_default(),
@@ -736,6 +781,22 @@ fn build_composite_convert_args(
             "-i".into(),
             cursor_path.to_string_lossy().into_owned(),
         ]);
+    }
+    if let Some((x_path, y_path)) = ripple_maps.as_ref() {
+        for map_path in [x_path, y_path] {
+            args.extend([
+                "-f".into(),
+                "rawvideo".into(),
+                "-pix_fmt".into(),
+                "gray16le".into(),
+                "-video_size".into(),
+                format!("{}x{}", state.metadata.width, state.metadata.height),
+                "-framerate".into(),
+                format!("{:.6}", state.metadata.export_frame_rate()),
+                "-i".into(),
+                map_path.to_string_lossy().into_owned(),
+            ]);
+        }
     }
     if let Some(wallpaper) = wallpaper_path.as_ref().filter(|_| use_wallpaper) {
         args.extend([
@@ -1328,6 +1389,166 @@ mod tests {
                 .any(|pair| pair == ["-framerate", "60.000000"]),
             "cursor track must enter at its generation rate: {args:?}"
         );
+    }
+
+    fn cursor_composite_state(
+        effect: crate::recording::editor::model::ClickEffect,
+    ) -> VideoEditState {
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+        };
+        let mut state = VideoEditState::new(VideoMetadata {
+            path: PathBuf::from("/tmp/input.mp4"),
+            duration_seconds: 10.0,
+            width: 64,
+            height: 48,
+            file_size_bytes: 100,
+            has_audio: false,
+            frame_rate: 30.0,
+        });
+        state.trim_start_seconds = 1.25;
+        state.trim_end_seconds = 1.6;
+        state.cursor.click_effect = effect;
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+        });
+        state.sidecar = Some(sidecar);
+        state
+    }
+
+    fn composite_graph(state: &VideoEditState) -> String {
+        let args = build_single_convert_args(
+            state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        args.windows(2)
+            .find(|pair| pair[0] == "-filter_complex")
+            .map(|pair| pair[1].clone())
+            .expect("the cursor overlay exports through the composite graph")
+    }
+
+    /// Drop the scratch directory's per-command sequence number, which is the
+    /// only part of the graph that differs between two builds.
+    fn normalized_graph(graph: &str) -> &str {
+        graph
+            .split_once("zoom.cmd")
+            .map(|(_, rest)| rest)
+            .unwrap_or(graph)
+    }
+
+    #[test]
+    fn a_visible_ripple_displaces_the_footage_before_the_cursor_overlay() {
+        use crate::recording::editor::model::ClickEffect;
+        use crate::recording::editor::sidecar::ClickSample;
+
+        let mut state = cursor_composite_state(ClickEffect::Ripple);
+        state.sidecar.as_mut().unwrap().clicks.push(ClickSample {
+            t: 1.3,
+            x: 20.0,
+            y: 20.0,
+            button: 1,
+        });
+        let args = build_single_convert_args(
+            &state,
+            state.trim_start_seconds,
+            state.trim_end_seconds,
+            Path::new("/tmp/output.mp4"),
+        );
+        let graph = args
+            .windows(2)
+            .find(|pair| pair[0] == "-filter_complex")
+            .map(|pair| pair[1].as_str())
+            .unwrap();
+        // The warp reads the full source before the crop, so it is the first
+        // filter in the chain and feeds the existing crop/scale path.
+        assert!(
+            graph.contains("[0:v][2:v][3:v]remap[rv];[rv]"),
+            "the ripple must remap the footage before the crop: {graph}"
+        );
+        assert!(graph.contains("overlay=0:0:eof_action=pass:shortest=0:format=yuv420"));
+        // Two 16-bit single-channel map inputs join the cursor track.
+        assert_eq!(
+            args.windows(2)
+                .filter(|pair| pair == &["-pix_fmt", "gray16le"])
+                .count(),
+            2
+        );
+        assert!(args.iter().any(|arg| arg.ends_with("ripple-x.raw")));
+        assert!(args.iter().any(|arg| arg.ends_with("ripple-y.raw")));
+    }
+
+    #[test]
+    fn a_clip_without_a_visible_ripple_keeps_the_plain_composite_graph() {
+        use crate::recording::editor::model::ClickEffect;
+
+        // Same sidecar and window, different effect and no clicks: the graph
+        // must be exactly the pre-warp graph, so the common path cannot
+        // regress.
+        let ripple = cursor_composite_state(ClickEffect::Ripple);
+        let off = cursor_composite_state(ClickEffect::None);
+        let ripple_graph = composite_graph(&ripple);
+        assert_eq!(
+            normalized_graph(&ripple_graph),
+            normalized_graph(&composite_graph(&off))
+        );
+        assert!(!ripple_graph.contains("remap"));
+        assert!(ripple_graph.contains("[0:v]sendcmd="));
+
+        // A click on an effect that is not the ripple stays on the drawn path.
+        use crate::recording::editor::sidecar::ClickSample;
+        let mut circle = cursor_composite_state(ClickEffect::Circle);
+        circle.sidecar.as_mut().unwrap().clicks.push(ClickSample {
+            t: 1.3,
+            x: 20.0,
+            y: 20.0,
+            button: 1,
+        });
+        assert_eq!(
+            normalized_graph(&composite_graph(&circle)),
+            normalized_graph(&ripple_graph)
+        );
+    }
+
+    #[test]
+    fn a_ripple_warp_keeps_the_wallpaper_and_mask_inputs_in_order() {
+        use crate::recording::editor::model::{ClickEffect, VideoBackground};
+        use crate::recording::editor::sidecar::ClickSample;
+
+        let dir =
+            std::env::temp_dir().join(format!("apexshot-ripple-wallpaper-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let wallpaper = dir.join("wallpaper.jpg");
+        std::fs::write(&wallpaper, b"fake-jpg").unwrap();
+
+        let mut state = cursor_composite_state(ClickEffect::Ripple);
+        state.background = VideoBackground::Wallpaper(wallpaper);
+        state.background_padding = 20.0;
+        state.background_corner_radius = 10.0;
+        state.sidecar.as_mut().unwrap().clicks.push(ClickSample {
+            t: 1.3,
+            x: 20.0,
+            y: 20.0,
+            button: 1,
+        });
+        let graph = composite_graph(&state);
+        // Input order is video, cursor, xmap, ymap, wallpaper, mask.
+        assert!(graph.contains("[0:v][2:v][3:v]remap[rv]"), "{graph}");
+        assert!(
+            graph.contains("[4:v]scale="),
+            "wallpaper must be input 4: {graph}"
+        );
+        assert!(
+            graph.contains("[5:v]alphamerge"),
+            "mask must be input 5: {graph}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

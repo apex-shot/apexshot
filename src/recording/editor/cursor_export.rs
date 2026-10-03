@@ -1,5 +1,7 @@
 use super::cursor_sprite;
-use super::model::{even_crop_rect, press_cursor_scale, source_to_zoomed_point, VideoEditState};
+use super::model::{
+    even_crop_rect, press_cursor_scale, source_to_zoomed_point, ClickEffect, VideoEditState,
+};
 use super::sidecar::CursorMotion;
 use gtk4::cairo::{Context, Format, ImageSurface, Operator};
 use std::io::Write;
@@ -11,6 +13,7 @@ pub fn write_rgba_track(
     end: f64,
     width: u32,
     height: u32,
+    skip_ripple_ring: bool,
     path: &Path,
 ) -> anyhow::Result<()> {
     let Some(sidecar) = state.sidecar.as_ref() else {
@@ -65,6 +68,11 @@ pub fn write_rgba_track(
                 state.metadata.width as f64,
                 state.metadata.height as f64,
             ) {
+                // When the composite runs the footage warp, the displaced
+                // band *is* the ripple; drawing a ring on top would double it.
+                if skip_ripple_ring && overlay_cursor.click_effect == ClickEffect::Ripple {
+                    continue;
+                }
                 let (px, py) = source_to_zoomed_point(x, y, view, width as f64, height as f64);
                 cursor_sprite::draw_click(
                     &cr,
@@ -136,7 +144,7 @@ mod tests {
     use super::*;
     use crate::recording::editor::model::VideoMetadata;
     use crate::recording::editor::sidecar::{
-        CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+        CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
     };
     use std::path::PathBuf;
 
@@ -169,11 +177,67 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("apexshot-cursor-rgba-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("cursor.rgba");
-        write_rgba_track(&state, 0.0, 0.2, 80, 60, &path).unwrap();
+        write_rgba_track(&state, 0.0, 0.2, 80, 60, false, &path).unwrap();
         let bytes = std::fs::read(&path).unwrap();
         let frames = ((0.2 * state.metadata.export_frame_rate()).ceil() as usize).max(1);
         assert_eq!(bytes.len(), frames * 80 * 60 * 4);
         assert!(bytes.iter().any(|b| *b != 0));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_drawn_ripple_ring_is_the_fallback_when_the_warp_is_skipped() {
+        let mut state = VideoEditState::new(VideoMetadata {
+            path: PathBuf::from("/tmp/cursor-export-ring.mp4"),
+            duration_seconds: 0.4,
+            width: 80,
+            height: 60,
+            file_size_bytes: 8,
+            has_audio: false,
+            frame_rate: 30.0,
+        });
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 2.0,
+            y: 2.0,
+            kind: CursorKind::Default,
+        });
+        sidecar.clicks.push(ClickSample {
+            t: 0.0,
+            x: 40.0,
+            y: 30.0,
+            button: 1,
+        });
+        state.sidecar = Some(sidecar);
+        state.cursor.click_effect = ClickEffect::Ripple;
+
+        let dir =
+            std::env::temp_dir().join(format!("apexshot-cursor-rgba-ring-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let ring_path = dir.join("ring.rgba");
+        let warp_path = dir.join("warp.rgba");
+        // `false` is the fallback: the warp is not running, so the ring draws.
+        write_rgba_track(&state, 0.1, 0.2, 80, 60, false, &ring_path).unwrap();
+        // `true` is the composite: the displaced band is the ripple, so the
+        // overlay must not double it with a ring.
+        write_rgba_track(&state, 0.1, 0.2, 80, 60, true, &warp_path).unwrap();
+        let lit = |path: &Path| {
+            std::fs::read(path)
+                .unwrap()
+                .chunks_exact(4)
+                .filter(|pixel| pixel[3] != 0)
+                .count()
+        };
+        assert!(
+            lit(&ring_path) > lit(&warp_path),
+            "the fallback must draw the ripple ring"
+        );
+        assert!(
+            lit(&warp_path) > 0,
+            "the cursor must still render with the warp"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -207,7 +271,7 @@ mod tests {
             std::env::temp_dir().join(format!("apexshot-cursor-rgba-fps-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("cursor.rgba");
-        write_rgba_track(&state, 0.0, 0.2, 80, 60, &path).unwrap();
+        write_rgba_track(&state, 0.0, 0.2, 80, 60, false, &path).unwrap();
         let bytes = std::fs::read(&path).unwrap();
         // 0.2 s at the source's 60 fps is 12 frames — twice the old fixed
         // 30 fps grid, so the cursor no longer steps in high-fps exports.
@@ -238,7 +302,7 @@ mod tests {
         state.sidecar = Some(sidecar);
 
         let path = std::env::temp_dir().join("apexshot-inferred-cursor.rgba");
-        let error = write_rgba_track(&state, 0.0, 0.2, 80, 60, &path).unwrap_err();
+        let error = write_rgba_track(&state, 0.0, 0.2, 80, 60, false, &path).unwrap_err();
         assert!(error.to_string().contains("inferred"));
         assert!(!path.exists());
     }
