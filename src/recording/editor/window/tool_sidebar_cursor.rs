@@ -623,11 +623,6 @@ fn build_cursor_effects_tab(
         }
     });
     swatch.set_child(Some(&swatch_paint));
-    swatch.connect_clicked({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        move |button| open_click_color_dialog(button, state.clone(), on_change.clone())
-    });
     let hex = Label::new(Some("#FFFFFF"));
     hex.add_css_class("recording-editor-click-color-hex");
     hex.set_xalign(0.0);
@@ -636,6 +631,20 @@ fn build_cursor_effects_tab(
     color_row.append(&swatch);
     color_row.append(&hex);
     body.append(&color_row);
+
+    // The click colour opens the editor's own fill card, titled for the click
+    // effect, instead of a separate centered colour dialog. The click colour
+    // is flat, so the Gradient tab is hidden.
+    crate::recording::editor::window::custom_wallpaper_popover::build_custom_fill_popover(
+        &body,
+        &swatch,
+        &t("Click color"),
+        crate::recording::editor::window::custom_wallpaper_popover::FillOps::for_click_color(
+            state.clone(),
+        ),
+        on_change.clone(),
+        false,
+    );
 
     let dots = GtkBox::new(Orientation::Horizontal, 6);
     dots.add_css_class("recording-editor-click-color-dots");
@@ -653,19 +662,6 @@ fn build_cursor_effects_tab(
         dots.append(&dot);
     }
     body.append(&dots);
-
-    let size_row = cursor_slider_row(&t("Size"));
-    let opacity_row = cursor_slider_row(&t("Opacity"));
-    let intensity_row = cursor_slider_row(&t("Intensity"));
-    size_row.scale.set_range(MIN_CLICK_SCALE, MAX_CLICK_SCALE);
-    size_row.scale.set_increments(0.05, 0.1);
-    opacity_row.scale.set_range(0.0, 1.0);
-    opacity_row.scale.set_increments(0.05, 0.1);
-    intensity_row.scale.set_range(0.0, 1.0);
-    intensity_row.scale.set_increments(0.05, 0.1);
-    body.append(&size_row.widget);
-    body.append(&opacity_row.widget);
-    body.append(&intensity_row.widget);
 
     let syncing = Rc::new(Cell::new(false));
     none_btn.connect_toggled({
@@ -728,27 +724,6 @@ fn build_cursor_effects_tab(
             on_change();
         }
     });
-    bind_cursor_f64(
-        &size_row.scale,
-        syncing.clone(),
-        state.clone(),
-        on_change.clone(),
-        |cursor, value| cursor.click_scale = value,
-    );
-    bind_cursor_f64(
-        &opacity_row.scale,
-        syncing.clone(),
-        state.clone(),
-        on_change.clone(),
-        |cursor, value| cursor.click_opacity = value,
-    );
-    bind_cursor_f64(
-        &intensity_row.scale,
-        syncing.clone(),
-        state.clone(),
-        on_change,
-        |cursor, value| cursor.click_intensity = value,
-    );
 
     let refresh = {
         let live = live.clone();
@@ -759,9 +734,6 @@ fn build_cursor_effects_tab(
         let ripple_btn = ripple_btn.clone();
         let circle_btn = circle_btn.clone();
         let echo_btn = echo_btn.clone();
-        let size_scale = size_row.scale.clone();
-        let opacity_scale = opacity_row.scale.clone();
-        let intensity_scale = intensity_row.scale.clone();
         let swatch = swatch.clone();
         let dots = dots.clone();
         let syncing = syncing.clone();
@@ -777,18 +749,12 @@ fn build_cursor_effects_tab(
             }
             spotlight_btn.set_visible(matches!(cursor.click_effect, ClickEffect::Spotlight));
             echo_btn.set_visible(matches!(cursor.click_effect, ClickEffect::Echo));
-            size_scale.set_value(cursor.click_scale);
-            opacity_scale.set_value(cursor.click_opacity);
-            intensity_scale.set_value(cursor.click_intensity);
             let enabled = cursor.click_effect != ClickEffect::None;
-            // The studied circle has fixed greys and alphas, so colour and
-            // intensity do not apply to it.
-            let uses_custom_greys = enabled && cursor.click_effect != ClickEffect::Circle;
-            size_scale.set_sensitive(enabled);
-            opacity_scale.set_sensitive(enabled);
-            intensity_scale.set_sensitive(uses_custom_greys);
-            swatch.set_sensitive(uses_custom_greys);
-            dots.set_sensitive(uses_custom_greys);
+            // The studied circle has fixed greys and alphas, so colour does
+            // not apply to it.
+            let uses_colour = enabled && cursor.click_effect != ClickEffect::Circle;
+            swatch.set_sensitive(uses_colour);
+            dots.set_sensitive(uses_colour);
             hex.set_text(&format!(
                 "#{:02X}{:02X}{:02X}",
                 cursor.click_color.0, cursor.click_color.1, cursor.click_color.2
@@ -852,35 +818,6 @@ fn draw_color_chip(
     cr.set_source_rgba(0.0, 0.0, 0.0, 0.28);
     cr.set_line_width(1.0);
     let _ = cr.stroke();
-}
-
-fn open_click_color_dialog(
-    widget: &impl IsA<Widget>,
-    state: Arc<Mutex<VideoEditState>>,
-    on_change: Rc<dyn Fn()>,
-) {
-    let (r, g, b) = state.lock().unwrap().cursor.click_color;
-    let initial = gdk::RGBA::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0);
-    let parent = widget
-        .root()
-        .and_then(|root| root.downcast::<Window>().ok());
-    let dialog = ColorChooserDialog::new(Some(&t("Click color")), parent.as_ref());
-    dialog.set_modal(true);
-    dialog.set_use_alpha(false);
-    dialog.set_rgba(&initial);
-    dialog.connect_response(move |dialog, response| {
-        if response == gtk4::ResponseType::Ok {
-            let color = dialog.rgba();
-            state.lock().unwrap().cursor.click_color = (
-                (color.red() * 255.0).round().clamp(0.0, 255.0) as u8,
-                (color.green() * 255.0).round().clamp(0.0, 255.0) as u8,
-                (color.blue() * 255.0).round().clamp(0.0, 255.0) as u8,
-            );
-            on_change();
-        }
-        dialog.close();
-    });
-    dialog.present();
 }
 
 fn draw_click_live_preview(

@@ -1,14 +1,13 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
     nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoBackground,
-    VideoEditState, ZoomEasing, ZoomMode, MAX_CLICK_SCALE, MAX_CLIP_SPEED, MAX_CURSOR_SIZE,
-    MAX_CURSOR_SPEED, MIN_CLICK_SCALE, MIN_CLIP_SPEED, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED,
-    ZOOM_SCALE_PRESETS,
+    VideoEditState, ZoomEasing, ZoomMode, MAX_CLIP_SPEED, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED,
+    MIN_CLIP_SPEED, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
-    gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
-    EventControllerMotion, GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay,
-    PolicyType, ScrolledWindow, Switch, ToggleButton, Widget, Window,
+    gdk, glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, EventControllerMotion,
+    GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay, PolicyType,
+    ScrolledWindow, Switch, ToggleButton, Widget, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -1278,6 +1277,26 @@ mod tests {
         assert!(
             !source.contains("t(\"Image\")"),
             "the popover must not duplicate the panel's Image tab"
+        );
+    }
+
+    #[test]
+    fn the_cursor_click_colour_opens_the_shared_fill_card_without_gradient() {
+        // The click colour is flat, so it reuses the editor's fill card for the
+        // picker chrome but hides the Gradient tab. A separate centred dialog
+        // would not match the rest of the editor.
+        let source = include_str!("tool_sidebar_cursor.rs");
+        assert!(
+            source.contains("FillOps::for_click_color("),
+            "the click colour must use the shared fill card's colour ops"
+        );
+        assert!(
+            source.contains("&t(\"Click color\")"),
+            "the card must be titled for the click effect, not Custom Wallpaper"
+        );
+        assert!(
+            !source.contains("open_click_color_dialog"),
+            "the old centered colour dialog must be gone"
         );
     }
 

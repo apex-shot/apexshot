@@ -398,6 +398,7 @@ fn build_background_panel(
             state.clone(),
         ),
         on_change.clone(),
+        true,
     );
 
     image_row.connect_clicked({
