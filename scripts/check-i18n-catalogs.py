@@ -86,6 +86,7 @@ def registered_messages() -> list[str]:
         "Minimal",
         "Spotlight",
         "Ripple",
+        "Circle",
         "Echo",
         "Glide",
         "Smooth",

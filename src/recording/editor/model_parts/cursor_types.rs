@@ -95,34 +95,36 @@ pub enum ClickEffect {
     Spotlight,
     #[default]
     Ripple,
+    Circle,
     Echo,
 }
 
 impl ClickEffect {
-    pub fn parse(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "none" => Self::None,
-            "spotlight" | "pulse" => Self::Spotlight,
-            "echo" => Self::Echo,
-            _ => Self::Ripple,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Spotlight => "spotlight",
-            Self::Ripple => "ripple",
-            Self::Echo => "echo",
-        }
-    }
-
     pub fn label(self) -> &'static str {
         match self {
             Self::None => "Off",
             Self::Spotlight => "Spotlight",
             Self::Ripple => "Ripple",
+            Self::Circle => "Circle",
             Self::Echo => "Echo",
+        }
+    }
+
+    /// Visible lifetime in milliseconds for this effect.
+    ///
+    /// The studied effects have a fixed per-effect lifetime. `Spotlight` and
+    /// `Echo` are local effects that keep loading from existing projects, so
+    /// they fall back to the project's persisted duration.
+    pub fn visible_duration_ms(self, fallback_ms: u32) -> f64 {
+        match self {
+            Self::Ripple => {
+                crate::recording::editor::click_effect::RIPPLE_VISIBLE_DURATION_MS
+            }
+            Self::Circle => {
+                crate::recording::editor::click_effect::CIRCLE_VISIBLE_DURATION_MS
+            }
+            Self::None => 0.0,
+            Self::Spotlight | Self::Echo => fallback_ms as f64,
         }
     }
 }
@@ -310,7 +312,11 @@ impl CursorSettings {
     }
 
     pub fn click_window_seconds(self) -> f64 {
-        self.clamped().click_duration_ms as f64 / 1000.0
+        let settings = self.clamped();
+        settings
+            .click_effect
+            .visible_duration_ms(settings.click_duration_ms)
+            / 1000.0
     }
 }
 

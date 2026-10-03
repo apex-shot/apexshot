@@ -1,3 +1,8 @@
+use super::click_effect::{
+    circle_opacity, circle_radius_fraction, ripple_opacity, ripple_radius_fraction, CIRCLE_ALPHA,
+    CIRCLE_FILL_GRAY_LINEAR, CIRCLE_RIM_ALPHA, CIRCLE_RIM_GRAY_LINEAR, CIRCLE_RIM_WIDTH_01,
+    RIPPLE_BAND_01,
+};
 use super::model::{ClickEffect, CursorSettings, CursorTheme, MAX_CURSOR_SIZE, MIN_CURSOR_SIZE};
 use gtk4::cairo::{Antialias, Context, Filter, Format, ImageSurface, SurfacePattern};
 use image::RgbaImage;
@@ -151,9 +156,13 @@ pub fn draw_click(
     progress: f64,
     settings: CursorSettings,
     alpha: f64,
+    reference_width: f64,
 ) {
     let settings = settings.clamped();
-    let alpha = (alpha * settings.click_opacity).clamp(0.0, 1.0);
+    let frame_alpha = alpha.clamp(0.0, 1.0);
+    // The studied ripple and circle have fixed opacity; only the local
+    // Spotlight/Echo effects use the user opacity knob.
+    let legacy_alpha = (frame_alpha * settings.click_opacity).clamp(0.0, 1.0);
     match settings.click_effect {
         ClickEffect::None => {}
         ClickEffect::Spotlight => draw_spotlight(
@@ -163,21 +172,12 @@ pub fn draw_click(
             progress,
             settings.size,
             settings.click_intensity,
-            alpha,
+            legacy_alpha,
             settings.click_color,
             settings.click_scale,
         ),
-        ClickEffect::Ripple => draw_ripple(
-            cr,
-            x,
-            y,
-            progress,
-            settings.size,
-            settings.click_intensity,
-            alpha,
-            settings.click_color,
-            settings.click_scale,
-        ),
+        ClickEffect::Ripple => draw_ripple(cr, x, y, progress, frame_alpha, reference_width),
+        ClickEffect::Circle => draw_circle(cr, x, y, progress, frame_alpha, reference_width),
         ClickEffect::Echo => draw_echo(
             cr,
             x,
@@ -185,40 +185,61 @@ pub fn draw_click(
             progress,
             settings.size,
             settings.click_intensity,
-            alpha,
+            legacy_alpha,
             settings.click_color,
             settings.click_scale,
         ),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn draw_ripple(
-    cr: &Context,
-    x: f64,
-    y: f64,
-    progress: f64,
-    size: f64,
-    intensity: f64,
-    alpha: f64,
-    color: (u8, u8, u8),
-    scale: f64,
-) {
+/// Draw the studied ripple's geometry as a ring overlay.
+///
+/// The studied ripple is a footage warp; this is a drawn stand-in that carries
+/// the studied lifetime, band, and outward travel but does not pull or split
+/// the video pixels. The warp itself is not ported. The studied effect has a
+/// fixed size, opacity, and no colour, so the local size/opacity/intensity and
+/// colour knobs do not apply; the ring is drawn in a neutral white.
+pub fn draw_ripple(cr: &Context, x: f64, y: f64, progress: f64, alpha: f64, reference_width: f64) {
     let progress = progress.clamp(0.0, 1.0);
-    let fade = (1.0 - progress).powi(2);
-    let amount = fade * intensity.clamp(0.0, 1.0) * alpha.clamp(0.0, 1.0);
-    if amount < 0.02 {
+    let amount = ripple_opacity(progress) * alpha.clamp(0.0, 1.0);
+    if amount < 0.02 || reference_width <= 0.0 {
         return;
     }
-    let (r, g, b) = click_rgb(color);
-    let radius = (10.0 + 34.0 * progress) * overlay_scale(size, 1.0) * scale.max(0.01);
-    cr.set_line_width((2.4 * (1.0 - progress * 0.45)).clamp(1.1, 2.4));
-    cr.set_source_rgba(r, g, b, 0.82 * amount);
+    let radius = reference_width * ripple_radius_fraction(progress);
+    let band = (reference_width * RIPPLE_BAND_01).max(1.0);
+    cr.set_line_width(band);
+    cr.set_source_rgba(1.0, 1.0, 1.0, 0.82 * amount);
     cr.arc(x, y, radius, 0.0, TAU);
     let _ = cr.stroke();
-    cr.set_source_rgba(r, g, b, 0.16 * amount);
-    cr.arc(x, y, radius * 0.55, 0.0, TAU);
+}
+
+/// Draw the studied circle: a grey disc with a thin dark rim.
+///
+/// Sizes are fractions of the video width, so the effect scales with the
+/// recording resolution. The studied greys are linear-space values; they are
+/// used directly on our non-linear overlay surface. The studied effect has a
+/// fixed size and opacity, so the local size/opacity knobs do not apply.
+pub fn draw_circle(cr: &Context, x: f64, y: f64, progress: f64, alpha: f64, reference_width: f64) {
+    let progress = progress.clamp(0.0, 1.0);
+    let fade = circle_opacity(progress);
+    let alpha = (alpha.clamp(0.0, 1.0) * CIRCLE_ALPHA * fade).clamp(0.0, 1.0);
+    if alpha <= 0.0 || reference_width <= 0.0 {
+        return;
+    }
+    let radius = reference_width * circle_radius_fraction(progress);
+    if radius <= 0.0 {
+        return;
+    }
+    let rim_width = (reference_width * CIRCLE_RIM_WIDTH_01).max(0.75);
+    let fill = CIRCLE_FILL_GRAY_LINEAR;
+    let rim = CIRCLE_RIM_GRAY_LINEAR;
+    cr.set_source_rgba(fill, fill, fill, alpha);
+    cr.arc(x, y, radius, 0.0, TAU);
     let _ = cr.fill();
+    cr.set_line_width(rim_width);
+    cr.set_source_rgba(rim, rim, rim, alpha * CIRCLE_RIM_ALPHA);
+    cr.arc(x, y, radius, 0.0, TAU);
+    let _ = cr.stroke();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -602,23 +623,32 @@ fn surface_from_rgba(img: &RgbaImage) -> ImageSurface {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recording::editor::model::{MAX_CLICK_SCALE, MIN_CLICK_SCALE};
 
     const TEST_SURFACE_SIZE: i32 = 192;
 
     fn render_click(settings: CursorSettings) -> Vec<u8> {
+        render_click_at(
+            settings,
+            TEST_SURFACE_SIZE as f64 / 2.0,
+            TEST_SURFACE_SIZE as f64 / 2.0,
+        )
+    }
+
+    fn render_click_at(settings: CursorSettings, x: f64, y: f64) -> Vec<u8> {
+        render_click_with_width(settings, x, y, TEST_SURFACE_SIZE as f64)
+    }
+
+    fn render_click_with_width(
+        settings: CursorSettings,
+        x: f64,
+        y: f64,
+        reference_width: f64,
+    ) -> Vec<u8> {
         let mut surface =
             ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
         {
             let cr = Context::new(&surface).unwrap();
-            draw_click(
-                &cr,
-                TEST_SURFACE_SIZE as f64 / 2.0,
-                TEST_SURFACE_SIZE as f64 / 2.0,
-                0.25,
-                settings,
-                1.0,
-            );
+            draw_click(&cr, x, y, 0.25, settings, 1.0, reference_width);
         }
         surface.flush();
         let pixels = surface.data().unwrap().to_vec();
@@ -786,55 +816,147 @@ mod tests {
         let off = render(ClickEffect::None);
         let spotlight = render(ClickEffect::Spotlight);
         let ripple = render(ClickEffect::Ripple);
+        let circle = render(ClickEffect::Circle);
         let echo = render(ClickEffect::Echo);
 
         assert!(off.iter().all(|byte| *byte == 0));
         assert!(spotlight.iter().any(|byte| *byte != 0));
         assert!(ripple.iter().any(|byte| *byte != 0));
+        assert!(circle.iter().any(|byte| *byte != 0));
         assert!(echo.iter().any(|byte| *byte != 0));
         assert_ne!(spotlight, ripple);
         assert_ne!(spotlight, echo);
         assert_ne!(ripple, echo);
+        assert_ne!(ripple, circle);
     }
 
     #[test]
-    fn click_color_scale_opacity_and_intensity_affect_rendering() {
-        let red = render_click(CursorSettings {
-            click_color: (255, 0, 0),
-            ..CursorSettings::default()
-        });
-        let blue = render_click(CursorSettings {
-            click_color: (0, 0, 255),
-            ..CursorSettings::default()
-        });
-        let red_total: usize = red.chunks_exact(4).map(|pixel| pixel[2] as usize).sum();
-        let red_blue_total: usize = red.chunks_exact(4).map(|pixel| pixel[0] as usize).sum();
-        let blue_total: usize = blue.chunks_exact(4).map(|pixel| pixel[0] as usize).sum();
-        let blue_red_total: usize = blue.chunks_exact(4).map(|pixel| pixel[2] as usize).sum();
-        assert!(red_total > red_blue_total);
-        assert!(blue_total > blue_red_total);
+    fn a_click_on_a_frame_edge_still_paints() {
+        for (x, y) in [
+            (0.0, 0.0),
+            (TEST_SURFACE_SIZE as f64, 0.0),
+            (0.0, TEST_SURFACE_SIZE as f64),
+            (TEST_SURFACE_SIZE as f64, TEST_SURFACE_SIZE as f64),
+        ] {
+            for effect in [
+                ClickEffect::Ripple,
+                ClickEffect::Circle,
+                ClickEffect::Spotlight,
+                ClickEffect::Echo,
+            ] {
+                let pixels = render_click_at(
+                    CursorSettings {
+                        click_effect: effect,
+                        ..CursorSettings::default()
+                    },
+                    x,
+                    y,
+                );
+                assert!(
+                    pixels.iter().any(|byte| *byte != 0),
+                    "{effect:?} at ({x}, {y}) should still paint"
+                );
+            }
+        }
+    }
 
-        let small = render_click(CursorSettings {
-            click_scale: MIN_CLICK_SCALE,
-            ..CursorSettings::default()
-        });
-        let large = render_click(CursorSettings {
-            click_scale: MAX_CLICK_SCALE,
-            ..CursorSettings::default()
-        });
-        let (small_min_x, _, small_max_x, _) = alpha_bounds(&small).unwrap();
-        let (large_min_x, _, large_max_x, _) = alpha_bounds(&large).unwrap();
-        assert!(large_max_x - large_min_x > small_max_x - small_min_x);
+    #[test]
+    fn circle_size_scales_with_the_video_width() {
+        let render = |reference_width| {
+            render_click_with_width(
+                CursorSettings {
+                    click_effect: ClickEffect::Circle,
+                    click_scale: 1.0,
+                    click_opacity: 1.0,
+                    ..CursorSettings::default()
+                },
+                TEST_SURFACE_SIZE as f64 / 2.0,
+                TEST_SURFACE_SIZE as f64 / 2.0,
+                reference_width,
+            )
+        };
+        let small = render(200.0);
+        let large = render(400.0);
+        let (small_min, _, small_max, _) = alpha_bounds(&small).unwrap();
+        let (large_min, _, large_max, _) = alpha_bounds(&large).unwrap();
+        assert!(
+            large_max - large_min > small_max - small_min,
+            "a wider reference should draw a larger circle"
+        );
+    }
 
-        let transparent = render_click(CursorSettings {
-            click_opacity: 0.0,
-            ..CursorSettings::default()
-        });
-        let no_intensity = render_click(CursorSettings {
-            click_intensity: 0.0,
-            ..CursorSettings::default()
-        });
-        assert!(transparent.iter().all(|byte| *byte == 0));
-        assert!(no_intensity.iter().all(|byte| *byte == 0));
+    #[test]
+    fn studied_effects_ignore_the_local_size_opacity_and_intensity_knobs() {
+        for effect in [ClickEffect::Ripple, ClickEffect::Circle] {
+            let render = |scale, opacity, intensity| {
+                render_click(CursorSettings {
+                    click_effect: effect,
+                    click_scale: scale,
+                    click_opacity: opacity,
+                    click_intensity: intensity,
+                    ..CursorSettings::default()
+                })
+            };
+            assert_eq!(
+                render(0.5, 0.0, 0.0),
+                render(2.0, 1.0, 1.0),
+                "{effect:?} must use the studied fixed size and opacity"
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_effects_use_the_local_size_opacity_and_intensity_knobs() {
+        for effect in [ClickEffect::Spotlight, ClickEffect::Echo] {
+            let render = |scale, opacity, intensity| {
+                render_click(CursorSettings {
+                    click_effect: effect,
+                    click_scale: scale,
+                    click_opacity: opacity,
+                    click_intensity: intensity,
+                    ..CursorSettings::default()
+                })
+            };
+            assert_ne!(
+                render(0.5, 1.0, 1.0),
+                render(2.0, 1.0, 1.0),
+                "{effect:?} size"
+            );
+            assert_ne!(
+                render(1.0, 0.0, 1.0),
+                render(1.0, 1.0, 1.0),
+                "{effect:?} opacity"
+            );
+            assert_ne!(
+                render(1.0, 1.0, 0.0),
+                render(1.0, 1.0, 1.0),
+                "{effect:?} intensity"
+            );
+        }
+    }
+
+    #[test]
+    fn click_colour_affects_only_the_legacy_effects() {
+        let render = |effect, color| {
+            render_click(CursorSettings {
+                click_effect: effect,
+                click_color: color,
+                ..CursorSettings::default()
+            })
+        };
+        for effect in [ClickEffect::Spotlight, ClickEffect::Echo] {
+            assert_ne!(
+                render(effect, (255, 255, 255)),
+                render(effect, (255, 0, 0)),
+                "colour should affect {effect:?}"
+            );
+        }
+        for effect in [ClickEffect::Ripple, ClickEffect::Circle] {
+            assert_eq!(
+                render(effect, (255, 255, 255)),
+                render(effect, (255, 0, 0)),
+                "the studied {effect:?} has no colour knob"
+            );
+        }
     }
 }

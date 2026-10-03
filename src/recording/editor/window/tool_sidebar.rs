@@ -1,14 +1,13 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
     nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoBackground,
-    VideoEditState, ZoomEasing, ZoomMode, MAX_CLICK_DURATION_MS, MAX_CLICK_SCALE, MAX_CLIP_SPEED,
-    MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLICK_DURATION_MS, MIN_CLICK_SCALE, MIN_CLIP_SPEED,
-    MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
+    VideoEditState, ZoomEasing, ZoomMode, MAX_CLIP_SPEED, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED,
+    MIN_CLIP_SPEED, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
-    gdk, glib, prelude::*, Align, Box as GtkBox, Button, ColorChooserDialog, DrawingArea,
-    EventControllerMotion, GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay,
-    PolicyType, ScrolledWindow, Switch, ToggleButton, Widget, Window,
+    gdk, glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, EventControllerMotion,
+    GestureClick, GestureDrag, Grid, Image, Label, Orientation, Overlay, PolicyType,
+    ScrolledWindow, Switch, ToggleButton, Widget, Window,
 };
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -1279,6 +1278,28 @@ mod tests {
             !source.contains("t(\"Image\")"),
             "the popover must not duplicate the panel's Image tab"
         );
+    }
+
+    #[test]
+    fn the_cursor_click_effect_tab_offers_only_the_effect_picker() {
+        // The studied click effect has no size, opacity, intensity, or colour
+        // controls; the tab is the effect cards alone. The colour field stays
+        // in the model so legacy Spotlight/Echo projects still render.
+        let source = include_str!("tool_sidebar_cursor.rs");
+        for removed in [
+            "CLICK_COLOR_PRESETS",
+            "open_click_color_dialog",
+            "FillOps::for_click_color(",
+            "cursor_slider_row(&t(\"Intensity\"))",
+            "cursor_slider_row(&t(\"Opacity\"))",
+            "click_effect_card(ClickEffect::Spotlight)",
+            "click_effect_card(ClickEffect::Echo)",
+        ] {
+            assert!(
+                !source.contains(removed),
+                "the click effect tab must not offer {removed}"
+            );
+        }
     }
 
     #[test]

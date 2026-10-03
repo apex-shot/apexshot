@@ -1,13 +1,3 @@
-const CLICK_COLOR_PRESETS: [(u8, u8, u8); 7] = [
-    (255, 255, 255),
-    (24, 24, 28),
-    (176, 92, 56),
-    (80, 160, 255),
-    (72, 210, 140),
-    (255, 200, 80),
-    (240, 80, 110),
-];
-
 struct CursorPanel {
     widget: GtkBox,
     refresh: Rc<dyn Fn()>,
@@ -579,91 +569,14 @@ fn build_cursor_effects_tab(
     click_row.set_hexpand(true);
     click_row.set_homogeneous(true);
     let none_btn = click_effect_card(ClickEffect::None);
-    let spotlight_btn = click_effect_card(ClickEffect::Spotlight);
     let ripple_btn = click_effect_card(ClickEffect::Ripple);
-    let echo_btn = click_effect_card(ClickEffect::Echo);
-    spotlight_btn.set_group(Some(&none_btn));
+    let circle_btn = click_effect_card(ClickEffect::Circle);
     ripple_btn.set_group(Some(&none_btn));
-    echo_btn.set_group(Some(&none_btn));
+    circle_btn.set_group(Some(&none_btn));
     click_row.append(&none_btn);
-    click_row.append(&spotlight_btn);
     click_row.append(&ripple_btn);
-    click_row.append(&echo_btn);
+    click_row.append(&circle_btn);
     body.append(&click_row);
-
-    let color_row = GtkBox::new(Orientation::Horizontal, 8);
-    color_row.add_css_class("recording-editor-click-color-row");
-    color_row.set_hexpand(true);
-    let color_label = Label::new(Some(&t("Color")));
-    color_label.add_css_class("recording-editor-zoom-classic-label");
-    color_label.set_xalign(0.0);
-    color_label.set_hexpand(true);
-    color_label.set_valign(Align::Center);
-    let swatch = Button::new();
-    swatch.add_css_class("recording-editor-click-color-swatch");
-    swatch.set_has_frame(false);
-    swatch.set_tooltip_text(Some(&t("Choose click color")));
-    let swatch_paint = DrawingArea::new();
-    swatch_paint.set_content_width(28);
-    swatch_paint.set_content_height(22);
-    swatch_paint.set_can_target(false);
-    swatch_paint.set_draw_func({
-        let state = state.clone();
-        move |_, cr, width, height| {
-            let (r, g, b) = state.lock().unwrap().cursor.click_color;
-            draw_color_chip(cr, width as f64, height as f64, (r, g, b), 6.0);
-        }
-    });
-    swatch.set_child(Some(&swatch_paint));
-    swatch.connect_clicked({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        move |button| open_click_color_dialog(button, state.clone(), on_change.clone())
-    });
-    let hex = Label::new(Some("#FFFFFF"));
-    hex.add_css_class("recording-editor-click-color-hex");
-    hex.set_xalign(0.0);
-    hex.set_valign(Align::Center);
-    color_row.append(&color_label);
-    color_row.append(&swatch);
-    color_row.append(&hex);
-    body.append(&color_row);
-
-    let dots = GtkBox::new(Orientation::Horizontal, 6);
-    dots.add_css_class("recording-editor-click-color-dots");
-    dots.set_halign(Align::End);
-    for color in CLICK_COLOR_PRESETS {
-        let dot = color_dot_button(color);
-        dot.connect_clicked({
-            let state = state.clone();
-            let on_change = on_change.clone();
-            move |_| {
-                state.lock().unwrap().cursor.click_color = color;
-                on_change();
-            }
-        });
-        dots.append(&dot);
-    }
-    body.append(&dots);
-
-    let size_row = cursor_slider_row(&t("Size"));
-    let opacity_row = cursor_slider_row(&t("Opacity"));
-    let duration_row = cursor_slider_row(&t("Duration"));
-    let intensity_row = cursor_slider_row(&t("Intensity"));
-    size_row.scale.set_range(MIN_CLICK_SCALE, MAX_CLICK_SCALE);
-    size_row.scale.set_increments(0.05, 0.1);
-    opacity_row.scale.set_range(0.0, 1.0);
-    opacity_row.scale.set_increments(0.05, 0.1);
-    duration_row
-        .scale
-        .set_range(MIN_CLICK_DURATION_MS as f64, MAX_CLICK_DURATION_MS as f64);
-    duration_row.scale.set_increments(20.0, 100.0);
-    intensity_row.scale.set_range(0.0, 1.0);
-    intensity_row.scale.set_increments(0.05, 0.1);
-    body.append(&size_row.widget);
-    body.append(&opacity_row.widget);
-    body.append(&duration_row.widget);
-    body.append(&intensity_row.widget);
 
     let syncing = Rc::new(Cell::new(false));
     none_btn.connect_toggled({
@@ -675,18 +588,6 @@ fn build_cursor_effects_tab(
                 return;
             }
             state.lock().unwrap().cursor.click_effect = ClickEffect::None;
-            on_change();
-        }
-    });
-    spotlight_btn.connect_toggled({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |button| {
-            if syncing.get() || !button.is_active() {
-                return;
-            }
-            state.lock().unwrap().cursor.click_effect = ClickEffect::Spotlight;
             on_change();
         }
     });
@@ -702,7 +603,7 @@ fn build_cursor_effects_tab(
             on_change();
         }
     });
-    echo_btn.connect_toggled({
+    circle_btn.connect_toggled({
         let state = state.clone();
         let on_change = on_change.clone();
         let syncing = syncing.clone();
@@ -710,79 +611,28 @@ fn build_cursor_effects_tab(
             if syncing.get() || !button.is_active() {
                 return;
             }
-            state.lock().unwrap().cursor.click_effect = ClickEffect::Echo;
+            state.lock().unwrap().cursor.click_effect = ClickEffect::Circle;
             on_change();
         }
     });
-    bind_cursor_f64(
-        &size_row.scale,
-        syncing.clone(),
-        state.clone(),
-        on_change.clone(),
-        |cursor, value| cursor.click_scale = value,
-    );
-    bind_cursor_f64(
-        &opacity_row.scale,
-        syncing.clone(),
-        state.clone(),
-        on_change.clone(),
-        |cursor, value| cursor.click_opacity = value,
-    );
-    bind_cursor_f64(
-        &duration_row.scale,
-        syncing.clone(),
-        state.clone(),
-        on_change.clone(),
-        |cursor, value| cursor.click_duration_ms = value.round() as u32,
-    );
-    bind_cursor_f64(
-        &intensity_row.scale,
-        syncing.clone(),
-        state.clone(),
-        on_change,
-        |cursor, value| cursor.click_intensity = value,
-    );
-
     let refresh = {
         let live = live.clone();
-        let swatch_paint = swatch_paint.clone();
-        let hex = hex.clone();
         let none_btn = none_btn.clone();
-        let spotlight_btn = spotlight_btn.clone();
         let ripple_btn = ripple_btn.clone();
-        let echo_btn = echo_btn.clone();
-        let size_scale = size_row.scale.clone();
-        let opacity_scale = opacity_row.scale.clone();
-        let duration_scale = duration_row.scale.clone();
-        let intensity_scale = intensity_row.scale.clone();
-        let swatch = swatch.clone();
-        let dots = dots.clone();
+        let circle_btn = circle_btn.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let cursor = state.lock().unwrap().cursor;
             syncing.set(true);
             match cursor.click_effect {
                 ClickEffect::None => none_btn.set_active(true),
-                ClickEffect::Spotlight => spotlight_btn.set_active(true),
                 ClickEffect::Ripple => ripple_btn.set_active(true),
-                ClickEffect::Echo => echo_btn.set_active(true),
+                ClickEffect::Circle => circle_btn.set_active(true),
+                // Legacy Spotlight/Echo are no longer offered. Leave the
+                // picker unselected so the stored value is not silently
+                // changed; the effect still renders from the saved value.
+                ClickEffect::Spotlight | ClickEffect::Echo => {}
             }
-            size_scale.set_value(cursor.click_scale);
-            opacity_scale.set_value(cursor.click_opacity);
-            duration_scale.set_value(cursor.click_duration_ms as f64);
-            intensity_scale.set_value(cursor.click_intensity);
-            let enabled = cursor.click_effect != ClickEffect::None;
-            size_scale.set_sensitive(enabled);
-            opacity_scale.set_sensitive(enabled);
-            duration_scale.set_sensitive(enabled);
-            intensity_scale.set_sensitive(enabled);
-            swatch.set_sensitive(enabled);
-            dots.set_sensitive(enabled);
-            hex.set_text(&format!(
-                "#{:02X}{:02X}{:02X}",
-                cursor.click_color.0, cursor.click_color.1, cursor.click_color.2
-            ));
-            swatch_paint.queue_draw();
             live.queue_draw();
             syncing.set(false);
         }) as Rc<dyn Fn()>
@@ -792,29 +642,6 @@ fn build_cursor_effects_tab(
         widget: body,
         refresh,
     }
-}
-
-fn color_dot_button(color: (u8, u8, u8)) -> Button {
-    let button = Button::new();
-    button.add_css_class("recording-editor-click-color-dot");
-    button.set_has_frame(false);
-    let paint = DrawingArea::new();
-    paint.set_content_width(16);
-    paint.set_content_height(16);
-    paint.set_can_target(false);
-    paint.set_draw_func(move |_, cr, width, height| {
-        let cx = width as f64 / 2.0;
-        let cy = height as f64 / 2.0;
-        cr.set_source_rgb(
-            color.0 as f64 / 255.0,
-            color.1 as f64 / 255.0,
-            color.2 as f64 / 255.0,
-        );
-        cr.arc(cx, cy, 6.0, 0.0, std::f64::consts::TAU);
-        let _ = cr.fill();
-    });
-    button.set_child(Some(&paint));
-    button
 }
 
 fn draw_color_chip(
@@ -841,35 +668,6 @@ fn draw_color_chip(
     cr.set_source_rgba(0.0, 0.0, 0.0, 0.28);
     cr.set_line_width(1.0);
     let _ = cr.stroke();
-}
-
-fn open_click_color_dialog(
-    widget: &impl IsA<Widget>,
-    state: Arc<Mutex<VideoEditState>>,
-    on_change: Rc<dyn Fn()>,
-) {
-    let (r, g, b) = state.lock().unwrap().cursor.click_color;
-    let initial = gdk::RGBA::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0, 1.0);
-    let parent = widget
-        .root()
-        .and_then(|root| root.downcast::<Window>().ok());
-    let dialog = ColorChooserDialog::new(Some(&t("Click color")), parent.as_ref());
-    dialog.set_modal(true);
-    dialog.set_use_alpha(false);
-    dialog.set_rgba(&initial);
-    dialog.connect_response(move |dialog, response| {
-        if response == gtk4::ResponseType::Ok {
-            let color = dialog.rgba();
-            state.lock().unwrap().cursor.click_color = (
-                (color.red() * 255.0).round().clamp(0.0, 255.0) as u8,
-                (color.green() * 255.0).round().clamp(0.0, 255.0) as u8,
-                (color.blue() * 255.0).round().clamp(0.0, 255.0) as u8,
-            );
-            on_change();
-        }
-        dialog.close();
-    });
-    dialog.present();
 }
 
 fn draw_click_live_preview(
@@ -901,6 +699,7 @@ fn draw_click_live_preview(
             (local / duration).clamp(0.0, 1.0),
             settings,
             1.0,
+            width,
         );
     }
     cursor_sprite::draw(cr, cx, cy, 1.0, 1.0, "default", settings, 0.95);
@@ -980,6 +779,15 @@ fn draw_click_effect_icon(
             cr.set_line_width(2.0 * s);
             cr.set_source_rgba(r, g, b, 0.72);
             cr.arc(cx, cy, 13.0 * s, 0.0, std::f64::consts::TAU);
+            let _ = cr.stroke();
+        }
+        ClickEffect::Circle => {
+            cr.set_source_rgba(r, g, b, 0.22);
+            cr.arc(cx, cy, 12.0 * s, 0.0, std::f64::consts::TAU);
+            let _ = cr.fill();
+            cr.set_line_width(1.6 * s);
+            cr.set_source_rgba(r, g, b, 0.72);
+            cr.arc(cx, cy, 12.0 * s, 0.0, std::f64::consts::TAU);
             let _ = cr.stroke();
         }
         ClickEffect::Echo => {
