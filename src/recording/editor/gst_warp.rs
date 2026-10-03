@@ -202,7 +202,13 @@ fn uniform_structure(state: &[f32; 16]) -> gst::Structure {
         .build()
 }
 
-fn create_pipe() -> Result<(OwnedFd, OwnedFd), String> {
+/// Create a pipe for a writer thread to feed ffmpeg through an inherited fd.
+///
+/// Shared by the GPU ripple warp (`pipe:3`) and the cursor track (`pipe:4`).
+/// Both ends are `CLOEXEC`; the read end is handed to ffmpeg by
+/// [`crate::recording::backend::attach_pipe_as_fd`], which clears that flag on
+/// the fd ffmpeg actually inherits.
+pub(super) fn create_pipe() -> Result<(OwnedFd, OwnedFd), String> {
     let mut fds = [0i32; 2];
     if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
         return Err(format!(

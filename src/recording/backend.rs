@@ -17,9 +17,9 @@ use crop::{
 use crop::{crop_rgba_frame, even_crop_output, scale_crop_to_frame};
 pub(super) use crop::{fit_within_max_resolution, wayland_video_filter};
 #[cfg(unix)]
-pub(super) use ffmpeg_process::attach_audio_pipe_as_fd3;
+pub(super) use ffmpeg_process::{attach_audio_pipe_as_fd3, attach_pipe_as_fd};
 #[cfg(not(unix))]
-use ffmpeg_process::attach_audio_pipe_as_fd3;
+use ffmpeg_process::{attach_audio_pipe_as_fd3, attach_pipe_as_fd};
 use ffmpeg_process::{
     ffmpeg_error_detail, set_child_stdin_nonblocking, wait_for_ffmpeg_child,
     write_ffmpeg_frame_interruptible,

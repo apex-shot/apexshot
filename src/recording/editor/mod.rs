@@ -2,6 +2,7 @@ pub mod auto_zoom;
 pub mod click_effect;
 pub mod cursor_export;
 pub mod cursor_sprite;
+pub mod cursor_track;
 pub mod ffmpeg;
 pub mod gst_warp;
 pub mod imported_pointer;
