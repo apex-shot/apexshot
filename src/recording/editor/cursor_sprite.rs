@@ -926,6 +926,39 @@ mod tests {
     }
 
     #[test]
+    fn opacity_affects_every_effect_and_intensity_only_where_it_applies() {
+        for effect in [
+            ClickEffect::Ripple,
+            ClickEffect::Spotlight,
+            ClickEffect::Circle,
+            ClickEffect::Echo,
+        ] {
+            let settings = |color, intensity, opacity| CursorSettings {
+                click_effect: effect,
+                click_scale: 1.0,
+                click_color: color,
+                click_intensity: intensity,
+                click_opacity: opacity,
+                ..CursorSettings::default()
+            };
+            let bright = render_click(settings((255, 255, 255), 1.0, 1.0));
+            let clear = render_click(settings((255, 255, 255), 1.0, 0.0));
+            let dim = render_click(settings((255, 255, 255), 0.0, 1.0));
+            let red = render_click(settings((255, 0, 0), 1.0, 1.0));
+            assert_ne!(bright, clear, "opacity should affect {effect:?}");
+            if effect == ClickEffect::Circle {
+                // The studied circle has fixed greys and alphas, so it ignores
+                // our colour and intensity controls.
+                assert_eq!(bright, dim, "intensity is not part of the circle");
+                assert_eq!(bright, red, "colour is not part of the circle");
+            } else {
+                assert_ne!(bright, dim, "intensity should affect {effect:?}");
+                assert_ne!(bright, red, "colour should affect {effect:?}");
+            }
+        }
+    }
+
+    #[test]
     fn click_color_scale_opacity_and_intensity_affect_rendering() {
         let red = render_click(CursorSettings {
             click_color: (255, 0, 0),

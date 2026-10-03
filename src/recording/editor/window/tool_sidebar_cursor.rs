@@ -781,11 +781,14 @@ fn build_cursor_effects_tab(
             opacity_scale.set_value(cursor.click_opacity);
             intensity_scale.set_value(cursor.click_intensity);
             let enabled = cursor.click_effect != ClickEffect::None;
+            // The studied circle has fixed greys and alphas, so colour and
+            // intensity do not apply to it.
+            let uses_custom_greys = enabled && cursor.click_effect != ClickEffect::Circle;
             size_scale.set_sensitive(enabled);
             opacity_scale.set_sensitive(enabled);
-            intensity_scale.set_sensitive(enabled);
-            swatch.set_sensitive(enabled);
-            dots.set_sensitive(enabled);
+            intensity_scale.set_sensitive(uses_custom_greys);
+            swatch.set_sensitive(uses_custom_greys);
+            dots.set_sensitive(uses_custom_greys);
             hex.set_text(&format!(
                 "#{:02X}{:02X}{:02X}",
                 cursor.click_color.0, cursor.click_color.1, cursor.click_color.2
