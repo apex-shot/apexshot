@@ -100,26 +100,6 @@ pub enum ClickEffect {
 }
 
 impl ClickEffect {
-    pub fn parse(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "none" => Self::None,
-            "spotlight" | "pulse" => Self::Spotlight,
-            "circle" => Self::Circle,
-            "echo" => Self::Echo,
-            _ => Self::Ripple,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Spotlight => "spotlight",
-            Self::Ripple => "ripple",
-            Self::Circle => "circle",
-            Self::Echo => "echo",
-        }
-    }
-
     pub fn label(self) -> &'static str {
         match self {
             Self::None => "Off",
