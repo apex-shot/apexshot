@@ -571,22 +571,11 @@ fn build_cursor_effects_tab(
     let none_btn = click_effect_card(ClickEffect::None);
     let ripple_btn = click_effect_card(ClickEffect::Ripple);
     let circle_btn = click_effect_card(ClickEffect::Circle);
-    // Legacy projects can still carry Spotlight or Echo. Those cards appear
-    // only while one of them is the active value, so an existing project is
-    // never silently swapped to a different effect.
-    let spotlight_btn = click_effect_card(ClickEffect::Spotlight);
-    let echo_btn = click_effect_card(ClickEffect::Echo);
-    spotlight_btn.set_visible(false);
-    echo_btn.set_visible(false);
     ripple_btn.set_group(Some(&none_btn));
     circle_btn.set_group(Some(&none_btn));
-    spotlight_btn.set_group(Some(&none_btn));
-    echo_btn.set_group(Some(&none_btn));
     click_row.append(&none_btn);
     click_row.append(&ripple_btn);
     click_row.append(&circle_btn);
-    click_row.append(&spotlight_btn);
-    click_row.append(&echo_btn);
     body.append(&click_row);
 
     let syncing = Rc::new(Cell::new(false));
@@ -599,18 +588,6 @@ fn build_cursor_effects_tab(
                 return;
             }
             state.lock().unwrap().cursor.click_effect = ClickEffect::None;
-            on_change();
-        }
-    });
-    spotlight_btn.connect_toggled({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |button| {
-            if syncing.get() || !button.is_active() {
-                return;
-            }
-            state.lock().unwrap().cursor.click_effect = ClickEffect::Spotlight;
             on_change();
         }
     });
@@ -638,39 +615,24 @@ fn build_cursor_effects_tab(
             on_change();
         }
     });
-    echo_btn.connect_toggled({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        let syncing = syncing.clone();
-        move |button| {
-            if syncing.get() || !button.is_active() {
-                return;
-            }
-            state.lock().unwrap().cursor.click_effect = ClickEffect::Echo;
-            on_change();
-        }
-    });
-
     let refresh = {
         let live = live.clone();
         let none_btn = none_btn.clone();
-        let spotlight_btn = spotlight_btn.clone();
         let ripple_btn = ripple_btn.clone();
         let circle_btn = circle_btn.clone();
-        let echo_btn = echo_btn.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let cursor = state.lock().unwrap().cursor;
             syncing.set(true);
             match cursor.click_effect {
                 ClickEffect::None => none_btn.set_active(true),
-                ClickEffect::Spotlight => spotlight_btn.set_active(true),
                 ClickEffect::Ripple => ripple_btn.set_active(true),
                 ClickEffect::Circle => circle_btn.set_active(true),
-                ClickEffect::Echo => echo_btn.set_active(true),
+                // Legacy Spotlight/Echo are no longer offered. Leave the
+                // picker unselected so the stored value is not silently
+                // changed; the effect still renders from the saved value.
+                ClickEffect::Spotlight | ClickEffect::Echo => {}
             }
-            spotlight_btn.set_visible(matches!(cursor.click_effect, ClickEffect::Spotlight));
-            echo_btn.set_visible(matches!(cursor.click_effect, ClickEffect::Echo));
             live.queue_draw();
             syncing.set(false);
         }) as Rc<dyn Fn()>

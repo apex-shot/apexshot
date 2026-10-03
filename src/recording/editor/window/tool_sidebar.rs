@@ -1292,6 +1292,8 @@ mod tests {
             "FillOps::for_click_color(",
             "cursor_slider_row(&t(\"Intensity\"))",
             "cursor_slider_row(&t(\"Opacity\"))",
+            "click_effect_card(ClickEffect::Spotlight)",
+            "click_effect_card(ClickEffect::Echo)",
         ] {
             assert!(
                 !source.contains(removed),
