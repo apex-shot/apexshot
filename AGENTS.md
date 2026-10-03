@@ -22,3 +22,15 @@ Background panels", "Expose area capture across the tray, CLI, and shortcuts").
 Never prefix a PR title (or a commit subject) with `feat:`/`fix:`/`chore:` — the
 type lives in the branch name (`feat/…`, `fix/…`). `CONTRIBUTING.md`'s
 conventional-commit examples do not match this repo's history; the history wins.
+
+## Product references
+
+Never name the products whose behaviour we study or take inspiration from — in
+PR titles, PR descriptions, commit subjects or bodies, code comments, doc
+comments, docs, or tests. Refer to the behaviour as *studied* or *researched*
+the way the existing code does ("the studied ripple", "the reference we
+studied"). A name in a comment is still a name, and a platform feature named
+only to point at another product counts too.
+
+Why: we do not want readers to learn where an idea came from. This holds even
+when the mention is flattering or only a comparison.
