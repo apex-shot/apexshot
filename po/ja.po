@@ -2625,3 +2625,21 @@ msgstr "Instant animation"
 
 msgid "If enabled, the zoom will be applied instantly without any animation."
 msgstr "If enabled, the zoom will be applied instantly without any animation."
+
+msgid "Camera follows the recorded pointer"
+msgstr "カメラが記録されたカーソルを追従します"
+
+msgid "These settings apply to every zoom."
+msgstr "これらの設定はすべてのズームに適用されます。"
+
+msgid "Camera speed"
+msgstr "カメラ速度"
+
+msgid "Smoothness"
+msgstr "滑らかさ"
+
+msgid "Start animation early"
+msgstr "アニメーションを早めに開始"
+
+msgid "Begin the camera move 0.35 seconds before each zoom."
+msgstr "各ズームの 0.35 秒前からカメラの動きを開始します。"

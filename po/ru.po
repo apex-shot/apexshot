@@ -2661,3 +2661,21 @@ msgstr "Instant animation"
 
 msgid "If enabled, the zoom will be applied instantly without any animation."
 msgstr "If enabled, the zoom will be applied instantly without any animation."
+
+msgid "Camera follows the recorded pointer"
+msgstr "Камера следует за записанным курсором"
+
+msgid "These settings apply to every zoom."
+msgstr "Эти настройки применяются ко всем зумам."
+
+msgid "Camera speed"
+msgstr "Скорость камеры"
+
+msgid "Smoothness"
+msgstr "Плавность"
+
+msgid "Start animation early"
+msgstr "Запускать анимацию раньше"
+
+msgid "Begin the camera move 0.35 seconds before each zoom."
+msgstr "Движение камеры начинается за 0,35 секунды до каждого зума."
