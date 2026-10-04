@@ -2,10 +2,11 @@ use super::squircle_clip::{relative_camera_transform, SquircleClip};
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::model::{
-    format_timecode, source_to_zoomed_point, view_to_source, zoom_camera_transform, CursorSettings,
-    ExportQuality, VideoBackground, VideoEditState, VideoGradient, ZoomClip, ZoomMode,
-    FRAME_ASPECT_RATIOS,
+    format_timecode, source_to_zoomed_point, view_to_source, zoom_camera_transform, ClickEffect,
+    CursorSettings, ExportQuality, VideoBackground, VideoEditState, VideoGradient, ZoomClip,
+    ZoomMode, FRAME_ASPECT_RATIOS,
 };
+use crate::recording::editor::ripple_preview::{PreviewRipple, PreviewRippleClick};
 use crate::recording::editor::sidecar::CursorMotion;
 use gtk4::{
     gdk, glib, prelude::*, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button,
@@ -933,8 +934,9 @@ fn apply_preview_view(
     if clip_w < 2.0 || clip_h < 2.0 {
         return;
     }
-    let (view, src_w, src_h, samples) = {
+    let (view, src_w, src_h, samples, ripple) = {
         let state = state.lock().unwrap();
+        let view = visible_source_view(&state, timeline_t, source_t, placing);
         let samples = if placing {
             Vec::new()
         } else {
@@ -947,12 +949,14 @@ fn apply_preview_view(
                 .collect()
         };
         (
-            visible_source_view(&state, timeline_t, source_t, placing),
+            view,
             state.metadata.width.max(1) as f64,
             state.metadata.height.max(1) as f64,
             samples,
+            preview_ripple_frame(&state, view, source_t),
         )
     };
+    squircle.set_ripple_frame(ripple);
     let (tx, ty, sx, sy) = zoom_camera_transform(view, src_w, src_h, clip_w, clip_h);
     let relative_samples: Vec<_> = samples
         .into_iter()
@@ -982,6 +986,53 @@ fn apply_preview_view(
         provider.load_from_data(&video_css);
         last_css.replace(video_css);
     }
+}
+
+fn preview_ripple_frame(
+    state: &VideoEditState,
+    view: (f64, f64, f64, f64),
+    source_t: f64,
+) -> Option<PreviewRipple> {
+    if state.cursor.click_effect != ClickEffect::Ripple
+        || state.video_hidden
+        || !source_t.is_finite()
+    {
+        return None;
+    }
+    let sidecar = state
+        .sidecar
+        .as_ref()
+        .filter(|sidecar| sidecar.can_render_cursor_overlay())?;
+    let width = state.metadata.width as f64;
+    let height = state.metadata.height as f64;
+    let mut clicks: Vec<_> = sidecar
+        .clicks
+        .iter()
+        .filter_map(|click| {
+            let age_ms = (source_t - click.t) * 1000.0;
+            if !(0.0..crate::recording::editor::click_effect::RIPPLE_VISIBLE_DURATION_MS)
+                .contains(&age_ms)
+            {
+                return None;
+            }
+            let (x, y) = sidecar.map_to_video(click.x, click.y, width, height);
+            Some(PreviewRippleClick { x, y, age_ms })
+        })
+        .collect();
+    clicks.sort_by(|a, b| a.age_ms.total_cmp(&b.age_ms));
+    clicks.truncate(3);
+    clicks.reverse();
+    clicks
+        .iter()
+        .any(|click| {
+            crate::recording::editor::click_effect::ripple_bounce_at_ms(click.age_ms).abs() > 1e-9
+        })
+        .then_some(PreviewRipple {
+            view,
+            source_width: width,
+            source_height: height,
+            clicks,
+        })
 }
 
 /// What the preview's image layer is showing. Wallpapers load from disk;
@@ -1134,6 +1185,9 @@ fn draw_preview_overlays(
                 state.metadata.width as f64,
                 state.metadata.height as f64,
             ) {
+                if cursor.click_effect == ClickEffect::Ripple {
+                    continue;
+                }
                 let (px, py) = source_to_zoomed_point(x, y, view, w, h);
                 crate::recording::editor::cursor_sprite::draw_click(
                     cr,
@@ -1214,6 +1268,64 @@ fn manual_focus_rect(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ripple_preview_selects_the_same_recent_clicks_and_video_space_as_export() {
+        use super::*;
+        use crate::recording::editor::model::VideoMetadata;
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
+        };
+        let mut state = VideoEditState::new(VideoMetadata {
+            path: "/nonexistent/ripple-preview-fixture.mp4".into(),
+            duration_seconds: 5.0,
+            width: 1920,
+            height: 1080,
+            file_size_bytes: 0,
+            has_audio: false,
+            frame_rate: 30.0,
+        });
+        let mut sidecar = PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 300,
+                y: 100,
+                w: 960,
+                h: 540,
+            },
+        );
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 20.0,
+            kind: CursorKind::Default,
+        });
+        for t in [0.2, 1.4, 1.5, 1.6, 1.7, 2.1] {
+            sidecar.clicks.push(ClickSample {
+                t,
+                x: 10.0,
+                y: 20.0,
+                button: 1,
+            });
+        }
+        state.sidecar = Some(sidecar);
+        let view = (100.0, 50.0, 960.0, 540.0);
+        let frame = preview_ripple_frame(&state, view, 2.0).unwrap();
+        assert_eq!(frame.view, view);
+        assert_eq!(frame.source_width, 1920.0);
+        assert_eq!(frame.clicks.len(), 3);
+        for (click, age) in frame.clicks.iter().zip([500.0_f64, 400.0, 300.0]) {
+            assert!((click.age_ms - age).abs() < 1e-9);
+            assert_eq!((click.x, click.y), (20.0, 40.0));
+        }
+        state.cursor.click_effect = ClickEffect::Circle;
+        assert!(preview_ripple_frame(&state, view, 2.0).is_none());
+        state.cursor.click_effect = ClickEffect::Ripple;
+        state.video_hidden = true;
+        assert!(preview_ripple_frame(&state, view, 2.0).is_none());
+        state.video_hidden = false;
+        state.sidecar.as_mut().unwrap().mark_inferred_from_video();
+        assert!(preview_ripple_frame(&state, view, 2.0).is_none());
+    }
     #[test]
     fn manual_focus_placement_uses_the_unzoomed_source_view_with_blur_enabled() {
         use crate::recording::editor::model::{VideoEditState, VideoMetadata, ZoomClip, ZoomMode};

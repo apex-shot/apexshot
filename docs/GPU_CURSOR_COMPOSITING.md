@@ -29,6 +29,17 @@ area rather than with the cursor.
 | Sprite bitmaps, hot spots, click effects | `cursor_sprite.rs`, `assets/cursors/` |
 | Full-canvas overlay blend | `build_composite_convert_args` in `ffmpeg.rs` |
 | Ripple warp (GPU, ripple only) | `gst_warp.rs` |
+| Live ripple preview (current-frame sampling) | `ripple_preview.rs`, `window/squircle_clip.rs` |
+
+The video preview now applies the ripple displacement to the current footage
+before drawing the cursor, using the same prepared source-space pull as export.
+It captures only the visible view plus a sampling margin, preserves crop/zoom
+coordinates, and caches an unchanged frame. This portable preview path uses
+texture readback and CPU sampling rather than a renderer-specific GL shader;
+it works with the GTK renderer instead of requiring the export's GStreamer GL
+stack. Ring overlays remain the export fallback when that stack is unavailable,
+not the normal video preview. Cursor compositing itself is still the CPU path
+described above; this does not implement option B below.
 
 ## Options
 
