@@ -106,6 +106,8 @@ pub struct VideoEditState {
     pub segment_speeds: Vec<f64>,
     pub segment_muted: Vec<bool>,
     pub zoom_clips: Vec<ZoomClip>,
+    pub zoom_camera: ZoomCameraSettings,
+    pub(super) zoom_camera_cache: std::sync::Arc<std::sync::Mutex<ZoomCameraCache>>,
     pub selected_zoom: Option<usize>,
     pub cursor_hide_clips: Vec<CursorHideClip>,
     pub selected_cursor_hide: Option<usize>,

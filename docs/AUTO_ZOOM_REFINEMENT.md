@@ -34,8 +34,9 @@ overlapping candidates and a staged count that `Apply` could not honour. The
 click-window model removes the class of bug instead of patching it: windows
 merge before they are ever placed.
 
-The camera that follows inside a zoom now chases the movement-group centre
-on a spring (phase 3), replacing the earlier edge-feathering follow.
+The camera chases the movement-group centre with a screen-rectangle spring (phase 3),
+replacing the earlier edge-feathering follow. The spring moves the screen's
+position and size together, rather than easing scale separately from panning.
 
 ## Phases
 
@@ -43,12 +44,12 @@ on a spring (phase 3), replacing the earlier edge-feathering follow.
    focus, source anchoring. Done.
 2. **Wire in and remove the old detector** — placement uses the generator;
    the old multi-signal detector and the clicks/hovers choice are gone. Done.
-3. **Camera follow** — the follow camera chases the movement-group centre
-   active at the current time on the project's single screen spring, and
-   snaps per zoom when instant is set. The studied app drives the screen with
-   one project-level `screenMovementSpring`; its `mouseMovementSpring`
-   drag/click stiffening smooths the cursor sprite, not the camera, so it is
-   not applied here. Done.
+3. **Camera follow** — one composition-time screen spring drives panning
+   and zooming. Movement groups are built per zoom from its source window;
+   the preceding pointer sample is carried in and sub-10-pixel movement is
+   filtered as jitter. Close automatic zooms retain the evaluated viewport
+   and velocity. Instant zooms snap. Cursor drag/click stiffening still applies
+   only to the cursor sprite, not the screen. Done.
 4. **Style inheritance** — a new zoom opens with the level and style of the
    last zoom the user edited. Done.
 5. **Instant toggle** — each automatic zoom carries an instant-vs-animated
@@ -57,23 +58,30 @@ on a spring (phase 3), replacing the earlier edge-feathering follow.
 
 ## Motion decisions
 
-The studied behaviour drives zoom motion with springs plus a per-zoom
-instant flag — there are no named easing presets. The port follows that
-split where the camera exists and keeps our own controls where it does
-not:
+The studied behaviour drives the screen rectangle with a spring plus a
+per-zoom instant flag. Both automatic and manual zooms now use that split:
 
-- Automatic clips show an Instant switch instead of easing presets.
-  Animated chases the movement-group centre on the one screen spring;
-  instant jumps to it. The camera does not stiffen near a click or during a
-  recorded drag: in the studied app the `mouseMovementSpring` drag/click
-  changes smooth the cursor sprite, while the screen keeps its own spring.
-  The flag is stored per zoom,
-  inherited by newly added zooms, and always opens off for generated
-  zooms. Older projects load it as animated.
-- Manual clips keep the Glide/Smooth/Snappy/Linear presets. A manual zoom
-  is a fixed focus point, not a follow camera, so the presets remain its
-  motion control. This is a deliberate local divergence, not a studied
-  behaviour.
+- Automatic clips follow the movement-group centre; manual clips use a
+  fixed focus. Animated clips share the screen spring, and Instant applies
+  to both modes. The flag is inherited by newly added zooms and always opens
+  off for generated zooms. Older projects load it as animated.
+- Project-wide Camera speed and Smoothness controls tune the screen spring
+  separately from cursor smoothing. Start animation early optionally begins
+  an animated zoom 350 ms before its block; instant zooms never start early.
+  Settings persist with backward-compatible defaults and participate in zoom
+  undo/redo. Reset restores these settings as well as the selected animation.
+- Camera integration uses a fixed composition-time grid, so retiming footage
+  changes pointer timing without speeding up the spring. Cached states make
+  random seeking match sequential playback. Standalone exits fit the spring
+  to the block's end with zero terminal velocity; close automatic zooms hold
+  their framing and carry their velocity into the next block.
+- Motion blur defaults off. When enabled, preview and export average at most
+  eight camera views of the current video frame and its cursor over a half-frame
+  exposure scaled by the strength. It does not blur unrelated video content
+  across frames. Stationary views and instant cuts stay sharp; corners and
+  backgrounds are composited after the camera exposure.
+- Legacy easing fields remain readable for older projects using Classic
+  Animation, but named easing presets are no longer shown for the new camera.
 - The Classic Animation switch is gone from the panel: no counterpart was
   found in the studied behaviour, where the follow is simply always on.
   The project-wide `zoom_classic` field is still honoured when an older

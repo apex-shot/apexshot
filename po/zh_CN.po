@@ -2628,3 +2628,21 @@ msgstr "保存上一次截图："
 
 msgid "No screenshot is available to save"
 msgstr "没有可保存的截图"
+
+msgid "Camera follows the recorded pointer"
+msgstr "相机跟随录制的光标"
+
+msgid "These settings apply to every zoom."
+msgstr "这些设置适用于每个缩放。"
+
+msgid "Camera speed"
+msgstr "相机速度"
+
+msgid "Smoothness"
+msgstr "平滑度"
+
+msgid "Start animation early"
+msgstr "提前开始动画"
+
+msgid "Begin the camera move 0.35 seconds before each zoom."
+msgstr "在每次缩放前 0.35 秒开始相机移动。"

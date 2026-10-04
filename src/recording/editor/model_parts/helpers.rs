@@ -573,6 +573,46 @@ pub fn movement_groups(
     groups
 }
 
+/// Pointer samples closer than this to the last kept one are jitter.
+const FOLLOW_JITTER_PIXELS: f64 = 10.0;
+
+/// The pointer samples one zoom's follow camera reads, in `(time, x, y)`.
+///
+/// Ports the studied per-zoom event list: samples within 10 px of the last kept
+/// one are dropped as jitter, only samples inside `[start, end]` are kept, and
+/// the last sample before `start` is carried in at the zoom's first instant so
+/// the first group begins where the pointer already was. Grouping each zoom
+/// from its own window keeps pointer history from before the zoom — and a
+/// group left half-filled by it — out of the camera's targets.
+pub fn zoom_follow_samples(
+    points: &[(f64, f64, f64)],
+    start: f64,
+    end: f64,
+) -> Vec<(f64, f64, f64)> {
+    let mut kept: Vec<(f64, f64, f64)> = Vec::new();
+    for &(t, x, y) in points {
+        if !t.is_finite() || !x.is_finite() || !y.is_finite() {
+            continue;
+        }
+        let far_enough = kept
+            .last()
+            .is_none_or(|&(_, kx, ky)| (x - kx).hypot(y - ky) >= FOLLOW_JITTER_PIXELS);
+        if far_enough {
+            kept.push((t, x, y));
+        }
+    }
+    let first_inside = kept.partition_point(|&(t, _, _)| t < start);
+    let mut window: Vec<(f64, f64, f64)> = kept[first_inside..]
+        .iter()
+        .take_while(|&&(t, _, _)| t <= end)
+        .copied()
+        .collect();
+    if let Some(&(_, x, y)) = first_inside.checked_sub(1).and_then(|i| kept.get(i)) {
+        window.insert(0, (start - 0.001, x, y));
+    }
+    window
+}
+
 /// Precompute each movement group's first sample time and dwell-weighted
 /// centre. The centre does not depend on the query time — only which group is
 /// active does — so the follow camera can index this once per evaluation

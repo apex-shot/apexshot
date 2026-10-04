@@ -2679,3 +2679,21 @@ msgstr "Letzten Screenshot speichern:"
 
 msgid "No screenshot is available to save"
 msgstr "Es ist kein Screenshot zum Speichern verfügbar"
+
+msgid "Camera follows the recorded pointer"
+msgstr "Die Kamera folgt dem aufgezeichneten Cursor"
+
+msgid "These settings apply to every zoom."
+msgstr "Diese Einstellungen gelten für jeden Zoom."
+
+msgid "Camera speed"
+msgstr "Kamerageschwindigkeit"
+
+msgid "Smoothness"
+msgstr "Weichheit"
+
+msgid "Start animation early"
+msgstr "Animation früher starten"
+
+msgid "Begin the camera move 0.35 seconds before each zoom."
+msgstr "Die Kamerabewegung beginnt 0,35 Sekunden vor jedem Zoom."
