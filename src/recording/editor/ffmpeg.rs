@@ -920,7 +920,6 @@ fn build_composite_convert_args(
         VideoBackground::None => "0x000000".to_string(),
     };
 
-    let (eff_w, eff_h) = state.effective_source_dimensions();
     let (cursor_w, cursor_h) = if blur_samples > 1 {
         (state.metadata.width.max(2), state.metadata.height.max(2))
     } else {
@@ -1010,14 +1009,12 @@ fn build_composite_convert_args(
         )
     } else {
         format!(
-            "[0:v]{}sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1",
+            "[0:v]{}sendcmd=f={},{}scale@zs={video_w}:{video_h},crop@z=w={video_w}:h={video_h}:x=0:y=0,setsar=1",
             freeze_tail_tpad(state)
                 .map(|pad| format!("{pad},"))
                 .unwrap_or_default(),
             escape_filter_path(&cmd_path),
             static_crop_prefix(state),
-            src_w = eff_w.max(2),
-            src_h = eff_h.max(2),
         )
     };
     // The cursor stays on the video, not the background. It is blended in the
@@ -1224,7 +1221,8 @@ fn build_camera_commands(
 ) -> (String, bool) {
     let fps = state.metadata.export_frame_rate();
     let frames = (((end - start).max(0.0) * fps).ceil() as usize).max(1);
-    let (crop_x, crop_y, _, _) = state.crop_or_full();
+    let (crop_x, crop_y, source_w, source_h) = state.crop_or_full();
+    let (video_w, video_h) = state.video_rect_dimensions();
     let mut lines = String::new();
     let mut moving = false;
     for index in 0..frames {
@@ -1244,8 +1242,16 @@ fn build_camera_commands(
                 format!("zb{sample}")
             };
             let (x, y, w, h) = (view.0 - crop_x, view.1 - crop_y, view.2, view.3);
+            let scaled_w =
+                super::model::even_dimension((source_w * video_w as f64 / w).round() as u32)
+                    .max(video_w);
+            let scaled_h =
+                super::model::even_dimension((source_h * video_h as f64 / h).round() as u32)
+                    .max(video_h);
+            let x = ((x * scaled_w as f64 / source_w).round() as u32).min(scaled_w - video_w) & !1;
+            let y = ((y * scaled_h as f64 / source_h).round() as u32).min(scaled_h - video_h) & !1;
             lines.push_str(&format!(
-                "{local_t:.3} crop@{target} w {w:.0};\n{local_t:.3} crop@{target} h {h:.0};\n{local_t:.3} crop@{target} x {x:.0};\n{local_t:.3} crop@{target} y {y:.0};\n"
+                "{local_t:.3} scale@{target}s w {scaled_w};\n{local_t:.3} scale@{target}s h {scaled_h};\n{local_t:.3} crop@{target} x {x};\n{local_t:.3} crop@{target} y {y};\n"
             ));
         }
     }
@@ -1260,7 +1266,6 @@ fn camera_blur_filter(
 ) -> String {
     let samples = samples.clamp(1, 8);
     let (video_w, video_h) = state.video_rect_dimensions();
-    let (src_w, src_h) = state.effective_source_dimensions();
     let mut filter = "[0:v]".to_string();
     if let Some(pad) = freeze_tail_tpad(state) {
         filter.push_str(&pad);
@@ -1290,7 +1295,7 @@ fn camera_blur_filter(
             format!("zb{sample}")
         };
         filter.push_str(&format!(
-            ";[zb_in{sample}]crop@{target}=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1,format=yuv420p[zb_out{sample}]"
+            ";[zb_in{sample}]scale@{target}s={video_w}:{video_h},crop@{target}=w={video_w}:h={video_h}:x=0:y=0,setsar=1,format=yuv420p[zb_out{sample}]"
         ));
     }
     filter.push(';');
@@ -1976,6 +1981,19 @@ mod tests {
     }
 
     #[test]
+    fn camera_commands_resize_the_source_without_changing_the_output_crop() {
+        let mut state = moving_camera_state();
+        state.zoom_clips[0].start = 0.0;
+        state.zoom_clips[0].end = 2.0;
+        state.zoom_clips[0].instant = true;
+        let commands = build_sendcmd(&state, 0.0, 1.0);
+        assert!(commands.starts_with("0.000 scale@zs w 640;\n0.000 scale@zs h 480;\n0.000 crop@z x 260;\n0.000 crop@z y 120;"));
+        assert!(!commands.contains("crop@z w ") && !commands.contains("crop@z h "));
+        let graph = composite_graph(&state);
+        assert!(graph.contains("scale@zs=320:240,crop@z=w=320:h=240:x=0:y=0"));
+    }
+
+    #[test]
     fn sharp_and_blurred_camera_commands_share_the_same_frame_schedule() {
         let mut state = moving_camera_state();
         state.metadata.frame_rate = 60.0;
@@ -1998,7 +2016,7 @@ mod tests {
         let sharp_current: Vec<_> = sharp.lines().collect();
         let blurred_current: Vec<_> = blurred
             .lines()
-            .filter(|line| line.contains("crop@z "))
+            .filter(|line| line.contains("crop@z ") || line.contains("scale@zs "))
             .collect();
         assert_eq!(sharp_current, blurred_current);
     }
@@ -2787,7 +2805,7 @@ mod tests {
             .expect("a fill exports through the composite graph");
 
         assert!(
-            graph.contains(&format!("scale={video_w}:{video_h}")),
+            graph.contains(&format!("scale@zs={video_w}:{video_h}")),
             "video layer must be the fitted rect, not the whole canvas: {graph}"
         );
         assert!(
