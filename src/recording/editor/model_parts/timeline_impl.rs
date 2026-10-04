@@ -79,16 +79,10 @@ impl VideoEditState {
         self.freeze_tail
     }
 
-    /// Composition end of the last segment: its own end, plus any freeze tail
-    /// the user added to that segment.
+    /// Composition end of the retained footage: the last segment still on the
+    /// timeline, plus any freeze tail the user added to it.
     pub fn last_segment_end(&self) -> f64 {
-        let last = self.segment_order.last().copied().unwrap_or(0);
-        let end = self.segment_start(last) + self.segment_timeline_duration(last);
-        if self.freeze_applies_to(last) {
-            end + self.freeze_tail
-        } else {
-            end
-        }
+        self.video_end_seconds()
     }
 
     /// Drop the held tail. Returns true when there was one.

@@ -72,37 +72,6 @@
                 opacity: 0.35;
             }
 
-            button.recording-editor-zoom-delete {
-                min-height: 24px;
-                padding: 0;
-                border: none;
-                background: transparent;
-                color: #F87171;
-            }
-
-            button.recording-editor-zoom-delete label,
-            button.recording-editor-zoom-delete image {
-                color: inherit;
-                font-size: 12px;
-                font-weight: 500;
-            }
-
-            button.recording-editor-zoom-delete:hover {
-                background: transparent;
-                color: #FCA5A5;
-            }
-
-            button.recording-editor-zoom-delete:disabled {
-                opacity: 0.35;
-            }
-
-            .recording-editor-zoom-footer {
-                padding: 8px 14px 10px 14px;
-                background: #252525;
-                border-top: 1px solid alpha(white, 0.06);
-                border-radius: 0 0 12px 12px;
-            }
-
             .editor-theme-light .recording-editor-workspace {
                 background: @recording-editor-surface-light;
             }
@@ -382,15 +351,6 @@
 
             .editor-theme-light switch.recording-editor-zoom-switch {
                 background: alpha(#111827, 0.16);
-            }
-
-            .editor-theme-light .recording-editor-zoom-footer {
-                background: #e6e7eb;
-                border-top-color: alpha(#111827, 0.10);
-            }
-
-            .editor-theme-light button.recording-editor-zoom-delete {
-                color: #DC2626;
             }
 
             /* The pill carries the surface in both themes; the thumb is the

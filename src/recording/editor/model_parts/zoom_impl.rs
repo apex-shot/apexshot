@@ -542,7 +542,15 @@ impl VideoEditState {
         if let Some(kept) = self.segments_kept.get_mut(index) {
             *kept = false;
         }
+        if self.frozen_segment == Some(index) {
+            self.clear_freeze_tail();
+        }
         self.composition_changed();
+        self.playhead_seconds = self
+            .playback_position(self.playhead_seconds)
+            .map(|(timeline, _)| timeline)
+            .unwrap_or(0.0);
+        self.clamp_timeline_scroll();
     }
 
     pub fn segment_speed(&self, index: usize) -> f64 {

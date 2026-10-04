@@ -1,4 +1,4 @@
-/// Right-click menu for a clip on the Zoom or Hide track.
+/// Right-click menu for a clip on the video, Zoom or Hide track.
 ///
 /// This replaces the sidebar's footer Delete button: a clip is acted on where
 /// it sits instead of being selected and then deleted from across the window.
@@ -6,6 +6,7 @@
 /// (`ClipMenuTarget`) rather than a second menu implementation.
 #[derive(Clone, Copy)]
 pub enum ClipMenuTarget {
+    Video(usize),
     Zoom(usize),
     Hide(usize),
 }
@@ -13,7 +14,9 @@ pub enum ClipMenuTarget {
 impl ClipMenuTarget {
     fn index(self) -> usize {
         match self {
-            ClipMenuTarget::Zoom(index) | ClipMenuTarget::Hide(index) => index,
+            ClipMenuTarget::Video(index)
+            | ClipMenuTarget::Zoom(index)
+            | ClipMenuTarget::Hide(index) => index,
         }
     }
 
@@ -53,6 +56,7 @@ pub fn show_clip_menu(
 
     let index = target.index();
     let is_zoom = target.is_zoom();
+    let is_video = matches!(target, ClipMenuTarget::Video(_));
 
     // The hide item names what the click will do, so a clip that is already
     // disabled offers "Show" and the eye matches. Paste is offered only when
@@ -70,7 +74,61 @@ pub fn show_clip_menu(
         (hidden, guard.can_paste_clipboard_at_playhead())
     };
 
-    let mut items: Vec<MenuItem> = vec![
+    let (muted_now, can_mute_video) = {
+        let guard = state.lock().unwrap();
+        (
+            guard.segment_is_muted(index),
+            !guard.video_locked && guard.has_audio_track() && !guard.audio_locked,
+        )
+    };
+
+    let mut items: Vec<MenuItem> = if is_video {
+        let mut items = Vec::new();
+        if can_mute_video {
+            items.push(MenuItem {
+                icon: if muted_now {
+                    "audio-volume-high-symbolic"
+                } else {
+                    "audio-volume-muted-symbolic"
+                },
+                label: if muted_now { t("Unmute") } else { t("Mute") },
+                danger: false,
+                action: {
+                    let state = state.clone();
+                    let on_change = on_change.clone();
+                    Rc::new(move || {
+                        {
+                            let mut guard = state.lock().unwrap();
+                            if !guard.video_locked {
+                                select_video(&mut guard, Some(index));
+                                guard.set_selected_clip_muted(!muted_now);
+                            }
+                        }
+                        on_change();
+                    })
+                },
+            });
+        }
+        items.push(MenuItem {
+            icon: icon_names::custom::USER_TRASH_SYMBOLIC,
+            label: t("Delete"),
+            danger: true,
+            action: {
+                let state = state.clone();
+                let on_change = on_change.clone();
+                Rc::new(move || {
+                    {
+                        let mut guard = state.lock().unwrap();
+                        select_video(&mut guard, Some(index));
+                        guard.remove_selected_clip();
+                    }
+                    on_change();
+                })
+            },
+        });
+        items
+    } else {
+        vec![
         MenuItem {
             icon: icon_names::shipped::COPY_ARROW_RIGHT_REGULAR,
             label: t("Duplicate"),
@@ -179,12 +237,13 @@ pub fn show_clip_menu(
                 })
             },
         },
-    ];
+    ]
+    };
 
     // Paste is offered only when a paste would actually land: something is on
     // the clipboard and the playhead is clear of the clip it would insert. It
     // is inserted before Delete so the destructive row stays last.
-    if can_paste {
+    if can_paste && !is_video {
         let state = state.clone();
         let on_change = on_change.clone();
         items.insert(
@@ -201,9 +260,9 @@ pub fn show_clip_menu(
         );
     }
 
-    for item in items {
+    for (position, item) in items.into_iter().enumerate() {
         // The reference separates the destructive row from the rest.
-        if item.danger {
+        if item.danger && position > 0 {
             card.append(&menu_separator());
         }
         card.append(&menu_row(item, &popover));
@@ -271,4 +330,71 @@ fn menu_row(item: MenuItem, popover: &Popover) -> Button {
         popover.popdown();
     });
     button
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_video_clip_is_offered_delete_and_mute_only() {
+        let menu = include_str!("clip_menu.rs");
+        let source = menu
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the menu's production source");
+        let start = source
+            .find("let mut items: Vec<MenuItem> = if is_video {")
+            .expect("the video branch of the item list");
+        let video = {
+            let rest = &source[start + 1..];
+            let end = rest
+                .find("\n    } else {")
+                .expect("the overlay branch follows the video branch");
+            &source[start..start + 1 + end]
+        };
+        assert!(
+            video.contains("select_video(&mut guard, Some(index));"),
+            "a video action must target the clicked segment, not whatever was selected"
+        );
+        assert!(
+            video.contains("guard.remove_selected_clip();"),
+            "the video menu must delete the clicked clip"
+        );
+        assert!(
+            video.contains("guard.set_selected_clip_muted(!muted_now);"),
+            "the video menu must mute and unmute the clicked clip"
+        );
+        assert!(
+            video.contains("if !guard.video_locked {"),
+            "the model setter leaves the video lock to the caller, so the menu rechecks it"
+        );
+        assert!(
+            !video.contains("paste_clipboard_at_playhead"),
+            "the overlay clipboard paste must not be offered on a video clip"
+        );
+        assert!(
+            !video.contains("label: if hidden_now"),
+            "a video clip has no hide flag"
+        );
+        assert!(
+            source.contains("if can_paste && !is_video {"),
+            "paste must stay out of the video menu while the overlays keep it"
+        );
+    }
+
+    #[test]
+    fn a_delete_only_menu_has_no_leading_separator() {
+        let menu = include_str!("clip_menu.rs");
+        let source = menu
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the menu's production source");
+        let loop_start = source
+            .find("for (position, item) in items.into_iter().enumerate() {")
+            .expect("the row loop must know each row's position");
+        let rows = &source[loop_start..];
+        assert!(
+            rows.contains("if item.danger && position > 0 {"),
+            "a separator must not lead a menu whose only destructive row is first"
+        );
+    }
 }

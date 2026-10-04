@@ -981,6 +981,139 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_right_click_targets_the_clip_under_it_and_ignores_the_empty_band() {
+        let interaction = include_str!("interaction.rs");
+        let production = interaction
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the interaction source");
+        let start = production
+            .find("pub fn bind_video_clip(")
+            .expect("the video clip's gesture bindings");
+        let bind = {
+            let rest = &production[start + 1..];
+            let end = rest
+                .find("\npub fn bind_zoom_track(")
+                .expect("the video bindings end where the zoom lane's begin");
+            &production[start..start + 1 + end]
+        };
+        let menu_start = bind
+            .find("menu.set_button(3);")
+            .expect("the video lane's right-click binding");
+        let menu = &bind[menu_start..];
+        assert!(
+            menu.contains("video_layout(&guard, width)"),
+            "the target must come from the drawn segment rectangles"
+        );
+        assert!(
+            !menu.contains("video_hit("),
+            "the extender handle in video_hit would claim the last segment from the empty band"
+        );
+        assert!(
+            menu.contains("x >= x0 && x <= x1"),
+            "the rectangle test must be inclusive so a clip edge still targets its clip"
+        );
+        let locked = menu
+            .find("if guard.video_locked {")
+            .expect("a locked video offers no menu");
+        let hit = menu
+            .find("video_layout(&guard, width)")
+            .expect("the segment hit test");
+        assert!(
+            locked < hit,
+            "the lock check must come before anything is selected or opened"
+        );
+        assert!(
+            menu.contains("ClipMenuTarget::Video(index)"),
+            "the menu must open on the clicked video segment"
+        );
+    }
+
+    #[test]
+    fn the_player_seeks_the_retained_source_and_not_the_raw_timeline() {
+        let interaction = include_str!("interaction.rs");
+        let production = interaction
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the interaction source");
+        let toggle_start = production
+            .find("pub fn toggle_playback(")
+            .expect("the play toggle");
+        let toggle = {
+            let rest = &production[toggle_start + 1..];
+            let end = rest
+                .find("\npub fn pause_playback(")
+                .expect("the play toggle ends at the pause control");
+            &production[toggle_start..toggle_start + 1 + end]
+        };
+        assert!(
+            toggle.contains("guard.playback_position(replay)"),
+            "starting playback must resolve a retained source position"
+        );
+        assert!(
+            !toggle.contains("guard.source_playhead()"),
+            "the scrubbing fallback would play deleted footage"
+        );
+        assert!(
+            toggle.contains("playing.set(false);"),
+            "a composition with nothing retained must start paused"
+        );
+
+        let tick_start = production
+            .find("pub fn tick_playback(")
+            .expect("the playback tick");
+        let tick = {
+            let rest = &production[tick_start + 1..];
+            let end = rest
+                .find("\nfn stop_playback_at_end(")
+                .expect("the tick ends at the end-of-playback control");
+            &production[tick_start..tick_start + 1 + end]
+        };
+        let resolved = tick
+            .find("playback_position(guard.playhead_seconds)")
+            .expect("the tick resolves the retained position before it advances");
+        let stopped = tick
+            .find("stop_playback_at_end(state, media, playing, play_button, redraw);")
+            .expect("a composition with nothing retained must stop");
+        assert!(
+            resolved < stopped,
+            "the no-retained-footage stop must precede any playback work"
+        );
+        assert!(
+            tick.contains("next += (actual.unwrap_or(source_t) - source_t).max(0.0);"),
+            "the advance must add the media delta to the resolved logical position"
+        );
+        assert!(
+            !tick.contains("source_to_timeline(seconds)"),
+            "mapping a raw source time can jump straight into a deleted range"
+        );
+        assert!(
+            tick.contains("usable_media_timestamp_seconds("),
+            "the drift check must read the media's own timestamp"
+        );
+        assert!(
+            tick.contains("let off_source = actual.is_none_or(|seconds| (seconds - seek_to).abs() > 0.05);"),
+            "normal playback may only seek off its expected source by more than the tolerance"
+        );
+        assert!(
+            tick.contains("if is_ended || off_source {"),
+            "native EOF must seek the retained source instead of ending playback"
+        );
+        assert!(
+            tick.contains("if !is_playing || is_ended {"),
+            "playback resumes the media only when it stalled or ran out"
+        );
+        assert!(
+            !tick.contains("if media_file.is_ended() {\n            stop_playback_at_end"),
+            "EOF may not stop playback while retained footage remains"
+        );
+        assert!(
+            !production.contains("playback_restart_source"),
+            "the mixed-coordinate restart heuristic is gone"
+        );
+    }
+
     /// Body of the first rule for `selector`, without its braces.
     fn css_rule<'a>(css: &'a str, selector: &str) -> &'a str {
         css.split(selector)
