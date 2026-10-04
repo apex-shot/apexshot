@@ -115,13 +115,13 @@ pub fn near_step(value: f64, step: f64) -> bool {
 
 pub fn format_ruler_label(seconds: f64, major: f64) -> String {
     let total = seconds.max(0.0);
-    let minutes = (total / 60.0).floor() as u64;
-    let secs = total - minutes as f64 * 60.0;
     if major < 1.0 {
-        format!("{minutes}:{secs:04.1}")
-    } else {
-        format!("{minutes}:{:02}", secs.floor() as u64)
+        let minutes = (total / 60.0).floor() as u64;
+        let secs = total - minutes as f64 * 60.0;
+        return format!("{minutes}:{secs:04.1}");
     }
+    let whole = total.round().max(0.0) as u64;
+    format!("{}:{:02}", whole / 60, whole % 60)
 }
 
 pub fn draw_video_clip(
@@ -1087,5 +1087,25 @@ mod tests {
                 "the pill body must be solid #660033, not a translucent tint",
             );
         }
+    }
+
+    #[test]
+    fn whole_second_ruler_labels_round_and_carry() {
+        assert_eq!(super::format_ruler_label(0.0, 2.0), "0:00");
+        assert_eq!(super::format_ruler_label(2.0, 2.0), "0:02");
+        assert_eq!(super::format_ruler_label(4.0, 2.0), "0:04");
+        assert_eq!(super::format_ruler_label(6.0, 2.0), "0:06");
+        assert_eq!(super::format_ruler_label(8.0, 2.0), "0:08");
+        assert_eq!(
+            super::format_ruler_label(3.9999999999999996, 2.0),
+            "0:04",
+            "an accumulated tick error must still read as the second it is"
+        );
+        assert_eq!(
+            super::format_ruler_label(59.60000000000001, 2.0),
+            "1:00",
+            "rounding must carry into the next minute"
+        );
+        assert_eq!(super::format_ruler_label(0.4, 0.5), "0:00.4");
     }
 }

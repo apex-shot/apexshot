@@ -57,16 +57,11 @@ pub fn video_hit(state: &VideoEditState, width: f64, x: f64) -> VideoHit {
     // handle the drag target even where the last segment's body or its inset
     // edge handle would otherwise win.
     if end_x > 0.0 && x >= end_x - EXTEND_HANDLE_HIT {
-        let segment = state
-            .segment_order
-            .iter()
-            .rev()
-            .find(|&&index| state.segments_kept.get(index).copied().unwrap_or(true))
-            .copied();
+        let segment = rightmost_video_segment(state, width);
         return VideoHit {
             cursor: TrackCursor::ResizeEnd,
             segment,
-            drag: Some(ClipDrag::End),
+            drag: segment.and_then(|index| segment_edge_drag(state, index, false)),
         };
     }
     for &(_, seg_idx, x0, x1) in &layout {
@@ -232,37 +227,145 @@ pub fn seek_to_x(
     }
 }
 
-pub fn x_to_source(state: &VideoEditState, width: f64, x: f64) -> f64 {
-    state
-        .timeline_to_source(x_to_timeline(state, width, x))
-        .clamp(0.0, state.metadata.duration_seconds.max(0.0))
+pub fn rightmost_video_segment(state: &VideoEditState, width: f64) -> Option<usize> {
+    video_layout(state, width)
+        .into_iter()
+        .max_by(|left, right| left.3.total_cmp(&right.3))
+        .map(|(_, segment, _, _)| segment)
 }
 
-/// Right-hand edge target for the end drag, from a composition time.
-///
-/// Inside the clip this is the same clamped source time as `x_to_source`.
-/// Past the last frame there is no source to map onto, so the overshoot
-/// becomes held seconds beyond the source end — exactly what a freeze hold
-/// consumes. `x_to_source` cannot do this: it clamps at the source duration,
-/// which made expanding the right edge a no-op.
-///
-/// The overshoot is measured from where the *footage* ends, never from the
-/// clip's drawn tail. `last_segment_end()` already includes the hold this drag
-/// is setting, so feeding it back made every update compute
-/// `new_hold = overshoot - old_hold`: the tail converged to half the drag while
-/// alternating frame to frame — a handle that followed only half way and
-/// flickered. `source_to_timeline(trim_end_seconds)` is the composition time of
-/// the last real frame and does not move with the hold, so the target is a
-/// fixed point for a fixed pointer.
-pub fn edge_target_at(state: &VideoEditState, timeline_t: f64) -> f64 {
-    let duration = state.metadata.duration_seconds.max(0.0);
-    let source_t = state.timeline_to_source(timeline_t);
-    if source_t > duration {
-        let footage_end = state.source_to_timeline(state.trim_end_seconds);
-        state.trim_end_seconds + (timeline_t - footage_end).max(0.0)
-    } else {
-        source_t.clamp(0.0, duration)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ClipResizeAnchor {
+    pub kind: ClipResizeKind,
+    pub source_edge: f64,
+    pub timeline_edge: f64,
+    pub speed: f64,
+    pub pixels_per_second: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClipResizeKind {
+    Start,
+    End,
+    Cut(usize),
+}
+
+impl ClipResizeAnchor {
+    fn edges(
+        state: &VideoEditState,
+        segment: usize,
+        drag: ClipDrag,
+    ) -> Option<(ClipResizeKind, f64, f64, f64)> {
+        let bounds = state.segment_boundaries();
+        let &(source_start, source_end) = bounds.get(segment)?;
+        let speed = state.segment_speed(segment);
+        match drag {
+            ClipDrag::Start => Some((
+                ClipResizeKind::Start,
+                source_start,
+                state.segment_start(segment),
+                speed,
+            )),
+            ClipDrag::End => {
+                let hold = if state.freeze_applies_to_segment(segment) {
+                    state.freeze_tail_seconds()
+                } else {
+                    0.0
+                };
+                Some((
+                    ClipResizeKind::End,
+                    source_end + hold * speed,
+                    state.segment_start(segment) + state.segment_timeline_duration(segment) + hold,
+                    speed,
+                ))
+            }
+            ClipDrag::Cut(cut_index) => {
+                let cut = *state.cuts.get(cut_index)?;
+                Some((
+                    ClipResizeKind::Cut(cut_index),
+                    cut,
+                    state.segment_start(segment) + (cut - source_start).max(0.0) / speed,
+                    speed,
+                ))
+            }
+            _ => None,
+        }
     }
+
+    pub fn for_video(
+        state: &VideoEditState,
+        width: f64,
+        segment: usize,
+        drag: ClipDrag,
+    ) -> Option<ClipResizeAnchor> {
+        let (kind, source_edge, timeline_edge, speed) = Self::edges(state, segment, drag)?;
+        Some(ClipResizeAnchor {
+            kind,
+            source_edge,
+            timeline_edge,
+            speed,
+            pixels_per_second: pixels_per_second(state, width),
+        })
+    }
+
+    pub fn for_extend(state: &VideoEditState, width: f64) -> Option<ClipResizeAnchor> {
+        let segment = rightmost_video_segment(state, width)?;
+        let drag = segment_edge_drag(state, segment, false)?;
+        ClipResizeAnchor::for_video(state, width, segment, drag)
+    }
+}
+
+pub fn apply_clip_resize(
+    state: &mut VideoEditState,
+    width: f64,
+    anchor: &ClipResizeAnchor,
+    offset_x: f64,
+) {
+    let desired = anchor.timeline_edge + offset_x / anchor.pixels_per_second.max(1e-6);
+    let snapped = snap_timeline_to_playhead(state, width, desired.max(0.0));
+    let source = anchor.source_edge + (snapped - anchor.timeline_edge) * anchor.speed;
+    match anchor.kind {
+        ClipResizeKind::End => state.set_trim_end(source),
+        ClipResizeKind::Start => {
+            let old_source = state.trim_start_seconds;
+            let old_comp = state.segment_start(0);
+            state.set_trim_start(source);
+            if !state.cuts.is_empty() && state.segments_kept.first().copied().unwrap_or(true) {
+                let start = old_comp
+                    + (state.trim_start_seconds - old_source) / state.segment_speed(0).max(1e-6);
+                state.set_segment_start(0, start);
+            }
+        }
+        ClipResizeKind::Cut(index) => {
+            let Some(before_cut) = state.cuts.get(index).copied() else {
+                return;
+            };
+            let right = index + 1;
+            let before_comp = state.segment_start(right);
+            state.move_cut(index, source);
+            let Some(new_cut) = state.cuts.get(index).copied() else {
+                return;
+            };
+            if state.segments_kept.get(right).copied().unwrap_or(true) {
+                let start = before_comp
+                    + (new_cut - before_cut) / state.segment_speed(right).max(1e-6);
+                state.set_segment_start(right, start);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+pub fn edge_target_at(state: &VideoEditState, timeline_t: f64) -> f64 {
+    let Some(segment) = rightmost_video_segment(state, 1000.0) else {
+        return state.trim_end_seconds;
+    };
+    let Some((_, source_edge, timeline_edge, speed)) =
+        ClipResizeAnchor::edges(state, segment, ClipDrag::End)
+    else {
+        return state.trim_end_seconds;
+    };
+    source_edge + (timeline_t - timeline_edge) * speed
 }
 
 pub fn x_to_timeline(state: &VideoEditState, width: f64, x: f64) -> f64 {
@@ -280,13 +383,6 @@ pub fn in_extend_band(state: &VideoEditState, width: f64, x: f64) -> bool {
     end_x > 0.0 && x >= end_x - EXTEND_HANDLE_HIT
 }
 
-/// Apply one pointer position to the clip's end while the extend mover is
-/// dragged: composition seconds in, a freeze hold or a trim out.
-pub fn apply_extend_drag(state: &mut VideoEditState, width: f64, x: f64) {
-    let edge = snap_timeline_to_playhead(state, width, x_to_timeline(state, width, x));
-    let target = edge_target_at(state, edge);
-    state.set_trim_end(target);
-}
 
 pub fn pixels_per_second(state: &VideoEditState, width: f64) -> f64 {
     width.max(1.0) / state.visible_span_seconds().max(0.001)
@@ -349,14 +445,6 @@ pub fn snap_timeline_to_playhead(state: &VideoEditState, width: f64, time: f64) 
         playhead_snap_threshold(state, width),
     )
     .max(0.0)
-}
-
-pub fn snap_source_to_playhead(state: &VideoEditState, width: f64, source_t: f64) -> f64 {
-    snap_to_target(
-        source_t,
-        state.source_playhead(),
-        playhead_snap_threshold(state, width),
-    )
 }
 
 pub fn snap_range_start_to_playhead(
@@ -683,5 +771,159 @@ mod freeze_edge_tests {
         assert!(!in_extend_band(&state, width, end_x - 10.0));
         assert!(in_extend_band(&state, width, end_x - 2.0), "left half of the mover");
         assert!(in_extend_band(&state, width, end_x + 50.0), "past the clip");
+    }
+}
+
+#[cfg(test)]
+mod resize_anchor_tests {
+    use super::{
+        apply_clip_resize, rightmost_video_segment, video_end_x, video_hit,
+        ClipResizeAnchor, ClipResizeKind, ClipDrag,
+    };
+    use crate::recording::editor::model::{VideoEditState, VideoMetadata};
+    use std::path::PathBuf;
+
+    fn state13() -> VideoEditState {
+        VideoEditState::new(VideoMetadata {
+            path: PathBuf::from("/tmp/input.mp4"),
+            duration_seconds: 13.0,
+            width: 1920,
+            height: 1080,
+            file_size_bytes: 1024,
+            has_audio: false,
+            frame_rate: 30.0,
+        })
+    }
+
+    fn joined_fixture() -> VideoEditState {
+        let mut state = state13();
+        state.add_cut(3.0);
+        state.add_cut(6.0);
+        state.selected_segment = Some(1);
+        state.remove_selected_clip();
+        state.set_segment_start(2, 3.0);
+        state
+    }
+
+    #[test]
+    fn end_resize_holds_its_anchor_and_restores_the_real_frames() {
+        let mut state = joined_fixture();
+        let width = 1300.0;
+        let anchor =
+            ClipResizeAnchor::for_video(&state, width, 2, ClipDrag::End).expect("end anchor");
+        assert!((anchor.timeline_edge - 10.0).abs() < 1e-9);
+        assert!((anchor.source_edge - 13.0).abs() < 1e-9);
+        let pps = anchor.pixels_per_second;
+
+        for _ in 0..5 {
+            apply_clip_resize(&mut state, width, &anchor, -2.0 * pps);
+            assert!(
+                (state.trim_end_seconds - 11.0).abs() < 1e-9,
+                "out {}",
+                state.trim_end_seconds
+            );
+            assert_eq!(state.freeze_tail_seconds(), 0.0);
+            assert!((state.video_end_seconds() - 8.0).abs() < 1e-9);
+        }
+
+        let restore =
+            ClipResizeAnchor::for_video(&state, width, 2, ClipDrag::End).expect("restore anchor");
+        apply_clip_resize(&mut state, width, &restore, 2.0 * pps);
+        assert!((state.trim_end_seconds - 13.0).abs() < 1e-9);
+        assert_eq!(state.freeze_tail_seconds(), 0.0);
+        assert!((state.video_end_seconds() - 10.0).abs() < 1e-9);
+
+        apply_clip_resize(&mut state, width, &restore, 3.0 * pps);
+        assert!((state.trim_end_seconds - 13.0).abs() < 1e-9);
+        assert!((state.freeze_tail_seconds() - 1.0).abs() < 1e-9);
+        assert!((state.video_end_seconds() - 11.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_cut_resize_keeps_the_right_clip_outpoint_and_repeats_stably() {
+        let mut state = joined_fixture();
+        let width = 1300.0;
+        let anchor =
+            ClipResizeAnchor::for_video(&state, width, 2, ClipDrag::Cut(1)).expect("cut anchor");
+        assert_eq!(anchor.kind, ClipResizeKind::Cut(1));
+        assert!((anchor.timeline_edge - 3.0).abs() < 1e-9);
+        assert!((anchor.source_edge - 6.0).abs() < 1e-9);
+        let pps = anchor.pixels_per_second;
+
+        for _ in 0..5 {
+            apply_clip_resize(&mut state, width, &anchor, 2.0 * pps);
+            assert!((state.cuts[1] - 8.0).abs() < 1e-9, "cut {}", state.cuts[1]);
+            assert!(
+                (state.segment_start(2) - 5.0).abs() < 1e-9,
+                "start {}",
+                state.segment_start(2)
+            );
+            assert!((state.video_end_seconds() - 10.0).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn an_extreme_shrink_keeps_the_floor_and_reespands_real_frames() {
+        let mut state = joined_fixture();
+        let width = 1300.0;
+        let anchor =
+            ClipResizeAnchor::for_video(&state, width, 2, ClipDrag::End).expect("end anchor");
+        let pps = anchor.pixels_per_second;
+
+        apply_clip_resize(&mut state, width, &anchor, -100.0 * pps);
+        assert!(
+            (state.trim_end_seconds - 6.25).abs() < 1e-9,
+            "out {}",
+            state.trim_end_seconds
+        );
+        assert_eq!(state.freeze_tail_seconds(), 0.0);
+
+        apply_clip_resize(&mut state, width, &anchor, 0.0);
+        assert!((state.trim_end_seconds - 13.0).abs() < 1e-9);
+        assert_eq!(state.freeze_tail_seconds(), 0.0);
+    }
+
+    #[test]
+    fn a_retimed_clip_converts_overshoot_through_its_speed() {
+        let mut state = joined_fixture();
+        let width = 1300.0;
+        state.segment_speeds[2] = 2.0;
+        let anchor =
+            ClipResizeAnchor::for_video(&state, width, 2, ClipDrag::End).expect("end anchor");
+        assert!((anchor.timeline_edge - 6.5).abs() < 1e-9);
+        let pps = anchor.pixels_per_second;
+
+        apply_clip_resize(&mut state, width, &anchor, 1.0 * pps);
+        assert!((state.freeze_tail_seconds() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_mid_drag_scroll_does_not_move_the_target() {
+        let mut state = joined_fixture();
+        let width = 1300.0;
+        let anchor =
+            ClipResizeAnchor::for_video(&state, width, 2, ClipDrag::End).expect("end anchor");
+        let pps = anchor.pixels_per_second;
+
+        apply_clip_resize(&mut state, width, &anchor, -2.0 * pps);
+        let target = state.trim_end_seconds;
+        state.set_timeline_scroll(5.0);
+        apply_clip_resize(&mut state, width, &anchor, -2.0 * pps);
+        assert!((state.trim_end_seconds - target).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_deleted_original_tail_leaves_the_shared_band_on_the_retained_cut() {
+        let mut state = state13();
+        state.add_cut(6.0);
+        state.selected_segment = Some(1);
+        state.remove_selected_clip();
+        let width = 1300.0;
+        let end_x = video_end_x(&state, width);
+        assert!(rightmost_video_segment(&state, width) == Some(0));
+        let hit = video_hit(&state, width, end_x + 1.0);
+        assert_eq!(hit.drag, Some(ClipDrag::Cut(0)));
+        let anchor = ClipResizeAnchor::for_extend(&state, width).expect("band anchor");
+        assert_eq!(anchor.kind, ClipResizeKind::Cut(0));
     }
 }

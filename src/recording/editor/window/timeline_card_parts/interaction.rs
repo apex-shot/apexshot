@@ -389,16 +389,13 @@ pub fn bind_video_clip(
     area.add_controller(click);
 
     let drag_kind = Rc::new(Cell::new(None::<ClipDrag>));
-    // The clip end's x when the extend drag began. The mover is inset from the
-    // edge, so the drag tracks the pointer's travel from there instead of
-    // snapping the end to wherever the grab landed.
-    let end_origin = Rc::new(Cell::new(0.0));
+    let resize_anchor = Rc::new(Cell::new(None::<ClipResizeAnchor>));
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
         let state = state.clone();
         let drag_kind = drag_kind.clone();
-        let end_origin = end_origin.clone();
+        let resize_anchor = resize_anchor.clone();
         let dragging = dragging.clone();
         let redraw = redraw.clone();
         move |gesture, x, _| {
@@ -413,12 +410,13 @@ pub fn bind_video_clip(
                 return;
             }
             let hit = video_hit(&guard, width, x);
-            if hit.drag == Some(ClipDrag::End) {
-                end_origin.set(video_end_x(&guard, width));
-            }
             if let Some(seg) = hit.segment {
                 select_video(&mut guard, Some(seg));
             }
+            resize_anchor.set(match (hit.segment, hit.drag) {
+                (Some(segment), Some(drag)) => ClipResizeAnchor::for_video(&guard, width, segment, drag),
+                _ => None,
+            });
             let lift = matches!(
                 hit.drag,
                 Some(ClipDrag::Move { .. }) | Some(ClipDrag::Segment { .. })
@@ -433,7 +431,7 @@ pub fn bind_video_clip(
         let state = state.clone();
         let media = media.clone();
         let drag_kind = drag_kind.clone();
-        let end_origin = end_origin.clone();
+        let resize_anchor = resize_anchor.clone();
         let redraw = redraw.clone();
         move |gesture, offset_x, _| {
             let Some((start_x, _)) = gesture.start_point() else {
@@ -445,25 +443,11 @@ pub fn bind_video_clip(
                 .unwrap_or(1.0);
             let x = start_x + offset_x;
             match drag_kind.get() {
-                Some(ClipDrag::Start) => {
-                    let mut guard = state.lock().unwrap();
-                    let seconds =
-                        snap_source_to_playhead(&guard, width, x_to_source(&guard, width, x));
-                    guard.set_trim_start(seconds);
-                }
-                Some(ClipDrag::End) => {
-                    let mut guard = state.lock().unwrap();
-                    // The handle can live past the source end (a freeze
-                    // hold), so snap and convert in composition seconds
-                    // rather than through the source-clamped helper. Travel
-                    // from the grab's origin, not the pointer's absolute x.
-                    apply_extend_drag(&mut guard, width, end_origin.get() + offset_x);
-                }
-                Some(ClipDrag::Cut(index)) => {
-                    let mut guard = state.lock().unwrap();
-                    let seconds =
-                        snap_source_to_playhead(&guard, width, x_to_source(&guard, width, x));
-                    guard.move_cut(index, seconds);
+                Some(ClipDrag::Start | ClipDrag::End | ClipDrag::Cut(_)) => {
+                    if let Some(anchor) = resize_anchor.get() {
+                        let mut guard = state.lock().unwrap();
+                        apply_clip_resize(&mut guard, width, &anchor, offset_x);
+                    }
                 }
                 Some(ClipDrag::Move {
                     origin_offset,
@@ -532,6 +516,7 @@ pub fn bind_video_clip(
         Rc::new(Cell::new(None)),
         set_band_hover,
     );
+
     let menu = GestureClick::new();
     menu.set_button(3);
     menu.connect_pressed({
@@ -594,7 +579,8 @@ pub fn bind_video_clip(
             );
         }
     });
-    area.add_controller(menu);}
+    area.add_controller(menu);
+}
 
 pub fn bind_zoom_track(
     area: &DrawingArea,
@@ -640,13 +626,13 @@ pub fn bind_zoom_track(
     area.add_controller(click);
 
     let drag_kind = Rc::new(Cell::new(None::<ZoomDrag>));
-    let end_origin = Rc::new(Cell::new(0.0));
+    let resize_anchor = Rc::new(Cell::new(None::<ClipResizeAnchor>));
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
         let state = state.clone();
         let drag_kind = drag_kind.clone();
-        let end_origin = end_origin.clone();
+        let resize_anchor = resize_anchor.clone();
         let dragging = dragging.clone();
         move |gesture, x, _| {
             let width = gesture
@@ -678,7 +664,7 @@ pub fn bind_zoom_track(
                 None
             };
             if matches!(kind, Some(ZoomDrag::Extend)) {
-                end_origin.set(video_end_x(&guard, width));
+                resize_anchor.set(ClipResizeAnchor::for_extend(&guard, width));
             }
             dragging.set(match kind {
                 Some(ZoomDrag::Move { index, .. }) => Some(index),
@@ -691,7 +677,7 @@ pub fn bind_zoom_track(
         let state = state.clone();
         let media = media.clone();
         let drag_kind = drag_kind.clone();
-        let end_origin = end_origin.clone();
+        let resize_anchor = resize_anchor.clone();
         let redraw = redraw.clone();
         move |gesture, offset_x, _| {
             let Some((start_x, _)) = gesture.start_point() else {
@@ -737,8 +723,10 @@ pub fn bind_zoom_track(
                     seek_to_x(&state, &media, width, start_x + offset_x);
                 }
                 Some(ZoomDrag::Extend) => {
-                    let mut guard = state.lock().unwrap();
-                    apply_extend_drag(&mut guard, width, end_origin.get() + offset_x);
+                    if let Some(anchor) = resize_anchor.get() {
+                        let mut guard = state.lock().unwrap();
+                        apply_clip_resize(&mut guard, width, &anchor, offset_x);
+                    }
                 }
                 None => {}
             }
@@ -875,13 +863,13 @@ pub fn bind_hide_track(
     area.add_controller(click);
 
     let drag_kind = Rc::new(Cell::new(None::<HideDrag>));
-    let end_origin = Rc::new(Cell::new(0.0));
+    let resize_anchor = Rc::new(Cell::new(None::<ClipResizeAnchor>));
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
         let state = state.clone();
         let drag_kind = drag_kind.clone();
-        let end_origin = end_origin.clone();
+        let resize_anchor = resize_anchor.clone();
         let dragging = dragging.clone();
         move |gesture, x, _| {
             let width = gesture
@@ -912,7 +900,7 @@ pub fn bind_hide_track(
                 None
             };
             if matches!(kind, Some(HideDrag::Extend)) {
-                end_origin.set(video_end_x(&guard, width));
+                resize_anchor.set(ClipResizeAnchor::for_extend(&guard, width));
             }
             dragging.set(match kind {
                 Some(HideDrag::Move { index, .. }) => Some(index),
@@ -925,7 +913,7 @@ pub fn bind_hide_track(
         let state = state.clone();
         let media = media.clone();
         let drag_kind = drag_kind.clone();
-        let end_origin = end_origin.clone();
+        let resize_anchor = resize_anchor.clone();
         let redraw = redraw.clone();
         move |gesture, offset_x, _| {
             let Some((start_x, _)) = gesture.start_point() else {
@@ -971,8 +959,10 @@ pub fn bind_hide_track(
                     seek_to_x(&state, &media, width, start_x + offset_x);
                 }
                 Some(HideDrag::Extend) => {
-                    let mut guard = state.lock().unwrap();
-                    apply_extend_drag(&mut guard, width, end_origin.get() + offset_x);
+                    if let Some(anchor) = resize_anchor.get() {
+                        let mut guard = state.lock().unwrap();
+                        apply_clip_resize(&mut guard, width, &anchor, offset_x);
+                    }
                 }
                 None => {}
             }
