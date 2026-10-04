@@ -2623,6 +2623,12 @@ msgstr "Instant animation"
 msgid "If enabled, the zoom will be applied instantly without any animation."
 msgstr "If enabled, the zoom will be applied instantly without any animation."
 
+msgid "Save Last Screenshot:"
+msgstr "保存上一次截图："
+
+msgid "No screenshot is available to save"
+msgstr "没有可保存的截图"
+
 msgid "Camera follows the recorded pointer"
 msgstr "相机跟随录制的光标"
 

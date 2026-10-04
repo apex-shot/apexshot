@@ -128,6 +128,11 @@ pub(super) fn dispatch_daemon_action(
             std::thread::spawn(crate::gnome_shell::hide_recording_mask_best_effort);
         }
 
+        DaemonAction::SaveLastCapture => {
+            tokio::task::spawn_blocking(move || {
+                capture_handlers::handle_save_last_capture(state_clone)
+            });
+        }
         DaemonAction::ShowLastPreview => {
             let path = state.lock().unwrap().last_capture_path.clone();
             if let Some(p) = path {

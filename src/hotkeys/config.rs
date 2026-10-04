@@ -307,6 +307,12 @@ pub fn hotkey_config_from_app_config(app_config: &crate::config::AppConfig) -> H
     );
     push_binding(
         &mut bindings,
+        "save_last_capture",
+        &app_config.shortcut_save_last_capture,
+        &["save-last"],
+    );
+    push_binding(
+        &mut bindings,
         "record_screen",
         &app_config.shortcut_record_screen,
         &["record", "screen", "--overlay-stop"],

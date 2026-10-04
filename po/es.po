@@ -2670,6 +2670,12 @@ msgstr "Instant animation"
 msgid "If enabled, the zoom will be applied instantly without any animation."
 msgstr "If enabled, the zoom will be applied instantly without any animation."
 
+msgid "Save Last Screenshot:"
+msgstr "Guardar la última captura:"
+
+msgid "No screenshot is available to save"
+msgstr "No hay ninguna captura disponible para guardar"
+
 msgid "Camera follows the recorded pointer"
 msgstr "La cámara sigue el cursor grabado"
 

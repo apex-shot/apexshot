@@ -123,6 +123,7 @@ pub struct AppConfig {
     pub shortcut_capture_window: String,
     pub shortcut_capture_menu: String,
     pub shortcut_show_last_preview: String,
+    pub shortcut_save_last_capture: String,
     pub shortcut_open_recording_ui: String,
     pub shortcut_record_screen: String,
     pub shortcut_recording_stop_save: String,
@@ -260,6 +261,7 @@ impl Default for AppConfig {
             shortcut_capture_window: String::new(),
             shortcut_capture_menu: "Shift+Super+5".to_string(),
             shortcut_show_last_preview: "Ctrl+Alt+P".to_string(),
+            shortcut_save_last_capture: String::new(),
             shortcut_open_recording_ui: String::new(),
             shortcut_record_screen: String::new(),
             shortcut_recording_stop_save: "Ctrl+Alt+Shift+S".to_string(),
@@ -902,6 +904,23 @@ mod tests {
 
         assert!(cfg.after_capture_open_annotate);
         assert!(!cfg.after_capture_show_quick_access);
+    }
+
+    #[test]
+    fn save_last_capture_shortcut_is_optional_by_default_and_round_trips() {
+        assert!(AppConfig::default().shortcut_save_last_capture.is_empty());
+
+        let original = AppConfig {
+            shortcut_save_last_capture: "Ctrl+Alt+S".into(),
+            ..AppConfig::default()
+        };
+        let yaml = serde_yml::to_string(&original).expect("config should serialize");
+        let loaded: AppConfig = serde_yml::from_str(&yaml).expect("config should deserialize");
+
+        assert_eq!(
+            loaded.shortcut_save_last_capture,
+            original.shortcut_save_last_capture
+        );
     }
 
     #[test]

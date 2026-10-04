@@ -2,7 +2,11 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::{
-    capture::{save_capture, save_existing_png, SaveConfig},
+    capture::{
+        save_capture, save_existing_png,
+        unsaved::{UnsavedCaptureStore, UNSAVED_CAPTURE_MAX_AGE},
+        ImageFormat, SaveConfig,
+    },
     capture_overlay::{
         begin_capture_session, capture_area_file_via_cpp, capture_crosshair_file_via_cpp,
         capture_screen_file_via_cpp, capture_still_via_portal, is_launch_blocked_error,
@@ -18,12 +22,8 @@ use anyhow::Context;
 
 use super::*;
 
-pub(super) fn screenshot_image_format(value: &str) -> crate::capture::ImageFormat {
-    match value {
-        "JPEG" => crate::capture::ImageFormat::Jpeg { quality: 85 },
-        "WebP" => crate::capture::ImageFormat::WebP,
-        _ => crate::capture::ImageFormat::Png,
-    }
+pub(super) fn screenshot_image_format(value: &str) -> ImageFormat {
+    ImageFormat::from_setting(value)
 }
 
 pub(super) fn screenshot_save_config_from(app_config: &crate::config::AppConfig) -> SaveConfig {
@@ -36,11 +36,6 @@ pub(super) fn screenshot_save_config_from(app_config: &crate::config::AppConfig)
     }
 
     save_config
-}
-
-pub(super) fn screenshot_save_config() -> SaveConfig {
-    let app_config = load_config().sanitized();
-    screenshot_save_config_from(&app_config)
 }
 
 pub(super) fn shutter_sound_asset_path(sound_name: &str) -> Option<PathBuf> {
@@ -114,6 +109,7 @@ pub(super) fn apply_screenshot_after_capture_actions(
     saved_path: std::path::PathBuf,
     state: Arc<Mutex<DaemonState>>,
     target_display: Option<CaptureDisplay>,
+    unsaved_capture: bool,
 ) {
     let config = load_config().sanitized();
     state.lock().unwrap().last_capture_path = Some(saved_path.clone());
@@ -126,14 +122,28 @@ pub(super) fn apply_screenshot_after_capture_actions(
     // looks like "upload did nothing" when the user pastes.
     let defer_text_clipboard =
         crate::cloud::upload::should_defer_text_clipboard_to_share_url(&config);
+    let configured_mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
+        &config.adv_clipboard_mode,
+    );
+    let mode = if unsaved_capture {
+        configured_mode.for_unsaved_capture()
+    } else {
+        configured_mode
+    };
+    let unsaved_bitmap_only =
+        unsaved_capture && mode == crate::utils::clipboard::ScreenshotClipboardMode::ImageOnly;
     let clip_path = saved_path.clone();
     let clip_config = config.clone();
     std::thread::spawn(move || {
+        if !clip_config.after_capture_copy_file_to_clipboard {
+            return;
+        }
         if defer_text_clipboard {
-            if !clip_config.after_capture_copy_file_to_clipboard {
-                return;
-            }
             if let Err(e) = crate::utils::clipboard::copy_image_to_clipboard(&clip_path) {
+                eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
+            }
+        } else if unsaved_bitmap_only {
+            if let Err(e) = crate::utils::clipboard::copy_image_only_to_clipboard(&clip_path) {
                 eprintln!("[daemon] Failed to copy screenshot image to clipboard: {e}");
             }
         } else {
@@ -176,39 +186,68 @@ pub(super) fn save_and_open(
     let config = load_config().sanitized();
 
     if !config.after_capture_save {
-        // Even if not saving, copy to clipboard if enabled (using temp capture data)
-        if config.after_capture_copy_file_to_clipboard {
-            // Save to a temp file first for clipboard copy
-            if let Ok(temp_path) = save_capture(&capture, &screenshot_save_config()) {
-                copy_screenshot_to_clipboard(&temp_path, &config);
-                let _ = std::fs::remove_file(&temp_path);
+        let store = unsaved_capture_store(&state);
+        match save_capture(
+            &capture,
+            &unsaved_capture_save_config(screenshot_save_config_from(&config), store.dir()),
+        ) {
+            Ok(path) => {
+                eprintln!(
+                    "[daemon] Save is disabled; keeping capture at {}",
+                    path.display()
+                );
+                run_unsaved_capture_actions(path, state, None);
+                true
+            }
+            Err(e) => {
+                notify_screenshot_capture_failed("Unsaved", &e);
+                false
             }
         }
-
-        eprintln!(
-            "[daemon] Screenshot discarded because Save is disabled in after-capture settings"
-        );
-        send_desktop_notification(
-            &crate::i18n::t("Screenshot not saved"),
-            &crate::i18n::t("Save is disabled in After capture settings"),
-        );
-        return true;
-    }
-
-    match save_capture(&capture, &screenshot_save_config()) {
-        Ok(path) => {
-            let path: std::path::PathBuf = path;
-            eprintln!("[daemon] Saved: {}", path.display());
-            crate::usage_telemetry::record_screenshot();
-            play_shutter_sound_if_enabled();
-            apply_screenshot_after_capture_actions(path, state, None);
-            true
-        }
-        Err(e) => {
-            eprintln!("[daemon] Save error: {e}");
-            false
+    } else {
+        match save_capture(&capture, &screenshot_save_config_from(&config)) {
+            Ok(path) => {
+                let path: std::path::PathBuf = path;
+                eprintln!("[daemon] Saved: {}", path.display());
+                crate::usage_telemetry::record_screenshot();
+                play_shutter_sound_if_enabled();
+                apply_screenshot_after_capture_actions(path, state, None, false);
+                true
+            }
+            Err(e) => {
+                eprintln!("[daemon] Save error: {e}");
+                false
+            }
         }
     }
+}
+
+/// Save config for a capture that lands in app-owned storage because the user
+/// turned auto-save off: always lossless PNG, never the export folder.
+pub(super) fn unsaved_capture_save_config(base: SaveConfig, dir: &std::path::Path) -> SaveConfig {
+    base.with_format(ImageFormat::Png)
+        .with_output_dir(dir)
+        .with_prefix("unsaved")
+}
+
+fn unsaved_capture_store(state: &Arc<Mutex<DaemonState>>) -> UnsavedCaptureStore {
+    let store = UnsavedCaptureStore::app_owned();
+    store.clean_stale(last_capture_path(state).as_deref(), UNSAVED_CAPTURE_MAX_AGE);
+    store
+}
+
+/// Shutter sound, telemetry and the normal after-capture actions for a capture
+/// that auto-save did not write to the export folder, so Quick Access,
+/// annotate, the clipboard, drag-and-drop and an auto-upload all work before
+/// the user decides to save.
+fn run_unsaved_capture_actions(
+    path: std::path::PathBuf,
+    state: Arc<Mutex<DaemonState>>,
+    target_display: Option<CaptureDisplay>,
+) {
+    crate::usage_telemetry::record_screenshot();
+    play_shutter_sound_if_enabled();
+    apply_screenshot_after_capture_actions(path, state, target_display, true);
 }
 
 pub(super) fn save_existing_png_and_open(path: std::path::PathBuf, state: Arc<Mutex<DaemonState>>) {
@@ -222,24 +261,28 @@ fn save_existing_png_and_open_on_display(
 ) {
     let config = load_config().sanitized();
     if !config.after_capture_save {
-        // Even if not saving, copy to clipboard if enabled
-        copy_screenshot_to_clipboard(&path, &config);
-        let _ = std::fs::remove_file(&path);
-        eprintln!(
-            "[daemon] Screenshot discarded because Save is disabled in after-capture settings"
-        );
-        send_desktop_notification(
-            &crate::i18n::t("Screenshot not saved"),
-            &crate::i18n::t("Save is disabled in After capture settings"),
-        );
+        let store = unsaved_capture_store(&state);
+        match store.keep(&path) {
+            Ok(unsaved_path) => {
+                eprintln!(
+                    "[daemon] Save is disabled; keeping capture at {}",
+                    unsaved_path.display()
+                );
+                run_unsaved_capture_actions(unsaved_path, state, target_display);
+            }
+            Err(err) => {
+                eprintln!("[daemon] Could not store the unsaved capture: {err}");
+                run_unsaved_capture_actions(path, state, target_display);
+            }
+        }
         return;
     }
 
-    match save_existing_png(&path, &screenshot_save_config()) {
+    match save_existing_png(&path, &screenshot_save_config_from(&config)) {
         Ok(saved_path) => {
             eprintln!("[daemon] Saved: {}", saved_path.display());
             crate::usage_telemetry::record_screenshot();
-            apply_screenshot_after_capture_actions(saved_path, state, target_display);
+            apply_screenshot_after_capture_actions(saved_path, state, target_display, false);
         }
         Err(e) => {
             let _ = std::fs::remove_file(&path);
@@ -423,6 +466,64 @@ pub(super) fn stop_preview_overlay(state: &Arc<Mutex<DaemonState>>) -> bool {
     }
 
     false
+}
+
+/// Ask for a destination for the last capture and write it there.
+///
+/// The chooser runs in its own GTK process so the daemon keeps its own context;
+/// a second request while one is still open is ignored.
+pub(super) fn handle_save_last_capture(state: Arc<Mutex<DaemonState>>) {
+    let Some(path) = last_capture_path(&state) else {
+        eprintln!("[daemon] No screenshot available to save.");
+        notify_no_screenshot_to_save();
+        return;
+    };
+
+    if !crate::capture::save_dialog::is_supported_screenshot(&path) || !path.exists() {
+        eprintln!(
+            "[daemon] Cannot save {}: not an available screenshot file",
+            path.display()
+        );
+        notify_no_screenshot_to_save();
+        return;
+    }
+
+    let mut guard = match state.lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    if let Some(child) = guard.save_capture_child.as_mut() {
+        if child.try_wait().ok().flatten().is_none() {
+            eprintln!("[daemon] A save dialog is already open.");
+            return;
+        }
+        guard.save_capture_child = None;
+    }
+
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+    match std::process::Command::new(&exe)
+        .arg("save-capture-internal")
+        .arg(&path)
+        .spawn()
+    {
+        Ok(child) => guard.save_capture_child = Some(child),
+        Err(error) => {
+            guard.save_capture_child = None;
+            eprintln!("[daemon] Failed to open the save dialog: {error}");
+            send_desktop_notification(
+                &crate::i18n::t("Screenshot not saved"),
+                &crate::i18n::tfmt("Save failed: {message}", &[("message", &error.to_string())]),
+            );
+        }
+    }
+}
+
+fn notify_no_screenshot_to_save() {
+    send_desktop_notification(
+        &crate::i18n::t("Screenshot not saved"),
+        &crate::i18n::t("No screenshot is available to save"),
+    );
 }
 
 pub(super) fn show_preview_for_path(
@@ -714,7 +815,9 @@ fn handle_interactive_capture_result(
                 {
                     send_desktop_notification(
                         &crate::i18n::t("Recording failed"),
-                        &crate::i18n::t("GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first."),
+                        &crate::i18n::t(
+                            "GNOME Shell extension is not installed. Please install the ApexShot GNOME extension first.",
+                        ),
                     );
                 }
             }

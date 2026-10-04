@@ -438,6 +438,9 @@ pub(super) fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<Daemon
             "show_last_preview" | "show-last-preview" => {
                 return Some(super::DaemonAction::ShowLastPreview);
             }
+            "save_last_capture" | "save-last-capture" => {
+                return Some(super::DaemonAction::SaveLastCapture);
+            }
             "record_screen" | "record-screen" => return Some(super::DaemonAction::RecordScreen),
             "record_area" | "record-area" => return Some(super::DaemonAction::RecordArea),
             "open_recording_ui" | "open-recording-ui" => {
@@ -472,6 +475,7 @@ pub(super) fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<Daemon
         Some("restore-recently-closed") => Some(super::DaemonAction::RestoreRecentlyClosed),
         Some("toggle-overlays") => Some(super::DaemonAction::ToggleOverlays),
         Some("show-last-preview") => Some(super::DaemonAction::ShowLastPreview),
+        Some("save-last") => Some(super::DaemonAction::SaveLastCapture),
         Some("record") => match binding.args.get(1).map(|s| s.as_str()) {
             Some("ui") => Some(super::DaemonAction::OpenRecordingUi),
             Some("screen") => Some(super::DaemonAction::RecordScreen),

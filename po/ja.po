@@ -2626,6 +2626,12 @@ msgstr "Instant animation"
 msgid "If enabled, the zoom will be applied instantly without any animation."
 msgstr "If enabled, the zoom will be applied instantly without any animation."
 
+msgid "Save Last Screenshot:"
+msgstr "最後のスクリーンショットを保存:"
+
+msgid "No screenshot is available to save"
+msgstr "保存できるスクリーンショットがありません"
+
 msgid "Camera follows the recorded pointer"
 msgstr "カメラが記録されたカーソルを追従します"
 

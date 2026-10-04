@@ -60,6 +60,7 @@ pub enum DaemonAction {
     OpenImageEditor,
     StopRecordingSave,
     ShowLastPreview,
+    SaveLastCapture,
     ShowPreviewForPath(std::path::PathBuf),
     OpenLastCapture,
     OpenHistory,
@@ -99,6 +100,7 @@ impl From<TrayAction> for DaemonAction {
 pub(super) struct DaemonState {
     pub(super) last_capture_path: Option<std::path::PathBuf>,
     pub(super) preview_child: Option<std::process::Child>,
+    pub(super) save_capture_child: Option<std::process::Child>,
     /// Channel to send GTK work to the main OS thread. `None` when the daemon
     /// owns the main thread itself (legacy / test mode).
     pub(super) gtk_tx: Option<std::sync::mpsc::Sender<GtkWork>>,
@@ -453,6 +455,7 @@ pub(super) async fn run_daemon_inner(
     let state = Arc::new(Mutex::new(DaemonState {
         last_capture_path: None,
         preview_child: None,
+        save_capture_child: None,
         gtk_tx,
     }));
 
@@ -470,6 +473,14 @@ pub(super) async fn run_daemon_inner(
 
     // Anonymous daily heartbeat (opt-out via Settings / APEXSHOT_TELEMETRY=0).
     crate::usage_telemetry::spawn_daemon_telemetry_worker();
+
+    std::thread::spawn(|| {
+        let removed = crate::capture::unsaved::UnsavedCaptureStore::app_owned()
+            .clean_stale(None, crate::capture::unsaved::UNSAVED_CAPTURE_MAX_AGE);
+        if removed > 0 {
+            eprintln!("[daemon] Removed {removed} stale unsaved capture(s).");
+        }
+    });
 
     // Main action channel — both tray and hotkeys send here.
     let (action_tx, action_rx) = std::sync::mpsc::channel::<DaemonAction>();
@@ -727,6 +738,7 @@ pub(super) fn parse_trigger_action(action: &str) -> Option<DaemonAction> {
         "restore_recently_closed" => Some(DaemonAction::RestoreRecentlyClosed),
         "toggle_overlays" => Some(DaemonAction::ToggleOverlays),
         "show_last_preview" => Some(DaemonAction::ShowLastPreview),
+        "save_last_capture" | "save-last" => Some(DaemonAction::SaveLastCapture),
         "open_last" => Some(DaemonAction::OpenLastCapture),
         "history" => Some(DaemonAction::OpenHistory),
         "settings" => Some(DaemonAction::OpenSettings),
@@ -824,6 +836,22 @@ mod tests {
             save_config.format,
             crate::capture::ImageFormat::Jpeg { quality: 85 }
         );
+        assert!(!save_config.include_cursor);
+    }
+
+    #[test]
+    fn unsaved_capture_save_config_never_reaches_the_export_folder() {
+        let base = crate::capture::SaveConfig::default()
+            .with_output_dir("/tmp/export")
+            .with_format(crate::capture::ImageFormat::Jpeg { quality: 90 })
+            .with_cursor(false);
+        let store_dir = Path::new("/tmp/apexshot-unsaved");
+
+        let save_config = unsaved_capture_save_config(base, store_dir);
+
+        assert_eq!(save_config.output_dir.as_deref(), Some(store_dir));
+        assert_eq!(save_config.format, crate::capture::ImageFormat::Png);
+        assert_eq!(save_config.filename_prefix.as_deref(), Some("unsaved"));
         assert!(!save_config.include_cursor);
     }
 
@@ -1010,6 +1038,29 @@ mod tests {
     }
 
     #[test]
+    fn binding_to_daemon_action_maps_save_last_capture() {
+        let by_name = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+S".into(),
+            args: vec!["save-last".into()],
+            name: Some("save_last_capture".into()),
+        };
+        let by_args = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+S".into(),
+            args: vec!["save-last".into()],
+            name: None,
+        };
+
+        assert!(matches!(
+            binding_to_daemon_action(&by_name),
+            Some(super::DaemonAction::SaveLastCapture)
+        ));
+        assert!(matches!(
+            binding_to_daemon_action(&by_args),
+            Some(super::DaemonAction::SaveLastCapture)
+        ));
+    }
+
+    #[test]
     fn binding_to_daemon_action_maps_open_file_by_name_without_args() {
         // Name-only bindings must resolve without relying on CLI args fallback.
         let open_file = crate::hotkeys::HotkeyBinding {
@@ -1021,6 +1072,18 @@ mod tests {
             binding_to_daemon_action(&open_file),
             Some(super::DaemonAction::OpenFile)
         );
+    }
+
+    #[test]
+    fn parse_trigger_action_accepts_save_last_capture() {
+        assert!(matches!(
+            parse_trigger_action("save_last_capture"),
+            Some(DaemonAction::SaveLastCapture)
+        ));
+        assert!(matches!(
+            parse_trigger_action("save-last"),
+            Some(DaemonAction::SaveLastCapture)
+        ));
     }
 
     #[test]

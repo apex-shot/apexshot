@@ -1,5 +1,5 @@
 use gtk4::{glib, prelude::*, Application, ApplicationWindow, Button};
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
@@ -123,19 +123,22 @@ pub(super) fn wire_output_lifecycle(
     let path_save = path.to_path_buf();
     let window_save = window.downgrade();
     let app_save = app.downgrade();
+    let save_chooser: Rc<RefCell<Option<gtk4::FileChooserNative>>> = Rc::new(RefCell::new(None));
+    let save_chooser_open = Rc::new(Cell::new(false));
     save_btn.connect_clicked(move |_| {
-        if let Some(window) = window_save.upgrade() {
-            window.set_visible(false);
-        }
-
         let state_save = state_save.clone();
         let path_save = path_save.clone();
         let window_save = window_save.clone();
         let app_save = app_save.clone();
         let in_motion = in_motion.clone();
         let export_motion = export_motion.clone();
+        let save_chooser = save_chooser.clone();
+        let save_chooser_open = save_chooser_open.clone();
         glib::idle_add_local_once(move || {
             if in_motion.get() {
+                if let Some(window) = window_save.upgrade() {
+                    window.set_visible(false);
+                }
                 match export_motion() {
                     Ok(video_path) => {
                         let _ = persist_image_session(&path_save, &state_save.lock().unwrap());
@@ -163,48 +166,61 @@ pub(super) fn wire_output_lifecycle(
                 }
                 return;
             }
-            let (image_result, annotation_data) = {
-                let state = state_save.lock().unwrap();
-                let save_result = save_edited_image(&path_save, &state);
-                let annotation_result = persist_image_session(&path_save, &state);
-                (save_result, annotation_result)
-            };
 
-            if let Err(error) = annotation_data {
-                eprintln!("[editor] Warning: Failed to save annotations: {error}");
+            if save_chooser_open.get() {
+                return;
             }
 
-            match image_result {
-                Ok(()) => {
-                    let config = crate::config::load_config().sanitized();
-                    crate::daemon::copy_screenshot_to_clipboard(&path_save, &config);
-                    if let Some(window) = window_save.upgrade() {
-                        window.close();
+            if !done_needs_save_chooser(&path_save) {
+                if let Some(window) = window_save.upgrade() {
+                    window.set_visible(false);
+                }
+                match save_edited_image(&path_save, &state_save.lock().unwrap()) {
+                    Ok(()) => {
+                        finish_image_session(&state_save, &path_save, &window_save, &app_save)
                     }
-                    if let Some(app) = app_save.upgrade() {
-                        app.quit();
-                    }
-                    if config.after_capture_show_quick_access
-                        && !crate::daemon::show_preview_via_daemon(&path_save)
-                    {
-                        let executable =
-                            std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
-                        if let Err(error) = Command::new(&executable)
-                            .arg("preview")
-                            .arg(&path_save)
-                            .spawn()
-                        {
-                            eprintln!("[editor] Failed to open preview: {error}");
+                    Err(error) => {
+                        eprintln!("Failed to save edited image: {error}");
+                        if let Some(window) = window_save.upgrade() {
+                            window.set_visible(true);
                         }
                     }
                 }
-                Err(error) => {
-                    eprintln!("Failed to save edited image: {error}");
-                    if let Some(window) = window_save.upgrade() {
-                        window.set_visible(true);
-                    }
-                }
+                return;
             }
+
+            if let Err(error) = save_edited_image(&path_save, &state_save.lock().unwrap()) {
+                eprintln!("Failed to save edited image: {error}");
+                return;
+            }
+
+            save_chooser_open.set(true);
+            let save_chooser_open_done = save_chooser_open.clone();
+            let save_chooser_done = save_chooser.clone();
+            let state_done = state_save.clone();
+            let window_done = window_save.clone();
+            let app_done = app_save.clone();
+            let chooser = crate::capture::save_dialog::show_save_dialog(
+                window_save
+                    .upgrade()
+                    .as_ref()
+                    .map(|window| window.upcast_ref()),
+                path_save.clone(),
+                move |destination| {
+                    save_chooser_open_done.set(false);
+                    *save_chooser_done.borrow_mut() = None;
+
+                    let Some(destination) = destination else {
+                        if let Some(window) = window_done.upgrade() {
+                            window.set_visible(true);
+                        }
+                        return;
+                    };
+
+                    finish_image_session(&state_done, &destination, &window_done, &app_done);
+                },
+            );
+            *save_chooser.borrow_mut() = Some(chooser);
         });
     });
 
@@ -220,8 +236,54 @@ pub(super) fn wire_output_lifecycle(
     });
 }
 
+/// Done writes back to the file the editor opened; a capture the user has not
+/// saved yet needs a destination from the user instead.
+pub(super) fn done_needs_save_chooser(path: &Path) -> bool {
+    crate::capture::unsaved::UnsavedCaptureStore::app_owned().owns(path)
+}
+
+/// Persist the session at `path`, honor the after-capture clipboard setting and
+/// close the editor the way Done always has.
+fn finish_image_session(
+    state: &Arc<Mutex<EditorState>>,
+    path: &Path,
+    window: &gtk4::glib::WeakRef<ApplicationWindow>,
+    app: &gtk4::glib::WeakRef<Application>,
+) {
+    if let Err(error) = persist_image_session(path, &state.lock().unwrap()) {
+        eprintln!("[editor] Warning: Failed to save annotations: {error}");
+    }
+
+    let config = crate::config::load_config().sanitized();
+    crate::daemon::copy_screenshot_to_clipboard(path, &config);
+    if let Some(window) = window.upgrade() {
+        window.close();
+    }
+    if let Some(app) = app.upgrade() {
+        app.quit();
+    }
+    if config.after_capture_show_quick_access && !crate::daemon::show_preview_via_daemon(path) {
+        let executable = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("apexshot"));
+        if let Err(error) = Command::new(&executable).arg("preview").arg(path).spawn() {
+            eprintln!("[editor] Failed to open preview: {error}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::done_needs_save_chooser;
+
+    #[test]
+    fn done_routes_unsaved_captures_through_the_save_chooser() {
+        let store = crate::capture::unsaved::UnsavedCaptureStore::app_owned();
+
+        assert!(done_needs_save_chooser(&store.dir().join("unsaved-1.png")));
+        assert!(!done_needs_save_chooser(std::path::Path::new(
+            "/tmp/shot.png"
+        )));
+    }
+
     #[test]
     fn editor_upload_saves_edits_before_uploading() {
         let source = include_str!("output.rs");

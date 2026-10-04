@@ -355,6 +355,16 @@ impl ScreenshotClipboardMode {
     pub fn includes_image(self) -> bool {
         matches!(self, Self::ImageOnly | Self::Both)
     }
+
+    /// Mode for a capture that only lives in app-owned temporary storage: the
+    /// bitmap alone, because a `file://` URI would point at a file the app
+    /// cleans up later.
+    pub fn for_unsaved_capture(self) -> Self {
+        match self {
+            Self::Both => Self::ImageOnly,
+            other => other,
+        }
+    }
 }
 
 /// Copy a screenshot according to the configured clipboard mode.
@@ -442,6 +452,15 @@ mod tests {
         }
         assert!(ImageOnly.includes_image() && Both.includes_image());
         assert!(!FilePathOnly.includes_image());
+    }
+
+    #[test]
+    fn unsaved_captures_keep_only_the_bitmap_on_the_clipboard() {
+        use ScreenshotClipboardMode::{Both, FilePathOnly, ImageOnly};
+
+        assert_eq!(Both.for_unsaved_capture(), ImageOnly);
+        assert_eq!(ImageOnly.for_unsaved_capture(), ImageOnly);
+        assert_eq!(FilePathOnly.for_unsaved_capture(), FilePathOnly);
     }
 
     #[test]

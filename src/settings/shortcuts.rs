@@ -329,6 +329,7 @@ pub fn install_shortcut_editors(widgets: &ShortcutSettingsWidgets, parent: &Appl
         &widgets.capture_fullscreen_btn,
         &widgets.capture_window_btn,
         &widgets.show_last_preview_btn,
+        &widgets.save_last_capture_btn,
         &widgets.record_screen_btn,
         &widgets.recording_stop_save_btn,
     ] {
@@ -349,6 +350,7 @@ pub struct ShortcutSettingsWidgets {
     pub capture_fullscreen_btn: Button,
     pub capture_window_btn: Button,
     pub show_last_preview_btn: Button,
+    pub save_last_capture_btn: Button,
     pub record_screen_btn: Button,
     pub recording_stop_save_btn: Button,
 }
@@ -529,6 +531,13 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         &config.shortcut_show_last_preview,
         true,
     );
+    let save_last_capture_btn = create_row(
+        &screenshots_frame,
+        "Save Last Screenshot:",
+        None,
+        &config.shortcut_save_last_capture,
+        false,
+    );
     section.append(&screenshots_frame);
 
     create_header(&section, "Recording", "camera-video-symbolic");
@@ -562,6 +571,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         capture_fullscreen_btn,
         capture_window_btn,
         show_last_preview_btn,
+        save_last_capture_btn,
         record_screen_btn,
         recording_stop_save_btn,
     }

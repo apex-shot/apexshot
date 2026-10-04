@@ -88,6 +88,7 @@ pub struct SaveInputs {
     pub shortcut_capture_fullscreen: Button,
     pub shortcut_capture_window: Button,
     pub shortcut_show_last_preview: Button,
+    pub shortcut_save_last_capture: Button,
     pub shortcut_record_screen: Button,
     pub shortcut_recording_stop_save: Button,
     pub adv_retina_suffix: CheckButton,
@@ -134,19 +135,7 @@ pub fn install_checkbox_behaviors(
         }
     });
 
-    // "Copy to clipboard" is independent of "Save" — clipboard copy works
-    // even when saving is disabled (copies from temp file then discards).
-    let _ = screenshot_copy_to_clipboard_check;
-
-    screenshot_open_annotate_check.set_sensitive(screenshot_save_check.is_active());
-    let screenshot_open_annotate_toggle_for_save = screenshot_open_annotate_check.clone();
-    screenshot_save_check.connect_toggled(move |check| {
-        let active = check.is_active();
-        screenshot_open_annotate_toggle_for_save.set_sensitive(active);
-        if !active {
-            screenshot_open_annotate_toggle_for_save.set_active(false);
-        }
-    });
+    let _ = (screenshot_copy_to_clipboard_check, screenshot_save_check);
 
     let a1 = quick_access_auto_close_action_input.clone();
     let a2 = quick_access_auto_close_interval_input.clone();
@@ -266,6 +255,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     // Window capture discontinued — always persist empty.
     config.shortcut_capture_window.clear();
     config.shortcut_show_last_preview = button_label_value(&inputs.shortcut_show_last_preview);
+    config.shortcut_save_last_capture = button_label_value(&inputs.shortcut_save_last_capture);
     config.shortcut_open_recording_ui.clear();
     config.shortcut_record_screen = button_label_value(&inputs.shortcut_record_screen);
     config.shortcut_recording_stop_save = button_label_value(&inputs.shortcut_recording_stop_save);
@@ -319,6 +309,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
         || previous_config.shortcut_capture_fullscreen != config.shortcut_capture_fullscreen
         || previous_config.shortcut_capture_window != config.shortcut_capture_window
         || previous_config.shortcut_show_last_preview != config.shortcut_show_last_preview
+        || previous_config.shortcut_save_last_capture != config.shortcut_save_last_capture
         || previous_config.shortcut_open_recording_ui != config.shortcut_open_recording_ui
         || previous_config.shortcut_record_screen != config.shortcut_record_screen
         || previous_config.shortcut_recording_stop_save != config.shortcut_recording_stop_save;
