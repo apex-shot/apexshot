@@ -5,6 +5,7 @@
 
 pub mod editor;
 mod preview_overlay;
+pub mod save_dialog;
 pub mod unsaved;
 pub use editor::types::{
     AnnotationAction, ArrowStyle, DrawColor, FontSettings, ObfuscateMethod, Point, Rect,

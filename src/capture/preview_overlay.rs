@@ -1,4 +1,3 @@
-use crate::capture::{ImageFormat, SaveConfig};
 use crate::capture_overlay::CaptureDisplay;
 use crate::config::load_config;
 use crate::i18n::t;
@@ -9,8 +8,7 @@ use gtk4::{
     glib::{self, ControlFlow},
     prelude::*,
     Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea,
-    EventControllerKey, FileChooserAction, FileChooserNative, Orientation, Overlay, ResponseType,
-    WidgetPaintable, Window,
+    EventControllerKey, FileChooserNative, Orientation, Overlay, WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::{Cell, RefCell};
@@ -442,6 +440,7 @@ fn setup_preview_window(
     let pinned = Arc::new(AtomicBool::new(start_pinned));
     let edit_opened = Arc::new(AtomicBool::new(false));
     let save_dialog_open = Rc::new(Cell::new(false));
+    let save_chooser: Rc<RefCell<Option<FileChooserNative>>> = Rc::new(RefCell::new(None));
     let auto_close_anchor = Arc::new(Mutex::new(Instant::now()));
     let source_bytes = Arc::new(Mutex::new(None::<Arc<Vec<u8>>>));
 
@@ -716,6 +715,7 @@ fn setup_preview_window(
     let preview_id_actions = preview_id.clone();
     let emit_extension_events_actions = emit_extension_events;
     let save_dialog_open_actions = save_dialog_open.clone();
+    let save_chooser_actions = save_chooser.clone();
 
     glib::idle_add_local_once(move || {
         let Some(window) = window_actions.upgrade() else {
@@ -824,6 +824,7 @@ fn setup_preview_window(
         let path_save_as = path_actions.clone();
         let window_weak_save_as = window.downgrade();
         let save_dialog_open_click = save_dialog_open_actions;
+        let save_chooser_click = save_chooser_actions;
         save_btn_actions.connect_clicked(move |_| {
             if save_dialog_open_click.get() {
                 return;
@@ -831,65 +832,19 @@ fn setup_preview_window(
             let Some(parent) = window_weak_save_as.upgrade() else {
                 return;
             };
-
-            let config = load_config().sanitized();
-            let configured_format =
-                crate::capture::ImageFormat::from_setting(&config.screenshot_format);
             save_dialog_open_click.set(true);
 
-            let chooser = FileChooserNative::new(
-                Some(&t("Select screenshot save location")),
+            let save_dialog_open_done = save_dialog_open_click.clone();
+            let save_chooser_done = save_chooser_click.clone();
+            let chooser = crate::capture::save_dialog::show_save_dialog(
                 Some(&parent),
-                FileChooserAction::Save,
-                Some(&t("Save")),
-                Some(&t("Cancel")),
+                path_save_as.clone(),
+                move |_destination| {
+                    save_dialog_open_done.set(false);
+                    *save_chooser_done.borrow_mut() = None;
+                },
             );
-            chooser.set_current_name(&crate::capture::generate_filename(
-                &SaveConfig::default().with_format(configured_format),
-            ));
-            if let Some(folder) = save_dialog_folder(&config) {
-                let _ = chooser.set_current_folder(Some(&gtk4::gio::File::for_path(folder)));
-            }
-
-            let source = path_save_as.clone();
-            let save_dialog_open_response = save_dialog_open_click.clone();
-            chooser.connect_response(move |chooser, response| {
-                save_dialog_open_response.set(false);
-
-                if let SaveAsOutcome::Save {
-                    destination,
-                    format,
-                } = save_as_outcome(
-                    response,
-                    chooser.file().and_then(|file| file.path()),
-                    configured_format,
-                ) {
-                    match crate::capture::save_image_to_path(&source, &destination, format) {
-                        Ok(()) => eprintln!(
-                            "[preview] Saved {} to {}",
-                            source.display(),
-                            destination.display()
-                        ),
-                        Err(err) => {
-                            eprintln!(
-                                "[preview] Save as failed for {}: {err}",
-                                destination.display()
-                            );
-                            let detail = format!("{}: {err}", destination.display());
-                            crate::utils::notify::desktop_notification(
-                                &t("Screenshot not saved"),
-                                &crate::i18n::tfmt(
-                                    "Save failed: {message}",
-                                    &[("message", &detail)],
-                                ),
-                            );
-                        }
-                    }
-                }
-
-                chooser.hide();
-            });
-            chooser.show();
+            *save_chooser_click.borrow_mut() = Some(chooser);
         });
 
         let path_upload = path_actions.clone();
@@ -1390,69 +1345,6 @@ fn save_pill_button(label: &str) -> Button {
     let button = copy_pill_button(label);
     button.set_tooltip_text(Some(&t("Select screenshot save location")));
     button
-}
-
-/// Where the Save dialog opens: the configured screenshot export location,
-/// else the user's Pictures folder.
-fn save_dialog_folder(config: &crate::config::AppConfig) -> Option<PathBuf> {
-    let configured = SaveConfig::default()
-        .with_output_dir(&config.screenshot_export_location)
-        .get_output_dir()
-        .ok()
-        .filter(|dir| dir.is_dir());
-
-    configured.or_else(|| dirs::picture_dir().filter(|dir| dir.is_dir()))
-}
-
-/// What a finished Save dialog means for the capture.
-#[derive(Debug, PartialEq, Eq)]
-enum SaveAsOutcome {
-    /// The user cancelled, so the capture stays exactly where it is.
-    Cancelled,
-    Save {
-        destination: PathBuf,
-        format: ImageFormat,
-    },
-}
-
-fn save_as_outcome(
-    response: ResponseType,
-    chosen: Option<PathBuf>,
-    configured_format: ImageFormat,
-) -> SaveAsOutcome {
-    if response != ResponseType::Accept {
-        return SaveAsOutcome::Cancelled;
-    }
-    let Some(chosen) = chosen else {
-        return SaveAsOutcome::Cancelled;
-    };
-
-    let format = save_as_format(&chosen, configured_format);
-    SaveAsOutcome::Save {
-        destination: chosen,
-        format,
-    }
-}
-
-/// Encoding for the destination the picker confirmed. The chosen path is used
-/// exactly as confirmed, so an overwrite prompt always covers the file that is
-/// written; a recognised extension picks the encoding, otherwise the
-/// configured format does.
-fn save_as_format(destination: &Path, configured: ImageFormat) -> ImageFormat {
-    let extension = destination
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .map(|extension| extension.to_ascii_lowercase());
-
-    match extension.as_deref() {
-        Some("png") => ImageFormat::Png,
-        Some("jpg") | Some("jpeg") => match configured {
-            ImageFormat::Jpeg { quality } => ImageFormat::Jpeg { quality },
-            _ => ImageFormat::Jpeg { quality: 85 },
-        },
-        Some("webp") => ImageFormat::WebP,
-        _ => configured,
-    }
 }
 
 fn file_uri(path: &Path) -> Result<String, CapturePreviewError> {
@@ -1985,97 +1877,12 @@ mod tests {
         let production = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production.contains("save_pill_button")
-                && production.contains("FileChooserAction::Save")
-                && production.contains("save_image_to_path")
-                && production.contains("save_dialog_folder")
+                && production.contains("save_dialog::show_save_dialog")
                 && production.contains("for_unsaved_capture")
                 && production.contains("if save_dialog_open_click.get()")
                 && production.contains("if save_dialog_open_timeout.get()"),
             "the Quick Access card must offer Save as… regardless of auto-save, \
              open at most one chooser and hold the auto-close countdown"
-        );
-    }
-
-    #[test]
-    fn save_as_cancel_leaves_the_capture_where_it_is() {
-        assert_eq!(
-            save_as_outcome(
-                ResponseType::Cancel,
-                Some(PathBuf::from("/tmp/picked.png")),
-                ImageFormat::Png
-            ),
-            SaveAsOutcome::Cancelled
-        );
-        assert_eq!(
-            save_as_outcome(ResponseType::DeleteEvent, None, ImageFormat::Png),
-            SaveAsOutcome::Cancelled
-        );
-        assert_eq!(
-            save_as_outcome(ResponseType::Accept, None, ImageFormat::Png),
-            SaveAsOutcome::Cancelled
-        );
-    }
-
-    #[test]
-    fn save_as_keeps_the_confirmed_destination_and_its_extension_format() {
-        assert_eq!(
-            save_as_outcome(
-                ResponseType::Accept,
-                Some(PathBuf::from("/tmp/picked.png")),
-                ImageFormat::WebP
-            ),
-            SaveAsOutcome::Save {
-                destination: PathBuf::from("/tmp/picked.png"),
-                format: ImageFormat::Png,
-            }
-        );
-        assert_eq!(
-            save_as_outcome(
-                ResponseType::Accept,
-                Some(PathBuf::from("/tmp/picked.jpeg")),
-                ImageFormat::Png
-            ),
-            SaveAsOutcome::Save {
-                destination: PathBuf::from("/tmp/picked.jpeg"),
-                format: ImageFormat::Jpeg { quality: 85 },
-            }
-        );
-        assert_eq!(
-            save_as_outcome(
-                ResponseType::Accept,
-                Some(PathBuf::from("/tmp/picked.webp")),
-                ImageFormat::Png
-            ),
-            SaveAsOutcome::Save {
-                destination: PathBuf::from("/tmp/picked.webp"),
-                format: ImageFormat::WebP,
-            }
-        );
-    }
-
-    #[test]
-    fn save_as_never_rewrites_an_unrecognised_destination() {
-        assert_eq!(
-            save_as_outcome(
-                ResponseType::Accept,
-                Some(PathBuf::from("/tmp/picked")),
-                ImageFormat::WebP
-            ),
-            SaveAsOutcome::Save {
-                destination: PathBuf::from("/tmp/picked"),
-                format: ImageFormat::WebP,
-            }
-        );
-        assert_eq!(
-            save_as_outcome(
-                ResponseType::Accept,
-                Some(PathBuf::from("/tmp/picked.tiff")),
-                ImageFormat::Png
-            ),
-            SaveAsOutcome::Save {
-                destination: PathBuf::from("/tmp/picked.tiff"),
-                format: ImageFormat::Png,
-            }
         );
     }
 

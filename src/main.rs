@@ -76,6 +76,19 @@ fn main() {
             }
             return;
         }
+        "save-capture-internal" => {
+            if args.len() < 3 {
+                eprintln!("Error: missing screenshot path");
+                std::process::exit(1);
+            }
+            if let Err(e) =
+                apexshot::capture::save_dialog::run_save_capture_command(PathBuf::from(&args[2]))
+            {
+                eprintln!("Save failed: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
         "settings-internal" => {
             if let Err(e) = show_settings_window() {
                 eprintln!("Failed to open settings window: {e}");
@@ -208,6 +221,12 @@ async fn async_main(args: Vec<String>) {
         "show-last-preview" => {
             if !trigger_daemon_action("show_last_preview").await {
                 eprintln!("Show last preview requires a running ApexShot daemon.");
+                std::process::exit(1);
+            }
+        }
+        "save-last" => {
+            if !trigger_daemon_action("save_last_capture").await {
+                eprintln!("Save Last Screenshot requires a running ApexShot daemon.");
                 std::process::exit(1);
             }
         }

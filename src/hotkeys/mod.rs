@@ -779,6 +779,27 @@ mod tests {
     }
 
     #[test]
+    fn save_last_capture_binding_follows_the_optional_shortcut() {
+        let hotkeys = hotkey_config_from_app_config(&crate::config::AppConfig::default());
+        assert!(!hotkeys
+            .bindings
+            .iter()
+            .any(|binding| binding.name.as_deref() == Some("save_last_capture")));
+
+        let cfg = crate::config::AppConfig {
+            shortcut_save_last_capture: "Ctrl+Alt+S".into(),
+            ..crate::config::AppConfig::default()
+        };
+        let hotkeys = hotkey_config_from_app_config(&cfg);
+
+        assert!(hotkeys.bindings.iter().any(|binding| {
+            binding.name.as_deref() == Some("save_last_capture")
+                && binding.accelerator == "CTRL+ALT+S"
+                && binding.args == vec!["save-last".to_string()]
+        }));
+    }
+
+    #[test]
     fn app_config_shortcuts_map_to_runtime_hotkeys() {
         let cfg = crate::config::AppConfig {
             shortcut_open_file: "Ctrl+Alt+O".into(),

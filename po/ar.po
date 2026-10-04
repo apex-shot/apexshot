@@ -2641,3 +2641,9 @@ msgstr "Instant animation"
 
 msgid "If enabled, the zoom will be applied instantly without any animation."
 msgstr "If enabled, the zoom will be applied instantly without any animation."
+
+msgid "Save Last Screenshot:"
+msgstr "حفظ آخر لقطة شاشة:"
+
+msgid "No screenshot is available to save"
+msgstr "لا توجد لقطة شاشة متاحة للحفظ"

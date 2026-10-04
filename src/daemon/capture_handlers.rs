@@ -468,6 +468,64 @@ pub(super) fn stop_preview_overlay(state: &Arc<Mutex<DaemonState>>) -> bool {
     false
 }
 
+/// Ask for a destination for the last capture and write it there.
+///
+/// The chooser runs in its own GTK process so the daemon keeps its own context;
+/// a second request while one is still open is ignored.
+pub(super) fn handle_save_last_capture(state: Arc<Mutex<DaemonState>>) {
+    let Some(path) = last_capture_path(&state) else {
+        eprintln!("[daemon] No screenshot available to save.");
+        notify_no_screenshot_to_save();
+        return;
+    };
+
+    if !crate::capture::save_dialog::is_supported_screenshot(&path) || !path.exists() {
+        eprintln!(
+            "[daemon] Cannot save {}: not an available screenshot file",
+            path.display()
+        );
+        notify_no_screenshot_to_save();
+        return;
+    }
+
+    let mut guard = match state.lock() {
+        Ok(guard) => guard,
+        Err(_) => return,
+    };
+
+    if let Some(child) = guard.save_capture_child.as_mut() {
+        if child.try_wait().ok().flatten().is_none() {
+            eprintln!("[daemon] A save dialog is already open.");
+            return;
+        }
+        guard.save_capture_child = None;
+    }
+
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
+    match std::process::Command::new(&exe)
+        .arg("save-capture-internal")
+        .arg(&path)
+        .spawn()
+    {
+        Ok(child) => guard.save_capture_child = Some(child),
+        Err(error) => {
+            guard.save_capture_child = None;
+            eprintln!("[daemon] Failed to open the save dialog: {error}");
+            send_desktop_notification(
+                &crate::i18n::t("Screenshot not saved"),
+                &crate::i18n::tfmt("Save failed: {message}", &[("message", &error.to_string())]),
+            );
+        }
+    }
+}
+
+fn notify_no_screenshot_to_save() {
+    send_desktop_notification(
+        &crate::i18n::t("Screenshot not saved"),
+        &crate::i18n::t("No screenshot is available to save"),
+    );
+}
+
 pub(super) fn show_preview_for_path(
     path: std::path::PathBuf,
     state: &Arc<Mutex<DaemonState>>,
