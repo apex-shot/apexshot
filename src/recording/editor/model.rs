@@ -39,6 +39,7 @@ pub mod background_render {
 }
 
 include!("model_parts/helpers.rs");
+include!("model_parts/zoom_camera.rs");
 
 #[cfg(test)]
 mod tests {

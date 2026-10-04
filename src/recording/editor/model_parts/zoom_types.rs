@@ -1,3 +1,64 @@
+#[derive(Debug, Clone, Copy, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ZoomCameraSettings {
+    pub speed: f64,
+    pub smoothness: f64,
+    pub start_early: bool,
+    pub motion_blur: f64,
+}
+
+impl Default for ZoomCameraSettings {
+    fn default() -> Self {
+        Self {
+            speed: 1.0,
+            smoothness: 0.5,
+            start_early: false,
+            motion_blur: 0.0,
+        }
+    }
+}
+
+impl ZoomCameraSettings {
+    pub fn clamped(self) -> Self {
+        let defaults = Self::default();
+        Self {
+            speed: if self.speed.is_finite() {
+                self.speed.clamp(0.25, 3.0)
+            } else {
+                defaults.speed
+            },
+            smoothness: if self.smoothness.is_finite() {
+                self.smoothness.clamp(0.0, 1.0)
+            } else {
+                defaults.smoothness
+            },
+            start_early: self.start_early,
+            motion_blur: if self.motion_blur.is_finite() {
+                self.motion_blur.clamp(0.0, 1.0)
+            } else {
+                defaults.motion_blur
+            },
+        }
+    }
+
+    pub fn spring(self) -> CameraSpring {
+        let settings = self.clamped();
+        CameraSpring {
+            stiffness: 125.0 * settings.speed * settings.speed,
+            damping: (4.0 + 16.0 * settings.smoothness) * settings.speed,
+            mass: 1.5,
+        }
+    }
+
+    pub fn lead_in_seconds(self) -> f64 {
+        if self.start_early {
+            0.35
+        } else {
+            0.0
+        }
+    }
+}
+
 /// Where a zoom clip came from.
 ///
 /// `mode` describes camera behavior — whether the clip follows the pointer.
@@ -124,5 +185,36 @@ impl ZoomClip {
     pub fn has_card_motion(&self) -> bool {
         self.rotation_x.abs() + self.rotation_y.abs() + self.rotation_z.abs() + self.perspective
             > 0.04
+    }
+}
+
+#[cfg(test)]
+mod zoom_camera_settings_tests {
+    use super::*;
+
+    #[test]
+    fn zoom_camera_defaults_match_the_shared_spring() {
+        let settings = ZoomCameraSettings::default();
+        assert_eq!(settings.spring(), CAMERA_FOLLOW_SPRING);
+        assert_eq!(settings.lead_in_seconds(), 0.0);
+    }
+
+    #[test]
+    fn zoom_camera_speed_and_smoothness_map_to_the_spring() {
+        let settings = ZoomCameraSettings {
+            speed: 2.0,
+            smoothness: 0.75,
+            start_early: true,
+            motion_blur: 0.4,
+        };
+        assert_eq!(
+            settings.spring(),
+            CameraSpring {
+                stiffness: 500.0,
+                damping: 32.0,
+                mass: 1.5,
+            }
+        );
+        assert_eq!(settings.lead_in_seconds(), 0.35);
     }
 }

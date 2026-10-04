@@ -897,7 +897,8 @@ fn build_composite_convert_args(
     // to cover it too: preview keeps moving the zoom through a freeze, and the
     // export must match.
     let freeze = state.freeze_tail_seconds();
-    let _ = std::fs::write(&cmd_path, build_sendcmd(state, start, end + freeze));
+    let (commands, blur_samples) = build_zoom_commands(state, start, end + freeze);
+    let _ = std::fs::write(&cmd_path, commands);
 
     // The video is the fitted rect inside the output canvas; a fixed Frame
     // insets it with the background padding, and the fill (or the black
@@ -920,6 +921,11 @@ fn build_composite_convert_args(
     };
 
     let (eff_w, eff_h) = state.effective_source_dimensions();
+    let (cursor_w, cursor_h) = if blur_samples > 1 {
+        (state.metadata.width.max(2), state.metadata.height.max(2))
+    } else {
+        (video_w, video_h)
+    };
     let can_draw_cursor = state
         .sidecar
         .as_ref()
@@ -931,14 +937,27 @@ fn build_composite_convert_args(
     // The track is streamed, so nothing is rendered until ffmpeg asks for it:
     // starting the writer is what decides whether a cursor can be drawn at all.
     let mut cursor_track = if can_draw_cursor {
-        match super::cursor_track::ActiveCursorTrack::start(
-            state,
-            start,
-            end,
-            video_w,
-            video_h,
-            warp_requested,
-        ) {
+        let track = if blur_samples > 1 {
+            super::cursor_track::ActiveCursorTrack::start_with_view(
+                state,
+                start,
+                end + freeze,
+                cursor_w,
+                cursor_h,
+                warp_requested,
+                true,
+            )
+        } else {
+            super::cursor_track::ActiveCursorTrack::start(
+                state,
+                start,
+                end + freeze,
+                cursor_w,
+                cursor_h,
+                warp_requested,
+            )
+        };
+        match track {
             Ok(track) => Some(track),
             Err(err) => {
                 eprintln!("[export] cursor track unavailable, exporting without it: {err}");
@@ -982,22 +1001,31 @@ fn build_composite_convert_args(
     // When the warp runs, `[0:v]` is the raw warped frames from the GStreamer
     // pipe; otherwise it is the source. Either way the crop/zoom/background
     // path below is unchanged.
-    let mut filter = format!(
-        "[0:v]{}sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1",
-        freeze_tail_tpad(state)
-            .map(|pad| format!("{pad},"))
-            .unwrap_or_default(),
-        escape_filter_path(&cmd_path),
-        static_crop_prefix(state),
-        src_w = eff_w.max(2),
-        src_h = eff_h.max(2),
-    );
+    let mut filter = if blur_samples > 1 {
+        camera_blur_filter(
+            state,
+            &cmd_path,
+            blur_samples,
+            draw_cursor.then_some(cursor_index),
+        )
+    } else {
+        format!(
+            "[0:v]{}sendcmd=f={},{}crop@z=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1",
+            freeze_tail_tpad(state)
+                .map(|pad| format!("{pad},"))
+                .unwrap_or_default(),
+            escape_filter_path(&cmd_path),
+            static_crop_prefix(state),
+            src_w = eff_w.max(2),
+            src_h = eff_h.max(2),
+        )
+    };
     // The cursor stays on the video, not the background. It is blended in the
     // video's own 4:2:0 space: an RGB working format (what `format=auto`
     // resolves to for an RGBA overlay) round-trips the frame through RGB,
     // which shifts chroma on every cropped frame — the purple cast through
     // zooms — and makes the encoder write 4:4:4 output.
-    if draw_cursor {
+    if draw_cursor && blur_samples == 1 {
         filter.push_str(&format!(
             "[vc0];[vc0][{cursor_index}:v]overlay=0:0:eof_action=pass:shortest=0:format=yuv420"
         ));
@@ -1082,7 +1110,7 @@ fn build_composite_convert_args(
             "-pix_fmt".into(),
             "rgba".into(),
             "-video_size".into(),
-            format!("{video_w}x{video_h}"),
+            format!("{cursor_w}x{cursor_h}"),
             "-framerate".into(),
             format!("{:.6}", state.metadata.export_frame_rate()),
             "-i".into(),
@@ -1111,6 +1139,9 @@ fn build_composite_convert_args(
     // `hwupload` is parsed.
     if let Some(encoder) = encoder {
         args.extend(hardware_encode::hardware_input_args(encoder));
+    }
+    if blur_samples > 1 {
+        args.extend(["-filter_complex_threads".into(), "1".into()]);
     }
     args.extend(["-filter_complex".into(), filter]);
     args.extend(export_video_args(encoder, state.quality));
@@ -1145,24 +1176,139 @@ fn static_crop_prefix(state: &VideoEditState) -> String {
 }
 
 fn build_sendcmd(state: &VideoEditState, start: f64, end: f64) -> String {
+    build_camera_commands(state, start, end, 1).0
+}
+
+pub(super) fn zoom_blur_view(
+    state: &VideoEditState,
+    timeline_t: f64,
+    source_t: f64,
+    sample_index: usize,
+) -> (f64, f64, f64, f64) {
+    let (cx, cy, cw, ch) = state.crop_or_full();
+    let (scale, center) = state.eval_zoom_blur_sample_at(timeline_t, source_t, sample_index);
+    let (x, y, w, h) = even_crop_rect(
+        scale,
+        (center.0 - cx, center.1 - cy),
+        cw.max(2.0) as u32,
+        ch.max(2.0) as u32,
+    );
+    (cx + x as f64, cy + y as f64, w as f64, h as f64)
+}
+
+pub(super) fn zoom_export_times(state: &VideoEditState, start: f64, local_t: f64) -> (f64, f64) {
+    (
+        state.source_to_timeline(start + local_t),
+        (start + local_t).min(state.trim_end_seconds),
+    )
+}
+
+fn build_zoom_commands(state: &VideoEditState, start: f64, end: f64) -> (String, usize) {
+    let samples = state.zoom_blur_sample_count().clamp(1, 8);
+    if samples == 1 {
+        return (build_sendcmd(state, start, end), 1);
+    }
+    let (commands, moving) = build_camera_commands(state, start, end, samples);
+    if moving {
+        (commands, samples)
+    } else {
+        (build_sendcmd(state, start, end), 1)
+    }
+}
+
+fn build_camera_commands(
+    state: &VideoEditState,
+    start: f64,
+    end: f64,
+    samples: usize,
+) -> (String, bool) {
     let fps = state.metadata.export_frame_rate();
-    let duration = (end - start).max(0.0);
-    let frames = ((duration * fps).ceil() as usize).max(1);
-    let (crop_x, crop_y, eff_w, eff_h) = state.crop_or_full();
-    let src_w = eff_w.max(2.0) as u32;
-    let src_h = eff_h.max(2.0) as u32;
+    let frames = (((end - start).max(0.0) * fps).ceil() as usize).max(1);
+    let (crop_x, crop_y, _, _) = state.crop_or_full();
     let mut lines = String::new();
+    let mut moving = false;
     for index in 0..frames {
         let local_t = index as f64 / fps;
-        let source_t = start + local_t;
-        let (scale, center) = state.eval_zoom(source_t);
-        let center = (center.0 - crop_x, center.1 - crop_y);
-        let (x, y, w, h) = even_crop_rect(scale, center, src_w, src_h);
-        lines.push_str(&format!(
-            "{local_t:.3} crop@z w {w};\n{local_t:.3} crop@z h {h};\n{local_t:.3} crop@z x {x};\n{local_t:.3} crop@z y {y};\n"
+        let (timeline_t, source_t) = zoom_export_times(state, start, local_t);
+        let current = zoom_blur_view(state, timeline_t, source_t, 0);
+        for sample in 0..samples {
+            let view = if sample == 0 {
+                current
+            } else {
+                zoom_blur_view(state, timeline_t, source_t, sample)
+            };
+            moving |= view != current;
+            let target = if sample == 0 {
+                "z".into()
+            } else {
+                format!("zb{sample}")
+            };
+            let (x, y, w, h) = (view.0 - crop_x, view.1 - crop_y, view.2, view.3);
+            lines.push_str(&format!(
+                "{local_t:.3} crop@{target} w {w:.0};\n{local_t:.3} crop@{target} h {h:.0};\n{local_t:.3} crop@{target} x {x:.0};\n{local_t:.3} crop@{target} y {y:.0};\n"
+            ));
+        }
+    }
+    (lines, moving)
+}
+
+fn camera_blur_filter(
+    state: &VideoEditState,
+    cmd_path: &Path,
+    samples: usize,
+    cursor_index: Option<usize>,
+) -> String {
+    let samples = samples.clamp(1, 8);
+    let (video_w, video_h) = state.video_rect_dimensions();
+    let (src_w, src_h) = state.effective_source_dimensions();
+    let mut filter = "[0:v]".to_string();
+    if let Some(pad) = freeze_tail_tpad(state) {
+        filter.push_str(&pad);
+        filter.push_str(if cursor_index.is_some() {
+            "[zb_hold];[zb_hold]"
+        } else {
+            ","
+        });
+    }
+    if let Some(cursor_index) = cursor_index {
+        filter.push_str(&format!(
+            "[{cursor_index}:v]overlay=0:0:eof_action=pass:shortest=0:format=yuv420,"
         ));
     }
-    lines
+    filter.push_str(&format!(
+        "sendcmd=f={},{}split={samples}",
+        escape_filter_path(cmd_path),
+        static_crop_prefix(state),
+    ));
+    for sample in 0..samples {
+        filter.push_str(&format!("[zb_in{sample}]"));
+    }
+    for sample in 0..samples {
+        let target = if sample == 0 {
+            "z".into()
+        } else {
+            format!("zb{sample}")
+        };
+        filter.push_str(&format!(
+            ";[zb_in{sample}]crop@{target}=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1,format=yuv420p16le[zb_out{sample}]"
+        ));
+    }
+    for sample in 1..samples {
+        let previous = if sample == 1 {
+            "zb_out0".into()
+        } else {
+            format!("zb_avg{}", sample - 1)
+        };
+        filter.push_str(&format!(
+            ";[{previous}][zb_out{sample}]blend=all_expr='(A*{sample}+B)/{}'",
+            sample + 1,
+        ));
+        if sample + 1 < samples {
+            filter.push_str(&format!("[zb_avg{sample}]"));
+        }
+    }
+    filter.push_str(",format=yuv420p");
+    filter
 }
 
 fn lead_in_tpad(state: &VideoEditState) -> Option<String> {
@@ -1756,6 +1902,327 @@ mod tests {
         assert_eq!(grid_lines(f64::NAN), 30 * 4);
         // Absurd rates are clamped so the command file stays small.
         assert_eq!(grid_lines(10_000.0), 240 * 4);
+    }
+
+    fn moving_camera_state() -> VideoEditState {
+        let mut state = VideoEditState::new(VideoMetadata {
+            path: PathBuf::from("/tmp/camera-blur.mp4"),
+            duration_seconds: 1.0,
+            width: 320,
+            height: 240,
+            file_size_bytes: 100,
+            has_audio: false,
+            frame_rate: 30.0,
+        });
+        state
+            .zoom_clips
+            .push(crate::recording::editor::model::ZoomClip {
+                start: 0.1,
+                end: 0.9,
+                scale: 2.0,
+                center: (210.0, 120.0),
+                ease_ms: 300,
+                mode: crate::recording::editor::model::ZoomMode::Manual,
+                ..Default::default()
+            });
+        state
+    }
+
+    #[test]
+    fn camera_blur_is_absent_when_disabled_or_stationary() {
+        let mut state = moving_camera_state();
+        let sharp = composite_graph(&state);
+        assert!(!sharp.contains("split="));
+        assert!(!sharp.contains("blend="));
+        assert_eq!(
+            build_zoom_commands(&state, 0.0, 1.0).0,
+            build_sendcmd(&state, 0.0, 1.0)
+        );
+        state.zoom_camera.motion_blur = 1.0;
+        state.zoom_clips[0].instant = true;
+        state.zoom_clips[0].start = 0.0;
+        state.zoom_clips[0].end = 2.0;
+        let stationary = composite_graph(&state);
+        assert!(!stationary.contains("split="));
+        assert!(!stationary.contains("blend="));
+        assert_eq!(build_zoom_commands(&state, 0.0, 1.0).1, 1);
+    }
+
+    #[test]
+    fn camera_blur_splits_one_current_frame_into_eight_normalized_views() {
+        let mut state = moving_camera_state();
+        state.zoom_camera.motion_blur = 1.0;
+        let graph = composite_graph(&state);
+        assert!(graph.contains("split=8"), "{graph}");
+        assert_eq!(graph.matches("crop@").count(), 8);
+        assert_eq!(graph.matches("blend=all_expr=").count(), 7);
+        assert!(graph.contains("(A*7+B)/8"));
+        assert!(!graph.contains("tmix"));
+        assert!(!graph.contains("tblend"));
+        assert!(!graph.contains("gblur"));
+        let (commands, samples) = build_zoom_commands(&state, 0.0, 1.0);
+        assert_eq!(samples, 8);
+        assert_eq!(commands.lines().count(), 30 * 8 * 4);
+        assert!(commands.contains("crop@zb7"));
+        assert!(!commands.contains("crop@zb8"));
+    }
+
+    #[test]
+    fn camera_blur_export_clock_advances_through_a_speed_adjusted_freeze() {
+        let mut state = moving_camera_state();
+        state.timeline_offset_seconds = 2.0;
+        state.segment_starts[0] = 2.0;
+        state.set_selected_clip_speed(2.0);
+        let (timeline_t, source_t) = zoom_export_times(&state, 0.0, 1.4);
+        assert!((timeline_t - 2.7).abs() < 1e-9);
+        assert_eq!(source_t, 1.0);
+    }
+
+    #[test]
+    fn sharp_and_blurred_camera_commands_share_the_same_frame_schedule() {
+        let mut state = moving_camera_state();
+        state.metadata.frame_rate = 60.0;
+        let sharp = build_sendcmd(&state, 0.0, 1.0);
+        state.zoom_camera.motion_blur = 1.0;
+        let (blurred, samples) = build_zoom_commands(&state, 0.0, 1.0);
+        assert_eq!(samples, 8);
+        let sharp_times: Vec<_> = sharp
+            .lines()
+            .step_by(4)
+            .map(|line| line.split_once(' ').unwrap().0)
+            .collect();
+        let blurred_times: Vec<_> = blurred
+            .lines()
+            .step_by(4 * samples)
+            .map(|line| line.split_once(' ').unwrap().0)
+            .collect();
+        assert_eq!(sharp_times, blurred_times);
+        assert_eq!(sharp_times[1], "0.017");
+        let sharp_current: Vec<_> = sharp.lines().collect();
+        let blurred_current: Vec<_> = blurred
+            .lines()
+            .filter(|line| line.contains("crop@z "))
+            .collect();
+        assert_eq!(sharp_current, blurred_current);
+    }
+
+    #[test]
+    fn camera_blur_keeps_cursor_ripple_and_card_on_the_existing_composite_path() {
+        use crate::recording::editor::model::{ClickEffect, VideoBackground};
+        use crate::recording::editor::sidecar::ClickSample;
+        let mut state = cursor_composite_state(ClickEffect::Ripple);
+        state.zoom_clips = moving_camera_state().zoom_clips;
+        state.zoom_clips[0].start = 0.05;
+        state.zoom_clips[0].end = 0.65;
+        state.zoom_clips[0].center = (32.0, 24.0);
+        state.zoom_camera.motion_blur = 1.0;
+        state.background = VideoBackground::Plain {
+            r: 30,
+            g: 40,
+            b: 50,
+        };
+        state.background_corner_radius = 10.0;
+        state.sidecar.as_mut().unwrap().clicks.push(ClickSample {
+            t: 1.3,
+            x: 20.0,
+            y: 20.0,
+            button: 1,
+        });
+        let args = warp_args(&state);
+        let graph = graph_of(&args);
+        assert!(graph.contains("[0:v][2:v]overlay=0:0"), "{graph}");
+        assert!(graph.find("overlay=0:0").unwrap() < graph.find("split=8").unwrap());
+        assert!(graph.find("split=8").unwrap() < graph.find("alphamerge").unwrap());
+        assert!(args.windows(2).any(|pair| pair == ["-video_size", "64x48"]));
+        assert!(!args.iter().any(|arg| arg.contains("cursor.rgba")));
+    }
+
+    #[test]
+    fn ffmpeg_camera_blur_softens_motion_without_changing_stationary_frames() {
+        assert!(Command::new("ffmpeg")
+            .arg("-version")
+            .output()
+            .unwrap()
+            .status
+            .success());
+        let scratch = ScratchDir::new("camera-blur-test", 0.0);
+        let source = scratch.path.join("stripes.mkv");
+        let created = Command::new("ffmpeg")
+            .args(["-y", "-nostdin", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i"])
+            .arg("nullsrc=size=320x240:rate=30:duration=1,geq=lum='if(lt(mod(X,16),8),235,16)':cb=128:cr=128")
+            .args(["-c:v", "ffv1"])
+            .arg(&source)
+            .output().unwrap();
+        assert!(
+            created.status.success(),
+            "{}",
+            String::from_utf8_lossy(&created.stderr)
+        );
+        let mut state = moving_camera_state();
+        state.metadata.path = source.clone();
+        let render = |state: &VideoEditState| {
+            let command = build_single_convert_args_with(
+                state,
+                0.0,
+                1.0,
+                Path::new("/tmp/camera-blur-output.mkv"),
+                None,
+            );
+            let output = Command::new("ffmpeg")
+                .args(["-nostdin", "-hide_banner", "-loglevel", "error", "-i"])
+                .arg(&source)
+                .args([
+                    "-filter_complex_threads",
+                    "1",
+                    "-filter_complex",
+                    graph_of(&command.args),
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-f",
+                    "rawvideo",
+                    "-",
+                ])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            output.stdout
+        };
+        let sharp = render(&state);
+        state.zoom_camera.motion_blur = 1.0;
+        let blurred = render(&state);
+        let frame_size = 320 * 240 * 3 / 2;
+        assert_eq!(sharp.len(), 30 * frame_size);
+        assert_eq!(sharp.len(), blurred.len());
+        assert_eq!(&sharp[..frame_size], &blurred[..frame_size]);
+        let sharpness = |video: &[u8]| -> u64 {
+            video
+                .chunks_exact(frame_size)
+                .skip(4)
+                .take(6)
+                .map(|frame| {
+                    frame[..320 * 240]
+                        .chunks_exact(320)
+                        .map(|row| {
+                            row.windows(2)
+                                .map(|p| p[0].abs_diff(p[1]) as u64)
+                                .sum::<u64>()
+                        })
+                        .sum::<u64>()
+                })
+                .sum()
+        };
+        assert!(
+            sharpness(&blurred) < sharpness(&sharp),
+            "moving camera exposure must soften the stripe edges"
+        );
+        let mut comparison = image::GrayImage::new(640, 240);
+        for (offset, video) in [(0, &sharp), (320, &blurred)] {
+            let frame = &video[6 * frame_size..7 * frame_size];
+            for y in 0..240 {
+                for x in 0..320 {
+                    let luma = frame[y * 320 + x].saturating_sub(16) as u16 * 255 / 219;
+                    comparison.put_pixel(
+                        offset + x as u32,
+                        y as u32,
+                        image::Luma([luma.min(255) as u8]),
+                    );
+                }
+            }
+        }
+        std::fs::create_dir_all("target/test-fixtures").unwrap();
+        comparison
+            .save("target/test-fixtures/camera-blur-export.png")
+            .unwrap();
+        state.zoom_clips[0].instant = true;
+        state.zoom_clips[0].start = 0.0;
+        state.zoom_clips[0].end = 2.0;
+        let stationary_blurred = render(&state);
+        state.zoom_camera.motion_blur = 0.0;
+        assert_eq!(stationary_blurred, render(&state));
+    }
+
+    #[test]
+    fn camera_blur_export_streams_the_current_cursor_before_averaging() {
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+        };
+        let scratch = ScratchDir::new("camera-blur-cursor-test", 0.0);
+        let source = scratch.path.join("source.mkv");
+        let output = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=black:size=320x240:rate=30:duration=1",
+                "-c:v",
+                "ffv1",
+            ])
+            .arg(&source)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let mut state = moving_camera_state();
+        state.metadata.path = source;
+        state.zoom_camera.motion_blur = 1.0;
+        let without = scratch.path.join("without-cursor.mp4");
+        export_edited_to(&state, without.clone()).unwrap();
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 160.0,
+            y: 120.0,
+            kind: CursorKind::Default,
+        });
+        state.sidecar = Some(sidecar);
+        let with_cursor = scratch.path.join("with-cursor.mp4");
+        export_edited_to(&state, with_cursor.clone()).unwrap();
+        assert_ne!(first_frame_rgba(&with_cursor), first_frame_rgba(&without));
+        assert!((probe_metadata(&with_cursor).unwrap().duration_seconds - 1.0).abs() < 0.034);
+        state.set_trim_end(1.4);
+        state.zoom_clips[0].end = 1.4;
+        for strength in [0.0, 1.0] {
+            state.zoom_camera.motion_blur = strength;
+            let frozen = scratch.path.join(format!("frozen-cursor-{strength}.mp4"));
+            export_edited_to(&state, frozen.clone()).unwrap();
+            let output = Command::new("ffmpeg")
+                .args([
+                    "-nostdin",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-sseof",
+                    "-0.04",
+                    "-i",
+                ])
+                .arg(&frozen)
+                .args(["-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "-"])
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                output.stdout.iter().any(|&pixel| pixel > 100),
+                "the cursor must remain visible in the last frozen frame at blur {strength}"
+            );
+            assert!((probe_metadata(&frozen).unwrap().duration_seconds - 1.4).abs() < 0.034);
+        }
     }
 
     #[test]

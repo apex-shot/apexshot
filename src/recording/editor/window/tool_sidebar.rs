@@ -1,8 +1,8 @@
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
     nearest_zoom_preset, ClickEffect, CursorMotionStyle, CursorTheme, EditorTool, VideoBackground,
-    VideoEditState, ZoomEasing, ZoomMode, MAX_CLIP_SPEED, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED,
-    MIN_CLIP_SPEED, MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
+    VideoEditState, ZoomMode, MAX_CLIP_SPEED, MAX_CURSOR_SIZE, MAX_CURSOR_SPEED, MIN_CLIP_SPEED,
+    MIN_CURSOR_SIZE, MIN_CURSOR_SPEED, ZOOM_SCALE_PRESETS,
 };
 use gtk4::{
     gdk, glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, EventControllerMotion,
@@ -156,7 +156,7 @@ fn build_zoom_panel(
     mode_row.append(&manual_btn);
 
     let mode_hint = Label::new(Some(&if auto_available {
-        t("Camera recenters when the cursor nears the edge of the zoomed view")
+        t("Camera follows the recorded pointer")
     } else {
         t("Set a fixed focus point for this zoom")
     }));
@@ -183,11 +183,13 @@ fn build_zoom_panel(
             chip.connect_clicked({
                 let state = state.clone();
                 let on_change = on_change.clone();
+                let pause_playback = pause_playback.clone();
                 let syncing = syncing.clone();
                 move |_| {
                     if syncing.get() {
                         return;
                     }
+                    pause_playback();
                     state.lock().unwrap().set_selected_zoom_scale(scale);
                     on_change();
                 }
@@ -228,53 +230,81 @@ fn build_zoom_panel(
     instant_row.append(&instant_label);
     instant_row.append(&instant);
 
-    let easing_label = Label::new(Some(&t("Easing")));
-    easing_label.add_css_class("recording-editor-zoom-kicker");
-    easing_label.add_css_class("recording-editor-zoom-easing-kicker");
-    easing_label.set_xalign(0.0);
-    let easing_row = GtkBox::new(Orientation::Horizontal, 6);
-    easing_row.add_css_class("recording-editor-zoom-easing");
-    easing_row.set_hexpand(true);
-    easing_row.set_homogeneous(true);
-    let easing_buttons: Vec<(ZoomEasing, ToggleButton)> = ZoomEasing::ALL
-        .iter()
-        .map(|&easing| {
-            let button = ToggleButton::with_label(&t(easing.label()));
-            button.add_css_class("recording-editor-zoom-easing-btn");
-            button.set_has_frame(false);
-            button.set_hexpand(true);
-            button.connect_toggled({
-                let state = state.clone();
-                let on_change = on_change.clone();
-                let syncing = syncing.clone();
-                move |button| {
-                    if syncing.get() || !button.is_active() {
-                        return;
-                    }
-                    state.lock().unwrap().set_selected_zoom_easing(easing);
-                    on_change();
+    let camera_hint = Label::new(Some(&t("These settings apply to every zoom.")));
+    camera_hint.add_css_class("recording-editor-zoom-hint");
+    camera_hint.set_wrap(true);
+    camera_hint.set_xalign(0.0);
+    camera_hint.set_max_width_chars(34);
+
+    let speed_slider =
+        FillSlider::new_with_value_text(&t("Camera speed"), |value, _, _| format_clip_speed(value));
+    speed_slider.set_range(0.25, 3.0);
+    speed_slider.set_increments(0.05, 0.25);
+    speed_slider.set_logarithmic(true);
+    let smoothness_slider = FillSlider::new(&t("Smoothness"));
+    smoothness_slider.set_range(0.0, 1.0);
+    smoothness_slider.set_increments(0.01, 0.1);
+    let motion_blur_slider = FillSlider::new(&t("Motion blur"));
+    motion_blur_slider.set_range(0.0, 1.0);
+    motion_blur_slider.set_increments(0.01, 0.1);
+
+    for (slider, setter) in [
+        (
+            &speed_slider,
+            VideoEditState::set_zoom_camera_speed as fn(&mut VideoEditState, f64),
+        ),
+        (
+            &smoothness_slider,
+            VideoEditState::set_zoom_camera_smoothness,
+        ),
+        (
+            &motion_blur_slider,
+            VideoEditState::set_zoom_camera_motion_blur,
+        ),
+    ] {
+        slider.connect_value_changed({
+            let state = state.clone();
+            let on_change = on_change.clone();
+            let pause_playback = pause_playback.clone();
+            let syncing = syncing.clone();
+            move |slider| {
+                if syncing.get() {
+                    return;
                 }
-            });
-            easing_row.append(&button);
-            (easing, button)
-        })
-        .collect();
-    let first_easing = easing_buttons[0].1.clone();
-    for (index, (_, button)) in easing_buttons.iter().enumerate() {
-        if index > 0 {
-            button.set_group(Some(&first_easing));
-        }
+                pause_playback();
+                setter(&mut state.lock().unwrap(), slider.value());
+                on_change();
+            }
+        });
     }
 
-    // Automatic generation reads recorded clicks; the mode hint above
-    // explains what Detect uses, so there is nothing to configure here.
+    let early_row = GtkBox::new(Orientation::Horizontal, 8);
+    early_row.add_css_class("recording-editor-zoom-classic");
+    early_row.set_hexpand(true);
+    let early_label = Label::new(Some(&t("Start animation early")));
+    early_label.add_css_class("recording-editor-zoom-classic-label");
+    early_label.set_xalign(0.0);
+    early_label.set_hexpand(true);
+    let start_early = Switch::new();
+    start_early.add_css_class("recording-editor-zoom-switch");
+    start_early.set_valign(Align::Center);
+    start_early.set_halign(Align::End);
+    start_early.set_tooltip_text(Some(&t(
+        "Begin the camera move 0.35 seconds before each zoom.",
+    )));
+    early_row.append(&early_label);
+    early_row.append(&start_early);
+
     body.append(&mode_row);
     body.append(&mode_hint);
     body.append(&chips);
     body.append(&animation_header);
     body.append(&instant_row);
-    body.append(&easing_label);
-    body.append(&easing_row);
+    body.append(&camera_hint);
+    body.append(&speed_slider.widget());
+    body.append(&smoothness_slider.widget());
+    body.append(&early_row);
+    body.append(&motion_blur_slider.widget());
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -289,11 +319,13 @@ fn build_zoom_panel(
     auto_btn.connect_toggled({
         let state = state.clone();
         let on_change = on_change.clone();
+        let pause_playback = pause_playback.clone();
         let syncing = syncing.clone();
         move |button| {
             if syncing.get() || !button.is_active() {
                 return;
             }
+            pause_playback();
             state.lock().unwrap().set_selected_zoom_mode(ZoomMode::Auto);
             on_change();
         }
@@ -301,11 +333,13 @@ fn build_zoom_panel(
     manual_btn.connect_toggled({
         let state = state.clone();
         let on_change = on_change.clone();
+        let pause_playback = pause_playback.clone();
         let syncing = syncing.clone();
         move |button| {
             if syncing.get() || !button.is_active() {
                 return;
             }
+            pause_playback();
             state
                 .lock()
                 .unwrap()
@@ -316,7 +350,9 @@ fn build_zoom_panel(
     reset.connect_clicked({
         let state = state.clone();
         let on_change = on_change.clone();
+        let pause_playback = pause_playback.clone();
         move |_| {
+            pause_playback();
             state.lock().unwrap().reset_zoom_animation();
             on_change();
         }
@@ -335,17 +371,31 @@ fn build_zoom_panel(
             gtk4::glib::Propagation::Proceed
         }
     });
+    start_early.connect_state_set({
+        let state = state.clone();
+        let on_change = on_change.clone();
+        let pause_playback = pause_playback.clone();
+        let syncing = syncing.clone();
+        move |_, active| {
+            if !syncing.get() {
+                pause_playback();
+                state.lock().unwrap().set_zoom_camera_start_early(active);
+                on_change();
+            }
+            gtk4::glib::Propagation::Proceed
+        }
+    });
     let refresh = {
         let panel = panel.clone();
         let auto_btn = auto_btn.clone();
         let manual_btn = manual_btn.clone();
         let mode_hint = mode_hint.clone();
         let instant = instant.clone();
-        let instant_row = instant_row.clone();
         let chip_buttons = chip_buttons.clone();
-        let easing_buttons = easing_buttons.clone();
-        let easing_row = easing_row.clone();
-        let easing_label = easing_label.clone();
+        let speed_slider = speed_slider.clone();
+        let smoothness_slider = smoothness_slider.clone();
+        let start_early = start_early.clone();
+        let motion_blur_slider = motion_blur_slider.clone();
         let reset = reset.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
@@ -359,9 +409,16 @@ fn build_zoom_panel(
             auto_btn.set_sensitive(auto_available && can_edit);
             manual_btn.set_sensitive(can_edit);
             instant.set_sensitive(can_edit);
-            reset.set_sensitive(can_edit);
-            easing_row.set_sensitive(can_edit);
-            easing_label.set_sensitive(can_edit);
+            reset.set_sensitive(!guard.zoom_locked);
+            speed_slider.set_sensitive(!guard.zoom_locked);
+            smoothness_slider.set_sensitive(!guard.zoom_locked);
+            start_early.set_sensitive(!guard.zoom_locked);
+            motion_blur_slider.set_sensitive(!guard.zoom_locked);
+            let camera = guard.zoom_camera.clamped();
+            speed_slider.set_value(camera.speed);
+            smoothness_slider.set_value(camera.smoothness);
+            start_early.set_active(camera.start_early);
+            motion_blur_slider.set_value(camera.motion_blur);
             if let Some(clip) = &selected {
                 let mode = if clip.mode == ZoomMode::Auto && auto_available {
                     ZoomMode::Auto
@@ -370,20 +427,12 @@ fn build_zoom_panel(
                 };
                 mode_hint.set_text(&match mode {
                     ZoomMode::Manual => t("Set a fixed focus point for this zoom"),
-                    ZoomMode::Auto => {
-                        t("Camera recenters when the cursor nears the edge of the zoomed view")
-                    }
+                    ZoomMode::Auto => t("Camera follows the recorded pointer"),
                 });
                 match mode {
                     ZoomMode::Auto => auto_btn.set_active(true),
                     ZoomMode::Manual => manual_btn.set_active(true),
                 }
-                // Automatic motion is the follow camera: animated chases it,
-                // instant jumps. Manual motion stays on the easing presets,
-                // which have no counterpart in the studied behaviour.
-                instant_row.set_visible(mode == ZoomMode::Auto);
-                easing_row.set_visible(mode == ZoomMode::Manual);
-                easing_label.set_visible(mode == ZoomMode::Manual);
             } else {
                 mode_hint.set_text(&if auto_available {
                     t("Detect uses recorded clicks")
@@ -393,18 +442,8 @@ fn build_zoom_panel(
                 if !auto_available {
                     manual_btn.set_active(true);
                 }
-                instant_row.set_visible(false);
-                easing_row.set_visible(true);
-                easing_label.set_visible(true);
             }
             instant.set_active(selected.as_ref().is_some_and(|clip| clip.instant));
-            let selected_easing = selected
-                .as_ref()
-                .map(|clip| clip.easing)
-                .unwrap_or(ZoomEasing::Glide);
-            for (easing, button) in &easing_buttons {
-                button.set_active(*easing == selected_easing);
-            }
             let selected_preset = selected
                 .as_ref()
                 .map(|clip| nearest_zoom_preset(clip.scale));
@@ -1780,6 +1819,56 @@ mod tests {
             !panel.contains("guard.background = VideoBackground::Plain {\n                r: 17,"),
             "switching tabs must not write a fill"
         );
+    }
+
+    #[test]
+    fn zoom_camera_controls_are_project_wide_and_sync_their_values() {
+        let source = include_str!("tool_sidebar.rs");
+        let start = source.find("fn build_zoom_panel(").unwrap();
+        let end = source.find("struct ClipPanel").unwrap();
+        let zoom = &source[start..end];
+        for control in [
+            "FillSlider::new_with_value_text(&t(\"Camera speed\")",
+            "FillSlider::new(&t(\"Smoothness\"))",
+            "FillSlider::new(&t(\"Motion blur\"))",
+            "Label::new(Some(&t(\"Start animation early\")))",
+            "VideoEditState::set_zoom_camera_speed",
+            "VideoEditState::set_zoom_camera_smoothness",
+            "VideoEditState::set_zoom_camera_motion_blur",
+            "set_zoom_camera_start_early(active)",
+            "speed_slider.set_value(camera.speed)",
+            "smoothness_slider.set_value(camera.smoothness)",
+            "start_early.set_active(camera.start_early)",
+            "motion_blur_slider.set_value(camera.motion_blur)",
+        ] {
+            assert!(zoom.contains(control), "missing camera control: {control}");
+        }
+        for control in [
+            "speed_slider",
+            "smoothness_slider",
+            "start_early",
+            "motion_blur_slider",
+        ] {
+            assert!(
+                zoom.contains(&format!("{control}.set_sensitive(!guard.zoom_locked)")),
+                "{control} must work without a selected clip and respect the zoom lock"
+            );
+        }
+    }
+
+    #[test]
+    fn zoom_instant_is_visible_in_both_modes_and_named_easing_is_removed() {
+        let source = include_str!("tool_sidebar.rs");
+        let start = source.find("fn build_zoom_panel(").unwrap();
+        let end = source.find("struct ClipPanel").unwrap();
+        let zoom = &source[start..end];
+        assert!(zoom.contains("body.append(&instant_row)"));
+        assert!(zoom.contains("instant.set_sensitive(can_edit)"));
+        assert!(zoom.contains("set_selected_zoom_instant(active)"));
+        assert!(!zoom.contains("instant_row.set_visible("));
+        assert!(!zoom.contains("easing_buttons"));
+        assert!(!zoom.contains("set_selected_zoom_easing"));
+        assert!(!zoom.contains("nears the edge"));
     }
 
     #[test]

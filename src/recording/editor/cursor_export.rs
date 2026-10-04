@@ -21,14 +21,34 @@ pub fn write_rgba_track<W: Write>(
     skip_ripple_ring: bool,
     sink: &mut W,
 ) -> anyhow::Result<()> {
+    write_rgba_track_with_view(
+        state,
+        start,
+        end,
+        (width, height),
+        skip_ripple_ring,
+        false,
+        sink,
+    )
+}
+
+pub(super) fn write_rgba_track_with_view<W: Write>(
+    state: &VideoEditState,
+    start: f64,
+    end: f64,
+    dimensions: (u32, u32),
+    skip_ripple_ring: bool,
+    source_space: bool,
+    sink: &mut W,
+) -> anyhow::Result<()> {
     let Some(sidecar) = state.sidecar.as_ref() else {
         anyhow::bail!("no pointer sidecar");
     };
     if !sidecar.can_render_cursor_overlay() {
         anyhow::bail!("pointer data was inferred from baked video frames");
     }
-    let width = width.max(2);
-    let height = height.max(2);
+    let width = dimensions.0.max(2);
+    let height = dimensions.1.max(2);
     let duration = (end - start).max(0.0);
     let frame_rate = state.metadata.export_frame_rate();
     let frames = ((duration * frame_rate).ceil() as usize).max(1);
@@ -45,18 +65,35 @@ pub fn write_rgba_track<W: Write>(
     let mut surface = ImageSurface::create(Format::ARgb32, width as i32, height as i32)?;
     let mut pixels = vec![0u8; (width * height * 4) as usize];
     for index in 0..frames {
-        let source_t = start + index as f64 / frame_rate;
+        let (timeline_t, source_t) =
+            super::ffmpeg::zoom_export_times(state, start, index as f64 / frame_rate);
         let cr = Context::new(&surface)?;
         cr.set_operator(Operator::Clear);
         let _ = cr.paint();
         cr.set_operator(Operator::Over);
-        let (scale, center) = state.eval_zoom(source_t);
+        let (scale, center) = state.eval_zoom_at(timeline_t, source_t);
         let center = (center.0 - crop_x, center.1 - crop_y);
         let (zx, zy, zw, zh) = even_crop_rect(scale, center, src_w, src_h);
-        let view = (crop_x + zx as f64, crop_y + zy as f64, zw as f64, zh as f64);
+        let view = if source_space {
+            (
+                0.0,
+                0.0,
+                state.metadata.width as f64,
+                state.metadata.height as f64,
+            )
+        } else {
+            (crop_x + zx as f64, crop_y + zy as f64, zw as f64, zh as f64)
+        };
         // Click effects are sized as fractions of the source video width, so
         // map that width into the same zoomed space the click points use.
-        let reference_width = state.metadata.width as f64 * width as f64 / zw.max(1) as f64;
+        let (video_w, video_h) = state.video_rect_dimensions();
+        let reference_width = state.metadata.width as f64
+            * if source_space {
+                video_w as f64
+            } else {
+                width as f64
+            }
+            / zw.max(1) as f64;
         let mut overlay_cursor = cursor;
         overlay_cursor.size = cursor_sprite::overlay_scale(cursor.size, scale);
         if let Some(mut frame) = sidecar.presented_in_video_at(
@@ -65,7 +102,7 @@ pub fn write_rgba_track<W: Write>(
             state.metadata.width as f64,
             state.metadata.height as f64,
         ) {
-            frame.alpha *= state.cursor_hide_alpha_for_source(source_t);
+            frame.alpha *= state.cursor_hide_alpha(timeline_t);
             for (x, y, progress) in sidecar.click_ripples_in_video_at(
                 source_t,
                 overlay_cursor.click_window_seconds(),
@@ -78,28 +115,46 @@ pub fn write_rgba_track<W: Write>(
                     continue;
                 }
                 let (px, py) = source_to_zoomed_point(x, y, view, width as f64, height as f64);
+                let _ = cr.save();
+                cr.translate(px, py);
+                if source_space {
+                    cr.scale(
+                        zw as f64 / video_w.max(1) as f64,
+                        zh as f64 / video_h.max(1) as f64,
+                    );
+                }
                 cursor_sprite::draw_click(
                     &cr,
-                    px,
-                    py,
+                    0.0,
+                    0.0,
                     progress,
                     overlay_cursor,
                     frame.alpha,
                     reference_width,
                 );
+                let _ = cr.restore();
             }
             let (px, py) =
                 source_to_zoomed_point(frame.x, frame.y, view, width as f64, height as f64);
+            let _ = cr.save();
+            cr.translate(px, py);
+            if source_space {
+                cr.scale(
+                    zw as f64 / video_w.max(1) as f64,
+                    zh as f64 / video_h.max(1) as f64,
+                );
+            }
             cursor_sprite::draw(
                 &cr,
-                px,
-                py,
+                0.0,
+                0.0,
                 1.0,
                 press_cursor_scale(sidecar, source_t),
                 frame.kind.as_str(),
                 overlay_cursor,
                 frame.alpha,
             );
+            let _ = cr.restore();
         }
         drop(cr);
         surface.flush();

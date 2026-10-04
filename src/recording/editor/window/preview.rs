@@ -1,10 +1,10 @@
-use super::squircle_clip::SquircleClip;
+use super::squircle_clip::{relative_camera_transform, SquircleClip};
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::model::{
-    even_crop_rect, format_timecode, source_to_zoomed_point, view_to_source, zoom_camera_transform,
-    CursorSettings, ExportQuality, VideoBackground, VideoEditState, VideoGradient, ZoomClip,
-    ZoomMode, FRAME_ASPECT_RATIOS,
+    format_timecode, source_to_zoomed_point, view_to_source, zoom_camera_transform, CursorSettings,
+    ExportQuality, VideoBackground, VideoEditState, VideoGradient, ZoomClip, ZoomMode,
+    FRAME_ASPECT_RATIOS,
 };
 use crate::recording::editor::sidecar::CursorMotion;
 use gtk4::{
@@ -168,11 +168,23 @@ fn build_preview_inner(
     cursor_layer.set_vexpand(true);
     cursor_layer.set_can_target(true);
     let placing_focus = Rc::new(Cell::new(false));
+    let camera_cursor = DrawingArea::new();
+    camera_cursor.set_hexpand(true);
+    camera_cursor.set_vexpand(true);
+    camera_cursor.set_can_target(false);
+    camera_cursor.set_draw_func({
+        let state = state.clone();
+        let placing_focus = placing_focus.clone();
+        move |_, cr, width, height| {
+            draw_preview_overlays(&state, cr, width, height, placing_focus.get(), true);
+        }
+    });
+    squircle.add_camera_overlay(&camera_cursor);
     cursor_layer.set_draw_func({
         let state = state.clone();
         let placing_focus = placing_focus.clone();
         move |_, cr, width, height| {
-            draw_preview_overlays(&state, cr, width, height, placing_focus.get());
+            draw_preview_overlays(&state, cr, width, height, placing_focus.get(), false);
         }
     });
     overlay.add_overlay(&cursor_layer);
@@ -228,6 +240,7 @@ fn build_preview_inner(
         let media_tick = media.clone();
         let placing_focus = placing_focus.clone();
         let cursor_layer_tick = cursor_layer.clone();
+        let camera_cursor = camera_cursor.clone();
         let empty_hint = empty_hint.clone();
         let last_zoom_css = Rc::new(RefCell::new(String::new()));
         let last_bg_css = Rc::new(RefCell::new(String::new()));
@@ -314,6 +327,7 @@ fn build_preview_inner(
                 &state,
                 &picture,
                 &clip,
+                &squircle,
                 &zoom_css,
                 &last_zoom_css,
                 clock_now,
@@ -331,6 +345,7 @@ fn build_preview_inner(
                 dims,
             );
             cursor_layer.queue_draw();
+            camera_cursor.queue_draw();
             glib::ControlFlow::Continue
         });
     }
@@ -883,17 +898,7 @@ fn visible_source_view(
     if placing {
         return (cx, cy, cw, ch);
     }
-    let (scale, center) = state.eval_zoom_at(timeline_t, source_t);
-    if scale <= 1.01 {
-        return (cx, cy, cw, ch);
-    }
-    let (zx, zy, zw, zh) = even_crop_rect(
-        scale,
-        (center.0 - cx, center.1 - cy),
-        cw.max(2.0) as u32,
-        ch.max(2.0) as u32,
-    );
-    (cx + zx as f64, cy + zy as f64, zw as f64, zh as f64)
+    crate::recording::editor::ffmpeg::zoom_blur_view(state, timeline_t, source_t, 0)
 }
 
 fn placing_manual(state: &VideoEditState, playing: bool) -> bool {
@@ -907,6 +912,7 @@ fn apply_preview_view(
     state: &Arc<Mutex<VideoEditState>>,
     picture: &Picture,
     clip: &Overlay,
+    squircle: &SquircleClip,
     provider: &CssProvider,
     last_css: &RefCell<String>,
     timeline_t: f64,
@@ -927,15 +933,40 @@ fn apply_preview_view(
     if clip_w < 2.0 || clip_h < 2.0 {
         return;
     }
-    let (view, src_w, src_h) = {
+    let (view, src_w, src_h, samples) = {
         let state = state.lock().unwrap();
+        let samples = if placing {
+            Vec::new()
+        } else {
+            (1..state.zoom_blur_sample_count().min(8))
+                .map(|index| {
+                    crate::recording::editor::ffmpeg::zoom_blur_view(
+                        &state, timeline_t, source_t, index,
+                    )
+                })
+                .collect()
+        };
         (
             visible_source_view(&state, timeline_t, source_t, placing),
             state.metadata.width.max(1) as f64,
             state.metadata.height.max(1) as f64,
+            samples,
         )
     };
     let (tx, ty, sx, sy) = zoom_camera_transform(view, src_w, src_h, clip_w, clip_h);
+    let relative_samples: Vec<_> = samples
+        .into_iter()
+        .map(|sample| {
+            relative_camera_transform(
+                (tx, ty, sx, sy),
+                zoom_camera_transform(sample, src_w, src_h, clip_w, clip_h),
+            )
+        })
+        .collect();
+    let moving = relative_samples.iter().any(|&(x, y, sx, sy)| {
+        x.abs() > 1e-6 || y.abs() > 1e-6 || (sx - 1.0).abs() > 1e-9 || (sy - 1.0).abs() > 1e-9
+    });
+    squircle.set_camera_samples(if moving { relative_samples } else { Vec::new() });
     let video_css = if (sx - 1.0).abs() < 0.002
         && (sy - 1.0).abs() < 0.002
         && tx.abs() < 0.5
@@ -1066,6 +1097,7 @@ fn draw_preview_overlays(
     width: i32,
     height: i32,
     placing: bool,
+    draw_cursor: bool,
 ) {
     let state = state.lock().unwrap();
     let w = width as f64;
@@ -1083,7 +1115,7 @@ fn draw_preview_overlays(
     if let Some(sidecar) = state
         .sidecar
         .as_ref()
-        .filter(|sidecar| sidecar.can_render_cursor_overlay())
+        .filter(|sidecar| draw_cursor && sidecar.can_render_cursor_overlay())
     {
         if let Some(mut frame) = sidecar.presented_in_video_at(
             source_t,
@@ -1127,7 +1159,7 @@ fn draw_preview_overlays(
         }
     }
 
-    if placing {
+    if placing && !draw_cursor {
         if let Some(clip) = state.selected_zoom_clip() {
             let (x, y, rect_w, rect_h) = manual_focus_rect(clip, view, w, h);
             cr.set_source_rgba(1.0, 0.48, 0.12, 0.22);
@@ -1182,6 +1214,38 @@ fn manual_focus_rect(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn manual_focus_placement_uses_the_unzoomed_source_view_with_blur_enabled() {
+        use crate::recording::editor::model::{VideoEditState, VideoMetadata, ZoomClip, ZoomMode};
+        let mut state = VideoEditState::new(VideoMetadata {
+            path: std::path::PathBuf::from("/tmp/manual-focus.mp4"),
+            duration_seconds: 1.0,
+            width: 320,
+            height: 240,
+            file_size_bytes: 100,
+            has_audio: false,
+            frame_rate: 30.0,
+        });
+        state.zoom_camera.motion_blur = 1.0;
+        state.zoom_clips.push(ZoomClip {
+            start: 0.0,
+            end: 1.0,
+            scale: 2.0,
+            center: (160.0, 120.0),
+            mode: ZoomMode::Manual,
+            ..Default::default()
+        });
+        assert_eq!(
+            super::visible_source_view(&state, 0.4, 0.4, true),
+            state.crop_or_full()
+        );
+        assert_eq!(
+            super::visible_source_view(&state, 0.4, 0.4, false),
+            crate::recording::editor::ffmpeg::zoom_blur_view(&state, 0.4, 0.4, 0),
+        );
+        assert!(super::visible_source_view(&state, 0.4, 0.4, false).2 < 320.0);
+    }
+
     #[test]
     fn cursor_layer_is_not_css_zoomed() {
         let source = include_str!("preview.rs");

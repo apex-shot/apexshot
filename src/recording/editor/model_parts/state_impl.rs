@@ -22,6 +22,8 @@ impl VideoEditState {
             segment_speeds: vec![1.0],
             segment_muted: vec![false],
             zoom_clips: Vec::new(),
+            zoom_camera: ZoomCameraSettings::default(),
+            zoom_camera_cache: Default::default(),
             selected_zoom: None,
             cursor_hide_clips: Vec::new(),
             selected_cursor_hide: None,
