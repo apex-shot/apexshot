@@ -265,7 +265,11 @@ pub fn build_timeline_card(
     extend_layer.set_draw_func({
         let state = state.clone();
         let hovered_extend = hovered_extend.clone();
+        let dragging_video = dragging_video.clone();
         move |area, cr, width, height| {
+            if dragging_video.get().is_some() {
+                return;
+            }
             draw_extend_region(
                 &state,
                 hovered_extend.get(),
@@ -903,6 +907,78 @@ mod tests {
         assert_eq!(zoom_thumb_height(56), 50);
         // Degenerate tracks clamp to the floor instead of pinching to nothing.
         assert_eq!(zoom_thumb_height(4), ZOOM_BAR_MIN_HEIGHT);
+    }
+
+    #[test]
+    fn moving_a_clip_hides_the_extend_band_until_the_pointer_releases_it() {
+        let shell = include_str!("shell.rs");
+        let start = shell
+            .find("extend_layer.set_draw_func({")
+            .expect("the extend layer's draw callback");
+        let draw = {
+            let rest = &shell[start + 1..];
+            let end = rest
+                .find("\n    });")
+                .expect("the draw callback spans one closure argument");
+            &shell[start..start + 1 + end]
+        };
+        assert!(
+            draw.contains("let dragging_video = dragging_video.clone();"),
+            "the extend layer's draw callback must watch the clip drag it shares with the lanes"
+        );
+        let guard = draw
+            .find("if dragging_video.get().is_some() {")
+            .expect("a moving clip must suppress the extend band");
+        assert!(
+            guard < draw.find("draw_extend_region(").expect("the band draw"),
+            "the guard must return before anything is painted"
+        );
+
+        let interaction = include_str!("interaction.rs");
+        let start = interaction
+            .find("pub fn bind_video_clip(")
+            .expect("the video clip's gesture bindings");
+        let bind = {
+            let rest = &interaction[start + 1..];
+            let end = rest
+                .find("\n    area.add_controller(drag);")
+                .expect("the drag controller is added once both ends are bound");
+            &interaction[start..start + 1 + end]
+        };
+        let begin_start = bind
+            .find("drag.connect_drag_begin({")
+            .expect("the drag's begin handler");
+        let begin = &bind[begin_start..];
+        assert!(
+            begin.contains("let redraw = redraw.clone();"),
+            "the begin handler must repaint, so the band goes as the clip starts moving"
+        );
+        assert!(
+            begin.contains("dragging.set(if lift { hit.segment } else { None });"),
+            "a body drag must set the shared lift the lanes and the band read"
+        );
+        let lift = begin
+            .find("dragging.set(if lift { hit.segment } else { None });")
+            .expect("the lift assignment");
+        assert!(
+            lift < begin.find("drop(guard);").expect("the state lock released"),
+            "the state lock must be released before the repaint takes it again"
+        );
+        assert!(
+            begin.find("drop(guard);").expect("the state lock released")
+                < begin.find("redraw();").expect("the begin repaint"),
+            "releasing the lock before redraw is what keeps the repaint from deadlocking"
+        );
+
+        let end_start = bind
+            .find("drag.connect_drag_end({")
+            .expect("the drag's end handler");
+        let end = &bind[end_start..];
+        assert!(
+            end.find("dragging.set(None);").expect("the lift cleared")
+                < end.find("redraw();").expect("the end repaint"),
+            "the release must clear the lift before the last repaint restores the band"
+        );
     }
 
     /// Body of the first rule for `selector`, without its braces.

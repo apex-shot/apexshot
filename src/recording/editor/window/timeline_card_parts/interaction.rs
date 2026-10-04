@@ -362,6 +362,7 @@ pub fn bind_video_clip(
         let drag_kind = drag_kind.clone();
         let end_origin = end_origin.clone();
         let dragging = dragging.clone();
+        let redraw = redraw.clone();
         move |gesture, x, _| {
             let width = gesture
                 .widget()
@@ -386,6 +387,8 @@ pub fn bind_video_clip(
             );
             dragging.set(if lift { hit.segment } else { None });
             drag_kind.set(hit.drag);
+            drop(guard);
+            redraw();
         }
     });
     drag.connect_drag_update({
