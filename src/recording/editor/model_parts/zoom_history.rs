@@ -21,6 +21,8 @@ const ZOOM_EDIT_COALESCE: Duration = Duration::from_millis(350);
 #[derive(Debug, Clone, PartialEq)]
 struct ZoomSnapshot {
     clips: Vec<ZoomClip>,
+    camera: ZoomCameraSettings,
+    classic: bool,
     selected: Option<usize>,
     clipboard: Option<ClipClipboard>,
 }
@@ -29,6 +31,8 @@ impl ZoomSnapshot {
     fn capture(state: &VideoEditState) -> Self {
         Self {
             clips: state.zoom_clips.clone(),
+            camera: state.zoom_camera,
+            classic: state.zoom_classic,
             selected: state.selected_zoom,
             clipboard: state.clipboard.clone(),
         }
@@ -37,6 +41,8 @@ impl ZoomSnapshot {
     fn restore(self, state: &mut VideoEditState) {
         state.selected_zoom = self.selected.filter(|index| *index < self.clips.len());
         state.zoom_clips = self.clips;
+        state.zoom_camera = self.camera;
+        state.zoom_classic = self.classic;
         state.clipboard = self.clipboard;
     }
 }
@@ -115,6 +121,57 @@ impl ZoomHistory {
 }
 
 impl VideoEditState {
+    pub fn set_zoom_camera_speed(&mut self, speed: f64) {
+        let settings = ZoomCameraSettings {
+            speed,
+            ..self.zoom_camera
+        }
+        .clamped();
+        if self.zoom_locked || self.zoom_camera == settings {
+            return;
+        }
+        self.record_continuous_zoom_edit();
+        self.zoom_camera = settings;
+        self.zoom_classic = false;
+    }
+
+    pub fn set_zoom_camera_smoothness(&mut self, smoothness: f64) {
+        let settings = ZoomCameraSettings {
+            smoothness,
+            ..self.zoom_camera
+        }
+        .clamped();
+        if self.zoom_locked || self.zoom_camera == settings {
+            return;
+        }
+        self.record_continuous_zoom_edit();
+        self.zoom_camera = settings;
+        self.zoom_classic = false;
+    }
+
+    pub fn set_zoom_camera_start_early(&mut self, start_early: bool) {
+        if self.zoom_locked || self.zoom_camera.start_early == start_early {
+            return;
+        }
+        self.record_zoom_command();
+        self.zoom_camera.start_early = start_early;
+        self.zoom_classic = false;
+    }
+
+    pub fn set_zoom_camera_motion_blur(&mut self, motion_blur: f64) {
+        let settings = ZoomCameraSettings {
+            motion_blur,
+            ..self.zoom_camera
+        }
+        .clamped();
+        if self.zoom_locked || self.zoom_camera == settings {
+            return;
+        }
+        self.record_continuous_zoom_edit();
+        self.zoom_camera = settings;
+        self.zoom_classic = false;
+    }
+
     /// Take the step a continuous edit is about to change.
     pub(super) fn record_continuous_zoom_edit(&mut self) {
         let before = ZoomSnapshot::capture(self);
@@ -154,5 +211,115 @@ impl VideoEditState {
         next.restore(self);
         self.reproject_anchored_zooms();
         true
+    }
+}
+
+#[cfg(test)]
+mod zoom_camera_history_tests {
+    use super::*;
+
+    fn state() -> VideoEditState {
+        VideoEditState::new(VideoMetadata {
+            path: PathBuf::from("/tmp/apexshot-zoom-camera-history.mp4"),
+            duration_seconds: 10.0,
+            width: 1920,
+            height: 1080,
+            file_size_bytes: 0,
+            has_audio: false,
+            frame_rate: 30.0,
+        })
+    }
+
+    #[test]
+    fn zoom_camera_sliders_coalesce_and_toggle_gets_a_discrete_step() {
+        let mut state = state();
+        state.set_zoom_camera_speed(1.5);
+        state.set_zoom_camera_speed(2.0);
+        assert_eq!(state.zoom_history.undo.len(), 1);
+        state.set_zoom_camera_start_early(true);
+        assert_eq!(state.zoom_history.undo.len(), 2);
+        state.set_zoom_camera_motion_blur(0.4);
+        state.set_zoom_camera_motion_blur(0.8);
+        assert_eq!(state.zoom_history.undo.len(), 3);
+
+        assert!(state.undo_zoom_edit());
+        assert_eq!(state.zoom_camera.motion_blur, 0.0);
+        assert!(state.zoom_camera.start_early);
+        assert!(state.undo_zoom_edit());
+        assert!(!state.zoom_camera.start_early);
+        assert_eq!(state.zoom_camera.speed, 2.0);
+        assert!(state.undo_zoom_edit());
+        assert_eq!(state.zoom_camera, ZoomCameraSettings::default());
+        assert!(state.redo_zoom_edit());
+        assert_eq!(state.zoom_camera.speed, 2.0);
+        assert!(state.redo_zoom_edit());
+        assert!(state.zoom_camera.start_early);
+        assert!(state.redo_zoom_edit());
+        assert_eq!(state.zoom_camera.motion_blur, 0.8);
+    }
+
+    #[test]
+    fn zoom_camera_edits_migrate_classic_motion_and_undo_restores_it() {
+        let edits: [fn(&mut VideoEditState); 4] = [
+            |state| state.set_zoom_camera_speed(2.0),
+            |state| state.set_zoom_camera_smoothness(0.8),
+            |state| state.set_zoom_camera_start_early(true),
+            |state| state.set_zoom_camera_motion_blur(0.5),
+        ];
+        for edit in edits {
+            let mut state = state();
+            state.zoom_classic = true;
+            state.set_zoom_camera_speed(1.0);
+            state.set_zoom_camera_smoothness(0.5);
+            state.set_zoom_camera_start_early(false);
+            state.set_zoom_camera_motion_blur(0.0);
+            assert!(state.zoom_classic);
+            assert!(state.zoom_history.undo.is_empty());
+
+            edit(&mut state);
+            let edited_settings = state.zoom_camera;
+            assert!(!state.zoom_classic);
+            assert!(state.undo_zoom_edit());
+            assert!(state.zoom_classic);
+            assert_eq!(state.zoom_camera, ZoomCameraSettings::default());
+            assert!(state.redo_zoom_edit());
+            assert!(!state.zoom_classic);
+            assert_eq!(state.zoom_camera, edited_settings);
+        }
+    }
+
+    #[test]
+    fn zoom_camera_settings_respect_lock_and_skip_unchanged_values() {
+        let mut state = state();
+        state.set_zoom_camera_speed(1.0);
+        state.set_zoom_camera_smoothness(0.5);
+        state.set_zoom_camera_start_early(false);
+        state.set_zoom_camera_motion_blur(0.0);
+        assert!(state.zoom_history.undo.is_empty());
+
+        state.zoom_locked = true;
+        state.set_zoom_camera_speed(2.0);
+        state.set_zoom_camera_smoothness(0.8);
+        state.set_zoom_camera_start_early(true);
+        state.set_zoom_camera_motion_blur(0.5);
+        assert_eq!(state.zoom_camera, ZoomCameraSettings::default());
+        assert!(state.zoom_history.undo.is_empty());
+    }
+
+    #[test]
+    fn zoom_camera_setters_clamp_and_replace_non_finite_values() {
+        let mut state = state();
+        state.set_zoom_camera_speed(100.0);
+        state.set_zoom_camera_smoothness(-1.0);
+        state.set_zoom_camera_motion_blur(2.0);
+        assert_eq!(state.zoom_camera.speed, 3.0);
+        assert_eq!(state.zoom_camera.smoothness, 0.0);
+        assert_eq!(state.zoom_camera.motion_blur, 1.0);
+        state.set_zoom_camera_speed(-1.0);
+        assert_eq!(state.zoom_camera.speed, 0.25);
+        state.set_zoom_camera_speed(f64::NAN);
+        state.set_zoom_camera_smoothness(f64::INFINITY);
+        state.set_zoom_camera_motion_blur(f64::NEG_INFINITY);
+        assert_eq!(state.zoom_camera, ZoomCameraSettings::default());
     }
 }

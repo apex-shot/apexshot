@@ -12,10 +12,10 @@ use std::time::UNIX_EPOCH;
 use super::model::{
     AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorSettings, CursorTheme,
     DimensionPreset, ExportQuality, GradientKind, GradientStop, ProjectMedia, ProjectMediaKind,
-    VideoBackground, VideoEditState, VideoGradient, ZoomAnchor, ZoomClip, ZoomEasing, ZoomMode,
-    ZoomOrigin, ZoomStyle, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY,
-    DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW,
-    DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED,
+    VideoBackground, VideoEditState, VideoGradient, ZoomAnchor, ZoomCameraSettings, ZoomClip,
+    ZoomEasing, ZoomMode, ZoomOrigin, ZoomStyle, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS,
+    DEFAULT_CLICK_INTENSITY, DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS,
+    DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED,
 };
 
 pub const VIDEO_PROJECT_VERSION: u32 = 1;
@@ -42,6 +42,8 @@ pub struct VideoProjectFile {
     pub segment_muted: Vec<bool>,
     pub timeline_offset_seconds: f64,
     pub zoom_clips: Vec<ZoomClipFile>,
+    #[serde(default)]
+    pub zoom_camera: ZoomCameraSettings,
     #[serde(default)]
     pub cursor_hide_clips: Vec<CursorHideClipFile>,
     pub zoom_classic: bool,
@@ -931,6 +933,7 @@ impl VideoEditState {
             segment_muted: self.segment_muted.clone(),
             timeline_offset_seconds: self.timeline_offset_seconds,
             zoom_clips: self.zoom_clips.iter().map(zoom_to_file).collect(),
+            zoom_camera: self.zoom_camera.clamped(),
             cursor_hide_clips: self.cursor_hide_clips.iter().map(hide_to_file).collect(),
             zoom_classic: self.zoom_classic,
             zoom_hidden: self.zoom_hidden,
@@ -992,6 +995,7 @@ impl VideoEditState {
         self.segment_muted = file.segment_muted;
         self.timeline_offset_seconds = file.timeline_offset_seconds;
         self.zoom_clips = file.zoom_clips.iter().map(zoom_from_file).collect();
+        self.zoom_camera = file.zoom_camera.clamped();
         self.cursor_hide_clips = file.cursor_hide_clips.iter().map(hide_from_file).collect();
         self.zoom_classic = file.zoom_classic;
         self.zoom_hidden = file.zoom_hidden;
@@ -1210,6 +1214,132 @@ mod tests {
         assert!(restored.sidecar.is_none());
 
         cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn roundtrip_preserves_zoom_camera_settings() {
+        let dir = scratch("zoom-camera-roundtrip");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let mut state = VideoEditState::new(metadata_for(&video, 16));
+        state.set_zoom_camera_speed(1.75);
+        state.set_zoom_camera_smoothness(0.8);
+        state.set_zoom_camera_start_early(true);
+        state.set_zoom_camera_motion_blur(0.6);
+        save_project(&video, &state.to_project()).unwrap();
+
+        let mut restored = VideoEditState::new(metadata_for(&video, 16));
+        restored.apply_project(load_project(&video).expect("project should load"));
+        assert_eq!(restored.zoom_camera, state.zoom_camera);
+        assert!(!restored.undo_zoom_edit());
+        assert!(!restored.redo_zoom_edit());
+
+        cleanup_project(&video);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn old_project_json_without_zoom_camera_defaults_to_shared_motion() {
+        let dir = scratch("zoom-camera-old-format");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let state = VideoEditState::new(metadata_for(&video, 16));
+        let mut json = serde_json::to_value(state.to_project()).unwrap();
+        json.as_object_mut().unwrap().remove("zoom_camera");
+        let file: VideoProjectFile = serde_json::from_value(json).unwrap();
+        assert_eq!(file.zoom_camera, ZoomCameraSettings::default());
+
+        let mut restored = VideoEditState::new(metadata_for(&video, 16));
+        restored.apply_project(file);
+        assert_eq!(restored.zoom_camera, ZoomCameraSettings::default());
+        assert!(restored.session_is_default());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn partial_zoom_camera_settings_keep_defaults_for_missing_fields() {
+        let dir = scratch("zoom-camera-partial");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let state = VideoEditState::new(metadata_for(&video, 16));
+        let mut json = serde_json::to_value(state.to_project()).unwrap();
+        json["zoom_camera"] = serde_json::json!({"start_early": true});
+        let file: VideoProjectFile = serde_json::from_value(json).unwrap();
+        assert_eq!(
+            file.zoom_camera,
+            ZoomCameraSettings {
+                start_early: true,
+                ..Default::default()
+            }
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn zoom_camera_settings_are_clamped_when_loading_and_saving() {
+        let dir = scratch("zoom-camera-clamped");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let mut state = VideoEditState::new(metadata_for(&video, 16));
+        let mut file = state.to_project();
+        file.zoom_camera = ZoomCameraSettings {
+            speed: 12.0,
+            smoothness: -0.5,
+            start_early: true,
+            motion_blur: 4.0,
+        };
+        state.apply_project(file);
+        assert_eq!(
+            state.zoom_camera,
+            ZoomCameraSettings {
+                speed: 3.0,
+                smoothness: 0.0,
+                start_early: true,
+                motion_blur: 1.0,
+            }
+        );
+
+        state.zoom_camera = ZoomCameraSettings {
+            speed: f64::NAN,
+            smoothness: f64::INFINITY,
+            start_early: false,
+            motion_blur: f64::NEG_INFINITY,
+        };
+        let saved = state.to_project();
+        assert_eq!(saved.zoom_camera, ZoomCameraSettings::default());
+        serde_json::to_string(&saved).expect("saved camera settings must be finite");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn each_zoom_camera_setting_makes_the_session_dirty_and_undo_restores_default() {
+        let dir = scratch("zoom-camera-dirty");
+        let video = write_video(&dir, "clip.mp4", 16);
+        let mut state = VideoEditState::new(metadata_for(&video, 16));
+        let saved_default = state.to_project();
+        let edits: [fn(&mut VideoEditState); 4] = [
+            |state| state.set_zoom_camera_speed(2.0),
+            |state| state.set_zoom_camera_smoothness(0.8),
+            |state| state.set_zoom_camera_start_early(true),
+            |state| state.set_zoom_camera_motion_blur(0.5),
+        ];
+        for edit in edits {
+            assert!(state.session_is_default());
+            assert!(!state.session_is_dirty(None));
+            edit(&mut state);
+            assert!(!state.session_is_default());
+            assert!(state.session_is_dirty(None));
+            assert!(state.session_is_dirty(Some(&saved_default)));
+            let saved_edit = state.to_project();
+            assert!(!state.session_is_dirty(Some(&saved_edit)));
+            assert!(state.undo_zoom_edit());
+            assert!(state.session_is_default());
+            assert!(!state.session_is_dirty(Some(&saved_default)));
+            assert!(state.redo_zoom_edit());
+            assert!(!state.session_is_default());
+            assert!(state.undo_zoom_edit());
+        }
+
         let _ = fs::remove_dir_all(&dir);
     }
 

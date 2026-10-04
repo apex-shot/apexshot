@@ -9,6 +9,7 @@ pub(crate) mod hardware_encode;
 pub mod imported_pointer;
 pub mod model;
 pub mod project;
+pub(crate) mod ripple_preview;
 pub mod sidecar;
 pub mod ui_support;
 pub(crate) mod window;
