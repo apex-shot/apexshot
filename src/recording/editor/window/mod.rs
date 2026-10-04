@@ -162,6 +162,9 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         build_window_controls(&window, state.clone(), exporting.clone());
     root.append(&title_bar);
 
+    let estimate_label = Label::new(None);
+    estimate_label.add_css_class("recording-editor-estimate");
+
     let paint_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let refresh_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let ping = {
@@ -172,6 +175,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         let upload_btn = upload_btn.clone();
         let export_btn = export_btn.clone();
         let exporting = exporting.clone();
+        let estimate_label = estimate_label.clone();
         Rc::new(move || {
             let (name, has_video) = {
                 let state = state.lock().unwrap();
@@ -182,6 +186,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
             let enabled = has_video && !exporting.get();
             upload_btn.set_sensitive(enabled);
             export_btn.set_sensitive(enabled);
+            footer::update_estimate(&estimate_label, &state, false);
             if let Some(paint) = paint_slot.borrow().clone() {
                 paint();
             }
@@ -200,8 +205,6 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     stage.add_css_class("recording-editor-stage");
     stage.set_hexpand(true);
     stage.set_vexpand(true);
-    let estimate_label = Label::new(None);
-    estimate_label.add_css_class("recording-editor-estimate");
     let preview_media = media.borrow().clone();
     let (preview_widget, _, _) =
         preview::build_preview_with_media(state.clone(), estimate_label.clone(), preview_media);
@@ -990,6 +993,56 @@ mod tests {
         assert!(
             chooser.claim(),
             "the slot must free once the chooser's response has landed"
+        );
+    }
+
+    #[test]
+    fn editor_refresh_recalculates_export_size() {
+        let source = include_str!("mod.rs");
+        let production = &source[..source.find("\n#[cfg(test)]").expect("tests module")];
+        let start = production
+            .find("let ping = {")
+            .expect("the window's status refresh closure");
+        let ping = {
+            let rest = &production[start + 1..];
+            let end = rest
+                .find("\n    let workspace =")
+                .expect("the status refresh closes before the workspace is built");
+            &production[start..start + 1 + end]
+        };
+        assert!(
+            ping.contains("let estimate_label = estimate_label.clone();"),
+            "the refresh must capture the estimate label, not borrow the row's"
+        );
+        assert!(
+            ping.contains("footer::update_estimate(&estimate_label, &state, false);"),
+            "the refresh must recompute the estimated export size"
+        );
+        assert!(
+            production
+                .find("let estimate_label = Label::new(None);")
+                .expect("the estimate label")
+                < start,
+            "the label must exist before the refresh captures it"
+        );
+
+        let start = production
+            .find("fn load_preview_video(")
+            .expect("the preview video loader");
+        let loader = {
+            let rest = &production[start + 1..];
+            let end = rest.find("\nfn ").expect("the loader is followed by a fn");
+            &production[start..start + 1 + end]
+        };
+        let replace = loader
+            .find("*state.lock().unwrap() = next;")
+            .expect("the loader must replace the edit state");
+        let refresh = loader
+            .find("ping();")
+            .expect("the loader must refresh the window after replacing the state");
+        assert!(
+            replace < refresh,
+            "the refresh must run after the new metadata is in place"
         );
     }
 
