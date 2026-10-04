@@ -5,6 +5,7 @@
 
 pub mod editor;
 mod preview_overlay;
+pub mod unsaved;
 pub use editor::types::{
     AnnotationAction, ArrowStyle, DrawColor, FontSettings, ObfuscateMethod, Point, Rect,
 };
@@ -58,6 +59,15 @@ impl ImageFormat {
             ImageFormat::Png => "png",
             ImageFormat::Jpeg { .. } => "jpg",
             ImageFormat::WebP => "webp",
+        }
+    }
+
+    /// Map Settings → Screenshots → "Image format" onto a format.
+    pub fn from_setting(value: &str) -> Self {
+        match value {
+            "JPEG" => ImageFormat::Jpeg { quality: 85 },
+            "WebP" => ImageFormat::WebP,
+            _ => ImageFormat::Png,
         }
     }
 
@@ -349,7 +359,7 @@ fn composite_cursor(image: &mut RgbaImage, cursor: &CursorData) {
 }
 
 /// Generate a timestamped filename
-fn generate_filename(config: &SaveConfig) -> String {
+pub(crate) fn generate_filename(config: &SaveConfig) -> String {
     let timestamp = if config.timestamp_format.is_some() {
         "custom".to_string()
     } else {
@@ -412,6 +422,35 @@ pub fn save_existing_png(source_path: &Path, config: &SaveConfig) -> SaveResult<
             Ok(output_path)
         }
     }
+}
+
+/// Write an existing capture to a destination the user picked.
+///
+/// Unlike [`save_existing_png`] this keeps the destination path exactly as
+/// chosen and converts the source to `format`, so "Save as…" lands where the
+/// user pointed the file chooser.
+pub fn save_image_to_path(
+    source_path: &Path,
+    destination: &Path,
+    format: ImageFormat,
+) -> SaveResult<()> {
+    if let Some(parent) = destination.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+
+    let image = image::open(source_path)?;
+    match format {
+        ImageFormat::Png => image.save_with_format(destination, image::ImageFormat::Png)?,
+        ImageFormat::Jpeg { quality } => {
+            let rgb_image: RgbImage = image.into_rgb8();
+            encode_jpeg_rgb_to_path(&rgb_image, destination, quality)?;
+        }
+        ImageFormat::WebP => image.save_with_format(destination, image::ImageFormat::WebP)?,
+    }
+
+    Ok(())
 }
 
 pub fn save_capture(capture: &CaptureData, config: &SaveConfig) -> SaveResult<PathBuf> {
@@ -836,6 +875,67 @@ mod tests {
         assert_eq!(webp_path.extension().and_then(|e| e.to_str()), Some("webp"));
         let webp_img = image::open(&webp_path).expect("open converted webp");
         assert_eq!(webp_img.dimensions(), (20, 14));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn image_format_from_setting_matches_the_settings_values() {
+        assert_eq!(ImageFormat::from_setting("PNG"), ImageFormat::Png);
+        assert_eq!(
+            ImageFormat::from_setting("JPEG"),
+            ImageFormat::Jpeg { quality: 85 }
+        );
+        assert_eq!(ImageFormat::from_setting("WebP"), ImageFormat::WebP);
+        assert_eq!(ImageFormat::from_setting("unknown"), ImageFormat::Png);
+    }
+
+    #[test]
+    fn save_image_to_path_writes_the_chosen_destination_in_every_format() {
+        let dir = unique_temp_dir("save-as");
+        let source = save_capture(
+            &sample_capture(20, 14),
+            &SaveConfig::default()
+                .with_output_dir(&dir)
+                .with_cursor(false)
+                .with_prefix("source"),
+        )
+        .expect("source png");
+
+        let nested = dir.join("chosen").join("kept-name");
+        let jpeg = nested.with_extension("jpg");
+        save_image_to_path(&source, &jpeg, ImageFormat::Jpeg { quality: 90 })
+            .expect("save as jpeg");
+        assert_eq!(jpeg.extension().and_then(|e| e.to_str()), Some("jpg"));
+        assert_eq!(
+            image::open(&jpeg).expect("open jpeg").dimensions(),
+            (20, 14)
+        );
+
+        let png = nested.with_extension("png");
+        save_image_to_path(&source, &png, ImageFormat::Png).expect("save as png");
+        assert!(png.exists());
+        assert_eq!(image::open(&png).expect("open png").dimensions(), (20, 14));
+
+        let webp = nested.with_extension("webp");
+        save_image_to_path(&source, &webp, ImageFormat::WebP).expect("save as webp");
+        assert_eq!(
+            image::open(&webp).expect("open webp").dimensions(),
+            (20, 14)
+        );
+
+        assert!(source.exists(), "save as must not consume the capture");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_image_to_path_reports_a_missing_source() {
+        let dir = unique_temp_dir("save-as-missing");
+        let missing = dir.join("gone.png");
+        let destination = dir.join("destination.png");
+
+        assert!(save_image_to_path(&missing, &destination, ImageFormat::Png).is_err());
+        assert!(!destination.exists());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

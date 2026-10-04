@@ -134,19 +134,7 @@ pub fn install_checkbox_behaviors(
         }
     });
 
-    // "Copy to clipboard" is independent of "Save" — clipboard copy works
-    // even when saving is disabled (copies from temp file then discards).
-    let _ = screenshot_copy_to_clipboard_check;
-
-    screenshot_open_annotate_check.set_sensitive(screenshot_save_check.is_active());
-    let screenshot_open_annotate_toggle_for_save = screenshot_open_annotate_check.clone();
-    screenshot_save_check.connect_toggled(move |check| {
-        let active = check.is_active();
-        screenshot_open_annotate_toggle_for_save.set_sensitive(active);
-        if !active {
-            screenshot_open_annotate_toggle_for_save.set_active(false);
-        }
-    });
+    let _ = (screenshot_copy_to_clipboard_check, screenshot_save_check);
 
     let a1 = quick_access_auto_close_action_input.clone();
     let a2 = quick_access_auto_close_interval_input.clone();

@@ -1,3 +1,4 @@
+use crate::capture::{ImageFormat, SaveConfig};
 use crate::capture_overlay::CaptureDisplay;
 use crate::config::load_config;
 use crate::i18n::t;
@@ -8,7 +9,8 @@ use gtk4::{
     glib::{self, ControlFlow},
     prelude::*,
     Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DragSource, DrawingArea,
-    EventControllerKey, Orientation, Overlay, WidgetPaintable, Window,
+    EventControllerKey, FileChooserAction, FileChooserNative, Orientation, Overlay, ResponseType,
+    WidgetPaintable, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
 use std::cell::{Cell, RefCell};
@@ -439,6 +441,7 @@ fn setup_preview_window(
 
     let pinned = Arc::new(AtomicBool::new(start_pinned));
     let edit_opened = Arc::new(AtomicBool::new(false));
+    let save_dialog_open = Rc::new(Cell::new(false));
     let auto_close_anchor = Arc::new(Mutex::new(Instant::now()));
     let source_bytes = Arc::new(Mutex::new(None::<Arc<Vec<u8>>>));
 
@@ -492,8 +495,9 @@ fn setup_preview_window(
         Align::End,
     );
     let copy_btn = copy_pill_button(&t("Copy"));
+    let save_btn = save_pill_button(&t("Save"));
 
-    // Framed card: screenshot with corner actions and a centered Copy pill.
+    // Framed card: screenshot with corner actions and centered Copy / Save pills.
     let card = Overlay::new();
     card.set_widget_name("capture-preview-card");
     card.set_hexpand(false);
@@ -503,12 +507,17 @@ fn setup_preview_window(
     card.add_overlay(&pin_btn);
     card.add_overlay(&upload_btn);
     card.add_overlay(&edit_btn);
-    card.add_overlay(&copy_btn);
+    let action_pills = GtkBox::new(Orientation::Horizontal, 6);
+    action_pills.set_halign(Align::Center);
+    action_pills.set_valign(Align::Center);
+    action_pills.append(&copy_btn);
+    action_pills.append(&save_btn);
+    card.add_overlay(&action_pills);
     card.set_measure_overlay(&close_btn, false);
     card.set_measure_overlay(&pin_btn, false);
     card.set_measure_overlay(&upload_btn, false);
     card.set_measure_overlay(&edit_btn, false);
-    card.set_measure_overlay(&copy_btn, false);
+    card.set_measure_overlay(&action_pills, false);
 
     let chrome = GtkBox::new(Orientation::Vertical, 0);
     chrome.set_widget_name("capture-preview-chrome");
@@ -697,6 +706,7 @@ fn setup_preview_window(
     let pin_icon_actions = pin_icon.clone();
     let edit_btn_actions = edit_btn.clone();
     let copy_btn_actions = copy_btn.clone();
+    let save_btn_actions = save_btn.clone();
     let upload_btn_actions = upload_btn.clone();
     let close_btn_actions = close_btn.clone();
     let pin_btn_actions = pin_btn.clone();
@@ -705,6 +715,7 @@ fn setup_preview_window(
     let start_pinned_actions = start_pinned;
     let preview_id_actions = preview_id.clone();
     let emit_extension_events_actions = emit_extension_events;
+    let save_dialog_open_actions = save_dialog_open.clone();
 
     glib::idle_add_local_once(move || {
         let Some(window) = window_actions.upgrade() else {
@@ -808,6 +819,77 @@ fn setup_preview_window(
             if let Err(e) = copy_screenshot_to_clipboard(&path_copy) {
                 eprintln!("Copy failed: {e}");
             }
+        });
+
+        let path_save_as = path_actions.clone();
+        let window_weak_save_as = window.downgrade();
+        let save_dialog_open_click = save_dialog_open_actions;
+        save_btn_actions.connect_clicked(move |_| {
+            if save_dialog_open_click.get() {
+                return;
+            }
+            let Some(parent) = window_weak_save_as.upgrade() else {
+                return;
+            };
+
+            let config = load_config().sanitized();
+            let configured_format =
+                crate::capture::ImageFormat::from_setting(&config.screenshot_format);
+            save_dialog_open_click.set(true);
+
+            let chooser = FileChooserNative::new(
+                Some(&t("Select screenshot save location")),
+                Some(&parent),
+                FileChooserAction::Save,
+                Some(&t("Save")),
+                Some(&t("Cancel")),
+            );
+            chooser.set_current_name(&crate::capture::generate_filename(
+                &SaveConfig::default().with_format(configured_format),
+            ));
+            if let Some(folder) = save_dialog_folder(&config) {
+                let _ = chooser.set_current_folder(Some(&gtk4::gio::File::for_path(folder)));
+            }
+
+            let source = path_save_as.clone();
+            let save_dialog_open_response = save_dialog_open_click.clone();
+            chooser.connect_response(move |chooser, response| {
+                save_dialog_open_response.set(false);
+
+                if let SaveAsOutcome::Save {
+                    destination,
+                    format,
+                } = save_as_outcome(
+                    response,
+                    chooser.file().and_then(|file| file.path()),
+                    configured_format,
+                ) {
+                    match crate::capture::save_image_to_path(&source, &destination, format) {
+                        Ok(()) => eprintln!(
+                            "[preview] Saved {} to {}",
+                            source.display(),
+                            destination.display()
+                        ),
+                        Err(err) => {
+                            eprintln!(
+                                "[preview] Save as failed for {}: {err}",
+                                destination.display()
+                            );
+                            let detail = format!("{}: {err}", destination.display());
+                            crate::utils::notify::desktop_notification(
+                                &t("Screenshot not saved"),
+                                &crate::i18n::tfmt(
+                                    "Save failed: {message}",
+                                    &[("message", &detail)],
+                                ),
+                            );
+                        }
+                    }
+                }
+
+                chooser.hide();
+            });
+            chooser.show();
         });
 
         let path_upload = path_actions.clone();
@@ -958,11 +1040,19 @@ fn setup_preview_window(
     let window_weak_timeout = window.downgrade();
     let pinned_timeout = pinned.clone();
     let edit_opened_timeout = edit_opened.clone();
+    let save_dialog_open_timeout = save_dialog_open.clone();
     let auto_close_anchor_timeout = auto_close_anchor.clone();
     let timeout_dismiss_action = dismiss_action;
     glib::timeout_add_seconds_local(1, move || {
         if edit_opened_timeout.load(Ordering::Relaxed) {
             return ControlFlow::Break;
+        }
+
+        if save_dialog_open_timeout.get() {
+            if let Ok(mut anchor) = auto_close_anchor_timeout.lock() {
+                *anchor = Instant::now();
+            }
+            return ControlFlow::Continue;
         }
 
         let auto_close_elapsed = auto_close_anchor_timeout
@@ -1203,9 +1293,9 @@ fn install_preview_css() {
             }
 
             button.preview-copy-btn {
-                min-width: 72px;
+                min-width: 52px;
                 min-height: 30px;
-                padding: 0 16px;
+                padding: 0 10px;
                 border-radius: 999px;
                 border: none;
                 background: #f3f4f6;
@@ -1295,6 +1385,76 @@ fn copy_pill_button(label: &str) -> Button {
     button
 }
 
+/// "Save" opens a file chooser, so the tooltip names the destination it picks.
+fn save_pill_button(label: &str) -> Button {
+    let button = copy_pill_button(label);
+    button.set_tooltip_text(Some(&t("Select screenshot save location")));
+    button
+}
+
+/// Where the Save dialog opens: the configured screenshot export location,
+/// else the user's Pictures folder.
+fn save_dialog_folder(config: &crate::config::AppConfig) -> Option<PathBuf> {
+    let configured = SaveConfig::default()
+        .with_output_dir(&config.screenshot_export_location)
+        .get_output_dir()
+        .ok()
+        .filter(|dir| dir.is_dir());
+
+    configured.or_else(|| dirs::picture_dir().filter(|dir| dir.is_dir()))
+}
+
+/// What a finished Save dialog means for the capture.
+#[derive(Debug, PartialEq, Eq)]
+enum SaveAsOutcome {
+    /// The user cancelled, so the capture stays exactly where it is.
+    Cancelled,
+    Save {
+        destination: PathBuf,
+        format: ImageFormat,
+    },
+}
+
+fn save_as_outcome(
+    response: ResponseType,
+    chosen: Option<PathBuf>,
+    configured_format: ImageFormat,
+) -> SaveAsOutcome {
+    if response != ResponseType::Accept {
+        return SaveAsOutcome::Cancelled;
+    }
+    let Some(chosen) = chosen else {
+        return SaveAsOutcome::Cancelled;
+    };
+
+    let format = save_as_format(&chosen, configured_format);
+    SaveAsOutcome::Save {
+        destination: chosen,
+        format,
+    }
+}
+
+/// Encoding for the destination the picker confirmed. The chosen path is used
+/// exactly as confirmed, so an overwrite prompt always covers the file that is
+/// written; a recognised extension picks the encoding, otherwise the
+/// configured format does.
+fn save_as_format(destination: &Path, configured: ImageFormat) -> ImageFormat {
+    let extension = destination
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase());
+
+    match extension.as_deref() {
+        Some("png") => ImageFormat::Png,
+        Some("jpg") | Some("jpeg") => match configured {
+            ImageFormat::Jpeg { quality } => ImageFormat::Jpeg { quality },
+            _ => ImageFormat::Jpeg { quality: 85 },
+        },
+        Some("webp") => ImageFormat::WebP,
+        _ => configured,
+    }
+}
+
 fn file_uri(path: &Path) -> Result<String, CapturePreviewError> {
     url::Url::from_file_path(path)
         .map(|u| u.to_string())
@@ -1308,6 +1468,11 @@ fn copy_screenshot_to_clipboard(path: &Path) -> Result<(), CapturePreviewError> 
     let mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
         &config.adv_clipboard_mode,
     );
+    let mode = if crate::capture::unsaved::UnsavedCaptureStore::app_owned().owns(path) {
+        mode.for_unsaved_capture()
+    } else {
+        mode
+    };
     crate::utils::clipboard::copy_screenshot_with_mode(path, mode).map_err(|e| {
         if e.contains("not found") {
             CapturePreviewError::ClipboardToolNotFound
@@ -1811,6 +1976,106 @@ mod tests {
                 && !production.contains("preview-tools")
                 && !production.contains("preview-close-label"),
             "quick-access overlay must be a framed screenshot with corner actions and a Copy pill"
+        );
+    }
+
+    #[test]
+    fn preview_card_offers_save_as_next_to_copy_and_pauses_auto_close() {
+        let source = include_str!("preview_overlay.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("save_pill_button")
+                && production.contains("FileChooserAction::Save")
+                && production.contains("save_image_to_path")
+                && production.contains("save_dialog_folder")
+                && production.contains("for_unsaved_capture")
+                && production.contains("if save_dialog_open_click.get()")
+                && production.contains("if save_dialog_open_timeout.get()"),
+            "the Quick Access card must offer Save as… regardless of auto-save, \
+             open at most one chooser and hold the auto-close countdown"
+        );
+    }
+
+    #[test]
+    fn save_as_cancel_leaves_the_capture_where_it_is() {
+        assert_eq!(
+            save_as_outcome(
+                ResponseType::Cancel,
+                Some(PathBuf::from("/tmp/picked.png")),
+                ImageFormat::Png
+            ),
+            SaveAsOutcome::Cancelled
+        );
+        assert_eq!(
+            save_as_outcome(ResponseType::DeleteEvent, None, ImageFormat::Png),
+            SaveAsOutcome::Cancelled
+        );
+        assert_eq!(
+            save_as_outcome(ResponseType::Accept, None, ImageFormat::Png),
+            SaveAsOutcome::Cancelled
+        );
+    }
+
+    #[test]
+    fn save_as_keeps_the_confirmed_destination_and_its_extension_format() {
+        assert_eq!(
+            save_as_outcome(
+                ResponseType::Accept,
+                Some(PathBuf::from("/tmp/picked.png")),
+                ImageFormat::WebP
+            ),
+            SaveAsOutcome::Save {
+                destination: PathBuf::from("/tmp/picked.png"),
+                format: ImageFormat::Png,
+            }
+        );
+        assert_eq!(
+            save_as_outcome(
+                ResponseType::Accept,
+                Some(PathBuf::from("/tmp/picked.jpeg")),
+                ImageFormat::Png
+            ),
+            SaveAsOutcome::Save {
+                destination: PathBuf::from("/tmp/picked.jpeg"),
+                format: ImageFormat::Jpeg { quality: 85 },
+            }
+        );
+        assert_eq!(
+            save_as_outcome(
+                ResponseType::Accept,
+                Some(PathBuf::from("/tmp/picked.webp")),
+                ImageFormat::Png
+            ),
+            SaveAsOutcome::Save {
+                destination: PathBuf::from("/tmp/picked.webp"),
+                format: ImageFormat::WebP,
+            }
+        );
+    }
+
+    #[test]
+    fn save_as_never_rewrites_an_unrecognised_destination() {
+        assert_eq!(
+            save_as_outcome(
+                ResponseType::Accept,
+                Some(PathBuf::from("/tmp/picked")),
+                ImageFormat::WebP
+            ),
+            SaveAsOutcome::Save {
+                destination: PathBuf::from("/tmp/picked"),
+                format: ImageFormat::WebP,
+            }
+        );
+        assert_eq!(
+            save_as_outcome(
+                ResponseType::Accept,
+                Some(PathBuf::from("/tmp/picked.tiff")),
+                ImageFormat::Png
+            ),
+            SaveAsOutcome::Save {
+                destination: PathBuf::from("/tmp/picked.tiff"),
+                format: ImageFormat::Png,
+            }
         );
     }
 
