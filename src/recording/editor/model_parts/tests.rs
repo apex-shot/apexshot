@@ -926,6 +926,49 @@ fn movement_groups_split_when_the_pointer_roams_far() {
 }
 
 #[test]
+fn zoom_follow_samples_drop_jitter_and_stay_inside_the_zoom() {
+    let points = vec![
+        (0.0, 100.0, 100.0),
+        (0.5, 400.0, 400.0),
+        (1.0, 403.0, 402.0),
+        (1.5, 900.0, 500.0),
+        (2.0, 1500.0, 800.0),
+        (3.0, 1800.0, 900.0),
+    ];
+    let window = zoom_follow_samples(&points, 1.2, 2.5);
+    let times: Vec<f64> = window.iter().map(|sample| sample.0).collect();
+    assert_eq!(times.len(), 3, "carry-in plus two inside samples: {window:?}");
+    assert!((times[0] - 1.199).abs() < 1e-9, "carry-in starts the zoom, got {times:?}");
+    assert_eq!((window[0].1, window[0].2), (400.0, 400.0), "the 3 px wobble is jitter");
+    assert_eq!(times[1], 1.5);
+    assert_eq!(times[2], 2.0);
+}
+
+#[test]
+fn zoom_follow_samples_without_history_start_at_the_first_inside_sample() {
+    let points = vec![(1.0, 100.0, 100.0), (2.0, 600.0, 100.0)];
+    let window = zoom_follow_samples(&points, 0.5, 3.0);
+    assert_eq!(window.len(), 2);
+    assert_eq!(window[0].0, 1.0);
+}
+
+#[test]
+fn eval_zoom_at_groups_each_zoom_from_its_own_window() {
+    let mut state = VideoEditState::new(metadata());
+    attach_pointer(&mut state, 1900.0, 540.0);
+    let index = state.add_zoom_at(0.5).expect("zoom fits");
+    state.zoom_clips[index].scale = 2.0;
+    state.set_selected_zoom_instant(true);
+    let timeline_t = state.zoom_clips[index].start + 0.05;
+    let source_t = state.timeline_to_source(timeline_t);
+    let (_, center) = state.eval_zoom_at(timeline_t, source_t);
+    assert!(
+        (center.0 - 1440.0).abs() < 1e-6,
+        "a pointer parked before the zoom is carried in as its first group, got {center:?}"
+    );
+}
+
+#[test]
 fn spring_step_moves_toward_the_target() {
     let spring = CAMERA_FOLLOW_SPRING;
     let (value, velocity) = spring_step(0.0, 0.0, 100.0, spring, 1.0 / 120.0);
