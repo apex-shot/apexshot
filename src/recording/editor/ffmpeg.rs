@@ -1290,24 +1290,18 @@ fn camera_blur_filter(
             format!("zb{sample}")
         };
         filter.push_str(&format!(
-            ";[zb_in{sample}]crop@{target}=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1,format=yuv420p16le[zb_out{sample}]"
+            ";[zb_in{sample}]crop@{target}=w={src_w}:h={src_h}:x=0:y=0,scale={video_w}:{video_h},setsar=1,format=yuv420p[zb_out{sample}]"
         ));
     }
-    for sample in 1..samples {
-        let previous = if sample == 1 {
-            "zb_out0".into()
-        } else {
-            format!("zb_avg{}", sample - 1)
-        };
-        filter.push_str(&format!(
-            ";[{previous}][zb_out{sample}]blend=all_expr='(A*{sample}+B)/{}'",
-            sample + 1,
-        ));
-        if sample + 1 < samples {
-            filter.push_str(&format!("[zb_avg{sample}]"));
-        }
+    filter.push(';');
+    for sample in 0..samples {
+        filter.push_str(&format!("[zb_out{sample}]"));
     }
-    filter.push_str(",format=yuv420p");
+    let weights = vec!["1"; samples].join(" ");
+    filter.push_str(&format!(
+        "mix=inputs={samples}:weights='{weights}':scale={}:duration=shortest,format=yuv420p",
+        1.0 / samples as f64
+    ));
     filter
 }
 
@@ -1561,6 +1555,7 @@ fn run_ffmpeg_with_inputs(
     }
 
     let child = cmd.spawn().context("failed to run ffmpeg")?;
+    drop(cmd);
     let output = child.wait_with_output()?;
     // ffmpeg has exited, so the cursor writer has either finished or hit the
     // closed pipe. Joining it here means the track never outlives the export.
@@ -1955,8 +1950,10 @@ mod tests {
         let graph = composite_graph(&state);
         assert!(graph.contains("split=8"), "{graph}");
         assert_eq!(graph.matches("crop@").count(), 8);
-        assert_eq!(graph.matches("blend=all_expr=").count(), 7);
-        assert!(graph.contains("(A*7+B)/8"));
+        assert_eq!(graph.matches("mix=inputs=8").count(), 1);
+        assert!(graph.contains("weights='1 1 1 1 1 1 1 1':scale=0.125:duration=shortest"));
+        assert!(!graph.contains("blend=all_expr="));
+        assert!(!graph.contains("yuv420p16le"));
         assert!(!graph.contains("tmix"));
         assert!(!graph.contains("tblend"));
         assert!(!graph.contains("gblur"));
@@ -2223,6 +2220,40 @@ mod tests {
             );
             assert!((probe_metadata(&frozen).unwrap().duration_seconds - 1.4).abs() < 0.034);
         }
+    }
+
+    #[test]
+    fn an_early_ffmpeg_exit_closes_the_parent_cursor_reader_before_joining() {
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+        };
+        let mut state = moving_camera_state();
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 160.0,
+            y: 120.0,
+            kind: CursorKind::Default,
+        });
+        state.sidecar = Some(sidecar);
+        let track =
+            super::super::cursor_track::ActiveCursorTrack::start(&state, 0.0, 1.0, 320, 240, false)
+                .unwrap();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let result = run_ffmpeg_with_inputs(
+                &["-version".into()],
+                Path::new("/nonexistent/unused-cursor-output.mp4"),
+                None,
+                Some(track),
+            );
+            let _ = sender.send(result);
+        });
+        receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("the cursor writer must stop when ffmpeg exits without consuming its pipe")
+            .unwrap();
     }
 
     #[test]
