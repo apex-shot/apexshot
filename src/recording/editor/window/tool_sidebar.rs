@@ -554,15 +554,8 @@ fn build_clip_panel(
     scroll.set_hexpand(true);
     scroll.set_child(Some(&body));
 
-    let footer_delete = delete_tool_button(&t("Delete clip"));
-    let footer = GtkBox::new(Orientation::Horizontal, 6);
-    footer.add_css_class("recording-editor-zoom-footer");
-    footer.set_hexpand(true);
-    footer.append(&footer_delete);
-
     panel.append(&header);
     panel.append(&scroll);
-    panel.append(&footer);
 
     mute.connect_state_set({
         let state = state.clone();
@@ -578,20 +571,10 @@ fn build_clip_panel(
             gtk4::glib::Propagation::Proceed
         }
     });
-    footer_delete.connect_clicked({
-        let state = state.clone();
-        let on_change = on_change.clone();
-        move |_| {
-            state.lock().unwrap().remove_selected_clip();
-            on_change();
-        }
-    });
-
     let refresh = {
         let panel = panel.clone();
         let mute = mute.clone();
         let speed_slider = speed_slider.clone();
-        let footer_delete = footer_delete.clone();
         let syncing = syncing.clone();
         Rc::new(move || {
             let guard = state.lock().unwrap();
@@ -607,7 +590,6 @@ fn build_clip_panel(
             mute.set_active(muted);
             speed_slider.set_sensitive(can_edit);
             mute.set_sensitive(can_mute);
-            footer_delete.set_sensitive(guard.selected_segment.is_some() && !guard.video_locked);
             syncing.set(false);
         }) as Rc<dyn Fn()>
     };
@@ -685,22 +667,6 @@ fn build_hide_panel() -> HidePanel {
         widget: panel,
         refresh,
     }
-}
-
-fn delete_tool_button(label: &str) -> Button {
-    let button = Button::new();
-    button.add_css_class("recording-editor-zoom-delete");
-    button.set_has_frame(false);
-    button.set_halign(Align::Start);
-    let row = GtkBox::new(Orientation::Horizontal, 6);
-    row.set_halign(Align::Start);
-    let icon = Image::from_icon_name("user-trash-symbolic");
-    icon.set_pixel_size(13);
-    let text = Label::new(Some(label));
-    row.append(&icon);
-    row.append(&text);
-    button.set_child(Some(&row));
-    button
 }
 
 #[cfg(test)]
@@ -1942,6 +1908,47 @@ mod tests {
         assert!(
             (0.2..0.3).contains(&one_x),
             "1x needs real track space, got {one_x}"
+        );
+    }
+
+    #[test]
+    fn the_clip_panel_drops_its_delete_row_and_keeps_speed_and_mute() {
+        let source = include_str!("tool_sidebar.rs");
+        let production = source
+            .split("\n#[cfg(test)]")
+            .next()
+            .expect("the sidebar's production source");
+        let start = production
+            .find("fn build_clip_panel(")
+            .expect("the video clip panel");
+        let rest = &production[start + 1..];
+        let end = rest
+            .find("\n/// Format a clip speed")
+            .expect("the panel ends before the speed formatter");
+        let panel = &production[start..start + 1 + end];
+        assert!(
+            panel.contains("set_selected_clip_speed(slider.value());"),
+            "the clip panel keeps its speed control"
+        );
+        assert!(
+            panel.contains("set_selected_clip_muted(active);"),
+            "the clip panel keeps its mute switch"
+        );
+        assert!(
+            panel.contains("mute.set_sensitive(can_mute);"),
+            "the mute switch must keep its audio and lock gating"
+        );
+        assert!(
+            !panel.contains("remove_selected_clip"),
+            "deleting a clip belongs to its right-click menu, not the sidebar"
+        );
+        assert!(
+            !production.contains("Delete clip"),
+            "the sidebar's delete row is gone"
+        );
+        assert!(
+            !production.contains("delete_tool_button"),
+            "the button helper went with the row"
         );
     }
 

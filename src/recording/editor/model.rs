@@ -8,7 +8,7 @@ mod types {
 pub use types::*;
 use types::{seed_project_media, MIN_DIMENSION};
 
-mod state {
+pub(crate) mod state {
     use super::*;
     include!("model_parts/state_impl.rs");
 }

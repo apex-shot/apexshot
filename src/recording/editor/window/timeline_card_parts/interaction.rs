@@ -10,16 +10,27 @@ pub fn toggle_playback(
         return;
     }
 
-    let (seek_to, speed, muted) = {
+    let resolved = {
         let mut guard = state.lock().unwrap();
-        guard.playhead_seconds =
-            playhead_for_replay(guard.playhead_seconds, guard.content_end_seconds());
-        let seek_to = guard.source_playhead();
-        (
-            seek_to,
-            guard.speed_for_source(seek_to),
-            guard.muted_for_source(seek_to),
-        )
+        let end = guard.content_end_seconds();
+        let replay = playhead_for_replay(guard.playhead_seconds, end);
+        guard.playback_position(replay).map(|(timeline, source)| {
+            guard.playhead_seconds = timeline;
+            (
+                source,
+                guard.speed_for_source(source),
+                guard.muted_for_source(source),
+            )
+        })
+    };
+    let Some((seek_to, speed, muted)) = resolved else {
+        if let Some(media_file) = media.borrow().as_ref() {
+            media_file.pause();
+        }
+        playing.set(false);
+        set_play_icon(play_button, "media-playback-start-symbolic");
+        redraw();
+        return;
     };
     if let Some(media_file) = media.borrow().as_ref() {
         media_file.pause();
@@ -86,6 +97,24 @@ pub fn tick_playback(
     if !playing.get() {
         return;
     }
+
+    let resolved = {
+        let guard = state.lock().unwrap();
+        guard
+            .playback_position(guard.playhead_seconds)
+            .map(|(base_timeline, source_t)| {
+                (
+                    base_timeline,
+                    source_t,
+                    guard.content_end_seconds(),
+                    guard.speed_for_source(source_t),
+                )
+            })
+    };
+    let Some((base_timeline, source_t, end, speed)) = resolved else {
+        stop_playback_at_end(state, media, playing, play_button, redraw);
+        return;
+    };
 
     // A freeze hold runs past the source, where the media has no frames left.
     // Keep the last frame on screen and walk the playhead to the real end,
@@ -159,66 +188,75 @@ pub fn tick_playback(
         }
     }
 
-    if let Some(media_file) = media.borrow().as_ref() {
-        if media_file.is_ended() {
-            stop_playback_at_end(state, media, playing, play_button, redraw);
-            return;
-        }
+    let drive_seek = (speed - 1.0).abs() > 1e-6;
+    let (actual, is_playing, is_ended) = match media.borrow().as_ref() {
+        Some(media_file) => (
+            usable_media_timestamp_seconds(media_file.timestamp(), media_file.is_seeking()),
+            media_file.is_playing(),
+            media_file.is_ended(),
+        ),
+        None => (None, false, false),
+    };
+
+    let mut next = base_timeline;
+    if drive_seek || is_ended || actual.is_none() {
+        next += 0.05;
+    } else if is_playing {
+        next += (actual.unwrap_or(source_t) - source_t).max(0.0);
+    }
+    let mut reached_end = next >= end;
+    if reached_end {
+        next = end;
     }
 
-    let (mut next, end, speed, source_t) = {
-        let guard = state.lock().unwrap();
-        let source_t = guard.source_playhead();
-        (
-            guard.playhead_seconds,
-            guard.content_end_seconds(),
-            guard.speed_for_source(source_t),
-            source_t,
-        )
+    let (logical, seek_to, muted) = {
+        let mut guard = state.lock().unwrap();
+        match guard.playback_position(next) {
+            Some((timeline, source)) => {
+                guard.playhead_seconds = timeline;
+                (timeline, source, guard.muted_for_source(source))
+            }
+            None => {
+                reached_end = true;
+                (next, source_t, guard.muted_for_source(source_t))
+            }
+        }
     };
-    let mut reached_end = false;
-    let drive_seek = (speed - 1.0).abs() > 1e-6;
+    if logical >= end {
+        reached_end = true;
+    }
 
-    if drive_seek {
-        next += 0.05;
+    if reached_end {
         if let Some(media_file) = media.borrow().as_ref() {
             if media_file.is_playing() {
                 media_file.pause();
             }
-        }
-    } else if let Some(media_file) = media.borrow().as_ref() {
-        if media_file.is_playing() {
-            if let Some(seconds) =
-                usable_media_timestamp_seconds(media_file.timestamp(), media_file.is_seeking())
-            {
-                next = state.lock().unwrap().source_to_timeline(seconds);
+            media_file.set_muted(muted);
+            if actual.is_some_and(|seconds| (seconds - seek_to).abs() > 1e-4) {
+                media_file.seek((seek_to * 1_000_000.0) as i64);
             }
-        } else {
-            media_file.play();
         }
-    } else {
-        next += 0.05;
-    }
-
-    if next >= end {
-        next = end;
-        reached_end = true;
-    }
-    let (muted, seek_to) = {
-        let mut guard = state.lock().unwrap();
-        guard.playhead_seconds = next;
-        let seek_to = guard.source_playhead();
-        (guard.muted_for_source(seek_to), seek_to)
-    };
-    if let Some(media_file) = media.borrow().as_ref() {
-        media_file.set_muted(muted);
-        if drive_seek && (seek_to - source_t).abs() > 1e-4 {
-            media_file.seek((seek_to * 1_000_000.0) as i64);
-        }
-    }
-    if reached_end {
         stop_playback_at_end(state, media, playing, play_button, redraw);
         return;
+    }
+    if let Some(media_file) = media.borrow().as_ref() {
+        if drive_seek {
+            if media_file.is_playing() {
+                media_file.pause();
+            }
+            if (seek_to - source_t).abs() > 1e-4 {
+                media_file.seek((seek_to * 1_000_000.0) as i64);
+            }
+        } else {
+            let off_source = actual.is_none_or(|seconds| (seconds - seek_to).abs() > 0.05);
+            if is_ended || off_source {
+                media_file.seek((seek_to * 1_000_000.0) as i64);
+            }
+            if !is_playing || is_ended {
+                media_file.play();
+            }
+        }
+        media_file.set_muted(muted);
     }
     redraw();
 }
@@ -494,7 +532,69 @@ pub fn bind_video_clip(
         Rc::new(Cell::new(None)),
         set_band_hover,
     );
-}
+    let menu = GestureClick::new();
+    menu.set_button(3);
+    menu.connect_pressed({
+        let state = state.clone();
+        let media = media.clone();
+        let redraw = redraw.clone();
+        move |gesture, _, x, y| {
+            let width = gesture
+                .widget()
+                .map(|widget| widget.allocated_width().max(1) as f64)
+                .unwrap_or(1.0);
+            let index = {
+                let mut guard = state.lock().unwrap();
+                if guard.video_locked {
+                    return;
+                }
+                let hit = video_layout(&guard, width)
+                    .into_iter()
+                    .find(|&(_, _, x0, x1)| x >= x0 && x <= x1)
+                    .map(|(_, seg_idx, _, _)| seg_idx);
+                let Some(index) = hit else {
+                    return;
+                };
+                select_video(&mut guard, Some(index));
+                index
+            };
+            redraw();
+            let Some(area) = gesture
+                .widget()
+                .and_then(|widget| widget.downcast::<DrawingArea>().ok())
+            else {
+                return;
+            };
+            show_clip_menu(
+                &area,
+                ClipMenuTarget::Video(index),
+                x,
+                y,
+                state.clone(),
+                Rc::new({
+                    let state = state.clone();
+                    let media = media.clone();
+                    let redraw = redraw.clone();
+                    move || {
+                        let position = {
+                            let guard = state.lock().unwrap();
+                            guard.playback_position(guard.playhead_seconds)
+                        };
+                        if let Some(media_file) = media.borrow().as_ref() {
+                            match position {
+                                Some((_, source)) => {
+                                    media_file.seek((source * 1_000_000.0) as i64);
+                                }
+                                None => media_file.pause(),
+                            }
+                        }
+                        redraw();
+                    }
+                }),
+            );
+        }
+    });
+    area.add_controller(menu);}
 
 pub fn bind_zoom_track(
     area: &DrawingArea,

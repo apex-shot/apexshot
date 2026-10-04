@@ -263,6 +263,7 @@ fn build_preview_inner(
                 placing,
                 radius,
                 background,
+                retained,
             ) = {
                 let s = state.lock().unwrap();
                 let source_t = s.source_playhead();
@@ -284,6 +285,7 @@ fn build_preview_inner(
                     placing_manual(&s, playing),
                     s.background_corner_radius_px(),
                     s.background.clone(),
+                    s.last_segment_end() > f64::EPSILON,
                 )
             };
             placing_focus.set(placing);
@@ -291,7 +293,8 @@ fn build_preview_inner(
                 .then(|| gtk4::gdk::Cursor::from_name("crosshair", None))
                 .flatten();
             cursor_layer_tick.set_cursor(crosshair.as_ref());
-            picture.set_visible(duration > 0.0);
+            picture.set_visible(duration > 0.0 && retained);
+            cursor_layer_tick.set_visible(retained);
             empty_hint.set_visible(duration <= 0.0);
             picture.set_opacity(if hidden { 0.0 } else { 1.0 });
             clock.set_text(&format!(

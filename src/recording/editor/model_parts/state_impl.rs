@@ -68,33 +68,53 @@ impl VideoEditState {
     }
 
     pub fn content_end_seconds(&self) -> f64 {
-        let zoom_end = self
-            .zoom_clips
-            .iter()
-            .map(|clip| clip.end)
-            .fold(0.0_f64, f64::max);
-        let hide_end = self
-            .cursor_hide_clips
-            .iter()
-            .map(|clip| clip.end)
-            .fold(0.0_f64, f64::max);
         self.video_end_seconds()
-            .max(zoom_end)
-            .max(hide_end)
     }
 
-    fn video_end_seconds(&self) -> f64 {
+    pub(crate) fn video_end_seconds(&self) -> f64 {
         let bounds = self.segment_boundaries();
         self.segment_order
             .iter()
             .filter(|&&i| self.segments_kept.get(i).copied().unwrap_or(true))
             .filter_map(|&i| {
-                bounds
-                    .get(i)
-                    .map(|_| self.segment_start(i) + self.segment_timeline_duration(i))
+                bounds.get(i).map(|_| {
+                    let end = self.segment_start(i) + self.segment_timeline_duration(i);
+                    if self.freeze_applies_to_segment(i) {
+                        end + self.freeze_tail
+                    } else {
+                        end
+                    }
+                })
             })
             .fold(0.0_f64, f64::max)
-            .max(self.last_segment_end())
+    }
+
+    pub fn playback_position(&self, timeline_t: f64) -> Option<(f64, f64)> {
+        let frame = 1.0 / self.metadata.export_frame_rate().max(1.0);
+        let mut last = None;
+        for (index, composition_start, source_start, source_end) in self.placed_segment_slots() {
+            let speed = self.segment_speed(index);
+            let duration = (source_end - source_start).max(0.0) / speed;
+            let hold = if self.freeze_applies_to_segment(index) {
+                self.freeze_tail
+            } else {
+                0.0
+            };
+            let last_frame = (source_end - frame).max(source_start);
+            if timeline_t + 1e-9 < composition_start {
+                return Some((composition_start, source_start));
+            }
+            if timeline_t < composition_start + duration + hold {
+                if timeline_t >= composition_start + duration {
+                    return Some((timeline_t, last_frame));
+                }
+                let source = (source_start + (timeline_t - composition_start) * speed)
+                    .min(last_frame);
+                return Some((timeline_t, source));
+            }
+            last = Some((composition_start + duration + hold, last_frame));
+        }
+        last
     }
 
     pub fn visible_span_seconds(&self) -> f64 {

@@ -3880,3 +3880,173 @@ fn press_scale_is_the_same_on_a_random_seek() {
         assert!((press_cursor_scale(&sidecar, *t) - sequential[index]).abs() < 1e-12);
     }
 }
+
+#[test]
+fn deleting_the_tail_shrinks_the_clocks_and_the_playhead() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(4.0);
+    let end = state.video_end_seconds();
+    state.selected_segment = Some(1);
+    state.playhead_seconds = 9.0;
+    state.remove_selected_clip();
+    assert!(
+        (state.video_end_seconds() - 4.0).abs() < 1e-9,
+        "the retained footage ends at the cut, got {}",
+        state.video_end_seconds()
+    );
+    assert!((state.content_end_seconds() - 4.0).abs() < 1e-9);
+    assert!(
+        end > 4.0,
+        "the deleted tail must have been part of the end before deletion"
+    );
+    assert!(
+        (state.playhead_seconds - 4.0).abs() < 1e-9,
+        "the playhead must land at the new end, got {}",
+        state.playhead_seconds
+    );
+}
+
+#[test]
+fn orphan_effects_do_not_extend_the_deleted_tail() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(4.0);
+    let zoom = state.add_zoom_at(3.0).unwrap();
+    state.zoom_clips[zoom].end = 9.0;
+    let hide = state.add_cursor_hide_at(3.0).unwrap();
+    state.cursor_hide_clips[hide].end = 9.0;
+    state.selected_segment = Some(1);
+    state.remove_selected_clip();
+    assert!(
+        state.content_end_seconds() <= 4.0 + 1e-9,
+        "a zoom or hide past the retained footage must not keep playback running, got {}",
+        state.content_end_seconds()
+    );
+}
+
+#[test]
+fn deleting_every_clip_leaves_no_playback_position() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(4.0);
+    state.selected_segment = Some(0);
+    state.remove_selected_clip();
+    state.selected_segment = Some(1);
+    state.remove_selected_clip();
+    assert!(state.playback_position(0.0).is_none());
+    assert!(state.playback_position(5.0).is_none());
+    assert!(state.video_end_seconds().abs() < 1e-9);
+    assert!(state.playhead_seconds.abs() < 1e-9);
+}
+
+#[test]
+fn playback_skips_deleted_source_ranges() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(4.0);
+    state.selected_segment = Some(0);
+    state.remove_selected_clip();
+    let (timeline, source) = state.playback_position(0.0).expect("the kept clip plays");
+    assert!(
+        (timeline - 4.0).abs() < 1e-9 && (source - 4.0).abs() < 1e-9,
+        "the head of the composition is the kept clip's placed start, got {timeline}/{source}"
+    );
+    let (timeline, source) = state.playback_position(5.0).expect("inside the kept clip");
+    assert!(
+        (timeline - 5.0).abs() < 1e-9 && (source - 5.0).abs() < 1e-9,
+        "time inside the kept clip maps through its own source, got {timeline}/{source}"
+    );
+    let (timeline, source) = state.playback_position(3.9).expect("before the kept clip");
+    assert!(
+        (timeline - 4.0).abs() < 1e-9 && (source - 4.0).abs() < 1e-9,
+        "a time before the kept clip jumps to its placed start, got {timeline}/{source}"
+    );
+}
+
+#[test]
+fn playback_skips_a_deleted_middle_segment() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(4.0);
+    state.add_cut(7.0);
+    state.selected_segment = Some(1);
+    state.remove_selected_clip();
+    for (time, expected) in [(4.0, 7.0), (5.0, 7.0), (7.5, 7.5)] {
+        let (timeline, source) = state
+            .playback_position(time)
+            .unwrap_or_else(|| panic!("time {time} has retained footage"));
+        assert!(
+            (timeline - expected).abs() < 1e-9 && (source - expected).abs() < 1e-9,
+            "time {time} must resolve to {expected}, got {timeline}/{source}"
+        );
+    }
+}
+
+#[test]
+fn playback_resolves_a_retimed_kept_clip() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(4.0);
+    state.selected_segment = Some(0);
+    state.remove_selected_clip();
+    state.segment_speeds[1] = 2.0;
+    state.set_segment_start(1, 8.0);
+    let (timeline, source) = state.playback_position(5.0).expect("inside the clip");
+    assert!(
+        (timeline - 8.0).abs() < 1e-9 && (source - 4.0).abs() < 1e-9,
+        "a time before the clip jumps to its placed start, got {timeline}/{source}"
+    );
+    let (timeline, source) = state.playback_position(8.5).expect("inside the clip again");
+    assert!(
+        (timeline - 8.5).abs() < 1e-9 && (source - 5.0).abs() < 1e-9,
+        "a doubled speed consumes two source seconds per timeline second, got {timeline}/{source}"
+    );
+}
+
+#[test]
+fn playback_follows_a_reordered_source() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(4.0);
+    state.move_segment(1, 0);
+    state.set_segment_start(1, 5.9);
+    for (time, expect_timeline, expect_source) in
+        [(0.0, 0.0, 0.0), (3.9, 3.9, 3.9), (5.9, 5.9, 4.0), (6.0, 6.0, 4.1), (6.5, 6.5, 4.6)]
+    {
+        let (timeline, source) = state
+            .playback_position(time)
+            .unwrap_or_else(|| panic!("time {time} has retained footage"));
+        assert!(
+            (timeline - expect_timeline).abs() < 1e-9 && (source - expect_source).abs() < 1e-9,
+            "time {time} must resolve to {expect_timeline}/{expect_source}, got {timeline}/{source}"
+        );
+    }
+}
+
+#[test]
+fn a_hold_keeps_playback_on_the_last_decodable_frame() {
+    let mut state = VideoEditState::new(metadata());
+    state.playhead_seconds = 9.5;
+    assert!(state.extend_last_segment(2.0));
+    let last_frame = state.source_duration() - 1.0 / state.metadata.export_frame_rate();
+    let (timeline, source) = state.playback_position(11.0).expect("inside the hold");
+    assert!(
+        (timeline - 11.0).abs() < 1e-9 && source < state.source_duration() + 1e-9,
+        "the hold must pin the last decodable frame, got {timeline}/{source}"
+    );
+    assert!(
+        (source - last_frame).abs() < 1e-9,
+        "the held frame is one export frame below the source end, got {source}"
+    );
+}
+
+#[test]
+fn removing_a_held_tail_owner_cannot_resurrect_deleted_footage() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(4.0);
+    state.playhead_seconds = 3.5;
+    assert!(state.extend_last_segment(2.0));
+    assert!((state.video_end_seconds() - 12.0).abs() < 1e-9);
+    state.selected_segment = Some(1);
+    state.remove_selected_clip();
+    assert!(
+        (state.video_end_seconds() - 4.0).abs() < 1e-9,
+        "the hold went with its owner, got {}",
+        state.video_end_seconds()
+    );
+    assert!(state.freeze_tail_seconds().abs() < f64::EPSILON);
+}
