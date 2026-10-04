@@ -42,6 +42,18 @@ impl ActiveCursorTrack {
         height: u32,
         skip_ripple_ring: bool,
     ) -> Result<Self, String> {
+        Self::start_with_view(state, start, end, width, height, skip_ripple_ring, false)
+    }
+
+    pub(super) fn start_with_view(
+        state: &VideoEditState,
+        start: f64,
+        end: f64,
+        width: u32,
+        height: u32,
+        skip_ripple_ring: bool,
+        source_space: bool,
+    ) -> Result<Self, String> {
         let (read_fd, write_fd) = super::gst_warp::create_pipe()?;
         // The writer gets its own copy of the edit state so the render loop can
         // run off the caller's thread. A frame is only rendered when ffmpeg has
@@ -51,13 +63,13 @@ impl ActiveCursorTrack {
             .name("cursor-track".into())
             .spawn(move || {
                 let mut sink: std::fs::File = write_fd.into();
-                if let Err(err) = super::cursor_export::write_rgba_track(
+                if let Err(err) = super::cursor_export::write_rgba_track_with_view(
                     &state,
                     start,
                     end,
-                    width,
-                    height,
+                    (width, height),
                     skip_ripple_ring,
+                    source_space,
                     &mut sink,
                 ) {
                     // ffmpeg closing the pipe early is how this ends when the

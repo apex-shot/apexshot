@@ -955,6 +955,7 @@ impl VideoEditState {
         }
         self.record_zoom_command();
         self.zoom_classic = false;
+        self.zoom_camera = ZoomCameraSettings::default();
         if let Some(index) = self.selected_zoom {
             if let Some(clip) = self.zoom_clips.get_mut(index) {
                 // Auto zooms are created with Smooth; Reset must not bring back
@@ -1124,78 +1125,19 @@ impl VideoEditState {
     /// locates the pointer for the follow camera, which inside a hold stays
     /// pinned to the last real frame.
     ///
-    /// The follow camera chases the movement-group centre active at
-    /// `source_t` on the project's follow spring, starting at the clip's
-    /// stored centre. The evaluation is pure (no carried state), so random
-    /// seeks match sequential playback. Per-zoom `instant` snaps instead of
-    /// chasing.
+    /// The screen viewport follows one composition-time spring. Its position
+    /// and size retain their velocities between adjoining zooms, while source
+    /// time identifies the pointer's per-zoom movement group. Cached fixed-step
+    /// frames make random seeks and sequential playback evaluate the same path.
     pub fn eval_zoom_at(&self, timeline_t: f64, source_t: f64) -> (f64, (f64, f64)) {
+        if !self.zoom_classic {
+            return self.eval_spring_zoom_at(timeline_t, source_t);
+        }
         let frame_w = self.metadata.width as f64;
         let frame_h = self.metadata.height as f64;
         if self.zoom_hidden {
             return (1.0, (frame_w / 2.0, frame_h / 2.0));
         }
-        let (scale, center) = eval_zoom(&self.zoom_clips, timeline_t, frame_w, frame_h);
-        if self.zoom_classic || scale <= 1.01 {
-            return (scale, center);
-        }
-        // Inside a clip, follow its own framing. In a morph gap, keep following
-        // the clip the camera just left: `eval_zoom` holds that clip's stored
-        // framing, and recentering it here continues the camera from the
-        // evaluated endpoint instead of snapping back to the stored center.
-        let clip_index = self
-            .zoom_clips
-            .iter()
-            .position(|clip| !clip.hidden && timeline_t >= clip.start && timeline_t <= clip.end)
-            .or_else(|| zoom_gap_hold_predecessor(&self.zoom_clips, timeline_t));
-        let Some(clip) = clip_index.map(|index| &self.zoom_clips[index]) else {
-            return (scale, center);
-        };
-        if clip.mode != ZoomMode::Auto {
-            return (scale, center);
-        }
-        let Some(sidecar) = self.sidecar.as_ref() else {
-            return (scale, center);
-        };
-        // Pointer and clicks in encoded-video pixels, the same space the
-        // cursor overlay draws in, so the camera and the cursor never react
-        // to different data. Area recordings need the video mapping; without
-        // it the follow would chase capture-local coordinates.
-        let points: Vec<(f64, f64, f64)> = sidecar
-            .pointer
-            .iter()
-            .map(|sample| {
-                let (x, y) = sidecar.map_to_video(sample.x, sample.y, frame_w, frame_h);
-                (sample.t, x, y)
-            })
-            .collect();
-        if points.is_empty() {
-            return (scale, center);
-        }
-        let crop = self.crop_or_full();
-        let budget = movement_group_budget(crop, clip.scale);
-        if clip.instant {
-            // An instant zoom snaps to the group centre instead of chasing
-            // it: same target, no spring.
-            let target =
-                movement_group_center_at(&points, source_t, budget).unwrap_or(clip.center);
-            return (scale, clamp_zoom_center(crop, scale, target));
-        }
-        let from_source = self.timeline_to_source(clip.start);
-        if !source_t.is_finite() || !from_source.is_finite() || source_t <= from_source {
-            return (scale, clamp_zoom_center(crop, scale, clip.center));
-        }
-        // The screen is driven by the one project-level follow spring. The
-        // studied `mouseMovementSpring` drag/click stiffening smooths the
-        // cursor sprite, not the camera, so it is not applied here.
-        let followed = evaluate_spring_camera(
-            clip.center,
-            &points,
-            from_source,
-            source_t,
-            budget,
-            CAMERA_FOLLOW_SPRING,
-        );
-        (scale, clamp_zoom_center(crop, scale, followed))
+        eval_zoom(&self.zoom_clips, timeline_t, frame_w, frame_h)
     }
 }

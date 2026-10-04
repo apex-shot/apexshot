@@ -14,6 +14,8 @@
 //! [`ripple_radius_fraction`] and [`ripple_opacity`] remain only as the
 //! drawn-ring fallback for paths that cannot run the warp (see
 //! `cursor_export`).
+//! The live video preview samples its current footage with the same prepared
+//! pull before compositing the cursor, so it no longer uses that ring stand-in.
 //!
 //! The chromatic split is **not** implemented. The studied `split` separates
 //! the colour channels along the ring; reproducing it in the single shader
@@ -177,39 +179,121 @@ pub fn ripple_calm_zone(distance: f64, pull_size_px: f64) -> f64 {
     }
 }
 
-/// Shared terms of the studied per-pixel displacement.
+/// One ripple's frame-constant state, shared by scalar and image samplers.
 ///
-/// Returns `(bounce, ring, calm_zone, direction_x, direction_y)` or `None`
-/// when the pixel is outside the band, sits exactly on the click, or the
-/// ripple is outside its visible window. Mirrors the studied shader's early
-/// returns.
-fn ripple_terms(
-    px: f64,
-    py: f64,
+/// Preparing a click once avoids recalculating its radius and damped bounce
+/// for every pixel. The per-pixel terms retain the export displacement maths.
+/// A conservative bounding box skips clearly unaffected pixels before the
+/// unchanged radial test, leaving floating-point boundary decisions to it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PreparedRipple {
     click_x: f64,
     click_y: f64,
-    age_ms: f64,
-    pull_size_01: f64,
+    bounce: f64,
+    radius: f64,
+    band: f64,
+    outer_bound: f64,
+    pull_size_px: f64,
     video_width: f64,
-) -> Option<(f64, f64, f64, f64, f64)> {
-    let bounce = ripple_bounce_at_ms(age_ms);
-    if bounce == 0.0 {
-        return None;
+}
+
+impl PreparedRipple {
+    /// Prepare a source-space click at one age, in encoded pixels and ms.
+    pub(crate) fn new(
+        click_x: f64,
+        click_y: f64,
+        age_ms: f64,
+        pull_size_01: f64,
+        video_width: f64,
+    ) -> Self {
+        let radius = ripple_radius_px(age_ms, pull_size_01, video_width);
+        let band = video_width * RIPPLE_BAND_01;
+        Self {
+            click_x,
+            click_y,
+            bounce: ripple_bounce_at_ms(age_ms),
+            radius,
+            band,
+            outer_bound: (radius + band * 3.0) * (1.0 + f64::EPSILON * 4.0),
+            pull_size_px: pull_size_01 * video_width,
+            video_width,
+        }
     }
-    let radius = ripple_radius_px(age_ms, pull_size_01, video_width);
-    let band = video_width * RIPPLE_BAND_01;
-    let rel_x = px - click_x;
-    let rel_y = py - click_y;
-    let distance = (rel_x * rel_x + rel_y * rel_y).sqrt();
-    if (distance - radius).abs() > band * 3.0 {
-        return None;
+
+    fn terms(&self, px: f64, py: f64) -> Option<(f64, f64, f64, f64)> {
+        if self.bounce == 0.0 {
+            return None;
+        }
+        let rel_x = px - self.click_x;
+        let rel_y = py - self.click_y;
+        if (rel_x.abs() > self.outer_bound || rel_y.abs() > self.outer_bound)
+            && !rel_x.is_nan()
+            && !rel_y.is_nan()
+        {
+            return None;
+        }
+        let distance = (rel_x * rel_x + rel_y * rel_y).sqrt();
+        if (distance - self.radius).abs() > self.band * 3.0 {
+            return None;
+        }
+        let ring = ripple_ring(distance, self.radius, self.band);
+        if distance == 0.0 {
+            return None;
+        }
+        let calm_zone = ripple_calm_zone(distance, self.pull_size_px);
+        Some((ring, calm_zone, rel_x / distance, rel_y / distance))
     }
-    let ring = ripple_ring(distance, radius, band);
-    if distance == 0.0 {
-        return None;
+
+    /// Conservative source-x bounds of possible displacement on one source row.
+    ///
+    /// The slightly expanded outer radius preserves the original radial test's
+    /// floating-point boundary decisions. Indeterminate bounds cover the full
+    /// row rather than omitting any potentially displaced pixels.
+    pub(crate) fn row_bounds(&self, source_y: f64) -> Option<(f64, f64)> {
+        if self.bounce == 0.0 {
+            return None;
+        }
+        let dy = (source_y - self.click_y).abs();
+        if dy > self.outer_bound {
+            return None;
+        }
+        if !dy.is_finite() || !self.outer_bound.is_finite() || self.outer_bound <= 0.0 {
+            return Some((f64::NEG_INFINITY, f64::INFINITY));
+        }
+        let ratio = dy / self.outer_bound;
+        let extent = self.outer_bound * (1.0 - ratio * ratio).max(0.0).sqrt();
+        Some((
+            (self.click_x - extent).next_down(),
+            (self.click_x + extent).next_up(),
+        ))
     }
-    let calm_zone = ripple_calm_zone(distance, pull_size_01 * video_width);
-    Some((bounce, ring, calm_zone, rel_x / distance, rel_y / distance))
+
+    /// Signed source-pixel pull; sample the original frame at `pixel - pull`.
+    pub(crate) fn pull_px(&self, px: f64, py: f64) -> (f64, f64) {
+        match self.terms(px, py) {
+            Some((ring, calm_zone, dir_x, dir_y)) => {
+                let scalar = self.bounce * ring * self.video_width * RIPPLE_PULL_01 * calm_zone;
+                (dir_x * scalar, dir_y * scalar)
+            }
+            None => (0.0, 0.0),
+        }
+    }
+
+    fn split_px(&self, px: f64, py: f64) -> (f64, f64) {
+        match self.terms(px, py) {
+            Some((ring, calm_zone, dir_x, dir_y)) => {
+                let scalar = self.bounce.abs()
+                    * ring
+                    * (1.0 - ring)
+                    * 4.0
+                    * self.video_width
+                    * RIPPLE_CHROMATIC_ABERRATION_01
+                    * calm_zone;
+                (dir_x * scalar, dir_y * scalar)
+            }
+            None => (0.0, 0.0),
+        }
+    }
 }
 
 /// The studied footage pull at `age_ms` for a destination pixel, in video
@@ -229,13 +313,7 @@ pub fn ripple_pull_px(
     pull_size_01: f64,
     video_width: f64,
 ) -> (f64, f64) {
-    match ripple_terms(px, py, click_x, click_y, age_ms, pull_size_01, video_width) {
-        Some((bounce, ring, calm_zone, dir_x, dir_y)) => {
-            let scalar = bounce * ring * video_width * RIPPLE_PULL_01 * calm_zone;
-            (dir_x * scalar, dir_y * scalar)
-        }
-        None => (0.0, 0.0),
-    }
+    PreparedRipple::new(click_x, click_y, age_ms, pull_size_01, video_width).pull_px(px, py)
 }
 
 /// The studied chromatic split at `age_ms` for a destination pixel, in video
@@ -253,19 +331,7 @@ pub fn ripple_split_px(
     pull_size_01: f64,
     video_width: f64,
 ) -> (f64, f64) {
-    match ripple_terms(px, py, click_x, click_y, age_ms, pull_size_01, video_width) {
-        Some((bounce, ring, calm_zone, dir_x, dir_y)) => {
-            let scalar = bounce.abs()
-                * ring
-                * (1.0 - ring)
-                * 4.0
-                * video_width
-                * RIPPLE_CHROMATIC_ABERRATION_01
-                * calm_zone;
-            (dir_x * scalar, dir_y * scalar)
-        }
-        None => (0.0, 0.0),
-    }
+    PreparedRipple::new(click_x, click_y, age_ms, pull_size_01, video_width).split_px(px, py)
 }
 
 /// Read margin the studied renderer keeps around a warping effect, in video

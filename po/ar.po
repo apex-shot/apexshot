@@ -2647,3 +2647,21 @@ msgstr "حفظ آخر لقطة شاشة:"
 
 msgid "No screenshot is available to save"
 msgstr "لا توجد لقطة شاشة متاحة للحفظ"
+
+msgid "Camera follows the recorded pointer"
+msgstr "تتبع الكاميرا المؤشر المسجل"
+
+msgid "These settings apply to every zoom."
+msgstr "تنطبق هذه الإعدادات على كل تكبير."
+
+msgid "Camera speed"
+msgstr "سرعة الكاميرا"
+
+msgid "Smoothness"
+msgstr "السلاسة"
+
+msgid "Start animation early"
+msgstr "بدء الرسوم المتحركة مبكرًا"
+
+msgid "Begin the camera move 0.35 seconds before each zoom."
+msgstr "تبدأ حركة الكاميرا قبل كل تكبير بـ 0.35 ثانية."

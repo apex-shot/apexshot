@@ -196,7 +196,8 @@ pub fn draw_click(
 ///
 /// The studied ripple is a footage warp; this is a drawn stand-in that carries
 /// the studied lifetime, band, and outward travel but does not pull or split
-/// the video pixels. The warp itself is not ported. The studied effect has a
+/// the video pixels. Export and the video preview apply the footage warp
+/// separately; this remains the overlay-only fallback. The studied effect has a
 /// fixed size, opacity, and no colour, so the local size/opacity/intensity and
 /// colour knobs do not apply; the ring is drawn in a neutral white.
 pub fn draw_ripple(cr: &Context, x: f64, y: f64, progress: f64, alpha: f64, reference_width: f64) {

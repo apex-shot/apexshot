@@ -2667,3 +2667,21 @@ msgstr "Сохранить последний снимок:"
 
 msgid "No screenshot is available to save"
 msgstr "Нет снимка экрана для сохранения"
+
+msgid "Camera follows the recorded pointer"
+msgstr "Камера следует за записанным курсором"
+
+msgid "These settings apply to every zoom."
+msgstr "Эти настройки применяются ко всем зумам."
+
+msgid "Camera speed"
+msgstr "Скорость камеры"
+
+msgid "Smoothness"
+msgstr "Плавность"
+
+msgid "Start animation early"
+msgstr "Запускать анимацию раньше"
+
+msgid "Begin the camera move 0.35 seconds before each zoom."
+msgstr "Движение камеры начинается за 0,35 секунды до каждого зума."
