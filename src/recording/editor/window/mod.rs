@@ -281,6 +281,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     });
     preview_widget.add_controller(drop_target);
 
+    let open_video_chooser = OpenVideoChooser::default();
     let open_click = GestureClick::new();
     open_click.set_button(1);
     open_click.connect_released({
@@ -289,8 +290,15 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         let filmstrip = filmstrip.clone();
         let window = window.clone();
         let ping = ping.clone();
+        let open_video_chooser = open_video_chooser.clone();
         move |_, _, _, _| {
             if state.lock().unwrap().metadata.duration_seconds > 0.0 {
+                return;
+            }
+            // The picker on Wayland belongs to the compositor, so the empty
+            // preview keeps taking clicks while one is up. Refuse the click
+            // rather than stacking a second chooser on the one already waiting.
+            if !open_video_chooser.claim() {
                 return;
             }
             show_open_preview_video(
@@ -299,6 +307,7 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
                 media.clone(),
                 filmstrip.clone(),
                 ping.clone(),
+                open_video_chooser.clone(),
             );
         }
     });
@@ -549,12 +558,34 @@ fn spawn_filmstrip_job(
     });
 }
 
+/// The one open-video chooser the editor may have up at a time.
+///
+/// The picker on Wayland belongs to the compositor, not to this window, so the
+/// empty preview stays clickable for as long as one is up: every click raised
+/// another file chooser on top of the one already waiting. The slot is claimed
+/// before the chooser is built and released when its response lands.
+#[derive(Clone, Default)]
+struct OpenVideoChooser(Rc<Cell<bool>>);
+
+impl OpenVideoChooser {
+    /// Claims the slot, reporting false when a chooser is already up.
+    fn claim(&self) -> bool {
+        !self.0.replace(true)
+    }
+
+    /// Frees the slot once the chooser's response has landed.
+    fn release(&self) {
+        self.0.set(false);
+    }
+}
+
 fn show_open_preview_video(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     media: Rc<RefCell<Option<MediaFile>>>,
     filmstrip: Rc<RefCell<Vec<gtk4::gdk_pixbuf::Pixbuf>>>,
     ping: Rc<dyn Fn()>,
+    open_video_chooser: OpenVideoChooser,
 ) {
     let title = t("Open video");
     let open = t("Open");
@@ -573,6 +604,7 @@ fn show_open_preview_video(
     chooser.add_filter(&filter);
     let window = window.clone();
     chooser.connect_response(move |dialog, response| {
+        open_video_chooser.release();
         if response == ResponseType::Accept {
             if let Some(path) = dialog.file().and_then(|file| file.path()) {
                 load_preview_video(path, &state, &media, &filmstrip, &window, &ping);
@@ -938,6 +970,40 @@ mod tests {
         assert!(
             painting.contains("let (r, g, b, a) = tone.edge;"),
             "Selected video clips must stroke their outline"
+        );
+    }
+
+    #[test]
+    fn the_empty_preview_lets_only_one_open_video_chooser_through() {
+        // The regression this pins: the empty preview keeps taking clicks while
+        // the picker is up — on Wayland that picker belongs to the compositor,
+        // so it leaves the editor interactive — and every click built another
+        // file chooser on top of the one already waiting. The slot is claimed
+        // before the chooser is built and freed when its response lands.
+        let chooser = super::OpenVideoChooser::default();
+        assert!(chooser.claim(), "the first click must raise a chooser");
+        assert!(
+            !chooser.claim(),
+            "a click while one is up must not raise a second chooser"
+        );
+        chooser.release();
+        assert!(
+            chooser.claim(),
+            "the slot must free once the chooser's response has landed"
+        );
+    }
+
+    #[test]
+    fn the_open_video_click_claims_the_slot_before_it_shows_a_chooser() {
+        let source = include_str!("mod.rs");
+        let production = &source[..source.find("\n#[cfg(test)]").expect("tests module")];
+        assert!(
+            production.contains("if !open_video_chooser.claim()"),
+            "the empty preview must refuse a click while a chooser is already up"
+        );
+        assert!(
+            production.contains("open_video_chooser.release()"),
+            "the chooser's response must free the slot for the next click"
         );
     }
 }

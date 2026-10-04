@@ -21,6 +21,16 @@ fn popup_on_editor(parent: &ApplicationWindow, card: &impl IsA<gtk4::Widget>) ->
         let parent = parent.clone();
         move || center_editor_popup(&popover, &parent)
     });
+    // GTK takes the dialog down without any of its own buttons too: the
+    // editor pops every popover down the moment its window loses
+    // activation — opening another window does exactly that — and the
+    // compositor dismisses a popover whose grab lost its surface the
+    // same way. Neither path runs the Close handler, so the modal blur
+    // and the input-eating scrim were left up after the dialog itself
+    // was gone, and the editor stayed blurred and dead until it was
+    // restarted. Every dismissal funnels through the popover's `closed`
+    // signal, so that is where the teardown belongs.
+    popover.connect_closed(close_editor_popup);
     popover
 }
 
@@ -249,4 +259,116 @@ pub(super) fn show_export_in_progress_close(
             on_close_anyway();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_dismissal_tears_the_modal_blur_down() {
+        // The regression this pins: exporting a video raised the success
+        // dialog, and opening another window made the editor's
+        // deactivation sweep pop that dialog down on its own. That path
+        // never ran the dialog's Close handler, so the modal blur and
+        // the scrim stayed up — the editor stayed blurred, dimmed and
+        // pointer-dead until it was restarted. `popup_on_editor` owns
+        // the modal state, so it has to tear it down through the one
+        // signal every dismissal funnels through.
+        let source = include_str!("dialogs.rs");
+        let popup_start = source.find("fn popup_on_editor").expect("popup_on_editor");
+        let popup_end = source
+            .find("fn center_editor_popup")
+            .expect("center_editor_popup");
+        let popup = &source[popup_start..popup_end];
+        assert!(
+            popup.contains("connect_closed") && popup.contains("close_editor_popup"),
+            "the modal blur and scrim must come down on the popover's `closed` signal, not only on the dialog's Close button"
+        );
+    }
+
+    #[test]
+    fn the_editor_comes_back_when_the_sweep_takes_the_dialog_down() {
+        // Built through the real popup and the real shell: the sweep's
+        // plain `popdown` — the whole of what focus-out does to a
+        // popover — has to leave the editor unblurred, the scrim down
+        // and the dialog unparented.
+        let Some(result) = crate::test_support::with_gtk(|| {
+            use gtk4::prelude::*;
+            use gtk4::{
+                glib as gtk_glib, Application, ApplicationWindow, Box as GtkBox, Orientation,
+                Overlay,
+            };
+
+            let app = Application::builder()
+                .application_id(crate::app_identity::app_id())
+                .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+                .build();
+            // `startup` has to fire before any window is added, or GTK
+            // refuses to present the window and the dialog never maps.
+            app.register(None::<&gtk4::gio::Cancellable>)
+                .expect("the test application to register");
+            let window = ApplicationWindow::new(&app);
+            let shell = Overlay::new();
+            let root = GtkBox::new(Orientation::Vertical, 0);
+            root.add_css_class("recording-editor-root");
+            let scrim = GtkBox::new(Orientation::Vertical, 0);
+            scrim.add_css_class("recording-editor-modal-scrim");
+            scrim.set_visible(false);
+            shell.set_child(Some(&root));
+            shell.add_overlay(&scrim);
+            window.set_child(Some(&shell));
+
+            // Surfaces are positioned by the compositor, so the loop
+            // has to run in real time before visibility means anything.
+            // The editor is already up when a dialog opens, so the
+            // window presents before the dialog does.
+            window.present();
+            let pump = || {
+                let ctx = gtk_glib::MainContext::default();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+                while std::time::Instant::now() < deadline {
+                    while ctx.iteration(false) {}
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            };
+            pump();
+
+            let card = GtkBox::new(Orientation::Vertical, 0);
+            let dialog = super::popup_on_editor(&window, &card);
+            pump();
+
+            let blurred = root.has_css_class("recording-editor-modal-blur");
+            let scrim_up = scrim.is_visible();
+
+            // What `popdown_popovers` does to every popover when the
+            // window loses activation to another window.
+            dialog.popdown();
+            pump();
+
+            let blurred_after = root.has_css_class("recording-editor-modal-blur");
+            let scrim_after = scrim.is_visible();
+            let parented = dialog.parent().is_some();
+
+            dialog.unparent();
+            window.destroy();
+            (blurred, scrim_up, blurred_after, scrim_after, parented)
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+
+        assert!(result.0, "the dialog must blur the editor while it is up");
+        assert!(result.1, "the dialog must raise the scrim while it is up");
+        assert!(
+            !result.2,
+            "the sweep's popdown must take the modal blur off the editor"
+        );
+        assert!(
+            !result.3,
+            "the sweep's popdown must take the scrim back down"
+        );
+        assert!(
+            !result.4,
+            "the sweep's popdown must hand the dialog back from its parent"
+        );
+    }
 }
