@@ -1174,6 +1174,13 @@ impl VideoEditState {
         }
         let crop = self.crop_or_full();
         let budget = movement_group_budget(crop, clip.scale);
+        let from_source = self.timeline_to_source(clip.start);
+        let to_source = self.timeline_to_source(clip.end);
+        let points = if from_source.is_finite() && to_source.is_finite() {
+            zoom_follow_samples(&points, from_source, to_source.max(from_source))
+        } else {
+            points
+        };
         if clip.instant {
             // An instant zoom snaps to the group centre instead of chasing
             // it: same target, no spring.
@@ -1181,7 +1188,6 @@ impl VideoEditState {
                 movement_group_center_at(&points, source_t, budget).unwrap_or(clip.center);
             return (scale, clamp_zoom_center(crop, scale, target));
         }
-        let from_source = self.timeline_to_source(clip.start);
         if !source_t.is_finite() || !from_source.is_finite() || source_t <= from_source {
             return (scale, clamp_zoom_center(crop, scale, clip.center));
         }
