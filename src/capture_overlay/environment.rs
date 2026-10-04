@@ -65,6 +65,28 @@ fn should_use_gtk_layer_shell_selector() -> bool {
     )
 }
 
+/// Whether ApexShot's own shutter sound can play on a capture route: the native
+/// wlroots freeze only. The Qt overlay prefers the Screenshot portal, and every
+/// portal route leaves capture audio to the desktop.
+fn supports_custom_shutter_sound_from(
+    portal_only: bool,
+    gtk_layer_shell_selector: bool,
+    force_screenshot_portal_first: bool,
+) -> bool {
+    !portal_only && gtk_layer_shell_selector && !force_screenshot_portal_first
+}
+
+/// Whether ApexShot's own shutter sound can play on this session's capture
+/// route. Portal and desktop-controlled routes never play it, so Settings must
+/// not offer the sound controls there.
+pub fn supports_custom_shutter_sound() -> bool {
+    supports_custom_shutter_sound_from(
+        crate::app_identity::portal_only(),
+        should_use_gtk_layer_shell_selector(),
+        WaylandBackend::should_force_screenshot_portal_first(),
+    )
+}
+
 fn force_wayland_gdk_for_layer_shell() {
     // On Hyprland/sway, GDK may default to X11 backend (via XWayland) because
     // DISPLAY=:0 is set. Layer-shell requires the Wayland GDK backend.

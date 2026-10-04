@@ -227,7 +227,7 @@ impl WaylandBackend {
     /// When set, try the Screenshot portal before compositor-native paths.
     /// Useful for debugging the portal path on a given desktop.
     /// Always true under portal-only / Flatpak builds.
-    fn should_force_screenshot_portal_first() -> bool {
+    pub(crate) fn should_force_screenshot_portal_first() -> bool {
         crate::app_identity::portal_only()
             || std::env::var_os("APEXSHOT_WAYLAND_SCREENSHOT_PORTAL").is_some()
     }
@@ -784,6 +784,23 @@ impl WaylandBackend {
         &self,
         origin: Option<(i32, i32)>,
     ) -> DisplayResult<CaptureData> {
+        self.capture_selection_still(origin, false)
+    }
+
+    /// Freeze capture for the native selector flows, where the configured
+    /// shutter sound belongs at the initial freeze rather than at save time.
+    pub fn capture_screen_for_selection_at_with_sound(
+        &self,
+        origin: Option<(i32, i32)>,
+    ) -> DisplayResult<CaptureData> {
+        self.capture_selection_still(origin, !Self::should_force_screenshot_portal_first())
+    }
+
+    fn capture_selection_still(
+        &self,
+        origin: Option<(i32, i32)>,
+        play_sound: bool,
+    ) -> DisplayResult<CaptureData> {
         if Self::should_force_screenshot_portal_first() {
             match Self::capture_still_via_screenshot_portal() {
                 Ok(data) => return Ok(data),
@@ -794,11 +811,19 @@ impl WaylandBackend {
         }
 
         if let Some(result) = Self::capture_monitor_via_kde_native() {
-            return result;
+            let capture = result?;
+            if play_sound {
+                crate::utils::capture_sound::play_shutter_sound_if_enabled();
+            }
+            return Ok(capture);
         }
 
         if let Some(result) = Self::capture_monitor_via_native_screencopy_at(origin) {
-            return result;
+            let capture = result?;
+            if play_sound {
+                crate::utils::capture_sound::play_shutter_sound_if_enabled();
+            }
+            return Ok(capture);
         }
 
         match Self::capture_still_via_screenshot_portal() {

@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use crate::{
@@ -36,73 +35,6 @@ pub(super) fn screenshot_save_config_from(app_config: &crate::config::AppConfig)
     }
 
     save_config
-}
-
-pub(super) fn shutter_sound_asset_path(sound_name: &str) -> Option<PathBuf> {
-    let file_name = match sound_name {
-        "Camera" => "camera.ogg",
-        "Classic" => "classic.ogg",
-        "Pop" => "pop.ogg",
-        "None" => return None,
-        _ => return None,
-    };
-
-    let asset_paths = [
-        // Development: relative to the current project directory.
-        std::env::current_dir()
-            .unwrap_or_default()
-            .join("assets/sounds")
-            .join(file_name),
-        // Installed: relative to binary location
-        std::env::current_exe()
-            .ok()
-            .and_then(|exe| {
-                exe.parent()
-                    .map(|dir| dir.join("assets/sounds").join(file_name))
-            })
-            .unwrap_or_default(),
-        // System-wide install
-        PathBuf::from("/usr/share/apexshot/sounds").join(file_name),
-        PathBuf::from("/usr/local/share/apexshot/sounds").join(file_name),
-    ];
-
-    asset_paths
-        .into_iter()
-        .find(|path| !path.as_os_str().is_empty() && path.exists())
-}
-
-pub(super) fn play_shutter_sound_if_enabled() {
-    let config = load_config().sanitized();
-    if !config.play_sounds || config.shutter_sound == "None" {
-        return;
-    }
-
-    let Some(sound_path) = shutter_sound_asset_path(&config.shutter_sound) else {
-        eprintln!(
-            "[daemon] Shutter sound '{}' selected but asset file is not available yet",
-            config.shutter_sound
-        );
-        return;
-    };
-
-    let playback = std::process::Command::new("sh")
-        .arg("-c")
-        .arg(
-            "if command -v pw-play >/dev/null 2>&1; then pw-play \"$1\"; \
-             elif command -v paplay >/dev/null 2>&1; then paplay \"$1\"; \
-             elif command -v aplay >/dev/null 2>&1; then aplay \"$1\"; \
-             else exit 127; fi",
-        )
-        .arg("sh")
-        .arg(&sound_path)
-        .spawn();
-
-    if let Err(e) = playback {
-        eprintln!(
-            "[daemon] Failed to start shutter sound playback for {}: {e}",
-            sound_path.display()
-        );
-    }
 }
 
 pub(super) fn apply_screenshot_after_capture_actions(
@@ -210,7 +142,6 @@ pub(super) fn save_and_open(
                 let path: std::path::PathBuf = path;
                 eprintln!("[daemon] Saved: {}", path.display());
                 crate::usage_telemetry::record_screenshot();
-                play_shutter_sound_if_enabled();
                 apply_screenshot_after_capture_actions(path, state, None, false);
                 true
             }
@@ -236,17 +167,16 @@ fn unsaved_capture_store(state: &Arc<Mutex<DaemonState>>) -> UnsavedCaptureStore
     store
 }
 
-/// Shutter sound, telemetry and the normal after-capture actions for a capture
-/// that auto-save did not write to the export folder, so Quick Access,
-/// annotate, the clipboard, drag-and-drop and an auto-upload all work before
-/// the user decides to save.
+/// Telemetry and the normal after-capture actions for a capture that auto-save
+/// did not write to the export folder, so Quick Access, annotate, the
+/// clipboard, drag-and-drop and an auto-upload all work before the user
+/// decides to save.
 fn run_unsaved_capture_actions(
     path: std::path::PathBuf,
     state: Arc<Mutex<DaemonState>>,
     target_display: Option<CaptureDisplay>,
 ) {
     crate::usage_telemetry::record_screenshot();
-    play_shutter_sound_if_enabled();
     apply_screenshot_after_capture_actions(path, state, target_display, true);
 }
 

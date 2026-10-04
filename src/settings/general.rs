@@ -128,8 +128,11 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
 
     let sounds_frame = build_frame();
 
+    let custom_shutter_sound = crate::capture_overlay::supports_custom_shutter_sound();
+
     let play_sounds_check = CheckButton::new();
     play_sounds_check.set_active(config.play_sounds);
+    play_sounds_check.set_sensitive(custom_shutter_sound);
     let sounds_hbox = GtkBox::new(Orientation::Horizontal, 12);
     sounds_hbox.set_hexpand(true);
     let sound_option = Label::new(Some(&t("Play sounds")));
@@ -146,7 +149,7 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     if shutter_sound_input.active_id().as_deref() != Some(config.shutter_sound.as_str()) {
         shutter_sound_input.set_active_id(DEFAULT_SHUTTER_SOUND);
     }
-    shutter_sound_input.set_sensitive(config.play_sounds);
+    shutter_sound_input.set_sensitive(custom_shutter_sound && config.play_sounds);
 
     let shutter_hbox = GtkBox::new(Orientation::Horizontal, 12);
     shutter_hbox.set_hexpand(true);
@@ -157,6 +160,21 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     shutter_hbox.append(&shutter_title);
     shutter_hbox.append(shutter_sound_input.widget());
     sounds_frame.append(&build_row!(&shutter_hbox, true));
+
+    let sound_help_text = if custom_shutter_sound {
+        t("Played once, when the capture freezes. Saving or cropping stays silent.")
+    } else {
+        t("Your desktop controls the capture sound on this route, so ApexShot cannot replace or disable it here and will not play an additional sound.")
+    };
+    let sound_help = Label::new(Some(&sound_help_text));
+    sound_help.add_css_class("dim-label");
+    sound_help.set_wrap(true);
+    sound_help.set_xalign(0.0);
+    sound_help.set_hexpand(true);
+    let sound_help_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    sound_help_hbox.set_hexpand(true);
+    sound_help_hbox.append(&sound_help);
+    sounds_frame.append(&build_row!(&sound_help_hbox, true));
     section.append(&sounds_frame);
 
     // --- System Tray Group ---

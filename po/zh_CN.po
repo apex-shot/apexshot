@@ -2646,3 +2646,9 @@ msgstr "提前开始动画"
 
 msgid "Begin the camera move 0.35 seconds before each zoom."
 msgstr "在每次缩放前 0.35 秒开始相机移动。"
+
+msgid "Played once, when the capture freezes. Saving or cropping stays silent."
+msgstr "捕获画面冻结时播放一次。保存或裁剪时保持静音。"
+
+msgid "Your desktop controls the capture sound on this route, so ApexShot cannot replace or disable it here and will not play an additional sound."
+msgstr "此路径下捕获音由您的桌面控制，因此 ApexShot 无法在此替换或关闭它，也不会播放额外的声音。"

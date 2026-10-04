@@ -2693,3 +2693,9 @@ msgstr "Iniciar la animación antes"
 
 msgid "Begin the camera move 0.35 seconds before each zoom."
 msgstr "La cámara empieza a moverse 0,35 segundos antes de cada zoom."
+
+msgid "Played once, when the capture freezes. Saving or cropping stays silent."
+msgstr "Se reproduce una vez, al congelarse la captura. Guardar y recortar permanecen en silencio."
+
+msgid "Your desktop controls the capture sound on this route, so ApexShot cannot replace or disable it here and will not play an additional sound."
+msgstr "En esta ruta, el sonido de captura lo controla tu escritorio, así que ApexShot no puede reemplazarlo ni desactivarlo aquí y no reproducirá un sonido adicional."

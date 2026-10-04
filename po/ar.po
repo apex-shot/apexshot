@@ -2665,3 +2665,9 @@ msgstr "بدء الرسوم المتحركة مبكرًا"
 
 msgid "Begin the camera move 0.35 seconds before each zoom."
 msgstr "تبدأ حركة الكاميرا قبل كل تكبير بـ 0.35 ثانية."
+
+msgid "Played once, when the capture freezes. Saving or cropping stays silent."
+msgstr "يتم تشغيله مرة واحدة عند تجميد الالتقاط. يبقى الحفظ والقص صامتين."
+
+msgid "Your desktop controls the capture sound on this route, so ApexShot cannot replace or disable it here and will not play an additional sound."
+msgstr "في هذا المسار يتحكم سطح المكتب في صوت الالتقاط، لذا لا يستطيع ApexShot استبداله أو تعطيله هنا ولن يشغّل صوتًا إضافيًا."
