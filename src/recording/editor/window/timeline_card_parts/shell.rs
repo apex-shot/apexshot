@@ -1114,6 +1114,43 @@ mod tests {
         );
     }
 
+    #[test]
+    fn every_lane_resizes_from_the_anchor_captured_at_drag_begin() {
+        let interaction = include_str!("interaction.rs");
+        let production = interaction
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the interaction source");
+        for (lane, drag) in [
+            ("pub fn bind_video_clip(", "ClipDrag"),
+            ("pub fn bind_zoom_track(", "ZoomDrag"),
+            ("pub fn bind_hide_track(", "HideDrag"),
+        ] {
+            let start = production.find(lane).unwrap_or_else(|| panic!("{lane}"));
+            let rest = &production[start + 1..];
+            let end = rest.find("\n    area.add_controller(drag);").expect("the drag controller");
+            let bind = &production[start..start + 1 + end];
+            assert!(
+                bind.contains("Rc::new(Cell::new(None::<ClipResizeAnchor>))"),
+                "{lane} must hold the anchor captured once at drag begin"
+            );
+            assert!(
+                bind.contains("ClipResizeAnchor::for_video(&guard, width, segment, drag)")
+                    || bind.contains("ClipResizeAnchor::for_extend(&guard, width)"),
+                "{lane} must capture an anchor for the resize gestures"
+            );
+            assert!(
+                bind.contains("apply_clip_resize(&mut guard, width, &anchor, offset_x)"),
+                "{lane} must apply the pointer offset against the captured anchor"
+            );
+            assert!(
+                !bind.contains("time_to_x(anchor"),
+                "{lane} must not re-read the mutated timeline while dragging"
+            );
+            assert!(bind.contains(drag), "{lane} must keep its own drag kinds");
+        }
+    }
+
     /// Body of the first rule for `selector`, without its braces.
     fn css_rule<'a>(css: &'a str, selector: &str) -> &'a str {
         css.split(selector)

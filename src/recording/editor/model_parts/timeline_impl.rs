@@ -4,13 +4,17 @@ impl VideoEditState {
             return;
         }
         let duration = self.metadata.duration_seconds.max(0.0);
-        let max_start = if duration > MIN_TRIM_DURATION_SECONDS {
+        let mut max_start = if duration > MIN_TRIM_DURATION_SECONDS {
             self.trim_end_seconds - MIN_TRIM_DURATION_SECONDS
         } else {
             self.trim_end_seconds
         };
+        if let Some(&cut) = self.cuts.first() {
+            max_start = max_start.min(cut - MIN_TRIM_DURATION_SECONDS);
+        }
         self.trim_start_seconds = value.clamp(0.0, max_start.max(0.0));
         self.composition_changed();
+        self.clamp_timeline_scroll();
     }
 
     pub fn shift_trim(&mut self, delta: f64) {
@@ -37,39 +41,32 @@ impl VideoEditState {
     }
 
     pub fn set_trim_end(&mut self, value: f64) {
-        if self.video_locked {
+        if self.video_locked || !value.is_finite() {
             return;
         }
         let duration = self.metadata.duration_seconds.max(0.0);
-        let min_end = if duration > MIN_TRIM_DURATION_SECONDS {
-            self.trim_start_seconds + MIN_TRIM_DURATION_SECONDS
-        } else {
-            self.trim_start_seconds
-        };
-        // Dragging the right handle past the source end starts (or grows) a
-        // hold on the last frame. It reaches real frames only once the hold is
-        // spent, so the handle never crosses into territory that does not
-        // exist. Callers pass an unclamped target, so this also covers the
-        // very first expansion.
-        if value > self.trim_end_seconds {
-            let tail = (value - self.trim_end_seconds).max(0.0);
-            if tail > f64::EPSILON {
-                // Name the segment the hold belongs to, the same way the
-                // freeze button does. Without this the seconds are stored but
-                // nothing applies them: the drawn clip, the hit box, the
-                // composition length and the export all ignore the tail.
-                if let Some(last) = self.segment_order.last().copied() {
-                    if self.segments_kept.get(last).copied().unwrap_or(true) {
-                        self.frozen_segment = Some(last);
-                    }
+        let final_cut = self
+            .cuts
+            .last()
+            .copied()
+            .unwrap_or(self.trim_start_seconds);
+        let floor = (self.trim_start_seconds + MIN_TRIM_DURATION_SECONDS)
+            .max(final_cut + MIN_TRIM_DURATION_SECONDS)
+            .min(duration);
+        let hold = (value - duration).max(0.0);
+        self.trim_end_seconds = value.clamp(floor, duration);
+        self.freeze_tail = 0.0;
+        self.frozen_segment = None;
+        if hold > f64::EPSILON {
+            if let Some(last) = self.segment_order.last().copied() {
+                if self.segments_kept.get(last).copied().unwrap_or(true) {
+                    self.frozen_segment = Some(last);
+                    self.freeze_tail = hold / self.segment_speed(last).max(1e-6);
                 }
             }
-            self.freeze_tail = tail;
-            return;
         }
-        self.freeze_tail = 0.0;
-        self.trim_end_seconds = value.clamp(min_end.min(duration), duration);
         self.composition_changed();
+        self.clamp_timeline_scroll();
     }
 
     /// Held seconds after `trim_end_seconds`: the clip's last frame frozen on
