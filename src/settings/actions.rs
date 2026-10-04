@@ -116,9 +116,10 @@ pub fn install_checkbox_behaviors(
     quick_access_auto_close_action_input: &SettingsSelect,
     quick_access_auto_close_interval_input: &SettingsSelect,
 ) {
+    let shutter_sound_supported = crate::capture_overlay::supports_custom_shutter_sound();
     let shutter_sound_input_toggle = shutter_sound_input.clone();
     play_sounds_check.connect_toggled(move |check| {
-        shutter_sound_input_toggle.set_sensitive(check.is_active());
+        shutter_sound_input_toggle.set_sensitive(check.is_active() && shutter_sound_supported);
     });
 
     let screenshot_open_annotate_toggle = screenshot_open_annotate_check.clone();

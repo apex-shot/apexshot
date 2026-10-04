@@ -21,7 +21,7 @@ fn capture_selected_monitor(
     let backend = WaylandBackend::new()
         .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
     backend
-        .capture_screen_for_selection_at(Some((choice.x, choice.y)))
+        .capture_screen_for_selection_at_with_sound(Some((choice.x, choice.y)))
         .or_else(|_| backend.capture_screen())
         .map_err(|err| {
             SelectionError::InitError(format!("Wayland background capture failed: {err}"))
@@ -157,7 +157,7 @@ fn capture_area_file_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathResu
     let backend = WaylandBackend::new()
         .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
     let full_capture = backend
-        .capture_screen_for_selection_at(Some((monitor_choice.x, monitor_choice.y)))
+        .capture_screen_for_selection_at_with_sound(Some((monitor_choice.x, monitor_choice.y)))
         .or_else(|_| backend.capture_screen())
         .map_err(|err| {
             SelectionError::InitError(format!("Wayland background capture failed: {err}"))
@@ -236,7 +236,7 @@ fn capture_crosshair_file_via_gtk_layer_shell_wlroots() -> Result<PathBuf, Selec
     let backend = WaylandBackend::new()
         .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
     let full_capture = backend
-        .capture_screen_for_selection_at(Some((monitor_choice.x, monitor_choice.y)))
+        .capture_screen_for_selection_at_with_sound(Some((monitor_choice.x, monitor_choice.y)))
         .or_else(|_| backend.capture_screen())
         .map_err(|err| {
             SelectionError::InitError(format!("Wayland background capture failed: {err}"))
@@ -266,7 +266,7 @@ fn capture_screen_file_via_wlroots() -> Result<PathBuf, SelectionError> {
     let backend = WaylandBackend::new()
         .map_err(|err| SelectionError::InitError(format!("Wayland backend unavailable: {err}")))?;
     let capture = backend
-        .capture_screen_for_selection_impl()
+        .capture_screen_for_selection_at_with_sound(None)
         .or_else(|_| backend.capture_screen())
         .map_err(|err| {
             SelectionError::InitError(format!("Wayland fullscreen capture failed: {err}"))

@@ -7,9 +7,9 @@ mod tests {
         parse_area_capture_output_with_persist, parse_area_capture_output_with_stderr,
         parse_capture_screen_json, parse_capture_screen_json_with_mode, parse_recording_json,
         parse_selection_json, save_capture_to_temp_png, should_request_screenshot_lock,
-        should_use_gtk_layer_shell_selector_from_env, tracked_overlay_id,
-        AreaCapturePathResult, CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode,
-        OverlaySelection, RecordingType,
+        should_use_gtk_layer_shell_selector_from_env, supports_custom_shutter_sound_from,
+        tracked_overlay_id, AreaCapturePathResult, CaptureSessionCoordinator, LaunchBlockedReason,
+        OverlayExitCode, OverlaySelection, RecordingType,
     };
     use crate::{
         backend::{CaptureData, PixelFormat},
@@ -50,6 +50,16 @@ mod tests {
             },
         );
         assert_eq!(on_args, vec!["--show-timer", "--timer-seconds=3"]);
+    }
+
+    #[test]
+    fn custom_shutter_sound_support_follows_the_capture_route() {
+        assert!(supports_custom_shutter_sound_from(false, true, false));
+
+        assert!(!supports_custom_shutter_sound_from(true, true, false));
+        assert!(!supports_custom_shutter_sound_from(false, false, false));
+        assert!(!supports_custom_shutter_sound_from(false, true, true));
+        assert!(!supports_custom_shutter_sound_from(true, false, true));
     }
 
     #[test]
