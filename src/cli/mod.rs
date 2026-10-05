@@ -3,3 +3,4 @@
 pub(crate) mod handlers;
 pub(crate) mod install;
 pub(crate) mod native_host;
+pub(crate) mod update;

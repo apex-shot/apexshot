@@ -64,6 +64,13 @@ fn main() {
     // Handle GTK-only commands BEFORE entering tokio runtime
     // These commands run their own GTK main loop and don't need tokio
     match args[1].as_str() {
+        "update" => {
+            if let Err(error) = cli::update::run_update(&args) {
+                eprintln!("Update failed: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
         "edit-internal" => {
             if args.len() < 3 {
                 eprintln!("Error: missing image path");
@@ -616,6 +623,7 @@ pub(crate) fn print_usage() {
     println!("  native-host <sub> Install/uninstall native messaging host");
     println!("  video-editor [mp4] Open the recording editor");
     println!("  install           Install local binary and set up autostart");
+    println!("  update            Update ApexShot to the latest published release");
     println!("  --version / -V    Print version");
     println!("  uninstall         Remove local install, autostart, and native host manifests");
     println!();

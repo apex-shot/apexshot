@@ -251,7 +251,19 @@ in progress.
 
 ### Updating
 
-The generic updater detects the distro:
+Update ApexShot from your terminal:
+
+```bash
+apexshot update
+```
+
+The command runs the official updater in your current terminal, detects the
+distribution, and asks for sudo when needed. Ubuntu/Debian, Arch, and Fedora
+use their existing package update paths. If the installed version is current
+or newer, it exits without downloading or installing a package. Flatpak installs should use
+`flatpak update` from a host terminal instead.
+
+For older ApexShot versions without this command, the generic updater still works:
 
 ```bash
 curl -fsSL https://apexshot.org/update | sh
@@ -494,6 +506,7 @@ apexshot logout                  # Sign out of ApexShot Cloud
 apexshot daemon                  # Background tray + hotkeys
 apexshot hotkeys install         # Install desktop keybindings
 apexshot install                 # Local binary + autostart install
+apexshot update                  # Update to the latest published release
 apexshot --version               # Print version
 ```
 
