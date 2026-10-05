@@ -98,7 +98,9 @@ impl EditorState {
         let dy = point.y - anchor.y;
         let img_w = self.base_image.width() as i32;
         let img_h = self.base_image.height() as i32;
+        let canvas_bounds = self.canvas_bounds_for_dimensions(img_w as u32, img_h as u32);
         let resize_handle = self.select_resize_handle;
+        let before = self.document_snapshot();
         let (moved, effect_action) = if let Some(action) = self.actions.get_mut(index) {
             let moved = if let Some(handle) = resize_handle {
                 resize_action(action, handle, dx, dy)
@@ -107,7 +109,7 @@ impl EditorState {
             };
 
             if moved {
-                clamp_action_to_image(action, img_w, img_h);
+                clamp_action_to_canvas(action, canvas_bounds);
             }
 
             let effect_action = matches!(
@@ -125,8 +127,9 @@ impl EditorState {
             return false;
         }
 
+        self.history_interaction_before.get_or_insert(before);
         self.select_drag_anchor = Some(point);
-        self.redo_actions.clear();
+        self.clear_redo_history();
         if effect_action {
             self.select_drag_effect_dirty = true;
         }
@@ -145,6 +148,7 @@ impl EditorState {
     }
 
     pub fn end_select_drag_without_rebuild(&mut self) {
+        self.finish_history_interaction();
         self.select_drag_anchor = None;
         self.select_resize_handle = None;
         self.drag_start = None;
@@ -178,6 +182,7 @@ impl EditorState {
             return false;
         }
 
+        let before = self.document_snapshot();
         let removed = self.actions.remove(index);
         let next_number_after_remove = match &removed {
             AnnotationAction::Number { number, style, .. } if *style == self.numbering_style => {
@@ -187,31 +192,33 @@ impl EditorState {
         };
         self.select_drag_anchor = None;
         self.select_resize_handle = None;
-        self.redo_actions.clear();
+        self.clear_redo_history();
         if let Some(next_number) = next_number_after_remove {
             self.next_number = next_number;
         } else {
             self.sync_next_number();
         }
+        self.commit_history_change(before, super::history::HistoryKind::Edit);
         true
     }
 }
 
-/// Clamp an annotation action so it stays within the image bounds.
-/// For rect-based actions (Obfuscate, Focus, Box, Circle) the rect is clamped.
-/// For point-based actions (Text, Number, Pen, Arrow, Line) each point is clamped.
-fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) {
+/// Clamp annotations to the screenshot and its current Appearance surround.
+fn clamp_action_to_canvas(action: &mut AnnotationAction, bounds: (f64, f64, f64, f64)) {
+    let (min_x, min_y, max_x, max_y) = bounds;
+    let width = (max_x - min_x).max(1.0);
+    let height = (max_y - min_y).max(1.0);
     match action {
         AnnotationAction::Obfuscate { rect, .. }
         | AnnotationAction::Focus { rect, .. }
         | AnnotationAction::Box { rect, .. }
         | AnnotationAction::Circle { rect, .. } => {
-            let w = rect.width.min(img_w);
-            let h = rect.height.min(img_h);
+            let w = (rect.width as f64).min(width) as i32;
+            let h = (rect.height as f64).min(height) as i32;
             rect.width = w;
             rect.height = h;
-            rect.x = rect.x.max(0).min(img_w - w);
-            rect.y = rect.y.max(0).min(img_h - h);
+            rect.x = (rect.x as f64).max(min_x).min(max_x - w as f64).round() as i32;
+            rect.y = (rect.y as f64).max(min_y).min(max_y - h as f64).round() as i32;
         }
         AnnotationAction::Text {
             position,
@@ -240,30 +247,30 @@ fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) 
             let box_w = bounds.rect.width as f64;
             let box_h = bounds.rect.height as f64;
             let new_box_left = (bounds.rect.x as f64)
-                .max(0.0)
-                .min((img_w as f64 - box_w).max(0.0));
+                .max(min_x)
+                .min((max_x - box_w).max(min_x));
             position.x = new_box_left;
             let padding_y = 8.0;
             let new_box_top = (bounds.rect.y as f64)
-                .max(0.0)
-                .min((img_h as f64 - box_h).max(0.0));
+                .max(min_y)
+                .min((max_y - box_h).max(min_y));
             position.y = new_box_top + font.size + padding_y;
         }
         AnnotationAction::Number { position, .. } => {
-            position.x = position.x.max(0.0).min(img_w as f64);
-            position.y = position.y.max(0.0).min(img_h as f64);
+            position.x = position.x.max(min_x).min(max_x);
+            position.y = position.y.max(min_y).min(max_y);
         }
         AnnotationAction::Pen { points, .. } | AnnotationAction::Highlighter { points, .. } => {
             for p in points {
-                p.x = p.x.max(0.0).min(img_w as f64);
-                p.y = p.y.max(0.0).min(img_h as f64);
+                p.x = p.x.max(min_x).min(max_x);
+                p.y = p.y.max(min_y).min(max_y);
             }
         }
         AnnotationAction::Line { start, end, .. } => {
-            start.x = start.x.max(0.0).min(img_w as f64);
-            start.y = start.y.max(0.0).min(img_h as f64);
-            end.x = end.x.max(0.0).min(img_w as f64);
-            end.y = end.y.max(0.0).min(img_h as f64);
+            start.x = start.x.max(min_x).min(max_x);
+            start.y = start.y.max(min_y).min(max_y);
+            end.x = end.x.max(min_x).min(max_x);
+            end.y = end.y.max(min_y).min(max_y);
         }
         AnnotationAction::Arrow {
             start,
@@ -272,8 +279,8 @@ fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) 
             stroke_size,
             ..
         } => {
-            let iw = img_w as f64;
-            let ih = img_h as f64;
+            let iw = max_x;
+            let ih = max_y;
             let margin = *stroke_size * 0.5;
             let mut min_x = start.x.min(end.x);
             let mut max_x = start.x.max(end.x);
@@ -310,15 +317,15 @@ fn clamp_action_to_image(action: &mut AnnotationAction, img_w: i32, img_h: i32) 
                 }
             }
 
-            let shift_x = if min_x < margin {
-                margin - min_x
+            let shift_x = if min_x < bounds.0 + margin {
+                bounds.0 + margin - min_x
             } else if max_x > iw - margin {
                 (iw - margin) - max_x
             } else {
                 0.0
             };
-            let shift_y = if min_y < margin {
-                margin - min_y
+            let shift_y = if min_y < bounds.1 + margin {
+                bounds.1 + margin - min_y
             } else if max_y > ih - margin {
                 (ih - margin) - max_y
             } else {
@@ -396,6 +403,36 @@ mod tests {
                 assert_eq!(rect.y, 24);
             }
             other => panic!("expected obfuscate action, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn selection_drag_keeps_annotations_inside_new_background_canvas_bounds() {
+        let mut state = EditorState::new(RgbaImage::new(32, 32));
+        state.background_style = super::super::super::types::BackgroundStyle::PlainColor(
+            crate::capture::editor::types::DrawColor::new(0.1, 0.2, 0.3, 1.0),
+        );
+        state.push_action(AnnotationAction::Box {
+            rect: Rect {
+                x: 2,
+                y: 2,
+                width: 6,
+                height: 6,
+            },
+            color: DRAW_COLORS[0],
+            stroke_size: STROKE_WIDTH,
+            shadow: false,
+        });
+        state.selected_action_index = Some(0);
+        state.select_drag_anchor = Some(Point { x: 3.0, y: 3.0 });
+        assert!(state.update_select_drag(Point { x: -3.0, y: -3.0 }));
+
+        match &state.actions[0] {
+            AnnotationAction::Box { rect, .. } => {
+                assert!(rect.x < 0);
+                assert!(rect.y < 0);
+            }
+            other => panic!("expected box, got {other:?}"),
         }
     }
 

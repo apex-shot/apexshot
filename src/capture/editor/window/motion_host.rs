@@ -174,7 +174,11 @@ impl MotionHost {
             let in_motion = self.in_motion.clone();
             let duration_slider = self.parts.shared.duration_slider.clone();
             let duration_value = self.parts.shared.duration_value.clone();
+            let static_interact_enter = static_appearance_interact.clone();
             Rc::new(move || {
+                if let Some(interact) = static_interact_enter.as_ref() {
+                    interact();
+                }
                 session.capture_snapshot(&state.lock().unwrap());
                 // Fresh panel from the captured runtime: every control shows
                 // the Static values instead of window-open state.

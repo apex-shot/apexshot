@@ -2,8 +2,8 @@ use gtk4::cairo::{Context, Format, ImageSurface};
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, DrawingArea, Entry,
     FileChooserAction, FileChooserNative, FileFilter, GestureClick, Grid, Image, Label,
-    Orientation, PickFlags, PolicyType, ResponseType, Revealer, RevealerTransitionType,
-    ScrolledWindow, Separator, Stack, ToggleButton,
+    Orientation, PolicyType, ResponseType, Revealer, RevealerTransitionType, ScrolledWindow,
+    Separator, Stack, ToggleButton,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -222,24 +222,13 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     root.add_css_class("editor-motion-inspector");
     root.set_hexpand(false);
     root.set_vexpand(false);
-    // Safety net for view-only toggles and future controls: any pointer press
-    // inside Appearance arms Background. Mutating controls also call
-    // notify_interact explicitly so keyboard/popover edits are covered.
+    // Any pointer interaction in Appearance deactivates the Static tool.
+    // Mutating controls also notify explicitly for keyboard/popover edits.
     {
         let notify = notify_interact.clone();
-        let root_for_pick = root.clone();
         let capture = GestureClick::new();
         capture.set_propagation_phase(gtk4::PropagationPhase::Capture);
-        capture.connect_pressed(move |_, _, x, y| {
-            // Disclosure headers only expand or collapse; they change no
-            // appearance value, so they must not arm the tool or mark the
-            // canvas interactive. That mark schedules a full-quality canvas
-            // repaint mid-slide, which is a hitch right when the reveal is
-            // animating.
-            if !press_is_disclosure_header(&root_for_pick, x, y) {
-                notify();
-            }
-        });
+        capture.connect_pressed(move |_, _, _, _| notify());
         root.add_controller(capture);
     }
 
@@ -1596,19 +1585,6 @@ fn motion_appearance_body() -> GtkBox {
 /// over a revealer, collapsed by default. The fill tabs own the top of the
 /// panel; everything else opens on demand so the sidebar never becomes one
 /// long scroll. The heading stays in the row the revealer wraps.
-/// Whether a press at `(x, y)` in `root` landed on a disclosure header.
-/// Disclosure toggles are view-only, so the panel's press notifier skips them.
-fn press_is_disclosure_header(root: &GtkBox, x: f64, y: f64) -> bool {
-    let mut node = root.pick(x, y, PickFlags::DEFAULT);
-    while let Some(widget) = node {
-        if widget.has_css_class("editor-disclosure-header") {
-            return true;
-        }
-        node = widget.parent();
-    }
-    false
-}
-
 fn motion_disclosure_row(title: &str, body: &GtkBox) -> GtkBox {
     let row = GtkBox::new(Orientation::Vertical, 8);
     row.add_css_class("editor-motion-settings-section");
@@ -2212,12 +2188,9 @@ mod tests {
         );
     }
 
-    /// The disclosure reveal re-snapshots its body every frame, so opening one
-    /// must not carry per-frame cairo or a mid-slide canvas repaint. The style
-    /// swatches are cached to a surface and blitted, and a header press is not
-    /// treated as an Appearance edit.
+    /// Disclosure clicks also deactivate the current Static canvas tool.
     #[test]
-    fn disclosure_open_is_cheap_and_view_only() {
+    fn appearance_pointer_interaction_deactivates_static_tool() {
         let source = include_str!("appearance.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
@@ -2227,12 +2200,7 @@ mod tests {
                 && production_source.contains("Some((w, h, _)) if *w == width && *h == height"),
             "frame-style swatches must render once per size and blit during the reveal",
         );
-        assert!(
-            production_source.contains("fn press_is_disclosure_header(")
-                && production_source.contains("has_css_class(\"editor-disclosure-header\")")
-                && production_source.contains("if !press_is_disclosure_header("),
-            "a disclosure header press must not arm the tool or mark the canvas interactive",
-        );
+        assert!(production_source.contains("capture.connect_pressed(move |_, _, _, _| notify());"));
     }
 
     #[test]

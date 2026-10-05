@@ -98,6 +98,16 @@ pub(super) fn wire_canvas_drag(
 
         let mut st = state_drag_begin.lock().unwrap();
 
+        if st.selected_tool == Tool::Crop {
+            st.begin_crop_drag(t.view_to_image_clamped(view_point), t.scale);
+            st.drag_start_view = Some(view_point);
+            drop(st);
+            if let Some(area) = drawing_area_begin.upgrade() {
+                area.queue_draw();
+            }
+            return;
+        }
+
         if st.selected_tool == Tool::Select {
             let image_point = t.view_to_image_clamped(view_point);
 
@@ -353,6 +363,7 @@ pub(super) fn wire_canvas_drag(
                 if handle_hit.is_some() || resize_hit {
                     // Handle drag: set up active_text_is_dragging so the motion
                     // handler takes over — same as the active-edit handle path.
+                    st.begin_history_interaction();
                     st.active_text_bounds = Some(bounds);
                     st.active_text_is_dragging = true;
                     st.active_text_drag_handle = handle_hit;
@@ -575,6 +586,24 @@ pub(super) fn wire_canvas_drag(
             .unwrap_or_else(|| *transform_drag_update.lock().unwrap());
         let mut st = state_drag_update.lock().unwrap();
 
+        if st.selected_tool == Tool::Crop {
+            if let Some(start_view) = st.drag_start_view {
+                let current_view = Point {
+                    x: start_view.x + offset_x,
+                    y: start_view.y + offset_y,
+                };
+                let shift_pressed = gesture
+                    .current_event_state()
+                    .contains(gdk::ModifierType::SHIFT_MASK);
+                st.update_crop_drag(t.view_to_image_clamped(current_view), shift_pressed);
+            }
+            drop(st);
+            if let Some(area) = drawing_area_update.upgrade() {
+                area.queue_draw();
+            }
+            return;
+        }
+
         // Arrow control point dragging
         if let Some(handle_idx) = st.arrow_control_dragging {
             let start_view = st.drag_start_view.unwrap_or(Point { x: 0.0, y: 0.0 });
@@ -693,6 +722,7 @@ pub(super) fn wire_canvas_drag(
     let sync_size_control_drag_end = sync_size_control.clone();
     let sync_select_inspector_drag_end = sync_select_inspector.clone();
     let rebuild_effects_async_drag_end = rebuild_effects_async.clone();
+    let drag_start_transform_end = drag_start_transform.clone();
     drag.connect_drag_end(move |gesture, offset_x, offset_y| {
         let _ = gesture.current_event_state();
         if space_pan_dragging_end.replace(false) {
@@ -714,8 +744,30 @@ pub(super) fn wire_canvas_drag(
             return;
         }
 
-        let t = *transform_drag_end.lock().unwrap();
+        let t = drag_start_transform_end
+            .borrow()
+            .unwrap_or_else(|| *transform_drag_end.lock().unwrap());
         let mut st = state_drag_end.lock().unwrap();
+
+        if st.selected_tool == Tool::Crop {
+            if let Some(start_view) = st.drag_start_view {
+                let current_view = Point {
+                    x: start_view.x + offset_x,
+                    y: start_view.y + offset_y,
+                };
+                let shift_pressed = gesture
+                    .current_event_state()
+                    .contains(gdk::ModifierType::SHIFT_MASK);
+                st.update_crop_drag(t.view_to_image_clamped(current_view), shift_pressed);
+            }
+            st.end_crop_drag();
+            st.drag_start_view = None;
+            drop(st);
+            if let Some(area) = drawing_area_end.upgrade() {
+                area.queue_draw();
+            }
+            return;
+        }
 
         // Arrow control point dragging: clear and return
         if st.arrow_control_dragging.is_some() {

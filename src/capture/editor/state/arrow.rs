@@ -19,6 +19,7 @@ impl EditorState {
             return false;
         };
 
+        let before = self.document_snapshot();
         let Some(action) = self.actions.get_mut(index) else {
             self.selected_action_index = None;
             return false;
@@ -37,7 +38,8 @@ impl EditorState {
         }
 
         *current_style = style;
-        self.redo_actions.clear();
+        self.clear_redo_history();
+        self.commit_history_change(before, super::history::HistoryKind::Edit);
         true
     }
 
@@ -46,6 +48,7 @@ impl EditorState {
             return false;
         };
 
+        let before = self.document_snapshot();
         let Some(action) = self.actions.get_mut(index) else {
             self.selected_action_index = None;
             return false;
@@ -65,7 +68,8 @@ impl EditorState {
         if let Some(points) = control_points.as_mut() {
             points.reverse();
         }
-        self.redo_actions.clear();
+        self.clear_redo_history();
+        self.commit_history_change(before, super::history::HistoryKind::Edit);
         true
     }
 
@@ -110,11 +114,15 @@ impl EditorState {
         let Some(action_index) = self.selected_action_index else {
             return;
         };
+        if self.history_interaction_before.is_none() {
+            let before = self.document_snapshot();
+            self.history_interaction_before = Some(before);
+        }
+        let bounds =
+            self.canvas_bounds_for_dimensions(self.base_image.width(), self.base_image.height());
         let Some(action) = self.actions.get_mut(action_index) else {
             return;
         };
-        let iw = self.base_image.width() as f64;
-        let ih = self.base_image.height() as f64;
         if let AnnotationAction::Arrow {
             control_points: Some(handles),
             start,
@@ -124,8 +132,8 @@ impl EditorState {
         {
             if handles.len() >= 3 {
                 let clamp_point = |mut point: Point| {
-                    point.x = point.x.max(0.0).min(iw);
-                    point.y = point.y.max(0.0).min(ih);
+                    point.x = point.x.max(bounds.0).min(bounds.2);
+                    point.y = point.y.max(bounds.1).min(bounds.3);
                     point
                 };
                 match index {
@@ -155,15 +163,15 @@ impl EditorState {
                 match index {
                     0 => {
                         let mut clamped = new_pos;
-                        clamped.x = clamped.x.max(0.0).min(iw);
-                        clamped.y = clamped.y.max(0.0).min(ih);
+                        clamped.x = clamped.x.max(bounds.0).min(bounds.2);
+                        clamped.y = clamped.y.max(bounds.1).min(bounds.3);
                         *start = clamped;
                         handles[0] = clamped;
                     }
                     1 => {
                         let mut clamped = new_pos;
-                        clamped.x = clamped.x.max(0.0).min(iw);
-                        clamped.y = clamped.y.max(0.0).min(ih);
+                        clamped.x = clamped.x.max(bounds.0).min(bounds.2);
+                        clamped.y = clamped.y.max(bounds.1).min(bounds.3);
                         *end = clamped;
                         handles[1] = clamped;
                     }
@@ -174,12 +182,14 @@ impl EditorState {
     }
 
     pub fn finalize_arrow_control_editing(&mut self) {
+        self.finish_history_interaction();
         self.arrow_editing_controls = false;
         self.arrow_control_dragging = None;
     }
 
     pub fn finalize_arrow_interaction_cleanup(&mut self) {
         self.clear_drag_without_rebuild();
+        self.finish_history_interaction();
         self.arrow_editing_controls = self
             .selected_action_index
             .and_then(|index| self.actions.get(index))

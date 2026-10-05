@@ -1,17 +1,23 @@
 use gtk4::{
-    prelude::*, Align, Box as GtkBox, Button, Entry, Image, Label, Orientation, Popover, Scale,
-    Stack,
+    glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, Entry, Image, Label, Orientation,
+    Popover, Scale, Stack,
 };
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use super::super::{
     color::{MAX_STROKE_SIZE, MIN_STROKE_SIZE},
     pen_weight::PenWeight,
-    types::{ArrowStyle, ObfuscateMethod, Tool},
+    state::EditorState,
+    types::{ArrowStyle, CropAspectRatio, ObfuscateMethod, Tool},
     ui_support::{
         arrow_style_toolbar_icon, icon_tool_button, tool_icon_widget, toolbar_icon_size,
-        traffic_light_button,
+        traffic_light_button, DockedBarInset,
     },
+};
+use super::floating_bar::{
+    build_option_row, build_pill, dock_position, dock_reserve, move_bar, popdown_for, queue_draw,
+    set_bar_shown, set_dock_reserve, sync_option_selection, wire_option_rows, DockRefs,
 };
 use super::icon_names;
 use crate::i18n::t;
@@ -22,7 +28,7 @@ pub(super) struct ToolbarBaseParts {
     pub traffic_minimize: Button,
     pub traffic_zoom: Button,
     pub select_btn: Button,
-    pub background_btn: Button,
+    pub crop_btn: Button,
     pub draw_btn: Button,
     pub arrow_btn: Button,
     pub line_btn: Button,
@@ -65,6 +71,15 @@ pub(super) struct ToolbarRightParts {
     pub undo_btn: Button,
     pub redo_btn: Button,
     pub delete_selected_btn: Button,
+}
+
+pub(super) struct CropControlParts {
+    pub root: GtkBox,
+    pub apply: Button,
+    pub cancel: Button,
+    ratio_label: Label,
+    ratio_list: GtkBox,
+    dimensions: Label,
 }
 
 pub(super) struct ToolbarModeParts {
@@ -147,7 +162,7 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
     }
 
     let select_btn = icon_tool_button(icon_names::custom::SELECT_MODE_SYMBOLIC, &t("Select"));
-    let background_btn = icon_tool_button(icon_names::custom::IMAGE_ALT_SYMBOLIC, &t("Background"));
+    let crop_btn = icon_tool_button(icon_names::custom::CROP_SYMBOLIC, &t("Crop"));
     let draw_btn = icon_tool_button(icon_names.draw, &t("Pen"));
 
     let arrow_btn = icon_tool_button(icon_names.arrow, &t("Arrow"));
@@ -164,7 +179,7 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
     // below keep the content-sized `.editor-tool-button` look.
     for btn in [
         &select_btn,
-        &background_btn,
+        &crop_btn,
         &draw_btn,
         &arrow_btn,
         &line_btn,
@@ -196,7 +211,7 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
         traffic_minimize,
         traffic_zoom,
         select_btn,
-        background_btn,
+        crop_btn,
         draw_btn,
         arrow_btn,
         line_btn,
@@ -210,6 +225,150 @@ pub(super) fn build_toolbar_base(icon_names: ToolbarBaseIconNames<'_>) -> Toolba
         sep_1,
         sep_2,
     }
+}
+
+const CROP_RATIOS: [CropAspectRatio; 5] = [
+    CropAspectRatio::Freeform,
+    CropAspectRatio::Original,
+    CropAspectRatio::Square,
+    CropAspectRatio::FourThree,
+    CropAspectRatio::SixteenNine,
+];
+
+fn crop_ratio_label(ratio: CropAspectRatio) -> String {
+    match ratio {
+        CropAspectRatio::Freeform => t("Freeform"),
+        CropAspectRatio::Original => t("Original"),
+        CropAspectRatio::Square => "1:1".into(),
+        CropAspectRatio::FourThree => "4:3".into(),
+        CropAspectRatio::SixteenNine => "16:9".into(),
+        _ => t("Freeform"),
+    }
+}
+
+pub(super) fn build_crop_controls(
+    state: &Arc<Mutex<EditorState>>,
+    drawing_area: &DrawingArea,
+) -> CropControlParts {
+    let root = GtkBox::new(Orientation::Horizontal, 8);
+    root.add_css_class("editor-text-floating-bar");
+    root.add_css_class("editor-crop-control-bar");
+    root.set_halign(Align::Start);
+    root.set_valign(Align::Start);
+    set_bar_shown(&root, false);
+
+    let ratio = build_pill("Crop");
+    for preset in CROP_RATIOS {
+        let row = build_option_row(&crop_ratio_label(preset), "editor-crop-ratio-check");
+        row.add_css_class("editor-crop-ratio-option");
+        ratio.list.append(&row);
+    }
+    {
+        let state = state.clone();
+        let area = drawing_area.downgrade();
+        wire_option_rows(
+            &ratio.list,
+            "editor-crop-ratio-option",
+            move |index, button| {
+                if let Some(preset) = CROP_RATIOS.get(index).copied() {
+                    state.lock().unwrap().set_crop_ratio(preset);
+                    popdown_for(button);
+                    queue_draw(&area);
+                }
+            },
+        );
+    }
+
+    let dimensions = Label::new(Some("—"));
+    dimensions.add_css_class("editor-crop-dimensions");
+    dimensions.set_width_chars(11);
+
+    let cancel = Button::with_label(&t("Cancel"));
+    cancel.set_has_frame(false);
+    cancel.set_focusable(false);
+    cancel.add_css_class("editor-tool-button");
+    cancel.add_css_class("flat");
+    cancel.add_css_class("editor-crop-cancel");
+    let apply = Button::with_label(&t("Apply"));
+    apply.set_has_frame(false);
+    apply.set_focusable(false);
+    apply.add_css_class("editor-done-button");
+    apply.add_css_class("editor-crop-apply");
+
+    root.append(&ratio.button);
+    root.append(&dimensions);
+    root.append(&cancel);
+    root.append(&apply);
+
+    CropControlParts {
+        root,
+        ratio_label: ratio.label,
+        ratio_list: ratio.list,
+        dimensions,
+        apply,
+        cancel,
+    }
+}
+
+pub(super) fn install_crop_controls_tick(
+    bar: &CropControlParts,
+    drawing_area: &DrawingArea,
+    state: &Arc<Mutex<EditorState>>,
+    dock_refs: &DockRefs,
+    inset: &DockedBarInset,
+) {
+    let root = bar.root.clone();
+    let ratio_label = bar.ratio_label.clone();
+    let ratio_list = bar.ratio_list.clone();
+    let dimensions = bar.dimensions.clone();
+    let apply = bar.apply.clone();
+    let state = state.clone();
+    let inset = inset.clone();
+    let dock_refs = DockRefs {
+        scroller: dock_refs.scroller.clone(),
+        drawing_area: dock_refs.drawing_area.clone(),
+    };
+    drawing_area.add_tick_callback(move |widget, _| {
+        let (show, ratio, rect, size) = {
+            let st = state.lock().unwrap();
+            (
+                st.selected_tool == Tool::Crop,
+                st.crop_ratio,
+                st.crop_rect,
+                st.base_image.dimensions(),
+            )
+        };
+        set_bar_shown(&root, show);
+        if !show {
+            set_dock_reserve(&inset, "crop", 0.0, widget);
+            return glib::ControlFlow::Continue;
+        }
+        ratio_label.set_label(&crop_ratio_label(ratio));
+        sync_option_selection(
+            &ratio_list,
+            CROP_RATIOS
+                .iter()
+                .position(|candidate| *candidate == ratio)
+                .unwrap_or(0),
+            "editor-crop-ratio-option-active",
+        );
+        if let Some(rect) = rect {
+            dimensions.set_label(&format!("{} × {}", rect.width, rect.height));
+            apply.set_sensitive(
+                rect.x != 0
+                    || rect.y != 0
+                    || rect.width != size.0 as i32
+                    || rect.height != size.1 as i32,
+            );
+        } else {
+            dimensions.set_label("—");
+            apply.set_sensitive(false);
+        }
+        set_dock_reserve(&inset, "crop", dock_reserve(root.height() as f64), widget);
+        let (left, top) = dock_position(&dock_refs, root.width() as f64);
+        move_bar(&root, left, top);
+        glib::ControlFlow::Continue
+    });
 }
 
 pub(super) fn build_obfuscate_method_controls() -> (GtkBox, Button, Popover, GtkBox) {
@@ -577,7 +736,7 @@ fn build_number_options_dropdown() -> (
 }
 
 pub(super) fn build_toolbar_mode_controls(
-    background_btn: &Button,
+    crop_btn: &Button,
     select_btn: &Button,
     draw_btn: &Button,
     box_btn: &Button,
@@ -882,7 +1041,7 @@ pub(super) fn build_toolbar_mode_controls(
     let selection_group = GtkBox::new(Orientation::Horizontal, 1);
     selection_group.add_css_class("editor-tools-subgroup");
     selection_group.append(select_btn);
-    selection_group.append(background_btn);
+    selection_group.append(crop_btn);
 
     // Group 2: Drawing tools (freehand marks)
     let drawing_group = GtkBox::new(Orientation::Horizontal, 1);
@@ -1193,16 +1352,50 @@ mod tests {
     }
 
     #[test]
-    fn toolbar_removed_crop_tool_since_frame_covers_ratios() {
+    fn toolbar_exposes_crop_in_the_former_appearance_slot() {
         let source = include_str!("toolbar.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
-            !production_source.contains("crop_btn")
-                && !production_source.contains("selection_group.append(crop_btn);")
-                && !production_source
-                    .contains("toolbar_mode_stack.add_named(&crop_mode_group, Some(\"crop\"));"),
-            "Toolbar should no longer expose the Crop tool; Background Frame covers ratios",
+            production_source.contains(
+                "let crop_btn = icon_tool_button(icon_names::custom::CROP_SYMBOLIC, &t(\"Crop\"));"
+            ) && production_source.contains("selection_group.append(crop_btn);"),
+            "The Crop tool should occupy the former Appearance toolbar slot",
         );
+    }
+
+    #[test]
+    fn crop_controls_reuse_shared_pills_and_the_second_toolbar_dock() {
+        let source = include_str!("toolbar.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let crop_controls = production
+            .split("pub(super) fn build_crop_controls(")
+            .nth(1)
+            .unwrap();
+        let crop_controls = crop_controls
+            .split("pub(super) fn build_obfuscate_method_controls(")
+            .next()
+            .unwrap();
+        assert!(crop_controls.contains("root.add_css_class(\"editor-text-floating-bar\")"));
+        assert!(crop_controls.contains("let ratio = build_pill(\"Crop\")"));
+        assert!(crop_controls.contains("set_bar_shown(&root, show)"));
+        assert!(crop_controls.contains("dock_position(&dock_refs"));
+        assert!(crop_controls.contains("set_dock_reserve(&inset, \"crop\""));
+        assert!(!crop_controls.contains("set_visible(false)"));
+        assert!(!crop_controls.contains("Align::End"));
+        assert!(!crop_controls.contains("ComboBoxText"));
+    }
+
+    #[test]
+    fn crop_apply_uses_the_padded_primary_action_style() {
+        let source = include_str!("toolbar.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let apply = production
+            .split("let apply = Button::with_label(&t(\"Apply\"));")
+            .nth(1)
+            .unwrap();
+        let apply = apply.split("root.append(").next().unwrap();
+        assert!(apply.contains("apply.add_css_class(\"editor-done-button\")"));
+        assert!(!apply.contains("apply.add_css_class(\"editor-tool-button\")"));
     }
 
     #[test]

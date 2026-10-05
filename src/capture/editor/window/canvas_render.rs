@@ -256,6 +256,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             frame_style,
             scene_shadow,
             selected_tool,
+            crop_rect,
             selected_action,
             select_resize_handle,
             active_text_bounds,
@@ -295,6 +296,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 st.frame_style,
                 st.scene_shadow.clone(),
                 st.selected_tool,
+                st.crop_rect,
                 st.selected_action().cloned(),
                 st.select_resize_handle,
                 st.active_text_bounds.clone(),
@@ -407,7 +409,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             offset_y: canvas_offset_y,
             image_width,
             image_height,
-            has_background,
+            has_background: has_background || frame_without_background,
             canvas_offset_x,
             canvas_offset_y,
             canvas_scale: scale,
@@ -705,7 +707,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 t.canvas_scale = canvas_t.scale;
                 t.canvas_width = layout.canvas_width;
                 t.canvas_height = layout.canvas_height;
-                t.has_background = has_background;
+                t.has_background = has_background || frame_without_background;
 
                 // Stack presets: flat backing sheets behind the card, offset
                 // up-left like stacked prints. Farthest sheet first.
@@ -1022,6 +1024,8 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         let _ = context.save();
         context.translate(t.offset_x, t.offset_y);
         context.scale(t.scale, t.scale);
+        let _ = context.save();
+        crate::capture::editor::render::clip_annotation_content_to_canvas(context, t);
 
         let editing_action_index = active_text_input
             .as_ref()
@@ -1042,6 +1046,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         if let Some(draft) = draft_action {
             draw_draft_action(context, &draft);
         }
+        let _ = context.restore();
 
         // Scene Shadows overlay: above the card and its annotations, matching
         // the Motion overlay pass. Handles and edit outlines are editor
@@ -1269,6 +1274,18 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             }
             draw_text_edit_border(context, &bounds, t.scale);
             draw_text_edit_handles(context, &bounds, active_text_drag_handle.clone(), t.scale);
+        }
+        if selected_tool == Tool::Crop {
+            if let Some(rect) = crop_rect {
+                crate::capture::editor::render::draw_crop_overlay(
+                    context,
+                    image_width,
+                    image_height,
+                    rect,
+                    true,
+                    t.scale,
+                );
+            }
         }
         let _ = context.restore();
     });

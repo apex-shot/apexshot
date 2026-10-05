@@ -151,3 +151,18 @@
             .editor-size-group.size-group-inactive {
                 opacity: 0.42;
             }
+
+            .editor-crop-control-bar label.editor-crop-dimensions {
+                min-width: 82px;
+                color: #f4f4f6;
+                font-variant-numeric: tabular-nums;
+            }
+
+            .editor-crop-control-bar button.editor-crop-apply {
+                min-width: 0;
+                padding: 0 10px;
+            }
+
+            .editor-crop-control-bar button.editor-crop-cancel {
+                color: #f4f4f6;
+            }

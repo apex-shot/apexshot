@@ -621,6 +621,7 @@ pub(super) fn wire_canvas_click(
                     (st.active_text_bounds.take(), st.selected_action_index)
                 {
                     // Committed action handle resize: write new bounds back.
+                    let mut changed = false;
                     if let Some(crate::capture::editor::types::AnnotationAction::Text {
                         position,
                         font,
@@ -629,11 +630,20 @@ pub(super) fn wire_canvas_click(
                     }) = st.actions.get_mut(index)
                     {
                         let padding_y = 8.0;
-                        position.x = bounds.rect.x as f64;
-                        position.y = bounds.rect.y as f64 + font.size + padding_y;
-                        *max_width = Some(bounds.rect.width as f64);
+                        let next_x = bounds.rect.x as f64;
+                        let next_y = bounds.rect.y as f64 + font.size + padding_y;
+                        let next_width = Some(bounds.rect.width as f64);
+                        changed = position.x != next_x
+                            || position.y != next_y
+                            || *max_width != next_width;
+                        position.x = next_x;
+                        position.y = next_y;
+                        *max_width = next_width;
                     }
-                    st.redo_actions.clear();
+                    if changed {
+                        st.clear_redo_history();
+                    }
+                    st.finish_history_interaction();
                     false
                 } else {
                     false

@@ -94,6 +94,7 @@ impl EditorState {
         let stroke_size = self.stroke_size;
 
         match self.selected_tool {
+            Tool::Crop => None,
             Tool::Select => None,
             Tool::Background => None,
             Tool::Pen => {
@@ -263,6 +264,7 @@ impl EditorState {
         self.clear_drag();
 
         let mut result = match self.selected_tool {
+            Tool::Crop => None,
             Tool::Select => None,
             Tool::Background => None,
             Tool::Pen => None,

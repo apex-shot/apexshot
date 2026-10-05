@@ -27,6 +27,9 @@ pub(super) fn wire_window_keyboard(
     state: &Arc<Mutex<EditorState>>,
     drawing_area: &DrawingArea,
     tool_buttons: &[Button],
+    crop_apply_btn: &Button,
+    crop_cancel_btn: &Button,
+    sync_motion_crop_history: &Rc<dyn Fn()>,
     space_pan_active: &Rc<Cell<bool>>,
     space_pan_dragging: &Rc<Cell<bool>>,
     eyedropper_mode: &Rc<Cell<bool>>,
@@ -41,6 +44,9 @@ pub(super) fn wire_window_keyboard(
     sync_select_inspector: &Rc<dyn Fn()>,
 ) {
     let tool_buttons = tool_buttons.to_vec();
+    let crop_apply_btn = crop_apply_btn.clone();
+    let crop_cancel_btn = crop_cancel_btn.clone();
+    let sync_motion_crop_history = sync_motion_crop_history.clone();
     // Capture-phase Space handler: tool/chrome buttons are often focusable and
     // would activate on Space in the bubble phase, which breaks hand-pan after
     // the first tool click. Capture runs before the focused widget.
@@ -143,6 +149,17 @@ pub(super) fn wire_window_keyboard(
             return glib::Propagation::Stop;
         }
 
+        if state_keys.lock().unwrap().selected_tool == Tool::Crop {
+            if matches!(key, gdk::Key::Return | gdk::Key::KP_Enter) {
+                crop_apply_btn.emit_clicked();
+                return glib::Propagation::Stop;
+            }
+            if key == gdk::Key::Escape {
+                crop_cancel_btn.emit_clicked();
+                return glib::Propagation::Stop;
+            }
+        }
+
         let ctrl = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
         let shift = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
         let pressed = key.to_unicode();
@@ -203,6 +220,7 @@ pub(super) fn wire_window_keyboard(
                 state_keys.lock().unwrap().undo()
             };
             if changed {
+                sync_motion_crop_history();
                 sync_select_inspector_keys();
                 if let Some(area) = drawing_area_keys.upgrade() {
                     area.queue_draw();
@@ -213,6 +231,7 @@ pub(super) fn wire_window_keyboard(
 
         if ctrl && (pressed == Some('y') || pressed == Some('Y')) {
             if state_keys.lock().unwrap().redo() {
+                sync_motion_crop_history();
                 sync_select_inspector_keys();
                 if let Some(area) = drawing_area_keys.upgrade() {
                     area.queue_draw();

@@ -786,7 +786,7 @@ fn setup_editor_window_full(
         traffic_minimize,
         traffic_zoom,
         select_btn,
-        background_btn,
+        crop_btn,
         draw_btn,
         arrow_btn,
         line_btn,
@@ -893,7 +893,7 @@ fn setup_editor_window_full(
         stroke_size_popover: _,
         stroke_size_list: _toolbar_stroke_size_list,
     } = toolbar::build_toolbar_mode_controls(
-        &background_btn,
+        &crop_btn,
         &select_btn,
         &draw_btn,
         &box_btn,
@@ -1307,6 +1307,11 @@ fn setup_editor_window_full(
         img_height as i32,
         canvas::EYEDROPPER_LOUPE_SIZE,
     );
+    let crop_controls = toolbar::build_crop_controls(&state, &drawing_area);
+    let crop_control_bar = crop_controls.root.clone();
+    let crop_apply_btn = crop_controls.apply.clone();
+    let crop_cancel_btn = crop_controls.cancel.clone();
+    canvas_overlay.add_overlay(&crop_control_bar);
     // The zoom controls are added to the canvas pane later so they remain fixed
     // while the image scrolls and scales.
 
@@ -1318,8 +1323,8 @@ fn setup_editor_window_full(
     // Async Effects Pipeline (channels, worker, polling, watchdog, rebuild callback).
     let rebuild_effects_async = effects::install_async_effects_pipeline(&state, &drawing_area);
 
-    // Static Background shares Motion Appearance: same builder, same session,
-    // same side-panel tools (Appearance). No crop here.
+    // Static Appearance shares the Motion builder and session. The crop tool
+    // stays in the toolbar and its actions remain image-local.
     // Appearance edits repaint the canvas at pointer rate (a gradient-stop
     // drag, a slider, a preset click) while no canvas drag is running, so the
     // interactive burst is what keeps those frames on the cheap image filter
@@ -1328,9 +1333,7 @@ fn setup_editor_window_full(
         let drawing_area = drawing_area.clone();
         move || drawing_area.queue_draw()
     }));
-    // Auto-select slot: filled once the toolbar wiring exists below. The panel
-    // captures this forwarder now, so Appearance clicks (and Motion-leave
-    // rebuilds) arm Background even though tool buttons don't exist yet.
+    // The panel captures this forwarder before the toolbar wiring exists.
     let background_auto_select_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> =
         Rc::new(RefCell::new(None));
     let background_interact_forwarder: Rc<dyn Fn()> = Rc::new({
@@ -1601,6 +1604,13 @@ fn setup_editor_window_full(
         scroller: canvas_scroller.clone(),
         drawing_area: drawing_area.clone(),
     };
+    toolbar::install_crop_controls_tick(
+        &crop_controls,
+        &drawing_area,
+        &state,
+        &dock_refs,
+        &docked_inset,
+    );
 
     // Docked text bar (font + size) below the main toolbar, like the other
     // tool bars. Shows while Text is armed, with a text selected, or editing.
@@ -1646,8 +1656,7 @@ fn setup_editor_window_full(
     canvas_overlay.add_overlay(&arrow_bar.root);
     arrow_bar::install_arrow_bar_tick(&arrow_bar, &drawing_area, &state, &dock_refs, &docked_inset);
 
-    // Floating obfuscate bars: method picker above the active rect, intensity
-    // slider below it. Anchored to the rect they edit, like the text bar.
+    // Obfuscate method picker in the second toolbar, intensity slider by the rect.
     let obfuscate_bar = obfuscate_bar::build_obfuscate_bar(
         &state,
         &drawing_area,
@@ -1664,6 +1673,8 @@ fn setup_editor_window_full(
         &state,
         &transform,
         &size_slider,
+        &dock_refs,
+        &docked_inset,
     );
 
     // Floating focus bar: intensity slider below the active rect. Anchored to
@@ -2402,8 +2413,8 @@ fn setup_editor_window_full(
         }
     });
     sync_size_control();
-    // Shared Background->static sync: Appearance edits Motion runtime; static
-    // preview/export read EditorState, so copy across each frame. No crop here.
+    // Shared Appearance sync: Static preview/export read EditorState, so copy
+    // Motion-runtime styling across each frame without changing crop geometry.
     // ponytail: one sync point, not per-callback dual-write.
     {
         let motion_session = motion_host.session();
@@ -2451,7 +2462,7 @@ fn setup_editor_window_full(
 
     // Order must match `tool_button_index` in types.rs (used by click handlers + shortcuts).
     let tool_buttons = vec![
-        background_btn.clone(),  // 0 Background
+        crop_btn.clone(),        // 0 Crop
         select_btn.clone(),      // 1 Select
         draw_btn.clone(),        // 2 Pen
         box_btn.clone(),         // 3 Box
@@ -2468,9 +2479,8 @@ fn setup_editor_window_full(
     // Highlight whatever tool preferences restored (Background is only the default).
     set_active_tool_button(&tool_buttons, tool_button_index(initial_tool));
 
-    // Appearance interaction arms Background: a Pen/Arrow/etc. left selected
-    // would otherwise draw when the user clicks empty canvas to inspect a
-    // background change. No toggle — always land on Background.
+    // Appearance interaction returns Static to its neutral mode. A stale tool
+    // would otherwise draw on the canvas while the user is inspecting styling.
     *background_auto_select_slot.borrow_mut() = Some(Rc::new({
         let state = state.clone();
         let tool_buttons = tool_buttons.clone();
@@ -2485,10 +2495,6 @@ fn setup_editor_window_full(
             if in_motion.get() {
                 return;
             }
-            let needs_switch = state.lock().unwrap().selected_tool != Tool::Background;
-            if !needs_switch {
-                return;
-            }
             let rebuild = state
                 .lock()
                 .unwrap()
@@ -2496,7 +2502,7 @@ fn setup_editor_window_full(
             if rebuild {
                 rebuild_effects_async();
             }
-            set_active_tool_button(&tool_buttons, tool_button_index(Tool::Background));
+            set_active_tool_button(&tool_buttons, usize::MAX);
             update_toolbar_for_tool(Tool::Background);
             sync_shared_colors();
             sync_size_control();
@@ -2504,6 +2510,94 @@ fn setup_editor_window_full(
             drawing_area.queue_draw();
         }
     }));
+
+    crop_apply_btn.connect_clicked({
+        let state = state.clone();
+        let motion_session = motion_host.session();
+        let drawing_area = drawing_area.downgrade();
+        let update_canvas_content_size = update_canvas_content_size.clone();
+        let crop_cancel_btn = crop_cancel_btn.clone();
+        move |_| {
+            let motion_before = motion_session.motion_state();
+            let (applied, crop, old_width, old_height) = {
+                let mut st = state.lock().unwrap();
+                let crop = st.crop_rect;
+                let width = st.base_image.width();
+                let height = st.base_image.height();
+                (st.apply_pending_crop(), crop, width, height)
+            };
+            if applied {
+                state.lock().unwrap().restart_text_detection();
+                if let Some(crop) = crop {
+                    motion_session.rebase_source_coordinates_for_crop(crop, old_width, old_height);
+                    motion_session.capture_snapshot(&state.lock().unwrap());
+                    state.lock().unwrap().attach_motion_history_to_latest_crop(
+                        motion_before,
+                        motion_session.motion_state(),
+                    );
+                }
+                update_canvas_content_size();
+                crop_cancel_btn.emit_clicked();
+            }
+            if let Some(area) = drawing_area.upgrade() {
+                area.queue_draw();
+            }
+        }
+    });
+
+    crop_cancel_btn.connect_clicked({
+        let state = state.clone();
+        let tool_buttons = tool_buttons.clone();
+        let update_toolbar_for_tool = update_toolbar_for_tool.clone();
+        let sync_picker = sync_shared_colors_for_active_tool.clone();
+        let sync_size_control = sync_size_control.clone();
+        let drawing_area = drawing_area.downgrade();
+        let window = window.clone();
+        move |_| {
+            state
+                .lock()
+                .unwrap()
+                .set_tool_without_rebuild(Tool::Background);
+            set_active_tool_button(&tool_buttons, usize::MAX);
+            update_toolbar_for_tool(Tool::Background);
+            sync_picker();
+            sync_size_control();
+            cursor::set_window_cursor_name(&window, Some("default"));
+            if let Some(area) = drawing_area.upgrade() {
+                area.queue_draw();
+            }
+        }
+    });
+
+    let sync_motion_crop_history: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let motion_session = motion_host.session();
+        let motion_preview = motion_host.parts.shell.preview.clone();
+        let motion_ruler = motion_host.parts.timeline.ruler.clone();
+        let motion_track = motion_host.parts.timeline.motion_track.clone();
+        let motion_text_track = motion_host.parts.timeline.text_track.clone();
+        let motion_playhead = motion_host.parts.timeline.playhead_overlay.clone();
+        move || {
+            let (motion_change, restart_text_detection) = {
+                let mut st = state.lock().unwrap();
+                (
+                    st.take_motion_history_state(),
+                    st.take_text_detection_restart(),
+                )
+            };
+            if let Some(change) = motion_change {
+                motion_session.restore_crop_history_state(&state.lock().unwrap(), change);
+                motion_preview.queue_draw();
+                motion_ruler.queue_draw();
+                motion_track.queue_draw();
+                motion_text_track.queue_draw();
+                motion_playhead.queue_draw();
+            }
+            if restart_text_detection {
+                state.lock().unwrap().restart_text_detection();
+            }
+        }
+    });
 
     events::wire_editor_events(events::EventContext {
         app: app.clone(),
@@ -2515,7 +2609,10 @@ fn setup_editor_window_full(
         drawing_area: drawing_area.clone(),
         tool_buttons: tool_buttons.clone(),
         select_btn: select_btn.clone(),
-        background_btn: background_btn.clone(),
+        crop_btn: crop_btn.clone(),
+        crop_apply_btn: crop_apply_btn.clone(),
+        crop_cancel_btn: crop_cancel_btn.clone(),
+        sync_motion_crop_history: sync_motion_crop_history.clone(),
         draw_btn: draw_btn.clone(),
         arrow_btn: arrow_btn.clone(),
         line_btn: line_btn.clone(),
@@ -2889,8 +2986,9 @@ mod tests {
                     "set_active_tool_button(&tool_buttons, tool_button_index(initial_tool));",
                 )
                 && !production_source.contains("update_toolbar_for_tool(Tool::Arrow);")
-                && !production_source.contains("background_btn.add_css_class(\"active-tool\");"),
-            "Editor startup should highlight and route the inspector from the restored tool, not hardcode Background/Arrow",
+                && production_source.contains("set_active_tool_button(&tool_buttons, usize::MAX);")
+                && !production_source.contains("Tool::Background => 0,"),
+            "Editor startup should highlight the restored visible tool and keep neutral Appearance unhighlighted",
         );
     }
 

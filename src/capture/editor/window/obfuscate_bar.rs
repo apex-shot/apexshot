@@ -1,11 +1,8 @@
-//! Floating obfuscate bars: method picker and intensity slider.
+//! Obfuscate controls: docked method picker and floating intensity slider.
 //!
-//! Unlike the docked number bar these two stay anchored to the active
-//! obfuscate rect — the method pill on top of it, the intensity pill below —
-//! because they edit that specific rect (draft or selected), mirroring the
-//! text bar. The method pill reuses the shared pill shell
-//! ([`super::floating_bar::build_pill`]); the slider keeps its custom scale,
-//! like the number bar keeps its stepper.
+//! The method picker uses the shared second-toolbar dock while Obfuscate is
+//! active or Select holds an obfuscation. Only the intensity slider follows
+//! the draft or selected region; Blackout has no intensity slider.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -19,19 +16,20 @@ use crate::capture::editor::{
     color::{MAX_OBFUSCATE_AMOUNT, MIN_OBFUSCATE_AMOUNT},
     state::EditorState,
     types::{AnnotationAction, ObfuscateMethod, Tool, ViewTransform},
+    ui_support::DockedBarInset,
 };
 use crate::i18n::t;
 
 use super::floating_bar::{
-    build_option_row, build_pill, move_bar, popdown_for, queue_draw, sync_option_selection,
-    wire_option_rows,
+    build_option_row, build_pill, dock_position, dock_reserve, move_bar, popdown_for, queue_draw,
+    set_bar_shown, set_dock_reserve, sync_option_selection, wire_option_rows, DockRefs,
 };
 use super::OBFUSCATE_METHOD_OPTIONS;
 
 const METHOD_ROW_CLASS: &str = "editor-obfuscate-inspector-option";
 const METHOD_ACTIVE_CLASS: &str = "editor-obfuscate-inspector-option-active";
 
-/// Clearance between the rect and either bar.
+/// Clearance between the rect and its floating slider.
 const BAR_GAP: f64 = 12.0;
 
 pub(super) struct ObfuscateBar {
@@ -129,7 +127,7 @@ pub(super) fn build_obfuscate_bar(
     method_bar.set_halign(Align::Start);
     method_bar.set_valign(Align::Start);
     method_bar.append(&method_pill.button);
-    method_bar.set_visible(false);
+    set_bar_shown(&method_bar, false);
 
     let slider = Scale::with_range(
         Orientation::Horizontal,
@@ -180,15 +178,16 @@ pub(super) fn build_obfuscate_bar(
     }
 }
 
-/// Own the bars' visibility and placement: the method pill above the active
-/// rect, the intensity pill below it. Owns visibility: Obfuscate/Select tool
-/// plus a draft or selected rect shows them.
+/// Dock the method picker while the tool is active and float its intensity
+/// slider beside a draft or selected region.
 pub(super) fn install_obfuscate_bar_tick(
     bar: &ObfuscateBar,
     drawing_area: &DrawingArea,
     state: &Arc<Mutex<EditorState>>,
     transform: &Arc<Mutex<ViewTransform>>,
     toolbar_slider: &Scale,
+    dock_refs: &DockRefs,
+    inset: &DockedBarInset,
 ) {
     let method_bar = bar.method_bar.clone();
     let slider_bar = bar.slider_bar.clone();
@@ -199,24 +198,26 @@ pub(super) fn install_obfuscate_bar_tick(
     let state = state.clone();
     let transform = transform.clone();
     let toolbar_slider = toolbar_slider.clone();
+    let inset = inset.clone();
+    let dock_refs = DockRefs {
+        scroller: dock_refs.scroller.clone(),
+        drawing_area: dock_refs.drawing_area.clone(),
+    };
     // Sticky max heights (never underestimate, so a bar never covers the rect);
     // widths track the last measurement so a max never off-centers a bar.
-    let known_method = Rc::new(Cell::new((200.0f64, 48.0f64)));
     let known_slider = Rc::new(Cell::new((220.0f64, 48.0f64)));
 
     drawing_area.add_tick_callback(move |widget, _| {
-        let (show_bar, rect_opt, method, amount, view) = {
+        let (show_method, rect_opt, method, amount, view) = {
             let st = state.lock().unwrap();
             // Live draft first; otherwise the selected rect (reselect) when the
             // Obfuscate or Select tool is active. Prefer the rect's own
             // method/amount so re-editing shows the truth.
-            let mut show = false;
             let mut rect_opt = None;
             let mut method = st.obfuscate_method();
             let mut amount = st.current_obfuscate_amount();
             if st.selected_tool == Tool::Obfuscate {
                 if let Some(AnnotationAction::Obfuscate { rect, .. }) = st.draft_action() {
-                    show = true;
                     rect_opt = Some(rect);
                 }
             }
@@ -228,26 +229,25 @@ pub(super) fn install_obfuscate_bar_tick(
                 }) = st.selected_action()
                 {
                     if matches!(st.selected_tool, Tool::Obfuscate | Tool::Select) {
-                        show = true;
                         rect_opt = Some(*rect);
                         method = *m;
                         amount = *a;
                     }
                 }
             }
+            let show = st.selected_tool == Tool::Obfuscate || rect_opt.is_some();
             drop(st);
             let view = *transform.lock().unwrap();
             (show, rect_opt, method, amount, view)
         };
-        let Some(rect) = rect_opt.filter(|_| show_bar) else {
-            if method_bar.is_visible() {
-                method_bar.set_visible(false);
-            }
+        set_bar_shown(&method_bar, show_method);
+        if !show_method {
+            set_dock_reserve(&inset, "obfuscate", 0.0, widget);
             if slider_bar.is_visible() {
                 slider_bar.set_visible(false);
             }
             return glib::ControlFlow::Continue;
-        };
+        }
         // Sync method UI + intensity UI from state.
         let (icon_name, label, tooltip) = match method {
             ObfuscateMethod::Pixelate => {
@@ -271,6 +271,18 @@ pub(super) fn install_obfuscate_bar_tick(
         {
             sync_option_selection(&method_list, pos, METHOD_ACTIVE_CLASS);
         }
+        set_dock_reserve(
+            &inset,
+            "obfuscate",
+            dock_reserve(method_bar.height() as f64),
+            widget,
+        );
+        let (left, top) = dock_position(&dock_refs, method_bar.width() as f64);
+        move_bar(&method_bar, left, top);
+        let Some(rect) = rect_opt else {
+            slider_bar.set_visible(false);
+            return glib::ControlFlow::Continue;
+        };
         let has_slider = method.has_slider();
         if has_slider {
             slider.set_sensitive(true);
@@ -291,30 +303,6 @@ pub(super) fn install_obfuscate_bar_tick(
         let y = rect.y as f64 * view.scale + view.offset_y;
         let rect_h = rect.height as f64 * view.scale;
         let rect_cx = x + rect.width as f64 * view.scale / 2.0;
-        // Picker pill on top; flip below only when there is no room.
-        let (mut method_w, mut method_h) = known_method.get();
-        let (mbw, mbh) = (method_bar.width() as f64, method_bar.height() as f64);
-        if mbw > 1.0 {
-            method_w = mbw;
-        }
-        if mbh > 1.0 {
-            method_h = method_h.max(mbh);
-        }
-        known_method.set((method_w, method_h));
-        let mut method_top = y - method_h - BAR_GAP;
-        if method_top < 0.0 {
-            method_top = y + rect_h + BAR_GAP;
-        }
-        if method_top + method_h > area_h {
-            method_top = (area_h - method_h).max(0.0);
-        }
-        let method_left = (rect_cx - method_w / 2.0)
-            .max(0.0)
-            .min((area_w - method_w).max(0.0));
-        move_bar(&method_bar, method_left, method_top);
-        if !method_bar.is_visible() {
-            method_bar.set_visible(true);
-        }
         // Slider pill at the bottom; flip above only when there is no room.
         if slider_bar.is_visible() != has_slider {
             slider_bar.set_visible(has_slider);
@@ -370,18 +358,28 @@ mod tests {
     }
 
     #[test]
-    fn obfuscate_bar_stays_anchored_to_its_rect() {
+    fn obfuscate_method_uses_the_second_toolbar_even_before_drawing() {
         let source = production_source();
         assert!(
             source.contains("st.selected_tool == Tool::Obfuscate")
-                && source.contains("AnnotationAction::Obfuscate {")
-                && source.contains("st.draft_action()")
-                && source.contains("rect.x as f64 * view.scale + view.offset_x")
-                && source.contains("set_visible(false)")
-                && !source.contains("set_bar_shown(")
-                && !source.contains("dock_position("),
-            "An anchored rect editor follows its rect with set_visible, never the docked band"
+                && source.contains("set_bar_shown(&method_bar, show_method)")
+                && source.contains("dock_position(&dock_refs, method_bar.width() as f64)")
+                && source.contains("set_dock_reserve(&inset, \"obfuscate\", 0.0, widget)")
+                && !source.contains("method_bar.set_visible(")
+                && !source.contains("known_method"),
+            "The method picker stays docked while the tool is armed and releases its space when hidden"
         );
+    }
+
+    #[test]
+    fn only_the_intensity_slider_follows_the_drawn_region() {
+        let source = production_source();
+        assert!(source.contains("st.draft_action()"));
+        assert!(source.contains("let Some(rect) = rect_opt else"));
+        assert!(source.contains("rect.x as f64 * view.scale + view.offset_x"));
+        assert!(source.contains("move_bar(&slider_bar, slider_left, slider_top)"));
+        assert!(source.contains("let has_slider = method.has_slider()"));
+        assert!(!source.contains("dock_reserve(slider_bar"));
     }
 
     #[test]

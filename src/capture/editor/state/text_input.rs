@@ -175,6 +175,7 @@ impl EditorState {
             self.active_text_is_resizing = false;
 
             if let Some(index) = input_state.editing_action_index {
+                let before = self.document_snapshot();
                 if trimmed_text.is_empty() {
                     if index < self.actions.len()
                         && matches!(self.actions[index], AnnotationAction::Text { .. })
@@ -183,7 +184,8 @@ impl EditorState {
                         self.selected_action_index = None;
                         self.select_drag_anchor = None;
                         self.select_resize_handle = None;
-                        self.redo_actions.clear();
+                        self.clear_redo_history();
+                        self.commit_history_change(before, super::history::HistoryKind::Edit);
                     }
                     return None;
                 }
@@ -215,7 +217,8 @@ impl EditorState {
                     font.alignment = TextAlignment::Left;
                     *max_width = Some(b.rect.width as f64);
                     self.selected_action_index = Some(index);
-                    self.redo_actions.clear();
+                    self.clear_redo_history();
+                    self.commit_history_change(before, super::history::HistoryKind::Edit);
                 }
                 return None;
             }
@@ -639,6 +642,7 @@ impl EditorState {
             .as_ref()
             .and_then(|input| input.editing_action_index)
         {
+            let before = self.document_snapshot();
             let Some(AnnotationAction::Text { font, .. }) = self.actions.get_mut(index) else {
                 return false;
             };
@@ -647,7 +651,8 @@ impl EditorState {
             }
             font.size = next;
             self.text_size = next;
-            self.redo_actions.clear();
+            self.clear_redo_history();
+            self.commit_property_edit(before);
             return true;
         }
 
@@ -691,6 +696,7 @@ impl EditorState {
             .as_ref()
             .and_then(|input| input.editing_action_index)
         {
+            let before = self.document_snapshot();
             let Some(AnnotationAction::Text { font, .. }) = self.actions.get_mut(index) else {
                 return false;
             };
@@ -698,7 +704,8 @@ impl EditorState {
                 return false;
             }
             font.size = next;
-            self.redo_actions.clear();
+            self.clear_redo_history();
+            self.commit_property_edit(before);
             return true;
         }
 
@@ -706,6 +713,7 @@ impl EditorState {
             return false;
         };
 
+        let before = self.document_snapshot();
         let Some(action) = self.actions.get_mut(index) else {
             self.selected_action_index = None;
             return false;
@@ -720,7 +728,8 @@ impl EditorState {
         }
 
         font.size = next;
-        self.redo_actions.clear();
+        self.clear_redo_history();
+        self.commit_property_edit(before);
         true
     }
 
@@ -738,6 +747,7 @@ impl EditorState {
             .as_ref()
             .and_then(|input| input.editing_action_index)
         {
+            let before = self.document_snapshot();
             let Some(AnnotationAction::Text { font, .. }) = self.actions.get_mut(index) else {
                 return false;
             };
@@ -745,7 +755,8 @@ impl EditorState {
                 return false;
             }
             font.family = family;
-            self.redo_actions.clear();
+            self.clear_redo_history();
+            self.commit_property_edit(before);
             return true;
         }
 
@@ -753,6 +764,7 @@ impl EditorState {
             return false;
         };
 
+        let before = self.document_snapshot();
         let Some(action) = self.actions.get_mut(index) else {
             self.selected_action_index = None;
             return false;
@@ -767,7 +779,8 @@ impl EditorState {
         }
 
         font.family = family;
-        self.redo_actions.clear();
+        self.clear_redo_history();
+        self.commit_property_edit(before);
         true
     }
 
@@ -882,7 +895,7 @@ impl EditorState {
             self.selected_action_index = None;
             self.select_drag_anchor = None;
             self.select_resize_handle = None;
-            self.redo_actions.clear();
+            self.clear_redo_history();
             return true;
         }
 
@@ -895,7 +908,7 @@ impl EditorState {
         }
 
         *text = trimmed;
-        self.redo_actions.clear();
+        self.clear_redo_history();
         true
     }
 
