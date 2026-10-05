@@ -1,13 +1,20 @@
 #[cfg(test)]
 mod tests {
     use super::{
-        draw_motion_backdrop, draw_motion_foreground, draw_motion_frame,
+        draw_motion_backdrop, draw_motion_foreground, draw_motion_frame, draw_transformed_card,
         motion_text_contains_view_point, paint_card_shadow, paint_image_background,
         view_point_to_motion_text_position, CardLayout, MotionStage,
     };
+    use crate::capture::editor::composition::{
+        motion_background_composition, BackgroundComposition, CompositionLayout,
+    };
+    use crate::capture::editor::types::{
+        BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor, FrameStyle,
+    };
     use crate::recording::editor::model::{
-        project_card_corners, MotionBackgroundFillType, MotionEffectTransformTiming, MotionState,
-        MotionTransform, DEFAULT_MOTION_ZOOM,
+        project_card_corners, MotionAppearance, MotionBackgroundFillType,
+        MotionEffectTransformTiming, MotionFrame, MotionState, MotionTransform,
+        DEFAULT_MOTION_ZOOM,
     };
     use gtk4::cairo::{Context, Format, ImageSurface};
 
@@ -23,6 +30,18 @@ mod tests {
         assert_eq!(super::fit_stage_aspect(100.0, 50.0, None), (100.0, 50.0));
     }
 
+    /// The appearance the tilted-frame probes lay out with. Corner radius is
+    /// not part of the composition, so a probe and the rendered card share
+    /// geometry at any radius.
+    fn probe_appearance() -> MotionAppearance {
+        MotionAppearance {
+            background_padding: 0.0,
+            frame_style: FrameStyle::Border,
+            border_thickness: 6.0,
+            ..MotionAppearance::default()
+        }
+    }
+
     /// Motion starts with an empty track; tests add their own clip.
     fn motion_with_first_clip() -> MotionState {
         let mut motion = MotionState::default();
@@ -32,18 +51,21 @@ mod tests {
         motion
     }
 
-    /// Export-style layout: the full frame with default padding.
+    /// Export-style layout: the full frame under the default appearance.
     fn frame_layout(
         surface: &ImageSurface,
         transform: MotionTransform,
         zoom_anchor: (f64, f64),
     ) -> CardLayout {
-        CardLayout::with_padding(
+        let appearance = MotionAppearance::default();
+        card_layout(
             surface,
+            1.0,
             MotionStage::frame(1440.0, 900.0),
+            &appearance,
+            None,
             transform,
             zoom_anchor,
-            96.0,
         )
     }
 
@@ -63,6 +85,366 @@ mod tests {
         frame
     }
 
+    /// Build a card layout the way production does: the shared composition for
+    /// the source dimensions behind the texture, then the stage.
+    fn card_layout(
+        surface: &ImageSurface,
+        card_scale: f64,
+        stage: MotionStage,
+        appearance: &MotionAppearance,
+        canvas_aspect: Option<f64>,
+        transform: MotionTransform,
+        zoom_anchor: (f64, f64),
+    ) -> CardLayout {
+        let (source_w, source_h) = super::motion_source_size(surface, card_scale);
+        CardLayout::new(
+            motion_background_composition(source_w, source_h, appearance, canvas_aspect).compute(),
+            stage,
+            transform,
+            zoom_anchor,
+        )
+    }
+
+    /// The preview stage production builds for a still at this widget size.
+    fn preview_stage(
+        surface: &ImageSurface,
+        width: f64,
+        height: f64,
+        appearance: &MotionAppearance,
+        frame: &MotionFrame,
+    ) -> MotionStage {
+        let (source_w, source_h) = super::motion_source_size(surface, 1.0);
+        let composition = super::motion_canvas(source_w, source_h, appearance, frame);
+        MotionStage::preview(
+            width,
+            height,
+            composition.canvas_width,
+            composition.canvas_height,
+        )
+    }
+
+    /// Build the appearance Motion renders a card with for one geometry case.
+    fn geometry_appearance(
+        padding: f64,
+        style: FrameStyle,
+        filled: bool,
+        insert: f64,
+        alignment: BackgroundAlignment,
+    ) -> MotionAppearance {
+        MotionAppearance {
+            background_padding: padding,
+            background_insert: insert,
+            background_alignment: alignment,
+            background_fill_type: if filled {
+                MotionBackgroundFillType::Color
+            } else {
+                MotionBackgroundFillType::None
+            },
+            frame_style: style,
+            border_thickness: 6.0,
+            ..MotionAppearance::default()
+        }
+    }
+
+    /// The static canvas's own composition, written the way the canvas
+    /// renders it, so the comparison is against the real Static path and not
+    /// against Motion's builder twice.
+    fn static_composition(
+        source_w: f64,
+        source_h: f64,
+        padding: f64,
+        frame_style: FrameStyle,
+        filled: bool,
+        aspect: CropAspectRatio,
+        insert: f64,
+        alignment: BackgroundAlignment,
+    ) -> CompositionLayout {
+        let fill = if filled {
+            BackgroundStyle::PlainColor(DrawColor::new(0.0, 0.0, 0.0, 1.0))
+        } else {
+            BackgroundStyle::None
+        };
+        BackgroundComposition::new(source_w, source_h)
+            .with_style(fill)
+            .with_padding(padding)
+            .with_insert(insert)
+            .with_alignment(alignment)
+            .with_corner_radius(18.0)
+            .with_aspect_ratio(aspect)
+            .with_frame_style(frame_style)
+            .with_frame_border_thickness(6.0)
+            .compute()
+    }
+
+    fn normalized_rect(layout: &CompositionLayout) -> [f64; 4] {
+        [
+            layout.image_rect.x / layout.canvas_width,
+            layout.image_rect.y / layout.canvas_height,
+            layout.image_rect.width / layout.canvas_width,
+            layout.image_rect.height / layout.canvas_height,
+        ]
+    }
+
+    /// Switching Static to Motion with an empty effects track must preserve
+    /// the card's normalized rectangle inside its background: same padding,
+    /// legacy inset, frame ratio, frame style and alignment, at any viewport.
+    /// The comparison uses the card corners the renderer actually projects
+    /// against the scene rectangle it actually paints.
+    #[test]
+    fn static_and_motion_share_the_normalized_card_rectangle() {
+        let styles = [
+            FrameStyle::Default,
+            FrameStyle::Stack,
+            FrameStyle::Stack2,
+            FrameStyle::Border,
+            FrameStyle::InsetLight,
+        ];
+        let cases: [(f64, Option<f64>, CropAspectRatio); 3] = [
+            (0.0, None, CropAspectRatio::Original),
+            (40.0, Some(16.0 / 9.0), CropAspectRatio::SixteenNine),
+            (96.0, Some(1.0), CropAspectRatio::Square),
+        ];
+        let viewports = [(1600.0, 1000.0), (320.0, 200.0)];
+        for (source_w, source_h) in [(1920.0, 1080.0), (320.0, 180.0)] {
+            let card = ImageSurface::create(Format::ARgb32, source_w as i32, source_h as i32)
+                .expect("card surface");
+            for (padding, canvas_aspect, crop_aspect) in cases {
+                for style in styles {
+                    for (insert, alignment) in [
+                        (0.0, BackgroundAlignment::Center),
+                        (60.0, BackgroundAlignment::BottomRight),
+                    ] {
+                        let appearance =
+                            geometry_appearance(padding, style, true, insert, alignment);
+                        let expected = normalized_rect(&static_composition(
+                            source_w,
+                            source_h,
+                            padding,
+                            style,
+                            true,
+                            crop_aspect,
+                            insert,
+                            alignment,
+                        ));
+                        let composition = motion_background_composition(
+                            source_w,
+                            source_h,
+                            &appearance,
+                            canvas_aspect,
+                        )
+                        .compute();
+                        for (width, height) in viewports {
+                            let scene = super::motion_preview_scene_rect(
+                                width,
+                                height,
+                                composition.canvas_width,
+                                composition.canvas_height,
+                            );
+                            let stage = MotionStage::preview(
+                                width,
+                                height,
+                                composition.canvas_width,
+                                composition.canvas_height,
+                            );
+                            let layout = card_layout(
+                                &card,
+                                1.0,
+                                stage,
+                                &appearance,
+                                canvas_aspect,
+                                MotionTransform::default(),
+                                (0.5, 0.5),
+                            );
+                            let top_left = layout.project(0.0, 0.0);
+                            let bottom_right = layout.project(layout.img_w(), layout.img_h());
+                            let actual = [
+                                (top_left.0 - scene.0) / scene.2,
+                                (top_left.1 - scene.1) / scene.3,
+                                (bottom_right.0 - top_left.0) / scene.2,
+                                (bottom_right.1 - top_left.1) / scene.3,
+                            ];
+                            for (a, b) in expected.iter().zip(actual.iter()) {
+                                assert!(
+                                    (a - b).abs() < 1e-9,
+                                    "{source_w}x{source_h} padding {padding} {style:?} \
+                                     insert {insert} at {width}x{height}: {expected:?} vs {actual:?}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            let small = geometry_appearance(0.0, FrameStyle::Default, true, 0.0, BackgroundAlignment::Center);
+            let composition =
+                motion_background_composition(source_w, source_h, &small, None).compute();
+            if source_w < 1600.0 {
+                let scene =
+                    super::motion_preview_scene_rect(1600.0, 1000.0, composition.canvas_width, composition.canvas_height);
+                assert!((scene.2 - composition.canvas_width).abs() < 1e-9);
+                assert!((scene.3 - composition.canvas_height).abs() < 1e-9);
+            }
+        }
+    }
+
+    /// Stack backings offset in composition canvas pixels, exactly like the
+    /// canvas the composition itself reserves for them. Legacy inset > 0
+    /// scales the card, so using the source fit here shrank every peek by the
+    /// draw scale and the sheets drifted inside the space Static had
+    /// reserved. Measured from the pixels the renderer paints.
+    #[test]
+    fn stack_backing_peek_tracks_the_composition_canvas() {
+        let card = ImageSurface::create(Format::ARgb32, 200, 200).expect("card");
+        {
+            let context = Context::new(&card).unwrap();
+            context.set_source_rgb(1.0, 1.0, 1.0);
+            context.paint().unwrap();
+        }
+        card.flush();
+
+        let appearance = geometry_appearance(24.0, FrameStyle::Stack2, true, 40.0, BackgroundAlignment::Center);
+        let source_w = 200.0;
+        let source_h = 200.0;
+        let composition =
+            motion_background_composition(source_w, source_h, &appearance, None).compute();
+        let stage = MotionStage::frame(400.0, 400.0);
+        let layout = card_layout(
+            &card,
+            1.0,
+            stage,
+            &appearance,
+            None,
+            MotionTransform::default(),
+            (0.5, 0.5),
+        );
+        assert!(
+            (layout.canvas_fit - 1.0).abs() < 1e-9,
+            "the stage must draw the composition at its native size"
+        );
+        assert!(
+            (layout.source_fit() - 0.8).abs() < 1e-9,
+            "the legacy inset must scale the source, so the two units differ"
+        );
+
+        let mut frame = ImageSurface::create(Format::ARgb32, 400, 400).unwrap();
+        {
+            let context = Context::new(&frame).unwrap();
+            draw_transformed_card(
+                &context,
+                &card,
+                layout,
+                &appearance,
+                1.0,
+                8,
+                gtk4::cairo::Filter::Good,
+            );
+        }
+        frame.flush();
+
+        let backing = FrameStyle::Stack2.spec().backing1.expect("Stack2 backing");
+        let draw_w = composition.image_rect.width * layout.canvas_fit;
+        let draw_h = composition.image_rect.height * layout.canvas_fit;
+        let canvas_x = stage.center_x - composition.canvas_width * layout.canvas_fit / 2.0;
+        let canvas_y = stage.center_y - composition.canvas_height * layout.canvas_fit / 2.0;
+        let image_left = canvas_x + composition.image_rect.x * layout.canvas_fit;
+        let image_top = canvas_y + composition.image_rect.y * layout.canvas_fit;
+        let (sin, cos) = backing.rotation_deg.to_radians().sin_cos();
+        let pivot = (
+            image_left + draw_w + backing.offset_x * layout.canvas_fit,
+            image_top + draw_h + backing.offset_y * layout.canvas_fit,
+        );
+        let (corner_x, corner_y) = (0.0, -draw_h);
+        let top = (
+            pivot.0 + corner_x * cos - corner_y * sin,
+            pivot.1 + corner_x * sin + corner_y * cos,
+        );
+
+        let stride = frame.stride() as usize;
+        let data = frame.data().unwrap();
+        let alpha_at = |x: f64, y: f64| data[y.round() as usize * stride + x.round() as usize * 4 + 3];
+        assert!(
+            alpha_at(top.0 - 2.0, top.1 + 3.0) > 200,
+            "the painted backing must reach the peek the composition reserved"
+        );
+        assert_eq!(
+            alpha_at(top.0 - 2.0, top.1 - 4.0),
+            0,
+            "nothing may be painted above the reserved peek"
+        );
+    }
+
+    /// The downscaled preview texture must describe the same card as the
+    /// full-resolution export: fixed-pixel frame overhangs would otherwise
+    /// shrink with the preview.
+    #[test]
+    fn downscaled_preview_keeps_the_source_card_geometry() {
+        let card = ImageSurface::create(Format::ARgb32, 2560, 1440).unwrap();
+        let (preview, scale) = super::scaled_card_preview(&card).expect("preview texture");
+        let appearance = geometry_appearance(40.0, FrameStyle::Stack2, true, 30.0, BackgroundAlignment::TopLeft);
+        let stage = MotionStage::frame(1280.0, 800.0);
+        let full = card_layout(
+            &card,
+            1.0,
+            stage,
+            &appearance,
+            Some(16.0 / 9.0),
+            MotionTransform::default(),
+            (0.5, 0.5),
+        );
+        let downscaled = card_layout(
+            &preview,
+            scale,
+            stage,
+            &appearance,
+            Some(16.0 / 9.0),
+            MotionTransform::default(),
+            (0.5, 0.5),
+        );
+        assert!((full.img_w() - downscaled.img_w()).abs() < 1e-9);
+        assert!((full.source_fit() - downscaled.source_fit()).abs() < 1e-9);
+        for (a, b) in [
+            (full.project(0.0, 0.0), downscaled.project(0.0, 0.0)),
+            (
+                full.project(full.img_w(), full.img_h()),
+                downscaled.project(downscaled.img_w(), downscaled.img_h()),
+            ),
+        ] {
+            assert!((a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6, "{a:?} vs {b:?}");
+        }
+    }
+
+    /// Inverse title placement and its hit region must use the same
+    /// source-derived stage at any preview size.
+    #[test]
+    fn inverse_hit_test_tracks_the_preview_stage() {
+        let surface = ImageSurface::create(Format::ARgb32, 1200, 675).expect("surface");
+        let mut motion = MotionState::default();
+        let index = motion.add_text_at(0.0).expect("title clip");
+        let segment = &motion.text_segments[index];
+        let appearance = geometry_appearance(40.0, FrameStyle::Border, true, 0.0, BackgroundAlignment::Center);
+        for (width, height) in [(1440.0, 900.0), (360.0, 240.0)] {
+            let stage = preview_stage(&surface, width, height, &appearance, &motion.frame);
+            let layout = card_layout(
+                &surface,
+                1.0,
+                stage,
+                &appearance,
+                motion.frame.effective_aspect(),
+                MotionTransform::default(),
+                (0.5, 0.5),
+            );
+            let center = layout.project(segment.pos_x * layout.img_w(), segment.pos_y * layout.img_h());
+            assert!(
+                motion_text_contains_view_point(layout, segment, 0.5, center.0, center.1),
+                "the title hit region must track the {width}x{height} preview"
+            );
+            assert!(!motion_text_contains_view_point(
+                layout, segment, 0.5, 2.0, 2.0
+            ));
+            let restored = view_point_to_motion_text_position(layout, center.0, center.1);
+            assert!((restored.0 - segment.pos_x).abs() < 0.02, "{restored:?}");
+        }
+    }
+
     #[test]
     fn flat_card_pose_draws_exactly_its_rect() {
         let card = ImageSurface::create(Format::ARgb32, 100, 50).unwrap();
@@ -78,12 +460,19 @@ mod tests {
         {
             let context = Context::new(&frame).unwrap();
             // No rotation and no perspective take the single-rectangle path.
+            let layout = card_layout(
+                &card,
+                1.0,
+                MotionStage::frame(400.0, 300.0),
+                &motion.appearance,
+                None,
+                MotionTransform::default(),
+                (0.5, 0.5),
+            );
             super::draw_transformed_card(
                 &context,
                 &card,
-                MotionStage::frame(400.0, 300.0),
-                MotionTransform::default(),
-                (0.5, 0.5),
+                layout,
                 &motion.appearance,
                 1.0,
                 8,
@@ -113,23 +502,28 @@ mod tests {
     fn scene_fill_is_bounded_in_preview_and_full_frame_on_export() {
         let card = ImageSurface::create(Format::ARgb32, 8, 8).unwrap();
         let mut motion = MotionState::default();
-        let (scene_x, scene_y, scene_w, scene_h) = super::motion_scene_bounds(128.0, 96.0);
-        let center_x = (scene_x + scene_w * 0.5).floor() as usize;
-        let center_y = (scene_y + scene_h * 0.5).floor() as usize;
-        let center = center_y * 128 * 4 + center_x * 4;
-        let corner_x = scene_x.ceil() as usize + 1;
-        let corner_y = scene_y.ceil() as usize + 1;
-        let scene_corner = corner_y * 128 * 4 + corner_x * 4;
 
         // The preview keeps the checkerboard canvas until a fill is chosen.
         let mut frame = render_appearance_frame(&card, &motion, true);
         let data = frame.data().unwrap();
         assert_ne!(&data[..4], &[0, 0, 0, 255]);
 
-        // A chosen fill paints a square bounded scene panel: its center and
-        // corners take the color while the outer canvas stays checkerboard.
         motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
         motion.appearance.background_color = [0.2, 0.4, 0.6, 1.0];
+        let (source_w, source_h) = super::motion_source_size(&card, 1.0);
+        let composition = super::motion_canvas(source_w, source_h, &motion.appearance, &motion.frame);
+        let (scene_x, scene_y, scene_w, scene_h) = super::motion_preview_scene_rect(
+            128.0,
+            96.0,
+            composition.canvas_width,
+            composition.canvas_height,
+        );
+        let center_x = (scene_x + scene_w * 0.5).floor() as usize;
+        let center_y = (scene_y + scene_h * 0.5).floor() as usize;
+        let center = center_y * 128 * 4 + center_x * 4;
+        let corner_x = scene_x.ceil() as usize + 1;
+        let corner_y = scene_y.ceil() as usize + 1;
+        let scene_corner = corner_y * 128 * 4 + corner_x * 4;
         let mut frame = render_appearance_frame(&card, &motion, true);
         let data = frame.data().unwrap();
         // Cairo ARgb32 is BGRA on the Linux targets we support.
@@ -168,7 +562,7 @@ mod tests {
 
         let mut baseline = render_appearance_frame(&blank_card, &motion, true);
         let baseline_data = baseline.data().unwrap();
-        let stage = MotionStage::preview(128.0, 96.0, None);
+        let stage = preview_stage(&blank_card, 128.0, 96.0, &motion.appearance, &motion.frame);
         let scene_center_x = stage.center_x.floor() as usize;
         let scene_center_y = stage.center_y.floor() as usize;
         let outside_scene = scene_center_y * 128 * 4 + 10 * 4;
@@ -271,8 +665,17 @@ mod tests {
             ..MotionTransform::default()
         };
         let stage = MotionStage::frame(400.0, 300.0);
-        let fit = super::motion_canvas_fit(100.0, 50.0, 0.0, stage.bounds_w, stage.bounds_h);
-        let (cx, cy) = super::motion_card_center(100.0, 50.0, fit, stage, transform, (0.5, 0.5));
+        let probe = card_layout(
+            &card,
+            1.0,
+            stage,
+            &probe_appearance(),
+            None,
+            transform,
+            (0.5, 0.5),
+        );
+        let fit = probe.source_fit();
+        let (cx, cy) = (probe.cx, probe.cy);
         // Quad order is TL, TR, BR, BL.
         let (qx, qy) = project_card_corners(100.0, 50.0, fit, transform, cx, cy)[1];
         let px = qx.round() as i32;
@@ -293,12 +696,19 @@ mod tests {
             let mut frame = ImageSurface::create(Format::ARgb32, 400, 300).unwrap();
             {
                 let context = Context::new(&frame).unwrap();
+                let layout = card_layout(
+                    &card,
+                    1.0,
+                    stage,
+                    &motion.appearance,
+                    None,
+                    transform,
+                    (0.5, 0.5),
+                );
                 super::draw_transformed_card(
                     &context,
                     &card,
-                    stage,
-                    transform,
-                    (0.5, 0.5),
+                    layout,
                     &motion.appearance,
                     1.0,
                     8,
@@ -356,8 +766,17 @@ mod tests {
             ..MotionTransform::default()
         };
         let stage = MotionStage::frame(400.0, 300.0);
-        let fit = super::motion_canvas_fit(100.0, 50.0, 0.0, stage.bounds_w, stage.bounds_h);
-        let (cx, cy) = super::motion_card_center(100.0, 50.0, fit, stage, transform, (0.5, 0.5));
+        let probe = card_layout(
+            &card,
+            1.0,
+            stage,
+            &probe_appearance(),
+            None,
+            transform,
+            (0.5, 0.5),
+        );
+        let fit = probe.source_fit();
+        let (cx, cy) = (probe.cx, probe.cy);
         let hw = 100.0 * fit * SCALE / 2.0;
         let hh = 50.0 * fit * SCALE / 2.0;
         // On-screen corner radius of the texture: the source-pixel radius at
@@ -378,12 +797,19 @@ mod tests {
         let mut frame = ImageSurface::create(Format::ARgb32, 400, 300).unwrap();
         {
             let context = Context::new(&frame).unwrap();
+            let layout = card_layout(
+                &rounded,
+                1.0,
+                stage,
+                &motion.appearance,
+                None,
+                transform,
+                (0.5, 0.5),
+            );
             super::draw_transformed_card(
                 &context,
                 &rounded,
-                stage,
-                transform,
-                (0.5, 0.5),
+                layout,
                 &motion.appearance,
                 1.0,
                 8,
@@ -479,12 +905,7 @@ mod tests {
     #[test]
     fn card_shadow_has_a_smooth_falloff_and_stays_inside_the_scene() {
         let mut frame = ImageSurface::create(Format::ARgb32, 160, 120).unwrap();
-        let stage = MotionStage {
-            bounds_w: 120.0,
-            bounds_h: 80.0,
-            center_x: 80.0,
-            center_y: 60.0,
-        };
+        let stage = MotionStage { ..MotionStage::frame(120.0, 80.0) };
         let corners = [(50.0, 40.0), (110.0, 40.0), (110.0, 80.0), (50.0, 80.0)];
         let mut appearance = MotionState::default().appearance;
         appearance.shadow_opacity = 1.0;
@@ -847,12 +1268,14 @@ mod tests {
             "linear move at half time: {scale}"
         );
 
-        let layout = CardLayout::with_padding(
+        let layout = card_layout(
             &card,
+            1.0,
             MotionStage::frame(200.0, 150.0),
+            &motion.appearance,
+            motion.frame.effective_aspect(),
             motion.sample(time),
             motion.zoom_anchor_at(time),
-            0.0,
         );
         let edge = layout.project(64.0, 32.0);
         let probe_x = (edge.0 - 2.0).round() as usize;
@@ -1031,7 +1454,16 @@ mod tests {
         let backdrop = ImageSurface::create(Format::ARgb32, 160, 120).unwrap();
         {
             let context = Context::new(&backdrop).unwrap();
-            draw_motion_backdrop(&context, 160, 120, &motion, None, true, true);
+            draw_motion_backdrop(
+                &context,
+                160,
+                120,
+                &motion,
+                None,
+                true,
+                true,
+                Some(super::motion_source_size(&card, 1.0)),
+            );
         }
         backdrop.flush();
 
@@ -1157,16 +1589,8 @@ mod tests {
         let zoom_anchor = (0.22, 0.78);
         let layout = frame_layout(&surface, transform, zoom_anchor);
         let expected = (0.27, 0.71);
-        let point = layout.project(expected.0 * layout.img_w, expected.1 * layout.img_h);
-        let actual = view_point_to_motion_text_position(
-            &surface,
-            MotionStage::frame(1440.0, 900.0),
-            96.0,
-            transform,
-            zoom_anchor,
-            point.0,
-            point.1,
-        );
+        let point = layout.project(expected.0 * layout.img_w(), expected.1 * layout.img_h());
+        let actual = view_point_to_motion_text_position(layout, point.0, point.1);
         assert!((actual.0 - expected.0).abs() < 0.003, "x: {actual:?}");
         assert!((actual.1 - expected.1).abs() < 0.003, "y: {actual:?}");
     }
@@ -1185,31 +1609,28 @@ mod tests {
             ..MotionTransform::default()
         };
         let zoom_anchor = (0.32, 0.68);
-        let layout = frame_layout(&surface, transform, zoom_anchor);
-        let title_center =
-            layout.project(segment.pos_x * layout.img_w, segment.pos_y * layout.img_h);
-
-        assert!(motion_text_contains_view_point(
+        let stage = preview_stage(&surface, 1440.0, 900.0, &motion.appearance, &motion.frame);
+        let layout = card_layout(
             &surface,
-            MotionStage::frame(1440.0, 900.0),
-            96.0,
+            1.0,
+            stage,
+            &motion.appearance,
+            motion.frame.effective_aspect(),
             transform,
             zoom_anchor,
+        );
+        let title_center =
+            layout.project(segment.pos_x * layout.img_w(), segment.pos_y * layout.img_h());
+
+        assert!(motion_text_contains_view_point(
+            layout,
             segment,
             0.5,
             title_center.0,
             title_center.1,
         ));
         assert!(!motion_text_contains_view_point(
-            &surface,
-            MotionStage::frame(1440.0, 900.0),
-            96.0,
-            transform,
-            zoom_anchor,
-            segment,
-            0.5,
-            4.0,
-            4.0,
+            layout, segment, 0.5, 4.0, 4.0,
         ));
     }
 
@@ -1341,8 +1762,8 @@ mod tests {
         unzoomed.scale = 1.0;
         let before = frame_layout(&surface, unzoomed, (0.5, 0.5));
         let after = frame_layout(&surface, transform, zoom_anchor);
-        let source_x = zoom_anchor.0 * before.img_w;
-        let source_y = zoom_anchor.1 * before.img_h;
+        let source_x = zoom_anchor.0 * before.img_w();
+        let source_y = zoom_anchor.1 * before.img_h();
         let expected = before.project(source_x, source_y);
         let actual = after.project(source_x, source_y);
         assert!(

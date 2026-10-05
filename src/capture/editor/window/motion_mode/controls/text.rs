@@ -180,23 +180,16 @@ pub(super) fn install(
             let Some(card) = runtime.card.as_ref() else {
                 return;
             };
-            let transform = runtime.motion.sample(runtime.motion.playhead);
-            let zoom_anchor = runtime.motion.zoom_anchor_at(runtime.motion.playhead);
-            let stage = super::super::super::motion_render::MotionStage::preview(
+            let layout = super::super::super::motion_render::motion_preview_card_layout(
+                card,
                 width,
                 height,
-                runtime.motion.frame.effective_aspect(),
+                &runtime.motion,
+                runtime.motion.playhead,
             );
-            let padding = runtime.motion.appearance.effective_padding();
             let (pos_x, pos_y) =
                 super::super::super::motion_render::view_point_to_motion_text_position(
-                    card,
-                    stage,
-                    padding,
-                    transform,
-                    zoom_anchor,
-                    x,
-                    y,
+                    layout, x, y,
                 );
             drop(runtime);
             {
@@ -227,16 +220,15 @@ pub(super) fn install(
                     runtime.card.as_ref().map(|card| {
                         let width = preview.allocated_width().max(1) as f64;
                         let height = preview.allocated_height().max(1) as f64;
-                        super::super::super::motion_render::motion_text_contains_view_point(
+                        let layout = super::super::super::motion_render::motion_preview_card_layout(
                             card,
-                            super::super::super::motion_render::MotionStage::preview(
-                                width,
-                                height,
-                                runtime.motion.frame.effective_aspect(),
-                            ),
-                            runtime.motion.appearance.effective_padding(),
-                            runtime.motion.sample(runtime.motion.playhead),
-                            runtime.motion.zoom_anchor_at(runtime.motion.playhead),
+                            width,
+                            height,
+                            &runtime.motion,
+                            runtime.motion.playhead,
+                        );
+                        super::super::super::motion_render::motion_text_contains_view_point(
+                            layout,
                             segment,
                             runtime.motion.playhead,
                             x,

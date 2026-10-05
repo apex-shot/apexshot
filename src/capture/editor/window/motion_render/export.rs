@@ -7,7 +7,13 @@ pub fn export_motion_mp4(
     crate::recording::editor::ffmpeg::ensure_tools_available()
         .map_err(|error| error.to_string())?;
 
-    let (out_w, out_h) = motion_frame_output_size(&motion.frame);
+    let source_w = f64::from(snapshot.width().max(1));
+    let source_h = f64::from(snapshot.height().max(1));
+    let canvas = motion_canvas(source_w, source_h, &motion.appearance, &motion.frame);
+    let (out_w, out_h) = motion_frame_output_size(
+        &motion.frame,
+        canvas.canvas_width / canvas.canvas_height,
+    );
     let Some(card) = crate::capture::editor::render::rgba_image_to_surface(snapshot) else {
         return Err("could not prepare the Motion still".into());
     };
@@ -119,8 +125,11 @@ pub fn export_motion_mp4(
 
 /// Output canvas for a Frame preset. Delegates to the frame's own sizing so
 /// manual W/H (Custom) and the full ratio grid share one budget rule.
-fn motion_frame_output_size(frame: &crate::recording::editor::model::MotionFrame) -> (i32, i32) {
-    frame.output_size()
+fn motion_frame_output_size(
+    frame: &crate::recording::editor::model::MotionFrame,
+    source_aspect: f64,
+) -> (i32, i32) {
+    frame.output_size_for(source_aspect)
 }
 
 fn unique_motion_path(dir: &Path, stem: &str) -> PathBuf {

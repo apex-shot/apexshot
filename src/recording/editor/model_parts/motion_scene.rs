@@ -12,11 +12,16 @@ pub enum MotionBackgroundFillType {
 /// The scene fields carried by the Motion appearance model.  This is
 /// deliberately separate from the animated card transform: the background is
 /// a compositor layer, shared by preview and export.
-use crate::capture::editor::types::FrameStyle;
+use crate::capture::editor::types::{BackgroundAlignment, FrameStyle};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MotionAppearance {
     pub background_padding: f64,
+    /// Legacy card inset (0-200 slider units) and placement inside the
+    /// canvas. Motion has no controls for them, but it must render them or a
+    /// restored static layout would silently change on entering Motion.
+    pub background_insert: f64,
+    pub background_alignment: BackgroundAlignment,
     pub background_fill_type: MotionBackgroundFillType,
     pub background_color: [f64; 4],
     /// The background gradient, shared verbatim with the video editor's
@@ -39,20 +44,6 @@ pub struct MotionAppearance {
     pub shadow_position: (f64, f64),
 }
 
-impl MotionAppearance {
-    /// Rendering padding for the card layout: the stored value floored to a
-    /// breathing room while a fill is active, mirroring Static's
-    /// `effective_background_padding` so the card never touches the fill on
-    /// any Frame in either mode. Hit-testing and text/watermark layers must
-    /// use this too, not the raw field, or layers drift apart.
-    pub fn effective_padding(&self) -> f64 {
-        crate::capture::editor::types::effective_background_padding(
-            self.background_padding,
-            self.background_fill_type != MotionBackgroundFillType::None,
-        )
-    }
-}
-
 impl Default for MotionAppearance {
     fn default() -> Self {
         Self {
@@ -61,6 +52,8 @@ impl Default for MotionAppearance {
             // default for this field. Capture's Background tool overrides this
             // to 0px (see `MotionSession::new`).
             background_padding: 96.0,
+            background_insert: 0.0,
+            background_alignment: BackgroundAlignment::Center,
             background_fill_type: MotionBackgroundFillType::None,
             background_color: [0.0, 0.0, 0.0, 1.0],
             gradient: VideoGradient {
@@ -284,7 +277,12 @@ impl MotionFrame {
     /// ratio taller than 9:16 caps its long edge at the same 1920 budget.
     /// Dimensions are rounded to even values because the MP4 encoder's
     /// yuv420p pixel format requires even sizes.
-    pub fn output_size(&self) -> (i32, i32) {
+    ///
+    /// `source_aspect` is the composed Motion canvas aspect of the still.
+    /// Standard has no ratio of its own, so it uses that instead of the
+    /// fixed 16:9 default: the export keeps the canvas the preview shows
+    /// rather than re-framing the composition into a different shape.
+    pub fn output_size_for(&self, source_aspect: f64) -> (i32, i32) {
         if let Some((w, h)) = self.preset.fixed_dimensions() {
             return (Self::even(f64::from(w)), Self::even(f64::from(h)));
         }
@@ -303,7 +301,7 @@ impl MotionFrame {
                 };
                 (Self::even(w), Self::even(h))
             }
-            _ => match self.effective_aspect() {
+            _ => match self.effective_aspect().or(Some(source_aspect)) {
                 None => (1920, 1080),
                 Some(aspect) if aspect >= 1.0 => (1920, Self::even(1920.0 / aspect)),
                 Some(aspect) => {
@@ -316,6 +314,13 @@ impl MotionFrame {
                 }
             },
         }
+    }
+
+    /// Output canvas without a source still's canvas aspect. Standard keeps
+    /// the established 16:9 export budget here; the editor's Frame panel shows
+    /// the still's own W/H for Standard instead (see `build_motion_appearance`).
+    pub fn output_size(&self) -> (i32, i32) {
+        self.output_size_for(16.0 / 9.0)
     }
 }
 

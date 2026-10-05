@@ -24,6 +24,10 @@ pub(in crate::capture::editor::window) struct MotionBackdropCache {
     pub(in crate::capture::editor::window) width: i32,
     pub(in crate::capture::editor::window) height: i32,
     pub(in crate::capture::editor::window) prefers_dark: bool,
+    /// Scene panel rectangle the pixels were painted for: source size, Frame
+    /// preset and canvas dimensions all land here, so any of them changing
+    /// invalidates the cache without keying on foreground-only card styling.
+    pub(in crate::capture::editor::window) scene_rect: (f64, f64, f64, f64),
     pub(in crate::capture::editor::window) appearance: MotionAppearance,
     pub(in crate::capture::editor::window) surface: gtk4::cairo::ImageSurface,
 }

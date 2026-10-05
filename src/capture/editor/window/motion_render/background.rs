@@ -9,6 +9,7 @@ fn paint_backdrop(
     background_surface: Option<&ImageSurface>,
     checkerboard: bool,
     prefers_dark: bool,
+    canvas: Option<(f64, f64)>,
 ) {
     let appearance = &motion.appearance;
     // The editor canvas keeps its checkerboard; a chosen fill paints inside a
@@ -22,10 +23,12 @@ fn paint_backdrop(
             None,
             !prefers_dark,
         );
+        let (canvas_w, canvas_h) = canvas.unwrap_or((f64::from(width), f64::from(height)));
         Some(motion_preview_scene_rect(
             f64::from(width),
             f64::from(height),
-            motion.frame.effective_aspect(),
+            canvas_w,
+            canvas_h,
         ))
     } else {
         None

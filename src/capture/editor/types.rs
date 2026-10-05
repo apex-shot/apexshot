@@ -48,12 +48,13 @@ pub fn effective_background_padding(padding: f64, has_fill: bool) -> f64 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum BackgroundAlignment {
     TopLeft,
     TopCenter,
     TopRight,
     CenterLeft,
+    #[default]
     Center,
     CenterRight,
     BottomLeft,
