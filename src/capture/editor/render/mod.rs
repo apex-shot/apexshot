@@ -1,6 +1,6 @@
 use super::color::{highlighter_stroke_width, HIGHLIGHTER_ALPHA_SCALE};
 use super::numbering_style::{NumberSize, NumberingStyle};
-use super::types::{AnnotationAction, DrawColor, FrameSpec, Point, Rect, SelectHandle};
+use super::types::{AnnotationAction, DrawColor, FrameSpec, FrameStyle, Point, Rect, SelectHandle};
 use image::{ImageBuffer, RgbaImage};
 use rayon::prelude::*;
 
@@ -21,7 +21,11 @@ pub use background_blur::{
 pub use effects::{
     apply_blackout_rect, apply_blur_rect, apply_censor_rect, apply_focus_rect, apply_hybrid_blur,
 };
-pub use liquid_glass::{glass_layer, GlassLook, GlassRing};
+#[cfg(test)]
+pub use liquid_glass::clear_lens;
+#[allow(unused_imports)]
+pub use liquid_glass::liquid_preview_backdrop;
+pub use liquid_glass::{glass_layer, liquid_preview_layer, GlassLook, GlassRing, LiquidPreview};
 pub use noise::{apply_background_noise, paint_background_noise};
 #[allow(unused_imports)]
 pub use text::{
@@ -1049,6 +1053,57 @@ pub fn rounded_rect_path(
         }
     }
     context.close_path();
+}
+
+/// Styles whose main border joins the image rather than leaving a gap.
+pub fn frame_has_attached_border(style: FrameStyle) -> bool {
+    matches!(
+        style,
+        FrameStyle::Default
+            | FrameStyle::InsetLight
+            | FrameStyle::InsetDark
+            | FrameStyle::Border
+            | FrameStyle::Retro
+    )
+}
+
+/// Fill a band using the image's exact corner outline. Outside bands paint
+/// before the image and overlap its antialiased edge by one pixel.
+pub fn paint_attached_frame_border(
+    context: &gtk4::cairo::Context,
+    image_rect: &super::composition::FloatRect,
+    radius: f64,
+    thickness: f64,
+    color: DrawColor,
+    inset: bool,
+) {
+    if thickness <= 0.01 || image_rect.width <= 0.0 || image_rect.height <= 0.0 {
+        return;
+    }
+    let outer = if inset { 0.0 } else { thickness };
+    let inner = if inset { thickness } else { 1.0 };
+    let _ = context.save();
+    context.new_path();
+    context.set_fill_rule(gtk4::cairo::FillRule::EvenOdd);
+    rounded_rect_path(
+        context,
+        image_rect.x - outer,
+        image_rect.y - outer,
+        image_rect.width + outer * 2.0,
+        image_rect.height + outer * 2.0,
+        if radius <= 0.0 { 0.0 } else { radius + outer },
+    );
+    rounded_rect_path(
+        context,
+        image_rect.x + inner,
+        image_rect.y + inner,
+        image_rect.width - inner * 2.0,
+        image_rect.height - inner * 2.0,
+        (radius - inner).max(0.0),
+    );
+    context.set_source_rgba(color.r, color.g, color.b, color.a);
+    let _ = context.fill();
+    let _ = context.restore();
 }
 
 /// Resolved Liquid Glass geometry in device pixels.

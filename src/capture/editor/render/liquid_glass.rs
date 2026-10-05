@@ -15,6 +15,8 @@
 
 use image::RgbaImage;
 
+use crate::capture::editor::types::{FrameStyle, Rect};
+
 /// The card the glass wraps, in backdrop pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlassRing {
@@ -28,8 +30,10 @@ pub struct GlassRing {
 }
 
 /// Look of the glass, mirroring the reference shader's uniforms.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GlassLook {
+    /// Use a continuous clear body with a single outer reflection.
+    pub clear_body: bool,
     /// How far samples bend, at most this fraction of the band.
     pub refraction: f64,
     /// Colour fringing, as a fraction of the band.
@@ -57,55 +61,33 @@ pub struct GlassLook {
 
 impl Default for GlassLook {
     fn default() -> Self {
-        // Apple Liquid Glass (NSGlassEffectView) recipe: the band stays clear
-        // so the backdrop reads through it. Frost comes from blur plus a
-        // saturation lift — not from a white veil — while the brightness
-        // lives in the top-weighted specular and the crisp edge rim. The old
-        // recipe stacked flat white additions that rendered a milky gray tube,
-        // especially over dark backdrops.
         Self {
-            refraction: 0.5,
-            chroma: 0.04,
-            blur: 0.18,
-            specular: 0.5,
+            clear_body: true,
+            refraction: 0.65,
+            chroma: 0.025,
+            blur: 0.04,
+            specular: 0.20,
             fresnel: 1.0,
-            reflection: 0.25,
-            edge_highlight: 0.9,
-            tint: 0.03,
-            brightness: 0.0,
-            saturation: 0.35,
+            reflection: 0.12,
+            edge_highlight: 0.06,
+            tint: 0.0,
+            brightness: 0.16,
+            saturation: 0.02,
             body_shade: 0.0,
         }
     }
 }
 
 impl GlassLook {
-    /// Frosted Glass Light (Shots.so language): the band smears the backdrop
-    /// into milk instead of lensing it. Refraction and fringing go near
-    /// zero, blur goes heavy, form lighting stays whisper-soft, and the
-    /// body lifts whitish while the rim keeps its definition.
-    pub fn frost_light() -> Self {
+    /// Shared lens optics with the selected frame's light or smoked tint.
+    pub fn for_style(style: FrameStyle) -> Self {
         Self {
-            refraction: 0.06,
-            chroma: 0.0,
-            blur: 1.2,
-            specular: 0.12,
-            fresnel: 0.6,
-            reflection: 0.10,
-            edge_highlight: 0.5,
-            tint: 0.0,
-            brightness: 0.0,
-            saturation: 0.0,
-            body_shade: -0.55,
-        }
-    }
-
-    /// Frosted Glass Dark: the same smear, smoked instead of milky.
-    pub fn frost_dark() -> Self {
-        Self {
-            body_shade: 0.55,
-            edge_highlight: 0.6,
-            ..Self::frost_light()
+            body_shade: match style {
+                FrameStyle::GlassLight => -0.55,
+                FrameStyle::GlassDark => 0.55,
+                _ => 0.0,
+            },
+            ..Self::default()
         }
     }
 }
@@ -117,21 +99,103 @@ pub struct GlassLayer {
     pub y: i64,
 }
 
-/// Rounded-rect signed distance plus the outward unit normal at that point.
-/// `px`/`py` are relative to the rect's centre.
+/// Signed distance and outward normal of the card's shared squircle outline.
 fn rounded_rect_sdf(px: f64, py: f64, half_w: f64, half_h: f64, radius: f64) -> (f64, f64, f64) {
     let qx = px.abs() - half_w + radius;
     let qy = py.abs() - half_h + radius;
-    let mx = qx.max(0.0);
-    let my = qy.max(0.0);
-    let length = (mx * mx + my * my).sqrt();
-    let distance = length + qx.min(0.0).max(qy.min(0.0)) - radius;
-    if length <= 1e-6 {
-        return (distance, 0.0, 0.0);
-    }
     let sign_x = if px < 0.0 { -1.0 } else { 1.0 };
     let sign_y = if py < 0.0 { -1.0 } else { 1.0 };
-    (distance, sign_x * mx / length, sign_y * my / length)
+    if qx <= 0.0 || qy <= 0.0 {
+        let mx = qx.max(0.0);
+        let my = qy.max(0.0);
+        let (normal_x, normal_y) = if mx > my {
+            (sign_x, 0.0)
+        } else if my > mx {
+            (0.0, sign_y)
+        } else {
+            (0.0, 0.0)
+        };
+        return (qx.max(qy) - radius, normal_x, normal_y);
+    }
+    let (distance, normal_x, normal_y) = squircle_corner_sdf(qx, qy, radius);
+    (distance, normal_x * sign_x, normal_y * sign_y)
+}
+
+/// Segments per rounded corner in [`crate::capture::editor::render::rounded_rect_path`].
+const CORNER_SEGMENTS: usize = 16;
+
+/// Signed distance to the card's corner polygon in the corner's own frame,
+/// where `qx`/`qy` are the offsets from the corner centre along its two
+/// outward axes (both positive here): the nearest point on the
+/// quarter-superellipse segment chain, signed by the chain's outward normal.
+fn squircle_corner_sdf(qx: f64, qy: f64, radius: f64) -> (f64, f64, f64) {
+    if radius <= 0.0 {
+        let length = qx.hypot(qy);
+        return (length, qx / length, qy / length);
+    }
+    let mut best = f64::INFINITY;
+    let mut closest = (0.0, 0.0);
+    let mut edge_normal = (0.0, 0.0);
+    let mut previous = (radius, 0.0);
+    for step in 1..=CORNER_SEGMENTS {
+        let angle = step as f64 / CORNER_SEGMENTS as f64 * std::f64::consts::FRAC_PI_2;
+        let (sine, cosine) = angle.sin_cos();
+        let point = (radius * cosine.abs().sqrt(), radius * sine.abs().sqrt());
+        let edge = (point.0 - previous.0, point.1 - previous.1);
+        let length_squared = edge.0 * edge.0 + edge.1 * edge.1;
+        let (projected, normal) = if length_squared <= 1e-12 {
+            (previous, (0.0, 0.0))
+        } else {
+            let along = (((qx - previous.0) * edge.0 + (qy - previous.1) * edge.1)
+                / length_squared)
+                .clamp(0.0, 1.0);
+            let length = length_squared.sqrt();
+            (
+                (previous.0 + edge.0 * along, previous.1 + edge.1 * along),
+                (edge.1 / length, -edge.0 / length),
+            )
+        };
+        let offset = (qx - projected.0, qy - projected.1);
+        let distance = (offset.0 * offset.0 + offset.1 * offset.1).sqrt();
+        if distance < best {
+            best = distance;
+            closest = projected;
+            edge_normal = normal;
+        }
+        previous = point;
+    }
+    let offset = (qx - closest.0, qy - closest.1);
+    let sign = if offset.0 * edge_normal.0 + offset.1 * edge_normal.1 >= 0.0 {
+        1.0
+    } else {
+        -1.0
+    };
+    let normal = if best > 1e-9 {
+        (sign * offset.0 / best, sign * offset.1 / best)
+    } else {
+        edge_normal
+    };
+    (sign * best, normal.0, normal.1)
+}
+
+/// Surface slope and inward displacement through a convex squircle bevel,
+/// refracting a perpendicular ray from air into glass with index 1.5.
+pub fn clear_lens(u: f64, gap: f64, strength: f64) -> (f64, f64) {
+    if u <= 0.0 {
+        return (0.0, 0.0);
+    }
+    if u >= 1.0 {
+        return (1.0e4, 0.0);
+    }
+    let quartic = u * u * u * u;
+    let under_dome = 1.0 - quartic;
+    let height = under_dome.powf(0.25);
+    let derivative = u * u * u / under_dome.powf(0.75).max(1e-6);
+    let slope = 4.0 * derivative;
+    let theta_i = slope.atan();
+    let theta_t = (theta_i.sin() / 1.5).asin();
+    let displacement = height * (4.0 * gap) * (theta_i - theta_t).tan() * strength;
+    (slope, displacement)
 }
 
 /// Glass cross-section across the band, ported from the reference
@@ -276,23 +340,30 @@ pub fn glass_layer(backdrop: &RgbaImage, ring: &GlassRing, look: &GlassLook) -> 
             let distance_from_card = distance.clamp(0.0, gap);
 
             let u = distance_from_card / gap;
-            let slope = lens_slope(u, gap);
-            // Outside the band there is no glass: keep the backdrop sharp so
-            // no gray fringe leaks past the outer lip.
-            let bend_amount = if distance > gap {
-                0.0
+            let (slope, bend_amount) = if look.clear_body {
+                clear_lens(u, gap, look.refraction)
+            } else if distance > gap {
+                // Outside the band there is no glass: keep the backdrop sharp so
+                // no gray fringe leaks past the outer lip.
+                (lens_slope(u, gap), 0.0)
             } else {
-                (slope / 4.0) * max_bend
+                let frost_slope = lens_slope(u, gap);
+                (frost_slope, (frost_slope / 4.0) * max_bend)
             };
-            let sample_x = pixel_x + normal_x * bend_amount;
-            let sample_y = pixel_y + normal_y * bend_amount;
+            let bend_sign = if look.clear_body { -1.0 } else { 1.0 };
+            let sample_x = pixel_x + bend_sign * normal_x * bend_amount;
+            let sample_y = pixel_y + bend_sign * normal_y * bend_amount;
 
             // Colour fringing follows the reference: stronger at the rim where
             // the surface tilts, calmer through the middle.
             let edge_weight =
                 (1.0 - (2.0 * (distance_from_card / gap - 0.5)).abs()).clamp(0.0, 1.0);
             let edge = 1.0 - edge_weight;
-            let fringing = look.chroma * 18.0 * (edge * 0.7 + 0.3) * 0.12 * gap * 0.25;
+            let fringing = if look.clear_body {
+                bend_amount * look.chroma
+            } else {
+                look.chroma * 18.0 * (edge * 0.7 + 0.3) * 0.12 * gap * 0.25
+            };
             let red = sample(
                 backdrop,
                 sample_x + normal_x * fringing,
@@ -358,10 +429,16 @@ pub fn glass_layer(backdrop: &RgbaImage, ring: &GlassRing, look: &GlassLook) -> 
             } else {
                 0.0
             };
+            let source_luminance = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2];
+            let gain = if look.clear_body {
+                1.0 + look.brightness * (1.0 - smoothstep(0.85, 0.98, source_luminance))
+            } else {
+                1.0 + look.brightness
+            };
             for channel in color.iter_mut() {
-                *channel *= 1.0 + look.brightness;
+                *channel *= gain;
             }
-            let luminance = 0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2];
+            let luminance = source_luminance * gain;
             for channel in color.iter_mut() {
                 *channel = luminance + (*channel - luminance) * (1.0 + look.saturation);
             }
@@ -389,79 +466,98 @@ pub fn glass_layer(backdrop: &RgbaImage, ring: &GlassRing, look: &GlassLook) -> 
                 }
             }
 
-            // Surface normal of the beveled glass: the gradient of the height
-            // field points along the outward normal, so it only needs scaling.
-            let gradient_x = normal_x * slope;
-            let gradient_y = normal_y * slope;
-            let normal = normalize3(-gradient_x, -gradient_y, 1.0);
+            // Surface normal of the beveled glass: the clear dome rises along
+            // the outward normal, the frost band keeps the reference tube's
+            // negated gradient.
+            let normal = if look.clear_body {
+                normalize3(normal_x * slope, normal_y * slope, 1.0)
+            } else {
+                normalize3(-normal_x * slope, -normal_y * slope, 1.0)
+            };
 
             let mut specular = 0.0;
-            for (light_x, light_y, light_z, shininess, weight) in lights {
-                let (hx, hy, hz) = normalize3(light_x, light_y, light_z + 1.0);
-                let dot = (normal.0 * hx + normal.1 * hy + normal.2 * hz).max(0.0);
-                specular += dot.powf(shininess) * weight;
+            if look.clear_body {
+                for (light_x, light_y, weight) in [(-0.6, -0.6, 1.0), (0.6, 0.6, 0.5)] {
+                    let (hx, hy, hz) = normalize3(light_x, light_y, 2.0);
+                    let dot = (normal.0 * hx + normal.1 * hy + normal.2 * hz).max(0.0);
+                    specular += dot.powf(12.0) * weight;
+                }
+            } else {
+                for (light_x, light_y, light_z, shininess, weight) in lights {
+                    let (hx, hy, hz) = normalize3(light_x, light_y, light_z + 1.0);
+                    let dot = (normal.0 * hx + normal.1 * hy + normal.2 * hz).max(0.0);
+                    specular += dot.powf(shininess) * weight;
+                }
             }
             specular *= look.specular;
 
-            let fresnel = (1.0 - normal.2.abs()).powf(4.0) * look.fresnel;
-            let top_bias = (0.5 - 0.5 * py / half_h.max(1.0)).clamp(0.0, 1.0);
-            // Tilt-driven reflection for the lips plus a broad top sheen
-            // through the middle: the lips catch the light by curvature while
-            // the top of the tube carries a Shots-style reflection even where
-            // the surface is flat, so black backdrops still read as glass.
-            let tilt = (1.0 - normal.2.abs()).powf(1.5);
-            let reflection = tilt * (0.25 + 0.75 * top_bias) * look.reflection;
-            // Narrow top sheen: Apple glass pools light at the top of the
-            // tube instead of washing the whole band white.
-            let sheen = edge_weight * top_bias.powf(2.0) * 0.20;
-            // Strokes on both lips, top biased, like a real glass tube.
-            let outer_sdf = distance - gap;
-            let outer_stroke = smoothstep(-2.5, -1.5, outer_sdf)
-                * (1.0 - smoothstep(-1.0, 0.0, outer_sdf))
-                * (0.3 + 0.7 * top_bias);
-            let inner_stroke = smoothstep(-1.5, -0.5, distance)
-                * (1.0 - smoothstep(0.5, 1.5, distance))
-                * (0.3 + 0.7 * top_bias);
-            let rim = edge * look.edge_highlight * 0.20;
-            let inner_glow = smoothstep(
-                5.0,
-                0.0,
-                (gap - distance_from_card).min(distance_from_card + 1.0),
-            ) * look.edge_highlight
-                * 0.15;
-            let environment = (0.5 - normal.1 * 0.5) * fresnel * 0.04;
+            let fresnel = if look.clear_body {
+                let f0 = ((1.5_f64 - 1.0) / (1.5 + 1.0)).powi(2);
+                f0 + (1.0 - f0) * (1.0 - normal.2.abs()).powf(5.0) * look.fresnel
+            } else {
+                (1.0 - normal.2.abs()).powf(4.0) * look.fresnel
+            };
 
-            // Clear middle, bright lips: body terms (specular/reflection/
-            // sheen/environment) are quieted where the tube is flat so the
-            // backdrop shows through, while lip terms (rim/strokes/glow)
-            // stay full strength for the crisp Apple edge light.
-            let body = specular + reflection + sheen + environment;
-            let lips =
-                rim + inner_glow + (outer_stroke + inner_stroke * 0.8) * look.edge_highlight * 0.5;
-            let envelope = (0.35 + 0.65 * edge.max(tilt)).clamp(0.0, 1.0);
-            let addition = body * envelope + lips;
-            for channel in color.iter_mut() {
-                *channel *= backdrop_alpha;
-                *channel += addition;
-            }
-            let alpha = (backdrop_alpha + addition).clamp(0.0, 1.0);
-            let fresnel_alpha = fresnel * 0.2;
+            let alpha = if look.clear_body {
+                let inverse_root_two = std::f64::consts::FRAC_1_SQRT_2;
+                let environment =
+                    (0.70 + 0.30 * (normal.0 + normal.1) * -inverse_root_two).clamp(0.08, 0.93);
+                let white_level = color.iter().copied().fold(f64::INFINITY, f64::min);
+                let environment = environment
+                    + ((1.0 - environment) - environment) * smoothstep(0.90, 0.98, white_level);
+                let reflect = ((fresnel + specular) * (1.0 + look.reflection)).clamp(0.0, 0.92);
+                for channel in color.iter_mut() {
+                    *channel = *channel * backdrop_alpha * (1.0 - reflect) + environment * reflect;
+                }
+                backdrop_alpha * (1.0 - reflect) + reflect
+            } else {
+                let top_bias = (0.5 - 0.5 * py / half_h.max(1.0)).clamp(0.0, 1.0);
+                let tilt = (1.0 - normal.2.abs()).powf(1.5);
+                let reflection = tilt * (0.25 + 0.75 * top_bias) * look.reflection;
+                let sheen = edge_weight * top_bias.powf(2.0) * 0.20;
+                let outer_sdf = distance - gap;
+                let outer_stroke = smoothstep(-2.5, -1.5, outer_sdf)
+                    * (1.0 - smoothstep(-1.0, 0.0, outer_sdf))
+                    * (0.3 + 0.7 * top_bias);
+                let inner_stroke = smoothstep(-1.5, -0.5, distance)
+                    * (1.0 - smoothstep(0.5, 1.5, distance))
+                    * (0.3 + 0.7 * top_bias);
+                let rim = edge * look.edge_highlight * 0.20;
+                let inner_glow = smoothstep(
+                    5.0,
+                    0.0,
+                    (gap - distance_from_card).min(distance_from_card + 1.0),
+                ) * look.edge_highlight
+                    * 0.15;
+                let environment = (0.5 - normal.1 * 0.5) * fresnel * 0.04;
+
+                let body = specular + reflection + sheen + environment;
+                let lips = rim
+                    + inner_glow
+                    + (outer_stroke + inner_stroke * 0.8) * look.edge_highlight * 0.5;
+                let envelope = (0.35 + 0.65 * edge.max(tilt)).clamp(0.0, 1.0);
+                let addition = body * envelope + lips;
+                for channel in color.iter_mut() {
+                    *channel = *channel * backdrop_alpha + addition;
+                }
+                (backdrop_alpha + addition).clamp(0.0, 1.0)
+            };
+            let fresnel_alpha = if look.clear_body { 0.0 } else { fresnel * 0.2 };
             for channel in color.iter_mut() {
                 *channel = *channel * (1.0 - fresnel_alpha) + alpha * fresnel_alpha;
             }
 
             // Anti-aliased mask: opaque through the band, feathered on the
             // outer lip and where the glass meets the card.
-            let inner_alpha = smoothstep(-1.2, -0.2, distance);
-            let outer_alpha = 1.0 - smoothstep(gap - 1.2, gap + 0.6, distance);
+            let inner_alpha = smoothstep(-0.5, 0.5, distance);
+            let outer_alpha = 1.0 - smoothstep(gap - 0.5, gap + 0.5, distance);
             let coverage = (inner_alpha * outer_alpha).clamp(0.0, 1.0);
-            let alpha = (alpha * coverage).clamp(0.0, 1.0);
-            if coverage <= 0.002 || alpha <= 0.002 {
+            let masked_alpha = (alpha * coverage).clamp(0.0, 1.0);
+            if coverage <= 0.002 || masked_alpha <= 0.002 {
                 continue;
             }
             let to_byte = |value: f64| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
-            // Back to straight alpha for the compositors we hand this to.
-            let straight = |value: f64| (value / alpha / coverage).clamp(0.0, 1.0);
+            let straight = |value: f64| (value / alpha).clamp(0.0, 1.0);
             layer.put_pixel(
                 lx,
                 ly,
@@ -469,7 +565,7 @@ pub fn glass_layer(backdrop: &RgbaImage, ring: &GlassRing, look: &GlassLook) -> 
                     to_byte(straight(color[0])),
                     to_byte(straight(color[1])),
                     to_byte(straight(color[2])),
-                    to_byte(alpha),
+                    to_byte(masked_alpha),
                 ]),
             );
         }
@@ -479,6 +575,103 @@ pub fn glass_layer(backdrop: &RgbaImage, ring: &GlassRing, look: &GlassLook) -> 
         image: layer,
         x: x0 as i64,
         y: y0 as i64,
+    })
+}
+
+/// One-frame memo of the static preview's glass layer, keyed by the captured
+/// backdrop crop, the ring, and the look.
+pub struct LiquidPreview {
+    cached: Option<LiquidPreviewCache>,
+}
+
+struct LiquidPreviewCache {
+    backdrop: RgbaImage,
+    ring: GlassRing,
+    look: GlassLook,
+    layer: GlassLayer,
+}
+
+impl LiquidPreview {
+    /// Create an empty preview cache.
+    pub fn new() -> Self {
+        Self { cached: None }
+    }
+
+    /// The glass layer for `backdrop` in backdrop pixels, reusing the last
+    /// result while the backdrop, ring and look are unchanged.
+    pub fn layer(
+        &mut self,
+        backdrop: &RgbaImage,
+        ring: &GlassRing,
+        look: &GlassLook,
+    ) -> Option<&GlassLayer> {
+        let reusable = self.cached.as_ref().is_some_and(|cached| {
+            &cached.backdrop == backdrop && cached.ring == *ring && cached.look == *look
+        });
+        if !reusable {
+            let layer = glass_layer(backdrop, ring, look)?;
+            self.cached = Some(LiquidPreviewCache {
+                backdrop: backdrop.clone(),
+                ring: *ring,
+                look: *look,
+                layer,
+            });
+        }
+        self.cached.as_ref().map(|cached| &cached.layer)
+    }
+}
+
+impl Default for LiquidPreview {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Rasterize a recorded scene group into straight-alpha pixels at `crop`.
+pub fn liquid_preview_backdrop(group: &gtk4::cairo::Pattern, crop: Rect) -> Option<RgbaImage> {
+    if crop.width <= 0 || crop.height <= 0 {
+        return None;
+    }
+    let mut surface =
+        gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, crop.width, crop.height)
+            .ok()?;
+    {
+        let context = gtk4::cairo::Context::new(&surface).ok()?;
+        context.set_operator(gtk4::cairo::Operator::Source);
+        context.set_source_rgba(0.0, 0.0, 0.0, 0.0);
+        context.paint().ok()?;
+        context.set_operator(gtk4::cairo::Operator::Over);
+        context.translate(-f64::from(crop.x), -f64::from(crop.y));
+        context.set_source(group).ok()?;
+        context.paint().ok()?;
+    }
+    surface.flush();
+    let stride = surface.stride() as usize;
+    let data = surface.data().ok()?;
+    Some(super::cairo_argb_to_rgba_image(
+        crop.width as u32,
+        crop.height as u32,
+        stride,
+        data.as_ref(),
+    ))
+}
+
+/// The refracted glass band for one preview frame, in absolute device pixels:
+/// `crop` is the bounded rectangle rasterized from `group`, and `ring` sits
+/// inside it.
+pub fn liquid_preview_layer(
+    preview: &mut LiquidPreview,
+    group: &gtk4::cairo::Pattern,
+    crop: Rect,
+    ring: &GlassRing,
+    look: &GlassLook,
+) -> Option<GlassLayer> {
+    let backdrop = liquid_preview_backdrop(group, crop)?;
+    let layer = preview.layer(&backdrop, ring, look)?;
+    Some(GlassLayer {
+        image: layer.image.clone(),
+        x: i64::from(crop.x) + layer.x,
+        y: i64::from(crop.y) + layer.y,
     })
 }
 

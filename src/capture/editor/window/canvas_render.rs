@@ -16,13 +16,15 @@ use std::time::{Duration, Instant};
 
 use crate::capture::editor::{
     color::selection_hit_padding_for_scale,
-    composition::BackgroundComposition,
+    composition::{BackgroundComposition, FloatRect},
     render::{
         blur_background_surface, draw_active_text_input, draw_annotation_action,
         draw_arrow_control_handles, draw_arrow_selection_outline,
         draw_canvas_checkerboard_background, draw_draft_action, draw_rgba_to_context,
         draw_selection_handles, draw_selection_outline, draw_text_edit_border,
-        draw_text_edit_handles, paint_background_noise, rgba_image_to_surface, text_action_bounds,
+        draw_text_edit_handles, frame_has_attached_border, liquid_preview_layer,
+        paint_attached_frame_border, paint_background_noise, paint_surface_with_filter,
+        rgba_image_to_surface, text_action_bounds, GlassLook, GlassRing, LiquidPreview,
         BACKGROUND_BLUR_MAX_RADIUS,
     },
     selection::{action_bounds_with_padding, action_resize_handles},
@@ -60,6 +62,9 @@ pub(super) struct CanvasRenderCaches {
     /// marks a full-resolution/unblurred surface. A burst only upgrades it, so
     /// a drag never re-blurs a surface that is already crisp enough.
     pub background_edge: Rc<Cell<f64>>,
+    /// The last refracted band the Liquid preview built, reused while the
+    /// captured crop, its ring and the look are unchanged.
+    pub liquid_preview: Rc<RefCell<LiquidPreview>>,
 }
 
 impl CanvasRenderCaches {
@@ -70,6 +75,7 @@ impl CanvasRenderCaches {
             background_surface: Rc::new(RefCell::new(None)),
             background_signature: Rc::new(RefCell::new(None)),
             background_edge: Rc::new(Cell::new(f64::INFINITY)),
+            liquid_preview: Rc::new(RefCell::new(LiquidPreview::new())),
         }
     }
 }
@@ -215,6 +221,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
     let background_surface = caches.background_surface.clone();
     let background_signature_cache = caches.background_signature.clone();
     let background_edge = caches.background_edge.clone();
+    let liquid_preview = caches.liquid_preview.clone();
     let canvas_padding_draw = canvas_padding as f64;
     let interactive_preview = interactive_preview.clone();
     let wallpaper_cache = wallpaper_cache.clone();
@@ -435,6 +442,12 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
 
         context.set_operator(gtk4::cairo::Operator::Source);
         draw_canvas_checkerboard_background(context, width, height, None, !prefers_dark);
+
+        let liquid_group = frame_style.spec().liquid;
+        let mut liquid_backdrop = None;
+        if liquid_group {
+            context.push_group();
+        }
 
         if has_background || frame_without_background {
             context.set_operator(gtk4::cairo::Operator::Over);
@@ -669,6 +682,17 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 paint_motion_scene_shadow(&context, scene_stage, &scene_shadow, true);
             }
 
+            if liquid_group {
+                if let Ok(background) = context.pop_group() {
+                    context.set_operator(gtk4::cairo::Operator::Over);
+                    context.push_group();
+                    if context.set_source(&background).is_ok() {
+                        let _ = context.paint();
+                    }
+                    liquid_backdrop = Some(background);
+                }
+            }
+
             if let Some(layout) = background_layout.as_ref() {
                 t.offset_x = canvas_t.offset_x + layout.image_rect.x * canvas_t.scale;
                 t.offset_y = canvas_t.offset_y + layout.image_rect.y * canvas_t.scale;
@@ -765,6 +789,21 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             let rect_w = image_width * t.scale;
             let rect_h = image_height * t.scale;
             let corner_r = background_corner_radius * background_scale_factor * t.scale;
+            if frame_has_attached_border(frame_style) && !frame_style.spec().inset_border {
+                paint_attached_frame_border(
+                    context,
+                    &FloatRect {
+                        x: t.offset_x,
+                        y: t.offset_y,
+                        width: rect_w,
+                        height: rect_h,
+                    },
+                    corner_r,
+                    border_thickness * background_scale_factor * t.scale,
+                    border_color,
+                    false,
+                );
+            }
 
             let _ = context.save();
             context.translate(t.offset_x, t.offset_y);
@@ -804,11 +843,76 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         if has_background || frame_without_background {
             let _ = context.restore();
         }
+
+        let mut liquid_preview_painted = false;
+        if liquid_group {
+            if let Ok(scene) = context.pop_group() {
+                context.set_operator(gtk4::cairo::Operator::Over);
+                if context.set_source(&scene).is_ok() {
+                    let _ = context.paint();
+                }
+                let spec = frame_style.spec();
+                let band_source = if border_thickness > 0.01 {
+                    border_thickness
+                } else {
+                    spec.border_thickness
+                };
+                let unit = background_scale_factor * t.scale;
+                let gap =
+                    (band_source + spec.outer1.map(|outer| outer.thickness).unwrap_or(0.0)) * unit;
+                let crop_x = canvas_t.offset_x.floor().max(0.0);
+                let crop_y = canvas_t.offset_y.floor().max(0.0);
+                let crop = Rect {
+                    x: crop_x as i32,
+                    y: crop_y as i32,
+                    width: ((canvas_t.offset_x + virtual_w * canvas_t.scale)
+                        .ceil()
+                        .min(f64::from(width))
+                        - crop_x)
+                        .max(0.0) as i32,
+                    height: ((canvas_t.offset_y + virtual_h * canvas_t.scale)
+                        .ceil()
+                        .min(f64::from(height))
+                        - crop_y)
+                        .max(0.0) as i32,
+                };
+                let ring = GlassRing {
+                    x: t.offset_x - crop_x,
+                    y: t.offset_y - crop_y,
+                    width: image_width * t.scale,
+                    height: image_height * t.scale,
+                    radius: background_corner_radius * background_scale_factor * t.scale,
+                    gap,
+                };
+                let layer = {
+                    let mut preview = liquid_preview.borrow_mut();
+                    liquid_preview_layer(
+                        &mut preview,
+                        liquid_backdrop.as_ref().unwrap_or(&scene),
+                        crop,
+                        &ring,
+                        &GlassLook::for_style(frame_style),
+                    )
+                };
+                if let Some(layer) = layer {
+                    if let Some(surface) = rgba_image_to_surface(&layer.image) {
+                        paint_surface_with_filter(
+                            context,
+                            &surface,
+                            layer.x as f64,
+                            layer.y as f64,
+                            gtk4::cairo::Filter::Nearest,
+                        );
+                        liquid_preview_painted = true;
+                    }
+                }
+            }
+        }
         // Frame style preset: outside border drawn *around* the screenshot on
         // top of any background/wallpaper, below the annotations. The stroke is
         // centered on an expanded path so the inner edge aligns with the image
         // edge and the outer edge carries the radius outward.
-        {
+        if !liquid_preview_painted {
             let bw = image_width * t.scale;
             let bh = image_height * t.scale;
             let br = background_corner_radius * background_scale_factor * t.scale;
@@ -833,27 +937,23 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 // Inset borders paint fully inside the image edge.
                 if spec.inset_border && border_thickness > 0.0 {
                     let lw = (border_thickness * unit).max(0.0);
-                    if lw > 0.01 && bw - lw > 1.0 && bh - lw > 1.0 {
-                        let e = lw / 2.0;
-                        let _ = context.save();
-                        context.translate(t.offset_x + e, t.offset_y + e);
-                        draw_rounded_rect_path(
-                            context,
-                            bw - e * 2.0,
-                            bh - e * 2.0,
-                            (br - e).max(0.0),
-                            0.0,
-                        );
-                        context.set_source_rgba(
-                            border_color.r,
-                            border_color.g,
-                            border_color.b,
-                            border_color.a,
-                        );
-                        context.set_line_width(lw);
-                        let _ = context.stroke();
-                        let _ = context.restore();
-                    }
+                    paint_attached_frame_border(
+                        context,
+                        &FloatRect {
+                            x: t.offset_x,
+                            y: t.offset_y,
+                            width: bw,
+                            height: bh,
+                        },
+                        if has_background || frame_without_background {
+                            br
+                        } else {
+                            0.0
+                        },
+                        lw,
+                        border_color,
+                        true,
+                    );
                 }
                 let mut expand = 0.0;
                 let stroke_outside = |thickness: f64,
@@ -883,7 +983,10 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                     let _ = context.restore();
                     extra + lw
                 };
-                if border_thickness > 0.0 && !spec.inset_border {
+                if border_thickness > 0.0
+                    && !spec.inset_border
+                    && !frame_has_attached_border(frame_style)
+                {
                     expand = stroke_outside(
                         border_thickness,
                         br,
@@ -1208,6 +1311,84 @@ fn draw_rounded_rect_path(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn liquid_scene_group_replay_keeps_the_surround_under_the_scene() {
+        let (width, height) = (60, 40);
+        let mut reference = ImageSurface::create(gtk4::cairo::Format::ARgb32, width, height)
+            .expect("reference surface");
+        {
+            let context = gtk4::cairo::Context::new(&reference).expect("reference context");
+            draw_canvas_checkerboard_background(&context, width, height, None, true);
+        }
+        let recording = gtk4::cairo::RecordingSurface::create(
+            gtk4::cairo::Content::ColorAlpha,
+            Some(gtk4::cairo::Rectangle::new(
+                0.0,
+                0.0,
+                width as f64,
+                height as f64,
+            )),
+        )
+        .expect("recording surface");
+        {
+            let context = gtk4::cairo::Context::new(&recording).expect("context");
+            context.set_operator(gtk4::cairo::Operator::Source);
+            draw_canvas_checkerboard_background(&context, width, height, None, true);
+            context.push_group();
+            context.set_operator(gtk4::cairo::Operator::Over);
+            context.set_source_rgb(0.9, 0.2, 0.1);
+            context.rectangle(15.0, 10.0, 30.0, 20.0);
+            context.fill().expect("scene");
+            let scene = context.pop_group().expect("scene group");
+            context.set_operator(gtk4::cairo::Operator::Over);
+            context.set_source(&scene).expect("scene source");
+            context.paint().expect("replay");
+        }
+        let mut surface =
+            ImageSurface::create(gtk4::cairo::Format::ARgb32, width, height).expect("surface");
+        {
+            let context = gtk4::cairo::Context::new(&surface).expect("raster context");
+            context
+                .set_source_surface(&recording, 0.0, 0.0)
+                .expect("recording source");
+            context.paint().expect("rasterize recording");
+        }
+        surface.flush();
+        reference.flush();
+        let replayed = {
+            let stride = surface.stride() as usize;
+            let data = surface.data().expect("surface data");
+            crate::capture::editor::render::cairo_argb_to_rgba_image(
+                width as u32,
+                height as u32,
+                stride,
+                data.as_ref(),
+            )
+        };
+        let surround = {
+            let stride = reference.stride() as usize;
+            let data = reference.data().expect("reference data");
+            crate::capture::editor::render::cairo_argb_to_rgba_image(
+                width as u32,
+                height as u32,
+                stride,
+                data.as_ref(),
+            )
+        };
+        for (x, y) in [(2u32, 2u32), (57, 2), (2, 37), (57, 37), (5, 20)] {
+            assert_eq!(
+                replayed.get_pixel(x, y),
+                surround.get_pixel(x, y),
+                "the surround outside the scene must keep the checkerboard, ({x}, {y})"
+            );
+        }
+        let scene_pixel = *replayed.get_pixel(30, 20);
+        assert!(
+            scene_pixel[0] > 200 && scene_pixel[1] < 90,
+            "the scene must still composite over the surround, got {scene_pixel:?}"
+        );
+    }
 
     #[test]
     fn canvas_render_owns_draw_func_caches_and_lock_release() {

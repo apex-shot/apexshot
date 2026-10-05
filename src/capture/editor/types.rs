@@ -174,9 +174,8 @@ pub struct FrameSpec {
     /// to `render::LiquidFrame` (Cairo previews) or `render::glass_layer`
     /// (static exports). The whitish/darkish read comes from `border_color`.
     pub liquid: bool,
-    /// True for the frosted-glass siblings (Glass Light, Glass Dark): a
-    /// heavily-blurred milky/smoked band like Shots.so frames, as opposed
-    /// to Liquid's clear refractive edge. Only meaningful with `liquid`.
+    /// Diffuse light/smoked tint in the Cairo approximation. The pixel
+    /// renderer uses the shared glass optics with the corresponding tint.
     pub frost: bool,
     pub outer1: Option<FrameOuterStroke>,
     pub outer2: Option<FrameOuterStroke>,
@@ -230,12 +229,8 @@ impl FrameStyle {
                 backing1: None,
                 backing2: None,
             },
-            // Glass Light: frosted glass like Shots.so frames in a 3px edge —
-            // a heavily-blurred band carrying a whitish veil, edged by a
-            // crisp specular rim. The backdrop smears through the frost
-            // instead of bending like Liquid's refractive edge.
             Self::GlassLight => FrameSpec {
-                border_thickness: 2.0,
+                border_thickness: 2.5,
                 inset_border: false,
                 liquid: true,
                 frost: true,
@@ -249,10 +244,8 @@ impl FrameStyle {
                 backing1: None,
                 backing2: None,
             },
-            // Glass Dark: the same 3px frost, smoked — the band deepens the
-            // backdrop while the white speculars and rim keep the glass read.
             Self::GlassDark => FrameSpec {
-                border_thickness: 2.0,
+                border_thickness: 2.5,
                 inset_border: false,
                 liquid: true,
                 frost: true,
@@ -266,23 +259,15 @@ impl FrameStyle {
                 backing1: None,
                 backing2: None,
             },
-            // Liquid Glass (Apple/NSGlassEffectView language): a 3px glass
-            // edge — a 2px clear refracted body capped by a 1px specular
-            // rim. The body stays translucent so the backdrop reads through
-            // it; the light lives in the top-weighted specular and the crisp
-            // rim, visible all around the perimeter. Renderers expand this
-            // into gradients (Cairo previews) or the refraction shader
-            // (`render::glass_layer` in static exports) rather than a flat
-            // stroke.
             Self::Liquid => FrameSpec {
-                border_thickness: 2.0,
+                border_thickness: 2.5,
                 inset_border: false,
                 liquid: true,
                 frost: false,
-                border_color: DrawColor::new(1.0, 1.0, 1.0, 0.20),
+                border_color: DrawColor::new(1.0, 1.0, 1.0, 0.10),
                 outer1: Some(FrameOuterStroke {
                     thickness: 1.0,
-                    color: DrawColor::new(1.0, 1.0, 1.0, 0.9),
+                    color: DrawColor::new(1.0, 1.0, 1.0, 0.55),
                     gap: 0.0,
                 }),
                 outer2: None,

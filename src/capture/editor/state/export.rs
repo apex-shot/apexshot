@@ -2,7 +2,8 @@ use super::super::composition::{BackgroundComposition, CompositionLayout, FloatR
 use super::super::pen_weight::{HighlighterMode, PenWeight};
 use super::super::render::{
     apply_background_blur, apply_background_noise, apply_blur_rect, cairo_argb_to_rgba_image,
-    glass_layer, rgba_image_to_surface, GlassLook, GlassRing, BACKGROUND_BLUR_MAX_RADIUS,
+    frame_has_attached_border, glass_layer, paint_attached_frame_border, rgba_image_to_surface,
+    GlassLook, GlassRing, BACKGROUND_BLUR_MAX_RADIUS,
 };
 use super::super::types::{
     AnnotationAction, BackgroundStyle, DrawColor, EditorError, FrameStyle, Rect,
@@ -136,29 +137,18 @@ fn stroke_frame_border(
         // canvas instead of a stroke (see `paint_liquid_glass`).
         return;
     }
-    // Inset borders paint fully inside the image edge; the surround (and any
-    // accent rings) still starts at the image edge itself.
-    if spec.inset_border && border_thickness > 0.0 {
-        let lw = (border_thickness * unit).max(0.0);
-        if lw > 0.01 {
-            let e = lw / 2.0;
-            context.set_source_rgba(
-                border_color.r,
-                border_color.g,
-                border_color.b,
-                border_color.a,
-            );
-            context.set_line_width(lw);
-            draw_rounded_rect_path(
+    if frame_has_attached_border(style) {
+        if spec.inset_border {
+            paint_attached_frame_border(
                 context,
-                image_rect.x + e,
-                image_rect.y + e,
-                (image_rect.width - e * 2.0).max(1.0),
-                (image_rect.height - e * 2.0).max(1.0),
-                (base_radius - e).max(0.0),
+                image_rect,
+                base_radius,
+                border_thickness * unit,
+                border_color,
+                true,
             );
-            let _ = context.stroke();
         }
+        return;
     }
     let mut expand = 0.0;
     let stroke_outside = |context: &gtk4::cairo::Context,
@@ -219,6 +209,46 @@ fn stroke_frame_border(
 }
 
 impl EditorState {
+    fn paint_attached_border_underlay(
+        &self,
+        canvas: RgbaImage,
+        layout: &CompositionLayout,
+    ) -> Result<RgbaImage, EditorError> {
+        if !frame_has_attached_border(self.frame_style)
+            || self.frame_style.spec().inset_border
+            || self.border_thickness <= 0.01
+        {
+            return Ok(canvas);
+        }
+        let Some(mut surface) = rgba_image_to_surface(&canvas) else {
+            return Ok(canvas);
+        };
+        let unit = layout.scale_factor * layout.draw_scale;
+        {
+            let context = gtk4::cairo::Context::new(&surface)
+                .map_err(|error| EditorError::ImageSave(error.to_string()))?;
+            paint_attached_frame_border(
+                &context,
+                &layout.image_rect,
+                self.background_corner_radius * unit,
+                self.border_thickness * unit,
+                self.border_color,
+                false,
+            );
+        }
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface
+            .data()
+            .map_err(|error| EditorError::ImageSave(error.to_string()))?;
+        Ok(cairo_argb_to_rgba_image(
+            canvas.width(),
+            canvas.height(),
+            stride,
+            &data,
+        ))
+    }
+
     pub fn to_rendered_image(&self) -> Result<RgbaImage, EditorError> {
         let (width, height) = self.working_image.dimensions();
         if width == 0 || height == 0 {
@@ -254,21 +284,19 @@ impl EditorState {
             if self.border_thickness > 0.0 {
                 let thickness = self.border_thickness.max(0.0);
                 if thickness > 0.01 {
-                    let inset = thickness / 2.0;
-                    context.set_source_rgba(
-                        self.border_color.r,
-                        self.border_color.g,
-                        self.border_color.b,
-                        self.border_color.a,
+                    paint_attached_frame_border(
+                        &context,
+                        &FloatRect {
+                            x: 0.0,
+                            y: 0.0,
+                            width: width as f64,
+                            height: height as f64,
+                        },
+                        0.0,
+                        thickness,
+                        self.border_color,
+                        true,
                     );
-                    context.set_line_width(thickness);
-                    context.rectangle(
-                        inset,
-                        inset,
-                        (width as f64 - thickness).max(1.0),
-                        (height as f64 - thickness).max(1.0),
-                    );
-                    let _ = context.stroke();
                 }
             }
 
@@ -322,6 +350,7 @@ impl EditorState {
         if self.background_corner_radius > 0.0 {
             apply_corner_radius(&mut final_shot, radius);
         }
+        canvas = self.paint_attached_border_underlay(canvas, &layout)?;
         image::imageops::overlay(
             &mut canvas,
             &final_shot,
@@ -333,7 +362,7 @@ impl EditorState {
         if width == 0 || height == 0 {
             return Ok(canvas);
         }
-        let canvas = self.paint_liquid_glass(canvas, &layout);
+        let canvas = self.paint_liquid_glass(canvas, &layout, None);
         let Some(mut surface) = rgba_image_to_surface(&canvas) else {
             return Ok(canvas);
         };
@@ -440,12 +469,13 @@ impl EditorState {
         &self,
         canvas: RgbaImage,
         layout: &CompositionLayout,
+        glass_backdrop: Option<&RgbaImage>,
     ) -> Result<RgbaImage, EditorError> {
         let (width, height) = (canvas.width(), canvas.height());
         if width == 0 || height == 0 {
             return Ok(canvas);
         }
-        let canvas = self.paint_liquid_glass(canvas, layout);
+        let canvas = self.paint_liquid_glass(canvas, layout, glass_backdrop);
         let Some(mut surface) = rgba_image_to_surface(&canvas) else {
             return Ok(canvas);
         };
@@ -492,9 +522,10 @@ impl EditorState {
         &self,
         clean_screenshot: &RgbaImage,
     ) -> Result<RgbaImage, EditorError> {
-        let canvas = self.render_with_background(clean_screenshot)?;
+        let (canvas, glass_backdrop) = self.render_with_background(clean_screenshot)?;
         let layout = self.background_layout_for(clean_screenshot);
-        let canvas = self.paint_vector_annotations_on_canvas(canvas, &layout)?;
+        let canvas =
+            self.paint_vector_annotations_on_canvas(canvas, &layout, glass_backdrop.as_ref())?;
         // Scene Shadows overlay: above the card and the annotations. The still
         // has no watermark layer, so nothing sits on top of it here.
         paint_scene_shadow_layer(canvas, &self.scene_shadow, false)
@@ -522,14 +553,23 @@ impl EditorState {
 
     /// Liquid Glass frame: bend the composited canvas through the glass band
     /// and light it. Runs before the annotation pass so strokes stay on top.
-    fn paint_liquid_glass(&self, canvas: RgbaImage, layout: &CompositionLayout) -> RgbaImage {
+    fn paint_liquid_glass(
+        &self,
+        canvas: RgbaImage,
+        layout: &CompositionLayout,
+        glass_backdrop: Option<&RgbaImage>,
+    ) -> RgbaImage {
         let spec = self.frame_style.spec();
         if !spec.liquid {
             return canvas;
         }
         let unit = layout.scale_factor * layout.draw_scale;
-        let gap = (spec.border_thickness + spec.outer1.map(|outer| outer.thickness).unwrap_or(0.0))
-            * unit;
+        let band_source = if self.border_thickness > 0.01 {
+            self.border_thickness
+        } else {
+            spec.border_thickness
+        };
+        let gap = (band_source + spec.outer1.map(|outer| outer.thickness).unwrap_or(0.0)) * unit;
         let ring = GlassRing {
             x: layout.image_rect.x,
             y: layout.image_rect.y,
@@ -538,15 +578,8 @@ impl EditorState {
             radius: self.background_corner_radius * unit,
             gap,
         };
-        // The glass family shares one shader; geometry plus per-style body
-        // shade carry the look. The wide frosted siblings smear instead of
-        // lensing, so they get dedicated frost presets.
-        let look = match self.frame_style {
-            FrameStyle::GlassLight => GlassLook::frost_light(),
-            FrameStyle::GlassDark => GlassLook::frost_dark(),
-            _ => GlassLook::default(),
-        };
-        let Some(layer) = glass_layer(&canvas, &ring, &look) else {
+        let look = GlassLook::for_style(self.frame_style);
+        let Some(layer) = glass_layer(glass_backdrop.unwrap_or(&canvas), &ring, &look) else {
             return canvas;
         };
         let mut canvas = canvas;
@@ -554,7 +587,10 @@ impl EditorState {
         canvas
     }
 
-    fn render_with_background(&self, screenshot: &RgbaImage) -> Result<RgbaImage, EditorError> {
+    fn render_with_background(
+        &self,
+        screenshot: &RgbaImage,
+    ) -> Result<(RgbaImage, Option<RgbaImage>), EditorError> {
         let layout = self.background_layout_for(screenshot);
 
         let mut canvas = match &self.background_style {
@@ -645,7 +681,7 @@ impl EditorState {
                     image::imageops::FilterType::Triangle,
                 )
             }
-            BackgroundStyle::None => return Ok(screenshot.clone()),
+            BackgroundStyle::None => return Ok((screenshot.clone(), None)),
         };
 
         // The Appearance blur softens the fill only, and it lands before the
@@ -665,6 +701,7 @@ impl EditorState {
         // Scene Shadows underlay: on the fill, under the card backings, the
         // drop shadow, and the card itself.
         canvas = paint_scene_shadow_layer(canvas, &self.scene_shadow, true)?;
+        let glass_backdrop = self.frame_style.spec().liquid.then(|| canvas.clone());
 
         // Backing sheets (Stack looks, Retro window) behind the card.
         {
@@ -704,6 +741,8 @@ impl EditorState {
             );
         }
 
+        canvas = self.paint_attached_border_underlay(canvas, &layout)?;
+
         image::imageops::overlay(
             &mut canvas,
             &final_screenshot,
@@ -711,7 +750,7 @@ impl EditorState {
             layout.image_rect.y.round() as i64,
         );
 
-        Ok(canvas)
+        Ok((canvas, glass_backdrop))
     }
 
     fn load_and_resize_background(

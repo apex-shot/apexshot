@@ -175,7 +175,11 @@ pub(super) fn wire_output_lifecycle(
                 if let Some(window) = window_save.upgrade() {
                     window.set_visible(false);
                 }
-                match save_edited_image(&path_save, &state_save.lock().unwrap()) {
+                let save_result = {
+                    let state = state_save.lock().unwrap();
+                    save_edited_image(&path_save, &state)
+                };
+                match save_result {
                     Ok(()) => {
                         finish_image_session(&state_save, &path_save, &window_save, &app_save)
                     }
@@ -324,5 +328,36 @@ mod tests {
                 && handler.contains("save_edited_image"),
             "Done in Motion exports MP4; Done in Static still flattens the PNG"
         );
+    }
+
+    #[test]
+    fn done_releases_the_save_guard_before_finishing_the_session() {
+        let source = include_str!("output.rs");
+        let direct_save = source
+            .split("if !done_needs_save_chooser(&path_save) {")
+            .nth(1)
+            .expect("direct save branch")
+            .split("if let Err(error) = save_edited_image")
+            .next()
+            .expect("direct save handler");
+        let scoped_save = direct_save
+            .find("let save_result = {")
+            .expect("scoped save");
+        let guard_end = scoped_save
+            + direct_save[scoped_save..]
+                .find("};")
+                .expect("save guard scope ends");
+        let dispatch = direct_save
+            .find("match save_result {")
+            .expect("result dispatch");
+        let finish = direct_save
+            .find("finish_image_session(")
+            .expect("finish session");
+        assert!(direct_save[scoped_save..guard_end].contains("state_save.lock().unwrap()"));
+        assert!(
+            direct_save[scoped_save..guard_end].contains("save_edited_image(&path_save, &state)")
+        );
+        assert!(guard_end < dispatch && dispatch < finish);
+        assert!(!direct_save.contains("match save_edited_image("));
     }
 }
