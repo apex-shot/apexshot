@@ -4,20 +4,10 @@
 /// position instead of floating over the editor viewport.
 fn paint_motion_text(
     context: &Context,
-    surface: &ImageSurface,
-    stage: MotionStage,
+    layout: CardLayout,
     motion: &MotionState,
     time: f64,
-    card_scale: f64,
 ) {
-    let transform = motion.sample(time);
-    let layout = CardLayout::with_padding(
-        surface,
-        stage,
-        transform,
-        motion.zoom_anchor_at(time),
-        motion.appearance.effective_padding(),
-    );
     for segment in &motion.text_segments {
         let Some(style) = segment.sample(time) else {
             continue;
@@ -32,14 +22,9 @@ fn paint_motion_text(
         if line.is_empty() {
             continue;
         }
-        // Size clamps are authored against the source card, so evaluate them
-        // in source pixels and scale the result into the (possibly
-        // downscaled) preview texture.
-        let size = (layout.img_h / card_scale.max(1e-6) * 0.060 * segment.size.clamp(0.5, 2.2))
-            .clamp(14.0, 160.0)
-            * card_scale;
-        let anchor_x = segment.pos_x.clamp(0.05, 0.95) * layout.img_w;
-        let anchor_y = segment.pos_y.clamp(0.05, 0.95) * layout.img_h;
+        let size = (layout.img_h() * 0.060 * segment.size.clamp(0.5, 2.2)).clamp(14.0, 160.0);
+        let anchor_x = segment.pos_x.clamp(0.05, 0.95) * layout.img_w();
+        let anchor_y = segment.pos_y.clamp(0.05, 0.95) * layout.img_h();
         let Some(matrix) = layout.local_matrix(anchor_x, anchor_y) else {
             continue;
         };
@@ -55,15 +40,15 @@ fn paint_motion_text(
             let _ = context.restore();
             continue;
         };
-        let animated_offset_x = style.offset_x * layout.img_h / 1080.0;
+        let animated_offset_x = style.offset_x * layout.img_h() / 1080.0;
         let x = anchor_x + animated_offset_x - ext.width() / 2.0 - ext.x_bearing();
         // `MotionTextStyle` uses a 1080pt artboard baseline. Scale it into
         // the source image so the entrance distance remains consistent after
         // the card is fitted into either preview or export.
-        let animated_offset = style.offset_y * layout.img_h / 1080.0;
+        let animated_offset = style.offset_y * layout.img_h() / 1080.0;
         let y = anchor_y + animated_offset - ext.height() / 2.0 - ext.y_bearing();
         context.set_source_rgba(0.0, 0.0, 0.0, 0.42 * style.alpha);
-        context.move_to(x, y + 4.0 * card_scale);
+        context.move_to(x, y + 4.0);
         let _ = context.show_text(&line);
         context.set_source_rgba(1.0, 1.0, 1.0, style.alpha);
         context.move_to(x, y);
@@ -77,36 +62,26 @@ fn paint_motion_text(
 /// resolve it once for export, keeping the two compositor paths equivalent.
 fn paint_motion_watermark(
     context: &Context,
-    card: &ImageSurface,
-    stage: MotionStage,
+    layout: CardLayout,
     motion: &MotionState,
     watermark: &ImageSurface,
-    time: f64,
 ) {
     if motion.watermark.image_file_name.is_none() {
         return;
     }
-    let transform = motion.sample(time);
-    let layout = CardLayout::with_padding(
-        card,
-        stage,
-        transform,
-        motion.zoom_anchor_at(time),
-        motion.appearance.effective_padding(),
-    );
     let source_w = f64::from(watermark.width().max(1));
     let source_h = f64::from(watermark.height().max(1));
-    let width = (layout.img_w * motion.watermark.size.clamp(0.02, 0.8)).max(1.0);
+    let width = (layout.img_w() * motion.watermark.size.clamp(0.02, 0.8)).max(1.0);
     let height = (width * source_h / source_w)
-        .min(layout.img_h * 0.8)
+        .min(layout.img_h() * 0.8)
         .max(1.0);
-    let inset = (layout.img_w * motion.watermark.inset.clamp(0.0, 0.45))
-        .min((layout.img_w - width).max(0.0) * 0.5);
-    let inset_y = inset.min((layout.img_h - height).max(0.0) * 0.5);
-    let x = (motion.watermark.position.0.clamp(0.0, 1.0) * layout.img_w - width * 0.5)
-        .clamp(inset, (layout.img_w - inset - width).max(inset));
-    let y = (motion.watermark.position.1.clamp(0.0, 1.0) * layout.img_h - height * 0.5)
-        .clamp(inset_y, (layout.img_h - inset_y - height).max(inset_y));
+    let inset = (layout.img_w() * motion.watermark.inset.clamp(0.0, 0.45))
+        .min((layout.img_w() - width).max(0.0) * 0.5);
+    let inset_y = inset.min((layout.img_h() - height).max(0.0) * 0.5);
+    let x = (motion.watermark.position.0.clamp(0.0, 1.0) * layout.img_w() - width * 0.5)
+        .clamp(inset, (layout.img_w() - inset - width).max(inset));
+    let y = (motion.watermark.position.1.clamp(0.0, 1.0) * layout.img_h() - height * 0.5)
+        .clamp(inset_y, (layout.img_h() - inset_y - height).max(inset_y));
     let Some(matrix) = layout.local_matrix(x, y) else {
         return;
     };
@@ -246,12 +221,8 @@ fn visible_motion_text(
 /// Whether a preview pointer is on the rendered text itself. Text placement
 /// must begin on this hit region; a selected title alone is not permission to
 /// rewrite its coordinates by dragging empty canvas space.
-pub fn motion_text_contains_view_point(
-    surface: &ImageSurface,
-    stage: MotionStage,
-    padding: f64,
-    transform: MotionTransform,
-    zoom_anchor: (f64, f64),
+pub(crate) fn motion_text_contains_view_point(
+    layout: CardLayout,
     segment: &MotionTextSegment,
     time: f64,
     view_x: f64,
@@ -271,9 +242,11 @@ pub fn motion_text_contains_view_point(
         return false;
     }
 
-    let layout = CardLayout::with_padding(surface, stage, transform, zoom_anchor, padding);
-    let size = (layout.img_h * 0.060 * segment.size.clamp(0.5, 2.2)).clamp(14.0, 160.0);
-    let Ok(measure) = Context::new(surface) else {
+    let size = (layout.img_h() * 0.060 * segment.size.clamp(0.5, 2.2)).clamp(14.0, 160.0);
+    let Ok(measure_surface) = ImageSurface::create(Format::ARgb32, 1, 1) else {
+        return false;
+    };
+    let Ok(measure) = Context::new(&measure_surface) else {
         return false;
     };
     measure.select_font_face(
@@ -286,23 +259,15 @@ pub fn motion_text_contains_view_point(
         return false;
     };
     let anchor_x =
-        segment.pos_x.clamp(0.05, 0.95) * layout.img_w + style.offset_x * layout.img_h / 1080.0;
+        segment.pos_x.clamp(0.05, 0.95) * layout.img_w() + style.offset_x * layout.img_h() / 1080.0;
     let anchor_y =
-        segment.pos_y.clamp(0.05, 0.95) * layout.img_h + style.offset_y * layout.img_h / 1080.0;
-    let pointer = view_point_to_motion_text_position(
-        surface,
-        stage,
-        padding,
-        transform,
-        zoom_anchor,
-        view_x,
-        view_y,
-    );
-    let pointer_x = pointer.0 * layout.img_w;
-    let pointer_y = pointer.1 * layout.img_h;
+        segment.pos_y.clamp(0.05, 0.95) * layout.img_h() + style.offset_y * layout.img_h() / 1080.0;
+    let pointer = view_point_to_motion_text_position(layout, view_x, view_y);
+    let pointer_x = pointer.0 * layout.img_w();
+    let pointer_y = pointer.1 * layout.img_h();
     // Keep a small source-space hit slop so a title is still easy to grab at
     // normal preview zoom, while never turning empty card space into a drag.
-    let slop = (8.0 / layout.fit.max(0.05)).min(24.0);
+    let slop = (8.0 / layout.source_fit().max(0.05)).min(24.0);
     let left = anchor_x - ext.width() / 2.0;
     let top = anchor_y - ext.height() / 2.0;
     pointer_x >= left - slop

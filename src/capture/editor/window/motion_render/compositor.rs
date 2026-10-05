@@ -65,6 +65,8 @@ pub fn draw_motion_frame(
     live_preview: bool,
     card_scale: f64,
 ) {
+    let (source_w, source_h) = motion_source_size(surface, card_scale);
+    let canvas = motion_canvas(source_w, source_h, &motion.appearance, &motion.frame);
     draw_motion_backdrop(
         context,
         width,
@@ -73,6 +75,7 @@ pub fn draw_motion_frame(
         background_surface,
         checkerboard,
         prefers_dark,
+        Some((canvas.canvas_width, canvas.canvas_height)),
     );
     draw_motion_foreground(
         context,
@@ -90,6 +93,8 @@ pub fn draw_motion_frame(
 
 /// Paint the scene layer shared by the static Motion preview and playback
 /// frames. The editor caches this output while its Appearance is unchanged.
+/// `canvas` is the composition canvas the caller laid the still out in, so
+/// the backdrop clips to exactly the scene the foreground stage uses.
 pub(super) fn draw_motion_backdrop(
     context: &Context,
     width: i32,
@@ -98,6 +103,7 @@ pub(super) fn draw_motion_backdrop(
     background_surface: Option<&ImageSurface>,
     checkerboard: bool,
     prefers_dark: bool,
+    canvas: Option<(f64, f64)>,
 ) {
     paint_backdrop(
         context,
@@ -107,6 +113,7 @@ pub(super) fn draw_motion_backdrop(
         background_surface,
         checkerboard,
         prefers_dark,
+        canvas,
     );
 }
 
@@ -125,20 +132,18 @@ pub(super) fn draw_motion_foreground(
     live_preview: bool,
     card_scale: f64,
 ) {
-    // Padding, zoom, and titles all lay out against the background's
-    // rectangle so the card can never sit outside the scene it belongs to.
+    let (source_w, source_h) = motion_source_size(surface, card_scale);
+    let composition = motion_canvas(source_w, source_h, &motion.appearance, &motion.frame);
     let stage = if checkerboard {
         MotionStage::preview(
             f64::from(width),
             f64::from(height),
-            motion.frame.effective_aspect(),
+            composition.canvas_width,
+            composition.canvas_height,
         )
     } else {
         MotionStage::frame(f64::from(width), f64::from(height))
     };
-    // The background and animated foreground are one composition. Keep every
-    // transformed layer inside the same scene bounds instead of allowing a
-    // scaled or rotated card to spill over the preview checkerboard.
     let _ = context.save();
     context.rectangle(
         stage.center_x - stage.bounds_w * 0.5,
@@ -178,6 +183,7 @@ pub(super) fn draw_motion_foreground(
         motion.appearance.border_radius * surface_long / 400.0,
     );
     let card_surface = rounded.as_ref().unwrap_or(surface);
+    let card_layout = CardLayout::new(composition, stage, current_transform, current_anchor);
     // True motion blur is the average of every instant of the exposure.
     // Cairo has no CIMotionBlur/CIZoomBlur, so ApexShot reaches the same
     // result with temporal accumulation: the card is rendered at a dense set
@@ -189,13 +195,11 @@ pub(super) fn draw_motion_foreground(
     let sample_offsets = if exposure > f64::EPSILON {
         let exposure_start = (time - exposure).max(0.0);
         let travel = card_corner_travel(
-            card_surface,
-            stage,
+            card_layout,
             motion.sample(exposure_start),
-            motion.sample(time),
             motion.zoom_anchor_at(exposure_start),
-            motion.zoom_anchor_at(time),
-            motion.appearance.effective_padding(),
+            current_transform,
+            current_anchor,
         );
         blur_settings.temporal_offsets(
             frame_rate,
@@ -215,7 +219,7 @@ pub(super) fn draw_motion_foreground(
             width,
             height,
             card_surface,
-            stage,
+            card_layout,
             motion,
             &sample_offsets,
             time,
@@ -225,16 +229,14 @@ pub(super) fn draw_motion_foreground(
         draw_transformed_card(
             context,
             card_surface,
-            stage,
-            current_transform,
-            current_anchor,
+            card_layout,
             &motion.appearance,
             1.0,
             mesh_div,
             card_filter,
         );
     }
-    paint_motion_text(context, surface, stage, motion, time, card_scale);
+    paint_motion_text(context, card_layout, motion, time);
     // The overlay shadow pass shades the card and titles; the watermark
     // stays the topmost layer.
     paint_motion_scene_shadow(context, stage, &motion.scene_shadow, false);
@@ -242,7 +244,7 @@ pub(super) fn draw_motion_foreground(
     // titles. Its card-space projection makes the layer track zoom and
     // perspective identically in preview and export.
     if let Some(watermark_surface) = watermark_surface {
-        paint_motion_watermark(context, surface, stage, motion, watermark_surface, time);
+        paint_motion_watermark(context, card_layout, motion, watermark_surface);
     }
     context.restore().ok();
 }
@@ -258,7 +260,7 @@ fn paint_motion_blurred_card(
     width: i32,
     height: i32,
     surface: &ImageSurface,
-    stage: MotionStage,
+    base: CardLayout,
     motion: &MotionState,
     sample_offsets: &[f64],
     time: f64,
@@ -288,9 +290,7 @@ fn paint_motion_blurred_card(
         draw_transformed_card(
             &scratch_context,
             surface,
-            stage,
-            motion.sample(sample_t),
-            motion.zoom_anchor_at(sample_t),
+            base.with_pose(motion.sample(sample_t), motion.zoom_anchor_at(sample_t)),
             &motion.appearance,
             1.0,
             MOTION_BLUR_MESH_DIVISIONS,

@@ -1,9 +1,7 @@
 fn draw_transformed_card(
     context: &Context,
     surface: &ImageSurface,
-    stage: MotionStage,
-    transform: MotionTransform,
-    zoom_anchor: (f64, f64),
+    layout: CardLayout,
     appearance: &MotionAppearance,
     alpha: f64,
     mesh_div: usize,
@@ -14,26 +12,23 @@ fn draw_transformed_card(
     // pixels, so a downscaled preview texture scales it to keep the corner
     // visually identical to the full-resolution export. Callers prepare the
     // rounded surface once per frame; the blur renderer draws it per subframe.
-    let img_w = surface.width() as f64;
-    let img_h = surface.height() as f64;
+    let img_w = layout.img_w();
+    let img_h = layout.img_h();
     if img_w < 1.0 || img_h < 1.0 {
         return;
     }
+    let transform = layout.transform;
+    let (cx, cy) = (layout.cx, layout.cy);
+    let stage = layout.stage;
     let ref_scale = motion_reference_scale(img_w, img_h);
-    let fit = motion_canvas_fit(
-        img_w,
-        img_h,
-        appearance.effective_padding(),
-        stage.bounds_w,
-        stage.bounds_h,
-    );
+    let fit = layout.source_fit();
+    let canvas_fit = layout.canvas_fit;
     // Stage-space corner radius of the rounded card image. Callers bake the
     // radius into the texture in source pixels and the mesh draws it at
     // `fit * scale`, so frame geometry must apply both factors to stay glued
     // to the card edge. Without `scale`, a zoomed card's corners outrun the
     // frame and a sliver of background shows between image and frame.
     let card_radius = card_corner_radius(appearance, ref_scale, fit, transform.scale);
-    let (cx, cy) = motion_card_center(img_w, img_h, fit, stage, transform, zoom_anchor);
     let corners = project_card_corners(img_w, img_h, fit, transform, cx, cy);
     if alpha >= 0.99 {
         paint_card_shadow(
@@ -73,13 +68,13 @@ fn draw_transformed_card(
                 if flat {
                     let _ = context.save();
                     if backing.center_pivot {
-                        context.translate(cx + backing.offset_x * fit, cy + backing.offset_y * fit);
+                        context.translate(cx + backing.offset_x * canvas_fit, cy + backing.offset_y * canvas_fit);
                         context.rotate(backing.rotation_deg.to_radians());
                         context.translate(-hw, -hh);
                     } else {
                         context.translate(
-                            cx - hw + backing.offset_x * fit + hw * 2.0,
-                            cy - hh + backing.offset_y * fit + hh * 2.0,
+                            cx - hw + backing.offset_x * canvas_fit + hw * 2.0,
+                            cy - hh + backing.offset_y * canvas_fit + hh * 2.0,
                         );
                         context.rotate(backing.rotation_deg.to_radians());
                         context.translate(-hw * 2.0, -hh * 2.0);
@@ -104,8 +99,8 @@ fn draw_transformed_card(
                     for corner in &corners {
                         let rx = corner.0 - px;
                         let ry = corner.1 - py;
-                        let qx = px + backing.offset_x * fit + rx * cos - ry * sin;
-                        let qy = py + backing.offset_y * fit + rx * sin + ry * cos;
+                        let qx = px + backing.offset_x * canvas_fit + rx * cos - ry * sin;
+                        let qy = py + backing.offset_y * canvas_fit + rx * sin + ry * cos;
                         if first {
                             context.move_to(qx, qy);
                             first = false;
@@ -120,8 +115,10 @@ fn draw_transformed_card(
         }
     }
 
+    let hw = img_w * fit * transform.scale / 2.0;
+    let hh = img_h * fit * transform.scale / 2.0;
     paint_perspective_card(
-        context, surface, img_w, img_h, fit, transform, cx, cy, alpha, mesh_div, filter,
+        context, surface, hw, hh, transform, cx, cy, alpha, mesh_div, filter,
     );
     if alpha >= 0.99 {
         let spec = appearance.frame_style.spec();
@@ -519,9 +516,8 @@ fn trace_rounded_quad(
 fn paint_perspective_card(
     context: &Context,
     surface: &ImageSurface,
-    img_w: f64,
-    img_h: f64,
-    fit: f64,
+    hw: f64,
+    hh: f64,
     transform: MotionTransform,
     cx: f64,
     cy: f64,
@@ -529,8 +525,8 @@ fn paint_perspective_card(
     mesh_div: usize,
     filter: Filter,
 ) {
-    let hw = img_w * fit * transform.scale / 2.0;
-    let hh = img_h * fit * transform.scale / 2.0;
+    let img_w = f64::from(surface.width().max(1));
+    let img_h = f64::from(surface.height().max(1));
     let depth = card_depth(hw, hh, transform.perspective);
     // Perspective without rotation projects 1:1 (z == 0 so w == 1). Treat it
     // as flat: one rectangle blit instead of the triangle mesh, so a still

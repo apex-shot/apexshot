@@ -6,10 +6,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::capture::editor::composition::{motion_background_composition, CompositionLayout};
 use crate::recording::editor::model::{
     affine_from_three_points as affine_components, background_render::render_gradient, card_depth,
     project_card_corners, project_point, MotionAppearance, MotionBackgroundFillType,
-    MotionBlurBudgetMode, MotionSceneShadow, MotionSceneShadowPreset, MotionState,
+    MotionBlurBudgetMode, MotionFrame, MotionSceneShadow, MotionSceneShadowPreset, MotionState,
     MotionTextSegment, MotionTransform, MOTION_EXPORT_FPS,
 };
 

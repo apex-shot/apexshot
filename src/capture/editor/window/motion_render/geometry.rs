@@ -31,9 +31,10 @@ impl MotionStage {
         }
     }
 
-    pub(super) fn preview(width: f64, height: f64, frame_aspect: Option<f64>) -> Self {
-        let (_, _, bounds_w, bounds_h) = motion_scene_bounds(width, height);
-        let (bounds_w, bounds_h) = fit_stage_aspect(bounds_w, bounds_h, frame_aspect);
+    /// The editor's scene panel for a composition canvas, capped at the
+    /// canvas's native size like Static's own canvas scale.
+    pub(super) fn preview(width: f64, height: f64, canvas_w: f64, canvas_h: f64) -> Self {
+        let (_, _, bounds_w, bounds_h) = motion_preview_scene_rect(width, height, canvas_w, canvas_h);
         Self {
             bounds_w,
             bounds_h,
@@ -41,10 +42,16 @@ impl MotionStage {
             center_y: height / 2.0,
         }
     }
+
+    fn composition_fit(&self, canvas_w: f64, canvas_h: f64) -> f64 {
+        (self.bounds_w / canvas_w.max(1.0))
+            .min(self.bounds_h / canvas_h.max(1.0))
+            .min(1.0)
+    }
 }
 
 /// Largest centered rectangle with the requested aspect inside the given
-/// bounds; `None` (Standard) keeps the bounds unchanged.
+/// bounds; `None` keeps the bounds unchanged.
 pub(super) fn fit_stage_aspect(bounds_w: f64, bounds_h: f64, aspect: Option<f64>) -> (f64, f64) {
     let Some(aspect) = aspect else {
         return (bounds_w, bounds_h);
@@ -53,16 +60,21 @@ pub(super) fn fit_stage_aspect(bounds_w: f64, bounds_h: f64, aspect: Option<f64>
     (width, width / aspect)
 }
 
-/// The preview scene panel rectangle for the current Frame preset: the inset
-/// scene bounds re-fitted to the preset's aspect. The backdrop clip and the
-/// foreground stage must agree on this rectangle.
+/// The preview scene panel rectangle for a composition canvas, capped at the
+/// canvas's native size. Backdrop, foreground, controls and cache all use it.
 pub(super) fn motion_preview_scene_rect(
     width: f64,
     height: f64,
-    frame_aspect: Option<f64>,
+    canvas_w: f64,
+    canvas_h: f64,
 ) -> (f64, f64, f64, f64) {
     let (x, y, bounds_w, bounds_h) = motion_scene_bounds(width, height);
-    let (scene_w, scene_h) = fit_stage_aspect(bounds_w, bounds_h, frame_aspect);
+    let canvas_w = canvas_w.max(1.0);
+    let canvas_h = canvas_h.max(1.0);
+    let (fitted_w, _) = fit_stage_aspect(bounds_w, bounds_h, Some(canvas_w / canvas_h));
+    let scale = (fitted_w / canvas_w).min(1.0);
+    let scene_w = canvas_w * scale;
+    let scene_h = canvas_h * scale;
     (
         x + (bounds_w - scene_w) / 2.0,
         y + (bounds_h - scene_h) / 2.0,
@@ -71,11 +83,46 @@ pub(super) fn motion_preview_scene_rect(
     )
 }
 
+/// Original source dimensions behind a Motion card texture. The preview draws
+/// a downscaled texture (`card_scale`) while exports draw it full size; every
+/// card-space value has to be computed against the source, or the fixed-pixel
+/// frame overhangs would shrink with the preview texture.
+pub(super) fn motion_source_size(surface: &ImageSurface, card_scale: f64) -> (f64, f64) {
+    let scale = if card_scale.is_finite() && card_scale > 0.0 {
+        card_scale
+    } else {
+        1.0
+    };
+    (
+        (f64::from(surface.width().max(1)) / scale).round().max(1.0),
+        (f64::from(surface.height().max(1)) / scale).round().max(1.0),
+    )
+}
+
+/// The composition canvas for a still: source dimensions, the shared
+/// Appearance and the Frame ratio in one place, for the backdrop clip, the
+/// card, the controls and the export size.
+pub(super) fn motion_canvas(
+    source_w: f64,
+    source_h: f64,
+    appearance: &MotionAppearance,
+    frame: &MotionFrame,
+) -> CompositionLayout {
+    motion_background_composition(source_w, source_h, appearance, frame.effective_aspect()).compute()
+}
+
 #[derive(Clone, Copy)]
-struct CardLayout {
-    img_w: f64,
-    img_h: f64,
-    fit: f64,
+pub(crate) struct CardLayout {
+    /// Static's shared card composition for the original source dimensions:
+    /// the one description every Motion layer reads, so the normalized image
+    /// rectangle cannot drift between the two editors.
+    composition: CompositionLayout,
+    stage: MotionStage,
+    /// Stage pixels per composition-canvas pixel.
+    canvas_fit: f64,
+    /// Composition image center in stage pixels, before the camera transform.
+    base_x: f64,
+    base_y: f64,
     transform: MotionTransform,
     cx: f64,
     cy: f64,
@@ -91,54 +138,121 @@ pub(super) fn motion_reference_scale(img_w: f64, img_h: f64) -> f64 {
     img_w.max(img_h) / 400.0
 }
 
-/// Fit the padded canvas (screenshot + surround) into the stage, matching the
-/// Static composition where padding grows the canvas instead of shrinking the
-/// card by raw pixels.
-pub(super) fn motion_canvas_fit(
-    img_w: f64,
-    img_h: f64,
-    padding: f64,
-    bounds_w: f64,
-    bounds_h: f64,
-) -> f64 {
-    let scale = motion_reference_scale(img_w, img_h);
-    let pad_px = padding.clamp(0.0, 200.0) * scale;
-    let canvas_w = img_w + pad_px * 2.0;
-    let canvas_h = img_h + pad_px * 2.0;
-    (bounds_w / canvas_w)
-        .min(bounds_h / canvas_h)
-        .clamp(0.05, 1.0)
+/// Stage position of the composition's image center: the canvas is fitted and
+/// centered in the stage exactly like Static centers its canvas in the
+/// viewport, then the image's own inset and alignment place the card inside
+/// it.
+fn motion_composition_center(
+    composition: &CompositionLayout,
+    canvas_fit: f64,
+    stage: MotionStage,
+) -> (f64, f64) {
+    let origin_x = stage.center_x - composition.canvas_width * canvas_fit / 2.0;
+    let origin_y = stage.center_y - composition.canvas_height * canvas_fit / 2.0;
+    (
+        origin_x + (composition.image_rect.x + composition.image_rect.width / 2.0) * canvas_fit,
+        origin_y + (composition.image_rect.y + composition.image_rect.height / 2.0) * canvas_fit,
+    )
 }
 
 impl CardLayout {
-    fn with_padding(
-        surface: &ImageSurface,
+    pub(crate) fn new(
+        composition: CompositionLayout,
         stage: MotionStage,
         transform: MotionTransform,
         zoom_anchor: (f64, f64),
-        padding: f64,
     ) -> Self {
-        let img_w = surface.width().max(1) as f64;
-        let img_h = surface.height().max(1) as f64;
-        let fit = motion_canvas_fit(img_w, img_h, padding, stage.bounds_w, stage.bounds_h);
-        let (cx, cy) = motion_card_center(img_w, img_h, fit, stage, transform, zoom_anchor);
+        let canvas_fit =
+            stage.composition_fit(composition.canvas_width, composition.canvas_height);
+        let (base_x, base_y) = motion_composition_center(&composition, canvas_fit, stage);
+        let mut layout = Self {
+            composition,
+            stage,
+            canvas_fit,
+            base_x,
+            base_y,
+            transform,
+            cx: base_x,
+            cy: base_y,
+        };
+        let (cx, cy) = layout.pose_center(transform, zoom_anchor);
+        layout.cx = cx;
+        layout.cy = cy;
+        layout
+    }
+
+    /// The same composition under a different camera pose. Motion blur
+    /// accumulates several poses of one card, and the zoom anchor depends on
+    /// the pose, so each subframe re-centers the unchanged base layout.
+    fn with_pose(&self, transform: MotionTransform, zoom_anchor: (f64, f64)) -> Self {
+        let (cx, cy) = self.pose_center(transform, zoom_anchor);
         Self {
-            img_w,
-            img_h,
-            fit,
             transform,
             cx,
             cy,
+            ..*self
         }
     }
 
+    /// Camera framing in the background's coordinate space: pad top-right
+    /// shows top-right, so the card moves opposite the camera and the pad
+    /// edges map to the background edges at every scale.
+    fn pose_center(&self, transform: MotionTransform, zoom_anchor: (f64, f64)) -> (f64, f64) {
+        let cx = self.base_x - transform.pos_x * self.stage.bounds_w * 0.5;
+        let cy = self.base_y - transform.pos_y * self.stage.bounds_h * 0.5;
+        let (anchor_x, anchor_y) = (zoom_anchor.0.clamp(0.0, 1.0), zoom_anchor.1.clamp(0.0, 1.0));
+        if (transform.scale - 1.0).abs() < f64::EPSILON
+            || ((anchor_x - 0.5).abs() < f64::EPSILON && (anchor_y - 0.5).abs() < f64::EPSILON)
+        {
+            return (cx, cy);
+        }
+        let half_w = self.img_w() * self.source_fit() / 2.0;
+        let half_h = self.img_h() * self.source_fit() / 2.0;
+        let local_x = (anchor_x * 2.0 - 1.0) * half_w;
+        let local_y = (anchor_y * 2.0 - 1.0) * half_h;
+        let mut unzoomed = transform;
+        unzoomed.scale = 1.0;
+        let before = project_point(
+            local_x,
+            local_y,
+            unzoomed,
+            card_depth(half_w, half_h, transform.perspective),
+        );
+        let scaled_half_w = half_w * transform.scale;
+        let scaled_half_h = half_h * transform.scale;
+        let after = project_point(
+            local_x * transform.scale,
+            local_y * transform.scale,
+            transform,
+            card_depth(scaled_half_w, scaled_half_h, transform.perspective),
+        );
+        (cx + before.0 - after.0, cy + before.1 - after.1)
+    }
+
+    /// Original source width of the card.
+    fn img_w(&self) -> f64 {
+        self.composition.image_rect.width / self.composition.draw_scale
+    }
+
+    /// Original source height of the card.
+    fn img_h(&self) -> f64 {
+        self.composition.image_rect.height / self.composition.draw_scale
+    }
+
+    /// Stage pixels per source pixel, including the composition's draw scale.
+    fn source_fit(&self) -> f64 {
+        self.composition.draw_scale * self.canvas_fit
+    }
+
     fn project(&self, image_x: f64, image_y: f64) -> (f64, f64) {
-        let hw = self.img_w * self.fit * self.transform.scale / 2.0;
-        let hh = self.img_h * self.fit * self.transform.scale / 2.0;
+        let hw =
+            self.composition.image_rect.width * self.canvas_fit * self.transform.scale / 2.0;
+        let hh =
+            self.composition.image_rect.height * self.canvas_fit * self.transform.scale / 2.0;
         let depth = card_depth(hw, hh, self.transform.perspective);
         let (x, y) = project_point(
-            (image_x / self.img_w * 2.0 - 1.0) * hw,
-            (image_y / self.img_h * 2.0 - 1.0) * hh,
+            (image_x / self.img_w() * 2.0 - 1.0) * hw,
+            (image_y / self.img_h() * 2.0 - 1.0) * hh,
             self.transform,
             depth,
         );
@@ -147,8 +261,8 @@ impl CardLayout {
 
     fn local_matrix(&self, image_x: f64, image_y: f64) -> Option<Matrix> {
         let origin = self.project(image_x, image_y);
-        let x = self.project((image_x + 1.0).min(self.img_w), image_y);
-        let y = self.project(image_x, (image_y + 1.0).min(self.img_h));
+        let x = self.project((image_x + 1.0).min(self.img_w()), image_y);
+        let y = self.project(image_x, (image_y + 1.0).min(self.img_h()));
         let xx = x.0 - origin.0;
         let yx = x.1 - origin.1;
         let xy = y.0 - origin.0;
@@ -171,21 +285,19 @@ impl CardLayout {
 /// The motion blur renderer sizes its temporal sample count from this so the
 /// smear gradient stays continuous even during fast camera moves.
 pub(super) fn card_corner_travel(
-    surface: &ImageSurface,
-    stage: MotionStage,
+    base: CardLayout,
     from: MotionTransform,
-    to: MotionTransform,
     from_anchor: (f64, f64),
+    to: MotionTransform,
     to_anchor: (f64, f64),
-    padding: f64,
 ) -> f64 {
     let corners = |transform: MotionTransform, anchor: (f64, f64)| {
-        let layout = CardLayout::with_padding(surface, stage, transform, anchor, padding);
+        let layout = base.with_pose(transform, anchor);
         [
             layout.project(0.0, 0.0),
-            layout.project(layout.img_w, 0.0),
-            layout.project(layout.img_w, layout.img_h),
-            layout.project(0.0, layout.img_h),
+            layout.project(layout.img_w(), 0.0),
+            layout.project(layout.img_w(), layout.img_h()),
+            layout.project(0.0, layout.img_h()),
         ]
     };
     let from = corners(from, from_anchor);
@@ -196,26 +308,48 @@ pub(super) fn card_corner_travel(
         .fold(0.0, f64::max)
 }
 
+/// Card layout for the interactive Motion preview: the widget's allocated
+/// size and the still's full-resolution surface, laid out in the same
+/// composition the renderer draws. Pointer placement and title hit testing
+/// share it, so a click lands where the title is drawn.
+pub(crate) fn motion_preview_card_layout(
+    card: &ImageSurface,
+    width: f64,
+    height: f64,
+    motion: &MotionState,
+    time: f64,
+) -> CardLayout {
+    let (source_w, source_h) = motion_source_size(card, 1.0);
+    let composition = motion_canvas(source_w, source_h, &motion.appearance, &motion.frame);
+    let stage = MotionStage::preview(
+        width,
+        height,
+        composition.canvas_width,
+        composition.canvas_height,
+    );
+    CardLayout::new(
+        composition,
+        stage,
+        motion.sample(time),
+        motion.zoom_anchor_at(time),
+    )
+}
+
 /// Convert a pointer in the Motion preview back into the source artboard.
 /// A short Newton refinement keeps placement accurate for the non-linear
 /// perspective projection used by the card mesh.
-pub fn view_point_to_motion_text_position(
-    surface: &ImageSurface,
-    stage: MotionStage,
-    padding: f64,
-    transform: MotionTransform,
-    zoom_anchor: (f64, f64),
+pub(crate) fn view_point_to_motion_text_position(
+    layout: CardLayout,
     view_x: f64,
     view_y: f64,
 ) -> (f64, f64) {
-    let layout = CardLayout::with_padding(surface, stage, transform, zoom_anchor, padding);
     let mut best = (0.5, 0.5);
     let mut best_distance = f64::INFINITY;
     for row in 0..=12 {
         for column in 0..=12 {
             let u = column as f64 / 12.0;
             let v = row as f64 / 12.0;
-            let point = layout.project(u * layout.img_w, v * layout.img_h);
+            let point = layout.project(u * layout.img_w(), v * layout.img_h());
             let distance = (point.0 - view_x).powi(2) + (point.1 - view_y).powi(2);
             if distance < best_distance {
                 best_distance = distance;
@@ -224,14 +358,14 @@ pub fn view_point_to_motion_text_position(
         }
     }
     for _ in 0..6 {
-        let point = layout.project(best.0 * layout.img_w, best.1 * layout.img_h);
+        let point = layout.project(best.0 * layout.img_w(), best.1 * layout.img_h());
         let du = layout.project(
-            ((best.0 + 0.002).min(1.0)) * layout.img_w,
-            best.1 * layout.img_h,
+            ((best.0 + 0.002).min(1.0)) * layout.img_w(),
+            best.1 * layout.img_h(),
         );
         let dv = layout.project(
-            best.0 * layout.img_w,
-            ((best.1 + 0.002).min(1.0)) * layout.img_h,
+            best.0 * layout.img_w(),
+            ((best.1 + 0.002).min(1.0)) * layout.img_h(),
         );
         let j00 = (du.0 - point.0) / 0.002;
         let j10 = (du.1 - point.1) / 0.002;
@@ -352,52 +486,4 @@ fn path_through_points(context: &Context, points: &[(f64, f64)]) {
         }
     }
     context.close_path();
-}
-
-/// Keep the selected source point stationary while a camera scales in. The
-/// transform's ordinary X/Y position is applied first; the anchor offset then
-/// compensates only for zoom. Preview, export, title painting, and inverse
-/// title placement all use this same center calculation.
-fn motion_card_center(
-    img_w: f64,
-    img_h: f64,
-    fit: f64,
-    stage: MotionStage,
-    transform: MotionTransform,
-    zoom_anchor: (f64, f64),
-) -> (f64, f64) {
-    // Position is the camera framing in the background's coordinate space:
-    // pad top-right shows top-right. The card moves opposite the camera so the
-    // requested region lands in the stage center. Pad edges map to background
-    // edges at every scale instead of behaving like a small translation or a
-    // zoom-dependent pan.
-    let cx = stage.center_x - transform.pos_x * stage.bounds_w * 0.5;
-    let cy = stage.center_y - transform.pos_y * stage.bounds_h * 0.5;
-    let (anchor_x, anchor_y) = (zoom_anchor.0.clamp(0.0, 1.0), zoom_anchor.1.clamp(0.0, 1.0));
-    if (transform.scale - 1.0).abs() < f64::EPSILON
-        || ((anchor_x - 0.5).abs() < f64::EPSILON && (anchor_y - 0.5).abs() < f64::EPSILON)
-    {
-        return (cx, cy);
-    }
-    let half_w = img_w * fit / 2.0;
-    let half_h = img_h * fit / 2.0;
-    let local_x = (anchor_x * 2.0 - 1.0) * half_w;
-    let local_y = (anchor_y * 2.0 - 1.0) * half_h;
-    let mut unzoomed = transform;
-    unzoomed.scale = 1.0;
-    let before = project_point(
-        local_x,
-        local_y,
-        unzoomed,
-        card_depth(half_w, half_h, transform.perspective),
-    );
-    let scaled_half_w = half_w * transform.scale;
-    let scaled_half_h = half_h * transform.scale;
-    let after = project_point(
-        local_x * transform.scale,
-        local_y * transform.scale,
-        transform,
-        card_depth(scaled_half_w, scaled_half_h, transform.perspective),
-    );
-    (cx + before.0 - after.0, cy + before.1 - after.1)
 }

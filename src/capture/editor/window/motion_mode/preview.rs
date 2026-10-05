@@ -5,6 +5,9 @@ use std::rc::Rc;
 use std::sync::mpsc;
 
 use super::{MotionHoverTrack, MotionRuntime};
+use crate::capture::editor::window::motion_render::{
+    motion_canvas, motion_preview_scene_rect, motion_source_size,
+};
 use crate::recording::editor::model::{MotionAppearance, MotionState};
 
 pub(super) fn draw_motion_preview(
@@ -493,10 +496,23 @@ fn cached_backdrop(
 ) -> Option<ImageSurface> {
     let width = width.max(1);
     let height = height.max(1);
+    let source = match (runtime.card_preview.as_ref(), runtime.card.as_ref()) {
+        (Some(preview), _) => Some(motion_source_size(preview, runtime.card_scale)),
+        (None, Some(card)) => Some(motion_source_size(card, 1.0)),
+        _ => None,
+    };
+    let canvas = source.map(|(w, h)| {
+        let composition = motion_canvas(w, h, &runtime.motion.appearance, &runtime.motion.frame);
+        (composition.canvas_width, composition.canvas_height)
+    });
+    let (canvas_w, canvas_h) = canvas.unwrap_or((f64::from(width), f64::from(height)));
+    let scene_rect =
+        motion_preview_scene_rect(f64::from(width), f64::from(height), canvas_w, canvas_h);
     let stale = runtime.backdrop_cache.as_ref().is_none_or(|cache| {
         cache.width != width
             || cache.height != height
             || cache.prefers_dark != prefers_dark
+            || cache.scene_rect != scene_rect
             || !same_backdrop_appearance(&cache.appearance, &runtime.motion.appearance)
     });
     if stale {
@@ -510,12 +526,14 @@ fn cached_backdrop(
             runtime.background_surface.as_ref(),
             true,
             prefers_dark,
+            canvas,
         );
         surface.flush();
         runtime.backdrop_cache = Some(super::session::MotionBackdropCache {
             width,
             height,
             prefers_dark,
+            scene_rect,
             appearance: runtime.motion.appearance.clone(),
             surface,
         });
@@ -611,6 +629,12 @@ mod tests {
         assert!(!same_backdrop_appearance(&original, &styled));
     }
 
+    fn preview_canvas(card: &ImageSurface, motion: &MotionState) -> (f64, f64) {
+        let (source_w, source_h) = motion_source_size(card, 1.0);
+        let canvas = motion_canvas(source_w, source_h, &motion.appearance, &motion.frame);
+        (canvas.canvas_width, canvas.canvas_height)
+    }
+
     #[test]
     fn background_thread_composite_matches_the_direct_frame() {
         use crate::capture::editor::window::motion_render;
@@ -630,7 +654,16 @@ mod tests {
         let backdrop = ImageSurface::create(Format::ARgb32, 160, 120).unwrap();
         {
             let context = Context::new(&backdrop).unwrap();
-            motion_render::draw_motion_backdrop(&context, 160, 120, &motion, None, true, true);
+            motion_render::draw_motion_backdrop(
+                &context,
+                160,
+                120,
+                &motion,
+                None,
+                true,
+                true,
+                Some(preview_canvas(&card, &motion)),
+            );
         }
         backdrop.flush();
 
