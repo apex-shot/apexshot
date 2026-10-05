@@ -78,6 +78,37 @@ impl MotionState {
         self.insert_segment(start, end)
     }
 
+    pub fn motion_duplicate_span(&self, index: usize) -> Option<(f64, f64)> {
+        let segment = self.segments.get(index)?;
+        duplicate_span_after(
+            segment.end,
+            segment.duration(),
+            self.duration,
+            self.segments
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .map(|(_, segment)| (segment.start, segment.end)),
+        )
+    }
+
+    pub fn duplicate_motion_segment(&mut self, index: usize) -> Option<usize> {
+        let (start, end) = self.motion_duplicate_span(index)?;
+        let mut duplicate = self.segments.get(index)?.clone();
+        duplicate.start = start;
+        duplicate.end = end;
+        self.segments.push(duplicate);
+        self.segments.sort_by(|a, b| a.start.total_cmp(&b.start));
+        self.reconcile_effect_segments();
+        let index = self
+            .segments
+            .iter()
+            .position(|segment| (segment.start - start).abs() < 1e-6)?;
+        self.selected = Some(index);
+        self.selected_text = None;
+        Some(index)
+    }
+
     fn insert_segment(&mut self, start: f64, end: f64) -> Option<usize> {
         // Default the new move to the opposite of where the camera already
         // is: pull back to identity when the move it chains from left the
@@ -391,6 +422,37 @@ impl MotionState {
     pub fn add_text_at(&mut self, start: f64) -> Option<usize> {
         let (start, end) = self.text_add_span(start)?;
         self.insert_text(start, end)
+    }
+
+    pub fn text_duplicate_span(&self, index: usize) -> Option<(f64, f64)> {
+        let segment = self.text_segments.get(index)?;
+        duplicate_span_after(
+            segment.end,
+            segment.duration(),
+            self.duration,
+            self.text_segments
+                .iter()
+                .enumerate()
+                .filter(|(other, _)| *other != index)
+                .map(|(_, segment)| (segment.start, segment.end)),
+        )
+    }
+
+    pub fn duplicate_text_segment(&mut self, index: usize) -> Option<usize> {
+        let (start, end) = self.text_duplicate_span(index)?;
+        let mut duplicate = self.text_segments.get(index)?.clone();
+        duplicate.start = start;
+        duplicate.end = end;
+        self.text_segments.push(duplicate);
+        self.text_segments
+            .sort_by(|a, b| a.start.total_cmp(&b.start));
+        let index = self
+            .text_segments
+            .iter()
+            .position(|segment| (segment.start - start).abs() < 1e-6)?;
+        self.selected_text = Some(index);
+        self.selected = None;
+        Some(index)
     }
 
     fn insert_text(&mut self, start: f64, end: f64) -> Option<usize> {
@@ -746,6 +808,30 @@ impl MotionState {
         }
         nearest
     }
+}
+
+fn duplicate_span_after(
+    earliest_start: f64,
+    length: f64,
+    duration: f64,
+    ranges: impl Iterator<Item = (f64, f64)>,
+) -> Option<(f64, f64)> {
+    if length <= 0.0 {
+        return None;
+    }
+    let mut ranges: Vec<_> = ranges.collect();
+    ranges.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut start = earliest_start;
+    for (clip_start, clip_end) in ranges {
+        if clip_end <= start {
+            continue;
+        }
+        if clip_start - start >= length {
+            return Some((start, start + length));
+        }
+        start = start.max(clip_end);
+    }
+    (start + length <= duration).then_some((start, start + length))
 }
 
 fn motion_ranges_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> bool {

@@ -68,7 +68,6 @@ pub(in crate::capture::editor::window) struct MotionSharedControlParts {
     pub blur_shutter_slider: FillSlider,
     pub blur_shutter_value: Label,
     pub clip_hint: Label,
-    pub delete_btn: Button,
     pub inspector_syncing: Rc<Cell<bool>>,
 }
 
@@ -76,7 +75,6 @@ pub(in crate::capture::editor::window) struct MotionTextControlParts {
     pub text_empty_box: GtkBox,
     pub text_editor_box: GtkBox,
     pub text_add_btn: Button,
-    pub text_delete_btn: Button,
     pub text_view: TextView,
     pub text_pos_pad: MotionTextPad,
     pub text_pos_readout: Label,

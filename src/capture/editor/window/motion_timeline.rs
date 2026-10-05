@@ -11,7 +11,9 @@ use crate::i18n::t;
 use crate::recording::editor::model::DEFAULT_MOTION_DURATION_SECONDS;
 use crate::typography::UI_FONT_FAMILY;
 
-use super::icon_names::custom::{EDIT_UNDO_RTL_SYMBOLIC, EDIT_UNDO_SYMBOLIC};
+use super::icon_names::custom::{
+    EDIT_UNDO_RTL_SYMBOLIC, EDIT_UNDO_SYMBOLIC, SPLINE_SYMBOLIC, TYPE_SYMBOLIC,
+};
 use super::motion_mode::{MotionHoverTrack, MotionRuntime};
 
 pub(super) struct MotionTimeline {
@@ -56,14 +58,9 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     let skip_back = icon_button("media-skip-backward-symbolic", &t("Skip back 1s"));
     let skip_forward = icon_button("media-skip-forward-symbolic", &t("Skip forward 1s"));
 
-    let add_btn = labeled_tool_button(
-        "list-add-symbolic",
-        &t("Motion"),
-        &t("Add motion at playhead"),
-    );
+    let add_btn = labeled_tool_button(SPLINE_SYMBOLIC, &t("Motion"), &t("Add motion at playhead"));
     add_btn.add_css_class("recording-editor-timeline-tool-active");
-    let add_text_btn =
-        labeled_tool_button("list-add-symbolic", &t("Text"), &t("Add text at playhead"));
+    let add_text_btn = labeled_tool_button(TYPE_SYMBOLIC, &t("Text"), &t("Add text at playhead"));
 
     let undo_btn = icon_button(EDIT_UNDO_SYMBOLIC, &t("Undo"));
     let redo_btn = icon_button(EDIT_UNDO_RTL_SYMBOLIC, &t("Redo"));
@@ -505,7 +502,7 @@ fn draw_add_track(
 /// Colors for one effect clip. `faint` is the sibling state while another
 /// clip in the same lane owns the selection: it steps back so the selected
 /// clip reads first without disappearing.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct ClipTone {
     fill: (f64, f64, f64, f64),
     edge: (f64, f64, f64, f64),
@@ -563,6 +560,69 @@ fn text_clip_tone(selected: bool, faint: bool) -> ClipTone {
     }
 }
 
+fn disabled_clip_tone(mut tone: ClipTone, disabled: bool) -> ClipTone {
+    if disabled {
+        let gray = (tone.fill.0 + tone.fill.1 + tone.fill.2) / 3.0;
+        tone.fill.0 = (tone.fill.0 + gray) / 2.0;
+        tone.fill.1 = (tone.fill.1 + gray) / 2.0;
+        tone.fill.2 = (tone.fill.2 + gray) / 2.0;
+        tone.fill.3 *= 0.55;
+        tone.edge.3 *= 0.55;
+        tone.handle.3 *= 0.6;
+        tone.label *= 0.65;
+    }
+    tone
+}
+
+fn draw_clip_glyph(cr: &Context, x: f64, center_y: f64, opacity: f64, text: bool) {
+    let _ = cr.save();
+    cr.translate(x, center_y - 7.0);
+    cr.scale(14.0 / 24.0, 14.0 / 24.0);
+    cr.set_source_rgba(1.0, 1.0, 1.0, opacity);
+    cr.set_line_width(2.0);
+    cr.set_line_cap(gtk4::cairo::LineCap::Round);
+    cr.set_line_join(gtk4::cairo::LineJoin::Round);
+    if text {
+        cr.move_to(12.0, 4.0);
+        cr.line_to(12.0, 20.0);
+        cr.move_to(4.0, 7.0);
+        cr.line_to(4.0, 5.0);
+        cr.arc(
+            5.0,
+            5.0,
+            1.0,
+            std::f64::consts::PI,
+            3.0 * std::f64::consts::FRAC_PI_2,
+        );
+        cr.line_to(19.0, 4.0);
+        cr.arc(
+            19.0,
+            5.0,
+            1.0,
+            3.0 * std::f64::consts::FRAC_PI_2,
+            std::f64::consts::TAU,
+        );
+        cr.line_to(20.0, 7.0);
+        cr.move_to(9.0, 20.0);
+        cr.line_to(15.0, 20.0);
+    } else {
+        for (cx, cy) in [(19.0, 5.0), (5.0, 19.0)] {
+            cr.new_sub_path();
+            cr.arc(cx, cy, 2.0, 0.0, std::f64::consts::TAU);
+        }
+        cr.new_sub_path();
+        cr.arc(
+            17.0,
+            17.0,
+            12.0,
+            std::f64::consts::PI,
+            3.0 * std::f64::consts::FRAC_PI_2,
+        );
+    }
+    let _ = cr.stroke();
+    let _ = cr.restore();
+}
+
 /// Edge grips that advertise trim-dragging on the selected clip. They render
 /// only with a selection, which keeps unselected lanes quiet.
 fn draw_trim_handles(cr: &Context, x0: f64, y: f64, clip_w: f64, clip_h: f64, tone: ClipTone) {
@@ -608,7 +668,10 @@ fn draw_motion_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
         let y = 7.0;
         let clip_h = h - 14.0;
         let selected = runtime.motion.selected == Some(index);
-        let tone = motion_clip_tone(selected, has_selection && !selected);
+        let tone = disabled_clip_tone(
+            motion_clip_tone(selected, has_selection && !selected),
+            segment.is_disabled,
+        );
         rounded_rect(cr, x0, y, clip_w, clip_h, 5.0);
         cr.set_source_rgba(tone.fill.0, tone.fill.1, tone.fill.2, tone.fill.3);
         let _ = cr.fill();
@@ -626,16 +689,28 @@ fn draw_motion_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
             let _ = cr.stroke();
             draw_trim_handles(cr, x0, y, clip_w, clip_h, tone);
         }
-        if clip_w > 40.0 {
-            cr.set_source_rgba(1.0, 1.0, 1.0, tone.label);
-            cr.select_font_face(
-                UI_FONT_FAMILY,
-                gtk4::cairo::FontSlant::Normal,
-                gtk4::cairo::FontWeight::Normal,
-            );
-            cr.set_font_size(11.0);
-            cr.move_to(x0 + 14.0, y + clip_h * 0.62);
-            let _ = cr.show_text(&t("Motion"));
+        if clip_w > 32.0 {
+            let _ = cr.save();
+            rounded_rect(cr, x0, y, clip_w, clip_h, 5.0);
+            cr.clip();
+            let center_y = y + clip_h / 2.0;
+            draw_clip_glyph(cr, x0 + 12.0, center_y, tone.label, false);
+            if clip_w > 42.0 {
+                let _ = cr.save();
+                cr.rectangle(x0 + 27.0, y + 2.0, (clip_w - 40.0).max(0.0), clip_h - 4.0);
+                cr.clip();
+                cr.set_source_rgba(1.0, 1.0, 1.0, tone.label);
+                cr.select_font_face(
+                    UI_FONT_FAMILY,
+                    gtk4::cairo::FontSlant::Normal,
+                    gtk4::cairo::FontWeight::Normal,
+                );
+                cr.set_font_size(11.0);
+                cr.move_to(x0 + 28.0, y + clip_h * 0.62);
+                let _ = cr.show_text(&t("Motion"));
+                let _ = cr.restore();
+            }
+            let _ = cr.restore();
         }
     }
 }
@@ -672,7 +747,10 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
         let y = 6.0;
         let clip_h = h - 12.0;
         let selected = runtime.motion.selected_text == Some(index);
-        let tone = text_clip_tone(selected, has_selection && !selected);
+        let tone = disabled_clip_tone(
+            text_clip_tone(selected, has_selection && !selected),
+            segment.is_disabled,
+        );
         rounded_rect(cr, x0, y, clip_w, clip_h, 5.0);
         cr.set_source_rgba(tone.fill.0, tone.fill.1, tone.fill.2, tone.fill.3);
         let _ = cr.fill();
@@ -690,22 +768,34 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
             let _ = cr.stroke();
             draw_trim_handles(cr, x0, y, clip_w, clip_h, tone);
         }
-        if clip_w > 36.0 {
-            cr.set_source_rgba(1.0, 1.0, 1.0, tone.label);
-            cr.select_font_face(
-                UI_FONT_FAMILY,
-                gtk4::cairo::FontSlant::Normal,
-                gtk4::cairo::FontWeight::Normal,
-            );
-            cr.set_font_size(11.0);
-            cr.move_to(x0 + 14.0, y + clip_h * 0.64);
-            let label = segment.text.trim();
-            let label = if label.is_empty() {
-                t("Text")
-            } else {
-                label.to_string()
-            };
-            let _ = cr.show_text(&label);
+        if clip_w > 32.0 {
+            let _ = cr.save();
+            rounded_rect(cr, x0, y, clip_w, clip_h, 5.0);
+            cr.clip();
+            let center_y = y + clip_h / 2.0;
+            draw_clip_glyph(cr, x0 + 12.0, center_y, tone.label, true);
+            if clip_w > 42.0 {
+                let _ = cr.save();
+                cr.rectangle(x0 + 27.0, y + 2.0, (clip_w - 40.0).max(0.0), clip_h - 4.0);
+                cr.clip();
+                cr.set_source_rgba(1.0, 1.0, 1.0, tone.label);
+                cr.select_font_face(
+                    UI_FONT_FAMILY,
+                    gtk4::cairo::FontSlant::Normal,
+                    gtk4::cairo::FontWeight::Normal,
+                );
+                cr.set_font_size(11.0);
+                cr.move_to(x0 + 28.0, y + clip_h * 0.64);
+                let label = segment.text.trim();
+                let label = if label.is_empty() {
+                    t("Text")
+                } else {
+                    label.to_string()
+                };
+                let _ = cr.show_text(&label);
+                let _ = cr.restore();
+            }
+            let _ = cr.restore();
         }
     }
 }
@@ -817,7 +907,51 @@ pub(super) fn format_clock(seconds: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{motion_clip_tone, text_clip_tone};
+    use super::{disabled_clip_tone, motion_clip_tone, text_clip_tone};
+
+    #[test]
+    fn lucide_symbolic_icons_use_filled_outlines_instead_of_svg_strokes() {
+        for svg in [
+            include_str!("../../../../data/icons/spline-symbolic.svg"),
+            include_str!("../../../../data/icons/type-symbolic.svg"),
+        ] {
+            assert!(svg.contains("fill=\"#222222\""));
+            assert!(!svg.contains("stroke=") && !svg.contains("fill=\"none\""));
+        }
+    }
+
+    #[test]
+    fn timeline_hover_never_queues_large_preview_paints_per_pointer_event() {
+        let controls = include_str!("motion_mode/controls/timeline.rs");
+        let hover = controls
+            .split("let hover = EventControllerMotion::new();")
+            .nth(1)
+            .unwrap();
+        let hover = hover.split("board.add_controller(hover);").next().unwrap();
+        assert!(hover.contains("preview_dirty = true"));
+        assert!(!hover.contains("preview.queue_draw()"));
+        let playback = include_str!("motion_mode/controls/playback.rs");
+        assert!(playback.contains("add_tick_callback"));
+        assert!(!playback.contains("timeout_add_local"));
+    }
+
+    #[test]
+    fn tab_delete_buttons_are_replaced_by_clip_menu_deletion() {
+        assert!(!include_str!("motion_mode/build.rs").contains("delete_btn"));
+        assert!(!include_str!("motion_mode/parts.rs").contains("delete_btn"));
+        assert!(include_str!("motion_mode/controls/clip_menu.rs").contains("remove_selected()"));
+        assert!(include_str!("motion_mode/controls/mod.rs").contains("gdk::Key::Delete"));
+    }
+
+    #[test]
+    fn disabled_clips_stay_visible_but_dim_their_fill_and_label() {
+        for tone in [motion_clip_tone(true, false), text_clip_tone(true, false)] {
+            let disabled = disabled_clip_tone(tone, true);
+            assert!(disabled.fill.3 > 0.0 && disabled.fill.3 < tone.fill.3);
+            assert!(disabled.label > 0.0 && disabled.label < tone.label);
+            assert_eq!(disabled_clip_tone(tone, false), tone);
+        }
+    }
 
     #[test]
     fn motion_timeline_reuses_video_editor_dock_classes() {

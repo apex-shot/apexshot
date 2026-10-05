@@ -6,12 +6,6 @@ use std::time::Instant;
 use super::super::{MotionModeParts, MotionSession};
 use super::Redraw;
 
-/// Motion is an interactive camera tool, so target a display-refresh cadence
-/// instead of the old 30 Hz edit-preview timer. `Instant` still supplies the
-/// elapsed time, which keeps the animation duration independent of frames
-/// that GTK may skip under load.
-const MOTION_PREVIEW_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(16);
-
 pub(super) fn install_primary(parts: &MotionModeParts, session: &MotionSession, redraw: Redraw) {
     parts.timeline.play_btn.connect_clicked({
         let session = session.runtime.clone();
@@ -76,22 +70,21 @@ pub(super) fn install_timer(
         }
     });
 
-    glib::timeout_add_local(MOTION_PREVIEW_FRAME_INTERVAL, {
+    parts.shell.preview.add_tick_callback({
         let session_runtime = session.runtime.clone();
         let redraw = redraw.clone();
-        let preview = parts.shell.preview.clone();
         let playhead_overlay = parts.timeline.playhead_overlay.clone();
         let playhead_clock = parts.timeline.playhead_clock.clone();
         let last_clock = std::rc::Rc::new(std::cell::RefCell::new(String::new()));
         let in_motion = in_motion.clone();
         let prefers_dark = session.prefers_dark;
-        move || {
+        move |preview, _| {
             if !in_motion.get() {
                 return glib::ControlFlow::Continue;
             }
             // Finished background composites land here (hover, scrub, and
             // playback all schedule through the same slot).
-            super::super::preview::poll_preview_results(&session_runtime, &preview, prefers_dark);
+            super::super::preview::poll_preview_results(&session_runtime, preview, prefers_dark);
             let playing = session_runtime.borrow().playing;
             if playing {
                 let mut runtime = session_runtime.borrow_mut();

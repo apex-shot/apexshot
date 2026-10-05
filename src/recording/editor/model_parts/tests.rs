@@ -4050,3 +4050,123 @@ fn removing_a_held_tail_owner_cannot_resurrect_deleted_footage() {
     );
     assert!(state.freeze_tail_seconds().abs() < f64::EPSILON);
 }
+
+#[test]
+fn motion_segment_duplication_preserves_settings_and_uses_the_first_fitting_gap() {
+    let mut motion = MotionState::default();
+    let source = motion.add_segment_at(0.0).expect("source motion clip");
+    motion.add_segment_at(3.0).expect("later motion clip");
+    motion.segments[source].zoom_mode = MotionZoomMode::Auto;
+    motion.segments[source].intensity = 0.37;
+    motion.segments[source].zoom_anchor_x = 0.2;
+    motion.segments[source].is_disabled = true;
+    motion.segments[source].timing.transition_duration = 0.42;
+
+    assert_eq!(motion.motion_duplicate_span(source), Some((1.0, 2.0)));
+    let duplicate = motion
+        .duplicate_motion_segment(source)
+        .expect("room after source");
+    let source_clip = &motion.segments[source];
+    let duplicate_clip = &motion.segments[duplicate];
+    assert_eq!((duplicate_clip.start, duplicate_clip.end), (1.0, 2.0));
+    assert_eq!(duplicate_clip.duration(), source_clip.duration());
+    assert_eq!(duplicate_clip.zoom_mode, source_clip.zoom_mode);
+    assert_eq!(duplicate_clip.intensity, source_clip.intensity);
+    assert_eq!(duplicate_clip.zoom_anchor_x, source_clip.zoom_anchor_x);
+    assert_eq!(duplicate_clip.is_disabled, source_clip.is_disabled);
+    assert_eq!(duplicate_clip.to, source_clip.to);
+    assert_eq!(duplicate_clip.timing, source_clip.timing);
+    assert_eq!(motion.selected, Some(duplicate));
+    assert_eq!(motion.selected_text, None);
+    assert!(
+        motion
+            .segments
+            .iter()
+            .find(|segment| (segment.start - 3.0).abs() < f64::EPSILON)
+            .unwrap()
+            .start
+            >= duplicate_clip.end
+    );
+}
+
+#[test]
+fn motion_segment_duplication_is_a_noop_when_no_full_gap_exists() {
+    let mut motion = MotionState::default();
+    let source = motion.add_segment_at(0.0).expect("source motion clip");
+    motion.set_duration(1.0);
+    let before = motion.clone();
+
+    assert_eq!(motion.motion_duplicate_span(source), None);
+    assert_eq!(motion.duplicate_motion_segment(source), None);
+    assert_eq!(motion, before);
+}
+
+#[test]
+fn text_segment_duplication_preserves_formatting_and_uses_the_first_fitting_gap() {
+    let mut motion = MotionState::default();
+    let source = motion.add_text_at(0.0).expect("source text clip");
+    motion.add_text_at(3.0).expect("later text clip");
+    motion.text_segments[source].text = "Formatted title".into();
+    motion.text_segments[source].animation = MotionTextAnimation::Typewriter;
+    motion.text_segments[source].typewriter_time = 0.63;
+    motion.text_segments[source].is_disabled = true;
+    motion.text_segments[source].format.bold = true;
+    motion.text_segments[source].format.italic = true;
+    motion.text_segments[source].format.color = [0.2, 0.4, 0.6, 0.8];
+
+    assert_eq!(motion.text_duplicate_span(source), Some((1.0, 2.0)));
+    let duplicate = motion
+        .duplicate_text_segment(source)
+        .expect("room after source");
+    let source_clip = &motion.text_segments[source];
+    let duplicate_clip = &motion.text_segments[duplicate];
+    assert_eq!((duplicate_clip.start, duplicate_clip.end), (1.0, 2.0));
+    assert_eq!(duplicate_clip.duration(), source_clip.duration());
+    assert_eq!(duplicate_clip.text, source_clip.text);
+    assert_eq!(duplicate_clip.animation, source_clip.animation);
+    assert_eq!(duplicate_clip.typewriter_time, source_clip.typewriter_time);
+    assert_eq!(duplicate_clip.is_disabled, source_clip.is_disabled);
+    assert_eq!(duplicate_clip.format, source_clip.format);
+    assert_eq!(motion.selected_text, Some(duplicate));
+    assert_eq!(motion.selected, None);
+    assert!(
+        motion
+            .text_segments
+            .iter()
+            .find(|segment| (segment.start - 3.0).abs() < f64::EPSILON)
+            .unwrap()
+            .start
+            >= duplicate_clip.end
+    );
+}
+
+#[test]
+fn text_segment_duplication_is_a_noop_when_no_full_gap_exists() {
+    let mut motion = MotionState::default();
+    let source = motion.add_text_at(0.0).expect("source text clip");
+    motion.set_duration(1.0);
+    let before = motion.clone();
+
+    assert_eq!(motion.text_duplicate_span(source), None);
+    assert_eq!(motion.duplicate_text_segment(source), None);
+    assert_eq!(motion, before);
+}
+
+#[test]
+fn motion_duplication_skips_short_gaps_and_reconciles_the_new_camera_chain() {
+    let mut motion = MotionState::default();
+    let source = motion.add_segment_at(0.0).unwrap();
+    motion.set_selected_end_scale(1.5);
+    let preceding = motion.add_segment_at(1.5).unwrap();
+    let incoming = motion.segments[preceding].to;
+    let target = motion.segments[source].to;
+
+    assert_eq!(motion.motion_duplicate_span(source), Some((2.5, 3.5)));
+    let duplicate = motion.duplicate_motion_segment(source).unwrap();
+    assert_eq!(motion.segments[duplicate].from, incoming);
+    assert_eq!(motion.segments[duplicate].to, target);
+    assert!(motion
+        .segments
+        .windows(2)
+        .all(|clips| clips[0].end <= clips[1].start));
+}

@@ -9,6 +9,7 @@ use crate::recording::editor::model::MotionState;
 
 use super::{MotionModeChrome, MotionModeParts, MotionSession};
 
+mod clip_menu;
 mod playback;
 mod sync;
 mod text;
@@ -189,18 +190,6 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
         request_live_preview.clone(),
         request_transition_preview.clone(),
     );
-
-    parts.shared.delete_btn.connect_clicked({
-        let session = session.runtime.clone();
-        let redraw = redraw.clone();
-        move |_| {
-            let mut runtime = session.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.remove_selected();
-            drop(runtime);
-            redraw();
-        }
-    });
 
     // Timeline history: the same stacks power the dock buttons and the
     // Ctrl+Z / Ctrl+Shift+Z (or Ctrl+Y) shortcuts.

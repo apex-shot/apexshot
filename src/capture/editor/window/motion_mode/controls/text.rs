@@ -60,8 +60,6 @@ pub(super) fn install(
     request_live_preview: RequestLivePreview,
     request_text_transition_preview: RequestTextTransitionPreview,
 ) {
-    // The Text page owns its own add/delete so it works with nothing
-    // selected, exactly like the timeline's add button.
     parts.text.text_add_btn.connect_clicked({
         let session = session.runtime.clone();
         let redraw = redraw.clone();
@@ -83,17 +81,6 @@ pub(super) fn install(
             if let Some((start, entrance_seconds)) = new_text {
                 request_text_transition_preview(start, entrance_seconds);
             }
-        }
-    });
-    parts.text.text_delete_btn.connect_clicked({
-        let session = session.runtime.clone();
-        let redraw = redraw.clone();
-        move |_| {
-            let mut runtime = session.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.remove_selected();
-            drop(runtime);
-            redraw();
         }
     });
     parts.text.text_view.buffer().connect_changed({

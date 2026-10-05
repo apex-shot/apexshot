@@ -142,7 +142,7 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     motion_tab_btn.set_has_frame(false);
     motion_tab_btn.set_can_target(true);
     motion_tab_btn.set_tooltip_text(Some(&t("Motion")));
-    let motion_icon = Image::from_icon_name(icon_names::custom::WAND_SPARKLES_SYMBOLIC);
+    let motion_icon = Image::from_icon_name(icon_names::custom::SPLINE_SYMBOLIC);
     motion_icon.set_pixel_size(20);
     motion_tab_btn.set_child(Some(&motion_icon));
     motion_tab_btn.add_css_class("editor-tool-button");
@@ -158,7 +158,7 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
         btn.add_css_class("editor-tool-button");
         btn
     };
-    let text_tab_btn = notch_btn("Text", icon_names::custom::FONT_X_GENERIC_SYMBOLIC);
+    let text_tab_btn = notch_btn("Text", icon_names::custom::TYPE_SYMBOLIC);
     let appearance_tab_btn = notch_btn("Appearance", icon_names::custom::IMAGE_ALT_SYMBOLIC);
     let watermark_tab_btn = notch_btn("Watermark", icon_names::IMAGE_REGULAR);
     motion_tabs.append(&motion_tab_btn);
