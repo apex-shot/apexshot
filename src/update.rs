@@ -14,7 +14,8 @@ use std::{
 
 pub const RELEASES_URL: &str = "https://github.com/apex-shot/apexshot/releases";
 const LATEST_RELEASE_API: &str = "https://api.github.com/repos/apex-shot/apexshot/releases/latest";
-const UPDATE_SCRIPT_URL: &str = "https://apexshot.org/update";
+/// Official entrypoint for distribution-aware native package updates.
+pub const UPDATE_SCRIPT_URL: &str = "https://apexshot.org/update";
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 const PROMPT_SNOOZE: Duration = Duration::from_secs(24 * 60 * 60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(4);
@@ -126,6 +127,31 @@ fn fetch_latest_release() -> Result<GithubRelease, String> {
         .map_err(|err| err.to_string())?
         .into_json()
         .map_err(|err| err.to_string())
+}
+
+/// Check the latest stable release immediately, without the tray's daily cache
+/// or preview overrides. Network and invalid release responses are errors.
+pub fn check_for_update_now() -> Result<Option<UpdateInfo>, String> {
+    update_from_release(fetch_latest_release()?, env!("CARGO_PKG_VERSION"))
+}
+
+fn update_from_release(
+    release: GithubRelease,
+    installed: &str,
+) -> Result<Option<UpdateInfo>, String> {
+    if release.draft || release.prerelease {
+        return Err("The latest release is not a published stable release.".into());
+    }
+    if parse_version(&release.tag_name).is_none() || parse_version(installed).is_none() {
+        return Err("Could not compare the installed and latest release versions.".into());
+    }
+    if !is_newer_version(&release.tag_name, installed) {
+        return Ok(None);
+    }
+    Ok(Some(UpdateInfo {
+        version: release.tag_name.trim_start_matches('v').to_string(),
+        release_url: release.html_url,
+    }))
 }
 
 /// Checks GitHub for a newer stable release, respecting the local daily cache.
@@ -266,6 +292,47 @@ mod tests {
         assert!(is_newer_version("1.10.0", "1.9.9"));
         assert!(!is_newer_version("0.2.35", "0.2.35"));
         assert!(!is_newer_version("0.2.34", "0.2.35"));
+    }
+
+    fn release(tag: &str) -> GithubRelease {
+        GithubRelease {
+            tag_name: tag.into(),
+            html_url: RELEASES_URL.into(),
+            draft: false,
+            prerelease: false,
+        }
+    }
+
+    #[test]
+    fn explicit_update_skips_equal_or_older_releases() {
+        assert_eq!(update_from_release(release("v0.2.35"), "0.2.35"), Ok(None));
+        assert_eq!(update_from_release(release("v0.2.34"), "0.2.35"), Ok(None));
+        assert_eq!(
+            update_from_release(release("v0.2.35.0"), "0.2.35"),
+            Ok(None)
+        );
+    }
+
+    #[test]
+    fn explicit_update_only_returns_a_newer_release() {
+        let update = update_from_release(release("v0.2.36"), "0.2.35")
+            .unwrap()
+            .unwrap();
+        assert_eq!(update.version, "0.2.36");
+        assert!(update_from_release(release("v0.2.10"), "0.2.9")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn explicit_update_refuses_invalid_and_unpublished_releases() {
+        assert!(update_from_release(release("latest"), "0.2.35").is_err());
+        let mut unpublished = release("v0.2.36");
+        unpublished.draft = true;
+        assert!(update_from_release(unpublished, "0.2.35").is_err());
+        let mut prerelease = release("v0.2.36-beta");
+        prerelease.prerelease = true;
+        assert!(update_from_release(prerelease, "0.2.35").is_err());
     }
 
     #[test]
