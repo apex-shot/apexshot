@@ -2655,3 +2655,93 @@ msgstr "キャプチャがフリーズしたときに一度だけ再生されま
 
 msgid "Your desktop controls the capture sound on this route, so ApexShot cannot replace or disable it here and will not play an additional sound."
 msgstr "この経路ではキャプチャ音をデスクトップ側が制御するため、ApexShot がここで置き換えたり無効にしたりすることはできず、追加の音も再生されません。"
+
+msgid "Bold"
+msgstr "太字"
+
+msgid "Canvas"
+msgstr "キャンバス"
+
+msgid "Center"
+msgstr "中央"
+
+msgid "Character"
+msgstr "文字"
+
+msgid "Choose how Typewriter reveals the text"
+msgstr "タイプライター効果でテキストを表示する単位を選択"
+
+msgid "Content"
+msgstr "内容"
+
+msgid "Drag to place the headline on the composition; double-click to reset"
+msgstr "ドラッグして構図内に見出しを配置し、ダブルクリックでリセット"
+
+msgid "Drag to place the title on the image; double-click to reset"
+msgstr "ドラッグして画像上にタイトルを配置し、ダブルクリックでリセット"
+
+msgid "Edit text color"
+msgstr "文字色を編集"
+
+msgid "Entrance duration for slides and fades"
+msgstr "スライドとフェードの表示アニメーションの長さ"
+
+msgid "From bottom"
+msgstr "下から"
+
+msgid "From left"
+msgstr "左から"
+
+msgid "From right"
+msgstr "右から"
+
+msgid "From top"
+msgstr "上から"
+
+msgid "Italic"
+msgstr "斜体"
+
+msgid "Letter spacing"
+msgstr "文字間隔"
+
+msgid "Line spacing"
+msgstr "行間"
+
+msgid "No fonts found"
+msgstr "フォントが見つかりません"
+
+msgid "Outline"
+msgstr "輪郭"
+
+msgid "Paragraph width; Auto keeps the natural line width"
+msgstr "段落の幅。「自動」では自然な行幅を維持"
+
+msgid "Placement"
+msgstr "配置"
+
+msgid "Rotation"
+msgstr "回転"
+
+msgid "Search fonts…"
+msgstr "フォントを検索…"
+
+msgid "Text color"
+msgstr "文字色"
+
+msgid "Time to reveal all text"
+msgstr "テキスト全体の表示にかかる時間"
+
+msgid "Type your text; press Enter for a new line"
+msgstr "テキストを入力し、Enterキーで改行"
+
+msgid "Typewriter"
+msgstr "タイプライター"
+
+msgid "Typography"
+msgstr "文字設定"
+
+msgid "Width"
+msgstr "幅"
+
+msgid "Word"
+msgstr "単語"

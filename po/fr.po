@@ -2703,3 +2703,95 @@ msgstr "Joué une fois, au gel de la capture. L'enregistrement et le recadrage r
 
 msgid "Your desktop controls the capture sound on this route, so ApexShot cannot replace or disable it here and will not play an additional sound."
 msgstr "Sur ce chemin, le son de capture est contrôlé par votre bureau : ApexShot ne peut ni le remplacer ni le désactiver ici et ne jouera aucun son supplémentaire."
+
+msgid "Bold"
+msgstr "Gras"
+
+msgid "Canvas"
+msgstr "Toile"
+
+msgid "Center"
+msgstr "Centre"
+
+msgid "Character"
+msgstr "Caractère"
+
+msgid "Choose how Typewriter reveals the text"
+msgstr "Choisissez comment l'effet Machine à écrire révèle le texte"
+
+msgid "Content"
+msgstr "Contenu"
+
+msgid "Drag to place the headline on the composition; double-click to reset"
+msgstr ""
+"Faites glisser pour placer le titre dans la composition ; double-cliquez pour réinitialiser"
+
+msgid "Drag to place the title on the image; double-click to reset"
+msgstr ""
+"Faites glisser pour placer le titre sur l'image ; double-cliquez pour réinitialiser"
+
+msgid "Edit text color"
+msgstr "Modifier la couleur du texte"
+
+msgid "Entrance duration for slides and fades"
+msgstr "Durée d'entrée des effets de glissement et de fondu"
+
+msgid "From bottom"
+msgstr "Depuis le bas"
+
+msgid "From left"
+msgstr "Depuis la gauche"
+
+msgid "From right"
+msgstr "Depuis la droite"
+
+msgid "From top"
+msgstr "Depuis le haut"
+
+msgid "Italic"
+msgstr "Italique"
+
+msgid "Letter spacing"
+msgstr "Espacement des caractères"
+
+msgid "Line spacing"
+msgstr "Interligne"
+
+msgid "No fonts found"
+msgstr "Aucune police trouvée"
+
+msgid "Outline"
+msgstr "Contour"
+
+msgid "Paragraph width; Auto keeps the natural line width"
+msgstr "Largeur du paragraphe ; Auto conserve la largeur naturelle des lignes"
+
+msgid "Placement"
+msgstr "Placement"
+
+msgid "Rotation"
+msgstr "Rotation"
+
+msgid "Search fonts…"
+msgstr "Rechercher des polices…"
+
+msgid "Text color"
+msgstr "Couleur du texte"
+
+msgid "Time to reveal all text"
+msgstr "Temps nécessaire pour révéler tout le texte"
+
+msgid "Type your text; press Enter for a new line"
+msgstr "Saisissez votre texte ; appuyez sur Entrée pour ajouter une ligne"
+
+msgid "Typewriter"
+msgstr "Machine à écrire"
+
+msgid "Typography"
+msgstr "Typographie"
+
+msgid "Width"
+msgstr "Largeur"
+
+msgid "Word"
+msgstr "Mot"

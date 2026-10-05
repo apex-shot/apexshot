@@ -2652,3 +2652,93 @@ msgstr "捕获画面冻结时播放一次。保存或裁剪时保持静音。"
 
 msgid "Your desktop controls the capture sound on this route, so ApexShot cannot replace or disable it here and will not play an additional sound."
 msgstr "此路径下捕获音由您的桌面控制，因此 ApexShot 无法在此替换或关闭它，也不会播放额外的声音。"
+
+msgid "Bold"
+msgstr "粗体"
+
+msgid "Canvas"
+msgstr "画布"
+
+msgid "Center"
+msgstr "居中"
+
+msgid "Character"
+msgstr "字符"
+
+msgid "Choose how Typewriter reveals the text"
+msgstr "选择打字机效果显示文本的方式"
+
+msgid "Content"
+msgstr "内容"
+
+msgid "Drag to place the headline on the composition; double-click to reset"
+msgstr "拖动以在合成画面中放置标题；双击重置"
+
+msgid "Drag to place the title on the image; double-click to reset"
+msgstr "拖动以在图像上放置标题；双击重置"
+
+msgid "Edit text color"
+msgstr "编辑文本颜色"
+
+msgid "Entrance duration for slides and fades"
+msgstr "滑入和淡入效果的入场时长"
+
+msgid "From bottom"
+msgstr "从下方"
+
+msgid "From left"
+msgstr "从左侧"
+
+msgid "From right"
+msgstr "从右侧"
+
+msgid "From top"
+msgstr "从上方"
+
+msgid "Italic"
+msgstr "斜体"
+
+msgid "Letter spacing"
+msgstr "字间距"
+
+msgid "Line spacing"
+msgstr "行间距"
+
+msgid "No fonts found"
+msgstr "未找到字体"
+
+msgid "Outline"
+msgstr "描边"
+
+msgid "Paragraph width; Auto keeps the natural line width"
+msgstr "段落宽度；“自动”保留自然行宽"
+
+msgid "Placement"
+msgstr "位置"
+
+msgid "Rotation"
+msgstr "旋转"
+
+msgid "Search fonts…"
+msgstr "搜索字体…"
+
+msgid "Text color"
+msgstr "文本颜色"
+
+msgid "Time to reveal all text"
+msgstr "显示全部文本所需的时间"
+
+msgid "Type your text; press Enter for a new line"
+msgstr "输入文本；按 Enter 键换行"
+
+msgid "Typewriter"
+msgstr "打字机"
+
+msgid "Typography"
+msgstr "排版"
+
+msgid "Width"
+msgstr "宽度"
+
+msgid "Word"
+msgstr "单词"
