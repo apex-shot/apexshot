@@ -1,6 +1,6 @@
 //! Tool-mode button activation for the editor toolbar.
 //!
-//! Owns Select, Background, Pen, Arrow, Line, Box, Circle, Text, Number,
+//! Owns Crop, Select, Pen, Arrow, Line, Box, Circle, Text, Number,
 //! Obfuscate, Focus, and Highlighter click handlers. Toggle policies differ by
 //! tool and must stay distinct (number/highlighter toggle-off,
 //! obfuscate effect rebuild recovery, pen cursor).
@@ -22,7 +22,7 @@ use super::super::cursor::{set_window_cursor_name, update_pen_cursor};
 pub(super) struct ToolModeButtons<'a> {
     pub tool_buttons: &'a [Button],
     pub select: &'a Button,
-    pub background: &'a Button,
+    pub crop: &'a Button,
     pub pen: &'a Button,
     pub arrow: &'a Button,
     pub line: &'a Button,
@@ -49,7 +49,7 @@ pub(super) fn wire_tool_mode_switches(
     let ToolModeButtons {
         tool_buttons,
         select,
-        background,
+        crop,
         pen,
         arrow,
         line,
@@ -88,33 +88,32 @@ pub(super) fn wire_tool_mode_switches(
         }
     });
 
-    let state_background = state.clone();
-    let drawing_area_background = drawing_area.downgrade();
-    let buttons_background = tool_buttons.to_vec();
-    let update_toolbar_for_tool_background = update_toolbar_for_tool.clone();
-    let sync_picker_for_active_tool_background = sync_picker_for_active_tool.clone();
-    let sync_size_control_background = sync_size_control.clone();
-    let rebuild_effects_async_background = rebuild_effects_async.clone();
-    background.connect_clicked(move |_| {
-        let next_tool = {
-            let mut state = state_background.lock().unwrap();
-            let rebuild = if state.selected_tool == Tool::Background {
-                let rebuild = state.set_tool_without_rebuild(Tool::Arrow);
-                (Tool::Arrow, rebuild)
-            } else {
+    let state_crop = state.clone();
+    let drawing_area_crop = drawing_area.downgrade();
+    let buttons_crop = tool_buttons.to_vec();
+    let update_toolbar_for_tool_crop = update_toolbar_for_tool.clone();
+    let sync_picker_for_active_tool_crop = sync_picker_for_active_tool.clone();
+    let sync_size_control_crop = sync_size_control.clone();
+    let rebuild_effects_async_crop = rebuild_effects_async.clone();
+    crop.connect_clicked(move |_| {
+        let (next_tool, rebuild) = {
+            let mut state = state_crop.lock().unwrap();
+            if state.selected_tool == Tool::Crop {
                 let rebuild = state.set_tool_without_rebuild(Tool::Background);
                 (Tool::Background, rebuild)
-            };
-            if rebuild.1 {
-                rebuild_effects_async_background();
+            } else {
+                let rebuild = state.set_tool_without_rebuild(Tool::Crop);
+                (Tool::Crop, rebuild)
             }
-            rebuild.0
         };
-        set_active_tool_button(&buttons_background, tool_button_index(next_tool));
-        update_toolbar_for_tool_background(next_tool);
-        sync_picker_for_active_tool_background();
-        sync_size_control_background();
-        if let Some(area) = drawing_area_background.upgrade() {
+        if rebuild {
+            rebuild_effects_async_crop();
+        }
+        set_active_tool_button(&buttons_crop, tool_button_index(next_tool));
+        update_toolbar_for_tool_crop(next_tool);
+        sync_picker_for_active_tool_crop();
+        sync_size_control_crop();
+        if let Some(area) = drawing_area_crop.upgrade() {
             area.queue_draw();
         }
     });

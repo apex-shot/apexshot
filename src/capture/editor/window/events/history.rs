@@ -13,14 +13,17 @@ pub(super) fn wire_history_buttons(
     rebuild_effects_async: &Rc<dyn Fn()>,
     sync_size_control: &Rc<dyn Fn()>,
     sync_select_inspector: &Rc<dyn Fn()>,
+    sync_motion_crop_history: &Rc<dyn Fn()>,
 ) {
     let state_undo = state.clone();
     let drawing_area_undo = drawing_area.downgrade();
     let sync_size_control_undo = sync_size_control.clone();
     let rebuild_effects_async_undo = rebuild_effects_async.clone();
+    let sync_motion_crop_history_undo = sync_motion_crop_history.clone();
     undo_btn.connect_clicked(move |_| {
         let changed = state_undo.lock().unwrap().undo_without_rebuild();
         if changed {
+            sync_motion_crop_history_undo();
             rebuild_effects_async_undo();
             sync_size_control_undo();
             if let Some(area) = drawing_area_undo.upgrade() {
@@ -33,9 +36,11 @@ pub(super) fn wire_history_buttons(
     let drawing_area_redo = drawing_area.downgrade();
     let sync_size_control_redo = sync_size_control.clone();
     let rebuild_effects_async_redo = rebuild_effects_async.clone();
+    let sync_motion_crop_history_redo = sync_motion_crop_history.clone();
     redo_btn.connect_clicked(move |_| {
         let changed = state_redo.lock().unwrap().redo_without_rebuild();
         if changed {
+            sync_motion_crop_history_redo();
             rebuild_effects_async_redo();
             sync_size_control_redo();
             if let Some(area) = drawing_area_redo.upgrade() {

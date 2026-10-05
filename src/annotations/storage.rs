@@ -960,6 +960,35 @@ mod tests {
     }
 
     #[test]
+    fn cropped_base_and_rebased_annotations_roundtrip_without_a_crop_record() {
+        let (path, _) = scratch_png("cropped-roundtrip");
+        let cropped = image::RgbaImage::from_pixel(3, 4, image::Rgba([40, 50, 60, 255]));
+        let actions = [AnnotationAction::Text {
+            position: crate::capture::editor::types::Point { x: 1.0, y: 2.0 },
+            text: "editable".into(),
+            color: DrawColor::new(1.0, 1.0, 1.0, 1.0),
+            font: EditorFontSettings::default(),
+            max_width: Some(8.0),
+            shadow: false,
+            background_color: None,
+        }];
+
+        save_session(&path, &cropped, &actions);
+
+        let file = load_annotations(&path).unwrap().expect("crop sidecar");
+        assert_eq!(file.canvas_size.width, 3);
+        assert_eq!(file.canvas_size.height, 4);
+        assert_eq!(file.annotations.len(), 1);
+        let original = load_original_image(&path).unwrap().expect("cropped source");
+        assert_eq!(original.dimensions(), (3, 4));
+        assert!(matches!(
+            serializable_to_action(&file.annotations[0]),
+            AnnotationAction::Text { position, .. } if position.x == 1.0 && position.y == 2.0
+        ));
+        cleanup_png(&path);
+    }
+
+    #[test]
     fn empty_session_deletes_existing_sidecar() {
         let (path, image) = scratch_png("delete-empty");
         let actions = [AnnotationAction::Line {

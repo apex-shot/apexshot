@@ -418,6 +418,8 @@ pub fn frame_needs_canvas(style: FrameStyle, border_thickness: f64) -> bool {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Tool {
+    /// Crop the screenshot source before committing annotations.
+    Crop,
     Select,
     Background,
     Pen,
@@ -430,6 +432,21 @@ pub enum Tool {
     Number,
     Obfuscate,
     Focus,
+}
+
+/// Hit targets used by the Static editor's bounded crop selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CropHandle {
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+    Move,
+    Create,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -787,7 +804,7 @@ impl ViewTransform {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Rect {
     pub x: i32,
     pub y: i32,
@@ -856,7 +873,7 @@ impl Rect {
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum AnnotationAction {
     Pen {
         points: Vec<Point>,
@@ -1062,12 +1079,13 @@ pub fn tool_uses_stroke_size(tool: Tool) -> bool {
     )
 }
 
-/// Index into the editor toolbar `tool_buttons` vector built in `window/mod.rs`.
-/// Keep this match arm order identical to that vector or active-tool highlighting breaks.
+/// Index into the visible editor toolbar vector, or `usize::MAX` for neutral Background mode.
+/// Keep each visible tool's index aligned with the vector in `window/mod.rs`.
 pub fn tool_button_index(tool: Tool) -> usize {
     match tool {
-        Tool::Background => 0,
+        Tool::Crop => 0,
         Tool::Select => 1,
+        Tool::Background => usize::MAX,
         Tool::Pen => 2,
         Tool::Box => 3,
         Tool::Circle => 4,

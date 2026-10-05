@@ -8,7 +8,7 @@ use super::super::pen_weight::HighlighterMode;
 use super::super::state::EditorState;
 use super::super::text_detect::{clamp_cursor_size, DetectionStatus};
 use super::super::types::{
-    cursor_name_for_select_handle, AnnotationAction, Point, Tool, ViewTransform,
+    cursor_name_for_select_handle, AnnotationAction, CropHandle, Point, Tool, ViewTransform,
 };
 
 /// Default highlighter cursor size (when no text detected)
@@ -89,6 +89,7 @@ pub fn cursor_name_for_view_point(
 
     let image_point = transform.view_to_image_clamped(view_point);
     match state.selected_tool {
+        Tool::Crop => crop_hover_cursor_name(state, image_point, transform.scale),
         Tool::Select => select_hover_cursor_name(state, image_point, transform.scale),
         Tool::Text => "text",
         Tool::Background => "default",
@@ -152,6 +153,23 @@ pub fn cursor_name_for_view_point(
         Tool::Pen | Tool::Arrow | Tool::Line | Tool::Number | Tool::Obfuscate | Tool::Focus => {
             "crosshair"
         }
+    }
+}
+
+fn crop_hover_cursor_name(state: &EditorState, point: Point, scale: f64) -> &'static str {
+    let Some(rect) = state.crop_rect else {
+        return "crosshair";
+    };
+    match super::super::state::crop_handle_at(rect, point, scale) {
+        Some(CropHandle::TopLeft | CropHandle::BottomRight) => "nwse-resize",
+        Some(CropHandle::TopRight | CropHandle::BottomLeft) => "nesw-resize",
+        Some(CropHandle::Top | CropHandle::Bottom) => "ns-resize",
+        Some(CropHandle::Left | CropHandle::Right) => "ew-resize",
+        Some(CropHandle::Move) => "grab",
+        Some(CropHandle::Create) | None if super::super::state::point_in_rect(point, rect) => {
+            "grab"
+        }
+        _ => "crosshair",
     }
 }
 

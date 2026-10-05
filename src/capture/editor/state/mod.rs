@@ -4,6 +4,7 @@
 //! so private field access remains inside the `state` module tree.
 
 mod arrow;
+mod crop;
 mod drag_draw;
 mod effects;
 mod export;
@@ -11,6 +12,9 @@ mod history;
 mod selection;
 mod text_input;
 mod tool_style;
+
+pub(super) use crop::{crop_handle_at, point_in_rect};
+pub(crate) use history::MotionCropHistoryChange;
 
 use super::color::{
     DEFAULT_COLOR_INDEX, DEFAULT_FOCUS_INTENSITY, DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS,
@@ -37,6 +41,13 @@ pub struct EditorState {
     pub working_image_revision: u64,
     pub actions: Vec<AnnotationAction>,
     pub redo_actions: Vec<AnnotationAction>,
+    undo_history: Vec<history::HistoryTransaction>,
+    redo_history: Vec<history::HistoryTransaction>,
+    history_interaction_before: Option<history::DocumentSnapshot>,
+    pending_motion_history_state: Option<history::MotionCropHistoryChange>,
+    pub crop_rect: Option<Rect>,
+    pub crop_ratio: CropAspectRatio,
+    crop_drag: Option<crop::CropDrag>,
     pub selected_tool: Tool,
     pub selected_action_index: Option<usize>,
     pub selected_color: DrawColor,
@@ -103,6 +114,7 @@ pub struct EditorState {
     pub text_detector: Arc<Mutex<TextDetector>>,
     pub text_detection_ready: Arc<AtomicBool>,
     pub text_detection_handle: Option<BackgroundTextDetection>,
+    text_detection_restart_pending: bool,
 
     // Highlighter mode
     pub highlighter_mode: HighlighterMode,
@@ -214,6 +226,13 @@ impl EditorState {
             working_image_revision: 1,
             actions: Vec::new(),
             redo_actions: Vec::new(),
+            undo_history: Vec::new(),
+            redo_history: Vec::new(),
+            history_interaction_before: None,
+            pending_motion_history_state: None,
+            crop_rect: None,
+            crop_ratio: CropAspectRatio::Freeform,
+            crop_drag: None,
             selected_tool: Tool::Background,
             selected_action_index: None,
             selected_color: DRAW_COLORS[DEFAULT_COLOR_INDEX],
@@ -281,6 +300,7 @@ impl EditorState {
             text_detector: Arc::new(Mutex::new(TextDetector::new_pending())),
             text_detection_ready: Arc::new(AtomicBool::new(false)),
             text_detection_handle: None,
+            text_detection_restart_pending: false,
             highlighter_mode: HighlighterMode::default(),
             pen_weight: PenWeight::default(),
             locked_highlighter_stroke_size: None,
@@ -299,6 +319,10 @@ impl EditorState {
     }
 
     pub fn set_tool_without_rebuild(&mut self, tool: Tool) -> bool {
+        self.finish_history_interaction();
+        if self.selected_tool == Tool::Crop && tool != Tool::Crop {
+            self.cancel_crop();
+        }
         if tool != Tool::Select {
             self.selected_action_index = None;
             self.select_drag_anchor = None;
@@ -306,12 +330,22 @@ impl EditorState {
         }
         if tool != Tool::Text {
             self.cancel_text_input();
+            self.cancel_text_edit();
             self.hovered_text_action_index = None;
         }
         if tool != Tool::Arrow {
             self.finalize_arrow_control_editing();
         }
         self.selected_tool = tool;
+        if tool == Tool::Crop && self.crop_rect.is_none() {
+            self.crop_rect = Some(Rect {
+                x: 0,
+                y: 0,
+                width: self.base_image.width() as i32,
+                height: self.base_image.height() as i32,
+            });
+            self.set_crop_ratio(self.crop_ratio);
+        }
         self.clear_drag_without_rebuild_and_check_effect()
     }
 

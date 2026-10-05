@@ -3,7 +3,7 @@ use super::*;
 #[test]
 fn tool_shortcuts_map_to_expected_tools() {
     // Indices must match the tool_buttons vector in window/mod.rs
-    // (Background, Select, Pen, Box, Circle, Arrow, Line, Text,
+    // (Crop, Select, Pen, Box, Circle, Arrow, Line, Text,
     //  Obfuscate, Number, Highlighter, Focus).
     assert_eq!(tool_shortcut_target('0'), Some((Tool::Select, 1)));
     assert_eq!(tool_shortcut_target('P'), Some((Tool::Pen, 2)));
@@ -24,7 +24,8 @@ fn tool_shortcuts_map_to_expected_tools() {
 
 #[test]
 fn tool_button_index_matches_toolbar_vector_order() {
-    assert_eq!(tool_button_index(Tool::Background), 0);
+    assert_eq!(tool_button_index(Tool::Crop), 0);
+    assert_eq!(tool_button_index(Tool::Background), usize::MAX);
     assert_eq!(tool_button_index(Tool::Select), 1);
     assert_eq!(tool_button_index(Tool::Pen), 2);
     assert_eq!(tool_button_index(Tool::Box), 3);

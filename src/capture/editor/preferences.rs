@@ -113,7 +113,7 @@ impl EditorPreferences {
     }
 
     pub fn apply_to_state(&self, state: &mut EditorState) {
-        state.selected_tool = self.tool;
+        state.set_tool_without_rebuild(self.tool);
         state.selected_color = DrawColor::new(
             self.color.r as f64 / 255.0,
             self.color.g as f64 / 255.0,
@@ -205,6 +205,19 @@ mod tests {
         assert_eq!(prefs.pen_weight, state.pen_weight);
         assert_eq!(prefs.numbering_style, state.numbering_style);
         assert_eq!(prefs.number_size, state.number_size);
+    }
+
+    #[test]
+    fn restored_crop_tool_has_immediately_adjustable_bounds() {
+        let prefs = EditorPreferences {
+            tool: Tool::Crop,
+            ..EditorPreferences::default()
+        };
+        let mut state = EditorState::new(RgbaImage::new(80, 60));
+        prefs.apply_to_state(&mut state);
+        let rect = state.crop_rect.expect("visible crop selection");
+        assert_eq!((rect.x, rect.y, rect.width, rect.height), (0, 0, 80, 60));
+        assert_eq!(state.selected_tool, Tool::Crop);
     }
 
     #[test]

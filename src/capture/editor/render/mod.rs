@@ -1,6 +1,8 @@
 use super::color::{highlighter_stroke_width, HIGHLIGHTER_ALPHA_SCALE};
 use super::numbering_style::{NumberSize, NumberingStyle};
-use super::types::{AnnotationAction, DrawColor, FrameSpec, FrameStyle, Point, Rect, SelectHandle};
+use super::types::{
+    AnnotationAction, DrawColor, FrameSpec, FrameStyle, Point, Rect, SelectHandle, ViewTransform,
+};
 use image::{ImageBuffer, RgbaImage};
 use rayon::prelude::*;
 
@@ -58,6 +60,18 @@ pub fn draw_rgba_to_context(context: &gtk4::cairo::Context, image: &RgbaImage) {
     };
 
     paint_surface_with_filter(context, &surface, 0.0, 0.0, gtk4::cairo::Filter::Nearest);
+}
+
+/// Clip vector annotations and drafts to the visible screenshot/background canvas.
+pub fn clip_annotation_content_to_canvas(context: &gtk4::cairo::Context, transform: ViewTransform) {
+    let (min_x, min_y, max_x, max_y) = transform.canvas_bounds_in_image_coords();
+    context.rectangle(
+        min_x,
+        min_y,
+        (max_x - min_x).max(0.0),
+        (max_y - min_y).max(0.0),
+    );
+    context.clip();
 }
 pub fn rgba_image_to_surface(image: &RgbaImage) -> Option<gtk4::cairo::ImageSurface> {
     let (width, height) = image.dimensions();
@@ -336,12 +350,14 @@ fn draw_effect_draft_rect(context: &gtk4::cairo::Context, rect: Rect) {
     let _ = context.stroke();
 }
 #[allow(dead_code)]
+/// Paint the crop mask, thirds guides, and resize handles in image space.
 pub fn draw_crop_overlay(
     context: &gtk4::cairo::Context,
-    _image_width: f64,
-    _image_height: f64,
+    image_width: f64,
+    image_height: f64,
     rect: Rect,
     active: bool,
+    view_scale: f64,
 ) {
     let x = rect.x as f64;
     let y = rect.y as f64;
@@ -353,33 +369,30 @@ pub fn draw_crop_overlay(
     }
 
     let _ = context.save();
+    context.rectangle(0.0, 0.0, image_width, image_height);
+    context.clip();
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.48);
+    for (mx, my, mw, mh) in [
+        (0.0, 0.0, image_width, y),
+        (0.0, y + height, image_width, image_height - y - height),
+        (0.0, y, x, height),
+        (x + width, y, image_width - x - width, height),
+    ] {
+        if mw > 0.0 && mh > 0.0 {
+            context.rectangle(mx, my, mw, mh);
+        }
+    }
+    let _ = context.fill();
+
     context.rectangle(x, y, width, height);
-    context.set_line_width(if active { 1.0 } else { 0.8 });
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.52);
+    context.set_line_width(1.0 / view_scale.max(0.1));
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.92);
     let _ = context.stroke();
 
-    let edge_dash_len = (width.min(height) * 0.13).clamp(14.0, 30.0);
-    let half_edge_dash_len = edge_dash_len / 2.0;
     let mid_x = x + width / 2.0;
     let mid_y = y + height / 2.0;
-
-    context.set_line_cap(gtk4::cairo::LineCap::Round);
-    context.set_line_width(if active { 2.2 } else { 1.8 });
-    context.set_source_rgba(1.0, 1.0, 1.0, if active { 0.92 } else { 0.8 });
-
-    context.move_to(mid_x - half_edge_dash_len, y);
-    context.line_to(mid_x + half_edge_dash_len, y);
-    context.move_to(mid_x - half_edge_dash_len, y + height);
-    context.line_to(mid_x + half_edge_dash_len, y + height);
-    context.move_to(x, mid_y - half_edge_dash_len);
-    context.line_to(x, mid_y + half_edge_dash_len);
-    context.move_to(x + width, mid_y - half_edge_dash_len);
-    context.line_to(x + width, mid_y + half_edge_dash_len);
-    let _ = context.stroke();
-
-    context.set_line_cap(gtk4::cairo::LineCap::Butt);
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.36);
-    context.set_line_width(1.0);
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.42);
+    context.set_line_width(1.0 / view_scale.max(0.1));
     for idx in 1..=2 {
         let dx = width * (idx as f64) / 3.0;
         let dy = height * (idx as f64) / 3.0;
@@ -391,27 +404,24 @@ pub fn draw_crop_overlay(
     }
     let _ = context.stroke();
 
-    let corner_len = (width.min(height) * 0.12).clamp(12.0, 26.0);
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.98);
-    context.set_line_width(if active { 3.2 } else { 2.5 });
-
-    context.move_to(x, y + corner_len);
-    context.line_to(x, y);
-    context.line_to(x + corner_len, y);
-
-    context.move_to(x + width - corner_len, y);
-    context.line_to(x + width, y);
-    context.line_to(x + width, y + corner_len);
-
-    context.move_to(x, y + height - corner_len);
-    context.line_to(x, y + height);
-    context.line_to(x + corner_len, y + height);
-
-    context.move_to(x + width - corner_len, y + height);
-    context.line_to(x + width, y + height);
-    context.line_to(x + width, y + height - corner_len);
-
-    let _ = context.stroke();
+    let handle = (9.0 / view_scale.max(0.1)).clamp(6.0, 14.0);
+    for (hx, hy) in [
+        (x, y),
+        (mid_x, y),
+        (x + width, y),
+        (x, mid_y),
+        (x + width, mid_y),
+        (x, y + height),
+        (mid_x, y + height),
+        (x + width, y + height),
+    ] {
+        context.rectangle(hx - handle / 2.0, hy - handle / 2.0, handle, handle);
+        context.set_source_rgba(0.08, 0.08, 0.09, 0.9);
+        let _ = context.fill_preserve();
+        context.set_source_rgba(1.0, 1.0, 1.0, if active { 1.0 } else { 0.85 });
+        context.set_line_width(1.2 / view_scale.max(0.1));
+        let _ = context.stroke();
+    }
     let _ = context.restore();
 }
 pub(super) fn selection_outline_stroke_width(view_scale: f64) -> f64 {
@@ -1372,6 +1382,42 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn partial_annotation_is_clipped_to_composition_canvas_bounds() {
+        let mut transform = super::super::types::ViewTransform::for_image(16.0, 16.0);
+        transform.has_background = true;
+        transform.canvas_width = 24.0;
+        transform.canvas_height = 24.0;
+        transform.image_rect_x = 4.0;
+        transform.image_rect_y = 4.0;
+
+        let mut surface = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 32, 32)
+            .expect("surface");
+        let context = gtk4::cairo::Context::new(&surface).expect("context");
+        context.save().unwrap();
+        clip_annotation_content_to_canvas(&context, transform);
+        draw_annotation_action(
+            &context,
+            &AnnotationAction::Line {
+                start: Point { x: -20.0, y: 5.0 },
+                end: Point { x: 30.0, y: 5.0 },
+                color: DrawColor::new(1.0, 0.0, 0.0, 1.0),
+                stroke_size: 3.0,
+                shadow: false,
+            },
+        );
+        context.restore().unwrap();
+        drop(context);
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface.data().expect("surface data");
+        let image = cairo_argb_to_rgba_image(32, 32, stride, &data);
+
+        assert!(image.get_pixel(1, 5).0[0] > 200);
+        assert!(image.get_pixel(19, 5).0[0] > 200);
+        assert_eq!(image.get_pixel(21, 5).0[3], 0);
+    }
 
     #[test]
     fn paint_surface_with_filter_sets_requested_filter() {

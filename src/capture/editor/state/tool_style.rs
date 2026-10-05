@@ -33,6 +33,7 @@ impl EditorState {
         // ponytail: amount snaps to the new method's current amount; per-method memory stays in the pixelate/blur stores.
         let current = self.current_obfuscate_amount();
         if let Some(index) = self.selected_action_index {
+            let before = self.document_snapshot();
             if let Some(AnnotationAction::Obfuscate {
                 method: act_method,
                 amount: act_amount,
@@ -46,7 +47,8 @@ impl EditorState {
                 if (*act_amount - current).abs() > f64::EPSILON {
                     *act_amount = clamp_obfuscate_amount(current);
                 }
-                self.redo_actions.clear();
+                self.clear_redo_history();
+                self.commit_property_edit(before);
             } else if self.actions.get(index).is_none() {
                 self.selected_action_index = None;
             }
@@ -135,6 +137,8 @@ impl EditorState {
 
     pub fn set_numbering_style(&mut self, style: NumberingStyle) -> bool {
         let mut changed = false;
+        let mut action_changed = false;
+        let before = self.document_snapshot();
         if self.numbering_style != style {
             self.numbering_style = style;
             changed = true;
@@ -150,6 +154,7 @@ impl EditorState {
                     if *action_style != style {
                         *action_style = style;
                         changed = true;
+                        action_changed = true;
                     }
                 }
                 Some(_) => {}
@@ -159,13 +164,18 @@ impl EditorState {
         if changed {
             // Continue the run of the newly active style rather than restarting it.
             self.sync_next_number();
-            self.redo_actions.clear();
+            self.clear_redo_history();
+            if action_changed {
+                self.commit_property_edit(before);
+            }
         }
         changed
     }
 
     pub fn set_number_size(&mut self, size: NumberSize) -> bool {
         let mut changed = false;
+        let mut action_changed = false;
+        let before = self.document_snapshot();
         if self.number_size != size {
             self.number_size = size;
             changed = true;
@@ -179,6 +189,7 @@ impl EditorState {
                     if *action_size != size {
                         *action_size = size;
                         changed = true;
+                        action_changed = true;
                     }
                 }
                 Some(_) => {}
@@ -186,7 +197,10 @@ impl EditorState {
             }
         }
         if changed {
-            self.redo_actions.clear();
+            self.clear_redo_history();
+            if action_changed {
+                self.commit_property_edit(before);
+            }
         }
         changed
     }
@@ -221,7 +235,7 @@ impl EditorState {
                 changed = true;
             }
             if changed {
-                self.redo_actions.clear();
+                self.clear_redo_history();
             }
             return changed;
         };
@@ -233,13 +247,15 @@ impl EditorState {
         if current == value {
             return false;
         }
+        let before = self.document_snapshot();
         if let Some(AnnotationAction::Number { number, .. }) = self.actions.get_mut(index) {
             *number = value;
         }
         // Keep the next marker above the highest existing number so a later
         // add never reuses (duplicates) the edited value.
         self.sync_next_number();
-        self.redo_actions.clear();
+        self.clear_redo_history();
+        self.commit_property_edit(before);
         true
     }
 
@@ -268,6 +284,7 @@ impl EditorState {
         let Some(index) = self.selected_action_index else {
             return false;
         };
+        let before = self.document_snapshot();
         let Some(action) = self.actions.get_mut(index) else {
             self.selected_action_index = None;
             return false;
@@ -283,7 +300,8 @@ impl EditorState {
             return false;
         }
         *act_intensity = next;
-        self.redo_actions.clear();
+        self.clear_redo_history();
+        self.commit_property_edit(before);
         true
     }
 
@@ -359,6 +377,7 @@ impl EditorState {
         let Some(index) = self.selected_action_index else {
             return false;
         };
+        let before = self.document_snapshot();
         let Some(action) = self.actions.get_mut(index) else {
             self.selected_action_index = None;
             return false;
@@ -370,7 +389,8 @@ impl EditorState {
             return false;
         }
         *stroke_size = size;
-        self.redo_actions.clear();
+        self.clear_redo_history();
+        self.commit_property_edit(before);
         true
     }
 
@@ -418,6 +438,7 @@ impl EditorState {
         let Some(index) = self.selected_action_index else {
             return false;
         };
+        let before = self.document_snapshot();
         let Some(action) = self.actions.get_mut(index) else {
             self.selected_action_index = None;
             return false;
@@ -438,7 +459,8 @@ impl EditorState {
             return false;
         }
         *target = next;
-        self.redo_actions.clear();
+        self.clear_redo_history();
+        self.commit_property_edit(before);
         true
     }
 
@@ -454,6 +476,7 @@ impl EditorState {
         let Some(index) = self.selected_action_index else {
             return false;
         };
+        let before = self.document_snapshot();
         let Some(action) = self.actions.get_mut(index) else {
             self.selected_action_index = None;
             return false;
@@ -468,7 +491,8 @@ impl EditorState {
             return false;
         }
         *act_amount = next;
-        self.redo_actions.clear();
+        self.clear_redo_history();
+        self.commit_property_edit(before);
         true
     }
 
@@ -571,6 +595,7 @@ impl EditorState {
         let Some(index) = self.selected_action_index else {
             return false;
         };
+        let before = self.document_snapshot();
         let Some(action) = self.actions.get_mut(index) else {
             self.selected_action_index = None;
             return false;
@@ -590,7 +615,8 @@ impl EditorState {
             return false;
         }
         *target = color;
-        self.redo_actions.clear();
+        self.clear_redo_history();
+        self.commit_property_edit(before);
         true
     }
 }
