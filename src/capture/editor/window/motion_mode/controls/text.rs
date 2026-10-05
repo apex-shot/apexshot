@@ -2,7 +2,7 @@ use gtk4::{prelude::*, GestureDrag};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use crate::recording::editor::model::{MotionState, MotionTextSegment, MotionTransform};
+use crate::recording::editor::model::{MotionState, MotionTextSegment};
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
 use super::super::{MotionModeParts, MotionRuntime, MotionSession};
@@ -12,11 +12,7 @@ use super::{Redraw, RequestLivePreview, RequestTextTransitionPreview};
 /// own reference rectangle.
 struct TextPlacementContext {
     card: gtk4::cairo::ImageSurface,
-    stage: super::super::super::motion_render::MotionStage,
-    padding: f64,
-    transform: MotionTransform,
-    zoom_anchor: (f64, f64),
-    card_scale: f64,
+    layout: super::super::super::motion_render::CardLayout,
     time: f64,
 }
 
@@ -29,14 +25,9 @@ impl TextPlacementContext {
         let context = gtk4::cairo::Context::new(&self.card).ok()?;
         super::super::super::motion_render::motion_text_placement(
             &context,
-            &self.card,
-            self.stage,
+            self.layout,
             segment,
             time,
-            self.card_scale,
-            self.transform,
-            self.zoom_anchor,
-            self.padding,
         )
     }
 
@@ -522,25 +513,16 @@ fn preview_placement_context(
     let width = f64::from(preview.allocated_width().max(1));
     let height = f64::from(preview.allocated_height().max(1));
     let runtime = session.borrow();
-    let (card, card_scale) = match runtime.card_preview.as_ref() {
-        Some(card) => (card.clone(), runtime.card_scale),
-        None => (runtime.card.clone()?, 1.0),
-    };
+    let card = runtime.card.clone()?;
     let time = super::super::preview::preview_time(&runtime);
-    let stage = super::super::super::motion_render::MotionStage::preview(
+    let layout = super::super::super::motion_render::motion_preview_card_layout(
+        &card,
         width,
         height,
-        runtime.motion.frame.effective_aspect(),
-    );
-    let context = TextPlacementContext {
-        card,
-        stage,
-        padding: runtime.motion.appearance.effective_padding(),
-        transform: runtime.motion.sample(time),
-        zoom_anchor: runtime.motion.zoom_anchor_at(time),
-        card_scale,
+        &runtime.motion,
         time,
-    };
+    );
+    let context = TextPlacementContext { card, layout, time };
     Some(context)
 }
 

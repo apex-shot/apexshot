@@ -19,7 +19,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use crate::capture::editor::types::FrameStyle;
+use crate::capture::editor::types::{BackgroundAlignment, FrameStyle};
 use crate::recording::editor::model::{
     GradientStop, MotionAppearance, MotionBackgroundFillType, MotionBlurSettings,
     MotionEffectTransformTiming, MotionFrame, MotionFramePreset, MotionSceneShadow,
@@ -308,6 +308,12 @@ pub struct MotionTextSegmentFile {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MotionAppearanceFile {
     pub background_padding: f64,
+    /// Absent in files written before Motion carried it; the zero/Center
+    /// defaults reproduce the old framing exactly.
+    #[serde(default)]
+    pub background_insert: f64,
+    #[serde(default)]
+    pub background_alignment: BackgroundAlignment,
     pub background_fill_type: MotionBackgroundFillTypeFile,
     pub background_color: [f64; 4],
     /// The background gradient, stored in the video editor's own shape so a
@@ -714,6 +720,8 @@ impl From<&MotionAppearance> for MotionAppearanceFile {
     fn from(value: &MotionAppearance) -> Self {
         Self {
             background_padding: value.background_padding,
+            background_insert: value.background_insert,
+            background_alignment: value.background_alignment,
             background_fill_type: (&value.background_fill_type).into(),
             background_color: value.background_color,
             gradient: value.gradient.clone(),
@@ -742,6 +750,8 @@ impl From<&MotionAppearanceFile> for MotionAppearance {
         let gradient = gradient_from_file(value);
         Self {
             background_padding: value.background_padding,
+            background_insert: value.background_insert,
+            background_alignment: value.background_alignment,
             background_fill_type: value.background_fill_type.into(),
             background_color: value.background_color,
             gradient,
@@ -1210,6 +1220,7 @@ pub fn list_projects() -> Vec<MotionProjectFile> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::capture::editor::types::BackgroundAlignment;
     use crate::recording::editor::model::{
         MotionTextFormat, MotionTextSegment, MotionTransform, DEFAULT_MOTION_TEXT_CANVAS_WIDTH,
         MAX_MOTION_TEXT_LETTER_SPACING, MAX_MOTION_TEXT_LINE_SPACING, MAX_MOTION_TEXT_OUTLINE,
@@ -1349,6 +1360,44 @@ mod tests {
         assert_eq!(restored.segments[0].to.scale, 2.5);
         assert_eq!(restored.segments[0].timing.kind, MotionTimingKind::Spring);
         assert_eq!(restored.segments[0].timing.spring_bounce, 0.3);
+    }
+
+    /// The legacy inset and alignment are Motion geometry now: an older
+    /// sidecar must load with the framing defaults, and one that carries them
+    /// must round-trip so a saved layout is not silently reset.
+    #[test]
+    fn legacy_inset_and_alignment_default_and_round_trip() {
+        let source = source_image();
+        let mut motion = MotionState::default();
+        motion.appearance.background_insert = 62.0;
+        motion.appearance.background_alignment = BackgroundAlignment::BottomLeft;
+
+        let project = to_project(&motion, &source);
+        let json = serde_json::to_string(&project).unwrap();
+        let restored: MotionProjectFile = serde_json::from_str(&json).unwrap();
+        let mut state = MotionState::default();
+        restored.apply_to(&mut state);
+        assert_eq!(state.appearance.background_insert, 62.0);
+        assert_eq!(
+            state.appearance.background_alignment,
+            BackgroundAlignment::BottomLeft
+        );
+
+        let mut legacy: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let appearance = legacy
+            .get_mut("appearance")
+            .and_then(|value| value.as_object_mut())
+            .expect("appearance object");
+        appearance.remove("background_insert");
+        appearance.remove("background_alignment");
+        let legacy: MotionProjectFile = serde_json::from_value(legacy).unwrap();
+        let mut state = MotionState::default();
+        legacy.apply_to(&mut state);
+        assert_eq!(state.appearance.background_insert, 0.0);
+        assert_eq!(
+            state.appearance.background_alignment,
+            BackgroundAlignment::Center
+        );
     }
 
     #[test]

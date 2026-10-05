@@ -476,6 +476,8 @@ pub(super) fn sync_static_appearance_to_motion(
         BackgroundStyle::Blurred(_) => {}
     }
     motion.background_padding = state.background_padding;
+    motion.background_insert = state.background_insert;
+    motion.background_alignment = state.background_alignment;
     motion.background_blur = state.background_blur;
     motion.background_noise = state.background_noise;
     motion.border_radius = state.background_corner_radius;
@@ -515,6 +517,8 @@ pub(super) fn sync_motion_appearance_to_static(
         },
     };
     state.background_padding = motion.background_padding;
+    state.background_insert = motion.background_insert;
+    state.background_alignment = motion.background_alignment;
     state.background_blur = motion.background_blur;
     state.background_noise = motion.background_noise;
     state.background_corner_radius = motion.border_radius;
@@ -812,6 +816,37 @@ mod tests {
         );
     }
 
+    /// The legacy inset and alignment ride along in both sync directions, so a
+    /// restored static layout survives a mode switch instead of resetting.
+    #[test]
+    fn the_legacy_insert_and_alignment_sync_both_ways() {
+        use crate::capture::editor::state::EditorState;
+        use crate::capture::editor::types::BackgroundAlignment;
+        use crate::recording::editor::model::{MotionAppearance, MotionFrame, MotionSceneShadow};
+        use image::RgbaImage;
+
+        let image = || RgbaImage::from_pixel(8, 8, image::Rgba([0, 0, 0, 255]));
+        let mut state = EditorState::new(image());
+        state.background_insert = 55.0;
+        state.background_alignment = BackgroundAlignment::TopRight;
+
+        let mut motion = MotionAppearance::default();
+        let mut frame = MotionFrame::default();
+        super::sync_static_appearance_to_motion(&state, &mut motion, &mut frame);
+        assert!((motion.background_insert - 55.0).abs() < f64::EPSILON);
+        assert_eq!(motion.background_alignment, BackgroundAlignment::TopRight);
+
+        let mut restored = EditorState::new(image());
+        super::sync_motion_appearance_to_static(
+            &motion,
+            &frame,
+            &MotionSceneShadow::default(),
+            &mut restored,
+        );
+        assert!((restored.background_insert - 55.0).abs() < f64::EPSILON);
+        assert_eq!(restored.background_alignment, BackgroundAlignment::TopRight);
+    }
+
     #[test]
     fn static_background_imports_into_motion_without_doubling() {
         use crate::capture::editor::state::EditorState;
@@ -879,6 +914,28 @@ mod tests {
             custom_height: 1440,
         };
         assert_eq!(square.output_size(), (1920, 1920));
+    }
+
+    /// Standard has no ratio of its own, so the export follows the composed
+    /// Motion canvas the preview shows instead of a fixed 16:9 default.
+    #[test]
+    fn standard_frame_output_keeps_the_composed_canvas_aspect() {
+        use crate::recording::editor::model::{MotionFrame, MotionFramePreset};
+        let standard = MotionFrame {
+            preset: MotionFramePreset::Standard,
+            custom_width: 1920,
+            custom_height: 1440,
+        };
+        assert_eq!(standard.output_size_for(4.0 / 3.0), (1920, 1440));
+        assert_eq!(standard.output_size_for(9.0 / 16.0), (1080, 1920));
+        // Callers with no still behind them keep the established budget.
+        assert_eq!(standard.output_size(), (1920, 1080));
+        // Explicit presets keep their own sizing.
+        let square = MotionFrame {
+            preset: MotionFramePreset::OneOne,
+            ..standard.clone()
+        };
+        assert_eq!(square.output_size_for(4.0 / 3.0), (1920, 1920));
     }
 
     #[test]

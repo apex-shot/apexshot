@@ -1,4 +1,5 @@
-use super::types::{BackgroundAlignment, BackgroundStyle, CropAspectRatio, FrameStyle};
+use super::types::{BackgroundAlignment, BackgroundStyle, CropAspectRatio, DrawColor, FrameStyle};
+use crate::recording::editor::model::{MotionAppearance, MotionBackgroundFillType};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FloatRect {
@@ -32,7 +33,7 @@ pub struct ShadowSpec {
     pub rect: FloatRect,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CompositionLayout {
     pub canvas_width: f64,
     pub canvas_height: f64,
@@ -53,6 +54,9 @@ pub struct BackgroundComposition {
     alignment: BackgroundAlignment,
     corner_radius: f64,
     aspect_ratio: CropAspectRatio,
+    /// Explicit numeric canvas aspect, taking precedence over `aspect_ratio`;
+    /// `None` keeps the crop-ratio behaviour the static canvas has always had.
+    canvas_aspect: Option<f64>,
     frame_style: FrameStyle,
     frame_border_thickness: f64,
     /// Explicit drop-shadow from the shared Appearance panel, in the same
@@ -74,6 +78,7 @@ impl BackgroundComposition {
             alignment: BackgroundAlignment::Center,
             corner_radius: 18.0,
             aspect_ratio: CropAspectRatio::Original,
+            canvas_aspect: None,
             frame_style: FrameStyle::Default,
             frame_border_thickness: 0.0,
             shadow_profile: None,
@@ -126,6 +131,14 @@ impl BackgroundComposition {
 
     pub fn with_aspect_ratio(mut self, aspect_ratio: CropAspectRatio) -> Self {
         self.aspect_ratio = aspect_ratio;
+        self
+    }
+
+    /// Expand the canvas to an exact numeric aspect instead of a
+    /// `CropAspectRatio`, for ratios with no crop-ratio twin (Motion's Frame
+    /// presets and manual Custom size).
+    pub fn with_canvas_aspect(mut self, canvas_aspect: Option<f64>) -> Self {
+        self.canvas_aspect = canvas_aspect.filter(|aspect| aspect.is_finite() && *aspect > 0.0);
         self
     }
 
@@ -225,10 +238,10 @@ impl BackgroundComposition {
             canvas_width += padding_px * 2.0;
             canvas_height += padding_px * 2.0;
 
-            if let Some(ratio) = self
-                .aspect_ratio
-                .aspect_ratio(canvas_width as i32, canvas_height as i32)
-            {
+            if let Some(ratio) = self.canvas_aspect.or_else(|| {
+                self.aspect_ratio
+                    .aspect_ratio(canvas_width as i32, canvas_height as i32)
+            }) {
                 let current_ratio = canvas_width / canvas_height;
                 if current_ratio < ratio {
                     canvas_width = canvas_height * ratio;
@@ -372,6 +385,33 @@ impl BackgroundComposition {
             scale_factor,
         }
     }
+}
+
+/// Build Motion's card composition from the shared Appearance: same fill
+/// rule, inset, alignment, frame style and border thickness as Static. Motion's
+/// fill enum only decides whether a fill exists; the geometry never depends on
+/// which fill, so no wallpaper or gradient is decoded here.
+pub fn motion_background_composition(
+    source_w: f64,
+    source_h: f64,
+    appearance: &MotionAppearance,
+    canvas_aspect: Option<f64>,
+) -> BackgroundComposition {
+    let filled = appearance.background_fill_type != MotionBackgroundFillType::None;
+    let style = if filled {
+        BackgroundStyle::PlainColor(DrawColor::new(0.0, 0.0, 0.0, 1.0))
+    } else {
+        BackgroundStyle::None
+    };
+    BackgroundComposition::new(source_w, source_h)
+        .with_style(style)
+        .with_padding(appearance.background_padding)
+        .with_insert(appearance.background_insert)
+        .with_alignment(appearance.background_alignment)
+        .with_corner_radius(appearance.border_radius)
+        .with_canvas_aspect(canvas_aspect)
+        .with_frame_style(appearance.frame_style)
+        .with_frame_border_thickness(appearance.border_thickness)
 }
 
 #[cfg(test)]

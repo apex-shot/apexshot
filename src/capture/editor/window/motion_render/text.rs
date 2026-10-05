@@ -19,14 +19,10 @@ struct MotionTextReference {
 }
 
 fn motion_text_reference(
-    surface: &ImageSurface,
-    stage: MotionStage,
+    layout: CardLayout,
     segment: &MotionTextSegment,
-    card_scale: f64,
-    transform: MotionTransform,
-    zoom_anchor: (f64, f64),
-    padding: f64,
 ) -> Option<MotionTextReference> {
+    let stage = layout.stage;
     if segment.annotation_coordinate_space.is_canvas() {
         return Some(MotionTextReference {
             matrix: Matrix::new(
@@ -40,20 +36,19 @@ fn motion_text_reference(
             card: None,
             width: stage.bounds_w,
             height: stage.bounds_h,
-            font_size: 0.06 * stage.bounds_h * segment.size.clamp(
-                MIN_MOTION_TEXT_SIZE,
-                MAX_MOTION_TEXT_SIZE,
-            ),
+            font_size: 0.06
+                * stage.bounds_h
+                * segment
+                    .size
+                    .clamp(MIN_MOTION_TEXT_SIZE, MAX_MOTION_TEXT_SIZE),
         });
     }
-    let layout = CardLayout::with_padding(surface, stage, transform, zoom_anchor, padding);
-    let source_h = layout.img_h / card_scale.max(1e-6);
-    let font_size = motion_text_card_font_px(source_h, segment.size) * card_scale.max(1e-6);
+    let font_size = motion_text_card_font_px(layout.img_h(), segment.size);
     Some(MotionTextReference {
         matrix: Matrix::identity(),
         card: Some(layout),
-        width: layout.img_w,
-        height: layout.img_h,
+        width: layout.img_w(),
+        height: layout.img_h(),
         font_size,
     })
 }
@@ -204,18 +199,16 @@ impl MotionTextPlacement {
         if let Some(card) = self.reference.card {
             let points = [
                 card.project(0.0, 0.0),
-                card.project(card.img_w, 0.0),
-                card.project(card.img_w, card.img_h),
-                card.project(0.0, card.img_h),
+                card.project(card.img_w(), 0.0),
+                card.project(card.img_w(), card.img_h()),
+                card.project(0.0, card.img_h()),
             ];
             let mut crosses = (0..4).map(|index| {
                 let a = points[index];
                 let b = points[(index + 1) % 4];
                 (b.0 - a.0) * (stage_y - a.1) - (b.1 - a.1) * (stage_x - a.0)
             });
-            if !crosses.clone().all(|cross| cross >= -1e-6)
-                && !crosses.all(|cross| cross <= 1e-6)
-            {
+            if !crosses.clone().all(|cross| cross >= -1e-6) && !crosses.all(|cross| cross <= 1e-6) {
                 return false;
             }
         }
@@ -237,7 +230,9 @@ impl MotionTextPlacement {
         if let Some(card) = self.reference.card {
             card.project(self.anchor.0, self.anchor.1)
         } else {
-            self.reference.matrix.transform_point(self.anchor.0, self.anchor.1)
+            self.reference
+                .matrix
+                .transform_point(self.anchor.0, self.anchor.1)
         }
     }
 
@@ -250,7 +245,11 @@ impl MotionTextPlacement {
             let (x, y) = card.unproject(view_x, view_y);
             (x * self.reference.width, y * self.reference.height)
         } else {
-            self.reference.matrix.try_invert().ok()?.transform_point(view_x, view_y)
+            self.reference
+                .matrix
+                .try_invert()
+                .ok()?
+                .transform_point(view_x, view_y)
         };
         let (min, max) = self.position_band;
         let position = |value: f64, extent: f64, (low, high): (f64, f64)| {
@@ -434,19 +433,12 @@ fn motion_text_reveal(
 
 pub(in crate::capture::editor::window) fn motion_text_placement(
     context: &Context,
-    surface: &ImageSurface,
-    stage: MotionStage,
+    card_layout: CardLayout,
     segment: &MotionTextSegment,
     time: f64,
-    card_scale: f64,
-    transform: MotionTransform,
-    zoom_anchor: (f64, f64),
-    padding: f64,
 ) -> Option<MotionTextPlacement> {
     let style = segment.sample(time)?;
-    let mut reference = motion_text_reference(
-        surface, stage, segment, card_scale, transform, zoom_anchor, padding,
-    )?;
+    let mut reference = motion_text_reference(card_layout, segment)?;
     let format = &segment.format;
     let text = motion_text_content(segment);
     let wrap_width = if format.wrap_width > 0.0 {
@@ -463,7 +455,11 @@ pub(in crate::capture::editor::window) fn motion_text_placement(
     };
     let box_h = f64::from(logical.height());
     let outline = format.outline_width * reference.font_size * 0.5;
-    let shadow = if format.shadow { reference.font_size * 0.06 } else { 0.0 };
+    let shadow = if format.shadow {
+        reference.font_size * 0.06
+    } else {
+        0.0
+    };
     let left = f64::from(ink.x()) - outline;
     let top = f64::from(ink.y()) - outline;
     let right = f64::from(ink.x() + ink.width()) + outline;
@@ -471,10 +467,22 @@ pub(in crate::capture::editor::window) fn motion_text_placement(
     let rotation = motion_text_box_matrix(0.0, 0.0, box_w, box_h, format.rotation, 1.0);
     let corners = [(left, top), (right, top), (right, bottom), (left, bottom)]
         .map(|(x, y)| rotation.transform_point(x, y));
-    let min_x = corners.iter().map(|point| point.0).fold(f64::INFINITY, f64::min);
-    let max_x = corners.iter().map(|point| point.0).fold(f64::NEG_INFINITY, f64::max);
-    let min_y = corners.iter().map(|point| point.1).fold(f64::INFINITY, f64::min);
-    let max_y = corners.iter().map(|point| point.1).fold(f64::NEG_INFINITY, f64::max);
+    let min_x = corners
+        .iter()
+        .map(|point| point.0)
+        .fold(f64::INFINITY, f64::min);
+    let max_x = corners
+        .iter()
+        .map(|point| point.0)
+        .fold(f64::NEG_INFINITY, f64::max);
+    let min_y = corners
+        .iter()
+        .map(|point| point.1)
+        .fold(f64::INFINITY, f64::min);
+    let max_y = corners
+        .iter()
+        .map(|point| point.1)
+        .fold(f64::NEG_INFINITY, f64::max);
     let inset = reference.font_size * 0.03;
     let scale = ((reference.width - inset * 2.0).max(1.0) / (max_x - min_x).max(1.0))
         .min((reference.height - inset * 2.0).max(1.0) / (max_y - min_y).max(1.0))
@@ -500,10 +508,10 @@ pub(in crate::capture::editor::window) fn motion_text_placement(
     if let Some(card) = reference.card {
         reference.matrix = card.local_matrix(anchor.0, anchor.1)?;
     }
-    let center_x = anchor.0 - (min_x + max_x) * scale * 0.5
-        + style.offset_x * reference.height / 1080.0;
-    let center_y = anchor.1 - (min_y + max_y) * scale * 0.5
-        + style.offset_y * reference.height / 1080.0;
+    let center_x =
+        anchor.0 - (min_x + max_x) * scale * 0.5 + style.offset_x * reference.height / 1080.0;
+    let center_y =
+        anchor.1 - (min_y + max_y) * scale * 0.5 + style.offset_y * reference.height / 1080.0;
     let to_stage = motion_text_compose(
         &reference.matrix,
         &motion_text_box_matrix(center_x, center_y, box_w, box_h, format.rotation, scale),
@@ -541,9 +549,9 @@ impl MotionTextPlacement {
         if let Some(card) = self.reference.card {
             let points = [
                 card.project(0.0, 0.0),
-                card.project(card.img_w, 0.0),
-                card.project(card.img_w, card.img_h),
-                card.project(0.0, card.img_h),
+                card.project(card.img_w(), 0.0),
+                card.project(card.img_w(), card.img_h()),
+                card.project(0.0, card.img_h()),
             ];
             path_through_points(context, &points);
             context.clip();
@@ -577,29 +585,9 @@ impl MotionTextPlacement {
 
 /// Draw every title. Card-attached titles follow the camera; Canvas titles are
 /// a layer of their own and never inherit the image transform.
-fn paint_motion_text(
-    context: &Context,
-    surface: &ImageSurface,
-    stage: MotionStage,
-    motion: &MotionState,
-    time: f64,
-    card_scale: f64,
-) {
-    let transform = motion.sample(time);
-    let zoom_anchor = motion.zoom_anchor_at(time);
-    let padding = motion.appearance.effective_padding();
+fn paint_motion_text(context: &Context, card_layout: CardLayout, motion: &MotionState, time: f64) {
     for segment in &motion.text_segments {
-        let Some(placement) = motion_text_placement(
-            context,
-            surface,
-            stage,
-            segment,
-            time,
-            card_scale,
-            transform,
-            zoom_anchor,
-            padding,
-        ) else {
+        let Some(placement) = motion_text_placement(context, card_layout, segment, time) else {
             continue;
         };
         placement.paint(context);
@@ -610,47 +598,31 @@ fn paint_motion_text(
 /// entrance offset: the point a placement drag steers.
 #[cfg(test)]
 pub fn motion_text_anchor_view_point(
-    surface: &ImageSurface,
-    stage: MotionStage,
-    padding: f64,
-    transform: MotionTransform,
-    zoom_anchor: (f64, f64),
+    card_layout: CardLayout,
     segment: &MotionTextSegment,
 ) -> Option<(f64, f64)> {
-    let context = Context::new(surface).ok()?;
-    let placement = motion_text_placement(
-        &context, surface, stage, segment, segment.start, 1.0, transform, zoom_anchor, padding,
-    )?;
+    let surface = ImageSurface::create(Format::ARgb32, 1, 1).ok()?;
+    let context = Context::new(&surface).ok()?;
+    let placement = motion_text_placement(&context, card_layout, segment, segment.start)?;
     Some(placement.anchor_view_point())
 }
 
 /// Whether a preview pointer is on the rendered text itself.
 #[cfg(test)]
 pub fn motion_text_contains_view_point(
-    surface: &ImageSurface,
-    stage: MotionStage,
-    padding: f64,
-    transform: MotionTransform,
-    zoom_anchor: (f64, f64),
+    card_layout: CardLayout,
     segment: &MotionTextSegment,
     time: f64,
     view_x: f64,
     view_y: f64,
 ) -> bool {
-    let Ok(context) = Context::new(surface) else {
+    let Ok(surface) = ImageSurface::create(Format::ARgb32, 1, 1) else {
         return false;
     };
-    let Some(placement) = motion_text_placement(
-        &context,
-        surface,
-        stage,
-        segment,
-        time,
-        1.0,
-        transform,
-        zoom_anchor,
-        padding,
-    ) else {
+    let Ok(context) = Context::new(&surface) else {
+        return false;
+    };
+    let Some(placement) = motion_text_placement(&context, card_layout, segment, time) else {
         return false;
     };
     placement.contains_stage_point(view_x, view_y, placement.local_slop(6.0))

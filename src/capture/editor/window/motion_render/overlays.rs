@@ -3,36 +3,26 @@
 /// resolve it once for export, keeping the two compositor paths equivalent.
 fn paint_motion_watermark(
     context: &Context,
-    card: &ImageSurface,
-    stage: MotionStage,
+    layout: CardLayout,
     motion: &MotionState,
     watermark: &ImageSurface,
-    time: f64,
 ) {
     if motion.watermark.image_file_name.is_none() {
         return;
     }
-    let transform = motion.sample(time);
-    let layout = CardLayout::with_padding(
-        card,
-        stage,
-        transform,
-        motion.zoom_anchor_at(time),
-        motion.appearance.effective_padding(),
-    );
     let source_w = f64::from(watermark.width().max(1));
     let source_h = f64::from(watermark.height().max(1));
-    let width = (layout.img_w * motion.watermark.size.clamp(0.02, 0.8)).max(1.0);
+    let width = (layout.img_w() * motion.watermark.size.clamp(0.02, 0.8)).max(1.0);
     let height = (width * source_h / source_w)
-        .min(layout.img_h * 0.8)
+        .min(layout.img_h() * 0.8)
         .max(1.0);
-    let inset = (layout.img_w * motion.watermark.inset.clamp(0.0, 0.45))
-        .min((layout.img_w - width).max(0.0) * 0.5);
-    let inset_y = inset.min((layout.img_h - height).max(0.0) * 0.5);
-    let x = (motion.watermark.position.0.clamp(0.0, 1.0) * layout.img_w - width * 0.5)
-        .clamp(inset, (layout.img_w - inset - width).max(inset));
-    let y = (motion.watermark.position.1.clamp(0.0, 1.0) * layout.img_h - height * 0.5)
-        .clamp(inset_y, (layout.img_h - inset_y - height).max(inset_y));
+    let inset = (layout.img_w() * motion.watermark.inset.clamp(0.0, 0.45))
+        .min((layout.img_w() - width).max(0.0) * 0.5);
+    let inset_y = inset.min((layout.img_h() - height).max(0.0) * 0.5);
+    let x = (motion.watermark.position.0.clamp(0.0, 1.0) * layout.img_w() - width * 0.5)
+        .clamp(inset, (layout.img_w() - inset - width).max(inset));
+    let y = (motion.watermark.position.1.clamp(0.0, 1.0) * layout.img_h() - height * 0.5)
+        .clamp(inset_y, (layout.img_h() - inset_y - height).max(inset_y));
     let Some(matrix) = layout.local_matrix(x, y) else {
         return;
     };
