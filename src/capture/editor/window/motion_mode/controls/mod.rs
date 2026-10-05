@@ -9,6 +9,7 @@ use crate::recording::editor::model::MotionState;
 
 use super::{MotionModeChrome, MotionModeParts, MotionSession};
 
+mod clip_menu;
 mod playback;
 mod sync;
 mod text;

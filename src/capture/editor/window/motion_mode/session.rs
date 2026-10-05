@@ -174,6 +174,12 @@ impl MotionRuntime {
         self.last_edit = Some(Instant::now());
     }
 
+    pub(in crate::capture::editor::window) fn begin_motion_command(&mut self) {
+        self.last_edit = None;
+        self.begin_motion_edit();
+        self.last_edit = None;
+    }
+
     fn push_motion_history(&mut self) {
         if self.undo_stack.last() == Some(&self.motion) {
             return;
@@ -483,5 +489,23 @@ mod tests {
         runtime.begin_motion_edit();
         runtime.motion.add_segment_at(1.0);
         assert_eq!(runtime.motion_history_availability(), (true, false));
+    }
+
+    #[test]
+    fn discrete_clip_commands_have_separate_undo_steps() {
+        let mut runtime = runtime_with_clip();
+        runtime.begin_motion_edit();
+        runtime.motion.set_selected_end_scale(1.5);
+        runtime.begin_motion_command();
+        runtime.motion.set_selected_disabled(true);
+        runtime.begin_motion_command();
+        runtime.motion.remove_selected();
+
+        assert!(runtime.undo_motion());
+        assert!(runtime.motion.selected_segment().unwrap().is_disabled);
+        assert!(runtime.undo_motion());
+        let segment = runtime.motion.selected_segment().unwrap();
+        assert!(!segment.is_disabled);
+        assert_eq!(segment.to.scale, 1.5);
     }
 }

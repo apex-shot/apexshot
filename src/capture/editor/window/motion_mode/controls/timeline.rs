@@ -5,6 +5,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::super::{MotionHoverTrack, MotionModeParts, MotionRuntime, MotionSession};
+use super::clip_menu::{show_clip_menu, ClipMenuTarget};
 use super::{Redraw, RequestTextTransitionPreview, RequestTransitionPreview};
 
 /// Whether a board-relative pointer height falls inside `lane`.
@@ -220,6 +221,58 @@ pub(super) fn install(
     });
     parts.timeline.motion_track.add_controller(track_click);
 
+    let motion_menu = GestureClick::new();
+    motion_menu.set_button(3);
+    motion_menu.connect_pressed({
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        move |gesture, _, x, y| {
+            let Some(area) = gesture
+                .widget()
+                .and_then(|widget| widget.downcast::<DrawingArea>().ok())
+            else {
+                return;
+            };
+            let width = area.allocated_width().max(1) as f64;
+            let height = area.allocated_height() as f64;
+            if y < 7.0 || y > height - 7.0 {
+                return;
+            }
+            let index = {
+                let mut runtime = session.borrow_mut();
+                let duration = runtime.motion.duration.max(0.001);
+                let Some(index) =
+                    runtime
+                        .motion
+                        .segments
+                        .iter()
+                        .enumerate()
+                        .find_map(|(index, segment)| {
+                            let x0 = (segment.start / duration).clamp(0.0, 1.0) * width;
+                            let x1 = (segment.end / duration).clamp(0.0, 1.0) * width;
+                            (x >= x0 && x <= x0 + (x1 - x0).max(22.0)).then_some(index)
+                        })
+                else {
+                    return;
+                };
+                runtime.motion.selected = Some(index);
+                runtime.motion.selected_text = None;
+                runtime.source_selected = false;
+                index
+            };
+            redraw();
+            show_clip_menu(
+                &area,
+                ClipMenuTarget::Motion(index),
+                x,
+                y,
+                session.clone(),
+                redraw.clone(),
+            );
+        }
+    });
+    parts.timeline.motion_track.add_controller(motion_menu);
+
     let drag_kind = Rc::new(Cell::new(None::<DragKind>));
     let drag = GestureDrag::new();
     drag.set_button(1);
@@ -416,6 +469,54 @@ pub(super) fn install(
     });
     parts.timeline.text_track.add_controller(text_click);
 
+    let text_menu = GestureClick::new();
+    text_menu.set_button(3);
+    text_menu.connect_pressed({
+        let session = session.runtime.clone();
+        let redraw = redraw.clone();
+        move |gesture, _, x, y| {
+            let Some(area) = gesture
+                .widget()
+                .and_then(|widget| widget.downcast::<DrawingArea>().ok())
+            else {
+                return;
+            };
+            let width = area.allocated_width().max(1) as f64;
+            let height = area.allocated_height() as f64;
+            if y < 6.0 || y > height - 6.0 {
+                return;
+            }
+            let index =
+                {
+                    let mut runtime = session.borrow_mut();
+                    let duration = runtime.motion.duration.max(0.001);
+                    let Some(index) = runtime.motion.text_segments.iter().enumerate().find_map(
+                        |(index, segment)| {
+                            let x0 = (segment.start / duration).clamp(0.0, 1.0) * width;
+                            let x1 = (segment.end / duration).clamp(0.0, 1.0) * width;
+                            (x >= x0 && x <= x0 + (x1 - x0).max(22.0)).then_some(index)
+                        },
+                    ) else {
+                        return;
+                    };
+                    runtime.motion.selected_text = Some(index);
+                    runtime.motion.selected = None;
+                    runtime.source_selected = false;
+                    index
+                };
+            redraw();
+            show_clip_menu(
+                &area,
+                ClipMenuTarget::Text(index),
+                x,
+                y,
+                session.clone(),
+                redraw.clone(),
+            );
+        }
+    });
+    parts.timeline.text_track.add_controller(text_menu);
+
     let text_drag_kind = Rc::new(Cell::new(None::<DragKind>));
     let text_drag = GestureDrag::new();
     text_drag.set_button(1);
@@ -567,6 +668,7 @@ pub(super) fn install(
         .ancestor(Overlay::static_type())
     {
         let hover = EventControllerMotion::new();
+        hover.set_propagation_phase(gtk4::PropagationPhase::Capture);
         hover.connect_motion({
             let session = session.runtime.clone();
             let hovered = parts.timeline.playhead_hovered.clone();
@@ -574,7 +676,34 @@ pub(super) fn install(
             let motion_track = parts.timeline.motion_track.clone();
             let text_track = parts.timeline.text_track.clone();
             let preview = parts.shell.preview.clone();
+            let drag_kind = drag_kind.clone();
+            let text_drag_kind = text_drag_kind.clone();
             move |controller, x, y| {
+                if drag_kind.get().is_some() || text_drag_kind.get().is_some() {
+                    let (had_hover, was_previewing) = {
+                        let mut runtime = session.borrow_mut();
+                        let was = super::super::preview::hover_preview_frame(
+                            &runtime.motion,
+                            runtime.hover_time,
+                            runtime.hover_track,
+                            runtime.playing,
+                        )
+                        .is_some();
+                        let had = runtime.hover_time.is_some() || runtime.hover_track.is_some();
+                        runtime.hover_time = None;
+                        runtime.hover_track = None;
+                        (had, was)
+                    };
+                    if had_hover {
+                        hover_playhead.queue_draw();
+                        motion_track.queue_draw();
+                        text_track.queue_draw();
+                        if was_previewing {
+                            preview.queue_draw();
+                        }
+                    }
+                    return;
+                }
                 let board = controller.widget();
                 let width = board
                     .as_ref()
@@ -760,6 +889,8 @@ fn install_track_end_cursor(
     text_track: bool,
 ) {
     let pointer = EventControllerMotion::new();
+    let last_cursor = Rc::new(Cell::new(None::<&'static str>));
+    let motion_cursor = last_cursor.clone();
     pointer.connect_motion(move |controller, x, _| {
         let width = controller
             .widget()
@@ -793,15 +924,21 @@ fn install_track_end_cursor(
                     .find_map(|segment| edge_at(segment.start, segment.end))
             }
         };
-        if let Some(widget) = controller.widget() {
-            widget.set_cursor(
-                gdk::Cursor::from_name(cursor_name.unwrap_or("default"), None).as_ref(),
-            );
+        let cursor_name = cursor_name.unwrap_or("default");
+        if motion_cursor.get() != Some(cursor_name) {
+            if let Some(widget) = controller.widget() {
+                widget.set_cursor(gdk::Cursor::from_name(cursor_name, None).as_ref());
+            }
+            motion_cursor.set(Some(cursor_name));
         }
     });
-    pointer.connect_leave(|controller| {
-        if let Some(widget) = controller.widget() {
-            widget.set_cursor(None);
+    pointer.connect_leave({
+        let last_cursor = last_cursor.clone();
+        move |controller| {
+            if let Some(widget) = controller.widget() {
+                widget.set_cursor(None);
+            }
+            last_cursor.set(None);
         }
     });
     track.add_controller(pointer);

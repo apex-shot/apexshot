@@ -201,10 +201,12 @@ struct PreviewInputs<'a> {
     watermark: Option<&'a ImageSurface>,
 }
 
-fn surface_to_pixels(surface: &mut ImageSurface) -> Option<super::session::PreviewPixels> {
-    surface.flush();
+fn surface_to_pixels(surface: &ImageSurface) -> Option<super::session::PreviewPixels> {
     let stride = surface.stride();
-    let bytes = surface.data().ok()?.to_vec();
+    let mut bytes = Vec::new();
+    surface
+        .with_data(|data| bytes.extend_from_slice(data))
+        .ok()?;
     Some(super::session::PreviewPixels {
         width: surface.width(),
         height: surface.height(),
@@ -240,28 +242,25 @@ fn schedule_preview_job_locked(
         runtime.preview_dirty = true;
         return;
     }
-    let (mut card, card_scale) = match runtime.card_preview.as_ref() {
+    let (card, card_scale) = match runtime.card_preview.as_ref() {
         Some(preview) => (preview.clone(), runtime.card_scale),
         None => match runtime.card.as_ref() {
             Some(card) => (card.clone(), 1.0),
             None => return,
         },
     };
-    let Some(mut backdrop) = backdrop else {
+    let Some(backdrop) = backdrop else {
         return;
     };
     // Pixels are the only thing allowed across the boundary: one quick copy
     // here (~1ms) instead of a 12ms composite blocking pointer motion.
-    let (Some(backdrop), Some(card)) = (
-        surface_to_pixels(&mut backdrop),
-        surface_to_pixels(&mut card),
-    ) else {
+    let (Some(backdrop), Some(card)) = (surface_to_pixels(&backdrop), surface_to_pixels(&card))
+    else {
         return;
     };
     let watermark = match runtime.watermark_surface.as_ref() {
         Some(surface) => {
-            let mut owned = surface.clone();
-            let Some(pixels) = surface_to_pixels(&mut owned) else {
+            let Some(pixels) = surface_to_pixels(surface) else {
                 return;
             };
             Some(pixels)
@@ -321,6 +320,9 @@ pub(super) fn schedule_preview_job(runtime: &Rc<RefCell<MotionRuntime>>, prefers
         cached_backdrop(&mut guard, width, height, prefers_dark)
     };
     let mut runtime = runtime.borrow_mut();
+    if runtime.live_preview || runtime.playing {
+        return;
+    }
     let time = preview_time(&runtime);
     let live = runtime.live_preview || runtime.playing;
     let gen = runtime.preview_content_gen;
@@ -356,21 +358,7 @@ pub(super) fn poll_preview_results(
         if let Some(last) = last {
             match last {
                 Some(result) => {
-                    // A worker scheduled earlier can land after the cache
-                    // already moved on (edits bump the gen; inline playback
-                    // advances time every frame). Storing it would regress
-                    // the preview to an older frame — including the frozen
-                    // look when a slow worker overwrites a newer inline
-                    // composite. Drop outdated results; the next draw or
-                    // dirty reschedule covers the current input.
-                    let outdated = result.content_gen != runtime.preview_content_gen
-                        || runtime.preview_frame.as_ref().is_some_and(|cached| {
-                            cached.content_gen == result.content_gen
-                                && cached.width == result.width
-                                && cached.height == result.height
-                                && cached.time.to_bits() > result.time.to_bits()
-                        });
-                    if !outdated {
+                    if preview_result_is_current(&runtime, &result) {
                         if let Some(surface) = surface_from_pixels(&super::session::PreviewPixels {
                             width: result.width,
                             height: result.height,
@@ -403,6 +391,31 @@ pub(super) fn poll_preview_results(
         runtime.borrow_mut().preview_dirty = false;
         schedule_preview_job(runtime, prefers_dark);
     }
+}
+
+fn preview_result_is_current(
+    runtime: &MotionRuntime,
+    result: &super::session::PreviewResult,
+) -> bool {
+    if result.content_gen != runtime.preview_content_gen || runtime.live_preview || runtime.playing
+    {
+        return false;
+    }
+    let Some(cached) = runtime.preview_frame.as_ref() else {
+        return true;
+    };
+    if cached.width != result.width || cached.height != result.height {
+        return false;
+    }
+    let time = preview_time(runtime);
+    !preview_cache_hit(
+        Some(cached),
+        result.width,
+        result.height,
+        time,
+        false,
+        runtime.preview_content_gen,
+    ) || (result.time.to_bits() == time.to_bits() && !result.live_preview)
 }
 
 /// The worker body: rebuild surfaces from the transferred pixels, composite,
@@ -582,6 +595,89 @@ mod tests {
     use super::*;
 
     #[test]
+    fn shared_preview_surfaces_can_be_copied_for_the_worker() {
+        let surface = ImageSurface::create(Format::ARgb32, 8, 8).unwrap();
+        let context = Context::new(&surface).unwrap();
+        context.set_source_rgb(0.2, 0.5, 0.8);
+        context.paint().unwrap();
+        let shared = surface.clone();
+        let pixels = surface_to_pixels(&shared).expect("copy a cached shared surface");
+        let restored = surface_from_pixels(&pixels).unwrap();
+        surface
+            .with_data(|original| assert_eq!(original, pixels.bytes))
+            .unwrap();
+        restored
+            .with_data(|copy| assert_eq!(copy, pixels.bytes))
+            .unwrap();
+    }
+
+    #[test]
+    fn hover_worker_starts_with_cached_shared_surfaces() {
+        let session = super::super::session::MotionSession::new(true, 0.0);
+        let mut runtime = session.runtime.borrow_mut();
+        let card = ImageSurface::create(Format::ARgb32, 16, 12).unwrap();
+        runtime.card = Some(card.clone());
+        let backdrop = ImageSurface::create(Format::ARgb32, 32, 24).unwrap();
+        let shared_backdrop = backdrop.clone();
+        schedule_preview_job_locked(&mut runtime, 32, 24, 0.4, false, 0, Some(shared_backdrop));
+        assert!(
+            runtime.preview_busy,
+            "shared textures must not prevent scheduling"
+        );
+        let result = runtime
+            .preview_rx
+            .as_ref()
+            .unwrap()
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap()
+            .expect("worker renders a frame");
+        assert_eq!(result.time, 0.4);
+        assert_eq!((result.width, result.height), (32, 24));
+    }
+
+    #[test]
+    fn backward_hover_results_land_without_overwriting_live_or_exact_frames() {
+        let session = super::super::session::MotionSession::new(true, 0.0);
+        let mut runtime = session.runtime.borrow_mut();
+        runtime.motion.add_segment_at(0.0).unwrap();
+        runtime.hover_track = Some(MotionHoverTrack::Motion);
+        runtime.hover_time = Some(0.25);
+        runtime.preview_frame = Some(super::super::session::PreviewFrame {
+            width: 32,
+            height: 24,
+            time: 0.8,
+            live_preview: false,
+            content_gen: 0,
+            surface: ImageSurface::create(Format::ARgb32, 32, 24).unwrap(),
+        });
+        let mut result = super::super::session::PreviewResult {
+            width: 32,
+            height: 24,
+            time: 0.5,
+            live_preview: false,
+            content_gen: 0,
+            stride: 128,
+            bytes: Vec::new(),
+        };
+        assert!(preview_result_is_current(&runtime, &result));
+        runtime.playing = true;
+        assert!(!preview_result_is_current(&runtime, &result));
+        runtime.playing = false;
+        runtime.live_preview = true;
+        assert!(!preview_result_is_current(&runtime, &result));
+        runtime.live_preview = false;
+        runtime.preview_frame.as_mut().unwrap().time = 0.25;
+        assert!(!preview_result_is_current(&runtime, &result));
+        result.time = 0.25;
+        assert!(preview_result_is_current(&runtime, &result));
+        result.content_gen = 1;
+        assert!(!preview_result_is_current(&runtime, &result));
+        result.content_gen = 0;
+        result.width = 40;
+        assert!(!preview_result_is_current(&runtime, &result));
+    }
+
+    #[test]
     fn hover_preview_only_plays_directly_over_a_clip() {
         let mut motion = MotionState::default();
         motion.add_segment_at(0.0).expect("motion clip");
@@ -669,7 +765,7 @@ mod tests {
 
         // Pixel round-trip across the thread boundary must be lossless.
         let mut card = card;
-        let round_tripped = surface_from_pixels(&surface_to_pixels(&mut card).unwrap()).unwrap();
+        let round_tripped = surface_from_pixels(&surface_to_pixels(&card).unwrap()).unwrap();
         let mut round_tripped = round_tripped;
         round_tripped.flush();
         assert_eq!(
