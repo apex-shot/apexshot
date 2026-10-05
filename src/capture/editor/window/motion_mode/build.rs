@@ -570,20 +570,8 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     text_typewriter_box.set_visible(false);
     text_animation_section.append(&text_typewriter_box);
     text_editor_box.append(&text_animation_section);
-    // The page owns its Delete: the shared button lives on Move, so deleting
-    // the selected title must not require switching pages first.
-    let text_delete_btn = Button::with_label(&t("Delete"));
-    text_delete_btn.set_has_frame(false);
-    text_delete_btn.add_css_class("editor-sidebar-action-button");
-    text_editor_box.append(&text_delete_btn);
     text_editor_box.set_visible(false);
     text_box.append(&text_editor_box);
-
-    let delete_btn = Button::with_label(&t("Delete"));
-    delete_btn.set_has_frame(false);
-    delete_btn.add_css_class("editor-sidebar-action-button");
-    delete_btn.set_sensitive(false);
-    inspector.append(&delete_btn);
 
     let appearance_inspector = build_motion_appearance_panel(window, &session, &preview, None);
     let watermark_inspector = build_motion_watermark_panel(window, &session, &preview);
@@ -649,14 +637,12 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
                 blur_shutter_slider,
                 blur_shutter_value,
                 clip_hint,
-                delete_btn,
                 inspector_syncing,
             },
             text: MotionTextControlParts {
                 text_empty_box,
                 text_editor_box,
                 text_add_btn,
-                text_delete_btn,
                 text_view,
                 text_pos_pad,
                 text_pos_readout,

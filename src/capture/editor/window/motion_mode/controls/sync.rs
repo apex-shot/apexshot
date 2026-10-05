@@ -32,7 +32,6 @@ pub(super) fn make_redraw(
     let clip_box = parts.transform.clip_box.clone();
     let text_empty_box = parts.text.text_empty_box.clone();
     let text_editor_box = parts.text.text_editor_box.clone();
-    let text_delete_btn = parts.text.text_delete_btn.clone();
     let text_view = parts.text.text_view.clone();
     let text_pos_pad = parts.text.text_pos_pad.clone();
     let text_pos_readout = parts.text.text_pos_readout.clone();
@@ -91,7 +90,6 @@ pub(super) fn make_redraw(
     let easing_x2_value = parts.transform.easing_x2_value.clone();
     let easing_y2_slider = parts.transform.easing_y2_slider.clone();
     let easing_y2_value = parts.transform.easing_y2_value.clone();
-    let delete_btn = parts.shared.delete_btn.clone();
     let syncing = parts.shared.inspector_syncing.clone();
     let last_had_text = Rc::new(std::cell::Cell::new(false));
     let last_had_clip = Rc::new(std::cell::Cell::new(false));
@@ -177,7 +175,6 @@ pub(super) fn make_redraw(
         // clip selects it.
         text_empty_box.set_visible(!has_text);
         text_editor_box.set_visible(has_text);
-        text_delete_btn.set_sensitive(has_text);
         clip_hint.set_visible(!has_clip && !has_text);
         if let Some(segment) = selected_text {
             let buffer = text_view.buffer();
@@ -262,7 +259,6 @@ pub(super) fn make_redraw(
             anchor_pad.set_anchor(0.5, 0.5);
         }
         anchor_pad.set_surface(anchor_surface);
-        delete_btn.set_sensitive(has_clip || has_text);
         undo_btn.set_sensitive(can_undo);
         redo_btn.set_sensitive(can_redo);
         syncing.set(false);

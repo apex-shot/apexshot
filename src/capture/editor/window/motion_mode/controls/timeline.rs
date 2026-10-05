@@ -675,7 +675,6 @@ pub(super) fn install(
             let hover_playhead = parts.timeline.hover_playhead.clone();
             let motion_track = parts.timeline.motion_track.clone();
             let text_track = parts.timeline.text_track.clone();
-            let preview = parts.shell.preview.clone();
             let drag_kind = drag_kind.clone();
             let text_drag_kind = text_drag_kind.clone();
             move |controller, x, y| {
@@ -699,7 +698,7 @@ pub(super) fn install(
                         motion_track.queue_draw();
                         text_track.queue_draw();
                         if was_previewing {
-                            preview.queue_draw();
+                            session.borrow_mut().preview_dirty = true;
                         }
                     }
                     return;
@@ -772,11 +771,8 @@ pub(super) fn install(
                 } else if next_track == Some(MotionHoverTrack::Text) {
                     text_track.queue_draw();
                 }
-                // Hover scrub drives the preview (red line), never the
-                // playhead. The paint is a cheap blit of the latest
-                // background-thread frame, so it follows every motion.
                 if was_previewing || is_previewing {
-                    preview.queue_draw();
+                    session.borrow_mut().preview_dirty = true;
                 }
                 if hovered.replace(near) != near {
                     // The cursor follows the drawn head, so grabbing it works
@@ -796,7 +792,6 @@ pub(super) fn install(
             let hover_playhead = parts.timeline.hover_playhead.clone();
             let motion_track = parts.timeline.motion_track.clone();
             let text_track = parts.timeline.text_track.clone();
-            let preview = parts.shell.preview.clone();
             move |controller| {
                 let (lane_changed, was_previewing) = {
                     let mut runtime = session.borrow_mut();
@@ -821,7 +816,7 @@ pub(super) fn install(
                 // playhead frame, but only if it was showing a hover frame:
                 // leaving empty lane space changes nothing.
                 if was_previewing {
-                    preview.queue_draw();
+                    session.borrow_mut().preview_dirty = true;
                 }
                 if let Some(widget) = controller.widget() {
                     widget.set_cursor(None);

@@ -309,7 +309,14 @@ fn schedule_preview_job_locked(
 /// a frame lands while newer input arrived mid-flight).
 pub(super) fn schedule_preview_job(runtime: &Rc<RefCell<MotionRuntime>>, prefers_dark: bool) {
     let (width, height) = {
-        let runtime = runtime.borrow();
+        let mut runtime = runtime.borrow_mut();
+        if runtime.live_preview || runtime.playing {
+            return;
+        }
+        if runtime.preview_busy {
+            runtime.preview_dirty = true;
+            return;
+        }
         match runtime.preview_frame.as_ref() {
             Some(frame) => (frame.width, frame.height),
             None => return,
@@ -320,9 +327,6 @@ pub(super) fn schedule_preview_job(runtime: &Rc<RefCell<MotionRuntime>>, prefers
         cached_backdrop(&mut guard, width, height, prefers_dark)
     };
     let mut runtime = runtime.borrow_mut();
-    if runtime.live_preview || runtime.playing {
-        return;
-    }
     let time = preview_time(&runtime);
     let live = runtime.live_preview || runtime.playing;
     let gen = runtime.preview_content_gen;
@@ -633,6 +637,50 @@ mod tests {
             .expect("worker renders a frame");
         assert_eq!(result.time, 0.4);
         assert_eq!((result.width, result.height), (32, 24));
+    }
+
+    #[test]
+    fn busy_hover_requests_only_mark_the_latest_input_dirty() {
+        let session = super::super::session::MotionSession::new(true, 0.0);
+        session.runtime.borrow_mut().preview_busy = true;
+        schedule_preview_job(&session.runtime, true);
+        let runtime = session.runtime.borrow();
+        assert!(runtime.preview_dirty);
+        assert!(runtime.backdrop_cache.is_none());
+        assert!(runtime.preview_tx.is_none());
+    }
+
+    #[test]
+    fn hover_worker_schedules_the_latest_coalesced_pointer_position() {
+        let session = super::super::session::MotionSession::new(true, 0.0);
+        {
+            let mut runtime = session.runtime.borrow_mut();
+            runtime.card = Some(ImageSurface::create(Format::ARgb32, 16, 12).unwrap());
+            runtime.motion.add_segment_at(0.0).unwrap();
+            runtime.hover_track = Some(MotionHoverTrack::Motion);
+            runtime.preview_frame = Some(super::super::session::PreviewFrame {
+                width: 32,
+                height: 24,
+                time: 0.0,
+                live_preview: false,
+                content_gen: 0,
+                surface: ImageSurface::create(Format::ARgb32, 32, 24).unwrap(),
+            });
+            for time in [0.2, 0.4, 0.6] {
+                runtime.hover_time = Some(time);
+                runtime.preview_dirty = true;
+            }
+        }
+        schedule_preview_job(&session.runtime, true);
+        let runtime = session.runtime.borrow();
+        let result = runtime
+            .preview_rx
+            .as_ref()
+            .unwrap()
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.time, 0.6);
     }
 
     #[test]

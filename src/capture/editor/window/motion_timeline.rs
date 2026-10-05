@@ -910,6 +910,40 @@ mod tests {
     use super::{disabled_clip_tone, motion_clip_tone, text_clip_tone};
 
     #[test]
+    fn lucide_symbolic_icons_use_filled_outlines_instead_of_svg_strokes() {
+        for svg in [
+            include_str!("../../../../data/icons/spline-symbolic.svg"),
+            include_str!("../../../../data/icons/type-symbolic.svg"),
+        ] {
+            assert!(svg.contains("fill=\"#222222\""));
+            assert!(!svg.contains("stroke=") && !svg.contains("fill=\"none\""));
+        }
+    }
+
+    #[test]
+    fn timeline_hover_never_queues_large_preview_paints_per_pointer_event() {
+        let controls = include_str!("motion_mode/controls/timeline.rs");
+        let hover = controls
+            .split("let hover = EventControllerMotion::new();")
+            .nth(1)
+            .unwrap();
+        let hover = hover.split("board.add_controller(hover);").next().unwrap();
+        assert!(hover.contains("preview_dirty = true"));
+        assert!(!hover.contains("preview.queue_draw()"));
+        let playback = include_str!("motion_mode/controls/playback.rs");
+        assert!(playback.contains("add_tick_callback"));
+        assert!(!playback.contains("timeout_add_local"));
+    }
+
+    #[test]
+    fn tab_delete_buttons_are_replaced_by_clip_menu_deletion() {
+        assert!(!include_str!("motion_mode/build.rs").contains("delete_btn"));
+        assert!(!include_str!("motion_mode/parts.rs").contains("delete_btn"));
+        assert!(include_str!("motion_mode/controls/clip_menu.rs").contains("remove_selected()"));
+        assert!(include_str!("motion_mode/controls/mod.rs").contains("gdk::Key::Delete"));
+    }
+
+    #[test]
     fn disabled_clips_stay_visible_but_dim_their_fill_and_label() {
         for tone in [motion_clip_tone(true, false), text_clip_tone(true, false)] {
             let disabled = disabled_clip_tone(tone, true);
