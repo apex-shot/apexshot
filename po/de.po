@@ -2703,3 +2703,95 @@ msgstr "Wird einmal abgespielt, wenn die Aufnahme einfriert. Speichern und Zusch
 
 msgid "Your desktop controls the capture sound on this route, so ApexShot cannot replace or disable it here and will not play an additional sound."
 msgstr "Auf diesem Weg steuert Ihre Desktop-Umgebung den Aufnahmeton. ApexShot kann ihn hier weder ersetzen noch deaktivieren und spielt keinen zusätzlichen Ton ab."
+
+msgid "Bold"
+msgstr "Fett"
+
+msgid "Canvas"
+msgstr "Leinwand"
+
+msgid "Center"
+msgstr "Mitte"
+
+msgid "Character"
+msgstr "Zeichen"
+
+msgid "Choose how Typewriter reveals the text"
+msgstr "Wählen, wie der Schreibmaschinen-Effekt den Text einblendet"
+
+msgid "Content"
+msgstr "Inhalt"
+
+msgid "Drag to place the headline on the composition; double-click to reset"
+msgstr ""
+"Ziehen, um die Überschrift in der Komposition zu platzieren; zum Zurücksetzen doppelklicken"
+
+msgid "Drag to place the title on the image; double-click to reset"
+msgstr ""
+"Ziehen, um den Titel auf dem Bild zu platzieren; zum Zurücksetzen doppelklicken"
+
+msgid "Edit text color"
+msgstr "Textfarbe bearbeiten"
+
+msgid "Entrance duration for slides and fades"
+msgstr "Einblenddauer für Gleit- und Überblend-Effekte"
+
+msgid "From bottom"
+msgstr "Von unten"
+
+msgid "From left"
+msgstr "Von links"
+
+msgid "From right"
+msgstr "Von rechts"
+
+msgid "From top"
+msgstr "Von oben"
+
+msgid "Italic"
+msgstr "Kursiv"
+
+msgid "Letter spacing"
+msgstr "Zeichenabstand"
+
+msgid "Line spacing"
+msgstr "Zeilenabstand"
+
+msgid "No fonts found"
+msgstr "Keine Schriftarten gefunden"
+
+msgid "Outline"
+msgstr "Kontur"
+
+msgid "Paragraph width; Auto keeps the natural line width"
+msgstr "Absatzbreite; Auto behält die natürliche Zeilenbreite bei"
+
+msgid "Placement"
+msgstr "Platzierung"
+
+msgid "Rotation"
+msgstr "Drehung"
+
+msgid "Search fonts…"
+msgstr "Schriftarten suchen…"
+
+msgid "Text color"
+msgstr "Textfarbe"
+
+msgid "Time to reveal all text"
+msgstr "Zeit bis zur vollständigen Texteinblendung"
+
+msgid "Type your text; press Enter for a new line"
+msgstr "Text eingeben; für eine neue Zeile die Eingabetaste drücken"
+
+msgid "Typewriter"
+msgstr "Schreibmaschine"
+
+msgid "Typography"
+msgstr "Typografie"
+
+msgid "Width"
+msgstr "Breite"
+
+msgid "Word"
+msgstr "Wort"

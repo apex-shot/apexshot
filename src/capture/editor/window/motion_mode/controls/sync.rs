@@ -2,7 +2,7 @@ use gtk4::prelude::*;
 use std::rc::Rc;
 
 use crate::i18n::t;
-use crate::recording::editor::model::{MotionState, MotionTimingKind};
+use crate::recording::editor::model::{MotionState, MotionTextAnimation, MotionTimingKind};
 
 use super::super::widgets::format_duration_label;
 use super::super::{MotionModeChrome, MotionModeParts, MotionSession};
@@ -33,13 +33,30 @@ pub(super) fn make_redraw(
     let text_empty_box = parts.text.text_empty_box.clone();
     let text_editor_box = parts.text.text_editor_box.clone();
     let text_delete_btn = parts.text.text_delete_btn.clone();
-    let text_entry = parts.text.text_entry.clone();
+    let text_view = parts.text.text_view.clone();
     let text_pos_pad = parts.text.text_pos_pad.clone();
     let text_pos_readout = parts.text.text_pos_readout.clone();
+    let text_attach_buttons = parts.text.text_attach_buttons.clone();
+    let text_font_picker = parts.text.text_font_picker.clone();
+    let text_bold_btn = parts.text.text_bold_btn.clone();
+    let text_italic_btn = parts.text.text_italic_btn.clone();
+    let text_color_picker = parts.text.text_color_picker.clone();
+    let text_opacity_slider = parts.text.text_opacity_slider.clone();
+    let text_alignment_buttons = parts.text.text_alignment_buttons.clone();
+    let text_width_slider = parts.text.text_width_slider.clone();
     let text_size_slider = parts.text.text_size_slider.clone();
     let text_size_value = parts.text.text_size_value.clone();
+    let text_line_spacing_slider = parts.text.text_line_spacing_slider.clone();
+    let text_letter_spacing_slider = parts.text.text_letter_spacing_slider.clone();
+    let text_rotation_slider = parts.text.text_rotation_slider.clone();
+    let text_outline_slider = parts.text.text_outline_slider.clone();
+    let text_shadow_btn = parts.text.text_shadow_btn.clone();
     let text_anim_buttons = parts.text.text_anim_buttons.clone();
+    let text_scope_box = parts.text.text_scope_box.clone();
     let text_scope_buttons = parts.text.text_scope_buttons.clone();
+    let text_transition_slider = parts.text.text_transition_slider.clone();
+    let text_typewriter_box = parts.text.text_typewriter_box.clone();
+    let text_typewriter_slider = parts.text.text_typewriter_slider.clone();
     let clip_hint = parts.shared.clip_hint.clone();
     let scale_slider = parts.transform.scale_slider.clone();
     let intensity_slider = parts.transform.intensity_slider.clone();
@@ -163,19 +180,54 @@ pub(super) fn make_redraw(
         text_delete_btn.set_sensitive(has_text);
         clip_hint.set_visible(!has_clip && !has_text);
         if let Some(segment) = selected_text {
-            if !text_entry.has_focus() {
-                text_entry.set_text(&segment.text);
+            let buffer = text_view.buffer();
+            if !text_view.has_focus()
+                && buffer.text(&buffer.start_iter(), &buffer.end_iter(), false) != segment.text
+            {
+                buffer.set_text(&segment.text);
             }
+            let canvas = segment.annotation_coordinate_space.is_canvas();
+            text_pos_pad.set_attachment(canvas);
             text_pos_pad.set_text_pos(segment.pos_x, segment.pos_y);
             text_pos_readout.set_label(&super::super::build::motion_text_pos_readout(
                 segment.pos_x,
                 segment.pos_y,
             ));
+            for (space, button) in &text_attach_buttons {
+                button.set_active(space.is_canvas() == canvas);
+            }
+            text_font_picker.set_family(&segment.format.font_family);
+            text_bold_btn.set_active(segment.format.bold);
+            text_italic_btn.set_active(segment.format.italic);
+            text_color_picker.set_color(segment.format.color);
+            text_opacity_slider.set_value(segment.format.color[3] * 100.0);
+            for (alignment, button) in &text_alignment_buttons {
+                button.set_active(*alignment == segment.format.alignment);
+            }
+            text_width_slider.set_value(segment.format.wrap_width);
             text_size_slider.set_value(segment.size);
             text_size_value.set_label(&format!("{:.0}%", segment.size * 100.0));
+            text_line_spacing_slider.set_value(segment.format.line_spacing);
+            text_letter_spacing_slider.set_value(segment.format.letter_spacing);
+            text_rotation_slider.set_value(segment.format.rotation);
+            text_outline_slider.set_value(segment.format.outline_width);
+            text_shadow_btn.set_active(segment.format.shadow);
             for (animation, button) in &text_anim_buttons {
                 button.set_active(*animation == segment.animation);
             }
+            let is_typewriter = segment.animation == MotionTextAnimation::Typewriter;
+            text_scope_box.set_visible(is_typewriter);
+            text_typewriter_box.set_visible(is_typewriter);
+            text_transition_slider.widget().set_visible(matches!(
+                segment.animation,
+                MotionTextAnimation::Fade
+                    | MotionTextAnimation::SlideFromLeft
+                    | MotionTextAnimation::SlideFromRight
+                    | MotionTextAnimation::SlideTop
+                    | MotionTextAnimation::SlideBottom
+            ));
+            text_typewriter_slider.set_value(segment.typewriter_time * 1000.0);
+            text_transition_slider.set_value(segment.transition_duration * 1000.0);
             for (scope, button) in &text_scope_buttons {
                 button.set_active(*scope == segment.scope);
             }

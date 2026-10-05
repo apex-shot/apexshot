@@ -34,7 +34,8 @@ impl MotionStage {
     /// The editor's scene panel for a composition canvas, capped at the
     /// canvas's native size like Static's own canvas scale.
     pub(super) fn preview(width: f64, height: f64, canvas_w: f64, canvas_h: f64) -> Self {
-        let (_, _, bounds_w, bounds_h) = motion_preview_scene_rect(width, height, canvas_w, canvas_h);
+        let (_, _, bounds_w, bounds_h) =
+            motion_preview_scene_rect(width, height, canvas_w, canvas_h);
         Self {
             bounds_w,
             bounds_h,
@@ -95,7 +96,9 @@ pub(super) fn motion_source_size(surface: &ImageSurface, card_scale: f64) -> (f6
     };
     (
         (f64::from(surface.width().max(1)) / scale).round().max(1.0),
-        (f64::from(surface.height().max(1)) / scale).round().max(1.0),
+        (f64::from(surface.height().max(1)) / scale)
+            .round()
+            .max(1.0),
     )
 }
 
@@ -108,7 +111,8 @@ pub(super) fn motion_canvas(
     appearance: &MotionAppearance,
     frame: &MotionFrame,
 ) -> CompositionLayout {
-    motion_background_composition(source_w, source_h, appearance, frame.effective_aspect()).compute()
+    motion_background_composition(source_w, source_h, appearance, frame.effective_aspect())
+        .compute()
 }
 
 #[derive(Clone, Copy)]
@@ -162,8 +166,7 @@ impl CardLayout {
         transform: MotionTransform,
         zoom_anchor: (f64, f64),
     ) -> Self {
-        let canvas_fit =
-            stage.composition_fit(composition.canvas_width, composition.canvas_height);
+        let canvas_fit = stage.composition_fit(composition.canvas_width, composition.canvas_height);
         let (base_x, base_y) = motion_composition_center(&composition, canvas_fit, stage);
         let mut layout = Self {
             composition,
@@ -245,10 +248,8 @@ impl CardLayout {
     }
 
     fn project(&self, image_x: f64, image_y: f64) -> (f64, f64) {
-        let hw =
-            self.composition.image_rect.width * self.canvas_fit * self.transform.scale / 2.0;
-        let hh =
-            self.composition.image_rect.height * self.canvas_fit * self.transform.scale / 2.0;
+        let hw = self.composition.image_rect.width * self.canvas_fit * self.transform.scale / 2.0;
+        let hh = self.composition.image_rect.height * self.canvas_fit * self.transform.scale / 2.0;
         let depth = card_depth(hw, hh, self.transform.perspective);
         let (x, y) = project_point(
             (image_x / self.img_w() * 2.0 - 1.0) * hw,
@@ -261,8 +262,8 @@ impl CardLayout {
 
     fn local_matrix(&self, image_x: f64, image_y: f64) -> Option<Matrix> {
         let origin = self.project(image_x, image_y);
-        let x = self.project((image_x + 1.0).min(self.img_w()), image_y);
-        let y = self.project(image_x, (image_y + 1.0).min(self.img_h()));
+        let x = self.project(image_x + 1.0, image_y);
+        let y = self.project(image_x, image_y + 1.0);
         let xx = x.0 - origin.0;
         let yx = x.1 - origin.1;
         let xy = y.0 - origin.0;
@@ -278,6 +279,41 @@ impl CardLayout {
             origin.0 - xx * image_x - xy * image_y,
             origin.1 - yx * image_x - yy * image_y,
         ))
+    }
+
+    fn unproject(&self, view_x: f64, view_y: f64) -> (f64, f64) {
+        let mut best = (0.5, 0.5);
+        let mut best_distance = f64::INFINITY;
+        for row in 0..=12 {
+            for column in 0..=12 {
+                let u = column as f64 / 12.0;
+                let v = row as f64 / 12.0;
+                let point = self.project(u * self.img_w(), v * self.img_h());
+                let distance = (point.0 - view_x).powi(2) + (point.1 - view_y).powi(2);
+                if distance < best_distance {
+                    best_distance = distance;
+                    best = (u, v);
+                }
+            }
+        }
+        for _ in 0..6 {
+            let point = self.project(best.0 * self.img_w(), best.1 * self.img_h());
+            let du = self.project((best.0 + 0.002) * self.img_w(), best.1 * self.img_h());
+            let dv = self.project(best.0 * self.img_w(), (best.1 + 0.002) * self.img_h());
+            let j00 = (du.0 - point.0) / 0.002;
+            let j10 = (du.1 - point.1) / 0.002;
+            let j01 = (dv.0 - point.0) / 0.002;
+            let j11 = (dv.1 - point.1) / 0.002;
+            let det = j00 * j11 - j01 * j10;
+            if det.abs() < 1e-7 {
+                break;
+            }
+            let dx = point.0 - view_x;
+            let dy = point.1 - view_y;
+            best.0 = (best.0 - (j11 * dx - j01 * dy) / det).clamp(0.0, 1.0);
+            best.1 = (best.1 - (-j10 * dx + j00 * dy) / det).clamp(0.0, 1.0);
+        }
+        best
     }
 }
 
@@ -338,48 +374,13 @@ pub(crate) fn motion_preview_card_layout(
 /// Convert a pointer in the Motion preview back into the source artboard.
 /// A short Newton refinement keeps placement accurate for the non-linear
 /// perspective projection used by the card mesh.
-pub(crate) fn view_point_to_motion_text_position(
+#[cfg(test)]
+pub fn view_point_to_motion_text_position(
     layout: CardLayout,
     view_x: f64,
     view_y: f64,
 ) -> (f64, f64) {
-    let mut best = (0.5, 0.5);
-    let mut best_distance = f64::INFINITY;
-    for row in 0..=12 {
-        for column in 0..=12 {
-            let u = column as f64 / 12.0;
-            let v = row as f64 / 12.0;
-            let point = layout.project(u * layout.img_w(), v * layout.img_h());
-            let distance = (point.0 - view_x).powi(2) + (point.1 - view_y).powi(2);
-            if distance < best_distance {
-                best_distance = distance;
-                best = (u, v);
-            }
-        }
-    }
-    for _ in 0..6 {
-        let point = layout.project(best.0 * layout.img_w(), best.1 * layout.img_h());
-        let du = layout.project(
-            ((best.0 + 0.002).min(1.0)) * layout.img_w(),
-            best.1 * layout.img_h(),
-        );
-        let dv = layout.project(
-            best.0 * layout.img_w(),
-            ((best.1 + 0.002).min(1.0)) * layout.img_h(),
-        );
-        let j00 = (du.0 - point.0) / 0.002;
-        let j10 = (du.1 - point.1) / 0.002;
-        let j01 = (dv.0 - point.0) / 0.002;
-        let j11 = (dv.1 - point.1) / 0.002;
-        let det = j00 * j11 - j01 * j10;
-        if det.abs() < 1e-7 {
-            break;
-        }
-        let dx = point.0 - view_x;
-        let dy = point.1 - view_y;
-        best.0 = (best.0 - (j11 * dx - j01 * dy) / det).clamp(0.0, 1.0);
-        best.1 = (best.1 - (-j10 * dx + j00 * dy) / det).clamp(0.0, 1.0);
-    }
+    let best = layout.unproject(view_x, view_y);
     (best.0.clamp(0.05, 0.95), best.1.clamp(0.05, 0.95))
 }
 

@@ -13,6 +13,19 @@ pub const EDITOR_MIN_WINDOW_WIDTH: i32 = 980;
 /// The image viewport starts below this so zoomed content cannot cover the tools.
 pub const EDITOR_TOP_CHROME_HEIGHT: i32 = 56;
 
+fn is_text_input_type(widget_type: gtk4::glib::Type) -> bool {
+    widget_type.is_a(gtk4::Editable::static_type())
+        || widget_type.is_a(gtk4::TextView::static_type())
+}
+
+pub(crate) fn text_input_has_focus(widget: &impl IsA<Widget>) -> bool {
+    widget
+        .root()
+        .and_then(|root| root.downcast::<gtk4::Window>().ok())
+        .and_then(|window| gtk4::prelude::GtkWindowExt::focus(&window))
+        .is_some_and(|focused| is_text_input_type(focused.type_()))
+}
+
 /// Vertical space docked tool bars have claimed above the canvas, in view pixels.
 ///
 /// Docked bars reflow the canvas instead of floating over it: the layout sizing and
@@ -696,6 +709,7 @@ mod tests {
         arrow_style_toolbar_icon, custom_toolbar_icon_inset, toolbar_icon_size, EditorToolIcon,
     };
     use crate::capture::editor::types::ArrowStyle;
+    use gtk4::prelude::StaticType;
 
     #[test]
     fn window_drag_treats_color_chip_as_interactive() {
@@ -753,6 +767,35 @@ mod tests {
             custom_toolbar_icon_inset(&EditorToolIcon::Named("fallback".to_owned())),
             0.0
         );
+    }
+
+    #[test]
+    fn text_input_types_keep_their_native_keyboard_handling() {
+        for widget_type in [
+            gtk4::Entry::static_type(),
+            gtk4::Text::static_type(),
+            gtk4::TextView::static_type(),
+            gtk4::SpinButton::static_type(),
+        ] {
+            assert!(super::is_text_input_type(widget_type), "{widget_type}");
+        }
+        for widget_type in [
+            gtk4::Button::static_type(),
+            gtk4::DrawingArea::static_type(),
+            gtk4::Box::static_type(),
+        ] {
+            assert!(!super::is_text_input_type(widget_type), "{widget_type}");
+        }
+    }
+
+    #[test]
+    fn motion_content_field_has_scoped_dark_and_light_styles() {
+        let css = super::EDITOR_CSS;
+        assert!(css.contains(".editor-motion-content-field {"));
+        assert!(css.contains(".editor-motion-content-field:focus-within {"));
+        assert!(css.contains("textview.editor-motion-content-text text {"));
+        assert!(css.contains(".editor-theme-light .editor-motion-content-field"));
+        assert!(css.contains(".editor-theme-light textview.editor-motion-content-text"));
     }
 
     #[test]

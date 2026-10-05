@@ -404,13 +404,13 @@ pub(super) fn install(
                             .motion
                             .text_segments
                             .get(index)
-                            .map(|s| (s.start, s.typewriter_time))
+                            .map(|s| (s.start, s.entrance_seconds()))
                     })
                 }
             };
             redraw();
-            if let Some((start, typewriter_time)) = new_text {
-                request_text_transition_preview(start, typewriter_time);
+            if let Some((start, entrance_seconds)) = new_text {
+                request_text_transition_preview(start, entrance_seconds);
             }
         }
     });
@@ -740,12 +740,12 @@ pub(super) fn install(
                         .motion
                         .text_segments
                         .get(index)
-                        .map(|s| (s.start, s.typewriter_time))
+                        .map(|s| (s.start, s.entrance_seconds()))
                 })
             };
             redraw();
-            if let Some((start, typewriter_time)) = new_text {
-                request_text_transition_preview(start, typewriter_time);
+            if let Some((start, entrance_seconds)) = new_text {
+                request_text_transition_preview(start, entrance_seconds);
             }
         }
     });

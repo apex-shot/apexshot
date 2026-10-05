@@ -1,13 +1,17 @@
-use gtk4::{Box as GtkBox, Button, DrawingArea, Entry, Label, Overlay, ToggleButton};
+use gtk4::{Box as GtkBox, Button, DrawingArea, Label, Overlay, TextView, ToggleButton};
 use std::cell::Cell;
 use std::rc::Rc;
 
-use crate::recording::editor::model::{MotionTextAnimation, MotionTextScope, MotionTimingKind};
+use crate::recording::editor::model::{
+    MotionTextAlignment, MotionTextAnimation, MotionTextCoordinateSpace, MotionTextScope,
+    MotionTimingKind,
+};
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
 use super::anchor_pad::MotionAnchorPad;
 use super::position_pad::MotionPositionPad;
 use super::text_pad::MotionTextPad;
+use super::typography::{MotionFontPicker, MotionTextColorPicker};
 
 pub(in crate::capture::editor::window) struct MotionModeParts {
     pub shell: MotionModeShellParts,
@@ -73,13 +77,30 @@ pub(in crate::capture::editor::window) struct MotionTextControlParts {
     pub text_editor_box: GtkBox,
     pub text_add_btn: Button,
     pub text_delete_btn: Button,
-    pub text_entry: Entry,
+    pub text_view: TextView,
     pub text_pos_pad: MotionTextPad,
     pub text_pos_readout: Label,
+    pub text_attach_buttons: Vec<(MotionTextCoordinateSpace, ToggleButton)>,
+    pub text_font_picker: MotionFontPicker,
+    pub text_bold_btn: ToggleButton,
+    pub text_italic_btn: ToggleButton,
+    pub text_color_picker: MotionTextColorPicker,
+    pub text_opacity_slider: FillSlider,
+    pub text_alignment_buttons: Vec<(MotionTextAlignment, ToggleButton)>,
+    pub text_width_slider: FillSlider,
     pub text_size_slider: FillSlider,
     pub text_size_value: Label,
+    pub text_line_spacing_slider: FillSlider,
+    pub text_letter_spacing_slider: FillSlider,
+    pub text_rotation_slider: FillSlider,
+    pub text_outline_slider: FillSlider,
+    pub text_shadow_btn: ToggleButton,
     pub text_anim_buttons: Vec<(MotionTextAnimation, ToggleButton)>,
+    pub text_scope_box: GtkBox,
     pub text_scope_buttons: Vec<(MotionTextScope, ToggleButton)>,
+    pub text_transition_slider: FillSlider,
+    pub text_typewriter_box: GtkBox,
+    pub text_typewriter_slider: FillSlider,
 }
 
 pub(in crate::capture::editor::window) struct MotionTransformControlParts {

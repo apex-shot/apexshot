@@ -2699,3 +2699,95 @@ msgstr "Se reproduce una vez, al congelarse la captura. Guardar y recortar perma
 
 msgid "Your desktop controls the capture sound on this route, so ApexShot cannot replace or disable it here and will not play an additional sound."
 msgstr "En esta ruta, el sonido de captura lo controla tu escritorio, así que ApexShot no puede reemplazarlo ni desactivarlo aquí y no reproducirá un sonido adicional."
+
+msgid "Bold"
+msgstr "Negrita"
+
+msgid "Canvas"
+msgstr "Lienzo"
+
+msgid "Center"
+msgstr "Centro"
+
+msgid "Character"
+msgstr "Carácter"
+
+msgid "Choose how Typewriter reveals the text"
+msgstr "Elige cómo el efecto Máquina de escribir revela el texto"
+
+msgid "Content"
+msgstr "Contenido"
+
+msgid "Drag to place the headline on the composition; double-click to reset"
+msgstr ""
+"Arrastra para colocar el encabezado en la composición; haz doble clic para restablecer"
+
+msgid "Drag to place the title on the image; double-click to reset"
+msgstr ""
+"Arrastra para colocar el título sobre la imagen; haz doble clic para restablecer"
+
+msgid "Edit text color"
+msgstr "Editar color del texto"
+
+msgid "Entrance duration for slides and fades"
+msgstr "Duración de entrada de los efectos de deslizamiento y fundido"
+
+msgid "From bottom"
+msgstr "Desde abajo"
+
+msgid "From left"
+msgstr "Desde la izquierda"
+
+msgid "From right"
+msgstr "Desde la derecha"
+
+msgid "From top"
+msgstr "Desde arriba"
+
+msgid "Italic"
+msgstr "Cursiva"
+
+msgid "Letter spacing"
+msgstr "Espaciado entre letras"
+
+msgid "Line spacing"
+msgstr "Interlineado"
+
+msgid "No fonts found"
+msgstr "No se encontraron fuentes"
+
+msgid "Outline"
+msgstr "Contorno"
+
+msgid "Paragraph width; Auto keeps the natural line width"
+msgstr "Ancho del párrafo; Auto conserva el ancho natural de la línea"
+
+msgid "Placement"
+msgstr "Posición"
+
+msgid "Rotation"
+msgstr "Rotación"
+
+msgid "Search fonts…"
+msgstr "Buscar fuentes…"
+
+msgid "Text color"
+msgstr "Color del texto"
+
+msgid "Time to reveal all text"
+msgstr "Tiempo para revelar todo el texto"
+
+msgid "Type your text; press Enter for a new line"
+msgstr "Escribe tu texto; pulsa Intro para añadir una nueva línea"
+
+msgid "Typewriter"
+msgstr "Máquina de escribir"
+
+msgid "Typography"
+msgstr "Tipografía"
+
+msgid "Width"
+msgstr "Ancho"
+
+msgid "Word"
+msgstr "Palabra"

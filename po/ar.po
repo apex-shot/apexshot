@@ -2671,3 +2671,93 @@ msgstr "يتم تشغيله مرة واحدة عند تجميد الالتقاط
 
 msgid "Your desktop controls the capture sound on this route, so ApexShot cannot replace or disable it here and will not play an additional sound."
 msgstr "في هذا المسار يتحكم سطح المكتب في صوت الالتقاط، لذا لا يستطيع ApexShot استبداله أو تعطيله هنا ولن يشغّل صوتًا إضافيًا."
+
+msgid "Bold"
+msgstr "عريض"
+
+msgid "Canvas"
+msgstr "لوحة الرسم"
+
+msgid "Center"
+msgstr "وسط"
+
+msgid "Character"
+msgstr "حرف"
+
+msgid "Choose how Typewriter reveals the text"
+msgstr "اختر كيفية إظهار النص بتأثير الآلة الكاتبة"
+
+msgid "Content"
+msgstr "المحتوى"
+
+msgid "Drag to place the headline on the composition; double-click to reset"
+msgstr "اسحب لوضع العنوان على التكوين؛ انقر مرتين لإعادة الضبط"
+
+msgid "Drag to place the title on the image; double-click to reset"
+msgstr "اسحب لوضع العنوان على الصورة؛ انقر مرتين لإعادة الضبط"
+
+msgid "Edit text color"
+msgstr "تعديل لون النص"
+
+msgid "Entrance duration for slides and fades"
+msgstr "مدة الظهور لتأثيرات الانزلاق والتلاشي"
+
+msgid "From bottom"
+msgstr "من الأسفل"
+
+msgid "From left"
+msgstr "من اليسار"
+
+msgid "From right"
+msgstr "من اليمين"
+
+msgid "From top"
+msgstr "من الأعلى"
+
+msgid "Italic"
+msgstr "مائل"
+
+msgid "Letter spacing"
+msgstr "تباعد الأحرف"
+
+msgid "Line spacing"
+msgstr "تباعد الأسطر"
+
+msgid "No fonts found"
+msgstr "لم يتم العثور على خطوط"
+
+msgid "Outline"
+msgstr "حدود"
+
+msgid "Paragraph width; Auto keeps the natural line width"
+msgstr "عرض الفقرة؛ يحافظ الخيار التلقائي على العرض الطبيعي للسطر"
+
+msgid "Placement"
+msgstr "الموضع"
+
+msgid "Rotation"
+msgstr "الدوران"
+
+msgid "Search fonts…"
+msgstr "ابحث عن الخطوط…"
+
+msgid "Text color"
+msgstr "لون النص"
+
+msgid "Time to reveal all text"
+msgstr "الوقت اللازم لإظهار النص بالكامل"
+
+msgid "Type your text; press Enter for a new line"
+msgstr "اكتب النص؛ اضغط على Enter لبدء سطر جديد"
+
+msgid "Typewriter"
+msgstr "آلة كاتبة"
+
+msgid "Typography"
+msgstr "تنسيق الخط"
+
+msgid "Width"
+msgstr "العرض"
+
+msgid "Word"
+msgstr "كلمة"

@@ -144,7 +144,7 @@ pub(super) fn draw_motion_preview(
 
 /// Effective preview time: the red hover line wins while idle over a clip,
 /// exactly as before — only where the frame comes from has changed.
-fn preview_time(runtime: &MotionRuntime) -> f64 {
+pub(super) fn preview_time(runtime: &MotionRuntime) -> f64 {
     hover_preview_frame(
         &runtime.motion,
         runtime.hover_time,

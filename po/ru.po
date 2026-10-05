@@ -2691,3 +2691,95 @@ msgstr "Звучит один раз, когда снимок замирает. 
 
 msgid "Your desktop controls the capture sound on this route, so ApexShot cannot replace or disable it here and will not play an additional sound."
 msgstr "На этом маршруте звук захвата задаёт ваш рабочий стол, поэтому ApexShot не может заменить или отключить его здесь и не воспроизведёт дополнительный звук."
+
+msgid "Bold"
+msgstr "Полужирный"
+
+msgid "Canvas"
+msgstr "Холст"
+
+msgid "Center"
+msgstr "По центру"
+
+msgid "Character"
+msgstr "Символ"
+
+msgid "Choose how Typewriter reveals the text"
+msgstr "Выберите, как эффект пишущей машинки раскрывает текст"
+
+msgid "Content"
+msgstr "Содержимое"
+
+msgid "Drag to place the headline on the composition; double-click to reset"
+msgstr ""
+"Перетащите заголовок в нужное место композиции; дважды щёлкните для сброса"
+
+msgid "Drag to place the title on the image; double-click to reset"
+msgstr ""
+"Перетащите заголовок в нужное место изображения; дважды щёлкните для сброса"
+
+msgid "Edit text color"
+msgstr "Изменить цвет текста"
+
+msgid "Entrance duration for slides and fades"
+msgstr "Длительность появления для эффектов сдвига и затухания"
+
+msgid "From bottom"
+msgstr "Снизу"
+
+msgid "From left"
+msgstr "Слева"
+
+msgid "From right"
+msgstr "Справа"
+
+msgid "From top"
+msgstr "Сверху"
+
+msgid "Italic"
+msgstr "Курсив"
+
+msgid "Letter spacing"
+msgstr "Межбуквенный интервал"
+
+msgid "Line spacing"
+msgstr "Межстрочный интервал"
+
+msgid "No fonts found"
+msgstr "Шрифты не найдены"
+
+msgid "Outline"
+msgstr "Контур"
+
+msgid "Paragraph width; Auto keeps the natural line width"
+msgstr "Ширина абзаца; Авто сохраняет естественную ширину строки"
+
+msgid "Placement"
+msgstr "Размещение"
+
+msgid "Rotation"
+msgstr "Поворот"
+
+msgid "Search fonts…"
+msgstr "Поиск шрифтов…"
+
+msgid "Text color"
+msgstr "Цвет текста"
+
+msgid "Time to reveal all text"
+msgstr "Время до полного появления текста"
+
+msgid "Type your text; press Enter for a new line"
+msgstr "Введите текст; нажмите Enter для новой строки"
+
+msgid "Typewriter"
+msgstr "Пишущая машинка"
+
+msgid "Typography"
+msgstr "Типографика"
+
+msgid "Width"
+msgstr "Ширина"
+
+msgid "Word"
+msgstr "Слово"
