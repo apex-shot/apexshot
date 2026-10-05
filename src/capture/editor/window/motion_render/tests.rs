@@ -2,8 +2,8 @@
 mod tests {
     use super::{
         draw_motion_backdrop, draw_motion_foreground, draw_motion_frame,
-        motion_text_contains_view_point, paint_card_shadow, paint_image_background,
-        view_point_to_motion_text_position, CardLayout, MotionStage,
+        motion_text_contains_view_point, motion_text_revealed_bytes, paint_card_shadow,
+        paint_image_background, view_point_to_motion_text_position, CardLayout, MotionStage,
     };
     use crate::recording::editor::model::{
         project_card_corners, MotionBackgroundFillType, MotionEffectTransformTiming, MotionState,
@@ -1176,6 +1176,13 @@ mod tests {
         let surface = ImageSurface::create(Format::ARgb32, 1200, 675).expect("surface");
         let mut motion = MotionState::default();
         let index = motion.add_text_at(0.0).expect("title clip");
+        motion.set_selected_text_attachment(
+            crate::recording::editor::model::MotionTextCoordinateSpace::MotionCanvasLocal,
+            motion.text_segments[index].pos_x,
+            motion.text_segments[index].pos_y,
+        );
+        motion.set_selected_text_wrap_width(0.0);
+        motion.set_selected_text_alignment(MotionTextAlignment::Center);
         let segment = &motion.text_segments[index];
         let transform = MotionTransform {
             scale: 1.12,
@@ -1591,5 +1598,961 @@ mod tests {
         assert!((p0.0 - 100.0).abs() < 1e-6 && (p0.1 - 200.0).abs() < 1e-6);
         assert!((p1.0 - 120.0).abs() < 1e-6 && (p1.1 - 204.0).abs() < 1e-6);
         assert!((p2.0 - 98.0).abs() < 1e-6 && (p2.1 - 210.0).abs() < 1e-6);
+    }
+
+    use super::motion_text_anchor_view_point;
+    use crate::recording::editor::model::{
+        MotionTextAnimation, MotionTextAlignment, MotionTextCoordinateSpace, MotionTextScope,
+        DEFAULT_MOTION_TEXT_TRANSITION_SECONDS,
+    };
+
+    const TITLE_BLUE: [f64; 4] = [0.1, 0.3, 0.9, 1.0];
+
+    fn black_card(width: i32, height: i32) -> ImageSurface {
+        let card = ImageSurface::create(Format::ARgb32, width, height).unwrap();
+        {
+            let context = Context::new(&card).unwrap();
+            context.set_source_rgb(0.0, 0.0, 0.0);
+            context.paint().unwrap();
+        }
+        card.flush();
+        card
+    }
+
+    /// A flat blue composition carrying one black card and one white title:
+    /// the only bright pixels in a render are the title's own ink.
+    fn title_motion(
+        attachment: MotionTextCoordinateSpace,
+        pose: MotionTransform,
+        pos: (f64, f64),
+        configure: impl FnOnce(&mut MotionState),
+    ) -> MotionState {
+        let mut motion = MotionState::default();
+        motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+        motion.appearance.background_color = TITLE_BLUE;
+        motion.appearance.background_padding = 0.0;
+        motion.appearance.shadow_opacity = 0.0;
+        motion.scene_shadow.opacity = 0.0;
+        motion.add_segment_at(0.0).expect("move");
+        motion.set_selected_transition_ms(0);
+        motion.set_selected_end_scale(pose.scale.clamp(1.0, 4.0));
+        motion.set_selected_end_pos_x(pose.pos_x);
+        motion.set_selected_end_pos_y(pose.pos_y);
+        motion.set_selected_end_yaw(pose.rotation_y);
+        motion.add_text_at(0.0).expect("title clip");
+        motion.set_selected_text_attachment(attachment, pos.0, pos.1);
+        motion.set_selected_text_value("HEADLINE".into());
+        motion.set_selected_text_wrap_width(0.25);
+        motion.set_selected_text_shadow(false);
+        configure(&mut motion);
+        motion
+    }
+
+    fn render_composition(motion: &MotionState, width: i32, height: i32, time: f64) -> ImageSurface {
+        let card = black_card(200, 150);
+        let frame = ImageSurface::create(Format::ARgb32, width, height).unwrap();
+        {
+            let context = Context::new(&frame).unwrap();
+            draw_motion_frame(
+                &context, width, height, &card, motion, None, None, time, false, true, false, 1.0,
+            );
+        }
+        frame.flush();
+        frame
+    }
+
+    /// Bounding box of the brightest pixels: the white title ink, never the
+    /// blue fill or the black card. Half-open on the far edge.
+    fn bright_bbox(surface: &mut ImageSurface) -> Option<(usize, usize, usize, usize)> {
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let (width, height) = (surface.width() as usize, surface.height() as usize);
+        let data = surface.data().unwrap();
+        let (mut left, mut top, mut right, mut bottom) = (width, height, 0usize, 0usize);
+        let mut found = false;
+        for y in 0..height {
+            for x in 0..width {
+                let offset = y * stride + x * 4;
+                if data[offset] > 170 && data[offset + 1] > 170 && data[offset + 2] > 170 {
+                    found = true;
+                    left = left.min(x);
+                    top = top.min(y);
+                    right = right.max(x + 1);
+                    bottom = bottom.max(y + 1);
+                }
+            }
+        }
+        found.then_some((left, top, right, bottom))
+    }
+
+    fn canvas_contains(
+        card: &ImageSurface,
+        stage: MotionStage,
+        segment: &crate::recording::editor::model::MotionTextSegment,
+        time: f64,
+        point: (f64, f64),
+    ) -> bool {
+        motion_text_contains_view_point(
+            card,
+            stage,
+            0.0,
+            MotionTransform::default(),
+            (0.5, 0.5),
+            segment,
+            time,
+            point.0,
+            point.1,
+        )
+    }
+
+
+
+
+
+
+    /// Bounding boxes of the title's ink, one per visual line: contiguous
+    /// bright rows, each with its own horizontal extent.
+    fn ink_lines(surface: &mut ImageSurface) -> Vec<(usize, usize, usize, usize)> {
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let (width, height) = (surface.width() as usize, surface.height() as usize);
+        let data = surface.data().unwrap();
+        let mut lines: Vec<(usize, usize, usize, usize)> = Vec::new();
+        let mut current: Option<(usize, usize, usize, usize)> = None;
+        for y in 0..height {
+            let mut row: Option<(usize, usize)> = None;
+            for x in 0..width {
+                let offset = y * stride + x * 4;
+                if data[offset] > 170 && data[offset + 1] > 170 && data[offset + 2] > 170 {
+                    row = Some((row.map_or(x, |(x0, _)| x0), x));
+                }
+            }
+            match (current, row) {
+                (None, Some((x0, x1))) => current = Some((x0, x1, y, y + 1)),
+                (Some((x0, x1, y0, y1)), Some((rx0, rx1))) => {
+                    current = Some((x0.min(rx0), x1.max(rx1), y0, y1.max(y + 1)))
+                }
+                (Some(line), None) => {
+                    lines.push(line);
+                    current = None;
+                }
+                (None, None) => {}
+            }
+        }
+        lines.extend(current);
+        lines
+    }
+
+
+
+    #[test]
+    fn canvas_text_pad_keeps_the_whole_title_visible_at_every_edge() {
+        for alignment in MotionTextAlignment::ALL {
+            let mut motion = title_motion(
+                MotionTextCoordinateSpace::Canvas,
+                MotionTransform::default(),
+                (0.5, 0.5),
+                |motion| {
+                    motion.set_selected_text_value("Corner\ntext".into());
+                    motion.set_selected_text_alignment(alignment);
+                    motion.set_selected_text_wrap_width(0.55);
+                },
+            );
+            let mut centered = render_composition(&motion, 600, 400, 0.5);
+            let (x0, y0, x1, y1) = bright_bbox(&mut centered).expect("centered title");
+            let expected = ((x1 - x0) as i32, (y1 - y0) as i32);
+            for (x, y) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
+                motion.set_selected_text_pos(x, y);
+                let mut frame = render_composition(&motion, 600, 400, 0.5);
+                let (left, top, right, bottom) = bright_bbox(&mut frame).expect("edge title");
+                assert!(
+                    ((right - left) as i32 - expected.0).abs() <= 2
+                        && ((bottom - top) as i32 - expected.1).abs() <= 2,
+                    "{alignment:?} at ({x}, {y}) clipped the title: {left},{top}..{right},{bottom}; expected {expected:?}"
+                );
+                assert!(if x == 0.0 { left <= 3 } else { right >= 597 });
+                assert!(if y == 0.0 { top <= 3 } else { bottom >= 397 });
+            }
+        }
+    }
+
+    #[test]
+    fn image_text_pad_tracks_the_image_bounds_at_every_edge() {
+        let pose = MotionTransform { pos_x: -0.5, ..MotionTransform::default() };
+        for alignment in MotionTextAlignment::ALL {
+            let mut motion = title_motion(
+                MotionTextCoordinateSpace::MotionCanvasLocal,
+                pose,
+                (0.5, 0.5),
+                |motion| {
+                    motion.set_selected_text_value("Inside\nimage".into());
+                    motion.set_selected_text_alignment(alignment);
+                    motion.set_selected_text_wrap_width(0.55);
+                },
+            );
+            let mut centered = render_composition(&motion, 600, 400, 0.5);
+            let (x0, y0, x1, y1) = bright_bbox(&mut centered).expect("centered title");
+            let expected = ((x1 - x0) as i32, (y1 - y0) as i32);
+            for (x, y) in [(0.05, 0.05), (0.95, 0.05), (0.05, 0.95), (0.95, 0.95)] {
+                motion.set_selected_text_pos(x, y);
+                let mut frame = render_composition(&motion, 600, 400, 0.5);
+                let (left, top, right, bottom) = bright_bbox(&mut frame).expect("image title");
+                assert!(left >= 350 && right <= 550 && top >= 125 && bottom <= 275);
+                assert!(
+                    ((right - left) as i32 - expected.0).abs() <= 2
+                        && ((bottom - top) as i32 - expected.1).abs() <= 2,
+                    "{alignment:?} at ({x}, {y}) clipped image text: {left},{top}..{right},{bottom}"
+                );
+                assert!(if x == 0.05 { left <= 353 } else { right >= 547 });
+                assert!(if y == 0.05 { top <= 128 } else { bottom >= 272 });
+            }
+        }
+    }
+
+    #[test]
+    fn text_placement_and_drag_share_the_scaled_tilted_image_geometry() {
+        let card = black_card(2560, 1440);
+        let (preview, scale) = super::scaled_card_preview(&card).expect("scaled texture");
+        let stage = MotionStage::rect_at(24.0, 24.0, 1100.0, 760.0);
+        let transform = MotionTransform {
+            scale: 1.1,
+            rotation_x: -9.0,
+            rotation_y: 14.0,
+            rotation_z: 12.0,
+            perspective: 0.24,
+            pos_x: -0.18,
+            pos_y: 0.12,
+        };
+        let zoom_anchor = (0.22, 0.78);
+        let mut motion = title_motion(
+            MotionTextCoordinateSpace::MotionCanvasLocal,
+            transform,
+            (0.5, 0.5),
+            |motion| { motion.set_selected_text_value("IMAGE".into()); },
+        );
+        let context = Context::new(&preview).unwrap();
+        for position in [(0.05, 0.05), (0.5, 0.5), (0.95, 0.95)] {
+            motion.set_selected_text_pos(position.0, position.1);
+            let segment = &motion.text_segments[0];
+            let placement = super::motion_text_placement(
+                &context, &preview, stage, segment, 0.5, scale, transform, zoom_anchor, 40.0,
+            ).expect("preview placement");
+            let point = placement.anchor_view_point();
+            let restored = placement.position_at(point.0, point.1).expect("inverse placement");
+            assert!((restored.0 - position.0).abs() < 0.003, "{restored:?} vs {position:?}");
+            assert!((restored.1 - position.1).abs() < 0.003, "{restored:?} vs {position:?}");
+            let original_context = Context::new(&card).unwrap();
+            let original = super::motion_text_placement(
+                &original_context, &card, stage, segment, 0.5, 1.0, transform, zoom_anchor, 40.0,
+            ).expect("original placement").anchor_view_point();
+            assert!((point.0 - original.0).abs() < 3.0);
+            assert!((point.1 - original.1).abs() < 3.0);
+        }
+        motion.set_selected_text_pos(0.5, 0.5);
+        let placement = super::motion_text_placement(
+            &context, &preview, stage, &motion.text_segments[0], 0.5, scale,
+            transform, zoom_anchor, 40.0,
+        ).unwrap();
+        let point = placement.anchor_view_point();
+        let target = (point.0 + 50.0, point.1 - 20.0);
+        let position = placement.position_at(target.0, target.1).unwrap();
+        motion.set_selected_text_pos(position.0, position.1);
+        let moved = super::motion_text_placement(
+            &context, &preview, stage, &motion.text_segments[0], 0.5, scale,
+            transform, zoom_anchor, 40.0,
+        ).unwrap().anchor_view_point();
+        assert!((moved.0 - target.0).abs() < 0.01);
+        assert!((moved.1 - target.1).abs() < 0.01);
+    }
+
+    #[test]
+    fn changing_text_attachment_preserves_its_visible_center() {
+        let card = black_card(200, 150);
+        let context = Context::new(&card).unwrap();
+        let stage = MotionStage::frame(600.0, 400.0);
+        let mut motion = title_motion(
+            MotionTextCoordinateSpace::Canvas,
+            MotionTransform::default(),
+            (0.6, 0.5),
+            |motion| { motion.set_selected_text_value("Text".into()); },
+        );
+        let initial = super::motion_text_placement(
+            &context, &card, stage, &motion.text_segments[0], 0.5, 1.0,
+            MotionTransform::default(), (0.5, 0.5), 0.0,
+        ).unwrap().anchor_view_point();
+        for attachment in [MotionTextCoordinateSpace::MotionCanvasLocal, MotionTextCoordinateSpace::Canvas] {
+            let mut target = motion.text_segments[0].clone();
+            target.annotation_coordinate_space = attachment;
+            let placement = super::motion_text_placement(
+                &context, &card, stage, &target, 0.5, 1.0,
+                MotionTransform::default(), (0.5, 0.5), 0.0,
+            ).unwrap();
+            let position = placement.position_at(initial.0, initial.1).unwrap();
+            motion.set_selected_text_attachment(attachment, position.0, position.1);
+            let point = super::motion_text_placement(
+                &context, &card, stage, &motion.text_segments[0], 0.5, 1.0,
+                MotionTransform::default(), (0.5, 0.5), 0.0,
+            ).unwrap().anchor_view_point();
+            assert!((point.0 - initial.0).abs() < 0.001);
+            assert!((point.1 - initial.1).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn canvas_title_holds_still_while_the_image_moves() {
+        let pose = MotionTransform {
+            scale: 1.2,
+            rotation_y: 12.0,
+            pos_x: -0.6,
+            pos_y: 0.1,
+            ..MotionTransform::default()
+        };
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let still = title_motion(canvas, MotionTransform::default(), (0.2, 0.5), |_| {});
+        let moved = title_motion(canvas, pose, (0.2, 0.5), |_| {});
+
+        let (mut still_frame, mut moved_frame) = (
+            render_composition(&still, 600, 400, 0.5),
+            render_composition(&moved, 600, 400, 0.5),
+        );
+        let still_box = bright_bbox(&mut still_frame).expect("canvas title ink");
+        let moved_box = bright_bbox(&mut moved_frame).expect("canvas title ink");
+        assert_eq!(
+            still_box, moved_box,
+            "a Canvas title must not travel with the image card"
+        );
+        assert_ne!(
+            still_frame.data().unwrap().to_vec(),
+            moved_frame.data().unwrap().to_vec(),
+            "the moved card must change the composition around the still title"
+        );
+
+        let card = black_card(200, 150);
+        let stage = MotionStage::frame(600.0, 400.0);
+        let segment = &still.text_segments[0];
+        let still_anchor = motion_text_anchor_view_point(
+            &card,
+            stage,
+            0.0,
+            MotionTransform::default(),
+            (0.5, 0.5),
+            segment,
+        )
+        .expect("anchor");
+        let moved_anchor =
+            motion_text_anchor_view_point(&card, stage, 0.0, pose, (0.5, 0.5), segment)
+                .expect("anchor");
+        assert_eq!(still_anchor, moved_anchor);
+    }
+
+    #[test]
+    fn card_title_still_follows_the_moving_image() {
+        let pose = MotionTransform {
+            scale: 1.2,
+            rotation_y: 12.0,
+            pos_x: -0.6,
+            pos_y: 0.1,
+            ..MotionTransform::default()
+        };
+        let image = MotionTextCoordinateSpace::MotionCanvasLocal;
+        let still = title_motion(image, MotionTransform::default(), (0.2, 0.5), |_| {});
+        let moved = title_motion(image, pose, (0.2, 0.5), |_| {});
+
+        let (mut still_frame, mut moved_frame) = (
+            render_composition(&still, 600, 400, 0.5),
+            render_composition(&moved, 600, 400, 0.5),
+        );
+        let still_box = bright_bbox(&mut still_frame).expect("card title ink");
+        let moved_box = bright_bbox(&mut moved_frame).expect("card title ink");
+        assert_ne!(
+            still_box, moved_box,
+            "an image-attached title must follow the card"
+        );
+
+        let card = black_card(200, 150);
+        let stage = MotionStage::frame(600.0, 400.0);
+        let segment = &still.text_segments[0];
+        let still_anchor = motion_text_anchor_view_point(
+            &card,
+            stage,
+            0.0,
+            MotionTransform::default(),
+            (0.5, 0.5),
+            segment,
+        )
+        .expect("anchor");
+        let moved_anchor =
+            motion_text_anchor_view_point(&card, stage, 0.0, pose, (0.5, 0.5), segment)
+                .expect("anchor");
+        assert_ne!(still_anchor, moved_anchor);
+    }
+
+    #[test]
+    fn canvas_title_hit_test_inverts_its_own_rotation() {
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let flat = title_motion(canvas, MotionTransform::default(), (0.5, 0.5), |motion| {
+            motion.set_selected_text_value("HEADING".into());
+            motion.set_selected_text_wrap_width(0.0);
+        });
+        let mut rotated = flat.clone();
+        rotated.set_selected_text_rotation(90.0);
+
+        let (mut flat_frame, mut rotated_frame) = (
+            render_composition(&flat, 600, 400, 0.5),
+            render_composition(&rotated, 600, 400, 0.5),
+        );
+        let (fx0, fy0, fx1, fy1) = bright_bbox(&mut flat_frame).expect("flat ink");
+        let (rx0, ry0, rx1, ry1) = bright_bbox(&mut rotated_frame).expect("rotated ink");
+        let (flat_w, flat_h) = ((fx1 - fx0) as f64, (fy1 - fy0) as f64);
+        let (rotated_w, rotated_h) = ((rx1 - rx0) as f64, (ry1 - ry0) as f64);
+        assert!(
+            rotated_h > rotated_w * 2.0 && flat_w > flat_h * 2.0,
+            "a 90 degree title must stand upright: flat {flat_w}x{flat_h}, rotated {rotated_w}x{rotated_h}"
+        );
+
+        let card = black_card(200, 150);
+        let stage = MotionStage::frame(600.0, 400.0);
+        let segment = &flat.text_segments[0];
+        let rotated_segment = &rotated.text_segments[0];
+        let center = ((fx0 as f64 + fx1 as f64) * 0.5, (fy0 as f64 + fy1 as f64) * 0.5);
+        assert!(canvas_contains(&card, stage, segment, 0.5, center));
+        assert!(canvas_contains(&card, stage, rotated_segment, 0.5, center));
+        let along = (center.0 + flat_w * 0.4, center.1);
+        let across = (center.0, center.1 + flat_w * 0.4);
+        assert!(
+            canvas_contains(&card, stage, segment, 0.5, along),
+            "the flat title covers its own baseline"
+        );
+        assert!(
+            !canvas_contains(&card, stage, rotated_segment, 0.5, along),
+            "the rotated title must not cover the flat run's far end"
+        );
+        assert!(
+            !canvas_contains(&card, stage, segment, 0.5, across),
+            "the flat title must not cover a point below its line"
+        );
+        assert!(
+            canvas_contains(&card, stage, rotated_segment, 0.5, across),
+            "the rotated title covers what the flat one did not"
+        );
+        assert!(!canvas_contains(&card, stage, segment, 0.5, (60.0, 380.0)));
+        assert!(!canvas_contains(
+            &card,
+            stage,
+            rotated_segment,
+            0.5,
+            (60.0, 380.0)
+        ));
+    }
+
+    #[test]
+    fn wrapped_canvas_title_breaks_lines_and_hits_the_second_one() {
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let mut motion = title_motion(canvas, MotionTransform::default(), (0.5, 0.5), |_| {});
+        motion.set_selected_text_value("a background headline wrapping over lines".into());
+        motion.set_selected_text_wrap_width(0.45);
+
+        let mut frame = render_composition(&motion, 600, 400, 0.5);
+        let (left, top, right, bottom) = bright_bbox(&mut frame).expect("wrapped ink");
+        let font = 0.06 * 400.0;
+        let box_width = 0.45 * 600.0;
+        assert!(
+            (bottom - top) as f64 > font * 1.8,
+            "wrapped copy must occupy more than one line: {:?}",
+            (left, top, right, bottom)
+        );
+        assert!(
+            (right - left) as f64 <= box_width + 2.0,
+            "the paragraph box must bound the wrapped ink: {}",
+            right - left
+        );
+
+        let card = black_card(200, 150);
+        let stage = MotionStage::frame(600.0, 400.0);
+        let segment = &motion.text_segments[0];
+        let second_line = (
+            (left as f64 + right as f64) * 0.5,
+            top as f64 + (bottom - top) as f64 * 0.75,
+        );
+        assert!(canvas_contains(&card, stage, segment, 0.5, second_line));
+        assert!(!canvas_contains(
+            &card,
+            stage,
+            segment,
+            0.5,
+            (second_line.0, bottom as f64 + 12.0)
+        ));
+    }
+
+    #[test]
+    fn canvas_title_scales_with_the_composition_not_the_viewport() {
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let motion = title_motion(canvas, MotionTransform::default(), (0.3, 0.4), |_| {});
+        let mut small = render_composition(&motion, 600, 400, 0.5);
+        let mut large = render_composition(&motion, 1200, 800, 0.5);
+        let (sx0, sy0, sx1, sy1) = bright_bbox(&mut small).expect("small ink");
+        let (lx0, ly0, lx1, ly1) = bright_bbox(&mut large).expect("large ink");
+        let height_ratio = (ly1 - ly0) as f64 / (sy1 - sy0) as f64;
+        assert!(
+            (height_ratio - 2.0).abs() < 0.2,
+            "the title must scale with the composition, got {height_ratio}"
+        );
+        let small_center = ((sx0 + sx1) as f64 / 2.0 / 600.0, (sy0 + sy1) as f64 / 2.0 / 400.0);
+        let large_center = ((lx0 + lx1) as f64 / 2.0 / 1200.0, (ly0 + ly1) as f64 / 2.0 / 800.0);
+        assert!(
+            (small_center.0 - large_center.0).abs() < 0.01
+                && (small_center.1 - large_center.1).abs() < 0.01,
+            "the title keeps its composition position: {small_center:?} vs {large_center:?}"
+        );
+
+        let card = black_card(200, 150);
+        let segment = &motion.text_segments[0];
+        let preview_stage = MotionStage::preview(600.0, 400.0, None);
+        let (px, py) =
+            motion_text_anchor_view_point(&card, preview_stage, 0.0, MotionTransform::default(), (0.5, 0.5), segment)
+                .expect("preview anchor");
+        let frame_stage = MotionStage::frame(600.0, 400.0);
+        let (fx, fy) =
+            motion_text_anchor_view_point(&card, frame_stage, 0.0, MotionTransform::default(), (0.5, 0.5), segment)
+                .expect("frame anchor");
+        let normalized = |stage: MotionStage, x: f64, y: f64| {
+            (
+                (x - (stage.center_x - stage.bounds_w / 2.0)) / stage.bounds_w,
+                (y - (stage.center_y - stage.bounds_h / 2.0)) / stage.bounds_h,
+            )
+        };
+        let preview_norm = normalized(preview_stage, px, py);
+        let frame_norm = normalized(frame_stage, fx, fy);
+        assert!((preview_norm.0 - frame_norm.0).abs() < 1e-9);
+        assert!((preview_norm.1 - frame_norm.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn typewriter_reveal_keeps_the_paragraph_metrics_stable() {
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let mut motion = title_motion(canvas, MotionTransform::default(), (0.5, 0.5), |motion| {
+            motion.set_selected_text_value("AB\nCD".into());
+            motion.set_selected_text_wrap_width(0.0);
+            motion.set_selected_text_animation(MotionTextAnimation::Typewriter);
+            motion.set_selected_text_scope(MotionTextScope::Character);
+            motion.set_selected_text_typewriter_time(1.0);
+        });
+        motion.set_selected_text_alignment(MotionTextAlignment::Left);
+        let font = 0.06 * 400.0;
+
+        let mut first = render_composition(&motion, 600, 400, 0.25);
+        let mut all = render_composition(&motion, 600, 400, 1.0);
+        let (fx0, fy0, fx1, fy1) = bright_bbox(&mut first).expect("one revealed grapheme");
+        let (ax0, ay0, ax1, ay1) = bright_bbox(&mut all).expect("full paragraph");
+        assert!(
+            ((fy1 - fy0) as f64) < font * 1.6,
+            "one revealed grapheme draws one line, got {:?}",
+            (fx0, fy0, fx1, fy1)
+        );
+        assert!(
+            ((ay1 - ay0) as f64) > font * 1.8,
+            "the full paragraph keeps both lines, got {:?}",
+            (ax0, ay0, ax1, ay1)
+        );
+        assert_eq!(
+            (fx0, fy0),
+            (ax0, ay0),
+            "revealing more text must not move the paragraph's first line"
+        );
+    }
+
+    #[test]
+    fn word_and_line_reveals_preserve_newlines_and_reveal_row_by_row() {
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let font = 0.06 * 400.0;
+
+        let mut words = title_motion(canvas, MotionTransform::default(), (0.5, 0.5), |motion| {
+            motion.set_selected_text_value("one two\nthree four".into());
+            motion.set_selected_text_wrap_width(0.0);
+            motion.set_selected_text_animation(MotionTextAnimation::Typewriter);
+            motion.set_selected_text_scope(MotionTextScope::Word);
+            motion.set_selected_text_typewriter_time(1.0);
+        });
+        words.set_selected_text_alignment(MotionTextAlignment::Left);
+        let mut half = render_composition(&words, 600, 400, 0.5);
+        let mut whole = render_composition(&words, 600, 400, 1.0);
+        let (_, hy0, _, hy1) = bright_bbox(&mut half).expect("two revealed words");
+        let (_, wy0, _, wy1) = bright_bbox(&mut whole).expect("four revealed words");
+        assert!(
+            ((hy1 - hy0) as f64) < font * 1.6,
+            "two words stop at the newline, got {:?}",
+            (hy0, hy1)
+        );
+        assert!(
+            ((wy1 - wy0) as f64) > font * 1.8,
+            "four words keep both lines, got {:?}",
+            (wy0, wy1)
+        );
+
+        let mut lines = title_motion(canvas, MotionTransform::default(), (0.5, 0.5), |motion| {
+            motion.set_selected_text_value("first line\nsecond line".into());
+            motion.set_selected_text_wrap_width(0.0);
+            motion.set_selected_text_animation(MotionTextAnimation::Typewriter);
+            motion.set_selected_text_scope(MotionTextScope::Line);
+            motion.set_selected_text_typewriter_time(1.0);
+        });
+        lines.set_selected_text_alignment(MotionTextAlignment::Left);
+        let mut one_line = render_composition(&lines, 600, 400, 0.5);
+        let mut both_lines = render_composition(&lines, 600, 400, 0.6);
+        let (_, oy0, _, oy1) = bright_bbox(&mut one_line).expect("first line");
+        let (_, by0, _, by1) = bright_bbox(&mut both_lines).expect("both lines");
+        assert!(
+            ((oy1 - oy0) as f64) < font * 1.6,
+            "half the lines reveal the first row only, got {:?}",
+            (oy0, oy1)
+        );
+        assert!(
+            ((by1 - by0) as f64) > font * 1.8,
+            "the last line lands with its own reveal step, got {:?}",
+            (by0, by1)
+        );
+    }
+
+    #[test]
+    fn character_reveal_counts_graphemes_not_chars() {
+        let text = "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}x";
+        assert_eq!(text.chars().count(), 6);
+        let cluster = motion_text_revealed_bytes(text, MotionTextScope::Character, 0.5)
+            .expect("half the graphemes");
+        assert_eq!(
+            cluster,
+            "\u{1f468}\u{200d}\u{1f469}\u{200d}\u{1f467}".len(),
+            "a half reveal must not cut inside a grapheme cluster"
+        );
+        assert_eq!(
+            motion_text_revealed_bytes(text, MotionTextScope::Character, 1.0),
+            Some(text.len())
+        );
+        assert_eq!(
+            motion_text_revealed_bytes(text, MotionTextScope::Character, 0.0),
+            None
+        );
+    }
+
+
+    #[test]
+    fn typewriter_prefix_keeps_completed_lines_intact() {
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let text = "LINE ONE IS QUITE LONG\nshort";
+        let motion = title_motion(canvas, MotionTransform::default(), (0.5, 0.5), |motion| {
+            motion.set_selected_text_value(text.into());
+            motion.set_selected_text_wrap_width(0.0);
+            motion.set_selected_text_alignment(MotionTextAlignment::Left);
+            motion.set_selected_text_animation(MotionTextAnimation::Typewriter);
+            motion.set_selected_text_scope(MotionTextScope::Character);
+            motion.set_selected_text_typewriter_time(1.0);
+        });
+        let revealed = 25.0 / 29.0;
+        assert_eq!(
+            motion_text_revealed_bytes(text, MotionTextScope::Character, revealed),
+            Some(25),
+            "the prefix must land one grapheme into the second line"
+        );
+
+        let mut prefix = render_composition(&motion, 600, 400, revealed);
+        let mut whole = render_composition(&motion, 600, 400, 1.0);
+        let prefix_lines = ink_lines(&mut prefix);
+        let whole_lines = ink_lines(&mut whole);
+        assert_eq!(prefix_lines.len(), 2, "both lines stay painted: {prefix_lines:?}");
+        assert_eq!(whole_lines.len(), 2, "{whole_lines:?}");
+        assert_eq!(
+            (prefix_lines[0].0, prefix_lines[0].1),
+            (whole_lines[0].0, whole_lines[0].1),
+            "the finished first line must keep its full width while the short second line types"
+        );
+        assert!(
+            prefix_lines[1].1 - prefix_lines[1].0 < whole_lines[1].1 - whole_lines[1].0,
+            "the second line is still only a prefix: {:?} vs {:?}",
+            prefix_lines[1],
+            whole_lines[1]
+        );
+    }
+
+    #[test]
+    fn partial_opacity_attenuates_the_shadow() {
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let posed = MotionTransform {
+            pos_x: -1.0,
+            ..MotionTransform::default()
+        };
+        let darkest = |opacity: f64, shadow: bool| {
+            let motion = title_motion(canvas, posed, (0.35, 0.4), |motion| {
+                motion.set_selected_text_shadow(shadow);
+                motion.set_selected_text_opacity(opacity);
+            });
+            let mut frame = render_composition(&motion, 600, 400, 0.5);
+            frame.flush();
+            let stride = frame.stride() as usize;
+            let data = frame.data().unwrap();
+            (0..400usize)
+                .flat_map(|y| (0..300usize).map(move |x| (x, y)))
+                .map(|(x, y)| data[y * stride + x * 4 + 2])
+                .min()
+                .expect("pixels")
+        };
+        let full = darkest(1.0, true);
+        let half = darkest(0.5, true);
+        let none = darkest(1.0, false);
+        assert!(
+            full < half && half < none,
+            "shadow strength must follow the title's opacity: full {full}, half {half}, none {none}"
+        );
+    }
+
+    #[test]
+    fn invisible_and_fading_titles_are_not_drag_targets() {
+        let card = black_card(200, 150);
+        let stage = MotionStage::frame(600.0, 400.0);
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let mut motion = title_motion(canvas, MotionTransform::default(), (0.5, 0.5), |_| {});
+        motion.set_selected_text_opacity(0.0);
+        let mut frame = render_composition(&motion, 600, 400, 1.0);
+        assert!(bright_bbox(&mut frame).is_none());
+        let segment = &motion.text_segments[0];
+        assert!(
+            !motion_text_contains_view_point(
+                &card,
+                stage,
+                0.0,
+                MotionTransform::default(),
+                (0.5, 0.5),
+                segment,
+                0.5,
+                300.0,
+                200.0,
+            ),
+            "a fully transparent title is not grabbable"
+        );
+
+        motion.set_selected_text_opacity(1.0);
+        motion.set_selected_text_animation(MotionTextAnimation::Fade);
+        motion.set_selected_text_transition_duration(1.0);
+        motion.set_text_range(0, 0.0, 3.0);
+        assert!(
+            !canvas_contains(&card, stage, &motion.text_segments[0], 0.0, (300.0, 200.0)),
+            "a fade that has not started is not grabbable"
+        );
+        assert!(
+            canvas_contains(&card, stage, &motion.text_segments[0], 0.5, (300.0, 200.0)),
+            "the title is grabbable once its fade is visible"
+        );
+    }
+
+    #[test]
+    fn auto_width_multiline_honours_alignment() {
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let line_extents = |alignment: MotionTextAlignment| {
+            let motion = title_motion(canvas, MotionTransform::default(), (0.5, 0.5), |motion| {
+                motion.set_selected_text_value("a much longer line\nshort".into());
+                motion.set_selected_text_wrap_width(0.0);
+                motion.set_selected_text_alignment(alignment);
+            });
+            let mut frame = render_composition(&motion, 600, 400, 0.5);
+            let lines = ink_lines(&mut frame);
+            assert_eq!(lines.len(), 2, "{alignment:?}: {lines:?}");
+            lines
+        };
+        let left = line_extents(MotionTextAlignment::Left);
+        let center = line_extents(MotionTextAlignment::Center);
+        let right = line_extents(MotionTextAlignment::Right);
+
+        assert!(
+            (left[1].0 as f64 - left[0].0 as f64).abs() < 4.0,
+            "left keeps the short line at the paragraph's left edge: {left:?}"
+        );
+        assert!(
+            (right[1].1 as f64 - right[0].1 as f64).abs() < 4.0,
+            "right puts the short line on the paragraph's right edge: {right:?}"
+        );
+        let centred = left[0].0 as f64
+            + (left[0].1 - left[0].0) as f64 / 2.0
+            - (center[1].1 - center[1].0) as f64 / 2.0;
+        assert!(
+            (center[1].0 as f64 - centred).abs() < 4.0,
+            "center straddles the paragraph: {center:?}"
+        );
+        assert!(
+            left[1].0 < center[1].0 && center[1].0 < right[1].0,
+            "the short line walks left, centre, right: {left:?} {center:?} {right:?}"
+        );
+    }
+
+    #[test]
+    fn reveal_follows_the_text_direction() {
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let reveal = |text: &str, family: Option<&str>| {
+            let motion = title_motion(canvas, MotionTransform::default(), (0.5, 0.5), |motion| {
+                motion.set_selected_text_value(text.into());
+                if let Some(family) = family {
+                    motion.set_selected_text_font_family(family.into());
+                }
+                motion.set_selected_text_wrap_width(0.0);
+                motion.set_selected_text_alignment(MotionTextAlignment::Left);
+                motion.set_selected_text_animation(MotionTextAnimation::Typewriter);
+                motion.set_selected_text_scope(MotionTextScope::Character);
+                motion.set_selected_text_typewriter_time(1.0);
+            });
+            let mut half = render_composition(&motion, 600, 400, 0.5);
+            let mut whole = render_composition(&motion, 600, 400, 1.0);
+            (
+                bright_bbox(&mut half).expect("half revealed"),
+                bright_bbox(&mut whole).expect("full text"),
+            )
+        };
+
+        let (half, whole) = reveal("revealing in reading order", None);
+        assert_eq!(
+            half.0, whole.0,
+            "a left-to-right title keeps its left edge: {half:?} vs {whole:?}"
+        );
+        assert!(half.2 < whole.2, "and grows to the right: {half:?} {whole:?}");
+
+        let arabic = "\u{645}\u{631}\u{62d}\u{628}\u{627}\u{20}\u{628}\u{627}\u{644}\u{639}\u{627}\u{644}\u{645}";
+        let (half, whole) = reveal(arabic, Some("DejaVu Sans"));
+        assert_eq!(
+            half.2, whole.2,
+            "a right-to-left title keeps its right edge: {half:?} vs {whole:?}"
+        );
+        assert!(
+            half.0 > whole.0 + 8,
+            "and grows to the left instead of always rightwards: {half:?} {whole:?}"
+        );
+    }
+
+    #[test]
+    fn invisible_title_leaks_no_shadow_or_outline() {
+        let canvas = MotionTextCoordinateSpace::Canvas;
+        let posed = MotionTransform {
+            pos_x: -1.0,
+            ..MotionTransform::default()
+        };
+        let transparent = title_motion(canvas, posed, (0.35, 0.4), |motion| {
+            motion.set_selected_text_opacity(0.0);
+        });
+        let adorned = title_motion(canvas, posed, (0.35, 0.4), |motion| {
+            motion.set_selected_text_shadow(true);
+            motion.set_selected_text_outline_width(0.12);
+            motion.set_selected_text_opacity(0.0);
+        });
+        let mut empty = title_motion(canvas, posed, (0.35, 0.4), |_| {});
+        empty.text_segments.clear();
+
+        let pixels = |motion: &MotionState| {
+            let mut frame = render_composition(motion, 600, 400, 0.5);
+            let bytes = frame.data().unwrap().to_vec();
+            (frame, bytes)
+        };
+        let (mut adorned_frame, adorned_pixels) = pixels(&adorned);
+        let (_, transparent_pixels) = pixels(&transparent);
+        let (_, empty_pixels) = pixels(&empty);
+        assert_eq!(
+            adorned_pixels, transparent_pixels,
+            "a transparent title must not paint its shadow or outline"
+        );
+        assert_eq!(
+            adorned_pixels, empty_pixels,
+            "a transparent title must leave the composition untouched"
+        );
+        assert!(bright_bbox(&mut adorned_frame).is_none());
+
+        let mut typed = title_motion(canvas, posed, (0.35, 0.4), |motion| {
+            motion.set_selected_text_shadow(true);
+            motion.set_selected_text_outline_width(0.12);
+            motion.set_selected_text_animation(MotionTextAnimation::Typewriter);
+            motion.set_selected_text_scope(MotionTextScope::Character);
+            motion.set_selected_text_typewriter_time(1.0);
+        });
+        typed.set_selected_text_value("HEADLINE".into());
+        typed.set_selected_text_wrap_width(0.0);
+        typed.set_selected_text_alignment(MotionTextAlignment::Left);
+        let mut partial = render_composition(&typed, 600, 400, 0.3);
+        let mut full = render_composition(&typed, 600, 400, 1.0);
+        let (_, _, partial_right, _) = bright_bbox(&mut partial).expect("revealed prefix");
+        let (fx0, fy0, full_right, fy1) = bright_bbox(&mut full).expect("full title");
+        assert!(
+            partial_right < full_right,
+            "the unrevealed tail must not be painted: {partial_right} vs {full_right}"
+        );
+        let _ = fx0;
+        let probe = (
+            full_right as f64 - 4.0,
+            (fy0 + fy1) as f64 * 0.5,
+        );
+        let card = black_card(200, 150);
+        let stage = MotionStage::frame(600.0, 400.0);
+        let segment = &typed.text_segments[0];
+        assert!(
+            canvas_contains(&card, stage, segment, 1.0, probe),
+            "the full title covers the tail of its own line"
+        );
+        assert!(
+            !canvas_contains(&card, stage, segment, 0.3, probe),
+            "an unrevealed glyph is not a drag target"
+        );
+    }
+
+    #[test]
+    fn text_entrance_duration_drives_slides_and_fades() {
+        let mut motion = MotionState::default();
+        let index = motion.add_text_at(0.0).expect("title clip");
+        motion.set_text_range(index, 0.0, 3.0);
+        motion.set_selected_text_animation(MotionTextAnimation::Fade);
+        motion.set_selected_text_transition_duration(1.0);
+        let slow = motion.text_segments[index].clone();
+        let early = slow.sample(0.1).expect("entrance").alpha;
+        let mid = slow.sample(0.5).expect("entrance").alpha;
+        assert!(early > 0.0 && early < mid && mid < 1.0, "{early} {mid}");
+        assert!((slow.sample(1.0).expect("entrance").alpha - 1.0).abs() < 1e-9);
+        let fade = slow.sample(0.5).expect("entrance");
+        assert!(fade.offset_x.abs() < 1e-9 && fade.offset_y.abs() < 1e-9);
+
+        motion.set_selected_text_transition_duration(0.2);
+        assert!(
+            (motion.text_segments[index]
+                .sample(0.5)
+                .expect("entrance")
+                .alpha
+                - 1.0)
+                .abs()
+                < 1e-9,
+            "a shorter entrance is already done at the same time"
+        );
+
+        motion.set_selected_text_animation(MotionTextAnimation::SlideFromLeft);
+        motion.set_selected_text_transition_duration(1.0);
+        let sliding = motion.text_segments[index].sample(0.5).expect("entrance");
+        assert!(
+            sliding.alpha > 0.0 && sliding.alpha < 1.0 && sliding.offset_x < 0.0,
+            "the slide uses the same configured duration"
+        );
+
+        motion.set_selected_text_transition_duration(DEFAULT_MOTION_TEXT_TRANSITION_SECONDS);
+        assert!(
+            (motion.text_segments[index].transition_duration - 0.28).abs() < f64::EPSILON,
+            "the recovered default entrance is unchanged"
+        );
+
+        // A configured entrance plays for its whole requested length inside a
+        // clip that is just as long, instead of being cut to a third of it.
+        let mut full_clip = MotionState::default();
+        let index = full_clip.add_text_at(0.0).expect("title clip");
+        full_clip.set_selected_text_animation(MotionTextAnimation::Fade);
+        full_clip.set_selected_text_transition_duration(1.0);
+        let segment = &full_clip.text_segments[index];
+        assert!((segment.duration() - 1.0).abs() < 1e-9);
+        let during = segment.sample(0.5).expect("entrance").alpha;
+        assert!(
+            during > 0.0 && during < 0.99,
+            "the entrance is still running at half a second: {during}"
+        );
+        assert!(
+            (segment.sample(1.0).expect("entrance").alpha - 1.0).abs() < 1e-9,
+            "and has just finished by the end of the clip"
+        );
     }
 }

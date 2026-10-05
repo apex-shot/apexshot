@@ -24,8 +24,9 @@ use crate::recording::editor::model::{
     GradientStop, MotionAppearance, MotionBackgroundFillType, MotionBlurSettings,
     MotionEffectTransformTiming, MotionFrame, MotionFramePreset, MotionSceneShadow,
     MotionSceneShadowPlacement, MotionSceneShadowPreset, MotionSegment, MotionState,
-    MotionTextAnimation, MotionTextCoordinateSpace, MotionTextScope, MotionTextSegment,
-    MotionTimingKind, MotionTransform, MotionWatermark, MotionZoomMode, VideoGradient,
+    MotionTextAlignment, MotionTextAnimation, MotionTextCoordinateSpace, MotionTextFormat,
+    MotionTextScope, MotionTextSegment, MotionTimingKind, MotionTransform, MotionWatermark,
+    MotionZoomMode, VideoGradient, DEFAULT_MOTION_TEXT_TRANSITION_SECONDS,
 };
 
 pub const MOTION_PROJECT_VERSION: u32 = 1;
@@ -153,6 +154,7 @@ pub enum MotionTextAnimationFile {
     SlideFromRight,
     SlideTop,
     SlideBottom,
+    Fade,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -170,6 +172,82 @@ pub enum MotionTextCoordinateSpaceFile {
     #[default]
     MotionCanvasLocal,
     CanonicalSource,
+    Canvas,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MotionTextAlignmentFile {
+    Left,
+    #[default]
+    Center,
+    Right,
+}
+
+/// A title's typography. Every field defaults to the legacy card title, so a
+/// sidecar written before formatting existed loads with the styling it had.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MotionTextFormatFile {
+    #[serde(default = "default_text_font_family")]
+    pub font_family: String,
+    #[serde(default = "default_true")]
+    pub bold: bool,
+    #[serde(default)]
+    pub italic: bool,
+    #[serde(default = "default_text_color")]
+    pub color: [f64; 4],
+    #[serde(default)]
+    pub alignment: MotionTextAlignmentFile,
+    #[serde(default)]
+    pub wrap_width: f64,
+    #[serde(default = "default_one")]
+    pub line_spacing: f64,
+    #[serde(default)]
+    pub letter_spacing: f64,
+    #[serde(default)]
+    pub rotation: f64,
+    #[serde(default)]
+    pub outline_width: f64,
+    #[serde(default = "default_true")]
+    pub shadow: bool,
+}
+
+impl Default for MotionTextFormatFile {
+    fn default() -> Self {
+        Self {
+            font_family: default_text_font_family(),
+            bold: true,
+            italic: false,
+            color: default_text_color(),
+            alignment: MotionTextAlignmentFile::Center,
+            wrap_width: 0.0,
+            line_spacing: 1.0,
+            letter_spacing: 0.0,
+            rotation: 0.0,
+            outline_width: 0.0,
+            shadow: true,
+        }
+    }
+}
+
+fn default_text_font_family() -> String {
+    crate::typography::UI_FONT_FAMILY.to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_one() -> f64 {
+    1.0
+}
+
+fn default_text_color() -> [f64; 4] {
+    [1.0, 1.0, 1.0, 1.0]
+}
+
+fn default_text_transition_seconds() -> f64 {
+    DEFAULT_MOTION_TEXT_TRANSITION_SECONDS
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -221,6 +299,10 @@ pub struct MotionTextSegmentFile {
     pub pos_x: f64,
     pub pos_y: f64,
     pub size: f64,
+    #[serde(default)]
+    pub format: MotionTextFormatFile,
+    #[serde(default = "default_text_transition_seconds")]
+    pub transition_duration: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -473,6 +555,7 @@ impl From<MotionTextAnimation> for MotionTextAnimationFile {
             MotionTextAnimation::SlideFromRight => Self::SlideFromRight,
             MotionTextAnimation::SlideTop => Self::SlideTop,
             MotionTextAnimation::SlideBottom => Self::SlideBottom,
+            MotionTextAnimation::Fade => Self::Fade,
         }
     }
 }
@@ -486,6 +569,63 @@ impl From<MotionTextAnimationFile> for MotionTextAnimation {
             MotionTextAnimationFile::SlideFromRight => Self::SlideFromRight,
             MotionTextAnimationFile::SlideTop => Self::SlideTop,
             MotionTextAnimationFile::SlideBottom => Self::SlideBottom,
+            MotionTextAnimationFile::Fade => Self::Fade,
+        }
+    }
+}
+
+impl From<MotionTextAlignment> for MotionTextAlignmentFile {
+    fn from(value: MotionTextAlignment) -> Self {
+        match value {
+            MotionTextAlignment::Left => Self::Left,
+            MotionTextAlignment::Center => Self::Center,
+            MotionTextAlignment::Right => Self::Right,
+        }
+    }
+}
+
+impl From<MotionTextAlignmentFile> for MotionTextAlignment {
+    fn from(value: MotionTextAlignmentFile) -> Self {
+        match value {
+            MotionTextAlignmentFile::Left => Self::Left,
+            MotionTextAlignmentFile::Center => Self::Center,
+            MotionTextAlignmentFile::Right => Self::Right,
+        }
+    }
+}
+
+impl From<&MotionTextFormat> for MotionTextFormatFile {
+    fn from(value: &MotionTextFormat) -> Self {
+        Self {
+            font_family: value.font_family.clone(),
+            bold: value.bold,
+            italic: value.italic,
+            color: value.color,
+            alignment: value.alignment.into(),
+            wrap_width: value.wrap_width,
+            line_spacing: value.line_spacing,
+            letter_spacing: value.letter_spacing,
+            rotation: value.rotation,
+            outline_width: value.outline_width,
+            shadow: value.shadow,
+        }
+    }
+}
+
+impl From<&MotionTextFormatFile> for MotionTextFormat {
+    fn from(value: &MotionTextFormatFile) -> Self {
+        Self {
+            font_family: value.font_family.clone(),
+            bold: value.bold,
+            italic: value.italic,
+            color: value.color,
+            alignment: value.alignment.into(),
+            wrap_width: value.wrap_width,
+            line_spacing: value.line_spacing,
+            letter_spacing: value.letter_spacing,
+            rotation: value.rotation,
+            outline_width: value.outline_width,
+            shadow: value.shadow,
         }
     }
 }
@@ -515,6 +655,7 @@ impl From<MotionTextCoordinateSpace> for MotionTextCoordinateSpaceFile {
         match value {
             MotionTextCoordinateSpace::MotionCanvasLocal => Self::MotionCanvasLocal,
             MotionTextCoordinateSpace::CanonicalSource => Self::CanonicalSource,
+            MotionTextCoordinateSpace::Canvas => Self::Canvas,
         }
     }
 }
@@ -524,6 +665,7 @@ impl From<MotionTextCoordinateSpaceFile> for MotionTextCoordinateSpace {
         match value {
             MotionTextCoordinateSpaceFile::MotionCanvasLocal => Self::MotionCanvasLocal,
             MotionTextCoordinateSpaceFile::CanonicalSource => Self::CanonicalSource,
+            MotionTextCoordinateSpaceFile::Canvas => Self::Canvas,
         }
     }
 }
@@ -542,6 +684,8 @@ impl From<&MotionTextSegment> for MotionTextSegmentFile {
             pos_x: value.pos_x,
             pos_y: value.pos_y,
             size: value.size,
+            format: (&value.format).into(),
+            transition_duration: value.transition_duration,
         }
     }
 }
@@ -560,6 +704,8 @@ impl From<&MotionTextSegmentFile> for MotionTextSegment {
             pos_x: value.pos_x,
             pos_y: value.pos_y,
             size: value.size,
+            format: (&value.format).into(),
+            transition_duration: value.transition_duration,
         }
     }
 }
@@ -1064,7 +1210,12 @@ pub fn list_projects() -> Vec<MotionProjectFile> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recording::editor::model::{MotionTextSegment, MotionTransform};
+    use crate::recording::editor::model::{
+        MotionTextFormat, MotionTextSegment, MotionTransform, DEFAULT_MOTION_TEXT_CANVAS_WIDTH,
+        MAX_MOTION_TEXT_LETTER_SPACING, MAX_MOTION_TEXT_LINE_SPACING, MAX_MOTION_TEXT_OUTLINE,
+        MAX_MOTION_TEXT_POS, MAX_MOTION_TEXT_ROTATION, MIN_MOTION_TEXT_LETTER_SPACING,
+        MIN_MOTION_TEXT_LINE_SPACING, MIN_MOTION_TEXT_POS,
+    };
 
     /// A unique source path per call: these tests write real sidecars, and a
     /// shared path would let parallel tests stomp each other's files.
@@ -1122,6 +1273,8 @@ mod tests {
             pos_x: 0.5,
             pos_y: 0.5,
             size: 1.0,
+            format: MotionTextFormat::default(),
+            transition_duration: DEFAULT_MOTION_TEXT_TRANSITION_SECONDS,
         });
         assert!(has_user_edits(&motion));
     }
@@ -1312,6 +1465,142 @@ mod tests {
         assert_eq!(appearance.gradient.stops[0].a, 128);
         assert_eq!(appearance.gradient.angle_degrees, 135.0);
         assert!(appearance.gradient.reversed);
+    }
+
+    /// A title sidecar written before formatting and attachments existed must
+    /// keep its card staging and its legacy styling.
+    #[test]
+    fn a_legacy_title_file_loads_with_legacy_styling() {
+        let json = serde_json::json!({
+            "start": 0.0,
+            "end": 1.0,
+            "text": "Old title",
+            "animation": "slide_from_left",
+            "scope": "word",
+            "typewriter_time": 0.6,
+            "is_disabled": false,
+            "annotation_coordinate_space": "motion_canvas_local",
+            "pos_x": 0.5,
+            "pos_y": 0.78,
+            "size": 1.0
+        });
+        let file: MotionTextSegmentFile =
+            serde_json::from_value(json).expect("legacy title parses");
+        let segment: MotionTextSegment = (&file).into();
+        assert_eq!(
+            segment.annotation_coordinate_space,
+            MotionTextCoordinateSpace::MotionCanvasLocal
+        );
+        assert!(!segment.annotation_coordinate_space.is_canvas());
+        assert_eq!(segment.format, MotionTextFormat::default());
+        assert_eq!(segment.format.alignment, MotionTextAlignment::Center);
+        assert!((segment.format.wrap_width - 0.0).abs() < f64::EPSILON);
+        assert!(segment.format.bold && segment.format.shadow);
+        assert_eq!(segment.format.color, [1.0, 1.0, 1.0, 1.0]);
+        assert!(
+            (segment.transition_duration - DEFAULT_MOTION_TEXT_TRANSITION_SECONDS).abs()
+                < f64::EPSILON
+        );
+    }
+
+    /// A Canvas headline stores and restores every formatting field, including
+    /// the Fade entrance.
+    #[test]
+    fn a_canvas_title_round_trips_every_formatting_field() {
+        let source = source_image();
+        let mut motion = MotionState::default();
+        let index = motion.add_text_at(0.0).expect("title clip");
+        motion.set_selected_text_value("Headline\nover two lines".into());
+        motion.set_selected_text_animation(MotionTextAnimation::Fade);
+        motion.set_selected_text_scope(MotionTextScope::Line);
+        motion.set_selected_text_transition_duration(1.5);
+        motion.set_selected_text_typewriter_time(0.9);
+        motion.set_selected_text_pos(0.12, 0.34);
+        motion.set_selected_text_size(1.4);
+        motion.set_selected_text_font_family("DejaVu Sans".into());
+        motion.set_selected_text_bold(false);
+        motion.set_selected_text_italic(true);
+        motion.set_selected_text_color([0.2, 0.4, 0.6, 0.8]);
+        motion.set_selected_text_alignment(MotionTextAlignment::Right);
+        motion.set_selected_text_wrap_width(0.6);
+        motion.set_selected_text_line_spacing(1.4);
+        motion.set_selected_text_letter_spacing(0.08);
+        motion.set_selected_text_rotation(35.0);
+        motion.set_selected_text_outline_width(0.05);
+        motion.set_selected_text_shadow(true);
+        let expected = motion.text_segments[index].clone();
+
+        let project = to_project(&motion, &source);
+        let json = serde_json::to_string(&project).expect("project serializes");
+        assert!(json.contains("\"canvas\"") && json.contains("\"fade\""));
+        let restored: MotionProjectFile = serde_json::from_str(&json).expect("project parses");
+        let mut loaded = MotionState::default();
+        restored.apply_to(&mut loaded);
+
+        assert_eq!(loaded.text_segments, vec![expected]);
+        assert_eq!(
+            loaded.text_segments[0].format.alignment,
+            MotionTextAlignment::Right
+        );
+        assert_eq!(
+            loaded.text_segments[0].annotation_coordinate_space,
+            MotionTextCoordinateSpace::Canvas
+        );
+    }
+
+    /// A new title is a composition headline: Canvas staging, a left-aligned
+    /// paragraph box, no card shadow — and the attachment switch is explicit
+    /// about which band each reference stores.
+    #[test]
+    fn new_titles_are_canvas_headlines_with_their_own_position_band() {
+        let mut motion = MotionState::default();
+        let index = motion.add_text_at(0.0).expect("title clip");
+        let segment = &motion.text_segments[index];
+        assert!(segment.annotation_coordinate_space.is_canvas());
+        assert_eq!(segment.format.alignment, MotionTextAlignment::Left);
+        assert_eq!(segment.format.wrap_width, DEFAULT_MOTION_TEXT_CANVAS_WIDTH);
+        assert!(!segment.format.shadow);
+        assert!(
+            (segment.transition_duration - DEFAULT_MOTION_TEXT_TRANSITION_SECONDS).abs()
+                < f64::EPSILON
+        );
+
+        motion.set_selected_text_pos(0.0, 1.0);
+        assert!((motion.text_segments[index].pos_x - 0.0).abs() < 1e-9);
+        assert!((motion.text_segments[index].pos_y - 1.0).abs() < 1e-9);
+
+        motion.set_selected_text_attachment(MotionTextCoordinateSpace::CanonicalSource, 0.0, 1.0);
+        let segment = &motion.text_segments[index];
+        assert_eq!(
+            segment.annotation_coordinate_space,
+            MotionTextCoordinateSpace::MotionCanvasLocal
+        );
+        assert!(!segment.annotation_coordinate_space.is_canvas());
+        assert!((segment.pos_x - MIN_MOTION_TEXT_POS).abs() < 1e-9);
+        assert!((segment.pos_y - MAX_MOTION_TEXT_POS).abs() < 1e-9);
+    }
+
+    #[test]
+    fn title_style_setters_clamp_to_their_control_bounds() {
+        let mut motion = MotionState::default();
+        let index = motion.add_text_at(0.0).expect("title clip");
+        motion.set_selected_text_line_spacing(9.0);
+        motion.set_selected_text_letter_spacing(-4.0);
+        motion.set_selected_text_rotation(900.0);
+        motion.set_selected_text_outline_width(3.0);
+        motion.set_selected_text_wrap_width(4.0);
+        motion.set_selected_text_opacity(3.0);
+        let format = &motion.text_segments[index].format;
+        assert!((format.line_spacing - MAX_MOTION_TEXT_LINE_SPACING).abs() < f64::EPSILON);
+        assert!(
+            MIN_MOTION_TEXT_LINE_SPACING <= format.line_spacing
+                && format.letter_spacing <= MAX_MOTION_TEXT_LETTER_SPACING
+        );
+        assert!((format.letter_spacing - MIN_MOTION_TEXT_LETTER_SPACING).abs() < f64::EPSILON);
+        assert!((format.rotation - MAX_MOTION_TEXT_ROTATION).abs() < f64::EPSILON);
+        assert!((format.outline_width - MAX_MOTION_TEXT_OUTLINE).abs() < f64::EPSILON);
+        assert!((format.wrap_width - 1.0).abs() < f64::EPSILON);
+        assert!((format.color[3] - 1.0).abs() < f64::EPSILON);
     }
 
     #[test]

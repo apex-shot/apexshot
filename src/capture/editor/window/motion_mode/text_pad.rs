@@ -4,7 +4,8 @@ use std::rc::Rc;
 
 use crate::i18n::t;
 use crate::recording::editor::model::{
-    DEFAULT_MOTION_TEXT_POS_X, DEFAULT_MOTION_TEXT_POS_Y, MAX_MOTION_TEXT_POS, MIN_MOTION_TEXT_POS,
+    DEFAULT_MOTION_TEXT_POS_X, DEFAULT_MOTION_TEXT_POS_Y, MAX_MOTION_TEXT_CANVAS_POS,
+    MAX_MOTION_TEXT_POS, MIN_MOTION_TEXT_CANVAS_POS, MIN_MOTION_TEXT_POS,
 };
 
 /// Marker radius, plus the breathing room that keeps the puck fully inside
@@ -18,15 +19,17 @@ const PAD_MARGIN: f64 = MARKER_RADIUS + 3.0;
 /// draggable puck is the title, so "where does it land" is answered by
 /// pointing at it instead of by reading two percentages.
 ///
-/// Normalized `0.0-1.0` coordinates across the card, clamped to the model's
-/// `MIN_MOTION_TEXT_POS..MAX_MOTION_TEXT_POS` band so the puck cannot show a
-/// position the model would refuse to store. The pad is a view/controller
-/// only: `set_text_pos` synchronizes without emitting, so the timeline
-/// selection and the preview drag cannot loop back through it.
+/// Normalized `0.0-1.0` coordinates across the title's own reference: the
+/// whole composition for a Canvas headline, the moving image for a card
+/// title. The puck is clamped to the band the model stores for that reference
+/// so it can never show a position the model would refuse. The pad is a
+/// view/controller only: `set_text_pos` synchronizes without emitting, so the
+/// timeline selection and the preview drag cannot loop back through it.
 #[derive(Clone)]
 pub(in crate::capture::editor::window) struct MotionTextPad {
     area: DrawingArea,
     position: Rc<Cell<(f64, f64)>>,
+    canvas: Rc<Cell<bool>>,
     listeners: Rc<RefCell<Vec<Rc<dyn Fn(f64, f64)>>>>,
 }
 
@@ -37,7 +40,6 @@ impl MotionTextPad {
         area.set_hexpand(true);
         area.add_css_class("editor-motion-position-pad");
         area.add_css_class("editor-motion-text-pad");
-        area.set_tooltip_text(Some(&t("Drag to place the title; double-click to reset")));
 
         let pad = Self {
             area: area.clone(),
@@ -45,8 +47,10 @@ impl MotionTextPad {
                 DEFAULT_MOTION_TEXT_POS_X,
                 DEFAULT_MOTION_TEXT_POS_Y,
             ))),
+            canvas: Rc::new(Cell::new(true)),
             listeners: Rc::new(RefCell::new(Vec::new())),
         };
+        pad.set_attachment(true);
         area.set_draw_func({
             let pad = pad.clone();
             move |widget, context, width, height| pad.draw(widget, context, width, height)
@@ -95,14 +99,28 @@ impl MotionTextPad {
         self.area.clone()
     }
 
+    /// Which reference the pad mirrors, so the band and the tooltip name the
+    /// area the position is stored against.
+    pub(super) fn set_attachment(&self, canvas: bool) {
+        self.canvas.set(canvas);
+        self.area.set_tooltip_text(Some(&if canvas {
+            t("Drag to place the headline on the composition; double-click to reset")
+        } else {
+            t("Drag to place the title on the image; double-click to reset")
+        }));
+        self.area.queue_draw();
+    }
+
     /// Update the puck without notifying listeners. Used when the timeline
     /// selection changes or the preview drag writes a position.
     pub(super) fn set_text_pos(&self, x: f64, y: f64) {
-        self.position.set((
-            x.clamp(MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS),
-            y.clamp(MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS),
-        ));
+        let (min, max) = self.band();
+        self.position.set((x.clamp(min, max), y.clamp(min, max)));
         self.area.queue_draw();
+    }
+
+    fn band(&self) -> (f64, f64) {
+        pad_reference_band(self.canvas.get())
     }
 
     pub(super) fn connect_value_changed(&self, listener: impl Fn(f64, f64) + 'static) {
@@ -119,7 +137,8 @@ impl MotionTextPad {
     fn apply_point(&self, point_x: f64, point_y: f64) {
         let width = f64::from(self.area.allocated_width().max(1));
         let height = f64::from(self.area.allocated_height().max(1));
-        let (x, y) = point_to_text_pos(point_x, point_y, width, height);
+        let (min, max) = self.band();
+        let (x, y) = point_to_text_pos(point_x, point_y, width, height, min, max);
         self.set_text_pos(x, y);
         self.notify();
     }
@@ -187,11 +206,18 @@ fn pad_inner_rect(width: f64, height: f64) -> (f64, f64, f64, f64) {
 ///
 /// The pad covers the whole card, so a click past the model's band clamps
 /// into it rather than escaping.
-fn point_to_text_pos(point_x: f64, point_y: f64, width: f64, height: f64) -> (f64, f64) {
+fn point_to_text_pos(
+    point_x: f64,
+    point_y: f64,
+    width: f64,
+    height: f64,
+    min: f64,
+    max: f64,
+) -> (f64, f64) {
     let (inset_x, inset_y, inner_w, inner_h) = pad_inner_rect(width, height);
     (
-        ((point_x - inset_x) / inner_w).clamp(MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS),
-        ((point_y - inset_y) / inner_h).clamp(MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS),
+        ((point_x - inset_x) / inner_w).clamp(min, max),
+        ((point_y - inset_y) / inner_h).clamp(min, max),
     )
 }
 
@@ -201,6 +227,16 @@ fn point_to_text_pos(point_x: f64, point_y: f64, width: f64, height: f64) -> (f6
 fn text_pos_to_point(pos_x: f64, pos_y: f64, width: f64, height: f64) -> (f64, f64) {
     let (inset_x, inset_y, inner_w, inner_h) = pad_inner_rect(width, height);
     (inset_x + pos_x * inner_w, inset_y + pos_y * inner_h)
+}
+
+/// Pad positions map every reference onto the pad's own inner rectangle: the
+/// band only says which values are storable, not where the puck travels.
+fn pad_reference_band(canvas: bool) -> (f64, f64) {
+    if canvas {
+        (MIN_MOTION_TEXT_CANVAS_POS, MAX_MOTION_TEXT_CANVAS_POS)
+    } else {
+        (MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS)
+    }
 }
 
 fn widget_is_light(widget: &impl gtk4::glib::object::IsA<Widget>) -> bool {
@@ -233,8 +269,9 @@ mod tests {
     fn text_pad_mapping_round_trips_through_the_marker_positions() {
         let (width, height) = (260.0, 152.0);
         for value in [MIN_MOTION_TEXT_POS, 0.5, MAX_MOTION_TEXT_POS] {
+            let (min, max) = pad_reference_band(false);
             let (x, y) = text_pos_to_point(value, value, width, height);
-            let (back_x, back_y) = point_to_text_pos(x, y, width, height);
+            let (back_x, back_y) = point_to_text_pos(x, y, width, height, min, max);
             assert!((back_x - value).abs() < 1e-9, "x {value} round-trips");
             assert!((back_y - value).abs() < 1e-9, "y {value} round-trips");
         }
@@ -244,13 +281,19 @@ mod tests {
     fn text_pad_clicks_clamp_to_the_model_band() {
         let (width, height) = (260.0, 152.0);
         // Far outside the pad in both directions.
+        let (min, max) = pad_reference_band(false);
         assert_eq!(
-            point_to_text_pos(-500.0, -500.0, width, height),
+            point_to_text_pos(-500.0, -500.0, width, height, min, max),
             (MIN_MOTION_TEXT_POS, MIN_MOTION_TEXT_POS)
         );
         assert_eq!(
-            point_to_text_pos(9_999.0, 9_999.0, width, height),
+            point_to_text_pos(9_999.0, 9_999.0, width, height, min, max),
             (MAX_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS)
+        );
+        let (min, max) = pad_reference_band(true);
+        assert_eq!(
+            point_to_text_pos(-500.0, 9_999.0, width, height, min, max),
+            (MIN_MOTION_TEXT_CANVAS_POS, MAX_MOTION_TEXT_CANVAS_POS)
         );
     }
 

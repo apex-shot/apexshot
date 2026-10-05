@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex};
 use crate::capture::editor::{
     state::EditorState,
     types::{tool_shortcut_target, Point, Tool},
-    ui_support::set_active_tool_button,
+    ui_support::{set_active_tool_button, text_input_has_focus},
 };
 
 use super::super::cursor::set_window_cursor_name;
@@ -62,10 +62,8 @@ pub(super) fn wire_window_keyboard(
             return glib::Propagation::Proceed;
         }
         if let Some(window) = window_space.upgrade() {
-            if let Some(focused) = gtk4::prelude::GtkWindowExt::focus(&window) {
-                if focused.is::<gtk4::Entry>() || focused.is::<gtk4::Text>() {
-                    return glib::Propagation::Proceed;
-                }
+            if text_input_has_focus(&window) {
+                return glib::Propagation::Proceed;
             }
         }
 
@@ -90,7 +88,7 @@ pub(super) fn wire_window_keyboard(
     let eyedropper_mode_released = eyedropper_mode.clone();
     let window_released = window.downgrade();
     space_pan_controller.connect_key_released(move |_, key, _, _| {
-        if key != gdk::Key::space {
+        if key != gdk::Key::space || !space_pan_active_released.get() {
             return;
         }
 
@@ -128,6 +126,12 @@ pub(super) fn wire_window_keyboard(
     let zoom_popup_keys = zoom_popup.clone();
 
     key_controller.connect_key_pressed(move |_, key, _, modifiers| {
+        if window_keys
+            .upgrade()
+            .is_some_and(|window| text_input_has_focus(&window))
+        {
+            return glib::Propagation::Proceed;
+        }
         if key == gdk::Key::Escape && eyedropper_mode_keys.get() {
             eyedropper_mode_keys.set(false);
             *eyedropper_point_keys.borrow_mut() = None;
@@ -280,6 +284,29 @@ pub(super) fn wire_window_keyboard(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn text_fields_are_exempt_from_capture_and_editor_shortcuts() {
+        let source = include_str!("keyboard.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap();
+        let capture = production
+            .split("space_pan_controller.connect_key_pressed")
+            .nth(1)
+            .unwrap();
+        assert!(
+            capture.find("text_input_has_focus(&window)").unwrap()
+                < capture.find("space_pan_active_capture.set(true)").unwrap()
+        );
+        let bubble = production
+            .split("key_controller.connect_key_pressed")
+            .nth(1)
+            .unwrap();
+        assert!(
+            bubble.find("text_input_has_focus(&window)").unwrap()
+                < bubble.find("st.active_text_input.is_some()").unwrap()
+        );
+        assert!(production.contains("!space_pan_active_released.get()"));
+    }
+
     #[test]
     fn window_keyboard_owns_space_pan_text_zoom_and_shortcuts() {
         let source = include_str!("keyboard.rs");

@@ -1,6 +1,6 @@
 use gtk4::{
-    prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, DrawingArea, Entry, Grid, Label,
-    Orientation, Overlay, ToggleButton,
+    prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, DrawingArea, Grid, Label,
+    Orientation, Overlay, PolicyType, ScrolledWindow, TextView, ToggleButton,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -8,12 +8,19 @@ use std::rc::Rc;
 use crate::capture::editor::ui_support::EDITOR_TOP_CHROME_HEIGHT;
 use crate::i18n::t;
 use crate::recording::editor::model::{
-    MotionEffectTransformTiming, MotionTextAnimation, MotionTextScope, MotionTimingKind,
-    DEFAULT_MOTION_DURATION_SECONDS, DEFAULT_MOTION_SPRING_BOUNCE, DEFAULT_MOTION_TEXT_POS_X,
-    DEFAULT_MOTION_TEXT_POS_Y, DEFAULT_MOTION_TEXT_SIZE, DEFAULT_MOTION_ZOOM,
-    MAX_MOTION_DURATION_SECONDS, MAX_MOTION_SPRING_BOUNCE, MAX_MOTION_TEXT_SIZE, MAX_MOTION_YAW,
-    MAX_MOTION_ZOOM, MAX_ZOOM_EASE_MS, MIN_MOTION_DURATION_SECONDS, MIN_MOTION_SPRING_BOUNCE,
-    MIN_MOTION_TEXT_SIZE, MIN_MOTION_YAW, MIN_MOTION_ZOOM, MIN_ZOOM_EASE_MS,
+    MotionEffectTransformTiming, MotionTextAlignment, MotionTextAnimation,
+    MotionTextCoordinateSpace, MotionTextScope, MotionTimingKind, DEFAULT_MOTION_DURATION_SECONDS,
+    DEFAULT_MOTION_SPRING_BOUNCE, DEFAULT_MOTION_TEXT_CANVAS_WIDTH,
+    DEFAULT_MOTION_TEXT_LETTER_SPACING, DEFAULT_MOTION_TEXT_LINE_SPACING,
+    DEFAULT_MOTION_TEXT_POS_X, DEFAULT_MOTION_TEXT_POS_Y, DEFAULT_MOTION_TEXT_SIZE,
+    DEFAULT_MOTION_TEXT_TRANSITION_SECONDS, DEFAULT_MOTION_TEXT_TYPEWRITER_SECONDS,
+    DEFAULT_MOTION_ZOOM, MAX_MOTION_DURATION_SECONDS, MAX_MOTION_SPRING_BOUNCE,
+    MAX_MOTION_TEXT_LETTER_SPACING, MAX_MOTION_TEXT_LINE_SPACING, MAX_MOTION_TEXT_OUTLINE,
+    MAX_MOTION_TEXT_ROTATION, MAX_MOTION_TEXT_SIZE, MAX_MOTION_TEXT_TRANSITION_SECONDS,
+    MAX_MOTION_YAW, MAX_MOTION_ZOOM, MAX_ZOOM_EASE_MS, MIN_MOTION_DURATION_SECONDS,
+    MIN_MOTION_SPRING_BOUNCE, MIN_MOTION_TEXT_LETTER_SPACING, MIN_MOTION_TEXT_LINE_SPACING,
+    MIN_MOTION_TEXT_ROTATION, MIN_MOTION_TEXT_SIZE, MIN_MOTION_TEXT_TRANSITION_SECONDS,
+    MIN_MOTION_YAW, MIN_MOTION_ZOOM, MIN_ZOOM_EASE_MS,
 };
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
@@ -25,6 +32,7 @@ use super::parts::{
 };
 use super::position_pad::MotionPositionPad;
 use super::text_pad::MotionTextPad;
+use super::typography::{MotionFontPicker, MotionTextColorPicker};
 use super::watermark::build_motion_watermark_panel;
 use super::widgets::{
     angle_slider_row, ease_preset_timing, format_duration_label, position_slider_row,
@@ -327,12 +335,134 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
 
     let text_editor_box = GtkBox::new(Orientation::Vertical, 10);
     let text_content_section = motion_settings_section("Content");
-    let text_entry = Entry::new();
-    text_entry.set_placeholder_text(Some(&t("Title")));
-    text_entry.set_hexpand(true);
-    text_content_section.append(&text_entry);
+    let text_view = TextView::new();
+    text_view.add_css_class("editor-motion-content-text");
+    text_view.set_wrap_mode(gtk4::WrapMode::WordChar);
+    text_view.set_accepts_tab(false);
+    text_view.set_left_margin(12);
+    text_view.set_right_margin(12);
+    text_view.set_top_margin(10);
+    text_view.set_bottom_margin(10);
+    text_view.buffer().set_enable_undo(true);
+    text_view.set_tooltip_text(Some(&t("Type your text; press Enter for a new line")));
+    let text_scroll = ScrolledWindow::new();
+    text_scroll.add_css_class("editor-motion-content-field");
+    text_scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    text_scroll.set_size_request(-1, 88);
+    text_scroll.set_child(Some(&text_view));
+    text_content_section.append(&text_scroll);
     text_editor_box.append(&text_content_section);
+
+    let typography_section = motion_settings_section("Typography");
+    let text_font_picker = MotionFontPicker::new();
+    typography_section.append(&text_font_picker.widget());
+
+    let text_font_style_row = GtkBox::new(Orientation::Horizontal, 6);
+    text_font_style_row.add_css_class("recording-editor-zoom-easing");
+    text_font_style_row.set_hexpand(true);
+    text_font_style_row.set_homogeneous(true);
+    let text_bold_btn = ToggleButton::with_label(&t("Bold"));
+    text_bold_btn.add_css_class("recording-editor-zoom-easing-btn");
+    text_bold_btn.set_has_frame(false);
+    text_bold_btn.set_hexpand(true);
+    let text_italic_btn = ToggleButton::with_label(&t("Italic"));
+    text_italic_btn.add_css_class("recording-editor-zoom-easing-btn");
+    text_italic_btn.set_has_frame(false);
+    text_italic_btn.set_hexpand(true);
+    text_font_style_row.append(&text_bold_btn);
+    text_font_style_row.append(&text_italic_btn);
+    typography_section.append(&text_font_style_row);
+
+    let text_color_picker = MotionTextColorPicker::new();
+    typography_section.append(&text_color_picker.widget());
+    let text_opacity_slider =
+        FillSlider::new_with_value_text(&t("Opacity"), |value, _, _| format!("{value:.0}%"));
+    text_opacity_slider.set_range(0.0, 100.0);
+    text_opacity_slider.set_increments(1.0, 10.0);
+    text_opacity_slider.set_value(100.0);
+    typography_section.append(&text_opacity_slider.widget());
+
+    let text_alignment_buttons: Vec<(MotionTextAlignment, ToggleButton)> = MotionTextAlignment::ALL
+        .iter()
+        .map(|&alignment| (alignment, toggle_row_button(&t(alignment.label()))))
+        .collect();
+    let text_alignment_row = toggle_row(&text_alignment_buttons);
+    typography_section.append(&text_alignment_row);
+
+    let text_width_slider = FillSlider::new_with_value_text(&t("Width"), {
+        let auto = t("Auto");
+        move |value, _, _| {
+            if value <= 0.0 {
+                auto.clone()
+            } else {
+                format!("{:.0}%", value * 100.0)
+            }
+        }
+    });
+    text_width_slider.set_range(0.0, 1.0);
+    text_width_slider.set_increments(0.01, 0.1);
+    text_width_slider.set_value(DEFAULT_MOTION_TEXT_CANVAS_WIDTH);
+    text_width_slider.widget().set_tooltip_text(Some(&t(
+        "Paragraph width; Auto keeps the natural line width",
+    )));
+    typography_section.append(&text_width_slider.widget());
+
+    let (_, text_size_value, text_size_slider) = span_slider_row(
+        &t("Size"),
+        DEFAULT_MOTION_TEXT_SIZE,
+        MIN_MOTION_TEXT_SIZE,
+        MAX_MOTION_TEXT_SIZE,
+    );
+    typography_section.append(&text_size_slider.widget());
+
+    let text_line_spacing_slider =
+        FillSlider::new_with_value_text(&t("Line spacing"), |value, _, _| format!("{value:.2}x"));
+    text_line_spacing_slider.set_range(MIN_MOTION_TEXT_LINE_SPACING, MAX_MOTION_TEXT_LINE_SPACING);
+    text_line_spacing_slider.set_increments(0.01, 0.1);
+    text_line_spacing_slider.set_value(DEFAULT_MOTION_TEXT_LINE_SPACING);
+    typography_section.append(&text_line_spacing_slider.widget());
+
+    let text_letter_spacing_slider =
+        FillSlider::new_with_value_text(&t("Letter spacing"), |value, _, _| {
+            format!("{value:.2}em")
+        });
+    text_letter_spacing_slider.set_range(
+        MIN_MOTION_TEXT_LETTER_SPACING,
+        MAX_MOTION_TEXT_LETTER_SPACING,
+    );
+    text_letter_spacing_slider.set_increments(0.01, 0.05);
+    text_letter_spacing_slider.set_value(DEFAULT_MOTION_TEXT_LETTER_SPACING);
+    typography_section.append(&text_letter_spacing_slider.widget());
+
+    let text_rotation_slider =
+        FillSlider::new_with_value_text(&t("Rotation"), |value, _, _| format!("{value:.0}°"));
+    text_rotation_slider.set_range(MIN_MOTION_TEXT_ROTATION, MAX_MOTION_TEXT_ROTATION);
+    text_rotation_slider.set_increments(1.0, 15.0);
+    text_rotation_slider.set_value(0.0);
+    typography_section.append(&text_rotation_slider.widget());
+
+    let text_outline_slider =
+        FillSlider::new_with_value_text(&t("Outline"), |value, _, _| format!("{value:.2}em"));
+    text_outline_slider.set_range(0.0, MAX_MOTION_TEXT_OUTLINE);
+    text_outline_slider.set_increments(0.005, 0.05);
+    text_outline_slider.set_value(0.0);
+    typography_section.append(&text_outline_slider.widget());
+
+    let text_shadow_btn = ToggleButton::with_label(&t("Shadow"));
+    text_shadow_btn.add_css_class("recording-editor-zoom-easing-btn");
+    text_shadow_btn.set_has_frame(false);
+    text_shadow_btn.set_hexpand(true);
+    typography_section.append(&text_shadow_btn);
+
     let text_placement_section = motion_settings_section("Placement");
+    let text_attach_buttons: Vec<(MotionTextCoordinateSpace, ToggleButton)> = [
+        (MotionTextCoordinateSpace::Canvas, t("Canvas")),
+        (MotionTextCoordinateSpace::image(), t("Image")),
+    ]
+    .iter()
+    .map(|(space, label)| (*space, toggle_row_button(label)))
+    .collect();
+    text_placement_section.append(&toggle_row(&text_attach_buttons));
     // The pad replaces the old X/Y sliders: dragging the puck is the same
     // gesture as dragging the title on the preview, so the panel and the
     // canvas teach each other. The readout keeps the old percentages
@@ -346,15 +476,9 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     text_pos_readout.add_css_class("recording-editor-zoom-kicker");
     text_pos_readout.set_xalign(0.0);
     text_placement_section.append(&text_pos_readout);
-    let (text_size_header, text_size_value, text_size_slider) = span_slider_row(
-        &t("Size"),
-        DEFAULT_MOTION_TEXT_SIZE,
-        MIN_MOTION_TEXT_SIZE,
-        MAX_MOTION_TEXT_SIZE,
-    );
-    text_placement_section.append(&text_size_header);
-    text_placement_section.append(&text_size_slider.widget());
     text_editor_box.append(&text_placement_section);
+    text_editor_box.append(&typography_section);
+
     let text_animation_section = motion_settings_section("Animation");
     let text_anim_grid = Grid::new();
     text_anim_grid.add_css_class("recording-editor-zoom-easing");
@@ -382,10 +506,12 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
         }
     }
     text_animation_section.append(&text_anim_grid);
+    let text_scope_box = GtkBox::new(Orientation::Vertical, 6);
+    text_scope_box.set_tooltip_text(Some(&t("Choose how Typewriter reveals the text")));
     let text_scope_label = Label::new(Some(&t("Scope")));
     text_scope_label.add_css_class("recording-editor-zoom-kicker");
     text_scope_label.set_xalign(0.0);
-    text_animation_section.append(&text_scope_label);
+    text_scope_box.append(&text_scope_label);
     let text_scope_row = GtkBox::new(Orientation::Horizontal, 6);
     text_scope_row.add_css_class("recording-editor-zoom-easing");
     text_scope_row.set_hexpand(true);
@@ -408,7 +534,41 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
             }
         }
     }
-    text_animation_section.append(&text_scope_row);
+    text_scope_box.append(&text_scope_row);
+    text_scope_box.set_visible(false);
+    text_animation_section.append(&text_scope_box);
+
+    let text_transition_slider = FillSlider::new_with_value_text(&t("Duration"), |value, _, _| {
+        format!("{:.2}s", value / 1000.0)
+    });
+    text_transition_slider.set_range(
+        MIN_MOTION_TEXT_TRANSITION_SECONDS * 1000.0,
+        MAX_MOTION_TEXT_TRANSITION_SECONDS * 1000.0,
+    );
+    text_transition_slider.set_increments(10.0, 50.0);
+    text_transition_slider.set_value(DEFAULT_MOTION_TEXT_TRANSITION_SECONDS * 1000.0);
+    text_transition_slider
+        .widget()
+        .set_tooltip_text(Some(&t("Entrance duration for slides and fades")));
+    text_transition_slider.widget().set_visible(false);
+    text_animation_section.append(&text_transition_slider.widget());
+
+    let text_typewriter_box = GtkBox::new(Orientation::Vertical, 0);
+    let text_typewriter_slider = FillSlider::new_with_value_text(&t("Duration"), |value, _, _| {
+        format!("{:.2}s", value / 1000.0)
+    });
+    text_typewriter_slider.set_range(
+        MIN_MOTION_TEXT_TRANSITION_SECONDS * 1000.0,
+        MAX_MOTION_TEXT_TRANSITION_SECONDS * 1000.0,
+    );
+    text_typewriter_slider.set_increments(10.0, 50.0);
+    text_typewriter_slider.set_value(DEFAULT_MOTION_TEXT_TYPEWRITER_SECONDS * 1000.0);
+    text_typewriter_slider
+        .widget()
+        .set_tooltip_text(Some(&t("Time to reveal all text")));
+    text_typewriter_box.append(&text_typewriter_slider.widget());
+    text_typewriter_box.set_visible(false);
+    text_animation_section.append(&text_typewriter_box);
     text_editor_box.append(&text_animation_section);
     // The page owns its Delete: the shared button lives on Move, so deleting
     // the selected title must not require switching pages first.
@@ -497,13 +657,30 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
                 text_editor_box,
                 text_add_btn,
                 text_delete_btn,
-                text_entry,
+                text_view,
                 text_pos_pad,
                 text_pos_readout,
+                text_attach_buttons,
+                text_font_picker,
+                text_bold_btn,
+                text_italic_btn,
+                text_color_picker,
+                text_opacity_slider,
+                text_alignment_buttons,
+                text_width_slider,
                 text_size_slider,
                 text_size_value,
+                text_line_spacing_slider,
+                text_letter_spacing_slider,
+                text_rotation_slider,
+                text_outline_slider,
+                text_shadow_btn,
                 text_anim_buttons,
+                text_scope_box,
                 text_scope_buttons,
+                text_transition_slider,
+                text_typewriter_box,
+                text_typewriter_slider,
             },
             transform: MotionTransformControlParts {
                 clip_box,
@@ -590,6 +767,36 @@ fn motion_settings_section(title: &str) -> GtkBox {
     section
 }
 
+/// One member of a segmented Motion toggle row.
+fn toggle_row_button(label: &str) -> ToggleButton {
+    let button = ToggleButton::with_label(label);
+    button.add_css_class("recording-editor-zoom-easing-btn");
+    button.set_has_frame(false);
+    button.set_hexpand(true);
+    button
+}
+
+/// Group segmented toggles into one row so exactly one stays active.
+fn toggle_row<T: Copy>(buttons: &[(T, ToggleButton)]) -> GtkBox {
+    let row = GtkBox::new(Orientation::Horizontal, 6);
+    row.add_css_class("recording-editor-zoom-easing");
+    row.set_hexpand(true);
+    row.set_homogeneous(true);
+    if let Some((_, first)) = buttons.first() {
+        for (index, (_, button)) in buttons.iter().enumerate() {
+            if index > 0 {
+                button.set_group(Some(first));
+            }
+        }
+    }
+    for (_, button) in buttons {
+        row.append(button);
+    }
+    row
+}
+
+/// Installed font families for the title's font selector, straight from the
+/// same Pango font map that shapes the text.
 /// Placement read-out for the text pad. The pad is the control; this is the
 /// exact value it lands on, in the same percentages the X/Y sliders showed
 /// before they were replaced.

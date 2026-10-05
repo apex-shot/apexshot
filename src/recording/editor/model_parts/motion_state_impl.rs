@@ -400,12 +400,14 @@ impl MotionState {
             text: "Title".into(),
             animation: MotionTextAnimation::None,
             scope: MotionTextScope::Character,
-            typewriter_time: 0.6,
+            typewriter_time: DEFAULT_MOTION_TEXT_TYPEWRITER_SECONDS,
             is_disabled: false,
-            annotation_coordinate_space: MotionTextCoordinateSpace::MotionCanvasLocal,
+            annotation_coordinate_space: MotionTextCoordinateSpace::Canvas,
             pos_x: DEFAULT_MOTION_TEXT_POS_X,
             pos_y: DEFAULT_MOTION_TEXT_POS_Y,
             size: DEFAULT_MOTION_TEXT_SIZE,
+            format: MotionTextFormat::canvas(),
+            transition_duration: DEFAULT_MOTION_TEXT_TRANSITION_SECONDS,
         });
         self.text_segments
             .sort_by(|a, b| a.start.total_cmp(&b.start));
@@ -500,8 +502,116 @@ impl MotionState {
     pub fn set_selected_text_pos(&mut self, pos_x: f64, pos_y: f64) {
         if let Some(index) = self.selected_text {
             if let Some(segment) = self.text_segments.get_mut(index) {
-                segment.pos_x = pos_x.clamp(MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS);
-                segment.pos_y = pos_y.clamp(MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS);
+                let (min, max) = motion_text_pos_band(segment.annotation_coordinate_space);
+                segment.pos_x = pos_x.clamp(min, max);
+                segment.pos_y = pos_y.clamp(min, max);
+            }
+        }
+    }
+
+    /// Switch the selected title between the composition canvas and the moving
+    /// card. The caller supplies the position to keep, because only the
+    /// renderer knows how the two references map on screen.
+    pub fn set_selected_text_attachment(
+        &mut self,
+        space: MotionTextCoordinateSpace,
+        pos_x: f64,
+        pos_y: f64,
+    ) {
+        if let Some(index) = self.selected_text {
+            if let Some(segment) = self.text_segments.get_mut(index) {
+                segment.annotation_coordinate_space = if space.is_canvas() {
+                    MotionTextCoordinateSpace::Canvas
+                } else {
+                    MotionTextCoordinateSpace::image()
+                };
+                let (min, max) = motion_text_pos_band(segment.annotation_coordinate_space);
+                segment.pos_x = pos_x.clamp(min, max);
+                segment.pos_y = pos_y.clamp(min, max);
+            }
+        }
+    }
+
+    pub fn set_selected_text_font_family(&mut self, font_family: String) {
+        self.edit_selected_text_format(|format| format.font_family = font_family);
+    }
+
+    pub fn set_selected_text_bold(&mut self, bold: bool) {
+        self.edit_selected_text_format(|format| format.bold = bold);
+    }
+
+    pub fn set_selected_text_italic(&mut self, italic: bool) {
+        self.edit_selected_text_format(|format| format.italic = italic);
+    }
+
+    pub fn set_selected_text_color(&mut self, color: [f64; 4]) {
+        self.edit_selected_text_format(|format| format.color = color);
+    }
+
+    pub fn set_selected_text_opacity(&mut self, opacity: f64) {
+        self.edit_selected_text_format(|format| format.color[3] = opacity.clamp(0.0, 1.0));
+    }
+
+    pub fn set_selected_text_alignment(&mut self, alignment: MotionTextAlignment) {
+        self.edit_selected_text_format(|format| format.alignment = alignment);
+    }
+
+    pub fn set_selected_text_wrap_width(&mut self, wrap_width: f64) {
+        self.edit_selected_text_format(|format| {
+            format.wrap_width = if wrap_width <= 0.0 {
+                0.0
+            } else {
+                wrap_width.clamp(MIN_MOTION_TEXT_WIDTH, 1.0)
+            };
+        });
+    }
+
+    pub fn set_selected_text_line_spacing(&mut self, line_spacing: f64) {
+        self.edit_selected_text_format(|format| {
+            format.line_spacing = line_spacing
+                .clamp(MIN_MOTION_TEXT_LINE_SPACING, MAX_MOTION_TEXT_LINE_SPACING);
+        });
+    }
+
+    pub fn set_selected_text_letter_spacing(&mut self, letter_spacing: f64) {
+        self.edit_selected_text_format(|format| {
+            format.letter_spacing = letter_spacing
+                .clamp(MIN_MOTION_TEXT_LETTER_SPACING, MAX_MOTION_TEXT_LETTER_SPACING);
+        });
+    }
+
+    pub fn set_selected_text_rotation(&mut self, rotation: f64) {
+        self.edit_selected_text_format(|format| {
+            let rotation = if rotation.is_finite() { rotation } else { 0.0 };
+            format.rotation = rotation.clamp(MIN_MOTION_TEXT_ROTATION, MAX_MOTION_TEXT_ROTATION);
+        });
+    }
+
+    pub fn set_selected_text_outline_width(&mut self, outline_width: f64) {
+        self.edit_selected_text_format(|format| {
+            format.outline_width = outline_width.clamp(0.0, MAX_MOTION_TEXT_OUTLINE);
+        });
+    }
+
+    pub fn set_selected_text_shadow(&mut self, shadow: bool) {
+        self.edit_selected_text_format(|format| format.shadow = shadow);
+    }
+
+    pub fn set_selected_text_transition_duration(&mut self, transition_duration: f64) {
+        if let Some(index) = self.selected_text {
+            if let Some(segment) = self.text_segments.get_mut(index) {
+                segment.transition_duration = transition_duration.clamp(
+                    MIN_MOTION_TEXT_TRANSITION_SECONDS,
+                    MAX_MOTION_TEXT_TRANSITION_SECONDS,
+                );
+            }
+        }
+    }
+
+    fn edit_selected_text_format(&mut self, edit: impl FnOnce(&mut MotionTextFormat)) {
+        if let Some(index) = self.selected_text {
+            if let Some(segment) = self.text_segments.get_mut(index) {
+                edit(&mut segment.format);
             }
         }
     }
@@ -640,4 +750,14 @@ impl MotionState {
 
 fn motion_ranges_overlap(a0: f64, a1: f64, b0: f64, b1: f64) -> bool {
     a0 < b1 && b0 < a1
+}
+
+/// The position band a title's reference rectangle allows: the whole
+/// composition for a Canvas title, the recovered inset band for a card title.
+fn motion_text_pos_band(space: MotionTextCoordinateSpace) -> (f64, f64) {
+    if space.is_canvas() {
+        (MIN_MOTION_TEXT_CANVAS_POS, MAX_MOTION_TEXT_CANVAS_POS)
+    } else {
+        (MIN_MOTION_TEXT_POS, MAX_MOTION_TEXT_POS)
+    }
 }

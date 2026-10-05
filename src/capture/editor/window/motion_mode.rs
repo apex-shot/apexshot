@@ -14,6 +14,7 @@ mod preview;
 mod session;
 mod text_pad;
 mod transition;
+mod typography;
 mod watermark;
 mod widgets;
 
@@ -36,6 +37,66 @@ pub(super) const WATERMARK_PAGE: &str = "motion-watermark";
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn text_panel_orders_content_placement_typography_and_animation() {
+        let build = include_str!("motion_mode/build.rs");
+        let content = build
+            .find("text_editor_box.append(&text_content_section)")
+            .unwrap();
+        let placement = build
+            .find("text_editor_box.append(&text_placement_section)")
+            .unwrap();
+        let typography = build
+            .find("text_editor_box.append(&typography_section)")
+            .unwrap();
+        let animation = build
+            .find("text_editor_box.append(&text_animation_section)")
+            .unwrap();
+        assert!(content < placement && placement < typography && typography < animation);
+    }
+
+    #[test]
+    fn text_scope_and_timing_controls_only_show_when_the_animation_uses_them() {
+        let build = include_str!("motion_mode/build.rs");
+        let sync = include_str!("motion_mode/controls/sync.rs");
+        let controls = include_str!("motion_mode/controls/text.rs");
+        assert!(build.contains("text_scope_box.append(&text_scope_label)"));
+        assert!(build.contains("text_scope_box.append(&text_scope_row)"));
+        assert!(build.contains("text_scope_box.set_visible(false)"));
+        assert!(build.contains("text_transition_slider.widget().set_visible(false)"));
+        assert!(sync
+            .contains("let is_typewriter = segment.animation == MotionTextAnimation::Typewriter"));
+        assert!(sync.contains("text_scope_box.set_visible(is_typewriter)"));
+        assert!(sync.contains("text_typewriter_box.set_visible(is_typewriter)"));
+        let timing = sync
+            .split("text_transition_slider.widget().set_visible(matches!(")
+            .nth(1)
+            .unwrap();
+        let timing = timing.split("));").next().unwrap();
+        for animation in [
+            "Fade",
+            "SlideFromLeft",
+            "SlideFromRight",
+            "SlideTop",
+            "SlideBottom",
+        ] {
+            assert!(timing.contains(&format!("MotionTextAnimation::{animation}")));
+        }
+        assert!(!timing.contains("MotionTextAnimation::None"));
+        assert!(!timing.contains("MotionTextAnimation::Typewriter"));
+        let animation_change = controls.split("for (animation, button)").nth(1).unwrap();
+        let animation_change = animation_change
+            .split("for (scope, button)")
+            .next()
+            .unwrap();
+        assert!(
+            animation_change.find("redraw();").unwrap()
+                < animation_change
+                    .find("request_text_transition_preview(start,")
+                    .unwrap()
+        );
+    }
+
     use super::*;
     use crate::capture::editor::state::EditorState;
     use crate::capture::editor::types::{AnnotationAction, Point};

@@ -36,6 +36,29 @@ pub const MAX_MOTION_TEXT_POS: f64 = 0.95;
 pub const DEFAULT_MOTION_TEXT_SIZE: f64 = 1.0;
 pub const MIN_MOTION_TEXT_SIZE: f64 = 0.5;
 pub const MAX_MOTION_TEXT_SIZE: f64 = 2.2;
+/// Canvas titles are placed on the whole composition, so their reference
+/// rectangle is the full stage and their position band is the full 0..1.
+pub const MIN_MOTION_TEXT_CANVAS_POS: f64 = 0.0;
+pub const MAX_MOTION_TEXT_CANVAS_POS: f64 = 1.0;
+/// New Canvas titles open as a left-aligned paragraph a little under half the
+/// composition wide; 0 keeps the legacy natural-width, card-relative title.
+pub const DEFAULT_MOTION_TEXT_CANVAS_WIDTH: f64 = 0.45;
+pub const DEFAULT_MOTION_TEXT_TYPEWRITER_SECONDS: f64 = 0.6;
+pub const DEFAULT_MOTION_TEXT_TRANSITION_SECONDS: f64 = 0.28;
+pub const MIN_MOTION_TEXT_TRANSITION_SECONDS: f64 = 0.05;
+pub const MAX_MOTION_TEXT_TRANSITION_SECONDS: f64 = 3.0;
+pub const DEFAULT_MOTION_TEXT_LINE_SPACING: f64 = 1.0;
+pub const MIN_MOTION_TEXT_LINE_SPACING: f64 = 0.5;
+pub const MAX_MOTION_TEXT_LINE_SPACING: f64 = 3.0;
+pub const DEFAULT_MOTION_TEXT_LETTER_SPACING: f64 = 0.0;
+pub const MIN_MOTION_TEXT_LETTER_SPACING: f64 = -0.1;
+pub const MAX_MOTION_TEXT_LETTER_SPACING: f64 = 0.5;
+pub const MIN_MOTION_TEXT_ROTATION: f64 = -180.0;
+pub const MAX_MOTION_TEXT_ROTATION: f64 = 180.0;
+pub const MAX_MOTION_TEXT_OUTLINE: f64 = 0.15;
+/// Smallest paragraph-box fraction a wrapped title accepts; below this the
+/// box is narrower than a couple of glyphs.
+pub const MIN_MOTION_TEXT_WIDTH: f64 = 0.1;
 
 /// Identity camera for a still or the start of a motion segment.
 /// Field names follow `orientationRotation*` / `perspectiveIntensity`.

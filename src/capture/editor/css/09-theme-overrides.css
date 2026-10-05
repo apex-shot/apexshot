@@ -45,6 +45,41 @@
                 background: alpha(#111827, 0.025);
             }
 
+            .editor-root.editor-theme-light .editor-motion-content-field {
+                background: alpha(#111827, 0.05);
+            }
+
+            .editor-root.editor-theme-light .editor-motion-content-field:focus-within {
+                background: alpha(#111827, 0.07);
+                box-shadow: inset 0 0 0 1px alpha(#c06540, 0.7);
+            }
+
+            .editor-root.editor-theme-light textview.editor-motion-content-text,
+            .editor-root.editor-theme-light textview.editor-motion-content-text text {
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light textview.editor-motion-content-text text selection {
+                background: alpha(#c06540, 0.25);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-motion-font-button,
+            .editor-root.editor-theme-light .editor-motion-font-search {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-motion-font-button:hover {
+                background: alpha(#111827, 0.10);
+            }
+
+            .editor-root.editor-theme-light popover.editor-motion-font-popover > contents {
+                background-color: #ffffff;
+                color: #1d2129;
+                border-color: alpha(#111827, 0.10);
+            }
+
             .editor-root.editor-theme-light button.editor-disclosure-header:hover
                 .editor-background-section-title {
                 color: alpha(#1d2129, 0.72);
