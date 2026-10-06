@@ -61,11 +61,7 @@ pub fn export_motion_mp4(
 
     let frame_count = ((motion.duration * f64::from(MOTION_EXPORT_FPS)).round() as u32).max(1);
     for index in 0..frame_count {
-        let time = if frame_count <= 1 {
-            0.0
-        } else {
-            motion.duration * f64::from(index) / f64::from(frame_count - 1)
-        };
+        let time = f64::from(index) / f64::from(MOTION_EXPORT_FPS);
         let mut surface = ImageSurface::create(Format::ARgb32, out_w, out_h)
             .map_err(|error| error.to_string())?;
         {

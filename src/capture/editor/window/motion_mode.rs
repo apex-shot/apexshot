@@ -28,6 +28,7 @@ pub(super) use transition::{
     apply_editor_mode, install_confirm_overlay, request_enter_motion, request_leave_motion,
     show_motion_tool_page, MotionModeChrome,
 };
+pub(super) use watermark::build_motion_watermark_panel;
 pub(super) const MOTION_PAGE: &str = "motion";
 pub(super) const STATIC_PAGE: &str = "static";
 /// Inspector stack pages owned by the Motion tool notch, in notch order.

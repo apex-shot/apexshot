@@ -274,7 +274,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         &upload_btn,
         &save_btn,
         &traffic_close,
-        in_motion,
+        in_motion.clone(),
         export_motion,
     );
 
@@ -409,6 +409,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
 
     wire_window_keyboard(
         &window,
+        &in_motion,
         &state,
         &drawing_area,
         &tool_buttons,

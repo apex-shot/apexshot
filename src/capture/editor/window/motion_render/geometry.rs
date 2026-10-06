@@ -203,7 +203,7 @@ impl CardLayout {
     fn pose_center(&self, transform: MotionTransform, zoom_anchor: (f64, f64)) -> (f64, f64) {
         let cx = self.base_x - transform.pos_x * self.stage.bounds_w * 0.5;
         let cy = self.base_y - transform.pos_y * self.stage.bounds_h * 0.5;
-        let (anchor_x, anchor_y) = (zoom_anchor.0.clamp(0.0, 1.0), zoom_anchor.1.clamp(0.0, 1.0));
+        let (anchor_x, anchor_y) = zoom_anchor;
         if (transform.scale - 1.0).abs() < f64::EPSILON
             || ((anchor_x - 0.5).abs() < f64::EPSILON && (anchor_y - 0.5).abs() < f64::EPSILON)
         {

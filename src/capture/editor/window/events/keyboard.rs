@@ -24,6 +24,7 @@ use super::zoom::ZOOM_STEP;
 /// Wire capture-phase Space pan and window keyboard shortcuts.
 pub(super) fn wire_window_keyboard(
     window: &ApplicationWindow,
+    in_motion: &Rc<Cell<bool>>,
     state: &Arc<Mutex<EditorState>>,
     drawing_area: &DrawingArea,
     tool_buttons: &[Button],
@@ -56,9 +57,13 @@ pub(super) fn wire_window_keyboard(
     let space_pan_dragging_capture = space_pan_dragging.clone();
     let eyedropper_mode_space = eyedropper_mode.clone();
     let state_space = state.clone();
+    let in_motion_space = in_motion.clone();
     let window_space = window.downgrade();
     let drawing_area_space = drawing_area.downgrade();
     space_pan_controller.connect_key_pressed(move |_, key, _, _| {
+        if in_motion_space.get() {
+            return glib::Propagation::Proceed;
+        }
         if key != gdk::Key::space || eyedropper_mode_space.get() {
             return glib::Propagation::Proceed;
         }
@@ -130,8 +135,12 @@ pub(super) fn wire_window_keyboard(
     let zoom_level_keys = zoom_level.clone();
     let apply_zoom_change_keys = apply_zoom_change.clone();
     let zoom_popup_keys = zoom_popup.clone();
+    let in_motion_keys = in_motion.clone();
 
     key_controller.connect_key_pressed(move |_, key, _, modifiers| {
+        if in_motion_keys.get() {
+            return glib::Propagation::Proceed;
+        }
         if window_keys
             .upgrade()
             .is_some_and(|window| text_input_has_focus(&window))

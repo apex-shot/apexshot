@@ -51,6 +51,259 @@ mod tests {
         motion
     }
 
+    fn assert_perspective_mesh_has_no_internal_seams(source_alpha: f64, opacity: f64) {
+        let card = ImageSurface::create(Format::ARgb32, 512, 288).unwrap();
+        {
+            let context = Context::new(&card).unwrap();
+            context.set_source_rgba(1.0, 1.0, 1.0, source_alpha);
+            context.paint().unwrap();
+        }
+        let transform = MotionTransform {
+            rotation_x: 8.0,
+            rotation_y: 16.0,
+            rotation_z: 3.5,
+            perspective: 0.36,
+            ..MotionTransform::default()
+        };
+        let appearance = MotionAppearance::default();
+        let layout = card_layout(
+            &card, 1.0, MotionStage::frame(640.0, 360.0), &appearance,
+            None, transform, (0.5, 0.5),
+        );
+        let mut frame = ImageSurface::create(Format::ARgb32, 640, 360).unwrap();
+        {
+            let context = Context::new(&frame).unwrap();
+            draw_transformed_card(&context, &card, layout, &appearance, opacity, 8, gtk4::cairo::Filter::Good);
+        }
+        frame.flush();
+        let inner = [(8.0, 8.0), (504.0, 8.0), (504.0, 280.0), (8.0, 280.0)]
+            .map(|(x, y)| layout.project(x, y));
+        let expected = (source_alpha * opacity * 255.0).round() as u8;
+        let stride = frame.stride() as usize;
+        let data = frame.data().unwrap();
+        let mut mismatches = 0;
+        let mut interior = 0;
+        let mut edge_pixels = 0;
+        for y in 0..360usize {
+            for x in 0..640usize {
+                let alpha = data[y * stride + x * 4 + 3];
+                if source_alpha == 1.0 && opacity == 1.0 && alpha > 0 && alpha < 255 {
+                    edge_pixels += 1;
+                }
+                let point = (x as f64 + 0.5, y as f64 + 0.5);
+                let inside = (0..4).all(|index| {
+                    let (a, b) = (inner[index], inner[(index + 1) % 4]);
+                    (b.0 - a.0) * (point.1 - a.1) - (b.1 - a.1) * (point.0 - a.0) >= 0.0
+                });
+                if inside {
+                    interior += 1;
+                    if alpha.abs_diff(expected) > 2 {
+                        mismatches += 1;
+                    }
+                }
+            }
+        }
+        assert!(interior > 10000);
+        assert_eq!(mismatches, 0, "mesh seams affect {mismatches}/{interior} interior pixels");
+        if source_alpha == 1.0 && opacity == 1.0 {
+            assert!(edge_pixels > 0, "the exterior must remain antialiased");
+        }
+    }
+
+    #[test]
+    fn opaque_perspective_mesh_has_no_internal_seams() {
+        assert_perspective_mesh_has_no_internal_seams(1.0, 1.0);
+    }
+
+    #[test]
+    fn transparent_perspective_mesh_applies_opacity_once() {
+        assert_perspective_mesh_has_no_internal_seams(0.5, 0.7);
+    }
+
+    #[test]
+    fn motion_disabled_clip_releases_the_camera_like_an_empty_gap() {
+        let mut motion = motion_with_first_clip();
+        motion.set_selected_perspective(0.0);
+        motion.set_selected_transition_ms(1000);
+        motion.add_segment_at(1.0).unwrap();
+        motion.set_selected_disabled(true);
+        let mut gap = motion.clone();
+        gap.selected = Some(1);
+        gap.remove_selected();
+
+        for time in [1.01, 1.25, 1.5, 1.99, 2.01] {
+            assert_eq!(motion.sample(time), gap.sample(time), "time {time}");
+        }
+    }
+
+    #[test]
+    fn motion_enabled_clip_after_a_disabled_clip_starts_from_identity() {
+        let mut motion = motion_with_first_clip();
+        motion.set_selected_perspective(0.0);
+        motion.add_segment_at(1.0).unwrap();
+        motion.add_segment_at(2.0).unwrap();
+        motion.selected = Some(1);
+        motion.set_selected_disabled(true);
+
+        assert_eq!(motion.segments[2].from, MotionTransform::default());
+        assert_eq!(motion.sample(2.0), MotionTransform::default());
+    }
+
+    #[test]
+    fn motion_adjacent_zoom_anchors_keep_the_rendered_card_continuous() {
+        let card = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
+        let mut motion = motion_with_first_clip();
+        motion.set_selected_perspective(0.0);
+        motion.set_selected_zoom_anchor(0.15, 0.25);
+        motion.add_segment_at(1.0).unwrap();
+        motion.set_selected_zoom_anchor(0.85, 0.75);
+        let before = frame_layout(&card, motion.sample(1.0), motion.zoom_anchor_at(1.0));
+        let after = frame_layout(
+            &card,
+            motion.sample(1.0 + 1e-7),
+            motion.zoom_anchor_at(1.0 + 1e-7),
+        );
+
+        assert!((before.cx - after.cx).abs() < 0.01);
+        assert!((before.cy - after.cy).abs() < 0.01);
+        assert_eq!(motion.zoom_anchor_at(2.0), (0.85, 0.75));
+    }
+
+    #[test]
+    fn motion_zero_intensity_preserves_the_previous_camera_anchor() {
+        let mut motion = motion_with_first_clip();
+        motion.set_selected_perspective(0.0);
+        motion.set_selected_zoom_anchor(0.15, 0.25);
+        motion.add_segment_at(1.0).unwrap();
+        motion.set_selected_zoom_anchor(0.85, 0.75);
+        motion.set_selected_intensity(0.0);
+
+        for time in [1.0, 1.25, 1.75, 2.0] {
+            assert_eq!(motion.zoom_anchor_at(time), (0.15, 0.25));
+            assert_eq!(motion.sample(time), motion.sample(1.0));
+        }
+        motion.add_segment_at(2.0).unwrap();
+        let anchor = motion.zoom_anchor_at(2.0 + 1e-9);
+        assert!((anchor.0 - 0.15).abs() < 1e-7);
+        assert!((anchor.1 - 0.25).abs() < 1e-7);
+    }
+
+    #[test]
+    fn motion_spring_preserves_zoom_anchor_overshoot_in_the_rendered_pose() {
+        use crate::recording::editor::model::MotionTimingKind;
+
+        let card = ImageSurface::create(Format::ARgb32, 200, 100).unwrap();
+        let mut motion = motion_with_first_clip();
+        motion.set_selected_perspective(0.0);
+        motion.set_selected_zoom_anchor(0.15, 0.25);
+        motion.add_segment_at(1.0).unwrap();
+        motion.set_selected_end_scale(2.0);
+        motion.set_selected_zoom_anchor(0.85, 0.75);
+        let timing = MotionEffectTransformTiming {
+            kind: MotionTimingKind::Spring,
+            spring_bounce: 0.35,
+            transition_duration: 1.0,
+            ..MotionEffectTransformTiming::default()
+        };
+        motion.set_transform_timing(timing);
+        let damping = -0.35_f64.ln() / 0.35_f64.ln().hypot(std::f64::consts::PI);
+        let frequency = -0.01_f64.ln() / damping;
+        let peak_time = std::f64::consts::PI / (frequency * (1.0 - damping * damping).sqrt());
+        let time = 1.0 + peak_time;
+        let anchor = motion.zoom_anchor_at(time);
+        let expected_anchor = (0.15 + 0.70 * 1.35, 0.25 + 0.50 * 1.35);
+        assert!((anchor.0 - expected_anchor.0).abs() < 1e-9);
+        assert!((anchor.1 - expected_anchor.1).abs() < 1e-9);
+        let pose = motion.sample(time);
+        let layout = frame_layout(&card, pose, anchor);
+        let expected_x = layout.base_x
+            - (pose.scale - 1.0) * (expected_anchor.0 * 2.0 - 1.0)
+                * layout.img_w() * layout.source_fit() * 0.5;
+        assert!((layout.cx - expected_x).abs() < 1e-9);
+        assert_eq!(motion.zoom_anchor_at(2.0), (0.85, 0.75));
+    }
+
+    #[test]
+    fn motion_mp4_frames_match_their_encoded_timestamps() {
+        use crate::recording::editor::model::MotionFramePreset;
+        use std::process::Command;
+
+        if crate::recording::editor::ffmpeg::ensure_tools_available().is_err() {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!(
+            "apexshot-motion-encode-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let snapshot = image::RgbaImage::from_pixel(64, 32, image::Rgba([255, 255, 255, 255]));
+        let source = root.join("timestamp-check.png");
+        let mut motion = motion_with_first_clip();
+        motion.set_duration(1.0);
+        motion.set_selected_perspective(0.0);
+        motion.set_selected_end_pos_x(0.5);
+        motion.set_selected_transition_ms(1000);
+        motion.segments[0].timing.easing_x1 = 0.0;
+        motion.segments[0].timing.easing_y1 = 0.0;
+        motion.segments[0].timing.easing_x2 = 1.0;
+        motion.segments[0].timing.easing_y2 = 1.0;
+        motion.frame.preset = MotionFramePreset::Custom;
+        motion.frame.custom_width = 320;
+        motion.frame.custom_height = 180;
+        let output = super::export_motion_mp4(&snapshot, &motion, true, &source).unwrap();
+        let probe = Command::new("ffprobe")
+            .args([
+                "-v", "error", "-select_streams", "v:0", "-show_entries",
+                "stream=width,height,nb_frames,r_frame_rate,duration", "-of", "json",
+            ])
+            .arg(&output)
+            .output()
+            .unwrap();
+        let decoded = Command::new("ffmpeg")
+            .args(["-v", "error", "-i"])
+            .arg(&output)
+            .args([
+                "-vf", "select=eq(n\\,29)", "-frames:v", "1", "-f", "rawvideo",
+                "-pix_fmt", "rgba", "pipe:1",
+            ])
+            .output()
+            .unwrap();
+        std::fs::remove_file(output).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+
+        assert!(probe.status.success());
+        let metadata: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+        let stream = &metadata["streams"][0];
+        assert_eq!(stream["width"], 320);
+        assert_eq!(stream["height"], 180);
+        assert_eq!(stream["nb_frames"], "30");
+        assert_eq!(stream["r_frame_rate"], "30/1");
+        assert_eq!(stream["duration"], "1.000000");
+        assert!(decoded.status.success());
+        assert_eq!(decoded.stdout.len(), 320 * 180 * 4);
+        let mut count = 0;
+        let mut sum_x = 0.0;
+        for (index, pixel) in decoded.stdout.chunks_exact(4).enumerate() {
+            if pixel[0] > 220 && pixel[1] > 220 && pixel[2] > 220 {
+                count += 1;
+                sum_x += (index % 320) as f64 + 0.5;
+            }
+        }
+        assert!(count > 0);
+        let card = crate::capture::editor::render::rgba_image_to_surface(&snapshot).unwrap();
+        let time = 29.0 / 30.0;
+        let expected = card_layout(
+            &card, 1.0, MotionStage::frame(320.0, 180.0), &motion.appearance,
+            motion.frame.effective_aspect(), motion.sample(time), motion.zoom_anchor_at(time),
+        );
+        let actual_x = sum_x / f64::from(count);
+        assert!(
+            (actual_x - expected.cx).abs() < 0.75,
+            "last encoded frame center {actual_x} must match its timestamp: {}",
+            expected.cx
+        );
+    }
+
     /// Export-style layout: the full frame under the default appearance.
     fn frame_layout(
         surface: &ImageSurface,

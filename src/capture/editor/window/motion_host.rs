@@ -22,6 +22,7 @@ pub(super) struct MotionHost {
     /// so sliders, swatches, and highlights match Static instead of
     /// window-open state.
     appearance_slot: Rc<RefCell<GtkBox>>,
+    watermark_slot: Rc<RefCell<GtkBox>>,
 }
 
 pub(super) struct MotionHostInstallInputs<'a> {
@@ -57,12 +58,14 @@ impl MotionHost {
         }
 
         let appearance_slot = Rc::new(RefCell::new(parts.panels.appearance_inspector.clone()));
+        let watermark_slot = Rc::new(RefCell::new(parts.panels.watermark_inspector.clone()));
         Self {
             parts,
             session: Rc::new(session),
             last_inspector: Rc::new(RefCell::new(String::from("placeholder"))),
             in_motion: Rc::new(Cell::new(false)),
             appearance_slot,
+            watermark_slot,
         }
     }
 
@@ -151,11 +154,63 @@ impl MotionHost {
             });
         }
         motion_mode::wire_motion_controls(
+            window,
             &self.parts,
             self.session.as_ref(),
             motion_chrome.clone(),
             self.last_inspector.clone(),
             self.in_motion.clone(),
+            Rc::new({
+                let window = window.downgrade();
+                let inspector_stack = inspector_stack.clone();
+                let appearance_slot = self.appearance_slot.clone();
+                let watermark_slot = self.watermark_slot.clone();
+                let session = self.session.clone();
+                let preview = self.parts.shell.preview.clone();
+                move |before| {
+                    let Some(window) = window.upgrade() else {
+                        return;
+                    };
+                    let (appearance_changed, watermark_changed) = {
+                        let runtime = session.runtime.borrow();
+                        (
+                            before.appearance != runtime.motion.appearance
+                                || before.frame != runtime.motion.frame
+                                || before.scene_shadow != runtime.motion.scene_shadow,
+                            before.watermark != runtime.motion.watermark,
+                        )
+                    };
+                    let visible_page = inspector_stack.visible_child_name();
+                    if appearance_changed {
+                        let old_panel = appearance_slot.borrow().clone();
+                        let fresh = motion_mode::build_motion_appearance_panel(
+                            &window,
+                            session.as_ref(),
+                            &preview,
+                            None,
+                        );
+                        fresh.set_visible(true);
+                        inspector_stack.remove(&old_panel);
+                        inspector_stack.add_named(&fresh, Some("motion-appearance"));
+                        *appearance_slot.borrow_mut() = fresh;
+                    }
+                    if watermark_changed {
+                        let old_panel = watermark_slot.borrow().clone();
+                        let fresh = motion_mode::build_motion_watermark_panel(
+                            &window,
+                            session.as_ref(),
+                            &preview,
+                        );
+                        fresh.set_visible(true);
+                        inspector_stack.remove(&old_panel);
+                        inspector_stack.add_named(&fresh, Some("motion-watermark"));
+                        *watermark_slot.borrow_mut() = fresh;
+                    }
+                    if let Some(page) = visible_page {
+                        inspector_stack.set_visible_child_name(&page);
+                    }
+                }
+            }),
         );
 
         let enter_motion = {
@@ -174,6 +229,7 @@ impl MotionHost {
             let in_motion = self.in_motion.clone();
             let duration_slider = self.parts.shared.duration_slider.clone();
             let duration_value = self.parts.shared.duration_value.clone();
+            let inspector_syncing = self.parts.shared.inspector_syncing.clone();
             let static_interact_enter = static_appearance_interact.clone();
             Rc::new(move || {
                 if let Some(interact) = static_interact_enter.as_ref() {
@@ -196,8 +252,10 @@ impl MotionHost {
                     *appearance_slot_enter.borrow_mut() = fresh;
                 }
                 let duration = session.duration();
+                inspector_syncing.set(true);
                 duration_slider.set_value(duration);
                 duration_value.set_label(&format!("{duration:.1}s"));
+                inspector_syncing.set(false);
                 motion_mode::apply_editor_mode(
                     &motion_chrome,
                     true,

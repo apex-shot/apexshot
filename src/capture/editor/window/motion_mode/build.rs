@@ -17,10 +17,10 @@ use crate::recording::editor::model::{
     DEFAULT_MOTION_ZOOM, MAX_MOTION_DURATION_SECONDS, MAX_MOTION_SPRING_BOUNCE,
     MAX_MOTION_TEXT_LETTER_SPACING, MAX_MOTION_TEXT_LINE_SPACING, MAX_MOTION_TEXT_OUTLINE,
     MAX_MOTION_TEXT_ROTATION, MAX_MOTION_TEXT_SIZE, MAX_MOTION_TEXT_TRANSITION_SECONDS,
-    MAX_MOTION_YAW, MAX_MOTION_ZOOM, MAX_ZOOM_EASE_MS, MIN_MOTION_DURATION_SECONDS,
-    MIN_MOTION_SPRING_BOUNCE, MIN_MOTION_TEXT_LETTER_SPACING, MIN_MOTION_TEXT_LINE_SPACING,
-    MIN_MOTION_TEXT_ROTATION, MIN_MOTION_TEXT_SIZE, MIN_MOTION_TEXT_TRANSITION_SECONDS,
-    MIN_MOTION_YAW, MIN_MOTION_ZOOM, MIN_ZOOM_EASE_MS,
+    MAX_MOTION_YAW, MAX_MOTION_ZOOM, MIN_MOTION_DURATION_SECONDS, MIN_MOTION_SPRING_BOUNCE,
+    MIN_MOTION_TEXT_LETTER_SPACING, MIN_MOTION_TEXT_LINE_SPACING, MIN_MOTION_TEXT_ROTATION,
+    MIN_MOTION_TEXT_SIZE, MIN_MOTION_TEXT_TRANSITION_SECONDS, MIN_MOTION_TRANSITION_SECONDS,
+    MIN_MOTION_YAW, MIN_MOTION_ZOOM,
 };
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
@@ -231,7 +231,10 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     ease_value.set_visible(false);
     let ease_slider =
         FillSlider::new_with_value_text(&t("Duration"), |value, _, _| format!("{:.0}ms", value));
-    ease_slider.set_range(MIN_ZOOM_EASE_MS as f64, MAX_ZOOM_EASE_MS as f64);
+    ease_slider.set_range(
+        MIN_MOTION_TRANSITION_SECONDS * 1000.0,
+        MAX_MOTION_DURATION_SECONDS * 1000.0,
+    );
     ease_slider.set_increments(20.0, 100.0);
     ease_slider.set_value(1200.0);
     timing_section.append(&ease_value);

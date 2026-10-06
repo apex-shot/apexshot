@@ -1051,6 +1051,7 @@ impl MotionProjectFile {
         motion.selected = None;
         motion.selected_text = None;
         motion.playhead = 0.0;
+        motion.set_duration(self.duration);
     }
 
     /// A display name for a History card: the reserved title, falling back to
@@ -1150,30 +1151,20 @@ pub fn restore_into(motion: &mut MotionState, source_path: &Path) {
 /// still just the per-image defaults writes no sidecar and clears any stale
 /// one, so opening the editor and closing it never leaves a file behind.
 pub fn has_user_edits(motion: &MotionState) -> bool {
-    if !motion.segments.is_empty() || !motion.text_segments.is_empty() {
-        return true;
-    }
-    if motion.watermark.image_file_name.is_some() {
-        return true;
-    }
-    if motion.appearance.background_fill_type != MotionBackgroundFillType::None {
-        return true;
-    }
-    if motion.appearance.wallpaper_image_name.is_some()
-        || motion.appearance.custom_background_image.is_some()
-    {
-        return true;
-    }
-    if motion.appearance.selected_gradient_preset_index.is_some() {
-        return true;
-    }
-    if motion.frame.preset != MotionFramePreset::Standard {
-        return true;
-    }
-    if motion.scene_shadow.preset != MotionSceneShadowPreset::None {
-        return true;
-    }
-    false
+    let defaults = MotionState::default();
+    let appearance_defaults = MotionAppearance {
+        background_padding: motion.appearance.background_padding,
+        ..MotionAppearance::default()
+    };
+    motion.has_segments()
+        || motion.duration != defaults.duration
+        || motion.perspective_intensity != defaults.perspective_intensity
+        || motion.motion_blur != defaults.motion_blur
+        || motion.motion_blur_settings != defaults.motion_blur_settings
+        || motion.appearance != appearance_defaults
+        || motion.watermark != defaults.watermark
+        || motion.frame != defaults.frame
+        || motion.scene_shadow != defaults.scene_shadow
 }
 
 /// Persist `motion` for `source_path`, or clear the sidecar when nothing was
@@ -1246,6 +1237,52 @@ mod tests {
     #[test]
     fn default_state_has_no_user_edits() {
         assert!(!has_user_edits(&MotionState::default()));
+    }
+
+    #[test]
+    fn restored_disabled_motion_clips_do_not_bridge_a_camera_gap() {
+        let mut motion = MotionState::default();
+        motion.add_segment_at(0.0).unwrap();
+        motion.add_segment_at(1.0).unwrap();
+        motion.add_segment_at(2.0).unwrap();
+        motion.segments[1].is_disabled = true;
+        motion.segments[2].from = motion.segments[0].to;
+        let file = to_project(&motion, Path::new("motion-restoration.png"));
+        let mut restored = MotionState::default();
+        file.apply_to(&mut restored);
+
+        assert_eq!(restored.segments[2].from, MotionTransform::default());
+    }
+
+    #[test]
+    fn untouched_capture_padding_and_playhead_do_not_create_a_motion_project() {
+        let mut motion = MotionState::default();
+        motion.appearance.background_padding = 0.0;
+        motion.playhead = 2.0;
+        assert!(!has_user_edits(&motion));
+    }
+
+    #[test]
+    fn motion_duration_and_background_free_card_edits_are_saved() {
+        let mut motion = MotionState::default();
+        motion.set_duration(3.0);
+        assert!(has_user_edits(&motion));
+
+        motion = MotionState::default();
+        motion.appearance.border_radius = 12.0;
+        assert!(has_user_edits(&motion));
+        let source = source_image();
+        persist_motion_session(&motion, &source);
+        let project = load_project(&source).expect("background-free edits must persist");
+        delete_project(&source);
+        std::fs::remove_file(source).unwrap();
+        let mut restored = MotionState::default();
+        project.apply_to(&mut restored);
+        assert_eq!(restored.appearance.border_radius, 12.0);
+        assert_eq!(
+            restored.appearance.background_fill_type,
+            MotionBackgroundFillType::None
+        );
     }
 
     #[test]

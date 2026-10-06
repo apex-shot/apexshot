@@ -570,6 +570,17 @@ fn paint_perspective_card(
             grid[j * cols + i] = (cx + px, cy + py);
         }
     }
+    let corners = [grid[0], grid[div], grid[div * cols + div], grid[div * cols]];
+    let min_x = corners.iter().map(|point| point.0).fold(f64::INFINITY, f64::min).floor() - 1.0;
+    let min_y = corners.iter().map(|point| point.1).fold(f64::INFINITY, f64::min).floor() - 1.0;
+    let max_x = corners.iter().map(|point| point.0).fold(f64::NEG_INFINITY, f64::max).ceil() + 1.0;
+    let max_y = corners.iter().map(|point| point.1).fold(f64::NEG_INFINITY, f64::max).ceil() + 1.0;
+    let _ = context.save();
+    context.rectangle(min_x, min_y, max_x - min_x, max_y - min_y);
+    context.clip();
+    context.push_group();
+    context.reset_clip();
+    context.set_operator(Operator::Source);
     for j in 0..div {
         for i in 0..div {
             let u0 = i as f64 / div as f64;
@@ -589,7 +600,6 @@ fn paint_perspective_card(
                 surface,
                 [s00, s10, s01],
                 [d00, d10, d01],
-                alpha,
                 filter,
             );
             paint_textured_triangle(
@@ -597,11 +607,25 @@ fn paint_perspective_card(
                 surface,
                 [s10, s11, s01],
                 [d10, d11, d01],
-                alpha,
                 filter,
             );
         }
     }
+    let texture = context.pop_group();
+    let _ = context.restore();
+    let Ok(texture) = texture else {
+        return;
+    };
+    let _ = context.save();
+    context.move_to(corners[0].0, corners[0].1);
+    for corner in &corners[1..] {
+        context.line_to(corner.0, corner.1);
+    }
+    context.close_path();
+    context.clip();
+    context.set_source(&texture).ok();
+    context.paint_with_alpha(alpha).ok();
+    let _ = context.restore();
 }
 
 fn paint_textured_triangle(
@@ -609,7 +633,6 @@ fn paint_textured_triangle(
     surface: &ImageSurface,
     src: [(f64, f64); 3],
     dest: [(f64, f64); 3],
-    alpha: f64,
     filter: Filter,
 ) {
     let Some(matrix) = affine_from_three_points(src, dest) else {
@@ -617,6 +640,7 @@ fn paint_textured_triangle(
     };
     let clip = expand_triangle(dest, 0.6);
     let _ = context.save();
+    context.set_antialias(gtk4::cairo::Antialias::None);
     context.move_to(clip[0].0, clip[0].1);
     context.line_to(clip[1].0, clip[1].1);
     context.line_to(clip[2].0, clip[2].1);
@@ -625,11 +649,7 @@ fn paint_textured_triangle(
     context.transform(matrix);
     context.set_source_surface(surface, 0.0, 0.0).ok();
     context.source().set_filter(filter);
-    if alpha < 0.999 {
-        let _ = context.paint_with_alpha(alpha);
-    } else {
-        let _ = context.paint();
-    }
+    let _ = context.paint();
     let _ = context.restore();
 }
 
