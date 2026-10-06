@@ -399,10 +399,7 @@
             }
 
             .recording-editor-custom-popover {
-                /* A fixed, deliberately modest panel: 212px, the width the
-                 * reference keeps. Wide enough for the plane to read, narrow
-                 * enough not to cover the video it is editing. */
-                min-width: 212px;
+                min-width: 260px;
             }
 
             /* The app's floating surface, matching the main editor window
@@ -526,12 +523,8 @@
                 border-radius: 0;
             }
 
-            /* Same surface as the popover above, at the picker's slightly
-             * narrower width: the two cards sit side by side, so a different
-             * radius between them would read as a seam. No drop shadow,
-             * matching the popover above. */
             .recording-editor-gradient-picker-popover .recording-editor-gradient-picker-card {
-                min-width: 190px;
+                min-width: 260px;
                 background: #1c1c1c;
                 border-radius: 10px;
                 border: 1px solid alpha(white, 0.10);

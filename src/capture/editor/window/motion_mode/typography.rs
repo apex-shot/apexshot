@@ -6,7 +6,9 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use crate::i18n::t;
-use crate::recording::editor::window::custom_wallpaper_popover::{build_color_picker, ColorPicker};
+use crate::recording::editor::window::custom_wallpaper_popover::{
+    build_color_picker, build_color_popover, ColorPicker,
+};
 
 type FontChanged = Rc<RefCell<Option<Rc<dyn Fn(String)>>>>;
 type ColorChanged = Rc<RefCell<Option<Rc<dyn Fn((u8, u8, u8))>>>>;
@@ -298,41 +300,6 @@ impl MotionTextColorPicker {
         row.append(&label);
         row.append(&edit);
 
-        let popover = Popover::new();
-        popover.add_css_class("recording-editor-custom-popover");
-        popover.set_has_arrow(false);
-        popover.set_autohide(true);
-        popover.set_position(gtk4::PositionType::Left);
-        popover.set_valign(Align::Start);
-        popover.set_parent(&row);
-        popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(-8, 0, 1, 40)));
-        let body = GtkBox::new(Orientation::Vertical, 0);
-        body.add_css_class("recording-editor-custom-body");
-        let header = GtkBox::new(Orientation::Horizontal, 8);
-        header.add_css_class("recording-editor-custom-header");
-        let title = Label::new(Some(&t("Text color")));
-        title.add_css_class("recording-editor-custom-title");
-        title.set_hexpand(true);
-        title.set_xalign(0.0);
-        let close = Button::new();
-        close.add_css_class("recording-editor-custom-close");
-        close.set_has_frame(false);
-        close.set_tooltip_text(Some(&t("Close")));
-        let close_icon = Image::from_icon_name("window-close-symbolic");
-        close_icon.set_pixel_size(13);
-        close.set_child(Some(&close_icon));
-        close.connect_clicked({
-            let popover = popover.downgrade();
-            move |_| {
-                if let Some(popover) = popover.upgrade() {
-                    popover.popdown();
-                }
-            }
-        });
-        header.append(&title);
-        header.append(&close);
-        body.append(&header);
-
         let changed: ColorChanged = Rc::new(RefCell::new(None));
         let edited = Rc::new(Cell::new(false));
         let repaint: Rc<RefCell<Option<std::rc::Weak<dyn Fn()>>>> = Rc::new(RefCell::new(None));
@@ -370,11 +337,18 @@ impl MotionTextColorPicker {
             },
         );
         *repaint.borrow_mut() = Some(Rc::downgrade(&picker.repaint));
-        body.append(&picker.widget);
-        popover.set_child(Some(&body));
-        popover.connect_show({
-            let repaint = picker.repaint.clone();
-            move |_| repaint()
+        let popover = build_color_popover(&t("Text color"), &picker, None);
+        popover.set_position(gtk4::PositionType::Left);
+        popover.set_valign(Align::Start);
+        popover.set_parent(&row);
+        popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(-8, 0, 1, 40)));
+        row.connect_destroy({
+            let popover = popover.downgrade();
+            move |_| {
+                if let Some(popover) = popover.upgrade() {
+                    popover.unparent();
+                }
+            }
         });
         edit.connect_clicked(move |_| popover.popup());
         Self {
@@ -428,7 +402,7 @@ mod tests {
         assert!(production.contains("build_color_picker("));
         assert!(production.contains("recording-editor-bg-custom-row"));
         assert!(production.contains("recording-editor-bg-custom-edit"));
-        assert!(production.contains("recording-editor-custom-popover"));
+        assert!(production.contains("build_color_popover("));
         assert!(!production.contains("ColorDialog"));
         assert!(!production.contains("DropDown::"));
     }
