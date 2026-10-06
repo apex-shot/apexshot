@@ -11,7 +11,7 @@ use super::widgets::motion_appearance_slider;
 /// Watermark state is a dedicated Motion layer, not part of the background
 /// or card Appearance snapshot. Coordinates are normalized to the card so
 /// the chosen placement remains stable between preview and MP4 export.
-pub(super) fn build_motion_watermark_panel(
+pub(in crate::capture::editor::window) fn build_motion_watermark_panel(
     window: &ApplicationWindow,
     session: &MotionSession,
     preview: &DrawingArea,

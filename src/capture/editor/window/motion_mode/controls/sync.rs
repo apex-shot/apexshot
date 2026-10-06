@@ -2,7 +2,11 @@ use gtk4::prelude::*;
 use std::rc::Rc;
 
 use crate::i18n::t;
-use crate::recording::editor::model::{MotionState, MotionTextAnimation, MotionTimingKind};
+use crate::recording::editor::model::{
+    MotionState, MotionTextAnimation, MotionTimingKind, MAX_MOTION_DURATION_SECONDS,
+    MAX_MOTION_TEXT_TRANSITION_SECONDS, MIN_MOTION_TEXT_TRANSITION_SECONDS,
+    MIN_MOTION_TRANSITION_SECONDS,
+};
 
 use super::super::widgets::format_duration_label;
 use super::super::{MotionModeChrome, MotionModeParts, MotionSession};
@@ -20,6 +24,8 @@ pub(super) fn make_redraw(
     let playhead_overlay = parts.timeline.playhead_overlay.clone();
     let playhead_clock = parts.timeline.playhead_clock.clone();
     let duration_clock = parts.timeline.duration_clock.clone();
+    let duration_slider = parts.shared.duration_slider.clone();
+    let duration_value = parts.shared.duration_value.clone();
     let play_btn = parts.timeline.play_btn.clone();
     let undo_btn = parts.timeline.undo_btn.clone();
     let redo_btn = parts.timeline.redo_btn.clone();
@@ -126,9 +132,24 @@ pub(super) fn make_redraw(
         let blur = runtime.motion.motion_blur;
         let blur_settings = runtime.motion.motion_blur_settings.clamped();
         let perspective_intensity = runtime.motion.perspective_intensity;
-        let transform_timing = runtime.motion.selected_transform_timing();
+        let duration = runtime.motion.duration;
+        let transform_timing = runtime.motion.selected_transform_timing().clamped();
         drop(runtime);
         syncing.set(true);
+        duration_slider.set_value(duration);
+        duration_value.set_label(&format_duration_label(duration));
+        let transition_max_ms = selected
+            .as_ref()
+            .map(|segment| segment.duration().min(MAX_MOTION_DURATION_SECONDS) * 1000.0)
+            .unwrap_or(MAX_MOTION_DURATION_SECONDS * 1000.0)
+            .max(MIN_MOTION_TRANSITION_SECONDS * 1000.0);
+        ease_slider.set_range(MIN_MOTION_TRANSITION_SECONDS * 1000.0, transition_max_ms);
+        let effective_transition = selected
+            .as_ref()
+            .map(|segment| transform_timing.transition_duration.min(segment.duration()))
+            .unwrap_or(transform_timing.transition_duration);
+        ease_slider.set_value(effective_transition * 1000.0);
+        ease_value.set_label(&format!("{:.0}ms", effective_transition * 1000.0));
         blur_slider.set_value(blur);
         blur_value.set_label(&format!("{:.0}%", blur * 100.0));
         blur_shutter_slider.set_value(blur_settings.shutter_angle);
@@ -223,8 +244,35 @@ pub(super) fn make_redraw(
                     | MotionTextAnimation::SlideTop
                     | MotionTextAnimation::SlideBottom
             ));
-            text_typewriter_slider.set_value(segment.typewriter_time * 1000.0);
-            text_transition_slider.set_value(segment.transition_duration * 1000.0);
+            let text_duration = segment.duration();
+            let text_transition_max_ms = text_duration.clamp(
+                MIN_MOTION_TEXT_TRANSITION_SECONDS,
+                MAX_MOTION_TEXT_TRANSITION_SECONDS,
+            ) * 1000.0;
+            text_transition_slider.set_range(
+                MIN_MOTION_TEXT_TRANSITION_SECONDS * 1000.0,
+                text_transition_max_ms,
+            );
+            text_typewriter_slider.set_range(
+                MIN_MOTION_TEXT_TRANSITION_SECONDS * 1000.0,
+                text_transition_max_ms,
+            );
+            let effective_typewriter = segment
+                .typewriter_time
+                .clamp(
+                    MIN_MOTION_TEXT_TRANSITION_SECONDS,
+                    MAX_MOTION_TEXT_TRANSITION_SECONDS,
+                )
+                .min(text_duration);
+            let effective_text_transition = segment
+                .transition_duration
+                .clamp(
+                    MIN_MOTION_TEXT_TRANSITION_SECONDS,
+                    MAX_MOTION_TEXT_TRANSITION_SECONDS,
+                )
+                .min(text_duration);
+            text_typewriter_slider.set_value(effective_typewriter * 1000.0);
+            text_transition_slider.set_value(effective_text_transition * 1000.0);
             for (scope, button) in &text_scope_buttons {
                 button.set_active(*scope == segment.scope);
             }
@@ -249,11 +297,6 @@ pub(super) fn make_redraw(
             pos_x_value.set_label(&format!("{:.0}", segment.to.pos_x * 1000.0));
             pos_y_slider.set_value(segment.to.pos_y);
             pos_y_value.set_label(&format!("{:.0}", segment.to.pos_y * 1000.0));
-            ease_slider.set_value(transform_timing.transition_duration * 1000.0);
-            ease_value.set_label(&format!(
-                "{:.0}ms",
-                transform_timing.transition_duration * 1000.0
-            ));
             scale_slider.set_value(segment.to.scale);
         } else {
             anchor_pad.set_anchor(0.5, 0.5);
@@ -281,7 +324,11 @@ pub(super) fn install_shared(
         let session_runtime = session.runtime.clone();
         let duration_value = parts.shared.duration_value.clone();
         let redraw = redraw.clone();
+        let syncing = parts.shared.inspector_syncing.clone();
         move |slider| {
+            if syncing.get() {
+                return;
+            }
             let duration = MotionState::clamp_duration(slider.value());
             let mut runtime = session_runtime.borrow_mut();
             runtime.begin_motion_edit();

@@ -9,6 +9,8 @@ pub const MAX_MOTION_ZOOM: f64 = 4.0;
 pub const DEFAULT_MOTION_END_PERSPECTIVE: f64 = 0.18;
 /// Recovered transform-timing editor defaults.
 pub const DEFAULT_MOTION_TRANSITION_SECONDS: f64 = 1.2;
+pub const MIN_MOTION_TRANSITION_SECONDS: f64 = 0.0;
+pub const MAX_MOTION_TRANSITION_SECONDS: f64 = MAX_MOTION_DURATION_SECONDS;
 pub const DEFAULT_MOTION_EASING_X1: f64 = 0.25;
 pub const DEFAULT_MOTION_EASING_Y1: f64 = 1.0;
 pub const DEFAULT_MOTION_EASING_X2: f64 = 0.50;
@@ -46,7 +48,7 @@ pub const DEFAULT_MOTION_TEXT_CANVAS_WIDTH: f64 = 0.45;
 pub const DEFAULT_MOTION_TEXT_TYPEWRITER_SECONDS: f64 = 0.6;
 pub const DEFAULT_MOTION_TEXT_TRANSITION_SECONDS: f64 = 0.28;
 pub const MIN_MOTION_TEXT_TRANSITION_SECONDS: f64 = 0.05;
-pub const MAX_MOTION_TEXT_TRANSITION_SECONDS: f64 = 3.0;
+pub const MAX_MOTION_TEXT_TRANSITION_SECONDS: f64 = MAX_MOTION_DURATION_SECONDS;
 pub const DEFAULT_MOTION_TEXT_LINE_SPACING: f64 = 1.0;
 pub const MIN_MOTION_TEXT_LINE_SPACING: f64 = 0.5;
 pub const MAX_MOTION_TEXT_LINE_SPACING: f64 = 3.0;
@@ -148,8 +150,8 @@ impl MotionEffectTransformTiming {
         };
         Self {
             transition_duration: self.transition_duration.clamp(
-                MIN_ZOOM_EASE_MS as f64 / 1000.0,
-                MAX_ZOOM_EASE_MS as f64 / 1000.0,
+                MIN_MOTION_TRANSITION_SECONDS,
+                MAX_MOTION_TRANSITION_SECONDS,
             ),
             easing_x1: finite(self.easing_x1, 0.0).clamp(0.0, 1.0),
             easing_y1: finite(self.easing_y1, 0.0).clamp(0.0, 1.0),

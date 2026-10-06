@@ -408,14 +408,17 @@ pub(super) fn install(
     });
 
     let text_drag_grab = Rc::new(Cell::new(None::<TextDragGrab>));
+    let text_drag_checkpointed = Rc::new(Cell::new(false));
     let preview_drag = GestureDrag::new();
     preview_drag.set_button(1);
     preview_drag.connect_drag_begin({
         let session = session.runtime.clone();
         let preview = parts.shell.preview.clone();
         let text_drag_grab = text_drag_grab.clone();
+        let text_drag_checkpointed = text_drag_checkpointed.clone();
         move |_, x, y| {
             text_drag_grab.set(None);
+            text_drag_checkpointed.set(false);
             let Some(context) = preview_placement_context(&session, &preview) else {
                 return;
             };
@@ -446,6 +449,7 @@ pub(super) fn install(
         let request_live_preview = request_live_preview.clone();
         let syncing = parts.shared.inspector_syncing.clone();
         let text_drag_grab = text_drag_grab.clone();
+        let text_drag_checkpointed = text_drag_checkpointed.clone();
         move |gesture, offset_x, offset_y| {
             let Some(grab) = text_drag_grab.get() else {
                 return;
@@ -472,10 +476,17 @@ pub(super) fn install(
             let Some((pos_x, pos_y)) = position else {
                 return;
             };
-            {
+            let changed = {
                 let mut runtime = session.borrow_mut();
-                runtime.begin_motion_edit();
-                runtime.motion.set_selected_text_pos(pos_x, pos_y);
+                let mut checkpointed = text_drag_checkpointed.get();
+                let changed = runtime.update_motion_drag(&mut checkpointed, |motion| {
+                    motion.set_selected_text_pos(pos_x, pos_y);
+                });
+                text_drag_checkpointed.set(checkpointed);
+                changed
+            };
+            if !changed {
+                return;
             }
             syncing.set(true);
             text_pos_pad.set_text_pos(pos_x, pos_y);
@@ -486,7 +497,11 @@ pub(super) fn install(
     });
     preview_drag.connect_drag_end({
         let text_drag_grab = text_drag_grab.clone();
-        move |_, _, _| text_drag_grab.set(None)
+        let text_drag_checkpointed = text_drag_checkpointed.clone();
+        move |_, _, _| {
+            text_drag_grab.set(None);
+            text_drag_checkpointed.set(false);
+        }
     });
     parts.shell.preview.add_controller(preview_drag);
 }

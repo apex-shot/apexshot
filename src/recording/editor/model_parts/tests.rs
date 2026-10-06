@@ -2508,6 +2508,309 @@ fn ease_timing_keeps_the_recovered_bezier_and_does_not_overshoot() {
 }
 
 #[test]
+fn motion_ease_matches_parametric_bezier_reference_points() {
+    let coordinate = |u: f64, p1: f64, p2: f64| {
+        ((1.0 - 3.0 * p2 + 3.0 * p1) * u + 3.0 * p2 - 6.0 * p1) * u * u
+            + 3.0 * p1 * u
+    };
+    for (x1, y1, x2, y2) in [
+        (0.42, 0.0, 0.58, 1.0),
+        (0.25, 1.0, 0.50, 1.0),
+        (0.0, 0.0, 1.0, 1.0),
+        (0.0, 0.8, 0.0, 0.2),
+        (1.0, 0.2, 1.0, 0.8),
+        (0.9, 0.1, 0.1, 0.9),
+    ] {
+        let timing = MotionEffectTransformTiming {
+            easing_x1: x1,
+            easing_y1: y1,
+            easing_x2: x2,
+            easing_y2: y2,
+            ..MotionEffectTransformTiming::default()
+        };
+        for index in 0..=1000 {
+            let u = index as f64 / 1000.0;
+            let time = coordinate(u, x1, x2);
+            let reference = coordinate(u, y1, y2);
+            assert!(
+                (timing.apply(time) - reference).abs() < 1e-6,
+                "curve {x1}/{y1}/{x2}/{y2}, time {time}, expected {reference}"
+            );
+        }
+    }
+}
+
+#[test]
+fn motion_spring_matches_an_independent_mass_spring_simulation() {
+    for bounce in [0.0_f64, 0.05, 0.2, 0.35, 0.5] {
+        let timing = MotionEffectTransformTiming {
+            kind: MotionTimingKind::Spring,
+            spring_bounce: bounce,
+            ..MotionEffectTransformTiming::default()
+        };
+        let (damping, frequency) = if bounce == 0.0 {
+            let mut frequency = 6.0_f64;
+            for _ in 0..10 {
+                let decay = (-frequency).exp();
+                frequency += ((1.0 + frequency) * decay - 0.01) / (frequency * decay);
+            }
+            (1.0, frequency)
+        } else {
+            let damping = -bounce.ln() / bounce.ln().hypot(std::f64::consts::PI);
+            (damping, -0.01_f64.ln() / damping)
+        };
+        let acceleration = |position: f64, velocity: f64| {
+            frequency * frequency * (1.0 - position) - 2.0 * damping * frequency * velocity
+        };
+        let dt = 0.0001;
+        let (mut position, mut velocity) = (0.0, 0.0);
+        for step in 1..10000 {
+            let a1 = acceleration(position, velocity);
+            let v2 = velocity + a1 * dt * 0.5;
+            let a2 = acceleration(position + velocity * dt * 0.5, v2);
+            let v3 = velocity + a2 * dt * 0.5;
+            let a3 = acceleration(position + v2 * dt * 0.5, v3);
+            let v4 = velocity + a3 * dt;
+            let a4 = acceleration(position + v3 * dt, v4);
+            position += dt * (velocity + 2.0 * v2 + 2.0 * v3 + v4) / 6.0;
+            velocity += dt * (a1 + 2.0 * a2 + 2.0 * a3 + a4) / 6.0;
+            if step % 100 == 0 {
+                let progress = step as f64 * dt;
+                assert!(
+                    (timing.apply(progress) - position).abs() < 0.0003,
+                    "bounce {bounce}, progress {progress}, physical response {position}"
+                );
+            }
+        }
+        assert!((position - 1.0).abs() < 0.011);
+        assert_eq!(timing.apply(1.0), 1.0);
+    }
+}
+
+#[test]
+fn motion_transition_duration_scales_the_complete_camera_response() {
+    for kind in [MotionTimingKind::Ease, MotionTimingKind::Spring] {
+        let mut motion = MotionState::default();
+        let clip = motion.add_segment_at(0.0).unwrap();
+        motion.set_segment_range(clip, 0.0, 4.0);
+        motion.set_selected_end_scale(2.0);
+        motion.set_selected_end_pos_x(0.5);
+        motion.set_selected_end_pos_y(-0.25);
+        motion.set_selected_end_pitch(8.0);
+        motion.set_selected_end_yaw(12.0);
+        motion.set_selected_end_roll(6.0);
+        let mut timing = MotionEffectTransformTiming {
+            kind,
+            spring_bounce: 0.35,
+            transition_duration: 0.4,
+            ..MotionEffectTransformTiming::default()
+        };
+        motion.set_transform_timing(timing);
+        let short = motion.sample(0.2);
+        timing.transition_duration = 0.8;
+        motion.set_transform_timing(timing);
+        assert_eq!(short, motion.sample(0.4));
+        let response = timing.apply(0.5);
+        assert!((short.scale - (1.0 + response)).abs() < 1e-9);
+        assert!((short.pos_x - 0.5 * response).abs() < 1e-9);
+        assert!((short.pos_y + 0.25 * response).abs() < 1e-9);
+        assert!((short.rotation_x - 8.0 * response).abs() < 1e-9);
+        assert!((short.rotation_y - 12.0 * response).abs() < 1e-9);
+        assert!((short.rotation_z - 6.0 * response).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn motion_edge_resizing_retimes_every_transform_without_changing_the_curve() {
+    let pose_values = |pose: MotionTransform| [
+        pose.scale, pose.rotation_x, pose.rotation_y, pose.rotation_z,
+        pose.perspective, pose.pos_x, pose.pos_y,
+    ];
+    for kind in [MotionTimingKind::Ease, MotionTimingKind::Spring] {
+        let mut motion = MotionState::default();
+        let clip = motion.add_segment_at(0.0).unwrap();
+        motion.set_selected_end_scale(2.5);
+        motion.set_selected_end_pitch(8.0);
+        motion.set_selected_end_yaw(-12.0);
+        motion.set_selected_end_roll(6.0);
+        motion.set_selected_end_pos_x(0.4);
+        motion.set_selected_end_pos_y(-0.25);
+        motion.set_selected_zoom_anchor(0.2, 0.8);
+        motion.set_transform_timing(MotionEffectTransformTiming {
+            kind, spring_bounce: 0.35, transition_duration: 0.75,
+            ..MotionEffectTransformTiming::default()
+        });
+        let before = motion.segments[clip].clone();
+        let samples: Vec<_> = [0.15, 0.3, 0.6, 0.9]
+            .into_iter().map(|time| (time, motion.sample(time))).collect();
+
+        motion.resize_segment_range(clip, 1.0, 5.0);
+
+        let resized = motion.selected_segment().unwrap();
+        assert_eq!(resized.to, before.to);
+        assert_eq!(resized.zoom_anchor_x, before.zoom_anchor_x);
+        assert_eq!(resized.zoom_anchor_y, before.zoom_anchor_y);
+        assert_eq!(resized.timing.kind, before.timing.kind);
+        assert_eq!(resized.timing.spring_bounce, before.timing.spring_bounce);
+        assert!((resized.timing.transition_duration - 3.0).abs() < 1e-9);
+        for (time, expected) in samples {
+            let actual = motion.sample(1.0 + time * 4.0);
+            for (actual, expected) in pose_values(actual).into_iter().zip(pose_values(expected)) {
+                assert!((actual - expected).abs() < 1e-9, "{kind:?}, time {time}");
+            }
+        }
+    }
+}
+
+#[test]
+fn resizing_the_default_motion_clip_stretches_its_effective_transition() {
+    let mut motion = MotionState::default();
+    let clip = motion.add_segment_at(0.0).unwrap();
+    motion.resize_segment_range(clip, 0.0, 4.0);
+    assert_eq!(motion.segments[clip].timing.transition_duration, 4.0);
+    assert_eq!(motion.segments[clip].timing.clamped().transition_duration, 4.0);
+    motion.resize_segment_range(clip, 0.0, 0.5);
+    assert_eq!(motion.segments[clip].timing.transition_duration, 0.5);
+}
+
+#[test]
+fn text_edge_resizing_preserves_each_animation_at_equivalent_local_times() {
+    for animation in MotionTextAnimation::ALL {
+        let mut motion = MotionState::default();
+        let clip = motion.add_text_at(0.0).unwrap();
+        motion.set_selected_text_animation(animation);
+        let before = motion.text_segments[clip].clone();
+        let expected = before.sample(0.15).unwrap();
+
+        motion.resize_text_range(clip, 1.0, 5.0);
+
+        let resized = &motion.text_segments[clip];
+        let actual = resized.sample(1.6).unwrap();
+        assert_eq!(resized.text, before.text);
+        assert_eq!(resized.format, before.format);
+        assert_eq!(resized.pos_x, before.pos_x);
+        assert_eq!(resized.pos_y, before.pos_y);
+        assert!((resized.transition_duration - before.transition_duration * 4.0).abs() < 1e-9);
+        assert!((resized.typewriter_time - before.typewriter_time * 4.0).abs() < 1e-9);
+        for (actual, expected) in [actual.alpha, actual.offset_x, actual.offset_y, actual.reveal]
+            .into_iter().zip([expected.alpha, expected.offset_x, expected.offset_y, expected.reveal]) {
+            assert!((actual - expected).abs() < 1e-9, "{animation:?}");
+        }
+    }
+}
+
+#[test]
+fn text_resizing_does_not_ratchet_timings_when_dragging_through_a_short_span() {
+    let mut motion = MotionState::default();
+    let clip = motion.add_text_at(0.0).unwrap();
+    motion.set_text_range(clip, 0.0, 4.0);
+    let before = motion.text_segments[clip].clone();
+    motion.resize_text_range(clip, 0.0, 0.25);
+    motion.resize_text_range(clip, 0.0, 4.0);
+    assert_eq!(motion.text_segments[clip], before);
+}
+
+#[test]
+fn moving_clips_preserves_their_animation_durations() {
+    let mut motion = MotionState::default();
+    motion.set_duration(10.0);
+    let clip = motion.add_segment_at(0.0).unwrap();
+    motion.resize_segment_range(clip, 0.0, 4.0);
+    let timing = motion.segments[clip].timing;
+    motion.move_segment(clip, 5.0);
+    assert_eq!(motion.selected_segment().unwrap().timing, timing);
+    let text = motion.add_text_at(0.0).unwrap();
+    motion.resize_text_range(text, 0.0, 4.0);
+    let before = motion.text_segments[text].clone();
+    motion.move_text(text, 5.0);
+    let moved = motion.selected_text_segment().unwrap();
+    assert_eq!(moved.transition_duration, before.transition_duration);
+    assert_eq!(moved.typewriter_time, before.typewriter_time);
+}
+
+#[test]
+fn invalid_and_noop_resizes_do_not_change_clip_timings() {
+    let mut motion = MotionState::default();
+    motion.add_segment_at(0.0).unwrap();
+    motion.add_segment_at(2.0).unwrap();
+    motion.selected = Some(0);
+    let before = motion.clone();
+    motion.resize_segment_range(0, 0.0, 2.5);
+    assert_eq!(motion, before);
+    motion.resize_segment_range(0, 0.0, 0.1);
+    assert_eq!(motion, before);
+    motion.resize_segment_range(0, 0.0, 1.0);
+    assert_eq!(motion, before);
+    motion.add_text_at(0.0).unwrap();
+    motion.add_text_at(2.0).unwrap();
+    motion.selected_text = Some(0);
+    let before = motion.clone();
+    motion.resize_text_range(0, 0.0, 2.5);
+    assert_eq!(motion, before);
+    motion.resize_text_range(0, 0.0, 0.1);
+    assert_eq!(motion, before);
+}
+
+#[test]
+fn source_duration_changes_retime_both_full_length_lanes() {
+    let mut motion = MotionState::default();
+    let clip = motion.add_segment_at(0.0).unwrap();
+    motion.set_segment_range(clip, 0.0, 6.0);
+    motion.set_selected_transition_ms(3000);
+    let text = motion.add_text_at(0.0).unwrap();
+    motion.set_text_range(text, 0.0, 6.0);
+    motion.set_selected_text_typewriter_time(3.0);
+    motion.set_selected_text_transition_duration(1.5);
+    motion.set_duration(10.0);
+    assert_eq!(motion.segments[clip].end, 10.0);
+    assert_eq!(motion.segments[clip].timing.transition_duration, 5.0);
+    assert_eq!(motion.text_segments[text].end, 10.0);
+    assert_eq!(motion.text_segments[text].typewriter_time, 5.0);
+    assert_eq!(motion.text_segments[text].transition_duration, 2.5);
+    motion.set_duration(3.0);
+    assert_eq!(motion.segments[clip].timing.transition_duration, 1.5);
+    assert_eq!(motion.text_segments[text].typewriter_time, 1.5);
+    assert_eq!(motion.text_segments[text].transition_duration, 0.75);
+}
+
+#[test]
+fn a_short_typewriter_clip_reveals_the_whole_title_on_its_last_visible_frame() {
+    let mut motion = MotionState::default();
+    let text = motion.add_text_at(0.0).unwrap();
+    motion.set_selected_text_animation(MotionTextAnimation::Typewriter);
+    motion.set_text_range(text, 0.0, 0.25);
+    let segment = &motion.text_segments[text];
+    let last_frame = segment.end - 1.0 / f64::from(MOTION_EXPORT_FPS);
+    assert_eq!(segment.sample(last_frame).unwrap().reveal, 1.0);
+    assert_eq!(segment.entrance_seconds(), 0.25);
+    motion.set_selected_text_animation(MotionTextAnimation::None);
+    assert_eq!(motion.text_segments[text].entrance_seconds(), 0.0);
+}
+
+#[test]
+fn text_transitions_can_follow_a_full_ten_second_clip() {
+    for animation in [MotionTextAnimation::Typewriter, MotionTextAnimation::Fade] {
+        let mut motion = MotionState::default();
+        motion.set_duration(10.0);
+        let text = motion.add_text_at(0.0).unwrap();
+        motion.set_selected_text_animation(animation);
+        motion.set_selected_text_typewriter_time(1.0);
+        motion.set_selected_text_transition_duration(1.0);
+        motion.resize_text_range(text, 0.0, 10.0);
+        let segment = &motion.text_segments[text];
+        assert_eq!(segment.entrance_seconds(), 10.0);
+        assert_eq!(segment.typewriter_time, 10.0);
+        assert_eq!(segment.transition_duration, 10.0);
+        let early = segment.sample(1.0).unwrap();
+        match animation {
+            MotionTextAnimation::Typewriter => assert!((early.reveal - 0.1).abs() < 1e-9),
+            MotionTextAnimation::Fade => assert!((early.alpha - 0.271).abs() < 1e-9),
+            _ => unreachable!(),
+        }
+    }
+}
+
+#[test]
 fn spring_timing_settles_by_the_end_of_its_duration() {
     for bounce in [0.0, DEFAULT_MOTION_SPRING_BOUNCE, MAX_MOTION_SPRING_BOUNCE] {
         let timing = MotionEffectTransformTiming {

@@ -13,16 +13,18 @@ impl MotionState {
         if self.playhead > self.duration {
             self.playhead = self.duration;
         }
-        if self.segments.len() == 1 {
-            let segment = &mut self.segments[0];
-            if segment.start.abs() < 1e-6 && (segment.end - previous).abs() < 1e-6 {
-                segment.end = self.duration;
-            }
-        }
+        let full_motion_lane = self.segments.len() == 1;
+        let full_text_lane = self.text_segments.len() == 1;
         self.segments
             .retain(|segment| segment.start < self.duration);
         for segment in &mut self.segments {
-            segment.end = segment.end.min(self.duration);
+            let end = if full_motion_lane && segment.start.abs() < 1e-6 && (segment.end - previous).abs() < 1e-6 {
+                self.duration
+            } else {
+                segment.end.min(self.duration)
+            };
+            retime_motion_clip(segment, end - segment.start);
+            segment.end = end;
         }
         if let Some(index) = self.selected {
             if index >= self.segments.len() {
@@ -32,7 +34,13 @@ impl MotionState {
         self.text_segments
             .retain(|segment| segment.start < self.duration);
         for segment in &mut self.text_segments {
-            segment.end = segment.end.min(self.duration);
+            let end = if full_text_lane && segment.start.abs() < 1e-6 && (segment.end - previous).abs() < 1e-6 {
+                self.duration
+            } else {
+                segment.end.min(self.duration)
+            };
+            retime_text_clip(segment, end - segment.start);
+            segment.end = end;
         }
         if let Some(index) = self.selected_text {
             if index >= self.text_segments.len() {
@@ -220,6 +228,14 @@ impl MotionState {
     }
 
     pub fn set_segment_range(&mut self, index: usize, start: f64, end: f64) {
+        self.set_segment_range_inner(index, start, end, false);
+    }
+
+    pub fn resize_segment_range(&mut self, index: usize, start: f64, end: f64) {
+        self.set_segment_range_inner(index, start, end, true);
+    }
+
+    fn set_segment_range_inner(&mut self, index: usize, start: f64, end: f64, retime: bool) {
         if self.segments.get(index).is_none() {
             return;
         }
@@ -237,6 +253,9 @@ impl MotionState {
             return;
         }
         if let Some(segment) = self.segments.get_mut(index) {
+            if retime {
+                retime_motion_clip(segment, end - start);
+            }
             segment.start = start;
             segment.end = end;
         }
@@ -312,7 +331,10 @@ impl MotionState {
     /// Writes the transition duration into the selected clip's timing, so a
     /// slider nudge no longer rewrites every move on the track.
     pub fn set_selected_transition_ms(&mut self, transition_ms: u32) {
-        let transition_ms = transition_ms.clamp(MIN_ZOOM_EASE_MS, MAX_ZOOM_EASE_MS);
+        let transition_ms = transition_ms.clamp(
+            (MIN_MOTION_TRANSITION_SECONDS * 1000.0) as u32,
+            (MAX_MOTION_TRANSITION_SECONDS * 1000.0) as u32,
+        );
         if let Some(segment) = self.selected_segment_mut() {
             segment.timing.transition_duration = transition_ms as f64 / 1000.0;
         }
@@ -483,6 +505,14 @@ impl MotionState {
     }
 
     pub fn set_text_range(&mut self, index: usize, start: f64, end: f64) {
+        self.set_text_range_inner(index, start, end, false);
+    }
+
+    pub fn resize_text_range(&mut self, index: usize, start: f64, end: f64) {
+        self.set_text_range_inner(index, start, end, true);
+    }
+
+    fn set_text_range_inner(&mut self, index: usize, start: f64, end: f64, retime: bool) {
         if self.text_segments.get(index).is_none() {
             return;
         }
@@ -500,6 +530,9 @@ impl MotionState {
             return;
         }
         if let Some(segment) = self.text_segments.get_mut(index) {
+            if retime {
+                retime_text_clip(segment, end - start);
+            }
             segment.start = start;
             segment.end = end;
         }
@@ -548,7 +581,7 @@ impl MotionState {
     pub fn set_selected_text_typewriter_time(&mut self, typewriter_time: f64) {
         if let Some(index) = self.selected_text {
             if let Some(segment) = self.text_segments.get_mut(index) {
-                segment.typewriter_time = typewriter_time.max(0.0);
+                segment.typewriter_time = typewriter_time.clamp(0.0, MAX_MOTION_TEXT_TRANSITION_SECONDS);
             }
         }
     }
@@ -698,7 +731,7 @@ impl MotionState {
         let transform = if let Some(segment) = self
             .segments
             .iter()
-            .find(|segment| time >= segment.start && time <= segment.end)
+            .find(|segment| time >= segment.start && time <= segment.end && !segment.is_disabled)
         {
             segment.sample(time)
         } else if let Some((index, previous)) = self
@@ -733,22 +766,57 @@ impl MotionState {
     /// on `MotionEffectSegment`, not in the global compositor configuration.
     pub fn zoom_anchor_at(&self, time: f64) -> (f64, f64) {
         let time = time.clamp(0.0, self.duration.max(0.0));
-        self.segments
+        let Some((index, segment)) = self.segments
             .iter()
-            .find(|segment| time >= segment.start && time <= segment.end && !segment.is_disabled)
+            .enumerate()
+            .find(|(_, segment)| time >= segment.start && time <= segment.end && !segment.is_disabled)
             .or_else(|| {
                 self.segments
                     .iter()
+                    .enumerate()
                     .rev()
-                    .find(|segment| time > segment.end && !segment.is_disabled)
+                    .find(|(_, segment)| time > segment.end && !segment.is_disabled)
             })
-            .map(|segment| {
-                (
-                    segment.zoom_anchor_x.clamp(0.0, 1.0),
-                    segment.zoom_anchor_y.clamp(0.0, 1.0),
-                )
-            })
-            .unwrap_or((0.5, 0.5))
+        else {
+            return (0.5, 0.5);
+        };
+        let authored_anchor = |segment: &MotionSegment| (
+            segment.zoom_anchor_x.clamp(0.0, 1.0),
+            segment.zoom_anchor_y.clamp(0.0, 1.0),
+        );
+        let blend = |from: (f64, f64), to: (f64, f64), progress: f64| (
+            from.0 + (to.0 - from.0) * progress,
+            from.1 + (to.1 - from.1) * progress,
+        );
+        let mut previous_end = None;
+        let mut previous_anchor = (0.5, 0.5);
+        for previous in self.segments[..index].iter().filter(|segment| !segment.is_disabled) {
+            let authored = authored_anchor(previous);
+            previous_anchor = if previous_end.is_some_and(|end: f64| (end - previous.start).abs() <= 1e-9) {
+                blend(previous_anchor, authored, previous.intensity.clamp(0.0, 1.0))
+            } else {
+                authored
+            };
+            previous_end = Some(previous.end);
+        }
+        let authored = authored_anchor(segment);
+        let from = if previous_end.is_some_and(|end| (end - segment.start).abs() <= 1e-9) {
+            previous_anchor
+        } else {
+            authored
+        };
+        let target = blend(from, authored, segment.intensity.clamp(0.0, 1.0));
+        if time > segment.end {
+            return target;
+        }
+        let timing = segment.timing.clamped();
+        let ease = timing.transition_duration.min(segment.duration());
+        let progress = if ease <= f64::EPSILON {
+            1.0
+        } else {
+            timing.apply(((time - segment.start) / ease).clamp(0.0, 1.0))
+        };
+        blend(from, target, progress)
     }
 
     /// Each move starts from the pose the timeline leaves at its start. A
@@ -759,16 +827,14 @@ impl MotionState {
     fn reconcile_effect_segments(&mut self) {
         let mut previous_end = 0.0;
         let mut previous_pose = MotionTransform::default();
-        for segment in &mut self.segments {
+        for segment in self.segments.iter_mut().filter(|segment| !segment.is_disabled) {
             segment.from = if segment.start <= previous_end + 1e-9 {
                 previous_pose
             } else {
                 MotionTransform::default()
             };
             previous_end = segment.end;
-            if !segment.is_disabled {
-                previous_pose = segment.target_transform();
-            }
+            previous_pose = segment.target_transform();
         }
     }
 
@@ -808,6 +874,24 @@ impl MotionState {
         }
         nearest
     }
+}
+
+fn retime_motion_clip(segment: &mut MotionSegment, new_span: f64) {
+    let old_span = segment.duration();
+    if old_span <= f64::EPSILON || (new_span - old_span).abs() < 1e-9 {
+        return;
+    }
+    segment.timing.transition_duration =
+        segment.timing.clamped().transition_duration.min(old_span) * new_span / old_span;
+}
+
+fn retime_text_clip(segment: &mut MotionTextSegment, new_span: f64) {
+    let old_span = segment.duration();
+    if old_span <= f64::EPSILON || (new_span - old_span).abs() < 1e-9 {
+        return;
+    }
+    segment.transition_duration = segment.transition_duration.max(0.0).min(old_span) * new_span / old_span;
+    segment.typewriter_time = segment.typewriter_time.max(0.0).min(old_span) * new_span / old_span;
 }
 
 fn duplicate_span_after(

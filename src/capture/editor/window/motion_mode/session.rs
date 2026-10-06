@@ -20,6 +20,7 @@ const MOTION_HISTORY_LIMIT: usize = 100;
 /// Edits arriving within this window (one slider drag, one text burst) share
 /// a single undo step instead of flooding the stack.
 const MOTION_EDIT_COALESCE: Duration = Duration::from_millis(350);
+const AUTO_PREVIEW_QUIET_PERIOD: Duration = Duration::from_millis(300);
 
 /// Cached scene-only preview. Motion's card, text, and watermark remain
 /// dynamic, but the checkerboard/background layer can be reused for every
@@ -41,6 +42,38 @@ pub(in crate::capture::editor::window) struct MotionBackdropCache {
 pub(in crate::capture::editor::window) enum MotionHoverTrack {
     Motion,
     Text,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::capture::editor::window) enum AutoPreviewLane {
+    Motion,
+    Text,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(in crate::capture::editor::window) struct PendingAutoPreview {
+    pub(in crate::capture::editor::window) lane: AutoPreviewLane,
+    pub(in crate::capture::editor::window) start: f64,
+    pub(in crate::capture::editor::window) end: f64,
+    pub(in crate::capture::editor::window) pose_time: f64,
+    clip_end: f64,
+    pub(in crate::capture::editor::window) ready_at: Instant,
+}
+
+impl PendingAutoPreview {
+    fn matches_selection(self, motion: &MotionState) -> bool {
+        let selected_range = match self.lane {
+            AutoPreviewLane::Motion => motion
+                .selected_segment()
+                .map(|segment| (segment.start, segment.end)),
+            AutoPreviewLane::Text => motion
+                .selected_text_segment()
+                .map(|segment| (segment.start, segment.end)),
+        };
+        selected_range.is_some_and(|(start, end)| {
+            (start - self.start).abs() <= 1e-6 && (end - self.clip_end).abs() <= 1e-6
+        })
+    }
 }
 
 /// A finished background-thread composite. The preview paint blits this;
@@ -105,6 +138,7 @@ pub(in crate::capture::editor::window) struct MotionRuntime {
     pub(in crate::capture::editor::window) playing: bool,
     pub(in crate::capture::editor::window) live_preview: bool,
     pub(in crate::capture::editor::window) last_tick: Option<Instant>,
+    pub(in crate::capture::editor::window) pending_auto_preview: Option<PendingAutoPreview>,
     /// Playhead time at which an edit-triggered transition preview stops.
     pub(in crate::capture::editor::window) preview_end: Option<f64>,
     /// UI-only selection of the source (image) lane. Motion and Text selection
@@ -150,6 +184,7 @@ impl MotionRuntime {
             playing: false,
             live_preview: false,
             last_tick: None,
+            pending_auto_preview: None,
             preview_end: None,
             source_selected: false,
             hover_time: None,
@@ -168,6 +203,7 @@ impl MotionRuntime {
     /// the first update inside the coalesce window pushes the checkpoint and
     /// the rest reuse it.
     pub(in crate::capture::editor::window) fn begin_motion_edit(&mut self) {
+        self.stop_auto_preview();
         self.preview_content_gen = self.preview_content_gen.wrapping_add(1);
         let new_burst = self
             .last_edit
@@ -182,6 +218,27 @@ impl MotionRuntime {
         self.last_edit = None;
         self.begin_motion_edit();
         self.last_edit = None;
+    }
+
+    pub(in crate::capture::editor::window) fn update_motion_drag(
+        &mut self,
+        checkpointed: &mut bool,
+        update: impl FnOnce(&mut MotionState),
+    ) -> bool {
+        let mut candidate = self.motion.clone();
+        update(&mut candidate);
+        if candidate == self.motion {
+            return false;
+        }
+        if *checkpointed {
+            self.stop_auto_preview();
+            self.preview_content_gen = self.preview_content_gen.wrapping_add(1);
+        } else {
+            self.begin_motion_command();
+            *checkpointed = true;
+        }
+        self.motion = candidate;
+        true
     }
 
     fn push_motion_history(&mut self) {
@@ -217,6 +274,7 @@ impl MotionRuntime {
     }
 
     pub(in crate::capture::editor::window) fn undo_motion(&mut self) -> bool {
+        self.stop_auto_preview();
         // A drag that ended without changing anything still leaves a
         // checkpoint behind; skip those so Undo always makes progress.
         while self.undo_stack.last() == Some(&self.motion) {
@@ -234,6 +292,7 @@ impl MotionRuntime {
     }
 
     pub(in crate::capture::editor::window) fn redo_motion(&mut self) -> bool {
+        self.stop_auto_preview();
         let Some(next) = self.redo_stack.pop() else {
             return false;
         };
@@ -247,6 +306,89 @@ impl MotionRuntime {
 
     pub(in crate::capture::editor::window) fn motion_history_availability(&self) -> (bool, bool) {
         (!self.undo_stack.is_empty(), !self.redo_stack.is_empty())
+    }
+
+    pub(in crate::capture::editor::window) fn queue_auto_preview(
+        &mut self,
+        lane: AutoPreviewLane,
+        start: f64,
+        end: f64,
+        pose_time: f64,
+        now: Instant,
+    ) {
+        if self.playing && self.preview_end.is_none() {
+            self.cancel_auto_preview();
+            return;
+        }
+
+        let clip_end = match lane {
+            AutoPreviewLane::Motion => self.motion.selected_segment().map(|segment| segment.end),
+            AutoPreviewLane::Text => self
+                .motion
+                .selected_text_segment()
+                .map(|segment| segment.end),
+        };
+
+        self.cancel_auto_preview();
+        self.playing = false;
+        self.last_tick = None;
+        self.preview_end = None;
+        self.hover_time = None;
+        self.hover_track = None;
+        self.live_preview = false;
+        self.motion.playhead = pose_time;
+        let Some(clip_end) = clip_end else {
+            return;
+        };
+        if end <= start {
+            return;
+        }
+        self.pending_auto_preview = Some(PendingAutoPreview {
+            lane,
+            start,
+            end,
+            pose_time,
+            clip_end,
+            ready_at: now + AUTO_PREVIEW_QUIET_PERIOD,
+        });
+    }
+
+    pub(in crate::capture::editor::window) fn take_ready_auto_preview(
+        &mut self,
+        now: Instant,
+        drag_active: bool,
+    ) -> Option<PendingAutoPreview> {
+        self.cancel_stale_auto_preview();
+        let pending = self.pending_auto_preview?;
+        if drag_active || now < pending.ready_at {
+            return None;
+        }
+        self.pending_auto_preview.take()
+    }
+
+    pub(in crate::capture::editor::window) fn cancel_stale_auto_preview(&mut self) {
+        let Some(pending) = self.pending_auto_preview else {
+            return;
+        };
+        if (self.playing && self.preview_end.is_none())
+            || !pending.matches_selection(&self.motion)
+            || (self.motion.playhead - pending.pose_time).abs() > 1e-6
+        {
+            self.cancel_auto_preview();
+        }
+    }
+
+    pub(in crate::capture::editor::window) fn cancel_auto_preview(&mut self) {
+        self.pending_auto_preview = None;
+    }
+
+    pub(in crate::capture::editor::window) fn stop_auto_preview(&mut self) {
+        self.cancel_auto_preview();
+        if self.preview_end.is_some() {
+            self.playing = false;
+            self.last_tick = None;
+            self.preview_end = None;
+        }
     }
 
     /// Entering or leaving Motion starts a fresh history: the track is
@@ -340,6 +482,7 @@ impl MotionSession {
         runtime.playing = false;
         runtime.live_preview = false;
         runtime.last_tick = None;
+        runtime.cancel_auto_preview();
         runtime.preview_end = None;
         runtime.source_selected = false;
         runtime.hover_time = None;
@@ -413,6 +556,7 @@ impl MotionSession {
         runtime.playing = false;
         runtime.live_preview = false;
         runtime.last_tick = None;
+        runtime.cancel_auto_preview();
         runtime.preview_end = None;
         runtime.motion.playhead = 0.0;
         runtime.motion.segments.clear();
@@ -952,10 +1096,234 @@ mod crop_tests {
 mod tests {
     use super::*;
 
+    fn request_at(lane: AutoPreviewLane) -> (AutoPreviewLane, f64, f64, f64) {
+        (lane, 0.0, 0.3, 0.2)
+    }
+
     fn runtime_with_clip() -> MotionRuntime {
         let mut runtime = MotionRuntime::new();
         runtime.motion.add_segment_at(0.0).expect("motion clip");
         runtime
+    }
+
+    #[test]
+    fn many_auto_preview_requests_coalesce_until_the_latest_quiet_deadline() {
+        let mut runtime = runtime_with_clip();
+        let now = Instant::now();
+        let request = request_at(AutoPreviewLane::Motion);
+        runtime.queue_auto_preview(request.0, request.1, request.2, request.3, now);
+        runtime.queue_auto_preview(
+            request.0,
+            request.1,
+            request.2,
+            request.3,
+            now + Duration::from_millis(200),
+        );
+
+        assert!(runtime
+            .take_ready_auto_preview(now + Duration::from_millis(499), false)
+            .is_none());
+        assert_eq!(
+            runtime
+                .take_ready_auto_preview(now + Duration::from_millis(500), false)
+                .map(|pending| pending.ready_at),
+            Some(now + Duration::from_millis(500))
+        );
+        assert!(runtime
+            .take_ready_auto_preview(now + Duration::from_secs(1), false)
+            .is_none());
+    }
+
+    #[test]
+    fn held_drag_defers_a_ready_auto_preview_until_release() {
+        let mut runtime = runtime_with_clip();
+        let now = Instant::now();
+        let request = request_at(AutoPreviewLane::Motion);
+        runtime.queue_auto_preview(request.0, request.1, request.2, request.3, now);
+
+        assert!(runtime
+            .take_ready_auto_preview(now + AUTO_PREVIEW_QUIET_PERIOD, true)
+            .is_none());
+        assert!(!runtime.playing);
+        assert!(runtime.pending_auto_preview.is_some());
+        assert!(runtime
+            .take_ready_auto_preview(now + AUTO_PREVIEW_QUIET_PERIOD, false)
+            .is_some());
+    }
+
+    #[test]
+    fn new_edits_stop_automatic_playback_and_show_the_final_pose() {
+        let mut runtime = runtime_with_clip();
+        let now = Instant::now();
+        runtime.playing = true;
+        runtime.last_tick = Some(now);
+        runtime.preview_end = Some(2.0);
+        runtime.motion.playhead = 0.1;
+
+        runtime.queue_auto_preview(AutoPreviewLane::Motion, 0.0, 0.3, 0.2, now);
+
+        assert!(!runtime.playing);
+        assert_eq!(runtime.last_tick, None);
+        assert_eq!(runtime.preview_end, None);
+        assert_eq!(runtime.motion.playhead, 0.2);
+        assert!(runtime.pending_auto_preview.is_some());
+    }
+
+    #[test]
+    fn zero_length_auto_preview_keeps_the_pose_without_scheduling_playback() {
+        let mut runtime = runtime_with_clip();
+        runtime
+            .motion
+            .add_segment_at(1.0)
+            .expect("adjacent motion clip");
+        let now = Instant::now();
+        runtime.motion.playhead = 0.4;
+
+        runtime.queue_auto_preview(AutoPreviewLane::Motion, 1.0, 1.0, 1.001, now);
+
+        assert_eq!(runtime.motion.playhead, 1.001);
+        assert!(!runtime.playing);
+        assert!(runtime.pending_auto_preview.is_none());
+    }
+
+    #[test]
+    fn manual_playback_ignores_auto_preview_requests_without_seeking() {
+        let mut runtime = runtime_with_clip();
+        let now = Instant::now();
+        runtime.playing = true;
+        runtime.last_tick = Some(now);
+        runtime.motion.playhead = 0.7;
+
+        runtime.queue_auto_preview(AutoPreviewLane::Motion, 1.0, 1.3, 1.2, now);
+
+        assert!(runtime.playing);
+        assert_eq!(runtime.last_tick, Some(now));
+        assert_eq!(runtime.motion.playhead, 0.7);
+        assert_eq!(runtime.preview_end, None);
+        assert!(runtime.pending_auto_preview.is_none());
+    }
+
+    #[test]
+    fn selection_changes_and_seeks_cancel_pending_auto_preview() {
+        let mut runtime = runtime_with_clip();
+        runtime
+            .motion
+            .add_segment_at(3.0)
+            .expect("second motion clip");
+        runtime.motion.selected = Some(0);
+        let now = Instant::now();
+        let request = request_at(AutoPreviewLane::Motion);
+        runtime.queue_auto_preview(request.0, request.1, request.2, request.3, now);
+
+        runtime.motion.selected = Some(1);
+        assert!(runtime
+            .take_ready_auto_preview(now + AUTO_PREVIEW_QUIET_PERIOD, false)
+            .is_none());
+        assert!(runtime.pending_auto_preview.is_none());
+
+        runtime.motion.selected = Some(0);
+        runtime.queue_auto_preview(request.0, request.1, request.2, request.3, now);
+        runtime.motion.playhead = 0.5;
+        assert!(runtime
+            .take_ready_auto_preview(now + AUTO_PREVIEW_QUIET_PERIOD, false)
+            .is_none());
+        assert!(runtime.pending_auto_preview.is_none());
+    }
+
+    #[test]
+    fn resizing_the_selected_clip_invalidates_a_preview_with_old_bounds() {
+        let mut runtime = runtime_with_clip();
+        let now = Instant::now();
+        runtime.queue_auto_preview(AutoPreviewLane::Motion, 0.0, 0.3, 0.2, now);
+        assert!(runtime.pending_auto_preview.is_some());
+
+        runtime.motion.set_segment_range(0, 0.0, 0.8);
+
+        assert!(runtime
+            .take_ready_auto_preview(now + AUTO_PREVIEW_QUIET_PERIOD, false)
+            .is_none());
+        assert!(runtime.pending_auto_preview.is_none());
+    }
+
+    #[test]
+    fn accepted_edits_preserve_manual_playback_but_stop_automatic_preview() {
+        let mut runtime = runtime_with_clip();
+        let now = Instant::now();
+        runtime.playing = true;
+        runtime.last_tick = Some(now);
+        runtime.preview_end = None;
+        let mut checkpointed = false;
+
+        assert!(runtime.update_motion_drag(&mut checkpointed, |motion| {
+            motion.set_motion_blur(0.2);
+        }));
+        assert!(runtime.playing);
+        assert_eq!(runtime.last_tick, Some(now));
+        assert_eq!(runtime.preview_end, None);
+
+        runtime.preview_end = Some(1.0);
+        runtime.pending_auto_preview = Some(PendingAutoPreview {
+            lane: AutoPreviewLane::Motion,
+            start: 0.0,
+            end: 0.3,
+            pose_time: 0.2,
+            clip_end: 1.0,
+            ready_at: now,
+        });
+        assert!(runtime.update_motion_drag(&mut checkpointed, |motion| {
+            motion.set_motion_blur(0.3);
+        }));
+        assert!(!runtime.playing);
+        assert_eq!(runtime.last_tick, None);
+        assert_eq!(runtime.preview_end, None);
+        assert!(runtime.pending_auto_preview.is_none());
+    }
+
+    #[test]
+    fn no_op_edit_does_not_interrupt_an_automatic_preview_or_create_history() {
+        let mut runtime = runtime_with_clip();
+        let now = Instant::now();
+        runtime.playing = true;
+        runtime.last_tick = Some(now);
+        runtime.preview_end = Some(1.0);
+        let mut checkpointed = false;
+
+        assert!(!runtime.update_motion_drag(&mut checkpointed, |_| {}));
+
+        assert!(runtime.playing);
+        assert_eq!(runtime.last_tick, Some(now));
+        assert_eq!(runtime.preview_end, Some(1.0));
+        assert!(!checkpointed);
+        assert_eq!(runtime.motion_history_availability(), (false, false));
+    }
+
+    #[test]
+    fn a_different_model_edit_cancels_an_obsolete_auto_preview() {
+        let mut runtime = runtime_with_clip();
+        let now = Instant::now();
+        runtime.queue_auto_preview(AutoPreviewLane::Motion, 0.0, 0.3, 0.2, now);
+        assert!(runtime.pending_auto_preview.is_some());
+        runtime.begin_motion_edit();
+        runtime.motion.set_motion_blur(0.2);
+        assert!(runtime.pending_auto_preview.is_none());
+    }
+
+    #[test]
+    fn undo_and_mode_exit_cancel_pending_auto_preview() {
+        let mut runtime = runtime_with_clip();
+        let now = Instant::now();
+        let request = request_at(AutoPreviewLane::Motion);
+        runtime.queue_auto_preview(request.0, request.1, request.2, request.3, now);
+        runtime.undo_motion();
+        assert!(runtime.pending_auto_preview.is_none());
+
+        runtime.queue_auto_preview(request.0, request.1, request.2, request.3, now);
+        let session = MotionSession {
+            runtime: Rc::new(RefCell::new(runtime)),
+            prefers_dark: true,
+        };
+        session.clear_snapshot();
+        assert!(session.runtime.borrow().pending_auto_preview.is_none());
     }
 
     #[test]
@@ -1047,5 +1415,28 @@ mod tests {
         let segment = runtime.motion.selected_segment().unwrap();
         assert!(!segment.is_disabled);
         assert_eq!(segment.to.scale, 1.5);
+    }
+
+    #[test]
+    fn text_position_drag_keeps_one_checkpoint_after_a_long_pause() {
+        let mut runtime = MotionRuntime::new();
+        runtime.motion.add_text_at(0.0).expect("text clip");
+        let initial = {
+            let text = runtime.motion.selected_text_segment().unwrap();
+            (text.pos_x, text.pos_y)
+        };
+        let mut checkpointed = false;
+
+        assert!(runtime.update_motion_drag(&mut checkpointed, |motion| {
+            motion.set_selected_text_pos(0.6, 0.5);
+        }));
+        runtime.last_edit = Some(Instant::now() - MOTION_EDIT_COALESCE - Duration::from_secs(1));
+        assert!(runtime.update_motion_drag(&mut checkpointed, |motion| {
+            motion.set_selected_text_pos(0.7, 0.5);
+        }));
+
+        assert!(runtime.undo_motion());
+        let text = runtime.motion.selected_text_segment().unwrap();
+        assert_eq!((text.pos_x, text.pos_y), initial);
     }
 }

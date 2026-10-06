@@ -401,7 +401,15 @@ fn preview_result_is_current(
     runtime: &MotionRuntime,
     result: &super::session::PreviewResult,
 ) -> bool {
-    if result.content_gen != runtime.preview_content_gen || runtime.live_preview || runtime.playing
+    let advancing_edit_frame = (runtime.pending_auto_preview.is_some() || runtime.preview_dirty)
+        && result.content_gen < runtime.preview_content_gen
+        && runtime
+            .preview_frame
+            .as_ref()
+            .is_some_and(|cached| result.content_gen > cached.content_gen);
+    if (result.content_gen != runtime.preview_content_gen && !advancing_edit_frame)
+        || runtime.live_preview
+        || runtime.playing
     {
         return false;
     }
@@ -723,6 +731,51 @@ mod tests {
         result.content_gen = 0;
         result.width = 40;
         assert!(!preview_result_is_current(&runtime, &result));
+    }
+
+    #[test]
+    fn transform_edit_frames_advance_even_when_input_overtakes_the_worker() {
+        use super::super::session::AutoPreviewLane;
+
+        let session = super::super::session::MotionSession::new(true, 0.0);
+        let mut runtime = session.runtime.borrow_mut();
+        runtime.motion.add_segment_at(0.0).unwrap();
+        runtime.preview_content_gen = 3;
+        runtime.queue_auto_preview(
+            AutoPreviewLane::Motion,
+            0.0,
+            0.5,
+            0.4,
+            std::time::Instant::now(),
+        );
+        runtime.preview_frame = Some(super::super::session::PreviewFrame {
+            width: 32,
+            height: 24,
+            time: 0.4,
+            live_preview: false,
+            content_gen: 1,
+            surface: ImageSurface::create(Format::ARgb32, 32, 24).unwrap(),
+        });
+        let mut result = super::super::session::PreviewResult {
+            width: 32,
+            height: 24,
+            time: 0.4,
+            live_preview: false,
+            content_gen: 2,
+            stride: 128,
+            bytes: Vec::new(),
+        };
+        assert!(preview_result_is_current(&runtime, &result));
+        result.content_gen = 1;
+        assert!(!preview_result_is_current(&runtime, &result));
+        result.content_gen = 2;
+        runtime.playing = true;
+        assert!(!preview_result_is_current(&runtime, &result));
+        runtime.playing = false;
+        runtime.cancel_auto_preview();
+        assert!(!preview_result_is_current(&runtime, &result));
+        runtime.preview_dirty = true;
+        assert!(preview_result_is_current(&runtime, &result));
     }
 
     #[test]

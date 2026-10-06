@@ -30,10 +30,109 @@ enum DragKind {
     Body { index: usize, origin: f64 },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ClipPreviewRequest {
+    Motion { start: f64 },
+    Text { start: f64, entrance_seconds: f64 },
+}
+
 fn drag_kind_index(kind: DragKind) -> usize {
     match kind {
         DragKind::Start(index) | DragKind::End(index) | DragKind::Body { index, .. } => index,
     }
+}
+
+fn drag_preview_request(
+    runtime: &MotionRuntime,
+    kind: DragKind,
+    text_track: bool,
+    resize_changed: bool,
+) -> Option<ClipPreviewRequest> {
+    if !resize_changed || !matches!(kind, DragKind::Start(_) | DragKind::End(_)) {
+        return None;
+    }
+    if text_track {
+        runtime
+            .motion
+            .selected_text_segment()
+            .map(|segment| ClipPreviewRequest::Text {
+                start: segment.start,
+                entrance_seconds: segment.entrance_seconds(),
+            })
+    } else {
+        runtime
+            .motion
+            .selected_segment()
+            .map(|segment| ClipPreviewRequest::Motion {
+                start: segment.start,
+            })
+    }
+}
+
+fn update_clip_drag(
+    runtime: &mut MotionRuntime,
+    kind: &mut DragKind,
+    raw_time: f64,
+    body_delta: f64,
+    tolerance: f64,
+    text_track: bool,
+    checkpointed: &mut bool,
+) -> bool {
+    let previous_kind = *kind;
+    let index = drag_kind_index(previous_kind);
+    let changed = runtime.update_motion_drag(checkpointed, |motion| {
+        let range = if text_track {
+            motion
+                .text_segments
+                .get(index)
+                .map(|segment| (segment.start, segment.end))
+        } else {
+            motion
+                .segments
+                .get(index)
+                .map(|segment| (segment.start, segment.end))
+        };
+        let Some((start, end)) = range else {
+            return;
+        };
+        let time = if text_track {
+            motion.snap_text_time(raw_time, tolerance, Some(index))
+        } else {
+            motion.snap_effect_time(raw_time, tolerance, Some(index))
+        };
+        match (text_track, previous_kind) {
+            (false, DragKind::Start(_)) => motion.resize_segment_range(index, time, end),
+            (false, DragKind::End(_)) => motion.resize_segment_range(index, start, time),
+            (false, DragKind::Body { origin, .. }) => {
+                let start = motion.snap_effect_time(origin + body_delta, tolerance, Some(index));
+                motion.move_segment(index, start);
+            }
+            (true, DragKind::Start(_)) => motion.resize_text_range(index, time, end),
+            (true, DragKind::End(_)) => motion.resize_text_range(index, start, time),
+            (true, DragKind::Body { origin, .. }) => {
+                let start = motion.snap_text_time(origin + body_delta, tolerance, Some(index));
+                motion.move_text(index, start);
+            }
+        }
+    });
+    if changed {
+        let next_index = if text_track {
+            runtime.motion.selected_text
+        } else {
+            runtime.motion.selected
+        };
+        if let Some(next_index) = next_index {
+            *kind = match previous_kind {
+                DragKind::Start(_) => DragKind::Start(next_index),
+                DragKind::End(_) => DragKind::End(next_index),
+                DragKind::Body { origin, .. } => DragKind::Body {
+                    index: next_index,
+                    origin,
+                },
+            };
+        }
+    }
+    changed
 }
 
 pub(super) fn install(
@@ -58,6 +157,7 @@ pub(super) fn install(
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
             let mut runtime = session.borrow_mut();
+            runtime.cancel_auto_preview();
             let duration = runtime.motion.duration.max(0.001);
             runtime.motion.playhead = ((x / width) * duration).clamp(0.0, duration);
             drop(runtime);
@@ -85,6 +185,7 @@ pub(super) fn install(
             // preview while the drag is in flight.
             let had_hover = {
                 let mut runtime = session.borrow_mut();
+                runtime.cancel_auto_preview();
                 runtime.playing = false;
                 runtime.last_tick = None;
                 runtime.preview_end = None;
@@ -158,6 +259,7 @@ pub(super) fn install(
         let redraw = redraw.clone();
         move |_, _, _, _| {
             let mut runtime = session.borrow_mut();
+            runtime.cancel_auto_preview();
             runtime.source_selected = true;
             runtime.motion.selected = None;
             runtime.motion.selected_text = None;
@@ -274,11 +376,15 @@ pub(super) fn install(
     parts.timeline.motion_track.add_controller(motion_menu);
 
     let drag_kind = Rc::new(Cell::new(None::<DragKind>));
+    let drag_checkpointed = Rc::new(Cell::new(false));
+    let drag_resized = Rc::new(Cell::new(false));
     let drag = GestureDrag::new();
     drag.set_button(1);
     drag.connect_drag_begin({
         let session = session.runtime.clone();
         let drag_kind = drag_kind.clone();
+        let drag_checkpointed = drag_checkpointed.clone();
+        let drag_resized = drag_resized.clone();
         let motion_track_dragged = motion_track_dragged.clone();
         let redraw_motion_track = redraw_motion_track.clone();
         move |gesture, x, _| {
@@ -314,12 +420,9 @@ pub(super) fn install(
                 runtime.motion.selected_text = None;
                 runtime.source_selected = false;
             }
-            // One checkpoint per drag: the pre-drag state is what Undo
-            // restores, and the drag updates themselves stay checkpoint-free.
-            if kind.is_some() {
-                runtime.begin_motion_edit();
-            }
             drop(runtime);
+            drag_checkpointed.set(false);
+            drag_resized.set(false);
             drag_kind.set(kind);
             motion_track_dragged.set(kind.is_some());
             if kind.is_some() {
@@ -330,6 +433,8 @@ pub(super) fn install(
     drag.connect_drag_update({
         let session = session.runtime.clone();
         let drag_kind = drag_kind.clone();
+        let drag_checkpointed = drag_checkpointed.clone();
+        let drag_resized = drag_resized.clone();
         let redraw_motion_track = redraw_motion_track.clone();
         move |gesture, offset_x, _| {
             let Some(kind) = drag_kind.get() else {
@@ -346,68 +451,51 @@ pub(super) fn install(
             let duration = runtime.motion.duration.max(0.001);
             let raw_time = (((start_x + offset_x) / width) * duration).clamp(0.0, duration);
             let tolerance = (10.0 / width) * duration;
-            let index = match kind {
-                DragKind::Start(index) | DragKind::End(index) => index,
-                DragKind::Body { index, .. } => index,
-            };
-            let before = runtime
-                .motion
-                .segments
-                .get(index)
-                .map(|segment| (segment.start, segment.end));
-            match kind {
-                DragKind::Start(index) => {
-                    let time = runtime
-                        .motion
-                        .snap_effect_time(raw_time, tolerance, Some(index));
-                    let end = runtime
-                        .motion
-                        .segments
-                        .get(index)
-                        .map(|segment| segment.end)
-                        .unwrap_or(time);
-                    runtime.motion.set_segment_range(index, time, end);
-                }
-                DragKind::End(index) => {
-                    let time = runtime
-                        .motion
-                        .snap_effect_time(raw_time, tolerance, Some(index));
-                    let start = runtime
-                        .motion
-                        .segments
-                        .get(index)
-                        .map(|segment| segment.start)
-                        .unwrap_or(time);
-                    runtime.motion.set_segment_range(index, start, time);
-                }
-                DragKind::Body { index, origin } => {
-                    let delta = (offset_x / width) * duration;
-                    let start =
-                        runtime
-                            .motion
-                            .snap_effect_time(origin + delta, tolerance, Some(index));
-                    runtime.motion.move_segment(index, start);
-                }
-            }
-            let changed = before
-                != runtime
-                    .motion
-                    .segments
-                    .get(index)
-                    .map(|segment| (segment.start, segment.end));
+            let mut checkpointed = drag_checkpointed.get();
+            let mut kind = kind;
+            let changed = update_clip_drag(
+                &mut runtime,
+                &mut kind,
+                raw_time,
+                (offset_x / width) * duration,
+                tolerance,
+                false,
+                &mut checkpointed,
+            );
             drop(runtime);
+            drag_kind.set(Some(kind));
+            drag_checkpointed.set(checkpointed);
             if changed {
+                if matches!(kind, DragKind::Start(_) | DragKind::End(_)) {
+                    drag_resized.set(true);
+                }
                 redraw_motion_track();
             }
         }
     });
     drag.connect_drag_end({
+        let session = session.runtime.clone();
         let drag_kind = drag_kind.clone();
+        let drag_checkpointed = drag_checkpointed.clone();
+        let drag_resized = drag_resized.clone();
         let redraw = redraw.clone();
+        let request_transition_preview = request_transition_preview.clone();
         let motion_track_dragged = motion_track_dragged.clone();
         move |_, _, _| {
+            let preview_request = if drag_resized.replace(false) {
+                let runtime = session.borrow();
+                drag_kind
+                    .get()
+                    .and_then(|kind| drag_preview_request(&runtime, kind, false, true))
+            } else {
+                None
+            };
             drag_kind.set(None);
+            drag_checkpointed.set(false);
             redraw();
+            if let Some(ClipPreviewRequest::Motion { start }) = preview_request {
+                request_transition_preview(start);
+            }
             // GestureClick's release can arrive before or after GestureDrag's
             // end callback. Keep this suppression through the release phase,
             // then clear it even on toolkits that do not emit that click.
@@ -518,11 +606,15 @@ pub(super) fn install(
     parts.timeline.text_track.add_controller(text_menu);
 
     let text_drag_kind = Rc::new(Cell::new(None::<DragKind>));
+    let text_drag_checkpointed = Rc::new(Cell::new(false));
+    let text_drag_resized = Rc::new(Cell::new(false));
     let text_drag = GestureDrag::new();
     text_drag.set_button(1);
     text_drag.connect_drag_begin({
         let session = session.runtime.clone();
         let text_drag_kind = text_drag_kind.clone();
+        let text_drag_checkpointed = text_drag_checkpointed.clone();
+        let text_drag_resized = text_drag_resized.clone();
         let text_track_dragged = text_track_dragged.clone();
         let redraw_text_track = redraw_text_track.clone();
         move |gesture, x, _| {
@@ -559,11 +651,9 @@ pub(super) fn install(
                 runtime.motion.selected = None;
                 runtime.source_selected = false;
             }
-            // Same checkpoint-per-drag rule as the motion lane.
-            if kind.is_some() {
-                runtime.begin_motion_edit();
-            }
             drop(runtime);
+            text_drag_checkpointed.set(false);
+            text_drag_resized.set(false);
             text_drag_kind.set(kind);
             text_track_dragged.set(kind.is_some());
             if kind.is_some() {
@@ -574,6 +664,8 @@ pub(super) fn install(
     text_drag.connect_drag_update({
         let session = session.runtime.clone();
         let text_drag_kind = text_drag_kind.clone();
+        let text_drag_checkpointed = text_drag_checkpointed.clone();
+        let text_drag_resized = text_drag_resized.clone();
         let redraw_text_track = redraw_text_track.clone();
         move |gesture, offset_x, _| {
             let Some(kind) = text_drag_kind.get() else {
@@ -590,68 +682,55 @@ pub(super) fn install(
             let duration = runtime.motion.duration.max(0.001);
             let raw_time = (((start_x + offset_x) / width) * duration).clamp(0.0, duration);
             let tolerance = (10.0 / width) * duration;
-            let index = match kind {
-                DragKind::Start(index) | DragKind::End(index) => index,
-                DragKind::Body { index, .. } => index,
-            };
-            let before = runtime
-                .motion
-                .text_segments
-                .get(index)
-                .map(|segment| (segment.start, segment.end));
-            match kind {
-                DragKind::Start(index) => {
-                    let time = runtime
-                        .motion
-                        .snap_text_time(raw_time, tolerance, Some(index));
-                    let end = runtime
-                        .motion
-                        .text_segments
-                        .get(index)
-                        .map(|segment| segment.end)
-                        .unwrap_or(time);
-                    runtime.motion.set_text_range(index, time, end);
-                }
-                DragKind::End(index) => {
-                    let time = runtime
-                        .motion
-                        .snap_text_time(raw_time, tolerance, Some(index));
-                    let start = runtime
-                        .motion
-                        .text_segments
-                        .get(index)
-                        .map(|segment| segment.start)
-                        .unwrap_or(time);
-                    runtime.motion.set_text_range(index, start, time);
-                }
-                DragKind::Body { index, origin } => {
-                    let delta = (offset_x / width) * duration;
-                    let start =
-                        runtime
-                            .motion
-                            .snap_text_time(origin + delta, tolerance, Some(index));
-                    runtime.motion.move_text(index, start);
-                }
-            }
-            let changed = before
-                != runtime
-                    .motion
-                    .text_segments
-                    .get(index)
-                    .map(|segment| (segment.start, segment.end));
+            let mut checkpointed = text_drag_checkpointed.get();
+            let mut kind = kind;
+            let changed = update_clip_drag(
+                &mut runtime,
+                &mut kind,
+                raw_time,
+                (offset_x / width) * duration,
+                tolerance,
+                true,
+                &mut checkpointed,
+            );
             drop(runtime);
+            text_drag_kind.set(Some(kind));
+            text_drag_checkpointed.set(checkpointed);
             if changed {
+                if matches!(kind, DragKind::Start(_) | DragKind::End(_)) {
+                    text_drag_resized.set(true);
+                }
                 redraw_text_track();
             }
         }
     });
     text_drag.connect_drag_end({
+        let session = session.runtime.clone();
         let text_drag_kind = text_drag_kind.clone();
+        let text_drag_checkpointed = text_drag_checkpointed.clone();
+        let text_drag_resized = text_drag_resized.clone();
         let redraw = redraw.clone();
+        let request_text_transition_preview = request_text_transition_preview.clone();
         let text_track_dragged = text_track_dragged.clone();
         move |_, _, _| {
+            let preview_request = if text_drag_resized.replace(false) {
+                let runtime = session.borrow();
+                text_drag_kind
+                    .get()
+                    .and_then(|kind| drag_preview_request(&runtime, kind, true, true))
+            } else {
+                None
+            };
             text_drag_kind.set(None);
+            text_drag_checkpointed.set(false);
             redraw();
+            if let Some(ClipPreviewRequest::Text {
+                start,
+                entrance_seconds,
+            }) = preview_request
+            {
+                request_text_transition_preview(start, entrance_seconds);
+            }
             let reset_dragged = text_track_dragged.clone();
             glib::idle_add_local_once(move || reset_dragged.set(false));
         }
@@ -937,4 +1016,191 @@ fn install_track_end_cursor(
         }
     });
     track.add_controller(pointer);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capture::editor::window::motion_mode::MotionSession;
+
+    #[test]
+    fn moving_a_clip_past_another_keeps_dragging_the_original_clip() {
+        let session = MotionSession::new(false, 96.0);
+        let mut runtime = session.runtime.borrow_mut();
+        runtime.motion.set_duration(10.0);
+        runtime.motion.add_segment_at(0.0).unwrap();
+        runtime.motion.add_segment_at(2.0).unwrap();
+        let mut kind = DragKind::Body {
+            index: 0,
+            origin: 0.0,
+        };
+        let mut checkpointed = false;
+
+        assert!(update_clip_drag(
+            &mut runtime,
+            &mut kind,
+            5.1,
+            4.1,
+            0.0,
+            false,
+            &mut checkpointed,
+        ));
+        assert_eq!(drag_kind_index(kind), 1);
+        assert_eq!(runtime.motion.segments[0].start, 2.0);
+        assert_eq!(runtime.motion.segments[1].start, 4.1);
+
+        assert!(update_clip_drag(
+            &mut runtime,
+            &mut kind,
+            5.2,
+            4.2,
+            0.0,
+            false,
+            &mut checkpointed,
+        ));
+        assert_eq!(runtime.motion.segments[0].start, 2.0);
+        assert_eq!(runtime.motion.segments[1].start, 4.2);
+    }
+
+    #[test]
+    fn rejected_overlapping_drag_preserves_redo_history() {
+        let session = MotionSession::new(false, 96.0);
+        let mut runtime = session.runtime.borrow_mut();
+        runtime.motion.add_segment_at(0.0).unwrap();
+        runtime.motion.add_segment_at(2.0).unwrap();
+        runtime.motion.selected = Some(0);
+        runtime.begin_motion_command();
+        runtime.motion.set_selected_end_scale(1.5);
+        assert!(runtime.undo_motion());
+        assert!(runtime.motion_history_availability().1);
+
+        let mut kind = DragKind::Body {
+            index: 0,
+            origin: 0.0,
+        };
+        let mut checkpointed = false;
+        assert!(!update_clip_drag(
+            &mut runtime,
+            &mut kind,
+            2.5,
+            2.5,
+            0.0,
+            false,
+            &mut checkpointed,
+        ));
+        assert!(!checkpointed);
+        assert_eq!(runtime.motion.segments[0].start, 0.0);
+        assert!(runtime.motion_history_availability().1);
+    }
+
+    #[test]
+    fn only_changed_edge_resizes_request_a_fresh_preview() {
+        let session = MotionSession::new(false, 96.0);
+        let mut runtime = session.runtime.borrow_mut();
+        runtime.motion.add_segment_at(0.0).unwrap();
+        let edge = DragKind::End(0);
+        let body = DragKind::Body {
+            index: 0,
+            origin: 0.0,
+        };
+
+        assert!(matches!(
+            drag_preview_request(&runtime, edge, false, true),
+            Some(ClipPreviewRequest::Motion { start }) if start.abs() < f64::EPSILON
+        ));
+        assert_eq!(drag_preview_request(&runtime, body, false, true), None);
+        assert_eq!(drag_preview_request(&runtime, edge, false, false), None);
+
+        runtime.motion.add_text_at(2.0).unwrap();
+        let text_edge = DragKind::Start(0);
+        let text_body = DragKind::Body {
+            index: 0,
+            origin: 2.0,
+        };
+        assert!(matches!(
+            drag_preview_request(&runtime, text_edge, true, true),
+            Some(ClipPreviewRequest::Text {
+                start,
+                entrance_seconds,
+            }) if (start - 2.0).abs() < f64::EPSILON
+                && (entrance_seconds - runtime.motion.selected_text_segment().unwrap().entrance_seconds()).abs() < f64::EPSILON
+        ));
+        assert_eq!(drag_preview_request(&runtime, text_body, true, true), None);
+        assert_eq!(drag_preview_request(&runtime, text_edge, true, false), None);
+    }
+
+    #[test]
+    fn edge_resize_stops_the_old_preview_and_uses_the_retimed_motion_bounds() {
+        let session = MotionSession::new(false, 96.0);
+        let mut runtime = session.runtime.borrow_mut();
+        runtime.motion.add_segment_at(0.0).unwrap();
+        runtime.playing = true;
+        runtime.preview_end = Some(1.0);
+        runtime.last_tick = Some(std::time::Instant::now());
+        let mut kind = DragKind::End(0);
+        let mut checkpointed = false;
+        assert!(update_clip_drag(
+            &mut runtime,
+            &mut kind,
+            4.0,
+            0.0,
+            0.0,
+            false,
+            &mut checkpointed
+        ));
+        assert!(!runtime.playing);
+        assert_eq!(runtime.preview_end, None);
+        assert_eq!(
+            runtime
+                .motion
+                .selected_segment()
+                .unwrap()
+                .timing
+                .transition_duration,
+            4.0
+        );
+        let Some(ClipPreviewRequest::Motion { start }) =
+            drag_preview_request(&runtime, kind, false, true)
+        else {
+            panic!("a resized motion needs a fresh preview");
+        };
+        let (_, end, pose_time) =
+            super::super::motion_auto_preview_range(&runtime.motion, start).unwrap();
+        assert_eq!(end, 4.0);
+        assert_eq!(pose_time, 4.0);
+    }
+
+    #[test]
+    fn text_resize_preview_uses_the_updated_entrance_duration() {
+        use crate::recording::editor::model::MotionTextAnimation;
+        let session = MotionSession::new(false, 96.0);
+        let mut runtime = session.runtime.borrow_mut();
+        runtime.motion.add_text_at(0.0).unwrap();
+        runtime
+            .motion
+            .set_selected_text_animation(MotionTextAnimation::Typewriter);
+        let mut kind = DragKind::End(0);
+        let mut checkpointed = false;
+        assert!(update_clip_drag(
+            &mut runtime,
+            &mut kind,
+            4.0,
+            0.0,
+            0.0,
+            true,
+            &mut checkpointed
+        ));
+        let Some(ClipPreviewRequest::Text {
+            start,
+            entrance_seconds,
+        }) = drag_preview_request(&runtime, kind, true, true)
+        else {
+            panic!("a resized title needs a fresh preview");
+        };
+        assert_eq!(start, 0.0);
+        assert_eq!(entrance_seconds, 2.4);
+        let (_, end) =
+            super::super::motion_text_preview_range(&runtime.motion, start, entrance_seconds);
+        assert_eq!(end, 2.65);
+    }
 }

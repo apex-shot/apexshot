@@ -192,8 +192,13 @@ impl MotionTextSegment {
     /// Seconds the entrance of this title needs, whichever animation it uses.
     pub fn entrance_seconds(&self) -> f64 {
         match self.animation {
-            MotionTextAnimation::Typewriter => self.typewriter_time,
-            _ => self.transition_duration,
+            MotionTextAnimation::None => 0.0,
+            MotionTextAnimation::Typewriter => self.typewriter_time
+                .clamp(MIN_MOTION_TEXT_TRANSITION_SECONDS, MAX_MOTION_TEXT_TRANSITION_SECONDS)
+                .min(self.duration()),
+            _ => self.transition_duration
+                .clamp(MIN_MOTION_TEXT_TRANSITION_SECONDS, MAX_MOTION_TEXT_TRANSITION_SECONDS)
+                .min(self.duration()),
         }
     }
 
@@ -211,13 +216,7 @@ impl MotionTextSegment {
             });
         }
         let local = time - self.start;
-        let transition = self
-            .transition_duration
-            .clamp(
-                MIN_MOTION_TEXT_TRANSITION_SECONDS,
-                MAX_MOTION_TEXT_TRANSITION_SECONDS,
-            )
-            .min(span);
+        let transition = self.entrance_seconds();
         let progress = if transition <= f64::EPSILON {
             1.0
         } else {
@@ -231,7 +230,9 @@ impl MotionTextSegment {
                 1.0,
                 0.0,
                 0.0,
-                (local / self.typewriter_time.max(0.05)).clamp(0.0, 1.0),
+                if transition <= f64::EPSILON
+                    || time + 1.0 / f64::from(MOTION_EXPORT_FPS) >= self.end - 1e-9
+                { 1.0 } else { (local / transition).clamp(0.0, 1.0) },
             ),
             MotionTextAnimation::SlideFromLeft => (entrance, -distance, 0.0, 1.0),
             MotionTextAnimation::SlideFromRight => (entrance, distance, 0.0, 1.0),

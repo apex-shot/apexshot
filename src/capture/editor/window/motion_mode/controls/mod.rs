@@ -1,4 +1,4 @@
-use gtk4::{gdk, glib, prelude::*, EventControllerKey};
+use gtk4::{gdk, glib, prelude::*, ApplicationWindow, EventControllerKey};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Instant;
@@ -7,7 +7,8 @@ use crate::capture::editor::ui_support::text_input_has_focus;
 use crate::i18n::t;
 use crate::recording::editor::model::MotionState;
 
-use super::{MotionModeChrome, MotionModeParts, MotionSession};
+use super::session::AutoPreviewLane;
+use super::{MotionModeChrome, MotionModeParts, MotionRuntime, MotionSession};
 
 mod clip_menu;
 mod playback;
@@ -22,11 +23,13 @@ pub(super) type RequestTransitionPreview = Rc<dyn Fn(f64)>;
 pub(super) type RequestTextTransitionPreview = Rc<dyn Fn(f64, f64)>;
 
 pub(in crate::capture::editor::window) fn wire_motion_controls(
+    window: &ApplicationWindow,
     parts: &MotionModeParts,
     session: &MotionSession,
     chrome: Rc<MotionModeChrome>,
     _last_inspector: Rc<RefCell<String>>,
     in_motion: Rc<Cell<bool>>,
+    refresh_history_inspectors: Rc<dyn Fn(&MotionState)>,
 ) {
     let redraw = sync::make_redraw(parts, session, chrome.clone());
     // Playhead changes do not alter the inspector or track geometry. Updating
@@ -120,41 +123,65 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
         })
     };
 
-    // Editing a timed clip parameter has to be judged in motion. Play through
-    // the complete clip so the automatic preview and its timeline block have
-    // the same visible duration.
     let request_transition_preview = {
         let session = session.runtime.clone();
         let redraw_playhead = redraw_playhead.clone();
         Rc::new(move |segment_start: f64| {
             let mut runtime = session.borrow_mut();
-            let (start, end) = motion_transition_preview_range(&runtime.motion, segment_start);
-            let inside = runtime.motion.playhead >= start && runtime.motion.playhead <= end;
-            if !inside {
-                runtime.motion.playhead = start;
+            if let Some((start, end, pose_time)) =
+                motion_auto_preview_range(&runtime.motion, segment_start)
+            {
+                runtime.queue_auto_preview(
+                    AutoPreviewLane::Motion,
+                    start,
+                    end,
+                    pose_time,
+                    Instant::now(),
+                );
+            } else {
+                runtime.cancel_auto_preview();
             }
-            runtime.playing = true;
-            runtime.last_tick = Some(Instant::now());
-            runtime.preview_end = Some(end);
             drop(runtime);
             redraw_playhead();
         })
     };
 
-    // Text entrances run on their own clock (typewriter reveal or the shared
-    // 0.28s slide), so picking an animation replays the title's entrance
-    // instead of leaving the static preview on its invisible first frame.
     let request_text_transition_preview = {
         let session = session.runtime.clone();
         let redraw_playhead = redraw_playhead.clone();
         Rc::new(move |text_start: f64, entrance_seconds: f64| {
             let mut runtime = session.borrow_mut();
-            let (start, end) =
-                motion_text_preview_range(&runtime.motion, text_start, entrance_seconds);
-            runtime.motion.playhead = start;
-            runtime.playing = true;
-            runtime.last_tick = Some(Instant::now());
-            runtime.preview_end = Some(end);
+            let preview = runtime
+                .motion
+                .selected_text_segment()
+                .filter(|segment| (segment.start - text_start).abs() <= 1e-6)
+                .map(|segment| {
+                    let start = segment.start.clamp(0.0, runtime.motion.duration);
+                    let entrance = entrance_seconds.max(0.0);
+                    let pose_time = if entrance <= f64::EPSILON {
+                        (start + segment.duration().min(0.001)).min(segment.end)
+                    } else {
+                        (start + entrance).min(segment.end)
+                    }
+                    .min(runtime.motion.duration);
+                    let end = if entrance_seconds <= f64::EPSILON {
+                        start
+                    } else {
+                        motion_text_preview_range(&runtime.motion, text_start, entrance_seconds).1
+                    };
+                    (start, end, pose_time)
+                });
+            if let Some((start, end, pose_time)) = preview {
+                runtime.queue_auto_preview(
+                    AutoPreviewLane::Text,
+                    start,
+                    end,
+                    pose_time,
+                    Instant::now(),
+                );
+            } else {
+                runtime.cancel_auto_preview();
+            }
             drop(runtime);
             redraw_playhead();
         })
@@ -196,8 +223,11 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
     parts.timeline.undo_btn.connect_clicked({
         let session = session.runtime.clone();
         let redraw = redraw.clone();
+        let refresh_history_inspectors = refresh_history_inspectors.clone();
         move |_| {
+            let before = session.borrow().motion.clone();
             if session.borrow_mut().undo_motion() {
+                refresh_history_inspectors(&before);
                 redraw();
             }
         }
@@ -205,18 +235,23 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
     parts.timeline.redo_btn.connect_clicked({
         let session = session.runtime.clone();
         let redraw = redraw.clone();
+        let refresh_history_inspectors = refresh_history_inspectors.clone();
         move |_| {
+            let before = session.borrow().motion.clone();
             if session.borrow_mut().redo_motion() {
+                refresh_history_inspectors(&before);
                 redraw();
             }
         }
     });
 
     let delete_keys = EventControllerKey::new();
+    delete_keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
     delete_keys.connect_key_pressed({
         let session = session.runtime.clone();
         let redraw = redraw.clone();
         let in_motion = in_motion.clone();
+        let refresh_history_inspectors = refresh_history_inspectors.clone();
         move |controller, key, _, state| {
             if !in_motion.get() {
                 return glib::Propagation::Proceed;
@@ -227,21 +262,29 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
             {
                 return glib::Propagation::Proceed;
             }
-            if key == gdk::Key::z && state.contains(gdk::ModifierType::CONTROL_MASK) {
+            if matches!(key, gdk::Key::z | gdk::Key::Z)
+                && state.contains(gdk::ModifierType::CONTROL_MASK)
+            {
+                let before = session.borrow().motion.clone();
                 let changed = if state.contains(gdk::ModifierType::SHIFT_MASK) {
                     session.borrow_mut().redo_motion()
                 } else {
                     session.borrow_mut().undo_motion()
                 };
                 if changed {
+                    refresh_history_inspectors(&before);
                     redraw();
                     return glib::Propagation::Stop;
                 }
                 return glib::Propagation::Stop;
             }
-            if key == gdk::Key::y && state.contains(gdk::ModifierType::CONTROL_MASK) {
+            if matches!(key, gdk::Key::y | gdk::Key::Y)
+                && state.contains(gdk::ModifierType::CONTROL_MASK)
+            {
+                let before = session.borrow().motion.clone();
                 let changed = session.borrow_mut().redo_motion();
                 if changed {
+                    refresh_history_inspectors(&before);
                     redraw();
                 }
                 return glib::Propagation::Stop;
@@ -250,19 +293,36 @@ pub(in crate::capture::editor::window) fn wire_motion_controls(
                 return glib::Propagation::Proceed;
             }
             let mut runtime = session.borrow_mut();
-            runtime.begin_motion_edit();
-            let changed = runtime.motion.remove_selected();
+            let mut candidate = runtime.motion.clone();
+            let changed = candidate.remove_selected();
+            if changed {
+                runtime.begin_motion_command();
+                runtime.motion = candidate;
+            }
             drop(runtime);
             if changed {
                 redraw();
                 return glib::Propagation::Stop;
             }
-            glib::Propagation::Proceed
+            glib::Propagation::Stop
         }
     });
-    parts.shell.page.add_controller(delete_keys);
+    window.add_controller(delete_keys);
 
     playback::install_timer(parts, session, redraw, in_motion);
+}
+
+fn start_motion_transition_preview(runtime: &mut MotionRuntime, segment_start: f64) {
+    let (start, end) = motion_transition_preview_range(&runtime.motion, segment_start);
+    let inside = runtime.motion.playhead >= start && runtime.motion.playhead < end;
+    if !inside {
+        runtime.motion.playhead = start;
+    }
+    if !runtime.playing || !inside || runtime.last_tick.is_none() {
+        runtime.last_tick = Some(Instant::now());
+    }
+    runtime.playing = true;
+    runtime.preview_end = Some(end);
 }
 
 /// The playhead span a text entrance replays: from the clip's own start to the
@@ -299,9 +359,65 @@ fn motion_transition_preview_range(motion: &MotionState, segment_start: f64) -> 
     (start, end)
 }
 
+fn motion_auto_preview_range(motion: &MotionState, segment_start: f64) -> Option<(f64, f64, f64)> {
+    let segment = motion
+        .selected_segment()
+        .filter(|segment| !segment.is_disabled && (segment.start - segment_start).abs() <= 1e-6)?;
+    let transition = segment
+        .timing
+        .clamped()
+        .transition_duration
+        .clamp(0.0, segment.duration());
+    let pose_time = if transition <= f64::EPSILON {
+        (segment.start + segment.duration().min(0.001)).min(segment.end)
+    } else {
+        (segment.start + transition).min(segment.end)
+    };
+    let end = if transition <= f64::EPSILON {
+        segment.start
+    } else {
+        (pose_time + 0.12).min(segment.end)
+    };
+    Some((segment.start, end, pose_time))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_preview_restarts_after_the_previous_pass_ended() {
+        let session = MotionSession::new(true, 0.0);
+        let mut runtime = session.runtime.borrow_mut();
+        let index = runtime.motion.add_segment_at(1.0).unwrap();
+        runtime.motion.playhead = runtime.motion.segments[index].end;
+        runtime.playing = false;
+        runtime.last_tick = None;
+
+        start_motion_transition_preview(&mut runtime, 1.0);
+
+        assert_eq!(runtime.motion.playhead, 1.0);
+        assert!(runtime.playing);
+        assert_eq!(runtime.preview_end, Some(2.0));
+        assert!(runtime.last_tick.is_some());
+    }
+
+    #[test]
+    fn continuous_transform_edits_do_not_reset_the_playback_clock() {
+        let session = MotionSession::new(true, 0.0);
+        let mut runtime = session.runtime.borrow_mut();
+        runtime.motion.add_segment_at(1.0).unwrap();
+        runtime.motion.playhead = 1.5;
+        runtime.playing = true;
+        let last_tick = Instant::now() - std::time::Duration::from_millis(16);
+        runtime.last_tick = Some(last_tick);
+
+        start_motion_transition_preview(&mut runtime, 1.0);
+
+        assert_eq!(runtime.motion.playhead, 1.5);
+        assert_eq!(runtime.last_tick, Some(last_tick));
+        assert_eq!(runtime.preview_end, Some(2.0));
+    }
 
     #[test]
     fn typing_in_a_text_field_does_not_delete_or_undo_motion_clips() {
@@ -352,5 +468,46 @@ mod tests {
         assert!((start - motion.segments[0].start).abs() < f64::EPSILON);
         assert!((end - motion.segments[0].end).abs() < f64::EPSILON);
         assert!(end > motion.segments[0].timing.transition_duration);
+    }
+
+    #[test]
+    fn queued_motion_preview_holds_briefly_after_the_transition() {
+        let mut motion = MotionState::default();
+        let index = motion.add_segment_at(1.0).expect("motion clip");
+        motion.set_segment_range(index, 1.0, 5.0);
+        motion.set_selected_transition_ms(300);
+
+        let (start, end, pose_time) = motion_auto_preview_range(&motion, 1.0).unwrap();
+
+        assert_eq!(start, 1.0);
+        assert!((pose_time - 1.3).abs() < 1e-9);
+        assert!((end - 1.42).abs() < 1e-9);
+        assert!(end < motion.segments[index].end);
+    }
+
+    #[test]
+    fn disabled_motion_clips_do_not_request_auto_playback() {
+        let mut motion = MotionState::default();
+        motion.add_segment_at(0.0).unwrap();
+        motion.set_selected_disabled(true);
+        assert!(motion_auto_preview_range(&motion, 0.0).is_none());
+    }
+
+    #[test]
+    fn zero_motion_transition_keeps_the_authored_pose_without_playback() {
+        let mut motion = MotionState::default();
+        motion.add_segment_at(0.0).expect("preceding motion clip");
+        let index = motion.add_segment_at(1.0).expect("motion clip");
+        motion.set_segment_range(index, 1.0, 5.0);
+        motion
+            .selected_segment_mut()
+            .unwrap()
+            .timing
+            .transition_duration = 0.0;
+
+        let (start, end, pose_time) = motion_auto_preview_range(&motion, 1.0).unwrap();
+
+        assert_eq!((start, end), (1.0, 1.0));
+        assert!((pose_time - 1.001).abs() < 1e-9);
     }
 }
