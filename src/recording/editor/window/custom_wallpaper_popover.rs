@@ -591,6 +591,53 @@ pub(crate) struct ColorPicker {
     pub(crate) repaint: Rc<dyn Fn()>,
 }
 
+pub(crate) fn build_color_popover(
+    title: &str,
+    picker: &ColorPicker,
+    header_tool: Option<&Button>,
+) -> Popover {
+    let popover = Popover::new();
+    popover.add_css_class("recording-editor-custom-popover");
+    popover.set_has_arrow(false);
+
+    let body = GtkBox::new(Orientation::Vertical, 0);
+    body.add_css_class("recording-editor-custom-body");
+    let header = GtkBox::new(Orientation::Horizontal, 8);
+    header.add_css_class("recording-editor-custom-header");
+    let title = Label::new(Some(title));
+    title.add_css_class("recording-editor-custom-title");
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    header.append(&title);
+    if let Some(tool) = header_tool {
+        header.append(tool);
+    }
+    let close = Button::new();
+    close.add_css_class("recording-editor-custom-close");
+    close.set_has_frame(false);
+    close.set_tooltip_text(Some(&t("Close")));
+    let icon = Image::from_icon_name("window-close-symbolic");
+    icon.set_pixel_size(13);
+    close.set_child(Some(&icon));
+    close.connect_clicked({
+        let popover = popover.downgrade();
+        move |_| {
+            if let Some(popover) = popover.upgrade() {
+                popover.popdown();
+            }
+        }
+    });
+    header.append(&close);
+    body.append(&header);
+    body.append(&picker.widget);
+    popover.set_child(Some(&body));
+    popover.connect_show({
+        let repaint = picker.repaint.clone();
+        move |_| repaint()
+    });
+    popover
+}
+
 pub(crate) fn build_color_picker(
     get: Rc<dyn Fn() -> (u8, u8, u8)>,
     set: Rc<dyn Fn((u8, u8, u8))>,
@@ -1519,21 +1566,26 @@ fn build_gradient_page(
         .add_css_class("recording-editor-gradient-picker");
     let card = GtkBox::new(Orientation::Vertical, 0);
     card.add_css_class("recording-editor-gradient-picker-card");
+    card.add_css_class("recording-editor-custom-body");
     let card_header = GtkBox::new(Orientation::Horizontal, 0);
     card_header.add_css_class("recording-editor-gradient-picker-header");
-    let card_spacer = GtkBox::new(Orientation::Horizontal, 0);
-    card_spacer.set_hexpand(true);
+    card_header.add_css_class("recording-editor-custom-header");
+    let card_title = Label::new(Some(&t("Color")));
+    card_title.add_css_class("recording-editor-custom-title");
+    card_title.set_xalign(0.0);
+    card_title.set_hexpand(true);
     // The popover behind the card stays open while the card is up, so the card
     // needs a close of its own: clicking the same tile again also closes it,
     // but that is not something the card can advertise.
     let card_close = Button::new();
     card_close.add_css_class("recording-editor-gradient-picker-close");
+    card_close.add_css_class("recording-editor-custom-close");
     card_close.set_has_frame(false);
     card_close.set_tooltip_text(Some(&t("Close")));
     let card_close_icon = Image::from_icon_name("window-close-symbolic");
     card_close_icon.set_pixel_size(13);
     card_close.set_child(Some(&card_close_icon));
-    card_header.append(&card_spacer);
+    card_header.append(&card_title);
     card_header.append(&card_close);
     card.append(&card_header);
     card.append(&stop_picker.widget);
@@ -2204,6 +2256,50 @@ fn attach_stop_drag(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn standalone_color_popover_reuses_the_color_page_without_gradient_tabs() {
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let popover = source
+            .split("pub(crate) fn build_color_popover(")
+            .nth(1)
+            .unwrap()
+            .split("pub(crate) fn build_color_picker(")
+            .next()
+            .unwrap();
+        for shared in [
+            "recording-editor-custom-popover",
+            "recording-editor-custom-body",
+            "recording-editor-custom-header",
+            "recording-editor-custom-close",
+            "body.append(&picker.widget)",
+            "popover.connect_show",
+            "popover.popdown()",
+            "header.append(tool)",
+        ] {
+            assert!(
+                popover.contains(shared),
+                "the color popover must use {shared}"
+            );
+        }
+        assert!(!popover.contains("build_gradient_page"));
+        assert!(!popover.contains("ToggleButton"));
+
+        let css = include_str!("../ui_support_css/09.css");
+        for selector in [
+            ".recording-editor-custom-popover {",
+            ".recording-editor-gradient-picker-card {",
+        ] {
+            let rule = css
+                .split(selector)
+                .nth(1)
+                .unwrap()
+                .split('}')
+                .next()
+                .unwrap();
+            assert!(rule.contains("min-width: 260px;"));
+        }
+    }
+
     use super::*;
 
     #[test]

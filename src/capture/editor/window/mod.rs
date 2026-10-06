@@ -835,11 +835,10 @@ fn setup_editor_window_full(
     let color_picker_parts = color_picker::build_color_picker(
         state.clone(),
         canvas_queue_draw_signal,
-        drawing_area_placeholder.clone(),
         annotate_config.show_color_names,
         background_fill_slot.clone(),
     );
-    let color_floating_card = color_picker_parts.floating_card;
+    let color_popover = color_picker_parts.popover;
     let color_buttons = color_picker_parts.color_buttons;
     let color_picker_dot = color_picker_parts.color_picker_dot;
     let color_class_names = color_picker_parts.color_class_names;
@@ -1357,6 +1356,16 @@ fn setup_editor_window_full(
     );
     let static_appearance_slot = Rc::new(RefCell::new(background_inspector.clone()));
 
+    let open_color_picker: Rc<dyn Fn()> = Rc::new({
+        let sync_picker_for_active_tool = sync_picker_for_active_tool.clone();
+        let color_popover = color_popover.downgrade();
+        move || {
+            sync_picker_for_active_tool();
+            if let Some(popover) = color_popover.upgrade() {
+                popover.popup();
+            }
+        }
+    });
     let colors_panel_parts = colors_panel::build_colors_panel(
         state.clone(),
         apply_picker_color_to_editor.clone(),
@@ -1370,6 +1379,7 @@ fn setup_editor_window_full(
                 }
             }
         }),
+        open_color_picker,
     );
     let colors_inspector = colors_panel_parts.root;
     let sync_colors_panel_for_active_tool = colors_panel_parts.sync_for_active_tool;
@@ -1684,30 +1694,42 @@ fn setup_editor_window_full(
     canvas_overlay.add_overlay(&focus_bar.slider_bar);
     focus_bar::install_focus_bar_tick(&focus_bar, &drawing_area, &state, &transform, &size_slider);
 
-    // Floating color card: the picker panel floats over the right edge of the
-    // canvas pane, flush against the sidebar. It hangs off the canvas overlay
-    // (a fixed layer — the canvas image scrolls inside it), so it never
-    // scrolls away, never covers the sidebar, and never leaves the window.
-    //
-    // It starts below the chrome strip on purpose: the transparent top chrome
-    // spans that band and would swallow clicks on the card's own header (the
-    // eyedropper lives there). Same offset the docked tool bars use.
-    // Toggled by the toolbar color chip next to -/□/×.
     color_status.set_tooltip_text(Some(&t("Colors")));
     color_status.set_cursor_from_name(Some("pointer"));
-    color_floating_card.add_css_class("editor-color-floating-card");
-    color_floating_card.set_halign(gtk4::Align::End);
-    color_floating_card.set_valign(gtk4::Align::Start);
-    color_floating_card.set_margin_end(8);
-    color_floating_card.set_margin_top(EDITOR_TOP_CHROME_HEIGHT + 8);
-    color_floating_card.set_visible(false);
-    canvas_with_toolbar.add_overlay(&color_floating_card);
+    let color_popover_anchor = GtkBox::new(Orientation::Horizontal, 0);
+    color_popover_anchor.set_size_request(1, 1);
+    color_popover_anchor.set_halign(gtk4::Align::End);
+    color_popover_anchor.set_valign(gtk4::Align::Start);
+    color_popover_anchor.set_margin_end(8);
+    color_popover_anchor.set_margin_top(EDITOR_TOP_CHROME_HEIGHT + 8);
+    color_popover_anchor.set_can_target(false);
+    canvas_with_toolbar.add_overlay(&color_popover_anchor);
+    color_popover.set_position(gtk4::PositionType::Left);
+    color_popover.set_valign(gtk4::Align::Start);
+    color_popover.set_pointing_to(Some(&gdk::Rectangle::new(1, 0, 1, 1)));
+    color_popover.set_parent(&color_popover_anchor);
+    color_popover_anchor.connect_destroy({
+        let color_popover = color_popover.downgrade();
+        move |_| {
+            if let Some(popover) = color_popover.upgrade() {
+                popover.unparent();
+            }
+        }
+    });
     {
-        let card = color_floating_card.clone();
+        let color_popover = color_popover.downgrade();
+        let sync_shared_colors_for_active_tool = sync_shared_colors_for_active_tool.clone();
         let chip_click = gtk4::GestureClick::new();
         chip_click.connect_pressed(move |_, _, _, _| {
-            let next = !card.is_visible();
-            card.set_visible(next);
+            let Some(popover) = color_popover.upgrade() else {
+                return;
+            };
+            if popover.is_visible() {
+                popover.popdown();
+            } else {
+                sync_shared_colors_for_active_tool();
+                popover.popup();
+            }
         });
         color_status.add_controller(chip_click);
     }
@@ -2156,7 +2178,7 @@ fn setup_editor_window_full(
     let eyedropper_rendered = eyedropper.rendered.clone();
 
     *sidebar_eyedropper_activation.borrow_mut() = Some(Rc::new({
-        let color_floating_card = color_floating_card.clone();
+        let color_popover = color_popover.clone();
         let state = state.clone();
         let eyedropper_mode = eyedropper_mode.clone();
         let eyedropper_from_sidebar = eyedropper_from_sidebar.clone();
@@ -2168,7 +2190,7 @@ fn setup_editor_window_full(
         move || {
             eyedropper_from_sidebar.set(true);
             color_picker::activate_eyedropper(
-                &color_floating_card,
+                &color_popover,
                 state.clone(),
                 eyedropper_mode.clone(),
                 eyedropper_point.clone(),
@@ -2291,7 +2313,7 @@ fn setup_editor_window_full(
     // Eyedropper
     color_picker::connect_eyedropper_activation(
         &eyedropper_btn,
-        &color_floating_card,
+        &color_popover,
         state.clone(),
         eyedropper_mode.clone(),
         eyedropper_point.clone(),
@@ -2870,7 +2892,7 @@ mod tests {
     }
 
     #[test]
-    fn toolbar_color_chip_toggles_an_inside_left_picker_card() {
+    fn toolbar_color_chip_toggles_the_shared_color_popover() {
         let source = include_str!("mod.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         let picker_source = include_str!("color_picker.rs");
@@ -2879,19 +2901,26 @@ mod tests {
             .next()
             .unwrap_or(picker_source);
         assert!(
-            production_source.contains("canvas_with_toolbar.add_overlay(&color_floating_card);")
-                && production_source.contains("color_floating_card.set_visible(false);")
-                && production_source
-                    .contains("card.set_visible(next)")
-                && production_source.contains("color_floating_card.set_margin_end(8);")
-                && production_source
-                    .contains("color_floating_card.set_margin_top(EDITOR_TOP_CHROME_HEIGHT + 8);")
-                && production_source.contains("editor-color-floating-card")
-                && production_source.contains("workspace.append(&inspector);")
-                && picker_production.contains("pub floating_card: GtkBox")
-                && !picker_production.contains("set_popover(Some(&color_popover))")
-                && !production_source.contains("color_popover.set_parent(&color_status);"),
-            "The color chip next to -/□/× should toggle a picker card floating over the canvas right edge, never a popover that can leave the window"
+            production_source.contains("color_popover.set_position(gtk4::PositionType::Left);")
+                && production_source.contains("color_popover.set_valign(gtk4::Align::Start);")
+                && production_source.contains("color_popover.set_parent(&color_popover_anchor);")
+                && production_source.contains("color_popover_anchor.connect_destroy")
+                && production_source.contains("canvas_with_toolbar.add_overlay(&color_popover_anchor);")
+                && production_source.contains("color_popover_anchor.set_halign(gtk4::Align::End);")
+                && production_source.contains("color_popover_anchor.set_margin_end(8);")
+                && production_source.contains("color_popover_anchor.set_margin_top(EDITOR_TOP_CHROME_HEIGHT + 8);")
+                && production_source.contains("color_popover_anchor.set_can_target(false);")
+                && production_source.contains("popover.unparent();")
+                && production_source.contains("if popover.is_visible()")
+                && production_source.contains("popover.popdown();")
+                && production_source.contains("sync_shared_colors_for_active_tool();")
+                && picker_production.contains("pub popover: Popover")
+                && picker_production
+                    .contains("build_color_popover(&t(\"Color picker\"), &picker, Some(&eyedropper_btn));")
+                && picker_production.contains("popover.popdown();")
+                && !production_source.contains("color_floating_card")
+                && !production_source.contains("add_overlay(&color_popover)"),
+            "The toolbar chip should toggle the shared Color-only popover at its original canvas-side position and release its anchor on teardown"
         );
     }
 

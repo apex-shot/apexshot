@@ -1836,18 +1836,23 @@ fn paint_wallpaper_thumb(
     let source_h = f64::from(surface.height().max(1));
     let scale = (f64::from(width) / source_w).max(f64::from(height) / source_h);
     let _ = context.save();
-    motion_thumbnail_rounded_rectangle(
-        context,
-        0.0,
-        0.0,
-        f64::from(width),
-        f64::from(height),
-        11.0,
-    );
+    let width = f64::from(width);
+    let height = f64::from(height);
+    let radius = 11.0_f64.min(width / 2.0).min(height / 2.0).max(0.0);
+    context.new_sub_path();
+    for (x, y, start) in [
+        (width - radius, radius, -std::f64::consts::FRAC_PI_2),
+        (width - radius, height - radius, 0.0),
+        (radius, height - radius, std::f64::consts::FRAC_PI_2),
+        (radius, radius, std::f64::consts::PI),
+    ] {
+        context.arc(x, y, radius, start, start + std::f64::consts::FRAC_PI_2);
+    }
+    context.close_path();
     context.clip();
     context.translate(
-        (f64::from(width) - source_w * scale) * 0.5,
-        (f64::from(height) - source_h * scale) * 0.5,
+        (width - source_w * scale) * 0.5,
+        (height - source_h * scale) * 0.5,
     );
     context.scale(scale, scale);
     context.set_source_surface(surface, 0.0, 0.0).ok();
@@ -2084,6 +2089,43 @@ fn paint_image_row_thumb(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wallpaper_thumbnail_corners_match_the_circular_selection_border() {
+        use gtk4::cairo::{Context, Format, ImageSurface};
+
+        let source = ImageSurface::create(Format::ARgb32, 112, 56).unwrap();
+        let source_context = Context::new(&source).unwrap();
+        source_context.set_source_rgb(1.0, 1.0, 1.0);
+        source_context.paint().unwrap();
+        drop(source_context);
+
+        for size in [56, 12] {
+            let mut thumbnail = ImageSurface::create(Format::ARgb32, size, size).unwrap();
+            let context = Context::new(&thumbnail).unwrap();
+            super::paint_wallpaper_thumb(&context, &source, size, size);
+            drop(context);
+
+            let stride = thumbnail.stride() as usize;
+            let pixels = thumbnail.data().unwrap();
+            let pixel = |x: i32, y: i32| {
+                let offset = y as usize * stride + x as usize * 4;
+                u32::from_ne_bytes(pixels[offset..offset + 4].try_into().unwrap())
+            };
+            let inset = if size == 56 { 2 } else { 0 };
+            for (x, y) in [
+                (inset, inset),
+                (size - 1 - inset, inset),
+                (inset, size - 1 - inset),
+                (size - 1 - inset, size - 1 - inset),
+            ] {
+                assert_eq!(pixel(x, y), 0, "tile corners must follow circular arcs");
+            }
+            assert_eq!(pixel(size / 2, size / 2), u32::MAX);
+            assert!(pixel(size / 2, 0) >> 24 >= 240);
+            assert!(pixel(0, size / 2) >> 24 >= 240);
+        }
+    }
+
     /// The Image tab is the video editor's Image page: one full-width row
     /// carrying a leading chip, the label, and the folder glyph. The old
     /// section title over a separate Choose… button read as two controls for

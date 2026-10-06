@@ -130,51 +130,11 @@ pub fn draw_color_to_hex(color: DrawColor) -> String {
     format!("{r:02X}{g:02X}{b:02X}")
 }
 
-pub fn parse_hex_rgb(input: &str) -> Option<(u8, u8, u8)> {
-    let value = input.trim().trim_start_matches('#');
-    if value.len() != 6 || !value.chars().all(|ch| ch.is_ascii_hexdigit()) {
-        return None;
-    }
-
-    let r = u8::from_str_radix(&value[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&value[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&value[4..6], 16).ok()?;
-    Some((r, g, b))
-}
-
-pub fn parse_channel_u8(input: &str) -> Option<u8> {
-    input
-        .trim()
-        .parse::<u16>()
-        .ok()
-        .and_then(|value| u8::try_from(value).ok())
-}
-
-pub fn parse_alpha_percent(input: &str) -> Option<f64> {
-    let value = input.trim().parse::<f64>().ok()?;
-    if !(0.0..=100.0).contains(&value) {
-        return None;
-    }
-    Some(value / 100.0)
-}
-
 pub fn picker_dynamic_css(color: DrawColor) -> String {
     let (r, g, b, _) = draw_color_to_rgba_u8(color);
-    let alpha = color.a.clamp(0.0, 1.0);
 
     format!(
         "
-        #editor-picker-preview-hue {{
-            background: rgba({r}, {g}, {b}, {alpha:.3});
-        }}
-
-        #editor-picker-universal-wheel {{
-            background-image: radial-gradient(circle at 30% 28%,
-                rgba(255, 255, 255, 0.72) 0%,
-                rgba(255, 255, 255, 0.18) 24%,
-                rgba({r}, {g}, {b}, 1.0) 100%);
-        }}
-
         #editor-picker-opacity-slider trough {{
             background-image:
                 linear-gradient(45deg,

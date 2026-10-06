@@ -1102,16 +1102,14 @@ mod tests {
             "the picker body must not paint a drop shadow"
         );
 
-        // The card is deliberately modest, not the wide panel it started as.
-        // A wider min-width pads the popover back out over the video stage.
         let popover_rule = css
             .find(".recording-editor-custom-popover {")
             .expect("09.css must size the popover");
         let popover_rule_end =
             css[popover_rule..].find('}').expect("the rule is closed") + popover_rule;
         assert!(
-            css[popover_rule..popover_rule_end].contains("min-width: 212px;"),
-            "the card must stay at the modest width it was reduced to"
+            css[popover_rule..popover_rule_end].contains("min-width: 260px;"),
+            "the shared card must be wide enough for a balanced, box-shaped layout"
         );
 
         // The light theme needs its own surface or the dark card shows through.
@@ -1151,8 +1149,6 @@ mod tests {
             "the shared floating-card recipe must not carry a drop shadow"
         );
 
-        // The stop picker's mini card sits beside the main one, so it has to
-        // paint the same card at its own narrower width.
         let card = recording
             .find(".recording-editor-gradient-picker-card {")
             .expect("09.css must define the picker card's surface");
