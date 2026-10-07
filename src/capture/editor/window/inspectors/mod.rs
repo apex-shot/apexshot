@@ -14,7 +14,6 @@ use gtk4::{
     prelude::*, Box as GtkBox, Button, Image, Label, Orientation, PolicyType, ScrolledWindow, Stack,
 };
 
-use super::background_panel::BACKGROUND_SIDEBAR_WIDTH;
 use super::icon_names;
 use crate::i18n::t;
 
@@ -26,6 +25,8 @@ use stroke::{
     ArrowInspectorInputs, HighlighterInspectorInputs, LineInspectorInputs, PenInspectorInputs,
 };
 use text::{build_text_inspector, TextInspectorInputs};
+
+const INSPECTOR_SIDEBAR_WIDTH: i32 = 320;
 
 pub(super) struct InspectorParts {
     pub inspector_tabs: GtkBox,
@@ -117,7 +118,7 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
 
     let inspector_tabs = GtkBox::new(Orientation::Horizontal, 8);
     inspector_tabs.add_css_class("editor-inspector-tabs");
-    inspector_tabs.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
+    inspector_tabs.set_width_request(INSPECTOR_SIDEBAR_WIDTH);
     inspector_tabs.set_hexpand(false);
     inspector_tabs.set_halign(gtk4::Align::Fill);
 
@@ -168,16 +169,16 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
 
     let inspector = GtkBox::new(Orientation::Vertical, 0);
     inspector.add_css_class("editor-right-inspector");
-    inspector.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
+    inspector.set_width_request(INSPECTOR_SIDEBAR_WIDTH);
     inspector.set_hexpand(false);
     inspector.set_vexpand(true);
     inspector.append(input.sidebar_utility_controls);
     inspector.append(&inspector_tabs);
 
     let inspector_stack = Stack::new();
-    inspector_stack.set_hhomogeneous(true);
+    inspector_stack.set_hhomogeneous(false);
     inspector_stack.set_vhomogeneous(false);
-    inspector_stack.set_width_request(BACKGROUND_SIDEBAR_WIDTH);
+    inspector_stack.set_width_request(INSPECTOR_SIDEBAR_WIDTH);
     inspector_stack.set_hexpand(false);
     inspector_stack.set_vexpand(false);
     input.background_inspector.set_visible(true);

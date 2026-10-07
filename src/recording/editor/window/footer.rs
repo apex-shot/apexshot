@@ -5,9 +5,10 @@ use gtk4::{
     gio, glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, FileChooserAction,
     FileChooserNative, FileFilter, Image, Label, Orientation, ResponseType, Spinner,
 };
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -17,6 +18,7 @@ pub(super) fn build_inspector_actions(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
+    export_cancellation: Arc<AtomicBool>,
 ) -> GtkBox {
     let footer = GtkBox::new(Orientation::Horizontal, 6);
     footer.add_css_class("recording-editor-footer");
@@ -67,6 +69,7 @@ pub(super) fn build_inspector_actions(
         export_controls.clone(),
         spinner.clone(),
         exporting.clone(),
+        export_cancellation.clone(),
     );
     wire_export_button(
         &done,
@@ -75,6 +78,7 @@ pub(super) fn build_inspector_actions(
         export_controls,
         spinner.clone(),
         exporting,
+        export_cancellation,
     );
 
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
@@ -101,6 +105,7 @@ fn icon_action_button(icon_name: &str, tooltip: &str) -> Button {
 pub(super) fn build_upload_action(
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
+    export_cancellation: Arc<AtomicBool>,
 ) -> (Button, Spinner) {
     let button = Button::new();
     button.set_has_frame(false);
@@ -127,6 +132,7 @@ pub(super) fn build_upload_action(
         ],
         spinner.clone(),
         exporting,
+        export_cancellation,
     );
 
     (button, spinner)
@@ -136,6 +142,7 @@ pub(super) fn build_export_action(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
+    export_cancellation: Arc<AtomicBool>,
 ) -> (Button, Spinner) {
     let button = Button::new();
     button.set_has_frame(false);
@@ -164,6 +171,7 @@ pub(super) fn build_export_action(
         ],
         spinner.clone(),
         exporting,
+        export_cancellation,
     );
 
     (button, spinner)
@@ -185,6 +193,7 @@ fn wire_upload_button(
     controls: Vec<gtk4::Widget>,
     spinner: Spinner,
     exporting: Rc<Cell<bool>>,
+    export_cancellation: Arc<AtomicBool>,
 ) {
     button.set_sensitive(state.lock().unwrap().has_source_video());
     button.connect_clicked(move |_| {
@@ -200,6 +209,7 @@ fn wire_upload_button(
         }
 
         exporting.set(true);
+        export_cancellation.store(false, Ordering::Release);
         spinner.set_visible(true);
         spinner.start();
         for control in &controls {
@@ -208,11 +218,20 @@ fn wire_upload_button(
 
         // Export with current editor settings first, then upload the result.
         let state_snapshot = state.lock().unwrap().clone();
+        let cancellation_worker = export_cancellation.clone();
         let (sender, receiver) = std::sync::mpsc::channel::<Result<String, String>>();
         std::thread::spawn(move || {
             let result = (|| {
-                let path = ffmpeg::export_edited(&state_snapshot)
-                    .map_err(|err| format!("Export before upload failed: {err}"))?;
+                let path = ffmpeg::export_edited_to_cancellable(
+                    &state_snapshot,
+                    state_snapshot.export_path(),
+                    Some(&cancellation_worker),
+                )
+                .map_err(|err| format!("Export before upload failed: {err}"))?;
+                if cancellation_worker.load(Ordering::Acquire) {
+                    let _ = std::fs::remove_file(&path);
+                    return Err("Export cancelled".into());
+                }
                 crate::cloud::upload::upload_file(&config, &path)
                     .map(|result| result.share_url)
                     .map_err(|err| err.to_string())
@@ -223,6 +242,7 @@ fn wire_upload_button(
         let controls = controls.clone();
         let spinner = spinner.clone();
         let exporting = exporting.clone();
+        let export_cancellation = export_cancellation.clone();
         glib::timeout_add_local(Duration::from_millis(100), move || {
             match receiver.try_recv() {
                 Ok(result) => {
@@ -231,6 +251,9 @@ fn wire_upload_button(
                     spinner.set_visible(false);
                     for control in &controls {
                         control.set_sensitive(true);
+                    }
+                    if export_cancellation.load(Ordering::Acquire) {
+                        return glib::ControlFlow::Break;
                     }
                     match result {
                         Ok(share_url) => {
@@ -281,11 +304,17 @@ fn wire_export_button(
     controls: Vec<gtk4::Widget>,
     spinner: Spinner,
     exporting: Rc<Cell<bool>>,
+    export_cancellation: Arc<AtomicBool>,
 ) {
     let window = window.clone();
+    let chooser_slot = Rc::new(RefCell::new(None::<FileChooserNative>));
     button.set_sensitive(state.lock().unwrap().has_source_video());
+    let chooser_slot_click = chooser_slot.clone();
     button.connect_clicked(move |_| {
-        if exporting.get() || !state.lock().unwrap().has_source_video() {
+        if exporting.get()
+            || chooser_slot_click.borrow().is_some()
+            || !state.lock().unwrap().has_source_video()
+        {
             return;
         }
         let suggested = state.lock().unwrap().export_path();
@@ -318,12 +347,27 @@ fn wire_export_button(
         let spinner = spinner.clone();
         let exporting = exporting.clone();
         let window = window.clone();
+        export_cancellation.store(false, Ordering::Release);
+        let chooser_slot_response = Rc::downgrade(&chooser_slot_click);
+        let export_cancellation_response = export_cancellation.clone();
         chooser.connect_response(move |dialog, response| {
             dialog.hide();
+            let selected_file = (response == ResponseType::Accept)
+                .then(|| dialog.file())
+                .flatten();
+            if let Some(chooser_slot) = chooser_slot_response.upgrade() {
+                chooser_slot.borrow_mut().take();
+            }
             if response != ResponseType::Accept {
                 return;
             }
-            let Some(mut path) = dialog.file().and_then(|file| file.path()) else {
+            let Some(mut path) = selected_file.and_then(|file| file.path()) else {
+                dialogs::show_error(
+                    &window,
+                    &t("Export failed"),
+                    &t("ApexShot could not export this recording."),
+                    Some("Choose a local file to export."),
+                );
                 return;
             };
             let is_mp4 = path
@@ -342,9 +386,14 @@ fn wire_export_button(
             }
 
             let state_snapshot = state.lock().unwrap().clone();
+            let export_cancellation_worker = export_cancellation_response.clone();
             let (sender, receiver) = std::sync::mpsc::channel::<Result<PathBuf, String>>();
             std::thread::spawn(move || {
-                let result = ffmpeg::export_edited_to(&state_snapshot, path);
+                let result = ffmpeg::export_edited_to_cancellable(
+                    &state_snapshot,
+                    path,
+                    Some(&export_cancellation_worker),
+                );
                 let _ = sender.send(result.map_err(|err| err.to_string()));
             });
 
@@ -352,6 +401,7 @@ fn wire_export_button(
             let spinner = spinner.clone();
             let exporting = exporting.clone();
             let window = window.clone();
+            let export_cancellation = export_cancellation_response.clone();
             glib::timeout_add_local(Duration::from_millis(100), move || {
                 match receiver.try_recv() {
                     Ok(result) => {
@@ -360,6 +410,12 @@ fn wire_export_button(
                         spinner.set_visible(false);
                         for control in &controls {
                             control.set_sensitive(true);
+                        }
+                        if export_cancellation.load(Ordering::Acquire) {
+                            if let Ok(path) = &result {
+                                let _ = std::fs::remove_file(path);
+                            }
+                            return glib::ControlFlow::Break;
                         }
                         match result {
                             Ok(path) => {
@@ -397,6 +453,7 @@ fn wire_export_button(
                 }
             });
         });
+        *chooser_slot_click.borrow_mut() = Some(chooser.clone());
         chooser.show();
     });
 }
@@ -405,7 +462,10 @@ fn wire_export_button(
 mod tests {
     #[test]
     fn cloud_and_export_require_video_and_upload_applies_edits() {
-        let source = include_str!("footer.rs");
+        let source = include_str!("footer.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
         for fn_name in ["fn wire_upload_button", "fn wire_export_button"] {
             let start = source.find(fn_name).expect(fn_name);
             assert!(
@@ -426,6 +486,16 @@ mod tests {
         assert!(
             save_pos < write_pos,
             "Export must ask for a save location before encoding",
+        );
+        assert!(
+            export.contains("chooser_slot_click.borrow_mut() = Some(chooser.clone())")
+                && export.contains("Rc::downgrade(&chooser_slot_click)")
+                && export.contains("chooser_slot.borrow_mut().take()"),
+            "The native save chooser must stay strongly owned until its response",
+        );
+        assert!(
+            export.contains("export_edited_to_cancellable"),
+            "The export worker must observe the editor cancellation token",
         );
     }
 }

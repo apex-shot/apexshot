@@ -45,7 +45,7 @@ GI_TYPELIB_PATH=/usr/lib/x86_64-linux-gnu/mutter-18:/usr/lib/gnome-shell \
      dims the area outside a recording, lets ApexShot list and focus windows for its
      window picker, and keeps ApexShot's preview windows above other windows.
    - **Version**: 4
-   - **Supported GNOME versions**: 48, 49, 50
+   - **Supported GNOME versions**: 46, 48, 49, 50
    - **Website**: https://github.com/apex-shot/apexshot
 4. Upload the zip and the screenshots.
 5. Submit for review.
@@ -84,4 +84,4 @@ On Wayland, log out and back in to reload the shell.
 ## Notes
 
 - The extension does nothing on its own; ApexShot must be installed and running.
-- Requires GNOME Shell 48 or newer.
+- Supports GNOME Shell 46 and 48–50.

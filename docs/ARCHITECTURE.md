@@ -309,7 +309,7 @@ Native C++ overlay built with CMake and Qt5:
 - `src/request.cpp/h` — IPC request format
 
 ### GNOME Shell Extension (`gnome-extension/`)
-JavaScript/GJS extension for GNOME Shell 48–50:
+JavaScript/GJS extension for GNOME Shell 46 and 48–50:
 - `extension.js` — enables and disables the three services
 - `shell-overlay.js` — recording mask shell actors (`ShowMask` / `HideMask`)
 - `window-list.js` — window enumeration and activation for the window picker

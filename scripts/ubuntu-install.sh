@@ -448,7 +448,7 @@ install_gtk4_layer_shell_from_source() {
 
     # Pin a stable release that matches the Ubuntu 25.10 package series so
     # runtime behavior stays close to the official .deb CI build target.
-    local layer_shell_tag="${APEXSHOT_GTK4_LAYER_SHELL_TAG:-v1.0.4}"
+    local layer_shell_tag="${APEXSHOT_GTK4_LAYER_SHELL_TAG:-v1.1.1}"
     local src_dir
     src_dir=$(mktemp -d -t apexshot-gtk4-layer-shell.XXXXXX)
 
@@ -534,7 +534,11 @@ install_deps() {
     )
 
     local need_layer_shell_from_source=0
-    if apt-cache show libgtk4-layer-shell0 >/dev/null 2>&1; then
+    local bundled_layer_shell=0
+    local deb_file="${TMPDIR}/apexshot_${VERSION}_amd64.deb"
+    if [[ -f "$deb_file" ]] && dpkg-deb --fsys-tarfile "$deb_file" | tar -tf - | grep -Fx './usr/lib/apexshot/libgtk4-layer-shell.so.0' >/dev/null; then
+        bundled_layer_shell=1
+    elif apt-cache show libgtk4-layer-shell0 >/dev/null 2>&1; then
         deps+=(libgtk4-layer-shell0)
     else
         need_layer_shell_from_source=1
@@ -587,7 +591,7 @@ install_deps() {
 
     if [[ $need_layer_shell_from_source -eq 1 ]]; then
         install_gtk4_layer_shell_from_source
-    elif ! has_gtk4_layer_shell_lib; then
+    elif [[ $bundled_layer_shell -eq 0 ]] && ! has_gtk4_layer_shell_lib; then
         # Package was supposed to be available but the library is still missing
         # (broken local install, partial purge, etc.).
         warn "libgtk4-layer-shell0 was expected from apt but the shared library is not visible."
@@ -941,8 +945,8 @@ main() {
         return 0
     fi
 
-    install_deps
     download_deb
+    install_deps
     install_deb
     install_gnome_extension
     setup_browser_host

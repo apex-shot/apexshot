@@ -323,7 +323,7 @@ jobs:
         run: cmp target/release/apexshot-capture packaging/deb/apexshot-capture
 
       - name: Build .deb package
-        run: cargo deb --no-build --verbose
+        run: scripts/package-deb.sh --no-build --verbose
 
       - name: Get version from tag
         id: get_version

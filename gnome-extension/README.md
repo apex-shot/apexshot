@@ -37,7 +37,7 @@ gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 
 ## Requirements
 - ApexShot built with D-Bus integration (default build)
-- GNOME Shell 48–50 (see `metadata.json` `shell-version`)
+- GNOME Shell 46 and 48–50 (see `metadata.json` `shell-version`)
 - D-Bus session bus available
 
 ## Troubleshooting

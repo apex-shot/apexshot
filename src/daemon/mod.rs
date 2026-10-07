@@ -22,6 +22,9 @@ use crate::{
 };
 use anyhow::Context;
 
+static LOCAL_ACTION_SENDER: std::sync::Mutex<Option<std::sync::mpsc::Sender<DaemonAction>>> =
+    std::sync::Mutex::new(None);
+
 mod audio;
 mod capture_handlers;
 mod dispatch;
@@ -212,6 +215,14 @@ pub fn set_daemon_tray_visibility(visible: bool) -> bool {
 }
 
 pub(super) fn trigger_daemon_action_blocking(action: &str) -> bool {
+    let local_sender = LOCAL_ACTION_SENDER
+        .lock()
+        .ok()
+        .and_then(|sender| sender.clone());
+    if let Some(sender) = local_sender {
+        return enqueue_local_daemon_action(&sender, action);
+    }
+
     if tokio::runtime::Handle::try_current().is_ok() {
         let action = action.to_string();
         return std::thread::spawn(move || trigger_daemon_action_blocking(&action))
@@ -235,6 +246,13 @@ pub(super) fn trigger_daemon_action_blocking(action: &str) -> bool {
     proxy
         .call::<_, _, ()>("Trigger", &(action.to_string(),))
         .is_ok()
+}
+
+fn enqueue_local_daemon_action(
+    sender: &std::sync::mpsc::Sender<DaemonAction>,
+    action: &str,
+) -> bool {
+    parse_trigger_action(action).is_some_and(|action| sender.send(action).is_ok())
 }
 
 /// Tell the daemon to show preview for a specific path.
@@ -581,6 +599,9 @@ pub(super) async fn run_daemon_inner(
 
     // ── Action loop ──────────────────────────────────────────────────────────
     // ── Action loop ──────────────────────────────────────────────────────────
+    *LOCAL_ACTION_SENDER
+        .lock()
+        .expect("local daemon action sender mutex poisoned") = Some(action_tx.clone());
     while let Ok(action) = action_rx.recv() {
         if !dispatch::dispatch_daemon_action(
             action,
@@ -592,6 +613,9 @@ pub(super) async fn run_daemon_inner(
             break;
         }
     }
+    *LOCAL_ACTION_SENDER
+        .lock()
+        .expect("local daemon action sender mutex poisoned") = None;
 
     shutdown_warm_capture_helper();
     eprintln!("[daemon] Exiting.");
@@ -781,6 +805,57 @@ mod tests {
     use super::hotkey_listener::*;
     use super::*;
     use std::{path::Path, time::Duration};
+
+    #[test]
+    fn local_recording_events_queue_without_calling_the_daemon_over_dbus() {
+        assert_eq!(
+            DaemonAction::from(TrayAction::RecordScreen),
+            DaemonAction::RecordScreen
+        );
+        assert_eq!(
+            parse_trigger_action("record_screen"),
+            Some(DaemonAction::RecordScreen)
+        );
+        assert_eq!(
+            parse_trigger_action("recording_stop_save"),
+            Some(DaemonAction::StopRecordingSave)
+        );
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+
+        assert!(enqueue_local_daemon_action(
+            &sender,
+            "recording_session_started"
+        ));
+        assert!(enqueue_local_daemon_action(
+            &sender,
+            "recording_session_paused"
+        ));
+        assert!(enqueue_local_daemon_action(
+            &sender,
+            "recording_session_resumed"
+        ));
+        assert!(enqueue_local_daemon_action(
+            &sender,
+            "recording_session_restarted"
+        ));
+        assert!(enqueue_local_daemon_action(
+            &sender,
+            "recording_session_ended"
+        ));
+
+        assert_eq!(
+            receiver.try_iter().collect::<Vec<_>>(),
+            vec![
+                DaemonAction::RecordingSessionStarted,
+                DaemonAction::RecordingSessionPaused,
+                DaemonAction::RecordingSessionResumed,
+                DaemonAction::RecordingSessionRestarted,
+                DaemonAction::RecordingSessionEnded,
+            ]
+        );
+        assert!(!enqueue_local_daemon_action(&sender, "not-a-daemon-action"));
+    }
 
     #[test]
     fn exclusive_recording_blocks_meter_restart() {

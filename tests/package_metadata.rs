@@ -30,7 +30,7 @@ fn deb_package_includes_capture_helper_binary() {
     );
 
     assert!(
-        release_section.contains("cargo deb --no-build --verbose"),
+        release_section.contains("scripts/package-deb.sh --no-build --verbose"),
         "release workflow must package the already-built binaries with cargo deb --no-build"
     );
 
@@ -70,6 +70,68 @@ fn deb_package_includes_capture_helper_binary() {
             && release_section.contains("ldconfig")
             && !release_section.contains("sudo ninja -C build install"),
         "containerized release job should install gtk4-layer-shell without sudo"
+    );
+}
+
+#[test]
+fn deb_package_bundles_layer_shell_in_a_private_runtime_directory() {
+    let cargo_toml = include_str!("../Cargo.toml");
+    let build_script = include_str!("../build.rs");
+    let packaging_script = include_str!("../scripts/package-deb.sh");
+
+    assert!(
+        cargo_toml.contains("target/deb-staging/libgtk4-layer-shell.so.0\", \"usr/lib/apexshot/"),
+        "the .deb must ship gtk4-layer-shell outside distro-owned multiarch paths"
+    );
+    assert!(
+        cargo_toml.contains("libgtk-4-1"),
+        "the .deb must declare GTK4 explicitly when the private layer-shell library bypasses shlib metadata"
+    );
+    assert!(
+        cargo_toml.contains("gtk4-layer-shell.MIT-LICENSE")
+            && std::path::Path::new("packaging/debian/gtk4-layer-shell.MIT-LICENSE").exists(),
+        "the private runtime copy must include its upstream MIT license"
+    );
+    assert!(
+        build_script.contains("-Wl,-rpath,$ORIGIN/../lib/apexshot"),
+        "the ApexShot executable must resolve its privately bundled layer-shell library"
+    );
+    assert!(
+        packaging_script.contains("cp -L \"$library\" \"$staged_library\"")
+            && packaging_script.contains("cargo deb \"$@\""),
+        "the Debian packaging entrypoint must stage the installed library before cargo-deb"
+    );
+}
+
+#[test]
+fn gnome_extension_metadata_declares_gnome_46_without_dropping_newer_shells() {
+    let metadata: serde_json::Value =
+        serde_json::from_str(include_str!("../gnome-extension/metadata.json"))
+            .expect("extension metadata must be valid JSON");
+    let workflow = include_str!("../.github/workflows/release.yml");
+    let release_section = workflow
+        .split("  release:\n")
+        .nth(1)
+        .expect("workflow should contain a release job");
+    let versions = metadata["shell-version"]
+        .as_array()
+        .expect("shell-version must be an array");
+
+    for supported in ["46", "48", "49", "50"] {
+        assert!(
+            versions.iter().any(|version| version == supported),
+            "GNOME Shell {supported} must remain declared as supported"
+        );
+    }
+
+    assert!(
+        !versions.iter().any(|version| version == "45"),
+        "GNOME 46 support must not broaden to GNOME 45"
+    );
+    assert!(
+        release_section.contains("zip apexshot-gnome-integration.zip")
+            && release_section.contains("extension.js metadata.json"),
+        "the release ZIP must ship the same declared shell compatibility"
     );
 }
 

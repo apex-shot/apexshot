@@ -122,8 +122,8 @@ cargo run -- capture screen
 ### Building the Debian Package
 
 ```bash
-# Build the .deb package
-cargo deb
+# Build the .deb package (requires gtk4-layer-shell installed for linking)
+scripts/package-deb.sh
 
 # The package will be in target/debian/
 ```
@@ -158,7 +158,7 @@ The extension is plain ES modules in `gnome-extension/`. Two workflows:
 # Quick syntax check (the same one CI runs):
 pnpm check:gnome
 
-# Live-install into your session (works on GNOME 48–50):
+# Live-install into your session (works on GNOME 46 and 48–50):
 make -C gnome-extension install     # if a Makefile is present, otherwise:
 gnome-extensions pack gnome-extension --force \
   --extra-source=cursor-classifier.js \
