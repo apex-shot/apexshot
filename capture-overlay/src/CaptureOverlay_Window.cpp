@@ -159,14 +159,6 @@ QRect CaptureOverlay::targetScreenDesktopGeometry() const
     return QRect(0, 0, std::max(1, width()), std::max(1, height()));
 }
 
-// Kept for API completeness; list-picker capture uses freeze/area crop only.
-bool CaptureOverlay::captureWindowByIdToTemp(quint64 /*windowId*/,
-                                             QString& /*outPath*/,
-                                             QSize& /*outSize*/) const
-{
-    return false;
-}
-
 // ── Window enumeration (metadata only — no previews) ─────────────────────────
 
 QList<CaptureOverlay::WindowInfo> CaptureOverlay::enumerateWindowsFromX11() const

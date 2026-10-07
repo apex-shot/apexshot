@@ -38,7 +38,7 @@ inline constexpr double TOP_BAR_BTN_SIZE          = 32.0;
 inline constexpr int    SCROLL_CAPTURE_INTERVAL_MS = 300;
 inline constexpr int    DEFAULT_SELECTION_W       = 600;
 inline constexpr int    DEFAULT_SELECTION_H       = 744;
-// Area, Fullscreen, Scroll, Timer, OCR, Recording (Window capture removed)
+// Legacy side tools; Quick Capture handles Window through the in-overlay picker.
 inline constexpr int    NUM_TOOLS                 = 6;
 
 extern const char* TOOLBAR_LABELS[NUM_TOOLS];

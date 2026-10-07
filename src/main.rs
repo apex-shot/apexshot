@@ -3,7 +3,7 @@
 //! Usage:
 //!   cargo run -- capture screen
 //!   cargo run -- capture area
-//!   cargo run -- capture window
+//!   cargo run -- capture window (legacy direct CLI disabled; GUI: Quick Capture > Shot > Window)
 //!   cargo run -- record screen
 //!   cargo run -- record screen
 //!   cargo run -- ocr <image>
@@ -545,9 +545,9 @@ fn run_daemon_with_gtk_on_main_thread() {
                 let _ = reply.send(result);
             }
             GtkWork::CaptureWindow { reply } => {
-                eprintln!("[gtk] CaptureWindow ignored — window capture discontinued");
+                eprintln!("[gtk] Legacy direct CaptureWindow request ignored");
                 let _ = reply.send(Err(
-                    "Window capture is temporarily discontinued. Use area or fullscreen capture instead."
+                    "Legacy direct window capture is disabled. Use Quick Capture > Shot > Window instead."
                         .to_string(),
                 ));
             }

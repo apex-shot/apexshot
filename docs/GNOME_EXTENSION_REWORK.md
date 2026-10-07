@@ -172,6 +172,10 @@ panel; the tray tooltip and notification carry it instead. Note the `ksni` tray
 needs the AppIndicator extension on stock GNOME, which is why the notification
 path was re-enabled rather than relying on the tray alone.
 
+**Historical note:** The standalone `WindowPickerOverlay.cpp` / `.h` discussed below
+were unused and have been removed. The live Quick Capture Window picker is in
+`capture-overlay/src/CaptureOverlay_Window.cpp`; this historical account is retained.
+
 ### `capture-overlay/src/WindowPickerOverlay.cpp`
 
 Deleted the `captureWindowThumbnail` lambda and its `resolveCapturedPath` /
