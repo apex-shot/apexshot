@@ -31,6 +31,7 @@ use gtk4::{
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -158,8 +159,14 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         InitialVideo::None => Some(MediaFile::new()),
     }));
     let exporting = Rc::new(Cell::new(false));
-    let (title_bar, title_label, upload_btn, export_btn) =
-        build_window_controls(&window, state.clone(), exporting.clone());
+    let export_cancellation = Arc::new(AtomicBool::new(false));
+    let close_after_export = Rc::new(Cell::new(false));
+    let (title_bar, title_label, upload_btn, export_btn) = build_window_controls(
+        &window,
+        state.clone(),
+        exporting.clone(),
+        export_cancellation.clone(),
+    );
     root.append(&title_bar);
 
     let estimate_label = Label::new(None);
@@ -337,7 +344,13 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
     shell.set_clip_overlay(&scrim, true);
     crate::capture::editor::ui_support::install_edge_resize(&shell, &window);
     window.set_child(Some(&shell));
-    wire_close_persist(&window, state.clone(), exporting.clone());
+    wire_close_persist(
+        &window,
+        state.clone(),
+        exporting.clone(),
+        export_cancellation,
+        close_after_export,
+    );
     sweep_popovers_on_deactivate(&window);
     window.add_controller(build_zoom_history_keys(state.clone(), ping.clone()));
     window.present();
@@ -465,26 +478,39 @@ fn wire_close_persist(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
+    export_cancellation: Arc<AtomicBool>,
+    close_after_export: Rc<Cell<bool>>,
 ) {
-    let force_close = Rc::new(Cell::new(false));
     window.connect_close_request(move |window| {
-        if force_close.get() {
-            persist_video_session(&state.lock().unwrap());
-            return glib::Propagation::Proceed;
-        }
         if !state.lock().unwrap().has_source_video() {
             return glib::Propagation::Proceed;
+        }
+        if close_after_export.get() {
+            return glib::Propagation::Stop;
         }
         if exporting.get() {
             let window = window.clone();
             let state = state.clone();
-            let force_close = force_close.clone();
+            let export_cancellation = export_cancellation.clone();
+            let close_after_export = close_after_export.clone();
+            let exporting = exporting.clone();
             dialogs::show_export_in_progress_close(&window, {
                 let window = window.clone();
                 move || {
+                    export_cancellation.store(true, Ordering::Release);
                     persist_video_session(&state.lock().unwrap());
-                    force_close.set(true);
-                    window.close();
+                    close_after_export.set(true);
+                    let window = window.clone();
+                    let exporting = exporting.clone();
+                    let close_after_export = close_after_export.clone();
+                    glib::timeout_add_local(Duration::from_millis(50), move || {
+                        if exporting.get() {
+                            return glib::ControlFlow::Continue;
+                        }
+                        close_after_export.set(false);
+                        window.close();
+                        glib::ControlFlow::Break
+                    });
                 }
             });
             return glib::Propagation::Stop;
@@ -565,20 +591,38 @@ fn spawn_filmstrip_job(
 ///
 /// The picker on Wayland belongs to the compositor, not to this window, so the
 /// empty preview stays clickable for as long as one is up: every click raised
-/// another file chooser on top of the one already waiting. The slot is claimed
-/// before the chooser is built and released when its response lands.
+/// another file chooser on top of the one already waiting. The chooser remains
+/// strongly owned until its response, while the response closure holds only a
+/// weak reference to the slot.
 #[derive(Clone, Default)]
-struct OpenVideoChooser(Rc<Cell<bool>>);
+struct OpenVideoChooser(Rc<RefCell<OpenVideoChooserState>>);
+
+#[derive(Default)]
+struct OpenVideoChooserState {
+    active: bool,
+    chooser: Option<FileChooserNative>,
+}
 
 impl OpenVideoChooser {
     /// Claims the slot, reporting false when a chooser is already up.
     fn claim(&self) -> bool {
-        !self.0.replace(true)
+        let mut state = self.0.borrow_mut();
+        if state.active {
+            return false;
+        }
+        state.active = true;
+        true
+    }
+
+    fn retain(&self, chooser: &FileChooserNative) {
+        self.0.borrow_mut().chooser = Some(chooser.clone());
     }
 
     /// Frees the slot once the chooser's response has landed.
     fn release(&self) {
-        self.0.set(false);
+        let mut state = self.0.borrow_mut();
+        state.active = false;
+        state.chooser.take();
     }
 }
 
@@ -606,15 +650,22 @@ fn show_open_preview_video(
     filter.add_pattern("*.mp4");
     chooser.add_filter(&filter);
     let window = window.clone();
+    let chooser_slot = Rc::downgrade(&open_video_chooser.0);
     chooser.connect_response(move |dialog, response| {
-        open_video_chooser.release();
+        let selected_file = (response == ResponseType::Accept)
+            .then(|| dialog.file())
+            .flatten();
+        dialog.hide();
+        if let Some(chooser_slot) = chooser_slot.upgrade() {
+            OpenVideoChooser(chooser_slot).release();
+        }
         if response == ResponseType::Accept {
-            if let Some(path) = dialog.file().and_then(|file| file.path()) {
+            if let Some(path) = selected_file.and_then(|file| file.path()) {
                 load_preview_video(path, &state, &media, &filmstrip, &window, &ping);
             }
         }
-        dialog.hide();
     });
+    open_video_chooser.retain(&chooser);
     chooser.show();
 }
 
@@ -636,6 +687,7 @@ fn build_window_controls(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
+    export_cancellation: Arc<AtomicBool>,
 ) -> (GtkBox, Label, Button, Button) {
     const TRAFFIC_LIGHTS_WIDTH: i32 = 100;
     let bar = GtkBox::new(Orientation::Horizontal, 8);
@@ -659,9 +711,14 @@ fn build_window_controls(
     title.set_can_target(false);
     bar.append(&title);
 
-    let (export, export_spinner) =
-        footer::build_export_action(window, state.clone(), exporting.clone());
-    let (upload, upload_spinner) = footer::build_upload_action(state, exporting);
+    let (export, export_spinner) = footer::build_export_action(
+        window,
+        state.clone(),
+        exporting.clone(),
+        export_cancellation.clone(),
+    );
+    let (upload, upload_spinner) =
+        footer::build_upload_action(state, exporting, export_cancellation);
     let actions = GtkBox::new(Orientation::Horizontal, 8);
     actions.add_css_class("recording-editor-title-actions");
     actions.set_valign(Align::Center);
@@ -904,6 +961,29 @@ mod tests {
     }
 
     #[test]
+    fn close_anyway_cancels_the_export_process_before_persisting() {
+        let source = include_str!("mod.rs");
+        let start = source
+            .find("fn wire_close_persist(")
+            .expect("video close persist handler");
+        let rest = &source[start + 1..];
+        let end = rest
+            .find("\nfn ")
+            .map(|i| start + 1 + i)
+            .unwrap_or(source.len());
+        let handler = &source[start..end];
+
+        let cancel = handler
+            .find("export_cancellation.store(true, Ordering::Release)")
+            .expect("closing during an encode should cancel its process");
+        let persist = handler
+            .find("persist_video_session")
+            .expect("the project state should still be retained");
+        assert!(cancel < persist);
+        assert!(handler.contains("close_after_export.set(true)"));
+    }
+
+    #[test]
     fn light_theme_playhead_is_black_and_clips_have_no_lift_shadow() {
         let painting = include_str!("timeline_card_parts/painting.rs");
         assert!(
@@ -1055,8 +1135,14 @@ mod tests {
             "the empty preview must refuse a click while a chooser is already up"
         );
         assert!(
-            production.contains("open_video_chooser.release()"),
+            production.contains("OpenVideoChooser(chooser_slot).release()")
+                && production.contains("open_video_chooser.retain(&chooser)"),
             "the chooser's response must free the slot for the next click"
+        );
+        assert!(
+            production.contains("open_video_chooser.retain(&chooser)")
+                && production.contains("Rc::downgrade(&open_video_chooser.0)"),
+            "the chooser must be retained without creating a response-closure cycle"
         );
     }
 }

@@ -715,7 +715,7 @@ without requiring the Qt overlay or GNOME Shell extension.
 
 ### GNOME Shell Extension (`gnome-extension/`)
 
-**Purpose:** JavaScript/GJS extension for GNOME Shell 48–50 providing the recording mask, the window list the Qt window picker needs, and preview-window stacking.
+**Purpose:** JavaScript/GJS extension for GNOME Shell 46 and 48–50 providing the recording mask, the window list the Qt window picker needs, and preview-window stacking.
 
 **Key Files:**
 - `extension.js` — Enables and disables the three services
@@ -733,7 +733,7 @@ without requiring the Qt overlay or GNOME Shell extension.
 
 **UUID:** `apexshot-gnome-integration@apexshot.github.io`
 
-**Supported GNOME Versions:** 48–50 (see `gnome-extension/metadata.json`)
+**Supported GNOME Versions:** 46 and 48–50 (see `gnome-extension/metadata.json`)
 
 ---
 

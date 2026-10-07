@@ -2978,7 +2978,11 @@ mod tests {
         let production_source = production_editor_window_source();
         assert!(
             production_source.contains("let inspector_stack = Stack::new();")
-                && production_source.contains("inspector_stack.set_hhomogeneous(true);")
+                && production_source.contains("inspector_stack.set_hhomogeneous(false);")
+                && production_source.contains("const INSPECTOR_SIDEBAR_WIDTH: i32 = 320;")
+                && production_source.contains(
+                    "inspector_stack.set_width_request(INSPECTOR_SIDEBAR_WIDTH);"
+                )
                 && production_source.contains("input.background_inspector.set_visible(true);")
                 && production_source.contains("select_inspector.set_visible(true);")
                 && production_source.contains("pen_inspector.set_visible(true);")

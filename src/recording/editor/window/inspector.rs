@@ -4,6 +4,7 @@ use crate::recording::editor::model::VideoEditState;
 use gtk4::{prelude::*, ApplicationWindow, Box as GtkBox, Orientation};
 use std::cell::Cell;
 use std::rc::Rc;
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 pub(super) const INSPECTOR_WIDTH: i32 = 240;
@@ -12,6 +13,7 @@ pub(super) fn build_inspector(
     window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
+    export_cancellation: Arc<AtomicBool>,
 ) -> GtkBox {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("recording-editor-inspector");
@@ -19,7 +21,7 @@ pub(super) fn build_inspector(
     root.set_hexpand(false);
     root.set_vexpand(true);
 
-    let actions = footer::build_inspector_actions(window, state, exporting);
+    let actions = footer::build_inspector_actions(window, state, exporting, export_cancellation);
     root.append(&actions);
     root
 }

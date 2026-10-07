@@ -116,8 +116,11 @@ license-file = ["LICENSE", "4"]
 # alternative go into `recommends` instead, so dpkg never refuses to
 # install on a perfectly valid setup.
 #
-#   $auto                                      → shared libs of the Rust binary
-#                                                (gtk4, gstreamer, pipewire, …)
+#   $auto                                      → package-owned shared libs of the
+#                                                Rust binary; GTK4 is explicit
+#                                                because the private layer-shell
+#                                                copy cannot be resolved by
+#                                                dpkg-shlibdeps.
 #   wl-clipboard | xclip                       → clipboard copy: wl-clipboard on Wayland,
 #                                                xclip on X11. Either satisfies.
 #   pipewire-pulse | pulseaudio-utils          → provides `pactl` for audio source listing.
@@ -139,7 +142,15 @@ license-file = ["LICENSE", "4"]
 #                                                (cargo-deb's $auto cannot
 #                                                introspect asset binaries, so
 #                                                these MUST be listed manually)
-depends = "$auto, wl-clipboard | xclip, pipewire-pulse | pulseaudio-utils, xdg-utils, libnotify-bin, ffmpeg, wget, curl, unzip, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav, gstreamer1.0-pipewire, fonts-inter, tesseract-ocr, tesseract-ocr-eng, libqt5widgets5, libqt5dbus5, libqt5network5, libqt5x11extras5, libxtst6"
+#   gtk4-layer-shell                           → bundled privately for Noble,
+#                                                where no runtime package exists;
+#                                                ApexShot's RUNPATH keeps it
+#                                                separate from distro-owned files.
+#   libgtk-4-1                                → GTK4 runtime for the Rust
+#                                                binary; listed explicitly
+#                                                because dpkg-shlibdeps stops
+#                                                at the privately bundled SONAME.
+depends = "$auto, libgtk-4-1, wl-clipboard | xclip, pipewire-pulse | pulseaudio-utils, xdg-utils, libnotify-bin, ffmpeg, wget, curl, unzip, gstreamer1.0-plugins-base, gstreamer1.0-plugins-good, gstreamer1.0-plugins-bad, gstreamer1.0-libav, gstreamer1.0-pipewire, fonts-inter, tesseract-ocr, tesseract-ocr-eng, libqt5widgets5, libqt5dbus5, libqt5network5, libqt5x11extras5, libxtst6"
 # Recommended (not required) — optional capture paths, GNOME polish, and
 # stack-specific helpers that we don't want to *force* onto users who
 # don't need them:
@@ -154,6 +165,8 @@ section = "graphics"
 priority = "optional"
 assets = [
     ["target/release/apexshot", "usr/bin/", "755"],
+    ["target/deb-staging/libgtk4-layer-shell.so.0", "usr/lib/apexshot/", "644"],
+    ["packaging/debian/gtk4-layer-shell.MIT-LICENSE", "usr/share/doc/apexshot/gtk4-layer-shell.LICENSE", "644"],
     ["packaging/deb/apexshot-capture", "usr/bin/", "755"],
     ["packaging/deb/apexshot-native-host", "usr/bin/", "755"],
     ["packaging/io.github.codegoddy.apexshot.desktop", "usr/share/applications/io.github.codegoddy.apexshot.desktop", "644"],

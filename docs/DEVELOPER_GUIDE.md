@@ -282,7 +282,7 @@ apexshot/
 │   ├── tray/                      # System tray (ksni)
 │   └── utils/                     # clipboard, desktop_env, notify
 ├── capture-overlay/               # C++ Qt5 overlay (CMake ≥ 3.16)
-├── gnome-extension/               # GNOME Shell extension (JS/GJS, shell 48–50)
+├── gnome-extension/               # GNOME Shell extension (JS/GJS, shell 46 and 48–50)
 │   ├── extension.js
 │   ├── shell-overlay.js
 │   ├── window-list.js

@@ -6,9 +6,10 @@ use super::model::{
 };
 use anyhow::{anyhow, Context};
 use serde::Deserialize;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::process::{Child, Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 /// Distinguishes concurrent exports' scratch directories. The process id and
 /// start time are not enough: two exports that start at the same time (the
@@ -531,6 +532,14 @@ pub fn audio_args(mode: AudioMode, has_audio: bool) -> Vec<String> {
 }
 
 pub fn run_trim_only(state: &VideoEditState, output_path: PathBuf) -> anyhow::Result<PathBuf> {
+    run_trim_only_cancellable(state, output_path, None)
+}
+
+fn run_trim_only_cancellable(
+    state: &VideoEditState,
+    output_path: PathBuf,
+    cancellation: Option<&AtomicBool>,
+) -> anyhow::Result<PathBuf> {
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
         anyhow::bail!("no segments selected for export");
@@ -538,14 +547,22 @@ pub fn run_trim_only(state: &VideoEditState, output_path: PathBuf) -> anyhow::Re
     if kept.len() <= 1 {
         let (start, end) = kept.first().copied().unwrap();
         let args = build_single_trim_args(state, start, end, &output_path);
-        run_ffmpeg(&args, &output_path)?;
+        run_ffmpeg_cancellable(&args, &output_path, cancellation)?;
     } else {
-        run_multi_segment_trim(state, &kept, &output_path, false)?;
+        run_multi_segment_trim(state, &kept, &output_path, false, cancellation)?;
     }
     Ok(output_path)
 }
 
 pub fn run_convert(state: &VideoEditState, output_path: PathBuf) -> anyhow::Result<PathBuf> {
+    run_convert_cancellable(state, output_path, None)
+}
+
+fn run_convert_cancellable(
+    state: &VideoEditState,
+    output_path: PathBuf,
+    cancellation: Option<&AtomicBool>,
+) -> anyhow::Result<PathBuf> {
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
         anyhow::bail!("no segments selected for export");
@@ -553,9 +570,9 @@ pub fn run_convert(state: &VideoEditState, output_path: PathBuf) -> anyhow::Resu
     if kept.len() <= 1 {
         let (start, end) = kept.first().copied().unwrap();
         let command = build_single_convert_args(state, start, end, &output_path);
-        run_command(command, &output_path)?;
+        run_command(command, &output_path, cancellation)?;
     } else {
-        run_multi_segment_trim(state, &kept, &output_path, true)?;
+        run_multi_segment_trim(state, &kept, &output_path, true, cancellation)?;
     }
     Ok(output_path)
 }
@@ -729,19 +746,40 @@ pub fn export_edited(state: &VideoEditState) -> anyhow::Result<PathBuf> {
 }
 
 pub fn export_edited_to(state: &VideoEditState, output_path: PathBuf) -> anyhow::Result<PathBuf> {
+    export_edited_to_cancellable(state, output_path, None)
+}
+
+/// Export while allowing the editor window to stop and reap FFmpeg.
+pub(crate) fn export_edited_to_cancellable(
+    state: &VideoEditState,
+    output_path: PathBuf,
+    cancellation: Option<&AtomicBool>,
+) -> anyhow::Result<PathBuf> {
+    if cancellation_requested(cancellation) {
+        anyhow::bail!("export cancelled");
+    }
     sweep_stale_scratch_dirs();
     ensure_export_fits(state, &output_path)?;
     warn_if_memory_is_tight();
-    if state.needs_reencode() {
-        return run_convert(state, output_path);
-    }
-    match run_trim_only(state, output_path.clone()) {
-        Ok(path) => Ok(path),
-        Err(err) => {
-            eprintln!("[video-editor] trim-only export failed ({err}); falling back to convert");
-            run_convert(state, output_path)
+    let result = if state.needs_reencode() {
+        run_convert_cancellable(state, output_path.clone(), cancellation)
+    } else {
+        match run_trim_only_cancellable(state, output_path.clone(), cancellation) {
+            Ok(path) => Ok(path),
+            Err(err) if cancellation_requested(cancellation) => Err(err),
+            Err(err) => {
+                eprintln!(
+                    "[video-editor] trim-only export failed ({err}); falling back to convert"
+                );
+                run_convert_cancellable(state, output_path.clone(), cancellation)
+            }
         }
+    };
+    if cancellation_requested(cancellation) {
+        let _ = std::fs::remove_file(&output_path);
+        anyhow::bail!("export cancelled");
     }
+    result
 }
 
 fn build_single_trim_args(
@@ -1040,14 +1078,14 @@ fn build_composite_convert_args(
             // the wallpaper; the trailing `yuv420p` flattens it back for the
             // encoder, whose profile has no alpha.
             filter.push_str(&format!(
-                "[vcard];[{wallpaper_index}:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},setsar=1[bg];[bg][vcard]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p"
+                "[vcard];[{wallpaper_index}:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},setsar=1[bg];[bg][vcard]overlay=(W-w)/2:(H-h)/2:format=auto:shortest=1,format=yuv420p"
             ));
         } else {
             // Label the prepared video frame so it can be overlaid onto the
             // wallpaper canvas.
             filter.push_str("[video];");
             filter.push_str(&format!(
-                "[{wallpaper_index}:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},setsar=1[bg];[bg][video]overlay=(W-w)/2:(H-h)/2:format=yuv420"
+                "[{wallpaper_index}:v]scale={out_w}:{out_h}:force_original_aspect_ratio=increase,crop={out_w}:{out_h},setsar=1[bg];[bg][video]overlay=(W-w)/2:(H-h)/2:format=yuv420:shortest=1"
             ));
         }
     } else if rounded_mask.is_some() {
@@ -1055,7 +1093,7 @@ fn build_composite_convert_args(
         // alpha meaningful: `pad` fills the surrounding ring but leaves the
         // rounded corners transparent, and the encoder drops that alpha.
         filter.push_str(&format!(
-            "[vcard];color=c={bg}:s={out_w}x{out_h}[bgc];[bgc][vcard]overlay=(W-w)/2:(H-h)/2:format=auto,format=yuv420p"
+            "[vcard];color=c={bg}:s={out_w}x{out_h}[bgc];[bgc][vcard]overlay=(W-w)/2:(H-h)/2:format=auto:shortest=1,format=yuv420p"
         ));
     } else if out_w != video_w || out_h != video_h {
         filter.push_str(&format!(",pad={out_w}:{out_h}:{pad_x}:{pad_y}:{bg}"));
@@ -1436,6 +1474,7 @@ fn run_multi_segment_trim(
     _segments: &[(f64, f64)],
     output_path: &Path,
     convert: bool,
+    cancellation: Option<&AtomicBool>,
 ) -> anyhow::Result<()> {
     let segments_scratch = ScratchDir::new("segments", 0.0);
     let tmp_dir = &segments_scratch.path;
@@ -1475,7 +1514,8 @@ fn run_multi_segment_trim(
                 cursor: None,
             }
         };
-        run_command(command, &seg_path).with_context(|| format!("failed to export segment {i}"))?;
+        run_command(command, &seg_path, cancellation)
+            .with_context(|| format!("failed to export segment {i}"))?;
         segment_files.push(seg_path);
     }
 
@@ -1501,12 +1541,16 @@ fn run_multi_segment_trim(
         "copy".into(),
         output_path.to_string_lossy().into_owned(),
     ];
-    run_ffmpeg(&concat_args, output_path)?;
+    run_ffmpeg_cancellable(&concat_args, output_path, cancellation)?;
 
     Ok(())
 }
 
-fn run_command(command: ConvertCommand, output_path: &Path) -> anyhow::Result<()> {
+fn run_command(
+    command: ConvertCommand,
+    output_path: &Path,
+    cancellation: Option<&AtomicBool>,
+) -> anyhow::Result<()> {
     let ConvertCommand {
         args,
         scratch,
@@ -1516,9 +1560,9 @@ fn run_command(command: ConvertCommand, output_path: &Path) -> anyhow::Result<()
     // Hold the scratch tree until the command has finished reading it.
     let _scratch = scratch;
     if warp.is_none() && cursor.is_none() {
-        return run_ffmpeg(&args, output_path);
+        return run_ffmpeg_cancellable(&args, output_path, cancellation);
     }
-    run_ffmpeg_with_inputs(&args, output_path, warp, cursor)
+    run_ffmpeg_with_inputs(&args, output_path, warp, cursor, cancellation)
 }
 
 /// Run ffmpeg with the GPU warp on `pipe:3` and the cursor track on `pipe:4`.
@@ -1533,7 +1577,11 @@ fn run_ffmpeg_with_inputs(
     output_path: &Path,
     warp_setup: Option<super::gst_warp::WarpSetup>,
     mut cursor: Option<super::cursor_track::ActiveCursorTrack>,
+    cancellation: Option<&AtomicBool>,
 ) -> anyhow::Result<()> {
+    if cancellation_requested(cancellation) {
+        anyhow::bail!("export cancelled");
+    }
     let mut warp = match warp_setup {
         Some(setup) => {
             Some(super::gst_warp::ActiveGstWarp::start(&setup).map_err(|err| anyhow!(err))?)
@@ -1561,7 +1609,7 @@ fn run_ffmpeg_with_inputs(
 
     let child = cmd.spawn().context("failed to run ffmpeg")?;
     drop(cmd);
-    let output = child.wait_with_output()?;
+    let output = wait_for_ffmpeg_output(child, cancellation)?;
     // ffmpeg has exited, so the cursor writer has either finished or hit the
     // closed pipe. Joining it here means the track never outlives the export.
     if let Some(active) = cursor.as_mut() {
@@ -1590,10 +1638,25 @@ fn run_ffmpeg_with_inputs(
 }
 
 fn run_ffmpeg(args: &[String], output_path: &Path) -> anyhow::Result<()> {
-    let output = Command::new("ffmpeg")
+    run_ffmpeg_cancellable(args, output_path, None)
+}
+
+fn run_ffmpeg_cancellable(
+    args: &[String],
+    output_path: &Path,
+    cancellation: Option<&AtomicBool>,
+) -> anyhow::Result<()> {
+    if cancellation_requested(cancellation) {
+        anyhow::bail!("export cancelled");
+    }
+    let child = Command::new("ffmpeg")
         .args(args)
-        .output()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .context("failed to run ffmpeg")?;
+    let output = wait_for_ffmpeg_output(child, cancellation)?;
 
     if output.status.success() {
         return Ok(());
@@ -1604,6 +1667,60 @@ fn run_ffmpeg(args: &[String], output_path: &Path) -> anyhow::Result<()> {
         "ffmpeg failed: {}",
         String::from_utf8_lossy(&output.stderr).trim()
     ))
+}
+
+fn wait_for_ffmpeg_output(
+    mut child: Child,
+    cancellation: Option<&AtomicBool>,
+) -> anyhow::Result<Output> {
+    let Some(cancellation) = cancellation else {
+        return child
+            .wait_with_output()
+            .context("failed while waiting for ffmpeg");
+    };
+
+    let stdout = child
+        .stdout
+        .take()
+        .context("ffmpeg stdout pipe was not captured")?;
+    let stderr = child
+        .stderr
+        .take()
+        .context("ffmpeg stderr pipe was not captured")?;
+    let stdout_reader = std::thread::spawn(move || read_pipe(stdout));
+    let stderr_reader = std::thread::spawn(move || read_pipe(stderr));
+
+    loop {
+        if cancellation.load(Ordering::Acquire) {
+            let _ = child.kill();
+            let status = child.wait().context("failed to stop ffmpeg")?;
+            return Ok(Output {
+                status,
+                stdout: stdout_reader.join().unwrap_or_default(),
+                stderr: stderr_reader.join().unwrap_or_default(),
+            });
+        }
+
+        if let Some(status) = child.try_wait().context("failed to check ffmpeg status")? {
+            return Ok(Output {
+                status,
+                stdout: stdout_reader.join().unwrap_or_default(),
+                stderr: stderr_reader.join().unwrap_or_default(),
+            });
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+fn read_pipe(mut pipe: impl Read) -> Vec<u8> {
+    let mut output = Vec::new();
+    let _ = pipe.read_to_end(&mut output);
+    output
+}
+
+fn cancellation_requested(cancellation: Option<&AtomicBool>) -> bool {
+    cancellation.is_some_and(|cancellation| cancellation.load(Ordering::Acquire))
 }
 
 fn format_seconds(value: f64) -> String {
@@ -2265,6 +2382,7 @@ mod tests {
                 Path::new("/nonexistent/unused-cursor-output.mp4"),
                 None,
                 Some(track),
+                None,
             );
             let _ = sender.send(result);
         });
@@ -2272,6 +2390,97 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(5))
             .expect("the cursor writer must stop when ffmpeg exits without consuming its pipe")
             .unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancellation_terminates_the_active_encoder_process() {
+        let cancellation = std::sync::Arc::new(AtomicBool::new(false));
+        let mut command = Command::new("sleep");
+        command
+            .arg("30")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let child = command.spawn().expect("sleep must start");
+        let cancel = cancellation.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            cancel.store(true, Ordering::Release);
+        });
+
+        let started = std::time::Instant::now();
+        let output = wait_for_ffmpeg_output(child, Some(&cancellation))
+            .expect("a cancelled child should be reaped successfully");
+
+        assert!(!output.status.success());
+        assert!(started.elapsed() < std::time::Duration::from_secs(3));
+    }
+
+    #[test]
+    fn a_wallpaper_export_finishes_with_the_video_and_keeps_audio() {
+        if Command::new("ffmpeg").arg("-version").output().is_err() {
+            return;
+        }
+        let fixture = ScratchDir::new("wallpaper-test", 0.0);
+        let source = fixture.path.join("source.mp4");
+        let wallpaper = fixture.path.join("wallpaper.png");
+        let destination = fixture.path.join("edited.mp4");
+        let created = Command::new("ffmpeg")
+            .args([
+                "-y",
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=blue:s=160x120:r=10:d=0.6",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=440:duration=0.6",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-c:a",
+                "aac",
+            ])
+            .arg(&source)
+            .status()
+            .expect("the fixture encoder must start");
+        assert!(created.success());
+        image::RgbImage::from_pixel(160, 120, image::Rgb([220, 30, 40]))
+            .save(&wallpaper)
+            .unwrap();
+        let mut state = VideoEditState::new(probe_metadata(&source).unwrap());
+        state.background = VideoBackground::Wallpaper(wallpaper);
+        state.sidecar = None;
+        let expected_dimensions = state.output_dimensions();
+        let cancellation = std::sync::Arc::new(AtomicBool::new(false));
+        let worker_cancellation = cancellation.clone();
+        let worker_destination = destination.clone();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let result = export_edited_to_cancellable(
+                &state,
+                worker_destination,
+                Some(&worker_cancellation),
+            );
+            let _ = sender.send(result);
+        });
+        let result = receiver.recv_timeout(std::time::Duration::from_secs(10));
+        if result.is_err() {
+            cancellation.store(true, Ordering::Release);
+        }
+        worker.join().unwrap();
+        result
+            .expect("the looping wallpaper must not keep the export alive")
+            .unwrap();
+        let output = probe_metadata(&destination).unwrap();
+        assert!(output.has_audio);
+        assert_eq!((output.width, output.height), expected_dimensions);
+        assert!((output.duration_seconds - 0.6).abs() < 0.15);
     }
 
     #[test]

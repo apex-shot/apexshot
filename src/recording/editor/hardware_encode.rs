@@ -190,6 +190,22 @@ fn encoder_works(encoder: HardwareEncoder) -> bool {
         .unwrap_or(false)
 }
 
+pub(crate) fn recording_uses_nvenc() -> bool {
+    detect_hardware_encoder() == Some(HardwareEncoder::Nvenc)
+}
+
+pub(crate) fn recording_uses_vaapi() -> bool {
+    detect_hardware_encoder() == Some(HardwareEncoder::Vaapi)
+}
+
+pub(crate) fn recording_nvenc_works() -> bool {
+    encoder_works(HardwareEncoder::Nvenc)
+}
+
+pub(crate) fn recording_vaapi_works() -> bool {
+    encoder_works(HardwareEncoder::Vaapi)
+}
+
 /// The first hardware encoder that actually works, probed once per process.
 pub fn detect_hardware_encoder() -> Option<HardwareEncoder> {
     static DETECTED: OnceLock<Option<HardwareEncoder>> = OnceLock::new();

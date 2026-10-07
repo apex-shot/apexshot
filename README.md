@@ -67,7 +67,7 @@ Works best today on:
 | Arch Linux GNOME Wayland | Public beta, personally tested |
 | Hyprland Wayland | Public beta, personally tested |
 | Pop!_OS 22.04 (Ubuntu-based, Wayland) | Expected to work through the Ubuntu/Debian package path, less exercised |
-| GNOME Shell 45 / 46 (Wayland) | Should work, less exercised |
+| GNOME Shell 46 (Wayland) | Supported by the extension; GNOME integration tested on Ubuntu 24.04, not an actual Zorin installation |
 | Sway / wlroots-like compositors (Wayland) | Implementation exists through GTK4 layer-shell, `wlr-screencopy`, and `wf-recorder`, but needs more manual validation |
 | KDE Plasma 6 / Niri / other Wayland desktops | ScreenCast portal + PipeWire path implemented, not yet personally tested |
 | Fedora / RHEL (Wayland) | Screenshots supported (Fedora KDE validated). **Video recording is not supported** — use Spectacle or Kooha for screen recording |
@@ -394,7 +394,7 @@ GNOME Wayland. The extension gives ApexShot the shell-side hooks it needs.
 Recording itself works without the extension. Pause, stop, and restart are always
 available through global shortcuts, the tray icon, and the recording notification.
 
-**Supported GNOME versions:** 48–50
+**Supported GNOME versions:** 46 and 48–50
 
 #### Install from GitHub Release (Recommended)
 
@@ -452,7 +452,7 @@ journalctl /usr/bin/gnome-shell -f | grep apexshot
 |---|---|
 | Preview windows get hidden behind other apps | Verify extension is enabled: `gnome-extensions list` |
 | Recording mask does not appear | Check logs: `journalctl /usr/bin/gnome-shell -f | grep apexshot` |
-| Extension fails to enable | Confirm GNOME Shell version is 48–50 and matches `metadata.json` |
+| Extension fails to enable | Confirm GNOME Shell version is 46 or 48–50 and matches `metadata.json` |
 | D-Bus signals not working | Monitor session bus: `dbus-monitor --session | grep apexshot` |
 
 **Known Limitations:**
@@ -614,7 +614,7 @@ cargo test
 ### Building Debian Package
 
 ```bash
-cargo deb
+scripts/package-deb.sh
 ```
 
 The package will be created in `target/debian/`.

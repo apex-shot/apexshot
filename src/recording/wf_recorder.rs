@@ -67,29 +67,22 @@ pub(super) fn detect_vaapi_device() -> Option<String> {
 }
 
 pub(super) fn should_use_nvenc() -> bool {
-    if let Ok(val) = std::env::var("APEXSHOT_HW_ENCODER") {
-        if val == "cpu" || val == "off" || val == "soft" || val == "software" {
-            return false;
-        }
-        if val == "nvenc" {
-            return true;
-        }
+    match std::env::var("APEXSHOT_HW_ENCODER").as_deref() {
+        Ok("cpu" | "off" | "soft" | "software" | "vaapi") => false,
+        Ok("nvenc") => crate::recording::editor::hardware_encode::recording_nvenc_works(),
+        _ => crate::recording::editor::hardware_encode::recording_uses_nvenc(),
     }
-    super::backend::ffmpeg_encoder_available("h264_nvenc")
 }
 
 pub(super) fn should_use_vaapi() -> bool {
-    // Prefer hardware encoding when the render node and the ffmpeg HW
-    // encoder exist. Opt out with APEXSHOT_HW_ENCODER=cpu/off.
-    if let Ok(val) = std::env::var("APEXSHOT_HW_ENCODER") {
-        if val == "cpu" || val == "off" || val == "soft" || val == "software" {
-            return false;
-        }
-        if val == "vaapi" {
-            return detect_vaapi_device().is_some();
+    match std::env::var("APEXSHOT_HW_ENCODER").as_deref() {
+        Ok("cpu" | "off" | "soft" | "software" | "nvenc") => false,
+        Ok("vaapi") => crate::recording::editor::hardware_encode::recording_vaapi_works(),
+        _ => {
+            detect_vaapi_device().is_some()
+                && crate::recording::editor::hardware_encode::recording_uses_vaapi()
         }
     }
-    detect_vaapi_device().is_some() && super::backend::ffmpeg_encoder_available("h264_vaapi")
 }
 
 pub(super) fn ffmpeg_vaapi_args(width: u32, height: u32, qp: u32) -> Vec<String> {

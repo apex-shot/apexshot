@@ -115,6 +115,7 @@ fn build_capture_overlay() {
 
 fn main() {
     compile_translations();
+    println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN/../lib/apexshot");
 
     // Flatpak builds are portal-only: skip the Qt5/X11 C++ helper entirely.
     if std::env::var_os("CARGO_FEATURE_FLATPAK").is_none() {
