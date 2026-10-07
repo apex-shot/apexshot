@@ -7,6 +7,7 @@
 //! alive until the completion callback runs.
 
 use gtk4::{prelude::*, FileChooserAction, FileChooserNative, ResponseType, Window};
+use gtk4_layer_shell::LayerShell;
 use std::path::{Path, PathBuf};
 
 use super::{generate_filename, save_image_to_path, ImageFormat, SaveConfig};
@@ -70,6 +71,8 @@ pub fn save_dialog_folder(config: &crate::config::AppConfig) -> Option<PathBuf> 
 /// `completion` receives `Some(destination)` only once the capture was written
 /// there; cancellation and write failures report `None`. The returned dialog is
 /// still live, so the caller has to hold on to it until `completion` runs.
+/// Layer-shell parents are omitted because the portal can only export regular
+/// toplevel windows.
 pub fn show_save_dialog(
     parent: Option<&Window>,
     source: PathBuf,
@@ -80,7 +83,7 @@ pub fn show_save_dialog(
 
     let chooser = FileChooserNative::new(
         Some(&crate::i18n::t("Select screenshot save location")),
-        parent,
+        parent.filter(|window| !window.is_layer_window()),
         FileChooserAction::Save,
         Some(&crate::i18n::t("Save")),
         Some(&crate::i18n::t("Cancel")),
@@ -154,6 +157,50 @@ pub fn run_save_capture_command(path: PathBuf) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gtk4::test]
+    #[ignore = "requires a Wayland compositor with layer-shell and a FileChooser portal"]
+    fn save_dialog_preserves_regular_parents_and_omits_layer_shell_parents() {
+        assert!(gtk4_layer_shell::is_supported());
+
+        let regular = Window::new();
+        regular.present();
+        let regular_chooser = show_save_dialog(Some(&regular), "unsaved.png".into(), |_| {});
+        assert_eq!(regular_chooser.transient_for().as_ref(), Some(&regular));
+
+        let parentless_chooser = show_save_dialog(None, "unsaved.png".into(), |_| {});
+        assert!(parentless_chooser.transient_for().is_none());
+
+        let preview = Window::new();
+        preview.init_layer_shell();
+        preview.set_default_size(190, 135);
+        preview.present();
+        assert!(preview.is_layer_window());
+
+        let chooser = show_save_dialog(Some(&preview), "unsaved.png".into(), |_| {});
+        assert!(chooser.transient_for().is_none());
+
+        let main_loop = gtk4::glib::MainLoop::new(None, false);
+        let loop_quit = main_loop.clone();
+        gtk4::glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
+            loop_quit.quit();
+        });
+        main_loop.run();
+
+        assert!(preview.is_visible());
+        regular_chooser.hide();
+        parentless_chooser.hide();
+        chooser.hide();
+
+        let loop_quit = main_loop.clone();
+        gtk4::glib::timeout_add_local_once(std::time::Duration::from_millis(200), move || {
+            loop_quit.quit();
+        });
+        main_loop.run();
+
+        preview.close();
+        regular.close();
+    }
 
     #[test]
     fn save_cancel_leaves_the_capture_where_it_is() {
