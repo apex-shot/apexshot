@@ -7,7 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::annotations::{save_annotations, AnnotationError};
-use crate::capture::editor::{io_ops::save_edited_image, state::EditorState};
+use crate::capture::editor::{
+    io_ops::{save_clipboard_image, save_edited_image},
+    state::EditorState,
+};
 
 pub fn persist_image_session(path: &Path, state: &EditorState) -> Result<(), AnnotationError> {
     save_annotations(
@@ -39,14 +42,34 @@ pub(super) fn wire_output_lifecycle(
     in_motion: Rc<Cell<bool>>,
     export_motion: Rc<dyn Fn() -> Result<PathBuf, String>>,
 ) {
-    let path_copy = path.to_path_buf();
+    let state_copy = state.clone();
     copy_btn.connect_clicked(move |_| {
         let config = crate::config::load_config().sanitized();
         let mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
             &config.adv_clipboard_mode,
         );
-        if let Err(error) = crate::utils::clipboard::copy_screenshot_with_mode(&path_copy, mode) {
+        let snapshot = {
+            let state = state_copy.lock().unwrap();
+            save_clipboard_image(
+                crate::capture::unsaved::UnsavedCaptureStore::app_owned().dir(),
+                &state,
+            )
+        };
+        let result = snapshot
+            .map_err(|error| error.to_string())
+            .and_then(|snapshot| {
+                let result = crate::utils::clipboard::copy_screenshot_with_mode(&snapshot, mode);
+                if result.is_err() {
+                    let _ = std::fs::remove_file(snapshot);
+                }
+                result
+            });
+        if let Err(error) = result {
             eprintln!("Copy failed: {error}");
+            crate::utils::notify::desktop_notification_important(
+                &crate::i18n::t("Copy failed"),
+                &error,
+            );
         }
     });
 
@@ -277,6 +300,23 @@ fn finish_image_session(
 #[cfg(test)]
 mod tests {
     use super::done_needs_save_chooser;
+
+    #[test]
+    fn editor_copy_exports_current_state_without_saving_the_source_or_opening_a_chooser() {
+        let source = include_str!("output.rs");
+        let handler = source
+            .split("copy_btn.connect_clicked(move |_| {")
+            .nth(1)
+            .unwrap()
+            .split("let path_upload")
+            .next()
+            .unwrap();
+        assert!(handler.contains("state_copy.lock()"));
+        assert!(handler.contains("save_clipboard_image"));
+        assert!(handler.contains("copy_screenshot_with_mode(&snapshot, mode)"));
+        assert!(!handler.contains("save_edited_image"));
+        assert!(!handler.contains("show_save_dialog"));
+    }
 
     #[test]
     fn done_routes_unsaved_captures_through_the_save_chooser() {

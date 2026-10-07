@@ -106,7 +106,7 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     zoom_popup.append(&sep1);
     zoom_popup.append(&zoom_list);
 
-    let (copy_btn, _) = footer_icon_button(copy_icon_name, &t("Copy file URI"));
+    let (copy_btn, _) = footer_icon_button(copy_icon_name, &t("Copy to clipboard"));
     let (upload_btn, _) = footer_icon_button(upload_icon_name, &t("Upload to cloud"));
 
     let save_btn = Button::with_label(&t("Done"));
