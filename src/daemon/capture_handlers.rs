@@ -870,10 +870,10 @@ pub(super) fn handle_capture_screen_with_active_session(state: Arc<Mutex<DaemonS
 }
 
 pub(super) fn handle_capture_window(_state: Arc<Mutex<DaemonState>>) {
-    // Window capture is temporarily discontinued — do not fall back to area
-    // capture, which surprises users who pressed a leftover window shortcut.
+    // Keep legacy direct window actions from silently turning into area capture.
+    // Quick Capture > Shot > Window remains available through the GUI.
     eprintln!(
-        "[daemon] Window capture is temporarily discontinued. Use area or fullscreen capture."
+        "[daemon] Legacy direct window capture is disabled. Use Quick Capture > Shot > Window."
     );
 }
 

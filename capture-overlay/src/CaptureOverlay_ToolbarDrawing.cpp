@@ -45,8 +45,7 @@ constexpr AspectRatioOption kRecordingAspectOptions[] = {
 constexpr int kRecordingAspectOptionCount =
     static_cast<int>(sizeof(kRecordingAspectOptions) / sizeof(kRecordingAspectOptions[0]));
 
-// Keep bottom-anchored chrome above the app dock (matches BOTTOM_LIFT in
-// WindowPickerOverlay.cpp and DOCK_LIFT in the Rust overlay layout).
+// Keep bottom-anchored chrome above the app dock.
 constexpr double kDockLift = 76.0;
 }
 

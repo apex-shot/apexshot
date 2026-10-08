@@ -293,7 +293,10 @@ Public API surface for integration tests and downstream use:
 Native C++ overlay built with CMake and Qt5:
 - Region selection with visual feedback
 - Drawing tools (pen, shapes, text)
-- Window picker overlay
+- Quick Capture's in-overlay Window picker
+- Quick Capture > Shot > Window lists and activates GNOME windows through the extension's
+  `org.apexshot.WindowList` service (with an X11 fallback), then captures the selected
+  region live after the overlay hides
 - Crosshair capture mode
 - Screen and area capture modes
 - **Build:** triggered automatically by `build.rs` during Cargo build
@@ -304,7 +307,7 @@ Native C++ overlay built with CMake and Qt5:
 - `src/CaptureOverlay_Drawing.cpp` — drawing event handling
 - `src/CaptureOverlay_Events.cpp` — mouse/keyboard events
 - `src/CaptureOverlay_HitTest.cpp` — hit testing
-- `src/WindowPickerOverlay.cpp/h` — window selection
+- `src/CaptureOverlay_Window.cpp` — window enumeration, selection, and activation
 - `src/ScreenCapture.cpp/h` — screen grab logic
 - `src/request.cpp/h` — IPC request format
 
@@ -312,7 +315,7 @@ Native C++ overlay built with CMake and Qt5:
 JavaScript/GJS extension for GNOME Shell 46 and 48–50:
 - `extension.js` — enables and disables the three services
 - `shell-overlay.js` — recording mask shell actors (`ShowMask` / `HideMask`)
-- `window-list.js` — window enumeration and activation for the window picker
+- `window-list.js` — window enumeration and activation for Quick Capture's Window picker
 - `preview-stacking.js` — keeps ApexShot preview windows above other windows
 
 **D-Bus services exposed:**

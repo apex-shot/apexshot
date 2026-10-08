@@ -253,7 +253,7 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     config.shortcut_capture_previous_area =
         button_label_value(&inputs.shortcut_capture_previous_area);
     config.shortcut_capture_fullscreen = button_label_value(&inputs.shortcut_capture_fullscreen);
-    // Window capture discontinued — always persist empty.
+    // Keep the legacy direct-window shortcut unset; Quick Capture still offers Window.
     config.shortcut_capture_window.clear();
     config.shortcut_show_last_preview = button_label_value(&inputs.shortcut_show_last_preview);
     config.shortcut_save_last_capture = button_label_value(&inputs.shortcut_save_last_capture);

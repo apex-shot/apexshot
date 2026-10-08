@@ -105,7 +105,8 @@ fn open_quick_capture_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathRes
             ))
         }
         crate::overlay::CaptureMenuAction::Window => Err(SelectionError::InitError(
-            "Window capture is temporarily discontinued. Use area or display capture instead."
+            "The native wlroots window picker is unavailable. Use area or display capture here; \
+             Quick Capture > Shot > Window is available on GNOME or X11."
                 .into(),
         )),
         crate::overlay::CaptureMenuAction::Area => {

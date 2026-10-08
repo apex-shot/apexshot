@@ -165,6 +165,7 @@ cargo run --release
 # Screenshot capture modes
 cargo run --release -- capture screen
 cargo run --release -- capture area
+# Legacy direct window capture is disabled; use Quick Capture > Shot > Window instead.
 cargo run --release -- capture window
 cargo run --release -- capture crosshair
 

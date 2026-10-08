@@ -520,8 +520,8 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         &config.shortcut_capture_fullscreen,
         true,
     );
-    // Window capture is temporarily discontinued — hide the shortcut row so
-    // users cannot rebind a dead action from Settings.
+    // Hide the disabled legacy direct-window shortcut. Quick Capture still
+    // offers Window through its Shot menu.
     let capture_window_btn = Button::new();
     capture_window_btn.set_visible(false);
     let show_last_preview_btn = create_row(

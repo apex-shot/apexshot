@@ -276,8 +276,8 @@ pub(crate) fn run_capture(args: &[String]) {
         },
         "window" => {
             eprintln!(
-                "Error: window capture is temporarily discontinued.\n\
-                 Use 'apexshot capture area' or 'apexshot capture screen' instead."
+                "Error: legacy direct window capture is disabled.\n\
+                 Use Quick Capture > Shot > Window instead."
             );
             crate::print_usage();
             std::process::exit(1);
@@ -293,8 +293,8 @@ pub(crate) fn run_capture(args: &[String]) {
             match capture_type {
                 "window" => {
                     eprintln!(
-                        "Error: window capture is temporarily discontinued.\n\
-                         Use 'capture area' or 'capture screen' instead."
+                        "Error: legacy direct window capture is disabled.\n\
+                         Use Quick Capture > Shot > Window instead."
                     );
                     crate::print_usage();
                     std::process::exit(1);

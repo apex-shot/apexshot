@@ -1,7 +1,5 @@
-/// Run the capture overlay and handle the Window toolbar button (exit code 3)
-/// by immediately doing a window capture via the portal.
-/// Returns `SelectionResult` — `Ok(None)` means "window capture was done and
-/// the result should be retrieved from `capture_window_via_cpp()`".
+/// Run the capture overlay and preserve the legacy Window result (exit code 3).
+/// That compatibility result does not perform direct window capture.
 pub fn run_capture_overlay_with_window(
     background_png: Option<&std::path::Path>,
 ) -> SelectionResult {
@@ -53,8 +51,8 @@ pub fn run_capture_overlay_with_window(
 /// * `background_png` — optional path to a PNG screenshot to show as the
 ///   overlay background. If `None`, a dark semi-transparent overlay is used.
 ///
-/// Exit code 3 means "window capture requested" — we then invoke
-/// `--window-capture` to use GNOME Shell DBus.
+/// Exit code 3 remains on the legacy direct-window compatibility path; direct
+/// capture is disabled. Use Quick Capture > Shot > Window in the GUI instead.
 pub fn run_capture_overlay(background_png: Option<&std::path::Path>) -> SelectionResult {
     let output = run_capture_binary(&[], background_png)?;
 
@@ -82,18 +80,18 @@ pub fn run_capture_overlay(background_png: Option<&std::path::Path>) -> Selectio
     }
 }
 
-/// Window capture is temporarily discontinued (Wayland window listing / picker
-/// maintenance cost). Keep the API so callers compile; return a clear error.
+/// Legacy direct window capture is disabled; the GUI picker remains available
+/// through Quick Capture > Shot > Window. Keep this API for compatibility.
 pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
     Err(SelectionError::InitError(
-        "Window capture is temporarily discontinued. Use area or fullscreen capture instead."
+        "Legacy direct window capture is disabled. Use Quick Capture > Shot > Window instead."
             .into(),
     ))
 }
 
 pub fn capture_window_via_cpp() -> Result<CaptureData, SelectionError> {
     Err(SelectionError::InitError(
-        "Window capture is temporarily discontinued. Use area or fullscreen capture instead."
+        "Legacy direct window capture is disabled. Use Quick Capture > Shot > Window instead."
             .into(),
     ))
 }

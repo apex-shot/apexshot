@@ -826,7 +826,8 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
 
     if (windowCaptureMode && !captureMenuMode) {
         std::fprintf(stderr,
-                      "apexshot-capture: window capture is temporarily discontinued\n");
+                      "apexshot-capture: legacy direct window capture is disabled; "
+                      "use Quick Capture > Shot > Window\n");
         return 2;
     }
 

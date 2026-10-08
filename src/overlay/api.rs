@@ -98,7 +98,7 @@ impl AreaSelector {
     }
 
     fn new_window_picker() -> Self {
-        // Window capture is discontinued — open a normal area selector.
+        // Legacy direct window capture stays on the existing area-selector path.
         Self::new()
     }
 

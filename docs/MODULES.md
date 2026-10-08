@@ -263,7 +263,7 @@ the C++ Qt5 overlay (`capture-overlay/`) handles area selection instead.
 - Quick-capture menu (capture mode, timer, mic/speaker toggles) for
   screenshots and recording; format, countdown, resolution and quality
   recording settings live in Settings → Recording, not in the overlay
-- Window picker mode for selecting application windows
+- Quick Capture's Window action is handled by the C++ overlay described below
 - Fullscreen capture mode
 - Crosshair pixel-zoom mode for precise point capture
 - Built with GTK4 + `gtk4-layer-shell` for always-on-top behaviour
@@ -699,6 +699,8 @@ without requiring the Qt overlay or GNOME Shell extension.
 
 **Purpose:** Native C++ Qt5 overlay for region selection, drawing, window picking, and screen capture.
 
+**Quick Capture Window flow:** Choose Quick Capture > Shot > Window to list and select a window. On GNOME, the picker uses `org.apexshot.WindowList` for window metadata and activation; X11 has a fallback. The overlay then hides and captures the selected region live.
+
 **Build System:** CMake (triggered automatically by `build.rs`)
 
 **Key C++ Files:**
@@ -707,7 +709,7 @@ without requiring the Qt overlay or GNOME Shell extension.
 - `src/CaptureOverlay_Drawing.cpp` — Drawing event handling (mouse/pen)
 - `src/CaptureOverlay_Events.cpp` — Keyboard and mouse event filters
 - `src/CaptureOverlay_HitTest.cpp` — Hit testing for resize/move handles
-- `src/WindowPickerOverlay.cpp` / `WindowPickerOverlay.h` — Window enumeration and selection overlay
+- `src/CaptureOverlay_Window.cpp` — Quick Capture window enumeration, selection, and activation
 - `src/ScreenCapture.cpp` / `ScreenCapture.h` — Screen grab logic (X11/Wayland)
 - `src/request.cpp` / `request.h` — JSON IPC request/response format with Rust main app
 
@@ -715,12 +717,12 @@ without requiring the Qt overlay or GNOME Shell extension.
 
 ### GNOME Shell Extension (`gnome-extension/`)
 
-**Purpose:** JavaScript/GJS extension for GNOME Shell 46 and 48–50 providing the recording mask, the window list the Qt window picker needs, and preview-window stacking.
+**Purpose:** JavaScript/GJS extension for GNOME Shell 46 and 48–50 providing the recording mask, the window list Quick Capture's Window picker needs, and preview-window stacking.
 
 **Key Files:**
 - `extension.js` — Enables and disables the three services
 - `shell-overlay.js` — Recording mask shell actors (dimmed bands around the capture area)
-- `window-list.js` — Window enumeration and activation for window capture
+- `window-list.js` — Window enumeration and activation for Quick Capture's Window picker
 - `preview-stacking.js` — Keeps ApexShot preview windows above other windows
 - `metadata.json` — Extension metadata (UUID, GNOME versions, name)
 

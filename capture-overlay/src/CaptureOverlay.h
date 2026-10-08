@@ -85,7 +85,7 @@ public:
     /// timer state — used when the capture mode was chosen outside the overlay
     /// (tray, CLI, or hotkey), matching the quick-access Area selection.
     void suppressLegacyToolRail();
-    /// Enter the in-overlay window picker (used by Window tool and --window-capture).
+    /// Enter the in-overlay picker for Quick Capture > Shot > Window.
     void openWindowPickerMode();
     /// Full window-surface PNG written when a card was selected (may be empty).
     QString preCapturedImagePath() const { return m_preCapturedImagePath; }
@@ -325,7 +325,6 @@ private:
     bool activateWindowForCapture(quint64 windowId) const;
     QPoint windowListDesktopOrigin() const;
     QRect targetScreenDesktopGeometry() const;
-    bool captureWindowByIdToTemp(quint64 windowId, QString& outPath, QSize& outSize) const;
 
     // ── State ──────────────────────────────────────────────────────────────
     QPixmap   m_background;

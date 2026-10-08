@@ -10,8 +10,7 @@ pub(crate) const BRAND_ORANGE_G: f64 = 0.4;
 pub(crate) const BRAND_ORANGE_B: f64 = 0.0;
 pub(crate) const FEATURE_PANEL_TOP_GAP: f64 = 12.0;
 pub(crate) const FEATURE_PANEL_MARGIN: f64 = 16.0;
-/// Keep bottom-anchored chrome above the app dock, mirroring BOTTOM_LIFT in
-/// capture-overlay/src/WindowPickerOverlay.cpp.
+/// Keep bottom-anchored chrome above the app dock.
 pub(crate) const DOCK_LIFT: f64 = 76.0;
 pub(crate) const ACTION_CARD_GAP: f64 = 8.0;
 

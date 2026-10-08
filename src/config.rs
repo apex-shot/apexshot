@@ -257,7 +257,7 @@ impl Default for AppConfig {
             shortcut_capture_crosshair: "Ctrl+Alt+X".to_string(),
             shortcut_capture_previous_area: String::new(),
             shortcut_capture_fullscreen: "Shift+Super+3".to_string(),
-            // Empty — window capture is temporarily discontinued.
+            // Empty because legacy direct window capture is disabled; Quick Capture still offers Window.
             shortcut_capture_window: String::new(),
             shortcut_capture_menu: "Shift+Super+5".to_string(),
             shortcut_show_last_preview: "Ctrl+Alt+P".to_string(),
@@ -370,7 +370,7 @@ impl AppConfig {
             _ => "Wallpaper".to_string(),
         };
         self.window_screenshot_padding = self.window_screenshot_padding.clamp(0.0, 1.0);
-        // Window capture is temporarily discontinued — drop leftover hotkeys.
+        // Drop legacy direct-window hotkeys; Quick Capture still offers Window.
         self.shortcut_capture_window.clear();
         self.cloud_destination = match self.cloud_destination.as_str() {
             "apexshot" | "xbackbone" => self.cloud_destination,

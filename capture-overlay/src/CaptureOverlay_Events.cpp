@@ -458,7 +458,7 @@ void CaptureOverlay::mousePressEvent(QMouseEvent* event)
             std::fprintf(stderr,
                          "[CaptureOverlay] Window activation before capture: %s\n",
                          activated ? "ok" : "unavailable");
-            // List pick → crop the freeze (or live area) to this window's rect.
+            // The selected bounds are captured live after the overlay hides.
             m_selection = chosen.rect.normalized();
             if (m_selection.width() < kMinSize || m_selection.height() < kMinSize) {
                 // Fall back to desktop rect mapped into overlay space.

@@ -42,8 +42,6 @@ add_executable(apexshot-capture
     src/RecordingControlsWindow.h
     src/ScrollControlPanel.cpp
     src/ScrollControlPanel.h
-    src/WindowPickerOverlay.cpp
-    src/WindowPickerOverlay.h
 )
 
 target_link_libraries(apexshot-capture
