@@ -30,6 +30,7 @@ mod audio;
 mod backend;
 mod controls;
 mod gst_audio;
+mod timeline;
 mod wf_recorder;
 
 #[derive(Debug, Error)]
@@ -129,6 +130,12 @@ enum RecordingTerminalAction {
     Save,
     Discard,
     Restart,
+}
+
+struct RecordedSession {
+    path: PathBuf,
+    action: RecordingTerminalAction,
+    timeline: Option<timeline::RecordingTimeline>,
 }
 
 #[derive(Debug, Clone)]
@@ -340,7 +347,7 @@ fn command_exists(name: &str) -> bool {
 pub async fn start_recording(config: RecordingConfig) -> RecordResult<PathBuf> {
     start_recording_with_commands(config, None)
         .await
-        .map(|(path, _)| path)
+        .map(|session| session.path)
 }
 
 /// Start a recording session and stop when `stop_rx` resolves (in addition to Ctrl+C).
@@ -360,23 +367,29 @@ pub async fn start_recording_with_stop(
 
     start_recording_with_commands(config, Some(command_rx))
         .await
-        .map(|(path, action)| {
-            let stop_action = match action {
+        .map(|session| {
+            let stop_action = match session.action {
                 RecordingTerminalAction::Save => StopAction::Save,
                 RecordingTerminalAction::Discard => StopAction::Discard,
                 RecordingTerminalAction::Restart => StopAction::Discard,
             };
-            (path, stop_action)
+            (session.path, stop_action)
         })
 }
 
 async fn start_recording_with_commands(
     config: RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
-) -> RecordResult<(PathBuf, RecordingTerminalAction)> {
+) -> RecordResult<RecordedSession> {
     if wf_recorder::is_wlroots_session() {
         if wf_recorder::should_use_wf_recorder(&config) {
-            return wf_recorder::record_with_wf_recorder(config, command_rx).await;
+            return wf_recorder::record_with_wf_recorder(config, command_rx)
+                .await
+                .map(|(path, action)| RecordedSession {
+                    path,
+                    action,
+                    timeline: None,
+                });
         }
         return Err(RecordError::UnsupportedBackend(
             "wlroots recording with this output format is not supported".into(),

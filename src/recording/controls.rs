@@ -126,7 +126,11 @@ impl PointerTrackSession {
         }
     }
 
-    fn finish_save(mut self, output_path: &Path) -> bool {
+    fn finish_save(
+        mut self,
+        output_path: &Path,
+        timeline: Option<&super::timeline::RecordingTimeline>,
+    ) -> bool {
         let was_started = self.started;
         self.started = false;
         let result = match take_harvested_pointer_track() {
@@ -180,6 +184,18 @@ impl PointerTrackSession {
                         dragged,
                     })
                     .collect();
+                if let Some(timeline) = timeline {
+                    let pointer_origin_us = sidecar.t0_monotonic_us;
+                    if !timeline.rebase(&mut sidecar) {
+                        eprintln!("[recording] No retained media clock; deleting unsynchronized pointer sidecar");
+                        PointerSidecar::delete_next_to_video(output_path);
+                        return false;
+                    }
+                    eprintln!(
+                        "[recording] pointer origin monotonic_us={pointer_origin_us} media origin monotonic_us={}",
+                        sidecar.t0_monotonic_us
+                    );
+                }
                 sidecar.subtract_region();
                 match sidecar.write_next_to_video(output_path) {
                     Ok(path) => {
@@ -565,7 +581,7 @@ async fn start_shell_recording(
     config: super::RecordingConfig,
     prepared: Option<PreparedShellRecording>,
     command_rx: mpsc::UnboundedReceiver<RecordingControlCommand>,
-) -> super::RecordResult<(PathBuf, super::RecordingTerminalAction)> {
+) -> super::RecordResult<super::RecordedSession> {
     match prepared {
         Some(PreparedShellRecording::Video(backend)) => {
             super::backend::start_recording_with_prepared_backend(backend, Some(command_rx)).await
@@ -658,7 +674,11 @@ pub async fn run_recording_with_native_controls(
     };
 
     match outcome {
-        (path, super::RecordingTerminalAction::Restart) => {
+        super::RecordedSession {
+            path,
+            action: super::RecordingTerminalAction::Restart,
+            ..
+        } => {
             if let Some(event) =
                 super::daemon_event_for_terminal_action(super::RecordingTerminalAction::Restart)
             {
@@ -667,7 +687,11 @@ pub async fn run_recording_with_native_controls(
             delete_recording_outputs(&path);
             Box::pin(run_recording_with_native_controls(config, params)).await
         }
-        (path, super::RecordingTerminalAction::Save) => {
+        super::RecordedSession {
+            path,
+            action: super::RecordingTerminalAction::Save,
+            ..
+        } => {
             if let Some(event) =
                 super::daemon_event_for_terminal_action(super::RecordingTerminalAction::Save)
             {
@@ -675,7 +699,11 @@ pub async fn run_recording_with_native_controls(
             }
             Ok((path, StopAction::Save))
         }
-        (path, super::RecordingTerminalAction::Discard) => {
+        super::RecordedSession {
+            path,
+            action: super::RecordingTerminalAction::Discard,
+            ..
+        } => {
             if let Some(event) =
                 super::daemon_event_for_terminal_action(super::RecordingTerminalAction::Discard)
             {
@@ -776,7 +804,11 @@ async fn run_recording_with_shell_mask(
         };
 
         match outcome {
-            (path, action @ super::RecordingTerminalAction::Restart) => {
+            super::RecordedSession {
+                path,
+                action: action @ super::RecordingTerminalAction::Restart,
+                ..
+            } => {
                 if let Some(event) = super::daemon_event_for_terminal_action(action) {
                     super::notify_daemon_event(event);
                 }
@@ -784,14 +816,22 @@ async fn run_recording_with_shell_mask(
                 prepared_backend = prepare_shell_recording(config.clone()).await?;
                 continue;
             }
-            (path, action @ super::RecordingTerminalAction::Save) => {
+            super::RecordedSession {
+                path,
+                action: action @ super::RecordingTerminalAction::Save,
+                timeline,
+            } => {
                 if let Some(event) = super::daemon_event_for_terminal_action(action) {
                     super::notify_daemon_event(event);
                 }
-                pointer_track.finish_save(&path);
+                pointer_track.finish_save(&path, timeline.as_ref());
                 break (path, StopAction::Save);
             }
-            (path, action @ super::RecordingTerminalAction::Discard) => {
+            super::RecordedSession {
+                path,
+                action: action @ super::RecordingTerminalAction::Discard,
+                ..
+            } => {
                 if let Some(event) = super::daemon_event_for_terminal_action(action) {
                     super::notify_daemon_event(event);
                 }

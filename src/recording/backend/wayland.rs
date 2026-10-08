@@ -1,4 +1,5 @@
 use super::*;
+use gstreamer::glib;
 
 /// Try to start the GStreamer audio capture (mic + speaker monitor mixed and
 /// encoded in-process). `None` means the caller should keep the legacy
@@ -48,7 +49,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     audio_muxer: &str,
     config: &super::RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
-) -> super::RecordResult<(PathBuf, super::RecordingTerminalAction)> {
+) -> super::RecordResult<super::RecordedSession> {
     use std::io::Read;
     use std::process::{Command, Stdio};
 
@@ -127,6 +128,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     let fps = config.fps.max(1);
     // Native SPA bytes — no channel swap (see PipeWireCapture::pix_fmt).
     let pix_fmt = capture.pix_fmt();
+    let stream_header = super::timestamped_video::header(input_width, input_height, fps, pix_fmt)?;
 
     // Start audio only after the video capture stream is negotiated. This
     // keeps the encoded audio timeline aligned with the first video frame.
@@ -150,24 +152,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         .arg("warning")
         .arg("-nostats");
 
-    ffmpeg_cmd
-        .arg("-f")
-        .arg("rawvideo")
-        .arg("-pix_fmt")
-        .arg(pix_fmt)
-        .arg("-s")
-        .arg(format!("{}x{}", input_width, input_height))
-        .arg("-framerate")
-        .arg(fps.to_string())
-        // Rawvideo normally numbers submitted frames consecutively. At large
-        // resolutions encoder backpressure may allow only a few submissions
-        // per second, producing a sub-second video inside a much longer audio
-        // file. Timestamp frames when FFmpeg receives them so sparse writes
-        // retain the real recording duration.
-        .arg("-use_wallclock_as_timestamps")
-        .arg("1")
-        .arg("-i")
-        .arg("pipe:0");
+    ffmpeg_cmd.arg("-f").arg("matroska").arg("-i").arg("pipe:0");
 
     // Add every input before filters, codecs, maps, and other output options.
     // FFmpeg otherwise applies an option such as -vf to the following audio
@@ -219,7 +204,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             .saturating_sub(super::crf_resolution_reduction(fit_w, fit_h));
         ffmpeg_cmd
             .arg("-vf")
-            .arg(filter)
+            .arg(super::timestamped_video::cfr_filter(fps, &filter))
             .arg("-c:v")
             .arg("h264_nvenc")
             .arg("-rc")
@@ -271,8 +256,12 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             .saturating_sub(super::crf_resolution_reduction(vaapi_width, vaapi_height));
         let vaapi_args = super::wf_recorder::ffmpeg_vaapi_args(vaapi_width, vaapi_height, qp);
         video_desc = format!("h264_vaapi CQP qp{qp} {vaapi_width}x{vaapi_height} profile=high");
-        for arg in &vaapi_args {
-            ffmpeg_cmd.arg(arg);
+        for (index, arg) in vaapi_args.iter().enumerate() {
+            if index > 0 && vaapi_args[index - 1] == "-vf" {
+                ffmpeg_cmd.arg(super::timestamped_video::cfr_filter(fps, arg));
+            } else {
+                ffmpeg_cmd.arg(arg);
+            }
         }
         ffmpeg_cmd.arg("-g").arg((fps * 2).to_string());
         ffmpeg_cmd
@@ -295,7 +284,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         let filter = wayland_video_filter(config.max_resolution);
         ffmpeg_cmd
             .arg("-vf")
-            .arg(filter)
+            .arg(super::timestamped_video::cfr_filter(fps, &filter))
             .arg("-color_range")
             .arg("tv")
             .arg("-colorspace")
@@ -384,9 +373,6 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         }
     }
 
-    // Convert wall-clock-spaced input timestamps to the configured constant
-    // frame rate inside FFmpeg. This duplicates the latest decoded frame
-    // without pushing hundreds of MiB/s of repeated RGBA data through stdin.
     ffmpeg_cmd
         .arg("-fps_mode")
         .arg("cfr")
@@ -456,8 +442,16 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     let mut dropped_frames = 0u64;
     let mut last_drop_log = std::time::Instant::now();
     let mut first_written_at: Option<std::time::Instant> = None;
-    let mut last_pixels: Option<Vec<u8>> = None;
+    let mut last_pixels: Option<std::sync::Arc<Vec<u8>>> = None;
+    let mut last_encoded_pixels = None;
+    let mut pending_frame_at_us = None;
     let mut paused = false;
+    let mut timeline = super::timeline::RecordingTimeline::default();
+    if active_audio.is_none() && (config.mic_enabled || config.speaker_enabled) {
+        timeline.retain_live_audio_pauses();
+        eprintln!("[recording] Live Pulse audio fallback retains frozen pause intervals on the media clock");
+    }
+    let mut last_frame_at_us = None;
     let first_frame_deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
 
     loop {
@@ -490,6 +484,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                     break;
                 }
                 RecordingControlCommand::Pause if !paused => {
+                    timeline.pause(glib::monotonic_time());
                     println!("Recording paused");
                     if let Some(audio) = active_audio.as_mut() {
                         audio.set_paused(true);
@@ -498,6 +493,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                     super::notify_daemon_event("recording_session_paused");
                 }
                 RecordingControlCommand::Resume if paused => {
+                    timeline.resume(glib::monotonic_time());
                     println!("Recording resumed");
                     if let Some(audio) = active_audio.as_mut() {
                         audio.set_paused(false);
@@ -537,13 +533,9 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             }
         }
 
-        // Keep the latest PipeWire frame, but write to ffmpeg on our own clock.
-        // Some compositors only deliver changed frames; without duplicates a
-        // 16s mostly-static recording can encode as a 4s video at 30fps.
-        // Take at most one buffer per tick — spinning the queue can recycle a
-        // PipeWire buffer into a black frame.
         match capture.try_recv_frame() {
             Ok(Some(frame)) => {
+                let captured_at_us = frame.captured_at_us;
                 let expected = input_width as usize * input_height as usize * 4;
                 let pixels = if let Some(crop) = crop {
                     crop_rgba_frame(&frame, crop, input_width, input_height).ok()
@@ -553,7 +545,10 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                     None
                 };
                 match pixels {
-                    Some(pixels) if pixels.len() == expected => last_pixels = Some(pixels),
+                    Some(pixels) if pixels.len() == expected => {
+                        last_pixels = Some(std::sync::Arc::new(pixels));
+                        pending_frame_at_us = Some(captured_at_us);
+                    }
                     Some(pixels) => {
                         eprintln!(
                             "[recording] Skipping frame with {} bytes (expected {expected})",
@@ -591,6 +586,10 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             std::thread::sleep(std::time::Duration::from_millis(1));
             continue;
         };
+        let Some(frame_at_us) = pending_frame_at_us else {
+            next_frame_at = Some(std::time::Instant::now() + frame_interval);
+            continue;
+        };
 
         let now = std::time::Instant::now();
         let Some(deadline) = next_frame_at else {
@@ -602,10 +601,6 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             continue;
         }
 
-        // The encoder can't keep up with cadence (big frames, slower machines).
-        // Bursting to catch up only extends the delay behind realtime, so drop
-        // the backlog instead: wall-clock timestamps keep duration and A/V
-        // correct while motion degrades to a lower effective fps, smoothly.
         if now.saturating_duration_since(deadline) > frame_interval * 2 {
             dropped_frames += 1;
             if last_drop_log.elapsed() > std::time::Duration::from_secs(5) {
@@ -624,7 +619,7 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         if frames_written == 0 {
             if let Ok(path) = std::env::var("APEXSHOT_DUMP_FRAME") {
                 if !path.is_empty() {
-                    let _ = std::fs::write(&path, pixels);
+                    let _ = std::fs::write(&path, pixels.as_slice());
                     let _ = std::fs::write(
                         format!("{path}.info"),
                         format!("{input_width}x{input_height} {pix_fmt} fps={fps} {video_desc}"),
@@ -634,18 +629,38 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             }
         }
 
-        // A nonblocking pipe keeps stop/discard responsive even if ffmpeg
-        // stalls and stops consuming raw frames.
+        if last_frame_at_us.is_some_and(|previous| frame_at_us <= previous) {
+            pending_frame_at_us = None;
+            next_frame_at = Some(now + frame_interval);
+            continue;
+        }
+        let pts_us = timeline.frame_time_us(frame_at_us);
+        let frame_header = super::timestamped_video::frame_header(pts_us, pixels.len());
+        let initial_header = if frames_written == 0 {
+            stream_header.as_slice()
+        } else {
+            &[]
+        };
         match write_ffmpeg_frame_interruptible(
             &mut stdin,
-            pixels,
-            &mut command_rx,
-            &mut stop_action,
-            &mut paused,
-            &mut active_audio,
+            &[initial_header, &frame_header, pixels],
+            &mut FfmpegFrameControl {
+                command_rx: &mut command_rx,
+                stop_action: &mut stop_action,
+                paused: &mut paused,
+                active_audio: &mut active_audio,
+                timeline: &mut timeline,
+                notify: super::notify_daemon_event,
+            },
         ) {
             Ok(keep_recording) => {
+                if !keep_recording && stop_action != super::RecordingTerminalAction::Save {
+                    break;
+                }
                 frames_written += 1;
+                last_frame_at_us = Some(frame_at_us);
+                last_encoded_pixels = Some(std::sync::Arc::clone(pixels));
+                pending_frame_at_us = None;
                 if first_written_at.is_none() {
                     first_written_at = Some(std::time::Instant::now());
                 }
@@ -659,6 +674,9 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                     eprintln!(
                         "[recording] First frame written to ffmpeg ({} bytes, max_rgb={max_rgb})",
                         pixels.len()
+                    );
+                    eprintln!(
+                        "[recording] media origin monotonic_us={frame_at_us} pts_us={pts_us}"
                     );
                     if max_rgb == 0 {
                         eprintln!(
@@ -685,6 +703,8 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     }
 
     let stopped_at = std::time::Instant::now();
+    let stopped_at_us = glib::monotonic_time();
+    timeline.finish(stopped_at_us);
 
     // Release the exclusive GNOME ScreenCast session before audio drain or
     // ffmpeg finalization. Those can block for seconds; the compositor must
@@ -708,13 +728,42 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     // the mic open while ffmpeg drains — that would grow the audio track past
     // the session.
     if let Some(mut audio) = active_audio.take() {
-        if stop_action == super::RecordingTerminalAction::Discard {
+        if stop_action != super::RecordingTerminalAction::Save {
             audio.abort();
         } else {
             audio.stop();
         }
     }
     drop(audio_exclusive.take());
+
+    if stop_action == super::RecordingTerminalAction::Save {
+        if let (Some(pixels), Some(last_frame_at_us)) = (&last_encoded_pixels, last_frame_at_us) {
+            let end_pts = timeline.frame_time_us(stopped_at_us);
+            let tail_pts = end_pts.saturating_sub(1_000_000 / u64::from(fps));
+            let last_pts = timeline.frame_time_us(last_frame_at_us);
+            if tail_pts > last_pts {
+                let tail_header = super::timestamped_video::frame_header(tail_pts, pixels.len());
+                if let Err(err) = write_ffmpeg_frame_interruptible(
+                    &mut stdin,
+                    &[&tail_header, pixels],
+                    &mut FfmpegFrameControl {
+                        command_rx: &mut command_rx,
+                        stop_action: &mut stop_action,
+                        paused: &mut paused,
+                        active_audio: &mut active_audio,
+                        timeline: &mut timeline,
+                        notify: super::notify_daemon_event,
+                    },
+                ) {
+                    drop(stdin);
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = stderr_reader.join();
+                    return Err(err.into());
+                }
+            }
+        }
+    }
 
     if let (Some(start), true) = (
         first_written_at,
@@ -729,13 +778,20 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     // Deterministic encoder stop: close video stdin so ffmpeg finalizes once
     // both inputs are at EOF (audio already EOFed above).
     drop(stdin);
+    if stop_action != super::RecordingTerminalAction::Save {
+        let _ = child.kill();
+    }
 
     let status = wait_for_ffmpeg_child(&mut child)?;
     let ffmpeg_stderr = stderr_reader.join().unwrap_or_default();
 
-    if stop_action == super::RecordingTerminalAction::Discard {
+    if stop_action != super::RecordingTerminalAction::Save {
         let _ = std::fs::remove_file(&final_path);
-        return Ok((final_path, stop_action));
+        return Ok(super::RecordedSession {
+            path: final_path,
+            action: stop_action,
+            timeline: Some(timeline),
+        });
     }
 
     if frames_written == 0 {
@@ -781,5 +837,9 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         }
     }
 
-    Ok((final_path, stop_action))
+    Ok(super::RecordedSession {
+        path: final_path,
+        action: stop_action,
+        timeline: Some(timeline),
+    })
 }

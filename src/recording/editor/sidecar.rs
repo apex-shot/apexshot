@@ -152,6 +152,8 @@ impl PressSample {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PointerSidecar {
     pub version: u32,
+    /// Monotonic origin of the recording. Newly recorded event times use the
+    /// retained media clock, excluding pauses when the backend removes them.
     pub t0_monotonic_us: i64,
     pub region: CaptureRegion,
     pub pointer: Vec<PointerSample>,

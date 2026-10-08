@@ -7,6 +7,7 @@ mod ffmpeg_process;
 mod profile;
 mod session;
 mod source;
+mod timestamped_video;
 mod wayland;
 mod x11;
 
@@ -22,7 +23,7 @@ pub(super) use ffmpeg_process::{attach_audio_pipe_as_fd3, attach_pipe_as_fd};
 use ffmpeg_process::{attach_audio_pipe_as_fd3, attach_pipe_as_fd};
 use ffmpeg_process::{
     ffmpeg_error_detail, set_child_stdin_nonblocking, wait_for_ffmpeg_child,
-    write_ffmpeg_frame_interruptible,
+    write_ffmpeg_frame_interruptible, FfmpegFrameControl,
 };
 #[cfg(test)]
 use profile::{ffmpeg_available_encoders, video_encoder_props, PROFILES};
@@ -90,7 +91,7 @@ pub(super) async fn prepare_recording_backend(
 pub(super) async fn start_recording_with_prepared_backend(
     built: BuiltPipeline,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
-) -> super::RecordResult<(PathBuf, super::RecordingTerminalAction)> {
+) -> super::RecordResult<super::RecordedSession> {
     if let Some(wayland_source) = built.wayland_source {
         let final_path = built.final_path.clone();
         let encoder_name = built.encoder_name.clone();
@@ -112,7 +113,13 @@ pub(super) async fn start_recording_with_prepared_backend(
         .map_err(|e| RecordError::GStreamerError(format!("Join error: {e}")))?;
     }
 
-    record_x11_with_gstreamer(&built.config, built.profile, &built.final_path, command_rx).await
+    record_x11_with_gstreamer(&built.config, built.profile, &built.final_path, command_rx)
+        .await
+        .map(|(path, action)| super::RecordedSession {
+            path,
+            action,
+            timeline: None,
+        })
 }
 
 #[cfg(test)]
