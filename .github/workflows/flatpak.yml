@@ -48,6 +48,16 @@ jobs:
       - name: Add Flathub remote
         run: sudo flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
 
+      - name: Install Flatpak runtime, SDK, and extensions
+        run: >-
+          sudo flatpak install --system --assumeyes --noninteractive flathub
+          org.gnome.Platform//50
+          org.gnome.Sdk//50
+          org.freedesktop.Platform.GL.default//25.08
+          org.freedesktop.Platform.codecs-extra//25.08-extra
+          org.freedesktop.Sdk.Extension.rust-stable//25.08
+          org.freedesktop.Sdk.Extension.llvm20//25.08
+
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: flatpak/org.apexshot.ApexShot.yml
