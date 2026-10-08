@@ -44,6 +44,9 @@ pub struct PipeWireFrame {
     pub cursor: Option<CursorOverlay>,
     /// Color space from negotiated format.
     pub color_space: ColorSpace,
+    /// Compositor capture time on the local monotonic clock, or buffer receipt
+    /// time when the producer does not expose that clock domain.
+    pub captured_at_us: i64,
 }
 
 /// Cursor bitmap and position extracted from PipeWire buffer metadata.
@@ -172,6 +175,7 @@ struct StreamInner {
     format: Option<NegotiatedFormat>,
     raw_format: Option<spa::param::video::VideoInfoRaw>,
     frames: std::collections::VecDeque<Vec<u8>>,
+    frame_times: std::collections::VecDeque<i64>,
     /// Cursor overlays corresponding to frames (paired by queue position).
     cursor_queue: std::collections::VecDeque<CursorOverlay>,
     frames_consumed: u64,
@@ -289,6 +293,7 @@ impl PipeWireCapture {
             format: None,
             raw_format: None,
             frames: std::collections::VecDeque::new(),
+            frame_times: std::collections::VecDeque::new(),
             cursor_queue: std::collections::VecDeque::new(),
             frames_consumed: 0,
             error: None,
@@ -312,9 +317,14 @@ impl PipeWireCapture {
             .ok_or_else(|| PipeWireError::Connect("Failed to parse format pod".into()))?;
         let buffers_pod = spa::pod::Pod::from_bytes(&buffers_bytes)
             .ok_or_else(|| PipeWireError::Connect("Failed to parse buffers pod".into()))?;
-        let mut params = [format_pod, buffers_pod];
+        let header_bytes = build_header_meta_pod();
+        let header_pod = spa::pod::Pod::from_bytes(&header_bytes).ok_or_else(|| {
+            PipeWireError::Connect("Failed to parse frame header metadata pod".into())
+        })?;
+        let mut params = [format_pod, buffers_pod, header_pod];
 
         let inner_clone = Arc::clone(&inner);
+        let monotonic_header = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
         let _listener = stream
             .add_local_listener_with_user_data(inner_clone)
             .state_changed(|_stream, inner, old, new| {
@@ -376,7 +386,7 @@ impl PipeWireCapture {
                     cs.range_label(),
                 );
             })
-            .process(|_stream, inner| {
+            .process(move |_stream, inner| {
                 let mut guard = match inner.lock() {
                     Ok(g) => g,
                     Err(_) => return,
@@ -387,22 +397,22 @@ impl PipeWireCapture {
                     }
                 }
 
-                let mut buffer = match _stream.dequeue_buffer() {
-                    Some(b) => b,
+                let mut buffer = match CaptureBuffer::dequeue(_stream) {
+                    Some(buffer) => buffer,
                     None => {
                         eprintln!("[pipewire] Out of buffers!");
                         return;
                     }
                 };
 
-                let datas = buffer.datas_mut();
-                if datas.is_empty() {
-                    return;
-                }
-                let chunk_size = datas[0].chunk().size() as usize;
-                let Some(pixel_data) = copy_cpu_frame(&mut datas[..], chunk_size) else {
+                let received_at_us = gstreamer::glib::monotonic_time();
+                let Some((pixel_data, header_pts)) = buffer.copy_frame() else {
                     return;
                 };
+                let captured_at_us = frame_capture_time_us(header_pts, received_at_us, monotonic_header);
+                if guard.frames.is_empty() && guard.frames_consumed == 0 {
+                    eprintln!("[pipewire] first frame clock header_pts_ns={header_pts:?} received_us={received_at_us} captured_us={captured_at_us}");
+                }
 
                 // A recording encoder can be slower than the compositor at
                 // large resolutions. Never retain every full RGBA frame while
@@ -414,10 +424,12 @@ impl PipeWireCapture {
                     let dropped = push_latest_continuous_frame(&mut guard.frames, pixel_data);
                     for _ in 0..dropped {
                         guard.cursor_queue.pop_front();
+                        guard.frame_times.pop_front();
                     }
                 } else {
                     guard.frames.push_back(pixel_data);
                 }
+                guard.frame_times.push_back(captured_at_us);
             })
             .register()
             .map_err(|e| PipeWireError::Connect(format!("Failed to register listener: {e}")))?;
@@ -517,6 +529,10 @@ impl PipeWireCapture {
             None => return Ok(None),
         };
         let _ = guard.cursor_queue.pop_front();
+        let captured_at_us = guard
+            .frame_times
+            .pop_front()
+            .unwrap_or_else(gstreamer::glib::monotonic_time);
 
         guard.frames_consumed += 1;
         drop(guard);
@@ -553,6 +569,7 @@ impl PipeWireCapture {
             stride: row_len as u32,
             cursor: None,
             color_space,
+            captured_at_us,
         }))
     }
 
@@ -590,6 +607,67 @@ impl PipeWireCapture {
 // ---------------------------------------------------------------------------
 // DMA-BUF frame reading (zero-copy from GPU memory)
 // ---------------------------------------------------------------------------
+
+struct CaptureBuffer<'a> {
+    raw: std::ptr::NonNull<pw::sys::pw_buffer>,
+    stream: &'a pw::stream::Stream,
+}
+
+impl<'a> CaptureBuffer<'a> {
+    fn dequeue(stream: &'a pw::stream::Stream) -> Option<Self> {
+        let raw = std::ptr::NonNull::new(unsafe { stream.dequeue_raw_buffer() })?;
+        Some(Self { raw, stream })
+    }
+
+    fn copy_frame(&mut self) -> Option<(Vec<u8>, Option<i64>)> {
+        let buffer = unsafe { self.raw.as_ref().buffer.as_mut() }?;
+        unsafe { copy_spa_frame(buffer) }
+    }
+}
+
+impl Drop for CaptureBuffer<'_> {
+    fn drop(&mut self) {
+        unsafe { self.stream.queue_raw_buffer(self.raw.as_ptr()) };
+    }
+}
+
+/// Copy a dequeued buffer before returning its pixel storage to PipeWire.
+///
+/// # Safety
+/// The buffer's metadata and data arrays must remain valid for the call.
+unsafe fn copy_spa_frame(buffer: &mut spa_sys::spa_buffer) -> Option<(Vec<u8>, Option<i64>)> {
+    if buffer.n_datas == 0 || buffer.datas.is_null() {
+        return None;
+    }
+    let header = unsafe {
+        spa_sys::spa_buffer_find_meta_data(
+            buffer,
+            spa_sys::SPA_META_Header,
+            std::mem::size_of::<spa_sys::spa_meta_header>(),
+        )
+        .cast::<spa_sys::spa_meta_header>()
+        .as_ref()
+    };
+    if header.is_some_and(|header| header.flags & spa_sys::SPA_META_HEADER_FLAG_CORRUPTED != 0) {
+        return None;
+    }
+    let pts = header.map(|header| header.pts);
+    let datas = unsafe {
+        std::slice::from_raw_parts_mut(
+            buffer.datas.cast::<spa::buffer::Data>(),
+            buffer.n_datas as usize,
+        )
+    };
+    let chunk_size = datas[0].chunk().size() as usize;
+    Some((copy_cpu_frame(datas, chunk_size)?, pts))
+}
+
+fn frame_capture_time_us(pts_ns: Option<i64>, received_at_us: i64, monotonic_header: bool) -> i64 {
+    match pts_ns.filter(|&pts| monotonic_header && pts > 0 && pts / 1_000 <= received_at_us) {
+        Some(pts) => pts / 1_000,
+        None => received_at_us,
+    }
+}
 
 fn copy_cpu_frame(datas: &mut [spa::buffer::Data], chunk_size: usize) -> Option<Vec<u8>> {
     if datas.is_empty() || chunk_size == 0 || chunk_size > 64 * 1024 * 1024 {
@@ -768,6 +846,33 @@ fn build_shm_buffers_pod() -> Vec<u8> {
     .into_inner()
 }
 
+fn build_header_meta_pod() -> Vec<u8> {
+    use pw::spa::pod::{Object, Property, Value};
+    use pw::spa::utils::{Id, SpaTypes};
+
+    let object = Object {
+        type_: SpaTypes::ObjectParamMeta.as_raw(),
+        id: spa::param::ParamType::Meta.as_raw(),
+        properties: vec![
+            Property::new(
+                spa_sys::SPA_PARAM_META_type,
+                Value::Id(Id(spa_sys::SPA_META_Header)),
+            ),
+            Property::new(
+                spa_sys::SPA_PARAM_META_size,
+                Value::Int(std::mem::size_of::<spa_sys::spa_meta_header>() as i32),
+            ),
+        ],
+    };
+    pw::spa::pod::serialize::PodSerializer::serialize(
+        std::io::Cursor::new(Vec::with_capacity(128)),
+        &Value::Object(object),
+    )
+    .unwrap()
+    .0
+    .into_inner()
+}
+
 fn build_enum_format_pod(width_hint: Option<u32>, height_hint: Option<u32>) -> Vec<u8> {
     use pw::spa::pod::Value;
     use pw::spa::utils::{Fraction, Rectangle, SpaTypes};
@@ -893,6 +998,80 @@ pub fn capture_single_frame_with_min_frames(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compositor_frame_clock_uses_monotonic_header_and_falls_back_for_other_domains() {
+        assert_eq!(
+            frame_capture_time_us(Some(9_000_123_000), 9_050_000, true),
+            9_000_123
+        );
+        assert_eq!(
+            frame_capture_time_us(Some(9_000_123_000), 9_050_000, false),
+            9_050_000
+        );
+        for pts in [None, Some(-1), Some(0), Some(10_000_000_000)] {
+            assert_eq!(frame_capture_time_us(pts, 9_050_000, true), 9_050_000);
+        }
+    }
+
+    #[test]
+    fn frame_header_metadata_request_is_a_valid_pod() {
+        assert!(spa::pod::Pod::from_bytes(&build_header_meta_pod()).is_some());
+    }
+
+    #[test]
+    fn frame_metadata_stays_with_its_pixels_and_corrupted_buffers_are_rejected() {
+        let mut pixels = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
+        let mut chunk = spa_sys::spa_chunk {
+            offset: 0,
+            size: pixels.len() as u32,
+            stride: 8,
+            flags: 0,
+        };
+        let mut data = spa_sys::spa_data {
+            type_: spa_sys::SPA_DATA_MemPtr,
+            flags: 0,
+            fd: -1,
+            mapoffset: 0,
+            maxsize: pixels.len() as u32,
+            data: pixels.as_mut_ptr().cast(),
+            chunk: &mut chunk,
+        };
+        let mut header = spa_sys::spa_meta_header {
+            flags: 0,
+            offset: 0,
+            pts: 9_000_123_000,
+            dts_offset: 0,
+            seq: 1,
+        };
+        let mut metadata = spa_sys::spa_meta {
+            type_: spa_sys::SPA_META_Header,
+            size: std::mem::size_of::<spa_sys::spa_meta_header>() as u32,
+            data: (&mut header as *mut spa_sys::spa_meta_header).cast(),
+        };
+        let mut buffer = spa_sys::spa_buffer {
+            n_metas: 1,
+            n_datas: 1,
+            metas: &mut metadata,
+            datas: &mut data,
+        };
+        assert_eq!(
+            unsafe { copy_spa_frame(&mut buffer) },
+            Some((pixels.clone(), Some(header.pts)))
+        );
+        header.flags = spa_sys::SPA_META_HEADER_FLAG_CORRUPTED;
+        assert_eq!(header.flags, spa_sys::SPA_META_HEADER_FLAG_CORRUPTED);
+        assert!(unsafe { copy_spa_frame(&mut buffer) }.is_none());
+        buffer.n_metas = 0;
+        buffer.metas = std::ptr::null_mut();
+        assert_eq!(
+            unsafe { copy_spa_frame(&mut buffer) },
+            Some((pixels.clone(), None))
+        );
+        buffer.n_datas = 0;
+        buffer.datas = std::ptr::null_mut();
+        assert!(unsafe { copy_spa_frame(&mut buffer) }.is_none());
+    }
 
     #[test]
     fn test_format_bpp() {
