@@ -2742,3 +2742,53 @@ msgstr "宽度"
 
 msgid "Word"
 msgstr "单词"
+
+msgid "Available when your desktop supports the GlobalShortcuts portal"
+msgstr "当桌面支持 GlobalShortcuts 门户时可用"
+
+msgid "Desktop notification settings are managed outside Flatpak."
+msgstr "桌面通知设置在 Flatpak 外部管理。"
+
+msgid "Download GNOME Extension"
+msgstr "下载 GNOME 扩展"
+
+msgid "Download extension archive"
+msgstr "下载扩展压缩包"
+
+msgid "Enable GNOME Extension"
+msgstr "启用 GNOME 扩展"
+
+msgid "Extension Enabled ✓"
+msgstr "扩展已启用 ✓"
+
+msgid "Extension installation failed — try again"
+msgstr "扩展安装失败 — 请重试"
+
+msgid "Extension is installed but inactive — enable it in GNOME Extensions"
+msgstr "扩展已安装但未启用 — 请在 GNOME 扩展应用中启用"
+
+msgid ""
+"Host-installed browsers need scripts/install-flatpak-browser-host.py run on the host. This bridge does not support browsers installed as Flatpaks."
+msgstr ""
+"在宿主系统上安装的浏览器需要在宿主系统上运行 scripts/install-flatpak-browser-host.py。此桥接不支持以 Flatpak 形式安装的浏览器。"
+
+msgid ""
+"The GNOME extension is installed but not active. Use Enable GNOME Extension or enable it in GNOME Extensions."
+msgstr "GNOME 扩展已安装但未启用。请使用“启用 GNOME 扩展”或在 GNOME 扩展应用中启用。"
+
+msgid ""
+"The tray daemon starts when you finish. Capture from its menu; global hotkeys depend on desktop portal support and approval."
+msgstr "完成后，系统托盘守护进程将启动。请从其菜单进行捕获；全局快捷键需要桌面门户支持并获得授权。"
+
+msgid ""
+"These defaults require desktop GlobalShortcuts portal support and approval. Use the tray if shortcuts are unavailable."
+msgstr "这些默认设置需要桌面的 GlobalShortcuts 门户支持并获得授权。如果快捷键不可用，请使用系统托盘。"
+
+msgid ""
+"This Flatpak cannot install extensions into your host desktop. Open the release page and download the GNOME extension archive, then install and enable it on the host in GNOME Extensions or run `gnome-extensions install --force ~/Downloads/apexshot-gnome-integration.zip` followed by `gnome-extensions enable apexshot-gnome-integration@apexshot.github.io` in a host terminal. ApexShot will detect it when the extension is enabled."
+msgstr ""
+"此 Flatpak 无法在宿主桌面上安装扩展。请打开发布页面并下载 GNOME 扩展压缩包，然后在宿主系统的 GNOME 扩展应用中安装并启用，或在宿主终端中运行 `gnome-extensions install --force ~/Downloads/apexshot-gnome-integration.zip`，然后运行 `gnome-extensions enable apexshot-gnome-integration@apexshot.github.io`。扩展启用后，ApexShot 将检测到它。"
+
+msgid ""
+"You may need to log out and back in for the extension to appear in GNOME."
+msgstr "您可能需要注销并重新登录，扩展才会出现在 GNOME 中。"

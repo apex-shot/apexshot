@@ -2761,3 +2761,56 @@ msgstr "العرض"
 
 msgid "Word"
 msgstr "كلمة"
+
+msgid "Available when your desktop supports the GlobalShortcuts portal"
+msgstr "متاح عندما يدعم سطح المكتب لديك بوابة GlobalShortcuts"
+
+msgid "Desktop notification settings are managed outside Flatpak."
+msgstr "تُدار إعدادات إشعارات سطح المكتب خارج Flatpak."
+
+msgid "Download GNOME Extension"
+msgstr "تنزيل امتداد GNOME"
+
+msgid "Download extension archive"
+msgstr "تنزيل أرشيف الامتداد"
+
+msgid "Enable GNOME Extension"
+msgstr "تفعيل امتداد GNOME"
+
+msgid "Extension Enabled ✓"
+msgstr "الامتداد مفعّل ✓"
+
+msgid "Extension installation failed — try again"
+msgstr "فشل تثبيت الامتداد — حاول مجددًا"
+
+msgid "Extension is installed but inactive — enable it in GNOME Extensions"
+msgstr "الامتداد مثبت لكنه غير نشط — فعّله في تطبيق امتدادات GNOME"
+
+msgid ""
+"Host-installed browsers need scripts/install-flatpak-browser-host.py run on the host. This bridge does not support browsers installed as Flatpaks."
+msgstr ""
+"تحتاج المتصفحات المثبتة على النظام المضيف إلى تشغيل scripts/install-flatpak-browser-host.py على المضيف. لا يدعم هذا الجسر المتصفحات المثبتة عبر Flatpak."
+
+msgid ""
+"The GNOME extension is installed but not active. Use Enable GNOME Extension or enable it in GNOME Extensions."
+msgstr ""
+"امتداد GNOME مثبت لكنه غير نشط. استخدم «تفعيل امتداد GNOME» أو فعّله في تطبيق امتدادات GNOME."
+
+msgid ""
+"The tray daemon starts when you finish. Capture from its menu; global hotkeys depend on desktop portal support and approval."
+msgstr ""
+"تبدأ خدمة أيقونة النظام عند الانتهاء. التقط من قائمتها؛ تعتمد اختصارات لوحة المفاتيح العامة على دعم بوابة سطح المكتب وموافقتك."
+
+msgid ""
+"These defaults require desktop GlobalShortcuts portal support and approval. Use the tray if shortcuts are unavailable."
+msgstr ""
+"تتطلب هذه الإعدادات الافتراضية دعم بوابة GlobalShortcuts لسطح المكتب وموافقتك. استخدم أيقونة النظام إذا لم تتوفر الاختصارات."
+
+msgid ""
+"This Flatpak cannot install extensions into your host desktop. Open the release page and download the GNOME extension archive, then install and enable it on the host in GNOME Extensions or run `gnome-extensions install --force ~/Downloads/apexshot-gnome-integration.zip` followed by `gnome-extensions enable apexshot-gnome-integration@apexshot.github.io` in a host terminal. ApexShot will detect it when the extension is enabled."
+msgstr ""
+"لا يمكن لحزمة Flatpak هذه تثبيت امتدادات على سطح المكتب المضيف. افتح صفحة الإصدار ونزّل أرشيف امتداد GNOME، ثم ثبّته وفعّله على المضيف في تطبيق امتدادات GNOME أو شغّل `gnome-extensions install --force ~/Downloads/apexshot-gnome-integration.zip` ثم `gnome-extensions enable apexshot-gnome-integration@apexshot.github.io` في طرفية المضيف. سيكتشفه ApexShot عند تفعيل الامتداد."
+
+msgid ""
+"You may need to log out and back in for the extension to appear in GNOME."
+msgstr "قد تحتاج إلى تسجيل الخروج ثم الدخول مجددًا ليظهر الامتداد في GNOME."

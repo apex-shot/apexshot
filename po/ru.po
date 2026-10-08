@@ -2783,3 +2783,58 @@ msgstr "Ширина"
 
 msgid "Word"
 msgstr "Слово"
+
+msgid "Available when your desktop supports the GlobalShortcuts portal"
+msgstr "Доступно, если рабочий стол поддерживает портал GlobalShortcuts"
+
+msgid "Desktop notification settings are managed outside Flatpak."
+msgstr "Настройки уведомлений рабочего стола управляются вне Flatpak."
+
+msgid "Download GNOME Extension"
+msgstr "Скачать расширение GNOME"
+
+msgid "Download extension archive"
+msgstr "Скачать архив расширения"
+
+msgid "Enable GNOME Extension"
+msgstr "Включить расширение GNOME"
+
+msgid "Extension Enabled ✓"
+msgstr "Расширение включено ✓"
+
+msgid "Extension installation failed — try again"
+msgstr "Не удалось установить расширение — попробуйте ещё раз"
+
+msgid "Extension is installed but inactive — enable it in GNOME Extensions"
+msgstr ""
+"Расширение установлено, но неактивно — включите его в приложении «Расширения GNOME»"
+
+msgid ""
+"Host-installed browsers need scripts/install-flatpak-browser-host.py run on the host. This bridge does not support browsers installed as Flatpaks."
+msgstr ""
+"Для браузеров, установленных в основной системе, нужно запустить scripts/install-flatpak-browser-host.py в основной системе. Этот мост не поддерживает браузеры, установленные через Flatpak."
+
+msgid ""
+"The GNOME extension is installed but not active. Use Enable GNOME Extension or enable it in GNOME Extensions."
+msgstr ""
+"Расширение GNOME установлено, но неактивно. Используйте «Включить расширение GNOME» или включите его в приложении «Расширения GNOME»."
+
+msgid ""
+"The tray daemon starts when you finish. Capture from its menu; global hotkeys depend on desktop portal support and approval."
+msgstr ""
+"После завершения запускается служба системного трея. Делайте снимки через её меню; глобальные горячие клавиши требуют поддержки и разрешения портала рабочего стола."
+
+msgid ""
+"These defaults require desktop GlobalShortcuts portal support and approval. Use the tray if shortcuts are unavailable."
+msgstr ""
+"Эти настройки по умолчанию требуют поддержки и разрешения портала GlobalShortcuts рабочего стола. Если сочетания клавиш недоступны, используйте системный трей."
+
+msgid ""
+"This Flatpak cannot install extensions into your host desktop. Open the release page and download the GNOME extension archive, then install and enable it on the host in GNOME Extensions or run `gnome-extensions install --force ~/Downloads/apexshot-gnome-integration.zip` followed by `gnome-extensions enable apexshot-gnome-integration@apexshot.github.io` in a host terminal. ApexShot will detect it when the extension is enabled."
+msgstr ""
+"Этот Flatpak не может устанавливать расширения на рабочий стол основной системы. Откройте страницу выпуска и скачайте архив расширения GNOME, затем установите и включите его в основной системе через приложение «Расширения GNOME» или выполните `gnome-extensions install --force ~/Downloads/apexshot-gnome-integration.zip`, а затем `gnome-extensions enable apexshot-gnome-integration@apexshot.github.io` в терминале основной системы. ApexShot обнаружит расширение, когда оно будет включено."
+
+msgid ""
+"You may need to log out and back in for the extension to appear in GNOME."
+msgstr ""
+"Возможно, потребуется выйти из системы и войти снова, чтобы расширение появилось в GNOME."
