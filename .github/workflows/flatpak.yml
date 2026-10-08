@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Flatpak build tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils librsvg2-common
 
       - name: Add Flathub remote
         run: sudo flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
