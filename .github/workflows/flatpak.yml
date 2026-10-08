@@ -42,8 +42,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install ELF utilities required by flatpak-builder
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends elfutils
+      - name: Install Flatpak build tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
 
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
