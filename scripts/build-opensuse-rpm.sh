@@ -27,7 +27,18 @@ fi
 mkdir -p "${RPM_TOPDIR}"/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 
 archive="${RPM_TOPDIR}/SOURCES/apexshot-${version}.tar.gz"
-git -C "$REPO_DIR" archive --format=tar.gz --prefix="apexshot-${version}/" -o "$archive" HEAD
+if git -C "$REPO_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+    git -C "$REPO_DIR" archive --format=tar.gz --prefix="apexshot-${version}/" -o "$archive" HEAD
+else
+    echo "Warning: ${REPO_DIR} is not a git repository; falling back to tar-based source archive" >&2
+    tar \
+        --exclude-vcs \
+        --exclude='./target' \
+        --exclude='./.github' \
+        -czf "$archive" \
+        --transform="s#^.#apexshot-${version}#" \
+        -C "$REPO_DIR" .
+fi
 
 spec="${RPM_TOPDIR}/SPECS/apexshot.spec"
 sed "s/^Version:.*/Version:        ${version}/" "$SPEC_SRC" > "$spec"
