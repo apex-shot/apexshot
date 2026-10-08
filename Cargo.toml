@@ -89,10 +89,10 @@ qrcode = "0.14.1"           # QR fixture generation for decoder tests
 
 [features]
 default = ["tesseract-ocr"]
-# System Tesseract (native packages). Flatpak uses pure-Rust ocrs instead.
+# Tesseract is bundled in Flatpak and linked from the system in native packages.
 tesseract-ocr = ["dep:tesseract"]
-# Portal-only build: no Qt capture helper, no host escapes, no system tesseract.
-# Build with: cargo build --no-default-features --features flatpak
+# Sandboxed build with portal capture and bundled desktop tools.
+# Build with: cargo build --features flatpak
 flatpak = []
 
 [profile.release]
@@ -207,5 +207,6 @@ assets = [
     ["gnome-extension/shell-overlay.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
     ["gnome-extension/window-list.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
     ["gnome-extension/preview-stacking.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
+    ["gnome-extension/daemon-ownership.js", "usr/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/", "644"],
 ]
 maintainer-scripts = "packaging/debian"

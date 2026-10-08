@@ -713,6 +713,9 @@ impl WaylandBackend {
     /// Full-screen still capture. Prefers fast native/Screenshot paths; only
     /// falls back to ScreenCast + PipeWire when those fail.
     pub fn capture_screen_impl(&self) -> DisplayResult<CaptureData> {
+        if crate::app_identity::portal_only() {
+            return Self::capture_still_via_screenshot_portal();
+        }
         if Self::should_force_screenshot_portal_first() {
             match Self::capture_still_via_screenshot_portal() {
                 Ok(data) => return Ok(data),
@@ -801,6 +804,9 @@ impl WaylandBackend {
         origin: Option<(i32, i32)>,
         play_sound: bool,
     ) -> DisplayResult<CaptureData> {
+        if crate::app_identity::portal_only() {
+            return Self::capture_still_via_screenshot_portal();
+        }
         if Self::should_force_screenshot_portal_first() {
             match Self::capture_still_via_screenshot_portal() {
                 Ok(data) => return Ok(data),
@@ -933,6 +939,9 @@ impl DisplayBackend for WaylandBackend {
         // ScreenCast portal may not be available: capture the full screen via
         // wlr-screencopy, then crop to the active window bounds from the
         // compositor's window list.
+        if crate::app_identity::portal_only() {
+            return portal_result;
+        }
         if let Some(compositor) = crate::compositor::detect_compositor() {
             if let Ok(Some(window)) = compositor.get_active_window() {
                 eprintln!(

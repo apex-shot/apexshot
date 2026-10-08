@@ -1,5 +1,6 @@
 #include "CaptureOverlay.h"
 #include "CaptureOverlay_p.h"
+#include "Sandbox.h"
 #include <QApplication>
 #include <QGuiApplication>
 #include <QScreen>
@@ -43,6 +44,10 @@ bool desktopBounds(bool available, QRect& outBounds)
 bool x11RootCardinalProperty(const char* name, QVector<unsigned long>& values)
 {
 #if defined(Q_OS_LINUX)
+    if (isFlatpakWaylandSession()) {
+        return false;
+    }
+
     Display* display = XOpenDisplay(nullptr);
     if (!display) {
         return false;
@@ -529,7 +534,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
             return;
         }
 
-        QDBusInterface iface(QStringLiteral("org.apexshot.Daemon"),
+        QDBusInterface iface(daemonBusName(),
                              QStringLiteral("/org/apexshot/Daemon"),
                              QStringLiteral("org.apexshot.Daemon"),
                              QDBusConnection::sessionBus());

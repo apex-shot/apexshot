@@ -47,6 +47,7 @@ fn build_capture_overlay() {
     println!("cargo:rerun-if-changed=capture-overlay/src/ScrollControlPanel.h");
     println!("cargo:rerun-if-changed=capture-overlay/src/ScreenCapture.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/ScreenCapture.h");
+    println!("cargo:rerun-if-changed=capture-overlay/src/Sandbox.h");
     println!("cargo:rerun-if-changed=capture-overlay/src/MonitorPicker.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/MonitorPicker.h");
     println!("cargo:rerun-if-changed=capture-overlay/src/request.cpp");
@@ -115,12 +116,7 @@ fn main() {
     compile_translations();
     println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN/../lib/apexshot");
 
-    // Flatpak builds are portal-only: skip the Qt5/X11 C++ helper entirely.
-    if std::env::var_os("CARGO_FEATURE_FLATPAK").is_none() {
-        build_capture_overlay();
-    } else {
-        println!("cargo:warning=flatpak feature: skipping Qt capture-overlay build");
-    }
+    build_capture_overlay();
 
     // Rebuild whenever a custom SVG is added/modified in data/icons.
     println!("cargo:rerun-if-changed=data/icons");

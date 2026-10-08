@@ -71,10 +71,7 @@ const OVERLAY_FOCUS_REQUEST: &str = "focus";
 const OVERLAY_CANCEL_REQUEST: &str = "cancel";
 
 fn overlay_socket_path() -> PathBuf {
-    let base = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    base.join("apexshot-capture-overlay.sock")
+    crate::app_identity::capture_runtime_dir().join("apexshot-capture-overlay.sock")
 }
 
 pub fn request_existing_overlay_focus() -> bool {

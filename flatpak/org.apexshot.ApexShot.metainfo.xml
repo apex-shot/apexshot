@@ -12,7 +12,7 @@
   <description>
     <p>ApexShot captures screenshots and screen recordings on Linux with Wayland portals and PipeWire support.</p>
     <p>Annotate captures, extract text with OCR, scan QR codes, and share results from one desktop application.</p>
-    <p>This Flatpak build is portal-only: capture and recording use XDG desktop portals, telemetry is off by default, and host package tools are not used.</p>
+    <p>This Flatpak build uses desktop portals for capture and recording, includes its capture controls and OCR tools, and leaves telemetry off by default. Optional GNOME integration uses a separately installed host extension.</p>
   </description>
   <categories>
     <category>Graphics</category>

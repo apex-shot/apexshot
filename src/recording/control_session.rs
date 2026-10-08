@@ -8,7 +8,13 @@ use tokio::{sync::mpsc, task::JoinHandle};
 
 pub const RECORDING_CONTROL_OBJECT_PATH: &str = "/org/apexshot/RecordingControl";
 const RECORDING_CONTROL_INTERFACE: &str = "org.apexshot.RecordingControl";
-const RECORDING_CONTROL_BUS_PREFIX: &str = "org.apexshot.RecordingControl.p";
+fn recording_control_bus_prefix() -> &'static str {
+    if crate::app_identity::portal_only() {
+        "org.apexshot.ApexShot.RecordingControl.p"
+    } else {
+        "org.apexshot.RecordingControl.p"
+    }
+}
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RecordingControlCommand {
     Pause,
@@ -174,7 +180,7 @@ pub fn send_external_recording_command(command: RecordingControlCommand) -> bool
 
         names
             .into_iter()
-            .filter(|name| name.starts_with(RECORDING_CONTROL_BUS_PREFIX))
+            .filter(|name| name.starts_with(recording_control_bus_prefix()))
             .any(|name| {
                 let Ok(reply) = connection.call_method(
                     Some(name.as_str()),
@@ -283,7 +289,7 @@ pub struct RecordingControlServer {
 
 impl RecordingControlServer {
     pub async fn start(session_id: String) -> anyhow::Result<Self> {
-        let bus_name = format!("org.apexshot.RecordingControl.p{}", std::process::id());
+        let bus_name = format!("{}{}", recording_control_bus_prefix(), std::process::id());
         let command_tx = Arc::new(Mutex::new(None));
         let paused = Arc::new(AtomicBool::new(false));
         let iface = RecordingControlIface {
@@ -413,6 +419,18 @@ mod tests {
         assert_eq!(
             RecordingControlCommand::Restart.dbus_method(),
             "RestartActive"
+        );
+    }
+
+    #[test]
+    fn recording_control_namespace_matches_the_installation() {
+        assert_eq!(
+            super::recording_control_bus_prefix(),
+            if crate::app_identity::portal_only() {
+                "org.apexshot.ApexShot.RecordingControl.p"
+            } else {
+                "org.apexshot.RecordingControl.p"
+            }
         );
     }
 

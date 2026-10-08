@@ -675,7 +675,7 @@ pub(super) fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonSta
     let app_config = load_config().sanitized();
     apply_screenshot_timer_if_needed("area", &app_config);
 
-    if crate::app_identity::portal_only() {
+    if crate::capture_overlay::requires_portal_still_capture() {
         handle_portal_only_still_capture(state, true, "Area");
         return;
     }
@@ -769,8 +769,7 @@ pub(super) fn handle_capture_crosshair_with_active_session(state: Arc<Mutex<Daem
     let app_config = load_config().sanitized();
     apply_screenshot_timer_if_needed("crosshair", &app_config);
 
-    if crate::app_identity::portal_only() {
-        // No custom crosshair UI in the sandbox — interactive portal selector.
+    if crate::capture_overlay::requires_portal_still_capture() {
         handle_portal_only_still_capture(state, true, "Crosshair");
         return;
     }
@@ -826,7 +825,7 @@ pub(super) fn handle_capture_screen_with_active_session(state: Arc<Mutex<DaemonS
     let app_config = load_config().sanitized();
     apply_screenshot_timer_if_needed("screen", &app_config);
 
-    if crate::app_identity::portal_only() {
+    if crate::capture_overlay::requires_portal_still_capture() {
         handle_portal_only_still_capture(state, false, "Fullscreen");
         return;
     }

@@ -110,6 +110,9 @@ pub(super) struct DaemonState {
 }
 
 /// Well-known D-Bus name that the daemon registers.
+#[cfg(feature = "flatpak")]
+pub const DAEMON_BUS_NAME: &str = "org.apexshot.ApexShot.Daemon";
+#[cfg(not(feature = "flatpak"))]
 pub const DAEMON_BUS_NAME: &str = "org.apexshot.Daemon";
 
 /// D-Bus object path.
@@ -437,10 +440,7 @@ pub(super) async fn run_daemon_inner(
     crate::backend::portal_permissions::ensure_portal_permissions();
 
     // Pre-warm apexshot-capture so the first hotkey doesn't pay Qt cold start.
-    // Flatpak builds do not ship the Qt helper.
-    if !crate::app_identity::portal_only() {
-        ensure_warm_capture_helper();
-    }
+    ensure_warm_capture_helper();
 
     // ── SINGLE-INSTANCE CHECK ─────────────────────────────────────────────────
     // Try to register D-Bus name BEFORE any other initialization.
@@ -557,14 +557,14 @@ pub(super) async fn run_daemon_inner(
     // spawn `apexshot capture area` etc., which relay to us via D-Bus IPC.
     // We do NOT use the portal GlobalShortcuts here because it grabs keys
     // exclusively and prevents gsd-media-keys from grabbing the same keys.
-    // Portal listener is only started as a last resort on non-GNOME desktops.
-    let gnome_session = std::env::var_os("GNOME_SETUP_DISPLAY").is_some()
-        || std::env::var("XDG_CURRENT_DESKTOP")
-            .unwrap_or_default()
-            .to_ascii_uppercase()
-            .contains("GNOME");
+    let native_gnome_session = !crate::app_identity::portal_only()
+        && (std::env::var_os("GNOME_SETUP_DISPLAY").is_some()
+            || std::env::var("XDG_CURRENT_DESKTOP")
+                .unwrap_or_default()
+                .to_ascii_uppercase()
+                .contains("GNOME"));
 
-    if gnome_session {
+    if native_gnome_session {
         eprintln!("[daemon] GNOME detected — validating custom keybindings for D-Bus hotkeys.");
         match sync_gnome_hotkeys_for_current_desktop(None) {
             Ok(result) if result.updated => {
@@ -586,15 +586,17 @@ pub(super) async fn run_daemon_inner(
         let hotkey_tx = action_tx.clone();
         tokio::spawn(async move {
             if let Err(e) = hotkey_listener::run_hotkey_listener(hotkey_tx).await {
-                eprintln!("[daemon] Hotkey listener error: {e}");
+                eprintln!(
+                    "[daemon] Global shortcuts unavailable ({e}); tray and foreground capture remain available."
+                );
             }
         });
     }
 
-    if gnome_session {
+    if native_gnome_session {
         eprintln!("[daemon] Ready. Tray active; GNOME hotkeys use custom keybindings + D-Bus IPC.");
     } else {
-        eprintln!("[daemon] Ready. Listening for hotkeys and tray events.");
+        eprintln!("[daemon] Ready. Tray and D-Bus actions available; shortcut registration runs separately.");
     }
 
     // ── Action loop ──────────────────────────────────────────────────────────
@@ -800,6 +802,16 @@ pub(super) async fn run_dbus_server(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sandbox_gnome_shortcuts_do_not_use_native_custom_keybindings() {
+        let source = include_str!("mod.rs");
+        let startup = source.split("#[cfg(test)]").next().unwrap();
+        assert!(startup.contains("let native_gnome_session = !crate::app_identity::portal_only()"));
+        assert!(startup.contains("if native_gnome_session {"));
+        assert!(startup.contains("hotkey_listener::run_hotkey_listener(hotkey_tx).await"));
+        assert!(startup.contains("tray and foreground capture remain available"));
+    }
+
     use super::audio::*;
     use super::capture_handlers::*;
     use super::hotkey_listener::*;

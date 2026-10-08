@@ -129,6 +129,7 @@ package() {
     install -Dm644 "gnome-extension/shell-overlay.js" "$ext_dir/shell-overlay.js"
     install -Dm644 "gnome-extension/window-list.js" "$ext_dir/window-list.js"
     install -Dm644 "gnome-extension/preview-stacking.js" "$ext_dir/preview-stacking.js"
+    install -Dm644 "gnome-extension/daemon-ownership.js" "$ext_dir/daemon-ownership.js"
 
     # ── Background images for editor ──────────────────────────
     local bg_dir="$pkgdir/usr/share/apexshot/background-images"

@@ -1,5 +1,6 @@
 #include "CaptureOverlay.h"
 #include "CaptureOverlay_DrawingPrimitives_p.h"
+#include "Sandbox.h"
 
 #include <QColor>
 #include <QFont>
@@ -150,7 +151,12 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
 
         drawSetting("Controls", "Keyboard shortcuts", m_recControls, &m_recControls);
         drawSetting("HiDPI", "Display scale resolution", m_hidpi, &m_hidpi);
-        drawSetting("Notifications", "Do Not Disturb", m_doNotDisturb, &m_doNotDisturb);
+        const bool notificationsDisabled = isFlatpakSandboxed();
+        drawSetting("Notifications",
+                    notificationsDisabled ? "Desktop-managed" : "Do Not Disturb",
+                    m_doNotDisturb,
+                    &m_doNotDisturb,
+                    notificationsDisabled);
 
         drawSetting("Selection", "Remember last area", m_rememberSelection, &m_rememberSelection);
         drawSetting("Dim screen", "While recording", m_dimScreen, &m_dimScreen);

@@ -339,12 +339,13 @@ pub fn ensure_desktop_entry_pub(app_id: &str) -> anyhow::Result<std::path::PathB
 }
 
 pub fn sync_hotkeys_from_app_config(app_config: &crate::config::AppConfig) -> anyhow::Result<()> {
-    if let Some(msg) = crate::app_identity::host_escape_blocked("compositor hotkey install") {
-        anyhow::bail!(msg);
-    }
     let path = config::default_config_path();
     let cfg = config::hotkey_config_from_app_config(app_config);
     config::save_hotkey_config(&path, &cfg)?;
+
+    if crate::app_identity::portal_only() {
+        return Ok(());
+    }
 
     // For compositors that don't provide a GlobalShortcuts portal, generate
     // compositor-native bind-snippet files so the user's configured shortcuts
@@ -592,6 +593,25 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::path::Path;
+
+    #[test]
+    fn sandbox_shortcut_sync_saves_private_bindings_before_skipping_host_writes() {
+        let source = include_str!("mod.rs");
+        let sync = source
+            .split("pub fn sync_hotkeys_from_app_config(")
+            .nth(1)
+            .unwrap()
+            .split("pub(super) fn prompt_line")
+            .next()
+            .unwrap();
+        let save = sync
+            .find("config::save_hotkey_config(&path, &cfg)?")
+            .unwrap();
+        let guard = sync.find("if crate::app_identity::portal_only()").unwrap();
+        let host = sync.find("crate::compositor::detect_compositor()").unwrap();
+        assert!(save < guard && guard < host);
+        assert!(sync[guard..host].contains("return Ok(())"));
+    }
 
     fn sample_hotkey_config() -> HotkeyConfig {
         HotkeyConfig {

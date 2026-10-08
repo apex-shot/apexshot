@@ -251,7 +251,11 @@ pub fn status_notifier_id() -> String {
 pub fn spawn_tray(tx: Sender<TrayAction>) -> anyhow::Result<ksni::Handle<ApexShotTray>> {
     let service = ksni::TrayService::new(ApexShotTray::new(tx));
     let handle = service.handle();
-    service.spawn();
+    if crate::app_identity::portal_only() {
+        service.spawn_without_dbus_name();
+    } else {
+        service.spawn();
+    }
     Ok(handle)
 }
 

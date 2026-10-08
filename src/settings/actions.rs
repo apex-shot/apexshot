@@ -319,10 +319,14 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     crate::hotkeys::sync_hotkeys_from_app_config(&config)?;
     let _ = crate::hotkeys::sync_gnome_hotkeys_for_current_desktop(None);
 
-    if config.start_at_login {
-        install_autostart_entry_smart()?;
-    } else {
-        uninstall_autostart_entry()?;
+    if !crate::app_identity::portal_only()
+        || config.start_at_login != previous_config.start_at_login
+    {
+        if config.start_at_login {
+            install_autostart_entry_smart()?;
+        } else {
+            uninstall_autostart_entry()?;
+        }
     }
 
     // The daemon owns both the tray and global hotkey listeners. Keep it alive

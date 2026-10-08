@@ -1,9 +1,11 @@
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Emit `TrackedWindowOpened(tracked_id, pid, title, role, namespace, opened_at_ms)` on
-/// the session D-Bus. The extension uses `tracked_id` as the logical key and `pid`
-/// as the primary Wayland matching key.
+const TRACKED_WINDOW_PATH: &str = "/org/apexshot/TrackedWindow";
+const TRACKED_WINDOW_INTERFACE: &str = "org.apexshot.TrackedWindow";
+
+/// Emit a tracked-window event on the session D-Bus. Flatpak sends the app ID
+/// directly to the extension; native builds retain the existing signal payload.
 pub fn emit_tracked_window_opened(
     tracked_id: &str,
     pid: u32,
@@ -20,8 +22,32 @@ pub fn emit_tracked_window_opened(
     let title = title.to_owned();
     let role = role.to_owned();
     let namespace = namespace.to_owned();
+    let app_id = crate::app_identity::app_id().to_owned();
 
     if crate::app_identity::portal_only() {
+        std::thread::spawn(move || {
+            let Ok(connection) =
+                zbus::blocking::connection::Builder::session().and_then(|builder| builder.build())
+            else {
+                return;
+            };
+
+            let _ = connection.emit_signal(
+                Some(crate::gnome_shell::shell_overlay_bus_name()),
+                TRACKED_WINDOW_PATH,
+                TRACKED_WINDOW_INTERFACE,
+                "TrackedWindowOpened",
+                &(
+                    tracked_id,
+                    pid,
+                    title,
+                    role,
+                    namespace,
+                    app_id,
+                    opened_at_ms,
+                ),
+            );
+        });
         return;
     }
 
@@ -45,17 +71,31 @@ pub fn emit_tracked_window_opened(
 
 /// Emit `TrackedWindowClosed(tracked_id)` on the session D-Bus.
 pub fn emit_tracked_window_closed(tracked_id: &str) {
-    if crate::app_identity::portal_only() {
-        return;
-    }
     let tracked_id = tracked_id.to_owned();
 
     std::thread::spawn(move || {
+        if crate::app_identity::portal_only() {
+            let Ok(connection) =
+                zbus::blocking::connection::Builder::session().and_then(|builder| builder.build())
+            else {
+                return;
+            };
+
+            let _ = connection.emit_signal(
+                Some(crate::gnome_shell::shell_overlay_bus_name()),
+                TRACKED_WINDOW_PATH,
+                TRACKED_WINDOW_INTERFACE,
+                "TrackedWindowClosed",
+                &(tracked_id,),
+            );
+            return;
+        }
+
         let _ = Command::new("dbus-send")
             .args([
                 "--session",
                 "--type=signal",
-                "/org/apexshot/TrackedWindow",
+                TRACKED_WINDOW_PATH,
                 "org.apexshot.TrackedWindow.TrackedWindowClosed",
                 &format!("string:{}", tracked_id),
             ])

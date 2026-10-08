@@ -1,6 +1,7 @@
 #include "CaptureOverlay.h"
 #include "CaptureOverlay_p.h"
 #include "ScreenCapture.h"
+#include "Sandbox.h"
 #include <QApplication>
 #include <QDateTime>
 #include <QDir>
@@ -25,7 +26,7 @@
 
 static bool callDaemonBool(const QString& method, int arg = 0, bool hasArg = false)
 {
-    QDBusInterface iface(QStringLiteral("org.apexshot.Daemon"),
+    QDBusInterface iface(daemonBusName(),
                          QStringLiteral("/org/apexshot/Daemon"),
                          QStringLiteral("org.apexshot.Daemon"),
                          QDBusConnection::sessionBus());
@@ -43,7 +44,7 @@ static bool callDaemonBool(const QString& method, int arg = 0, bool hasArg = fal
 
 static bool callDaemonScrollStep(int x, int y, int steps)
 {
-    QDBusInterface iface(QStringLiteral("org.apexshot.Daemon"),
+    QDBusInterface iface(daemonBusName(),
                          QStringLiteral("/org/apexshot/Daemon"),
                          QStringLiteral("org.apexshot.Daemon"),
                          QDBusConnection::sessionBus());
@@ -72,7 +73,7 @@ static bool shouldUseManualScrollAssistMode()
 
 static void callDaemonVoid(const QString& method)
 {
-    QDBusInterface iface(QStringLiteral("org.apexshot.Daemon"),
+    QDBusInterface iface(daemonBusName(),
                          QStringLiteral("/org/apexshot/Daemon"),
                          QStringLiteral("org.apexshot.Daemon"),
                          QDBusConnection::sessionBus());
@@ -268,6 +269,31 @@ void CaptureOverlay::simulateScrollDown()
     QApplication::processEvents();
 
     const bool daemonScrolled = callDaemonScrollStep(targetX, targetY, kScrollLinesPerTick);
+
+    if (isFlatpakSandboxed()) {
+        if (!daemonScrolled) {
+            std::fprintf(stderr,
+                         "[CaptureOverlay] Auto-scroll: host scrolling unavailable; "
+                         "switching to manual assistance\n");
+            callDaemonVoid(QStringLiteral("ScrollEndGnome"));
+            m_manualScrollAssistMode = true;
+            setAttribute(Qt::WA_TransparentForMouseEvents, true);
+            releaseKeyboard();
+            hide();
+            m_scrollControlPanel->setStatus(
+                QStringLiteral("Scroll manually, then click Done"));
+            m_scrollControlPanel->show();
+            m_scrollControlPanel->raise();
+            QApplication::processEvents();
+            return;
+        }
+
+        if (!hadTransparentMouse) {
+            setAttribute(Qt::WA_TransparentForMouseEvents, false);
+        }
+        QApplication::processEvents();
+        return;
+    }
 
     if (!hadTransparentMouse) {
         setAttribute(Qt::WA_TransparentForMouseEvents, false);

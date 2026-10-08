@@ -47,6 +47,11 @@ fn extract_capture_error_detail(stderr: &str) -> Option<String> {
 
 /// Build a SelectionError for a non-success apexshot-capture exit code.
 fn overlay_exit_error(mode: &str, code: i32, stderr: &str) -> SelectionError {
+    if crate::app_identity::portal_only()
+        && stderr.contains("Portal screenshot rejected: status=1")
+    {
+        return SelectionError::Cancelled;
+    }
     let message = match extract_capture_error_detail(stderr) {
         Some(detail) => format!("apexshot-capture {mode} exited with code {code}: {detail}"),
         None => format!("apexshot-capture {mode} exited with code {code}"),

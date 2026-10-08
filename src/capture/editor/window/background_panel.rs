@@ -99,6 +99,9 @@ pub const MOTION_WALLPAPER_FILES: [&str; 70] = [
     "wallpaper-060.jpg",
 ];
 pub fn background_gradient_asset_path(file_name: &str) -> PathBuf {
+    if crate::app_identity::portal_only() {
+        return PathBuf::from("/app/share/apexshot/background-images").join(file_name);
+    }
     let asset_paths = [
         std::env::current_dir()
             .unwrap_or_default()

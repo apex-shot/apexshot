@@ -206,7 +206,7 @@ cmp "$ROOT_DIR/target/release/apexshot-capture" /usr/bin/apexshot-capture
 EXT_UUID="apexshot-gnome-integration@apexshot.github.io"
 SYSTEM_EXT="/usr/share/gnome-shell/extensions/$EXT_UUID"
 USER_EXT="$HOME/.local/share/gnome-shell/extensions/$EXT_UUID"
-EXT_FILES=(metadata.json extension.js cursor-classifier.js press-tracker.js shell-overlay.js window-list.js preview-stacking.js)
+EXT_FILES=(metadata.json extension.js cursor-classifier.js press-tracker.js shell-overlay.js window-list.js preview-stacking.js daemon-ownership.js)
 
 echo "Verifying packaged GNOME Shell extension..."
 for file in "${EXT_FILES[@]}"; do

@@ -8,15 +8,29 @@ import St from 'gi://St';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 import {classifyCursorTracker} from './cursor-classifier.js';
+import {
+    daemonCanChangeResource,
+    resourceBelongsToDaemon,
+    SHELL_OVERLAY_BUS_NAMES,
+} from './daemon-ownership.js';
 import {PressTracker} from './press-tracker.js';
 
-const DBUS_NAME = 'org.apexshot.ShellOverlay';
+const DBUS_NAMES = SHELL_OVERLAY_BUS_NAMES;
 const DBUS_PATH = '/org/apexshot/ShellOverlay';
-const DAEMON_BUS_NAME = 'org.apexshot.Daemon';
+const NATIVE_DAEMON_BUS_NAME = 'org.apexshot.Daemon';
+const FLATPAK_DAEMON_BUS_NAME = 'org.apexshot.ApexShot.Daemon';
+const DAEMON_BUS_NAMES = [NATIVE_DAEMON_BUS_NAME, FLATPAK_DAEMON_BUS_NAME];
 
 const DBUS_INTERFACE = `
 <node>
   <interface name="org.apexshot.ShellOverlay">
+    <method name="ShowMaskV2">
+      <arg type="s" name="daemon_name" direction="in"/>
+      <arg type="i" name="x" direction="in"/>
+      <arg type="i" name="y" direction="in"/>
+      <arg type="i" name="width" direction="in"/>
+      <arg type="i" name="height" direction="in"/>
+    </method>
     <method name="ShowMask">
       <arg type="i" name="x" direction="in"/>
       <arg type="i" name="y" direction="in"/>
@@ -24,6 +38,20 @@ const DBUS_INTERFACE = `
       <arg type="i" name="height" direction="in"/>
     </method>
     <method name="HideMask"/>
+    <method name="HideMaskV2">
+      <arg type="s" name="daemon_name" direction="in"/>
+    </method>
+    <method name="ShowCountdownV2">
+      <arg type="s" name="daemon_name" direction="in"/>
+      <arg type="i" name="x" direction="in"/>
+      <arg type="i" name="y" direction="in"/>
+      <arg type="i" name="width" direction="in"/>
+      <arg type="i" name="height" direction="in"/>
+      <arg type="u" name="seconds" direction="in"/>
+    </method>
+    <method name="HideCountdownV2">
+      <arg type="s" name="daemon_name" direction="in"/>
+    </method>
     <method name="ShowCountdown">
       <arg type="i" name="x" direction="in"/>
       <arg type="i" name="y" direction="in"/>
@@ -42,7 +70,24 @@ const DBUS_INTERFACE = `
       <arg type="i" name="fade_width" direction="in"/>
       <arg type="i" name="fade_height" direction="in"/>
     </method>
+    <method name="ShowCaptureCountdownV2">
+      <arg type="s" name="daemon_name" direction="in"/>
+      <arg type="i" name="monitor_x" direction="in"/>
+      <arg type="i" name="monitor_y" direction="in"/>
+      <arg type="i" name="monitor_width" direction="in"/>
+      <arg type="u" name="seconds" direction="in"/>
+      <arg type="i" name="fade_x" direction="in"/>
+      <arg type="i" name="fade_y" direction="in"/>
+      <arg type="i" name="fade_width" direction="in"/>
+      <arg type="i" name="fade_height" direction="in"/>
+    </method>
     <method name="FocusCaptureMenu">
+      <arg type="x" name="pid" direction="in"/>
+      <arg type="b" name="focused" direction="out"/>
+    </method>
+    <method name="FocusCaptureMenuV2">
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="window_title" direction="in"/>
       <arg type="x" name="pid" direction="in"/>
       <arg type="b" name="focused" direction="out"/>
     </method>
@@ -51,13 +96,30 @@ const DBUS_INTERFACE = `
       <arg type="i" name="monitor_x" direction="in"/>
       <arg type="i" name="monitor_y" direction="in"/>
     </method>
+    <method name="PositionQuickAccessV2">
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="window_title" direction="in"/>
+      <arg type="x" name="pid" direction="in"/>
+      <arg type="i" name="monitor_x" direction="in"/>
+      <arg type="i" name="monitor_y" direction="in"/>
+    </method>
     <method name="StartPointerTrack"/>
+    <method name="StartPointerTrackV3">
+      <arg type="s" name="daemon_name" direction="in"/>
+    </method>
     <method name="StopPointerTrack">
       <arg type="x" name="t0" direction="out"/>
       <arg type="a(diis)" name="samples" direction="out"/>
       <arg type="a(diii)" name="clicks" direction="out"/>
     </method>
     <method name="StopPointerTrackV2">
+      <arg type="x" name="t0" direction="out"/>
+      <arg type="a(diis)" name="samples" direction="out"/>
+      <arg type="a(diii)" name="clicks" direction="out"/>
+      <arg type="a(ddib)" name="presses" direction="out"/>
+    </method>
+    <method name="StopPointerTrackV3">
+      <arg type="s" name="daemon_name" direction="in"/>
       <arg type="x" name="t0" direction="out"/>
       <arg type="a(diis)" name="samples" direction="out"/>
       <arg type="a(diii)" name="clicks" direction="out"/>
@@ -98,15 +160,19 @@ const CAPTURE_COUNTDOWN_LABEL_STYLE = 'color: white; font-size: 22px; font-weigh
 export class ShellOverlayService {
     constructor() {
         this._dbus = null;
-        this._nameId = 0;
-        this._daemonWatchId = 0;
+        this._connection = null;
+        this._nameIds = [];
+        this._daemonWatchIds = new Map();
         this._monitorsChangedId = 0;
         this._maskGroup = null;
         this._rect = null;
+        this._maskOwner = null;
         this._countdown = null;
+        this._countdownOwner = null;
         this._captureFade = null;
         this._countdownTimerId = 0;
         this._tracking = false;
+        this._pointerTrackOwner = null;
         this._t0 = 0;
         this._samples = [];
         this._clicks = [];
@@ -122,36 +188,28 @@ export class ShellOverlayService {
         this._buttonMask = 0;
     }
 
-    enable() {
+    enable(connection) {
+        this._connection = connection;
         this._dbus = Gio.DBusExportedObject.wrapJSObject(DBUS_INTERFACE, this);
-        this._dbus.export(Gio.DBus.session, DBUS_PATH);
+        this._dbus.export(connection, DBUS_PATH);
 
-        this._nameId = Gio.DBus.session.own_name(
-            DBUS_NAME,
+        this._nameIds = DBUS_NAMES.map(name => connection.own_name(
+            name,
             Gio.BusNameOwnerFlags.REPLACE,
             null,
-            null);
+            null));
 
         this._monitorsChangedId = Main.layoutManager.connect('monitors-changed',
             () => this._redraw());
 
-        this._daemonWatchId = Gio.bus_watch_name(
-            Gio.BusType.SESSION,
-            DAEMON_BUS_NAME,
-            Gio.BusNameWatcherFlags.NONE,
-            () => {},
-            () => {
-                this.HideMask();
-                this.HideCountdown();
-                this._stopPointerTrackInternal(false);
-            });
+        for (const daemonName of DAEMON_BUS_NAMES)
+            this._watchDaemon(daemonName);
     }
 
     disable() {
-        if (this._daemonWatchId) {
-            Gio.bus_unwatch_name(this._daemonWatchId);
-            this._daemonWatchId = 0;
-        }
+        for (const watchId of this._daemonWatchIds.values())
+            Gio.bus_unwatch_name(watchId);
+        this._daemonWatchIds.clear();
         if (this._monitorsChangedId) {
             Main.layoutManager.disconnect(this._monitorsChangedId);
             this._monitorsChangedId = 0;
@@ -161,34 +219,100 @@ export class ShellOverlayService {
         this._destroyMask();
         this._destroyCountdown();
 
-        if (this._nameId) {
-            Gio.DBus.session.unown_name(this._nameId);
-            this._nameId = 0;
-        }
+        for (const nameId of this._nameIds)
+            this._connection.unown_name(nameId);
+        this._nameIds = [];
 
         if (this._dbus) {
             this._dbus.unexport();
             this._dbus = null;
         }
+        this._connection = null;
+    }
+
+    _watchDaemon(daemonName) {
+        if (this._daemonWatchIds.has(daemonName))
+            return;
+
+        const watchId = Gio.bus_watch_name(
+            Gio.BusType.SESSION,
+            daemonName,
+            Gio.BusNameWatcherFlags.NONE,
+            () => {},
+            () => this._cleanupDaemon(daemonName));
+        this._daemonWatchIds.set(daemonName, watchId);
+    }
+
+    _cleanupDaemon(daemonName) {
+        if (resourceBelongsToDaemon(this._maskOwner, daemonName)) {
+            this._rect = null;
+            this._maskOwner = null;
+            this._destroyMask();
+        }
+        if (resourceBelongsToDaemon(this._countdownOwner, daemonName)) {
+            this._countdownOwner = null;
+            this._destroyCountdown();
+        }
+        if (resourceBelongsToDaemon(this._pointerTrackOwner, daemonName)) {
+            this._pointerTrackOwner = null;
+            this._stopPointerTrackInternal(false);
+        }
+    }
+
+    _canControl(owner, daemonName) {
+        return DAEMON_BUS_NAMES.includes(daemonName) && daemonCanChangeResource(owner, daemonName);
     }
 
     ShowMask(x, y, width, height) {
+        this._showMask(NATIVE_DAEMON_BUS_NAME, x, y, width, height);
+    }
+
+    ShowMaskV2(daemonName, x, y, width, height) {
+        this._showMask(daemonName, x, y, width, height);
+    }
+
+    _showMask(daemonName, x, y, width, height) {
+        if (!this._canControl(this._maskOwner, daemonName))
+            return;
         if (width <= 0 || height <= 0) {
-            this.HideMask();
+            this._hideMask(daemonName);
             return;
         }
 
         this._rect = {x, y, width, height};
+        this._maskOwner = daemonName;
         this._redraw();
     }
 
     HideMask() {
+        this._hideMask(NATIVE_DAEMON_BUS_NAME);
+    }
+
+    HideMaskV2(daemonName) {
+        this._hideMask(daemonName);
+    }
+
+    _hideMask(daemonName) {
+        if (!this._canControl(this._maskOwner, daemonName))
+            return;
         this._rect = null;
+        this._maskOwner = null;
         this._destroyMask();
     }
 
     ShowCountdown(x, y, width, height, seconds) {
+        this._showCountdown(NATIVE_DAEMON_BUS_NAME, x, y, width, height, seconds);
+    }
+
+    ShowCountdownV2(daemonName, x, y, width, height, seconds) {
+        this._showCountdown(daemonName, x, y, width, height, seconds);
+    }
+
+    _showCountdown(daemonName, x, y, width, height, seconds) {
+        if (!this._canControl(this._countdownOwner, daemonName))
+            return;
         this._destroyCountdown();
+        this._countdownOwner = daemonName;
         if (width <= 0 || height <= 0 || seconds <= 0)
             return;
 
@@ -223,16 +347,34 @@ export class ShellOverlayService {
     }
 
     HideCountdown() {
+        this._hideCountdown(NATIVE_DAEMON_BUS_NAME);
+    }
+
+    HideCountdownV2(daemonName) {
+        this._hideCountdown(daemonName);
+    }
+
+    _hideCountdown(daemonName) {
+        if (!this._canControl(this._countdownOwner, daemonName))
+            return;
+        this._countdownOwner = null;
         this._destroyCountdown();
     }
 
     FocusCaptureMenu(pid) {
-        const actor = global.get_window_actors().find(candidate => {
-            const window = candidate.meta_window;
-            return window && window.get_pid() === pid
-                && (window.get_title() === 'ApexShot Capture'
-                    || window.get_title() === 'ApexShot Display Picker');
-        });
+        return this._focusCaptureMenu('', '', pid);
+    }
+
+    FocusCaptureMenuV2(appId, windowTitle, pid) {
+        return this._focusCaptureMenu(appId, windowTitle, pid);
+    }
+
+    _focusCaptureMenu(appId, windowTitle, pid) {
+        const allowedTitles = ['ApexShot Capture', 'ApexShot Display Picker'];
+        if (windowTitle && !allowedTitles.includes(windowTitle))
+            return false;
+        const titles = windowTitle ? [windowTitle] : allowedTitles;
+        const actor = this._findActor(titles, appId, pid);
         if (!actor)
             return false;
 
@@ -247,13 +389,58 @@ export class ShellOverlayService {
     }
 
     PositionQuickAccess(pid, monitorX, monitorY) {
+        this._positionQuickAccess('', 'ApexShot Preview', pid, monitorX, monitorY);
+    }
+
+    PositionQuickAccessV2(appId, windowTitle, pid, monitorX, monitorY) {
+        if (!windowTitle)
+            return;
+        this._positionQuickAccess(appId, windowTitle, pid, monitorX, monitorY);
+    }
+
+    _findActor(titles, appId, pid) {
+        const candidates = global.get_window_actors().filter(candidate => {
+            const window = candidate.meta_window;
+            return window && titles.includes(window.get_title());
+        });
+        if (appId) {
+            const byAppId = candidates.filter(candidate => {
+                const window = candidate.meta_window;
+                return this._windowHasAppId(window, appId);
+            });
+            if (byAppId.length === 1)
+                return byAppId[0];
+            if (byAppId.length > 1 && !this._isFlatpakAppId(appId)) {
+                const byPid = byAppId.filter(candidate => candidate.meta_window.get_pid() === pid);
+                return byPid.length === 1 ? byPid[0] : null;
+            }
+            return null;
+        }
+
+        return candidates.find(candidate => candidate.meta_window.get_pid() === pid) ?? null;
+    }
+
+    _windowHasAppId(window, appId) {
+        return this._windowApplicationIds(window).includes(appId);
+    }
+
+    _windowApplicationIds(window) {
+        return [
+            typeof window.get_gtk_application_id === 'function'
+                ? window.get_gtk_application_id()
+                : null,
+            typeof window.get_wm_class === 'function' ? window.get_wm_class() : null,
+        ].filter(Boolean);
+    }
+
+    _isFlatpakAppId(appId) {
+        return appId === 'org.apexshot.ApexShot' || appId === 'org.apexshot.ApexShot.Dev';
+    }
+
+    _positionQuickAccess(appId, windowTitle, pid, monitorX, monitorY) {
         let attempts = 0;
         const position = () => {
-            const actor = global.get_window_actors().find(candidate => {
-                const window = candidate.meta_window;
-                return window && window.get_pid() === pid
-                    && window.get_title() === 'ApexShot Preview';
-            });
+            const actor = this._findActor([windowTitle], appId, pid);
             if (!actor) {
                 attempts++;
                 return attempts < 20 ? GLib.SOURCE_CONTINUE : GLib.SOURCE_REMOVE;
@@ -273,7 +460,22 @@ export class ShellOverlayService {
 
     ShowCaptureCountdown(monitorX, monitorY, monitorWidth, seconds,
         fadeX, fadeY, fadeWidth, fadeHeight) {
+        this._showCaptureCountdown(NATIVE_DAEMON_BUS_NAME,
+            monitorX, monitorY, monitorWidth, seconds, fadeX, fadeY, fadeWidth, fadeHeight);
+    }
+
+    ShowCaptureCountdownV2(daemonName, monitorX, monitorY, monitorWidth, seconds,
+        fadeX, fadeY, fadeWidth, fadeHeight) {
+        this._showCaptureCountdown(daemonName,
+            monitorX, monitorY, monitorWidth, seconds, fadeX, fadeY, fadeWidth, fadeHeight);
+    }
+
+    _showCaptureCountdown(daemonName, monitorX, monitorY, monitorWidth, seconds,
+        fadeX, fadeY, fadeWidth, fadeHeight) {
+        if (!this._canControl(this._countdownOwner, daemonName))
+            return;
         this._destroyCountdown();
+        this._countdownOwner = daemonName;
         if (monitorWidth <= 0 || seconds <= 0)
             return;
 
@@ -326,7 +528,19 @@ export class ShellOverlayService {
     }
 
     StartPointerTrack() {
+        this._startPointerTrack(NATIVE_DAEMON_BUS_NAME);
+    }
+
+    StartPointerTrackV3(daemonName) {
+        this._startPointerTrack(daemonName);
+    }
+
+    _startPointerTrack(daemonName) {
+        if (!DAEMON_BUS_NAMES.includes(daemonName) ||
+            !this._canControl(this._pointerTrackOwner, daemonName))
+            return;
         this._stopPointerTrackInternal(false);
+        this._pointerTrackOwner = daemonName;
         this._samples = [];
         this._clicks = [];
         this._pressTracker = new PressTracker();
@@ -346,12 +560,24 @@ export class ShellOverlayService {
     }
 
     StopPointerTrack() {
-        const [t0, samples, clicks] = this._stopPointerTrackInternal(true);
-        return [t0, samples, clicks];
+        return this._stopPointerTrack(NATIVE_DAEMON_BUS_NAME, false);
     }
 
     StopPointerTrackV2() {
-        return this._stopPointerTrackInternal(true);
+        return this._stopPointerTrack(NATIVE_DAEMON_BUS_NAME, true);
+    }
+
+    StopPointerTrackV3(daemonName) {
+        return this._stopPointerTrack(daemonName, true);
+    }
+
+    _stopPointerTrack(daemonName, withPresses) {
+        if (!DAEMON_BUS_NAMES.includes(daemonName) ||
+            !this._canControl(this._pointerTrackOwner, daemonName))
+            return withPresses ? [0, [], [], []] : [0, [], []];
+        const result = this._stopPointerTrackInternal(true);
+        this._pointerTrackOwner = null;
+        return withPresses ? result : result.slice(0, 3);
     }
 
     GetPointerSnapshot() {
@@ -604,6 +830,7 @@ export class ShellOverlayService {
     }
 
     _destroyCountdown() {
+        this._countdownOwner = null;
         if (this._countdownTimerId) {
             GLib.source_remove(this._countdownTimerId);
             this._countdownTimerId = 0;

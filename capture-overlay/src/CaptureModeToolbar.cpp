@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "CaptureModeToolbar.h"
+#include "Sandbox.h"
 
 #include <QApplication>
 #include <QCoreApplication>
 #include <QCursor>
-#include <QDBusConnection>
-#include <QDBusInterface>
 #include <QEventLoop>
 #include <QFont>
 #include <QFontMetricsF>
@@ -159,15 +158,7 @@ void CaptureModeToolbar::focusAndRaise()
     }
     setFocus(Qt::ActiveWindowFocusReason);
 
-    QDBusInterface shellOverlay(
-        QStringLiteral("org.apexshot.ShellOverlay"),
-        QStringLiteral("/org/apexshot/ShellOverlay"),
-        QStringLiteral("org.apexshot.ShellOverlay"),
-        QDBusConnection::sessionBus());
-    if (shellOverlay.isValid()) {
-        shellOverlay.asyncCall(QStringLiteral("FocusCaptureMenu"),
-                               static_cast<qlonglong>(QCoreApplication::applicationPid()));
-    }
+    requestShellOverlayFocus(windowTitle());
 }
 
 QRectF CaptureModeToolbar::itemRect(int index) const

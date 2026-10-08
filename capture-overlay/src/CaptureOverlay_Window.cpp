@@ -1,5 +1,6 @@
 #include "CaptureOverlay.h"
 #include "CaptureOverlay_p.h"
+#include "Sandbox.h"
 
 #include <QDBusConnection>
 #include <QDBusInterface>
@@ -164,6 +165,10 @@ QRect CaptureOverlay::targetScreenDesktopGeometry() const
 QList<CaptureOverlay::WindowInfo> CaptureOverlay::enumerateWindowsFromX11() const
 {
     QList<WindowInfo> result;
+    if (isFlatpakWaylandSession()) {
+        return result;
+    }
+
     Display* dpy = XOpenDisplay(nullptr);
     if (!dpy) {
         return result;
@@ -277,13 +282,15 @@ QList<CaptureOverlay::WindowInfo> CaptureOverlay::enumerateWindowsFromExtension(
 {
     QList<WindowInfo> result;
 
-    QDBusInterface iface(QStringLiteral("org.apexshot.WindowList"),
+    QDBusInterface iface(windowListBusName(),
                          QStringLiteral("/org/apexshot/WindowList"),
                          QStringLiteral("org.apexshot.WindowList"),
                          QDBusConnection::sessionBus());
     if (!iface.isValid()) {
         std::fprintf(stderr,
-                     "[CaptureOverlay] Window list D-Bus unavailable; trying X11 fallback\n");
+                     isFlatpakWaylandSession()
+                         ? "[CaptureOverlay] Window list D-Bus unavailable in sandbox\n"
+                         : "[CaptureOverlay] Window list D-Bus unavailable; trying X11 fallback\n");
         return result;
     }
 
@@ -348,9 +355,8 @@ QList<CaptureOverlay::WindowInfo> CaptureOverlay::enumerateWindowsFromExtension(
 
 QList<CaptureOverlay::WindowInfo> CaptureOverlay::enumerateWindows() const
 {
-    // Metadata only: extension (all workspaces on GNOME) then X11.
     QList<WindowInfo> windows = enumerateWindowsFromExtension();
-    if (windows.isEmpty()) {
+    if (windows.isEmpty() && !isFlatpakWaylandSession()) {
         windows = enumerateWindowsFromX11();
     }
     return windows;
@@ -362,7 +368,7 @@ bool CaptureOverlay::activateWindowForCapture(quint64 windowId) const
         return false;
     }
 
-    QDBusInterface iface(QStringLiteral("org.apexshot.WindowList"),
+    QDBusInterface iface(windowListBusName(),
                          QStringLiteral("/org/apexshot/WindowList"),
                          QStringLiteral("org.apexshot.WindowList"),
                          QDBusConnection::sessionBus());
@@ -373,6 +379,10 @@ bool CaptureOverlay::activateWindowForCapture(quint64 windowId) const
         if (reply.isValid() && reply.value()) {
             return true;
         }
+    }
+
+    if (isFlatpakWaylandSession()) {
+        return false;
     }
 
     Display* display = XOpenDisplay(nullptr);

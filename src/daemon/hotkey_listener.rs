@@ -18,10 +18,12 @@ pub(super) async fn run_hotkey_listener(
     ensure_gio_desktop_env();
 
     // Tier 1: GNOME Shell GrabAccelerators (fast, no dialog, works on GNOME).
-    match run_hotkey_listener_gnome_shell(&cfg, tx.clone()).await {
-        Ok(()) => return Ok(()),
-        Err(e) => {
-            eprintln!("[daemon] GNOME Shell hotkeys unavailable ({e}), trying portal…");
+    if !crate::app_identity::portal_only() {
+        match run_hotkey_listener_gnome_shell(&cfg, tx.clone()).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                eprintln!("[daemon] GNOME Shell hotkeys unavailable ({e}), trying portal…");
+            }
         }
     }
 
@@ -379,6 +381,9 @@ pub(super) async fn portal_register_app_id(
     conn: &zbus::Connection,
     app_id: &str,
 ) -> anyhow::Result<()> {
+    if crate::app_identity::portal_only() {
+        return Ok(());
+    }
     use std::collections::HashMap;
     use zbus::zvariant::Value;
 

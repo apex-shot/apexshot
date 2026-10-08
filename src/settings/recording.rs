@@ -163,6 +163,13 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
         "Suppress desktop notifications until recording ends.",
         config.rec_notifications,
     );
+    if crate::app_identity::portal_only() {
+        rec_notifications.set_active(false);
+        rec_notifications.set_sensitive(false);
+        notifications_row.set_tooltip_text(Some(&crate::i18n::t(
+            "Desktop notification settings are managed outside Flatpak.",
+        )));
+    }
     behavior_frame.append(&build_row!(&notifications_row, false));
 
     let (countdown_row, rec_countdown) = build_toggle(

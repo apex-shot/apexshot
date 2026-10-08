@@ -4,6 +4,63 @@ import Gio from 'gi://Gio';
 
 const DBUS_PATH = '/org/apexshot/TrackedWindow';
 const DBUS_INTERFACE = 'org.apexshot.TrackedWindow';
+const TRACKED_WINDOW_IDENTITIES = {
+    preview: {namespace: 'apexshot-capture-preview'},
+    'annotate-editor': {namespace: 'apexshot-annotate-editor'},
+    'capture-overlay': {namespace: 'screenshot'},
+};
+
+function windowApplicationIds(window) {
+    const identities = [];
+    for (const method of ['get_gtk_application_id', 'get_wm_class']) {
+        if (typeof window[method] !== 'function')
+            continue;
+        const identity = window[method]();
+        if (identity && !identities.includes(identity))
+            identities.push(identity);
+    }
+    return identities;
+}
+
+function isFlatpakApplicationId(appId) {
+    return appId === 'org.apexshot.ApexShot' || appId === 'org.apexshot.ApexShot.Dev';
+}
+
+/// Resolve sandbox windows by stable app ID and title while preserving native PID matching.
+export function findTrackedWindow(candidates, tracked) {
+    const expected = TRACKED_WINDOW_IDENTITIES[tracked.role];
+    if (!expected || !tracked.title || tracked.namespace !== expected.namespace)
+        return null;
+
+    if (!tracked.appId) {
+        const byPid = candidates.filter(window => window.get_pid() === tracked.pid);
+        if (byPid.length === 1)
+            return byPid[0];
+        if (byPid.length > 1) {
+            const exact = byPid.filter(window => window.get_title() === tracked.title);
+            return exact.length === 1 ? exact[0] : null;
+        }
+        const byTitle = candidates.filter(window => window.get_title() === tracked.title);
+        return byTitle.length === 1 ? byTitle[0] : null;
+    }
+
+    const byTitle = candidates.filter(window => window.get_title() === tracked.title);
+    if (byTitle.length === 0)
+        return null;
+
+    const byAppId = byTitle.filter(window => windowApplicationIds(window).includes(tracked.appId));
+    if (byAppId.length === 1)
+        return byAppId[0];
+    if (byAppId.length > 1 && !isFlatpakApplicationId(tracked.appId)) {
+        const byPid = byAppId.filter(window => window.get_pid() === tracked.pid);
+        if (byPid.length === 1)
+            return byPid[0];
+    }
+    if (byAppId.length > 0 || byTitle.some(window => windowApplicationIds(window).length > 0))
+        return null;
+
+    return byTitle.length === 1 ? byTitle[0] : null;
+}
 
 /// Keeps ApexShot's own preview and editor windows above other windows.
 ///
@@ -31,10 +88,11 @@ export function applyAlwaysOnTop(window) {
 
 export class PreviewStacker {
     constructor() {
-        // trackedId -> {pid, title, window, signalIds}
+        // trackedId -> {identity, window, signalIds}
         this._tracked = new Map();
-        // trackedId -> {pid, title}, waiting for their MetaWindow to appear
+        // trackedId -> identity, waiting for their MetaWindow to appear
         this._pending = new Map();
+        this._connection = null;
         this._subscriptionId = 0;
         this._windowCreatedId = 0;
         this._focusWindowId = 0;
@@ -42,8 +100,9 @@ export class PreviewStacker {
         this._titleWatchers = new Map();
     }
 
-    enable() {
-        this._subscriptionId = Gio.DBus.session.signal_subscribe(
+    enable(connection) {
+        this._connection = connection;
+        this._subscriptionId = connection.signal_subscribe(
             null,
             DBUS_INTERFACE,
             null,
@@ -52,8 +111,10 @@ export class PreviewStacker {
             Gio.DBusSignalFlags.NONE,
             (connection, sender, path, iface, signal, params) => {
                 if (signal === 'TrackedWindowOpened') {
-                    const [trackedId, pid, title] = params.recursiveUnpack();
-                    this._onOpened(trackedId, pid, title);
+                    const values = params.recursiveUnpack();
+                    const [trackedId, pid, title, role, namespace] = values;
+                    const appId = typeof values[5] === 'string' ? values[5] : '';
+                    this._onOpened(trackedId, pid, title, role, namespace, appId);
                 } else if (signal === 'TrackedWindowClosed') {
                     const [trackedId] = params.recursiveUnpack();
                     this._onClosed(trackedId);
@@ -68,7 +129,7 @@ export class PreviewStacker {
 
     disable() {
         if (this._subscriptionId) {
-            Gio.DBus.session.signal_unsubscribe(this._subscriptionId);
+            this._connection.signal_unsubscribe(this._subscriptionId);
             this._subscriptionId = 0;
         }
 
@@ -90,17 +151,19 @@ export class PreviewStacker {
             this._release(trackedId);
 
         this._pending.clear();
+        this._connection = null;
     }
 
-    _onOpened(trackedId, pid, title) {
+    _onOpened(trackedId, pid, title, role, namespace, appId) {
         if (this._tracked.has(trackedId) || this._pending.has(trackedId))
             return;
 
-        const window = this._findWindow(pid, title);
+        const identity = {pid, title, role, namespace, appId};
+        const window = this._findWindow(identity);
         if (window)
-            this._pin(trackedId, pid, title, window);
+            this._pin(trackedId, identity, window);
         else
-            this._pending.set(trackedId, {pid, title});
+            this._pending.set(trackedId, identity);
     }
 
     _onClosed(trackedId) {
@@ -141,20 +204,20 @@ export class PreviewStacker {
     _resolvePending() {
         let resolved = false;
 
-        for (const [trackedId, {pid, title}] of [...this._pending]) {
-            const window = this._findWindow(pid, title);
+        for (const [trackedId, identity] of [...this._pending]) {
+            const window = this._findWindow(identity);
             if (!window)
                 continue;
 
             this._pending.delete(trackedId);
-            this._pin(trackedId, pid, title, window);
+            this._pin(trackedId, identity, window);
             resolved = true;
         }
 
         return resolved;
     }
 
-    _pin(trackedId, pid, title, window) {
+    _pin(trackedId, identity, window) {
         const signalIds = [
             window.connect('notify::minimized', () => {
                 if (!window.minimized)
@@ -164,7 +227,7 @@ export class PreviewStacker {
             window.connect('unmanaged', () => this._release(trackedId)),
         ];
 
-        this._tracked.set(trackedId, {pid, title, window, signalIds});
+        this._tracked.set(trackedId, {identity, window, signalIds});
         this._unwatchTitle(window);
         this._raise(window);
     }
@@ -193,9 +256,7 @@ export class PreviewStacker {
         applyAlwaysOnTop(window);
     }
 
-    /// Match on PID first, since titles change; fall back to an exact title
-    /// match for windows whose PID the compositor does not report.
-    _findWindow(pid, title) {
+    _findWindow(identity) {
         const candidates = [];
 
         for (const actor of global.get_window_actors()) {
@@ -204,16 +265,6 @@ export class PreviewStacker {
                 candidates.push(window);
         }
 
-        const byPid = candidates.filter(window => window.get_pid() === pid);
-        if (byPid.length > 1) {
-            const exact = byPid.find(window => window.get_title() === title);
-            if (exact)
-                return exact;
-        }
-        if (byPid.length > 0)
-            return byPid[0];
-
-        const byTitle = candidates.filter(window => window.get_title() === title);
-        return byTitle.length === 1 ? byTitle[0] : null;
+        return findTrackedWindow(candidates, identity);
     }
 }

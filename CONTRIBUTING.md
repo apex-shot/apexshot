@@ -165,7 +165,8 @@ gnome-extensions pack gnome-extension --force \
   --extra-source=press-tracker.js \
   --extra-source=shell-overlay.js \
   --extra-source=window-list.js \
-  --extra-source=preview-stacking.js
+  --extra-source=preview-stacking.js \
+  --extra-source=daemon-ownership.js
 gnome-extensions install --force apexshot-gnome-integration@apexshot.github.io.shell-extension.zip
 gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 ```
@@ -180,7 +181,7 @@ apexshot` to follow extension logs.
 cd gnome-extension
 zip apexshot-gnome-integration.zip \
   extension.js metadata.json \
-  cursor-classifier.js press-tracker.js shell-overlay.js window-list.js preview-stacking.js
+  cursor-classifier.js press-tracker.js shell-overlay.js window-list.js preview-stacking.js daemon-ownership.js
 ```
 
 This is identical to what the release workflow does in

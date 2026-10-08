@@ -6,8 +6,43 @@ use anyhow::Context;
 use crate::capture_overlay::RecordingRequest;
 
 const MASK_DBUS_DEST: &str = "org.apexshot.ShellOverlay";
+const FLATPAK_MASK_DBUS_DEST: &str = "org.apexshot.ApexShot.ShellOverlay";
 const MASK_DBUS_PATH: &str = "/org/apexshot/ShellOverlay";
 const MASK_DBUS_IFACE: &str = "org.apexshot.ShellOverlay";
+const UNKNOWN_METHOD_ERROR: &str = "org.freedesktop.DBus.Error.UnknownMethod";
+
+fn is_unknown_method_name(name: &str) -> bool {
+    name == UNKNOWN_METHOD_ERROR
+}
+
+fn is_unknown_method_error(error: &zbus::Error) -> bool {
+    matches!(
+        error,
+        zbus::Error::MethodError(name, _, _) if is_unknown_method_name(name.as_str())
+    )
+}
+
+fn call_v2_or_legacy<T>(
+    versioned: zbus::Result<T>,
+    legacy: impl FnOnce() -> zbus::Result<T>,
+) -> zbus::Result<T> {
+    match versioned {
+        Err(error) if is_unknown_method_error(&error) => legacy(),
+        result => result,
+    }
+}
+
+fn shell_overlay_name_for(portal_only: bool) -> &'static str {
+    if portal_only {
+        FLATPAK_MASK_DBUS_DEST
+    } else {
+        MASK_DBUS_DEST
+    }
+}
+
+pub(crate) fn shell_overlay_bus_name() -> &'static str {
+    shell_overlay_name_for(crate::app_identity::portal_only())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RecordingMaskGeometry {
@@ -59,10 +94,6 @@ impl Drop for MaskHandle {
 }
 
 pub fn should_use_gnome_shell_mask(wayland_display: Option<&str>, desktop: Option<&str>) -> bool {
-    // Flatpak v1: no dbus-send host shell-outs; typed zbus IPC is a later slice.
-    if crate::app_identity::portal_only() {
-        return false;
-    }
     let is_wayland = wayland_display.is_some_and(|value| !value.trim().is_empty());
     let is_gnome = desktop.is_some_and(|value| {
         value
@@ -84,12 +115,9 @@ pub fn current_session_supports_gnome_shell_mask() -> bool {
 }
 
 /// True when the ApexShot GNOME Shell extension is on the bus
-/// (`org.apexshot.ShellOverlay`). Used to prefer panel timer / shell stop UI
-/// over the desktop-notification recording indicator (Ubuntu GNOME path).
+/// (`org.apexshot.ShellOverlay` natively, or the scoped Flatpak alias). Used to
+/// prefer panel timer / shell stop UI over the desktop-notification indicator.
 pub fn is_shell_overlay_service_available() -> bool {
-    if crate::app_identity::portal_only() {
-        return false;
-    }
     overlay_name_has_owner()
 }
 
@@ -444,12 +472,25 @@ pub fn show_recording_mask(geometry: RecordingMaskGeometry) -> anyhow::Result<Ma
     let _ = hide_recording_mask();
 
     overlay_call_timeout(Duration::from_secs(2), move |proxy| {
-        proxy
-            .call::<_, _, ()>(
-                "ShowMask",
-                &(geometry.x, geometry.y, geometry.width, geometry.height),
-            )
-            .context("ShowMask failed")
+        call_v2_or_legacy(
+            proxy.call::<_, _, ()>(
+                "ShowMaskV2",
+                &(
+                    crate::daemon::DAEMON_BUS_NAME,
+                    geometry.x,
+                    geometry.y,
+                    geometry.width,
+                    geometry.height,
+                ),
+            ),
+            || {
+                proxy.call::<_, _, ()>(
+                    "ShowMask",
+                    &(geometry.x, geometry.y, geometry.width, geometry.height),
+                )
+            },
+        )
+        .context("ShowMask failed")
     })?;
 
     Ok(MaskHandle { shown: true })
@@ -487,18 +528,32 @@ pub fn show_recording_countdown(
     }
 
     overlay_call_timeout(Duration::from_secs(2), move |proxy| {
-        proxy
-            .call::<_, _, ()>(
-                "ShowCountdown",
+        call_v2_or_legacy(
+            proxy.call::<_, _, ()>(
+                "ShowCountdownV2",
                 &(
+                    crate::daemon::DAEMON_BUS_NAME,
                     geometry.x,
                     geometry.y,
                     geometry.width,
                     geometry.height,
                     seconds,
                 ),
-            )
-            .context("ShowCountdown failed")
+            ),
+            || {
+                proxy.call::<_, _, ()>(
+                    "ShowCountdown",
+                    &(
+                        geometry.x,
+                        geometry.y,
+                        geometry.width,
+                        geometry.height,
+                        seconds,
+                    ),
+                )
+            },
+        )
+        .context("ShowCountdown failed")
     })?;
     Ok(CountdownHandle { shown: true })
 }
@@ -522,17 +577,21 @@ fn show_countdown_args(geometry: RecordingMaskGeometry, seconds: u32) -> Vec<Str
 
 fn hide_recording_mask() -> anyhow::Result<()> {
     overlay_call_timeout(Duration::from_secs(2), |proxy| {
-        proxy
-            .call::<_, _, ()>("HideMask", &())
-            .context("HideMask failed")
+        call_v2_or_legacy(
+            proxy.call::<_, _, ()>("HideMaskV2", &(crate::daemon::DAEMON_BUS_NAME,)),
+            || proxy.call::<_, _, ()>("HideMask", &()),
+        )
+        .context("HideMask failed")
     })
 }
 
 fn hide_recording_countdown() -> anyhow::Result<()> {
     overlay_call_timeout(Duration::from_secs(2), |proxy| {
-        proxy
-            .call::<_, _, ()>("HideCountdown", &())
-            .context("HideCountdown failed")
+        call_v2_or_legacy(
+            proxy.call::<_, _, ()>("HideCountdownV2", &(crate::daemon::DAEMON_BUS_NAME,)),
+            || proxy.call::<_, _, ()>("HideCountdown", &()),
+        )
+        .context("HideCountdown failed")
     })
 }
 
@@ -559,7 +618,7 @@ fn overlay_name_has_owner() -> bool {
             .build()
             .ok()?;
         let proxy = zbus::blocking::fdo::DBusProxy::new(&conn).ok()?;
-        let name = zbus::names::BusName::try_from(MASK_DBUS_DEST).ok()?;
+        let name = zbus::names::BusName::try_from(shell_overlay_bus_name()).ok()?;
         proxy.name_has_owner(name).ok()
     })
     .unwrap_or(false)
@@ -573,17 +632,18 @@ where
     T: Send + 'static,
 {
     crate::utils::run_off_tokio(move || {
-        if let Some(msg) = crate::app_identity::host_escape_blocked("zbus") {
-            anyhow::bail!(msg);
-        }
         let conn = zbus::blocking::connection::Builder::session()
             .context("failed to create session bus builder for ShellOverlay")?
             .method_timeout(timeout)
             .build()
             .context("failed to connect to session bus for ShellOverlay")?;
-        let proxy =
-            zbus::blocking::Proxy::new(&conn, MASK_DBUS_DEST, MASK_DBUS_PATH, MASK_DBUS_IFACE)
-                .context("failed to create ShellOverlay proxy")?;
+        let proxy = zbus::blocking::Proxy::new(
+            &conn,
+            shell_overlay_bus_name(),
+            MASK_DBUS_PATH,
+            MASK_DBUS_IFACE,
+        )
+        .context("failed to create ShellOverlay proxy")?;
         f(&proxy)
     })
 }
@@ -599,43 +659,55 @@ where
 
 pub fn start_pointer_track() -> anyhow::Result<()> {
     with_shell_overlay_proxy(|proxy| {
-        proxy
-            .call::<_, _, ()>("StartPointerTrack", &())
-            .context("StartPointerTrack failed")
+        call_v2_or_legacy(
+            proxy.call::<_, _, ()>("StartPointerTrackV3", &(crate::daemon::DAEMON_BUS_NAME,)),
+            || proxy.call::<_, _, ()>("StartPointerTrack", &()),
+        )
+        .context("StartPointerTrack failed")
     })
 }
 
 pub fn stop_pointer_track() -> anyhow::Result<PointerTrackResult> {
     with_shell_overlay_proxy(|proxy| {
-        // Prefer the call that also carries mouse press intervals. An
-        // extension that predates it has no such method, so fall back to the
-        // original call rather than losing the recording's pointer data.
-        if let Ok((t0_monotonic_us, samples, clicks, presses)) =
+        // Prefer the current daemon-scoped API and preserve compatibility with
+        // extensions that predate it.
+        let versioned = proxy.call::<_, _, (
+            i64,
+            Vec<(f64, i32, i32, String)>,
+            Vec<(f64, i32, i32, i32)>,
+            Vec<(f64, f64, i32, bool)>,
+        )>("StopPointerTrackV3", &(crate::daemon::DAEMON_BUS_NAME,));
+        let with_presses = call_v2_or_legacy(versioned, || {
             proxy.call::<_, _, (
                 i64,
                 Vec<(f64, i32, i32, String)>,
                 Vec<(f64, i32, i32, i32)>,
                 Vec<(f64, f64, i32, bool)>,
             )>("StopPointerTrackV2", &())
-        {
-            return Ok(PointerTrackResult {
-                t0_monotonic_us,
-                samples,
-                clicks,
-                presses,
-            });
-        }
-        let (t0_monotonic_us, samples, clicks) = proxy
-            .call::<_, _, (i64, Vec<(f64, i32, i32, String)>, Vec<(f64, i32, i32, i32)>)>(
-                "StopPointerTrack",
-                &(),
-            )
-            .context("StopPointerTrack failed")?;
+        });
+        let (t0_monotonic_us, samples, clicks, presses) = match with_presses {
+            Ok(result) => result,
+            Err(error) if is_unknown_method_error(&error) => {
+                let (t0_monotonic_us, samples, clicks) = proxy
+                    .call::<_, _, (i64, Vec<(f64, i32, i32, String)>, Vec<(f64, i32, i32, i32)>)>(
+                        "StopPointerTrack",
+                        &(),
+                    )
+                    .context("StopPointerTrack failed")?;
+                return Ok(PointerTrackResult {
+                    t0_monotonic_us,
+                    samples,
+                    clicks,
+                    presses: Vec::new(),
+                });
+            }
+            Err(error) => return Err(error).context("StopPointerTrackV2 failed"),
+        };
         Ok(PointerTrackResult {
             t0_monotonic_us,
             samples,
             clicks,
-            presses: Vec::new(),
+            presses,
         })
     })
 }
@@ -666,7 +738,8 @@ pub fn print_pointer_debug() -> anyhow::Result<()> {
     }
     if !is_shell_overlay_service_available() {
         anyhow::bail!(
-            "org.apexshot.ShellOverlay is not on the bus — enable the ApexShot GNOME extension"
+            "{} is not on the bus — enable the ApexShot GNOME extension",
+            shell_overlay_bus_name()
         );
     }
     let (x, y, kind, valid) = get_pointer_snapshot()?;
@@ -687,13 +760,6 @@ mod tests {
 
     #[test]
     fn gnome_mask_enabled_for_gnome_wayland() {
-        if crate::app_identity::portal_only() {
-            assert!(!should_use_gnome_shell_mask(
-                Some("wayland-0"),
-                Some("ubuntu:GNOME")
-            ));
-            return;
-        }
         assert!(should_use_gnome_shell_mask(
             Some("wayland-0"),
             Some("ubuntu:GNOME")
@@ -702,6 +768,23 @@ mod tests {
             Some("wayland-1"),
             Some("GNOME")
         ));
+    }
+
+    #[test]
+    fn legacy_shell_calls_fallback_only_for_unknown_method() {
+        assert!(is_unknown_method_name(UNKNOWN_METHOD_ERROR));
+        assert!(!is_unknown_method_name(
+            "org.freedesktop.DBus.Error.AccessDenied"
+        ));
+        assert!(!is_unknown_method_name(
+            "org.freedesktop.DBus.Error.NoReply"
+        ));
+    }
+
+    #[test]
+    fn shell_overlay_selects_the_scoped_flatpak_alias() {
+        assert_eq!(shell_overlay_name_for(false), MASK_DBUS_DEST);
+        assert_eq!(shell_overlay_name_for(true), FLATPAK_MASK_DBUS_DEST);
     }
 
     #[test]

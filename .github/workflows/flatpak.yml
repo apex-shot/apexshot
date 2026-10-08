@@ -1,0 +1,54 @@
+name: Flatpak package build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/flatpak.yml
+      - Cargo.toml
+      - Cargo.lock
+      - build.rs
+      - capture-overlay/**
+      - flatpak/**
+      - src/**
+      - data/**
+      - po/**
+      - assets/fonts/**
+      - packaging/apexshot.svg
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/flatpak.yml
+      - Cargo.toml
+      - Cargo.lock
+      - build.rs
+      - capture-overlay/**
+      - flatpak/**
+      - src/**
+      - data/**
+      - po/**
+      - assets/fonts/**
+      - packaging/apexshot.svg
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and cache local test package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ELF utilities required by flatpak-builder
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends elfutils
+
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          manifest-path: flatpak/org.apexshot.ApexShot.yml
+          build-bundle: false
+          upload-artifact: false
+          cache: true
+          cache-key: flatpak-${{ hashFiles('flatpak/org.apexshot.ApexShot.yml', 'flatpak/cargo-sources.json', 'Cargo.lock') }}

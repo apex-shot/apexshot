@@ -97,8 +97,7 @@ pub fn capture_window_via_cpp() -> Result<CaptureData, SelectionError> {
 }
 
 pub fn capture_screen_file_via_cpp() -> Result<PathBuf, SelectionError> {
-    // Flatpak builds omit apexshot-capture; use the XDG Screenshot portal.
-    if crate::app_identity::portal_only() {
+    if requires_portal_still_capture() {
         return capture_still_file_via_portal(false);
     }
 
@@ -127,7 +126,7 @@ pub fn capture_screen_file_via_cpp() -> Result<PathBuf, SelectionError> {
 }
 
 pub fn capture_screen_via_cpp() -> Result<CaptureData, SelectionError> {
-    if crate::app_identity::portal_only() {
+    if requires_portal_still_capture() {
         return capture_still_via_portal(false);
     }
 
@@ -194,8 +193,7 @@ pub fn quick_capture_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
 }
 
 pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
-    // Flatpak builds omit apexshot-capture; use the interactive Screenshot portal.
-    if crate::app_identity::portal_only() {
+    if requires_portal_still_capture() {
         return capture_still_file_via_portal(true).map(AreaCapturePathResult::Captured);
     }
 
@@ -232,7 +230,7 @@ pub fn capture_area_file_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
 }
 
 pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
-    if crate::app_identity::portal_only() {
+    if requires_portal_still_capture() {
         return capture_still_via_portal(true).map(AreaCaptureResult::Captured);
     }
 
@@ -271,8 +269,7 @@ pub fn capture_area_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
 }
 
 pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
-    // No custom crosshair overlay in portal-only builds — interactive portal UI.
-    if crate::app_identity::portal_only() {
+    if requires_portal_still_capture() {
         return capture_still_file_via_portal(true);
     }
 
@@ -303,7 +300,7 @@ pub fn capture_crosshair_file_via_cpp() -> Result<PathBuf, SelectionError> {
 }
 
 pub fn capture_crosshair_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
-    if crate::app_identity::portal_only() {
+    if requires_portal_still_capture() {
         return capture_still_via_portal(true).map(AreaCaptureResult::Captured);
     }
 

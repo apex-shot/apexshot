@@ -338,7 +338,8 @@ install_system_files() {
         press-tracker.js \
         shell-overlay.js \
         window-list.js \
-        preview-stacking.js
+        preview-stacking.js \
+        daemon-ownership.js
     do
         $SUDO install -Dm0644 "${REPO_DIR}/gnome-extension/${ext_file}" \
             "${extension_dir}/${ext_file}"
