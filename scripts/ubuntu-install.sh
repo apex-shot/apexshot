@@ -634,10 +634,9 @@ install_deb() {
 
     local deb_file="${TMPDIR}/apexshot_${VERSION}_amd64.deb"
     prime_sudo
-    if ! run_spinner "Installing package..." bash -c "${SUDO} dpkg -i '${deb_file}' && ${SUDO} apt install -f -y -qq"; then
+    if ! run_spinner "Installing package..." bash -c "${SUDO} apt-get install --reinstall -y -qq '${deb_file}'"; then
         err "Package installation failed."
-        err "Try manual install: ${SUDO} dpkg -i '${deb_file}'"
-        err "Then resolve deps: ${SUDO} apt install -f"
+        err "Try manual install: ${SUDO} apt-get install --reinstall '${deb_file}'"
         exit 1
     fi
 

@@ -1,7 +1,7 @@
 # Maintainer: codegoddy <codegoddy@gmail.com>
 pkgname=apexshot
 pkgver=0.2.35
-pkgrel=1
+pkgrel=2
 pkgdesc="Open-source Linux screenshot, annotation, OCR, and screen recording tool"
 arch=('x86_64')
 url="https://github.com/apex-shot/apexshot"
@@ -9,6 +9,8 @@ license=('GPL-3.0-or-later')
 options=('!lto')
 install=apexshot.install
 depends=(
+    'gtk4-layer-shell'
+
     # Core clipboard / notifications
     'wl-clipboard'
     'libnotify'
@@ -77,7 +79,6 @@ makedepends=(
     'pkgconf'
     'gtk4'
     'libadwaita'
-    'gtk4-layer-shell'
 )
 source=("apexshot-0.2.35.tar.gz::https://github.com/apex-shot/apexshot/archive/v0.2.35.tar.gz")
 sha256sums=('SKIP')  # Update with actual checksum on release
