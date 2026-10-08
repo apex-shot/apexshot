@@ -310,8 +310,12 @@ fn opensuse_installer_contains_reported_dependency_set() {
         "openSUSE installer should resolve and download the published RPM"
     );
     assert!(
-        install_script.contains("zypper --non-interactive install '${RPM_FILE}'"),
+        install_script.contains("zypper --non-interactive --no-gpg-checks install '${RPM_FILE}'"),
         "openSUSE installer should install the downloaded RPM with zypper"
+    );
+    assert!(
+        install_script.contains("zypper --non-interactive --no-gpg-checks install --force '${RPM_FILE}'"),
+        "openSUSE installer should reinstall the RPM through zypper when forced"
     );
     assert!(
         update_script.contains("opensuse-install.sh") && update_script.contains("--force"),
