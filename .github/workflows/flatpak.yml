@@ -45,6 +45,9 @@ jobs:
       - name: Install Flatpak build tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils
 
+      - name: Add Flathub remote
+        run: sudo flatpak remote-add --system --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+
       - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
         with:
           manifest-path: flatpak/org.apexshot.ApexShot.yml
