@@ -26,13 +26,17 @@ pub fn emit_tracked_window_opened(
 
     if crate::app_identity::portal_only() {
         std::thread::spawn(move || {
-            let Ok(connection) =
-                zbus::blocking::connection::Builder::session().and_then(|builder| builder.build())
-            else {
-                return;
+            let connection = match zbus::blocking::connection::Builder::session()
+                .and_then(|builder| builder.build())
+            {
+                Ok(connection) => connection,
+                Err(error) => {
+                    eprintln!("[gnome_integration] Failed to connect to the session bus for window tracking: {error}");
+                    return;
+                }
             };
 
-            let _ = connection.emit_signal(
+            if let Err(error) = connection.emit_signal(
                 Some(crate::gnome_shell::shell_overlay_bus_name()),
                 TRACKED_WINDOW_PATH,
                 TRACKED_WINDOW_INTERFACE,
@@ -46,7 +50,11 @@ pub fn emit_tracked_window_opened(
                     app_id,
                     opened_at_ms,
                 ),
-            );
+            ) {
+                eprintln!(
+                    "[gnome_integration] Failed to announce tracked window to GNOME Shell: {error}"
+                );
+            }
         });
         return;
     }
@@ -66,6 +74,34 @@ pub fn emit_tracked_window_opened(
                 &format!("uint64:{}", opened_at_ms),
             ])
             .spawn();
+    });
+}
+
+pub fn register_capture_overlay(app_id: &'static str) {
+    if !crate::app_identity::portal_only() {
+        return;
+    }
+
+    std::thread::spawn(move || {
+        let connection = match zbus::blocking::connection::Builder::session()
+            .and_then(|builder| builder.build())
+        {
+            Ok(connection) => connection,
+            Err(error) => {
+                eprintln!("[gnome_integration] Failed to connect to the session bus to register the capture overlay: {error}");
+                return;
+            }
+        };
+
+        if let Err(error) = connection.call_method(
+            Some(crate::gnome_shell::shell_overlay_bus_name()),
+            "/org/apexshot/ShellOverlay",
+            Some("org.apexshot.ShellOverlay"),
+            "RegisterCaptureOverlayV2",
+            &(app_id, "ApexShot Capture Overlay"),
+        ) {
+            eprintln!("[gnome_integration] Failed to register the capture overlay with GNOME Shell: {error}");
+        }
     });
 }
 

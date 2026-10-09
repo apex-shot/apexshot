@@ -851,6 +851,51 @@ mod tests {
     }
 
     #[test]
+    fn secondary_toolbars_share_the_light_theme_surface() {
+        let css = super::EDITOR_CSS;
+        let light_surface = css
+            .split(".editor-root.editor-theme-light .editor-text-floating-bar {")
+            .nth(1)
+            .expect("secondary toolbars need a light theme surface")
+            .split('}')
+            .next()
+            .unwrap();
+        assert!(light_surface.contains("background-color: #eef0f5;"));
+        assert!(light_surface.contains("color: #1d2129;"));
+        assert!(light_surface.contains("border-color: alpha(#111827, 0.10);"));
+
+        for source in [
+            include_str!("window/arrow_bar.rs"),
+            include_str!("window/highlighter_bar.rs"),
+            include_str!("window/number_bar.rs"),
+            include_str!("window/text_bar.rs"),
+            include_str!("window/obfuscate_bar.rs"),
+            include_str!("window/focus_bar.rs"),
+        ] {
+            assert!(source.contains("add_css_class(\"editor-text-floating-bar\")"));
+        }
+    }
+
+    #[test]
+    fn secondary_toolbar_controls_and_popovers_have_light_theme_overrides() {
+        let css = super::EDITOR_CSS;
+        for selector in [
+            ".editor-number-floating-bar .editor-number-bar-stepper",
+            ".editor-obfuscate-intensity-slider trough",
+            ".editor-obfuscate-intensity-slider highlight",
+            "popover.editor-popover > contents",
+            "button.editor-popover-list-item",
+            "button.editor-popover-list-item:hover",
+            "button.editor-popover-list-item:active",
+        ] {
+            assert!(
+                css.contains(&format!(".editor-root.editor-theme-light {selector}")),
+                "secondary toolbar control lacks a light theme override: {selector}"
+            );
+        }
+    }
+
+    #[test]
     fn editor_css_avoids_unsupported_gtk_properties() {
         let production_source = super::EDITOR_CSS;
         for property in [

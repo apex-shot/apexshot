@@ -29,14 +29,14 @@ function isRecordingOverlayWindow(wmClass) {
 
 /// Serializes the given window records for ApexShot's window picker.
 ///
-/// ApexShot's recording overlays and windows that are not in the window list
-/// (docks, panels) are dropped, and sizes are clamped so the picker never has
-/// to lay out a zero-sized card.
+/// Tracked capture UI and windows outside the normal window list (docks,
+/// panels) are dropped, and sizes are clamped so cards are always layout-safe.
 export function buildWindowListPayload(windows) {
     return windows
         .filter(window =>
             Number.isFinite(window.id) && !window.skipTaskbar &&
-            !isRecordingOverlayWindow(window.wmClass))
+            !isRecordingOverlayWindow(window.wmClass) &&
+            !window.captureUi)
         .map(window => ({
             id: Math.trunc(window.id),
             title: window.title || 'Window',
@@ -64,7 +64,8 @@ export function activateWindowRecord(metaWindow, timestamp) {
 /// Lets ApexShot enumerate and focus windows, which a Wayland client cannot do
 /// for itself. Metadata only — no window contents are read or sent.
 export class WindowListService {
-    constructor() {
+    constructor(previewStacker) {
+        this._previewStacker = previewStacker;
         this._dbus = null;
         this._connection = null;
         this._nameIds = [];
@@ -137,6 +138,7 @@ export class WindowListService {
                     height: frame.height,
                     minimized: metaWindow.minimized,
                     skipTaskbar: metaWindow.is_skip_taskbar(),
+                    captureUi: this._previewStacker.isCaptureUiWindow(metaWindow),
                     wmClass,
                     metaWindow,
                 });

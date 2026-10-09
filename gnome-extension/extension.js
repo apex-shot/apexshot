@@ -20,10 +20,10 @@ export default class ApexShotExtension extends Extension {
         this._previewStacker = new PreviewStacker();
         this._previewStacker.enable(this._dbusConnection);
 
-        this._shellOverlay = new ShellOverlayService();
+        this._shellOverlay = new ShellOverlayService(this._previewStacker);
         this._shellOverlay.enable(this._dbusConnection);
 
-        this._windowList = new WindowListService();
+        this._windowList = new WindowListService(this._previewStacker);
         this._windowList.enable(this._dbusConnection);
     }
 

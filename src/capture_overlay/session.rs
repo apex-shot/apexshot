@@ -117,7 +117,13 @@ pub fn begin_capture_session() -> Result<CaptureOverlayGuard<'static>, LaunchBlo
 
 impl InteractiveOverlaySessionGuard {
     fn begin(extra_args: &[&str]) -> Self {
-        if !should_request_screenshot_lock(extra_args) || overlay_socket_is_listening() {
+        if !should_request_screenshot_lock(extra_args) {
+            return Self {
+                tracked_overlay_id: None,
+            };
+        }
+        if overlay_socket_is_listening() {
+            eprintln!("[capture_overlay] Skipping GNOME window tracking: an interactive overlay is already active.");
             return Self {
                 tracked_overlay_id: None,
             };
@@ -135,10 +141,12 @@ impl InteractiveOverlaySessionGuard {
             return;
         };
 
+        eprintln!("[capture_overlay] Registering GNOME capture overlay window (pid={pid}).");
+        crate::gnome_integration::register_capture_overlay(crate::app_identity::app_id());
         emit_tracked_window_opened(
             tracked_id,
             pid,
-            "ApexShot Capture",
+            "ApexShot Capture Overlay",
             "capture-overlay",
             "screenshot",
         );

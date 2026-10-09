@@ -42,6 +42,12 @@ struct WorkerCmdRequest<'a> {
     cmd: &'a str,
 }
 
+#[derive(Debug, Deserialize)]
+struct WorkerPingResponse {
+    ok: bool,
+    pid: u32,
+}
+
 /// Start (or verify) the long-lived `apexshot-capture --worker` process.
 ///
 /// Safe to call from the daemon at startup and again before each capture.
@@ -53,7 +59,7 @@ pub fn ensure_warm_capture_helper() {
             return;
         }
         match ensure_warm_worker_running() {
-            Ok(()) => {}
+            Ok(_) => {}
             Err(err) => {
                 eprintln!("[capture_overlay] Warm capture helper not ready: {err}");
             }
@@ -82,10 +88,10 @@ pub fn shutdown_warm_capture_helper() {
 }
 
 #[cfg(unix)]
-fn ensure_warm_worker_running() -> Result<(), String> {
+fn ensure_warm_worker_running() -> Result<u32, String> {
     // Reuse a live worker when possible.
-    if worker_ping(Duration::from_millis(250)).is_ok() {
-        return Ok(());
+    if let Ok(pid) = worker_ping(Duration::from_millis(250)) {
+        return Ok(pid);
     }
 
     let binary = find_capture_binary()
@@ -129,9 +135,9 @@ fn ensure_warm_worker_running() -> Result<(), String> {
     // Wait until the worker socket accepts pings.
     let deadline = Instant::now() + Duration::from_secs(8);
     while Instant::now() < deadline {
-        if worker_ping(Duration::from_millis(200)).is_ok() {
+        if let Ok(worker_pid) = worker_ping(Duration::from_millis(200)) {
             eprintln!("[capture_overlay] Warm capture helper ready (pid={pid}).");
-            return Ok(());
+            return Ok(worker_pid);
         }
         // If the child already died, fail fast.
         if let Ok(mut guard) = warm_worker_state().lock() {
@@ -151,9 +157,18 @@ fn ensure_warm_worker_running() -> Result<(), String> {
 }
 
 #[cfg(unix)]
-fn worker_ping(timeout: Duration) -> Result<(), String> {
-    worker_send_cmd("ping", timeout)?;
-    Ok(())
+fn worker_ping(timeout: Duration) -> Result<u32, String> {
+    parse_worker_ping_pid(&worker_send_cmd("ping", timeout)?)
+}
+
+#[cfg(unix)]
+fn parse_worker_ping_pid(payload: &str) -> Result<u32, String> {
+    let response: WorkerPingResponse = serde_json::from_str(payload)
+        .map_err(|error| format!("parse worker ping response: {error}"))?;
+    if !response.ok || response.pid == 0 {
+        return Err("warm capture worker returned an invalid process identity".into());
+    }
+    Ok(response.pid)
 }
 
 #[cfg(unix)]
@@ -191,17 +206,12 @@ fn run_capture_via_warm_worker(
         return Err("warm capture disabled by env".into());
     }
 
-    ensure_warm_worker_running()?;
+    let pid = ensure_warm_worker_running()?;
 
     let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
     let mut interactive_session = InteractiveOverlaySessionGuard::begin(extra_args);
 
-    // Track the worker pid for GNOME screenshot-lock stacking when available.
-    if let Ok(guard) = warm_worker_state().lock() {
-        if let Some(state) = guard.as_ref() {
-            interactive_session.attach_child_pid(state.child.id());
-        }
-    }
+    interactive_session.attach_child_pid(pid);
 
     let path = worker_socket_path();
     let mut stream =

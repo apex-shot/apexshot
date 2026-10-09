@@ -92,12 +92,22 @@ export class PreviewStacker {
         this._tracked = new Map();
         // trackedId -> identity, waiting for their MetaWindow to appear
         this._pending = new Map();
+        this._captureUiWindows = new WeakSet();
         this._connection = null;
         this._subscriptionId = 0;
         this._windowCreatedId = 0;
         this._focusWindowId = 0;
         // MetaWindow -> handler id for windows we watch for a late title
         this._titleWatchers = new Map();
+    }
+
+    isCaptureUiWindow(metaWindow) {
+        return Boolean(metaWindow && this._captureUiWindows.has(metaWindow));
+    }
+
+    registerCaptureUiWindow(metaWindow) {
+        if (metaWindow)
+            this._captureUiWindows.add(metaWindow);
     }
 
     enable(connection) {
@@ -151,6 +161,7 @@ export class PreviewStacker {
             this._release(trackedId);
 
         this._pending.clear();
+        this._captureUiWindows = new WeakSet();
         this._connection = null;
     }
 
@@ -228,6 +239,8 @@ export class PreviewStacker {
         ];
 
         this._tracked.set(trackedId, {identity, window, signalIds});
+        if (identity.role === 'preview' || identity.role === 'capture-overlay')
+            this.registerCaptureUiWindow(window);
         this._unwatchTitle(window);
         this._raise(window);
     }
