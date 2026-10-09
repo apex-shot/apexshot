@@ -20,9 +20,12 @@ BuildRequires:  libQt5DBus-devel
 BuildRequires:  libQt5Network-devel
 BuildRequires:  libQt5Widgets-devel
 BuildRequires:  libadwaita-devel
+BuildRequires:  libarchive-devel
+BuildRequires:  libcurl-devel
 BuildRequires:  libqt5-qtx11extras-devel
 BuildRequires:  libXtst-devel
-BuildRequires:  pkgconfig
+BuildRequires:  hicolor-icon-theme
+BuildRequires:  pkgconf-pkg-config
 BuildRequires:  pipewire-devel
 BuildRequires:  rust
 BuildRequires:  tesseract-ocr-devel
@@ -57,12 +60,20 @@ recording tool with Wayland portal and PipeWire support.
 %autosetup
 
 %build
+# Pin the cargo target directory to the build tree so the build is hermetic.
+# An inherited CARGO_TARGET_DIR (for example a shared cargo cache exported by
+# the caller) must not redirect the release binaries out of %{_builddir},
+# otherwise %install cannot find them.
+export CARGO_TARGET_DIR="%{_builddir}/%{name}-%{version}/target"
 cargo build --release
 
 %install
 install -Dm0755 target/release/apexshot %{buildroot}%{_bindir}/apexshot
 install -Dm0755 target/release/apexshot-capture %{buildroot}%{_bindir}/apexshot-capture
 install -Dm0755 packaging/deb/apexshot-native-host %{buildroot}%{_bindir}/apexshot-native-host
+# Pin the wrapper's interpreter: `/usr/bin/env bash` trips rpmlint's
+# env-script-interpreter check.
+sed -i '1s|^#!/usr/bin/env bash$|#!/bin/bash|' %{buildroot}%{_bindir}/apexshot-native-host
 
 install -Dm0644 packaging/io.github.codegoddy.apexshot.desktop %{buildroot}%{_datadir}/applications/io.github.codegoddy.apexshot.desktop
 install -Dm0644 packaging/io.github.codegoddy.apexshot.metainfo.xml %{buildroot}%{_datadir}/metainfo/io.github.codegoddy.apexshot.metainfo.xml
@@ -123,7 +134,6 @@ fi
 %{_datadir}/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg
 %{_datadir}/pixmaps/apexshot.svg
 %{_datadir}/locale/*/LC_MESSAGES/apexshot.mo
-%dir %{_sysconfdir}/opt
 %dir %{_sysconfdir}/opt/chrome
 %dir %{_sysconfdir}/opt/chrome/NativeMessagingHosts
 %config %{_sysconfdir}/opt/chrome/NativeMessagingHosts/io.github.codegoddy.apexshot.json
@@ -134,3 +144,5 @@ fi
 %{_datadir}/apexshot/
 
 %changelog
+* Fri Oct 09 2026 codegoddy <codegoddy@gmail.com> - 0.2.35-0
+- Initial openSUSE Tumbleweed RPM recipe

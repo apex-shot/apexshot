@@ -187,10 +187,31 @@ check_prereqs() {
         exit 1
     fi
 
-    # Binary openSUSE RPMs are not on GitHub Releases yet (spec + build script only).
-    err "openSUSE binary packages are not published on GitHub Releases yet."
-    err "Build locally: scripts/build-opensuse-rpm.sh"
-    exit 1
+    ok "Architecture: x86_64"
+
+    if ! command -v zypper >/dev/null 2>&1; then
+        err "This installer is for openSUSE systems with zypper."
+        exit 1
+    fi
+
+    if [[ $EUID -eq 0 ]]; then
+        SUDO=""
+    elif command -v sudo >/dev/null 2>&1; then
+        SUDO="sudo"
+    else
+        err "Root or sudo access is required to install ApexShot."
+        exit 1
+    fi
+
+    if command -v curl >/dev/null 2>&1; then
+        ok "curl found"
+    else
+        err "curl is required but not installed."
+        err "Install it with: sudo zypper install curl"
+        exit 1
+    fi
+
+    ok "zypper found"
 }
 
 prime_sudo() {
@@ -240,10 +261,14 @@ install_runtime_dependencies() {
 }
 
 resolve_rpm_url() {
-    local rpm_path
+    local rpm_path version_no_v
+    # Match only the main binary package, e.g. apexshot-0.2.35-0.x86_64.rpm.
+    # The release also carries the debuginfo/debugsource companions and the
+    # source RPM; anchoring on "apexshot-<version>-" keeps the installer from
+    # grabbing one of those when the release asset order places them first.
+    version_no_v="${VERSION#v}"
     rpm_path=$(curl -fsSL "${RELEASES_URL}/expanded_assets/${VERSION}" |
-               grep -oE "/${REPO}/releases/download/${VERSION}/[^\"]*\.x86_64\.rpm" |
-               grep -v '\.src\.rpm$' |
+               grep -oE "/${REPO}/releases/download/${VERSION}/apexshot-${version_no_v}-[0-9][^\"]*\.x86_64\.rpm" |
                head -n 1 || true)
 
     if [[ -z "$rpm_path" ]]; then
@@ -282,12 +307,15 @@ install_rpm() {
     fi
 
     prime_sudo
+    # Release RPMs are currently unsigned, and Tumbleweed refuses to install an
+    # unsigned package by default, so pass the global --no-gpg-checks flag
+    # (it must precede the `install` subcommand).
     if [[ $FORCE_REINSTALL -eq 1 ]]; then
         run_spinner "Reinstalling package..." \
-            bash -c "${SUDO} zypper --non-interactive install --force '${RPM_FILE}'"
+            bash -c "${SUDO} zypper --non-interactive --no-gpg-checks install --force '${RPM_FILE}'"
     else
         run_spinner "Installing package..." \
-            bash -c "${SUDO} zypper --non-interactive install '${RPM_FILE}'"
+            bash -c "${SUDO} zypper --non-interactive --no-gpg-checks install '${RPM_FILE}'"
     fi
 
     ok "ApexShot installed"
