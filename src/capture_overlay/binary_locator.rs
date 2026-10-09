@@ -20,6 +20,13 @@ fn find_capture_binary() -> Option<PathBuf> {
         }
     }
 
+    if crate::app_identity::portal_only() {
+        let candidate = PathBuf::from("/app/bin/apexshot-capture");
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
     // 2. Installed system paths — for .deb and manual installations
     if PathBuf::from("/usr/bin/apexshot-capture").exists() {
         eprintln!("[capture_overlay] Found apexshot-capture at /usr/bin/apexshot-capture");

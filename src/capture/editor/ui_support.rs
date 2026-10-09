@@ -129,11 +129,45 @@ pub fn read_gsettings_bool(schema: &str, key: &str) -> Option<bool> {
     }
 }
 
+fn portal_prefers_dark_theme() -> Option<bool> {
+    crate::utils::run_off_tokio(|| {
+        let connection = zbus::blocking::connection::Builder::session()
+            .ok()?
+            .method_timeout(std::time::Duration::from_millis(500))
+            .build()
+            .ok()?;
+        let reply = connection
+            .call_method(
+                Some("org.freedesktop.portal.Desktop"),
+                "/org/freedesktop/portal/desktop",
+                Some("org.freedesktop.portal.Settings"),
+                "ReadOne",
+                &("org.freedesktop.appearance", "color-scheme"),
+            )
+            .ok()?;
+        let value = reply
+            .body()
+            .deserialize::<zbus::zvariant::OwnedValue>()
+            .ok()?;
+        match u32::try_from(value).ok()? {
+            1 => Some(true),
+            2 => Some(false),
+            _ => None,
+        }
+    })
+}
+
 pub fn prefers_dark_glass_theme() -> bool {
     // Settings → General → Theme wins over the desktop preference. Only
     // `system` falls through to the GTK / gsettings probes below.
     if let Some(forced_dark) = crate::config::load_config().forced_dark_theme() {
         return forced_dark;
+    }
+
+    if crate::app_identity::portal_only() {
+        if let Some(dark) = portal_prefers_dark_theme() {
+            return dark;
+        }
     }
 
     if let Some(settings) = gtk4::Settings::default() {
@@ -705,6 +739,24 @@ pub fn install_top_bar_window_drag(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sandbox_system_theme_reads_the_portal_before_local_preferences() {
+        let source = include_str!("ui_support.rs");
+        let resolution = source
+            .split("pub fn prefers_dark_glass_theme() -> bool {")
+            .nth(1)
+            .unwrap()
+            .split("pub fn prefers_reduced_transparency()")
+            .next()
+            .unwrap();
+        let forced = resolution.find("forced_dark_theme()").unwrap();
+        let portal = resolution.find("portal_prefers_dark_theme()").unwrap();
+        let gtk = resolution.find("gtk4::Settings::default()").unwrap();
+        assert!(forced < portal && portal < gtk);
+        assert!(resolution.contains("crate::app_identity::portal_only()"));
+        assert!(source.contains(".method_timeout(std::time::Duration::from_millis(500))"));
+    }
+
     use super::{
         arrow_style_toolbar_icon, custom_toolbar_icon_inset, toolbar_icon_size, EditorToolIcon,
     };

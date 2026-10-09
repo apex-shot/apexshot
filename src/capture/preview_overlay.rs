@@ -190,7 +190,7 @@ fn apply_preview_stacking(
             crate::gnome_integration::emit_tracked_window_opened(
                 preview_id,
                 std::process::id(),
-                PREVIEW_TRACKED_TITLE,
+                &t(PREVIEW_TRACKED_TITLE),
                 PREVIEW_TRACKED_ROLE,
                 PREVIEW_TRACKED_NAMESPACE,
             );
@@ -1063,12 +1063,35 @@ fn setup_preview_window(
 
 fn request_gnome_preview_position(display: CaptureDisplay) {
     let pid = std::process::id() as i64;
+    let window_title = t(PREVIEW_TRACKED_TITLE);
     std::thread::spawn(move || {
         let Ok(connection) = zbus::blocking::Connection::session() else {
             return;
         };
+        if crate::app_identity::portal_only() {
+            let result = connection.call_method(
+                Some(crate::gnome_shell::shell_overlay_bus_name()),
+                "/org/apexshot/ShellOverlay",
+                Some("org.apexshot.ShellOverlay"),
+                "PositionQuickAccessV2",
+                &(
+                    crate::app_identity::app_id(),
+                    window_title,
+                    pid,
+                    display.x,
+                    display.y,
+                ),
+            );
+            if !matches!(
+                result,
+                Err(zbus::Error::MethodError(name, _, _))
+                    if name.as_str() == "org.freedesktop.DBus.Error.UnknownMethod"
+            ) {
+                return;
+            }
+        }
         let _ = connection.call_method(
-            Some("org.apexshot.ShellOverlay"),
+            Some(crate::gnome_shell::shell_overlay_bus_name()),
             "/org/apexshot/ShellOverlay",
             Some("org.apexshot.ShellOverlay"),
             "PositionQuickAccess",

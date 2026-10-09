@@ -50,7 +50,7 @@ gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 ### Recording mask does not appear
 - Check that the extension is enabled and reloaded
 - Check that ApexShot is running on GNOME Wayland
-- Monitor the session bus for `org.apexshot.ShellOverlay`
+- Monitor `org.apexshot.ShellOverlay` natively or `org.apexshot.ApexShot.ShellOverlay` in Flatpak
 - Make sure the ApexShot daemon log does not show a shell-mask fallback message
 
 ### Extension not loading
@@ -67,7 +67,7 @@ rm -rf ~/.local/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot
 
 1. For screenshot previews and annotate editor windows, ApexShot emits `TrackedWindowOpened` / `TrackedWindowClosed` signals on `org.apexshot.TrackedWindow`
 2. The extension tracks matching ApexShot windows and keeps them above other windows while they are active
-3. For recording masks, ApexShot calls `ShowMask(x, y, width, height)` on `org.apexshot.ShellOverlay`
+3. For recording masks, ApexShot calls the ShellOverlay API on its native or Flatpak bus name
 4. The extension creates shell-managed dim regions around the selected recording area
 5. When recording ends or errors out, ApexShot calls `HideMask()` and the extension removes the mask
-6. For the window picker, ApexShot calls `GetWindows()` and `ActivateWindowById(id)` on `org.apexshot.WindowList`
+6. For the window picker, ApexShot calls `GetWindows()` and `ActivateWindowById(id)` on its native or Flatpak WindowList name

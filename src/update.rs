@@ -157,7 +157,9 @@ fn update_from_release(
 /// Checks GitHub for a newer stable release, respecting the local daily cache.
 /// A failed request deliberately stays invisible to the user.
 pub fn check_for_update() -> Option<UpdateInfo> {
-    if std::env::var_os("APEXSHOT_DISABLE_UPDATE_CHECK").is_some() {
+    if crate::app_identity::portal_only()
+        || std::env::var_os("APEXSHOT_DISABLE_UPDATE_CHECK").is_some()
+    {
         return None;
     }
 
@@ -217,6 +219,9 @@ pub fn spawn_update_check(on_update: impl FnOnce(UpdateInfo) + Send + 'static) {
 /// windows use this so the prompt can appear immediately after the daemon has
 /// already performed its background check.
 pub fn cached_update() -> Option<UpdateInfo> {
+    if crate::app_identity::portal_only() {
+        return None;
+    }
     if std::env::var_os("APEXSHOT_UPDATE_PREVIEW").is_some() {
         return Some(UpdateInfo {
             version: "0.2.36".to_string(),
@@ -254,16 +259,15 @@ pub fn snooze_prompt(update: &UpdateInfo) {
 /// Flatpak's verified repository metadata; native installs use ApexShot's
 /// existing distro-aware updater script.
 pub fn launch_update() -> Result<(), String> {
-    let command = if crate::app_identity::portal_only() {
-        format!(
-            "flatpak update {}; printf '\\nApexShot update finished. You can close this window.\\n'; exec bash",
+    if crate::app_identity::portal_only() {
+        return crate::utils::open::open_uri(&format!(
+            "appstream://{}",
             crate::app_identity::app_id()
-        )
-    } else {
-        format!(
-            "curl -fsSL {UPDATE_SCRIPT_URL} | sh; printf '\\nApexShot update finished. You can close this window.\\n'; exec bash"
-        )
-    };
+        ));
+    }
+    let command = format!(
+        "curl -fsSL {UPDATE_SCRIPT_URL} | sh; printf '\\nApexShot update finished. You can close this window.\\n'; exec bash"
+    );
 
     let terminals: [(&str, &[&str]); 4] = [
         ("xdg-terminal-exec", &["bash", "-lc"]),

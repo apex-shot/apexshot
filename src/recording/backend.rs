@@ -149,11 +149,12 @@ async fn build_pipeline(
     output_path: &std::path::Path,
 ) -> super::RecordResult<BuiltPipeline> {
     // Get video source (Portal session + PipeWire fd for Wayland)
-    let wayland_source = if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        Some(get_wayland_source(config).await?)
-    } else {
-        None
-    };
+    let wayland_source =
+        if crate::app_identity::portal_only() || std::env::var("WAYLAND_DISPLAY").is_ok() {
+            Some(get_wayland_source(config).await?)
+        } else {
+            None
+        };
 
     // ffmpeg (the Wayland path) sets its own encoder arguments, and the X11
     // GStreamer pipeline builds its element properties itself where it knows
@@ -174,6 +175,22 @@ async fn build_pipeline(
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    #[test]
+    fn sandbox_recording_uses_the_portal_on_x11_too() {
+        let source = include_str!("backend.rs");
+        let pipeline = source
+            .split("async fn build_pipeline(")
+            .nth(1)
+            .unwrap()
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(pipeline.contains(
+            "crate::app_identity::portal_only() || std::env::var(\"WAYLAND_DISPLAY\").is_ok()"
+        ));
+        assert!(pipeline.contains("Some(get_wayland_source(config).await?)"));
+    }
 
     fn x11_recording_config() -> RecordingConfig {
         RecordingConfig {

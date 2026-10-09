@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 #include "CaptureCountdownPill.h"
+#include "Sandbox.h"
 
 #include <QApplication>
 #include <QDBusConnection>
@@ -149,22 +150,52 @@ bool run(QScreen* screen, int seconds, const QRect& fadeGlobalRect)
 
     if (screen) {
         QDBusInterface shellOverlay(
-            QStringLiteral("org.apexshot.ShellOverlay"),
+            shellOverlayBusName(),
             QStringLiteral("/org/apexshot/ShellOverlay"),
             QStringLiteral("org.apexshot.ShellOverlay"),
             QDBusConnection::sessionBus());
         if (shellOverlay.isValid()) {
             const QRect geometry = screen->geometry();
-            const QDBusMessage reply = shellOverlay.call(
-                QStringLiteral("ShowCaptureCountdown"),
-                geometry.x(),
-                geometry.y(),
-                geometry.width(),
-                static_cast<uint>(seconds),
-                fadeGlobalRect.x(),
-                fadeGlobalRect.y(),
-                fadeGlobalRect.width(),
-                fadeGlobalRect.height());
+            QDBusMessage reply;
+            if (isFlatpakSandboxed()) {
+                reply = shellOverlay.callWithArgumentList(
+                    QDBus::Block,
+                    QStringLiteral("ShowCaptureCountdownV2"),
+                    { daemonBusName(),
+                      geometry.x(),
+                      geometry.y(),
+                      geometry.width(),
+                      static_cast<uint>(seconds),
+                      fadeGlobalRect.x(),
+                      fadeGlobalRect.y(),
+                      fadeGlobalRect.width(),
+                      fadeGlobalRect.height() });
+                if (reply.type() == QDBusMessage::ErrorMessage
+                    && reply.errorName()
+                         == QStringLiteral("org.freedesktop.DBus.Error.UnknownMethod")) {
+                    reply = shellOverlay.call(
+                        QStringLiteral("ShowCaptureCountdown"),
+                        geometry.x(),
+                        geometry.y(),
+                        geometry.width(),
+                        static_cast<uint>(seconds),
+                        fadeGlobalRect.x(),
+                        fadeGlobalRect.y(),
+                        fadeGlobalRect.width(),
+                        fadeGlobalRect.height());
+                }
+            } else {
+                reply = shellOverlay.call(
+                    QStringLiteral("ShowCaptureCountdown"),
+                    geometry.x(),
+                    geometry.y(),
+                    geometry.width(),
+                    static_cast<uint>(seconds),
+                    fadeGlobalRect.x(),
+                    fadeGlobalRect.y(),
+                    fadeGlobalRect.width(),
+                    fadeGlobalRect.height());
+            }
             if (reply.type() != QDBusMessage::ErrorMessage) {
                 QElapsedTimer elapsed;
                 elapsed.start();
@@ -172,14 +203,14 @@ bool run(QScreen* screen, int seconds, const QRect& fadeGlobalRect)
                     QApplication::processEvents(QEventLoop::AllEvents, 20);
                     QThread::msleep(20);
                 }
-                shellOverlay.call(QStringLiteral("HideCountdown"));
+                hideShellOverlayCountdown(shellOverlay);
                 QApplication::processEvents(QEventLoop::AllEvents, 50);
                 QThread::msleep(200);
                 return true;
             }
             // A Shell method can fail after creating its actor. Always clear a
             // partial countdown before falling back to the Qt implementation.
-            shellOverlay.call(QStringLiteral("HideCountdown"));
+            hideShellOverlayCountdown(shellOverlay);
         }
     }
 

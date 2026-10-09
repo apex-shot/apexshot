@@ -3,8 +3,9 @@
 import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
+import {WINDOW_LIST_BUS_NAMES} from './daemon-ownership.js';
 
-const DBUS_NAME = 'org.apexshot.WindowList';
+const DBUS_NAMES = WINDOW_LIST_BUS_NAMES;
 const DBUS_PATH = '/org/apexshot/WindowList';
 
 const DBUS_INTERFACE = `
@@ -65,30 +66,32 @@ export function activateWindowRecord(metaWindow, timestamp) {
 export class WindowListService {
     constructor() {
         this._dbus = null;
-        this._nameId = 0;
+        this._connection = null;
+        this._nameIds = [];
     }
 
-    enable() {
+    enable(connection) {
+        this._connection = connection;
         this._dbus = Gio.DBusExportedObject.wrapJSObject(DBUS_INTERFACE, this);
-        this._dbus.export(Gio.DBus.session, DBUS_PATH);
+        this._dbus.export(connection, DBUS_PATH);
 
-        this._nameId = Gio.DBus.session.own_name(
-            DBUS_NAME,
+        this._nameIds = DBUS_NAMES.map(name => connection.own_name(
+            name,
             Gio.BusNameOwnerFlags.REPLACE,
             null,
-            null);
+            null));
     }
 
     disable() {
-        if (this._nameId) {
-            Gio.DBus.session.unown_name(this._nameId);
-            this._nameId = 0;
-        }
+        for (const nameId of this._nameIds)
+            this._connection.unown_name(nameId);
+        this._nameIds = [];
 
         if (this._dbus) {
             this._dbus.unexport();
             this._dbus = null;
         }
+        this._connection = null;
     }
 
     GetWindows() {

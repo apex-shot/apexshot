@@ -37,9 +37,11 @@ pub fn build(content: &GtkBox) {
     title.set_margin_bottom(8);
     content.append(&title);
 
-    let message = Label::new(Some(&t(
-        "The tray daemon starts when you finish so hotkeys and captures work right away.",
-    )));
+    let message = Label::new(Some(&if crate::app_identity::portal_only() {
+        t("The tray daemon starts when you finish. Capture from its menu; global hotkeys depend on desktop portal support and approval.")
+    } else {
+        t("The tray daemon starts when you finish so hotkeys and captures work right away.")
+    }));
     message.set_halign(Align::Center);
     message.set_wrap(true);
     message.set_justify(gtk4::Justification::Center);
@@ -50,7 +52,11 @@ pub fn build(content: &GtkBox) {
     let tray_title = t("Tray icon");
     let tray_body = t("Right-click for Area, Screen, and Record");
     let hotkeys_title = t("Hotkeys");
-    let hotkeys_body = t("Capture without opening Settings every time");
+    let hotkeys_body = if crate::app_identity::portal_only() {
+        t("Available when your desktop supports the GlobalShortcuts portal")
+    } else {
+        t("Capture without opening Settings every time")
+    };
     let menu_title = t("App menu");
     let menu_body = t("Open ApexShot anytime for Settings and preferences");
     let checklist = feature_card_list(&[

@@ -6,6 +6,7 @@
 /attached_assets/
 
 # Build artifacts
+/.flatpak-builder/
 *.deb
 *.rpm
 /build/

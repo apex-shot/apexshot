@@ -12,6 +12,9 @@ pub const DEV_APP_ID: &str = "org.apexshot.ApexShot.Dev";
 #[cfg(not(feature = "flatpak"))]
 pub const DEV_APP_ID: &str = "io.github.codegoddy.apexshot.dev";
 
+#[cfg(feature = "flatpak")]
+pub const OFFICIAL_BINARY: &str = "/app/bin/apexshot";
+#[cfg(not(feature = "flatpak"))]
 pub const OFFICIAL_BINARY: &str = "/usr/bin/apexshot";
 pub const DEV_WRAPPER: &str = "/usr/local/bin/apexshot-dev";
 
@@ -34,7 +37,7 @@ fn path_looks_like_dev(path: &Path) -> bool {
         })
 }
 
-/// True when running as a portal-only / sandboxed build.
+/// True when capture must use portals and host installation is unavailable.
 /// Compile-time (`--features flatpak`) or runtime (Flatpak sets `FLATPAK_ID`).
 pub fn portal_only() -> bool {
     cfg!(feature = "flatpak") || std::env::var_os("FLATPAK_ID").is_some()
@@ -43,6 +46,19 @@ pub fn portal_only() -> bool {
 /// Error string when a host-escape path is attempted under portal-only.
 pub fn host_escape_blocked(what: &str) -> Option<String> {
     portal_only().then(|| format!("{what} is unavailable in Flatpak/portal-only builds"))
+}
+
+/// App-private directory for capture-helper IPC in the sandbox.
+pub fn capture_runtime_dir() -> PathBuf {
+    let runtime = std::env::var_os("XDG_RUNTIME_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    if !portal_only() {
+        return runtime;
+    }
+    let directory = runtime.join("app").join(OFFICIAL_APP_ID);
+    let _ = std::fs::create_dir_all(&directory);
+    directory
 }
 
 pub fn is_dev() -> bool {
@@ -140,6 +156,28 @@ mod tests {
         assert_eq!(
             portal_only(),
             cfg!(feature = "flatpak") || std::env::var_os("FLATPAK_ID").is_some()
+        );
+    }
+
+    #[test]
+    fn installed_binary_matches_package_prefix() {
+        assert_eq!(
+            OFFICIAL_BINARY,
+            if cfg!(feature = "flatpak") {
+                "/app/bin/apexshot"
+            } else {
+                "/usr/bin/apexshot"
+            }
+        );
+    }
+
+    #[cfg(feature = "flatpak")]
+    #[test]
+    fn sandbox_capture_ipc_is_app_private() {
+        assert!(capture_runtime_dir().ends_with("app/org.apexshot.ApexShot"));
+        assert_eq!(
+            crate::daemon::DAEMON_BUS_NAME,
+            "org.apexshot.ApexShot.Daemon"
         );
     }
 }

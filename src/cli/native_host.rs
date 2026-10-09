@@ -86,6 +86,9 @@ pub(crate) fn install_native_host_manifest(
 ) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
 
+    if app_identity::portal_only() {
+        return Err("Browser registration must be installed on the host using scripts/install-flatpak-browser-host.py.".into());
+    }
     validate_extension_id(extension_id)?;
 
     let binary_path = app_identity::preferred_command_path();
@@ -131,6 +134,11 @@ pub(crate) fn install_native_host_manifest(
 }
 
 pub(crate) fn uninstall_native_host_manifest(browser: BrowserTarget) -> Result<(), String> {
+    if app_identity::portal_only() {
+        return Err(
+            "Remove the browser registration from the host, not from inside Flatpak.".into(),
+        );
+    }
     for path in native_manifest_paths(browser)? {
         match std::fs::remove_file(&path) {
             Ok(()) => println!("✓ Native host manifest removed: {}", path.display()),
@@ -433,5 +441,25 @@ pub(crate) async fn run_native_host() -> Result<(), String> {
                 });
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "flatpak"))]
+mod sandbox_tests {
+    use super::*;
+
+    #[test]
+    fn sandbox_registration_is_rejected_before_writing_browser_files() {
+        let error =
+            install_native_host_manifest("kaejmfabajnakpodjffipckmcpfpdenj", BrowserTarget::Both)
+                .unwrap_err();
+        assert!(error.contains("installed on the host"));
+    }
+
+    #[test]
+    fn sandbox_unregistration_is_rejected_before_removing_browser_files() {
+        assert!(uninstall_native_host_manifest(BrowserTarget::Both)
+            .unwrap_err()
+            .contains("from the host"));
     }
 }

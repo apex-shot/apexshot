@@ -7,10 +7,7 @@ fn warm_capture_disabled() -> bool {
 
 #[cfg(unix)]
 fn worker_socket_path() -> PathBuf {
-    let base = std::env::var_os("XDG_RUNTIME_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir);
-    base.join("apexshot-capture-worker.sock")
+    crate::app_identity::capture_runtime_dir().join("apexshot-capture-worker.sock")
 }
 
 #[cfg(unix)]

@@ -1,6 +1,7 @@
 #include "ScreenCapture.h"
 
 #include "request.h"
+#include "Sandbox.h"
 
 #include <QDBusConnection>
 #include <QDBusConnectionInterface>
@@ -25,9 +26,11 @@
 #include <QTimer>
 #include <QUuid>
 #include <QUrl>
+#include <QWidget>
 #include <QtMath>
 
 #include <cstdio>
+#include <memory>
 
 namespace {
 
@@ -57,6 +60,11 @@ bool savePngFast(const QImage& image, const QString& path, QString& outError)
 
 bool grabDesktopPixmap(QPixmap& outPixmap, QString& outError)
 {
+    if (isFlatpakSandboxed()) {
+        outError = QStringLiteral("Direct Qt screen capture is unavailable in Flatpak");
+        return false;
+    }
+
     QScreen* primary = QGuiApplication::primaryScreen();
     if (!primary) {
         outError = QStringLiteral("No primary screen available for fallback capture");
@@ -177,9 +185,25 @@ bool captureViaPortal(QString& outPortalPath, QString& outError, bool interactiv
 
     timeout.start();
 
+    QString parentWindow;
+    std::unique_ptr<QWidget> parentDummy;
+    if (isFlatpakSandboxed()) {
+        parentDummy = std::make_unique<QWidget>();
+        parentDummy->setAttribute(Qt::WA_DontShowOnScreen, true);
+        parentDummy->resize(1, 1);
+        parentDummy->show();
+        if (QGuiApplication::platformName().contains(QStringLiteral("wayland"),
+                                                     Qt::CaseInsensitive)) {
+            parentWindow = QStringLiteral("wayland:");
+        } else {
+            parentWindow = QStringLiteral("x11:0x%1")
+                             .arg(static_cast<qulonglong>(parentDummy->winId()), 0, 16);
+        }
+    }
+
     const auto callReply = screenshotInterface.call(
       QStringLiteral("Screenshot"),
-      QStringLiteral(""),
+      parentWindow,
       QMap<QString, QVariant>({ { QStringLiteral("handle_token"), token },
                                 { QStringLiteral("interactive"), interactive } }));
 
@@ -782,6 +806,13 @@ bool captureFullscreenToImage(QImage& outImage, QString& outError)
                 outImage.height());
         return true;
     }
+    if (isFlatpakSandboxed()) {
+        outError = portalError;
+        fprintf(stderr,
+                "apexshot-capture: Screenshot portal freeze failed (%s)\n",
+                portalError.toLocal8Bit().constData());
+        return false;
+    }
     fprintf(stderr,
             "apexshot-capture: Screenshot portal freeze failed (%s); trying Qt grab\n",
             portalError.toLocal8Bit().constData());
@@ -917,6 +948,10 @@ bool captureFullscreenToTempPngViaPortal(QString& outPath,
     QString portalPath;
     QString portalError;
     if (!captureViaPortal(portalPath, portalError, false)) {
+        if (isFlatpakSandboxed()) {
+            outError = portalError;
+            return false;
+        }
         // Fall back to in-process grab rather than failing hard on portal glitches.
         fprintf(stderr,
                 "apexshot-capture: Screenshot portal failed (%s); Qt grab fallback\n",

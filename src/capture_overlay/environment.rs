@@ -46,6 +46,9 @@ fn should_use_gtk_layer_shell_selector_from_env(
 }
 
 fn should_use_gtk_layer_shell_selector() -> bool {
+    if crate::app_identity::portal_only() {
+        return false;
+    }
     // Development-only route for visual parity testing on a desktop that would
     // normally take the Qt path (for example GNOME Wayland).
     if std::env::var_os("APEXSHOT_PREVIEW_RUST_CAPTURE_MENU").is_some() {
@@ -120,7 +123,7 @@ where
 }
 
 pub fn builtin_screenshot_overlay_active() -> bool {
-    if !is_gnome_session() {
+    if crate::app_identity::portal_only() || !is_gnome_session() {
         return false;
     }
 
@@ -148,4 +151,9 @@ pub fn builtin_screenshot_overlay_active() -> bool {
         let normalized = value.trim().trim_matches('"');
         matches!(normalized, "true" | "1")
     })
+}
+
+/// Fall back to the desktop selector if a sandbox lacks its bundled helper.
+pub fn requires_portal_still_capture() -> bool {
+    crate::app_identity::portal_only() && find_capture_binary().is_none()
 }

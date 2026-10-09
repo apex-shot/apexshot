@@ -59,9 +59,11 @@ pub fn build(content: &GtkBox) {
     hotkeys_title.set_halign(Align::Start);
     hotkeys_block.append(&hotkeys_title);
 
-    let hotkeys_hint = Label::new(Some(&t(
-        "Defaults below. Change them anytime in Settings → Shortcuts.",
-    )));
+    let hotkeys_hint = Label::new(Some(&if crate::app_identity::portal_only() {
+        t("These defaults require desktop GlobalShortcuts portal support and approval. Use the tray if shortcuts are unavailable.")
+    } else {
+        t("Defaults below. Change them anytime in Settings → Shortcuts.")
+    }));
     hotkeys_hint.set_halign(Align::Start);
     hotkeys_hint.set_wrap(true);
     hotkeys_hint.add_css_class("settings-sub-option");

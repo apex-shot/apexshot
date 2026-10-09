@@ -3,13 +3,12 @@
 // Freeze is taken before this UI (see main.cpp) so picker never appears in it.
 
 #include "MonitorPicker.h"
+#include "Sandbox.h"
 
 #include <QApplication>
 #include <QCloseEvent>
 #include <QCoreApplication>
 #include <QCursor>
-#include <QDBusConnection>
-#include <QDBusInterface>
 #include <QEvent>
 #include <QEventLoop>
 #include <QFocusEvent>
@@ -490,17 +489,8 @@ int selectMonitorIndex(const QList<QScreen*>& screens)
     if (panel->windowHandle()) {
         panel->windowHandle()->requestActivate();
     }
-    const auto requestShellFocus = []() {
-        QDBusInterface shellOverlay(
-          QStringLiteral("org.apexshot.ShellOverlay"),
-          QStringLiteral("/org/apexshot/ShellOverlay"),
-          QStringLiteral("org.apexshot.ShellOverlay"),
-          QDBusConnection::sessionBus());
-        if (shellOverlay.isValid()) {
-            shellOverlay.asyncCall(
-              QStringLiteral("FocusCaptureMenu"),
-              static_cast<qlonglong>(QCoreApplication::applicationPid()));
-        }
+    const auto requestShellFocus = [panelPtr]() {
+        requestShellOverlayFocus(panelPtr->windowTitle());
     };
     requestShellFocus();
     QTimer::singleShot(100, panel.get(), requestShellFocus);

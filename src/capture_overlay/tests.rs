@@ -448,6 +448,27 @@ mod tests {
         assert!(!detail.starts_with("apexshot-capture:"));
     }
 
+    #[cfg(feature = "flatpak")]
+    #[test]
+    fn sandbox_screenshot_dismissal_is_cancellation_not_capture_failure() {
+        assert!(matches!(
+            super::overlay_exit_error(
+                "--capture-screen",
+                2,
+                "apexshot-capture: fullscreen capture failed: Portal screenshot rejected: status=1",
+            ),
+            crate::overlay::SelectionError::Cancelled
+        ));
+        assert!(matches!(
+            super::overlay_exit_error(
+                "--capture-screen",
+                2,
+                "apexshot-capture: fullscreen capture failed: Portal screenshot rejected: status=2",
+            ),
+            crate::overlay::SelectionError::InitError(_)
+        ));
+    }
+
     #[test]
     fn save_capture_to_temp_png_round_trips_rgba_capture() {
         let capture = CaptureData::new(

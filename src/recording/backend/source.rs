@@ -53,7 +53,8 @@ pub(super) fn discard_recording_restore_tokens_in(dir: &std::path::Path) {
 /// Native `zkde_screencast` is opt-in only — it needs compositor authorization
 /// that often fails for third-party apps and caused confusing dual-UI / crashes.
 fn prefer_kde_native_screencast() -> bool {
-    std::env::var_os("APEXSHOT_KDE_NATIVE_SCREENCAST").is_some()
+    !crate::app_identity::portal_only()
+        && std::env::var_os("APEXSHOT_KDE_NATIVE_SCREENCAST").is_some()
         && crate::backend::kde_screencast::is_kde_native_screencast_preferred()
 }
 
@@ -126,6 +127,20 @@ pub(in crate::recording) async fn get_wayland_source(
         let proxy = Screencast::with_connection(conn.clone())
             .await
             .map_err(|e| RecordError::PortalError(e.to_string()))?;
+
+        let available_cursor_modes = proxy.available_cursor_modes().await.map_err(portal_err)?;
+        let cursor_mode = if available_cursor_modes.contains(cursor_mode) {
+            cursor_mode
+        } else if available_cursor_modes.contains(CursorMode::Hidden) {
+            eprintln!(
+                "[recording] Requested cursor mode {cursor_mode:?} is unavailable from this portal; recording without an embedded cursor."
+            );
+            CursorMode::Hidden
+        } else {
+            return Err(RecordError::UnsupportedBackend(
+                "ScreenCast portal does not offer a supported cursor mode".into(),
+            ));
+        };
 
         let session = proxy
             .create_session(CreateSessionOptions::default())

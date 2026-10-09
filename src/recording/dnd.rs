@@ -66,7 +66,7 @@ fn process_is_alive(pid: u32) -> bool {
 /// [`DndGuard`] could run. A live owner is left alone so concurrent ApexShot
 /// commands cannot interrupt an active recording's DND state.
 pub fn recover_stale_gnome_dnd() {
-    if !matches!(detect_desktop(), DesktopEnv::Gnome) {
+    if crate::app_identity::portal_only() || !matches!(detect_desktop(), DesktopEnv::Gnome) {
         return;
     }
     let Some(path) = recovery_path() else {
@@ -103,6 +103,9 @@ impl DndGuard {
     /// the previous state when dropped. Returns `None` if the desktop
     /// environment is unsupported.
     pub fn enable() -> Option<Self> {
+        if crate::app_identity::portal_only() {
+            return None;
+        }
         let desktop = detect_desktop();
         match desktop {
             DesktopEnv::Gnome => {

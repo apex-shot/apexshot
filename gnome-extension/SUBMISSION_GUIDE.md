@@ -8,13 +8,14 @@
 
 ## Building the package
 
-Only the six shipped files belong in the zip — no tests, no docs:
+Only runtime files belong in the zip — no tests or docs:
 
 ```bash
 cd gnome-extension
 zip apexshot-gnome-integration.zip \
   extension.js metadata.json \
-  cursor-classifier.js press-tracker.js shell-overlay.js window-list.js preview-stacking.js
+  cursor-classifier.js press-tracker.js shell-overlay.js window-list.js \
+  preview-stacking.js daemon-ownership.js
 ```
 
 Before uploading, run the review checks locally:
@@ -44,7 +45,7 @@ GI_TYPELIB_PATH=/usr/lib/x86_64-linux-gnu/mutter-18:/usr/lib/gnome-shell \
    - **Description**: Support for the ApexShot screenshot and screen recording app —
      dims the area outside a recording, lets ApexShot list and focus windows for its
      window picker, and keeps ApexShot's preview windows above other windows.
-   - **Version**: 4
+   - **Version**: 8
    - **Supported GNOME versions**: 46, 48, 49, 50
    - **Website**: https://github.com/apex-shot/apexshot
 4. Upload the zip and the screenshots.
@@ -58,13 +59,13 @@ GNOME Shell internals are touched. Review usually takes one to two weeks.
 To skip the official review, host the zip on GitHub Releases:
 
 ```bash
-gh release create gnome-extension-v4 gnome-extension/apexshot-gnome-integration.zip
+gh release create gnome-extension-v8 gnome-extension/apexshot-gnome-integration.zip
 ```
 
 Users then install with:
 
 ```bash
-wget https://github.com/apex-shot/apexshot/releases/download/gnome-extension-v4/apexshot-gnome-integration.zip
+wget https://github.com/apex-shot/apexshot/releases/download/gnome-extension-v8/apexshot-gnome-integration.zip
 gnome-extensions install apexshot-gnome-integration.zip
 gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 ```
@@ -73,7 +74,8 @@ gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 
 ```bash
 mkdir -p ~/.local/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io
-cp extension.js metadata.json cursor-classifier.js press-tracker.js shell-overlay.js window-list.js preview-stacking.js \
+cp extension.js metadata.json cursor-classifier.js press-tracker.js shell-overlay.js window-list.js \
+  preview-stacking.js daemon-ownership.js \
   ~/.local/share/gnome-shell/extensions/apexshot-gnome-integration@apexshot.github.io/
 gnome-extensions enable apexshot-gnome-integration@apexshot.github.io
 journalctl /usr/bin/gnome-shell -f | grep apexshot

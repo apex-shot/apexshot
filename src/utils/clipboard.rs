@@ -195,15 +195,11 @@ fn copy_bytes_via_external(
 /// Copy a file URI to the clipboard as `text/uri-list`.
 ///
 /// GUI callers (GTK main thread) use GDK's in-process clipboard; background
-/// callers fall back to `xclip`/`wl-copy`. Portal-only copies plain path text.
+/// callers fall back to bundled or system `xclip`/`wl-copy` clients.
 pub fn copy_uri_to_clipboard(path: &Path) -> Result<(), String> {
     let uri = url::Url::from_file_path(path)
         .map(|u| u.to_string())
         .map_err(|_| "Failed to convert path to file URI".to_string())?;
-
-    if crate::app_identity::portal_only() {
-        return copy_text_to_clipboard(&uri);
-    }
 
     if gtk_clipboard_set_provider(&gdk_file_provider(path)) {
         return Ok(());
@@ -281,18 +277,16 @@ fn normalize_to_png_bytes(image_data: &[u8]) -> Vec<u8> {
 }
 
 /// True when the in-process GDK clipboard is usable: on the GTK main thread
-/// with a display, outside Flatpak's portal-only path.
+/// with a display, including inside Flatpak.
 pub fn gdk_clipboard_available() -> bool {
-    !crate::app_identity::portal_only()
-        && on_gtk_main_thread()
-        && gtk4::gdk::Display::default().is_some()
+    on_gtk_main_thread() && gtk4::gdk::Display::default().is_some()
 }
 
 /// Copy an image file to the clipboard as a PNG image.
 ///
 /// GUI callers get an image + file-reference union on GDK's clipboard, so both
 /// image editors and file managers can paste it. Background callers use
-/// `xclip`/`wl-copy`; portal-only uses in-process arboard.
+/// bundled or system `xclip`/`wl-copy` clients.
 pub fn copy_image_to_clipboard(path: &Path) -> Result<(), String> {
     copy_image_to_clipboard_inner(path, true)
 }
@@ -305,10 +299,6 @@ pub fn copy_image_only_to_clipboard(path: &Path) -> Result<(), String> {
 
 fn copy_image_to_clipboard_inner(path: &Path, include_file_reference: bool) -> Result<(), String> {
     let image_data = std::fs::read(path).map_err(|e| format!("Failed to read image file: {e}"))?;
-
-    if crate::app_identity::portal_only() {
-        return copy_image_bytes_via_arboard(&image_data);
-    }
 
     let png_data = normalize_to_png_bytes(&image_data);
 
@@ -391,22 +381,6 @@ pub fn copy_screenshot_with_mode(path: &Path, mode: ScreenshotClipboardMode) -> 
             }
         }
     }
-}
-
-fn copy_image_bytes_via_arboard(image_data: &[u8]) -> Result<(), String> {
-    let img = image::load_from_memory(image_data)
-        .map_err(|e| format!("Failed to decode image for clipboard: {e}"))?
-        .to_rgba8();
-    let (width, height) = img.dimensions();
-    let mut clipboard =
-        arboard::Clipboard::new().map_err(|e| format!("Failed to access clipboard: {e}"))?;
-    clipboard
-        .set_image(arboard::ImageData {
-            width: width as usize,
-            height: height as usize,
-            bytes: img.into_raw().into(),
-        })
-        .map_err(|e| format!("Failed to set clipboard image: {e}"))
 }
 
 #[cfg(test)]

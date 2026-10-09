@@ -497,12 +497,10 @@ fn run_daemon_with_gtk_on_main_thread() {
                 let _ = reply.send(result);
             }
             GtkWork::CaptureAreaInit { reply } => {
-                // portal_only: interactive Screenshot portal (no apexshot-capture).
-                // Native: C++ / layer-shell area selector.
                 eprintln!(
                     "[gtk] CaptureAreaInit received — {}",
-                    if app_identity::portal_only() {
-                        "portal-only area capture"
+                    if apexshot::capture_overlay::requires_portal_still_capture() {
+                        "desktop portal selector"
                     } else {
                         "launching area selector"
                     }
@@ -514,8 +512,8 @@ fn run_daemon_with_gtk_on_main_thread() {
             GtkWork::CaptureCrosshair { reply } => {
                 eprintln!(
                     "[gtk] CaptureCrosshair received — {}",
-                    if app_identity::portal_only() {
-                        "portal-only interactive capture"
+                    if apexshot::capture_overlay::requires_portal_still_capture() {
+                        "desktop portal selector"
                     } else {
                         "launching Rust crosshair selector"
                     }
@@ -531,8 +529,8 @@ fn run_daemon_with_gtk_on_main_thread() {
             GtkWork::CaptureScreen { reply } => {
                 eprintln!(
                     "[gtk] CaptureScreen received — {}",
-                    if app_identity::portal_only() {
-                        "portal-only fullscreen capture"
+                    if apexshot::capture_overlay::requires_portal_still_capture() {
+                        "desktop portal capture"
                     } else {
                         "launching fullscreen capture"
                     }

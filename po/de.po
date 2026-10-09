@@ -2795,3 +2795,59 @@ msgstr "Breite"
 
 msgid "Word"
 msgstr "Wort"
+
+msgid "Available when your desktop supports the GlobalShortcuts portal"
+msgstr "Verfügbar, wenn Ihr Desktop das GlobalShortcuts-Portal unterstützt"
+
+msgid "Desktop notification settings are managed outside Flatpak."
+msgstr ""
+"Die Einstellungen für Desktop-Benachrichtigungen werden außerhalb von Flatpak verwaltet."
+
+msgid "Download GNOME Extension"
+msgstr "GNOME-Erweiterung herunterladen"
+
+msgid "Download extension archive"
+msgstr "Erweiterungsarchiv herunterladen"
+
+msgid "Enable GNOME Extension"
+msgstr "GNOME-Erweiterung aktivieren"
+
+msgid "Extension Enabled ✓"
+msgstr "Erweiterung aktiviert ✓"
+
+msgid "Extension installation failed — try again"
+msgstr "Installation der Erweiterung fehlgeschlagen — erneut versuchen"
+
+msgid "Extension is installed but inactive — enable it in GNOME Extensions"
+msgstr ""
+"Die Erweiterung ist installiert, aber inaktiv — aktivieren Sie sie in GNOME-Erweiterungen"
+
+msgid ""
+"Host-installed browsers need scripts/install-flatpak-browser-host.py run on the host. This bridge does not support browsers installed as Flatpaks."
+msgstr ""
+"Für auf dem Host installierte Browser muss scripts/install-flatpak-browser-host.py auf dem Host ausgeführt werden. Diese Brücke unterstützt keine als Flatpak installierten Browser."
+
+msgid ""
+"The GNOME extension is installed but not active. Use Enable GNOME Extension or enable it in GNOME Extensions."
+msgstr ""
+"Die GNOME-Erweiterung ist installiert, aber nicht aktiv. Verwenden Sie „GNOME-Erweiterung aktivieren“ oder aktivieren Sie sie in GNOME-Erweiterungen."
+
+msgid ""
+"The tray daemon starts when you finish. Capture from its menu; global hotkeys depend on desktop portal support and approval."
+msgstr ""
+"Der Dienst für das Symbol im Infobereich startet, wenn Sie fertig sind. Starten Sie Aufnahmen über sein Menü; globale Tastenkürzel hängen von der Unterstützung und Freigabe durch das Desktop-Portal ab."
+
+msgid ""
+"These defaults require desktop GlobalShortcuts portal support and approval. Use the tray if shortcuts are unavailable."
+msgstr ""
+"Diese Standardeinstellungen erfordern Unterstützung und Freigabe durch das GlobalShortcuts-Portal des Desktops. Verwenden Sie den Infobereich, wenn Tastenkürzel nicht verfügbar sind."
+
+msgid ""
+"This Flatpak cannot install extensions into your host desktop. Open the release page and download the GNOME extension archive, then install and enable it on the host in GNOME Extensions or run `gnome-extensions install --force ~/Downloads/apexshot-gnome-integration.zip` followed by `gnome-extensions enable apexshot-gnome-integration@apexshot.github.io` in a host terminal. ApexShot will detect it when the extension is enabled."
+msgstr ""
+"Dieses Flatpak kann keine Erweiterungen auf Ihrem Host-Desktop installieren. Öffnen Sie die Release-Seite und laden Sie das Archiv der GNOME-Erweiterung herunter. Installieren und aktivieren Sie es dann auf dem Host in GNOME-Erweiterungen oder führen Sie `gnome-extensions install --force ~/Downloads/apexshot-gnome-integration.zip` und anschließend `gnome-extensions enable apexshot-gnome-integration@apexshot.github.io` in einem Host-Terminal aus. ApexShot erkennt die Erweiterung, sobald sie aktiviert ist."
+
+msgid ""
+"You may need to log out and back in for the extension to appear in GNOME."
+msgstr ""
+"Möglicherweise müssen Sie sich ab- und wieder anmelden, damit die Erweiterung in GNOME erscheint."

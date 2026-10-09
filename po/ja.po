@@ -2745,3 +2745,56 @@ msgstr "幅"
 
 msgid "Word"
 msgstr "単語"
+
+msgid "Available when your desktop supports the GlobalShortcuts portal"
+msgstr "デスクトップがGlobalShortcutsポータルに対応している場合に利用できます"
+
+msgid "Desktop notification settings are managed outside Flatpak."
+msgstr "デスクトップの通知設定はFlatpakの外部で管理されます。"
+
+msgid "Download GNOME Extension"
+msgstr "GNOME拡張機能をダウンロード"
+
+msgid "Download extension archive"
+msgstr "拡張機能のアーカイブをダウンロード"
+
+msgid "Enable GNOME Extension"
+msgstr "GNOME拡張機能を有効にする"
+
+msgid "Extension Enabled ✓"
+msgstr "拡張機能が有効です ✓"
+
+msgid "Extension installation failed — try again"
+msgstr "拡張機能のインストールに失敗しました — もう一度お試しください"
+
+msgid "Extension is installed but inactive — enable it in GNOME Extensions"
+msgstr "拡張機能はインストール済みですが無効です — GNOME拡張機能アプリで有効にしてください"
+
+msgid ""
+"Host-installed browsers need scripts/install-flatpak-browser-host.py run on the host. This bridge does not support browsers installed as Flatpaks."
+msgstr ""
+"ホストにインストールされたブラウザーを使用するには、ホスト上でscripts/install-flatpak-browser-host.pyを実行する必要があります。このブリッジはFlatpakとしてインストールされたブラウザーには対応していません。"
+
+msgid ""
+"The GNOME extension is installed but not active. Use Enable GNOME Extension or enable it in GNOME Extensions."
+msgstr ""
+"GNOME拡張機能はインストール済みですが無効です。「GNOME拡張機能を有効にする」を使用するか、GNOME拡張機能アプリで有効にしてください。"
+
+msgid ""
+"The tray daemon starts when you finish. Capture from its menu; global hotkeys depend on desktop portal support and approval."
+msgstr ""
+"完了するとトレイのデーモンが起動します。そのメニューからキャプチャしてください。グローバルホットキーを使用するには、デスクトップポータルの対応と許可が必要です。"
+
+msgid ""
+"These defaults require desktop GlobalShortcuts portal support and approval. Use the tray if shortcuts are unavailable."
+msgstr ""
+"これらの既定値を使用するには、デスクトップのGlobalShortcutsポータルの対応と許可が必要です。ショートカットが利用できない場合はトレイを使用してください。"
+
+msgid ""
+"This Flatpak cannot install extensions into your host desktop. Open the release page and download the GNOME extension archive, then install and enable it on the host in GNOME Extensions or run `gnome-extensions install --force ~/Downloads/apexshot-gnome-integration.zip` followed by `gnome-extensions enable apexshot-gnome-integration@apexshot.github.io` in a host terminal. ApexShot will detect it when the extension is enabled."
+msgstr ""
+"このFlatpakはホストのデスクトップに拡張機能をインストールできません。リリースページを開いてGNOME拡張機能のアーカイブをダウンロードし、ホストのGNOME拡張機能アプリでインストールして有効にするか、ホストの端末で`gnome-extensions install --force ~/Downloads/apexshot-gnome-integration.zip`を実行した後、`gnome-extensions enable apexshot-gnome-integration@apexshot.github.io`を実行してください。拡張機能が有効になるとApexShotが検出します。"
+
+msgid ""
+"You may need to log out and back in for the extension to appear in GNOME."
+msgstr "GNOMEに拡張機能を表示するには、ログアウトしてから再度ログインする必要がある場合があります。"

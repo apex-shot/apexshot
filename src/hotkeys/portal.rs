@@ -12,6 +12,9 @@ pub(super) async fn register_portal_app_id(
     conn: &zbus::Connection,
     app_id: &str,
 ) -> anyhow::Result<()> {
+    if crate::app_identity::portal_only() {
+        return Ok(());
+    }
     // For unsandboxed applications, portal implementations may require associating the DBus peer
     // with an app_id that matches a .desktop file basename.
     let registry = zbus::Proxy::new(

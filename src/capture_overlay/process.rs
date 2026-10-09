@@ -53,8 +53,7 @@ fn run_capture_binary_cold(
 ) -> Result<Output, SelectionError> {
     let binary = find_capture_binary().ok_or_else(|| {
         SelectionError::InitError(if crate::app_identity::portal_only() {
-            "apexshot-capture is not shipped in Flatpak/portal-only builds; \
-             still capture must use the XDG Screenshot portal path."
+            "The bundled apexshot-capture helper is missing. Reinstall the Flatpak package."
                 .into()
         } else {
             "apexshot-capture binary not found. \

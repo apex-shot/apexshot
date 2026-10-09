@@ -175,7 +175,7 @@ pub fn install_autostart_entry_smart() -> anyhow::Result<std::path::PathBuf> {
 
 pub fn uninstall_autostart_entry() -> anyhow::Result<()> {
     if crate::app_identity::portal_only() {
-        let _ = request_background_autostart(false);
+        request_background_autostart(false)?;
         return Ok(());
     }
     let autostart_dir = autostart_dir()?;

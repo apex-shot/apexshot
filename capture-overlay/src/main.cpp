@@ -4,6 +4,7 @@
 #include "MonitorPicker.h"
 #include "RecordingControlsWindow.h"
 #include "ScreenCapture.h"
+#include "Sandbox.h"
 
 #include <QApplication>
 #include <QDateTime>
@@ -72,9 +73,8 @@ constexpr char kOverlayCancelRequest[] = "cancel";
 
 QString overlaySocketPath()
 {
-    const QString runtimeDir = qEnvironmentVariable("XDG_RUNTIME_DIR");
-    const QString baseDir = runtimeDir.isEmpty() ? QDir::tempPath() : runtimeDir;
-    return QDir(baseDir).filePath(QStringLiteral("apexshot-capture-overlay.sock"));
+    return QDir(runtimeIpcDirectory())
+      .filePath(QStringLiteral("apexshot-capture-overlay.sock"));
 }
 
 bool forwardOverlayRequestToExistingOverlay(const QString& socketPath, const char* request)
@@ -263,9 +263,8 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
 
 static QString workerSocketPath()
 {
-    const QString runtimeDir = qEnvironmentVariable("XDG_RUNTIME_DIR");
-    const QString baseDir = runtimeDir.isEmpty() ? QDir::tempPath() : runtimeDir;
-    return QDir(baseDir).filePath(QStringLiteral("apexshot-capture-worker.sock"));
+    return QDir(runtimeIpcDirectory())
+      .filePath(QStringLiteral("apexshot-capture-worker.sock"));
 }
 
 int runCaptureJob(QApplication& app, int argc, char* argv[]);
@@ -371,6 +370,12 @@ static QByteArray readSocketLine(QLocalSocket& socket, int timeoutMs)
 static int runWorkerServer(QApplication& app)
 {
     const QString sockPath = workerSocketPath();
+    if (!QDir().mkpath(QFileInfo(sockPath).absolutePath())) {
+        std::fprintf(stderr,
+                     "apexshot-capture: worker failed to create socket directory for %s\n",
+                     sockPath.toLocal8Bit().constData());
+        return 2;
+    }
     QLocalServer::removeServer(sockPath);
 
     QLocalServer server;
@@ -517,7 +522,14 @@ static int runWorkerServer(QApplication& app)
 
 int main(int argc, char* argv[])
 {
-    qputenv("QT_QPA_PLATFORM", "");
+    if (isFlatpakSandboxed()) {
+        if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")
+            && !qEnvironmentVariableIsEmpty("WAYLAND_DISPLAY")) {
+            qputenv("QT_QPA_PLATFORM", "wayland");
+        }
+    } else {
+        qputenv("QT_QPA_PLATFORM", "");
+    }
     qputenv("QT_IM_MODULE", "compose");
 
     bool workerMode = false;
@@ -536,8 +548,11 @@ int main(int argc, char* argv[])
         app.setFont(overlayFont);
     }
     app.setApplicationName("ApexShot Capture");
-    app.setDesktopFileName("io.github.codegoddy.apexshot");
-    app.setWindowIcon(QIcon::fromTheme("io.github.codegoddy.apexshot"));
+    const QString desktopFileName = isFlatpakSandboxed()
+        ? QStringLiteral("org.apexshot.ApexShot")
+        : QStringLiteral("io.github.codegoddy.apexshot");
+    app.setDesktopFileName(desktopFileName);
+    app.setWindowIcon(QIcon::fromTheme(desktopFileName));
 
     if (!QDBusConnection::sessionBus().isConnected()) {
         std::fprintf(stderr, "apexshot-capture: session bus not connected: %s\n",
@@ -780,6 +795,12 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             return kExitForwardedToExistingOverlay;
         }
 
+        if (!QDir().mkpath(QFileInfo(sessionSocketPath).absolutePath())) {
+            std::fprintf(stderr,
+                         "apexshot-capture: failed to create socket directory for %s\n",
+                         sessionSocketPath.toLocal8Bit().constData());
+            return 2;
+        }
         QLocalServer::removeServer(sessionSocketPath);
         if (!sessionServer.listen(sessionSocketPath)) {
             if (forwardOverlayRequestToExistingOverlay(sessionSocketPath, kOverlayFocusRequest)) {
