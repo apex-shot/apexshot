@@ -103,6 +103,15 @@ const DBUS_INTERFACE = `
       <arg type="i" name="monitor_x" direction="in"/>
       <arg type="i" name="monitor_y" direction="in"/>
     </method>
+    <method name="RegisterQuickAccessV2">
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="window_title" direction="in"/>
+      <arg type="x" name="pid" direction="in"/>
+    </method>
+    <method name="RegisterCaptureOverlayV2">
+      <arg type="s" name="app_id" direction="in"/>
+      <arg type="s" name="window_title" direction="in"/>
+    </method>
     <method name="StartPointerTrack"/>
     <method name="StartPointerTrackV3">
       <arg type="s" name="daemon_name" direction="in"/>
@@ -158,7 +167,8 @@ const CAPTURE_COUNTDOWN_LABEL_STYLE = 'color: white; font-size: 22px; font-weigh
 /// rect) parented to `global.window_group`, so it dims windows without
 /// covering the shell chrome.
 export class ShellOverlayService {
-    constructor() {
+    constructor(previewStacker) {
+        this._previewStacker = previewStacker;
         this._dbus = null;
         this._connection = null;
         this._nameIds = [];
@@ -398,6 +408,36 @@ export class ShellOverlayService {
         this._positionQuickAccess(appId, windowTitle, pid, monitorX, monitorY);
     }
 
+    RegisterQuickAccessV2(appId, windowTitle, pid) {
+        if (!appId || !windowTitle)
+            return;
+        this._positionQuickAccess(appId, windowTitle, pid, null, null);
+    }
+
+    RegisterCaptureOverlayV2(appId, windowTitle) {
+        if (!this._isFlatpakAppId(appId) || windowTitle !== 'ApexShot Capture Overlay')
+            return;
+
+        let attempts = 0;
+        const register = () => {
+            const windows = global.get_window_actors()
+                .map(actor => actor.meta_window)
+                .filter(window => window && window.get_title() === windowTitle &&
+                    this._windowHasAppId(window, appId));
+            if (windows.length === 0) {
+                attempts++;
+                return attempts < 20 ? GLib.SOURCE_CONTINUE : GLib.SOURCE_REMOVE;
+            }
+
+            for (const window of windows)
+                this._previewStacker.registerCaptureUiWindow(window);
+            return GLib.SOURCE_REMOVE;
+        };
+
+        if (register() === GLib.SOURCE_CONTINUE)
+            GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, register);
+    }
+
     _findActor(titles, appId, pid) {
         const candidates = global.get_window_actors().filter(candidate => {
             const window = candidate.meta_window;
@@ -447,6 +487,9 @@ export class ShellOverlayService {
             }
 
             const window = actor.meta_window;
+            this._previewStacker.registerCaptureUiWindow(window);
+            if (monitorX === null || monitorY === null)
+                return GLib.SOURCE_REMOVE;
             window.move_frame(true, monitorX, monitorY);
             window.make_above();
             if (typeof window.raise === 'function')

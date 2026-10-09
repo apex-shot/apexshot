@@ -115,6 +115,21 @@
                 background: #eef0f5;
             }
 
+            .editor-root.editor-theme-light .editor-text-floating-bar {
+                background-color: #eef0f5;
+                color: #1d2129;
+                border-color: alpha(#111827, 0.10);
+            }
+
+            .editor-root.editor-theme-light .editor-number-floating-bar .editor-number-bar-stepper {
+                background: alpha(#111827, 0.04);
+            }
+
+            .editor-root.editor-theme-light .editor-obfuscate-intensity-slider trough,
+            .editor-root.editor-theme-light .editor-obfuscate-intensity-slider highlight {
+                background-color: alpha(#111827, 0.20);
+            }
+
             .editor-root.editor-theme-light .editor-motion-confirm-card {
                 background: #ffffff;
             }
@@ -561,6 +576,22 @@
                 background: #ffffff;
                 color: #1d2129;
                 border: 1px solid alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light popover.editor-popover > contents {
+                background-color: #ffffff;
+                color: #1d2129;
+                border-color: alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light button.editor-popover-list-item {
+                color: alpha(#1d2129, 0.85);
+            }
+            .editor-root.editor-theme-light button.editor-popover-list-item:hover {
+                background-color: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-popover-list-item:active {
+                background-color: alpha(#111827, 0.10);
+                color: #1d2129;
             }
             .editor-root.editor-theme-light .editor-popover-list row:hover,
             .editor-root.editor-theme-light modelbutton:hover {

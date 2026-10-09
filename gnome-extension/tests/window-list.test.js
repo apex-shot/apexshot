@@ -30,6 +30,7 @@ function window(overrides) {
         minimized: false,
         skipTaskbar: false,
         wmClass: '',
+        captureUi: false,
     }, overrides);
 }
 
@@ -55,6 +56,25 @@ runTest('window list drops recording overlays and windows outside the window lis
 
     assertEqual(payload.length, 1, 'only the normal ApexShot window should be offered to the picker');
     assertEqual(payload[0].id, 10, 'the normal ApexShot window should be listed');
+});
+
+runTest('window list excludes tracked capture UI but keeps regular editors and unrelated titles', () => {
+    const payload = buildWindowListPayload([
+        window({id: 20, title: 'ApexShot', app: 'ApexShot',
+            wmClass: 'io.github.codegoddy.apexshot'}),
+        window({id: 21, title: 'ApexShot Editor', app: 'ApexShot',
+            wmClass: 'org.apexshot.ApexShot'}),
+        window({id: 22, title: 'ApexShot capture overlay', app: 'Unrelated app',
+            wmClass: 'org.example.unrelated'}),
+        window({id: 23, title: 'ApexShot Preview', app: 'ApexShot', captureUi: true}),
+        window({id: 24, title: 'ApexShot Capture Overlay', app: 'ApexShot', captureUi: true}),
+    ]);
+
+    assertEqual(payload.length, 3,
+        'only tracked transient UI should be hidden; regular ApexShot and unrelated windows remain');
+    assertEqual(payload[0].id, 20, 'normal ApexShot windows should remain listed');
+    assertEqual(payload[1].id, 21, 'the regular editor should remain listed');
+    assertEqual(payload[2].id, 22, 'a matching title alone should not hide an unrelated app');
 });
 
 runTest('window list clamps sizes so the picker can always lay out a card', () => {

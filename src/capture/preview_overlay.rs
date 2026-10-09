@@ -625,9 +625,7 @@ fn setup_preview_window(
     window.present();
     probe.log("after-window-present");
     if is_gnome_wayland_session() {
-        if let Some(display) = target_display {
-            request_gnome_preview_position(display);
-        }
+        register_gnome_preview(target_display);
     }
 
     let use_fallback_input_region = !layer_shell_active;
@@ -1061,11 +1059,21 @@ fn setup_preview_window(
     }
 }
 
-fn request_gnome_preview_position(display: CaptureDisplay) {
+fn register_gnome_preview(display: Option<CaptureDisplay>) {
     let pid = std::process::id() as i64;
     let window_title = t(PREVIEW_TRACKED_TITLE);
     std::thread::spawn(move || {
         let Ok(connection) = zbus::blocking::Connection::session() else {
+            return;
+        };
+        let _ = connection.call_method(
+            Some(crate::gnome_shell::shell_overlay_bus_name()),
+            "/org/apexshot/ShellOverlay",
+            Some("org.apexshot.ShellOverlay"),
+            "RegisterQuickAccessV2",
+            &(crate::app_identity::app_id(), window_title.as_str(), pid),
+        );
+        let Some(display) = display else {
             return;
         };
         if crate::app_identity::portal_only() {
@@ -1927,6 +1935,36 @@ mod tests {
                 && production.contains("emit_tracked_window_opened")
                 && production.contains("should_emit_extension_events(layer_shell_active)"),
             "GNOME preview must skip layer-shell and announce the window to the helper extension"
+        );
+    }
+
+    #[test]
+    fn gnome_preview_registration_does_not_require_monitor_metadata_or_pinning() {
+        let source = include_str!("preview_overlay.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(production.contains("register_gnome_preview(target_display);"));
+        let registration = production
+            .split("fn register_gnome_preview(")
+            .nth(1)
+            .unwrap();
+        assert!(
+            registration.find("\"RegisterQuickAccessV2\"").unwrap()
+                < registration.find("let Some(display) = display").unwrap()
+        );
+        let companion = include_str!("../../gnome-extension/shell-overlay.js");
+        assert!(companion.contains("<method name=\"RegisterQuickAccessV2\">"));
+        assert!(
+            companion.contains("this._positionQuickAccess(appId, windowTitle, pid, null, null)")
+        );
+        let placement = companion
+            .split("_positionQuickAccess(appId, windowTitle, pid, monitorX, monitorY) {")
+            .nth(1)
+            .unwrap();
+        assert!(
+            placement.find("registerCaptureUiWindow(window)").unwrap()
+                < placement
+                    .find("if (monitorX === null || monitorY === null)")
+                    .unwrap()
         );
     }
 

@@ -357,6 +357,63 @@ mod tests {
     }
 
     #[test]
+    fn tracked_overlay_title_matches_the_qt_window() {
+        let session = include_str!("session.rs");
+        let opened_event = session
+            .split("emit_tracked_window_opened(")
+            .nth(1)
+            .unwrap()
+            .split(')')
+            .next()
+            .unwrap();
+        let overlay = include_str!("../../capture-overlay/src/CaptureOverlay.cpp");
+        assert!(opened_event.contains("\"ApexShot Capture Overlay\""));
+        assert!(overlay.contains("setWindowTitle(QStringLiteral(\"ApexShot Capture Overlay\"));"));
+    }
+
+    #[test]
+    fn flatpak_capture_overlay_registration_uses_the_shell_method() {
+        let session = include_str!("session.rs");
+        assert!(session.contains("register_capture_overlay(crate::app_identity::app_id());"));
+
+        let integration = include_str!("../gnome_integration/mod.rs");
+        assert!(integration.contains("\"RegisterCaptureOverlayV2\""));
+
+        let shell_overlay = include_str!("../../gnome-extension/shell-overlay.js");
+        assert!(shell_overlay.contains("<method name=\"RegisterCaptureOverlayV2\">"));
+        assert!(shell_overlay.contains("window.get_title() === windowTitle"));
+        assert!(shell_overlay.contains("this._windowHasAppId(window, appId)"));
+        assert!(shell_overlay.contains("this._previewStacker.registerCaptureUiWindow(window)"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn warm_worker_ping_returns_the_reused_helpers_process_identity() {
+        assert_eq!(
+            super::parse_worker_ping_pid(r#"{"ok":true,"pid":1234}"#).unwrap(),
+            1234
+        );
+        let worker = include_str!("worker.rs");
+        assert!(worker.contains("let pid = ensure_warm_worker_running()?;"));
+        assert!(worker.contains("interactive_session.attach_child_pid(pid);"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn warm_worker_ping_rejects_missing_or_invalid_process_identities() {
+        for payload in [
+            r#"{"ok":true}"#,
+            r#"{"ok":false,"pid":1234}"#,
+            r#"{"ok":true,"pid":0}"#,
+            r#"{"ok":true,"pid":-1}"#,
+            r#"{"ok":true,"pid":"1234"}"#,
+            "invalid JSON",
+        ] {
+            assert!(super::parse_worker_ping_pid(payload).is_err(), "{payload}");
+        }
+    }
+
+    #[test]
     fn build_area_init_args_includes_screenshot_selection_settings() {
         let config = AppConfig {
             screenshot_freeze_screen: false,
