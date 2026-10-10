@@ -129,7 +129,7 @@
 
             .recording-editor-crop-dialog .recording-editor-primary-button {
                 font-weight: 600;
-                background: #B05C38;
+                background: #ff670d;
                 color: white;
                 transition: none;
             }
@@ -142,7 +142,7 @@
 
             .recording-editor-crop-dialog .recording-editor-primary-button:hover,
             .recording-editor-crop-dialog .recording-editor-primary-button:hover:focus {
-                background: #c06540;
+                background: #ff7c2f;
                 color: white;
             }
 
@@ -228,7 +228,7 @@
             }
 
             .editor-theme-light.recording-editor-root scale highlight {
-                background: #b05c38;
+                background: #ff670d;
                 box-shadow: none;
                 outline: none;
             }
@@ -238,7 +238,7 @@
             .editor-theme-light.recording-editor-root scale slider:active,
             .editor-theme-light.recording-editor-root scale:focus slider,
             .editor-theme-light.recording-editor-root scale:focus-within slider {
-                background: #b05c38;
+                background: #ff670d;
                 background-image: none;
                 border: none;
                 box-shadow: none;
@@ -264,8 +264,8 @@
             .editor-theme-light.recording-editor-root checkbutton:checked check,
             .editor-theme-light.recording-editor-root checkbutton check:checked,
             .editor-theme-light.recording-editor-root checkbutton.recording-editor-audio-choice check:checked {
-                background-color: #b05c38;
-                border-color: #b05c38;
+                background-color: #ff670d;
+                border-color: #ff670d;
                 color: #ffffff;
             }
 
@@ -304,7 +304,7 @@
             }
 
             .editor-theme-light .recording-editor-window-controls {
-                background: @recording-editor-surface-light;
+                background: transparent;
                 border-bottom: none;
             }
 
@@ -327,7 +327,7 @@
 
             .editor-theme-light button.recording-editor-title-upload:hover {
                 background: alpha(#111827, 0.06);
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light .recording-editor-title-entry {
@@ -425,7 +425,7 @@
             .editor-theme-light button.recording-editor-player-play:hover:focus,
             .editor-theme-light button.recording-editor-player-play:active {
                 background: transparent;
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light button.recording-editor-player-play image {
@@ -435,7 +435,7 @@
             .editor-theme-light button.recording-editor-player-play:hover image,
             .editor-theme-light button.recording-editor-player-play:hover:focus image,
             .editor-theme-light button.recording-editor-player-play:active image {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light button.recording-editor-aspect-button {

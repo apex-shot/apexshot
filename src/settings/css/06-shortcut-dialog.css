@@ -33,7 +33,7 @@
 
             .shortcut-capture-listening-icon {
                 font-size: 56px;
-                color: #e8764a;
+                color: #ff7c2f;
                 margin-top: 14px;
                 margin-bottom: 10px;
             }
@@ -77,12 +77,12 @@
             }
 
             .shortcut-capture-dialog button.shortcut-capture-primary-btn {
-                background: #b05c38;
+                background: #ff670d;
                 color: white;
             }
 
             .shortcut-capture-dialog button.shortcut-capture-primary-btn:hover {
-                background: #c06540;
+                background: #ff7c2f;
             }
 
             .shortcut-capture-dialog button.shortcut-capture-primary-btn:disabled {
@@ -131,7 +131,7 @@
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-listening-icon {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .shortcut-capture-dialog.editor-theme-light .shortcut-capture-keycap {
@@ -150,12 +150,12 @@
             }
 
             .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-primary-btn {
-                background: #b05c38;
+                background: #ff670d;
                 color: white;
             }
 
             .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-primary-btn:hover {
-                background: #c06540;
+                background: #ff7c2f;
             }
 
             .shortcut-capture-dialog.editor-theme-light button.shortcut-capture-primary-btn:disabled {

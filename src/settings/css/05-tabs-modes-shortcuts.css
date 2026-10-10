@@ -26,8 +26,8 @@
             }
 
             .editor-root.editor-theme-light .mode-preview-box.active {
-                border-color: #b05c38;
-                background-color: alpha(#b05c38, 0.08);
+                border-color: #ff670d;
+                background-color: alpha(#ff670d, 0.08);
                 box-shadow: 0 4px 12px alpha(black, 0.12);
             }
 
@@ -60,7 +60,7 @@
             }
 
             .recording-tab-button.active {
-                background-color: #b05c38;
+                background-color: #ff670d;
                 color: white;
                 box-shadow: 0 1px 3px alpha(black, 0.2);
             }
@@ -93,8 +93,8 @@
             }
 
             .mode-preview-box.active {
-                border-color: #b05c38;
-                background-color: alpha(#b05c38, 0.08);
+                border-color: #ff670d;
+                background-color: alpha(#ff670d, 0.08);
                 box-shadow: 0 4px 12px alpha(black, 0.3);
             }
 
@@ -154,8 +154,8 @@
             }
 
             .editor-root.editor-theme-light .shortcuts-record-btn:active {
-                background-color: alpha(#b05c38, 0.10);
-                border-color: alpha(#b05c38, 0.35);
+                background-color: alpha(#ff670d, 0.10);
+                border-color: alpha(#ff670d, 0.35);
             }
 
             .shortcuts-tip {

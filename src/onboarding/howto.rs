@@ -1,63 +1,26 @@
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Label, Orientation};
 
-use super::ui::feature_card_list;
-use crate::capture::editor::window::icon_names::custom;
+use super::ui::{escape_markup, heading, tip_block};
+use super::Nav;
 use crate::config::load_config;
 use crate::daemon::{ensure_daemon_running, trigger_daemon_action_sync};
-use crate::i18n::{self, t, tfmt};
+use crate::i18n::t;
 
-pub fn build(content: &GtkBox) {
-    let title = Label::new(None);
-    title.set_markup(&i18n::markup_title("How to capture"));
-    title.set_halign(Align::Center);
-    title.set_margin_bottom(8);
-    content.append(&title);
-
-    let subtitle = Label::new(Some(&t(
-        "ApexShot runs in the background with a tray icon and hotkeys.\nAfter setup, you do not need to open Settings every time.",
-    )));
-    subtitle.set_halign(Align::Center);
-    subtitle.set_wrap(true);
-    subtitle.set_justify(gtk4::Justification::Center);
-    subtitle.set_width_request(520);
-    subtitle.add_css_class("settings-sub-option");
-    subtitle.set_margin_bottom(12);
-    content.append(&subtitle);
+pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
+    body.append(&heading(
+        &t("How to capture"),
+        &t("ApexShot runs in the background with a tray icon and hotkeys.\nAfter setup, you do not need to open Settings every time."),
+    ));
 
     let config = load_config().sanitized();
     let area = display_shortcut(&config.shortcut_capture_area, "Shift+Super+4");
     let screen = display_shortcut(&config.shortcut_capture_fullscreen, "Shift+Super+3");
     let record = display_shortcut(&config.shortcut_open_recording_ui, "Ctrl+Alt+R");
 
-    let tray_title = t("Tray icon");
-    let tray_body = t("Right-click for Area, Screen, Window, and Record");
-    let menu_title = t("App menu");
-    let menu_body = t("Opening ApexShot shows Settings; captures stay on tray and hotkeys");
-    let tips = feature_card_list(&[
-        (
-            custom::OVERLAPPING_WINDOWS_SYMBOLIC,
-            tray_title.as_str(),
-            tray_body.as_str(),
-        ),
-        (
-            custom::SETTINGS_SYMBOLIC,
-            menu_title.as_str(),
-            menu_body.as_str(),
-        ),
-    ]);
-    tips.set_margin_bottom(14);
-    content.append(&tips);
-
-    // Hotkeys table
-    let hotkeys_block = GtkBox::new(Orientation::Vertical, 6);
-    hotkeys_block.set_halign(Align::Center);
-    hotkeys_block.set_width_request(480);
-
-    let hotkeys_title = Label::new(None);
-    hotkeys_title.set_markup(&i18n::markup_bold("Hotkeys"));
-    hotkeys_title.set_halign(Align::Start);
-    hotkeys_block.append(&hotkeys_title);
+    let hotkeys_block = GtkBox::new(Orientation::Vertical, 8);
+    hotkeys_block.set_margin_top(28);
+    hotkeys_block.set_halign(Align::Fill);
 
     let hotkeys_hint = Label::new(Some(&if crate::app_identity::portal_only() {
         t("These defaults require desktop GlobalShortcuts portal support and approval. Use the tray if shortcuts are unavailable.")
@@ -65,29 +28,36 @@ pub fn build(content: &GtkBox) {
         t("Defaults below. Change them anytime in Settings → Shortcuts.")
     }));
     hotkeys_hint.set_halign(Align::Start);
+    hotkeys_hint.set_xalign(0.0);
     hotkeys_hint.set_wrap(true);
     hotkeys_hint.add_css_class("settings-sub-option");
-    hotkeys_hint.set_margin_bottom(2);
     hotkeys_block.append(&hotkeys_hint);
 
     let frame = GtkBox::new(Orientation::Vertical, 0);
     frame.add_css_class("settings-table-frame");
-    frame.set_halign(Align::Fill);
+    frame.add_css_class("onboarding-hotkey-table");
     frame.set_hexpand(true);
-
-    // Header row
-    frame.append(&build_hotkey_row(&t("Action"), &t("Shortcut"), true, false));
-    frame.append(&build_hotkey_row(&t("Area capture"), &area, false, false));
-    frame.append(&build_hotkey_row(&t("Full screen"), &screen, false, true));
-    frame.append(&build_hotkey_row(&t("Record UI"), &record, false, false));
-
+    frame.append(&build_hotkey_row(&t("Action"), &t("Shortcut"), true));
+    frame.append(&build_hotkey_row(&t("Area capture"), &area, false));
+    frame.append(&build_hotkey_row(&t("Full screen"), &screen, false));
+    frame.append(&build_hotkey_row(&t("Record UI"), &record, false));
     hotkeys_block.append(&frame);
-    content.append(&hotkeys_block);
+    body.append(&hotkeys_block);
+
+    let tips = GtkBox::new(Orientation::Vertical, 14);
+    tips.set_margin_top(24);
+    tips.append(&tip_block(
+        &t("Tray icon"),
+        &t("Right-click for Area, Screen, Window, and Record"),
+    ));
+    tips.append(&tip_block(
+        &t("App menu"),
+        &t("Opening ApexShot shows Settings; captures stay on tray and hotkeys"),
+    ));
+    body.append(&tips);
 
     let try_btn = Button::with_label(&t("Take a test screenshot"));
-    try_btn.add_css_class("settings-primary-btn");
-    try_btn.set_halign(Align::Center);
-    try_btn.set_margin_top(28);
+    try_btn.add_css_class("secondary-settings-button");
     try_btn.set_tooltip_text(Some(&t(
         "Starts the tray daemon if needed, then takes a full screenshot",
     )));
@@ -113,33 +83,27 @@ pub fn build(content: &GtkBox) {
             }
         });
     });
-    content.append(&try_btn);
+    actions.append(&try_btn);
 
-    let hint = Label::new(Some(&t(
-        "Optional. You can skip this and try a capture after finishing setup.",
-    )));
-    hint.set_halign(Align::Center);
-    hint.set_wrap(true);
-    hint.set_margin_top(10);
-    hint.add_css_class("dim-label");
-    content.append(&hint);
+    let continue_btn = Button::with_label(&t("Continue"));
+    continue_btn.add_css_class("settings-primary-btn");
+    let advance = nav.advance.clone();
+    continue_btn.connect_clicked(move |_| advance());
+    actions.append(&continue_btn);
 }
 
 fn display_shortcut(value: &str, fallback: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        tfmt("{shortcut} (default)", &[("shortcut", fallback)])
+        fallback.to_string()
     } else {
         trimmed.to_string()
     }
 }
 
-fn build_hotkey_row(action: &str, shortcut: &str, is_header: bool, muted: bool) -> GtkBox {
+fn build_hotkey_row(action: &str, shortcut: &str, is_header: bool) -> GtkBox {
     let row = GtkBox::new(Orientation::Horizontal, 16);
     row.add_css_class("settings-table-row");
-    if muted {
-        row.add_css_class("settings-table-row-muted");
-    }
     row.set_hexpand(true);
     row.set_halign(Align::Fill);
 
@@ -156,7 +120,6 @@ fn build_hotkey_row(action: &str, shortcut: &str, is_header: bool, muted: bool) 
     action_label.set_xalign(0.0);
     action_label.set_halign(Align::Start);
     action_label.set_hexpand(true);
-    action_label.set_width_request(160);
 
     let shortcut_box = GtkBox::new(Orientation::Horizontal, 4);
     shortcut_box.set_halign(Align::End);
@@ -201,10 +164,4 @@ fn build_hotkey_row(action: &str, shortcut: &str, is_header: bool, muted: bool) 
     row.append(&action_label);
     row.append(&shortcut_box);
     row
-}
-
-fn escape_markup(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }

@@ -118,4 +118,14 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn settings_window_controls_inherit_the_root_surface() {
+        assert!(SETTINGS_CSS.contains(
+            ".settings-window-controls {\n                min-height: 0;\n                padding: 0;\n                background: transparent;"
+        ));
+        assert!(SETTINGS_CSS.contains(
+            ".editor-root.editor-theme-light .settings-window-controls {\n                background: transparent;"
+        ));
+    }
 }

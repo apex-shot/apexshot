@@ -142,7 +142,7 @@ pub fn build_about_section() -> AboutSettingsWidgets {
         open_in_browser(KOFI_URL);
     });
 
-    let cloud_note = Button::with_label(&t("Cloud is a separate paid product"));
+    let cloud_note = Button::with_label(&t("Support ApexShot / Go Pro"));
     cloud_note.add_css_class("about-link-button");
     cloud_note.set_halign(Align::Center);
     cloud_note.set_tooltip_text(Some(&t(

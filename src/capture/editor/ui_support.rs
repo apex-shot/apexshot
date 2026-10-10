@@ -759,9 +759,20 @@ mod tests {
 
     use super::{
         arrow_style_toolbar_icon, custom_toolbar_icon_inset, toolbar_icon_size, EditorToolIcon,
+        EDITOR_CSS,
     };
     use crate::capture::editor::types::ArrowStyle;
     use gtk4::prelude::StaticType;
+
+    #[test]
+    fn editor_toolbar_inherits_the_root_surface_in_both_themes() {
+        assert!(EDITOR_CSS.contains(
+            ".editor-root.editor-theme-dark .editor-toolbar {\n                background-color: transparent;"
+        ));
+        assert!(EDITOR_CSS.contains(
+            ".editor-root.editor-theme-light .editor-toolbar {\n                background-color: transparent;"
+        ));
+    }
 
     #[test]
     fn window_drag_treats_color_chip_as_interactive() {
@@ -941,7 +952,7 @@ mod tests {
         let production_source = super::EDITOR_CSS;
         assert!(
             production_source.contains("button.editor-inspector-tab-button {\n                min-height: 20px;\n                padding: 0;\n                border-radius: 0;\n                border: none;\n                background: transparent;")
-                && production_source.contains("button.editor-inspector-tab-button.active-inspector-tab {\n                background: transparent;\n                border: none;\n                color: #b05c38;")
+                && production_source.contains("button.editor-inspector-tab-button.active-inspector-tab {\n                background: transparent;\n                border: none;\n                color: #ff670d;")
                 && production_source.contains(".editor-inspector-tabs {\n                margin-top: 16px;\n                margin-bottom: 12px;")
                 && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && production_source.contains(".editor-inspector-placeholder-shell {\n                min-width: 210px;")
@@ -956,7 +967,7 @@ mod tests {
         let production_source = super::EDITOR_CSS;
         assert!(
             production_source.contains("editor-arrow-inspector-option-active")
-                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #b05c38;"),
+                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #ff670d;"),
             "Arrow inspector selection should use a subtle row surface plus an orange tick indicator",
         );
     }
@@ -966,7 +977,7 @@ mod tests {
         let production_source = super::EDITOR_CSS;
         assert!(
             production_source.contains("editor-text-inspector-option-active")
-                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #b05c38;")
+                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #ff670d;")
                 && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && !production_source.contains("TEXT_SIDEBAR_WIDTH"),
             "Text inspector rows should mirror Arrow selection styling without introducing a new sidepanel width path",
@@ -978,7 +989,7 @@ mod tests {
         let production_source = super::EDITOR_CSS;
         assert!(
             production_source.contains("editor-obfuscate-inspector-option-active")
-                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #b05c38;")
+                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #ff670d;")
                 && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && !production_source.contains("OBFUSCATE_SIDEBAR_WIDTH"),
             "Obfuscate inspector rows should use the shared sidepanel language without introducing a new width path",
@@ -991,7 +1002,7 @@ mod tests {
         assert!(
             production_source.contains("editor-number-style-option-active")
                 && production_source.contains("editor-number-size-option-active")
-                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #b05c38;")
+                && production_source.contains(".editor-arrow-inspector-check,\n            .editor-text-inspector-check,\n            .editor-obfuscate-inspector-check,\n            .editor-number-style-check,\n            .editor-number-size-check {\n                color: #ff670d;")
                 && production_source.contains(".editor-right-inspector {\n                min-width: 210px;")
                 && !production_source.contains("NUMBER_SIDEBAR_WIDTH"),
             "Number inspector rows should match the migrated sidepanel surface language without introducing a new width path",
@@ -1017,7 +1028,7 @@ mod tests {
         let production_source = super::EDITOR_CSS;
         assert!(
             production_source.contains("editor-crop-inspector-option-active")
-                && production_source.contains(".editor-crop-inspector-check {\n                color: #b05c38;")
+                && production_source.contains(".editor-crop-inspector-check {\n                color: #ff670d;")
                 && production_source.contains(".editor-crop-dimensions-row {\n                padding: 12px 0;"),
             "Crop inspector should use the same restrained inspector surface language as the other side-panel tools",
         );
@@ -1056,10 +1067,10 @@ mod tests {
         let production_source = super::EDITOR_CSS;
         assert!(
             production_source.contains("button.editor-add-to-colors-button {")
-                && production_source.contains("background: #B05C38;")
+                && production_source.contains("background: #ff670d;")
                 && production_source.contains("button.editor-add-to-colors-button:hover {\n                background: #C66B4A;")
                 && production_source.contains("button.editor-add-to-colors-button:active {\n                background: #8A4A2D;"),
-            "Add to colors button should use the #B05C38 editor accent states",
+            "Add to colors button should use the #ff670d editor accent states",
         );
     }
 

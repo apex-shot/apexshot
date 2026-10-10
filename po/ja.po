@@ -2798,3 +2798,125 @@ msgstr ""
 msgid ""
 "You may need to log out and back in for the extension to appear in GNOME."
 msgstr "GNOMEに拡張機能を表示するには、ログアウトしてから再度ログインする必要がある場合があります。"
+
+msgid "Back"
+msgstr "戻る"
+
+msgid "Cloud sharing"
+msgstr "クラウド共有"
+
+msgid "Connect ApexShot Cloud"
+msgstr "ApexShot Cloud を接続"
+
+msgid "Connect your account"
+msgstr "アカウントを接続"
+
+msgid "Copy code"
+msgstr "コードをコピー"
+
+msgid "Free"
+msgstr "無料"
+
+msgid "Manage your account or disconnect in Settings → Cloud."
+msgstr "アカウントの管理や接続解除は「設定 → クラウド」から行えます。"
+
+msgid ""
+"Not now? Skip with Next. Connect later from Settings → Cloud, or self-host XBackBone."
+msgstr "今はしない？「次へ」でスキップできます。後で「設定 → クラウド」から接続するか、XBackBone をセルフホストできます。"
+
+msgid "Open browser"
+msgstr "ブラウザを開く"
+
+msgid "Optional · capture stays free"
+msgstr "任意 · キャプチャは無料のまま"
+
+msgid "{plan} plan"
+msgstr "{plan} プラン"
+
+msgid "Starting…"
+msgstr "開始しています…"
+
+msgid "Try again"
+msgstr "再試行"
+
+msgid ""
+"Turn a capture into a link you can paste anywhere. Everything else keeps working offline."
+msgstr "キャプチャをどこにでも貼れるリンクに。それ以外はオフラインでも動作します。"
+
+msgid "Uploads are on: your next screenshot gets a share link copied for you."
+msgstr "アップロードが有効です。次のキャプチャでは共有リンクが自動でコピーされます。"
+
+msgid "Waiting for you to authorize…"
+msgstr "承認を待っています…"
+
+msgid "Could not open billing"
+msgstr "請求ページを開けませんでした"
+
+msgid "Go Pro"
+msgstr "Pro にアップグレード"
+
+msgid "Keep working"
+msgstr "作業を続ける"
+
+msgid "Support ApexShot / Go Pro"
+msgstr "ApexShot を支援 / Pro にアップグレード"
+
+msgid "Your capture is saved"
+msgstr "キャプチャを保存しました"
+
+msgid "Your screenshot companion for Linux. Set it up in a few quick steps."
+msgstr "Linux のためのスクリーンショットの相棒。数ステップですぐに設定できます。"
+
+msgid "Authorization was denied in the browser."
+msgstr "ブラウザで認証が拒否されました。"
+
+msgid "Automatic upload is off. Turn it on in Settings → Cloud to get a share link after each capture."
+msgstr "自動アップロードはオフです。「設定 → クラウド」でオンにすると、撮影ごとに共有リンクを取得できます。"
+
+msgid "Captures upload to your XBackBone server. Change the destination in Settings → Cloud."
+msgstr "キャプチャは XBackBone サーバーにアップロードされます。送信先は「設定 → クラウド」で変更できます。"
+
+msgid "Code expires in {minutes} min"
+msgstr "コードの有効期限：あと {minutes} 分"
+
+msgid "Couldn't reach ApexShot Cloud. Check your connection and try again."
+msgstr "ApexShot Cloud に接続できませんでした。接続を確認してもう一度お試しください。"
+
+msgid "Couldn't save your setup. Check that your config folder is writable, then try again."
+msgstr "セットアップを保存できませんでした。設定フォルダーに書き込めるか確認して、もう一度お試しください。"
+
+msgid "Get started"
+msgstr "はじめる"
+
+msgid "Hosted by us. Connect with a one-time code from your browser."
+msgstr "当社がホスト。ブラウザに表示されるワンタイムコードで接続します。"
+
+msgid "Optional. Connect ApexShot Cloud to turn a capture into a link you can paste anywhere. ApexShot works offline without an account, so you can skip this."
+msgstr "任意です。ApexShot Cloud に接続すると、キャプチャを好きな場所に貼れるリンクにできます。ApexShot はアカウントなしでオフラインでも使えるので、この手順は省略できます。"
+
+msgid "Self-host for full control of storage. Set it up later in Settings → Cloud."
+msgstr "ストレージを完全に管理できるセルフホスト型。後から「設定 → クラウド」で設定できます。"
+
+msgid "Share captures as links"
+msgstr "キャプチャをリンクで共有"
+
+msgid "Skip for now"
+msgstr "今はスキップ"
+
+msgid "Step {current} of {total}"
+msgstr "ステップ {current} / {total}"
+
+msgid "This code expired. Try again to get a new one."
+msgstr "コードの有効期限が切れました。もう一度お試しして新しいコードを取得してください。"
+
+msgid "Enter this code in your browser to link this device."
+msgstr "このコードをブラウザーに入力して、このデバイスをリンクします。"
+
+msgid "Opening your browser…"
+msgstr "ブラウザーを開いています…"
+
+msgid "Sent to your browser. If no page opened, copy the link below."
+msgstr "ブラウザーに送信しました。ページが開かない場合は、下のリンクをコピーしてください。"
+
+msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
+msgstr "ブラウザーを開けませんでした: {error}。下のリンクをコピーして、ご自身で開いてください。"

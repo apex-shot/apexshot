@@ -83,7 +83,7 @@
             .recent-captures-hero-timestamp {
                 font-size: 13px;
                 font-weight: 500;
-                color: #b05c38;
+                color: #ff670d;
                 margin-top: 4px;
             }
 
@@ -138,7 +138,7 @@
             .recent-captures-card-timestamp {
                 font-size: 12px;
                 font-weight: 500;
-                color: #b05c38;
+                color: #ff670d;
                 margin-top: 4px;
             }
 
@@ -180,14 +180,14 @@
             }
 
             .recent-captures-primary-button {
-                background-color: #b05c38;
-                border-color: #9a4c2c;
+                background-color: #ff670d;
+                border-color: #cf530b;
                 color: white;
             }
 
             .recent-captures-primary-button:hover,
             .recent-captures-primary-button:focus {
-                background-color: #c06540;
+                background-color: #ff7c2f;
             }
 
             .recent-captures-secondary-button:hover,
@@ -202,7 +202,7 @@
                 border: none;
                 border-radius: 6px;
                 padding: 6px 8px;
-                color: #b05c38;
+                color: #ff670d;
                 opacity: 0.8;
                 transition: opacity 0.2s, background 0.2s;
             }
@@ -437,7 +437,7 @@
                 color: white;
             }
             .recent-captures-segmented-btn:checked {
-                background: #b05c38;
+                background: #ff670d;
                 color: white;
                 box-shadow: 0 1px 3px alpha(black, 0.2);
             }
@@ -456,14 +456,14 @@
             }
 
             .editor-root.editor-theme-light .recent-captures-primary-button {
-                background-color: #b05c38;
-                border-color: #9a4c2c;
+                background-color: #ff670d;
+                border-color: #cf530b;
                 color: white;
             }
 
             .editor-root.editor-theme-light .recent-captures-primary-button:hover,
             .editor-root.editor-theme-light .recent-captures-primary-button:focus {
-                background-color: #c06540;
+                background-color: #ff7c2f;
             }
 
             .editor-root.editor-theme-light .recent-captures-secondary-button,
@@ -485,7 +485,7 @@
             }
 
             .editor-root.editor-theme-light .recent-captures-icon-btn {
-                color: #9a4c2c;
+                color: #cf530b;
             }
 
             .editor-root.editor-theme-light .recent-captures-icon-btn:hover {
@@ -502,7 +502,7 @@
                 color: black;
             }
             .editor-root.editor-theme-light .recent-captures-segmented-btn:checked {
-                background: #b05c38;
+                background: #ff670d;
                 color: white;
                 box-shadow: 0 1px 3px alpha(black, 0.1);
             }

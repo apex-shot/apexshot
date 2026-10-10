@@ -65,6 +65,7 @@ pub(super) fn build_inspector_actions(
 
     wire_upload_button(
         &upload,
+        window,
         state.clone(),
         export_controls.clone(),
         spinner.clone(),
@@ -103,6 +104,7 @@ fn icon_action_button(icon_name: &str, tooltip: &str) -> Button {
 }
 
 pub(super) fn build_upload_action(
+    window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     exporting: Rc<Cell<bool>>,
     export_cancellation: Arc<AtomicBool>,
@@ -125,6 +127,7 @@ pub(super) fn build_upload_action(
 
     wire_upload_button(
         &button,
+        window,
         state,
         vec![
             button.clone().upcast::<gtk4::Widget>(),
@@ -189,6 +192,7 @@ pub(super) fn update_estimate(label: &Label, state: &Arc<Mutex<VideoEditState>>,
 
 fn wire_upload_button(
     button: &Button,
+    window: &ApplicationWindow,
     state: Arc<Mutex<VideoEditState>>,
     controls: Vec<gtk4::Widget>,
     spinner: Spinner,
@@ -196,6 +200,7 @@ fn wire_upload_button(
     export_cancellation: Arc<AtomicBool>,
 ) {
     button.set_sensitive(state.lock().unwrap().has_source_video());
+    let window = window.downgrade();
     button.connect_clicked(move |_| {
         if exporting.get() || !state.lock().unwrap().has_source_video() {
             return;
@@ -219,7 +224,8 @@ fn wire_upload_button(
         // Export with current editor settings first, then upload the result.
         let state_snapshot = state.lock().unwrap().clone();
         let cancellation_worker = export_cancellation.clone();
-        let (sender, receiver) = std::sync::mpsc::channel::<Result<String, String>>();
+        let (sender, receiver) =
+            std::sync::mpsc::channel::<Result<String, crate::cloud::upload::UploadError>>();
         std::thread::spawn(move || {
             let result = (|| {
                 let path = ffmpeg::export_edited_to_cancellable(
@@ -227,14 +233,18 @@ fn wire_upload_button(
                     state_snapshot.export_path(),
                     Some(&cancellation_worker),
                 )
-                .map_err(|err| format!("Export before upload failed: {err}"))?;
+                .map_err(|err| {
+                    crate::cloud::upload::UploadError::Server(format!(
+                        "Export before upload failed: {err}"
+                    ))
+                })?;
                 if cancellation_worker.load(Ordering::Acquire) {
                     let _ = std::fs::remove_file(&path);
-                    return Err("Export cancelled".into());
+                    return Err(crate::cloud::upload::UploadError::Server(
+                        "Export cancelled".into(),
+                    ));
                 }
-                crate::cloud::upload::upload_file(&config, &path)
-                    .map(|result| result.share_url)
-                    .map_err(|err| err.to_string())
+                crate::cloud::upload::upload_file(&config, &path).map(|result| result.share_url)
             })();
             let _ = sender.send(result);
         });
@@ -242,6 +252,7 @@ fn wire_upload_button(
         let controls = controls.clone();
         let spinner = spinner.clone();
         let exporting = exporting.clone();
+        let window = window.clone();
         let export_cancellation = export_cancellation.clone();
         glib::timeout_add_local(Duration::from_millis(100), move || {
             match receiver.try_recv() {
@@ -273,7 +284,18 @@ fn wire_upload_button(
                             }
                         }
                         Err(err) => {
-                            crate::utils::notify::desktop_notification(&t("Upload failed"), &err);
+                            if let crate::cloud::upload::UploadError::UpgradeRequired(message) =
+                                &err
+                            {
+                                if let Some(window) = window.upgrade() {
+                                    crate::cloud::upgrade::show_prompt(&window, message);
+                                }
+                            } else {
+                                crate::utils::notify::desktop_notification(
+                                    &t("Upload failed"),
+                                    &err.to_string(),
+                                );
+                            }
                         }
                     }
                     glib::ControlFlow::Break

@@ -2847,3 +2847,128 @@ msgid ""
 "You may need to log out and back in for the extension to appear in GNOME."
 msgstr ""
 "Es posible que deba cerrar la sesión y volver a iniciarla para que la extensión aparezca en GNOME."
+
+msgid "Back"
+msgstr "Atrás"
+
+msgid "Cloud sharing"
+msgstr "Uso compartido en la nube"
+
+msgid "Connect ApexShot Cloud"
+msgstr "Conectar ApexShot Cloud"
+
+msgid "Connect your account"
+msgstr "Conecta tu cuenta"
+
+msgid "Copy code"
+msgstr "Copiar código"
+
+msgid "Free"
+msgstr "Gratis"
+
+msgid "Manage your account or disconnect in Settings → Cloud."
+msgstr "Gestiona tu cuenta o desconéctala en Ajustes → Nube."
+
+msgid ""
+"Not now? Skip with Next. Connect later from Settings → Cloud, or self-host XBackBone."
+msgstr ""
+"¿Ahora no? Omite con Siguiente. Conecta más tarde desde Ajustes → Nube, o aloja XBackBone por tu cuenta."
+
+msgid "Open browser"
+msgstr "Abrir navegador"
+
+msgid "Optional · capture stays free"
+msgstr "Opcional · la captura sigue siendo gratis"
+
+msgid "{plan} plan"
+msgstr "Plan {plan}"
+
+msgid "Starting…"
+msgstr "Iniciando…"
+
+msgid "Try again"
+msgstr "Reintentar"
+
+msgid ""
+"Turn a capture into a link you can paste anywhere. Everything else keeps working offline."
+msgstr ""
+"Convierte una captura en un enlace que puedes pegar donde quieras. Todo lo demás sigue funcionando sin conexión."
+
+msgid "Uploads are on: your next screenshot gets a share link copied for you."
+msgstr ""
+"Las subidas están activadas: tu próxima captura tendrá un enlace para compartir copiado automáticamente."
+
+msgid "Waiting for you to authorize…"
+msgstr "Esperando tu autorización…"
+
+msgid "Could not open billing"
+msgstr "No se pudo abrir la facturación"
+
+msgid "Go Pro"
+msgstr "Pasar a Pro"
+
+msgid "Keep working"
+msgstr "Seguir trabajando"
+
+msgid "Support ApexShot / Go Pro"
+msgstr "Apoyar ApexShot / Pasar a Pro"
+
+msgid "Your capture is saved"
+msgstr "Tu captura se ha guardado"
+
+msgid "Your screenshot companion for Linux. Set it up in a few quick steps."
+msgstr "Tu compañero de capturas para Linux. Configúralo en unos pocos pasos."
+
+msgid "Authorization was denied in the browser."
+msgstr "Se denegó la autorización en el navegador."
+
+msgid "Automatic upload is off. Turn it on in Settings → Cloud to get a share link after each capture."
+msgstr "La subida automática está desactivada. Actívala en Ajustes → Nube para obtener un enlace después de cada captura."
+
+msgid "Captures upload to your XBackBone server. Change the destination in Settings → Cloud."
+msgstr "Las capturas se suben a tu servidor XBackBone. Cambia el destino en Ajustes → Nube."
+
+msgid "Code expires in {minutes} min"
+msgstr "El código caduca en {minutes} min"
+
+msgid "Couldn't reach ApexShot Cloud. Check your connection and try again."
+msgstr "No se pudo conectar con ApexShot Cloud. Revisa tu conexión e inténtalo de nuevo."
+
+msgid "Couldn't save your setup. Check that your config folder is writable, then try again."
+msgstr "No se pudo guardar la configuración. Comprueba que la carpeta de configuración tenga permiso de escritura e inténtalo de nuevo."
+
+msgid "Get started"
+msgstr "Empezar"
+
+msgid "Hosted by us. Connect with a one-time code from your browser."
+msgstr "Alojado por nosotros. Conéctate con un código de un solo uso desde tu navegador."
+
+msgid "Optional. Connect ApexShot Cloud to turn a capture into a link you can paste anywhere. ApexShot works offline without an account, so you can skip this."
+msgstr "Opcional. Conecta ApexShot Cloud para convertir una captura en un enlace que puedes pegar donde quieras. ApexShot funciona sin conexión y sin cuenta, así que puedes omitir este paso."
+
+msgid "Self-host for full control of storage. Set it up later in Settings → Cloud."
+msgstr "Aloja tu propio servidor para control total del almacenamiento. Configúralo después en Ajustes → Nube."
+
+msgid "Share captures as links"
+msgstr "Comparte capturas como enlaces"
+
+msgid "Skip for now"
+msgstr "Omitir por ahora"
+
+msgid "Step {current} of {total}"
+msgstr "Paso {current} de {total}"
+
+msgid "This code expired. Try again to get a new one."
+msgstr "El código ha caducado. Inténtalo de nuevo para obtener uno nuevo."
+
+msgid "Enter this code in your browser to link this device."
+msgstr "Introduce este código en tu navegador para vincular este dispositivo."
+
+msgid "Opening your browser…"
+msgstr "Abriendo tu navegador…"
+
+msgid "Sent to your browser. If no page opened, copy the link below."
+msgstr "Enviado a tu navegador. Si no se abrió ninguna página, copia el enlace de abajo."
+
+msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
+msgstr "No se pudo abrir un navegador: {error}. Copia el enlace de abajo y ábrelo tú mismo."

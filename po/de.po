@@ -2851,3 +2851,129 @@ msgid ""
 "You may need to log out and back in for the extension to appear in GNOME."
 msgstr ""
 "Möglicherweise müssen Sie sich ab- und wieder anmelden, damit die Erweiterung in GNOME erscheint."
+
+msgid "Back"
+msgstr "Zurück"
+
+msgid "Cloud sharing"
+msgstr "Cloud-Freigabe"
+
+msgid "Connect ApexShot Cloud"
+msgstr "ApexShot Cloud verbinden"
+
+msgid "Connect your account"
+msgstr "Konto verbinden"
+
+msgid "Copy code"
+msgstr "Code kopieren"
+
+msgid "Free"
+msgstr "Kostenlos"
+
+msgid "Manage your account or disconnect in Settings → Cloud."
+msgstr ""
+"Verwalte dein Konto oder trenne die Verbindung unter Einstellungen → Cloud."
+
+msgid ""
+"Not now? Skip with Next. Connect later from Settings → Cloud, or self-host XBackBone."
+msgstr ""
+"Nicht jetzt? Überspringe mit „Weiter“. Verbinde später unter Einstellungen → Cloud oder betreibe XBackBone selbst."
+
+msgid "Open browser"
+msgstr "Browser öffnen"
+
+msgid "Optional · capture stays free"
+msgstr "Optional · Aufnahme bleibt kostenlos"
+
+msgid "{plan} plan"
+msgstr "{plan}-Tarif"
+
+msgid "Starting…"
+msgstr "Wird gestartet…"
+
+msgid "Try again"
+msgstr "Erneut versuchen"
+
+msgid ""
+"Turn a capture into a link you can paste anywhere. Everything else keeps working offline."
+msgstr ""
+"Mach aus einer Aufnahme einen Link, den du überall einfügen kannst. Alles andere funktioniert weiter offline."
+
+msgid "Uploads are on: your next screenshot gets a share link copied for you."
+msgstr ""
+"Uploads sind aktiv: Deine nächste Aufnahme erhält einen Freigabelink, der für dich kopiert wird."
+
+msgid "Waiting for you to authorize…"
+msgstr "Warten auf deine Autorisierung…"
+
+msgid "Could not open billing"
+msgstr "Abrechnung konnte nicht geöffnet werden"
+
+msgid "Go Pro"
+msgstr "Pro holen"
+
+msgid "Keep working"
+msgstr "Weiterarbeiten"
+
+msgid "Support ApexShot / Go Pro"
+msgstr "ApexShot unterstützen / Pro holen"
+
+msgid "Your capture is saved"
+msgstr "Deine Aufnahme wurde gespeichert"
+
+msgid "Your screenshot companion for Linux. Set it up in a few quick steps."
+msgstr "Dein Screenshot-Begleiter für Linux. In wenigen Schritten eingerichtet."
+
+msgid "Authorization was denied in the browser."
+msgstr "Die Autorisierung wurde im Browser abgelehnt."
+
+msgid "Automatic upload is off. Turn it on in Settings → Cloud to get a share link after each capture."
+msgstr "Automatischer Upload ist aus. Aktiviere ihn unter Einstellungen → Cloud, um nach jeder Aufnahme einen Link zu erhalten."
+
+msgid "Captures upload to your XBackBone server. Change the destination in Settings → Cloud."
+msgstr "Aufnahmen werden auf deinen XBackBone-Server hochgeladen. Ändere das Ziel unter Einstellungen → Cloud."
+
+msgid "Code expires in {minutes} min"
+msgstr "Code läuft in {minutes} Min. ab"
+
+msgid "Couldn't reach ApexShot Cloud. Check your connection and try again."
+msgstr "ApexShot Cloud ist nicht erreichbar. Prüfe deine Verbindung und versuche es erneut."
+
+msgid "Couldn't save your setup. Check that your config folder is writable, then try again."
+msgstr "Die Einrichtung konnte nicht gespeichert werden. Prüfe, ob der Konfigurationsordner beschreibbar ist, und versuche es erneut."
+
+msgid "Get started"
+msgstr "Los geht’s"
+
+msgid "Hosted by us. Connect with a one-time code from your browser."
+msgstr "Von uns gehostet. Verbinde dich mit einem einmaligen Code aus dem Browser."
+
+msgid "Optional. Connect ApexShot Cloud to turn a capture into a link you can paste anywhere. ApexShot works offline without an account, so you can skip this."
+msgstr "Optional. Verbinde ApexShot Cloud, um eine Aufnahme in einen Link zu verwandeln, den du überall einfügen kannst. ApexShot funktioniert auch offline ohne Konto, du kannst diesen Schritt also überspringen."
+
+msgid "Self-host for full control of storage. Set it up later in Settings → Cloud."
+msgstr "Selbst hosten für volle Kontrolle über den Speicher. Richte es später unter Einstellungen → Cloud ein."
+
+msgid "Share captures as links"
+msgstr "Aufnahmen als Links teilen"
+
+msgid "Skip for now"
+msgstr "Vorerst überspringen"
+
+msgid "Step {current} of {total}"
+msgstr "Schritt {current} von {total}"
+
+msgid "This code expired. Try again to get a new one."
+msgstr "Der Code ist abgelaufen. Versuche es erneut, um einen neuen zu erhalten."
+
+msgid "Enter this code in your browser to link this device."
+msgstr "Gib diesen Code in deinem Browser ein, um dieses Gerät zu verknüpfen."
+
+msgid "Opening your browser…"
+msgstr "Browser wird geöffnet…"
+
+msgid "Sent to your browser. If no page opened, copy the link below."
+msgstr "An deinen Browser gesendet. Falls keine Seite geöffnet wurde, kopiere den Link unten."
+
+msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
+msgstr "Browser konnte nicht geöffnet werden: {error}. Kopiere den Link unten und öffne ihn selbst."

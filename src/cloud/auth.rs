@@ -9,6 +9,17 @@ use super::listing::CloudAccount;
 
 const POLL_INTERVAL: u64 = 5;
 const MAX_POLL_SECONDS: u64 = 900;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Auth requests always run with finite timeouts so a stalled backend cannot
+/// hold a device login (or the onboarding step waiting on it) forever.
+fn agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_connect(CONNECT_TIMEOUT)
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+}
 
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
@@ -27,6 +38,19 @@ struct TokenResponse {
     refresh_token: String,
     expires_in: i32,
     device_id: String,
+}
+
+/// A started device-authorization login. Show [`DeviceLogin::user_code`] to the
+/// user, send them to [`DeviceLogin::verification_uri`], then poll with
+/// [`poll_device_login`] until it returns an account.
+#[derive(Debug, Clone)]
+pub struct DeviceLogin {
+    pub device_code: String,
+    /// Ready to display, grouped for readability (e.g. `ABCD-EFGH`).
+    pub user_code: String,
+    pub verification_uri: String,
+    pub interval_secs: u64,
+    pub expires_in_secs: u64,
 }
 
 #[derive(Debug)]
@@ -79,26 +103,33 @@ pub fn needs_backend_url(config: &AppConfig) -> bool {
     resolve_cloud_backend_url(config).is_empty()
 }
 
-pub fn login() -> Result<(), LoginError> {
-    let mut config = load_config();
-    if needs_backend_url(&config) {
+/// Ensure the config carries a resolved backend URL so later request paths
+/// match, persisting it when it was empty.
+fn ensure_backend_url(config: &mut AppConfig) -> Result<String, LoginError> {
+    if needs_backend_url(config) {
         return Err(LoginError::NotConfigured);
     }
-
-    // Ensure config carries the resolved URL so later upload/login paths match.
-    let backend_url = resolve_cloud_backend_url(&config);
+    let backend_url = resolve_cloud_backend_url(config);
     if config.cloud_backend_url.trim().is_empty() {
         config.cloud_backend_url = backend_url.clone();
-        let _ = save_config(&config);
+        let _ = save_config(config);
     }
+    Ok(backend_url)
+}
 
-    let was_logged_in = is_cloud_logged_in(&config);
-    let previous_email = config.cloud_user_email.clone();
-
+fn ensure_install_id(config: &mut AppConfig) {
     if config.cloud_install_id.is_empty() {
         config.cloud_install_id = generate_install_id();
-        let _ = save_config(&config);
+        let _ = save_config(config);
     }
+}
+
+/// Begin a device-authorization login. Returns the code the user must enter at
+/// [`DeviceLogin::verification_uri`]. Follow with [`poll_device_login`].
+pub fn begin_device_login() -> Result<DeviceLogin, LoginError> {
+    let mut config = load_config();
+    let backend_url = ensure_backend_url(&mut config)?;
+    ensure_install_id(&mut config);
 
     let device_body = serde_json::json!({
         "client_id": "apexshot-desktop",
@@ -106,32 +137,123 @@ pub fn login() -> Result<(), LoginError> {
         "install_id": config.cloud_install_id,
     })
     .to_string();
-    let device_resp: DeviceCodeResponse = ureq::post(&format!("{backend_url}/v1/auth/device"))
+    let device_resp: DeviceCodeResponse = agent()
+        .post(&format!("{backend_url}/v1/auth/device"))
         .set("Content-Type", "application/json")
         .send_string(&device_body)
         .map_err(|e| LoginError::HttpRequest(e.to_string()))?
         .into_json()
         .map_err(|e| LoginError::Server(format!("Invalid response: {e}")))?;
 
-    let user_code = format_user_code(&device_resp.user_code);
-    println!("First copy your one-time code: {user_code}");
+    Ok(DeviceLogin {
+        device_code: device_resp.device_code,
+        user_code: format_user_code(&device_resp.user_code),
+        verification_uri: device_resp.verification_uri,
+        interval_secs: device_resp.interval.max(1) as u64,
+        expires_in_secs: match device_resp.expires_in {
+            seconds if seconds > 0 => seconds as u64,
+            _ => MAX_POLL_SECONDS,
+        },
+    })
+}
+
+/// Poll once for a started login. `Ok(None)` means the user has not authorized
+/// yet; `Ok(Some(account))` means the session was created, tokens and the
+/// account were saved, and auto-upload-after-capture is on.
+pub fn poll_device_login(device_code: &str) -> Result<Option<CloudAccount>, LoginError> {
+    let config = load_config();
+    let backend_url = resolve_cloud_backend_url(&config);
+    if backend_url.is_empty() {
+        return Err(LoginError::NotConfigured);
+    }
+
+    let poll_body = serde_json::json!({
+        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+        "device_code": device_code,
+    })
+    .to_string();
+
+    match agent()
+        .post(&format!("{backend_url}/v1/auth/token"))
+        .set("Content-Type", "application/json")
+        .send_string(&poll_body)
+    {
+        Ok(resp) => {
+            let token: TokenResponse = resp
+                .into_json()
+                .map_err(|e| LoginError::Server(format!("Invalid token response: {e}")))?;
+            finish_login(token)
+        }
+        Err(ureq::Error::Status(400, resp)) => {
+            let body: serde_json::Value = resp.into_json().unwrap_or(serde_json::Value::Null);
+            device_poll_rejection(body["error"].as_str().unwrap_or(""))
+        }
+        Err(e) => Err(LoginError::HttpRequest(e.to_string())),
+    }
+}
+
+/// Map the error code of a rejected device-token poll. `pending` keeps polling;
+/// `access_denied` is the user refusing in the browser and must not look like a
+/// server fault.
+fn device_poll_rejection(error: &str) -> Result<Option<CloudAccount>, LoginError> {
+    if error.contains("pending") {
+        return Ok(None);
+    }
+    if error.contains("expired") {
+        return Err(LoginError::Expired);
+    }
+    if error.contains("denied") {
+        return Err(LoginError::Denied);
+    }
+    Err(LoginError::Server(error.to_string()))
+}
+
+/// Persist a completed device login: store tokens, cache the account (email +
+/// tier), and turn on auto-upload after capture.
+fn finish_login(token: TokenResponse) -> Result<Option<CloudAccount>, LoginError> {
+    let mut config = load_config();
+    let backend_url = resolve_cloud_backend_url(&config);
+    config.cloud_api_token = token.access_token;
+    config.cloud_refresh_token = token.refresh_token;
+
+    let account: CloudAccount = agent()
+        .get(&format!("{backend_url}/v1/account"))
+        .set(
+            "Authorization",
+            &format!("Bearer {}", config.cloud_api_token),
+        )
+        .call()
+        .map_err(|e| LoginError::HttpRequest(e.to_string()))?
+        .into_json()
+        .map_err(|e| LoginError::Server(format!("Invalid account response: {e}")))?;
+
+    // Caches email + plan tier (and syncs the pro-plan flag) so the
+    // entitlement is readable later without another request.
+    account.apply_to_config(&mut config);
+    config.cloud_auto_upload_after_capture = true;
+    save_config(&config).map_err(|e| LoginError::Server(format!("Failed to save config: {e}")))?;
+
+    Ok(Some(account))
+}
+
+pub fn login() -> Result<(), LoginError> {
+    let config = load_config();
+    let was_logged_in = is_cloud_logged_in(&config);
+    let previous_email = config.cloud_user_email.clone();
+
+    let start = begin_device_login()?;
+    println!("First copy your one-time code: {}", start.user_code);
     println!(
         "Press Enter to open {} in your browser...",
-        device_resp.verification_uri
+        start.verification_uri
     );
 
     let mut _input = String::new();
     let _ = std::io::stdin().read_line(&mut _input);
 
-    let _ = open_browser(&device_resp.verification_uri);
+    let _ = open_browser(&start.verification_uri);
 
-    let poll_body = serde_json::json!({
-        "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-        "device_code": device_resp.device_code,
-    })
-    .to_string();
-
-    let interval = device_resp.interval.max(1) as u64;
+    let interval = start.interval_secs.max(1);
     let elapsed = std::time::Instant::now();
 
     loop {
@@ -141,62 +263,22 @@ pub fn login() -> Result<(), LoginError> {
             return Err(LoginError::Expired);
         }
 
-        match ureq::post(&format!("{backend_url}/v1/auth/token"))
-            .set("Content-Type", "application/json")
-            .send_string(&poll_body)
-        {
-            Ok(resp) => {
-                let token: TokenResponse = resp
-                    .into_json()
-                    .map_err(|e| LoginError::Server(format!("Invalid token response: {e}")))?;
-
-                config.cloud_api_token = token.access_token;
-                config.cloud_refresh_token = token.refresh_token;
-
-                let account: CloudAccount = ureq::get(&format!("{backend_url}/v1/account"))
-                    .set(
-                        "Authorization",
-                        &format!("Bearer {}", config.cloud_api_token),
-                    )
-                    .call()
-                    .map_err(|e| LoginError::HttpRequest(e.to_string()))?
-                    .into_json()
-                    .map_err(|e| LoginError::Server(format!("Invalid account response: {e}")))?;
-
-                // Caches email + plan tier (and syncs the pro-plan flag) so the
-                // entitlement is readable later without another request.
-                account.apply_to_config(&mut config);
-                config.cloud_auto_upload_after_capture = true;
-                save_config(&config)
-                    .map_err(|e| LoginError::Server(format!("Failed to save config: {e}")))?;
-
-                println!("\n✓ Authentication complete.");
-                println!("✓ Logged in as {}", config.cloud_user_email);
-                println!("Your next screenshot will upload and copy a share link.");
-                if was_logged_in && config.cloud_user_email == previous_email {
-                    println!("! You were already logged in to this account");
-                }
-                crate::utils::notify::desktop_notification_important(
-                    &crate::i18n::t("You're connected"),
-                    &crate::i18n::t("Your next screenshot gets a share link."),
-                );
-                return Ok(());
-            }
-            Err(ureq::Error::Status(400, resp)) => {
-                let body: serde_json::Value = resp.into_json().unwrap_or(serde_json::Value::Null);
-                let error = body["error"].as_str().unwrap_or("");
-                if error.contains("pending") {
-                    continue;
-                }
-                if error.contains("expired") {
-                    return Err(LoginError::Expired);
-                }
-                return Err(LoginError::Server(error.to_string()));
-            }
-            Err(e) => {
-                return Err(LoginError::HttpRequest(e.to_string()));
-            }
+        if poll_device_login(&start.device_code)?.is_none() {
+            continue;
         }
+
+        let config = load_config();
+        println!("\n✓ Authentication complete.");
+        println!("✓ Logged in as {}", config.cloud_user_email);
+        println!("Your next screenshot will upload and copy a share link.");
+        if was_logged_in && config.cloud_user_email == previous_email {
+            println!("! You were already logged in to this account");
+        }
+        crate::utils::notify::desktop_notification_important(
+            &crate::i18n::t("You're connected"),
+            &crate::i18n::t("Your next screenshot gets a share link."),
+        );
+        return Ok(());
     }
 }
 
@@ -212,7 +294,8 @@ pub fn logout() -> Result<(), LogoutError> {
         serde_json::json!({ "token": config.cloud_api_token, "token_type_hint": "access_token" })
             .to_string();
 
-    let revoke_result = ureq::post(&format!("{backend_url}/v1/auth/revoke"))
+    let revoke_result = agent()
+        .post(&format!("{backend_url}/v1/auth/revoke"))
         .set("Content-Type", "application/json")
         .send_string(&revoke_body);
 
@@ -303,5 +386,42 @@ fn generate_install_id() -> String {
         )
     } else {
         format!("install-{}", chrono::Utc::now().timestamp())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_poll_keeps_waiting() {
+        assert!(matches!(
+            device_poll_rejection("authorization_pending"),
+            Ok(None)
+        ));
+    }
+
+    #[test]
+    fn access_denied_maps_to_denied_not_server_error() {
+        assert!(matches!(
+            device_poll_rejection("access_denied"),
+            Err(LoginError::Denied)
+        ));
+    }
+
+    #[test]
+    fn expired_device_code_maps_to_expired() {
+        assert!(matches!(
+            device_poll_rejection("expired_token"),
+            Err(LoginError::Expired)
+        ));
+    }
+
+    #[test]
+    fn unknown_rejection_is_a_server_error() {
+        assert!(matches!(
+            device_poll_rejection("invalid_grant"),
+            Err(LoginError::Server(code)) if code == "invalid_grant"
+        ));
     }
 }

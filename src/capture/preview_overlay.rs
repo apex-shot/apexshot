@@ -27,6 +27,7 @@ enum UploadUiEvent {
     Finished {
         dismiss: bool,
         share_url: Option<String>,
+        upgrade_message: Option<String>,
     },
 }
 
@@ -856,7 +857,11 @@ fn setup_preview_window(
         let uploading_poll = uploading.clone();
         glib::timeout_add_local(Duration::from_millis(50), move || {
             match upload_ui_rx.try_recv() {
-                Ok(UploadUiEvent::Finished { dismiss, share_url }) => {
+                Ok(UploadUiEvent::Finished {
+                    dismiss,
+                    share_url,
+                    upgrade_message,
+                }) => {
                     uploading_poll.set(false);
                     upload_btn_poll.set_sensitive(true);
                     if let Some(share_url) = share_url {
@@ -869,6 +874,11 @@ fn setup_preview_window(
                     if dismiss {
                         if let Some(window) = window_weak_upload_poll.upgrade() {
                             dismiss_preview_window(&window, dismiss_action_upload_poll);
+                        }
+                    }
+                    if let Some(message) = upgrade_message {
+                        if let Some(window) = window_weak_upload_poll.upgrade() {
+                            crate::cloud::upgrade::show_prompt(&window, &message);
                         }
                     }
                     // Keep listening so a later upload (after a failure) can still finish/dismiss.
@@ -903,7 +913,7 @@ fn setup_preview_window(
             std::thread::spawn(move || {
                 // Shared upload path (logs + notifications). Auto-upload after
                 // capture uses the same helper so behavior stays consistent.
-                let (dismiss, share_url) =
+                let (dismiss, share_url, upgrade_message) =
                     match crate::cloud::upload::upload_file_with_notifications_without_clipboard(
                         &config, &path,
                     ) {
@@ -913,11 +923,19 @@ fn setup_preview_window(
                             (
                                 should_close_preview_after_upload(close_after_upload),
                                 Some(result.share_url),
+                                None,
                             )
                         }
-                        Err(_) => (false, None),
+                        Err(crate::cloud::upload::UploadError::UpgradeRequired(message)) => {
+                            (false, None, Some(message))
+                        }
+                        Err(_) => (false, None, None),
                     };
-                let _ = upload_ui_tx.send(UploadUiEvent::Finished { dismiss, share_url });
+                let _ = upload_ui_tx.send(UploadUiEvent::Finished {
+                    dismiss,
+                    share_url,
+                    upgrade_message,
+                });
             });
         });
 

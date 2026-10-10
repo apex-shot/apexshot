@@ -147,10 +147,10 @@
             menubutton.editor-motion-color-button.active-motion-color-control > button:active,
             menubutton.editor-motion-color-button.active-motion-color-control > button:checked,
             menubutton.editor-motion-color-button.active-motion-color-control > button:focus {
-                border-color: #c06540;
-                background: alpha(#c06540, 0.10);
+                border-color: #ff7c2f;
+                background: alpha(#ff7c2f, 0.10);
                 background-image: none;
-                box-shadow: 0 0 0 1px #c06540;
+                box-shadow: 0 0 0 1px #ff7c2f;
                 outline: none;
             }
 
@@ -177,9 +177,9 @@
             menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button:active,
             menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button:checked,
             menubutton.editor-motion-gradient-stop.active-motion-gradient-stop > button:focus {
-                border-color: #c06540;
-                background: alpha(#c06540, 0.10);
-                box-shadow: 0 0 0 1px #c06540;
+                border-color: #ff7c2f;
+                background: alpha(#ff7c2f, 0.10);
+                box-shadow: 0 0 0 1px #ff7c2f;
             }
 
             .editor-motion-color-swatch {
@@ -205,7 +205,7 @@
             entry.editor-motion-color-hex-entry:focus {
                 color: #ffffff;
                 background: alpha(white, 0.11);
-                box-shadow: inset 0 0 0 1px #c06540;
+                box-shadow: inset 0 0 0 1px #ff7c2f;
             }
 
             popover.editor-motion-color-popover,
@@ -249,7 +249,7 @@
             .editor-root scale highlight {
                 min-height: 4px;
                 border-radius: 999px;
-                background: #b05c38;
+                background: #ff670d;
             }
 
             .editor-root scale:disabled trough {
@@ -257,7 +257,7 @@
             }
 
             .editor-root scale:disabled highlight {
-                background: alpha(#b05c38, 0.42);
+                background: alpha(#ff670d, 0.42);
             }
 
             .editor-root.editor-theme-light scale trough {
@@ -265,7 +265,7 @@
             }
 
             .editor-root.editor-theme-light scale highlight {
-                background: #b05c38;
+                background: #ff670d;
             }
 
             .editor-root.editor-theme-light scale:disabled trough {
@@ -273,7 +273,7 @@
             }
 
             .editor-root.editor-theme-light scale:disabled highlight {
-                background: alpha(#b05c38, 0.42);
+                background: alpha(#ff670d, 0.42);
             }
 
             .editor-root scale.editor-hue-slider trough {
@@ -388,7 +388,7 @@
                 min-width: 220px;
                 min-height: 30px;
                 border-radius: 6px;
-                background: #B05C38;
+                background: #ff670d;
                 color: #ffffff;
                 font-weight: 600;
                 font-size: 12px;

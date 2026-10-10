@@ -14,6 +14,7 @@ pub enum UploadError {
     NotConfigured(String),
     FileRead(String),
     HttpRequest(String),
+    UpgradeRequired(String),
     Server(String),
     AuthExpired(String),
 }
@@ -24,6 +25,7 @@ impl std::fmt::Display for UploadError {
             UploadError::NotConfigured(msg) => write!(f, "{msg}"),
             UploadError::FileRead(msg) => write!(f, "Failed to read file: {msg}"),
             UploadError::HttpRequest(msg) => write!(f, "Upload request failed: {msg}"),
+            UploadError::UpgradeRequired(msg) => write!(f, "Upload request failed: {msg}"),
             UploadError::Server(msg) => write!(f, "Server error: {msg}"),
             UploadError::AuthExpired(msg) => write!(f, "{msg}"),
         }
