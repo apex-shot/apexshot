@@ -23,7 +23,20 @@ pub struct DistroInfo {
 impl DistroInfo {
     /// Detect the current Linux distribution from /etc/os-release
     pub fn detect() -> Option<Self> {
-        Self::detect_from_path("/etc/os-release")
+        Self::detect_with_fallback(
+            Path::new("/etc/os-release"),
+            Path::new("/usr/lib/os-release"),
+        )
+    }
+
+    fn detect_with_fallback(primary: &Path, fallback: &Path) -> Option<Self> {
+        match fs::read_to_string(primary) {
+            Ok(raw) => Self::parse_os_release(&raw),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                Self::detect_from_path(fallback)
+            }
+            Err(_) => None,
+        }
     }
 
     /// Detect a distribution from an os-release file.
@@ -57,65 +70,64 @@ impl DistroInfo {
 
     /// Check if this is an Arch-based distribution
     pub fn is_arch(&self) -> bool {
-        self.matches_any(&["arch"])
+        self.family() == DistroFamily::Arch
     }
 
     /// Check if this is a Debian/Ubuntu-based distribution
     pub fn is_debian(&self) -> bool {
-        self.matches_any(&["ubuntu", "debian", "linuxmint", "pop", "elementary"])
+        self.family() == DistroFamily::Debian
     }
 
     /// Check if this is a Fedora/RHEL-based distribution
     pub fn is_fedora(&self) -> bool {
-        self.matches_any(&["fedora", "rhel", "centos", "almalinux", "rocky"])
+        self.family() == DistroFamily::Fedora
     }
 
     /// Check if this is openSUSE
     pub fn is_opensuse(&self) -> bool {
-        self.matches_any(&["opensuse-tumbleweed", "opensuse-leap", "opensuse", "suse"])
+        self.family() == DistroFamily::OpenSuse
     }
 
     /// Check if this is NixOS
     pub fn is_nixos(&self) -> bool {
-        self.id == "nixos"
+        self.family() == DistroFamily::Nixos
     }
 
     /// Check if this is Alpine Linux.
     pub fn is_alpine(&self) -> bool {
-        self.matches_any(&["alpine"])
+        self.family() == DistroFamily::Alpine
     }
 
     /// Check if this is Gentoo.
     pub fn is_gentoo(&self) -> bool {
-        self.matches_any(&["gentoo"])
+        self.family() == DistroFamily::Gentoo
     }
 
     /// Check if this is Void Linux.
     pub fn is_void(&self) -> bool {
-        self.matches_any(&["void"])
+        self.family() == DistroFamily::Void
     }
 
     /// Group this distribution into a support family.
     pub fn family(&self) -> DistroFamily {
-        if self.is_debian() {
-            DistroFamily::Debian
-        } else if self.is_arch() {
-            DistroFamily::Arch
-        } else if self.is_fedora() {
-            DistroFamily::Fedora
-        } else if self.is_opensuse() {
-            DistroFamily::OpenSuse
-        } else if self.is_nixos() {
-            DistroFamily::Nixos
-        } else if self.is_alpine() {
-            DistroFamily::Alpine
-        } else if self.is_gentoo() {
-            DistroFamily::Gentoo
-        } else if self.is_void() {
-            DistroFamily::Void
-        } else {
-            DistroFamily::Unknown
-        }
+        std::iter::once(&self.id)
+            .chain(&self.id_like)
+            .find_map(|id| match id.as_str() {
+                "ubuntu" | "debian" | "linuxmint" | "pop" | "elementary" => {
+                    Some(DistroFamily::Debian)
+                }
+                "arch" | "manjaro" => Some(DistroFamily::Arch),
+                "fedora" | "rhel" | "centos" | "almalinux" | "rocky" => Some(DistroFamily::Fedora),
+                "opensuse-tumbleweed" | "opensuse-leap" | "opensuse" | "suse" | "sles" => {
+                    Some(DistroFamily::OpenSuse)
+                }
+                "nixos" => Some(DistroFamily::Nixos),
+                "alpine" => Some(DistroFamily::Alpine),
+                "gentoo" => Some(DistroFamily::Gentoo),
+                "void" => Some(DistroFamily::Void),
+                _ => None,
+            })
+            .unwrap_or(DistroFamily::Unknown)
     }
 
     /// Runtime and packaging guidance for this distribution family.
@@ -134,11 +146,6 @@ impl DistroInfo {
         } else {
             "XDG Screenshot portal + PipeWire fallback"
         }
-    }
-
-    fn matches_any(&self, ids: &[&str]) -> bool {
-        ids.iter()
-            .any(|candidate| self.id == *candidate || self.id_like.iter().any(|id| id == candidate))
     }
 }
 
@@ -268,16 +275,20 @@ impl DistroSupport {
             },
             DistroFamily::Nixos => Self {
                 family,
-                tier: SupportTier::CommunityPackaging,
+                tier: SupportTier::ImplementedNeedsTesting,
                 package_manager: "nix",
-                install_command: "pending: flake/package expression",
+                install_command: "nix build .#apexshot (see packaging/nix/README.md for NixOS configuration)",
                 wayland_capture_method: "XDG ScreenCast portal + PipeWire",
                 required_runtime_packages: &[
                     "xdg-desktop-portal",
                     "pipewire",
-                    "gst_all_1.gst-plugins-rs",
+                    "gst_all_1.gst-plugins-base",
+                    "gst_all_1.gst-plugins-good",
+                    "gst_all_1.gst-plugins-bad",
+                    "gst_all_1.gst-libav",
                     "wl-clipboard",
                     "tesseract",
+                    "ffmpeg",
                 ],
                 recommended_portal_backends: &[
                     "xdg-desktop-portal-gnome",
@@ -455,6 +466,77 @@ fn normalize_id(value: impl AsRef<str>) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn vendor_release_is_only_used_when_local_release_is_missing() {
+        let directory =
+            std::env::temp_dir().join(format!("apexshot-distro-fallback-{}", std::process::id()));
+        fs::create_dir(&directory).unwrap();
+        let primary = directory.join("etc-os-release");
+        let fallback = directory.join("usr-lib-os-release");
+        fs::write(&fallback, "ID=nixos\n").unwrap();
+        assert_eq!(
+            DistroInfo::detect_with_fallback(&primary, &fallback)
+                .unwrap()
+                .family(),
+            DistroFamily::Nixos
+        );
+
+        fs::write(&primary, "ID=ubuntu\n").unwrap();
+        assert_eq!(
+            DistroInfo::detect_with_fallback(&primary, &fallback)
+                .unwrap()
+                .family(),
+            DistroFamily::Debian
+        );
+
+        fs::write(&primary, "NAME=Unknown\n").unwrap();
+        assert!(DistroInfo::detect_with_fallback(&primary, &fallback).is_none());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn recognized_id_takes_precedence_over_id_like() {
+        let distro = DistroInfo::parse_os_release("ID=nixos\nID_LIKE=debian\n").unwrap();
+        assert_eq!(distro.family(), DistroFamily::Nixos);
+        assert!(distro.is_nixos());
+        assert!(!distro.is_debian());
+
+        let distro = DistroInfo::parse_os_release("ID=opensuse-leap\nID_LIKE=fedora\n").unwrap();
+        assert_eq!(distro.family(), DistroFamily::OpenSuse);
+        assert!(!distro.is_fedora());
+    }
+
+    #[test]
+    fn unknown_id_uses_first_recognized_id_like() {
+        for (id_like, expected) in [
+            ("custom arch debian", DistroFamily::Arch),
+            ("custom debian arch", DistroFamily::Debian),
+            ("custom suse fedora", DistroFamily::OpenSuse),
+            ("custom nixos", DistroFamily::Nixos),
+            ("custom", DistroFamily::Unknown),
+        ] {
+            let distro =
+                DistroInfo::parse_os_release(&format!("ID=derivative\nID_LIKE=\"{id_like}\"\n"))
+                    .unwrap();
+            assert_eq!(distro.family(), expected);
+        }
+    }
+
+    #[test]
+    fn opensuse_variants_and_enterprise_ids_are_recognized() {
+        for id in ["opensuse-tumbleweed", "opensuse-leap", "opensuse", "sles"] {
+            let distro = DistroInfo::parse_os_release(&format!("ID={id}\n")).unwrap();
+            assert_eq!(distro.family(), DistroFamily::OpenSuse);
+        }
+    }
+
+    #[test]
+    fn nixos_profile_has_a_source_package_without_claiming_runtime_testing() {
+        let profile = DistroSupport::for_family(DistroFamily::Nixos);
+        assert_eq!(profile.tier, SupportTier::ImplementedNeedsTesting);
+        assert!(profile.install_command.contains("nix build .#apexshot"));
+    }
 
     #[test]
     fn test_distro_detection_arch() {

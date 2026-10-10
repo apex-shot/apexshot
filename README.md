@@ -66,13 +66,14 @@ Works best today on:
 | Ubuntu GNOME Wayland | Public beta, personally tested |
 | Arch Linux GNOME Wayland | Public beta, personally tested |
 | Hyprland Wayland | Public beta, personally tested |
-| Pop!_OS 22.04 (Ubuntu-based, Wayland) | Expected to work through the Ubuntu/Debian package path, less exercised |
+| Ubuntu 22.04-based derivatives | Their stock GTK 4.6 is below the application's GTK 4.10 requirement; the current native `.deb` is not compatible with that base |
 | GNOME Shell 46 (Wayland) | Supported by the extension; GNOME integration tested on Ubuntu 24.04, not an actual Zorin installation |
 | Sway / wlroots-like compositors (Wayland) | Implementation exists through GTK4 layer-shell, `wlr-screencopy`, and `wf-recorder`, but needs more manual validation |
 | KDE Plasma 6 / Niri / other Wayland desktops | ScreenCast portal + PipeWire path implemented, not yet personally tested |
 | Fedora / RHEL (Wayland) | Screenshots supported (Fedora KDE validated). **Video recording is not supported** — use Spectacle or Kooha for screen recording |
 | openSUSE Tumbleweed / Leap (Wayland) | Development stage: RPM spec + `scripts/build-opensuse-rpm.sh` exist; **no published binary** yet (generic installer will refuse) |
-| NixOS / Alpine / Gentoo / Void (Wayland) | Development stage: distro-family metadata only; packaging/testing pending |
+| NixOS (x86_64 Linux) | Source package provided through the repository flake; desktop capture, recording, and hotkeys still need runtime validation |
+| Alpine / Gentoo / Void (Wayland) | Development stage: distro-family metadata only; native packaging/testing pending |
 | SteamOS / Steam Deck (immutable Arch) | Not supported. The generic installer used to treat this as Arch because `pacman` exists; SteamOS is a read-only image, so that path fails on sudo, pacman keys, and PGP prompts, and any successful pacman install is wiped by the next SteamOS update. The installer now refuses instead. |
 | X11 on any distro | Experimental |
 
@@ -158,6 +159,14 @@ curl -fsSL https://apexshot.org/install | sh
 > status messages, download progress, and a summary screen when finished.
 
 ### Ubuntu / Debian
+
+The released `.deb` is built on Ubuntu 24.04. Distro-family detection selects
+an installer, not a guarantee of binary compatibility: derivatives must satisfy
+the package's actual library dependencies. ApexShot requires GTK 4.10 or newer;
+the [Ubuntu 22.04 archive](https://packages.ubuntu.com/jammy/libgtk-4-1) provides
+GTK 4.6. Don't force-install the package on an older base. The Nix source package
+provides its own locked library dependencies on x86_64 Linux, but desktop
+integration outside the tested environments still needs validation.
 
 The generic installer above will select this automatically. Direct command:
 
@@ -249,6 +258,26 @@ The openSUSE RPM build path is intended for Tumbleweed / Leap packaging
 validation and future OBS work. Runtime testing on KDE Plasma Wayland is still
 in progress.
 
+### NixOS
+
+Build the native application and Qt capture helper from the pinned Nixpkgs
+input and Cargo lockfile:
+
+```bash
+git clone https://github.com/apex-shot/apexshot.git
+cd apexshot
+nix build .#apexshot
+./result/bin/apexshot --help
+```
+
+This requires Nix's `nix-command` and `flakes` features. For declarative
+installation, portal/PipeWire setup, GNOME integration, browser native messaging,
+and updates, see [the Nix package guide](packaging/nix/README.md). The package
+supplies application dependencies; it doesn't configure the host's desktop
+services. Desktop capture and recording on NixOS are not yet runtime-validated.
+The generic installer points NixOS users to this package instead of selecting
+an unrelated package manager.
+
 ### Updating
 
 Update ApexShot from your terminal:
@@ -262,6 +291,9 @@ distribution, and asks for sudo when needed. Ubuntu/Debian, Arch, and Fedora
 use their existing package update paths. If the installed version is current
 or newer, it exits without downloading or installing a package. Flatpak installs should use
 `flatpak update` from a host terminal instead.
+NixOS installs should update their ApexShot flake input and rebuild their
+configuration; Nix profile installs should upgrade the corresponding profile
+entry. The generic updater does not modify Nix-managed installations.
 
 For older ApexShot versions without this command, the generic updater still works:
 

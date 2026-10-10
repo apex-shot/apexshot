@@ -262,11 +262,12 @@ install_runtime_dependencies() {
 }
 
 resolve_rpm_url() {
-    local rpm_path
+    local rpm_path version_no_v version_re
+    version_no_v="${VERSION#v}"
+    version_re=${version_no_v//./\\.}
     rpm_path=$(curl -fsSL "${RELEASES_URL}/expanded_assets/${VERSION}" |
-               grep -oE "/${REPO}/releases/download/${VERSION}/[^\"]*\.x86_64\.rpm" |
-               grep -v '\.src\.rpm$' |
-               head -n 1 || true)
+               grep -oE "\"/${REPO}/releases/download/${VERSION}/apexshot-${version_re}-[0-9]+\.fc[0-9]+\.x86_64\.rpm\"" |
+               head -n 1 | tr -d '"' || true)
 
     if [[ -z "$rpm_path" ]]; then
         return 1
@@ -284,7 +285,7 @@ download_rpm() {
     if ! rpm_url=$(resolve_rpm_url); then
         err "Could not find the Fedora RPM download URL for ${VERSION}."
         err "If this release is still publishing, try again in a few minutes."
-        err "Or use --from-source as a fallback."
+        err "For a source build, use a checked-out repository and follow CONTRIBUTING.md."
         exit 1
     fi
 
@@ -467,13 +468,12 @@ main() {
         return 0
     fi
 
-    install_runtime_dependencies
-
     if [[ $FROM_SOURCE -eq 1 ]]; then
         install_from_source
     fi
 
     download_rpm
+    install_runtime_dependencies
     install_rpm
     post_install_launch
     summary

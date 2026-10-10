@@ -83,6 +83,7 @@ right starting point for a change.
 | Native messaging host (browser)       | `native-host/`                                      | Bridge between Chrome/Chromium and the daemon. |
 | Chrome/Chromium extension             | `web-scroll-extension/`                             | Full-page scroll capture orchestration. |
 | Packaging (.deb)                      | `Cargo.toml [package.metadata.deb]`, `packaging/`   | Asset list, postinst/prerm, desktop file, icon, native-host manifest. |
+| Packaging (NixOS)                     | `flake.nix`, `flake.lock`, `packaging/nix/`          | Locked source build, GTK/Qt wrappers, assets, and declarative installation guide. |
 | CI                                    | `.github/workflows/release.yml`                     | Lint + build/test + tagged release. |
 | Architecture / module docs            | `docs/ARCHITECTURE.md`, `docs/MODULES.md`, `docs/DEVELOPER_GUIDE.md` | Deeper dives once you know the file you're touching. |
 
@@ -96,6 +97,12 @@ A handful of cross-cutting conventions worth knowing up front:
 - **Drawing-area redraw throttle** for the editor is a single constant
   (`DRAG_REDRAW_INTERVAL_US` in `src/capture/editor/color.rs`). Keep
   per-frame work cheap — `draft_action()` runs on every redraw.
+- **Distro identification** follows the [os-release specification](https://www.freedesktop.org/software/systemd/man/latest/os-release.html):
+  use `/etc/os-release`, falling back to `/usr/lib/os-release` only when
+  missing; prefer `ID`, then consult `ID_LIKE` in its declared order.
+  A shared package-manager family is not proof of binary compatibility.
+  Validate package recipes against upstream sources and report source-build
+  checks separately from desktop runtime testing.
 
 ## Development Setup
 

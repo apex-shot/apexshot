@@ -94,6 +94,7 @@ tesseract-ocr = ["dep:tesseract"]
 # Sandboxed build with portal capture and bundled desktop tools.
 # Build with: cargo build --features flatpak
 flatpak = []
+nix = []
 
 [profile.release]
 strip = true

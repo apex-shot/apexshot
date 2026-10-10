@@ -42,6 +42,12 @@ pub(crate) fn run_install(args: &[String]) {
         }
     }
 
+    if cfg!(feature = "nix") && !no_binary {
+        eprintln!("This installation is managed by Nix. Add ApexShot to your NixOS configuration or Nix profile instead of copying its binaries.");
+        eprintln!("Use `apexshot install --no-binary` only to configure user-session integration.");
+        std::process::exit(1);
+    }
+
     if !no_binary {
         install_binary(force, dev_install);
         install_desktop_launcher(dev_install);
@@ -96,6 +102,14 @@ pub(crate) fn run_uninstall(args: &[String]) {
                 std::process::exit(1);
             }
         }
+    }
+
+    if cfg!(feature = "nix") && !autostart_only {
+        eprintln!("This installation is managed by Nix. Remove ApexShot from your configuration and rebuild, or remove its Nix profile entry.");
+        eprintln!(
+            "Use `apexshot uninstall --autostart-only` only to remove user-session autostart."
+        );
+        std::process::exit(1);
     }
 
     uninstall_autostart(dev_install);
@@ -165,36 +179,11 @@ pub(crate) fn rpm_has_apexshot_package() -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) fn os_release_field(field: &str) -> Option<String> {
-    let content = std::fs::read_to_string("/etc/os-release").ok()?;
-    content.lines().find_map(|line| {
-        let (key, value) = line.split_once('=')?;
-        if key != field {
-            return None;
-        }
-        Some(value.trim_matches('"').to_string())
-    })
-}
-
 pub(crate) fn rpm_package_manager() -> &'static str {
-    let id = os_release_field("ID")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let id_like = os_release_field("ID_LIKE")
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let distro = format!(" {id} {id_like} ");
-
-    if distro.contains(" opensuse ") || distro.contains(" suse ") || distro.contains(" sles ") {
-        return "zypper";
-    }
-    if distro.contains(" fedora ")
-        || distro.contains(" rhel ")
-        || distro.contains(" centos ")
-        || distro.contains(" rocky ")
-        || distro.contains(" alma ")
-    {
-        return "dnf";
+    match apexshot::distro::DistroInfo::detect().map(|distro| distro.family()) {
+        Some(apexshot::distro::DistroFamily::OpenSuse) => return "zypper",
+        Some(apexshot::distro::DistroFamily::Fedora) => return "dnf",
+        _ => {}
     }
 
     if command_exists("dnf") {

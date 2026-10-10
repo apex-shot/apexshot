@@ -43,9 +43,15 @@ detect_distro_family() {
     id=""
     id_like=""
 
-    if [ -r /etc/os-release ]; then
+    release_file=/etc/os-release
+    if [ ! -e "$release_file" ]; then
+        release_file=/usr/lib/os-release
+    fi
+    if [ -r "$release_file" ]; then
+        ID=""
+        ID_LIKE=""
         # shellcheck disable=SC1091
-        . /etc/os-release
+        . "$release_file"
         id="${ID:-}"
         id_like="${ID_LIKE:-}"
     fi
@@ -56,24 +62,34 @@ detect_distro_family() {
         return
     fi
 
-    case " ${id} ${id_like} " in
-        *" arch "*|*" manjaro "*)
+    for candidate in $id $id_like; do
+        case "$candidate" in
+        nixos)
+            printf '%s' "nixos"
+            return
+            ;;
+        alpine|gentoo|void)
+            printf '%s' "$candidate"
+            return
+            ;;
+        arch|manjaro)
             printf '%s' "arch"
             return
             ;;
-        *" fedora "*|*" rhel "*|*" centos "*|*" rocky "*|*" alma "*)
+        fedora|rhel|centos|rocky|almalinux)
             printf '%s' "fedora"
             return
             ;;
-        *" opensuse "*|*" suse "*|*" sles "*)
+        opensuse-tumbleweed|opensuse-leap|opensuse|suse|sles)
             printf '%s' "opensuse"
             return
             ;;
-        *" debian "*|*" ubuntu "*|*" pop "*|*" linuxmint "*)
+        debian|ubuntu|pop|linuxmint|elementary)
             printf '%s' "ubuntu"
             return
             ;;
-    esac
+        esac
+    done
 
     if command -v pacman >/dev/null 2>&1; then
         printf '%s' "arch"
@@ -95,6 +111,17 @@ fi
 case "$(detect_distro_family)" in
     steamos)
         refuse_steamos
+        ;;
+    nixos)
+        echo "Use the Nix source package instead of a foreign .deb or RPM:" >&2
+        echo "  nix build github:apex-shot/apexshot#apexshot" >&2
+        echo "NixOS configuration: https://github.com/apex-shot/apexshot/blob/main/packaging/nix/README.md" >&2
+        exit 1
+        ;;
+    alpine|gentoo|void)
+        echo "Native packaging for this distribution is not available yet; do not install a foreign .deb or RPM." >&2
+        echo "Source build requirements: https://github.com/apex-shot/apexshot/blob/main/CONTRIBUTING.md" >&2
+        exit 1
         ;;
     arch)
         if [ -n "$SCRIPT_DIR" ] && [ -f "${SCRIPT_DIR}/arch-install.sh" ]; then

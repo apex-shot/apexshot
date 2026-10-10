@@ -33,6 +33,13 @@ fn shutter_sound_asset_path(sound_name: &str) -> Option<PathBuf> {
                     .map(|dir| dir.join("assets/sounds").join(file_name))
             })
             .unwrap_or_default(),
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| {
+                exe.parent()
+                    .map(|dir| dir.join("../share/apexshot/sounds").join(file_name))
+            })
+            .unwrap_or_default(),
         // System-wide install
         PathBuf::from("/usr/share/apexshot/sounds").join(file_name),
         PathBuf::from("/usr/local/share/apexshot/sounds").join(file_name),
@@ -112,5 +119,16 @@ mod tests {
     fn bundled_selection_resolves_from_the_checkout() {
         let path = shutter_sound_asset_path("Camera").expect("bundled sound should resolve");
         assert!(path.ends_with("assets/sounds/camera.ogg"));
+    }
+
+    #[test]
+    fn shutter_sound_assets_support_executable_relative_shared_paths() {
+        let source = include_str!("capture_sound.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+
+        assert!(
+            production_source.contains("../share/apexshot/sounds"),
+            "shutter sound lookup should resolve shared assets next to the executable's prefix",
+        );
     }
 }

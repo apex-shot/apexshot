@@ -18,6 +18,9 @@ pub(crate) fn run_update(args: &[String]) -> Result<(), String> {
             apexshot::app_identity::app_id()
         ));
     }
+    if cfg!(feature = "nix") {
+        return Err("This installation is managed by Nix. Update the ApexShot flake input and rebuild your configuration, or upgrade its Nix profile entry.".into());
+    }
 
     println!("Checking for ApexShot updates...");
     let Some(update) = apexshot::update::check_for_update_now()
@@ -61,6 +64,13 @@ fn updater_command() -> Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(all(feature = "nix", not(feature = "flatpak")))]
+    fn nix_update_returns_package_guidance_without_accessing_the_network() {
+        let args = ["apexshot", "update"].map(String::from);
+        assert!(run_update(&args).unwrap_err().contains("managed by Nix"));
+    }
 
     #[test]
     fn update_help_returns_without_starting_the_updater() {
