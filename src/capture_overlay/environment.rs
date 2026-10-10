@@ -153,7 +153,6 @@ pub fn builtin_screenshot_overlay_active() -> bool {
     })
 }
 
-/// Fall back to the desktop selector if a sandbox lacks its bundled helper.
 pub fn requires_portal_still_capture() -> bool {
     crate::app_identity::portal_only() && find_capture_binary().is_none()
 }

@@ -53,8 +53,7 @@ fn run_capture_binary_cold(
 ) -> Result<Output, SelectionError> {
     let binary = find_capture_binary().ok_or_else(|| {
         SelectionError::InitError(if crate::app_identity::portal_only() {
-            "The bundled apexshot-capture helper is missing. Reinstall the Flatpak package."
-                .into()
+            "The bundled apexshot-capture helper is missing. Reinstall the Flatpak package.".into()
         } else {
             "apexshot-capture binary not found. \
              Re-run `cargo build --release` to compile it, or check your PATH."
@@ -71,6 +70,12 @@ fn run_capture_binary_cold(
     let mut interactive_session = InteractiveOverlaySessionGuard::begin(extra_args);
 
     let mut cmd = Command::new(&binary);
+    cmd.env(
+        "APEXSHOT_PORTAL_HELPER",
+        std::env::current_exe().map_err(|error| {
+            SelectionError::InitError(format!("Unable to locate portal capture helper: {error}"))
+        })?,
+    );
     cmd.env("QT_IM_MODULE", "compose")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

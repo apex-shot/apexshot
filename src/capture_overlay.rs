@@ -26,11 +26,12 @@ use std::{
 };
 
 use crate::{
-    backend::{CaptureData, DisplayBackend, PixelFormat, WaylandBackend},
+    backend::{CaptureData, PixelFormat, WaylandBackend},
     gnome_integration::{emit_tracked_window_closed, emit_tracked_window_opened},
     overlay::{OverlaySelection, SelectionArea, SelectionError, SelectionResult},
 };
 use gtk4::gdk;
+use gtk4::prelude::MonitorExt;
 use serde::{Deserialize, Serialize};
 
 include!("capture_overlay/types.rs");

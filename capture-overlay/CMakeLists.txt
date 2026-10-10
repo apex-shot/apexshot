@@ -19,8 +19,6 @@ add_executable(apexshot-capture
     src/CaptureModeToolbar.h
     src/CaptureCountdownPill.cpp
     src/CaptureCountdownPill.h
-    src/request.cpp
-    src/request.h
     src/CaptureOverlay.cpp
     src/CaptureOverlay.h
     src/CaptureOverlay_p.h
@@ -48,6 +46,23 @@ add_executable(apexshot-capture
 target_link_libraries(apexshot-capture
     PRIVATE Qt5::Widgets Qt5::DBus Qt5::X11Extras Qt5::Network ${X11_LIBRARIES} ${X11_Xtst_LIB}
 )
+
+option(APEXSHOT_CAPTURE_BUILD_TESTS "Build the capture helper unit tests" OFF)
+if(APEXSHOT_CAPTURE_BUILD_TESTS)
+    find_package(Qt5 REQUIRED COMPONENTS Test)
+    enable_testing()
+    add_executable(apexshot-capture-tests
+        tests/ScreenCaptureTests.cpp
+        src/ScreenCapture.cpp
+        src/ScreenCapture.h
+        src/Sandbox.h
+    )
+    target_include_directories(apexshot-capture-tests PRIVATE src)
+    target_link_libraries(apexshot-capture-tests
+        PRIVATE Qt5::Gui Qt5::DBus Qt5::Test
+    )
+    add_test(NAME apexshot-capture-tests COMMAND apexshot-capture-tests)
+endif()
 
 install(TARGETS apexshot-capture
     RUNTIME DESTINATION bin
