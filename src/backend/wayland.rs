@@ -207,7 +207,8 @@ fn wlr_screencopy_global_advertised() -> bool {
     })
 }
 
-fn should_wait_for_portal_dialog_to_close(restore_token: Option<&str>) -> bool {
+/// Wait for a permission dialog only when the session did not restore a grant.
+pub(super) fn should_wait_for_portal_dialog_to_close(restore_token: Option<&str>) -> bool {
     restore_token.is_none()
 }
 

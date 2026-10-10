@@ -6,6 +6,10 @@ use ashpd::desktop::{
     },
     CreateSessionOptions, PersistMode, ResponseError, Session,
 };
+use image::{
+    codecs::png::{CompressionType, FilterType, PngEncoder},
+    ImageEncoder,
+};
 use sha2::{Digest, Sha256};
 use std::{
     io::{BufRead, Write},
@@ -215,7 +219,9 @@ impl PortalStillSession {
                 .map_err(|error| StillError::Capture(DisplayError::CaptureError(format!(
                     "Screen sharing was approved, but the PipeWire remote is unavailable: {error}"
                 ))))?;
-            tokio::time::sleep(Duration::from_millis(650)).await;
+            if super::wayland::should_wait_for_portal_dialog_to_close(token) {
+                tokio::time::sleep(Duration::from_millis(650)).await;
+            }
             Ok((stream.pipe_wire_node_id(), stream.position(), stream.size()))
         }.await;
         match result {
@@ -241,15 +247,11 @@ impl PortalStillSession {
             .map_err(|error| {
                 DisplayError::PortalError(format!("Failed to open PipeWire remote: {error}"))
             })?;
-        let frame = crate::pipewire_engine::capture_single_frame_with_min_frames(
-            fd,
-            self.node,
-            Duration::from_secs(5),
-            3,
-        )
-        .map_err(|error| {
-            DisplayError::CaptureError(format!("PipeWire still capture failed: {error}"))
-        })?;
+        let frame =
+            crate::pipewire_engine::capture_single_frame(fd, self.node, Duration::from_secs(5))
+                .map_err(|error| {
+                    DisplayError::CaptureError(format!("PipeWire still capture failed: {error}"))
+                })?;
         Ok(CaptureData::new(
             frame.pixels,
             frame.width,
@@ -284,7 +286,12 @@ fn capture_to_png(capture: CaptureData) -> anyhow::Result<serde_json::Value> {
         .mode(0o600)
         .open(&path)?;
     if let Err(error) =
-        image::DynamicImage::ImageRgba8(image).write_to(&mut file, image::ImageOutputFormat::Png)
+        PngEncoder::new_with_quality(&mut file, CompressionType::Fast, FilterType::Sub).write_image(
+            image.as_raw(),
+            capture.width,
+            capture.height,
+            image::ColorType::Rgba8,
+        )
     {
         let _ = std::fs::remove_file(&path);
         return Err(error.into());
@@ -479,6 +486,43 @@ mod tests {
         assert!(monitor(0).matches_stream(None, None));
         assert!(!monitor(0).matches_stream(Some((1920, -100)), None));
         assert!(!monitor(0).matches_stream(None, Some((1280, 720))));
+    }
+
+    #[test]
+    fn helper_png_round_trips_rgba_pixels_losslessly() {
+        let pixels = vec![7, 31, 201, 0, 240, 17, 85, 123];
+        let capture = CaptureData::new(pixels.clone(), 2, 1, PixelFormat::RGBA32);
+        let message = capture_to_png(capture).expect("helper PNG should encode");
+        let path = PathBuf::from(message["path"].as_str().expect("PNG path"));
+        let bytes = std::fs::read(&path);
+        let cleanup = std::fs::remove_file(&path);
+        let bytes = bytes.expect("helper PNG should be readable");
+        cleanup.expect("helper PNG should be removed");
+        let decoded = image::load_from_memory(&bytes)
+            .expect("helper PNG should decode")
+            .to_rgba8();
+
+        assert_eq!(decoded.as_raw(), &pixels);
+        assert_eq!(message["width"].as_u64(), Some(2));
+        assert_eq!(message["height"].as_u64(), Some(1));
+    }
+
+    #[test]
+    fn helper_png_rejects_malformed_pixel_data() {
+        let capture = CaptureData {
+            pixels: vec![1, 2, 3, 4, 5, 6, 7],
+            width: 2,
+            height: 1,
+            stride: 8,
+            format: PixelFormat::RGBA32,
+            cursor: None,
+            output_origin_x: 0,
+            output_origin_y: 0,
+            output_scale: 1,
+        };
+
+        let error = capture_to_png(capture).expect_err("malformed pixel data must fail");
+        assert_eq!(error.to_string(), "Invalid screenshot pixels");
     }
 
     #[test]

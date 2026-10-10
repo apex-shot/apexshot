@@ -2,7 +2,6 @@
 enum CaptureSessionState {
     Idle,
     ApexOverlayActive,
-    BuiltinOverlayActive,
 }
 
 #[derive(Debug)]
@@ -29,9 +28,9 @@ struct InteractiveOverlaySessionGuard {
 }
 
 impl CaptureSessionCoordinator {
-    pub fn begin_apex_overlay_session(
+    /// Reserve the shared capture slot without probing external state.
+    pub fn reserve_apex_overlay_session(
         &self,
-        builtin_overlay_active: bool,
     ) -> Result<CaptureOverlayGuard<'_>, LaunchBlockedReason> {
         let mut state = self
             .state
@@ -40,14 +39,21 @@ impl CaptureSessionCoordinator {
         if matches!(*state, CaptureSessionState::ApexOverlayActive) {
             return Err(LaunchBlockedReason::ApexOverlayAlreadyActive);
         }
-        if builtin_overlay_active {
-            *state = CaptureSessionState::BuiltinOverlayActive;
-            *state = CaptureSessionState::Idle;
-            return Err(LaunchBlockedReason::BuiltinOverlayActive);
-        }
         *state = CaptureSessionState::ApexOverlayActive;
         drop(state);
         Ok(CaptureOverlayGuard { coordinator: self })
+    }
+
+    /// Reserve the shared capture slot unless either overlay is already active.
+    pub fn begin_apex_overlay_session(
+        &self,
+        builtin_overlay_active: bool,
+    ) -> Result<CaptureOverlayGuard<'_>, LaunchBlockedReason> {
+        let guard = self.reserve_apex_overlay_session()?;
+        if builtin_overlay_active {
+            return Err(LaunchBlockedReason::BuiltinOverlayActive);
+        }
+        Ok(guard)
     }
 }
 
@@ -111,8 +117,35 @@ fn overlay_socket_is_listening() -> bool {
     }
 }
 
+/// Reserve the shared capture slot without performing external checks.
+pub fn reserve_capture_session() -> Result<CaptureOverlayGuard<'static>, LaunchBlockedReason> {
+    capture_session_coordinator().reserve_apex_overlay_session()
+}
+
+/// Reserve the shared slot and reject capture while the built-in UI is active.
 pub fn begin_capture_session() -> Result<CaptureOverlayGuard<'static>, LaunchBlockedReason> {
-    capture_session_coordinator().begin_apex_overlay_session(builtin_screenshot_overlay_active())
+    let guard = reserve_capture_session()?;
+    validate_capture_session(guard)
+}
+
+/// Check the built-in screenshot UI after reserving the shared capture slot.
+pub fn validate_capture_session(
+    guard: CaptureOverlayGuard<'static>,
+) -> Result<CaptureOverlayGuard<'static>, LaunchBlockedReason> {
+    validate_capture_session_with(guard, builtin_screenshot_overlay_active)
+}
+
+fn validate_capture_session_with<'a, F>(
+    guard: CaptureOverlayGuard<'a>,
+    builtin_overlay_active: F,
+) -> Result<CaptureOverlayGuard<'a>, LaunchBlockedReason>
+where
+    F: FnOnce() -> bool,
+{
+    if builtin_overlay_active() {
+        return Err(LaunchBlockedReason::BuiltinOverlayActive);
+    }
+    Ok(guard)
 }
 
 impl InteractiveOverlaySessionGuard {

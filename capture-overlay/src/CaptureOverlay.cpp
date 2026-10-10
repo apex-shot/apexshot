@@ -236,15 +236,17 @@ void CaptureOverlay::setFreezeBackground(const QPixmap& freeze)
     if (!m_background.isNull()) {
         // Opaque freeze underlay — do not rely on compositor alpha.
         setAttribute(Qt::WA_TranslucentBackground, false);
-        QImage full = m_background.toImage().convertToFormat(QImage::Format_ARGB32);
-        int bw = std::max(1, full.width() / 4);
-        int bh = std::max(1, full.height() / 4);
-        QImage small = full.scaled(bw, bh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-        for (int pass = 0; pass < 3; ++pass) {
-            small = small.scaled(bw * 2, bh * 2, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
-                         .scaled(bw, bh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+        if (!isCrosshairMode()) {
+            QImage full = m_background.toImage().convertToFormat(QImage::Format_ARGB32);
+            int bw = std::max(1, full.width() / 4);
+            int bh = std::max(1, full.height() / 4);
+            QImage small = full.scaled(bw, bh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            for (int pass = 0; pass < 3; ++pass) {
+                small = small.scaled(bw * 2, bh * 2, Qt::IgnoreAspectRatio, Qt::SmoothTransformation)
+                             .scaled(bw, bh, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
+            }
+            m_blurredBg = small;
         }
-        m_blurredBg = small;
     }
     update();
 }
@@ -398,7 +400,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     , m_scrollStage(ScrollStage::Inactive)
     , m_scrollCaptureReady(false)
     , m_scrollCaptureTimer(new QTimer(this))
-    , m_scrollControlPanel(new ScrollControlPanel())
+    , m_scrollControlPanel(new ScrollControlPanel(this))
     , m_scrollSimilarCount(0)
     , m_scrollFrameCount(0)
     , m_manualScrollAssistMode(false)
@@ -497,7 +499,7 @@ CaptureOverlay::CaptureOverlay(const QPixmap& background, QWidget* parent,
     }
 
     // Pre-build blurred background for frosted glass (1/4 res gaussian)
-    if (!m_background.isNull()) {
+    if (!isCrosshairMode() && !m_background.isNull()) {
         QImage full = m_background.toImage().convertToFormat(QImage::Format_ARGB32);
         int bw = std::max(1, full.width() / 4);
         int bh = std::max(1, full.height() / 4);

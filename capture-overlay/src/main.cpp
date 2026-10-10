@@ -833,11 +833,14 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     }
 
     if (captureScreenMode) {
+        const bool monitorPickerWasShown = QGuiApplication::screens().size() > 1;
         QScreen* screen = MonitorPicker::selectTargetScreen();
         if (!screen) {
             return 1;
         }
-        waitForOverlayUnmap();
+        if (monitorPickerWasShown) {
+            waitForOverlayUnmap();
+        }
         QString error;
         if (const auto status = captureSession.prepare(screen, screenshotCursor, error);
             status != ScreenCapture::CaptureStatus::Ok) {
@@ -1026,11 +1029,14 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     if (captureMenuMode) {
         targetScreen = captureMenuResult.screen;
     } else if (interactiveOverlayMode) {
+        const bool monitorPickerWasShown = QGuiApplication::screens().size() > 1;
         targetScreen = MonitorPicker::selectTargetScreen();
         if (!targetScreen) {
             return 1;
         }
-        waitForOverlayUnmap();
+        if (monitorPickerWasShown) {
+            waitForOverlayUnmap();
+        }
     }
 
     QImage desktopFreezeImage;

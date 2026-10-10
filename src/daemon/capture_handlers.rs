@@ -7,11 +7,10 @@ use crate::{
         ImageFormat, SaveConfig,
     },
     capture_overlay::{
-        begin_capture_session, capture_area_file_via_cpp, capture_crosshair_file_via_cpp,
-        capture_screen_file_via_cpp, capture_still_via_portal, is_launch_blocked_error,
-        open_quick_capture_via_cpp, request_existing_overlay_focus,
-        user_facing_capture_failure_message, AreaCapturePathResult, CaptureDisplay,
-        CaptureOverlayGuard, LaunchBlockedReason,
+        capture_area_file_via_cpp, capture_crosshair_file_via_cpp, capture_screen_file_via_cpp,
+        capture_still_via_portal, is_launch_blocked_error, open_quick_capture_via_cpp,
+        reserve_capture_session, user_facing_capture_failure_message, validate_capture_session,
+        AreaCapturePathResult, CaptureDisplay, CaptureOverlayGuard,
     },
     config::load_config,
     ocr::{extract_text, OcrConfig},
@@ -610,8 +609,11 @@ pub(super) fn screenshot_timer_supported(action: &str) -> bool {
     matches!(action, "screen" | "window")
 }
 
-pub(super) fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
-    let Some(_session_guard) = acquire_capture_session_guard("area") else {
+pub(super) fn handle_capture_area(
+    state: Arc<Mutex<DaemonState>>,
+    session_guard: CaptureOverlayGuard<'static>,
+) {
+    let Some(_session_guard) = validate_capture_session_guard("area", session_guard) else {
         return;
     };
     // Close any existing preview before starting capture (single-instance behavior)
@@ -619,8 +621,12 @@ pub(super) fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
     handle_capture_area_with_active_session(state);
 }
 
-pub(super) fn handle_quick_capture(state: Arc<Mutex<DaemonState>>) {
-    let Some(_session_guard) = acquire_capture_session_guard("quick-capture") else {
+pub(super) fn handle_quick_capture(
+    state: Arc<Mutex<DaemonState>>,
+    session_guard: CaptureOverlayGuard<'static>,
+) {
+    let Some(_session_guard) = validate_capture_session_guard("quick-capture", session_guard)
+    else {
         return;
     };
     let _ = stop_preview_overlay(&state);
@@ -629,8 +635,11 @@ pub(super) fn handle_quick_capture(state: Arc<Mutex<DaemonState>>) {
     handle_interactive_capture_result(result, state, gtk_tx, "Quick Capture");
 }
 
-pub(super) fn handle_capture_crosshair(state: Arc<Mutex<DaemonState>>) {
-    let Some(_session_guard) = acquire_capture_session_guard("crosshair") else {
+pub(super) fn handle_capture_crosshair(
+    state: Arc<Mutex<DaemonState>>,
+    session_guard: CaptureOverlayGuard<'static>,
+) {
+    let Some(_session_guard) = validate_capture_session_guard("crosshair", session_guard) else {
         return;
     };
     // Close any existing preview before starting capture
@@ -794,8 +803,11 @@ pub(super) fn handle_capture_crosshair_with_active_session(state: Arc<Mutex<Daem
     }
 }
 
-pub(super) fn handle_capture_screen(state: Arc<Mutex<DaemonState>>) {
-    let Some(_session_guard) = acquire_capture_session_guard("screen") else {
+pub(super) fn handle_capture_screen(
+    state: Arc<Mutex<DaemonState>>,
+    session_guard: CaptureOverlayGuard<'static>,
+) {
+    let Some(_session_guard) = validate_capture_session_guard("screen", session_guard) else {
         return;
     };
     // Close any existing preview before starting capture
@@ -855,19 +867,19 @@ pub(super) fn handle_capture_window(_state: Arc<Mutex<DaemonState>>) {
     );
 }
 
-pub(super) fn acquire_capture_session_guard(context: &str) -> Option<CaptureOverlayGuard<'static>> {
-    match begin_capture_session() {
+pub(super) fn acquire_capture_session_guard() -> Option<CaptureOverlayGuard<'static>> {
+    reserve_capture_session().ok()
+}
+
+fn validate_capture_session_guard(
+    context: &str,
+    guard: CaptureOverlayGuard<'static>,
+) -> Option<CaptureOverlayGuard<'static>> {
+    match validate_capture_session(guard) {
         Ok(guard) => Some(guard),
-        Err(LaunchBlockedReason::ApexOverlayAlreadyActive) => {
-            let refocused = request_existing_overlay_focus();
+        Err(reason) => {
             eprintln!(
-                "[daemon] Ignoring duplicate {context} request while ApexShot overlay is active (refocused={refocused})."
-            );
-            None
-        }
-        Err(LaunchBlockedReason::BuiltinOverlayActive) => {
-            eprintln!(
-                "[daemon] Refusing {context} request because the GNOME screenshot UI is active."
+                "[daemon] Refusing {context} request after capture validation failed: {reason:?}."
             );
             None
         }

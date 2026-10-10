@@ -6,7 +6,7 @@
             }
 
             .editor-root.editor-theme-dark .editor-toolbar {
-                background-color: transparent;
+                background-color: #0f0f0f;
             }
 
             .editor-root.editor-theme-dark .editor-footer {
@@ -34,7 +34,7 @@
             }
 
             .editor-root.editor-theme-light .editor-toolbar {
-                background-color: transparent;
+                background-color: #eef0f5;
             }
 
             .editor-root.editor-theme-light .editor-motion-tool-notch {

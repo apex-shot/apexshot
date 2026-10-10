@@ -461,16 +461,19 @@ impl PipeWireCapture {
             std::thread::sleep(Duration::from_millis(5));
         }
 
-        {
+        let validation_error = {
             let guard = inner.lock().unwrap();
             if let Some(ref err) = guard.error {
-                teardown_pw_stream(&thread_loop, &stream);
-                return Err(PipeWireError::Stream(err.clone()));
+                Some(PipeWireError::Stream(err.clone()))
+            } else if guard.format.is_none() {
+                Some(PipeWireError::FormatNegotiation)
+            } else {
+                None
             }
-            if guard.format.is_none() {
-                teardown_pw_stream(&thread_loop, &stream);
-                return Err(PipeWireError::FormatNegotiation);
-            }
+        };
+        if let Some(error) = validation_error {
+            teardown_pw_stream(&thread_loop, &stream);
+            return Err(error);
         }
 
         Ok(PipeWireCapture {
@@ -945,6 +948,7 @@ fn build_enum_format_pod(width_hint: Option<u32>, height_hint: Option<u32>) -> V
 // Convenience: single-frame capture
 // ---------------------------------------------------------------------------
 
+/// Capture one still frame with pixels normalized to RGBA.
 pub fn capture_single_frame(
     pipewire_fd: OwnedFd,
     node_id: u32,
@@ -953,6 +957,7 @@ pub fn capture_single_frame(
     capture_single_frame_with_min_frames(pipewire_fd, node_id, timeout, 1)
 }
 
+/// Capture an RGBA still after receiving the requested number of fresh frames.
 pub fn capture_single_frame_with_min_frames(
     pipewire_fd: OwnedFd,
     node_id: u32,
@@ -988,7 +993,25 @@ pub fn capture_single_frame_with_min_frames(
         last_frame = Some(capture.wait_for_frame(timeout)?);
     }
 
-    last_frame.ok_or(PipeWireError::NoFrame)
+    let mut frame = last_frame.ok_or(PipeWireError::NoFrame)?;
+    convert_still_pixels_to_rgba(&mut frame.pixels, capture.pix_fmt());
+    Ok(frame)
+}
+
+fn convert_still_pixels_to_rgba(pixels: &mut [u8], format: &str) {
+    let swap_red_blue = matches!(format, "bgr0" | "bgra");
+    let opaque = matches!(format, "bgr0" | "rgb0");
+    if !swap_red_blue && !opaque {
+        return;
+    }
+    for pixel in pixels.chunks_exact_mut(4) {
+        if swap_red_blue {
+            pixel.swap(0, 2);
+        }
+        if opaque {
+            pixel[3] = 255;
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -998,6 +1021,28 @@ pub fn capture_single_frame_with_min_frames(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn still_frames_convert_blue_first_formats_without_losing_alpha() {
+        let mut bgrx = vec![10, 20, 30, 0, 40, 50, 60, 99];
+        convert_still_pixels_to_rgba(&mut bgrx, "bgr0");
+        assert_eq!(bgrx, vec![30, 20, 10, 255, 60, 50, 40, 255]);
+
+        let mut bgra = vec![10, 20, 30, 70, 40, 50, 60, 80];
+        convert_still_pixels_to_rgba(&mut bgra, "bgra");
+        assert_eq!(bgra, vec![30, 20, 10, 70, 60, 50, 40, 80]);
+    }
+
+    #[test]
+    fn still_frames_preserve_red_first_colors_and_ignore_padding_alpha() {
+        let mut rgbx = vec![10, 20, 30, 0];
+        convert_still_pixels_to_rgba(&mut rgbx, "rgb0");
+        assert_eq!(rgbx, vec![10, 20, 30, 255]);
+
+        let mut rgba = vec![10, 20, 30, 70];
+        convert_still_pixels_to_rgba(&mut rgba, "rgba");
+        assert_eq!(rgba, vec![10, 20, 30, 70]);
+    }
 
     #[test]
     fn compositor_frame_clock_uses_monotonic_header_and_falls_back_for_other_domains() {

@@ -8,8 +8,9 @@ mod tests {
         parse_capture_screen_json, parse_capture_screen_json_with_mode, parse_recording_json,
         parse_selection_json, save_capture_to_temp_png, should_request_screenshot_lock,
         should_use_gtk_layer_shell_selector_from_env, supports_custom_shutter_sound_from,
-        tracked_overlay_id, AreaCapturePathResult, CaptureSessionCoordinator, LaunchBlockedReason,
-        OverlayExitCode, OverlaySelection, RecordingType,
+        tracked_overlay_id, validate_capture_session_with, AreaCapturePathResult,
+        CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode, OverlaySelection,
+        RecordingType,
     };
     use crate::{
         backend::{CaptureData, PixelFormat},
@@ -326,6 +327,57 @@ mod tests {
             coordinator.begin_apex_overlay_session(false).is_ok(),
             "builtin detection should not permanently wedge the coordinator"
         );
+    }
+
+    #[test]
+    fn capture_session_validation_drops_reservation_when_builtin_overlay_blocks() {
+        let coordinator = CaptureSessionCoordinator::default();
+        let guard = coordinator
+            .reserve_apex_overlay_session()
+            .expect("session should reserve the capture slot");
+
+        assert!(matches!(
+            validate_capture_session_with(guard, || true),
+            Err(LaunchBlockedReason::BuiltinOverlayActive)
+        ));
+
+        assert!(coordinator.reserve_apex_overlay_session().is_ok());
+    }
+
+    #[test]
+    fn capture_session_reservation_drops_and_can_be_reacquired() {
+        let coordinator = CaptureSessionCoordinator::default();
+        for _ in 0..3 {
+            let active = coordinator
+                .reserve_apex_overlay_session()
+                .expect("session should reserve the capture slot");
+
+            assert!(matches!(
+                coordinator.reserve_apex_overlay_session(),
+                Err(LaunchBlockedReason::ApexOverlayAlreadyActive)
+            ));
+
+            drop(active);
+            let reacquired = coordinator
+                .reserve_apex_overlay_session()
+                .expect("dropping the guard should release the capture slot");
+            drop(reacquired);
+        }
+    }
+
+    #[test]
+    fn capture_session_reservation_drops_when_builtin_probe_panics() {
+        let coordinator = CaptureSessionCoordinator::default();
+        let guard = coordinator
+            .reserve_apex_overlay_session()
+            .expect("first session should reserve the capture slot");
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            validate_capture_session_with(guard, || panic!("probe failed"))
+        }));
+
+        assert!(result.is_err());
+        assert!(coordinator.reserve_apex_overlay_session().is_ok());
     }
 
     #[test]

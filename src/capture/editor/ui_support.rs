@@ -767,10 +767,10 @@ mod tests {
     #[test]
     fn editor_toolbar_inherits_the_root_surface_in_both_themes() {
         assert!(EDITOR_CSS.contains(
-            ".editor-root.editor-theme-dark .editor-toolbar {\n                background-color: transparent;"
+            ".editor-root.editor-theme-dark .editor-toolbar {\n                background-color: #0f0f0f;"
         ));
         assert!(EDITOR_CSS.contains(
-            ".editor-root.editor-theme-light .editor-toolbar {\n                background-color: transparent;"
+            ".editor-root.editor-theme-light .editor-toolbar {\n                background-color: #eef0f5;"
         ));
     }
 

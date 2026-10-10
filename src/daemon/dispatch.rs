@@ -34,22 +34,32 @@ pub(super) fn dispatch_daemon_action(
             });
         }
         DaemonAction::QuickCapture => {
-            tokio::task::spawn_blocking(move || {
-                capture_handlers::handle_quick_capture(state_clone)
-            });
+            if let Some(session_guard) = capture_handlers::acquire_capture_session_guard() {
+                tokio::task::spawn_blocking(move || {
+                    capture_handlers::handle_quick_capture(state_clone, session_guard)
+                });
+            }
         }
         DaemonAction::CaptureArea => {
-            tokio::task::spawn_blocking(move || capture_handlers::handle_capture_area(state_clone));
+            if let Some(session_guard) = capture_handlers::acquire_capture_session_guard() {
+                tokio::task::spawn_blocking(move || {
+                    capture_handlers::handle_capture_area(state_clone, session_guard)
+                });
+            }
         }
         DaemonAction::CaptureCrosshair => {
-            tokio::task::spawn_blocking(move || {
-                capture_handlers::handle_capture_crosshair(state_clone)
-            });
+            if let Some(session_guard) = capture_handlers::acquire_capture_session_guard() {
+                tokio::task::spawn_blocking(move || {
+                    capture_handlers::handle_capture_crosshair(state_clone, session_guard)
+                });
+            }
         }
         DaemonAction::CaptureScreen => {
-            tokio::task::spawn_blocking(move || {
-                capture_handlers::handle_capture_screen(state_clone)
-            });
+            if let Some(session_guard) = capture_handlers::acquire_capture_session_guard() {
+                tokio::task::spawn_blocking(move || {
+                    capture_handlers::handle_capture_screen(state_clone, session_guard)
+                });
+            }
         }
         DaemonAction::CaptureWindow => {
             tokio::task::spawn_blocking(move || {
