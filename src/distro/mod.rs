@@ -137,15 +137,7 @@ impl DistroInfo {
 
     /// Summary of how screenshots are captured on this distribution.
     pub fn screenshot_capture_summary(&self) -> &'static str {
-        if self.is_debian() || self.is_arch() {
-            // GNOME Wayland: C++ overlay with XDG Screenshot portal still-image capture.
-            // wlroots: zwlr_screencopy_manager_v1 direct protocol,
-            // falls back to ScreenCast portal + PipeWire.
-            // X11: direct X11 backend.
-            "C++ overlay + XDG Screenshot portal / wlr-screencopy (no external CLI tools)"
-        } else {
-            "XDG Screenshot portal + PipeWire fallback"
-        }
+        "Permission-first ScreenCast portal + PipeWire / native wlr-screencopy / X11"
     }
 }
 

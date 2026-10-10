@@ -28,6 +28,9 @@
 #include <algorithm>
 
 class QTimer;
+namespace ScreenCapture {
+class CaptureSession;
+}
 class QScreen;
 
 #include "ScrollControlPanel.h"
@@ -158,6 +161,7 @@ public:
     }
     void setShowZoomPreview(bool enabled) { m_showZoomPreview = enabled; }
     void setFreezeSelectionBackground(bool enabled) { m_freezeSelectionBackground = enabled; }
+    void setCaptureSession(ScreenCapture::CaptureSession* session) { m_captureSession = session; }
     /// Replace the freeze underlay after the window is mapped. Used when GNOME
     /// places the overlay in the work area (below panels) so we re-crop the
     /// freeze to the actual window rect instead of stretching a full-screen
@@ -379,6 +383,7 @@ private:
     QTimer*        m_scrollCaptureTimer;
     ScrollControlPanel* m_scrollControlPanel;
     QRect          m_scrollCaptureArea;     // saved capture area in screen coords
+    ScreenCapture::CaptureSession* m_captureSession = nullptr;
     int            m_scrollSimilarCount;    // consecutive similar-frame count
     int            m_scrollFrameCount;      // total frames captured this session
     bool           m_manualScrollAssistMode;

@@ -67,9 +67,7 @@ pub(crate) fn run_install(args: &[String]) {
         }
     }
 
-    // Persist XDG portal permissions so the user doesn't have to re-approve
-    // screenshot/screencast access after every reboot.
-    apexshot::backend::portal_permissions::ensure_portal_permissions();
+    apexshot::backend::portal_permissions::report_portal_permissions();
 
     // Auto-configure shortcuts so they work out of the box on all desktops.
     // Best-effort: don't abort the install if hotkey setup fails.

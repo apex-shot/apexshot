@@ -434,10 +434,7 @@ pub(super) async fn run_daemon_inner(
 ) -> anyhow::Result<()> {
     eprintln!("[daemon] ApexShot daemon starting…");
 
-    // Ensure XDG portal permissions are persisted so the user doesn't have
-    // to re-approve screenshot/screencast access after reboot.
-    // (no-op in portal_only / Flatpak — never mutates PermissionStore)
-    crate::backend::portal_permissions::ensure_portal_permissions();
+    crate::backend::portal_permissions::report_portal_permissions();
 
     // Pre-warm apexshot-capture so the first hotkey doesn't pay Qt cold start.
     ensure_warm_capture_helper();

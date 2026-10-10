@@ -106,7 +106,11 @@ pub fn capture_screen_file_via_cpp() -> Result<PathBuf, SelectionError> {
         return capture_screen_file_via_wlroots();
     }
 
-    let output = run_capture_binary(&["--capture-screen"], None)?;
+    let config = crate::config::load_config().sanitized();
+    let mut args = vec!["--capture-screen".to_owned()];
+    append_screenshot_timer_args(&mut args, &config);
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    let output = run_capture_binary(&args, None)?;
 
     match output.status.code() {
         Some(0) => {

@@ -596,6 +596,7 @@ pub fn open_file(path: std::path::PathBuf) -> Result<(), String> {
     crate::utils::open::open_path(&path)
 }
 
+#[cfg(test)]
 pub(super) fn screenshot_timer_delay_duration(seconds: u32) -> Option<std::time::Duration> {
     if seconds == 0 {
         None
@@ -604,20 +605,9 @@ pub(super) fn screenshot_timer_delay_duration(seconds: u32) -> Option<std::time:
     }
 }
 
+#[cfg(test)]
 pub(super) fn screenshot_timer_supported(action: &str) -> bool {
     matches!(action, "screen" | "window")
-}
-
-pub(super) fn apply_screenshot_timer_if_needed(
-    action: &str,
-    app_config: &crate::config::AppConfig,
-) {
-    if !screenshot_timer_supported(action) {
-        return;
-    }
-    if let Some(delay) = screenshot_timer_delay_duration(app_config.screenshot_timer_interval) {
-        std::thread::sleep(delay);
-    }
 }
 
 pub(super) fn handle_capture_area(state: Arc<Mutex<DaemonState>>) {
@@ -648,8 +638,6 @@ pub(super) fn handle_capture_crosshair(state: Arc<Mutex<DaemonState>>) {
     handle_capture_crosshair_with_active_session(state);
 }
 
-/// Flatpak / portal-only still capture: Screenshot portal → save/open pipeline.
-/// Does not invoke `apexshot-capture` (omitted from portal-only builds).
 fn handle_portal_only_still_capture(
     state: Arc<Mutex<DaemonState>>,
     interactive: bool,
@@ -672,9 +660,6 @@ fn handle_portal_only_still_capture(
 }
 
 pub(super) fn handle_capture_area_with_active_session(state: Arc<Mutex<DaemonState>>) {
-    let app_config = load_config().sanitized();
-    apply_screenshot_timer_if_needed("area", &app_config);
-
     if crate::capture_overlay::requires_portal_still_capture() {
         handle_portal_only_still_capture(state, true, "Area");
         return;
@@ -766,9 +751,6 @@ fn handle_interactive_capture_result(
 }
 
 pub(super) fn handle_capture_crosshair_with_active_session(state: Arc<Mutex<DaemonState>>) {
-    let app_config = load_config().sanitized();
-    apply_screenshot_timer_if_needed("crosshair", &app_config);
-
     if crate::capture_overlay::requires_portal_still_capture() {
         handle_portal_only_still_capture(state, true, "Crosshair");
         return;
@@ -822,9 +804,6 @@ pub(super) fn handle_capture_screen(state: Arc<Mutex<DaemonState>>) {
 }
 
 pub(super) fn handle_capture_screen_with_active_session(state: Arc<Mutex<DaemonState>>) {
-    let app_config = load_config().sanitized();
-    apply_screenshot_timer_if_needed("screen", &app_config);
-
     if crate::capture_overlay::requires_portal_still_capture() {
         handle_portal_only_still_capture(state, false, "Fullscreen");
         return;

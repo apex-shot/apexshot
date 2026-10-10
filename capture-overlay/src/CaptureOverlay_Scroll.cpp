@@ -489,8 +489,11 @@ bool CaptureOverlay::captureScrollFrameSilent()
     QSize imageSize;
     QString error;
 
-    // Overlay stays visible; capture-safe rendering avoids drawing capture UI inside the capture area.
-    const bool ok = ScreenCapture::captureAreaToTempPng(m_scrollCaptureArea, imagePath, imageSize, error);
+    QImage frame;
+    bool ok = m_captureSession
+      && m_captureSession->captureFresh(frame, error) == ScreenCapture::CaptureStatus::Ok;
+    ok = ok && ScreenCapture::cropLogicalSelectionToTempPng(
+                 frame, m_captureSession->captureRect(), m_scrollCaptureArea, imagePath, imageSize, error);
 
     if (!ok) {
         std::fprintf(stderr,

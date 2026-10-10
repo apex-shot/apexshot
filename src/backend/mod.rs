@@ -1,6 +1,7 @@
 pub mod kde_screencast;
 pub mod kde_screenshot;
 pub mod portal_permissions;
+pub mod portal_still;
 pub mod screencopy;
 pub mod wayland;
 pub mod x11;
@@ -13,6 +14,9 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum DisplayError {
+    #[error("Capture cancelled")]
+    Cancelled,
+
     #[error("Backend not supported: {0}")]
     UnsupportedBackend(String),
 

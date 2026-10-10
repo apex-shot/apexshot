@@ -112,6 +112,11 @@ fn ensure_warm_worker_running() -> Result<u32, String> {
     let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
 
     let mut cmd = Command::new(&binary);
+    cmd.env(
+        "APEXSHOT_PORTAL_HELPER",
+        std::env::current_exe()
+            .map_err(|error| format!("unable to locate portal capture helper: {error}"))?,
+    );
     cmd.arg("--worker")
         .env("QT_IM_MODULE", "compose")
         .stdin(Stdio::null())

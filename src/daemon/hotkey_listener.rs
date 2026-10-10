@@ -35,7 +35,7 @@ pub(super) async fn run_hotkey_listener(
 ///
 /// We point to the main app's desktop file so that xdg-desktop-portal
 /// associates the daemon with `io.github.codegoddy.apexshot` — the same
-/// app ID used in the PermissionStore by `ensure_portal_permissions()`.
+/// app ID used in the PermissionStore by `report_portal_permissions()`.
 /// Without this, the portal derives the app ID from the autostart desktop
 /// file name (`apexshot`) which never matches, so permissions are never
 /// found and the user is asked to approve every time.

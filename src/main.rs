@@ -64,6 +64,13 @@ fn main() {
     // Handle GTK-only commands BEFORE entering tokio runtime
     // These commands run their own GTK main loop and don't need tokio
     match args[1].as_str() {
+        "portal-still-internal" => {
+            if let Err(error) = apexshot::backend::portal_still::run_internal_helper(&args) {
+                eprintln!("Portal still capture failed: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
         "update" => {
             if let Err(error) = cli::update::run_update(&args) {
                 eprintln!("Update failed: {error}");

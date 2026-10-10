@@ -45,25 +45,6 @@
 #include <fcntl.h>
 #endif
 
-// Helper QObject to receive the async XDG portal Screenshot response
-class PortalResponse : public QObject
-{
-    Q_OBJECT
-public:
-    QString uri;
-    bool    got = false;
-    QEventLoop loop;
-
-public slots:
-    void onResponse(uint code, const QVariantMap& results)
-    {
-        if (code == 0)
-            uri = results.value(QStringLiteral("uri")).toString();
-        got = true;
-        loop.quit();
-    }
-};
-
 namespace {
 
 constexpr int kExitRecordConfigUpdated = 6;
@@ -255,6 +236,21 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                 openEditor ? "true" : "false",
                 fullscreen ? "true" : "false");
     std::fflush(stdout);
+}
+
+int exitCodeForStatus(ScreenCapture::CaptureStatus status)
+{
+    return status == ScreenCapture::CaptureStatus::Cancelled ? 1 : 2;
+}
+
+void waitForOverlayUnmap()
+{
+    QApplication::sendPostedEvents();
+    QApplication::processEvents(QEventLoop::AllEvents, 50);
+    if (qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
+        QThread::msleep(300);
+        QApplication::processEvents(QEventLoop::AllEvents, 50);
+    }
 }
 
 } // namespace
@@ -608,6 +604,8 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     bool initialDimScreen = true;
     bool initialShowCountdown = true;
     int initialCaptureDelaySeconds = 5;
+    int screenshotTimerSeconds = 0;
+    bool screenshotCursor = false;
     QString selectionCursor = QStringLiteral("Disabled");
     bool showZoomPreview = false;
     bool freezeSelectionBackground = true;
@@ -619,6 +617,7 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     bool openRecordingUiMode = false;
     const QString sessionSocketPath = overlaySocketPath();
     QLocalServer sessionServer;
+    ScreenCapture::CaptureSession captureSession;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--background") == 0 && i + 1 < argc) {
@@ -659,7 +658,10 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         } else if (std::strcmp(argv[i], "--hide-timer") == 0) {
             controlShowTimer = false;
         } else if (QString(argv[i]).startsWith("--timer-seconds=")) {
-            initialCaptureDelaySeconds = std::max(0, QString(argv[i]).mid(16).toInt());
+            screenshotTimerSeconds = std::max(0, QString(argv[i]).mid(16).toInt());
+            initialCaptureDelaySeconds = screenshotTimerSeconds;
+        } else if (QString(argv[i]).startsWith("--screenshot-cursor=")) {
+            screenshotCursor = QString(argv[i]).mid(20) == QStringLiteral("1");
         } else if (QString(argv[i]).startsWith("--restore-selection=")) {
             // Format: --restore-selection=x,y,w,h
             QString val = QString(argv[i]).mid(20);
@@ -788,8 +790,7 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     // Every interactive overlay is scoped to one display. This includes the
     // legacy direct area selector used by recording as well as screenshot and
     // recording-UI entry points.
-    const bool interactiveOverlayMode =
-      !captureScreenMode && !recordControlsMode;
+    const bool interactiveOverlayMode = !recordControlsMode;
     if (interactiveOverlayMode) {
         if (forwardOverlayRequestToExistingOverlay(sessionSocketPath, kOverlayFocusRequest)) {
             return kExitForwardedToExistingOverlay;
@@ -832,10 +833,39 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     }
 
     if (captureScreenMode) {
+        QScreen* screen = MonitorPicker::selectTargetScreen();
+        if (!screen) {
+            return 1;
+        }
+        waitForOverlayUnmap();
+        QString error;
+        if (const auto status = captureSession.prepare(screen, screenshotCursor, error);
+            status != ScreenCapture::CaptureStatus::Ok) {
+            std::fprintf(stderr,
+                         "apexshot-capture: fullscreen capture failed: %s\n",
+                         error.toLocal8Bit().constData());
+            return exitCodeForStatus(status);
+        }
+        if (screenshotTimerSeconds > 0) {
+            if (controlShowTimer) {
+                if (!CaptureCountdownPill::run(screen, screenshotTimerSeconds)) {
+                    return 1;
+                }
+            } else {
+                QThread::sleep(static_cast<unsigned long>(screenshotTimerSeconds));
+            }
+        }
+        QImage image;
+        if (const auto status = captureSession.captureFresh(image, error);
+            status != ScreenCapture::CaptureStatus::Ok) {
+            std::fprintf(stderr,
+                         "apexshot-capture: fullscreen capture failed: %s\n",
+                         error.toLocal8Bit().constData());
+            return exitCodeForStatus(status);
+        }
         QString imagePath;
         QSize imageSize;
-        QString error;
-        if (!ScreenCapture::captureFullscreenToTempPng(imagePath, imageSize, error)) {
+        if (!ScreenCapture::saveImageToTempPng(image, imagePath, imageSize, error)) {
             std::fprintf(stderr,
                          "apexshot-capture: fullscreen capture failed: %s\n",
                          error.toLocal8Bit().constData());
@@ -876,12 +906,7 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         // Hiding a Wayland surface is asynchronous. Wait until the compositor
         // has committed the toolbar's unmap before requesting the screenshot,
         // otherwise its final frame can be baked into the captured image.
-        QApplication::sendPostedEvents();
-        QApplication::processEvents(QEventLoop::AllEvents, 50);
-        if (qEnvironmentVariableIsSet("WAYLAND_DISPLAY")) {
-            QThread::msleep(300);
-            QApplication::processEvents(QEventLoop::AllEvents, 50);
-        }
+        waitForOverlayUnmap();
 
         // The toolbar has been fully unmapped before any capture API is called.
         // Display capture can complete immediately; Area and Window continue in
@@ -925,24 +950,38 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                                    false);
                 return 0;
             }
-            if (!CaptureCountdownPill::run(captureMenuResult.screen,
-                                           captureMenuResult.timerSeconds)) {
+            QScreen* displayScreen = captureMenuResult.screen
+                ? captureMenuResult.screen
+                : QGuiApplication::primaryScreen();
+            QString error;
+            if (const auto status = captureSession.prepare(displayScreen, screenshotCursor, error);
+                status != ScreenCapture::CaptureStatus::Ok) {
+                sessionServer.close();
+                QLocalServer::removeServer(sessionSocketPath);
+                std::fprintf(stderr,
+                             "apexshot-capture: display capture failed: %s\n",
+                             error.toLocal8Bit().constData());
+                return exitCodeForStatus(status);
+            }
+            if (!CaptureCountdownPill::run(displayScreen, captureMenuResult.timerSeconds)) {
                 sessionServer.close();
                 QLocalServer::removeServer(sessionSocketPath);
                 return 1;
             }
 
-            QString imagePath;
-            QSize imageSize;
-            QString error;
-            const QRect displayGeometry = captureMenuResult.screen
-                ? captureMenuResult.screen->geometry()
-                : QGuiApplication::primaryScreen()->geometry();
-            const bool ok = ScreenCapture::captureAreaToTempPng(
-                displayGeometry, imagePath, imageSize, error);
+            QImage image;
+            const auto captureStatus = captureSession.captureFresh(image, error);
             sessionServer.close();
             QLocalServer::removeServer(sessionSocketPath);
-            if (!ok) {
+            if (captureStatus != ScreenCapture::CaptureStatus::Ok) {
+                std::fprintf(stderr,
+                             "apexshot-capture: display capture failed: %s\n",
+                             error.toLocal8Bit().constData());
+                return exitCodeForStatus(captureStatus);
+            }
+            QString imagePath;
+            QSize imageSize;
+            if (!ScreenCapture::saveImageToTempPng(image, imagePath, imageSize, error)) {
                 std::fprintf(stderr,
                              "apexshot-capture: display capture failed: %s\n",
                              error.toLocal8Bit().constData());
@@ -952,7 +991,7 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             printCaptureScreenJson(imagePath,
                                    imageSize,
                                    captureMenuResult.ocr ? "ocr" : nullptr,
-                                   displayGeometry);
+                                   displayScreen->geometry());
             return 0;
         }
 
@@ -983,56 +1022,52 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     const bool interactiveSelectorMode =
       areaInitMode || crosshairCaptureMode || openRecordingUiMode || windowCaptureMode;
 
-    // 1) Freeze first: capture at hotkey time into memory so
-    // the monitor picker / overlay never appear in the freeze frame, and so we
-    // avoid waiting on picker unmap before the expensive grab.
-    QImage desktopFreezeImage;
-    if (interactiveSelectorMode && freezeSelectionBackground && background.isNull()) {
-        QString freezeError;
-        if (ScreenCapture::captureFullscreenToImage(desktopFreezeImage, freezeError)) {
-            std::fprintf(stderr,
-                         "apexshot-capture: capture-area freeze ok (%dx%d)\n",
-                         desktopFreezeImage.width(),
-                         desktopFreezeImage.height());
-        } else {
-            std::fprintf(stderr,
-                         "apexshot-capture: capture-area freeze failed (%s); "
-                         "falling back to translucent overlay\n",
-                         freezeError.toLocal8Bit().constData());
-            desktopFreezeImage = QImage();
-        }
-    }
-
-    // 2) Pick monitor (metadata UI only — freeze already done when enabled).
-    // The selected target is passed to CaptureOverlay, so both screenshot and
-    // recording actions open on the display chosen in the picker.
     QScreen* targetScreen = nullptr;
     if (captureMenuMode) {
         targetScreen = captureMenuResult.screen;
     } else if (interactiveOverlayMode) {
         targetScreen = MonitorPicker::selectTargetScreen();
         if (!targetScreen) {
-            return 1; // cancelled
+            return 1;
         }
-        // Short drain so the picker surface is gone before the capture overlay maps.
-        QApplication::processEvents(QEventLoop::AllEvents, 20);
+        waitForOverlayUnmap();
+    }
+
+    QImage desktopFreezeImage;
+    if (interactiveSelectorMode && !openRecordingUiMode) {
+        QString sessionError;
+        QScreen* sessionScreen = targetScreen ? targetScreen : QGuiApplication::primaryScreen();
+        if (const auto status = captureSession.prepare(sessionScreen, screenshotCursor, sessionError);
+            status != ScreenCapture::CaptureStatus::Ok) {
+            std::fprintf(stderr,
+                         "apexshot-capture: capture session failed: %s\n",
+                         sessionError.toLocal8Bit().constData());
+            return exitCodeForStatus(status);
+        }
+        if (freezeSelectionBackground && background.isNull()) {
+            QString freezeError;
+            if (const auto status = captureSession.captureFresh(desktopFreezeImage, freezeError);
+                status != ScreenCapture::CaptureStatus::Ok) {
+                std::fprintf(stderr,
+                             "apexshot-capture: capture-area freeze failed: %s\n",
+                             freezeError.toLocal8Bit().constData());
+                return exitCodeForStatus(status);
+            }
+            std::fprintf(stderr,
+                         "apexshot-capture: capture-area freeze ok (%dx%d)\n",
+                         desktopFreezeImage.width(),
+                         desktopFreezeImage.height());
+        }
     }
 
     QPixmap overlayBackground = background;
-    if (overlayBackground.isNull() && !desktopFreezeImage.isNull() && targetScreen) {
+    if (overlayBackground.isNull() && !desktopFreezeImage.isNull()) {
         overlayBackground = ScreenCapture::freezeBackgroundForLogicalRect(
-          desktopFreezeImage, targetScreen->geometry());
+          desktopFreezeImage, captureSession.captureRect(), captureSession.captureRect());
         if (overlayBackground.isNull()) {
             std::fprintf(stderr,
                          "apexshot-capture: failed to crop freeze for selected monitor\n");
         }
-    } else if (overlayBackground.isNull() && !desktopFreezeImage.isNull()) {
-        QRect desktopBounds;
-        for (QScreen* screen : QGuiApplication::screens()) {
-            desktopBounds = desktopBounds.united(screen->geometry());
-        }
-        overlayBackground = ScreenCapture::freezeBackgroundForLogicalRect(
-          desktopFreezeImage, desktopBounds);
     }
 
     std::vector<std::unique_ptr<CaptureOverlay>> overlayWindows;
@@ -1067,6 +1102,7 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         overlay->setInitialVideoFps(initialVideoFps);
         overlay->setInitialRecordMono(initialRecordMono);
         overlay->setInitialOpenEditor(initialOpenEditor);
+        overlay->setCaptureSession(&captureSession);
         if (openRecordingUiMode) {
             overlay->openRecordingPanelForShortcut();
         }
@@ -1155,7 +1191,7 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                 continue;
             }
             const QPixmap aligned = ScreenCapture::freezeBackgroundForLogicalRect(
-              desktopFreezeImage, mapped);
+              desktopFreezeImage, captureSession.captureRect(), mapped);
             if (!aligned.isNull()) {
                 overlayWindow->setFreezeBackground(aligned);
                 std::fprintf(stderr,
@@ -1272,12 +1308,15 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         return 0;
     }
 
-    if (captureMenuMode
-        && captureMenuResult.action != CaptureModeToolbar::Action::Display
-        && captureMenuResult.timerSeconds > 0) {
+    const int captureDelaySeconds = captureMenuMode
+        ? captureMenuResult.timerSeconds
+        : screenshotTimerSeconds;
+    if ((areaInitMode || crosshairCaptureMode || windowCaptureMode)
+        && !overlay->recordRequested()
+        && captureDelaySeconds > 0) {
         const QRect fadeRect = windowCaptureMode ? overlay->desktopSelection() : QRect();
         if (!CaptureCountdownPill::run(targetScreen,
-                                       captureMenuResult.timerSeconds,
+                                       captureDelaySeconds,
                                        fadeRect)) {
             return 1;
         }
@@ -1285,7 +1324,10 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
 
     // Window picker may have already captured the real window surface
     // (Shell.Screenshot.screenshot_window) — prefer that over freeze crop.
-    if (overlay->hasPreCapturedImage()) {
+    if (overlay->hasPreCapturedImage() && captureDelaySeconds > 0) {
+        QFile::remove(overlay->preCapturedImagePath());
+    }
+    if (overlay->hasPreCapturedImage() && captureDelaySeconds == 0) {
         QString path = overlay->preCapturedImagePath();
         QImage image(path);
         if (!image.isNull() && QFileInfo::exists(path)) {
@@ -1354,27 +1396,22 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         const bool fullscreenRequested = overlay->recordFullscreen();
         const QRect selGlobal = overlay->desktopSelection();
         const bool isWayland = qEnvironmentVariableIsSet("WAYLAND_DISPLAY");
-        const QString desktop = qEnvironmentVariable("XDG_CURRENT_DESKTOP");
-        const bool isGnomeWayland =
-          isWayland &&
-          (desktop.contains("GNOME", Qt::CaseInsensitive) ||
-           qEnvironmentVariableIsSet("GNOME_SETUP_DISPLAY"));
 
         QString imagePath;
         QSize imageSize;
         QString error;
         bool ok = false;
 
-        // Area mode can crop the frozen frame shown by the selector. Window
-        // mode uses that frame only as picker background: after a row is chosen
-        // it must capture the selected window rect again so the result reflects
-        // the window at click time rather than the earlier picker underlay.
         if (!desktopFreezeImage.isNull()
             && !fullscreenRequested
             && !windowCaptureMode
-            && !(captureMenuMode && captureMenuResult.timerSeconds > 0)) {
-            ok = ScreenCapture::cropFromDesktopImageToTempPng(
-              desktopFreezeImage, selGlobal, imagePath, imageSize, error);
+            && captureDelaySeconds == 0) {
+            ok = ScreenCapture::cropLogicalSelectionToTempPng(desktopFreezeImage,
+                                                              captureSession.captureRect(),
+                                                              selGlobal,
+                                                              imagePath,
+                                                              imageSize,
+                                                              error);
             if (ok) {
                 std::fprintf(stderr,
                              "apexshot-capture: cropped selection from freeze "
@@ -1390,10 +1427,6 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         }
 
         if (!ok) {
-            // After the overlay hides itself, some compositors/portal backends can
-            // still composite one last frame containing parts of the UI. Give the
-            // compositor a moment to fully unmap the window before requesting the
-            // actual screenshot.
             if (isWayland) {
                 QApplication::processEvents(QEventLoop::AllEvents, 50);
                 const int settleMs = windowCaptureMode
@@ -1405,32 +1438,22 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                 QApplication::processEvents(QEventLoop::AllEvents, 50);
             }
 
-            if (crosshairCaptureMode) {
-                ok = ScreenCapture::captureAreaToTempPng(
-                  selGlobal, imagePath, imageSize, error);
-            } else if (fullscreenRequested) {
-                ok = ScreenCapture::captureFullscreenToTempPng(
-                  imagePath, imageSize, error);
-            } else {
-                ok = ScreenCapture::captureAreaToTempPng(
-                  selGlobal, imagePath, imageSize, error);
+            QImage frame;
+            const ScreenCapture::CaptureStatus status = captureSession.captureFresh(frame, error);
+            if (status != ScreenCapture::CaptureStatus::Ok) {
+                std::fprintf(stderr,
+                             "apexshot-capture: area capture failed: %s\n",
+                             error.toLocal8Bit().constData());
+                return exitCodeForStatus(status);
             }
-
-            if (!ok && isWayland && !isGnomeWayland) {
-                QString fallbackError;
-                const QPoint fallbackOrigin =
-                  overlay->desktopOriginForLocalCoordinates();
-                const QRect overlayGlobalGeometry(fallbackOrigin.x(),
-                                                  fallbackOrigin.y(),
-                                                  overlay->geometry().width(),
-                                                  overlay->geometry().height());
-                ok = ScreenCapture::captureAreaToTempPngFromOverlayLocal(
-                  sel, overlayGlobalGeometry, imagePath, imageSize, fallbackError);
-                if (!ok) {
-                    error = QStringLiteral("%1; overlay-local fallback failed (%2)")
-                              .arg(error, fallbackError);
-                }
-            }
+            ok = fullscreenRequested
+                ? ScreenCapture::saveImageToTempPng(frame, imagePath, imageSize, error)
+                : ScreenCapture::cropLogicalSelectionToTempPng(frame,
+                                                               captureSession.captureRect(),
+                                                               selGlobal,
+                                                               imagePath,
+                                                               imageSize,
+                                                               error);
         }
         if (!ok) {
             std::fprintf(stderr,
@@ -1456,5 +1479,3 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
 
     return 0;
 }
-
-#include "main.moc"

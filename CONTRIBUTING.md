@@ -68,7 +68,7 @@ right starting point for a change.
 |---------------------------------------|-----------------------------------------------------|-------|
 | Rust binary entry point + CLI         | `src/main.rs`                                       | Dispatches `daemon`, `capture`, `record`, `edit`, `preview`, `settings` subcommands. |
 | Background daemon, hotkeys, tray      | `src/daemon/`, `src/hotkeys/`, `src/tray/`          | D-Bus triggers, system tray (`ksni`), global shortcut registration. |
-| Capture backends (X11 / Wayland)      | `src/backend/`                                      | Tier list: wlr-screencopy → grim → portal Screenshot → portal ScreenCast (incl. `restore_token` cache). |
+| Capture backends (X11 / Wayland)      | `src/backend/`                                      | Interactive screenshots prepare a monitor-only ScreenCast session before timers; native X11 / wlr-screencopy remain available. Lower-level backend APIs also retain Screenshot portal fallbacks. |
 | Image editor + annotations            | `src/capture/editor/`                               | GTK4 + Cairo. Pen/highlighter rendering, color palette, selection, crop. |
 | Preview overlay                       | `src/capture/preview_overlay.rs`                    | Quick-access card after capture (drag, edit, copy, save). |
 | Recording pipeline                    | `src/recording/`                                    | Native PipeWire (`pipewire_engine.rs`) + ffmpeg on Wayland; GStreamer ximagesrc on X11. Video encoding, audio source discovery (`pactl`). |
@@ -90,10 +90,13 @@ right starting point for a change.
 A handful of cross-cutting conventions worth knowing up front:
 
 - **Restore-token caches** for the XDG ScreenCast portal live at
-  `~/.cache/apexshot/`. The Rust path uses
-  `wayland-screencast-monitor.token` / `-window.token`; the C++ overlay
-  uses `cpp-screencast.token`. Distinct files so neither can clobber
-  the other's grant.
+  `~/.cache/apexshot/`. Interactive screenshots use private
+  `still-monitor-<hash>.token` files scoped to app identity, desktop, chosen
+  output, and display topology. The Qt overlay delegates these sessions to
+  the Rust helper rather than keeping its own cache. Lower-level backend APIs
+  retain `wayland-screencast-monitor.token` / `-window.token`; recording
+  deliberately does not restore a previous source. Tokens rotate after use,
+  and desktop consent—not a direct PermissionStore write—controls access.
 - **Drawing-area redraw throttle** for the editor is a single constant
   (`DRAG_REDRAW_INTERVAL_US` in `src/capture/editor/color.rs`). Keep
   per-frame work cheap — `draft_action()` runs on every redraw.

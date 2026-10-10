@@ -24,7 +24,7 @@ use ashpd::desktop::{
         StartCastOptions,
     },
     screenshot::Screenshot,
-    CreateSessionOptions, PersistMode,
+    CreateSessionOptions, PersistMode, ResponseError,
 };
 use std::os::fd::OwnedFd;
 use std::path::PathBuf;
@@ -136,6 +136,75 @@ fn clear_restore_token(target: CaptureTarget) {
     if let Some(path) = restore_token_path(target) {
         let _ = std::fs::remove_file(path);
     }
+}
+
+enum ScreencastError {
+    Cancelled,
+    Failed(DisplayError),
+}
+
+impl From<DisplayError> for ScreencastError {
+    fn from(error: DisplayError) -> Self {
+        Self::Failed(error)
+    }
+}
+
+impl ScreencastError {
+    fn into_display(self) -> DisplayError {
+        match self {
+            Self::Cancelled => DisplayError::Cancelled,
+            Self::Failed(error) => error,
+        }
+    }
+}
+
+fn screencast_response_error(stage: &str, error: ashpd::Error) -> ScreencastError {
+    match error {
+        ashpd::Error::Response(ResponseError::Cancelled) => ScreencastError::Cancelled,
+        error => ScreencastError::Failed(DisplayError::PortalError(format!(
+            "{stage} failed: {error}"
+        ))),
+    }
+}
+
+fn screenshot_response_error(error: ashpd::Error) -> DisplayError {
+    match error {
+        ashpd::Error::Response(ResponseError::Cancelled) => DisplayError::Cancelled,
+        error => DisplayError::PortalError(format!("Screenshot portal response failed: {error}")),
+    }
+}
+
+fn wlr_screencopy_global_advertised() -> bool {
+    use wayland_client::{
+        globals::{registry_queue_init, GlobalListContents},
+        protocol::wl_registry,
+        Connection, Dispatch, QueueHandle,
+    };
+
+    struct GlobalsProbe;
+
+    impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for GlobalsProbe {
+        fn event(
+            _: &mut Self,
+            _: &wl_registry::WlRegistry,
+            _: wl_registry::Event,
+            _: &GlobalListContents,
+            _: &Connection,
+            _: &QueueHandle<Self>,
+        ) {
+        }
+    }
+
+    let Ok(connection) = Connection::connect_to_env() else {
+        return false;
+    };
+    let Ok((globals, _queue)) = registry_queue_init::<GlobalsProbe>(&connection) else {
+        return false;
+    };
+    globals.contents().with_list(|list| {
+        list.iter()
+            .any(|global| global.interface == "zwlr_screencopy_manager_v1")
+    })
 }
 
 fn should_wait_for_portal_dialog_to_close(restore_token: Option<&str>) -> bool {
@@ -254,7 +323,13 @@ impl WaylandBackend {
         result
     }
 
-    fn should_try_native_screencopy() -> bool {
+    pub(crate) fn native_screencopy_available() -> bool {
+        !Self::should_force_screenshot_portal_first()
+            && Self::should_try_native_screencopy()
+            && wlr_screencopy_global_advertised()
+    }
+
+    pub(crate) fn should_try_native_screencopy() -> bool {
         // Flatpak cannot talk to compositor-private protocols.
         if crate::app_identity::portal_only() {
             return false;
@@ -287,7 +362,7 @@ impl WaylandBackend {
     }
 
     /// Capture a specific output when `origin` is `Some((x, y))` (multi-monitor).
-    fn capture_monitor_via_native_screencopy_at(
+    pub(crate) fn capture_monitor_via_native_screencopy_at(
         origin: Option<(i32, i32)>,
     ) -> Option<DisplayResult<CaptureData>> {
         if !Self::should_try_native_screencopy() {
@@ -343,9 +418,7 @@ impl WaylandBackend {
                 DisplayError::PortalError(format!("Screenshot portal request failed: {e}"))
             })?;
 
-        let response = request.response().map_err(|e| {
-            DisplayError::PortalError(format!("Screenshot portal response failed: {e}"))
-        })?;
+        let response = request.response().map_err(screenshot_response_error)?;
 
         let path = screenshot_uri_to_path(response.uri())?;
 
@@ -376,21 +449,25 @@ impl WaylandBackend {
     ) -> DisplayResult<CaptureData> {
         if !interactive {
             if let Some(token) = load_restore_token(target) {
+                clear_restore_token(target);
                 match Self::capture_screencast_once(target, interactive, Some(token.as_str())).await
                 {
                     Ok(capture) => return Ok(capture),
-                    Err(_) => clear_restore_token(target),
+                    Err(error @ ScreencastError::Cancelled) => return Err(error.into_display()),
+                    Err(ScreencastError::Failed(_)) => {}
                 }
             }
         }
-        Self::capture_screencast_once(target, interactive, None).await
+        Self::capture_screencast_once(target, interactive, None)
+            .await
+            .map_err(ScreencastError::into_display)
     }
 
     async fn capture_screencast_once(
         target: CaptureTarget,
         interactive: bool,
         restore_token: Option<&str>,
-    ) -> DisplayResult<CaptureData> {
+    ) -> Result<CaptureData, ScreencastError> {
         let _portal_identity = crate::utils::desktop_env::scoped_portal_capture_identity();
 
         // Capture-private portal connection: Session.Close wedges the zbus
@@ -432,9 +509,9 @@ impl WaylandBackend {
             .await
             .map_err(|e| DisplayError::PortalError(format!("Failed to select sources: {e}")))?;
 
-        select_request.response().map_err(|e| {
-            DisplayError::PortalError(format!("Source selection cancelled/failed: {e}"))
-        })?;
+        select_request
+            .response()
+            .map_err(|e| screencast_response_error("Source selection", e))?;
 
         let start_request = screencast
             .start(&session, None, StartCastOptions::default())
@@ -445,7 +522,7 @@ impl WaylandBackend {
 
         let response = start_request
             .response()
-            .map_err(|e| DisplayError::PortalError(format!("ScreenCast start failed: {e}")))?;
+            .map_err(|e| screencast_response_error("ScreenCast start", e))?;
 
         let stream = response.streams().first().ok_or_else(|| {
             DisplayError::PortalError("No streams returned by ScreenCast portal".into())
@@ -498,7 +575,7 @@ impl WaylandBackend {
                         "[capture] Window capture: cropping from {}x{} to {}x{} at ({}, {})",
                         data.width, data.height, win_width, win_height, win_x, win_y
                     );
-                    return crop_capture(data, win_x, win_y, win_width, win_height);
+                    return Ok(crop_capture(data, win_x, win_y, win_width, win_height)?);
                 }
             }
 
@@ -510,7 +587,7 @@ impl WaylandBackend {
                     "[capture] Window capture: auto-detected content bounds {}x{} at ({}, {}) from {}x{}",
                     w, h, x, y, data.width, data.height
                 );
-                return crop_capture(data, x, y, w, h);
+                return Ok(crop_capture(data, x, y, w, h)?);
             }
             eprintln!(
                 "[capture] Window capture: no content bounds detected, returning full frame {}x{}",
@@ -519,7 +596,7 @@ impl WaylandBackend {
             return Ok(data);
         }
 
-        capture
+        capture.map_err(ScreencastError::from)
     }
 
     /// Detect the bounding box of actual content in a captured frame.
@@ -719,6 +796,7 @@ impl WaylandBackend {
         if Self::should_force_screenshot_portal_first() {
             match Self::capture_still_via_screenshot_portal() {
                 Ok(data) => return Ok(data),
+                Err(DisplayError::Cancelled) => return Err(DisplayError::Cancelled),
                 Err(err) => eprintln!(
                     "[capture] Forced Screenshot portal failed ({err}); trying native backends."
                 ),
@@ -735,6 +813,7 @@ impl WaylandBackend {
 
         match Self::capture_still_via_screenshot_portal() {
             Ok(data) => return Ok(data),
+            Err(DisplayError::Cancelled) => return Err(DisplayError::Cancelled),
             Err(err) => eprintln!(
                 "[capture] Screenshot portal unavailable ({err}); falling back to ScreenCast."
             ),
@@ -810,6 +889,7 @@ impl WaylandBackend {
         if Self::should_force_screenshot_portal_first() {
             match Self::capture_still_via_screenshot_portal() {
                 Ok(data) => return Ok(data),
+                Err(DisplayError::Cancelled) => return Err(DisplayError::Cancelled),
                 Err(err) => eprintln!(
                     "[capture] Forced Screenshot portal failed ({err}); trying native backends."
                 ),
@@ -834,6 +914,7 @@ impl WaylandBackend {
 
         match Self::capture_still_via_screenshot_portal() {
             Ok(data) => return Ok(data),
+            Err(DisplayError::Cancelled) => return Err(DisplayError::Cancelled),
             Err(err) => eprintln!(
                 "[capture] Native still capture unavailable; Screenshot portal failed ({err}); \
                  falling back to ScreenCast portal."
@@ -878,9 +959,7 @@ pub async fn capture_fullscreen_via_screenshot_portal() -> DisplayResult<Capture
         .await
         .map_err(|e| DisplayError::PortalError(format!("Screenshot portal request failed: {e}")))?;
 
-    let response = request.response().map_err(|e| {
-        DisplayError::PortalError(format!("Screenshot portal response failed: {e}"))
-    })?;
+    let response = request.response().map_err(screenshot_response_error)?;
 
     let path = screenshot_uri_to_path(response.uri())?;
 
@@ -931,7 +1010,7 @@ impl DisplayBackend for WaylandBackend {
             Self::capture_via_screencast(CaptureTarget::Window, true).await
         });
 
-        if portal_result.is_ok() {
+        if portal_result.is_ok() || matches!(&portal_result, Err(DisplayError::Cancelled)) {
             return portal_result;
         }
 
@@ -989,6 +1068,36 @@ mod tests {
     fn test_backend_creation() {
         let backend = WaylandBackend::new();
         assert!(backend.is_ok());
+    }
+
+    #[test]
+    fn portal_cancellation_remains_terminal_for_legacy_capture_paths() {
+        assert!(matches!(
+            screenshot_response_error(ashpd::Error::Response(ResponseError::Cancelled)),
+            DisplayError::Cancelled
+        ));
+        assert!(matches!(
+            ScreencastError::Cancelled.into_display(),
+            DisplayError::Cancelled
+        ));
+    }
+
+    #[test]
+    fn screencast_response_cancellation_is_not_a_failure() {
+        assert!(matches!(
+            screencast_response_error(
+                "ScreenCast start",
+                ashpd::Error::Response(ResponseError::Cancelled)
+            ),
+            ScreencastError::Cancelled
+        ));
+        assert!(matches!(
+            screencast_response_error(
+                "ScreenCast start",
+                ashpd::Error::Response(ResponseError::Other)
+            ),
+            ScreencastError::Failed(_)
+        ));
     }
 
     #[test]
