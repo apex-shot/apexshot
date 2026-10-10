@@ -28,6 +28,7 @@ private Q_SLOTS:
     void rejectsSelectionOutsideCaptureRect();
     void freezeUsesChosenMonitorOrigin();
     void cropsMixedDpiFrameToTempPng();
+    void cropsEachSyntheticMonitorFromVirtualDesktop();
     void portalRoutePreparesAndCapturesThroughHelper();
     void portalRouteMapsHelperCancellation();
     void portalRouteMapsHelperFailure();
@@ -257,6 +258,28 @@ void ScreenCaptureTests::cropsMixedDpiFrameToTempPng()
     QVERIFY(QFile::exists(path));
     QCOMPARE(QImage(path).size(), QSize(400, 200));
     QFile::remove(path);
+}
+
+void ScreenCaptureTests::cropsEachSyntheticMonitorFromVirtualDesktop()
+{
+    const QImage desktop = twoByOneBlueRightHalfImage(3840, 1080);
+    const QRect desktopBounds(0, 0, 3840, 1080);
+    QString leftPath;
+    QString rightPath;
+    QSize size;
+    QString error;
+    QVERIFY(ScreenCapture::cropLogicalSelectionToTempPng(
+      desktop, desktopBounds, QRect(0, 0, 1920, 1080), leftPath, size, error));
+    QCOMPARE(size, QSize(1920, 1080));
+    QVERIFY(ScreenCapture::cropLogicalSelectionToTempPng(
+      desktop, desktopBounds, QRect(1920, 0, 1920, 1080), rightPath, size, error));
+    QCOMPARE(size, QSize(1920, 1080));
+    const QImage left(leftPath);
+    const QImage right(rightPath);
+    QCOMPARE(left.pixelColor(20, 20), QColor(Qt::red));
+    QCOMPARE(right.pixelColor(20, 20), QColor(Qt::blue));
+    QFile::remove(leftPath);
+    QFile::remove(rightPath);
 }
 
 void ScreenCaptureTests::portalRoutePreparesAndCapturesThroughHelper()
