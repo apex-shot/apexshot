@@ -95,7 +95,6 @@ fn intro(view: &View) {
     let view_c = view.clone();
     connect_btn.connect_clicked(move |_| connect(&view_c));
     view.actions.append(&connect_btn);
-    view.nav.layout_footer();
 }
 
 fn connected(view: &View, config: &AppConfig) {
