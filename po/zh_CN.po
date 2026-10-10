@@ -2792,3 +2792,125 @@ msgstr ""
 msgid ""
 "You may need to log out and back in for the extension to appear in GNOME."
 msgstr "您可能需要注销并重新登录，扩展才会出现在 GNOME 中。"
+
+msgid "Back"
+msgstr "返回"
+
+msgid "Cloud sharing"
+msgstr "云端分享"
+
+msgid "Connect ApexShot Cloud"
+msgstr "连接 ApexShot Cloud"
+
+msgid "Connect your account"
+msgstr "连接你的账户"
+
+msgid "Copy code"
+msgstr "复制代码"
+
+msgid "Free"
+msgstr "免费"
+
+msgid "Manage your account or disconnect in Settings → Cloud."
+msgstr "在“设置 → 云端”中管理账户或断开连接。"
+
+msgid ""
+"Not now? Skip with Next. Connect later from Settings → Cloud, or self-host XBackBone."
+msgstr "暂时不用？点击“下一步”跳过。之后可在“设置 → 云端”中连接，或自行托管 XBackBone。"
+
+msgid "Open browser"
+msgstr "打开浏览器"
+
+msgid "Optional · capture stays free"
+msgstr "可选 · 截图始终免费"
+
+msgid "{plan} plan"
+msgstr "{plan} 方案"
+
+msgid "Starting…"
+msgstr "正在开始…"
+
+msgid "Try again"
+msgstr "重试"
+
+msgid ""
+"Turn a capture into a link you can paste anywhere. Everything else keeps working offline."
+msgstr "将截图变成可粘贴到任何地方的链接。其余功能离线也能正常使用。"
+
+msgid "Uploads are on: your next screenshot gets a share link copied for you."
+msgstr "上传已开启：你的下一张截图会自动复制分享链接。"
+
+msgid "Waiting for you to authorize…"
+msgstr "正在等待你授权…"
+
+msgid "Could not open billing"
+msgstr "无法打开账单页面"
+
+msgid "Go Pro"
+msgstr "升级到 Pro"
+
+msgid "Keep working"
+msgstr "继续工作"
+
+msgid "Support ApexShot / Go Pro"
+msgstr "支持 ApexShot / 升级到 Pro"
+
+msgid "Your capture is saved"
+msgstr "你的截图已保存"
+
+msgid "Your screenshot companion for Linux. Set it up in a few quick steps."
+msgstr "你在 Linux 上的截图伙伴。几步即可完成设置。"
+
+msgid "Authorization was denied in the browser."
+msgstr "浏览器中的授权已被拒绝。"
+
+msgid "Automatic upload is off. Turn it on in Settings → Cloud to get a share link after each capture."
+msgstr "自动上传已关闭。在“设置 → 云端”中开启后，每次截图都会获得分享链接。"
+
+msgid "Captures upload to your XBackBone server. Change the destination in Settings → Cloud."
+msgstr "截图将上传到您的 XBackBone 服务器。可在“设置 → 云端”中更改目标。"
+
+msgid "Code expires in {minutes} min"
+msgstr "代码将在 {minutes} 分钟后过期"
+
+msgid "Couldn't reach ApexShot Cloud. Check your connection and try again."
+msgstr "无法连接 ApexShot Cloud。请检查网络连接后重试。"
+
+msgid "Couldn't save your setup. Check that your config folder is writable, then try again."
+msgstr "无法保存设置。请确认配置文件夹可写入，然后重试。"
+
+msgid "Get started"
+msgstr "开始"
+
+msgid "Hosted by us. Connect with a one-time code from your browser."
+msgstr "由我们托管。使用浏览器中显示的一次性代码连接。"
+
+msgid "Optional. Connect ApexShot Cloud to turn a capture into a link you can paste anywhere. ApexShot works offline without an account, so you can skip this."
+msgstr "可选。连接 ApexShot Cloud 后，可将截图转为可随处粘贴的链接。ApexShot 无需账户即可离线使用，因此您可以跳过此步骤。"
+
+msgid "Self-host for full control of storage. Set it up later in Settings → Cloud."
+msgstr "自托管，完全掌控存储。可稍后在“设置 → 云端”中配置。"
+
+msgid "Share captures as links"
+msgstr "以链接形式分享截图"
+
+msgid "Skip for now"
+msgstr "暂时跳过"
+
+msgid "Step {current} of {total}"
+msgstr "第 {current} 步，共 {total} 步"
+
+msgid "This code expired. Try again to get a new one."
+msgstr "代码已过期。请重试以获取新代码。"
+
+msgid "Enter this code in your browser to link this device."
+msgstr "在浏览器中输入此代码，以关联此设备。"
+
+msgid "Opening your browser…"
+msgstr "正在打开浏览器…"
+
+msgid "Sent to your browser. If no page opened, copy the link below."
+msgstr "已发送到浏览器。如果没有打开页面，请复制下方链接。"
+
+msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
+msgstr "无法打开浏览器：{error}。请复制下方链接并自行打开。"

@@ -23,7 +23,7 @@
             }
 
             .editor-theme-light .recording-editor-dim-badge {
-                background: #b05c38;
+                background: #ff670d;
                 color: #ffffff;
                 border-color: alpha(#111827, 0.10);
             }
@@ -50,7 +50,7 @@
             .editor-theme-light button.recording-editor-tool-icon-active,
             .editor-theme-light button.recording-editor-tool-icon-active image {
                 background: transparent;
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light .recording-editor-timeline {
@@ -68,7 +68,7 @@
             }
 
             .editor-theme-light .recording-editor-play-button-hero {
-                background: #b05c38;
+                background: #ff670d;
                 color: #ffffff;
             }
 
@@ -77,7 +77,7 @@
             }
 
             .editor-theme-light .recording-editor-play-button-hero:hover {
-                background: #c06540;
+                background: #ff7c2f;
             }
 
             .editor-theme-light .recording-editor-play-button,
@@ -95,7 +95,7 @@
             }
 
             .editor-theme-light .recording-editor-cut-button-active {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light .recording-editor-play-button image,
@@ -105,7 +105,7 @@
             }
 
             .editor-theme-light .recording-editor-cut-button-active image {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light .recording-editor-thumbnail-strip {
@@ -119,13 +119,13 @@
             }
 
             .editor-theme-light .recording-editor-trim-range {
-                background: alpha(#b05c38, 0.15);
-                border-top-color: #b05c38;
-                border-bottom-color: #b05c38;
+                background: alpha(#ff670d, 0.15);
+                border-top-color: #ff670d;
+                border-bottom-color: #ff670d;
             }
 
             .editor-theme-light .recording-editor-trim-handle {
-                background: #b05c38;
+                background: #ff670d;
             }
 
             .editor-theme-light .recording-editor-time-label {
@@ -137,7 +137,7 @@
             }
 
             .editor-theme-light .recording-editor-convert-hint {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light button.recording-editor-dropdown {
@@ -205,7 +205,7 @@
             }
 
             .editor-theme-light .recording-editor-primary-button {
-                background: #b05c38;
+                background: #ff670d;
                 color: white;
             }
 
@@ -214,7 +214,7 @@
             }
 
             .editor-theme-light .recording-editor-primary-button:hover {
-                background: #c06540;
+                background: #ff7c2f;
             }
 
             .editor-theme-light .recording-editor-primary-button:hover label {
@@ -222,7 +222,7 @@
             }
 
             .editor-theme-light .recording-editor-primary-button:disabled {
-                background: #b05c38;
+                background: #ff670d;
                 color: white;
             }
 

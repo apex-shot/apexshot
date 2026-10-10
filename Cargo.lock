@@ -70,6 +70,7 @@ dependencies = [
  "anyhow",
  "arboard",
  "ashpd",
+ "async-channel",
  "async-trait",
  "base64",
  "chrono",

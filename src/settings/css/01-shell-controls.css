@@ -66,7 +66,7 @@
             .settings-window-controls {
                 min-height: 0;
                 padding: 0;
-                background: rgba(20, 20, 20, 0.94);
+                background: transparent;
                 border-bottom: 1px solid rgba(255, 255, 255, 0.08);
             }
 
@@ -162,7 +162,7 @@
             }
 
             .editor-root.editor-theme-light .settings-window-controls {
-                background: #f0f1f5;
+                background: transparent;
                 border-bottom: 1px solid alpha(#111827, 0.06);
             }
 

@@ -19,11 +19,11 @@
             }
 
             button.recording-editor-tool-rail-active {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             button.recording-editor-tool-rail-active image {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .recording-editor-media-library {
@@ -92,7 +92,7 @@
             button.recording-editor-media-tab-active,
             button.recording-editor-media-tab-active label,
             button.recording-editor-media-tab-active image {
-                color: #b05c38;
+                color: #ff670d;
                 background: transparent;
             }
 
@@ -109,8 +109,8 @@
             button.recording-editor-media-upload:hover,
             button.recording-editor-media-upload:hover:focus {
                 background: transparent;
-                border-color: #b05c38;
-                color: #b05c38;
+                border-color: #ff670d;
+                color: #ff670d;
             }
 
             .recording-editor-media-upload-icon,
@@ -228,7 +228,7 @@
             .editor-theme-light button.recording-editor-media-tab-active,
             .editor-theme-light button.recording-editor-media-tab-active label,
             .editor-theme-light button.recording-editor-media-tab-active image {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light button.recording-editor-media-upload {
@@ -239,8 +239,8 @@
 
             .editor-theme-light button.recording-editor-media-upload:hover,
             .editor-theme-light button.recording-editor-media-upload:hover:focus {
-                border-color: #b05c38;
-                color: #b05c38;
+                border-color: #ff670d;
+                color: #ff670d;
                 background: transparent;
             }
 

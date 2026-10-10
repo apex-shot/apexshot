@@ -718,7 +718,7 @@ fn build_window_controls(
         export_cancellation.clone(),
     );
     let (upload, upload_spinner) =
-        footer::build_upload_action(state, exporting, export_cancellation);
+        footer::build_upload_action(window, state, exporting, export_cancellation);
     let actions = GtkBox::new(Orientation::Horizontal, 8);
     actions.add_css_class("recording-editor-title-actions");
     actions.set_valign(Align::Center);

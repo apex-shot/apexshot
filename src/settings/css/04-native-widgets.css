@@ -14,7 +14,7 @@
             }
 
             .editor-root entry:focus {
-                border-color: alpha(#b05c38, 0.55);
+                border-color: alpha(#ff670d, 0.55);
             }
 
             .editor-root entry:disabled {
@@ -40,8 +40,8 @@
             }
 
             .editor-root checkbutton:checked check {
-                background-color: #b05c38;
-                border-color: #b05c38;
+                background-color: #ff670d;
+                border-color: #ff670d;
                 color: #ffffff;
             }
 
@@ -85,7 +85,7 @@
 
             .editor-root scale highlight {
                 min-height: 4px;
-                background-color: #b05c38;
+                background-color: #ff670d;
                 border-radius: 999px;
             }
 
@@ -103,7 +103,7 @@
             }
 
             .editor-root scale:disabled highlight {
-                background-color: alpha(#b05c38, 0.42);
+                background-color: alpha(#ff670d, 0.42);
             }
 
             .editor-root scale:disabled slider {
@@ -151,7 +151,7 @@
             }
 
             .editor-root.editor-theme-light entry:focus {
-                border-color: alpha(#b05c38, 0.55);
+                border-color: alpha(#ff670d, 0.55);
                 outline: none;
             }
 
@@ -175,8 +175,8 @@
             }
 
             .editor-root.editor-theme-light checkbutton:checked check {
-                background-color: #b05c38;
-                border-color: #9a4c2c;
+                background-color: #ff670d;
+                border-color: #cf530b;
                 color: #ffffff;
             }
 
@@ -203,7 +203,7 @@
 
             .editor-root.editor-theme-light scale highlight {
                 min-height: 4px;
-                background-color: #b05c38;
+                background-color: #ff670d;
                 border-radius: 999px;
             }
 
@@ -221,7 +221,7 @@
             }
 
             .editor-root.editor-theme-light scale:disabled highlight {
-                background-color: alpha(#b05c38, 0.42);
+                background-color: alpha(#ff670d, 0.42);
             }
 
             .editor-root.editor-theme-light scale:disabled slider {

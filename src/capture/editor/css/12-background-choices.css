@@ -24,7 +24,7 @@
                 background: alpha(white, 0.10);
                 border: 1px solid transparent;
                 color: #ffffff;
-                box-shadow: inset 0 0 0 1px #b05c38;
+                box-shadow: inset 0 0 0 1px #ff670d;
             }
 
             /* Motion keeps its background choices in one expanding card.
@@ -80,7 +80,7 @@
             button.editor-background-gradient-button.active-background-option {
                 border: 1px solid transparent;
                 background-color: alpha(white, 0.06);
-                box-shadow: inset 0 0 0 2px #b05c38;
+                box-shadow: inset 0 0 0 2px #ff670d;
             }
 
             button.editor-background-gradient-button.editor-background-preview-size-regular {
@@ -109,7 +109,7 @@
                 border: 1px solid transparent;
                 background: transparent;
                 background-color: transparent;
-                box-shadow: inset 0 0 0 2px #b05c38;
+                box-shadow: inset 0 0 0 2px #ff670d;
             }
 
             button.editor-background-gradient-button:hover {
@@ -127,8 +127,8 @@
             button.editor-motion-wallpaper-thumbnail.active-background-option,
             button.editor-motion-wallpaper-thumbnail.active-background-option:hover,
             button.editor-motion-wallpaper-thumbnail.active-background-option:active {
-                border: 2px solid #c06540;
-                box-shadow: 0 0 0 1px #c06540;
+                border: 2px solid #ff7c2f;
+                box-shadow: 0 0 0 1px #ff7c2f;
             }
 
             .editor-canvas {
@@ -160,7 +160,7 @@
 
             .editor-frame-dim-pill:focus-within {
                 background: alpha(white, 0.11);
-                box-shadow: inset 0 0 0 1px #c06540;
+                box-shadow: inset 0 0 0 1px #ff7c2f;
             }
 
             .editor-frame-dim-unit {
@@ -193,7 +193,7 @@
             }
 
             entry.editor-frame-dim-entry selection {
-                background: alpha(#c06540, 0.55);
+                background: alpha(#ff7c2f, 0.55);
                 color: #ffffff;
             }
 

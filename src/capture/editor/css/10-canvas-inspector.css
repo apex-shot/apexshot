@@ -115,7 +115,7 @@
             button.editor-inspector-tab-button.active-inspector-tab {
                 background: transparent;
                 border: none;
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-inspector-placeholder-shell {
@@ -146,7 +146,7 @@
 
             .editor-motion-content-field:focus-within {
                 background: alpha(white, 0.08);
-                box-shadow: inset 0 0 0 1px alpha(#c06540, 0.7);
+                box-shadow: inset 0 0 0 1px alpha(#ff7c2f, 0.7);
             }
 
             textview.editor-motion-content-text,
@@ -160,7 +160,7 @@
             }
 
             textview.editor-motion-content-text text selection {
-                background: alpha(#c06540, 0.35);
+                background: alpha(#ff7c2f, 0.35);
                 color: #ffffff;
             }
 
@@ -183,7 +183,7 @@
             }
 
             .editor-motion-font-search:focus-within {
-                box-shadow: inset 0 0 0 1px alpha(#c06540, 0.7);
+                box-shadow: inset 0 0 0 1px alpha(#ff7c2f, 0.7);
             }
 
             .editor-inspector-placeholder {
@@ -250,7 +250,7 @@
             }
 
             .editor-crop-inspector-check {
-                color: #b05c38;
+                color: #ff670d;
                 font-size: 12px;
                 font-weight: 600;
             }
@@ -315,12 +315,12 @@
 
             button.editor-crop-action-button-primary {
                 border: none;
-                background: #b05c38;
+                background: #ff670d;
                 color: #ffffff;
             }
 
             button.editor-crop-action-button-primary:hover {
-                background: #c06540;
+                background: #ff7c2f;
                 color: #ffffff;
             }
 
@@ -369,7 +369,7 @@
             .editor-obfuscate-inspector-check,
             .editor-number-style-check,
             .editor-number-size-check {
-                color: #b05c38;
+                color: #ff670d;
                 font-size: 12px;
                 font-weight: 600;
             }

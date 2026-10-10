@@ -2838,3 +2838,128 @@ msgid ""
 "You may need to log out and back in for the extension to appear in GNOME."
 msgstr ""
 "Возможно, потребуется выйти из системы и войти снова, чтобы расширение появилось в GNOME."
+
+msgid "Back"
+msgstr "Назад"
+
+msgid "Cloud sharing"
+msgstr "Облачный обмен"
+
+msgid "Connect ApexShot Cloud"
+msgstr "Подключить ApexShot Cloud"
+
+msgid "Connect your account"
+msgstr "Подключите аккаунт"
+
+msgid "Copy code"
+msgstr "Скопировать код"
+
+msgid "Free"
+msgstr "Бесплатно"
+
+msgid "Manage your account or disconnect in Settings → Cloud."
+msgstr "Управляйте аккаунтом или отключите его в разделе «Настройки → Облако»."
+
+msgid ""
+"Not now? Skip with Next. Connect later from Settings → Cloud, or self-host XBackBone."
+msgstr ""
+"Не сейчас? Пропустите кнопкой «Далее». Подключитесь позже в «Настройки → Облако» или разместите XBackBone самостоятельно."
+
+msgid "Open browser"
+msgstr "Открыть браузер"
+
+msgid "Optional · capture stays free"
+msgstr "Необязательно · захват остаётся бесплатным"
+
+msgid "{plan} plan"
+msgstr "Тариф {plan}"
+
+msgid "Starting…"
+msgstr "Запуск…"
+
+msgid "Try again"
+msgstr "Повторить"
+
+msgid ""
+"Turn a capture into a link you can paste anywhere. Everything else keeps working offline."
+msgstr ""
+"Превратите снимок в ссылку, которую можно вставить где угодно. Всё остальное работает офлайн."
+
+msgid "Uploads are on: your next screenshot gets a share link copied for you."
+msgstr ""
+"Загрузка включена: для следующего снимка ссылка для отправки будет скопирована автоматически."
+
+msgid "Waiting for you to authorize…"
+msgstr "Ожидание авторизации…"
+
+msgid "Could not open billing"
+msgstr "Не удалось открыть оплату"
+
+msgid "Go Pro"
+msgstr "Перейти на Pro"
+
+msgid "Keep working"
+msgstr "Продолжить работу"
+
+msgid "Support ApexShot / Go Pro"
+msgstr "Поддержать ApexShot / Перейти на Pro"
+
+msgid "Your capture is saved"
+msgstr "Ваш снимок сохранён"
+
+msgid "Your screenshot companion for Linux. Set it up in a few quick steps."
+msgstr "Ваш помощник для скриншотов в Linux. Настройте его за несколько шагов."
+
+msgid "Authorization was denied in the browser."
+msgstr "Авторизация отклонена в браузере."
+
+msgid "Automatic upload is off. Turn it on in Settings → Cloud to get a share link after each capture."
+msgstr "Автозагрузка выключена. Включите её в разделе «Настройки → Облако», чтобы получать ссылку после каждого снимка."
+
+msgid "Captures upload to your XBackBone server. Change the destination in Settings → Cloud."
+msgstr "Снимки загружаются на ваш сервер XBackBone. Измените назначение в разделе «Настройки → Облако»."
+
+msgid "Code expires in {minutes} min"
+msgstr "Код действителен ещё {minutes} мин"
+
+msgid "Couldn't reach ApexShot Cloud. Check your connection and try again."
+msgstr "Не удалось подключиться к ApexShot Cloud. Проверьте подключение и повторите попытку."
+
+msgid "Couldn't save your setup. Check that your config folder is writable, then try again."
+msgstr "Не удалось сохранить настройку. Проверьте, доступна ли для записи папка конфигурации, и повторите попытку."
+
+msgid "Get started"
+msgstr "Начать"
+
+msgid "Hosted by us. Connect with a one-time code from your browser."
+msgstr "Размещено у нас. Подключитесь с помощью одноразового кода из браузера."
+
+msgid "Optional. Connect ApexShot Cloud to turn a capture into a link you can paste anywhere. ApexShot works offline without an account, so you can skip this."
+msgstr "Необязательно. Подключите ApexShot Cloud, чтобы превращать снимок в ссылку, которую можно вставить где угодно. ApexShot работает офлайн и без аккаунта, так что этот шаг можно пропустить."
+
+msgid "Self-host for full control of storage. Set it up later in Settings → Cloud."
+msgstr "Самостоятельный хостинг для полного контроля над хранилищем. Настроить можно позже в разделе «Настройки → Облако»."
+
+msgid "Share captures as links"
+msgstr "Делитесь снимками ссылками"
+
+msgid "Skip for now"
+msgstr "Пропустить сейчас"
+
+msgid "Step {current} of {total}"
+msgstr "Шаг {current} из {total}"
+
+msgid "This code expired. Try again to get a new one."
+msgstr "Срок действия кода истёк. Повторите попытку, чтобы получить новый."
+
+msgid "Enter this code in your browser to link this device."
+msgstr "Введите этот код в браузере, чтобы привязать это устройство."
+
+msgid "Opening your browser…"
+msgstr "Открываем браузер…"
+
+msgid "Sent to your browser. If no page opened, copy the link below."
+msgstr "Ссылка передана в браузер. Если страница не открылась, скопируйте ссылку ниже."
+
+msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
+msgstr "Не удалось открыть браузер: {error}. Скопируйте ссылку ниже и откройте её самостоятельно."

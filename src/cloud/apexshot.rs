@@ -23,6 +23,8 @@ struct RefreshResponse {
 #[derive(Debug, Deserialize)]
 struct ApiErrorResponse {
     error: String,
+    #[serde(default)]
+    code: Option<String>,
 }
 
 /// Why an access-token refresh failed. Uploads discard this (they retry
@@ -182,11 +184,21 @@ fn map_upload_http_error(error: ureq::Error) -> UploadError {
                 .into_string()
                 .ok()
                 .and_then(|body| serde_json::from_str::<ApiErrorResponse>(&body).ok())
-                .map(|body| body.error.trim().to_string())
-                .filter(|message| !message.is_empty());
+                .filter(|body| !body.error.trim().is_empty());
 
             match detail {
-                Some(message) => UploadError::HttpRequest(format!("HTTP {code}: {message}")),
+                Some(body) => {
+                    let message = body.error.trim();
+                    let detail = format!("HTTP {code}: {message}");
+                    if code == 400
+                        && (body.code.as_deref() == Some("upgrade_required")
+                            || message.to_ascii_lowercase().contains("upgrade to pro"))
+                    {
+                        UploadError::UpgradeRequired(detail)
+                    } else {
+                        UploadError::HttpRequest(detail)
+                    }
+                }
                 None => UploadError::HttpRequest(format!("HTTP {code}")),
             }
         }
@@ -314,6 +326,43 @@ mod tests {
         )));
 
         assert!(is_auth_error(&result));
+    }
+
+    #[test]
+    fn identifies_structured_upgrade_response() {
+        let error = map_upload_http_error(make_status_error(
+            400,
+            r#"{"error":"Monthly upload limit reached","code":"upgrade_required"}"#,
+        ));
+
+        assert!(matches!(error, UploadError::UpgradeRequired(_)));
+    }
+
+    #[test]
+    fn identifies_legacy_free_storage_upgrade_response() {
+        let error = map_upload_http_error(make_status_error(
+            400,
+            r#"{"error":"Free plan storage is limited to 2 GB total. Delete files or upgrade to Pro to upload more."}"#,
+        ));
+
+        assert!(matches!(error, UploadError::UpgradeRequired(_)));
+    }
+
+    #[test]
+    fn does_not_offer_upgrade_for_paid_quota_or_provider_errors() {
+        for (status, body) in [
+            (
+                400,
+                r#"{"error":"Pro plan storage is limited to 100 GB total. Delete files before uploading more."}"#,
+            ),
+            (
+                500,
+                r#"{"error":"Upgrade to Pro","code":"upgrade_required"}"#,
+            ),
+        ] {
+            let error = map_upload_http_error(make_status_error(status, body));
+            assert!(matches!(error, UploadError::HttpRequest(_)));
+        }
     }
 
     #[test]

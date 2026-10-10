@@ -10,13 +10,13 @@
                 min-height: 18px;
                 padding: 0;
                 background: transparent;
-                color: #b05c38;
+                color: #ff670d;
                 font-size: 11px;
                 font-weight: 500;
             }
 
             button.recording-editor-zoom-reset label {
-                color: #b05c38;
+                color: #ff670d;
                 font-size: 11px;
                 font-weight: 500;
             }
@@ -61,7 +61,7 @@
             }
 
             switch.recording-editor-zoom-switch:checked {
-                background: #b05c38;
+                background: #ff670d;
             }
 
             switch.recording-editor-zoom-switch:checked slider {
@@ -123,8 +123,8 @@
 
             .editor-theme-light button.recording-editor-tool-section-btn:checked,
             .editor-theme-light button.recording-editor-tool-section-btn:checked:hover {
-                background: alpha(#b05c38, 0.14);
-                color: #b05c38;
+                background: alpha(#ff670d, 0.14);
+                color: #ff670d;
             }
 
             .editor-theme-light button.recording-editor-cursor-card {
@@ -137,7 +137,7 @@
 
             .editor-theme-light button.recording-editor-cursor-card:checked,
             .editor-theme-light button.recording-editor-cursor-card:checked:hover {
-                background: alpha(#b05c38, 0.14);
+                background: alpha(#ff670d, 0.14);
             }
 
             .editor-theme-light .recording-editor-cursor-card-label {
@@ -145,7 +145,7 @@
             }
 
             .editor-theme-light button.recording-editor-cursor-card:checked .recording-editor-cursor-card-label {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light .recording-editor-fill-slider {
@@ -168,7 +168,7 @@
             }
 
             .editor-theme-light .recording-editor-zoom-title {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light button.recording-editor-panel-upload {
@@ -179,8 +179,8 @@
 
             .editor-theme-light button.recording-editor-panel-upload:hover,
             .editor-theme-light button.recording-editor-panel-upload:focus {
-                border-color: alpha(#b05c38, 0.52);
-                background: alpha(#b05c38, 0.10);
+                border-color: alpha(#ff670d, 0.52);
+                background: alpha(#ff670d, 0.10);
                 color: #9f4e2f;
             }
 
@@ -198,7 +198,7 @@
 
             .editor-theme-light button.recording-editor-click-effect-card:checked,
             .editor-theme-light button.recording-editor-click-effect-card:checked:hover {
-                background: alpha(#b05c38, 0.14);
+                background: alpha(#ff670d, 0.14);
             }
 
             .editor-theme-light .recording-editor-click-effect-label {
@@ -206,7 +206,7 @@
             }
 
             .editor-theme-light button.recording-editor-click-effect-card:checked .recording-editor-click-effect-label {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light .recording-editor-cursor-tabs {
@@ -218,7 +218,7 @@
             }
 
             .editor-theme-light .recording-editor-cursor-unavailable-title {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light .recording-editor-cursor-unavailable-detail {
@@ -249,7 +249,7 @@
 
             .editor-theme-light button.recording-editor-motion-preset:checked,
             .editor-theme-light button.recording-editor-motion-preset:checked:hover {
-                background: alpha(#b05c38, 0.14);
+                background: alpha(#ff670d, 0.14);
             }
 
             .editor-theme-light .recording-editor-motion-preset-label {
@@ -261,7 +261,7 @@
             }
 
             .editor-theme-light button.recording-editor-motion-preset:checked .recording-editor-motion-preset-label {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light button.recording-editor-click-color-swatch {
@@ -288,13 +288,13 @@
 
             .editor-theme-light button.recording-editor-zoom-easing-btn:checked,
             .editor-theme-light button.recording-editor-zoom-easing-btn:checked:hover {
-                background: alpha(#b05c38, 0.14);
-                color: #b05c38;
+                background: alpha(#ff670d, 0.14);
+                color: #ff670d;
             }
 
             .editor-theme-light button.recording-editor-zoom-easing-btn:checked label,
             .editor-theme-light button.recording-editor-zoom-easing-btn:checked:hover label {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light .recording-editor-zoom-mode {
@@ -327,18 +327,18 @@
 
             .editor-theme-light button.recording-editor-zoom-chip-active,
             .editor-theme-light button.recording-editor-zoom-chip-active:hover {
-                background: alpha(#b05c38, 0.14);
-                color: #b05c38;
+                background: alpha(#ff670d, 0.14);
+                color: #ff670d;
             }
 
             .editor-theme-light button.recording-editor-zoom-chip-active label,
             .editor-theme-light button.recording-editor-zoom-chip-active:hover label {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light button.recording-editor-zoom-reset,
             .editor-theme-light button.recording-editor-zoom-reset label {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             .editor-theme-light .recording-editor-zoom-classic {

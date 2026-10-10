@@ -13,7 +13,7 @@
             button.recording-editor-player-play:hover:focus,
             button.recording-editor-player-play:active {
                 background: transparent;
-                color: #b05c38;
+                color: #ff670d;
             }
 
             button.recording-editor-player-play image {
@@ -23,7 +23,7 @@
             button.recording-editor-player-play:hover image,
             button.recording-editor-player-play:hover:focus image,
             button.recording-editor-player-play:active image {
-                color: #b05c38;
+                color: #ff670d;
             }
 
             button.recording-editor-aspect-button {
@@ -88,7 +88,7 @@
             }
 
             .recording-editor-dim-badge {
-                background: #b05c38;
+                background: #ff670d;
                 color: #ffffff;
                 font-size: 11px;
                 font-weight: 600;
@@ -160,7 +160,7 @@
             button.recording-editor-tool-icon:hover,
             button.recording-editor-tool-icon:hover:focus {
                 background: transparent;
-                color: #b05c38;
+                color: #ff670d;
             }
 
             button.recording-editor-tool-icon image {
@@ -170,7 +170,7 @@
             button.recording-editor-tool-icon:hover image,
             button.recording-editor-tool-icon-active,
             button.recording-editor-tool-icon-active image {
-                color: #b05c38;
+                color: #ff670d;
                 background: transparent;
             }
 
@@ -192,7 +192,7 @@
                 min-width: 10px;
                 min-height: 10px;
                 margin: 0;
-                background: #b05c38;
+                background: #ff670d;
                 background-image: none;
                 border: none;
                 box-shadow: none;
@@ -314,7 +314,7 @@
             .recording-editor-play-button-hero {
                 min-width: 40px;
                 min-height: 40px;
-                background: #b05c38;
+                background: #ff670d;
                 color: #ffffff;
             }
 
@@ -323,7 +323,7 @@
             }
 
             .recording-editor-play-button-hero:hover {
-                background: #c06540;
+                background: #ff7c2f;
             }
 
             .recording-editor-timeline-tools {

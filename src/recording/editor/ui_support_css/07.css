@@ -258,7 +258,7 @@
 
             button.recording-editor-tool-section-btn:checked,
             button.recording-editor-tool-section-btn:checked:hover {
-                background: alpha(#b05c38, 0.18);
+                background: alpha(#ff670d, 0.18);
                 color: #d5794e;
             }
 
@@ -276,7 +276,7 @@
 
             button.recording-editor-cursor-card:checked,
             button.recording-editor-cursor-card:checked:hover {
-                background: alpha(#b05c38, 0.16);
+                background: alpha(#ff670d, 0.16);
             }
 
             .recording-editor-cursor-card-label {
@@ -314,7 +314,7 @@
             }
 
             .recording-editor-zoom-title {
-                color: #b05c38;
+                color: #ff670d;
                 font-size: 14px;
                 font-weight: 600;
             }
@@ -333,8 +333,8 @@
 
             button.recording-editor-panel-upload:hover,
             button.recording-editor-panel-upload:focus {
-                border-color: alpha(#b05c38, 0.72);
-                background: alpha(#b05c38, 0.14);
+                border-color: alpha(#ff670d, 0.72);
+                background: alpha(#ff670d, 0.14);
                 color: #d5794e;
             }
 
@@ -368,7 +368,7 @@
 
             button.recording-editor-click-effect-card:checked,
             button.recording-editor-click-effect-card:checked:hover {
-                background: alpha(#b05c38, 0.16);
+                background: alpha(#ff670d, 0.16);
             }
 
             .recording-editor-click-effect-label {
@@ -398,7 +398,7 @@
             }
 
             .recording-editor-cursor-unavailable-title {
-                color: #b05c38;
+                color: #ff670d;
                 font-size: 12px;
                 font-weight: 600;
             }
@@ -461,7 +461,7 @@
 
             button.recording-editor-motion-preset:checked,
             button.recording-editor-motion-preset:checked:hover {
-                background: alpha(#b05c38, 0.16);
+                background: alpha(#ff670d, 0.16);
             }
 
             .recording-editor-motion-preset-label {
@@ -547,7 +547,7 @@
 
             button.recording-editor-zoom-easing-btn:checked,
             button.recording-editor-zoom-easing-btn:checked:hover {
-                background: alpha(#b05c38, 0.18);
+                background: alpha(#ff670d, 0.18);
                 color: #f0a07a;
             }
 
@@ -655,7 +655,7 @@
 
             button.recording-editor-zoom-chip-active,
             button.recording-editor-zoom-chip-active:hover {
-                background: alpha(#b05c38, 0.18);
+                background: alpha(#ff670d, 0.18);
                 color: #f0a07a;
             }
 

@@ -2814,3 +2814,126 @@ msgstr ""
 msgid ""
 "You may need to log out and back in for the extension to appear in GNOME."
 msgstr "قد تحتاج إلى تسجيل الخروج ثم الدخول مجددًا ليظهر الامتداد في GNOME."
+
+msgid "Back"
+msgstr "رجوع"
+
+msgid "Cloud sharing"
+msgstr "المشاركة عبر السحابة"
+
+msgid "Connect ApexShot Cloud"
+msgstr "ربط ApexShot Cloud"
+
+msgid "Connect your account"
+msgstr "اربط حسابك"
+
+msgid "Copy code"
+msgstr "نسخ الرمز"
+
+msgid "Free"
+msgstr "مجاني"
+
+msgid "Manage your account or disconnect in Settings → Cloud."
+msgstr "أدر حسابك أو افصل الاتصال من الإعدادات ← السحابة."
+
+msgid ""
+"Not now? Skip with Next. Connect later from Settings → Cloud, or self-host XBackBone."
+msgstr ""
+"ليس الآن؟ تخطَّ بزر «التالي». يمكنك الربط لاحقًا من الإعدادات ← السحابة، أو استضافة XBackBone بنفسك."
+
+msgid "Open browser"
+msgstr "فتح المتصفح"
+
+msgid "Optional · capture stays free"
+msgstr "اختياري · يظل الالتقاط مجانيًا"
+
+msgid "{plan} plan"
+msgstr "خطة {plan}"
+
+msgid "Starting…"
+msgstr "جارٍ البدء…"
+
+msgid "Try again"
+msgstr "حاول مرة أخرى"
+
+msgid ""
+"Turn a capture into a link you can paste anywhere. Everything else keeps working offline."
+msgstr "حوّل لقطة إلى رابط يمكنك لصقه في أي مكان. كل ما عدا ذلك يعمل دون اتصال."
+
+msgid "Uploads are on: your next screenshot gets a share link copied for you."
+msgstr "الرفع مفعّل: ستحصل لقطتك التالية على رابط مشاركة منسوخ لك."
+
+msgid "Waiting for you to authorize…"
+msgstr "في انتظار تفويضك…"
+
+msgid "Could not open billing"
+msgstr "تعذّر فتح الفوترة"
+
+msgid "Go Pro"
+msgstr "الترقية إلى Pro"
+
+msgid "Keep working"
+msgstr "متابعة العمل"
+
+msgid "Support ApexShot / Go Pro"
+msgstr "دعم ApexShot / الترقية إلى Pro"
+
+msgid "Your capture is saved"
+msgstr "تم حفظ لقطتك"
+
+msgid "Your screenshot companion for Linux. Set it up in a few quick steps."
+msgstr "رفيقك للقطات الشاشة على لينكس. أعِدّه في خطوات سريعة."
+
+msgid "Authorization was denied in the browser."
+msgstr "رُفض التفويض في المتصفح."
+
+msgid "Automatic upload is off. Turn it on in Settings → Cloud to get a share link after each capture."
+msgstr "الرفع التلقائي متوقف. فعّله من الإعدادات ← السحابة للحصول على رابط مشاركة بعد كل لقطة."
+
+msgid "Captures upload to your XBackBone server. Change the destination in Settings → Cloud."
+msgstr "تُرفع اللقطات إلى خادم XBackBone الخاص بك. غيّر الوجهة من الإعدادات ← السحابة."
+
+msgid "Code expires in {minutes} min"
+msgstr "تنتهي صلاحية الرمز خلال {minutes} دقيقة"
+
+msgid "Couldn't reach ApexShot Cloud. Check your connection and try again."
+msgstr "تعذر الوصول إلى ApexShot Cloud. تحقق من اتصالك وحاول مرة أخرى."
+
+msgid "Couldn't save your setup. Check that your config folder is writable, then try again."
+msgstr "تعذر حفظ الإعداد. تأكد من إمكانية الكتابة في مجلد الإعدادات، ثم حاول مرة أخرى."
+
+msgid "Get started"
+msgstr "ابدأ"
+
+msgid "Hosted by us. Connect with a one-time code from your browser."
+msgstr "نستضيفه نحن. اربط جهازك برمز لمرة واحدة من المتصفح."
+
+msgid "Optional. Connect ApexShot Cloud to turn a capture into a link you can paste anywhere. ApexShot works offline without an account, so you can skip this."
+msgstr "اختياري. اربط ApexShot Cloud لتحويل أي لقطة إلى رابط يمكنك لصقه في أي مكان. يعمل ApexShot دون اتصال بحساب، لذا يمكنك تخطي هذه الخطوة."
+
+msgid "Self-host for full control of storage. Set it up later in Settings → Cloud."
+msgstr "استضفه بنفسك للتحكم الكامل في التخزين. يمكنك إعداده لاحقًا من الإعدادات ← السحابة."
+
+msgid "Share captures as links"
+msgstr "شارك اللقطات كروابط"
+
+msgid "Skip for now"
+msgstr "تخطَّ الآن"
+
+msgid "Step {current} of {total}"
+msgstr "الخطوة {current} من {total}"
+
+msgid "This code expired. Try again to get a new one."
+msgstr "انتهت صلاحية الرمز. حاول مرة أخرى للحصول على رمز جديد."
+
+msgid "Enter this code in your browser to link this device."
+msgstr "أدخل هذا الرمز في متصفحك لربط هذا الجهاز."
+
+msgid "Opening your browser…"
+msgstr "جارٍ فتح متصفحك…"
+
+msgid "Sent to your browser. If no page opened, copy the link below."
+msgstr "تم الإرسال إلى متصفحك. إذا لم تُفتح أي صفحة، فانسخ الرابط أدناه."
+
+msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
+msgstr "تعذّر فتح متصفح: {error}. انسخ الرابط أدناه وافتحه بنفسك."

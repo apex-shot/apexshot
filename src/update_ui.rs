@@ -27,9 +27,9 @@ const UPDATE_CSS: &str = r#"
     button.apexshot-update-close:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
     button.apexshot-update-primary {
         min-height: 32px; padding: 4px 14px; border: none; border-radius: 7px;
-        background: #b05c38; color: white; font-size: 12px; font-weight: 700;
+        background: #ff670d; color: white; font-size: 12px; font-weight: 700;
     }
-    button.apexshot-update-primary:hover { background: #c06540; }
+    button.apexshot-update-primary:hover { background: #ff7c2f; }
     button.apexshot-update-link {
         padding: 0; min-height: 0; border: none; background: transparent;
         color: #d9815e; font-size: 12px;

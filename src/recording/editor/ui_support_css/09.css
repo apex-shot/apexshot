@@ -66,7 +66,7 @@
              * but in the editor's own accent rather than the capture one. */
             button.recording-editor-bg-none-row.active-background-option,
             button.recording-editor-bg-none-row.active-background-option:hover {
-                background: alpha(#b05c38, 0.18);
+                background: alpha(#ff670d, 0.18);
                 color: #f0a07a;
             }
 
@@ -207,8 +207,8 @@
 
             .editor-theme-light button.recording-editor-bg-none-row.active-background-option,
             .editor-theme-light button.recording-editor-bg-none-row.active-background-option:hover {
-                background: alpha(#b05c38, 0.18);
-                color: #b05c38;
+                background: alpha(#ff670d, 0.18);
+                color: #ff670d;
             }
 
             .editor-theme-light button.recording-editor-bg-image-row {

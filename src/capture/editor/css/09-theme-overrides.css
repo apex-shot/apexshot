@@ -6,7 +6,7 @@
             }
 
             .editor-root.editor-theme-dark .editor-toolbar {
-                background-color: #0f0f0f;
+                background-color: transparent;
             }
 
             .editor-root.editor-theme-dark .editor-footer {
@@ -34,7 +34,7 @@
             }
 
             .editor-root.editor-theme-light .editor-toolbar {
-                background-color: #eef0f5;
+                background-color: transparent;
             }
 
             .editor-root.editor-theme-light .editor-motion-tool-notch {
@@ -51,7 +51,7 @@
 
             .editor-root.editor-theme-light .editor-motion-content-field:focus-within {
                 background: alpha(#111827, 0.07);
-                box-shadow: inset 0 0 0 1px alpha(#c06540, 0.7);
+                box-shadow: inset 0 0 0 1px alpha(#ff7c2f, 0.7);
             }
 
             .editor-root.editor-theme-light textview.editor-motion-content-text,
@@ -60,7 +60,7 @@
             }
 
             .editor-root.editor-theme-light textview.editor-motion-content-text text selection {
-                background: alpha(#c06540, 0.25);
+                background: alpha(#ff7c2f, 0.25);
                 color: #1d2129;
             }
 
@@ -171,12 +171,12 @@
             }
 
             .editor-root.editor-theme-light button.editor-footer-zoom-header-btn.orange-btn {
-                background: #b05c38;
+                background: #ff670d;
                 color: #ffffff;
             }
 
             .editor-root.editor-theme-light button.editor-footer-zoom-header-btn.orange-btn:hover {
-                background: #c06540;
+                background: #ff7c2f;
                 color: #ffffff;
             }
 
@@ -223,12 +223,12 @@
             }
 
             .editor-footer-zoom-popup.editor-theme-light button.editor-footer-zoom-header-btn.orange-btn {
-                background: #b05c38;
+                background: #ff670d;
                 color: #ffffff;
             }
 
             .editor-footer-zoom-popup.editor-theme-light button.editor-footer-zoom-header-btn.orange-btn:hover {
-                background: #c06540;
+                background: #ff7c2f;
                 color: #ffffff;
             }
 
@@ -405,7 +405,7 @@
                 color: #1d2129;
             }
             .editor-root.editor-theme-light button.editor-inspector-tab-button.active-inspector-tab {
-                color: #b05c38;
+                color: #ff670d;
             }
             .editor-root.editor-theme-light button.editor-arrow-inspector-option,
             .editor-root.editor-theme-light button.editor-text-inspector-option,
@@ -462,7 +462,7 @@
                 background: alpha(#111827, 0.10);
                 border: 1px solid transparent;
                 color: #1d2129;
-                box-shadow: inset 0 0 0 1px #b05c38;
+                box-shadow: inset 0 0 0 1px #ff670d;
             }
 
             /* Background panel labels & section titles */
@@ -478,8 +478,8 @@
                 border-color: alpha(#111827, 0.20);
             }
             .editor-root.editor-theme-light checkbutton.editor-background-checkbox check:checked {
-                background-color: #b05c38;
-                border-color: #b05c38;
+                background-color: #ff670d;
+                border-color: #ff670d;
                 color: #ffffff;
             }
 

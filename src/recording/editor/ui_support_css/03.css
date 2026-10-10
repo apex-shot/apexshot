@@ -54,14 +54,14 @@
             }
 
             .recording-editor-trim-range {
-                background: alpha(#b05c38, 0.15);
-                border-top: 2px solid #b05c38;
-                border-bottom: 2px solid #b05c38;
+                background: alpha(#ff670d, 0.15);
+                border-top: 2px solid #ff670d;
+                border-bottom: 2px solid #ff670d;
             }
 
             .recording-editor-trim-handle {
                 min-width: 8px;
-                background: #b05c38;
+                background: #ff670d;
                 border-radius: 3px;
                 border: none;
             }
@@ -240,7 +240,7 @@
 
             .recording-editor-primary-button {
                 min-width: 112px;
-                background: #b05c38;
+                background: #ff670d;
                 color: white;
                 border: none;
                 border-radius: 6px;
@@ -256,7 +256,7 @@
             }
 
             .recording-editor-primary-button:hover {
-                background: #c06540;
+                background: #ff7c2f;
             }
 
             .recording-editor-primary-button:hover label {
@@ -265,7 +265,7 @@
 
             .recording-editor-primary-button:disabled {
                 opacity: 0.7;
-                background: #b05c38;
+                background: #ff670d;
                 color: white;
             }
 

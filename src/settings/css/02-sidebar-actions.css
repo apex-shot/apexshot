@@ -32,7 +32,7 @@
 
             .settings-nav-icon-selected {
                 opacity: 1;
-                color: #e8764a;
+                color: #ff7c2f;
             }
 
             .settings-nav-label {
@@ -55,7 +55,7 @@
 
             .editor-root button.settings-primary-btn {
                 background-image: none;
-                background-color: #b05c38;
+                background-color: #ff670d;
                 border: none;
                 border-radius: 6px;
                 padding: 4px 16px;
@@ -68,7 +68,7 @@
 
             .editor-root button.settings-primary-btn:hover {
                 background-image: none;
-                background-color: #c06540;
+                background-color: #ff7c2f;
                 box-shadow: none;
             }
 
@@ -95,12 +95,12 @@
             }
 
             .editor-root button.settings-save-btn.settings-save-btn-ready {
-                background-color: #b05c38;
+                background-color: #ff670d;
                 color: white;
             }
 
             .editor-root button.settings-save-btn.settings-save-btn-ready:hover {
-                background-color: #c06540;
+                background-color: #ff7c2f;
                 color: white;
             }
 
@@ -144,7 +144,7 @@
             }
 
             .editor-root.editor-theme-light .settings-nav-icon-selected {
-                color: #b05c38;
+                color: #ff670d;
                 opacity: 1;
             }
 
@@ -165,13 +165,13 @@
             }
 
             .editor-root.editor-theme-light button.settings-primary-btn {
-                background-color: #b05c38;
-                border-color: #9a4c2c;
+                background-color: #ff670d;
+                border-color: #cf530b;
                 color: white;
             }
 
             .editor-root.editor-theme-light button.settings-primary-btn:hover {
-                background-color: #c06540;
+                background-color: #ff7c2f;
             }
 
             .editor-root.editor-theme-light button.settings-save-btn {
@@ -185,12 +185,12 @@
             }
 
             .editor-root.editor-theme-light button.settings-save-btn.settings-save-btn-ready {
-                background-color: #b05c38;
+                background-color: #ff670d;
                 color: white;
             }
 
             .editor-root.editor-theme-light button.settings-save-btn.settings-save-btn-ready:hover {
-                background-color: #c06540;
+                background-color: #ff7c2f;
                 color: white;
             }
 

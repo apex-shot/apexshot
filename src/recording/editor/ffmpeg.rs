@@ -420,7 +420,7 @@ pub fn generate_waveform(metadata: &VideoMetadata) -> anyhow::Result<PathBuf> {
     let dir = thumbnail_cache_dir(&metadata.path);
     std::fs::create_dir_all(&dir)?;
     let output_path = dir.join("waveform.png");
-    let filter = "showwavespic=s=1200x64:colors=0xb05c38";
+    let filter = "showwavespic=s=1200x64:colors=0xff670d";
     let output = Command::new("ffmpeg")
         .args([
             "-y",

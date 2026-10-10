@@ -24,7 +24,7 @@
                 min-height: 26px;
                 border-radius: 6px;
                 padding: 0 14px;
-                background: #b05c38;
+                background: #ff670d;
                 border: none;
                 color: white;
                 font-size: 12px;
@@ -85,7 +85,7 @@
             }
 
             .editor-obfuscate-intensity-slider slider {
-                background: #b05c38;
+                background: #ff670d;
                 border: 2px solid white;
                 border-radius: 50%;
                 min-width: 8px;

@@ -32,7 +32,10 @@ mod tests {
     #[test]
     fn light_theme_chrome_matches_timeline() {
         assert!(RECORDING_EDITOR_CSS.contains(
-            ".editor-theme-light .recording-editor-window-controls {\n                background: @recording-editor-surface-light;"
+            ".recording-editor-window-controls {\n                min-height: 32px;\n                padding: 2px 8px 2px 10px;\n                background: transparent;"
+        ));
+        assert!(RECORDING_EDITOR_CSS.contains(
+            ".editor-theme-light .recording-editor-window-controls {\n                background: transparent;"
         ));
         assert!(RECORDING_EDITOR_CSS.contains(
             ".editor-theme-light.recording-editor-shell {\n                background: @recording-editor-surface-light;\n                border: 1px solid alpha(#111827, 0.18);"
