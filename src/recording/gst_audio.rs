@@ -856,6 +856,41 @@ mod tests {
         }
     }
 
+    /// Pull the first encoded frame the way `ActiveGstAudio::start` does: poll
+    /// on a deadline while draining bus errors, instead of trusting one
+    /// blocking pull. The appsink can still be changing state right after
+    /// `set_state(Playing)` and hand back an immediate `None`; a slow runner
+    /// must not turn that transient miss into a dead-pipeline failure.
+    fn pull_startup_sample(
+        pipeline: &gst::Pipeline,
+        appsink: &gst_app::AppSink,
+        grace: Duration,
+    ) -> Result<gst::Sample, String> {
+        let bus = pipeline.bus().ok_or("audio pipeline has no bus")?;
+        let deadline = Instant::now() + grace;
+        loop {
+            for message in bus.iter_timed(gst::ClockTime::ZERO) {
+                if let gst::MessageView::Error(err) = message.view() {
+                    return Err(format!("audio pipeline error: {}", err.error()));
+                }
+            }
+            if let Some(sample) = appsink.try_pull_sample(gst::ClockTime::ZERO) {
+                return Ok(sample);
+            }
+            if appsink.is_eos() {
+                return Err("audio pipeline reached EOS before producing a frame".into());
+            }
+            if Instant::now() > deadline {
+                let (_, current, pending) = pipeline.state(gst::ClockTime::from_mseconds(500));
+                return Err(format!(
+                    "no encoded frame within {}s (pipeline {current:?} -> {pending:?})",
+                    grace.as_secs()
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     fn skip_if_gst_audio_unavailable(encoder: AudioEncoder, app_sink: bool) -> bool {
         if ensure_gst_initialized().is_err() {
             eprintln!("skipping: GStreamer not available");
@@ -957,9 +992,10 @@ mod tests {
             pipeline.add(&bin.bin).unwrap();
             pipeline.set_state(gst::State::Playing).unwrap();
 
-            let sample = appsink
-                .try_pull_sample(gst::ClockTime::from_seconds(3))
-                .unwrap_or_else(|| panic!("{muxer} produced no encoded audio"));
+            // Poll on a deadline like ActiveGstAudio::start: a transient
+            // miss right after set_state(Playing) must not fail the run.
+            let sample = pull_startup_sample(&pipeline, &appsink, Duration::from_secs(10))
+                .unwrap_or_else(|err| panic!("{muxer} produced no encoded audio: {err}"));
             let buffer = sample.buffer().expect("sample has a buffer");
             assert!(buffer.size() > 0);
 
