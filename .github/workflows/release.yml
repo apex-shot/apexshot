@@ -53,6 +53,16 @@ jobs:
             node --check "$f"
           done
 
+      - name: Installer syntax and RPM asset selection tests
+        run: |
+          set -euo pipefail
+          sh -n scripts/install.sh
+          sh -n scripts/update.sh
+          bash -n scripts/fedora-install.sh
+          bash -n scripts/opensuse-install.sh
+          python3 scripts/test_distro_dispatch.py
+          python3 scripts/test_rpm_assets.py
+
       - name: Reject nested gitlinks
         run: |
           set -euo pipefail
@@ -572,7 +582,7 @@ jobs:
     name: Publish SHA256SUMS
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [release, fedora, arch]
+    needs: [release, fedora, opensuse, arch]
     permissions:
       contents: write
     steps:

@@ -261,15 +261,16 @@ install_runtime_dependencies() {
 }
 
 resolve_rpm_url() {
-    local rpm_path version_no_v
+    local rpm_path version_no_v version_re
     # Match only the main binary package, e.g. apexshot-0.2.35-0.x86_64.rpm.
     # The release also carries the debuginfo/debugsource companions and the
     # source RPM; anchoring on "apexshot-<version>-" keeps the installer from
     # grabbing one of those when the release asset order places them first.
     version_no_v="${VERSION#v}"
+    version_re=${version_no_v//./\\.}
     rpm_path=$(curl -fsSL "${RELEASES_URL}/expanded_assets/${VERSION}" |
-               grep -oE "/${REPO}/releases/download/${VERSION}/apexshot-${version_no_v}-[0-9][^\"]*\.x86_64\.rpm" |
-               head -n 1 || true)
+               grep -oE "\"/${REPO}/releases/download/${VERSION}/apexshot-${version_re}-[0-9]+\.x86_64\.rpm\"" |
+               head -n 1 | tr -d '"' || true)
 
     if [[ -z "$rpm_path" ]]; then
         return 1
@@ -464,13 +465,12 @@ main() {
         return 0
     fi
 
-    install_runtime_dependencies
-
     if [[ $FROM_SOURCE -eq 1 ]]; then
         install_from_source
     fi
 
     download_rpm
+    install_runtime_dependencies
     install_rpm
     post_install_launch
     summary

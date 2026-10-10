@@ -114,6 +114,15 @@ pub fn background_gradient_asset_path(file_name: &str) -> PathBuf {
                     .map(|dir| dir.join("background-images").join(file_name))
             })
             .unwrap_or_default(),
+        std::env::current_exe()
+            .ok()
+            .and_then(|exe| {
+                exe.parent().map(|dir| {
+                    dir.join("../share/apexshot/background-images")
+                        .join(file_name)
+                })
+            })
+            .unwrap_or_default(),
         PathBuf::from("/usr/share/apexshot/background-images").join(file_name),
         PathBuf::from("/usr/local/share/apexshot/background-images").join(file_name),
     ];
@@ -623,6 +632,17 @@ mod tests {
             production_source.contains("/usr/share/apexshot/background-images")
                 && production_source.contains("/usr/local/share/apexshot/background-images"),
             "background gradient lookup should support installed shared asset directories",
+        );
+    }
+
+    #[test]
+    fn background_gradient_assets_support_executable_relative_shared_paths() {
+        let source = include_str!("background_panel.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+
+        assert!(
+            production_source.contains("../share/apexshot/background-images"),
+            "background gradient lookup should resolve shared assets next to the executable's prefix",
         );
     }
 
