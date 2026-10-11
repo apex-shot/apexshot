@@ -450,9 +450,27 @@ pub fn is_fedora_portal_only_recording() -> bool {
     is_fedora_recording_unsupported()
 }
 
+/// Whether video recording is offered on this platform.
+///
+/// Fedora is the only exception; screenshots and the rest of the app stay
+/// available there. UI that advertises recording asks this before drawing a
+/// record affordance, so Fedora never invites a click it will refuse.
+pub fn recording_supported() -> bool {
+    !is_fedora_recording_unsupported()
+}
+
+/// Refusal returned by [`refuse_fedora_recording`].
+///
+/// Typed so callers can tell the refusal, which already notified the user,
+/// apart from a genuine recording failure and avoid stacking a second
+/// notification on top of it.
+#[derive(Debug, Error)]
+#[error("{}", FEDORA_RECORDING_UNSUPPORTED_MSG)]
+pub struct FedoraRecordingUnsupported;
+
 /// Notify the user and fail. Never starts a recording session on Fedora.
-pub fn refuse_fedora_recording() -> anyhow::Result<()> {
-    if !is_fedora_recording_unsupported() {
+pub fn refuse_fedora_recording() -> Result<(), FedoraRecordingUnsupported> {
+    if recording_supported() {
         return Ok(());
     }
     eprintln!("[recording] {FEDORA_RECORDING_UNSUPPORTED_MSG}");
@@ -464,7 +482,7 @@ pub fn refuse_fedora_recording() -> anyhow::Result<()> {
         crate::utils::notify::desktop_notification(&summary, &body);
     })
     .join();
-    anyhow::bail!("{FEDORA_RECORDING_UNSUPPORTED_MSG}")
+    Err(FedoraRecordingUnsupported)
 }
 
 /// Former Fedora portal entry — now always refuses.

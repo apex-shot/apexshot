@@ -106,7 +106,9 @@ whether the user interacts through the Qt overlay (GNOME) or the daemon/CLI
 (non-GNOME).
 
 > **Fedora:** Video recording is **not supported**. All recording entry points
-> call `refuse_fedora_recording()` and show a desktop notification. Screenshots
+> call `refuse_fedora_recording()` and show a desktop notification, and
+> `recording_supported()` keeps the tray, both capture toolbars, and the
+> Recording settings page from offering recording at all. Screenshots
 > and the rest of the app remain available. See
 > [`progress-fedora-kde-overlay-and-preview.md`](progress-fedora-kde-overlay-and-preview.md).
 

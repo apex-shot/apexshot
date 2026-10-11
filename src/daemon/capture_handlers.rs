@@ -730,6 +730,15 @@ fn handle_interactive_capture_result(
                     eprintln!("[daemon] Recording cancelled by user.");
                     return;
                 }
+                // The Fedora refusal already showed "Recording not supported".
+                // Stacking "Recording failed" on top of it reads as two bugs.
+                if err
+                    .downcast_ref::<crate::recording::FedoraRecordingUnsupported>()
+                    .is_some()
+                {
+                    eprintln!("[daemon] Recording unavailable: {err}");
+                    return;
+                }
                 eprintln!("[daemon] Recording failed: {err}");
                 send_desktop_notification(&crate::i18n::t("Recording failed"), &err.to_string());
                 // Show notification for GNOME extension not installed

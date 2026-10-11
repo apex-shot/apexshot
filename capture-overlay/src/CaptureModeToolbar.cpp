@@ -18,6 +18,7 @@
 #include <QPainterPath>
 #include <QScreen>
 #include <QTimer>
+#include <QToolTip>
 #include <QWindow>
 
 #include <algorithm>
@@ -63,10 +64,12 @@ Qt::WindowFlags toolbarFlags()
 
 } // namespace
 
-CaptureModeToolbar::CaptureModeToolbar(QScreen* screen, bool screenIsLocked)
+CaptureModeToolbar::CaptureModeToolbar(QScreen* screen, bool screenIsLocked,
+                                       bool recordingAvailable)
     : QWidget(nullptr, toolbarFlags())
     , m_screen(screen)
     , m_screenIsLocked(screenIsLocked)
+    , m_recordingAvailable(recordingAvailable)
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose, false);
@@ -80,7 +83,8 @@ CaptureModeToolbar::CaptureModeToolbar(QScreen* screen, bool screenIsLocked)
 }
 
 CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServer,
-                                                       QScreen* targetScreen)
+                                                       QScreen* targetScreen,
+                                                       bool recordingAvailable)
 {
     QScreen* screen = targetScreen;
     if (!screen) {
@@ -90,7 +94,7 @@ CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServe
         screen = QGuiApplication::primaryScreen();
     }
 
-    CaptureModeToolbar toolbar(screen, targetScreen != nullptr);
+    CaptureModeToolbar toolbar(screen, targetScreen != nullptr, recordingAvailable);
     QEventLoop loop;
     QObject::connect(&toolbar, &QObject::destroyed, &loop, &QEventLoop::quit);
     if (controlServer) {
@@ -221,7 +225,8 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
 
     for (int i = 0; i < kItemCount; ++i) {
         const QRectF cell = itemRect(i);
-        const bool disabled = (m_recording && i == 4)
+        const bool disabled = (!m_recordingAvailable && i == 1)
+            || (m_recording && i == 4)
             || (!m_recording && i == 2 && m_ocr)
             || (!m_recording && i == 3 && (m_timerSeconds > 0 || m_ocr))
             || (!m_recording && i == 4 && m_timerSeconds > 0)
@@ -379,13 +384,22 @@ void CaptureModeToolbar::mouseMoveEvent(QMouseEvent* event)
     const int hovered = hitTest(event->pos());
     if (hovered != m_hovered) {
         m_hovered = hovered;
-        const bool disabled = (m_recording && hovered == 4)
+        const bool disabled = (!m_recordingAvailable && hovered == 1)
+            || (m_recording && hovered == 4)
             || (!m_recording && hovered == 2 && m_ocr)
             || (!m_recording && hovered == 3 && (m_timerSeconds > 0 || m_ocr))
             || (!m_recording && hovered == 4 && m_timerSeconds > 0)
             || (!m_recording && hovered == 5 && m_timerSeconds > 0)
             || (!m_recording && hovered == 6 && m_ocr);
         setCursor(disabled || hovered < 0 ? Qt::ArrowCursor : Qt::PointingHandCursor);
+        // A disabled item never hovers, so explain the Video slot on itself.
+        if (!m_recordingAvailable && hovered == 1) {
+            QToolTip::showText(event->globalPos(),
+                               QStringLiteral("Video recording is not supported on this system"),
+                               this);
+        } else {
+            QToolTip::hideText();
+        }
         update();
     }
 }
@@ -401,6 +415,9 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         update();
         break;
     case 1:
+        if (!m_recordingAvailable) {
+            break;
+        }
         m_recording = true;
         m_ocr = false;
         m_timerSeconds = 0;
@@ -455,6 +472,7 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
 
 void CaptureModeToolbar::leaveEvent(QEvent*)
 {
+    QToolTip::hideText();
     if (m_hovered != -1) {
         m_hovered = -1;
         update();

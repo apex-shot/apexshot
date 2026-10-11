@@ -212,9 +212,11 @@ settings, tray, and hotkeys. Fedora KDE Plasma Wayland has been runtime-validate
 for the capture path.
 
 > **Video recording is not supported on Fedora.**  
-> Hotkeys, tray actions, and CLI `apexshot record …` show a desktop notification
-> and exit without starting a session. For screen recording on Fedora, use
-> **Spectacle** or **Kooha**. Screenshots in ApexShot continue to work normally.
+> The tray record entries, the Video item in both capture menus, and the
+> Recording settings page are disabled there. Hotkeys and CLI `apexshot record …`
+> show a desktop notification and exit without starting a session. For screen
+> recording on Fedora, use **Spectacle** or **Kooha**. Screenshots in ApexShot
+> continue to work normally.
 
 The generic installer selects the Fedora path automatically when `dnf` is
 available. Direct command:

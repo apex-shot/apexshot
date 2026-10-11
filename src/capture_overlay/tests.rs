@@ -6,7 +6,8 @@ mod tests {
         execute_builtin_overlay_query, is_gnome_wayland_session_from_env,
         parse_area_capture_output_with_persist, parse_area_capture_output_with_stderr,
         parse_capture_screen_json, parse_capture_screen_json_with_mode, parse_recording_json,
-        parse_selection_json, save_capture_to_temp_png, should_request_screenshot_lock,
+        parse_selection_json, recording_availability_args, save_capture_to_temp_png,
+        should_request_screenshot_lock,
         should_use_gtk_layer_shell_selector_from_env, supports_custom_shutter_sound_from,
         tracked_overlay_id, validate_capture_session_with, AreaCapturePathResult,
         CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode, OverlaySelection,
@@ -601,6 +602,14 @@ mod tests {
         let args = build_quick_capture_args(&crate::config::AppConfig::default());
         assert!(args.iter().any(|arg| arg == "--area-init"));
         assert!(args.iter().any(|arg| arg == "--capture-menu"));
+    }
+    #[test]
+    fn recording_availability_args_follow_the_platform_gate() {
+        assert!(recording_availability_args(true).is_empty());
+        assert_eq!(
+            recording_availability_args(false),
+            vec!["--recording-unavailable".to_string()]
+        );
     }
 
     #[test]
