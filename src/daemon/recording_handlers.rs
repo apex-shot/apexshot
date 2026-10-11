@@ -54,6 +54,14 @@ pub(super) fn update_recording_tray(
 }
 
 pub(super) async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonAction>) {
+    handle_recording_target(crate::recording::RecordingTarget::Screen).await;
+}
+
+pub(super) async fn handle_record_window(_tx: std::sync::mpsc::Sender<DaemonAction>) {
+    handle_recording_target(crate::recording::RecordingTarget::Window).await;
+}
+
+async fn handle_recording_target(target: crate::recording::RecordingTarget) {
     use crate::recording::{
         run_recording_with_controls, RecordingConfig, RecordingControlsParams, StopAction,
     };
@@ -64,10 +72,16 @@ pub(super) async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonActi
         return;
     }
 
-    eprintln!("[daemon] Starting screen recording…");
+    let label = match target {
+        crate::recording::RecordingTarget::Window => "window",
+        crate::recording::RecordingTarget::Screen => "screen",
+        crate::recording::RecordingTarget::Area => "area",
+    };
+    eprintln!("[daemon] Starting {label} recording…");
 
     let app_config = load_config().sanitized();
-    let config = RecordingConfig::from_app_config(&app_config, "mp4");
+    let mut config = RecordingConfig::from_app_config(&app_config, "mp4");
+    config.target = target;
     eprintln!(
         "[daemon] Recording output path: {}",
         config.output_path.display()
@@ -77,7 +91,7 @@ pub(super) async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonActi
         capture_y: 0,
         capture_w: 0,
         capture_h: 0,
-        is_fullscreen: true,
+        is_fullscreen: target == crate::recording::RecordingTarget::Screen,
         show_timer: true,
         use_shell_mask: false,
         dim_screen: false,
@@ -95,7 +109,19 @@ pub(super) async fn handle_record_screen(_tx: std::sync::mpsc::Sender<DaemonActi
             eprintln!("[daemon] Recording saved: {}", path.display());
             crate::usage_telemetry::record_recording();
         }
-        Err(e) => eprintln!("[daemon] Recording error: {e}"),
+        Err(e) => {
+            eprintln!("[daemon] Recording error: {e}");
+            if target == crate::recording::RecordingTarget::Window
+                && !e
+                    .downcast_ref::<crate::recording::RecordError>()
+                    .is_some_and(|error| matches!(error, crate::recording::RecordError::Cancelled))
+            {
+                crate::utils::notify::desktop_notification(
+                    &crate::i18n::t("Window recording unavailable"),
+                    &e.to_string(),
+                );
+            }
+        }
     }
 }
 

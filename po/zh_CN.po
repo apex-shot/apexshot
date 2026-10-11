@@ -707,6 +707,9 @@ msgstr "打开录制界面"
 msgid "Record Screen"
 msgstr "录制屏幕"
 
+msgid "Record Window"
+msgstr "录制窗口"
+
 msgid "Stop Recording"
 msgstr "停止录制"
 
@@ -1672,6 +1675,9 @@ msgstr "以单声道录制音频"
 
 msgid "Recording failed"
 msgstr "录制失败"
+
+msgid "Window recording unavailable"
+msgstr "无法录制窗口"
 
 msgid "Recording not saved"
 msgstr "录音未保存"
@@ -2914,3 +2920,9 @@ msgstr "已发送到浏览器。如果没有打开页面，请复制下方链接
 
 msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
 msgstr "无法打开浏览器：{error}。请复制下方链接并自行打开。"
+
+msgid "The selected portal will embed the cursor in the video, so it cannot be edited separately."
+msgstr "所选门户会将光标嵌入视频，因此无法单独编辑。"
+
+msgid "The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."
+msgstr "窗口光标仍可编辑，但没有 ApexShot GNOME 扩展时不会记录自动缩放点击。"

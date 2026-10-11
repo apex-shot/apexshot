@@ -709,6 +709,9 @@ msgstr "録画 UI を開く"
 msgid "Record Screen"
 msgstr "画面を録画"
 
+msgid "Record Window"
+msgstr "ウィンドウを録画"
+
 msgid "Stop Recording"
 msgstr "録画を停止"
 
@@ -1674,6 +1677,9 @@ msgstr "オーディオをモノラルで録音する"
 
 msgid "Recording failed"
 msgstr "記録に失敗しました"
+
+msgid "Window recording unavailable"
+msgstr "ウィンドウ録画を利用できません"
 
 msgid "Recording not saved"
 msgstr "録画が保存されませんでした"
@@ -2920,3 +2926,9 @@ msgstr "ブラウザーに送信しました。ページが開かない場合は
 
 msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
 msgstr "ブラウザーを開けませんでした: {error}。下のリンクをコピーして、ご自身で開いてください。"
+
+msgid "The selected portal will embed the cursor in the video, so it cannot be edited separately."
+msgstr "選択したポータルではカーソルが動画に埋め込まれるため、個別に編集できません。"
+
+msgid "The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."
+msgstr "ウィンドウカーソルは編集できますが、ApexShot GNOME 拡張機能がないと自動ズームのクリックは記録されません。"

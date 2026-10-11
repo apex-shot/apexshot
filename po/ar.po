@@ -713,6 +713,9 @@ msgstr "فتح واجهة التسجيل"
 msgid "Record Screen"
 msgstr "تسجيل الشاشة"
 
+msgid "Record Window"
+msgstr "تسجيل النافذة"
+
 msgid "Stop Recording"
 msgstr "إيقاف التسجيل"
 
@@ -1686,6 +1689,9 @@ msgstr "تسجيل الصوت بصوت أحادي"
 
 msgid "Recording failed"
 msgstr "فشل التسجيل"
+
+msgid "Window recording unavailable"
+msgstr "تسجيل النافذة غير متاح"
 
 msgid "Recording not saved"
 msgstr "لم يتم حفظ التسجيل"
@@ -2937,3 +2943,9 @@ msgstr "تم الإرسال إلى متصفحك. إذا لم تُفتح أي ص�
 
 msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
 msgstr "تعذّر فتح متصفح: {error}. انسخ الرابط أدناه وافتحه بنفسك."
+
+msgid "The selected portal will embed the cursor in the video, so it cannot be edited separately."
+msgstr "ستُضمّن البوابة المحددة المؤشر في الفيديو، لذا لن يمكن تعديله بشكل منفصل."
+
+msgid "The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."
+msgstr "سيظل مؤشر النافذة قابلاً للتحرير، لكن نقرات التكبير التلقائي لن تُسجّل دون إضافة GNOME الخاصة بـ ApexShot."

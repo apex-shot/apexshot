@@ -837,6 +837,24 @@ pub fn select_target_monitor_choice() -> Result<MonitorChoice, SelectionError> {
     select_target_monitor().map(|(_, choice)| choice)
 }
 
+/// Choose a primary monitor as an anchor without showing the picker.
+pub(crate) fn default_target_monitor_choice() -> Result<MonitorChoice, SelectionError> {
+    let display = gdk::Display::default()
+        .ok_or_else(|| SelectionError::InitError("No display found for monitor picker".into()))?;
+    let monitors = list_monitors(&display);
+    if monitors.is_empty() {
+        return Err(SelectionError::InitError("No monitor found".into()));
+    }
+    let index = (0..monitors.len())
+        .find(|&index| is_primary_guess(&monitors, index))
+        .unwrap_or(0);
+    Ok(MonitorChoice::from_monitor(
+        index as u32,
+        &monitors[index],
+        true,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

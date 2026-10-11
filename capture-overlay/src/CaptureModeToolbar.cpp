@@ -221,7 +221,7 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
 
     for (int i = 0; i < kItemCount; ++i) {
         const QRectF cell = itemRect(i);
-        const bool disabled = (m_recording && (i == 3 || i == 4))
+        const bool disabled = (m_recording && i == 4)
             || (!m_recording && i == 2 && m_ocr)
             || (!m_recording && i == 3 && (m_timerSeconds > 0 || m_ocr))
             || (!m_recording && i == 4 && m_timerSeconds > 0)
@@ -379,7 +379,7 @@ void CaptureModeToolbar::mouseMoveEvent(QMouseEvent* event)
     const int hovered = hitTest(event->pos());
     if (hovered != m_hovered) {
         m_hovered = hovered;
-        const bool disabled = (m_recording && (hovered == 3 || hovered == 4))
+        const bool disabled = (m_recording && hovered == 4)
             || (!m_recording && hovered == 2 && m_ocr)
             || (!m_recording && hovered == 3 && (m_timerSeconds > 0 || m_ocr))
             || (!m_recording && hovered == 4 && m_timerSeconds > 0)
@@ -418,7 +418,7 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         }
         break;
     case 3:
-        if (!m_recording && m_timerSeconds == 0 && !m_ocr) {
+        if (m_recording || (m_timerSeconds == 0 && !m_ocr)) {
             finish(Action::Window);
         }
         break;

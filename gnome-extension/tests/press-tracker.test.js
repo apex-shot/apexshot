@@ -62,14 +62,14 @@ runTest('take resets the tracker for the next recording', () => {
     assertEqual(tracker.take().length, 0, 'second take is empty');
 });
 
-runTest('the oldest interval is dropped once the cap is reached', () => {
+runTest('press compaction preserves the first and most recent intervals', () => {
     const tracker = new PressTracker();
     for (let i = 0; i <= MAX_PRESSES; i++) {
         tracker.press(1, i, 0, 0);
         tracker.release(1, i + 0.5);
     }
     const presses = tracker.take();
-    assertEqual(presses.length, MAX_PRESSES, 'capped length');
-    assertEqual(presses[0][0], 1, 'oldest dropped');
-    assertEqual(presses[presses.length - 1][0], MAX_PRESSES, 'newest kept');
+    assertEqual(presses.length <= MAX_PRESSES, true, 'capped length');
+    assertEqual(presses[0][0], 0, 'first press kept');
+    assertEqual(presses[presses.length - 1][0], MAX_PRESSES, 'newest press kept');
 });

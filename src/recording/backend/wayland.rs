@@ -1,4 +1,6 @@
+use super::crop::{normalize_window_frame, window_cursor_update, window_frame_crop};
 use super::*;
+use crate::pipewire_engine::{FrameCrop, PipeWireFrame};
 use gstreamer::glib;
 
 /// Try to start the GStreamer audio capture (mic + speaker monitor mixed and
@@ -40,6 +42,51 @@ fn start_gst_audio_or_fallback(
     }
 }
 
+fn first_valid_window_frame(
+    capture: &crate::pipewire_engine::PipeWireCapture,
+) -> super::RecordResult<(PipeWireFrame, FrameCrop)> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(8);
+    let mut rejected_frame = false;
+    loop {
+        match capture.try_recv_frame() {
+            Ok(Some(frame)) => {
+                if let Some(crop) = window_frame_crop(&frame) {
+                    return Ok((frame, crop));
+                }
+                if !rejected_frame {
+                    eprintln!(
+                        "[recording] Ignoring window frame with invalid crop or buffer bounds"
+                    );
+                    rejected_frame = true;
+                }
+            }
+            Ok(None) => {}
+            Err(err) => {
+                return Err(RecordError::GStreamerError(format!(
+                    "PipeWire window frame failed: {err}"
+                )))
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(RecordError::GStreamerError(
+                "The selected window did not produce a valid frame within 8 seconds".into(),
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+}
+
+fn update_pending_video_frame(
+    last_pixels: &mut Option<std::sync::Arc<Vec<u8>>>,
+    pending_frame_at_us: &mut Option<i64>,
+    frame: Option<(Vec<u8>, i64)>,
+) {
+    if let Some((pixels, captured_at_us)) = frame {
+        *last_pixels = Some(std::sync::Arc::new(pixels));
+        *pending_frame_at_us = Some(captured_at_us);
+    }
+}
+
 /// Wayland recording: native PipeWire frame capture + ffmpeg pipe for encoding.
 pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     mut wayland_source: WaylandSource,
@@ -75,7 +122,17 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     // match the negotiated format, which used to panic in convert_to_rgba_frame.
     let hint_w = (wayland_source.stream_width > 0).then_some(wayland_source.stream_width);
     let hint_h = (wayland_source.stream_height > 0).then_some(wayland_source.stream_height);
+    let window_target = config.target == super::RecordingTarget::Window;
+    let cursor_metadata_enabled = wayland_source.cursor_metadata_enabled;
     let capture = match match wayland_source.pipewire_fd {
+        Some(fd) if window_target => crate::pipewire_engine::PipeWireCapture::connect_window(
+            fd,
+            wayland_source.node_id,
+            None,
+            hint_w,
+            hint_h,
+            cursor_metadata_enabled,
+        ),
         Some(fd) => crate::pipewire_engine::PipeWireCapture::connect(
             fd,
             wayland_source.node_id,
@@ -105,29 +162,56 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         RecordError::GStreamerError("No format negotiated before recording".into())
     })?;
 
-    let crop = wayland_source.crop.and_then(|crop| {
-        scale_crop_to_frame(
-            crop,
-            wayland_source.stream_width,
-            wayland_source.stream_height,
-            format.width,
-            format.height,
-        )
-    });
-    let (input_width, input_height) = match crop {
-        Some(crop) => {
-            let (width, height) = even_crop_output(crop, format.width, format.height);
-            eprintln!(
-                "[recording] Applying Wayland area crop: left={} top={} => {}x{}",
-                crop.left, crop.top, width, height
-            );
-            (width, height)
+    let mut first_window_frame = None;
+    let mut first_window_cursor = None;
+    let mut window_output_size = None;
+    let crop = if window_target {
+        let (frame, crop) = first_valid_window_frame(&capture)?;
+        let width = crop.width;
+        let height = crop.height;
+        first_window_cursor = window_cursor_update(&frame, crop, width, height)
+            .map(|cursor| (frame.captured_at_us, cursor));
+        let pixels = normalize_window_frame(&frame, crop, width, height).ok_or_else(|| {
+            RecordError::GStreamerError("The selected window frame could not be normalized".into())
+        })?;
+        first_window_frame = Some((pixels, frame.captured_at_us));
+        window_output_size = Some((width, height));
+        None
+    } else {
+        wayland_source.crop.and_then(|crop| {
+            scale_crop_to_frame(
+                crop,
+                wayland_source.stream_width,
+                wayland_source.stream_height,
+                format.width,
+                format.height,
+            )
+        })
+    };
+    let (input_width, input_height) = if window_target {
+        window_output_size.ok_or_else(|| {
+            RecordError::GStreamerError("The selected window did not produce a valid frame".into())
+        })?
+    } else {
+        match crop {
+            Some(crop) => {
+                let (width, height) = even_crop_output(crop, format.width, format.height);
+                eprintln!(
+                    "[recording] Applying Wayland area crop: left={} top={} => {}x{}",
+                    crop.left, crop.top, width, height
+                );
+                (width, height)
+            }
+            None => (format.width.max(2) & !1, format.height.max(2) & !1),
         }
-        None => (format.width.max(2) & !1, format.height.max(2) & !1),
     };
     let fps = config.fps.max(1);
     // Native SPA bytes — no channel swap (see PipeWireCapture::pix_fmt).
-    let pix_fmt = capture.pix_fmt();
+    let pix_fmt = if window_target {
+        "rgba"
+    } else {
+        crate::pipewire_engine::pix_fmt_for_format(format.video_format)
+    };
     let stream_header = super::timestamped_video::header(input_width, input_height, fps, pix_fmt)?;
 
     // Start audio only after the video capture stream is negotiated. This
@@ -442,11 +526,23 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
     let mut dropped_frames = 0u64;
     let mut last_drop_log = std::time::Instant::now();
     let mut first_written_at: Option<std::time::Instant> = None;
-    let mut last_pixels: Option<std::sync::Arc<Vec<u8>>> = None;
-    let mut last_encoded_pixels = None;
+    let mut last_pixels = None;
     let mut pending_frame_at_us = None;
+    update_pending_video_frame(
+        &mut last_pixels,
+        &mut pending_frame_at_us,
+        first_window_frame.take(),
+    );
+    let mut last_encoded_pixels = None;
     let mut paused = false;
     let mut timeline = super::timeline::RecordingTimeline::default();
+    if window_target && cursor_metadata_enabled {
+        let (width, height) = window_output_size.expect("window target has an initial frame");
+        timeline.enable_window_cursor(width, height);
+        if let Some((captured_at_us, cursor)) = first_window_cursor {
+            timeline.record_window_cursor(captured_at_us, cursor);
+        }
+    }
     if active_audio.is_none() && (config.mic_enabled || config.speaker_enabled) {
         timeline.retain_live_audio_pauses();
         eprintln!("[recording] Live Pulse audio fallback retains frozen pause intervals on the media clock");
@@ -537,17 +633,39 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
             Ok(Some(frame)) => {
                 let captured_at_us = frame.captured_at_us;
                 let expected = input_width as usize * input_height as usize * 4;
-                let pixels = if let Some(crop) = crop {
-                    crop_rgba_frame(&frame, crop, input_width, input_height).ok()
-                } else if frame.pixels.len() == expected {
-                    Some(frame.pixels)
+                let mut cursor_update = None;
+                let pixels = if window_target {
+                    window_frame_crop(&frame).and_then(|crop| {
+                        if cursor_metadata_enabled {
+                            cursor_update =
+                                window_cursor_update(&frame, crop, input_width, input_height);
+                        }
+                        normalize_window_frame(&frame, crop, input_width, input_height)
+                    })
+                } else if frame.video_format == format.video_format
+                    && frame.width == format.width
+                    && frame.height == format.height
+                {
+                    if let Some(crop) = crop {
+                        crop_rgba_frame(&frame, crop, input_width, input_height).ok()
+                    } else if frame.pixels.len() == expected {
+                        Some(frame.pixels)
+                    } else {
+                        None
+                    }
                 } else {
                     None
                 };
                 match pixels {
                     Some(pixels) if pixels.len() == expected => {
-                        last_pixels = Some(std::sync::Arc::new(pixels));
-                        pending_frame_at_us = Some(captured_at_us);
+                        if let Some(cursor) = cursor_update {
+                            timeline.record_window_cursor(captured_at_us, cursor);
+                        }
+                        update_pending_video_frame(
+                            &mut last_pixels,
+                            &mut pending_frame_at_us,
+                            Some((pixels, captured_at_us)),
+                        );
                     }
                     Some(pixels) => {
                         eprintln!(
@@ -556,7 +674,9 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
                         );
                     }
                     None => {
-                        eprintln!("[recording] Skipping frame that failed area crop");
+                        eprintln!(
+                            "[recording] Skipping frame with invalid crop, format, or dimensions"
+                        );
                     }
                 }
                 if next_frame_at.is_none() {
@@ -842,4 +962,29 @@ pub(in crate::recording) fn record_wayland_with_ffmpeg_sync(
         action: stop_action,
         timeline: Some(timeline),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_valid_initial_window_frame_is_pending_without_later_damage() {
+        let captured_at_us = 1_234_567;
+        let pixels = [12, 34, 56, 255].repeat(4);
+        let mut last_pixels = None;
+        let mut pending_frame_at_us = None;
+        update_pending_video_frame(
+            &mut last_pixels,
+            &mut pending_frame_at_us,
+            Some((pixels.clone(), captured_at_us)),
+        );
+        update_pending_video_frame(&mut last_pixels, &mut pending_frame_at_us, None);
+
+        assert_eq!(
+            last_pixels.as_deref().map(|pixels| pixels.as_slice()),
+            Some(pixels.as_slice())
+        );
+        assert_eq!(pending_frame_at_us, Some(captured_at_us));
+    }
 }

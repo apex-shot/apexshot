@@ -264,6 +264,113 @@ mod tests {
     }
 
     #[test]
+    fn parse_recording_json_preserves_window_target_and_old_payload_defaults() {
+        let window = parse_recording_json(
+            r#"{"x":0,"y":0,"width":0,"height":0,"record_type":"video","window":true}"#,
+        )
+        .unwrap();
+        assert!(window.window);
+
+        let old_payload =
+            parse_recording_json(r#"{"x":0,"y":0,"width":0,"height":0,"record_type":"video"}"#)
+                .unwrap();
+        assert!(!old_payload.window);
+    }
+
+    #[test]
+    fn quick_capture_window_video_builds_a_portal_window_request() {
+        let request = super::recording_request_for_target(
+            crate::overlay::CaptureMenuResult {
+                recording: true,
+                ..crate::overlay::CaptureMenuResult::default()
+            },
+            None,
+            false,
+            true,
+        );
+
+        assert!(request.window);
+        assert!(!request.fullscreen);
+        assert_eq!(
+            (request.x, request.y, request.width, request.height),
+            (0, 0, 0, 0)
+        );
+    }
+
+    #[test]
+    fn qt_quick_capture_window_video_bypasses_still_and_monitor_capture() {
+        let main = include_str!("../../capture-overlay/src/main.cpp");
+        let menu_flow = main
+            .split("CaptureModeToolbar::Result captureMenuResult;")
+            .nth(1)
+            .unwrap()
+            .split("QImage desktopFreezeImage;")
+            .next()
+            .unwrap();
+        let window_route = menu_flow.find("if (captureMenuResult.recording").unwrap();
+        let monitor_picker = menu_flow
+            .find("MonitorPicker::selectTargetScreen()")
+            .unwrap();
+        assert!(window_route < monitor_picker);
+        let request_path = &menu_flow[..window_route];
+        assert!(request_path.contains("CaptureModeToolbar::choose"));
+        assert!(!request_path.contains("captureSession.prepare"));
+        let window_request = &menu_flow[window_route..monitor_picker];
+        assert!(window_request.contains("QRect(0, 0, 0, 0)"));
+        assert!(menu_flow.contains("captureMenuResult.microphone"));
+        assert!(menu_flow.contains("captureMenuResult.speaker"));
+        assert!(window_request.contains("returnRecordingRequest(QRect(0, 0, 0, 0), true)"));
+        assert!(main.contains("\\\"fullscreen\\\":%s,\\\"window\\\":%s"));
+
+        let toolbar = include_str!("../../capture-overlay/src/CaptureModeToolbar.cpp");
+        assert!(toolbar.contains("m_recording && i == 4"));
+        assert!(toolbar.contains("m_recording && hovered == 4"));
+        let click_handler = toolbar
+            .split("void CaptureModeToolbar::mousePressEvent")
+            .nth(1)
+            .unwrap();
+        let window_click = click_handler
+            .split("case 3:")
+            .nth(1)
+            .unwrap()
+            .split("case 4:")
+            .next()
+            .unwrap();
+        assert!(window_click.contains("m_recording"));
+        assert!(window_click.contains("finish(Action::Window)"));
+    }
+
+    #[test]
+    fn wlroots_quick_capture_window_video_skips_monitor_and_still_capture() {
+        let wlroots = include_str!("wlroots.rs");
+        let quick_capture = wlroots
+            .split("fn open_quick_capture_via_gtk_layer_shell_wlroots()")
+            .nth(1)
+            .unwrap();
+        let cancelled = quick_capture
+            .find("if menu.action == crate::overlay::CaptureMenuAction::Cancel")
+            .unwrap();
+        let menu_unmap = quick_capture
+            .find("wait_for_layer_shell_overlay_to_unmap()")
+            .unwrap();
+        let window_route = quick_capture
+            .find("if menu.action == crate::overlay::CaptureMenuAction::Window && menu.recording")
+            .unwrap();
+        let monitor_picker = quick_capture
+            .find("select_target_monitor_choice()?")
+            .unwrap();
+        assert!(cancelled < menu_unmap);
+        assert!(quick_capture[cancelled..menu_unmap]
+            .contains("return Ok(AreaCapturePathResult::Cancelled);"));
+        assert!(menu_unmap < window_route);
+        assert!(window_route < monitor_picker);
+        assert!(quick_capture[..window_route].contains("default_target_monitor_choice()?"));
+        assert!(!quick_capture[..window_route].contains("MonitorStill::prepare"));
+        assert!(quick_capture[window_route..monitor_picker]
+            .contains("recording_request_for_target(menu, None, false, true)"));
+    }
+
+    #[test]
     fn legacy_gif_record_type_falls_back_to_video() {
         // GIF recording is discontinued — old overlays sending "gif" get MP4.
         let request = parse_recording_json(

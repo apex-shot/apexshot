@@ -38,10 +38,17 @@ pub struct PipeWireFrame {
     pub pixels: Vec<u8>,
     pub width: u32,
     pub height: u32,
-    /// Row stride in bytes (= width * 4 for RGBA).
+    /// Row stride in bytes (= width * 4 for the normalized frame bytes).
     pub stride: u32,
-    /// Cursor overlay metadata (from SPA_META_Cursor, when available).
+    /// SPA format that applied when this frame was dequeued.
+    pub video_format: spa::param::video::VideoFormat,
+    /// Crop metadata copied from this frame's SPA buffer.
+    pub crop: FrameCropMetadata,
+    /// Cursor bitmap metadata when this buffer carries a valid bitmap.
     pub cursor: Option<CursorOverlay>,
+    /// Cursor validity and hotspot position for this buffer, independent of
+    /// whether the bitmap changed.
+    pub cursor_metadata: CursorMetadataState,
     /// Color space from negotiated format.
     pub color_space: ColorSpace,
     /// Compositor capture time on the local monotonic clock, or buffer receipt
@@ -49,19 +56,69 @@ pub struct PipeWireFrame {
     pub captured_at_us: i64,
 }
 
+/// Crop rectangle from one SPA video buffer, relative to that frame's pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameCrop {
+    /// Horizontal offset from the frame's left edge.
+    pub x: i32,
+    /// Vertical offset from the frame's top edge.
+    pub y: i32,
+    /// Crop width in pixels.
+    pub width: u32,
+    /// Crop height in pixels.
+    pub height: u32,
+}
+
+/// SPA crop metadata state copied from a video buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameCropMetadata {
+    /// The buffer did not carry SPA crop metadata.
+    Missing,
+    /// The buffer carried a crop rectangle; consumers must validate its bounds.
+    Present(FrameCrop),
+    /// The buffer carried malformed or incomplete crop metadata.
+    Invalid,
+}
+
 /// Cursor bitmap and position extracted from PipeWire buffer metadata.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CursorOverlay {
     /// RGBA pixel data for the cursor image.
     pub bitmap: Vec<u8>,
     pub width: u32,
     pub height: u32,
-    /// Screen position of the cursor (top-left of the bitmap).
+    /// Screen position of the bitmap's top-left corner.
     pub x: i32,
     pub y: i32,
     /// Hotspot offset within the bitmap (the click point).
     pub hotspot_x: i32,
     pub hotspot_y: i32,
+}
+
+/// Cursor hotspot position copied from a SPA cursor metadata update.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CursorPosition {
+    /// Hotspot position in the captured stream's pixel coordinates.
+    pub x: i32,
+    /// Hotspot position in the captured stream's pixel coordinates.
+    pub y: i32,
+    /// Hotspot offset within a newly supplied bitmap, when present.
+    pub hotspot_x: i32,
+    /// Hotspot offset within a newly supplied bitmap, when present.
+    pub hotspot_y: i32,
+}
+
+/// Cursor metadata state for one SPA video buffer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CursorMetadataState {
+    /// No cursor metadata was attached to this buffer.
+    Missing,
+    /// The metadata header was incomplete or malformed.
+    Invalid,
+    /// The producer explicitly reported no active cursor (id 0).
+    Hidden,
+    /// A valid cursor hotspot position was attached.
+    Present(CursorPosition),
 }
 
 /// Color space information from the negotiated video format.
@@ -109,6 +166,8 @@ pub struct NegotiatedFormat {
     pub width: u32,
     pub height: u32,
     pub stride: u32,
+    /// SPA pixel format negotiated for this stream format.
+    pub video_format: spa::param::video::VideoFormat,
     pub framerate_num: u32,
     pub framerate_denom: u32,
     pub color_space: ColorSpace,
@@ -152,32 +211,54 @@ fn format_bpp(format: spa::param::video::VideoFormat) -> u32 {
     }
 }
 
+fn video_format_preference(prefer_alpha: bool) -> [spa::param::video::VideoFormat; 4] {
+    if prefer_alpha {
+        [
+            spa::param::video::VideoFormat::BGRA,
+            spa::param::video::VideoFormat::RGBA,
+            spa::param::video::VideoFormat::BGRx,
+            spa::param::video::VideoFormat::RGBx,
+        ]
+    } else {
+        [
+            spa::param::video::VideoFormat::BGRx,
+            spa::param::video::VideoFormat::BGRA,
+            spa::param::video::VideoFormat::RGBx,
+            spa::param::video::VideoFormat::RGBA,
+        ]
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Internal shared state
 // ---------------------------------------------------------------------------
 
 const CONTINUOUS_FRAME_QUEUE_CAPACITY: usize = 1;
 
-fn push_latest_continuous_frame(
-    frames: &mut std::collections::VecDeque<Vec<u8>>,
-    pixel_data: Vec<u8>,
-) -> usize {
+fn push_latest_continuous_frame<T>(frames: &mut std::collections::VecDeque<T>, frame: T) -> usize {
     let mut dropped = 0;
     while frames.len() >= CONTINUOUS_FRAME_QUEUE_CAPACITY {
         frames.pop_front();
         dropped += 1;
     }
-    frames.push_back(pixel_data);
+    frames.push_back(frame);
     dropped
+}
+
+struct QueuedFrame {
+    pixels: Vec<u8>,
+    format: spa::param::video::VideoInfoRaw,
+    stride: i32,
+    crop: FrameCropMetadata,
+    cursor: Option<CursorOverlay>,
+    cursor_metadata: CursorMetadataState,
+    captured_at_us: i64,
 }
 
 struct StreamInner {
     format: Option<NegotiatedFormat>,
     raw_format: Option<spa::param::video::VideoInfoRaw>,
-    frames: std::collections::VecDeque<Vec<u8>>,
-    frame_times: std::collections::VecDeque<i64>,
-    /// Cursor overlays corresponding to frames (paired by queue position).
-    cursor_queue: std::collections::VecDeque<CursorOverlay>,
+    frames: std::collections::VecDeque<QueuedFrame>,
     frames_consumed: u64,
     error: Option<String>,
     max_frames: Option<u64>,
@@ -236,6 +317,29 @@ impl PipeWireCapture {
             max_frames,
             width_hint,
             height_hint,
+            false,
+            false,
+        )
+    }
+
+    /// Connect to a portal window stream, preferring an alpha-bearing format
+    /// and optionally requesting per-buffer cursor metadata.
+    pub fn connect_window(
+        pipewire_fd: OwnedFd,
+        node_id: u32,
+        max_frames: Option<u64>,
+        width_hint: Option<u32>,
+        height_hint: Option<u32>,
+        cursor_metadata: bool,
+    ) -> PipeWireResult<Self> {
+        Self::connect_inner(
+            PipeWireCoreSource::PortalFd(pipewire_fd),
+            node_id,
+            max_frames,
+            width_hint,
+            height_hint,
+            true,
+            cursor_metadata,
         )
     }
 
@@ -255,6 +359,8 @@ impl PipeWireCapture {
             max_frames,
             width_hint,
             height_hint,
+            false,
+            false,
         )
     }
 
@@ -264,6 +370,8 @@ impl PipeWireCapture {
         max_frames: Option<u64>,
         width_hint: Option<u32>,
         height_hint: Option<u32>,
+        prefer_alpha: bool,
+        cursor_metadata: bool,
     ) -> PipeWireResult<Self> {
         pw::init();
 
@@ -293,8 +401,6 @@ impl PipeWireCapture {
             format: None,
             raw_format: None,
             frames: std::collections::VecDeque::new(),
-            frame_times: std::collections::VecDeque::new(),
-            cursor_queue: std::collections::VecDeque::new(),
             frames_consumed: 0,
             error: None,
             max_frames,
@@ -311,7 +417,7 @@ impl PipeWireCapture {
         )
         .map_err(|e| PipeWireError::Connect(format!("Failed to create stream: {e}")))?;
 
-        let format_bytes = build_enum_format_pod(width_hint, height_hint);
+        let format_bytes = build_enum_format_pod_with_alpha(width_hint, height_hint, prefer_alpha);
         let buffers_bytes = build_shm_buffers_pod();
         let format_pod = spa::pod::Pod::from_bytes(&format_bytes)
             .ok_or_else(|| PipeWireError::Connect("Failed to parse format pod".into()))?;
@@ -321,7 +427,18 @@ impl PipeWireCapture {
         let header_pod = spa::pod::Pod::from_bytes(&header_bytes).ok_or_else(|| {
             PipeWireError::Connect("Failed to parse frame header metadata pod".into())
         })?;
-        let mut params = [format_pod, buffers_pod, header_pod];
+        let crop_bytes = build_crop_meta_pod();
+        let crop_pod = spa::pod::Pod::from_bytes(&crop_bytes).ok_or_else(|| {
+            PipeWireError::Connect("Failed to parse frame crop metadata pod".into())
+        })?;
+        let cursor_bytes = cursor_metadata.then(build_cursor_meta_pod);
+        let mut params = vec![format_pod, buffers_pod, header_pod, crop_pod];
+        if let Some(cursor_bytes) = cursor_bytes.as_ref() {
+            let cursor_pod = spa::pod::Pod::from_bytes(cursor_bytes).ok_or_else(|| {
+                PipeWireError::Connect("Failed to parse frame cursor metadata pod".into())
+            })?;
+            params.push(cursor_pod);
+        }
 
         let inner_clone = Arc::clone(&inner);
         let monotonic_header = crate::gnome_shell::current_session_supports_gnome_shell_overlay();
@@ -369,6 +486,7 @@ impl PipeWireCapture {
                     width: w,
                     height: h,
                     stride: w * bpp,
+                    video_format: info.format(),
                     framerate_num: info.framerate().num,
                     framerate_denom: info.framerate().denom,
                     color_space: cs,
@@ -406,7 +524,18 @@ impl PipeWireCapture {
                 };
 
                 let received_at_us = gstreamer::glib::monotonic_time();
-                let Some((pixel_data, header_pts)) = buffer.copy_frame() else {
+                let Some(raw_format) = guard.raw_format else {
+                    return;
+                };
+                let Some((
+                    pixel_data,
+                    stride,
+                    crop,
+                    cursor,
+                    cursor_metadata,
+                    header_pts,
+                )) = buffer.copy_frame()
+                else {
                     return;
                 };
                 let captured_at_us = frame_capture_time_us(header_pts, received_at_us, monotonic_header);
@@ -420,16 +549,20 @@ impl PipeWireCapture {
                 // unbounded queue can OOM-kill the daemon (and its tray icon)
                 // within seconds. Recording needs the freshest frame, whereas
                 // finite still capture must preserve every requested frame.
+                let frame = QueuedFrame {
+                    pixels: pixel_data,
+                    format: raw_format,
+                    stride,
+                    crop,
+                    cursor,
+                    cursor_metadata,
+                    captured_at_us,
+                };
                 if guard.max_frames.is_none() {
-                    let dropped = push_latest_continuous_frame(&mut guard.frames, pixel_data);
-                    for _ in 0..dropped {
-                        guard.cursor_queue.pop_front();
-                        guard.frame_times.pop_front();
-                    }
+                    push_latest_continuous_frame(&mut guard.frames, frame);
                 } else {
-                    guard.frames.push_back(pixel_data);
+                    guard.frames.push_back(frame);
                 }
-                guard.frame_times.push_back(captured_at_us);
             })
             .register()
             .map_err(|e| PipeWireError::Connect(format!("Failed to register listener: {e}")))?;
@@ -516,27 +649,10 @@ impl PipeWireCapture {
             return Err(PipeWireError::Stream(err.clone()));
         }
 
-        let raw_format = match guard.raw_format.as_ref() {
-            Some(f) => *f,
+        let queued = match guard.frames.pop_front() {
+            Some(frame) => frame,
             None => return Ok(None),
         };
-
-        let color_space = guard
-            .format
-            .as_ref()
-            .map(|f| f.color_space)
-            .unwrap_or_default();
-
-        let raw = match guard.frames.pop_front() {
-            Some(data) => data,
-            None => return Ok(None),
-        };
-        let _ = guard.cursor_queue.pop_front();
-        let captured_at_us = guard
-            .frame_times
-            .pop_front()
-            .unwrap_or_else(gstreamer::glib::monotonic_time);
-
         guard.frames_consumed += 1;
         drop(guard);
 
@@ -544,35 +660,33 @@ impl PipeWireCapture {
         // BGR→RGBA swap cost ~8ms/1080p and ~27ms/4K per frame (measured).
         // Feed native 4-byte pixels (ffmpeg `-pix_fmt` matches) and strip row
         // padding by whole rows only — usually a zero-copy move when packed.
-        let width = raw_format.size().width as usize;
-        let height = raw_format.size().height as usize;
-        let bpp = format_bpp(raw_format.format()) as usize;
-        let stride = match rgba_copy_plan(raw.len(), width, height, bpp) {
-            Some(s) => s,
-            None => return Ok(None),
-        };
-        let row_len = width * bpp;
-        let pixels = if stride == row_len {
-            raw
-        } else {
-            let mut packed = Vec::with_capacity(row_len * height);
-            for row in 0..height {
-                match raw.get(row * stride..row * stride + row_len) {
-                    Some(r) => packed.extend_from_slice(r),
-                    None => return Ok(None),
-                }
-            }
-            packed
+        let width = queued.format.size().width;
+        let height = queued.format.size().height;
+        let bpp = format_bpp(queued.format.format()) as usize;
+        let Some(pixels) = normalize_frame_rows(
+            queued.pixels,
+            queued.stride,
+            width as usize,
+            height as usize,
+            bpp,
+        ) else {
+            return Ok(None);
         };
 
         Ok(Some(PipeWireFrame {
             pixels,
-            width: width as u32,
-            height: height as u32,
-            stride: row_len as u32,
-            cursor: None,
-            color_space,
-            captured_at_us,
+            width,
+            height,
+            stride: width.saturating_mul(bpp as u32),
+            video_format: queued.format.format(),
+            crop: queued.crop,
+            cursor: queued.cursor,
+            cursor_metadata: queued.cursor_metadata,
+            color_space: ColorSpace {
+                range: queued.format.color_range(),
+                matrix: queued.format.color_matrix(),
+            },
+            captured_at_us: queued.captured_at_us,
         }))
     }
 
@@ -586,12 +700,7 @@ impl PipeWireCapture {
             .raw_format
             .as_ref()
             .map(|f| f.format());
-        match format {
-            Some(spa::param::video::VideoFormat::BGRA) => "bgra",
-            Some(spa::param::video::VideoFormat::RGBx) => "rgb0",
-            Some(spa::param::video::VideoFormat::RGBA) => "rgba",
-            _ => "bgr0",
-        }
+        format.map(pix_fmt_for_format).unwrap_or("bgr0")
     }
 
     pub fn frames_consumed(&self) -> u64 {
@@ -604,6 +713,16 @@ impl PipeWireCapture {
 
     pub fn error_message(&self) -> Option<String> {
         self.inner.lock().unwrap().error.clone()
+    }
+}
+
+/// Return the ffmpeg pixel-format label matching a native SPA video format.
+pub(crate) fn pix_fmt_for_format(format: spa::param::video::VideoFormat) -> &'static str {
+    match format {
+        spa::param::video::VideoFormat::BGRA => "bgra",
+        spa::param::video::VideoFormat::RGBx => "rgb0",
+        spa::param::video::VideoFormat::RGBA => "rgba",
+        _ => "bgr0",
     }
 }
 
@@ -622,7 +741,16 @@ impl<'a> CaptureBuffer<'a> {
         Some(Self { raw, stream })
     }
 
-    fn copy_frame(&mut self) -> Option<(Vec<u8>, Option<i64>)> {
+    fn copy_frame(
+        &mut self,
+    ) -> Option<(
+        Vec<u8>,
+        i32,
+        FrameCropMetadata,
+        Option<CursorOverlay>,
+        CursorMetadataState,
+        Option<i64>,
+    )> {
         let buffer = unsafe { self.raw.as_ref().buffer.as_mut() }?;
         unsafe { copy_spa_frame(buffer) }
     }
@@ -638,7 +766,16 @@ impl Drop for CaptureBuffer<'_> {
 ///
 /// # Safety
 /// The buffer's metadata and data arrays must remain valid for the call.
-unsafe fn copy_spa_frame(buffer: &mut spa_sys::spa_buffer) -> Option<(Vec<u8>, Option<i64>)> {
+unsafe fn copy_spa_frame(
+    buffer: &mut spa_sys::spa_buffer,
+) -> Option<(
+    Vec<u8>,
+    i32,
+    FrameCropMetadata,
+    Option<CursorOverlay>,
+    CursorMetadataState,
+    Option<i64>,
+)> {
     if buffer.n_datas == 0 || buffer.datas.is_null() {
         return None;
     }
@@ -655,14 +792,45 @@ unsafe fn copy_spa_frame(buffer: &mut spa_sys::spa_buffer) -> Option<(Vec<u8>, O
         return None;
     }
     let pts = header.map(|header| header.pts);
+    let crop = unsafe { copy_spa_crop(buffer) };
+    let (cursor_metadata, cursor) = unsafe { copy_spa_cursor(buffer) };
     let datas = unsafe {
         std::slice::from_raw_parts_mut(
             buffer.datas.cast::<spa::buffer::Data>(),
             buffer.n_datas as usize,
         )
     };
-    let chunk_size = datas[0].chunk().size() as usize;
-    Some((copy_cpu_frame(datas, chunk_size)?, pts))
+    let raw_chunk = unsafe { datas[0].as_raw().chunk.as_ref() }?;
+    let chunk_size = raw_chunk.size as usize;
+    let chunk_offset = raw_chunk.offset as usize;
+    let chunk_stride = raw_chunk.stride;
+    Some((
+        copy_cpu_frame(&mut datas[0], chunk_offset, chunk_size)?,
+        chunk_stride,
+        crop,
+        cursor,
+        cursor_metadata,
+        pts,
+    ))
+}
+
+unsafe fn copy_spa_crop(buffer: &spa_sys::spa_buffer) -> FrameCropMetadata {
+    let metadata = unsafe { spa_sys::spa_buffer_find_meta(buffer, spa_sys::SPA_META_VideoCrop) };
+    let Some(metadata) = (unsafe { metadata.as_ref() }) else {
+        return FrameCropMetadata::Missing;
+    };
+    if metadata.size < std::mem::size_of::<spa_sys::spa_meta_region>() as u32
+        || metadata.data.is_null()
+    {
+        return FrameCropMetadata::Invalid;
+    }
+    let region = unsafe { &*metadata.data.cast::<spa_sys::spa_meta_region>() };
+    FrameCropMetadata::Present(FrameCrop {
+        x: region.region.position.x,
+        y: region.region.position.y,
+        width: region.region.size.width,
+        height: region.region.size.height,
+    })
 }
 
 fn frame_capture_time_us(pts_ns: Option<i64>, received_at_us: i64, monotonic_header: bool) -> i64 {
@@ -672,42 +840,64 @@ fn frame_capture_time_us(pts_ns: Option<i64>, received_at_us: i64, monotonic_hea
     }
 }
 
-fn copy_cpu_frame(datas: &mut [spa::buffer::Data], chunk_size: usize) -> Option<Vec<u8>> {
-    if datas.is_empty() || chunk_size == 0 || chunk_size > 64 * 1024 * 1024 {
+fn copy_cpu_frame(
+    data: &mut spa::buffer::Data,
+    chunk_offset: usize,
+    chunk_size: usize,
+) -> Option<Vec<u8>> {
+    const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
+    if chunk_size == 0 || chunk_size > MAX_FRAME_BYTES {
         return None;
     }
-    let data = &mut datas[0];
     let kind = data.type_();
+    let max_size = data.as_raw().maxsize as usize;
+    if max_size == 0 || chunk_size > max_size {
+        return None;
+    }
     if let Some(mem) = data.data() {
-        if chunk_size <= mem.len() {
-            return Some(mem[..chunk_size].to_vec());
-        }
+        return copy_circular_chunk(mem, chunk_offset, chunk_size);
     }
     if kind == spa::buffer::DataType::MemFd {
-        return mmap_memfd(data.fd(), chunk_size);
+        let map_offset = data.as_raw().mapoffset as usize;
+        let mut mapped = mmap_memfd(data.fd(), max_size, map_offset)?;
+        return copy_circular_chunk(&mut mapped, chunk_offset, chunk_size);
     }
     None
 }
 
-fn mmap_memfd(fd: i32, chunk_size: usize) -> Option<Vec<u8>> {
-    if fd < 0 {
+fn copy_circular_chunk(data: &[u8], chunk_offset: usize, chunk_size: usize) -> Option<Vec<u8>> {
+    if data.is_empty() || chunk_size > data.len() {
+        return None;
+    }
+    let offset = chunk_offset % data.len();
+    let first_len = chunk_size.min(data.len() - offset);
+    let mut copied = Vec::with_capacity(chunk_size);
+    copied.extend_from_slice(data.get(offset..offset + first_len)?);
+    if first_len < chunk_size {
+        copied.extend_from_slice(data.get(..chunk_size - first_len)?);
+    }
+    Some(copied)
+}
+
+fn mmap_memfd(fd: i32, map_size: usize, map_offset: usize) -> Option<Vec<u8>> {
+    if fd < 0 || map_size == 0 || map_size > 64 * 1024 * 1024 {
         return None;
     }
     let ptr = unsafe {
         libc::mmap(
             std::ptr::null_mut(),
-            chunk_size,
+            map_size,
             libc::PROT_READ,
             libc::MAP_SHARED,
             fd,
-            0,
+            map_offset as libc::off_t,
         )
     };
     if ptr == libc::MAP_FAILED {
         return None;
     }
-    let copied = unsafe { std::slice::from_raw_parts(ptr as *const u8, chunk_size).to_vec() };
-    unsafe { libc::munmap(ptr, chunk_size) };
+    let copied = unsafe { std::slice::from_raw_parts(ptr as *const u8, map_size).to_vec() };
+    unsafe { libc::munmap(ptr, map_size) };
     Some(copied)
 }
 
@@ -729,94 +919,179 @@ const SPA_META_CURSOR: u32 = 5;
 //   4. In DMA-BUF path: check for extra SpaData::SyncObj datas,
 //      poll() on acquire fd, signal release fd after processing
 
-/// Extract SPA_META_Cursor from a PipeWire buffer.
-///
-/// Uses raw FFI to access the internal spa_buffer and call
-/// `spa_buffer_find_meta_data`. The safe `pipewire` crate does not expose
-/// this, so we reach through the `Buffer` struct's internal pointer.
+/// Copy cursor metadata while the producer's SPA buffer is still dequeued.
 ///
 /// # Safety
-/// `buffer` must be a valid, alive PipeWire buffer.
-#[allow(dead_code)]
-unsafe fn extract_cursor_metadata(buffer: &pw::buffer::Buffer) -> Option<CursorOverlay> {
-    // Buffer layout: { buf: NonNull<pw_sys::pw_buffer>, stream: &Stream }
-    // NonNull<T> is repr(transparent) over *const T, so offset 0 is the raw pointer.
-    let pw_buf: *const pw::sys::pw_buffer =
-        *(buffer as *const pw::buffer::Buffer as *const *const pw::sys::pw_buffer);
-
-    if pw_buf.is_null() {
-        return None;
-    }
-    let spa_buf: *mut spa_sys::spa_buffer = (*pw_buf).buffer;
-    if spa_buf.is_null() {
-        return None;
-    }
-
-    let cursor_meta = spa_sys::spa_buffer_find_meta_data(
-        spa_buf,
-        SPA_META_CURSOR,
-        std::mem::size_of::<spa_sys::spa_meta_cursor>(),
-    );
-
-    if cursor_meta.is_null() {
-        return None;
+/// The SPA buffer's metadata array and referenced payloads must remain valid
+/// for the call.
+unsafe fn copy_spa_cursor(
+    buffer: &spa_sys::spa_buffer,
+) -> (CursorMetadataState, Option<CursorOverlay>) {
+    let metadata = unsafe { spa_sys::spa_buffer_find_meta(buffer, SPA_META_CURSOR) };
+    let Some(metadata) = (unsafe { metadata.as_ref() }) else {
+        return (CursorMetadataState::Missing, None);
+    };
+    if metadata.data.is_null()
+        || metadata.size < std::mem::size_of::<spa_sys::spa_meta_cursor>() as u32
+    {
+        return (CursorMetadataState::Invalid, None);
     }
 
-    let cursor: &spa_sys::spa_meta_cursor = &*cursor_meta.cast::<spa_sys::spa_meta_cursor>();
-    let bitmap_offset = cursor.bitmap_offset;
-    if bitmap_offset == 0 {
-        return None;
+    let cursor = unsafe { &*metadata.data.cast::<spa_sys::spa_meta_cursor>() };
+    if cursor.id == 0 {
+        return (CursorMetadataState::Hidden, None);
     }
-
-    let bitmap_ptr =
-        (cursor_meta as *const u8).add(bitmap_offset as usize) as *const spa_sys::spa_meta_bitmap;
-    let bitmap: &spa_sys::spa_meta_bitmap = &*bitmap_ptr;
-
-    let bw = bitmap.size.width;
-    let bh = bitmap.size.height;
-    if bw == 0 || bh == 0 {
-        return None;
-    }
-
-    let bitmap_data_ptr = bitmap_ptr.add(1) as *const u8;
-    let bitmap_bytes = (bw * bh * 4) as usize;
-    let bitmap_pixels = std::slice::from_raw_parts(bitmap_data_ptr, bitmap_bytes).to_vec();
-
-    // Convert BGRA cursor bitmap to RGBA.
-    let mut rgba = bitmap_pixels;
-    for px in rgba.chunks_exact_mut(4) {
-        px.swap(0, 2); // B↔R
-    }
-
-    Some(CursorOverlay {
-        bitmap: rgba,
-        width: bw,
-        height: bh,
+    let position = CursorPosition {
         x: cursor.position.x,
         y: cursor.position.y,
         hotspot_x: cursor.hotspot.x,
         hotspot_y: cursor.hotspot.y,
-    })
+    };
+    let state = CursorMetadataState::Present(position);
+    let cursor_offset = cursor.bitmap_offset as usize;
+    let metadata_len = metadata.size as usize;
+    let Some(bitmap_header_end) =
+        cursor_offset.checked_add(std::mem::size_of::<spa_sys::spa_meta_bitmap>())
+    else {
+        return (state, None);
+    };
+    if cursor_offset < std::mem::size_of::<spa_sys::spa_meta_cursor>()
+        || bitmap_header_end > metadata_len
+    {
+        return (state, None);
+    }
+
+    let bitmap = unsafe {
+        &*metadata
+            .data
+            .cast::<u8>()
+            .add(cursor_offset)
+            .cast::<spa_sys::spa_meta_bitmap>()
+    };
+    if bitmap.format != spa::param::video::VideoFormat::RGBA.as_raw()
+        || bitmap.offset < std::mem::size_of::<spa_sys::spa_meta_bitmap>() as u32
+        || bitmap.stride <= 0
+    {
+        return (state, None);
+    }
+    let width = bitmap.size.width;
+    let height = bitmap.size.height;
+    let Some(row_bytes) = (width as usize).checked_mul(4) else {
+        return (state, None);
+    };
+    let stride = bitmap.stride as usize;
+    let Some(pixel_bytes) = stride.checked_mul(height as usize) else {
+        return (state, None);
+    };
+    let Some(pixel_start) = cursor_offset.checked_add(bitmap.offset as usize) else {
+        return (state, None);
+    };
+    let Some(pixel_end) = pixel_start.checked_add(pixel_bytes) else {
+        return (state, None);
+    };
+    if width == 0
+        || height == 0
+        || stride < row_bytes
+        || pixel_bytes > 64 * 1024 * 1024
+        || pixel_end > metadata_len
+    {
+        return (state, None);
+    }
+    let Some(x) = position.x.checked_sub(position.hotspot_x) else {
+        return (state, None);
+    };
+    let Some(y) = position.y.checked_sub(position.hotspot_y) else {
+        return (state, None);
+    };
+    let Some(output_len) = row_bytes.checked_mul(height as usize) else {
+        return (state, None);
+    };
+    let pixel_data = unsafe { metadata.data.cast::<u8>().add(pixel_start) };
+    let mut rgba = Vec::new();
+    if rgba.try_reserve_exact(output_len).is_err() {
+        return (state, None);
+    }
+    for row in 0..height as usize {
+        let Some(offset) = row.checked_mul(stride) else {
+            return (state, None);
+        };
+        let source = unsafe { std::slice::from_raw_parts(pixel_data.add(offset), row_bytes) };
+        rgba.extend_from_slice(source);
+    }
+
+    (
+        state,
+        Some(CursorOverlay {
+            bitmap: rgba,
+            width,
+            height,
+            x,
+            y,
+            hotspot_x: position.hotspot_x,
+            hotspot_y: position.hotspot_y,
+        }),
+    )
 }
 
 // ---------------------------------------------------------------------------
 // Frame format conversion
 // ---------------------------------------------------------------------------
 
+#[cfg(test)]
 fn rgba_copy_plan(raw_len: usize, width: usize, height: usize, bpp: usize) -> Option<usize> {
+    frame_copy_plan(raw_len, 0, width, height, bpp).map(|(stride, _)| stride)
+}
+
+fn frame_copy_plan(
+    raw_len: usize,
+    frame_stride: i32,
+    width: usize,
+    height: usize,
+    bpp: usize,
+) -> Option<(usize, bool)> {
     if width == 0 || height == 0 || bpp == 0 {
         return None;
     }
     let packed = width.checked_mul(bpp)?;
-    let min_len = packed.checked_mul(height)?;
-    if raw_len < min_len {
+    let reverse_rows = frame_stride < 0;
+    let stride = if frame_stride == 0 {
+        if raw_len.is_multiple_of(height) && raw_len / height >= packed {
+            raw_len / height
+        } else {
+            packed
+        }
+    } else {
+        frame_stride.unsigned_abs() as usize
+    };
+    if stride < packed {
         return None;
     }
-    if raw_len.is_multiple_of(height) {
-        let stride = raw_len / height;
-        if stride >= packed {
-            return Some(stride);
-        }
+    let required = stride
+        .checked_mul(height.saturating_sub(1))?
+        .checked_add(packed)?;
+    (raw_len >= required).then_some((stride, reverse_rows))
+}
+
+fn normalize_frame_rows(
+    mut raw: Vec<u8>,
+    frame_stride: i32,
+    width: usize,
+    height: usize,
+    bpp: usize,
+) -> Option<Vec<u8>> {
+    let (stride, reverse_rows) = frame_copy_plan(raw.len(), frame_stride, width, height, bpp)?;
+    let row_len = width.checked_mul(bpp)?;
+    let output_len = row_len.checked_mul(height)?;
+    if stride == row_len && !reverse_rows {
+        raw.truncate(output_len);
+        return Some(raw);
+    }
+    let mut packed = Vec::new();
+    packed.try_reserve_exact(output_len).ok()?;
+    for row in 0..height {
+        let source_row = if reverse_rows { height - row - 1 } else { row };
+        let start = source_row.checked_mul(stride)?;
+        packed.extend_from_slice(raw.get(start..start.checked_add(row_len)?)?);
     }
     Some(packed)
 }
@@ -850,6 +1125,28 @@ fn build_shm_buffers_pod() -> Vec<u8> {
 }
 
 fn build_header_meta_pod() -> Vec<u8> {
+    build_frame_meta_pod(
+        spa_sys::SPA_META_Header,
+        std::mem::size_of::<spa_sys::spa_meta_header>(),
+    )
+}
+
+fn build_crop_meta_pod() -> Vec<u8> {
+    build_frame_meta_pod(
+        spa_sys::SPA_META_VideoCrop,
+        std::mem::size_of::<spa_sys::spa_meta_region>(),
+    )
+}
+
+fn build_cursor_meta_pod() -> Vec<u8> {
+    const CURSOR_BITMAP_SIDE: usize = 384;
+    let size = std::mem::size_of::<spa_sys::spa_meta_cursor>()
+        + std::mem::size_of::<spa_sys::spa_meta_bitmap>()
+        + CURSOR_BITMAP_SIDE * CURSOR_BITMAP_SIDE * 4;
+    build_frame_meta_pod(SPA_META_CURSOR, size)
+}
+
+fn build_frame_meta_pod(meta_type: u32, size: usize) -> Vec<u8> {
     use pw::spa::pod::{Object, Property, Value};
     use pw::spa::utils::{Id, SpaTypes};
 
@@ -857,14 +1154,8 @@ fn build_header_meta_pod() -> Vec<u8> {
         type_: SpaTypes::ObjectParamMeta.as_raw(),
         id: spa::param::ParamType::Meta.as_raw(),
         properties: vec![
-            Property::new(
-                spa_sys::SPA_PARAM_META_type,
-                Value::Id(Id(spa_sys::SPA_META_Header)),
-            ),
-            Property::new(
-                spa_sys::SPA_PARAM_META_size,
-                Value::Int(std::mem::size_of::<spa_sys::spa_meta_header>() as i32),
-            ),
+            Property::new(spa_sys::SPA_PARAM_META_type, Value::Id(Id(meta_type))),
+            Property::new(spa_sys::SPA_PARAM_META_size, Value::Int(size as i32)),
         ],
     };
     pw::spa::pod::serialize::PodSerializer::serialize(
@@ -876,12 +1167,22 @@ fn build_header_meta_pod() -> Vec<u8> {
     .into_inner()
 }
 
+#[cfg(test)]
 fn build_enum_format_pod(width_hint: Option<u32>, height_hint: Option<u32>) -> Vec<u8> {
+    build_enum_format_pod_with_alpha(width_hint, height_hint, false)
+}
+
+fn build_enum_format_pod_with_alpha(
+    width_hint: Option<u32>,
+    height_hint: Option<u32>,
+    prefer_alpha: bool,
+) -> Vec<u8> {
     use pw::spa::pod::Value;
     use pw::spa::utils::{Fraction, Rectangle, SpaTypes};
 
     let w = width_hint.unwrap_or(1920);
     let h = height_hint.unwrap_or(1080);
+    let formats = video_format_preference(prefer_alpha);
 
     let obj = pw::spa::pod::object!(
         SpaTypes::ObjectParamFormat,
@@ -901,10 +1202,10 @@ fn build_enum_format_pod(width_hint: Option<u32>, height_hint: Option<u32>) -> V
             Choice,
             Enum,
             Id,
-            spa::param::video::VideoFormat::BGRx,
-            spa::param::video::VideoFormat::BGRA,
-            spa::param::video::VideoFormat::RGBx,
-            spa::param::video::VideoFormat::RGBA
+            formats[0],
+            formats[1],
+            formats[2],
+            formats[3]
         ),
         pw::spa::pod::property!(
             spa::param::format::FormatProperties::VideoSize,
@@ -994,7 +1295,7 @@ pub fn capture_single_frame_with_min_frames(
     }
 
     let mut frame = last_frame.ok_or(PipeWireError::NoFrame)?;
-    convert_still_pixels_to_rgba(&mut frame.pixels, capture.pix_fmt());
+    convert_still_pixels_to_rgba(&mut frame.pixels, pix_fmt_for_format(frame.video_format));
     Ok(frame)
 }
 
@@ -1021,6 +1322,176 @@ fn convert_still_pixels_to_rgba(pixels: &mut [u8], format: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn with_cursor_metadata<R>(
+        cursor: spa_sys::spa_meta_cursor,
+        bitmap: Option<(spa_sys::spa_meta_bitmap, Vec<u8>)>,
+        f: impl FnOnce(&spa_sys::spa_buffer) -> R,
+    ) -> R {
+        let cursor_size = std::mem::size_of::<spa_sys::spa_meta_cursor>();
+        let bitmap_end = bitmap
+            .as_ref()
+            .and_then(|(bitmap, bytes)| {
+                let payload_end = (bitmap.offset as usize).checked_add(bytes.len())?;
+                (cursor.bitmap_offset as usize)
+                    .checked_add(std::mem::size_of::<spa_sys::spa_meta_bitmap>().max(payload_end))
+            })
+            .unwrap_or(cursor_size);
+        let metadata_size = bitmap_end.max(cursor_size);
+        let mut storage = vec![0u64; metadata_size.div_ceil(std::mem::size_of::<u64>())];
+        let base = storage.as_mut_ptr().cast::<u8>();
+        unsafe {
+            std::ptr::write(base.cast::<spa_sys::spa_meta_cursor>(), cursor);
+            if let Some((bitmap, bytes)) = bitmap {
+                let bitmap_start = cursor.bitmap_offset as usize;
+                let bitmap_header_end = bitmap_start
+                    .checked_add(std::mem::size_of::<spa_sys::spa_meta_bitmap>())
+                    .unwrap_or(usize::MAX);
+                if bitmap_header_end <= metadata_size {
+                    let bitmap_ptr = base.add(bitmap_start).cast::<spa_sys::spa_meta_bitmap>();
+                    std::ptr::write(bitmap_ptr, bitmap);
+                    let pixel_start = bitmap_start
+                        .checked_add(bitmap.offset as usize)
+                        .unwrap_or(usize::MAX);
+                    let pixel_end = pixel_start.checked_add(bytes.len()).unwrap_or(usize::MAX);
+                    if pixel_end <= metadata_size {
+                        std::ptr::copy_nonoverlapping(
+                            bytes.as_ptr(),
+                            base.add(pixel_start),
+                            bytes.len(),
+                        );
+                    }
+                }
+            }
+        }
+        let mut metadata = spa_sys::spa_meta {
+            type_: SPA_META_CURSOR,
+            size: metadata_size as u32,
+            data: base.cast(),
+        };
+        let buffer = spa_sys::spa_buffer {
+            n_metas: 1,
+            n_datas: 0,
+            metas: &mut metadata,
+            datas: std::ptr::null_mut(),
+        };
+        f(&buffer)
+    }
+
+    fn cursor_header(id: u32, bitmap_offset: u32) -> spa_sys::spa_meta_cursor {
+        spa_sys::spa_meta_cursor {
+            id,
+            flags: 0,
+            position: spa_sys::spa_point { x: 30, y: 40 },
+            hotspot: spa_sys::spa_point { x: 2, y: 3 },
+            bitmap_offset,
+        }
+    }
+
+    #[test]
+    fn cursor_metadata_distinguishes_missing_hidden_and_position_only_updates() {
+        let missing = spa_sys::spa_buffer {
+            n_metas: 0,
+            n_datas: 0,
+            metas: std::ptr::null_mut(),
+            datas: std::ptr::null_mut(),
+        };
+        assert_eq!(
+            unsafe { copy_spa_cursor(&missing) },
+            (CursorMetadataState::Missing, None)
+        );
+        with_cursor_metadata(cursor_header(0, 0), None, |buffer| {
+            assert_eq!(
+                unsafe { copy_spa_cursor(buffer) },
+                (CursorMetadataState::Hidden, None)
+            );
+        });
+        with_cursor_metadata(cursor_header(7, 0), None, |buffer| {
+            assert_eq!(
+                unsafe { copy_spa_cursor(buffer) },
+                (
+                    CursorMetadataState::Present(CursorPosition {
+                        x: 30,
+                        y: 40,
+                        hotspot_x: 2,
+                        hotspot_y: 3,
+                    }),
+                    None,
+                )
+            );
+        });
+        with_cursor_metadata(cursor_header(7, u32::MAX), None, |buffer| {
+            let (state, overlay) = unsafe { copy_spa_cursor(buffer) };
+            assert!(matches!(state, CursorMetadataState::Present(_)));
+            assert!(overlay.is_none());
+        });
+    }
+
+    #[test]
+    fn cursor_bitmap_copy_checks_bounds_stride_and_hotspot_origin() {
+        let bitmap = spa_sys::spa_meta_bitmap {
+            format: spa::param::video::VideoFormat::RGBA.as_raw(),
+            size: spa_sys::spa_rectangle {
+                width: 1,
+                height: 2,
+            },
+            stride: 8,
+            offset: std::mem::size_of::<spa_sys::spa_meta_bitmap>() as u32,
+        };
+        with_cursor_metadata(
+            cursor_header(1, std::mem::size_of::<spa_sys::spa_meta_cursor>() as u32),
+            Some((
+                bitmap,
+                vec![1, 2, 3, 4, 90, 91, 92, 93, 5, 6, 7, 8, 80, 81, 82, 83],
+            )),
+            |buffer| {
+                let (state, overlay) = unsafe { copy_spa_cursor(buffer) };
+                assert_eq!(
+                    state,
+                    CursorMetadataState::Present(CursorPosition {
+                        x: 30,
+                        y: 40,
+                        hotspot_x: 2,
+                        hotspot_y: 3,
+                    })
+                );
+                let overlay = overlay.unwrap();
+                assert_eq!((overlay.width, overlay.height), (1, 2));
+                assert_eq!((overlay.x, overlay.y), (28, 37));
+                assert_eq!(overlay.bitmap, vec![1, 2, 3, 4, 5, 6, 7, 8]);
+            },
+        );
+
+        let malformed = spa_sys::spa_meta_bitmap {
+            offset: 4_096,
+            ..bitmap
+        };
+        with_cursor_metadata(
+            cursor_header(1, std::mem::size_of::<spa_sys::spa_meta_cursor>() as u32),
+            Some((malformed, Vec::new())),
+            |buffer| {
+                let (state, overlay) = unsafe { copy_spa_cursor(buffer) };
+                assert!(matches!(state, CursorMetadataState::Present(_)));
+                assert!(overlay.is_none());
+            },
+        );
+
+        with_cursor_metadata(
+            cursor_header(1, std::mem::size_of::<spa_sys::spa_meta_cursor>() as u32),
+            Some((
+                spa_sys::spa_meta_bitmap {
+                    stride: 3,
+                    ..bitmap
+                },
+                vec![1, 2, 3, 4, 5, 6, 7, 8],
+            )),
+            |buffer| {
+                let (state, overlay) = unsafe { copy_spa_cursor(buffer) };
+                assert!(matches!(state, CursorMetadataState::Present(_)));
+                assert!(overlay.is_none());
+            },
+        );
+    }
 
     #[test]
     fn still_frames_convert_blue_first_formats_without_losing_alpha() {
@@ -1062,6 +1533,8 @@ mod tests {
     #[test]
     fn frame_header_metadata_request_is_a_valid_pod() {
         assert!(spa::pod::Pod::from_bytes(&build_header_meta_pod()).is_some());
+        assert!(spa::pod::Pod::from_bytes(&build_crop_meta_pod()).is_some());
+        assert!(spa::pod::Pod::from_bytes(&build_cursor_meta_pod()).is_some());
     }
 
     #[test]
@@ -1102,7 +1575,14 @@ mod tests {
         };
         assert_eq!(
             unsafe { copy_spa_frame(&mut buffer) },
-            Some((pixels.clone(), Some(header.pts)))
+            Some((
+                pixels.clone(),
+                8,
+                FrameCropMetadata::Missing,
+                None,
+                CursorMetadataState::Missing,
+                Some(header.pts)
+            ))
         );
         header.flags = spa_sys::SPA_META_HEADER_FLAG_CORRUPTED;
         assert_eq!(header.flags, spa_sys::SPA_META_HEADER_FLAG_CORRUPTED);
@@ -1111,11 +1591,140 @@ mod tests {
         buffer.metas = std::ptr::null_mut();
         assert_eq!(
             unsafe { copy_spa_frame(&mut buffer) },
-            Some((pixels.clone(), None))
+            Some((
+                pixels.clone(),
+                8,
+                FrameCropMetadata::Missing,
+                None,
+                CursorMetadataState::Missing,
+                None
+            ))
         );
         buffer.n_datas = 0;
         buffer.datas = std::ptr::null_mut();
         assert!(unsafe { copy_spa_frame(&mut buffer) }.is_none());
+    }
+
+    #[test]
+    fn crop_metadata_is_copied_or_rejected_without_guessing() {
+        let mut region = spa_sys::spa_meta_region {
+            region: spa_sys::spa_region {
+                position: spa_sys::spa_point { x: 3, y: 5 },
+                size: spa_sys::spa_rectangle {
+                    width: 640,
+                    height: 480,
+                },
+            },
+        };
+        let mut short_metadata = spa_sys::spa_meta {
+            type_: spa_sys::SPA_META_VideoCrop,
+            size: 0,
+            data: (&mut region as *mut spa_sys::spa_meta_region).cast(),
+        };
+        let mut null_data_metadata = spa_sys::spa_meta {
+            type_: spa_sys::SPA_META_VideoCrop,
+            size: std::mem::size_of::<spa_sys::spa_meta_region>() as u32,
+            data: std::ptr::null_mut(),
+        };
+        let mut metadata = spa_sys::spa_meta {
+            type_: spa_sys::SPA_META_VideoCrop,
+            size: std::mem::size_of::<spa_sys::spa_meta_region>() as u32,
+            data: (&mut region as *mut spa_sys::spa_meta_region).cast(),
+        };
+        let metadata_buffer = |metadata: &mut spa_sys::spa_meta| spa_sys::spa_buffer {
+            n_metas: 1,
+            n_datas: 0,
+            metas: metadata,
+            datas: std::ptr::null_mut(),
+        };
+        let buffer = metadata_buffer(&mut metadata);
+        assert_eq!(
+            unsafe { copy_spa_crop(&buffer) },
+            FrameCropMetadata::Present(FrameCrop {
+                x: 3,
+                y: 5,
+                width: 640,
+                height: 480,
+            })
+        );
+
+        let short_buffer = metadata_buffer(&mut short_metadata);
+        assert_eq!(
+            unsafe { copy_spa_crop(&short_buffer) },
+            FrameCropMetadata::Invalid
+        );
+        let null_data_buffer = metadata_buffer(&mut null_data_metadata);
+        assert_eq!(
+            unsafe { copy_spa_crop(&null_data_buffer) },
+            FrameCropMetadata::Invalid
+        );
+        let missing_buffer = spa_sys::spa_buffer {
+            n_metas: 0,
+            n_datas: 0,
+            metas: std::ptr::null_mut(),
+            datas: std::ptr::null_mut(),
+        };
+        assert_eq!(
+            unsafe { copy_spa_crop(&missing_buffer) },
+            FrameCropMetadata::Missing
+        );
+    }
+
+    #[test]
+    fn queued_frames_keep_format_stride_and_crop_metadata_together() {
+        let mut bgra = spa::param::video::VideoInfoRaw::default();
+        bgra.set_format(spa::param::video::VideoFormat::BGRA);
+        bgra.set_size(spa::utils::Rectangle {
+            width: 2,
+            height: 2,
+        });
+        let mut rgba = spa::param::video::VideoInfoRaw::default();
+        rgba.set_format(spa::param::video::VideoFormat::RGBA);
+        rgba.set_size(spa::utils::Rectangle {
+            width: 3,
+            height: 2,
+        });
+        let crop = FrameCropMetadata::Present(FrameCrop {
+            x: 1,
+            y: 0,
+            width: 2,
+            height: 2,
+        });
+        let frames = [
+            QueuedFrame {
+                pixels: vec![1; 16],
+                format: bgra,
+                stride: 8,
+                crop,
+                cursor: None,
+                cursor_metadata: CursorMetadataState::Missing,
+                captured_at_us: 1,
+            },
+            QueuedFrame {
+                pixels: vec![2; 28],
+                format: rgba,
+                stride: 14,
+                crop: FrameCropMetadata::Missing,
+                cursor: None,
+                cursor_metadata: CursorMetadataState::Missing,
+                captured_at_us: 2,
+            },
+        ];
+
+        assert_eq!(frames[0].pixels, vec![1; 16]);
+        assert_eq!(
+            frames[0].format.format(),
+            spa::param::video::VideoFormat::BGRA
+        );
+        assert_eq!(frames[0].stride, 8);
+        assert_eq!(frames[0].crop, crop);
+        assert_eq!(frames[1].pixels, vec![2; 28]);
+        assert_eq!(
+            frames[1].format.format(),
+            spa::param::video::VideoFormat::RGBA
+        );
+        assert_eq!(frames[1].stride, 14);
+        assert_eq!(frames[1].crop, FrameCropMetadata::Missing);
     }
 
     #[test]
@@ -1131,6 +1740,25 @@ mod tests {
         assert!(!data.is_empty());
         let pod = spa::pod::Pod::from_bytes(&data);
         assert!(pod.is_some());
+    }
+
+    #[test]
+    fn window_stream_prefers_premultiplied_bgra_before_fallback_formats() {
+        assert_eq!(
+            video_format_preference(true),
+            [
+                spa::param::video::VideoFormat::BGRA,
+                spa::param::video::VideoFormat::RGBA,
+                spa::param::video::VideoFormat::BGRx,
+                spa::param::video::VideoFormat::RGBx,
+            ]
+        );
+        assert!(spa::pod::Pod::from_bytes(&build_enum_format_pod_with_alpha(
+            Some(1920),
+            Some(1080),
+            true,
+        ))
+        .is_some());
     }
 
     #[test]
@@ -1185,6 +1813,54 @@ mod tests {
         assert_eq!(rgba_copy_plan(0, 1920, 1080, 4), None);
         let padded = 1920 * 4 + 64;
         assert_eq!(rgba_copy_plan(padded * 1080, 1920, 1080, 4), Some(padded));
+    }
+
+    #[test]
+    fn frame_rows_respect_padded_and_negative_strides() {
+        let padded = vec![
+            1, 2, 3, 4, 5, 6, 7, 8, 90, 91, 92, 93, 9, 10, 11, 12, 13, 14, 15, 16,
+        ];
+        assert_eq!(
+            normalize_frame_rows(padded.clone(), 12, 2, 2, 4),
+            Some(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+        );
+        assert_eq!(
+            normalize_frame_rows(
+                vec![9, 10, 11, 12, 13, 14, 15, 16, 1, 2, 3, 4, 5, 6, 7, 8],
+                -8,
+                2,
+                2,
+                4
+            ),
+            Some(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16])
+        );
+        assert_eq!(
+            normalize_frame_rows(padded[..16].to_vec(), 7, 2, 2, 4),
+            None
+        );
+    }
+
+    #[test]
+    fn packed_frame_rows_keep_the_original_allocation() {
+        let raw = (0..17).collect::<Vec<u8>>();
+        let original_ptr = raw.as_ptr();
+        let packed = normalize_frame_rows(raw, 8, 2, 2, 4).unwrap();
+
+        assert_eq!(packed.as_ptr(), original_ptr);
+        assert_eq!(packed, (0..16).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn circular_buffer_copy_respects_offset_and_wraps_safely() {
+        assert_eq!(
+            copy_circular_chunk(&[0, 1, 2, 3, 4], 1, 3),
+            Some(vec![1, 2, 3])
+        );
+        assert_eq!(
+            copy_circular_chunk(&[0, 1, 2, 3, 4], 4, 3),
+            Some(vec![4, 0, 1])
+        );
+        assert_eq!(copy_circular_chunk(&[0, 1], 0, 3), None);
     }
 
     #[test]

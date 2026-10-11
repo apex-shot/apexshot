@@ -141,6 +141,8 @@ struct RecordedSession {
 #[derive(Debug, Clone)]
 pub struct RecordingConfig {
     pub output_path: PathBuf,
+    /// Portal or backend source selected for this recording.
+    pub target: RecordingTarget,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub x: Option<i32>,
@@ -160,6 +162,18 @@ pub struct RecordingConfig {
     pub speaker_source: Option<String>,
     /// webrtcdsp noise suppression on the mic branch (GStreamer audio path).
     pub noise_suppression: bool,
+}
+
+/// Capture source requested for a recording session.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum RecordingTarget {
+    /// Record the full screen or selected monitor.
+    #[default]
+    Screen,
+    /// Record a selected region of a monitor.
+    Area,
+    /// Record a window selected by the ScreenCast portal.
+    Window,
 }
 
 /// Directory for new recordings: Settings `video_export_location`, else XDG Videos.
@@ -212,6 +226,7 @@ impl Default for RecordingConfig {
         path.push("output.mp4");
         Self {
             output_path: path,
+            target: RecordingTarget::Screen,
             width: None,
             height: None,
             x: None,
@@ -233,6 +248,11 @@ impl Default for RecordingConfig {
 }
 
 impl RecordingConfig {
+    /// Whether this target should record pointer motion and click metadata.
+    pub(crate) fn pointer_track_enabled(&self) -> bool {
+        self.pointer_track && self.target != RecordingTarget::Window
+    }
+
     /// Build a recording config from Settings (export folder, filename pattern,
     /// fps / resolution / cursor / HiDPI / mono). Used by daemon screen/area
     /// hotkeys so they match the overlay recording path.
@@ -259,6 +279,7 @@ impl RecordingConfig {
 
         Self {
             output_path,
+            target: RecordingTarget::Screen,
             width: None,
             height: None,
             x: None,
@@ -381,7 +402,7 @@ async fn start_recording_with_commands(
     config: RecordingConfig,
     command_rx: Option<mpsc::UnboundedReceiver<RecordingControlCommand>>,
 ) -> RecordResult<RecordedSession> {
-    if wf_recorder::is_wlroots_session() {
+    if wf_recorder::is_wlroots_session() && config.target != RecordingTarget::Window {
         if wf_recorder::should_use_wf_recorder(&config) {
             return wf_recorder::record_with_wf_recorder(config, command_rx)
                 .await

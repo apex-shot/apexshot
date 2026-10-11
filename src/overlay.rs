@@ -27,4 +27,5 @@ pub use api::{
     SelectionError, SelectionResult,
 };
 pub use capture_menu::{choose_capture_mode, CaptureMenuAction, CaptureMenuResult};
+pub(crate) use monitor_picker::default_target_monitor_choice;
 pub use monitor_picker::{select_target_monitor_choice, MonitorChoice};

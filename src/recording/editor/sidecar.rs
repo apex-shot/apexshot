@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 pub const SIDECAR_VERSION: u32 = 2;
 pub const MAX_POINTER_SAMPLES: usize = 8_000;
+pub const WINDOW_CURSOR_STALE_SECONDS: f64 = 0.2;
 pub const MAX_CLICKS: usize = 500;
 pub const MAX_PRESSES: usize = 500;
 pub const CLICK_PULSE_WINDOW_SECONDS: f64 = 0.08;
@@ -19,6 +20,7 @@ pub enum PointerDataSource {
     #[default]
     Recorded,
     InferredFromVideo,
+    WindowMetadata,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -118,6 +120,18 @@ pub struct PointerSample {
     pub kind: CursorKind,
 }
 
+/// A recorded change in whether the selected window has a visible cursor.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct CursorVisibilitySample {
+    /// Event time on the recording clock, in seconds.
+    pub t: f64,
+    /// Whether a fresh cursor position is visible in the selected window.
+    pub visible: bool,
+    /// Preserve a cursor through a media-clock hold inserted for a pause.
+    #[serde(default)]
+    pub hold_until_next: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ClickSample {
     pub t: f64,
@@ -158,6 +172,10 @@ pub struct PointerSidecar {
     pub region: CaptureRegion,
     pub pointer: Vec<PointerSample>,
     pub clicks: Vec<ClickSample>,
+    /// Visibility changes for selected-window cursor metadata. Old sidecars
+    /// have no visibility data and retain their original always-visible rule.
+    #[serde(default)]
+    pub visibility: Vec<CursorVisibilitySample>,
     /// Mouse press intervals. Absent in version-1 sidecars, which load as an
     /// empty list and are otherwise unchanged.
     #[serde(default)]
@@ -174,6 +192,7 @@ impl PointerSidecar {
             region,
             pointer: Vec::new(),
             clicks: Vec::new(),
+            visibility: Vec::new(),
             presses: Vec::new(),
             source: PointerDataSource::Recorded,
         }
@@ -184,7 +203,10 @@ impl PointerSidecar {
     }
 
     pub fn can_render_cursor_overlay(&self) -> bool {
-        self.source == PointerDataSource::Recorded && !self.pointer.is_empty()
+        matches!(
+            self.source,
+            PointerDataSource::Recorded | PointerDataSource::WindowMetadata
+        ) && !self.pointer.is_empty()
     }
 
     /// Whether a mouse button is held at `t` (the interval is half-open, so a
@@ -356,12 +378,28 @@ impl PointerSidecar {
     /// uses this same path so the viewport and rendered cursor never react to
     /// different pointer data.
     pub fn motion_position_at(&self, t: f64, smooth: f64, speed: f64) -> Option<(f64, f64)> {
+        let samples = if self.source == PointerDataSource::WindowMetadata {
+            self.window_pointer_segment_at(t)?
+        } else {
+            &self.pointer
+        };
         if smooth <= 0.01 {
-            self.interpolated_at(t).map(|(x, y, _)| (x, y))
-        } else if self.pointer.is_empty() {
+            let position = if self.source == PointerDataSource::WindowMetadata {
+                Self::interpolated_window_in(samples, t)
+            } else {
+                Self::interpolated_in(samples, t)
+            };
+            position.map(|(x, y, _)| (x, y))
+        } else if samples.is_empty() {
             None
         } else {
-            Some(self.smoothed_at(t, smooth, speed))
+            Some(self.smoothed_at(
+                samples,
+                t,
+                smooth,
+                speed,
+                self.source == PointerDataSource::WindowMetadata,
+            ))
         }
     }
 
@@ -382,15 +420,22 @@ impl PointerSidecar {
         Some(self.map_to_video(x, y, video_width, video_height))
     }
 
-    fn smoothed_at(&self, t: f64, smooth: f64, speed: f64) -> (f64, f64) {
-        let Some(first) = self.pointer.first() else {
+    fn smoothed_at(
+        &self,
+        samples: &[PointerSample],
+        t: f64,
+        smooth: f64,
+        speed: f64,
+        window_metadata: bool,
+    ) -> (f64, f64) {
+        let Some(first) = samples.first() else {
             return (0.0, 0.0);
         };
         let tau = (0.01 + smooth.clamp(0.0, 1.0).powi(2) * 0.26) / speed.clamp(0.25, 3.0);
         let mut px = first.x;
         let mut py = first.y;
         let mut pt = first.t;
-        for sample in self.pointer.iter().skip(1) {
+        for sample in samples.iter().skip(1) {
             let target_t = sample.t.min(t);
             let dt = (target_t - pt).max(0.0);
             let k = 1.0 - (-dt / tau).exp();
@@ -400,7 +445,12 @@ impl PointerSidecar {
                 pt = sample.t;
                 continue;
             }
-            if let Some((ix, iy, _)) = self.interpolated_at(t) {
+            let interpolated = if window_metadata {
+                Self::interpolated_window_in(samples, t)
+            } else {
+                Self::interpolated_in(samples, t)
+            };
+            if let Some((ix, iy, _)) = interpolated {
                 px += (ix - px) * k;
                 py += (iy - py) * k;
             }
@@ -431,20 +481,40 @@ impl PointerSidecar {
     }
 
     pub fn interpolated_at(&self, t: f64) -> Option<(f64, f64, CursorKind)> {
-        if self.pointer.is_empty() {
+        if self.source == PointerDataSource::WindowMetadata {
+            Self::interpolated_window_in(self.window_pointer_segment_at(t)?, t)
+        } else {
+            Self::interpolated_in(&self.pointer, t)
+        }
+    }
+
+    fn interpolated_window_in(pointer: &[PointerSample], t: f64) -> Option<(f64, f64, CursorKind)> {
+        let idx = pointer.partition_point(|sample| sample.t <= t);
+        if idx > 0 && idx < pointer.len() {
+            let prev = &pointer[idx - 1];
+            let next = &pointer[idx];
+            if next.t - prev.t > WINDOW_CURSOR_STALE_SECONDS {
+                return Some((prev.x, prev.y, prev.kind));
+            }
+        }
+        Self::interpolated_in(pointer, t)
+    }
+
+    fn interpolated_in(pointer: &[PointerSample], t: f64) -> Option<(f64, f64, CursorKind)> {
+        if pointer.is_empty() {
             return None;
         }
-        let idx = self.pointer.partition_point(|sample| sample.t <= t);
+        let idx = pointer.partition_point(|sample| sample.t <= t);
         if idx == 0 {
-            let first = &self.pointer[0];
+            let first = &pointer[0];
             return Some((first.x, first.y, first.kind));
         }
-        if idx >= self.pointer.len() {
-            let last = self.pointer.last()?;
+        if idx >= pointer.len() {
+            let last = pointer.last()?;
             return Some((last.x, last.y, last.kind));
         }
-        let prev = &self.pointer[idx - 1];
-        let next = &self.pointer[idx];
+        let prev = &pointer[idx - 1];
+        let next = &pointer[idx];
         let span = (next.t - prev.t).max(f64::EPSILON);
         let alpha = ((t - prev.t) / span).clamp(0.0, 1.0);
         Some((
@@ -452,6 +522,46 @@ impl PointerSidecar {
             prev.y + (next.y - prev.y) * alpha,
             prev.kind,
         ))
+    }
+
+    fn window_pointer_segment_at(&self, t: f64) -> Option<&[PointerSample]> {
+        let visibility_index = self.visibility.partition_point(|sample| sample.t <= t);
+        let visible_since = self.visibility.get(visibility_index.checked_sub(1)?)?;
+        if !visible_since.visible {
+            return None;
+        }
+        let visibility_after = &self.visibility[visibility_index..];
+        let bounded = visibility_after.iter().any(|sample| !sample.visible);
+        let pointer_index = self.pointer.partition_point(|sample| sample.t <= t);
+        let latest_pointer = self.pointer.get(pointer_index.checked_sub(1)?)?;
+        if latest_pointer.t < visible_since.t {
+            return None;
+        }
+        let hold_until = visibility_after
+            .iter()
+            .find(|sample| sample.hold_until_next || !sample.visible);
+        if t - latest_pointer.t > WINDOW_CURSOR_STALE_SECONDS
+            && !bounded
+            && !hold_until.is_some_and(|sample| sample.visible && sample.hold_until_next)
+        {
+            return None;
+        }
+        let start = self
+            .pointer
+            .partition_point(|sample| sample.t < visible_since.t);
+        let hidden_at = visibility_after
+            .iter()
+            .find(|sample| !sample.visible)
+            .map(|sample| sample.t)
+            .unwrap_or(f64::INFINITY);
+        let end = self.pointer.partition_point(|sample| sample.t < hidden_at);
+        self.pointer.get(start..end)
+    }
+
+    pub(crate) fn compact_samples(&mut self) {
+        compact_to_limit(&mut self.pointer, MAX_POINTER_SAMPLES);
+        compact_to_limit(&mut self.clicks, MAX_CLICKS);
+        compact_to_limit(&mut self.presses, MAX_PRESSES);
     }
 
     pub fn click_pulse_at(&self, t: f64) -> f64 {
@@ -520,6 +630,24 @@ impl PointerSidecar {
     }
 }
 
+fn compact_to_limit<T: Clone>(samples: &mut Vec<T>, limit: usize) {
+    while samples.len() > limit {
+        let last = samples.len() - 1;
+        let mut compacted = Vec::with_capacity(last / 2 + 1);
+        compacted.push(samples[0].clone());
+        compacted.extend(
+            samples
+                .iter()
+                .enumerate()
+                .skip(2)
+                .take(last.saturating_sub(2))
+                .filter_map(|(index, sample)| (index % 2 == 0).then_some(sample.clone())),
+        );
+        compacted.push(samples[last].clone());
+        *samples = compacted;
+    }
+}
+
 fn pointer_sidecars_directory() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("/tmp"))
@@ -568,7 +696,50 @@ mod tests {
         }"#;
         let sidecar: PointerSidecar = serde_json::from_str(json).unwrap();
         assert_eq!(sidecar.source, PointerDataSource::Recorded);
+        assert!(sidecar.visibility.is_empty());
         assert!(sidecar.presses.is_empty());
+    }
+
+    #[test]
+    fn window_cursor_visibility_and_source_round_trip_in_the_sidecar() {
+        let mut sidecar = PointerSidecar::new(
+            1_000_000,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 80,
+            },
+        );
+        sidecar.source = PointerDataSource::WindowMetadata;
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 20.0,
+            kind: CursorKind::Default,
+        });
+        sidecar.visibility.push(CursorVisibilitySample {
+            t: 0.0,
+            visible: true,
+            hold_until_next: false,
+        });
+        sidecar.visibility.push(CursorVisibilitySample {
+            t: 1.0,
+            visible: false,
+            hold_until_next: false,
+        });
+        sidecar.clicks.push(ClickSample {
+            t: 0.5,
+            x: 10.0,
+            y: 20.0,
+            button: 1,
+        });
+
+        let encoded = serde_json::to_vec(&sidecar).unwrap();
+        let loaded: PointerSidecar = serde_json::from_slice(&encoded).unwrap();
+
+        assert_eq!(loaded, sidecar);
+        assert!(loaded.can_render_cursor_overlay());
     }
 
     #[test]
@@ -861,6 +1032,225 @@ mod tests {
         assert_eq!(sidecar.pointer[0].y, 80.0);
         assert_eq!(sidecar.clicks[0].x, 0.0);
         assert_eq!(sidecar.clicks[0].y, 0.0);
+    }
+
+    #[test]
+    fn window_metadata_visibility_hides_outside_and_stale_cursor_samples() {
+        let mut sidecar = PointerSidecar::new(
+            1_000_000,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 80,
+            },
+        );
+        sidecar.source = PointerDataSource::WindowMetadata;
+        sidecar.pointer = vec![
+            PointerSample {
+                t: 0.0,
+                x: 10.0,
+                y: 15.0,
+                kind: CursorKind::Default,
+            },
+            PointerSample {
+                t: 0.1,
+                x: 20.0,
+                y: 25.0,
+                kind: CursorKind::Default,
+            },
+            PointerSample {
+                t: 0.3,
+                x: 30.0,
+                y: 35.0,
+                kind: CursorKind::Default,
+            },
+        ];
+        sidecar.visibility = vec![
+            CursorVisibilitySample {
+                t: 0.0,
+                visible: true,
+                hold_until_next: false,
+            },
+            CursorVisibilitySample {
+                t: 0.15,
+                visible: false,
+                hold_until_next: false,
+            },
+            CursorVisibilitySample {
+                t: 0.3,
+                visible: true,
+                hold_until_next: false,
+            },
+        ];
+
+        assert!(sidecar.can_render_cursor_overlay());
+        assert!(sidecar.presented_at(0.1, CursorMotion::default()).is_some());
+        assert!(sidecar.presented_at(0.2, CursorMotion::default()).is_none());
+        assert!(sidecar.motion_position_at(0.2, 0.8, 1.0).is_none());
+        assert!(sidecar
+            .presented_at(0.35, CursorMotion::default())
+            .is_some());
+        assert!(sidecar
+            .presented_at(0.51, CursorMotion::default())
+            .is_none());
+        assert!(sidecar
+            .presented_in_video_at(0.2, CursorMotion::default(), 100.0, 80.0)
+            .is_none());
+    }
+
+    #[test]
+    fn bounded_window_visibility_holds_cursor_until_explicit_exit() {
+        let mut sidecar = PointerSidecar::new(
+            1_000_000,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 80,
+            },
+        );
+        sidecar.source = PointerDataSource::WindowMetadata;
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 15.0,
+            kind: CursorKind::Default,
+        });
+        sidecar.visibility = vec![
+            CursorVisibilitySample {
+                t: 0.0,
+                visible: true,
+                hold_until_next: false,
+            },
+            CursorVisibilitySample {
+                t: 2.0,
+                visible: false,
+                hold_until_next: false,
+            },
+        ];
+
+        assert_eq!(
+            sidecar.motion_position_at(1.0, 0.0, 1.0),
+            Some((10.0, 15.0))
+        );
+        assert!(sidecar.motion_position_at(2.0, 0.0, 1.0).is_none());
+    }
+
+    #[test]
+    fn window_cursor_holds_through_long_sample_gaps_without_interpolating() {
+        let mut sidecar = PointerSidecar::new(
+            1_000_000,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 80,
+            },
+        );
+        sidecar.source = PointerDataSource::WindowMetadata;
+        sidecar.pointer = vec![
+            PointerSample {
+                t: 0.0,
+                x: 10.0,
+                y: 15.0,
+                kind: CursorKind::Default,
+            },
+            PointerSample {
+                t: 1.0,
+                x: 90.0,
+                y: 75.0,
+                kind: CursorKind::Default,
+            },
+        ];
+        sidecar.visibility = vec![
+            CursorVisibilitySample {
+                t: 0.0,
+                visible: true,
+                hold_until_next: false,
+            },
+            CursorVisibilitySample {
+                t: 2.0,
+                visible: false,
+                hold_until_next: false,
+            },
+        ];
+
+        assert_eq!(
+            sidecar.motion_position_at(0.5, 0.0, 1.0),
+            Some((10.0, 15.0))
+        );
+        assert_eq!(
+            sidecar.motion_position_at(1.0, 0.0, 1.0),
+            Some((90.0, 75.0))
+        );
+    }
+
+    #[test]
+    fn window_cursor_reentry_does_not_reuse_the_previous_visible_segment() {
+        let mut sidecar = PointerSidecar::new(
+            1_000_000,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 80,
+            },
+        );
+        sidecar.source = PointerDataSource::WindowMetadata;
+        sidecar.pointer = vec![PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 15.0,
+            kind: CursorKind::Default,
+        }];
+        sidecar.visibility = vec![
+            CursorVisibilitySample {
+                t: 0.0,
+                visible: true,
+                hold_until_next: false,
+            },
+            CursorVisibilitySample {
+                t: 1.0,
+                visible: false,
+                hold_until_next: false,
+            },
+            CursorVisibilitySample {
+                t: 1.05,
+                visible: true,
+                hold_until_next: false,
+            },
+            CursorVisibilitySample {
+                t: 2.0,
+                visible: false,
+                hold_until_next: false,
+            },
+        ];
+
+        assert!(sidecar.motion_position_at(1.02, 0.0, 1.0).is_none());
+        assert!(sidecar.motion_position_at(1.05, 0.0, 1.0).is_none());
+    }
+
+    #[test]
+    fn sample_compaction_preserves_recording_end_and_first_position() {
+        let mut sidecar =
+            PointerSidecar::new(1, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer = (0..(MAX_POINTER_SAMPLES + 1))
+            .map(|index| PointerSample {
+                t: index as f64,
+                x: index as f64,
+                y: index as f64,
+                kind: CursorKind::Default,
+            })
+            .collect();
+        sidecar.compact_samples();
+
+        assert!(sidecar.pointer.len() <= MAX_POINTER_SAMPLES);
+        assert_eq!(sidecar.pointer.first().unwrap().x, 0.0);
+        assert_eq!(
+            sidecar.pointer.last().unwrap().x,
+            MAX_POINTER_SAMPLES as f64
+        );
     }
 
     #[test]

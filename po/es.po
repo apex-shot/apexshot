@@ -726,6 +726,9 @@ msgstr "Abrir la interfaz de grabación"
 msgid "Record Screen"
 msgstr "Grabar pantalla"
 
+msgid "Record Window"
+msgstr "Grabar ventana"
+
 msgid "Stop Recording"
 msgstr "Detener grabación"
 
@@ -1709,6 +1712,9 @@ msgstr "Grabar audio en mono"
 
 msgid "Recording failed"
 msgstr "Error en la grabación"
+
+msgid "Window recording unavailable"
+msgstr "La grabación de ventana no está disponible"
 
 msgid "Recording not saved"
 msgstr "La grabación no se ha guardado"
@@ -2972,3 +2978,9 @@ msgstr "Enviado a tu navegador. Si no se abrió ninguna página, copia el enlace
 
 msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
 msgstr "No se pudo abrir un navegador: {error}. Copia el enlace de abajo y ábrelo tú mismo."
+
+msgid "The selected portal will embed the cursor in the video, so it cannot be edited separately."
+msgstr "El portal seleccionado incrustará el cursor en el vídeo, por lo que no se podrá editar por separado."
+
+msgid "The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."
+msgstr "El cursor de la ventana seguirá siendo editable, pero los clics de Zoom automático no se grabarán sin la extensión de GNOME de ApexShot."

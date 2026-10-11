@@ -750,7 +750,11 @@ fn setup_countdown_window(
     cancel_stop_tx: Option<Arc<Mutex<Option<oneshot::Sender<StopAction>>>>>,
 ) {
     let display = gdk::Display::default().expect("No display");
-    let monitor = monitor_for_capture(&display, &params);
+    let monitor = if params.capture_w > 0 && params.capture_h > 0 {
+        monitor_for_capture(&display, &params)
+    } else {
+        countdown_monitor_for_display(&display)
+    };
     let monitor_geom = monitor.as_ref().map(|m| m.geometry());
     let bubble_size = 184.0;
 
@@ -1561,6 +1565,51 @@ fn monitor_for_capture(
     }
 
     None
+}
+
+fn countdown_monitor_for_display(display: &gdk::Display) -> Option<gdk::Monitor> {
+    let model = display.monitors();
+    let mut monitors = Vec::new();
+    let mut geometries = Vec::new();
+    for idx in 0..model.n_items() {
+        let Some(item) = model.item(idx) else {
+            continue;
+        };
+        let Ok(monitor) = item.downcast::<gdk::Monitor>() else {
+            continue;
+        };
+        let geometry = monitor.geometry();
+        monitors.push(monitor);
+        geometries.push((
+            geometry.x(),
+            geometry.y(),
+            geometry.width(),
+            geometry.height(),
+        ));
+    }
+    let index = countdown_monitor_index_from_geometries(&geometries)?;
+    monitors.get(index).cloned()
+}
+
+pub(super) fn countdown_monitor_index_from_geometries(
+    geometries: &[(i32, i32, i32, i32)],
+) -> Option<usize> {
+    let contains_display_origin = |(x, y, width, height): &(i32, i32, i32, i32)| {
+        *width > 0
+            && *height > 0
+            && *x <= 0
+            && x.checked_add(*width).is_some_and(|right| 0 < right)
+            && *y <= 0
+            && y.checked_add(*height).is_some_and(|bottom| 0 < bottom)
+    };
+    geometries
+        .iter()
+        .position(contains_display_origin)
+        .or_else(|| {
+            geometries
+                .iter()
+                .position(|(_, _, width, height)| *width > 0 && *height > 0)
+        })
 }
 
 #[cfg(test)]

@@ -57,6 +57,7 @@ pub enum DaemonAction {
     RestoreRecentlyClosed,
     ToggleOverlays,
     RecordScreen,
+    RecordWindow,
     RecordArea,
     OpenRecordingUi,
     OpenVideoEditor,
@@ -90,6 +91,7 @@ impl From<TrayAction> for DaemonAction {
             TrayAction::OpenVideoEditor => Self::OpenVideoEditor,
             TrayAction::OpenImageEditor => Self::OpenImageEditor,
             TrayAction::RecordScreen => Self::RecordScreen,
+            TrayAction::RecordWindow => Self::RecordWindow,
             TrayAction::StopRecordingSave => Self::StopRecordingSave,
             TrayAction::ShowLastPreview => Self::ShowLastPreview,
             TrayAction::OpenLastCapture => Self::OpenLastCapture,
@@ -743,6 +745,7 @@ pub(super) fn parse_trigger_action(action: &str) -> Option<DaemonAction> {
         "capture_screen" => Some(DaemonAction::CaptureScreen),
         "capture_window" => Some(DaemonAction::CaptureWindow),
         "record_screen" => Some(DaemonAction::RecordScreen),
+        "record_window" => Some(DaemonAction::RecordWindow),
         "record_area" => Some(DaemonAction::RecordArea),
         "open_recording_ui" => Some(DaemonAction::OpenRecordingUi),
         "open_video_editor" => Some(DaemonAction::OpenVideoEditor),
@@ -822,8 +825,16 @@ mod tests {
             DaemonAction::RecordScreen
         );
         assert_eq!(
+            DaemonAction::from(TrayAction::RecordWindow),
+            DaemonAction::RecordWindow
+        );
+        assert_eq!(
             parse_trigger_action("record_screen"),
             Some(DaemonAction::RecordScreen)
+        );
+        assert_eq!(
+            parse_trigger_action("record_window"),
+            Some(DaemonAction::RecordWindow)
         );
         assert_eq!(
             parse_trigger_action("recording_stop_save"),
@@ -1043,6 +1054,20 @@ mod tests {
             binding_to_daemon_action(&stop_by_args_only),
             Some(super::DaemonAction::StopRecordingSave)
         ));
+    }
+
+    #[test]
+    fn binding_to_daemon_action_maps_window_recording() {
+        let record_window = crate::hotkeys::HotkeyBinding {
+            accelerator: "CTRL+ALT+SHIFT+W".into(),
+            args: vec!["record".into(), "window".into()],
+            name: Some("record_window".into()),
+        };
+
+        assert_eq!(
+            binding_to_daemon_action(&record_window),
+            Some(DaemonAction::RecordWindow)
+        );
     }
 
     #[test]

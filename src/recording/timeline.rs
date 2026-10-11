@@ -1,6 +1,150 @@
 //! Map the compositor's monotonic input clock to the retained video timeline.
 
-use super::editor::sidecar::PointerSidecar;
+use super::editor::sidecar::{
+    CaptureRegion, CursorKind, CursorVisibilitySample, PointerDataSource, PointerSample,
+    PointerSidecar, MAX_POINTER_SAMPLES,
+};
+
+const MAX_WINDOW_CURSOR_SAMPLES: usize = MAX_POINTER_SAMPLES * 32;
+const MAX_WINDOW_VISIBILITY_SAMPLES: usize = MAX_POINTER_SAMPLES * 32;
+const WINDOW_CURSOR_CLICK_NEIGHBOR_US: i64 = 50_000;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct WindowPointerSample {
+    pub(super) at_us: i64,
+    pub(super) x: f64,
+    pub(super) y: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct WindowVisibilitySample {
+    pub(super) at_us: i64,
+    pub(super) visible: bool,
+}
+
+#[derive(Debug, Default)]
+struct WindowCursorTrack {
+    width: u32,
+    height: u32,
+    pointer: Vec<WindowPointerSample>,
+    visibility: Vec<WindowVisibilitySample>,
+    exhausted: bool,
+}
+
+impl WindowCursorTrack {
+    fn record(&mut self, at_us: i64, position: Option<(f64, f64)>) {
+        if at_us <= 0 || self.exhausted {
+            return;
+        }
+        if position.is_some_and(|(x, y)| !x.is_finite() || !y.is_finite()) {
+            return;
+        }
+        if self
+            .visibility
+            .last()
+            .is_some_and(|sample| sample.at_us >= at_us)
+            || self
+                .pointer
+                .last()
+                .is_some_and(|sample| sample.at_us >= at_us)
+        {
+            return;
+        }
+
+        let visible = position.is_some();
+        if self.visibility.len() >= MAX_WINDOW_VISIBILITY_SAMPLES
+            && self
+                .visibility
+                .last()
+                .is_none_or(|sample| sample.visible != visible)
+        {
+            self.visibility.push(WindowVisibilitySample {
+                at_us,
+                visible: false,
+            });
+            self.exhausted = true;
+            return;
+        }
+
+        match position {
+            Some((x, y)) => {
+                if !self.visibility.last().is_some_and(|sample| sample.visible) {
+                    self.visibility.push(WindowVisibilitySample {
+                        at_us,
+                        visible: true,
+                    });
+                }
+                self.pointer.push(WindowPointerSample { at_us, x, y });
+                compact_window_pointer(&mut self.pointer);
+            }
+            None if self.visibility.last().is_none_or(|sample| sample.visible) => {
+                self.visibility.push(WindowVisibilitySample {
+                    at_us,
+                    visible: false,
+                });
+            }
+            None => {}
+        }
+    }
+
+    fn positions_at(&self, at_us: i64) -> Vec<(f64, f64, i64)> {
+        let visibility_index = self
+            .visibility
+            .partition_point(|sample| sample.at_us <= at_us);
+        let Some(visible_since_index) = visibility_index.checked_sub(1) else {
+            return Vec::new();
+        };
+        let Some(visible_since) = self.visibility.get(visible_since_index) else {
+            return Vec::new();
+        };
+        if !visible_since.visible {
+            return Vec::new();
+        }
+
+        let hidden_at = self.visibility[visibility_index..]
+            .iter()
+            .find(|sample| !sample.visible)
+            .map(|sample| sample.at_us)
+            .unwrap_or(i64::MAX);
+        let pointer_index = self.pointer.partition_point(|sample| sample.at_us <= at_us);
+        let mut positions = Vec::with_capacity(2);
+        if let Some(pointer) = pointer_index
+            .checked_sub(1)
+            .and_then(|index| self.pointer.get(index))
+        {
+            if pointer.at_us >= visible_since.at_us {
+                positions.push((pointer.x, pointer.y, pointer.at_us));
+            }
+        }
+        if let Some(pointer) = self.pointer.get(pointer_index) {
+            if pointer.at_us.saturating_sub(at_us) <= WINDOW_CURSOR_CLICK_NEIGHBOR_US
+                && pointer.at_us < hidden_at
+            {
+                positions.push((pointer.x, pointer.y, pointer.at_us));
+            }
+        }
+        positions
+    }
+}
+
+fn compact_window_pointer(samples: &mut Vec<WindowPointerSample>) {
+    if samples.len() <= MAX_WINDOW_CURSOR_SAMPLES {
+        return;
+    }
+    let last = samples.len() - 1;
+    let mut compacted = Vec::with_capacity(last / 2 + 1);
+    compacted.push(samples[0]);
+    compacted.extend(
+        samples
+            .iter()
+            .enumerate()
+            .skip(2)
+            .take(last.saturating_sub(2))
+            .filter_map(|(index, sample)| (index % 2 == 0).then_some(*sample)),
+    );
+    compacted.push(samples[last]);
+    *samples = compacted;
+}
 
 #[derive(Debug, Default)]
 pub(super) struct RecordingTimeline {
@@ -9,11 +153,76 @@ pub(super) struct RecordingTimeline {
     pauses: Vec<(i64, i64)>,
     paused_at: Option<i64>,
     keep_pause_duration: bool,
+    window_cursor: Option<WindowCursorTrack>,
 }
 
 impl RecordingTimeline {
     pub(super) fn retain_live_audio_pauses(&mut self) {
         self.keep_pause_duration = true;
+    }
+
+    pub(super) fn enable_window_cursor(&mut self, width: u32, height: u32) {
+        self.window_cursor = Some(WindowCursorTrack {
+            width,
+            height,
+            ..WindowCursorTrack::default()
+        });
+    }
+
+    pub(super) fn record_window_cursor(&mut self, at_us: i64, position: Option<(f64, f64)>) {
+        if let Some(track) = self.window_cursor.as_mut() {
+            track.record(at_us, position);
+        }
+    }
+
+    pub(super) fn window_cursor_positions_at(&self, at_us: i64) -> Vec<(f64, f64, i64)> {
+        self.window_cursor
+            .as_ref()
+            .map_or_else(Vec::new, |track| track.positions_at(at_us))
+    }
+
+    pub(super) fn add_window_cursor_to_sidecar(
+        &self,
+        sidecar: &mut PointerSidecar,
+        origin_us: i64,
+    ) -> bool {
+        let Some(track) = self.window_cursor.as_ref() else {
+            return false;
+        };
+        if track.pointer.is_empty() {
+            return false;
+        }
+        sidecar.region = CaptureRegion {
+            x: 0,
+            y: 0,
+            w: track.width,
+            h: track.height,
+        };
+        sidecar.source = PointerDataSource::WindowMetadata;
+        sidecar.pointer = track
+            .pointer
+            .iter()
+            .map(|sample| PointerSample {
+                t: sample.at_us.saturating_sub(origin_us) as f64 / 1_000_000.0,
+                x: sample.x,
+                y: sample.y,
+                kind: CursorKind::Default,
+            })
+            .collect();
+        sidecar.visibility = track
+            .visibility
+            .iter()
+            .map(|sample| CursorVisibilitySample {
+                t: sample.at_us.saturating_sub(origin_us) as f64 / 1_000_000.0,
+                visible: sample.visible,
+                hold_until_next: false,
+            })
+            .collect();
+        true
+    }
+
+    pub(super) fn origin_us(&self) -> Option<i64> {
+        self.origin_us
     }
 
     pub(super) fn frame_time_us(&mut self, now_us: i64) -> u64 {
@@ -109,6 +318,68 @@ impl RecordingTimeline {
             }
         }
         sidecar.pointer = pointer;
+        let mut visibility = Vec::with_capacity(sidecar.visibility.len() + self.pauses.len());
+        for &(start, end) in &spans {
+            if self.keep_pause_duration {
+                if let Some(previous) = sidecar
+                    .visibility
+                    .iter()
+                    .rev()
+                    .find(|sample| sample.t.is_finite() && absolute(sample.t) <= start)
+                {
+                    let mut hold = *previous;
+                    hold.t = mapped(start) - 0.000001;
+                    hold.hold_until_next = true;
+                    if hold.t >= 0.0 {
+                        visibility.push(hold);
+                    }
+                }
+            }
+            if let Some(sample) = sidecar
+                .visibility
+                .iter()
+                .rev()
+                .find(|sample| sample.t.is_finite() && absolute(sample.t) <= start)
+            {
+                let mut sample = *sample;
+                sample.t = mapped(start);
+                sample.hold_until_next = false;
+                visibility.push(sample);
+            }
+            for sample in &sidecar.visibility {
+                let at = absolute(sample.t);
+                if sample.t.is_finite() && at > start && at < end {
+                    let mut sample = *sample;
+                    sample.t = mapped(at);
+                    visibility.push(sample);
+                }
+            }
+        }
+        let mut compacted_visibility = Vec::with_capacity(visibility.len());
+        for sample in visibility {
+            if compacted_visibility
+                .last()
+                .is_none_or(|previous: &CursorVisibilitySample| {
+                    (previous.visible, previous.hold_until_next)
+                        != (sample.visible, sample.hold_until_next)
+                })
+            {
+                compacted_visibility.push(sample);
+            }
+        }
+        sidecar.visibility = compacted_visibility;
+        if sidecar.source == PointerDataSource::WindowMetadata
+            && sidecar
+                .visibility
+                .last()
+                .is_some_and(|sample| sample.visible)
+        {
+            sidecar.visibility.push(CursorVisibilitySample {
+                t: mapped(end),
+                visible: false,
+                hold_until_next: false,
+            });
+        }
         sidecar.clicks.retain_mut(|click| {
             let at = absolute(click.t);
             if !click.t.is_finite() || !spans.iter().any(|&(start, end)| at >= start && at < end) {
@@ -326,6 +597,222 @@ mod tests {
         assert!(new.rebase(&mut sidecar));
         assert_eq!(sidecar.clicks, vec![click(0.5)]);
         assert!(sidecar.presses.is_empty());
+    }
+
+    #[test]
+    fn window_cursor_visibility_rebases_across_removed_pause_intervals() {
+        let mut clock = RecordingTimeline::default();
+        clock.enable_window_cursor(100, 80);
+        clock.frame_time_us(2_000_000);
+        clock.record_window_cursor(2_000_000, Some((10.0, 10.0)));
+        clock.record_window_cursor(3_000_000, Some((20.0, 20.0)));
+        clock.pause(4_000_000);
+        clock.resume(5_000_000);
+        clock.record_window_cursor(6_000_000, None);
+        clock.finish(7_000_000);
+
+        let mut sidecar = PointerSidecar::new(
+            1_000_000,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 80,
+            },
+        );
+        assert!(clock.add_window_cursor_to_sidecar(&mut sidecar, 1_000_000));
+        assert!(clock.rebase(&mut sidecar));
+        assert_eq!(
+            sidecar.visibility,
+            vec![
+                CursorVisibilitySample {
+                    t: 0.0,
+                    visible: true,
+                    hold_until_next: false,
+                },
+                CursorVisibilitySample {
+                    t: 3.0,
+                    visible: false,
+                    hold_until_next: false,
+                },
+            ]
+        );
+        assert!(sidecar
+            .presented_at(0.1, super::super::editor::sidecar::CursorMotion::default())
+            .is_some());
+        assert_eq!(
+            sidecar.motion_position_at(0.3, 0.0, 1.0),
+            Some((10.0, 10.0))
+        );
+        assert_eq!(
+            sidecar.motion_position_at(2.99, 0.0, 1.0),
+            Some((20.0, 20.0))
+        );
+        assert!(sidecar.motion_position_at(3.0, 0.0, 1.0).is_none());
+    }
+
+    #[test]
+    fn retained_pause_holds_keep_window_cursor_visible_until_resume() {
+        let mut clock = RecordingTimeline::default();
+        clock.retain_live_audio_pauses();
+        clock.enable_window_cursor(100, 80);
+        clock.frame_time_us(1_000_000);
+        clock.record_window_cursor(1_000_000, Some((10.0, 10.0)));
+        clock.record_window_cursor(2_000_000, Some((20.0, 20.0)));
+        clock.pause(3_000_000);
+        clock.resume(5_000_000);
+        clock.record_window_cursor(6_000_000, Some((30.0, 30.0)));
+        clock.finish(7_000_000);
+
+        let mut sidecar = PointerSidecar::new(
+            1_000_000,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 80,
+            },
+        );
+        assert!(clock.add_window_cursor_to_sidecar(&mut sidecar, 1_000_000));
+        assert!(clock.rebase(&mut sidecar));
+
+        assert!(sidecar
+            .presented_at(2.0, super::super::editor::sidecar::CursorMotion::default())
+            .is_some());
+        assert!(sidecar
+            .visibility
+            .iter()
+            .any(|sample| sample.hold_until_next));
+    }
+
+    #[test]
+    fn window_cursor_click_positions_bracket_nearby_samples_and_reset_on_reentry() {
+        let mut clock = RecordingTimeline::default();
+        clock.enable_window_cursor(100, 80);
+        clock.record_window_cursor(1_000_000, Some((10.0, 10.0)));
+        clock.record_window_cursor(1_016_000, Some((20.0, 20.0)));
+        clock.record_window_cursor(1_032_000, None);
+        clock.record_window_cursor(1_040_000, Some((30.0, 30.0)));
+        clock.record_window_cursor(2_000_000, None);
+
+        assert_eq!(
+            clock.window_cursor_positions_at(1_008_000),
+            vec![(10.0, 10.0, 1_000_000), (20.0, 20.0, 1_016_000)]
+        );
+        assert!(clock.window_cursor_positions_at(1_035_000).is_empty());
+        assert_eq!(
+            clock.window_cursor_positions_at(1_040_000),
+            vec![(30.0, 30.0, 1_040_000)]
+        );
+    }
+
+    #[test]
+    fn recording_end_bounds_the_final_window_cursor_visibility_interval() {
+        let mut clock = RecordingTimeline::default();
+        clock.enable_window_cursor(100, 80);
+        clock.frame_time_us(1_000_000);
+        clock.record_window_cursor(1_000_000, Some((10.0, 10.0)));
+        clock.finish(2_000_000);
+
+        let mut sidecar = PointerSidecar::new(
+            1_000_000,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 80,
+            },
+        );
+        assert!(clock.add_window_cursor_to_sidecar(&mut sidecar, 1_000_000));
+        assert!(clock.rebase(&mut sidecar));
+
+        assert_eq!(
+            sidecar.visibility.last(),
+            Some(&CursorVisibilitySample {
+                t: 1.0,
+                visible: false,
+                hold_until_next: false,
+            })
+        );
+        assert_eq!(
+            sidecar.motion_position_at(0.9, 0.0, 1.0),
+            Some((10.0, 10.0))
+        );
+        assert!(sidecar.motion_position_at(1.0, 0.0, 1.0).is_none());
+    }
+
+    #[test]
+    fn window_cursor_pause_rebase_preserves_visibility_on_both_sides_of_resume() {
+        let mut clock = RecordingTimeline::default();
+        clock.retain_live_audio_pauses();
+        clock.enable_window_cursor(100, 80);
+        clock.frame_time_us(1_000_000);
+        clock.record_window_cursor(1_000_000, Some((10.0, 10.0)));
+        clock.record_window_cursor(2_000_000, Some((20.0, 20.0)));
+        clock.pause(3_000_000);
+        clock.resume(5_000_000);
+        clock.record_window_cursor(6_000_000, Some((30.0, 30.0)));
+        clock.finish(7_000_000);
+
+        let mut sidecar = PointerSidecar::new(
+            1_000_000,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 80,
+            },
+        );
+        assert!(clock.add_window_cursor_to_sidecar(&mut sidecar, 1_000_000));
+        assert!(clock.rebase(&mut sidecar));
+
+        assert_eq!(
+            sidecar.motion_position_at(1.999, 0.0, 1.0),
+            Some((20.0, 20.0))
+        );
+        assert_eq!(
+            sidecar.motion_position_at(2.0, 0.0, 1.0),
+            Some((20.0, 20.0))
+        );
+        assert_eq!(
+            sidecar.motion_position_at(3.999, 0.0, 1.0),
+            Some((20.0, 20.0))
+        );
+        assert_eq!(
+            sidecar.motion_position_at(4.0, 0.0, 1.0),
+            Some((20.0, 20.0))
+        );
+    }
+
+    #[test]
+    fn window_cursor_compaction_keeps_the_full_recording_end_after_133_seconds() {
+        let origin_us = 1_000_000;
+        let mut clock = RecordingTimeline::default();
+        clock.enable_window_cursor(100, 80);
+        clock.frame_time_us(origin_us);
+        for index in 0..10_000 {
+            clock.record_window_cursor(
+                origin_us + index * 16_667,
+                Some((index as f64, (index % 80) as f64)),
+            );
+        }
+        clock.finish(origin_us + 10_000 * 16_667);
+        let mut sidecar = PointerSidecar::new(
+            origin_us,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 80,
+            },
+        );
+        assert!(clock.add_window_cursor_to_sidecar(&mut sidecar, origin_us));
+        assert_eq!(sidecar.pointer.len(), 10_000);
+        sidecar.compact_samples();
+
+        assert!(sidecar.pointer.len() <= MAX_POINTER_SAMPLES);
+        assert_eq!(sidecar.pointer.first().unwrap().x, 0.0);
+        assert_eq!(sidecar.pointer.last().unwrap().x, 9_999.0);
     }
 
     #[test]

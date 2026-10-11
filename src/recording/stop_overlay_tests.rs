@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::recording::stop_overlay::{
-        can_show_bar_outside_capture, display_bounds_from_monitor_geometries,
-        monitor_index_for_capture_from_geometries, RecordingControlsParams,
+        can_show_bar_outside_capture, countdown_monitor_index_from_geometries,
+        display_bounds_from_monitor_geometries, monitor_index_for_capture_from_geometries,
+        RecordingControlsParams,
     };
 
     #[test]
@@ -92,6 +93,22 @@ mod tests {
         };
         assert_eq!(
             monitor_index_for_capture_from_geometries(&geometries, &params),
+            None
+        );
+    }
+
+    #[test]
+    fn countdown_without_target_geometry_uses_display_origin_or_first_monitor() {
+        assert_eq!(
+            countdown_monitor_index_from_geometries(&[(-1600, 0, 1600, 900), (0, 0, 1920, 1080),]),
+            Some(1)
+        );
+        assert_eq!(
+            countdown_monitor_index_from_geometries(&[(-1600, -900, 1600, 900)]),
+            Some(0)
+        );
+        assert_eq!(
+            countdown_monitor_index_from_geometries(&[(0, 0, 0, 0)]),
             None
         );
     }

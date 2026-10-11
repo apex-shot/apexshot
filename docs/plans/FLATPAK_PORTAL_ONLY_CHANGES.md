@@ -42,6 +42,10 @@ dialog after rejection. Native backend ordering is unchanged.
 Wayland video recording uses ScreenCast and the portal-authorized PipeWire FD.
 Sandbox builds do not enable `wf-recorder` or experimental compositor-private
 recording, even when their native opt-in environment flags are present.
+Window recording asks the portal for a window-only source and consumes its
+PipeWire stream directly; it does not use the still-window picker or crop a
+monitor stream, and it never reuses monitor restore tokens. The selection
+dialog completes before the recording countdown.
 Area recording crops the authorized stream inside ApexShot.
 
 ## Desktop integration
