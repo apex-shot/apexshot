@@ -624,7 +624,7 @@ apexshot/
 ├── packaging/              # Desktop files, icons, deb/arch/fedora/opensuse assets
 ├── scripts/                # Installers, updaters, RPM helpers
 ├── tests/                  # Integration tests
-├── docs/                   # Architecture, module, and developer docs
+├── docs/                   # Reference docs (+ docs/README.md index); plans/ for active plans
 ├── build.rs                # Build script (CMake C++ overlay + icon bundling)
 └── Cargo.toml              # Rust dependencies and package metadata
 ```

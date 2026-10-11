@@ -12,7 +12,7 @@ Team leads, measurement scorecard, workspace API/web UI, billing, domains, and
 SSO live in the sibling cloud plan. Shared product decisions and gates are
 repeated here so this file stands alone.
 
-Detailed original Flatpak audit: `docs/FLATHUB_LAUNCH_PLAN.md`. Some quick wins
+Detailed original Flatpak audit: `docs/plans/FLATHUB_LAUNCH_PLAN.md`. Some quick wins
 in it are now complete, but its sandbox blockers remain valid.
 
 ---
@@ -79,7 +79,7 @@ reliability work only.
 - The application currently depends on host commands, direct portal permission
   manipulation, system installation paths, a Qt/X11 helper, autostart files, and
   browser native messaging. A Flatpak must not preserve those assumptions.
-- `docs/FLATHUB_LAUNCH_PLAN.md` contains the detailed original audit. Some quick
+- `docs/plans/FLATHUB_LAUNCH_PLAN.md` contains the detailed original audit. Some quick
   wins in it are now complete, but its sandbox blockers remain valid.
 
 ### Baseline caution
