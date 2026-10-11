@@ -581,17 +581,20 @@ mod tests {
             MotionAppearance, MotionBackgroundFillType, MotionFrame, MotionSceneShadow,
             MotionSceneShadowPlacement, MotionSceneShadowPreset,
         };
-        let mut appearance = MotionAppearance::default();
-        appearance.background_fill_type = MotionBackgroundFillType::Color;
-        appearance.background_color = [1.0, 1.0, 1.0, 1.0];
-        // 200px source makes the composition's scale factor 0.5, so this is a
-        // 25px fill band: a real fill corner and a real card center to sample.
-        appearance.background_padding = 50.0;
+        let appearance = MotionAppearance {
+            background_fill_type: MotionBackgroundFillType::Color,
+            background_color: [1.0, 1.0, 1.0, 1.0],
+            // 200px source makes the composition's scale factor 0.5, so this is a
+            // 25px fill band: a real fill corner and a real card center to sample.
+            background_padding: 50.0,
+            ..Default::default()
+        };
 
-        let mut shadow = MotionSceneShadow::default();
-        shadow.preset = MotionSceneShadowPreset::Vignette;
-        shadow.opacity = 1.0;
-        shadow.placement = MotionSceneShadowPlacement::Underlay;
+        let shadow = MotionSceneShadow {
+            preset: MotionSceneShadowPreset::Vignette,
+            opacity: 1.0,
+            placement: MotionSceneShadowPlacement::Underlay,
+        };
 
         let mut state = EditorState::new(image::RgbaImage::from_pixel(
             200,

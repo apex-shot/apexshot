@@ -30,7 +30,10 @@ fn is_ram_backed(path: &Path) -> bool {
     #[cfg(target_os = "linux")]
     {
         use std::os::unix::ffi::OsStrExt;
-        const TMPFS_MAGIC: i64 = 0x0102_1994;
+        // Linux exposes `f_type` as `__fsword_t`: `i64` on 64-bit, `i32` on
+        // 32-bit. Normalising both to `u64` is a no-op on the former and a
+        // widening on the latter, so neither target trips a cast lint.
+        const TMPFS_MAGIC: u64 = 0x0102_1994;
         let Ok(raw) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
             return false;
         };
@@ -38,7 +41,7 @@ fn is_ram_backed(path: &Path) -> bool {
         if unsafe { libc::statfs(raw.as_ptr(), &mut buf) } != 0 {
             return false;
         }
-        buf.f_type as i64 == TMPFS_MAGIC
+        buf.f_type as u64 == TMPFS_MAGIC
     }
     #[cfg(not(target_os = "linux"))]
     {

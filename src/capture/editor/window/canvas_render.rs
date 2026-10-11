@@ -671,7 +671,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             // fill reads as film grain, matching the Motion preview and export.
             if has_background {
                 paint_background_noise(
-                    &context,
+                    context,
                     canvas_t.offset_x,
                     canvas_t.offset_y,
                     virtual_w * canvas_t.scale,
@@ -681,7 +681,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 // Scene Shadows underlay: over the fill, under the card, its
                 // backings and its drop shadow. No fill means no scene to read
                 // the shading against (the inspector says so), so it is skipped.
-                paint_motion_scene_shadow(&context, scene_stage, &scene_shadow, true);
+                paint_motion_scene_shadow(context, scene_stage, &scene_shadow, true);
             }
 
             if liquid_group {
@@ -1054,7 +1054,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         // to view space for the pass, then carry on in image space.
         let _ = context.restore();
         if has_background {
-            paint_motion_scene_shadow(&context, scene_stage, &scene_shadow, false);
+            paint_motion_scene_shadow(context, scene_stage, &scene_shadow, false);
         }
         let _ = context.save();
         context.translate(t.offset_x, t.offset_y);
