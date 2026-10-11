@@ -15,6 +15,7 @@
 /capture-overlay/out/
 .tmp-capture-overlay-build/
 apexshot-gnome-integration@apexshot.github.io.zip
+apexshot-gnome-integration@apexshot.github.io.shell-extension.zip
 /gnome-extension/apexshot-gnome-integration.zip
 /web-scroll-extension/apexshot-web-scroll-extension.zip
 /packaging/deb/apexshot-capture
@@ -88,6 +89,8 @@ reddit-opensource-post.md
 reddit-reply.txt
 src/capture/editor/window-refactor-plan.md
 docs/superpowers/
+docs/DEAD_CODE_AND_QUALITY_AUDIT.md
+docs/ZOOM_TOOL_IMPROVEMENT_PLAN.md
 CLICK_KEYSTROKE_REMOVAL_PLAN.md
 CLICK_KEYSTROKE_REMOVAL_IMPLEMENTATION_PLAN.md
 fedora-kde-reply.txt
