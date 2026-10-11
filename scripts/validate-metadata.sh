@@ -23,7 +23,11 @@ for f in "${desktop_files[@]}"; do
     desktop-file-validate "$f"
 done
 
-echo "appstreamcli validate $metainfo"
-appstreamcli validate "$metainfo"
+# --no-net keeps validation deterministic: the URL/screenshot reachability
+# checks hit GitHub and fail on transient 5xx responses (the bugtracker URL
+# has flaked with a 504), turning a metadata-structure check into a flaky
+# network probe. We validate the file's content, not the network's uptime.
+echo "appstreamcli validate --no-net $metainfo"
+appstreamcli validate --no-net "$metainfo"
 
 echo "Metadata validation OK"
