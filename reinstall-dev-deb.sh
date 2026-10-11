@@ -108,8 +108,9 @@ cmp "$ROOT_DIR/target/release/apexshot-capture" "$ROOT_DIR/packaging/deb/apexsho
 echo "→ cargo-deb (reuse existing release binaries)"
 deb_start=$SECONDS
 # `--fast` trades .deb size for speed; this package is for local testing, and
-# xz at the default level is ~1/6 of the run's remaining wall clock.
-cargo deb --no-build --fast
+# xz at the default level is ~1/6 of the run's remaining wall clock. Go through
+# the packaging entrypoint so the bundled gtk4-layer-shell asset gets staged.
+"$ROOT_DIR/scripts/package-deb.sh" --no-build --fast
 deb_seconds=$((SECONDS - deb_start))
 
 shopt -s nullglob

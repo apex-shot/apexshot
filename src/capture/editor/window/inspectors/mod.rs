@@ -11,7 +11,8 @@ mod stroke;
 mod text;
 
 use gtk4::{
-    prelude::*, Box as GtkBox, Button, Image, Label, Orientation, PolicyType, ScrolledWindow, Stack,
+    prelude::*, Box as GtkBox, Button, Image, Label, Orientation, PolicyType, ScrolledWindow,
+    Spinner, Stack,
 };
 
 use super::icon_names;
@@ -73,6 +74,7 @@ pub(super) struct InspectorContentInputs<'a> {
     pub copy_btn: &'a Button,
     pub upload_btn: &'a Button,
     pub save_btn: &'a Button,
+    pub save_spinner: &'a Spinner,
 }
 
 pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> InspectorParts {
@@ -232,6 +234,7 @@ pub(super) fn build_tool_inspectors(input: InspectorContentInputs<'_>) -> Inspec
     sidebar_actions.append(input.copy_btn);
     sidebar_actions.append(input.upload_btn);
     sidebar_actions.append(&sidebar_action_spacer);
+    sidebar_actions.append(input.save_spinner);
     sidebar_actions.append(input.save_btn);
     inspector.append(&sidebar_actions);
 

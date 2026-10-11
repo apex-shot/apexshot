@@ -2,6 +2,10 @@
 
 `CONTRIBUTING.md` has the setup, subsystem map, and style rules.
 
+> **Maintainer-local agreement:** if `AGENTS.local.md` exists in the repository root,
+> read it and follow it before starting work. It is untracked and holds the maintainer's
+> environment, delegation, testing, and delivery preferences for this repository.
+
 ## Branches
 
 Small, self-contained change (docs, strings, a one-off fix): commit to `main`.

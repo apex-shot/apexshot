@@ -1,4 +1,4 @@
-use gtk4::{glib, prelude::*, Application, ApplicationWindow, Button};
+use gtk4::{glib, prelude::*, Application, ApplicationWindow, Button, Spinner};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -38,6 +38,7 @@ pub(super) fn wire_output_lifecycle(
     copy_btn: &Button,
     upload_btn: &Button,
     save_btn: &Button,
+    save_spinner: &Spinner,
     traffic_close: &Button,
     in_motion: Rc<Cell<bool>>,
     export_motion: Rc<dyn Fn() -> Result<PathBuf, String>>,
@@ -157,6 +158,9 @@ pub(super) fn wire_output_lifecycle(
     let app_save = app.downgrade();
     let save_chooser: Rc<RefCell<Option<gtk4::FileChooserNative>>> = Rc::new(RefCell::new(None));
     let save_chooser_open = Rc::new(Cell::new(false));
+    let done_busy = Rc::new(Cell::new(false));
+    let done_spinner = save_spinner.clone();
+    let save_btn_click = save_btn.clone();
     save_btn.connect_clicked(move |_| {
         let state_save = state_save.clone();
         let path_save = path_save.clone();
@@ -166,36 +170,50 @@ pub(super) fn wire_output_lifecycle(
         let export_motion = export_motion.clone();
         let save_chooser = save_chooser.clone();
         let save_chooser_open = save_chooser_open.clone();
+        let done_busy = done_busy.clone();
+        let done_spinner = done_spinner.clone();
+        let save_btn_click = save_btn_click.clone();
         glib::idle_add_local_once(move || {
+            if done_busy.get() {
+                return;
+            }
+
             if in_motion.get() {
-                if let Some(window) = window_save.upgrade() {
-                    window.set_visible(false);
-                }
-                match export_motion() {
-                    Ok(video_path) => {
-                        let _ = persist_image_session(&path_save, &state_save.lock().unwrap());
-                        crate::utils::notify::desktop_notification(
-                            &crate::i18n::t("Export complete"),
-                            &video_path.display().to_string(),
-                        );
-                        if let Some(window) = window_save.upgrade() {
-                            window.close();
+                done_busy.set(true);
+                save_btn_click.set_sensitive(false);
+                done_spinner.set_visible(true);
+                done_spinner.start();
+                // One frame for the spinner before the export blocks the main
+                // loop; the window stays up so the spin is visible.
+                glib::timeout_add_local_once(
+                    Duration::from_millis(50),
+                    move || match export_motion() {
+                        Ok(video_path) => {
+                            let _ = persist_image_session(&path_save, &state_save.lock().unwrap());
+                            crate::utils::notify::desktop_notification(
+                                &crate::i18n::t("Export complete"),
+                                &video_path.display().to_string(),
+                            );
+                            if let Some(window) = window_save.upgrade() {
+                                window.close();
+                            }
+                            if let Some(app) = app_save.upgrade() {
+                                app.quit();
+                            }
                         }
-                        if let Some(app) = app_save.upgrade() {
-                            app.quit();
+                        Err(error) => {
+                            eprintln!("Failed to export Motion video: {error}");
+                            crate::utils::notify::desktop_notification_important(
+                                &crate::i18n::t("Export failed"),
+                                &error,
+                            );
+                            done_busy.set(false);
+                            done_spinner.stop();
+                            done_spinner.set_visible(false);
+                            save_btn_click.set_sensitive(true);
                         }
-                    }
-                    Err(error) => {
-                        eprintln!("Failed to export Motion video: {error}");
-                        crate::utils::notify::desktop_notification_important(
-                            &crate::i18n::t("Export failed"),
-                            &error,
-                        );
-                        if let Some(window) = window_save.upgrade() {
-                            window.set_visible(true);
-                        }
-                    }
-                }
+                    },
+                );
                 return;
             }
 
@@ -204,24 +222,30 @@ pub(super) fn wire_output_lifecycle(
             }
 
             if !done_needs_save_chooser(&path_save) {
-                if let Some(window) = window_save.upgrade() {
-                    window.set_visible(false);
-                }
-                let save_result = {
-                    let state = state_save.lock().unwrap();
-                    save_edited_image(&path_save, &state)
-                };
-                match save_result {
-                    Ok(()) => {
-                        finish_image_session(&state_save, &path_save, &window_save, &app_save)
-                    }
-                    Err(error) => {
-                        eprintln!("Failed to save edited image: {error}");
-                        if let Some(window) = window_save.upgrade() {
-                            window.set_visible(true);
+                done_busy.set(true);
+                save_btn_click.set_sensitive(false);
+                done_spinner.set_visible(true);
+                done_spinner.start();
+                // One frame for the spinner before the flatten blocks the main
+                // loop.
+                glib::timeout_add_local_once(Duration::from_millis(50), move || {
+                    let save_result = {
+                        let state = state_save.lock().unwrap();
+                        save_edited_image(&path_save, &state)
+                    };
+                    match save_result {
+                        Ok(()) => {
+                            finish_image_session(&state_save, &path_save, &window_save, &app_save)
+                        }
+                        Err(error) => {
+                            eprintln!("Failed to save edited image: {error}");
+                            done_busy.set(false);
+                            done_spinner.stop();
+                            done_spinner.set_visible(false);
+                            save_btn_click.set_sensitive(true);
                         }
                     }
-                }
+                });
                 return;
             }
 

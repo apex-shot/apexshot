@@ -2,10 +2,11 @@
 //!
 //! One implementation feeds the static canvas, the static export, and the
 //! Motion compositor so a fill reads the same in every preview: a
-//! deterministic speckle field painted over the background only. The captured
-//! card is composited on top of it afterwards, so the screenshot stays clean.
+//! deterministic speckle field overlay-blended into the background only,
+//! preserving its average color rather than pulling it toward gray. The
+//! captured card is composited on top afterwards, so the screenshot stays clean.
 
-use gtk4::cairo::{Context, Extend, Filter, Format, ImageSurface, SurfacePattern};
+use gtk4::cairo::{Context, Extend, Filter, Format, ImageSurface, Operator, SurfacePattern};
 use image::{Rgba, RgbaImage};
 use std::cell::RefCell;
 
@@ -111,6 +112,7 @@ pub fn paint_background_noise(
     context.rectangle(x, y, width, height);
     context.clip();
     context.translate(x, y);
+    context.set_operator(Operator::Overlay);
     let _ = context.set_source(&pattern);
     let _ = context.paint();
     let _ = context.restore();
@@ -271,5 +273,54 @@ mod tests {
             .any(|(after, before)| after != before);
         assert!(differs, "the exported canvas must carry grain");
         assert_eq!(grained.get_pixel(0, 0)[3], 255, "grain stays opaque");
+    }
+
+    #[test]
+    fn grain_preserves_dark_light_and_saturated_background_colors() {
+        for rgb in [[18, 18, 18], [237, 237, 237], [240, 24, 64], [24, 56, 240]] {
+            let canvas =
+                RgbaImage::from_pixel(TILE_SIZE, TILE_SIZE, Rgba([rgb[0], rgb[1], rgb[2], 255]));
+            for amount in [0.3, 1.0] {
+                let grained = apply_background_noise(canvas.clone(), amount);
+                for (channel, base) in rgb.into_iter().enumerate() {
+                    let mean = grained
+                        .pixels()
+                        .map(|pixel| f64::from(pixel[channel]))
+                        .sum::<f64>()
+                        / f64::from(TILE_SIZE * TILE_SIZE);
+                    assert!(
+                        (mean - f64::from(base)).abs() < 1.0,
+                        "grain must preserve {rgb:?} at {amount}, channel {channel} averaged {mean}",
+                    );
+                    assert!(
+                        grained.pixels().any(|pixel| pixel[channel] < base)
+                            && grained.pixels().any(|pixel| pixel[channel] > base),
+                        "grain must vary both sides of the background color",
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn grain_does_not_turn_black_or_white_into_gray() {
+        for value in [0, 255] {
+            let canvas = RgbaImage::from_pixel(64, 64, Rgba([value, value, value, 255]));
+            assert!(
+                apply_background_noise(canvas, 1.0)
+                    .pixels()
+                    .all(|pixel| *pixel == Rgba([value, value, value, 255])),
+                "grain must not add a gray cast to {value}",
+            );
+        }
+    }
+
+    #[test]
+    fn painting_grain_restores_the_callers_operator() {
+        let surface = ImageSurface::create(Format::ARgb32, 32, 32).unwrap();
+        let context = Context::new(&surface).unwrap();
+        context.set_operator(Operator::Source);
+        paint_background_noise(&context, 0.0, 0.0, 32.0, 32.0, 1.0);
+        assert_eq!(context.operator(), Operator::Source);
     }
 }

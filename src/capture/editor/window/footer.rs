@@ -1,4 +1,4 @@
-use gtk4::{prelude::*, Box as GtkBox, Button, Label, Orientation};
+use gtk4::{prelude::*, Box as GtkBox, Button, Label, Orientation, Spinner};
 
 use super::super::ui_support::footer_icon_button;
 use crate::i18n::t;
@@ -17,6 +17,7 @@ pub(super) struct FooterParts {
     pub copy_btn: Button,
     pub upload_btn: Button,
     pub save_btn: Button,
+    pub save_spinner: Spinner,
 }
 
 fn build_zoom_row(label: &str, shortcut: &str) -> (Button, GtkBox) {
@@ -115,6 +116,11 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     save_btn.add_css_class("body");
     save_btn.set_valign(gtk4::Align::Center);
 
+    let save_spinner = Spinner::new();
+    save_spinner.set_size_request(12, 12);
+    save_spinner.set_visible(false);
+    save_spinner.set_valign(gtk4::Align::Center);
+
     FooterParts {
         zoom_button,
         zoom_label,
@@ -129,5 +135,6 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
         copy_btn,
         upload_btn,
         save_btn,
+        save_spinner,
     }
 }

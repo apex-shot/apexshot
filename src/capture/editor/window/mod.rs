@@ -1235,6 +1235,7 @@ fn setup_editor_window_full(
     let copy_btn = footer_parts.copy_btn;
     let upload_btn = footer_parts.upload_btn;
     let save_btn = footer_parts.save_btn;
+    let save_spinner = footer_parts.save_spinner;
     copy_btn.add_css_class("editor-sidebar-action-button");
     upload_btn.add_css_class("editor-sidebar-action-button");
     if empty_drop_zone {
@@ -1577,6 +1578,7 @@ fn setup_editor_window_full(
         copy_btn: &copy_btn,
         upload_btn: &upload_btn,
         save_btn: &save_btn,
+        save_spinner: &save_spinner,
     });
 
     // Canvas fills the pane (checkerboard). Toolbar + drag strip float on top;
@@ -2675,6 +2677,7 @@ fn setup_editor_window_full(
         redo_btn: redo_btn.clone(),
         delete_selected_btn: delete_selected_btn.clone(),
         save_btn: save_btn.clone(),
+        save_spinner: save_spinner.clone(),
         eyedropper: eyedropper.clone(),
         update_toolbar_for_tool: update_toolbar_for_tool.clone(),
         update_canvas_content_size: update_canvas_content_size.clone(),
