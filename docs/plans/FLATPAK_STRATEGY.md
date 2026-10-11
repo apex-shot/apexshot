@@ -95,7 +95,7 @@ Do not claim browser parity without testing the browser's packaging too.
 
 ## Distribution and publication
 
-[flatpak/README.md](../flatpak/README.md) describes the local build/install path.
+[flatpak/README.md](../../flatpak/README.md) describes the local build/install path.
 The development manifest is not a Flathub submission: it uses the working tree
 and includes AI-assisted packaging work. Current Flathub requirements prohibit
 AI-assisted manifests and require disclosure of affected generated app material.

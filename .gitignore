@@ -62,6 +62,7 @@ Thumbs.db
 
 # Tool caches
 .antigravitycli/
+.codebase-memory/
 
 # Cache
 .cache/
@@ -103,7 +104,6 @@ spectacle/
 webcut/
 /Recordly/
 .antigravitycli/
-reinstall-dev-deb.sh
 .tmp-inspect/
 tiny.png
 # Agent local memory

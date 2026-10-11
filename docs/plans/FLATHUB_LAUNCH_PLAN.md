@@ -320,7 +320,7 @@ flatpak run --command=sh org.apexshot.ApexShot   # poke around the sandbox
   (`packaging/fedora/apexshot.spec`, `packaging/opensuse/apexshot.spec`). Cheap wins
   once the metainfo exists.
 - Announce the Flathub availability on r/linux, r/gnome, r/unixporn, and Hacker News.
-  Your `ANNOUNCEMENTS.md` drafts are reusable, but update them: they still advertise
+  Your [`ANNOUNCEMENTS.md`](../ANNOUNCEMENTS.md) drafts are reusable, but update them: they still advertise
   the removed click-overlay/keystroke-overlay features and webcam PiP.
 - **Fix the Fedora recording gap or stop shipping the Fedora path as primary.**
   "Video recording is not supported on Fedora" is a large asterisk on one of the
