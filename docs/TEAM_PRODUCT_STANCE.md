@@ -65,7 +65,7 @@ Working price to test in discovery: **~$15/seat/month** (not hard-coded before v
 - No moving existing personal uploads into a workspace silently.
 - No desktop billing, SSO admin, or custom-domain admin.
 
-See `APEXSHOT_DESKTOP_IMPLEMENTATION_PLAN.md` §11 (desktop workspace support) and the sibling cloud plan for the full gate table.
+See `plans/APEXSHOT_DESKTOP_IMPLEMENTATION_PLAN.md` §11 (desktop workspace support) and the sibling cloud plan for the full gate table.
 
 ---
 
@@ -80,7 +80,7 @@ If it doesn’t clear the bar, you didn’t waste a year on admin UI — you lea
 
 ## Related docs
 
-- `docs/FLATPAK_STRATEGY.md` — native primary, Flatpak side channel  
-- `docs/FLATPAK_PORTAL_ONLY_CHANGES.md` — what portal-only code does  
-- `APEXSHOT_DESKTOP_IMPLEMENTATION_PLAN.md` — desktop half of distribution + teams plan  
+- `docs/plans/FLATPAK_STRATEGY.md` — native primary, Flatpak side channel  
+- `docs/plans/FLATPAK_PORTAL_ONLY_CHANGES.md` — what portal-only code does  
+- `plans/APEXSHOT_DESKTOP_IMPLEMENTATION_PLAN.md` — desktop half of distribution + teams plan  
 - Sibling: `apexshot-cloud` team/cloud implementation plan (leads, billing, workspaces)

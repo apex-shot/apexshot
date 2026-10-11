@@ -1,7 +1,7 @@
 # Flatpak acceptance checks
 
 Run these against a disposable desktop VM, not an existing user's capture
-configuration. Build/install instructions are in [flatpak/README.md](../flatpak/README.md).
+configuration. Build/install instructions are in [flatpak/README.md](../../flatpak/README.md).
 This is a test plan, not a claim that every row has passed.
 
 ## GNOME companion installation
