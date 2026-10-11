@@ -115,7 +115,7 @@ fn item_at(x: f64, y: f64) -> Option<usize> {
 }
 
 fn item_is_disabled(index: usize, state: MenuState) -> bool {
-    (state.recording && matches!(index, 3 | 4))
+    (state.recording && index == 4)
         || (!state.recording && index == 2 && state.ocr)
         || (!state.recording && index == 3 && (state.timer_seconds > 0 || state.ocr))
         || (!state.recording && index == 4 && state.timer_seconds > 0)
@@ -702,7 +702,7 @@ mod tests {
             ..shot
         };
         assert!(item_is_active(1, video));
-        assert!(item_is_disabled(3, video));
+        assert!(!item_is_disabled(3, video));
         assert!(item_is_disabled(4, video));
     }
     #[test]

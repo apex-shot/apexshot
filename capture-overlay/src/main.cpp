@@ -189,7 +189,7 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                          bool showCursor, bool rememberSelection,
                          bool dimScreen, bool countdown,
                          int videoFormat, int videoMaxRes, int videoFps, bool recordMono, bool openEditor,
-                         bool fullscreen)
+                         bool fullscreen, bool window = false)
 {
     std::printf("{\"x\":%d,\"y\":%d,\"width\":%d,\"height\":%d,"
                 "\"mode\":\"%s\",\"record_type\":\"%s\","
@@ -204,7 +204,7 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                 "\"remember_selection\":%s,\"dim_screen\":%s,"
                 "\"countdown\":%s,"
                 "\"video_format\":%d,\"video_max_res\":%d,\"video_fps\":%d,"
-                "\"record_mono\":%s,\"open_editor\":%s,\"fullscreen\":%s}\n",
+                "\"record_mono\":%s,\"open_editor\":%s,\"fullscreen\":%s,\"window\":%s}\n",
                 sel.x(), sel.y(), sel.width(), sel.height(),
                 mode,
                 recordType,
@@ -234,7 +234,8 @@ void printRecordingJson(const QRect& sel, const char* mode, const char* recordTy
                 videoFps,
                 recordMono ? "true" : "false",
                 openEditor ? "true" : "false",
-                fullscreen ? "true" : "false");
+                fullscreen ? "true" : "false",
+                window ? "true" : "false");
     std::fflush(stdout);
 }
 
@@ -887,6 +888,57 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
 
     CaptureModeToolbar::Result captureMenuResult;
     if (captureMenuMode) {
+        captureMenuResult = CaptureModeToolbar::choose(&sessionServer);
+        if (captureMenuResult.action == CaptureModeToolbar::Action::Cancel) {
+            sessionServer.close();
+            QLocalServer::removeServer(sessionSocketPath);
+            return 1;
+        }
+
+        waitForOverlayUnmap();
+
+        const auto returnRecordingRequest = [&](const QRect& geometry, bool window) {
+            sessionServer.close();
+            QLocalServer::removeServer(sessionSocketPath);
+            printRecordingJson(geometry,
+                               "record",
+                               "video",
+                               initialRecControls,
+                               captureMenuResult.microphone,
+                               captureMenuResult.speaker,
+                               false,
+                               false,
+                               initialClickSize,
+                               initialClickColor,
+                               initialClickStyle,
+                               initialClickAnimate,
+                               initialKeySize,
+                               initialKeyPosition,
+                               initialKeyAppearance,
+                               initialKeyBlurBg,
+                               initialKeyFilter,
+                               initialDisplayRecTime,
+                               initialHidpi,
+                               initialDoNotDisturb,
+                               initialShowCursor,
+                               initialRememberSelection,
+                               initialDimScreen,
+                               initialShowCountdown,
+                               initialVideoFormat,
+                               initialVideoMaxRes,
+                               initialVideoFps,
+                               initialRecordMono,
+                               initialOpenEditor,
+                               false,
+                               window);
+        };
+
+        if (captureMenuResult.recording
+            && captureMenuResult.action == CaptureModeToolbar::Action::Window) {
+            returnRecordingRequest(QRect(0, 0, 0, 0), true);
+            return 0;
+        }
+
         QScreen* targetScreen = nullptr;
         if (QGuiApplication::screens().size() > 1) {
             targetScreen = MonitorPicker::selectTargetScreen();
@@ -895,62 +947,18 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
                 QLocalServer::removeServer(sessionSocketPath);
                 return 1;
             }
+            waitForOverlayUnmap();
+        } else {
+            targetScreen = QGuiApplication::primaryScreen();
         }
+        captureMenuResult.screen = targetScreen;
 
-        // Choose the display before opening the capture menu, so the menu and
-        // every action it starts stay on the chosen display.
-        captureMenuResult = CaptureModeToolbar::choose(&sessionServer, targetScreen);
-        if (captureMenuResult.action == CaptureModeToolbar::Action::Cancel) {
-            sessionServer.close();
-            QLocalServer::removeServer(sessionSocketPath);
-            return 1;
-        }
-
-        // Hiding a Wayland surface is asynchronous. Wait until the compositor
-        // has committed the toolbar's unmap before requesting the screenshot,
-        // otherwise its final frame can be baked into the captured image.
-        waitForOverlayUnmap();
-
-        // The toolbar has been fully unmapped before any capture API is called.
-        // Display capture can complete immediately; Area and Window continue in
-        // the live selector without taking a freeze image first.
         if (captureMenuResult.action == CaptureModeToolbar::Action::Display) {
             if (captureMenuResult.recording) {
                 const QRect displayGeometry = captureMenuResult.screen
                     ? captureMenuResult.screen->geometry()
                     : QGuiApplication::primaryScreen()->geometry();
-                sessionServer.close();
-                QLocalServer::removeServer(sessionSocketPath);
-                printRecordingJson(displayGeometry,
-                                   "record",
-                                   "video",
-                                   initialRecControls,
-                                   captureMenuResult.microphone,
-                                   captureMenuResult.speaker,
-                                   false,
-                                   false,
-                                   initialClickSize,
-                                   initialClickColor,
-                                   initialClickStyle,
-                                   initialClickAnimate,
-                                   initialKeySize,
-                                   initialKeyPosition,
-                                   initialKeyAppearance,
-                                   initialKeyBlurBg,
-                                   initialKeyFilter,
-                                   initialDisplayRecTime,
-                                   initialHidpi,
-                                   initialDoNotDisturb,
-                                   initialShowCursor,
-                                   initialRememberSelection,
-                                   initialDimScreen,
-                                   initialShowCountdown,
-                                   initialVideoFormat,
-                                   initialVideoMaxRes,
-                                   initialVideoFps,
-                                   initialRecordMono,
-                                   initialOpenEditor,
-                                   false);
+                returnRecordingRequest(displayGeometry, false);
                 return 0;
             }
             QScreen* displayScreen = captureMenuResult.screen

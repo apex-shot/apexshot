@@ -43,8 +43,14 @@ export class PressTracker {
             return;
         this._open.delete(button);
         this._presses.push([press.t, t, button, press.dragged]);
-        if (this._presses.length > MAX_PRESSES)
-            this._presses.shift();
+        if (this._presses.length > MAX_PRESSES) {
+            const lastIndex = this._presses.length - 1;
+            const compacted = [this._presses[0]];
+            for (let i = 2; i < lastIndex; i += 2)
+                compacted.push(this._presses[i]);
+            compacted.push(this._presses[lastIndex]);
+            this._presses = compacted;
+        }
     }
 
     /// Close every still-held press at `t` (recording stopped mid-press).

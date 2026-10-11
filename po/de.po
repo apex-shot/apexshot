@@ -730,6 +730,9 @@ msgstr "Aufnahmeoberfläche öffnen"
 msgid "Record Screen"
 msgstr "Bildschirm aufnehmen"
 
+msgid "Record Window"
+msgstr "Fenster aufnehmen"
+
 msgid "Stop Recording"
 msgstr "Aufnahme stoppen"
 
@@ -1712,6 +1715,9 @@ msgstr "Audio in Mono aufnehmen"
 
 msgid "Recording failed"
 msgstr "Die Aufzeichnung ist fehlgeschlagen"
+
+msgid "Window recording unavailable"
+msgstr "Fensteraufnahme nicht verfügbar"
 
 msgid "Recording not saved"
 msgstr "Aufnahme wurde nicht gespeichert"
@@ -2977,3 +2983,9 @@ msgstr "An deinen Browser gesendet. Falls keine Seite geöffnet wurde, kopiere d
 
 msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
 msgstr "Browser konnte nicht geöffnet werden: {error}. Kopiere den Link unten und öffne ihn selbst."
+
+msgid "The selected portal will embed the cursor in the video, so it cannot be edited separately."
+msgstr "Das ausgewählte Portal bettet den Cursor in das Video ein, sodass er nicht separat bearbeitet werden kann."
+
+msgid "The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."
+msgstr "Der Fenstercursor bleibt bearbeitbar, aber Auto-Zoom-Klicks werden ohne die ApexShot-GNOME-Erweiterung nicht aufgezeichnet."

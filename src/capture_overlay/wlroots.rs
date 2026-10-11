@@ -157,16 +157,21 @@ fn crop_selected_still(
     crop_background(frozen, area.x, area.y, area.width, area.height)
 }
 
-fn recording_request_for_display(
-    choice: &crate::overlay::MonitorChoice,
+fn recording_request_for_target(
     menu: crate::overlay::CaptureMenuResult,
+    display: Option<CaptureDisplay>,
+    fullscreen: bool,
+    window: bool,
 ) -> RecordingRequest {
     let config = crate::config::load_config();
+    let (x, y, width, height) = display
+        .map(|display| (display.x, display.y, display.width, display.height))
+        .unwrap_or_default();
     RecordingRequest {
-        x: choice.x,
-        y: choice.y,
-        width: choice.width,
-        height: choice.height,
+        x,
+        y,
+        width,
+        height,
         record_type: RecordingType::Video,
         controls: config.rec_controls,
         mic: menu.microphone,
@@ -184,14 +189,19 @@ fn recording_request_for_display(
         record_mono: config.rec_video_mono,
         open_editor: config.rec_video_open_editor,
         noise_suppression: config.rec_noise_suppression,
-        fullscreen: true,
+        fullscreen,
+        window,
     }
 }
 
+fn recording_request_for_display(
+    choice: &crate::overlay::MonitorChoice,
+    menu: crate::overlay::CaptureMenuResult,
+) -> RecordingRequest {
+    recording_request_for_target(menu, Some(selected_display(choice)), true, false)
+}
+
 /// GTK quick-capture fallback for wlroots desktops.
-///
-/// The display must be selected before the capture menu maps. Every action
-/// then stays scoped to that display, exactly as in the Qt/GNOME flow.
 fn open_quick_capture_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathResult, SelectionError>
 {
     force_wayland_gdk_for_layer_shell();
@@ -203,14 +213,22 @@ fn open_quick_capture_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathRes
         }
     }
 
-    let monitor_choice = crate::overlay::select_target_monitor_choice()?;
-    let menu = crate::overlay::choose_capture_mode(&monitor_choice);
+    let menu_target = crate::overlay::default_target_monitor_choice()?;
+    let menu = crate::overlay::choose_capture_mode(&menu_target);
+    if menu.action == crate::overlay::CaptureMenuAction::Cancel {
+        return Ok(AreaCapturePathResult::Cancelled);
+    }
     // `choose_capture_mode` is a layer-shell surface.  Match the C++ flow by
     // giving the compositor one frame to unmap it before freezing the selected
     // output; otherwise the compact menu is baked into the Area background.
-    if menu.action != crate::overlay::CaptureMenuAction::Cancel {
-        wait_for_layer_shell_overlay_to_unmap();
+    wait_for_layer_shell_overlay_to_unmap();
+    if menu.action == crate::overlay::CaptureMenuAction::Window && menu.recording {
+        return Ok(AreaCapturePathResult::RecordingRequested(
+            recording_request_for_target(menu, None, false, true),
+        ));
     }
+    let monitor_choice = crate::overlay::select_target_monitor_choice()?;
+    wait_for_layer_shell_overlay_to_unmap();
     match menu.action {
         crate::overlay::CaptureMenuAction::Cancel => Ok(AreaCapturePathResult::Cancelled),
         crate::overlay::CaptureMenuAction::Display if menu.recording => {

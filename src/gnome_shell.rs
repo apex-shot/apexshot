@@ -62,6 +62,13 @@ pub struct CountdownHandle {
     shown: bool,
 }
 
+impl CountdownHandle {
+    /// Report whether the shell actually displayed the countdown.
+    pub fn is_shown(&self) -> bool {
+        self.shown
+    }
+}
+
 impl Drop for CountdownHandle {
     fn drop(&mut self) {
         if self.shown {
@@ -825,5 +832,11 @@ mod tests {
                 "uint32:3".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn countdown_handle_reports_when_the_shell_did_not_show_it() {
+        assert!(!CountdownHandle { shown: false }.is_shown());
+        assert!(CountdownHandle { shown: true }.is_shown());
     }
 }

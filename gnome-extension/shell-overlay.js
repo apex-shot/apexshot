@@ -156,6 +156,7 @@ const MASK_STYLE = 'background-color: rgba(0, 0, 0, 0.55);';
 const COUNTDOWN_SIZE = 184;
 const POINTER_POLL_MS = 16;
 const MAX_POINTER_SAMPLES = 8000;
+const MAX_CLICK_SAMPLES = 500;
 const COUNTDOWN_STYLE = 'background-color: rgba(0, 0, 0, 0.94); border-radius: 92px;';
 const COUNTDOWN_LABEL_STYLE = 'color: white; font-size: 72px; font-weight: bold; font-family: Inter, Cantarell, sans-serif;';
 const CAPTURE_COUNTDOWN_STYLE = 'background-color: rgba(255, 102, 0, 0.95); border: 1px solid rgba(255, 224, 196, 0.5); border-radius: 22px;';
@@ -737,8 +738,14 @@ export class ShellOverlayService {
             Math.abs(x - last[1]) <= 2 && Math.abs(y - last[2]) <= 2)
             return;
         this._clicks.push([t, x, y, button]);
-        if (this._clicks.length > 500)
-            this._clicks.shift();
+        if (this._clicks.length > MAX_CLICK_SAMPLES) {
+            const lastIndex = this._clicks.length - 1;
+            const compacted = [this._clicks[0]];
+            for (let i = 2; i < lastIndex; i += 2)
+                compacted.push(this._clicks[i]);
+            compacted.push(this._clicks[lastIndex]);
+            this._clicks = compacted;
+        }
     }
 
     _sampleButtons(t) {

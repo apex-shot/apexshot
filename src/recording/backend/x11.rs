@@ -317,6 +317,7 @@ mod tests {
     fn x11_config(max_resolution: Option<(u32, u32)>) -> RecordingConfig {
         RecordingConfig {
             output_path: PathBuf::from("/tmp/apexshot-test.mp4"),
+            target: super::super::RecordingTarget::Screen,
             width: Some(1920),
             height: Some(1200),
             x: Some(0),

@@ -142,8 +142,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
 
     // GIF recording is discontinued: old overlays may still send
     // record_type "gif" — record MP4 instead.
-    let _record_type_str =
-        extract_string(json, "record_type").unwrap_or_else(|| "video".into());
+    let _record_type_str = extract_string(json, "record_type").unwrap_or_else(|| "video".into());
     let record_type = RecordingType::Video;
 
     let controls = extract_bool(json, "controls").unwrap_or(false);
@@ -167,6 +166,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
     let open_editor = extract_bool(json, "open_editor").unwrap_or(false);
     let noise_suppression = extract_bool(json, "noise_suppression").unwrap_or(false);
     let fullscreen = extract_bool(json, "fullscreen").unwrap_or(false);
+    let window = extract_bool(json, "window").unwrap_or(false);
 
     Ok(RecordingRequest {
         x,
@@ -191,6 +191,7 @@ fn parse_recording_json(json: &str) -> Result<RecordingRequest, SelectionError> 
         open_editor,
         noise_suppression,
         fullscreen,
+        window,
     })
 }
 

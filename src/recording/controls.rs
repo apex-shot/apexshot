@@ -6,7 +6,7 @@ use crate::{
     config::{save_config, AppConfig},
     recording::editor::sidecar::{
         delete_recording_outputs, CaptureRegion, ClickSample, CursorKind, PointerSample,
-        PointerSidecar, PressSample, MAX_CLICKS, MAX_POINTER_SAMPLES, MAX_PRESSES,
+        PointerSidecar, PressSample,
     },
 };
 use std::path::{Path, PathBuf};
@@ -62,6 +62,7 @@ fn take_harvested_pointer_track() -> Option<crate::gnome_shell::PointerTrackResu
 struct PointerTrackSession {
     started: bool,
     region: CaptureRegion,
+    window_cursor_metadata: bool,
 }
 
 fn pointer_capture_region(
@@ -74,6 +75,148 @@ fn pointer_capture_region(
     }
 
     fullscreen_monitor.unwrap_or(configured)
+}
+
+fn window_clicks_from_shell_track(
+    result: &crate::gnome_shell::PointerTrackResult,
+    timeline: &super::timeline::RecordingTimeline,
+) -> Vec<ClickSample> {
+    const SHELL_SAMPLE_TOLERANCE_SECONDS: f64 = 0.05;
+
+    if result.t0_monotonic_us <= 0 {
+        return Vec::new();
+    }
+    result
+        .clicks
+        .iter()
+        .filter_map(|(t, x, y, button)| {
+            if !t.is_finite() {
+                return None;
+            }
+            let at_us = result
+                .t0_monotonic_us
+                .saturating_add((*t * 1_000_000.0).round() as i64);
+            timeline
+                .window_cursor_positions_at(at_us)
+                .into_iter()
+                .filter_map(|(local_x, local_y, sampled_at_us)| {
+                    let sampled_t =
+                        sampled_at_us.saturating_sub(result.t0_monotonic_us) as f64 / 1_000_000.0;
+                    let sample_index = result
+                        .samples
+                        .partition_point(|sample| sample.0.is_finite() && sample.0 <= sampled_t);
+                    let before = sample_index
+                        .checked_sub(1)
+                        .filter(|&index| result.samples[index].0.is_finite());
+                    let after = (sample_index < result.samples.len())
+                        .then_some(sample_index)
+                        .filter(|&index| result.samples[index].0.is_finite());
+                    let matches_click = |index: usize| {
+                        let (_, sample_x, sample_y, _) = &result.samples[index];
+                        sample_x.abs_diff(*x) <= 2 && sample_y.abs_diff(*y) <= 2
+                    };
+                    let nearest_sample =
+                        [before, after]
+                            .into_iter()
+                            .flatten()
+                            .min_by(|&left, &right| {
+                                (result.samples[left].0 - sampled_t)
+                                    .abs()
+                                    .total_cmp(&(result.samples[right].0 - sampled_t).abs())
+                            });
+                    let nearest_matches = nearest_sample.is_some_and(|index| {
+                        (result.samples[index].0 - sampled_t).abs()
+                            <= SHELL_SAMPLE_TOLERANCE_SECONDS
+                            && matches_click(index)
+                    });
+                    let bracket_matches = before.zip(after).is_some_and(|(before, after)| {
+                        matches_click(before) && matches_click(after)
+                    });
+                    if !nearest_matches && !bracket_matches {
+                        return None;
+                    }
+                    Some((
+                        sampled_at_us.abs_diff(at_us),
+                        ClickSample {
+                            t: *t,
+                            x: local_x,
+                            y: local_y,
+                            button: *button,
+                        },
+                    ))
+                })
+                .min_by_key(|(distance, _)| *distance)
+                .map(|(_, click)| click)
+        })
+        .collect()
+}
+
+fn write_window_cursor_sidecar(
+    output_path: &Path,
+    timeline: &super::timeline::RecordingTimeline,
+    origin_us: i64,
+    clicks: Vec<ClickSample>,
+    presses: Vec<PressSample>,
+) -> bool {
+    let mut sidecar = PointerSidecar::new(
+        origin_us,
+        CaptureRegion::from_capture(None, None, None, None),
+    );
+    if !timeline.add_window_cursor_to_sidecar(&mut sidecar, origin_us) {
+        PointerSidecar::delete_next_to_video(output_path);
+        return false;
+    }
+    sidecar.clicks = clicks;
+    sidecar.presses = presses;
+    if !timeline.rebase(&mut sidecar) {
+        eprintln!(
+            "[recording] No retained media clock; deleting unsynchronized window cursor sidecar"
+        );
+        PointerSidecar::delete_next_to_video(output_path);
+        return false;
+    }
+    sidecar.subtract_region();
+    sidecar.compact_samples();
+    match sidecar.write_next_to_video(output_path) {
+        Ok(path) => {
+            eprintln!("[recording] wrote window cursor sidecar {}", path.display());
+            true
+        }
+        Err(err) => {
+            eprintln!("[recording] failed to write window cursor sidecar: {err}");
+            PointerSidecar::delete_next_to_video(output_path);
+            false
+        }
+    }
+}
+
+fn window_presses_from_shell_track(
+    result: &crate::gnome_shell::PointerTrackResult,
+    clicks: &[ClickSample],
+) -> Vec<PressSample> {
+    result
+        .presses
+        .iter()
+        .filter(|(down, _, button, _)| {
+            down.is_finite()
+                && clicks
+                    .iter()
+                    .any(|click| click.button == *button && (click.t - *down).abs() <= 0.05)
+        })
+        .map(|(down, up, button, dragged)| PressSample {
+            down: *down,
+            up: *up,
+            button: *button,
+            dragged: *dragged,
+        })
+        .collect()
+}
+
+fn notify_window_click_tracking_unavailable() {
+    crate::utils::notify::desktop_notification(
+        &crate::i18n::t("Pointer track unavailable"),
+        &crate::i18n::t("The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."),
+    );
 }
 
 fn shell_fullscreen_pointer_region(params: &RecordingControlsParams) -> Option<CaptureRegion> {
@@ -94,33 +237,54 @@ fn shell_fullscreen_pointer_region(params: &RecordingControlsParams) -> Option<C
 }
 
 impl PointerTrackSession {
-    fn start(config: &super::RecordingConfig, region: CaptureRegion) -> Self {
-        if !config.pointer_track {
+    fn start(
+        config: &super::RecordingConfig,
+        region: CaptureRegion,
+        window_cursor_metadata: bool,
+    ) -> Self {
+        let should_track = config.pointer_track_enabled()
+            || (config.target == super::RecordingTarget::Window && window_cursor_metadata);
+        if !should_track {
+            if config.target == super::RecordingTarget::Window {
+                let _ = take_harvested_pointer_track();
+            }
             return Self {
                 started: false,
                 region,
+                window_cursor_metadata,
             };
         }
         let _ = take_harvested_pointer_track();
         match crate::gnome_shell::start_pointer_track() {
             Ok(()) => {
-                eprintln!("[recording] pointer track started (OS cursor hidden)");
+                if window_cursor_metadata {
+                    eprintln!("[recording] window pointer and click tracking started");
+                } else {
+                    eprintln!("[recording] pointer track started (OS cursor hidden)");
+                }
                 Self {
                     started: true,
                     region,
+                    window_cursor_metadata,
                 }
             }
             Err(err) => {
-                eprintln!(
-                    "[recording] StartPointerTrack failed ({err}); continuing without sidecar"
-                );
-                crate::utils::notify::desktop_notification(
-                    &crate::i18n::t("Pointer track unavailable"),
-                    &crate::i18n::t("Recording will continue with the OS cursor hidden. Enable the ApexShot GNOME extension for the editor."),
-                );
+                if window_cursor_metadata {
+                    eprintln!("[recording] StartPointerTrack failed ({err}); window cursor will remain editable without Auto Zoom click data");
+                    notify_window_click_tracking_unavailable();
+                } else {
+                    eprintln!(
+                        "[recording] StartPointerTrack failed ({err}); continuing without sidecar"
+                    );
+                    crate::utils::notify::desktop_notification(
+                        &crate::i18n::t("Pointer track unavailable"),
+                        &crate::i18n::t("Recording will continue with the OS cursor hidden. Enable the ApexShot GNOME extension for the editor."),
+                    );
+                }
                 Self {
                     started: false,
                     region,
+                    window_cursor_metadata,
                 }
             }
         }
@@ -135,14 +299,58 @@ impl PointerTrackSession {
         self.started = false;
         let result = match take_harvested_pointer_track() {
             Some(result) => Ok(result),
-            None if !was_started => {
+            None if !was_started && !self.window_cursor_metadata => {
                 PointerSidecar::delete_next_to_video(output_path);
                 return false;
+            }
+            None if !was_started => {
+                let Some(timeline) = timeline else {
+                    PointerSidecar::delete_next_to_video(output_path);
+                    return false;
+                };
+                let Some(origin_us) = timeline.origin_us() else {
+                    PointerSidecar::delete_next_to_video(output_path);
+                    return false;
+                };
+                return write_window_cursor_sidecar(
+                    output_path,
+                    timeline,
+                    origin_us,
+                    Vec::new(),
+                    Vec::new(),
+                );
             }
             None => crate::gnome_shell::stop_pointer_track(),
         };
         match result {
             Ok(result) => {
+                if self.window_cursor_metadata {
+                    let Some(timeline) = timeline else {
+                        PointerSidecar::delete_next_to_video(output_path);
+                        return false;
+                    };
+                    if result.samples.is_empty() || result.t0_monotonic_us <= 0 {
+                        eprintln!("[recording] GNOME Shell returned no usable click clock; window cursor will remain editable without Auto Zoom click data");
+                        notify_window_click_tracking_unavailable();
+                    }
+                    let origin_us = if result.t0_monotonic_us > 0 {
+                        result.t0_monotonic_us
+                    } else if let Some(origin_us) = timeline.origin_us() {
+                        origin_us
+                    } else {
+                        PointerSidecar::delete_next_to_video(output_path);
+                        return false;
+                    };
+                    let clicks = window_clicks_from_shell_track(&result, timeline);
+                    let presses = window_presses_from_shell_track(&result, &clicks);
+                    return write_window_cursor_sidecar(
+                        output_path,
+                        timeline,
+                        origin_us,
+                        clicks,
+                        presses,
+                    );
+                }
                 if result.samples.is_empty() {
                     eprintln!("[recording] StopPointerTrack returned no pointer samples");
                     crate::utils::notify::desktop_notification(
@@ -154,7 +362,6 @@ impl PointerTrackSession {
                 sidecar.pointer = result
                     .samples
                     .into_iter()
-                    .take(MAX_POINTER_SAMPLES)
                     .map(|(t, x, y, kind)| PointerSample {
                         t,
                         x: x as f64,
@@ -165,7 +372,6 @@ impl PointerTrackSession {
                 sidecar.clicks = result
                     .clicks
                     .into_iter()
-                    .take(MAX_CLICKS)
                     .map(|(t, x, y, button)| ClickSample {
                         t,
                         x: x as f64,
@@ -176,7 +382,6 @@ impl PointerTrackSession {
                 sidecar.presses = result
                     .presses
                     .into_iter()
-                    .take(MAX_PRESSES)
                     .map(|(down, up, button, dragged)| PressSample {
                         down,
                         up,
@@ -197,6 +402,7 @@ impl PointerTrackSession {
                     );
                 }
                 sidecar.subtract_region();
+                sidecar.compact_samples();
                 match sidecar.write_next_to_video(output_path) {
                     Ok(path) => {
                         eprintln!("[recording] wrote pointer sidecar {}", path.display());
@@ -362,6 +568,7 @@ fn should_use_shell_mask_for_request(
     shell_mask_available: bool,
 ) -> bool {
     shell_mask_available
+        && !request.window
         && request.dim_screen
         && !request.fullscreen
         && request.width > 0
@@ -397,7 +604,7 @@ pub fn prepare_overlay_recording_request(
     app_config.rec_noise_suppression = request.noise_suppression;
     app_config.rec_video_open_editor = request.open_editor;
 
-    if request.remember_selection {
+    if request.remember_selection && !request.window {
         app_config.last_selection_x = Some(request.x);
         app_config.last_selection_y = Some(request.y);
         app_config.last_selection_w = Some(request.width);
@@ -420,25 +627,33 @@ pub fn prepare_overlay_recording_request(
         _ => 30,
     };
 
-    let (capture_x, capture_y, capture_width, capture_height) = if request.fullscreen {
-        (None, None, None, None)
-    } else {
-        (
-            Some(request.x),
-            Some(request.y),
-            Some(request.width as u32),
-            Some(request.height as u32),
-        )
-    };
+    let (capture_x, capture_y, capture_width, capture_height) =
+        if request.fullscreen || request.window {
+            (None, None, None, None)
+        } else {
+            (
+                Some(request.x),
+                Some(request.y),
+                Some(request.width as u32),
+                Some(request.height as u32),
+            )
+        };
 
     let recording_config = super::RecordingConfig {
         output_path: output_path.clone(),
+        target: if request.window {
+            super::RecordingTarget::Window
+        } else if request.fullscreen {
+            super::RecordingTarget::Screen
+        } else {
+            super::RecordingTarget::Area
+        },
         width: capture_width,
         height: capture_height,
         x: capture_x,
         y: capture_y,
         cursor: true,
-        pointer_track: crate::gnome_shell::should_use_pointer_track(),
+        pointer_track: !request.window && crate::gnome_shell::should_use_pointer_track(),
         hidpi: request.hidpi,
         max_resolution,
         fps,
@@ -452,11 +667,11 @@ pub fn prepare_overlay_recording_request(
     };
 
     let controls_params = Some(RecordingControlsParams {
-        capture_x: request.x,
-        capture_y: request.y,
-        capture_w: request.width,
-        capture_h: request.height,
-        is_fullscreen: request.fullscreen,
+        capture_x: if request.window { 0 } else { request.x },
+        capture_y: if request.window { 0 } else { request.y },
+        capture_w: if request.window { 0 } else { request.width },
+        capture_h: if request.window { 0 } else { request.height },
+        is_fullscreen: request.fullscreen && !request.window,
         show_timer: true,
         use_shell_mask,
         dim_screen: request.dim_screen,
@@ -549,13 +764,20 @@ async fn run_shell_recording_countdown(params: RecordingControlsParams) -> anyho
     };
 
     match crate::gnome_shell::show_recording_countdown(geometry, params.countdown_seconds) {
-        Ok(countdown) => {
+        Ok(countdown) if countdown.is_shown() => {
             tokio::time::sleep(std::time::Duration::from_secs(
                 params.countdown_seconds.into(),
             ))
             .await;
             drop(countdown);
             Ok(true)
+        }
+        Ok(countdown) => {
+            drop(countdown);
+            eprintln!(
+                "[recording] GNOME Shell did not show the countdown; using fallback countdown."
+            );
+            run_recording_countdown_subprocess(params).await
         }
         Err(err) => {
             eprintln!("[recording] Failed to show GNOME Shell countdown ({err}); using fallback countdown.");
@@ -567,7 +789,7 @@ async fn run_shell_recording_countdown(params: RecordingControlsParams) -> anyho
 async fn prepare_shell_recording(
     config: super::RecordingConfig,
 ) -> super::RecordResult<Option<PreparedShellRecording>> {
-    if super::wf_recorder::is_wlroots_session() {
+    if super::wf_recorder::is_wlroots_session() && config.target != super::RecordingTarget::Window {
         return Ok(None);
     }
 
@@ -607,7 +829,9 @@ pub async fn run_recording_with_native_controls(
     // Prepare the capture backend *before* countdown so any portal / permission
     // UI appears first. Countdown then leads straight into recording without a
     // second chooser after "3-2-1".
-    let prepared_backend = if super::wf_recorder::is_wlroots_session() {
+    let prepared_backend = if super::wf_recorder::is_wlroots_session()
+        && config.target != super::RecordingTarget::Window
+    {
         None
     } else {
         match super::backend::prepare_recording_backend(config.clone()).await {
@@ -690,12 +914,29 @@ pub async fn run_recording_with_native_controls(
         super::RecordedSession {
             path,
             action: super::RecordingTerminalAction::Save,
-            ..
+            timeline,
         } => {
             if let Some(event) =
                 super::daemon_event_for_terminal_action(super::RecordingTerminalAction::Save)
             {
                 super::notify_daemon_event(event);
+            }
+            if config.target == super::RecordingTarget::Window {
+                if let Some(timeline) = timeline.as_ref() {
+                    if let Some(origin_us) = timeline.origin_us() {
+                        write_window_cursor_sidecar(
+                            &path,
+                            timeline,
+                            origin_us,
+                            Vec::new(),
+                            Vec::new(),
+                        );
+                    } else {
+                        PointerSidecar::delete_next_to_video(&path);
+                    }
+                } else {
+                    PointerSidecar::delete_next_to_video(&path);
+                }
             }
             Ok((path, StopAction::Save))
         }
@@ -770,7 +1011,7 @@ async fn run_recording_with_shell_mask(
 
     super::notify_daemon_event("recording_session_started");
     let final_outcome = loop {
-        let fullscreen_monitor = if config.pointer_track && params.is_fullscreen {
+        let fullscreen_monitor = if config.pointer_track_enabled() && params.is_fullscreen {
             let monitor_params = params.clone();
             match tokio::task::spawn_blocking(move || {
                 shell_fullscreen_pointer_region(&monitor_params)
@@ -787,7 +1028,16 @@ async fn run_recording_with_shell_mask(
             None
         };
         let pointer_region = pointer_capture_region(&config, fullscreen_monitor);
-        let pointer_track = PointerTrackSession::start(&config, pointer_region);
+        let window_cursor_metadata =
+            prepared_backend
+                .as_ref()
+                .is_some_and(|prepared| match prepared {
+                    PreparedShellRecording::Video(backend) => {
+                        backend.window_cursor_metadata_enabled()
+                    }
+                });
+        let pointer_track =
+            PointerTrackSession::start(&config, pointer_region, window_cursor_metadata);
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         control_server.set_command_sender(command_tx);
         let outcome =
@@ -1052,6 +1302,229 @@ mod tests {
     }
 
     #[test]
+    fn window_clicks_require_a_matching_shell_press_and_fresh_visible_local_cursor() {
+        let mut timeline = super::super::timeline::RecordingTimeline::default();
+        timeline.enable_window_cursor(100, 80);
+        timeline.record_window_cursor(1_000_000, Some((10.0, 15.0)));
+        timeline.record_window_cursor(1_016_000, Some((12.0, 18.0)));
+        timeline.record_window_cursor(1_032_000, None);
+        timeline.record_window_cursor(2_000_000, Some((30.0, 40.0)));
+        let result = crate::gnome_shell::PointerTrackResult {
+            t0_monotonic_us: 1_000_000,
+            samples: vec![
+                (0.01, 100, 200, "default".into()),
+                (0.03, 100, 200, "default".into()),
+                (1.0, 400, 500, "default".into()),
+            ],
+            clicks: vec![
+                (0.02, 100, 200, 1),
+                (0.04, 100, 200, 1),
+                (0.5, 300, 400, 1),
+                (1.0, 400, 500, 1),
+                (1.0, 700, 800, 1),
+            ],
+            presses: Vec::new(),
+        };
+
+        assert_eq!(
+            window_clicks_from_shell_track(&result, &timeline),
+            vec![
+                ClickSample {
+                    t: 0.02,
+                    x: 12.0,
+                    y: 18.0,
+                    button: 1,
+                },
+                ClickSample {
+                    t: 1.0,
+                    x: 30.0,
+                    y: 40.0,
+                    button: 1,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn stationary_window_click_maps_from_its_confirmed_shell_anchor() {
+        let mut timeline = super::super::timeline::RecordingTimeline::default();
+        timeline.enable_window_cursor(100, 80);
+        timeline.record_window_cursor(1_000_000, Some((12.0, 18.0)));
+        timeline.record_window_cursor(5_000_000, None);
+        let result = crate::gnome_shell::PointerTrackResult {
+            t0_monotonic_us: 1_000_000,
+            samples: vec![(0.0, 300, 400, "default".into())],
+            clicks: vec![(3.0, 300, 400, 1)],
+            presses: Vec::new(),
+        };
+
+        assert_eq!(
+            window_clicks_from_shell_track(&result, &timeline),
+            vec![ClickSample {
+                t: 3.0,
+                x: 12.0,
+                y: 18.0,
+                button: 1,
+            }]
+        );
+    }
+
+    #[test]
+    fn stationary_click_accepts_a_matching_shell_sample_bracket() {
+        let mut timeline = super::super::timeline::RecordingTimeline::default();
+        timeline.enable_window_cursor(100, 80);
+        timeline.record_window_cursor(1_056_000, Some((12.0, 18.0)));
+        timeline.record_window_cursor(2_000_000, None);
+        let result = crate::gnome_shell::PointerTrackResult {
+            t0_monotonic_us: 1_000_000,
+            samples: vec![
+                (0.0, 300, 400, "default".into()),
+                (0.112, 300, 400, "default".into()),
+            ],
+            clicks: vec![(0.5, 300, 400, 1)],
+            presses: Vec::new(),
+        };
+
+        assert_eq!(
+            window_clicks_from_shell_track(&result, &timeline),
+            vec![ClickSample {
+                t: 0.5,
+                x: 12.0,
+                y: 18.0,
+                button: 1,
+            }]
+        );
+    }
+
+    #[test]
+    fn shell_bracket_with_mismatched_or_missing_endpoint_does_not_map_a_click() {
+        for samples in [
+            vec![
+                (0.0, 300, 400, "default".into()),
+                (0.112, 700, 800, "default".into()),
+            ],
+            vec![(0.112, 300, 400, "default".into())],
+            vec![(0.0, 300, 400, "default".into())],
+        ] {
+            let mut timeline = super::super::timeline::RecordingTimeline::default();
+            timeline.enable_window_cursor(100, 80);
+            timeline.record_window_cursor(1_056_000, Some((12.0, 18.0)));
+            timeline.record_window_cursor(2_000_000, None);
+            let result = crate::gnome_shell::PointerTrackResult {
+                t0_monotonic_us: 1_000_000,
+                samples,
+                clicks: vec![(0.5, 300, 400, 1)],
+                presses: Vec::new(),
+            };
+
+            assert!(window_clicks_from_shell_track(&result, &timeline).is_empty());
+        }
+    }
+
+    #[test]
+    fn click_elsewhere_does_not_reuse_a_stale_window_cursor_position() {
+        let mut timeline = super::super::timeline::RecordingTimeline::default();
+        timeline.enable_window_cursor(100, 80);
+        timeline.record_window_cursor(1_000_000, Some((12.0, 18.0)));
+        timeline.record_window_cursor(4_000_000, None);
+        let result = crate::gnome_shell::PointerTrackResult {
+            t0_monotonic_us: 1_000_000,
+            samples: vec![
+                (0.0, 300, 400, "default".into()),
+                (3.0, 700, 800, "default".into()),
+            ],
+            clicks: vec![(3.0, 700, 800, 1)],
+            presses: Vec::new(),
+        };
+
+        assert!(window_clicks_from_shell_track(&result, &timeline).is_empty());
+    }
+
+    #[test]
+    fn click_outside_the_window_before_hidden_metadata_is_not_mapped() {
+        let mut timeline = super::super::timeline::RecordingTimeline::default();
+        timeline.enable_window_cursor(100, 80);
+        timeline.record_window_cursor(1_000_000, Some((12.0, 18.0)));
+        timeline.record_window_cursor(1_050_000, None);
+        let result = crate::gnome_shell::PointerTrackResult {
+            t0_monotonic_us: 1_000_000,
+            samples: vec![
+                (0.0, 300, 400, "default".into()),
+                (0.020, 700, 800, "default".into()),
+            ],
+            clicks: vec![(0.020, 700, 800, 1)],
+            presses: Vec::new(),
+        };
+
+        assert!(window_clicks_from_shell_track(&result, &timeline).is_empty());
+    }
+
+    #[test]
+    fn stationary_window_click_survives_sidecar_rebase_into_auto_zoom() {
+        use crate::recording::editor::auto_zoom;
+
+        let mut timeline = super::super::timeline::RecordingTimeline::default();
+        timeline.enable_window_cursor(100, 80);
+        timeline.frame_time_us(1_000_000);
+        timeline.record_window_cursor(1_000_000, Some((12.0, 18.0)));
+        timeline.record_window_cursor(4_500_000, None);
+        timeline.finish(6_000_000);
+        let result = crate::gnome_shell::PointerTrackResult {
+            t0_monotonic_us: 1_000_000,
+            samples: vec![(0.0, 300, 400, "default".into())],
+            clicks: vec![(3.0, 300, 400, 1)],
+            presses: Vec::new(),
+        };
+        let mut sidecar = PointerSidecar::new(
+            1_000_000,
+            CaptureRegion::from_capture(None, None, None, None),
+        );
+        let clicks = window_clicks_from_shell_track(&result, &timeline);
+        assert_eq!(clicks.len(), 1);
+        assert!(timeline.add_window_cursor_to_sidecar(&mut sidecar, 1_000_000));
+        sidecar.clicks = clicks;
+        assert!(timeline.rebase(&mut sidecar));
+
+        let zooms = auto_zoom::automatic_zooms(
+            &auto_zoom::clicks_from_sidecar(&sidecar, 100.0, 80.0),
+            &auto_zoom::pointer_from_sidecar(&sidecar, 100.0, 80.0),
+            5.0,
+        );
+        assert_eq!(zooms.len(), 1);
+        assert_eq!(zooms[0].center_time, 3.0);
+        assert_eq!(zooms[0].center, (12.0, 18.0));
+    }
+
+    #[test]
+    fn moving_click_uses_a_nearby_window_sample_after_the_click() {
+        let mut timeline = super::super::timeline::RecordingTimeline::default();
+        timeline.enable_window_cursor(100, 80);
+        timeline.record_window_cursor(1_000_000, Some((10.0, 15.0)));
+        timeline.record_window_cursor(1_016_000, Some((20.0, 25.0)));
+        timeline.record_window_cursor(1_032_000, Some((30.0, 35.0)));
+        timeline.record_window_cursor(2_000_000, None);
+        let result = crate::gnome_shell::PointerTrackResult {
+            t0_monotonic_us: 1_000_000,
+            samples: vec![
+                (0.016, 100, 200, "default".into()),
+                (0.032, 300, 400, "default".into()),
+            ],
+            clicks: vec![(0.020, 300, 400, 1)],
+            presses: Vec::new(),
+        };
+
+        assert_eq!(
+            window_clicks_from_shell_track(&result, &timeline),
+            vec![ClickSample {
+                t: 0.020,
+                x: 30.0,
+                y: 35.0,
+                button: 1,
+            }]
+        );
+    }
+
+    #[test]
     fn duplicate_session_end_keeps_the_first_pointer_track() {
         let mut slot = None;
         assert!(preserve_first_pointer_track(
@@ -1188,6 +1661,7 @@ mod tests {
             noise_suppression: true,
             open_editor: true,
             fullscreen: false,
+            window: false,
         };
 
         let prepared = prepare_overlay_recording_request(
@@ -1366,6 +1840,10 @@ mod tests {
         assert_eq!(prepared.recording_config.width, None);
         assert_eq!(prepared.recording_config.height, None);
         assert_eq!(
+            prepared.recording_config.target,
+            super::super::RecordingTarget::Screen
+        );
+        assert_eq!(
             prepared.controls_params,
             Some(RecordingControlsParams {
                 capture_x: -1920,
@@ -1524,6 +2002,121 @@ mod tests {
 
         assert!(should_use_shell_mask_for_request(&request, true));
         assert!(!should_use_shell_mask_for_request(&request, false));
+    }
+
+    #[test]
+    fn window_overlay_request_uses_window_target_without_screen_geometry() {
+        let request = RecordingRequest {
+            x: 400,
+            y: 250,
+            width: 800,
+            height: 600,
+            remember_selection: true,
+            window: true,
+            ..RecordingRequest::default()
+        };
+
+        let prepared = prepare_overlay_recording_request(
+            AppConfig::default(),
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 4, 2, 10, 0, 0).unwrap(),
+        );
+
+        assert_eq!(
+            prepared.recording_config.target,
+            super::super::RecordingTarget::Window
+        );
+        assert_eq!(prepared.recording_config.x, None);
+        assert_eq!(prepared.recording_config.y, None);
+        assert_eq!(prepared.recording_config.width, None);
+        assert_eq!(prepared.recording_config.height, None);
+        assert!(!prepared.recording_config.pointer_track);
+        assert_eq!(prepared.updated_app_config.last_selection_x, None);
+        assert!(!prepared.use_shell_mask);
+        let controls_params = prepared.controls_params.unwrap();
+        assert_eq!(
+            (
+                controls_params.capture_x,
+                controls_params.capture_y,
+                controls_params.capture_w,
+                controls_params.capture_h,
+                controls_params.is_fullscreen,
+            ),
+            (0, 0, 0, 0, false),
+            "window geometry is unknown until the portal selects the target"
+        );
+    }
+
+    #[test]
+    fn window_overlay_keeps_saved_ultra_fps_and_original_resolution() {
+        let request = RecordingRequest {
+            window: true,
+            video_fps: 3,
+            video_max_res: 1,
+            ..RecordingRequest::default()
+        };
+        let prepared = prepare_overlay_recording_request(
+            AppConfig {
+                rec_video_quality: 2,
+                rec_video_max_res: 0,
+                rec_video_fps: 3,
+                ..AppConfig::default()
+            },
+            &request,
+            chrono::Utc.with_ymd_and_hms(2026, 4, 2, 10, 0, 0).unwrap(),
+        );
+
+        assert_eq!(
+            prepared.recording_config.target,
+            super::super::RecordingTarget::Window
+        );
+        assert_eq!(prepared.recording_config.crf, 16);
+        assert_eq!(prepared.recording_config.fps, 60);
+        assert_eq!(prepared.recording_config.max_resolution, None);
+        assert_eq!(prepared.updated_app_config.rec_video_quality, 2);
+        assert_eq!(prepared.updated_app_config.rec_video_max_res, 0);
+        assert_eq!(prepared.updated_app_config.rec_video_fps, 3);
+    }
+
+    #[test]
+    fn hidden_shell_countdown_uses_the_visible_subprocess_fallback() {
+        let source = include_str!("controls.rs");
+        let countdown = source
+            .split("async fn run_shell_recording_countdown")
+            .nth(1)
+            .unwrap()
+            .split("async fn prepare_shell_recording")
+            .next()
+            .unwrap();
+        assert!(countdown.contains("countdown.is_shown()"));
+        assert!(countdown.contains("run_recording_countdown_subprocess(params).await"));
+
+        let shell_path = source
+            .split("async fn run_recording_with_shell_mask")
+            .nth(1)
+            .unwrap()
+            .split("async fn ")
+            .next()
+            .unwrap();
+        assert!(
+            shell_path
+                .find("prepare_shell_recording(config.clone()).await")
+                .unwrap()
+                < shell_path
+                    .find("run_shell_recording_countdown(params.clone()).await")
+                    .unwrap()
+        );
+    }
+
+    #[test]
+    fn window_target_disables_pointer_tracking_even_when_requested() {
+        let config = super::super::RecordingConfig {
+            target: super::super::RecordingTarget::Window,
+            pointer_track: true,
+            ..super::super::RecordingConfig::default()
+        };
+
+        assert!(!config.pointer_track_enabled());
     }
 
     #[test]

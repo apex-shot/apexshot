@@ -721,6 +721,9 @@ msgstr "Открыть интерфейс записи"
 msgid "Record Screen"
 msgstr "Записать экран"
 
+msgid "Record Window"
+msgstr "Записать окно"
+
 msgid "Stop Recording"
 msgstr "Остановить запись"
 
@@ -1704,6 +1707,9 @@ msgstr "Запись звука в монорежиме"
 
 msgid "Recording failed"
 msgstr "Запись не удалась"
+
+msgid "Window recording unavailable"
+msgstr "Запись окна недоступна"
 
 msgid "Recording not saved"
 msgstr "Запись не сохранена"
@@ -2963,3 +2969,9 @@ msgstr "Ссылка передана в браузер. Если страниц
 
 msgid "Couldn't open a browser: {error}. Copy the link below and open it yourself."
 msgstr "Не удалось открыть браузер: {error}. Скопируйте ссылку ниже и откройте её самостоятельно."
+
+msgid "The selected portal will embed the cursor in the video, so it cannot be edited separately."
+msgstr "Выбранный портал встроит курсор в видео, поэтому его нельзя будет редактировать отдельно."
+
+msgid "The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."
+msgstr "Курсор окна останется редактируемым, но клики для автозума не будут записываться без расширения GNOME ApexShot."

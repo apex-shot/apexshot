@@ -113,6 +113,9 @@ pub(super) fn dispatch_daemon_action(
         DaemonAction::RecordScreen => {
             tokio::spawn(recording_handlers::handle_record_screen(action_tx_clone));
         }
+        DaemonAction::RecordWindow => {
+            tokio::spawn(recording_handlers::handle_record_window(action_tx_clone));
+        }
         DaemonAction::RecordArea => {
             tokio::spawn(recording_handlers::handle_record_area(action_tx_clone));
         }

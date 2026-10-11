@@ -12,7 +12,7 @@ use apexshot::{
     preview_launch::{launch_preview_on_display, show_preview_direct_on_display},
     recording::{
         run_recording_with_controls, start_recording, RecordError, RecordingConfig,
-        RecordingControlsParams, StopAction,
+        RecordingControlsParams, RecordingTarget, StopAction,
     },
 };
 use std::path::PathBuf;
@@ -39,6 +39,7 @@ pub(crate) fn record_daemon_action(record_type: &str) -> Option<&'static str> {
         // discontinued error plus the usage menu. Routing them to the daemon
         // would succeed silently with the message lost in the daemon journal.
         "screen" => Some("record_screen"),
+        "window" => Some("record_window"),
         // Must match `DaemonIpc::trigger` action names in daemon/mod.rs.
         "stop" => Some("recording_stop_save"),
         _ => None,
@@ -655,6 +656,10 @@ pub(crate) async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error
 
     let app_config = load_config().sanitized();
     let mut config = RecordingConfig::from_app_config(&app_config, "mp4");
+    let window_recording = record_type == "window";
+    if window_recording {
+        config.target = RecordingTarget::Window;
+    }
 
     // Configure output path
     if let Some(p) = output_path {
@@ -675,22 +680,22 @@ pub(crate) async fn run_record(args: &[String]) -> Result<(), Box<dyn std::error
         );
         crate::print_usage();
         std::process::exit(1);
-    } else if record_type != "screen" {
+    } else if !matches!(record_type, "screen" | "window") {
         eprintln!(
             "Error: recording type '{record_type}' not supported \
-             (use 'screen', or control: stop|pause|resume|toggle-pause|restart|discard)"
+             (use 'screen' or 'window', or control: stop|pause|resume|toggle-pause|restart|discard)"
         );
         crate::print_usage();
         std::process::exit(1);
     }
 
-    let _final_path = if overlay_stop {
+    let _final_path = if overlay_stop || window_recording {
         let params = RecordingControlsParams {
             capture_x: 0,
             capture_y: 0,
             capture_w: 0,
             capture_h: 0,
-            is_fullscreen: true,
+            is_fullscreen: !window_recording,
             show_timer: true,
             use_shell_mask: false,
             dim_screen: false,

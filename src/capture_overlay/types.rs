@@ -75,6 +75,9 @@ pub struct RecordingRequest {
     #[serde(default)]
     pub noise_suppression: bool,
     pub fullscreen: bool,
+    /// True when the portal should select a single window instead of a monitor.
+    #[serde(default)]
+    pub window: bool,
 }
 
 impl Default for RecordingRequest {
@@ -102,6 +105,7 @@ impl Default for RecordingRequest {
             open_editor: true,
             noise_suppression: false,
             fullscreen: false,
+            window: false,
         }
     }
 }

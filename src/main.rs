@@ -663,6 +663,7 @@ pub(crate) fn print_usage() {
     println!();
     println!("Recording types:");
     println!("  screen            Record the full screen");
+    println!("  window            Record a portal-selected window");
     println!("  stop              Stop and save the active recording (requires daemon)");
     println!();
     println!("Recording options:");
@@ -794,6 +795,7 @@ mod tests {
         // path: visible error + usage menu instead of a silent daemon stub.
         assert_eq!(record_daemon_action("ui"), None);
         assert_eq!(record_daemon_action("screen"), Some("record_screen"));
+        assert_eq!(record_daemon_action("window"), Some("record_window"));
         assert_eq!(record_daemon_action("area"), None);
         // Control actions must use the daemon Trigger names (not legacy aliases).
         assert_eq!(record_daemon_action("stop"), Some("recording_stop_save"));
@@ -804,6 +806,7 @@ mod tests {
     fn record_control_actions_require_daemon() {
         assert!(is_record_control_action("stop"));
         assert!(!is_record_control_action("screen"));
+        assert!(!is_record_control_action("window"));
         assert!(!is_record_control_action("area"));
         assert!(!is_record_control_action("ui"));
     }

@@ -11,6 +11,7 @@ pub enum TrayAction {
     OpenVideoEditor,
     OpenImageEditor,
     RecordScreen,
+    RecordWindow,
     StopRecordingSave,
     ShowLastPreview,
     OpenLastCapture,
@@ -213,6 +214,11 @@ impl ksni::Tray for ApexShotTray {
                 &crate::i18n::t("Record Screen"),
                 idle,
                 TrayAction::RecordScreen
+            ),
+            item!(
+                &crate::i18n::t("Record Window"),
+                idle,
+                TrayAction::RecordWindow
             ),
             item!(
                 &crate::i18n::t("Stop Recording"),

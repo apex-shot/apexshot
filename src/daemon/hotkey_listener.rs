@@ -447,6 +447,7 @@ pub(super) fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<Daemon
                 return Some(super::DaemonAction::SaveLastCapture);
             }
             "record_screen" | "record-screen" => return Some(super::DaemonAction::RecordScreen),
+            "record_window" | "record-window" => return Some(super::DaemonAction::RecordWindow),
             "record_area" | "record-area" => return Some(super::DaemonAction::RecordArea),
             "open_recording_ui" | "open-recording-ui" => {
                 return Some(super::DaemonAction::OpenRecordingUi);
@@ -484,6 +485,7 @@ pub(super) fn binding_to_daemon_action(binding: &HotkeyBinding) -> Option<Daemon
         Some("record") => match binding.args.get(1).map(|s| s.as_str()) {
             Some("ui") => Some(super::DaemonAction::OpenRecordingUi),
             Some("screen") => Some(super::DaemonAction::RecordScreen),
+            Some("window") => Some(super::DaemonAction::RecordWindow),
             Some("area") => Some(super::DaemonAction::RecordArea),
             Some("stop") => Some(super::DaemonAction::StopRecordingSave),
             _ => None,

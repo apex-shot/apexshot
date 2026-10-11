@@ -51,10 +51,18 @@ pub(super) struct BuiltPipeline {
     config: super::RecordingConfig,
 }
 
+impl BuiltPipeline {
+    pub(super) fn window_cursor_metadata_enabled(&self) -> bool {
+        self.wayland_source
+            .as_ref()
+            .is_some_and(|source| source.cursor_metadata_enabled)
+    }
+}
+
 pub(super) async fn prepare_recording_backend(
     config: super::RecordingConfig,
 ) -> super::RecordResult<BuiltPipeline> {
-    if super::wf_recorder::is_wlroots_session() {
+    if super::wf_recorder::is_wlroots_session() && config.target != super::RecordingTarget::Window {
         return Err(RecordError::UnsupportedBackend(
             "wlroots recording must be prepared through its dedicated backend".into(),
         ));
@@ -149,12 +157,14 @@ async fn build_pipeline(
     output_path: &std::path::Path,
 ) -> super::RecordResult<BuiltPipeline> {
     // Get video source (Portal session + PipeWire fd for Wayland)
-    let wayland_source =
-        if crate::app_identity::portal_only() || std::env::var("WAYLAND_DISPLAY").is_ok() {
-            Some(get_wayland_source(config).await?)
-        } else {
-            None
-        };
+    let wayland_source = if config.target == super::RecordingTarget::Window
+        || crate::app_identity::portal_only()
+        || std::env::var("WAYLAND_DISPLAY").is_ok()
+    {
+        Some(get_wayland_source(config).await?)
+    } else {
+        None
+    };
 
     // ffmpeg (the Wayland path) sets its own encoder arguments, and the X11
     // GStreamer pipeline builds its element properties itself where it knows
@@ -186,15 +196,16 @@ mod tests {
             .split("#[cfg(test)]")
             .next()
             .unwrap();
-        assert!(pipeline.contains(
-            "crate::app_identity::portal_only() || std::env::var(\"WAYLAND_DISPLAY\").is_ok()"
-        ));
+        assert!(pipeline.contains("config.target == super::RecordingTarget::Window"));
+        assert!(pipeline.contains("crate::app_identity::portal_only()"));
+        assert!(pipeline.contains("std::env::var(\"WAYLAND_DISPLAY\").is_ok()"));
         assert!(pipeline.contains("Some(get_wayland_source(config).await?)"));
     }
 
     fn x11_recording_config() -> RecordingConfig {
         RecordingConfig {
             output_path: PathBuf::from("/tmp/apexshot-test.mp4"),
+            target: super::super::RecordingTarget::Screen,
             width: Some(2560),
             height: Some(1440),
             x: Some(120),
