@@ -1387,8 +1387,23 @@ fn build_gradient_page(
         }
     });
     {
+        // The chip is a toggle, not a one-way opener: pressing it while its
+        // menu is up takes the menu down. Nothing else does that for the press
+        // — the dropdown holds no grab to dismiss itself on a click outside it,
+        // and the press lands on the chip inside the card's own surface, where
+        // the popover's manual dismissal controller never sees it — so the
+        // handler reads the dropdown's state and answers both ways. That read
+        // is safe where the stop picker's card could not trust it: the chip can
+        // only be pressed while its ancestors are mapped, so `is_visible()`
+        // reports the dropdown's own state and nothing else.
         let popover = type_popover.clone();
-        type_button.connect_clicked(move |_| popover.popup());
+        type_button.connect_clicked(move |_| {
+            if popover.is_visible() {
+                popover.popdown();
+            } else {
+                popover.popup();
+            }
+        });
     }
 
     let mut type_checks: Vec<(GradientKind, Image)> = Vec::new();
@@ -3064,6 +3079,46 @@ mod tests {
         assert!(
             !production[start..end].contains("card.set_margin_end("),
             "the card's painted box must fill its surface: a gutter inside it adds to the seat"
+        );
+    }
+
+    #[test]
+    fn a_second_press_on_the_gradient_chip_closes_its_menu() {
+        // The type dropdown is built without the grab — a grabbing child popup
+        // under the grabless card is a protocol error — so no click-outside rule
+        // takes it down, and the press that lands back on the chip is a press
+        // inside the card's surface, which the popover's dismissal controller
+        // never sees either. The chip therefore has to be a toggle on its own:
+        // read the dropdown's state, close it when it is up, open it when it is
+        // down. Without the read, the second press would call popup() on an
+        // already-open menu and leave it standing, which reads as the menu
+        // ignoring the click.
+        let source = include_str!("custom_wallpaper_popover.rs");
+        let production = &source[..source.find("\n#[cfg(test)]").expect("tests module")];
+        let start = production
+            .find("fn build_gradient_page(")
+            .expect("the gradient page builds the card");
+        let end = production[start..]
+            .find("\nfn ")
+            .map(|at| start + at)
+            .unwrap_or(production.len());
+        let page = &production[start..end];
+        let chip = page
+            .find("type_button.connect_clicked")
+            .expect("the type chip opens the dropdown");
+        let handler = &page[chip..];
+        let reads_state = handler
+            .find("popover.is_visible()")
+            .expect("the chip has to read the dropdown's own state to be a toggle");
+        let closes = handler
+            .find("popover.popdown()")
+            .expect("a press on an open chip has to close the menu");
+        let opens = handler
+            .find("popover.popup()")
+            .expect("a press on a closed chip still has to open the menu");
+        assert!(
+            reads_state < closes && closes < opens,
+            "the chip must read the dropdown's state, close it while it is up and open it while it is down"
         );
     }
 }
