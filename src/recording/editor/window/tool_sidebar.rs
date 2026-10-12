@@ -1108,8 +1108,8 @@ mod tests {
         let popover_rule_end =
             css[popover_rule..].find('}').expect("the rule is closed") + popover_rule;
         assert!(
-            css[popover_rule..popover_rule_end].contains("min-width: 260px;"),
-            "the shared card must be wide enough for a balanced, box-shaped layout"
+            css[popover_rule..popover_rule_end].contains("min-width: 210px;"),
+            "the shared card must hold the reference's 210px width"
         );
 
         // The light theme needs its own surface or the dark card shows through.

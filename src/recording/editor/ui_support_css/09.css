@@ -398,8 +398,12 @@
                 border-radius: 0;
             }
 
+            /* The card's width, as the reference draws it: 210px. The card is
+             * shared by the video editor's Background panel and the image
+             * editor's Motion Appearance panel, so this one number is the size
+             * in both editors. */
             .recording-editor-custom-popover {
-                min-width: 260px;
+                min-width: 210px;
             }
 
             /* The app's floating surface, matching the main editor window
@@ -409,9 +413,16 @@
              * at the corner; the window's 10px is the radius that lines up.
              * No drop shadow: a popover sits on the video, and the blur reads
              * as a dark halo rather than lift. The light counterpart is
-             * below. */
+             * below.
+             *
+             * The reference's card is 210x250. Its height is a floor, not a
+             * cap: the Gradient page is built to land on it (stop rows at the
+             * reference's 32px, the ramp at 26), while the Color page is taller
+             * and takes the card past it — its plane is roughly square against
+             * this width, which is the reference's own rule for it. */
             .recording-editor-custom-body {
                 padding: 0;
+                min-height: 250px;
                 background: #1c1c1c;
                 border-radius: 10px;
                 border: 1px solid alpha(white, 0.10);
@@ -523,8 +534,10 @@
                 border-radius: 0;
             }
 
+            /* The mini card holds the same 210px as the card it hangs off, so
+             * the picker reads as the same surface rather than a wider one. */
             .recording-editor-gradient-picker-popover .recording-editor-gradient-picker-card {
-                min-width: 260px;
+                min-width: 210px;
                 background: #1c1c1c;
                 border-radius: 10px;
                 border: 1px solid alpha(white, 0.10);
@@ -552,12 +565,18 @@
                 background: alpha(white, 0.10);
             }
 
+            /* The page fills the card's content box (210px card less its 1px
+             * hairline per side), and every child carries 8px of its own, so
+             * this floor must stay under 208 or it would widen the card. */
             .recording-editor-gradient-editor {
-                min-width: 212px;
+                min-width: 208px;
             }
 
+            /* Gradient page rhythm, trimmed to the reference's section spacing
+             * so the tab lands on the card's 250px: the ramp and the stop rows
+             * are where this page used to stand taller than the picture. */
             .recording-editor-gradient-header {
-                margin: 0 8px 8px 8px;
+                margin: 0 8px 6px 8px;
             }
 
             /* The type picker reuses the app's own dropdown chrome (03.css for
@@ -568,8 +587,8 @@
             }
 
             button.recording-editor-gradient-icon {
-                min-width: 28px;
-                min-height: 28px;
+                min-width: 26px;
+                min-height: 26px;
                 padding: 0;
                 border: none;
                 border-radius: 7px;
@@ -585,7 +604,7 @@
             }
 
             .recording-editor-gradient-bar {
-                margin: 0 8px 10px 8px;
+                margin: 0 8px 6px 8px;
             }
 
             .recording-editor-gradient-steps-header {
@@ -620,13 +639,14 @@
             }
 
             .recording-editor-gradient-steps {
-                margin: 0 8px 10px 8px;
+                margin: 0 8px 6px 8px;
             }
 
             /* Full-width stop cards: a color chip and its hex. The selected
-             * stop mirrors the ringed pin on the bar. */
+             * stop mirrors the ringed pin on the bar. 32px is the row the
+             * reference draws around a 26px chip. */
             .recording-editor-gradient-step {
-                min-height: 48px;
+                min-height: 32px;
                 padding: 0 5px;
                 border-radius: 10px;
                 background: alpha(white, 0.05);
@@ -651,7 +671,7 @@
              * fill of its own: the row's card is the one surface, so the code
              * does not sit in a second, nested box. */
             .recording-editor-gradient-step .recording-editor-gradient-step-hex {
-                min-height: 34px;
+                min-height: 30px;
                 padding: 0 10px;
                 font-size: 12px;
                 color: alpha(white, 0.85);

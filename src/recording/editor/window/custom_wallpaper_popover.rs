@@ -39,8 +39,11 @@ const SPECTRUM_CONTENT_HEIGHT: i32 = 22;
 /// slimmer than the thumb so the handle straddles the bar.
 const SPECTRUM_BAR_THICKNESS: f64 = 10.0;
 /// Height of the gradient bar widget: the ramp's track with a stop handle
-/// straddling it.
-const GRADIENT_BAR_HEIGHT: i32 = 30;
+/// straddling it. The reference's ramp is 26px, which is also exactly the
+/// tallest a handle gets — a `GRADIENT_PIN_SIZE` pin plus a `GRADIENT_PIN_RING`
+/// on each side — so the selected stop's ring still fits the widget edge to
+/// edge.
+const GRADIENT_BAR_HEIGHT: i32 = 26;
 /// Side of a stop's square handle.
 const GRADIENT_PIN_SIZE: f64 = 20.0;
 /// Thickness of the ramp's track.
@@ -2284,6 +2287,9 @@ mod tests {
         assert!(!popover.contains("build_gradient_page"));
         assert!(!popover.contains("ToggleButton"));
 
+        // Both cards are the reference's 210px: the Color page's standalone
+        // popover and the stop picker's mini card are the same surface as the
+        // shared card, one size.
         let css = include_str!("../ui_support_css/09.css");
         for selector in [
             ".recording-editor-custom-popover {",
@@ -2296,7 +2302,10 @@ mod tests {
                 .split('}')
                 .next()
                 .unwrap();
-            assert!(rule.contains("min-width: 260px;"));
+            assert!(
+                rule.contains("min-width: 210px;"),
+                "{selector} must hold the reference's 210px card width"
+            );
         }
     }
 
