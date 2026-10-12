@@ -108,6 +108,7 @@ webcut/
 tiny.png
 # Agent local memory
 .agents/
+.claude/
 .kilo/
 .commandcode/
 
