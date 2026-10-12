@@ -137,6 +137,27 @@
                 border-radius: 8px;
             }
 
+            .editor-transform-hint {
+                color: rgba(255, 255, 255, 0.5);
+                font-size: 10px;
+                line-height: 1.35;
+            }
+
+            button.editor-transform-reset-button {
+                min-height: 30px;
+                padding: 0 10px;
+                border: 1px solid alpha(white, 0.08);
+                border-radius: 8px;
+                background: alpha(white, 0.045);
+                box-shadow: none;
+                color: rgba(255, 255, 255, 0.85);
+                font-size: 11px;
+            }
+
+            button.editor-transform-reset-button:hover {
+                background: alpha(white, 0.09);
+            }
+
             .editor-motion-content-field {
                 background: alpha(white, 0.06);
                 border: none;

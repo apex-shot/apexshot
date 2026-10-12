@@ -20,6 +20,7 @@ use super::color::{
     DEFAULT_COLOR_INDEX, DEFAULT_FOCUS_INTENSITY, DEFAULT_OBFUSCATE_AMOUNT, DRAW_COLORS,
     STROKE_WIDTH, TEXT_SIZE,
 };
+use super::image_transform::StaticImageTransform;
 use super::numbering_style::{NumberSize, NumberingStyle};
 use super::pen_weight::{HighlighterMode, PenWeight};
 use super::text_detect::{BackgroundTextDetection, TextDetector};
@@ -87,6 +88,7 @@ pub struct EditorState {
     pub drag_path: Vec<Point>,
     pub drag_shift_active: bool,
     pub background_style: BackgroundStyle,
+    pub static_image_transform: StaticImageTransform,
     pub background_padding: f64,
     pub background_shadow: f64,
     pub background_insert: f64,
@@ -272,6 +274,7 @@ impl EditorState {
             drag_path: Vec::new(),
             drag_shift_active: false,
             background_style: BackgroundStyle::None,
+            static_image_transform: StaticImageTransform::default(),
             background_padding: 0.0,
             background_shadow: 15.0,
             background_insert: 0.0,
@@ -316,6 +319,24 @@ impl EditorState {
             self.rebuild_effect_layer();
         }
         rebuild
+    }
+
+    /// Update this image's still transform and record it in document history.
+    pub fn set_static_image_transform(&mut self, transform: StaticImageTransform) -> bool {
+        let transform = transform.sanitized();
+        if self.static_image_transform == transform {
+            return false;
+        }
+        if self.selected_tool != Tool::Background {
+            self.set_tool_without_rebuild(Tool::Background);
+        }
+        let before = self.document_snapshot();
+        self.static_image_transform = transform;
+        if self.history_interaction_before.is_some() {
+            return true;
+        }
+        self.commit_history_change(before, history::HistoryKind::StaticTransform);
+        true
     }
 
     pub fn set_tool_without_rebuild(&mut self, tool: Tool) -> bool {

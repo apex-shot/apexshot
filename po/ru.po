@@ -1767,6 +1767,9 @@ msgstr "Сброс"
 msgid "Reset video edits"
 msgstr "Сбросить изменения в видео"
 
+msgid "Reset transforms"
+msgstr "Сбросить преобразования"
+
 msgid "Retry"
 msgstr "Повторить попытку"
 
@@ -1973,6 +1976,9 @@ msgstr ""
 
 msgid "The cursor is baked into this imported video."
 msgstr "Курсор встроен в это импортированное видео."
+
+msgid "The saved camera pose is paused while drawing."
+msgstr "Сохранённое положение камеры приостанавливается во время рисования."
 
 msgid "The video editor only supports MP4 recordings"
 msgstr "Видеоредактор поддерживает только записи в формате MP4"

@@ -52,6 +52,7 @@ pub(super) struct EventContext {
     pub session_alive: Rc<Cell<bool>>,
     pub state: Arc<Mutex<EditorState>>,
     pub transform: Arc<Mutex<ViewTransform>>,
+    pub sync_static_transform: Rc<dyn Fn()>,
     pub drawing_area: DrawingArea,
     pub tool_buttons: Vec<Button>,
     pub select_btn: Button,
@@ -142,6 +143,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         session_alive,
         state,
         transform,
+        sync_static_transform,
         drawing_area,
         tool_buttons,
         select_btn,
@@ -355,6 +357,7 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         &sync_size_control,
         &sync_select_inspector,
         &sync_motion_crop_history,
+        &sync_static_transform,
     );
 
     wire_canvas_drag(

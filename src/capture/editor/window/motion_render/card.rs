@@ -295,6 +295,62 @@ fn draw_transformed_card(
     }
 }
 
+pub(crate) fn static_card_appearance(
+    border_radius: f64,
+    frame_style: crate::capture::editor::types::FrameStyle,
+    border_thickness: f64,
+    border_fill_color: [f64; 4],
+    shadow_opacity: f64,
+    shadow_blur: f64,
+    shadow_position: (f64, f64),
+) -> MotionAppearance {
+    MotionAppearance {
+        border_radius,
+        frame_style,
+        border_thickness,
+        border_fill_color,
+        shadow_opacity,
+        shadow_blur,
+        shadow_position,
+        ..MotionAppearance::default()
+    }
+}
+
+pub(crate) fn draw_frozen_card(
+    context: &Context,
+    surface: &ImageSurface,
+    composition: CompositionLayout,
+    stage: MotionStage,
+    transform: MotionTransform,
+    appearance: &MotionAppearance,
+) {
+    let surface_long = f64::from(surface.width().max(surface.height()).max(1));
+    let rounded = rounded_motion_surface(
+        surface,
+        appearance.border_radius * surface_long / 400.0,
+    );
+    let card_surface = rounded.as_ref().unwrap_or(surface);
+    let layout = CardLayout::new(composition, stage, transform, (0.5, 0.5));
+    let _ = context.save();
+    context.rectangle(
+        stage.center_x - stage.bounds_w / 2.0,
+        stage.center_y - stage.bounds_h / 2.0,
+        stage.bounds_w,
+        stage.bounds_h,
+    );
+    context.clip();
+    draw_transformed_card(
+        context,
+        card_surface,
+        layout,
+        appearance,
+        1.0,
+        CARD_MESH_DIVISIONS,
+        Filter::Good,
+    );
+    context.restore().ok();
+}
+
 /// Stage-space corner radius of the rounded card image under a camera pose.
 /// Mirrors the caller's texture rounding (`border_radius * long_edge / 400`
 /// in source pixels) plus the mesh's `fit * scale` draw factor, so every

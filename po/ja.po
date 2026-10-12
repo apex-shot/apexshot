@@ -1736,6 +1736,9 @@ msgstr "リセット"
 msgid "Reset video edits"
 msgstr "動画の編集内容をリセットする"
 
+msgid "Reset transforms"
+msgstr "変換をリセット"
+
 msgid "Retry"
 msgstr "再試行"
 
@@ -1939,6 +1942,9 @@ msgstr "分析ワーカーが予期せず停止しました。手動ズームは
 
 msgid "The cursor is baked into this imported video."
 msgstr "このインポートされた動画には、カーソルが埋め込まれています。"
+
+msgid "The saved camera pose is paused while drawing."
+msgstr "描画中は保存したカメラ位置が一時停止します。"
 
 msgid "The video editor only supports MP4 recordings"
 msgstr "この動画編集ソフトは、MP4形式の録画ファイルのみに対応しています"

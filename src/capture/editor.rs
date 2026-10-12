@@ -1,5 +1,6 @@
 mod color;
 pub(crate) mod composition;
+pub(crate) mod image_transform;
 mod io_ops;
 pub mod motion_project;
 #[allow(dead_code)]

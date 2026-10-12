@@ -1734,6 +1734,9 @@ msgstr "重置"
 msgid "Reset video edits"
 msgstr "重置视频编辑"
 
+msgid "Reset transforms"
+msgstr "重置变换"
+
 msgid "Retry"
 msgstr "重试"
 
@@ -1937,6 +1940,9 @@ msgstr "分析任务意外停止。手动缩放功能仍然可用。"
 
 msgid "The cursor is baked into this imported video."
 msgstr "光标已渲染到这段导入的视频中。"
+
+msgid "The saved camera pose is paused while drawing."
+msgstr "绘制时会暂停已保存的相机视角。"
 
 msgid "The video editor only supports MP4 recordings"
 msgstr "视频编辑器仅支持MP4格式的视频文件"

@@ -85,7 +85,10 @@ pub(super) fn span_slider_row(
 /// Motion position is stored as a normalized value for resolution-independent
 /// rendering, but the inspector mirrors the direct-manipulation control in
 /// whole 3D position units (for example, `-31` and `303`).
-pub(super) fn position_slider_row(title: &str, initial: f64) -> (GtkBox, Label, FillSlider) {
+pub(in crate::capture::editor::window) fn position_slider_row(
+    title: &str,
+    initial: f64,
+) -> (GtkBox, Label, FillSlider) {
     let header = GtkBox::new(Orientation::Horizontal, 8);
     let value = Label::new(Some(&format!("{:.0}", initial * 1000.0)));
     header.set_visible(false);
@@ -98,7 +101,10 @@ pub(super) fn position_slider_row(title: &str, initial: f64) -> (GtkBox, Label, 
     (header, value, slider)
 }
 
-pub(super) fn angle_slider_row(title: &str, initial: f64) -> (GtkBox, Label, FillSlider) {
+pub(in crate::capture::editor::window) fn angle_slider_row(
+    title: &str,
+    initial: f64,
+) -> (GtkBox, Label, FillSlider) {
     let header = GtkBox::new(Orientation::Horizontal, 8);
     let value = Label::new(Some(&format!("{initial:.0}°")));
     header.set_visible(false);
@@ -107,6 +113,18 @@ pub(super) fn angle_slider_row(title: &str, initial: f64) -> (GtkBox, Label, Fil
     slider.set_increments(1.0, 5.0);
     slider.set_value(initial);
     (header, value, slider)
+}
+
+pub(in crate::capture::editor::window) fn perspective_slider_row(
+    initial: f64,
+) -> (Label, FillSlider) {
+    let value = Label::new(Some(&format!("{:.0}%", initial * 100.0)));
+    value.set_visible(false);
+    let slider = FillSlider::new(&t("Perspective"));
+    slider.set_range(0.0, 1.0);
+    slider.set_increments(0.01, 0.1);
+    slider.set_value(initial);
+    (value, slider)
 }
 
 /// Named cubic-Bézier presets for the Ease timing mode. Snappy is the

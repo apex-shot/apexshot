@@ -188,6 +188,32 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     preview: &DrawingArea,
     on_interact: Option<Rc<dyn Fn()>>,
 ) -> GtkBox {
+    build_appearance_panel(window, session, preview, on_interact, None)
+}
+
+pub(in crate::capture::editor::window) fn build_static_appearance_panel(
+    window: &ApplicationWindow,
+    session: &MotionSession,
+    preview: &DrawingArea,
+    on_interact: Option<Rc<dyn Fn()>>,
+    static_transform: GtkBox,
+) -> GtkBox {
+    build_appearance_panel(
+        window,
+        session,
+        preview,
+        on_interact,
+        Some(static_transform),
+    )
+}
+
+fn build_appearance_panel(
+    window: &ApplicationWindow,
+    session: &MotionSession,
+    preview: &DrawingArea,
+    on_interact: Option<Rc<dyn Fn()>>,
+    static_transform: Option<GtkBox>,
+) -> GtkBox {
     // Static image editor: interacting with Appearance must arm the Background
     // tool so a later canvas click previews instead of drawing with a stale
     // Pen/Arrow/etc. Motion callers pass None (no static toolbar to sync).
@@ -623,6 +649,9 @@ pub(in crate::capture::editor::window) fn build_motion_appearance_panel(
     // Paint the Custom summary chip once so it is correct before any edit.
     redraw_summary();
     root.append(&background_section);
+    if let Some(static_transform) = static_transform {
+        root.append(&motion_disclosure_row("Transform", &static_transform));
+    }
 
     let shadow_section = motion_appearance_body();
     let shadow_opacity =

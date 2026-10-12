@@ -15,10 +15,13 @@ pub(in crate::capture::editor::window) struct MotionPositionPad {
     area: DrawingArea,
     position: Rc<Cell<(f64, f64)>>,
     listeners: Rc<RefCell<Vec<Rc<dyn Fn(f64, f64)>>>>,
+    interaction_active: Rc<Cell<bool>>,
+    interaction_started: Rc<RefCell<Vec<Rc<dyn Fn()>>>>,
+    interaction_ended: Rc<RefCell<Vec<Rc<dyn Fn()>>>>,
 }
 
 impl MotionPositionPad {
-    pub(super) fn new() -> Self {
+    pub(in crate::capture::editor::window) fn new() -> Self {
         let area = DrawingArea::new();
         area.set_size_request(-1, 152);
         area.set_hexpand(true);
@@ -28,6 +31,9 @@ impl MotionPositionPad {
             area: area.clone(),
             position: Rc::new(Cell::new((0.0, 0.0))),
             listeners: Rc::new(RefCell::new(Vec::new())),
+            interaction_active: Rc::new(Cell::new(false)),
+            interaction_started: Rc::new(RefCell::new(Vec::new())),
+            interaction_ended: Rc::new(RefCell::new(Vec::new())),
         };
         area.set_draw_func({
             let pad = pad.clone();
@@ -38,7 +44,14 @@ impl MotionPositionPad {
         click.set_button(1);
         click.connect_pressed({
             let pad = pad.clone();
-            move |_, _, x, y| pad.apply_point(x, y)
+            move |_, _, x, y| {
+                pad.begin_interaction();
+                pad.apply_point(x, y);
+            }
+        });
+        click.connect_released({
+            let pad = pad.clone();
+            move |_, _, _, _| pad.end_interaction()
         });
         area.add_controller(click);
 
@@ -47,6 +60,7 @@ impl MotionPositionPad {
         drag.connect_drag_begin({
             let pad = pad.clone();
             move |gesture, _, _| {
+                pad.begin_interaction();
                 if let Some((x, y)) = gesture.start_point() {
                     pad.apply_point(x, y);
                 }
@@ -61,25 +75,59 @@ impl MotionPositionPad {
                 pad.apply_point(start_x + dx, start_y + dy);
             }
         });
+        drag.connect_drag_end({
+            let pad = pad.clone();
+            move |_, _, _| pad.end_interaction()
+        });
         area.add_controller(drag);
         area.set_cursor(gdk::Cursor::from_name("move", None).as_ref());
         area.set_tooltip_text(Some("Drag to choose what the camera shows"));
         pad
     }
 
-    pub(super) fn widget(&self) -> DrawingArea {
+    pub(in crate::capture::editor::window) fn widget(&self) -> DrawingArea {
         self.area.clone()
     }
 
     /// Update the visual marker without notifying listeners. Used when the
     /// transform changes through the X/Y sliders or timeline selection.
-    pub(super) fn set_position(&self, x: f64, y: f64) {
+    pub(in crate::capture::editor::window) fn set_position(&self, x: f64, y: f64) {
         self.position.set((x.clamp(-1.0, 1.0), y.clamp(-1.0, 1.0)));
         self.area.queue_draw();
     }
 
-    pub(super) fn connect_value_changed(&self, listener: impl Fn(f64, f64) + 'static) {
+    pub(in crate::capture::editor::window) fn connect_value_changed(
+        &self,
+        listener: impl Fn(f64, f64) + 'static,
+    ) {
         self.listeners.borrow_mut().push(Rc::new(listener));
+    }
+
+    pub(in crate::capture::editor::window) fn connect_interaction(
+        &self,
+        started: impl Fn() + 'static,
+        ended: impl Fn() + 'static,
+    ) {
+        self.interaction_started.borrow_mut().push(Rc::new(started));
+        self.interaction_ended.borrow_mut().push(Rc::new(ended));
+    }
+
+    fn begin_interaction(&self) {
+        if self.interaction_active.replace(true) {
+            return;
+        }
+        for listener in self.interaction_started.borrow().iter().cloned() {
+            listener();
+        }
+    }
+
+    fn end_interaction(&self) {
+        if !self.interaction_active.replace(false) {
+            return;
+        }
+        for listener in self.interaction_ended.borrow().iter().cloned() {
+            listener();
+        }
     }
 
     fn apply_point(&self, point_x: f64, point_y: f64) {

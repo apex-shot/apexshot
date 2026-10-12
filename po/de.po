@@ -1775,6 +1775,9 @@ msgstr "Zurücksetzen"
 msgid "Reset video edits"
 msgstr "Videobearbeitungen zurücksetzen"
 
+msgid "Reset transforms"
+msgstr "Transformationen zurücksetzen"
+
 msgid "Retry"
 msgstr "Erneut versuchen"
 
@@ -1984,6 +1987,9 @@ msgstr ""
 
 msgid "The cursor is baked into this imported video."
 msgstr "Der Cursor ist in diesem importierten Video fest eingebettet."
+
+msgid "The saved camera pose is paused while drawing."
+msgstr "Die gespeicherte Kameraperspektive ist beim Zeichnen pausiert."
 
 msgid "The video editor only supports MP4 recordings"
 msgstr "Der Video-Editor unterstützt ausschließlich MP4-Aufnahmen."

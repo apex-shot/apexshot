@@ -1,3 +1,4 @@
+use super::super::image_transform::StaticImageTransform;
 use super::super::text_detect::TextDetector;
 use super::super::types::{AnnotationAction, Rect};
 use super::EditorState;
@@ -12,6 +13,7 @@ pub(super) struct DocumentSnapshot {
     working_image: Arc<RgbaImage>,
     actions: Vec<AnnotationAction>,
     next_number: u32,
+    static_image_transform: StaticImageTransform,
 }
 
 impl DocumentSnapshot {
@@ -19,6 +21,7 @@ impl DocumentSnapshot {
         Arc::ptr_eq(&self.base_image, &other.base_image)
             && self.actions == other.actions
             && self.next_number == other.next_number
+            && self.static_image_transform == other.static_image_transform
     }
 }
 
@@ -32,6 +35,7 @@ pub(super) enum HistoryKind {
         old_width: u32,
         old_height: u32,
     },
+    StaticTransform,
 }
 
 pub(crate) struct MotionCropHistoryChange {
@@ -66,6 +70,7 @@ impl EditorState {
             working_image: Arc::clone(&self.working_image),
             actions: self.actions.clone(),
             next_number: self.next_number,
+            static_image_transform: self.static_image_transform,
         }
     }
 
@@ -156,6 +161,7 @@ impl EditorState {
         self.working_image = snapshot.working_image;
         self.actions = snapshot.actions;
         self.next_number = snapshot.next_number;
+        self.static_image_transform = snapshot.static_image_transform;
         self.selected_action_index = None;
         self.select_drag_anchor = None;
         self.select_resize_handle = None;

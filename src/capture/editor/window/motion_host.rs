@@ -42,6 +42,7 @@ pub(super) struct MotionHostInstallInputs<'a> {
     pub static_preview: &'a DrawingArea,
     pub static_appearance_slot: Rc<RefCell<GtkBox>>,
     pub static_appearance_interact: Option<Rc<dyn Fn()>>,
+    pub static_transform_sync_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
 }
 
 impl MotionHost {
@@ -104,6 +105,7 @@ impl MotionHost {
             static_preview,
             static_appearance_slot,
             static_appearance_interact,
+            static_transform_sync_slot,
         } = input;
 
         let motion_tabs_revealer = Revealer::new();
@@ -279,6 +281,8 @@ impl MotionHost {
             let static_preview_leave = static_preview.clone();
             let static_slot_leave = static_appearance_slot.clone();
             let static_interact_leave = static_appearance_interact.clone();
+            let state_leave = Arc::clone(state);
+            let static_transform_sync_leave = static_transform_sync_slot.clone();
             Rc::new(move || {
                 // Fresh Static panel from the Motion runtime first, so it
                 // shows current values instead of window-open state.
@@ -288,7 +292,9 @@ impl MotionHost {
                         &window_leave,
                         session.as_ref(),
                         &static_preview_leave,
+                        &state_leave,
                         static_interact_leave.clone(),
+                        &static_transform_sync_leave,
                     );
                     fresh.set_visible(true);
                     inspector_stack_leave.remove(&old_panel);
