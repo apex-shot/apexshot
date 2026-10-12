@@ -8,6 +8,7 @@ mod anchor_pad;
 mod appearance;
 mod build;
 mod controls;
+mod pad_handle;
 mod parts;
 mod position_pad;
 mod preview;

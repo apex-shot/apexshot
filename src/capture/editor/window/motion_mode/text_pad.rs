@@ -8,6 +8,8 @@ use crate::recording::editor::model::{
     MAX_MOTION_TEXT_POS, MIN_MOTION_TEXT_CANVAS_POS, MIN_MOTION_TEXT_POS,
 };
 
+use super::pad_handle::draw_soft_handle;
+
 /// Marker radius, plus the breathing room that keeps the puck fully inside
 /// the pad at every value.
 const MARKER_RADIUS: f64 = 16.0;
@@ -162,28 +164,9 @@ impl MotionTextPad {
         }
         context.fill().ok();
 
-        context.set_source_rgba(0.74, 0.74, 0.78, 0.56);
-        for column in 0..5 {
-            let x = width * (f64::from(column) + 0.5) / 5.0;
-            for row in 1..=3 {
-                let y = height * f64::from(row) / 4.0;
-                context.arc(x, y, 1.7, 0.0, std::f64::consts::TAU);
-                context.fill().ok();
-            }
-        }
-
         let (pos_x, pos_y) = self.position.get();
         let (x, y) = text_pos_to_point(pos_x, pos_y, width, height);
-        context.set_source_rgba(0.0, 0.0, 0.0, 0.20);
-        context.arc(x, y + 2.0, MARKER_RADIUS + 1.0, 0.0, std::f64::consts::TAU);
-        context.fill().ok();
-        context.set_source_rgb(0.94, 0.94, 0.94);
-        context.arc(x, y, MARKER_RADIUS, 0.0, std::f64::consts::TAU);
-        context.fill().ok();
-        // Theme accent orange (matches Position's marker and the crop dialog).
-        context.set_source_rgb(0.690, 0.361, 0.220);
-        context.arc(x, y, 10.0, 0.0, std::f64::consts::TAU);
-        context.fill().ok();
+        draw_soft_handle(context, x, y);
     }
 }
 

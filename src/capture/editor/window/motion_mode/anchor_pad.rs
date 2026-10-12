@@ -3,6 +3,7 @@ use gtk4::{gdk, prelude::*, DrawingArea, GestureClick, GestureDrag, Widget};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use super::pad_handle::draw_soft_handle;
 use crate::i18n::t;
 
 /// Visual 2D control for a Motion segment's zoom anchor.
@@ -163,17 +164,10 @@ impl MotionAnchorPad {
 
         let surface = self.surface.borrow().clone();
         let Some(surface) = surface else {
-            // No card yet: dotted placeholder grid like the position pad.
-            context.set_source_rgba(0.74, 0.74, 0.78, 0.56);
-            for column in 0..5 {
-                let x = width * (f64::from(column) + 0.5) / 5.0;
-                for row in 1..=3 {
-                    let y = height * f64::from(row) / 4.0;
-                    context.arc(x, y, 1.7, 0.0, std::f64::consts::TAU);
-                    context.fill().ok();
-                }
-            }
-            self.draw_marker(context, width * 0.5, height * 0.5);
+            // No card yet: an empty field with the handle at its centre, so the
+            // control still states its point before there is a thumbnail to
+            // state it against.
+            draw_soft_handle(context, width * 0.5, height * 0.5);
             return;
         };
         let surf_w = f64::from(surface.width().max(1));
@@ -226,20 +220,7 @@ impl MotionAnchorPad {
         context.stroke().ok();
 
         let (ax, ay) = self.anchor.get();
-        self.draw_marker(context, ix + ax * iw, iy + ay * ih);
-    }
-
-    fn draw_marker(&self, context: &gtk4::cairo::Context, x: f64, y: f64) {
-        context.set_source_rgba(0.0, 0.0, 0.0, 0.25);
-        context.arc(x, y + 2.0, 15.0, 0.0, std::f64::consts::TAU);
-        context.fill().ok();
-        context.set_source_rgb(0.94, 0.94, 0.94);
-        context.arc(x, y, 14.0, 0.0, std::f64::consts::TAU);
-        context.fill().ok();
-        // Theme accent orange (matches Position's marker and the crop dialog).
-        context.set_source_rgb(0.690, 0.361, 0.220);
-        context.arc(x, y, 8.5, 0.0, std::f64::consts::TAU);
-        context.fill().ok();
+        draw_soft_handle(context, ix + ax * iw, iy + ay * ih);
     }
 }
 
