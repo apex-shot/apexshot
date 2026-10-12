@@ -499,9 +499,30 @@ fn draw_add_track(
     }
 }
 
+/// Solid clip palette for the Motion lanes.
+///
+/// A text clip uses the editor's primary button orange (`#ff670d`), so the clip
+/// and the button that creates it read as the same colour. A motion clip uses
+/// the editor palette's own azure (`#0a85ff`, from `DRAW_COLORS`), rather than
+/// the video editor's flat pure-blue zoom clips, so the two timelines stay
+/// visually distinct.
+///
+/// Selection never lightens either hue. A clip that whitens on click reads as
+/// a washed-out version of itself, so a selected clip keeps the lane's one
+/// solid fill and states the selection with the deeper same-hue ring and grips
+/// below.
+const MOTION_CLIP_BLUE: (f64, f64, f64) = (0.04, 0.52, 1.00);
+const MOTION_CLIP_BLUE_DEEP: (f64, f64, f64) = (0.02, 0.29, 0.72);
+const MOTION_CLIP_BLUE_EDGE: (f64, f64, f64) = (0.55, 0.78, 1.00);
+const TEXT_CLIP_ORANGE: (f64, f64, f64) = (1.0, 103.0 / 255.0, 13.0 / 255.0);
+const TEXT_CLIP_ORANGE_DEEP: (f64, f64, f64) = (0.62, 0.22, 0.0);
+const TEXT_CLIP_ORANGE_EDGE: (f64, f64, f64) = (1.0, 178.0 / 255.0, 115.0 / 255.0);
+
 /// Colors for one effect clip. `faint` is the sibling state while another
 /// clip in the same lane owns the selection: it steps back so the selected
-/// clip reads first without disappearing.
+/// clip reads first without disappearing. Every state keeps the lane's one
+/// solid hue and fades it, rather than desaturating toward white, so all the
+/// clips in a lane stay recognisably the same colour.
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ClipTone {
     fill: (f64, f64, f64, f64),
@@ -511,23 +532,36 @@ struct ClipTone {
 }
 
 fn motion_clip_tone(selected: bool, faint: bool) -> ClipTone {
+    // One fill for every state: selection is the ring and the grips, so a
+    // clicked clip keeps its colour instead of turning pale.
+    let blue = MOTION_CLIP_BLUE;
     if selected {
         ClipTone {
-            fill: (0.30, 0.50, 0.84, 1.0),
-            edge: (0.80, 0.88, 1.0, 0.90),
-            handle: (0.86, 0.93, 1.0, 0.98),
+            fill: (blue.0, blue.1, blue.2, 1.0),
+            edge: (
+                MOTION_CLIP_BLUE_DEEP.0,
+                MOTION_CLIP_BLUE_DEEP.1,
+                MOTION_CLIP_BLUE_DEEP.2,
+                0.95,
+            ),
+            handle: (
+                MOTION_CLIP_BLUE_DEEP.0,
+                MOTION_CLIP_BLUE_DEEP.1,
+                MOTION_CLIP_BLUE_DEEP.2,
+                0.98,
+            ),
             label: 0.96,
         }
     } else if faint {
         ClipTone {
-            fill: (0.22, 0.35, 0.55, 0.62),
+            fill: (blue.0, blue.1, blue.2, 0.55),
             edge: (0.0, 0.0, 0.0, 0.0),
             handle: (0.0, 0.0, 0.0, 0.0),
             label: 0.55,
         }
     } else {
         ClipTone {
-            fill: (0.23, 0.38, 0.62, 0.95),
+            fill: (blue.0, blue.1, blue.2, 0.95),
             edge: (0.0, 0.0, 0.0, 0.0),
             handle: (0.0, 0.0, 0.0, 0.0),
             label: 0.82,
@@ -536,23 +570,37 @@ fn motion_clip_tone(selected: bool, faint: bool) -> ClipTone {
 }
 
 fn text_clip_tone(selected: bool, faint: bool) -> ClipTone {
+    // Same rule as the Motion lane: the fill is the button orange in every
+    // state, and selection is the deeper same-hue ring rather than a lighter
+    // fill.
+    let orange = TEXT_CLIP_ORANGE;
     if selected {
         ClipTone {
-            fill: (0.84, 0.44, 0.22, 1.0),
-            edge: (1.0, 0.80, 0.60, 0.90),
-            handle: (1.0, 0.88, 0.74, 0.98),
+            fill: (orange.0, orange.1, orange.2, 1.0),
+            edge: (
+                TEXT_CLIP_ORANGE_DEEP.0,
+                TEXT_CLIP_ORANGE_DEEP.1,
+                TEXT_CLIP_ORANGE_DEEP.2,
+                0.95,
+            ),
+            handle: (
+                TEXT_CLIP_ORANGE_DEEP.0,
+                TEXT_CLIP_ORANGE_DEEP.1,
+                TEXT_CLIP_ORANGE_DEEP.2,
+                0.98,
+            ),
             label: 0.96,
         }
     } else if faint {
         ClipTone {
-            fill: (0.55, 0.29, 0.16, 0.62),
+            fill: (orange.0, orange.1, orange.2, 0.55),
             edge: (0.0, 0.0, 0.0, 0.0),
             handle: (0.0, 0.0, 0.0, 0.0),
             label: 0.55,
         }
     } else {
         ClipTone {
-            fill: (0.62, 0.32, 0.18, 0.95),
+            fill: (orange.0, orange.1, orange.2, 0.95),
             edge: (0.0, 0.0, 0.0, 0.0),
             handle: (0.0, 0.0, 0.0, 0.0),
             label: 0.84,
@@ -653,8 +701,8 @@ fn draw_motion_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell
                 start,
                 end,
                 &t("Motion"),
-                (0.23, 0.38, 0.62),
-                (0.72, 0.84, 1.0),
+                MOTION_CLIP_BLUE,
+                MOTION_CLIP_BLUE_EDGE,
             );
         }
     }
@@ -733,8 +781,8 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
                 start,
                 end,
                 &t("Text"),
-                (0.62, 0.32, 0.18),
-                (0.98, 0.78, 0.62),
+                TEXT_CLIP_ORANGE,
+                TEXT_CLIP_ORANGE_EDGE,
             );
         }
     }
