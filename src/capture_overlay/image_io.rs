@@ -81,7 +81,7 @@ fn save_capture_to_temp_png(capture: &CaptureData) -> Result<PathBuf, SelectionE
     let image: ImageBuffer<Rgba<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgba)
         .ok_or_else(|| SelectionError::InitError("Failed to build RGBA image buffer".into()))?;
 
-    image.save(&tmp).map_err(|e| {
+    crate::utils::png_io::save_rgba_image(&tmp, &image).map_err(|e| {
         SelectionError::InitError(format!(
             "Failed to save temporary window capture {}: {e}",
             tmp.display()

@@ -6,10 +6,6 @@ use ashpd::desktop::{
     },
     CreateSessionOptions, PersistMode, ResponseError, Session,
 };
-use image::{
-    codecs::png::{CompressionType, FilterType, PngEncoder},
-    ImageEncoder,
-};
 use sha2::{Digest, Sha256};
 use std::{
     io::{BufRead, Write},
@@ -285,14 +281,13 @@ fn capture_to_png(capture: CaptureData) -> anyhow::Result<serde_json::Value> {
         .create_new(true)
         .mode(0o600)
         .open(&path)?;
-    if let Err(error) =
-        PngEncoder::new_with_quality(&mut file, CompressionType::Fast, FilterType::Sub).write_image(
-            image.as_raw(),
-            capture.width,
-            capture.height,
-            image::ColorType::Rgba8,
-        )
-    {
+    if let Err(error) = crate::utils::png_io::encode(
+        &mut file,
+        image.as_raw(),
+        capture.width,
+        capture.height,
+        image::ColorType::Rgba8,
+    ) {
         let _ = std::fs::remove_file(&path);
         return Err(error.into());
     }

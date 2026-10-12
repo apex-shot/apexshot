@@ -266,10 +266,7 @@ fn normalize_to_png_bytes(image_data: &[u8]) -> Vec<u8> {
         return image_data.to_vec();
     };
     let mut png = Vec::new();
-    if img
-        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-        .is_ok()
-    {
+    if crate::utils::png_io::encode_image(std::io::Cursor::new(&mut png), &img).is_ok() {
         png
     } else {
         image_data.to_vec()

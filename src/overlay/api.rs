@@ -250,7 +250,7 @@ pub fn select_area_from_image(image: &RgbaImage) -> SelectionResult {
             .unwrap_or_default()
             .as_millis()
     ));
-    let write_ok = image.save(&tmp_path).is_ok();
+    let write_ok = crate::utils::png_io::save_rgba_image(&tmp_path, image).is_ok();
     if write_ok {
         let result = crate::capture_overlay::run_capture_overlay(Some(&tmp_path));
         let _ = std::fs::remove_file(&tmp_path);
@@ -321,7 +321,7 @@ pub fn select_area_from_capture(capture: &CaptureData) -> SelectionResult {
             }
         }
         let img: image::RgbaImage = image::ImageBuffer::from_raw(w, h, rgba)?;
-        img.save(&tmp_path).ok()?;
+        crate::utils::png_io::save_rgba_image(&tmp_path, &img).ok()?;
         Some(())
     })()
     .is_some();

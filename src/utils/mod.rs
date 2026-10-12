@@ -6,6 +6,7 @@ pub mod clipboard;
 pub mod desktop_env;
 pub mod notify;
 pub mod open;
+pub mod png_io;
 
 /// Run `f` on a thread that is not driving a Tokio runtime.
 ///

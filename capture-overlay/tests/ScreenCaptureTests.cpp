@@ -29,6 +29,7 @@ private Q_SLOTS:
     void freezeUsesChosenMonitorOrigin();
     void cropsMixedDpiFrameToTempPng();
     void cropsEachSyntheticMonitorFromVirtualDesktop();
+    void tempPngUsesRealCompression();
     void portalRoutePreparesAndCapturesThroughHelper();
     void portalRouteMapsHelperCancellation();
     void portalRouteMapsHelperFailure();
@@ -258,6 +259,47 @@ void ScreenCaptureTests::cropsMixedDpiFrameToTempPng()
     QVERIFY(QFile::exists(path));
     QCOMPARE(QImage(path).size(), QSize(400, 200));
     QFile::remove(path);
+}
+
+void ScreenCaptureTests::tempPngUsesRealCompression()
+{
+    // A screenshot-shaped frame: a smooth gradient with structured detail on
+    // top. At libpng's default level this is a small fraction of its raw size;
+    // written as stored (uncompressed) blocks it is about the raw size. The
+    // temp PNG is what gets renamed straight into the user's Pictures folder,
+    // so its size is the size the user sees.
+    QImage frame(1600, 1000, QImage::Format_ARGB32);
+    for (int y = 0; y < frame.height(); ++y) {
+        const int shade = y * 255 / frame.height();
+        QRgb* row = reinterpret_cast<QRgb*>(frame.scanLine(y));
+        for (int x = 0; x < frame.width(); ++x) {
+            row[x] = (x % 40 < 20) ? qRgb(shade, (x / 4) & 0xff, 0x40)
+                                   : qRgb(shade, shade, shade);
+        }
+    }
+
+    QString path;
+    QSize size;
+    QString error;
+    QVERIFY(ScreenCapture::saveImageToTempPng(frame, path, size, error));
+    QCOMPARE(size, frame.size());
+
+    QFile file(path);
+    QVERIFY(file.open(QIODevice::ReadOnly));
+    const qint64 written = file.size();
+    file.close();
+    const QImage decoded(path);
+    QCOMPARE(decoded.size(), frame.size());
+    QVERIFY2(decoded.convertToFormat(QImage::Format_RGBA8888)
+               == frame.convertToFormat(QImage::Format_RGBA8888),
+             "the temp PNG must round-trip the pixels unchanged");
+    QFile::remove(path);
+
+    const qint64 raw = qint64(frame.width()) * frame.height() * 4;
+    QVERIFY2(written < raw / 8,
+             qPrintable(QStringLiteral("temp PNG is not really compressed: %1 bytes for %2 raw")
+                          .arg(written)
+                          .arg(raw)));
 }
 
 void ScreenCaptureTests::cropsEachSyntheticMonitorFromVirtualDesktop()

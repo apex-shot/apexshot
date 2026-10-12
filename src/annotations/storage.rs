@@ -264,8 +264,7 @@ pub fn save_original_image(
     }
 
     // Save as PNG to preserve quality
-    original
-        .save_with_format(&original_path, image::ImageFormat::Png)
+    crate::utils::png_io::save_rgba_image(&original_path, original)
         .map_err(|e| AnnotationError::WriteError(e.to_string()))?;
 
     Ok(())

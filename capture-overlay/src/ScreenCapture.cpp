@@ -29,6 +29,13 @@ constexpr int kCaptureTimeoutMs = 30000;
 constexpr int kShutdownTimeoutMs = 2000;
 constexpr double kAspectTolerance = 0.01;
 
+// QImageWriter::setCompression() takes a 0-100 ratio, not a zlib level: Qt maps
+// it with (ratio * 9) / 91. Anything at or below 10 therefore collapses to zlib
+// level 0, which writes the screenshot as stored (uncompressed) PNG blocks --
+// the same pixels, roughly 30x the bytes. 61 is the lowest ratio that reaches
+// level 6, the default libpng and the desktop's own screenshot tool use.
+constexpr int kPngCompressionRatio = 61;
+
 bool isWaylandSession()
 {
     const QString sessionType = qEnvironmentVariable("XDG_SESSION_TYPE");
@@ -392,7 +399,7 @@ bool saveImageToTempPng(const QImage& image,
         return false;
     }
     QImageWriter writer(&file, "PNG");
-    writer.setCompression(1);
+    writer.setCompression(kPngCompressionRatio);
     if (!writer.write(image)) {
         outError = QStringLiteral("Failed to save screenshot: %1").arg(writer.errorString());
         return false;
