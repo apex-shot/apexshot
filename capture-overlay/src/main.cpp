@@ -572,6 +572,7 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     bool captureMenuMode = false;
     bool saveOutput = false;
     bool recordControlsMode = false;
+    bool recordingUnavailable = false;
     bool timerCaptureEnabled = false;
     QString backgroundPath;
     QString controlDbusDest;
@@ -636,6 +637,10 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             windowCaptureMode = true;
         } else if (std::strcmp(argv[i], "--capture-menu") == 0) {
             captureMenuMode = true;
+        } else if (std::strcmp(argv[i], "--recording-unavailable") == 0) {
+            // Passed by the Rust side when this platform refuses video
+            // recording, so the toolbar disables the Video item up front.
+            recordingUnavailable = true;
         } else if (std::strcmp(argv[i], "--save-output") == 0) {
             saveOutput = true;
         } else if (std::strcmp(argv[i], "--record-controls") == 0) {
@@ -888,7 +893,8 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
 
     CaptureModeToolbar::Result captureMenuResult;
     if (captureMenuMode) {
-        captureMenuResult = CaptureModeToolbar::choose(&sessionServer);
+        captureMenuResult =
+            CaptureModeToolbar::choose(&sessionServer, nullptr, !recordingUnavailable);
         if (captureMenuResult.action == CaptureModeToolbar::Action::Cancel) {
             sessionServer.close();
             QLocalServer::removeServer(sessionSocketPath);

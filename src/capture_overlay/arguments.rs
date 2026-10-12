@@ -13,6 +13,13 @@ fn append_screenshot_timer_args(args: &mut Vec<String>, config: &crate::config::
 fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     let mut extra_args: Vec<String> = vec!["--area-init".into()];
 
+    // The C++ toolbar advertises recording. Tell it when this platform refuses
+    // recording so it draws that item disabled and explains itself, instead of
+    // accepting a click that the Rust side then has to reject.
+    extra_args.extend(recording_availability_args(
+        crate::recording::recording_supported(),
+    ));
+
     if config.rec_remember_selection {
         if let (Some(x), Some(y), Some(w), Some(h)) = (
             config.last_selection_x,
@@ -104,6 +111,18 @@ fn build_area_init_args(config: &crate::config::AppConfig) -> Vec<String> {
     });
 
     extra_args
+}
+
+/// Extra overlay arguments describing whether recording is offered here.
+///
+/// Split out from the config-driven args so the Fedora decision stays testable
+/// without depending on the host's `/etc/os-release`.
+fn recording_availability_args(recording_supported: bool) -> Vec<String> {
+    if recording_supported {
+        Vec::new()
+    } else {
+        vec!["--recording-unavailable".into()]
+    }
 }
 
 fn build_recording_ui_args(config: &crate::config::AppConfig) -> Vec<String> {

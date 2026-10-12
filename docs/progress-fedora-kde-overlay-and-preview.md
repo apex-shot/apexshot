@@ -18,18 +18,28 @@ Stabilize ApexShot behavior for Fedora KDE Plasma and related Linux desktop path
 | Supported on Fedora | Not supported on Fedora |
 |---|---|
 | Screenshots (area / screen / window) | Screen recording (full screen) |
-| Preview overlay, tray, settings, hotkeys | Portal / OpenH264 / VP9 encode paths for ApexShot |
+| Preview overlay, tray, settings, hotkeys (recording entries disabled) | Portal / OpenH264 / VP9 encode paths for ApexShot |
 | Cloud upload for images | In-app recording controls / stop indicator for video |
 
-**User-facing behavior:** hotkeys, tray “record”, and `apexshot record …` show a
-desktop notification (“Recording not supported”) and do not start a session.
+**User-facing behavior:** the tray record entries, the Video item in both
+capture toolbars, and the Recording settings page are disabled, each stating the
+reason. Hotkeys and `apexshot record …` still show a desktop notification
+(“Recording not supported”); neither starts a session.
 Message points users to **Spectacle** or **Kooha** for screen recording.
 
 **Code entry points (all refuse on Fedora):**
 - `recording::is_fedora_recording_unsupported()` / `refuse_fedora_recording()`
-- Daemon: `handle_record_screen`, `handle_record_area`, `handle_open_recording_ui`
-- CLI: `run_record` in `src/main.rs`
+  — the refusal error is `recording::FedoraRecordingUnsupported`, which keeps the
+  daemon from stacking a second “Recording failed” notification on top of it
+- `recording::recording_supported()` — the flag the UI asks before drawing a
+  record affordance
+- Daemon: `handle_record_screen`, `handle_record_window`, `handle_record_area`,
+  `handle_open_recording_ui`
+- CLI: `run_record` in `src/cli/handlers.rs`
 - Overlay request path: `run_overlay_recording_request_with_gtk`
+- C++ toolbar: `--recording-unavailable`, passed from
+  `src/capture_overlay/arguments.rs`
+- GTK capture menu: `overlay::choose_capture_mode(target, recording_available)`
 
 Other distros keep full recording UX unchanged.
 

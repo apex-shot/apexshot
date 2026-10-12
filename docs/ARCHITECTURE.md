@@ -361,6 +361,9 @@ extension path** used on GNOME Wayland.
 **Exception — Fedora:** video recording is not supported. All recording entry
 points call `refuse_fedora_recording()` and return before any portal/encode
 session is created. Screenshots on Fedora remain supported.
+`recording::recording_supported()` also drives the UI there: the tray record
+entries, the Video item in both capture toolbars, and the Recording settings
+page render disabled so nothing invites a click that would be refused.
 
 #### Native Rust recording path (non-GNOME): daemon → portal → native PipeWire + ffmpeg
 

@@ -21,6 +21,18 @@ pub struct RecordingSettingsWidgets {
     pub rec_video_mono: CheckButton,
 }
 
+/// Fedora refuses video recording, so its settings page states that once and
+/// shows the controls disabled instead of collecting values nothing can use.
+fn recording_unavailable_notice() -> Label {
+    let notice = Label::new(Some(&t(crate::recording::FEDORA_RECORDING_UNSUPPORTED_MSG)));
+    notice.set_wrap(true);
+    notice.set_xalign(0.0);
+    notice.set_halign(Align::Start);
+    notice.add_css_class("settings-sub-option-hint");
+    notice.set_margin_bottom(20);
+    notice
+}
+
 pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     let section = GtkBox::new(Orientation::Vertical, 14);
     section.set_halign(Align::Fill);
@@ -248,6 +260,19 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     video_frame.append(&build_row!(&mono_row, false));
 
     section.append(&video_frame);
+
+    // Fedora refuses video recording. Keep the page visible for reference, but
+    // disabled, and state the reason instead of letting the user configure a
+    // feature that every recording entry point will refuse.
+    let section = if crate::recording::recording_supported() {
+        section
+    } else {
+        section.set_sensitive(false);
+        let wrapper = GtkBox::new(Orientation::Vertical, 0);
+        wrapper.append(&recording_unavailable_notice());
+        wrapper.append(&section);
+        wrapper
+    };
 
     RecordingSettingsWidgets {
         section,
