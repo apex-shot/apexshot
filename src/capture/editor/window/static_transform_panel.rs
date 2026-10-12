@@ -406,51 +406,52 @@ mod tests {
 
     #[test]
     fn motion_pose_controls_sync_undo_redo_and_reset_without_feedback() {
-        if gtk4::init().is_err() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let state = Arc::new(Mutex::new(EditorState::new(image::RgbaImage::new(20, 12))));
+            let preview = gtk4::DrawingArea::new();
+            let sync_slot = Rc::new(RefCell::new(None));
+            let (panel, controls) =
+                build_static_transform_panel_with_controls(&state, &preview, None, &sync_slot);
+            let transform = StaticImageTransform {
+                yaw: 12.0,
+                pitch: -18.0,
+                roll: 7.0,
+                perspective: 0.41,
+                pos_x: -0.375,
+                pos_y: 0.275,
+            };
+            assert!(state.lock().unwrap().set_static_image_transform(transform));
+            let sync = sync_slot.borrow().clone().unwrap();
+            sync();
+            assert_eq!(state.lock().unwrap().static_image_transform, transform);
+            assert_eq!(state.lock().unwrap().history_availability(), (true, false));
+
+            assert!(state.lock().unwrap().undo());
+            sync();
+            assert_eq!(
+                state.lock().unwrap().static_image_transform,
+                StaticImageTransform::default()
+            );
+            assert_eq!(state.lock().unwrap().history_availability(), (false, true));
+
+            assert!(state.lock().unwrap().redo());
+            sync();
+            assert_eq!(state.lock().unwrap().static_image_transform, transform);
+            assert_eq!(state.lock().unwrap().history_availability(), (true, false));
+
+            controls.pos_x.set_value(0.5);
+            assert_eq!(state.lock().unwrap().static_image_transform.pos_x, 0.5);
+            find_button(panel.upcast_ref(), "Reset transforms")
+                .expect("reset button")
+                .emit_clicked();
+            assert_eq!(
+                state.lock().unwrap().static_image_transform,
+                StaticImageTransform::default()
+            );
+            assert!(state.lock().unwrap().undo());
+            assert_eq!(state.lock().unwrap().static_image_transform.pos_x, 0.5);
+        }) else {
             return;
-        }
-        let state = Arc::new(Mutex::new(EditorState::new(image::RgbaImage::new(20, 12))));
-        let preview = gtk4::DrawingArea::new();
-        let sync_slot = Rc::new(RefCell::new(None));
-        let (panel, controls) =
-            build_static_transform_panel_with_controls(&state, &preview, None, &sync_slot);
-        let transform = StaticImageTransform {
-            yaw: 12.0,
-            pitch: -18.0,
-            roll: 7.0,
-            perspective: 0.41,
-            pos_x: -0.375,
-            pos_y: 0.275,
         };
-        assert!(state.lock().unwrap().set_static_image_transform(transform));
-        let sync = sync_slot.borrow().clone().unwrap();
-        sync();
-        assert_eq!(state.lock().unwrap().static_image_transform, transform);
-        assert_eq!(state.lock().unwrap().history_availability(), (true, false));
-
-        assert!(state.lock().unwrap().undo());
-        sync();
-        assert_eq!(
-            state.lock().unwrap().static_image_transform,
-            StaticImageTransform::default()
-        );
-        assert_eq!(state.lock().unwrap().history_availability(), (false, true));
-
-        assert!(state.lock().unwrap().redo());
-        sync();
-        assert_eq!(state.lock().unwrap().static_image_transform, transform);
-        assert_eq!(state.lock().unwrap().history_availability(), (true, false));
-
-        controls.pos_x.set_value(0.5);
-        assert_eq!(state.lock().unwrap().static_image_transform.pos_x, 0.5);
-        find_button(panel.upcast_ref(), "Reset transforms")
-            .expect("reset button")
-            .emit_clicked();
-        assert_eq!(
-            state.lock().unwrap().static_image_transform,
-            StaticImageTransform::default()
-        );
-        assert!(state.lock().unwrap().undo());
-        assert_eq!(state.lock().unwrap().static_image_transform.pos_x, 0.5);
     }
 }
