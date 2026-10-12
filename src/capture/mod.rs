@@ -443,7 +443,7 @@ pub fn save_image_to_path(
 
     let image = image::open(source_path)?;
     match format {
-        ImageFormat::Png => image.save_with_format(destination, image::ImageFormat::Png)?,
+        ImageFormat::Png => crate::utils::png_io::save_image(destination, &image)?,
         ImageFormat::Jpeg { quality } => {
             let rgb_image: RgbImage = image.into_rgb8();
             encode_jpeg_rgb_to_path(&rgb_image, destination, quality)?;
@@ -477,7 +477,7 @@ pub fn save_capture(capture: &CaptureData, config: &SaveConfig) -> SaveResult<Pa
     // Save based on format
     match config.format {
         ImageFormat::Png => {
-            image.save(&output_path)?;
+            crate::utils::png_io::save_rgba_image(&output_path, &image)?;
         }
         ImageFormat::Jpeg { quality } => {
             // Convert to RGB for JPEG (no alpha)

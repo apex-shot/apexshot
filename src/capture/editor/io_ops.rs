@@ -2,6 +2,7 @@ use super::state::EditorState;
 use super::types::EditorError;
 use crate::utils::clipboard;
 use image::DynamicImage;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,7 +19,7 @@ pub fn save_edited_image(path: &Path, state: &EditorState) -> Result<(), EditorE
             let rgb = DynamicImage::ImageRgba8(final_image).to_rgb8();
             rgb.save_with_format(path, image::ImageFormat::Jpeg)
         }
-        "png" => final_image.save_with_format(path, image::ImageFormat::Png),
+        "png" => crate::utils::png_io::save_rgba_image(path, &final_image),
         _ => final_image.save(path),
     };
 
@@ -41,12 +42,20 @@ pub fn save_clipboard_image(dir: &Path, state: &EditorState) -> Result<PathBuf, 
         std::process::id()
     ));
     let result = {
-        let mut file = std::fs::OpenOptions::new()
+        let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(&path)
             .map_err(|e| EditorError::ImageSave(e.to_string()))?;
-        final_image.write_to(&mut file, image::ImageOutputFormat::Png)
+        let mut writer = std::io::BufWriter::new(file);
+        let encoded = crate::utils::png_io::encode(
+            &mut writer,
+            final_image.as_raw(),
+            final_image.width(),
+            final_image.height(),
+            image::ColorType::Rgba8,
+        );
+        encoded.and_then(|()| writer.flush().map_err(image::ImageError::from))
     };
     if let Err(error) = result {
         let _ = std::fs::remove_file(&path);

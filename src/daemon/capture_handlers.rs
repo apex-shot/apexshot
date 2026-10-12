@@ -497,7 +497,7 @@ pub(super) fn import_clipboard_image_to_temp_png() -> anyhow::Result<std::path::
             .map(|d| d.as_millis())
             .unwrap_or(0)
     ));
-    rgba.save(&path)
+    crate::utils::png_io::save_rgba_image(&path, &rgba)
         .with_context(|| format!("Failed to save clipboard image to {}", path.display()))?;
     Ok(path)
 }

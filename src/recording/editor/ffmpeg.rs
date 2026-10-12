@@ -1200,8 +1200,14 @@ fn write_rounded_mask(path: &Path, width: u32, height: u32, radius: f64) -> anyh
     let luma: Vec<u8> = mask.pixels.chunks_exact(3).map(|pixel| pixel[0]).collect();
     let gray = image::GrayImage::from_raw(mask.width, mask.height, luma)
         .ok_or_else(|| anyhow!("rounded mask buffer size mismatch"))?;
-    gray.save_with_format(path, image::ImageFormat::Png)
-        .context("failed to write the rounded-corner mask")?;
+    crate::utils::png_io::save_buffer(
+        path,
+        gray.as_raw(),
+        gray.width(),
+        gray.height(),
+        image::ColorType::L8,
+    )
+    .context("failed to write the rounded-corner mask")?;
     Ok(())
 }
 

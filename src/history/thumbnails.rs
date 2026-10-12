@@ -146,10 +146,9 @@ fn write_scaled_thumbnail(source: &Path, target: &Path) -> Result<(), String> {
         std::process::id(),
         TEMP_COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
-    // `save` infers the encoder from the extension and `.tmp` matches nothing,
-    // so every write would fail — name the format explicitly.
-    scaled
-        .save_with_format(&temp, image::ImageFormat::Png)
+    // The temp name ends in `.tmp`, which `save` cannot map to an encoder, so
+    // write PNG explicitly through the shared encoder.
+    crate::utils::png_io::save_image(&temp, &scaled)
         .map_err(|e| format!("Could not write the thumbnail: {e}"))?;
     std::fs::rename(&temp, target).map_err(|e| {
         let _ = std::fs::remove_file(&temp);
