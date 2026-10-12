@@ -55,3 +55,42 @@ fn undo_redo_stack_behaves_correctly() {
     assert_eq!(state.actions.len(), 2);
     assert_eq!(state.redo_actions.len(), 0);
 }
+
+#[test]
+fn static_transform_changes_participate_in_undo_and_redo() {
+    let mut state = EditorState::new(RgbaImage::new(32, 32));
+    let transform = crate::capture::editor::image_transform::StaticImageTransform {
+        yaw: 14.0,
+        pos_x: 0.2,
+        ..Default::default()
+    };
+
+    assert!(state.set_static_image_transform(transform));
+    assert_eq!(state.static_image_transform, transform);
+    assert!(state.undo());
+    assert_eq!(
+        state.static_image_transform,
+        crate::capture::editor::image_transform::StaticImageTransform::default()
+    );
+    assert!(state.redo());
+    assert_eq!(state.static_image_transform, transform);
+}
+
+#[test]
+fn resetting_static_transform_is_undoable() {
+    let mut state = EditorState::new(RgbaImage::new(32, 32));
+    let transform = crate::capture::editor::image_transform::StaticImageTransform {
+        pitch: 10.0,
+        pos_y: -0.3,
+        perspective: 0.5,
+        ..Default::default()
+    };
+    state.set_static_image_transform(transform);
+    state.set_static_image_transform(Default::default());
+    assert_eq!(
+        state.static_image_transform,
+        crate::capture::editor::image_transform::StaticImageTransform::default()
+    );
+    assert!(state.undo());
+    assert_eq!(state.static_image_transform, transform);
+}

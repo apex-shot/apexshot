@@ -7,6 +7,7 @@ use super::schema::{
     AnnotationFile, BackgroundAlignment, BackgroundSettings, BackgroundStyle, CropAspectRatio,
     Point, Rect, SerializableAnnotation,
 };
+use crate::capture::editor::image_transform::StaticImageTransform;
 use crate::capture::editor::types::{
     AnnotationAction, ArrowStyle as EditorArrowStyle,
     BackgroundAlignment as EditorBackgroundAlignment, BackgroundStyle as EditorBackgroundStyle,
@@ -99,6 +100,7 @@ pub fn save_annotations(
     background_alignment: EditorBackgroundAlignment,
     background_corner_radius: f64,
     background_aspect_ratio: EditorCropAspectRatio,
+    static_image_transform: StaticImageTransform,
 ) -> Result<(), AnnotationError> {
     let annotation_path = annotation_path_for_image(image_path);
     let image_hash = compute_image_hash(image_path)?;
@@ -114,6 +116,7 @@ pub fn save_annotations(
         corner_radius: background_corner_radius,
         aspect_ratio: crop_aspect_ratio_to_serializable(background_aspect_ratio),
     };
+    file.static_image_transform = static_image_transform.sanitized();
     file.annotations = annotations
         .iter()
         .filter_map(action_to_serializable)
@@ -295,6 +298,7 @@ pub struct ImageSessionSnapshot {
     pub background: BackgroundSettings,
     pub canvas_width: u32,
     pub canvas_height: u32,
+    pub static_image_transform: StaticImageTransform,
 }
 
 impl ImageSessionSnapshot {
@@ -310,6 +314,7 @@ impl ImageSessionSnapshot {
         background_alignment: EditorBackgroundAlignment,
         background_corner_radius: f64,
         background_aspect_ratio: EditorCropAspectRatio,
+        static_image_transform: StaticImageTransform,
     ) -> Self {
         Self {
             annotations: actions.iter().filter_map(action_to_serializable).collect(),
@@ -325,11 +330,14 @@ impl ImageSessionSnapshot {
             },
             canvas_width,
             canvas_height,
+            static_image_transform: static_image_transform.sanitized(),
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.annotations.is_empty() && self.background == BackgroundSettings::default()
+        self.annotations.is_empty()
+            && self.background == BackgroundSettings::default()
+            && self.static_image_transform.is_identity()
     }
 }
 
@@ -899,6 +907,7 @@ mod tests {
             EditorBackgroundAlignment::Center,
             18.0,
             EditorCropAspectRatio::Original,
+            StaticImageTransform::default(),
         )
         .unwrap();
     }
@@ -922,6 +931,13 @@ mod tests {
     #[test]
     fn persist_then_load_restores_actions_and_original() {
         let (path, image) = scratch_png("roundtrip");
+        let static_transform = StaticImageTransform {
+            yaw: 14.0,
+            pitch: -8.0,
+            perspective: 0.4,
+            pos_x: 0.2,
+            ..Default::default()
+        };
         let actions = [AnnotationAction::Box {
             rect: crate::capture::editor::types::Rect {
                 x: 1,
@@ -947,12 +963,14 @@ mod tests {
             EditorBackgroundAlignment::Center,
             18.0,
             EditorCropAspectRatio::Original,
+            static_transform,
         )
         .unwrap();
 
         let file = load_annotations(&path).unwrap().expect("sidecar");
         assert_eq!(file.annotations.len(), 1);
         assert!((file.background.padding - 42.0).abs() < f64::EPSILON);
+        assert_eq!(file.static_image_transform, static_transform);
         let original = load_original_image(&path).unwrap().expect("original");
         assert_eq!(original.dimensions(), image.dimensions());
         cleanup_png(&path);
@@ -1012,8 +1030,28 @@ mod tests {
             EditorBackgroundAlignment::Center,
             18.0,
             EditorCropAspectRatio::Original,
+            StaticImageTransform::default(),
         );
         assert!(empty.is_empty());
+        let transformed = ImageSessionSnapshot::from_editor(
+            image.width(),
+            image.height(),
+            &[],
+            &EditorBackgroundStyle::None,
+            0.0,
+            15.0,
+            0.0,
+            false,
+            EditorBackgroundAlignment::Center,
+            18.0,
+            EditorCropAspectRatio::Original,
+            StaticImageTransform {
+                pos_x: 0.2,
+                ..Default::default()
+            },
+        );
+        assert!(!transformed.is_empty());
+        assert_ne!(transformed, empty);
         delete_annotations(&path).unwrap();
         assert!(!annotations_exist(&path));
         assert!(load_original_image(&path).unwrap().is_none());

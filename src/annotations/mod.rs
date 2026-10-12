@@ -31,6 +31,7 @@
 //!     editor_state.background_alignment,
 //!     editor_state.background_corner_radius,
 //!     editor_state.background_aspect_ratio,
+//!     editor_state.static_image_transform,
 //! )?;
 //!
 //! // Load annotations when user clicks "Edit" again

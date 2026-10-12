@@ -42,5 +42,8 @@ mod drag_draw;
 #[path = "tests/transform.rs"]
 mod transform;
 
+#[path = "tests/static_transform.rs"]
+mod static_transform;
+
 #[path = "tests/arrows.rs"]
 mod arrows;

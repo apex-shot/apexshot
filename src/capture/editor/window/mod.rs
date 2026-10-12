@@ -322,12 +322,13 @@ mod footer;
 mod highlighter_bar;
 mod inspectors;
 mod motion_host;
-mod motion_mode;
+pub(in crate::capture::editor::window) mod motion_mode;
 // Scene Shadows painter is shared with the static preview/export paths.
 pub(crate) mod motion_render;
 mod motion_timeline;
 mod number_bar;
 mod obfuscate_bar;
+mod static_transform_panel;
 mod text_bar;
 mod toolbar;
 
@@ -658,6 +659,7 @@ fn setup_editor_window_full(
                     crate::annotations::crop_aspect_ratio_from_serializable(
                         annotation_file.background.aspect_ratio,
                     );
+                st.static_image_transform = annotation_file.static_image_transform.sanitized();
 
                 // Load annotations into state
                 for ann in &annotation_file.annotations {
@@ -1349,11 +1351,22 @@ fn setup_editor_window_full(
             }
         }
     });
+    let static_transform_sync_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let sync_static_transform: Rc<dyn Fn()> = Rc::new({
+        let slot = static_transform_sync_slot.clone();
+        move || {
+            if let Some(sync) = slot.borrow().as_ref() {
+                sync();
+            }
+        }
+    });
     let background_inspector = background_panel::build_shared_background_panel(
         &window,
         &motion_host.session(),
         &drawing_area,
+        &state,
         Some(background_interact_forwarder.clone()),
+        &static_transform_sync_slot,
     );
     let static_appearance_slot = Rc::new(RefCell::new(background_inspector.clone()));
 
@@ -2286,6 +2299,7 @@ fn setup_editor_window_full(
         static_preview: &drawing_area,
         static_appearance_slot: static_appearance_slot.clone(),
         static_appearance_interact: Some(background_interact_forwarder.clone()),
+        static_transform_sync_slot: static_transform_sync_slot.clone(),
     });
 
     if empty_drop_zone {
@@ -2630,6 +2644,7 @@ fn setup_editor_window_full(
         session_alive: session_alive.clone(),
         state: state.clone(),
         transform: transform.clone(),
+        sync_static_transform: sync_static_transform.clone(),
         drawing_area: drawing_area.clone(),
         tool_buttons: tool_buttons.clone(),
         select_btn: select_btn.clone(),
@@ -2781,6 +2796,7 @@ fn image_session_snapshot(state: &EditorState) -> crate::annotations::ImageSessi
         state.background_alignment,
         state.background_corner_radius,
         state.background_aspect_ratio,
+        state.static_image_transform,
     )
 }
 

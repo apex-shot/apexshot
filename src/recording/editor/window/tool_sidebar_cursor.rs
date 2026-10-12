@@ -826,6 +826,8 @@ pub(crate) struct FillSlider {
     dragging: Rc<Cell<bool>>,
     logarithmic: Rc<Cell<bool>>,
     listeners: Rc<RefCell<Vec<Rc<dyn Fn(&FillSlider)>>>>,
+    drag_started_listeners: Rc<RefCell<Vec<Rc<dyn Fn()>>>>,
+    drag_ended_listeners: Rc<RefCell<Vec<Rc<dyn Fn()>>>>,
     value_text: Rc<dyn Fn(f64, f64, f64) -> String>,
 }
 
@@ -855,6 +857,8 @@ impl FillSlider {
             dragging: Rc::new(Cell::new(false)),
             logarithmic: Rc::new(Cell::new(false)),
             listeners: Rc::new(RefCell::new(Vec::new())),
+            drag_started_listeners: Rc::new(RefCell::new(Vec::new())),
+            drag_ended_listeners: Rc::new(RefCell::new(Vec::new())),
             value_text: Rc::new(value_text),
         };
         area.set_draw_func({
@@ -871,6 +875,9 @@ impl FillSlider {
             move |gesture, x, _| {
                 slider.dragging.set(true);
                 slider.area.queue_draw();
+                for listener in slider.drag_started_listeners.borrow().iter().cloned() {
+                    listener();
+                }
                 slider.apply_x(gesture, x);
             }
         });
@@ -888,6 +895,9 @@ impl FillSlider {
             move |_, _, _| {
                 slider.dragging.set(false);
                 slider.area.queue_draw();
+                for listener in slider.drag_ended_listeners.borrow().iter().cloned() {
+                    listener();
+                }
             }
         });
         area.add_controller(drag);
@@ -967,6 +977,18 @@ impl FillSlider {
         F: Fn(&FillSlider) + 'static,
     {
         self.listeners.borrow_mut().push(Rc::new(f));
+    }
+
+    pub(crate) fn connect_drag_started(&self, listener: impl Fn() + 'static) {
+        self.drag_started_listeners
+            .borrow_mut()
+            .push(Rc::new(listener));
+    }
+
+    pub(crate) fn connect_drag_ended(&self, listener: impl Fn() + 'static) {
+        self.drag_ended_listeners
+            .borrow_mut()
+            .push(Rc::new(listener));
     }
 
     fn apply_x(&self, gesture: &GestureDrag, x: f64) {

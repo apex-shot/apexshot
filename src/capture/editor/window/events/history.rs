@@ -14,16 +14,19 @@ pub(super) fn wire_history_buttons(
     sync_size_control: &Rc<dyn Fn()>,
     sync_select_inspector: &Rc<dyn Fn()>,
     sync_motion_crop_history: &Rc<dyn Fn()>,
+    sync_static_transform: &Rc<dyn Fn()>,
 ) {
     let state_undo = state.clone();
     let drawing_area_undo = drawing_area.downgrade();
     let sync_size_control_undo = sync_size_control.clone();
     let rebuild_effects_async_undo = rebuild_effects_async.clone();
     let sync_motion_crop_history_undo = sync_motion_crop_history.clone();
+    let sync_static_transform_undo = sync_static_transform.clone();
     undo_btn.connect_clicked(move |_| {
         let changed = state_undo.lock().unwrap().undo_without_rebuild();
         if changed {
             sync_motion_crop_history_undo();
+            sync_static_transform_undo();
             rebuild_effects_async_undo();
             sync_size_control_undo();
             if let Some(area) = drawing_area_undo.upgrade() {
@@ -37,10 +40,12 @@ pub(super) fn wire_history_buttons(
     let sync_size_control_redo = sync_size_control.clone();
     let rebuild_effects_async_redo = rebuild_effects_async.clone();
     let sync_motion_crop_history_redo = sync_motion_crop_history.clone();
+    let sync_static_transform_redo = sync_static_transform.clone();
     redo_btn.connect_clicked(move |_| {
         let changed = state_redo.lock().unwrap().redo_without_rebuild();
         if changed {
             sync_motion_crop_history_redo();
+            sync_static_transform_redo();
             rebuild_effects_async_redo();
             sync_size_control_redo();
             if let Some(area) = drawing_area_redo.upgrade() {
@@ -66,4 +71,20 @@ pub(super) fn wire_history_buttons(
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn undo_and_redo_refresh_static_transform_controls() {
+        let source = include_str!("history.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(
+            source.contains("sync_static_transform_undo();")
+                && source.contains("sync_static_transform_redo();"),
+            "history changes must refresh the static transform inspector",
+        );
+    }
 }

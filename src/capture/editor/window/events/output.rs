@@ -27,6 +27,7 @@ pub fn persist_image_session(path: &Path, state: &EditorState) -> Result<(), Ann
         state.background_alignment,
         state.background_corner_radius,
         state.background_aspect_ratio,
+        state.static_image_transform,
     )
 }
 

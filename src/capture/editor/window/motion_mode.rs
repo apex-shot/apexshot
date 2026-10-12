@@ -10,7 +10,7 @@ mod build;
 mod controls;
 mod pad_handle;
 mod parts;
-mod position_pad;
+pub(in crate::capture::editor::window) mod position_pad;
 mod preview;
 mod session;
 mod text_pad;
@@ -20,9 +20,12 @@ mod watermark;
 mod widgets;
 
 pub(super) use appearance::build_motion_appearance_panel;
+pub(super) use appearance::build_static_appearance_panel;
 pub(super) use build::build_motion_mode;
+pub(in crate::capture::editor::window) use build::motion_settings_section;
 pub(super) use controls::wire_motion_controls;
 pub(super) use parts::MotionModeParts;
+pub(in crate::capture::editor::window) use position_pad::MotionPositionPad;
 use preview::draw_motion_preview;
 pub(super) use session::{MotionHoverTrack, MotionRuntime, MotionSession};
 pub(super) use transition::{
@@ -30,6 +33,9 @@ pub(super) use transition::{
     show_motion_tool_page, MotionModeChrome,
 };
 pub(super) use watermark::build_motion_watermark_panel;
+pub(in crate::capture::editor::window) use widgets::{
+    angle_slider_row, perspective_slider_row, position_slider_row,
+};
 pub(super) const MOTION_PAGE: &str = "motion";
 pub(super) const STATIC_PAGE: &str = "static";
 /// Inspector stack pages owned by the Motion tool notch, in notch order.
@@ -289,6 +295,28 @@ mod tests {
                 && source.contains("source_stack.add_named(&wallpaper_page, Some(\"wallpapers\"))")
                 && !source.contains("selection_stack"),
             "Background should pick its fill from the video editor's tab tray, not one stacked card"
+        );
+    }
+
+    #[test]
+    fn static_transform_extension_is_not_added_to_motion_appearance() {
+        let source = include_str!("motion_mode/appearance.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        let background = source
+            .find("root.append(&background_section)")
+            .expect("Background section append");
+        let transform = source
+            .find("root.append(&motion_disclosure_row(\"Transform\", &static_transform))")
+            .expect("static transform section append");
+        let shadow = source.find("let shadow_section").expect("Shadow section");
+        assert!(
+            source.contains("build_appearance_panel(window, session, preview, on_interact, None)")
+                && source.contains("Some(static_transform)")
+                && background < transform
+                && transform < shadow,
+            "only the static Appearance builder should attach the transform extension",
         );
     }
 

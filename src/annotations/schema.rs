@@ -22,6 +22,9 @@ pub struct AnnotationFile {
     /// Persisted background composition settings for non-destructive re-editing
     #[serde(default)]
     pub background: BackgroundSettings,
+    /// Still-image placement and perspective for this image.
+    #[serde(default)]
+    pub static_image_transform: crate::capture::editor::image_transform::StaticImageTransform,
     /// All annotation objects
     pub annotations: Vec<SerializableAnnotation>,
     /// When annotations were first created
@@ -366,6 +369,7 @@ impl AnnotationFile {
             image_hash,
             canvas_size: CanvasSize { width, height },
             background: BackgroundSettings::default(),
+            static_image_transform: Default::default(),
             annotations: Vec::new(),
             created_at: now,
             modified_at: now,
@@ -400,6 +404,50 @@ mod tests {
         assert_eq!(parsed.version, "1.1");
         assert_eq!(parsed.canvas_size.width, 1920);
         assert_eq!(parsed.background, BackgroundSettings::default());
+        assert_eq!(
+            parsed.static_image_transform,
+            crate::capture::editor::image_transform::StaticImageTransform::default()
+        );
+    }
+
+    #[test]
+    fn older_annotation_files_default_to_identity_transforms() {
+        let json = r#"{
+            "version":"1.1",
+            "image_path":"/test/image.png",
+            "image_hash":"sha256:abc123",
+            "canvas_size":{"width":20,"height":10},
+            "annotations":[],
+            "created_at":"2026-01-01T00:00:00Z",
+            "modified_at":"2026-01-01T00:00:00Z"
+        }"#;
+        let parsed: AnnotationFile = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            parsed.static_image_transform,
+            crate::capture::editor::image_transform::StaticImageTransform::default()
+        );
+    }
+
+    #[test]
+    fn annotation_file_roundtrips_static_image_transform() {
+        let mut file = AnnotationFile::new(
+            std::path::Path::new("/test/image.png"),
+            "sha256:abc123".to_string(),
+            20,
+            10,
+        );
+        file.static_image_transform =
+            crate::capture::editor::image_transform::StaticImageTransform {
+                yaw: 12.0,
+                pitch: -8.0,
+                roll: 6.0,
+                perspective: 0.4,
+                pos_x: 0.2,
+                pos_y: -0.1,
+            };
+        let json = serde_json::to_string(&file).unwrap();
+        let parsed: AnnotationFile = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.static_image_transform, file.static_image_transform);
     }
 
     #[test]

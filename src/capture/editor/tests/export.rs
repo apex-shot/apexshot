@@ -1257,7 +1257,8 @@ fn glass_presets_share_the_reduced_geometry_and_liquid_optics() {
         );
     }
     let source = include_str!("../window/canvas_render.rs");
-    assert!(source.contains("let liquid_group = frame_style.spec().liquid;"));
+    assert!(source.contains("let liquid_group = frame_style.spec().liquid && !transform_active;"));
+    assert!(source.contains("draw_static_motion_preview("));
     assert!(source.contains("&GlassLook::for_style(frame_style)"));
 }
 

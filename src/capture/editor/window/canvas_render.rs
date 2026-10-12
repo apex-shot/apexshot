@@ -5,8 +5,9 @@
 //! then release before Cairo work. Session/bootstrap entry points stay in
 //! `window/mod.rs`.
 
-use gtk4::cairo::ImageSurface;
+use gtk4::cairo::{Context, ImageSurface, Pattern};
 use gtk4::{prelude::*, Button, DrawingArea};
+use image::RgbaImage;
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -16,7 +17,8 @@ use std::time::{Duration, Instant};
 
 use crate::capture::editor::{
     color::selection_hit_padding_for_scale,
-    composition::{BackgroundComposition, FloatRect},
+    composition::{BackgroundComposition, CompositionLayout, FloatRect},
+    image_transform::StaticImageTransform,
     render::{
         blur_background_surface, draw_active_text_input, draw_annotation_action,
         draw_arrow_control_handles, draw_arrow_selection_outline,
@@ -36,7 +38,10 @@ use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::window::custom_wallpaper_popover::bitmap_to_surface;
 
 use super::motion_mode::MotionRuntime;
-use super::motion_render::{paint_card_shadow, paint_motion_scene_shadow, MotionStage};
+use super::motion_render::{
+    draw_frozen_card, paint_card_shadow, paint_motion_scene_shadow, static_card_appearance,
+    MotionStage,
+};
 
 /// Working width for the on-screen gradient fill. A gradient is smooth, so the
 /// paint stretches this across the canvas; matching the video editor's preview
@@ -56,6 +61,7 @@ type BackgroundSignature = (BackgroundStyle, Option<u64>, u64, Option<(bool, i32
 pub(super) struct CanvasRenderCaches {
     pub working_surface: Rc<RefCell<Option<ImageSurface>>>,
     pub working_revision: Rc<Cell<u64>>,
+    pub static_card_surface: Rc<RefCell<Option<(u64, Vec<AnnotationAction>, ImageSurface)>>>,
     pub background_surface: Rc<RefCell<Option<ImageSurface>>>,
     pub background_signature: Rc<RefCell<Option<BackgroundSignature>>>,
     /// Long edge the cached background surface was blurred at. `f64::INFINITY`
@@ -72,6 +78,7 @@ impl CanvasRenderCaches {
         Self {
             working_surface: Rc::new(RefCell::new(None)),
             working_revision: Rc::new(Cell::new(0)),
+            static_card_surface: Rc::new(RefCell::new(None)),
             background_surface: Rc::new(RefCell::new(None)),
             background_signature: Rc::new(RefCell::new(None)),
             background_edge: Rc::new(Cell::new(f64::INFINITY)),
@@ -168,6 +175,176 @@ fn schedule_burst_tail(
     });
 }
 
+fn begin_liquid_scene(context: &Context, background: &Pattern) {
+    context.set_operator(gtk4::cairo::Operator::Over);
+    context.push_group();
+    if context.set_source(background).is_ok() {
+        let _ = context.paint();
+    }
+}
+
+fn static_transform_for_preview(
+    stored: StaticImageTransform,
+    selected_tool: Tool,
+) -> StaticImageTransform {
+    if selected_tool == Tool::Background {
+        stored
+    } else {
+        StaticImageTransform::default()
+    }
+}
+
+fn card_composition(
+    background_layout: Option<CompositionLayout>,
+    image_width: f64,
+    image_height: f64,
+    background_alignment: crate::capture::editor::types::BackgroundAlignment,
+    background_corner_radius: f64,
+    background_aspect_ratio: crate::capture::editor::types::CropAspectRatio,
+    frame_style: crate::capture::editor::types::FrameStyle,
+    border_thickness: f64,
+) -> CompositionLayout {
+    background_layout.unwrap_or_else(|| {
+        BackgroundComposition::new(image_width, image_height)
+            .with_style(BackgroundStyle::None)
+            .with_padding(0.0)
+            .with_alignment(background_alignment)
+            .with_corner_radius(background_corner_radius)
+            .with_aspect_ratio(background_aspect_ratio)
+            .with_frame_style(frame_style)
+            .with_frame_border_thickness(border_thickness)
+            .compute()
+    })
+}
+
+fn update_canvas_image_transform(
+    transform: &mut ViewTransform,
+    canvas: ViewTransform,
+    layout: CompositionLayout,
+    has_canvas: bool,
+) {
+    transform.offset_x = canvas.offset_x + layout.image_rect.x * canvas.scale;
+    transform.offset_y = canvas.offset_y + layout.image_rect.y * canvas.scale;
+    transform.scale = canvas.scale * layout.draw_scale;
+    transform.image_rect_x = layout.image_rect.x;
+    transform.image_rect_y = layout.image_rect.y;
+    transform.canvas_draw_scale = layout.draw_scale;
+    transform.canvas_offset_x = canvas.offset_x;
+    transform.canvas_offset_y = canvas.offset_y;
+    transform.canvas_scale = canvas.scale;
+    transform.canvas_width = layout.canvas_width;
+    transform.canvas_height = layout.canvas_height;
+    transform.has_background = has_canvas;
+}
+
+fn static_motion_card_surface(
+    cache: &Rc<RefCell<Option<(u64, Vec<AnnotationAction>, ImageSurface)>>>,
+    working_image: &RgbaImage,
+    working_revision: u64,
+    actions: &[AnnotationAction],
+) -> Option<ImageSurface> {
+    if let Some((cached_revision, cached_actions, surface)) = cache.borrow().as_ref() {
+        if *cached_revision == working_revision && cached_actions == actions {
+            return Some(surface.clone());
+        }
+    }
+    let surface = rgba_image_to_surface(working_image)?;
+    {
+        let context = Context::new(&surface).ok()?;
+        for action in actions {
+            if !matches!(
+                action,
+                AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }
+            ) {
+                draw_annotation_action(&context, action);
+            }
+        }
+    }
+    surface.flush();
+    *cache.borrow_mut() = Some((working_revision, actions.to_vec(), surface.clone()));
+    Some(surface)
+}
+
+fn paint_static_motion_card(
+    context: &Context,
+    surface: &ImageSurface,
+    layout: CompositionLayout,
+    canvas: ViewTransform,
+    transform: StaticImageTransform,
+    appearance: &crate::recording::editor::model::MotionAppearance,
+) {
+    let stage = MotionStage::rect_at(0.0, 0.0, layout.canvas_width, layout.canvas_height);
+    let _ = context.save();
+    context.rectangle(
+        canvas.offset_x,
+        canvas.offset_y,
+        layout.canvas_width * canvas.scale,
+        layout.canvas_height * canvas.scale,
+    );
+    context.clip();
+    context.translate(canvas.offset_x, canvas.offset_y);
+    context.scale(canvas.scale, canvas.scale);
+    context.set_operator(gtk4::cairo::Operator::Over);
+    draw_frozen_card(
+        context,
+        surface,
+        layout,
+        stage,
+        transform.motion_transform(),
+        appearance,
+    );
+    let _ = context.restore();
+}
+
+fn draw_static_motion_preview(
+    context: &Context,
+    card_surface_cache: &Rc<RefCell<Option<(u64, Vec<AnnotationAction>, ImageSurface)>>>,
+    working_image: &RgbaImage,
+    working_revision: u64,
+    actions: &[AnnotationAction],
+    layout: CompositionLayout,
+    canvas: ViewTransform,
+    transform: &mut ViewTransform,
+    has_canvas: bool,
+    static_transform: StaticImageTransform,
+    background_corner_radius: f64,
+    frame_style: crate::capture::editor::types::FrameStyle,
+    border_thickness: f64,
+    border_color: crate::capture::editor::types::DrawColor,
+    shadow_opacity: f64,
+    shadow_blur: f64,
+    shadow_offset_x: f64,
+    shadow_offset_y: f64,
+) {
+    update_canvas_image_transform(transform, canvas, layout, has_canvas);
+    if let Some(surface) =
+        static_motion_card_surface(card_surface_cache, working_image, working_revision, actions)
+    {
+        let appearance = static_card_appearance(
+            background_corner_radius,
+            frame_style,
+            border_thickness,
+            [
+                border_color.r,
+                border_color.g,
+                border_color.b,
+                border_color.a,
+            ],
+            shadow_opacity,
+            shadow_blur,
+            (shadow_offset_x, shadow_offset_y),
+        );
+        paint_static_motion_card(
+            context,
+            &surface,
+            layout,
+            canvas,
+            static_transform,
+            &appearance,
+        );
+    }
+}
+
 /// Inputs for installing the canvas `set_draw_func`.
 pub(super) struct CanvasDrawInputs<'a> {
     pub state: &'a Arc<Mutex<EditorState>>,
@@ -218,6 +395,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
     let delete_selected_btn_draw = delete_selected_btn.clone();
     let working_surface = caches.working_surface.clone();
     let working_revision = caches.working_revision.clone();
+    let static_card_surface = caches.static_card_surface.clone();
     let background_surface = caches.background_surface.clone();
     let background_signature_cache = caches.background_signature.clone();
     let background_edge = caches.background_edge.clone();
@@ -236,6 +414,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             can_delete,
             working_image,
             working_image_revision,
+            static_image_transform,
             actions,
             draft_action,
             background_style,
@@ -276,6 +455,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 st.can_remove_selected_action(),
                 Arc::clone(&st.working_image),
                 st.working_image_revision,
+                st.static_image_transform,
                 st.actions.clone(),
                 st.draft_action(),
                 st.background_style.clone(),
@@ -324,6 +504,8 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
 
         let image_width = working_image.width() as f64;
         let image_height = working_image.height() as f64;
+        let preview_transform = static_transform_for_preview(static_image_transform, selected_tool);
+        let transform_active = !preview_transform.is_identity();
         let mut virtual_w = image_width;
         let mut virtual_h = image_height;
         let mut draw_scale_factor = 1.0;
@@ -445,7 +627,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         context.set_operator(gtk4::cairo::Operator::Source);
         draw_canvas_checkerboard_background(context, width, height, None, !prefers_dark);
 
-        let liquid_group = frame_style.spec().liquid;
+        let liquid_group = frame_style.spec().liquid && !transform_active;
         let mut liquid_backdrop = None;
         if liquid_group {
             context.push_group();
@@ -686,13 +868,47 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
 
             if liquid_group {
                 if let Ok(background) = context.pop_group() {
-                    context.set_operator(gtk4::cairo::Operator::Over);
-                    context.push_group();
-                    if context.set_source(&background).is_ok() {
-                        let _ = context.paint();
-                    }
+                    begin_liquid_scene(context, &background);
                     liquid_backdrop = Some(background);
                 }
+            }
+
+            if transform_active {
+                let layout = card_composition(
+                    background_layout,
+                    image_width,
+                    image_height,
+                    background_alignment,
+                    background_corner_radius,
+                    background_aspect_ratio,
+                    frame_style,
+                    border_thickness,
+                );
+                draw_static_motion_preview(
+                    context,
+                    &static_card_surface,
+                    &working_image,
+                    working_image_revision,
+                    &actions,
+                    layout,
+                    canvas_t,
+                    &mut t,
+                    true,
+                    preview_transform,
+                    background_corner_radius,
+                    frame_style,
+                    border_thickness,
+                    border_color,
+                    shadow_opacity,
+                    shadow_blur,
+                    shadow_offset_x,
+                    shadow_offset_y,
+                );
+                *transform_draw.lock().unwrap() = t;
+                if has_background {
+                    paint_motion_scene_shadow(context, scene_stage, &scene_shadow, false);
+                }
+                return;
             }
 
             if let Some(layout) = background_layout.as_ref() {
@@ -812,6 +1028,40 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             draw_rounded_rect_path(context, rect_w, rect_h, corner_r, 0.0);
             context.clip();
             context.translate(-t.offset_x, -t.offset_y);
+        }
+        if transform_active {
+            let layout = card_composition(
+                background_layout,
+                image_width,
+                image_height,
+                background_alignment,
+                background_corner_radius,
+                background_aspect_ratio,
+                frame_style,
+                border_thickness,
+            );
+            draw_static_motion_preview(
+                context,
+                &static_card_surface,
+                &working_image,
+                working_image_revision,
+                &actions,
+                layout,
+                canvas_t,
+                &mut t,
+                false,
+                preview_transform,
+                background_corner_radius,
+                frame_style,
+                border_thickness,
+                border_color,
+                shadow_opacity,
+                shadow_blur,
+                shadow_offset_x,
+                shadow_offset_y,
+            );
+            *transform_draw.lock().unwrap() = t;
+            return;
         }
         context.set_operator(gtk4::cairo::Operator::Over);
         *transform_draw.lock().unwrap() = t;
@@ -1330,6 +1580,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn editing_tools_preview_the_flat_image_without_changing_the_saved_transform() {
+        let stored = StaticImageTransform {
+            pos_x: 1.0,
+            yaw: 18.0,
+            ..Default::default()
+        };
+        assert_eq!(
+            static_transform_for_preview(stored, Tool::Background),
+            stored
+        );
+        for tool in [Tool::Select, Tool::Crop, Tool::Pen, Tool::Text] {
+            assert_eq!(
+                static_transform_for_preview(stored, tool),
+                StaticImageTransform::default()
+            );
+        }
+    }
+
+    #[test]
     fn liquid_scene_group_replay_keeps_the_surround_under_the_scene() {
         let (width, height) = (60, 40);
         let mut reference = ImageSurface::create(gtk4::cairo::Format::ARgb32, width, height)
@@ -1405,6 +1674,150 @@ mod tests {
             scene_pixel[0] > 200 && scene_pixel[1] < 90,
             "the scene must still composite over the surround, got {scene_pixel:?}"
         );
+    }
+
+    #[test]
+    fn frozen_static_card_matches_motion_at_yaw_pitch_and_position_extremes() {
+        use crate::capture::editor::composition::BackgroundComposition;
+        use crate::capture::editor::image_transform::StaticImageTransform;
+        use crate::capture::editor::types::{BackgroundAlignment, BackgroundStyle, DrawColor};
+        use crate::recording::editor::model::{MotionAppearance, MotionFrame};
+
+        fn pixels(surface: &mut ImageSurface) -> image::RgbaImage {
+            surface.flush();
+            let width = surface.width() as u32;
+            let height = surface.height() as u32;
+            let stride = surface.stride() as usize;
+            let data = surface.data().expect("rendered surface data");
+            crate::capture::editor::render::cairo_argb_to_rgba_image(
+                width,
+                height,
+                stride,
+                data.as_ref(),
+            )
+        }
+
+        let image = RgbaImage::from_fn(48, 32, |x, y| {
+            image::Rgba([200, (x * 5) as u8, (y * 7) as u8, 255])
+        });
+        let card_surface = rgba_image_to_surface(&image).expect("card surface");
+        let frame_style = crate::capture::editor::types::FrameStyle::Stack;
+        let static_layout = BackgroundComposition::new(48.0, 32.0)
+            .with_style(BackgroundStyle::PlainColor(DrawColor::new(
+                0.08, 0.18, 0.7, 1.0,
+            )))
+            .with_padding(24.0)
+            .with_insert(0.0)
+            .with_alignment(BackgroundAlignment::Center)
+            .with_corner_radius(8.0)
+            .with_frame_style(frame_style)
+            .with_frame_border_thickness(5.0)
+            .compute();
+        let motion_appearance = MotionAppearance {
+            background_padding: 24.0,
+            background_alignment: BackgroundAlignment::Center,
+            background_fill_type: crate::recording::editor::model::MotionBackgroundFillType::Color,
+            background_color: [0.08, 0.18, 0.7, 1.0],
+            border_radius: 8.0,
+            frame_style,
+            border_thickness: 5.0,
+            shadow_opacity: 0.5,
+            ..MotionAppearance::default()
+        };
+        let motion_layout = super::super::motion_render::motion_canvas(
+            48.0,
+            32.0,
+            &motion_appearance,
+            &MotionFrame::default(),
+        );
+        assert_eq!(static_layout.canvas_width, motion_layout.canvas_width);
+        assert_eq!(static_layout.canvas_height, motion_layout.canvas_height);
+        assert_eq!(static_layout.image_rect, motion_layout.image_rect);
+
+        for (pos_x, pos_y) in [(0.0, 0.0), (-1.0, -1.0), (1.0, 1.0)] {
+            let frozen = StaticImageTransform {
+                yaw: 0.0,
+                pitch: -24.0,
+                roll: 0.0,
+                perspective: 0.18,
+                pos_x,
+                pos_y,
+            };
+            let width = static_layout.canvas_width as i32;
+            let height = static_layout.canvas_height as i32;
+            let mut static_surface =
+                ImageSurface::create(gtk4::cairo::Format::ARgb32, width, height)
+                    .expect("static preview surface");
+            let mut motion_surface =
+                ImageSurface::create(gtk4::cairo::Format::ARgb32, width, height)
+                    .expect("Motion preview surface");
+            let appearance = static_card_appearance(
+                8.0,
+                frame_style,
+                5.0,
+                [1.0, 1.0, 1.0, 1.0],
+                0.5,
+                16.0,
+                (0.0, 16.0),
+            );
+            {
+                let context = Context::new(&static_surface).expect("static context");
+                context.set_source_rgb(0.08, 0.18, 0.7);
+                context.paint().expect("static background fill");
+                let mut view = ViewTransform::for_image(48.0, 32.0);
+                let canvas = ViewTransform::for_image(48.0, 32.0);
+                draw_static_motion_preview(
+                    &context,
+                    &Rc::new(RefCell::new(None)),
+                    &image,
+                    1,
+                    &[],
+                    static_layout,
+                    canvas,
+                    &mut view,
+                    true,
+                    frozen,
+                    8.0,
+                    frame_style,
+                    5.0,
+                    crate::capture::editor::types::DrawColor::new(1.0, 1.0, 1.0, 1.0),
+                    0.5,
+                    16.0,
+                    0.0,
+                    16.0,
+                );
+            }
+            {
+                let context = Context::new(&motion_surface).expect("Motion context");
+                context.set_source_rgb(0.08, 0.18, 0.7);
+                context.paint().expect("Motion background fill");
+                draw_frozen_card(
+                    &context,
+                    &card_surface,
+                    motion_layout,
+                    MotionStage::rect_at(
+                        0.0,
+                        0.0,
+                        motion_layout.canvas_width,
+                        motion_layout.canvas_height,
+                    ),
+                    frozen.motion_transform(),
+                    &appearance,
+                );
+            }
+            let static_pixels = pixels(&mut static_surface);
+            let motion_pixels = pixels(&mut motion_surface);
+            assert_eq!(static_pixels, motion_pixels);
+            if pos_x == 0.0 && pos_y == 0.0 {
+                let wallpaper = static_pixels.get_pixel(2, 2);
+                assert!(
+                    wallpaper[2] > 150 && wallpaper[0] < 80,
+                    "fixed fill: {wallpaper:?}"
+                );
+                let card = static_pixels.get_pixel(width as u32 / 2, height as u32 / 2);
+                assert!(card[0] > card[2], "frozen card: {card:?}");
+            }
+        }
     }
 
     #[test]

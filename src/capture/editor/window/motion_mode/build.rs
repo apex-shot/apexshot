@@ -17,10 +17,10 @@ use crate::recording::editor::model::{
     DEFAULT_MOTION_ZOOM, MAX_MOTION_DURATION_SECONDS, MAX_MOTION_SPRING_BOUNCE,
     MAX_MOTION_TEXT_LETTER_SPACING, MAX_MOTION_TEXT_LINE_SPACING, MAX_MOTION_TEXT_OUTLINE,
     MAX_MOTION_TEXT_ROTATION, MAX_MOTION_TEXT_SIZE, MAX_MOTION_TEXT_TRANSITION_SECONDS,
-    MAX_MOTION_YAW, MAX_MOTION_ZOOM, MIN_MOTION_DURATION_SECONDS, MIN_MOTION_SPRING_BOUNCE,
+    MAX_MOTION_ZOOM, MIN_MOTION_DURATION_SECONDS, MIN_MOTION_SPRING_BOUNCE,
     MIN_MOTION_TEXT_LETTER_SPACING, MIN_MOTION_TEXT_LINE_SPACING, MIN_MOTION_TEXT_ROTATION,
     MIN_MOTION_TEXT_SIZE, MIN_MOTION_TEXT_TRANSITION_SECONDS, MIN_MOTION_TRANSITION_SECONDS,
-    MIN_MOTION_YAW, MIN_MOTION_ZOOM,
+    MIN_MOTION_ZOOM,
 };
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
@@ -35,8 +35,8 @@ use super::text_pad::MotionTextPad;
 use super::typography::{MotionFontPicker, MotionTextColorPicker};
 use super::watermark::build_motion_watermark_panel;
 use super::widgets::{
-    angle_slider_row, ease_preset_timing, format_duration_label, position_slider_row,
-    span_slider_row, spring_preset_timing, timing_curve_icon,
+    angle_slider_row, ease_preset_timing, format_duration_label, perspective_slider_row,
+    position_slider_row, span_slider_row, spring_preset_timing, timing_curve_icon,
 };
 use super::MotionSession;
 
@@ -186,13 +186,8 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     clip_box.append(&transform_section);
 
     let rotation_section = motion_settings_section("Rotation & Perspective");
-    let yaw_value = Label::new(Some("8°"));
-    yaw_value.set_visible(false);
-    let yaw_slider =
-        FillSlider::new_with_value_text(&t("Yaw"), |value, _, _| format!("{value:.0}°"));
-    yaw_slider.set_range(MIN_MOTION_YAW, MAX_MOTION_YAW);
-    yaw_slider.set_increments(1.0, 5.0);
-    yaw_slider.set_value(8.0);
+    let (yaw_header, yaw_value, yaw_slider) = angle_slider_row(&t("Yaw"), 8.0);
+    rotation_section.append(&yaw_header);
     rotation_section.append(&yaw_value);
     rotation_section.append(&yaw_slider.widget());
 
@@ -203,12 +198,7 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     rotation_section.append(&roll_header);
     rotation_section.append(&roll_slider.widget());
 
-    let perspective_value = Label::new(Some("18%"));
-    perspective_value.set_visible(false);
-    let perspective_slider = FillSlider::new(&t("Perspective"));
-    perspective_slider.set_range(0.0, 1.0);
-    perspective_slider.set_increments(0.01, 0.1);
-    perspective_slider.set_value(0.18);
+    let (perspective_value, perspective_slider) = perspective_slider_row(0.18);
     rotation_section.append(&perspective_value);
     rotation_section.append(&perspective_slider.widget());
     clip_box.append(&rotation_section);
@@ -746,7 +736,7 @@ fn timing_mode_preview(kind: MotionTimingKind) -> MotionEffectTransformTiming {
     }
 }
 
-fn motion_settings_section(title: &str) -> GtkBox {
+pub(in crate::capture::editor::window) fn motion_settings_section(title: &str) -> GtkBox {
     let section = GtkBox::new(Orientation::Vertical, 8);
     section.add_css_class("editor-motion-settings-section");
     let heading = Label::new(Some(&t(title)));

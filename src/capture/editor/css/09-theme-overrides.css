@@ -45,6 +45,20 @@
                 background: alpha(#111827, 0.025);
             }
 
+            .editor-root.editor-theme-light .editor-transform-hint {
+                color: rgba(28, 30, 34, 0.58);
+            }
+
+            .editor-root.editor-theme-light button.editor-transform-reset-button {
+                border-color: alpha(#111827, 0.09);
+                background: alpha(#111827, 0.04);
+                color: rgba(28, 30, 34, 0.86);
+            }
+
+            .editor-root.editor-theme-light button.editor-transform-reset-button:hover {
+                background: alpha(#111827, 0.08);
+            }
+
             .editor-root.editor-theme-light .editor-motion-content-field {
                 background: alpha(#111827, 0.05);
             }

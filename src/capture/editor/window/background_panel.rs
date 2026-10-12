@@ -8,9 +8,11 @@
 
 use gtk4::{ApplicationWindow, Box as GtkBox, DrawingArea};
 use image::RgbaImage;
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use super::super::state::EditorState;
 use super::super::types::{BackgroundStyle, CropAspectRatio, DrawColor};
@@ -563,9 +565,23 @@ pub(super) fn build_shared_background_panel(
     window: &ApplicationWindow,
     session: &super::motion_mode::MotionSession,
     preview: &DrawingArea,
+    state: &Arc<Mutex<EditorState>>,
     on_interact: Option<Rc<dyn Fn()>>,
+    static_transform_sync: &Rc<RefCell<Option<Rc<dyn Fn()>>>>,
 ) -> GtkBox {
-    super::motion_mode::build_motion_appearance_panel(window, session, preview, on_interact)
+    let static_transform = super::static_transform_panel::build_static_transform_panel(
+        state,
+        preview,
+        on_interact.clone(),
+        static_transform_sync,
+    );
+    super::motion_mode::build_static_appearance_panel(
+        window,
+        session,
+        preview,
+        on_interact,
+        static_transform,
+    )
 }
 
 #[cfg(test)]
@@ -601,12 +617,19 @@ mod tests {
             200,
             image::Rgba([255, 255, 255, 255]),
         ));
+        let static_transform = crate::capture::editor::image_transform::StaticImageTransform {
+            yaw: 18.0,
+            pos_x: 0.2,
+            ..Default::default()
+        };
+        state.static_image_transform = static_transform;
         super::sync_motion_appearance_to_static(
             &appearance,
             &MotionFrame::default(),
             &shadow,
             &mut state,
         );
+        assert_eq!(state.static_image_transform, static_transform);
         assert_eq!(
             state.scene_shadow, shadow,
             "the mirror must carry the layer"
@@ -717,9 +740,10 @@ mod tests {
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains("build_shared_background_panel")
-                && production_source.contains("build_motion_appearance_panel")
+                && production_source.contains("build_static_appearance_panel")
+                && production_source.contains("build_static_transform_panel")
                 && production_source.contains("sync_motion_appearance_to_static"),
-            "static Background must reuse Motion Appearance (same side-panel tools)",
+            "static Appearance must reuse the shared builder and add its own transform section",
         );
     }
 

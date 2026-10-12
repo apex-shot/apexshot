@@ -8,7 +8,9 @@ use super::super::render::{
 use super::super::types::{
     AnnotationAction, BackgroundStyle, DrawColor, EditorError, FrameStyle, Rect,
 };
-use super::super::window::motion_render::{paint_motion_scene_shadow, MotionStage};
+use super::super::window::motion_render::{
+    draw_frozen_card, paint_motion_scene_shadow, static_card_appearance, MotionStage,
+};
 use super::EditorState;
 use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::model::MotionSceneShadow;
@@ -401,6 +403,9 @@ impl EditorState {
     }
 
     pub fn to_final_image(&self) -> Result<RgbaImage, EditorError> {
+        if !self.static_image_transform.is_identity() {
+            return self.to_static_transformed_image();
+        }
         if self.background_style != BackgroundStyle::None {
             // Annotations paint above the background/wallpaper in canvas space,
             // so text/shapes placed on the padding stay visible instead of being
@@ -410,6 +415,76 @@ impl EditorState {
         }
 
         self.to_rendered_image()
+    }
+
+    fn to_static_transformed_image(&self) -> Result<RgbaImage, EditorError> {
+        let screenshot = self.working_image.as_ref();
+        let layout = if self.background_style == BackgroundStyle::None
+            && !crate::capture::editor::types::frame_needs_canvas(
+                self.frame_style,
+                self.border_thickness,
+            ) {
+            BackgroundComposition::new(screenshot.width() as f64, screenshot.height() as f64)
+                .with_style(BackgroundStyle::None)
+                .with_padding(0.0)
+                .with_aspect_ratio(super::super::types::CropAspectRatio::Original)
+                .with_frame_style(self.frame_style)
+                .with_frame_border_thickness(self.border_thickness)
+                .compute()
+        } else {
+            self.background_layout_for(screenshot)
+        };
+        let (mut background, _) = self.render_background_base(screenshot, &layout)?;
+        let canvas_width = background.width();
+        let canvas_height = background.height();
+        let card = self.to_motion_card_image()?;
+        let card_surface = rgba_image_to_surface(&card)
+            .ok_or_else(|| EditorError::ImageSave("could not create card surface".into()))?;
+        let mut surface = rgba_image_to_surface(&background)
+            .ok_or_else(|| EditorError::ImageSave("could not create background surface".into()))?;
+        {
+            let context = gtk4::cairo::Context::new(&surface)
+                .map_err(|error| EditorError::ImageSave(error.to_string()))?;
+            let appearance = static_card_appearance(
+                self.background_corner_radius,
+                self.frame_style,
+                self.border_thickness,
+                [
+                    self.border_color.r,
+                    self.border_color.g,
+                    self.border_color.b,
+                    self.border_color.a,
+                ],
+                self.shadow_opacity,
+                self.shadow_blur,
+                (self.shadow_offset_x, self.shadow_offset_y),
+            );
+            draw_frozen_card(
+                &context,
+                &card_surface,
+                layout,
+                MotionStage::frame(f64::from(canvas_width), f64::from(canvas_height)),
+                self.static_image_transform.motion_transform(),
+                &appearance,
+            );
+        }
+        surface.flush();
+        let stride = gtk4::cairo::Format::ARgb32
+            .stride_for_width(canvas_width)
+            .map_err(|error| EditorError::ImageSave(error.to_string()))?;
+        let surface_data = surface
+            .data()
+            .map_err(|error| EditorError::ImageSave(error.to_string()))?;
+        background = cairo_argb_to_rgba_image(
+            canvas_width,
+            canvas_height,
+            stride as usize,
+            surface_data.as_ref(),
+        );
+        if self.background_style != BackgroundStyle::None {
+            background = paint_scene_shadow_layer(background, &self.scene_shadow, false)?;
+        }
+        Ok(background)
     }
 
     /// Background-free card for Motion: the screenshot (effects baked) plus
@@ -585,6 +660,103 @@ impl EditorState {
         let mut canvas = canvas;
         image::imageops::overlay(&mut canvas, &layer.image, layer.x, layer.y);
         canvas
+    }
+
+    fn render_background_base(
+        &self,
+        screenshot: &RgbaImage,
+        layout: &CompositionLayout,
+    ) -> Result<(RgbaImage, Option<RgbaImage>), EditorError> {
+        let mut canvas = match &self.background_style {
+            BackgroundStyle::PlainColor(color) => RgbaImage::from_pixel(
+                layout.canvas_width as u32,
+                layout.canvas_height as u32,
+                image::Rgba([
+                    (color.r.clamp(0.0, 1.0) * 255.0) as u8,
+                    (color.g.clamp(0.0, 1.0) * 255.0) as u8,
+                    (color.b.clamp(0.0, 1.0) * 255.0) as u8,
+                    (color.a.clamp(0.0, 1.0) * 255.0) as u8,
+                ]),
+            ),
+            BackgroundStyle::Gradient(gradient) => {
+                let bitmap = render_gradient(
+                    gradient,
+                    layout.canvas_width.max(1.0) as u32,
+                    layout.canvas_height.max(1.0) as u32,
+                );
+                let mut rgba = Vec::with_capacity(bitmap.pixels.len() / 3 * 4);
+                for rgb in bitmap.pixels.chunks_exact(3) {
+                    rgba.extend_from_slice(&[rgb[0], rgb[1], rgb[2], 255]);
+                }
+                RgbaImage::from_raw(bitmap.width, bitmap.height, rgba)
+                    .expect("gradient raster matches its own dimensions")
+            }
+            BackgroundStyle::Wallpaper(path) => self.load_and_resize_background(
+                path,
+                layout.canvas_width as u32,
+                layout.canvas_height as u32,
+            )?,
+            BackgroundStyle::Blurred(blur_idx) => {
+                let base_radius = match blur_idx {
+                    0 => 10.0,
+                    1 => 35.0,
+                    2 => 80.0,
+                    _ => 20.0,
+                };
+                const MAX_BLUR_DIM: u32 = 800;
+                let (width, height) = screenshot.dimensions();
+                let mut blurred = if width > MAX_BLUR_DIM || height > MAX_BLUR_DIM {
+                    let scale = MAX_BLUR_DIM as f64 / f64::from(width.max(height));
+                    image::imageops::resize(
+                        screenshot,
+                        (f64::from(width) * scale).round().max(1.0) as u32,
+                        (f64::from(height) * scale).round().max(1.0) as u32,
+                        image::imageops::FilterType::Triangle,
+                    )
+                } else {
+                    screenshot.clone()
+                };
+                let (blur_width, blur_height) = blurred.dimensions();
+                let slider_radius = self.background_blur.clamp(0.0, 1.0)
+                    * BACKGROUND_BLUR_MAX_RADIUS
+                    * (f64::from(blur_width) / layout.canvas_width.max(1.0));
+                apply_blur_rect(
+                    &mut blurred,
+                    Rect {
+                        x: 0,
+                        y: 0,
+                        width: blur_width as i32,
+                        height: blur_height as i32,
+                    },
+                    base_radius + slider_radius,
+                    false,
+                );
+                image::imageops::resize(
+                    &blurred,
+                    layout.canvas_width as u32,
+                    layout.canvas_height as u32,
+                    image::imageops::FilterType::Triangle,
+                )
+            }
+            BackgroundStyle::None => {
+                RgbaImage::new(layout.canvas_width as u32, layout.canvas_height as u32)
+            }
+        };
+
+        if matches!(
+            self.background_style,
+            BackgroundStyle::Gradient(_) | BackgroundStyle::Wallpaper(_)
+        ) {
+            apply_background_blur(&mut canvas, self.background_blur, 1.0);
+        }
+        if self.background_style != BackgroundStyle::None {
+            canvas = apply_background_noise(canvas, self.background_noise);
+            canvas = paint_scene_shadow_layer(canvas, &self.scene_shadow, true)?;
+        }
+        let glass_backdrop = (self.frame_style.spec().liquid
+            && self.background_style != BackgroundStyle::None)
+            .then(|| canvas.clone());
+        Ok((canvas, glass_backdrop))
     }
 
     fn render_with_background(
