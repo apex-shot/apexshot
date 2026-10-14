@@ -953,7 +953,9 @@ mod tests {
 
         assert!(selected_destination.is_file());
         assert_eq!(
-            image::open(&selected_destination).unwrap().to_rgba8(),
+            image::load_from_memory(&std::fs::read(&selected_destination).unwrap())
+                .unwrap()
+                .to_rgba8(),
             state.to_final_image().unwrap()
         );
         assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
