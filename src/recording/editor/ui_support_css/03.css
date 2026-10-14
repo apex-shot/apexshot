@@ -297,6 +297,33 @@
                 color: #ffffff;
             }
 
+            /* Bare-text action for dialogs whose secondary choice should read
+               as a plain link beside the filled primary, not as a second
+               filled pill competing with it. */
+            .recording-editor-ghost-button {
+                min-width: 28px;
+                min-height: 28px;
+                background: transparent;
+                color: alpha(white, 0.86);
+                border: none;
+                border-radius: 5px;
+                padding: 0 10px;
+                font-size: 12px;
+            }
+
+            .recording-editor-ghost-button label {
+                color: alpha(white, 0.86);
+                font-size: 12px;
+            }
+
+            .recording-editor-ghost-button:hover {
+                background: alpha(white, 0.10);
+            }
+
+            .recording-editor-ghost-button:hover label {
+                color: #ffffff;
+            }
+
             .recording-editor-drop-banner {
                 background: #1d1d1d;
                 border-radius: 8px;
@@ -335,21 +362,28 @@
                 filter: blur(8px) brightness(0.7);
             }
 
+            .editor-root.recording-editor-modal-blur {
+                filter: blur(8px) brightness(0.7);
+            }
+
             /* ── Dialog ── */
             popover.recording-editor-dialog,
             popover.recording-editor-dialog contents,
             popover.recording-editor-dialog > contents {
                 padding: 0;
                 margin: 0;
+                /* The card inside carries the Motion confirm card's 360px
+                   width, and is free to grow with its body text. */
                 min-width: 360px;
-                max-width: 400px;
+                max-width: 420px;
                 background: transparent;
                 border: none;
+                border-radius: 0;
                 box-shadow: none;
             }
 
             .recording-editor-dialog {
-                background: #1e1e1e;
-                border-radius: 12px;
-                border: 1px solid alpha(white, 0.08);
-                box-shadow: 0 12px 40px alpha(black, 0.55);
+                background: transparent;
+                border-radius: 0;
+                border: none;
+                box-shadow: none;

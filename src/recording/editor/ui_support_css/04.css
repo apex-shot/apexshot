@@ -4,21 +4,58 @@
                 background: transparent;
             }
 
+            /* This card is the image editor's Motion confirm card: one
+               near-black surface, one 12px radius, the same 1px rim. */
             .recording-editor-dialog-bg {
-                background: #1e1e1e;
+                background: @recording-editor-surface;
                 border-radius: 12px;
-                border: 1px solid alpha(white, 0.08);
+                border: 1px solid alpha(white, 0.16);
             }
 
+            /* Same weights as that card's title, which is an inspector title. */
             .recording-editor-dialog-title {
-                color: #F1F1F3;
-                font-size: 15px;
-                font-weight: 700;
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 13px;
+                font-weight: 600;
+                letter-spacing: -0.1px;
             }
 
+            /* Same weights as that card's body, an inspector hint — including
+               the indent that sets the body in from the title's left edge. */
             .recording-editor-dialog-body {
-                color: alpha(white, 0.55);
+                color: rgba(255, 255, 255, 0.52);
+                font-size: 11px;
+                line-height: 1.4;
+                padding: 10px 12px;
+            }
+
+            /* The dialog's actions carry that card's weights: a bare-text
+               secondary beside one filled #ff670d primary. */
+            .recording-editor-dialog-root .recording-editor-primary-button {
+                min-width: 72px;
+                min-height: 26px;
+                padding: 0 14px;
+                border-radius: 6px;
+                background: #ff670d;
+                border: none;
+                color: white;
                 font-size: 12px;
+                font-weight: 600;
+                box-shadow: none;
+            }
+
+            .recording-editor-dialog-root .recording-editor-primary-button label {
+                color: white;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .recording-editor-dialog-root .recording-editor-primary-button:hover {
+                background: #c06a44;
+            }
+
+            .recording-editor-dialog-root .recording-editor-primary-button:active {
+                background: #8a4a2d;
             }
 
             .recording-editor-crop-dialog {
