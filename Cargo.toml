@@ -75,7 +75,7 @@ pipewire = "0.9"
 libspa-sys = "0.9"
 relm4-icons = "0.10.1"
 wayland-client = "0.31.12"
-wayland-protocols = "0.32.10"
+wayland-protocols = { version = "0.32.10", features = ["client", "unstable"] }
 wayland-protocols-wlr = "0.3.10"
 libc = "0.2.182"
 wayland-protocols-plasma = { version = "0.3.12", features = ["client"] }

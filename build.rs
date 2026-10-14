@@ -18,6 +18,8 @@ fn build_capture_overlay() {
     // Tell Cargo to re-run this script if C++ sources change
     println!("cargo:rerun-if-changed=capture-overlay/CMakeLists.txt");
     println!("cargo:rerun-if-changed=capture-overlay/src/main.cpp");
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureMenuResult.cpp");
+    println!("cargo:rerun-if-changed=capture-overlay/src/CaptureMenuResult.h");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay.h");
     println!("cargo:rerun-if-changed=capture-overlay/src/CaptureOverlay_DrawingPrimitives_p.h");

@@ -5,13 +5,14 @@ mod tests {
         build_quick_capture_args, build_recording_ui_args, classify_overlay_exit_code,
         execute_builtin_overlay_query, is_gnome_wayland_session_from_env,
         parse_area_capture_output_with_persist, parse_area_capture_output_with_stderr,
-        parse_capture_screen_json, parse_capture_screen_json_with_mode, parse_recording_json,
-        parse_selection_json, recording_availability_args, save_capture_to_temp_png,
-        should_request_screenshot_lock,
-        should_use_gtk_layer_shell_selector_from_env, supports_custom_shutter_sound_from,
+        parse_capture_menu_control_request, parse_capture_screen_json,
+        parse_capture_screen_json_with_mode, parse_recording_json, parse_selection_json,
+        quick_capture_menu_result_json, recording_availability_args, save_capture_to_temp_png,
+        should_request_screenshot_lock, should_use_gtk_layer_shell_selector_from_env,
+        should_use_layer_shell_quick_capture_menu_from_env, supports_custom_shutter_sound_from,
         tracked_overlay_id, validate_capture_session_with, AreaCapturePathResult,
-        CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode, OverlaySelection,
-        RecordingType,
+        CaptureMenuControlRequest, CaptureSessionCoordinator, LaunchBlockedReason, OverlayExitCode,
+        OverlaySelection, RecordingType,
     };
     use crate::{
         backend::{CaptureData, PixelFormat},
@@ -150,6 +151,202 @@ mod tests {
             None,
             true,
         ));
+    }
+
+    #[test]
+    fn layer_shell_menu_route_requires_capability_and_preserves_special_routes() {
+        assert!(!should_use_gtk_layer_shell_selector_from_env(
+            Some("wayland-0"),
+            Some("Hyprland"),
+            None,
+            Some("instance"),
+            None,
+            false,
+        ));
+        assert!(should_use_layer_shell_quick_capture_menu_from_env(
+            Some("wayland-0"),
+            Some("Hyprland"),
+            None,
+            false,
+            false,
+            true,
+        ));
+
+        for desktop in ["KDE", "Niri", "sway"] {
+            assert!(should_use_layer_shell_quick_capture_menu_from_env(
+                Some("wayland-0"),
+                Some(desktop),
+                None,
+                false,
+                false,
+                true,
+            ));
+        }
+
+        assert!(!should_use_layer_shell_quick_capture_menu_from_env(
+            Some("wayland-0"),
+            Some("GNOME"),
+            None,
+            false,
+            false,
+            true,
+        ));
+        assert!(!should_use_layer_shell_quick_capture_menu_from_env(
+            None,
+            Some("KDE"),
+            None,
+            false,
+            false,
+            true,
+        ));
+        assert!(!should_use_layer_shell_quick_capture_menu_from_env(
+            Some("wayland-0"),
+            Some("KDE"),
+            None,
+            false,
+            false,
+            false,
+        ));
+        assert!(!should_use_layer_shell_quick_capture_menu_from_env(
+            Some("wayland-0"),
+            Some("Hyprland"),
+            None,
+            true,
+            false,
+            true,
+        ));
+        assert!(!should_use_layer_shell_quick_capture_menu_from_env(
+            Some("wayland-0"),
+            Some("KDE"),
+            None,
+            false,
+            true,
+            false,
+        ));
+
+        assert!(should_use_layer_shell_quick_capture_menu_from_env(
+            Some("wayland-0"),
+            Some("KDE"),
+            None,
+            false,
+            true,
+            true,
+        ));
+    }
+
+    #[test]
+    fn layer_shell_menu_result_round_trips_backend_options() {
+        use crate::overlay::{CaptureMenuAction as Action, CaptureMenuResult};
+
+        let cases = [
+            CaptureMenuResult {
+                action: Action::Area,
+                ocr: true,
+                microphone: true,
+                speaker: true,
+                ..CaptureMenuResult::default()
+            },
+            CaptureMenuResult {
+                action: Action::Display,
+                timer_seconds: 5,
+                ..CaptureMenuResult::default()
+            },
+            CaptureMenuResult {
+                action: Action::Area,
+                ..CaptureMenuResult::default()
+            },
+            CaptureMenuResult {
+                action: Action::Window,
+                recording: true,
+                microphone: true,
+                speaker: true,
+                ..CaptureMenuResult::default()
+            },
+        ];
+        for menu in cases {
+            let json = quick_capture_menu_result_json(menu, true).unwrap();
+            let parsed: CaptureMenuResult = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, menu);
+        }
+
+        let menu = CaptureMenuResult {
+            action: Action::Display,
+            timer_seconds: 3,
+            ..CaptureMenuResult::default()
+        };
+        let args = super::build_quick_capture_args_with_menu(&AppConfig::default(), menu).unwrap();
+        assert!(args
+            .iter()
+            .any(|arg| arg.starts_with("--capture-menu-result={")));
+    }
+
+    #[test]
+    fn layer_shell_menu_result_rejects_cancel_and_unsupported_state() {
+        use crate::overlay::{CaptureMenuAction as Action, CaptureMenuResult};
+
+        assert!(quick_capture_menu_result_json(CaptureMenuResult::default(), true).is_err());
+        assert!(quick_capture_menu_result_json(
+            CaptureMenuResult {
+                action: Action::Display,
+                ocr: true,
+                ..CaptureMenuResult::default()
+            },
+            true,
+        )
+        .is_err());
+        assert!(quick_capture_menu_result_json(
+            CaptureMenuResult {
+                action: Action::Area,
+                recording: true,
+                ..CaptureMenuResult::default()
+            },
+            true,
+        )
+        .is_err());
+        assert!(quick_capture_menu_result_json(
+            CaptureMenuResult {
+                action: Action::Display,
+                recording: true,
+                ..CaptureMenuResult::default()
+            },
+            false,
+        )
+        .is_err());
+        assert!(quick_capture_menu_result_json(
+            CaptureMenuResult {
+                action: Action::Window,
+                timer_seconds: 5,
+                ..CaptureMenuResult::default()
+            },
+            true,
+        )
+        .is_err());
+        assert!(serde_json::from_str::<CaptureMenuResult>("not json").is_err());
+        assert!(serde_json::from_str::<CaptureMenuResult>(
+            r#"{
+                "action":"display",
+                "recording":false,
+                "ocr":false,
+                "timer_seconds":0,
+                "microphone":false,
+                "speaker":false,
+                "other":true
+            }"#
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn layer_shell_menu_control_accepts_only_focus_and_cancel() {
+        assert_eq!(
+            parse_capture_menu_control_request(b"focus\n"),
+            Some(CaptureMenuControlRequest::Focus)
+        );
+        assert_eq!(
+            parse_capture_menu_control_request(b"cancel\n"),
+            Some(CaptureMenuControlRequest::Cancel)
+        );
+        assert_eq!(parse_capture_menu_control_request(b"other\n"), None);
     }
 
     #[test]

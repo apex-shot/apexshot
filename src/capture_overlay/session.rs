@@ -80,6 +80,133 @@ fn overlay_socket_path() -> PathBuf {
     crate::app_identity::capture_runtime_dir().join("apexshot-capture-overlay.sock")
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CaptureMenuControlRequest {
+    Focus,
+    Cancel,
+}
+
+fn parse_capture_menu_control_request(payload: &[u8]) -> Option<CaptureMenuControlRequest> {
+    match payload {
+        b"focus\n" | b"focus" => Some(CaptureMenuControlRequest::Focus),
+        b"cancel\n" | b"cancel" => Some(CaptureMenuControlRequest::Cancel),
+        _ => None,
+    }
+}
+
+#[cfg(unix)]
+pub(crate) struct CaptureMenuControlSession {
+    receiver: Option<std::sync::mpsc::Receiver<CaptureMenuControlRequest>>,
+    running: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    listener_thread: Option<std::thread::JoinHandle<()>>,
+    socket_path: PathBuf,
+    socket_identity: (u64, u64),
+}
+
+#[cfg(unix)]
+impl CaptureMenuControlSession {
+    pub(crate) fn start() -> Option<Self> {
+        use std::io::Read;
+        use std::os::unix::fs::MetadataExt;
+        use std::os::unix::net::UnixListener;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let socket_path = overlay_socket_path();
+        let parent = socket_path.parent()?;
+        std::fs::create_dir_all(parent).ok()?;
+
+        let listener = match UnixListener::bind(&socket_path) {
+            Ok(listener) => listener,
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => {
+                if request_existing_overlay_focus() {
+                    return None;
+                }
+                std::fs::remove_file(&socket_path).ok()?;
+                UnixListener::bind(&socket_path).ok()?
+            }
+            Err(_) => return None,
+        };
+        let metadata = std::fs::metadata(&socket_path).ok()?;
+        let socket_identity = (metadata.dev(), metadata.ino());
+        if listener.set_nonblocking(true).is_err() {
+            drop(listener);
+            remove_capture_menu_socket_if_owned(&socket_path, socket_identity);
+            return None;
+        }
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let running = std::sync::Arc::new(AtomicBool::new(true));
+        let thread_running = running.clone();
+        let listener_thread = match std::thread::Builder::new()
+            .name("capture-menu-control".into())
+            .spawn(move || {
+                while thread_running.load(Ordering::Acquire) {
+                    match listener.accept() {
+                        Ok((stream, _)) => {
+                            let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+                            let mut payload = Vec::new();
+                            let _ = stream.take(64).read_to_end(&mut payload);
+                            if let Some(request) =
+                                parse_capture_menu_control_request(payload.as_slice())
+                            {
+                                let _ = sender.send(request);
+                            }
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(20));
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {}
+                        Err(_) => break,
+                    }
+                }
+            }) {
+            Ok(thread) => thread,
+            Err(_) => {
+                remove_capture_menu_socket_if_owned(&socket_path, socket_identity);
+                return None;
+            }
+        };
+
+        Some(Self {
+            receiver: Some(receiver),
+            running,
+            listener_thread: Some(listener_thread),
+            socket_path,
+            socket_identity,
+        })
+    }
+
+    pub(crate) fn take_receiver(
+        &mut self,
+    ) -> Option<std::sync::mpsc::Receiver<CaptureMenuControlRequest>> {
+        self.receiver.take()
+    }
+}
+
+#[cfg(unix)]
+impl Drop for CaptureMenuControlSession {
+    fn drop(&mut self) {
+        self.running
+            .store(false, std::sync::atomic::Ordering::Release);
+        if let Some(thread) = self.listener_thread.take() {
+            let _ = thread.join();
+        }
+        remove_capture_menu_socket_if_owned(&self.socket_path, self.socket_identity);
+    }
+}
+
+#[cfg(unix)]
+fn remove_capture_menu_socket_if_owned(path: &Path, identity: (u64, u64)) {
+    use std::os::unix::fs::MetadataExt;
+
+    if std::fs::metadata(path)
+        .ok()
+        .is_some_and(|metadata| (metadata.dev(), metadata.ino()) == identity)
+    {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 pub fn request_existing_overlay_focus() -> bool {
     send_overlay_socket_request(OVERLAY_FOCUS_REQUEST)
 }

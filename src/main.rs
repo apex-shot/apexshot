@@ -35,6 +35,20 @@ use apexshot::{
 use std::path::PathBuf;
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+
+    match args.get(1).map(String::as_str) {
+        Some("agent") => std::process::exit(cli::agent::run_cli(&args[2..])),
+        Some("mcp") => {
+            if let Err(error) = cli::mcp::run_stdio() {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+            return;
+        }
+        _ => {}
+    }
+
     let _ = dotenvy::dotenv();
     if let Some(mut config_dir) = dirs::config_dir() {
         config_dir.push("apexshot");
@@ -44,8 +58,6 @@ fn main() {
 
     apexshot::i18n::init_from_config();
     apexshot::recording::dnd::recover_stale_gnome_dnd();
-
-    let args: Vec<String> = std::env::args().collect();
 
     if args.len() < 2 {
         // No arguments - open settings or onboarding, and ensure the tray/hotkey
@@ -516,6 +528,12 @@ fn run_daemon_with_gtk_on_main_thread() {
                     .map_err(|e| e.to_string());
                 let _ = reply.send(result);
             }
+            GtkWork::QuickCaptureLayerShellMenu { reply } => {
+                let result =
+                    apexshot::capture_overlay::open_quick_capture_via_layer_shell_menu_on_main_thread()
+                    .map_err(|error| error.to_string());
+                let _ = reply.send(result);
+            }
             GtkWork::CaptureCrosshair { reply } => {
                 eprintln!(
                     "[gtk] CaptureCrosshair received — {}",
@@ -626,6 +644,8 @@ pub(crate) fn print_usage() {
     println!("  login             Sign in to ApexShot Cloud (device authorization)");
     println!("  logout            Sign out of ApexShot Cloud");
     println!("  native-host <sub> Install/uninstall native messaging host");
+    println!("  agent <command>   Run agent CLI commands");
+    println!("  mcp               Run the MCP stdio server");
     println!("  video-editor [mp4] Open the recording editor");
     println!("  install           Install local binary and set up autostart");
     println!("  update            Update ApexShot to the latest published release");

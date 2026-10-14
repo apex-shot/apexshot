@@ -1,3 +1,4 @@
+#include "CaptureMenuResult.h"
 #include "ScreenCapture.h"
 
 #include <QFile>
@@ -37,6 +38,9 @@ private Q_SLOTS:
     void portalRouteFailsWithoutHelper();
     void waylandSessionUsesPortalWithX11QtPlatform();
     void nativeX11DoesNotRequestPortal();
+    void parsesLayerShellCaptureMenuResult();
+    void rejectsMalformedLayerShellCaptureMenuResult();
+    void rejectsUnsupportedLayerShellCaptureMenuState();
 };
 
 namespace {
@@ -420,6 +424,143 @@ void ScreenCaptureTests::nativeX11DoesNotRequestPortal()
     const auto status = session.prepare(QGuiApplication::primaryScreen(), false, error);
     qputenv("XDG_SESSION_TYPE", previous);
     QCOMPARE(status, ScreenCapture::CaptureStatus::Ok);
+}
+
+void ScreenCaptureTests::parsesLayerShellCaptureMenuResult()
+{
+    CaptureMenuResult::Selection selection;
+    QString error;
+    QVERIFY(CaptureMenuResult::parse(
+      QByteArrayLiteral(R"({
+          "action":"area",
+          "recording":false,
+          "ocr":true,
+          "timer_seconds":0,
+          "microphone":true,
+          "speaker":true
+      })"),
+      true,
+      &selection,
+      &error));
+    QCOMPARE(static_cast<int>(selection.action),
+             static_cast<int>(CaptureMenuResult::Action::Area));
+    QVERIFY(!selection.recording);
+    QVERIFY(selection.ocr);
+    QCOMPARE(selection.timerSeconds, 0);
+    QVERIFY(selection.microphone);
+    QVERIFY(selection.speaker);
+    QVERIFY(error.isEmpty());
+
+    QVERIFY(CaptureMenuResult::parse(
+      QByteArrayLiteral(R"({
+          "action":"area",
+          "recording":false,
+          "ocr":false,
+          "timer_seconds":0,
+          "microphone":true,
+          "speaker":true
+      })"),
+      true,
+      &selection));
+    QVERIFY(!selection.recording);
+    QVERIFY(selection.microphone);
+    QVERIFY(selection.speaker);
+
+    QVERIFY(CaptureMenuResult::parse(
+      QByteArrayLiteral(R"({
+          "action":"window",
+          "recording":true,
+          "ocr":false,
+          "timer_seconds":0,
+          "microphone":true,
+          "speaker":true
+      })"),
+      true,
+      &selection));
+    QCOMPARE(static_cast<int>(selection.action),
+             static_cast<int>(CaptureMenuResult::Action::Window));
+    QVERIFY(selection.recording);
+    QVERIFY(selection.microphone);
+    QVERIFY(selection.speaker);
+}
+
+void ScreenCaptureTests::rejectsMalformedLayerShellCaptureMenuResult()
+{
+    CaptureMenuResult::Selection selection;
+    const QByteArray invalid[] = {
+        QByteArrayLiteral("not json"),
+        QByteArrayLiteral("[]"),
+        QByteArrayLiteral("{\"action\":\"display\"}"),
+        QByteArrayLiteral(R"({
+            "action":"cancel",
+            "recording":false,
+            "ocr":false,
+            "timer_seconds":0,
+            "microphone":false,
+            "speaker":false
+        })"),
+        QByteArrayLiteral(R"({
+            "action":"display",
+            "recording":false,
+            "ocr":false,
+            "timer_seconds":0,
+            "microphone":false,
+            "speaker":false,
+            "unexpected":true
+        })"),
+    };
+    for (const QByteArray& json : invalid) {
+        QVERIFY(!CaptureMenuResult::parse(json, true, &selection));
+    }
+}
+
+void ScreenCaptureTests::rejectsUnsupportedLayerShellCaptureMenuState()
+{
+    CaptureMenuResult::Selection selection;
+    QVERIFY(!CaptureMenuResult::parse(
+      QByteArrayLiteral(R"({
+          "action":"display",
+          "recording":false,
+          "ocr":true,
+          "timer_seconds":0,
+          "microphone":false,
+          "speaker":false
+      })"),
+      true,
+      &selection));
+    QVERIFY(!CaptureMenuResult::parse(
+      QByteArrayLiteral(R"({
+          "action":"area",
+          "recording":true,
+          "ocr":false,
+          "timer_seconds":0,
+          "microphone":false,
+          "speaker":false
+      })"),
+      true,
+      &selection));
+    QVERIFY(!CaptureMenuResult::parse(
+      QByteArrayLiteral(R"({
+          "action":"window",
+          "recording":false,
+          "ocr":false,
+          "timer_seconds":5,
+          "microphone":false,
+          "speaker":false
+      })"),
+      true,
+      &selection));
+    QVERIFY(!CaptureMenuResult::parse(
+      QByteArrayLiteral(R"({
+          "action":"display",
+          "recording":true,
+          "ocr":false,
+          "timer_seconds":0,
+          "microphone":false,
+          "speaker":false
+      })"),
+      false,
+      &selection));
 }
 
 int main(int argc, char* argv[])

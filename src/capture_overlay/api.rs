@@ -152,9 +152,7 @@ pub fn open_recording_ui_via_cpp() -> Result<AreaCapturePathResult, SelectionErr
 
 pub fn open_quick_capture_via_cpp() -> Result<AreaCapturePathResult, SelectionError> {
     if should_use_gtk_layer_shell_selector() {
-        eprintln!(
-            "[capture_overlay] Using ApexShot GTK capture menu on wlroots compositor"
-        );
+        eprintln!("[capture_overlay] Using ApexShot GTK capture menu on wlroots compositor");
         return open_quick_capture_via_gtk_layer_shell_wlroots();
     }
 
@@ -167,8 +165,108 @@ pub fn open_quick_capture_via_cpp() -> Result<AreaCapturePathResult, SelectionEr
     parse_area_capture_output_with_stderr(output.status.code(), stdout.trim(), stderr.trim())
 }
 
+/// Show the layer-shell Quick Capture menu on the GTK main thread, then hand
+/// its selection to the existing Qt capture flow.
+pub fn open_quick_capture_via_layer_shell_menu_on_main_thread(
+) -> Result<Option<AreaCapturePathResult>, SelectionError> {
+    let wayland_display = std::env::var("WAYLAND_DISPLAY").ok();
+    let desktop = std::env::var("XDG_CURRENT_DESKTOP").ok();
+    let gnome_setup_display = std::env::var("GNOME_SETUP_DISPLAY").ok();
+    let gtk_layer_shell_selector = should_use_gtk_layer_shell_selector();
+    let portal_only = crate::app_identity::portal_only();
+    if !layer_shell_quick_capture_menu_environment_from_env(
+        wayland_display.as_deref(),
+        desktop.as_deref(),
+        gnome_setup_display.as_deref(),
+        gtk_layer_shell_selector,
+        portal_only,
+    ) {
+        return Ok(None);
+    }
+
+    force_wayland_gdk_for_layer_shell();
+    if let Err(error) = gtk4::init() {
+        if gdk::Display::default().is_none() {
+            eprintln!("[capture_overlay] GTK init failed for Quick Capture menu: {error}");
+            return Ok(None);
+        }
+    }
+    let layer_shell_supported = gtk4_layer_shell::is_supported();
+    if !should_use_layer_shell_quick_capture_menu_from_env(
+        wayland_display.as_deref(),
+        desktop.as_deref(),
+        gnome_setup_display.as_deref(),
+        gtk_layer_shell_selector,
+        portal_only,
+        layer_shell_supported,
+    ) || gdk::Display::default().is_none()
+    {
+        return Ok(None);
+    }
+
+    #[cfg(not(unix))]
+    return Ok(None);
+
+    #[cfg(unix)]
+    {
+        let Some(mut control_session) = CaptureMenuControlSession::start() else {
+            return Ok(None);
+        };
+        let menu_target = match crate::overlay::default_target_monitor_choice() {
+            Ok(target) => target,
+            Err(error) => {
+                eprintln!(
+                    "[capture_overlay] Could not select a target for the layer-shell menu: {error}"
+                );
+                return Ok(None);
+            }
+        };
+        let Some(control_receiver) = control_session.take_receiver() else {
+            return Ok(None);
+        };
+        let Some(menu) = crate::overlay::choose_capture_mode_on_layer_shell(
+            &menu_target,
+            crate::recording::recording_supported(),
+            control_receiver,
+        ) else {
+            return Ok(None);
+        };
+        if menu.action == crate::overlay::CaptureMenuAction::Cancel {
+            return Ok(Some(AreaCapturePathResult::Cancelled));
+        }
+
+        wait_for_layer_shell_overlay_to_unmap();
+
+        let config = crate::config::load_config();
+        let extra_args =
+            build_quick_capture_args_with_menu(&config, menu).map_err(SelectionError::InitError)?;
+        let arg_refs: Vec<&str> = extra_args.iter().map(String::as_str).collect();
+        let output = run_capture_binary(&arg_refs, None)?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        parse_area_capture_output_with_stderr(output.status.code(), stdout.trim(), stderr.trim())
+            .map(Some)
+    }
+}
+
 pub fn quick_capture_via_cpp() -> Result<AreaCaptureResult, SelectionError> {
-    match open_quick_capture_via_cpp()? {
+    quick_capture_path_result_to_capture(open_quick_capture_via_cpp()?)
+}
+
+/// Show the layer-shell Quick Capture menu from a caller already on the GTK
+/// main thread, returning `None` when the caller should use the existing route.
+pub fn quick_capture_via_layer_shell_menu_on_main_thread(
+) -> Result<Option<AreaCaptureResult>, SelectionError> {
+    let Some(result) = open_quick_capture_via_layer_shell_menu_on_main_thread()? else {
+        return Ok(None);
+    };
+    quick_capture_path_result_to_capture(result).map(Some)
+}
+
+fn quick_capture_path_result_to_capture(
+    result: AreaCapturePathResult,
+) -> Result<AreaCaptureResult, SelectionError> {
+    match result {
         AreaCapturePathResult::Captured(path) => {
             let capture = load_capture_data_from_path(&path);
             let _ = std::fs::remove_file(&path);

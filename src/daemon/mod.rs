@@ -393,6 +393,9 @@ pub enum GtkWork {
     CaptureAreaInit {
         reply: std::sync::mpsc::SyncSender<Result<AreaCapturePathResult, String>>,
     },
+    QuickCaptureLayerShellMenu {
+        reply: std::sync::mpsc::SyncSender<Result<Option<AreaCapturePathResult>, String>>,
+    },
     CaptureCrosshair {
         reply: std::sync::mpsc::SyncSender<Result<std::path::PathBuf, String>>,
     },

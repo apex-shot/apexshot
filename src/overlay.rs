@@ -26,6 +26,7 @@ pub use api::{
     select_window_from_capture_with_gtk, AreaSelector, OverlaySelection, SelectionArea,
     SelectionError, SelectionResult,
 };
+pub(crate) use capture_menu::choose_capture_mode_on_layer_shell;
 pub use capture_menu::{choose_capture_mode, CaptureMenuAction, CaptureMenuResult};
 pub(crate) use monitor_picker::default_target_monitor_choice;
 pub use monitor_picker::{select_target_monitor_choice, MonitorChoice};

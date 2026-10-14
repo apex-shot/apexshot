@@ -68,6 +68,39 @@ fn should_use_gtk_layer_shell_selector() -> bool {
     )
 }
 
+fn layer_shell_quick_capture_menu_environment_from_env(
+    wayland_display: Option<&str>,
+    desktop: Option<&str>,
+    gnome_setup_display: Option<&str>,
+    gtk_layer_shell_selector: bool,
+    portal_only: bool,
+) -> bool {
+    let is_wayland = wayland_display.is_some_and(|value| !value.trim().is_empty());
+    let is_gnome = desktop_value_contains(desktop, "GNOME")
+        || gnome_setup_display.is_some_and(|value| !value.trim().is_empty());
+    let uses_existing_native_selector = gtk_layer_shell_selector && !portal_only;
+
+    is_wayland && !is_gnome && !uses_existing_native_selector
+}
+
+fn should_use_layer_shell_quick_capture_menu_from_env(
+    wayland_display: Option<&str>,
+    desktop: Option<&str>,
+    gnome_setup_display: Option<&str>,
+    gtk_layer_shell_selector: bool,
+    portal_only: bool,
+    layer_shell_supported: bool,
+) -> bool {
+    layer_shell_supported
+        && layer_shell_quick_capture_menu_environment_from_env(
+            wayland_display,
+            desktop,
+            gnome_setup_display,
+            gtk_layer_shell_selector,
+            portal_only,
+        )
+}
+
 /// Whether ApexShot's own shutter sound can play on a capture route: the native
 /// wlroots freeze only. The Qt overlay prefers the Screenshot portal, and every
 /// portal route leaves capture audio to the desktop.

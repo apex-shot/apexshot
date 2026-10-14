@@ -631,7 +631,23 @@ pub(super) fn handle_quick_capture(
     };
     let _ = stop_preview_overlay(&state);
     let gtk_tx = state.lock().unwrap().gtk_tx.clone();
-    let result = open_quick_capture_via_cpp().map_err(anyhow::Error::from);
+    let layer_shell_menu = gtk_tx.as_ref().and_then(|gtk_tx| {
+        let (reply_tx, reply_rx) = std::sync::mpsc::sync_channel(0);
+        if gtk_tx
+            .send(super::GtkWork::QuickCaptureLayerShellMenu { reply: reply_tx })
+            .is_err()
+        {
+            return None;
+        }
+        Some(reply_rx.recv())
+    });
+    let result = match layer_shell_menu {
+        Some(Ok(Ok(Some(result)))) => Ok(result),
+        Some(Ok(Ok(None))) | None | Some(Err(_)) => {
+            open_quick_capture_via_cpp().map_err(anyhow::Error::from)
+        }
+        Some(Ok(Err(error))) => Err(anyhow::Error::msg(error)),
+    };
     handle_interactive_capture_result(result, state, gtk_tx, "Quick Capture");
 }
 

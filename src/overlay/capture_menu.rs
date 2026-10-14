@@ -9,11 +9,14 @@ use gtk4::{
     EventControllerMotion, GestureClick, Window,
 };
 use gtk4_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+use serde::{Deserialize, Serialize};
 use std::cell::{Cell, RefCell};
 use std::f64::consts::PI;
 use std::rc::Rc;
+use std::time::Duration;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum CaptureMenuAction {
     Cancel,
     Display,
@@ -21,7 +24,8 @@ pub enum CaptureMenuAction {
     Area,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CaptureMenuResult {
     pub action: CaptureMenuAction,
     pub recording: bool,
@@ -135,6 +139,14 @@ fn item_is_active(index: usize, state: MenuState) -> bool {
         || (!state.recording && index == 6 && state.timer_seconds > 0)
         || (state.recording && index == 5 && state.microphone)
         || (state.recording && index == 6 && state.speaker)
+}
+
+fn set_recording_mode(state: &mut MenuState, recording: bool) {
+    state.recording = recording;
+    if recording {
+        state.ocr = false;
+        state.timer_seconds = 0;
+    }
 }
 
 fn rounded_rect(context: &cairo::Context, rect: Rect, radius: f64) {
@@ -513,9 +525,34 @@ fn install_transparent_window_css(display: &gdk::Display) {
 /// [`crate::recording::recording_supported`]; when false the Video slot is
 /// drawn disabled and hovering it explains why.
 pub fn choose_capture_mode(target: &MonitorChoice, recording_available: bool) -> CaptureMenuResult {
-    let Some(display) = gdk::Display::default() else {
-        return CaptureMenuResult::default();
+    choose_capture_mode_internal(target, recording_available, None, false).unwrap_or_default()
+}
+
+pub(crate) fn choose_capture_mode_on_layer_shell(
+    target: &MonitorChoice,
+    recording_available: bool,
+    control_receiver: std::sync::mpsc::Receiver<crate::capture_overlay::CaptureMenuControlRequest>,
+) -> Option<CaptureMenuResult> {
+    choose_capture_mode_internal(target, recording_available, Some(control_receiver), true)
+}
+
+fn choose_capture_mode_internal(
+    target: &MonitorChoice,
+    recording_available: bool,
+    control_receiver: Option<
+        std::sync::mpsc::Receiver<crate::capture_overlay::CaptureMenuControlRequest>,
+    >,
+    require_layer_shell: bool,
+) -> Option<CaptureMenuResult> {
+    let display = gdk::Display::default()?;
+    let layer_shell_monitor = if gtk4_layer_shell::is_supported() {
+        find_monitor_at(&display, target.x, target.y)
+    } else {
+        None
     };
+    if require_layer_shell && layer_shell_monitor.is_none() {
+        return None;
+    }
     install_transparent_window_css(&display);
     let result = Rc::new(RefCell::new(None));
     let main_loop = glib::MainLoop::new(None, false);
@@ -526,16 +563,14 @@ pub fn choose_capture_mode(target: &MonitorChoice, recording_available: bool) ->
         .css_classes(["apexshot-capture-menu"])
         .build();
     window.set_default_size(PANEL_WIDTH, PANEL_HEIGHT);
-    if gtk4_layer_shell::is_supported() {
-        if let Some(monitor) = find_monitor_at(&display, target.x, target.y) {
-            window.init_layer_shell();
-            window.set_layer(Layer::Overlay);
-            window.set_anchor(Edge::Top, true);
-            window.set_margin(Edge::Top, 28);
-            window.set_monitor(Some(&monitor));
-            window.set_keyboard_mode(KeyboardMode::Exclusive);
-            window.set_namespace(Some("apexshot-capture-menu"));
-        }
+    if let Some(monitor) = layer_shell_monitor {
+        window.init_layer_shell();
+        window.set_layer(Layer::Overlay);
+        window.set_anchor(Edge::Top, true);
+        window.set_margin(Edge::Top, 28);
+        window.set_monitor(Some(&monitor));
+        window.set_keyboard_mode(KeyboardMode::Exclusive);
+        window.set_namespace(Some("apexshot-capture-menu"));
     }
     let state = Rc::new(RefCell::new(MenuState {
         recording_available,
@@ -615,12 +650,8 @@ pub fn choose_capture_mode(target: &MonitorChoice, recording_available: bool) ->
                 return;
             }
             match index {
-                0 => menu.recording = false,
-                1 => {
-                    menu.recording = true;
-                    menu.ocr = false;
-                    menu.timer_seconds = 0;
-                }
+                0 => set_recording_mode(&mut menu, false),
+                1 => set_recording_mode(&mut menu, true),
                 2 => {
                     *result.borrow_mut() = Some(menu.result(CaptureMenuAction::Display));
                     drop(menu);
@@ -695,14 +726,42 @@ pub fn choose_capture_mode(target: &MonitorChoice, recording_available: bool) ->
             glib::Propagation::Proceed
         });
     }
+    let control_poll = control_receiver.map(|receiver| {
+        let result = result.clone();
+        let main_loop = main_loop.clone();
+        let window = window.clone();
+        let drawing = drawing.clone();
+        glib::timeout_add_local(Duration::from_millis(50), move || {
+            loop {
+                match receiver.try_recv() {
+                    Ok(crate::capture_overlay::CaptureMenuControlRequest::Focus) => {
+                        window.present();
+                        let _ = drawing.grab_focus();
+                    }
+                    Ok(crate::capture_overlay::CaptureMenuControlRequest::Cancel) => {
+                        *result.borrow_mut() = Some(CaptureMenuResult::default());
+                        window.close();
+                        main_loop.quit();
+                        return glib::ControlFlow::Continue;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                }
+            }
+            glib::ControlFlow::Continue
+        })
+    });
     window.present();
     let _ = drawing.grab_focus();
     main_loop.run();
+    if let Some(control_poll) = control_poll {
+        control_poll.remove();
+    }
     window.hide();
     window.destroy();
     while glib::MainContext::default().iteration(false) {}
     let selected = result.borrow().unwrap_or_default();
-    selected
+    Some(selected)
 }
 
 #[cfg(test)]
@@ -743,6 +802,59 @@ mod tests {
         assert!(!item_is_active(1, unavailable));
         assert!(!item_is_disabled(2, unavailable));
     }
+
+    #[test]
+    fn shot_ocr_disables_display_and_timer_but_allows_area() {
+        let shot = MenuState {
+            recording_available: true,
+            recording: false,
+            ocr: true,
+            timer_seconds: 0,
+            microphone: false,
+            speaker: false,
+        };
+
+        assert!(item_is_disabled(2, shot));
+        assert!(!item_is_disabled(4, shot));
+        assert!(item_is_disabled(6, shot));
+    }
+
+    #[test]
+    fn video_audio_toggles_survive_shot_selection_for_area_capture() {
+        let shot = MenuState {
+            recording_available: true,
+            recording: false,
+            ocr: false,
+            timer_seconds: 0,
+            microphone: false,
+            speaker: false,
+        };
+        let mut video = MenuState {
+            recording: true,
+            microphone: true,
+            speaker: true,
+            ..shot
+        };
+
+        set_recording_mode(&mut video, false);
+
+        assert!(!video.recording);
+        assert!(video.microphone);
+        assert!(video.speaker);
+        assert!(!item_is_disabled(4, video));
+        assert_eq!(
+            video.result(CaptureMenuAction::Area),
+            CaptureMenuResult {
+                action: CaptureMenuAction::Area,
+                recording: false,
+                ocr: false,
+                timer_seconds: 0,
+                microphone: true,
+                speaker: true,
+            }
+        );
+    }
+
     #[test]
     fn item_rects_match_the_cpp_toolbar_layout() {
         assert_eq!(item_rect(0).x, 8.0);

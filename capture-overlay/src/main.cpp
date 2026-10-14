@@ -1,4 +1,5 @@
 #include "CaptureOverlay.h"
+#include "CaptureMenuResult.h"
 #include "CaptureModeToolbar.h"
 #include "CaptureCountdownPill.h"
 #include "MonitorPicker.h"
@@ -570,6 +571,10 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     bool crosshairCaptureMode = false;
     bool windowCaptureMode = false;
     bool captureMenuMode = false;
+    bool captureMenuResultSpecified = false;
+    bool malformedCaptureMenuResultArgument = false;
+    QByteArray captureMenuResultJson;
+    CaptureMenuResult::Selection selectedCaptureMenuResult;
     bool saveOutput = false;
     bool recordControlsMode = false;
     bool recordingUnavailable = false;
@@ -620,6 +625,7 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
     const QString sessionSocketPath = overlaySocketPath();
     QLocalServer sessionServer;
     ScreenCapture::CaptureSession captureSession;
+    const QString captureMenuResultPrefix = QStringLiteral("--capture-menu-result=");
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--background") == 0 && i + 1 < argc) {
@@ -637,6 +643,15 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             windowCaptureMode = true;
         } else if (std::strcmp(argv[i], "--capture-menu") == 0) {
             captureMenuMode = true;
+        } else if (QString::fromLocal8Bit(argv[i]).startsWith(
+                     QStringLiteral("--capture-menu-result"))) {
+            const QString argument = QString::fromLocal8Bit(argv[i]);
+            if (captureMenuResultSpecified || !argument.startsWith(captureMenuResultPrefix)) {
+                malformedCaptureMenuResultArgument = true;
+            } else {
+                captureMenuResultSpecified = true;
+                captureMenuResultJson = argument.mid(captureMenuResultPrefix.size()).toUtf8();
+            }
         } else if (std::strcmp(argv[i], "--recording-unavailable") == 0) {
             // Passed by the Rust side when this platform refuses video
             // recording, so the toolbar disables the Video item up front.
@@ -793,12 +808,33 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
         return 2;
     }
 
+    if (malformedCaptureMenuResultArgument
+        || (captureMenuResultSpecified
+            && (!captureMenuMode || !areaInitMode || captureScreenMode || crosshairCaptureMode
+                || windowCaptureMode || recordControlsMode || openRecordingUiMode))) {
+        std::fprintf(stderr, "apexshot-capture: invalid Quick Capture menu argument\n");
+        return 2;
+    }
+    if (captureMenuResultSpecified) {
+        QString menuError;
+        if (!CaptureMenuResult::parse(captureMenuResultJson,
+                                      !recordingUnavailable,
+                                      &selectedCaptureMenuResult,
+                                      &menuError)) {
+            std::fprintf(stderr,
+                         "apexshot-capture: invalid Quick Capture menu state: %s\n",
+                         menuError.toLocal8Bit().constData());
+            return 2;
+        }
+    }
+
     // Every interactive overlay is scoped to one display. This includes the
     // legacy direct area selector used by recording as well as screenshot and
     // recording-UI entry points.
     const bool interactiveOverlayMode = !recordControlsMode;
     if (interactiveOverlayMode) {
-        if (forwardOverlayRequestToExistingOverlay(sessionSocketPath, kOverlayFocusRequest)) {
+        if (!captureMenuResultSpecified
+            && forwardOverlayRequestToExistingOverlay(sessionSocketPath, kOverlayFocusRequest)) {
             return kExitForwardedToExistingOverlay;
         }
 
@@ -893,15 +929,34 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
 
     CaptureModeToolbar::Result captureMenuResult;
     if (captureMenuMode) {
-        captureMenuResult =
-            CaptureModeToolbar::choose(&sessionServer, nullptr, !recordingUnavailable);
-        if (captureMenuResult.action == CaptureModeToolbar::Action::Cancel) {
-            sessionServer.close();
-            QLocalServer::removeServer(sessionSocketPath);
-            return 1;
-        }
+        if (captureMenuResultSpecified) {
+            switch (selectedCaptureMenuResult.action) {
+            case CaptureMenuResult::Action::Display:
+                captureMenuResult.action = CaptureModeToolbar::Action::Display;
+                break;
+            case CaptureMenuResult::Action::Window:
+                captureMenuResult.action = CaptureModeToolbar::Action::Window;
+                break;
+            case CaptureMenuResult::Action::Area:
+                captureMenuResult.action = CaptureModeToolbar::Action::Area;
+                break;
+            }
+            captureMenuResult.recording = selectedCaptureMenuResult.recording;
+            captureMenuResult.ocr = selectedCaptureMenuResult.ocr;
+            captureMenuResult.timerSeconds = selectedCaptureMenuResult.timerSeconds;
+            captureMenuResult.microphone = selectedCaptureMenuResult.microphone;
+            captureMenuResult.speaker = selectedCaptureMenuResult.speaker;
+        } else {
+            captureMenuResult =
+                CaptureModeToolbar::choose(&sessionServer, nullptr, !recordingUnavailable);
+            if (captureMenuResult.action == CaptureModeToolbar::Action::Cancel) {
+                sessionServer.close();
+                QLocalServer::removeServer(sessionSocketPath);
+                return 1;
+            }
 
-        waitForOverlayUnmap();
+            waitForOverlayUnmap();
+        }
 
         const auto returnRecordingRequest = [&](const QRect& geometry, bool window) {
             sessionServer.close();

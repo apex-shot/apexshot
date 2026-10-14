@@ -137,6 +137,44 @@ fn build_quick_capture_args(config: &crate::config::AppConfig) -> Vec<String> {
     args
 }
 
+fn build_quick_capture_args_with_menu(
+    config: &crate::config::AppConfig,
+    menu: crate::overlay::CaptureMenuResult,
+) -> Result<Vec<String>, String> {
+    let recording_available = crate::recording::recording_supported();
+    let menu_json = quick_capture_menu_result_json(menu, recording_available)?;
+    let mut args = build_quick_capture_args(config);
+    args.push(format!("--capture-menu-result={menu_json}"));
+    Ok(args)
+}
+
+fn quick_capture_menu_result_json(
+    menu: crate::overlay::CaptureMenuResult,
+    recording_available: bool,
+) -> Result<String, String> {
+    use crate::overlay::CaptureMenuAction as Action;
+
+    let valid_action = match menu.action {
+        Action::Display => !menu.ocr,
+        Action::Window => menu.timer_seconds == 0 && !menu.ocr,
+        Action::Area => !menu.recording && menu.timer_seconds == 0,
+        Action::Cancel => false,
+    };
+    let valid_mode = if menu.recording {
+        recording_available && !menu.ocr && menu.timer_seconds == 0
+    } else {
+        !(menu.ocr && menu.timer_seconds > 0)
+            && menu.timer_seconds <= 10
+            && matches!(menu.timer_seconds, 0 | 3 | 5 | 10)
+    };
+
+    if !valid_action || !valid_mode {
+        return Err("Unsupported Quick Capture menu state".into());
+    }
+
+    serde_json::to_string(&menu).map_err(|error| format!("Serialize Quick Capture menu: {error}"))
+}
+
 fn build_crosshair_args(config: &crate::config::AppConfig) -> Vec<String> {
     let mut args = vec!["--crosshair-capture".into()];
     append_screenshot_timer_args(&mut args, config);

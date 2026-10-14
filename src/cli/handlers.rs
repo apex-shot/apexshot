@@ -5,7 +5,8 @@ use apexshot::{
     capture::{save_capture, ImageFormat, SaveConfig},
     capture_overlay::{
         capture_area_via_cpp, capture_crosshair_via_cpp, capture_screen_via_cpp,
-        is_launch_blocked_error, quick_capture_via_cpp, AreaCaptureResult,
+        is_launch_blocked_error, quick_capture_via_cpp,
+        quick_capture_via_layer_shell_menu_on_main_thread, AreaCaptureResult,
     },
     hotkeys::ensure_desktop_entry_pub,
     ocr::{extract_text_from_capture, extract_text_from_path, ContentSource, OcrConfig, OcrOutput},
@@ -204,7 +205,11 @@ pub(crate) fn run_capture(args: &[String]) {
         "area" | "menu" | "quick" => match if capture_type == "area" {
             capture_area_via_cpp()
         } else {
-            quick_capture_via_cpp()
+            match quick_capture_via_layer_shell_menu_on_main_thread() {
+                Ok(Some(result)) => Ok(result),
+                Ok(None) => quick_capture_via_cpp(),
+                Err(error) => Err(error),
+            }
         } {
             Ok(AreaCaptureResult::Captured(capture)) => {
                 println!("Captured area...");

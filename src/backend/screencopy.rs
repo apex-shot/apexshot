@@ -12,10 +12,12 @@
 //! `zwlr_screencopy_manager_v1` in the global registry, `capture()` returns
 //! `None` and the caller can try the next tier.
 
+use std::collections::BTreeMap;
 use wayland_client::{
     protocol::{wl_buffer, wl_output, wl_registry, wl_shm, wl_shm_pool},
     Connection, Dispatch, EventQueue, Proxy, QueueHandle,
 };
+use wayland_protocols::xdg::xdg_output::zv1::client::{zxdg_output_manager_v1, zxdg_output_v1};
 use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_frame_v1, zwlr_screencopy_manager_v1,
 };
@@ -80,53 +82,44 @@ fn capture_preferred(prefer_origin: Option<(i32, i32)>) -> DisplayResult<Option<
         ));
     }
 
-    // Prefer the output nearest the requested origin (multi-monitor picker).
-    // Fall back to smallest logical origin so multi-monitor crops at least
-    // start from a stable desktop origin used by the overlay.
+    let output_order = state
+        .outputs
+        .iter()
+        .map(|output| output.id().protocol_id())
+        .collect::<Vec<_>>();
+    let output_id = select_output_id(
+        &state.output_infos,
+        &output_order,
+        state.xdg_output_manager.is_some(),
+        prefer_origin,
+    )
+    .map_err(|error| match error {
+        OutputSelectionError::NoOutputs => {
+            DisplayError::CaptureError("No Wayland outputs found".into())
+        }
+        OutputSelectionError::AmbiguousOrigin => DisplayError::UnsupportedBackend(
+            "Multiple Wayland outputs share the requested logical origin".into(),
+        ),
+        OutputSelectionError::MissingLogicalPosition => DisplayError::UnsupportedBackend(
+            "The compositor did not report logical positions for every output".into(),
+        ),
+    })?;
     let output = state
         .outputs
         .iter()
-        .min_by_key(|o| {
-            let origin = state
-                .output_infos
-                .iter()
-                .find(|info| info.id == o.id().protocol_id())
-                .map(|info| (info.x, info.y))
-                .unwrap_or((0, 0));
-            match prefer_origin {
-                Some((px, py)) => {
-                    let dx = (origin.0 - px) as i64;
-                    let dy = (origin.1 - py) as i64;
-                    (dx * dx + dy * dy, origin.0 as i64, origin.1 as i64)
-                }
-                None => (0, origin.0 as i64, origin.1 as i64),
-            }
-        })
+        .find(|output| output.id().protocol_id() == output_id)
         .cloned()
-        .expect("checked non-empty");
+        .ok_or_else(|| DisplayError::CaptureError("Selected Wayland output disappeared".into()))?;
 
-    // Snapshot the selected output's origin and scale before we move
+    // Snapshot the selected output's logical origin and scale before we move
     // `state` fields further down. These are used to correctly crop
     // the physical-pixel image when the caller supplies logical-area
     // coordinates (see CaptureData::output_origin_* / output_scale).
-    let output_origin_x = state
-        .output_infos
-        .iter()
-        .find(|info| info.id == output.id().protocol_id())
-        .map(|info| info.x)
-        .unwrap_or(0);
-    let output_origin_y = state
-        .output_infos
-        .iter()
-        .find(|info| info.id == output.id().protocol_id())
-        .map(|info| info.y)
-        .unwrap_or(0);
-    let output_scale = state
-        .output_infos
-        .iter()
-        .find(|info| info.id == output.id().protocol_id())
-        .map(|info| info.scale)
-        .unwrap_or(1);
+    let output_info = state.output_infos.get(&output_id).ok_or_else(|| {
+        DisplayError::CaptureError("Selected Wayland output metadata disappeared".into())
+    })?;
+    let (output_origin_x, output_origin_y) = output_info.effective_origin();
+    let output_scale = output_info.scale;
 
     if let Some((px, py)) = prefer_origin {
         eprintln!(
@@ -384,10 +377,108 @@ struct FrameInfo {
 
 #[derive(Clone, Debug)]
 struct OutputInfo {
-    id: u32,
-    x: i32,
-    y: i32,
+    geometry_origin: (i32, i32),
+    logical_position: Option<(i32, i32)>,
     scale: i32,
+}
+
+impl OutputInfo {
+    fn new() -> Self {
+        Self {
+            geometry_origin: (0, 0),
+            logical_position: None,
+            scale: 1,
+        }
+    }
+
+    fn effective_origin(&self) -> (i32, i32) {
+        self.logical_position.unwrap_or(self.geometry_origin)
+    }
+
+    fn update_geometry_origin(&mut self, origin: (i32, i32)) {
+        self.geometry_origin = origin;
+    }
+
+    fn update_logical_position(&mut self, position: (i32, i32)) {
+        self.logical_position = Some(position);
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum OutputSelectionError {
+    NoOutputs,
+    AmbiguousOrigin,
+    MissingLogicalPosition,
+}
+
+fn output_distance_squared(left: (i32, i32), right: (i32, i32)) -> i128 {
+    let dx = i128::from(left.0) - i128::from(right.0);
+    let dy = i128::from(left.1) - i128::from(right.1);
+    dx * dx + dy * dy
+}
+
+fn select_output_id(
+    output_infos: &BTreeMap<u32, OutputInfo>,
+    output_order: &[u32],
+    xdg_output_available: bool,
+    prefer_origin: Option<(i32, i32)>,
+) -> Result<u32, OutputSelectionError> {
+    if output_order.is_empty() {
+        return Err(OutputSelectionError::NoOutputs);
+    }
+    let Some(prefer_origin) = prefer_origin else {
+        return output_order
+            .iter()
+            .filter_map(|id| output_infos.get(id).map(|info| (*id, info)))
+            .min_by_key(|(_, info)| info.effective_origin())
+            .map(|(id, _)| id)
+            .ok_or(OutputSelectionError::NoOutputs);
+    };
+    if xdg_output_available
+        && output_order.len() > 1
+        && output_order.iter().any(|id| {
+            output_infos
+                .get(id)
+                .is_none_or(|info| info.logical_position.is_none())
+        })
+    {
+        return Err(OutputSelectionError::MissingLogicalPosition);
+    }
+
+    let ranked = output_order
+        .iter()
+        .filter_map(|id| output_infos.get(id).map(|info| (*id, info)))
+        .map(|(id, info)| {
+            (
+                output_distance_squared(info.effective_origin(), prefer_origin),
+                id,
+                info.effective_origin(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let closest_distance = ranked
+        .iter()
+        .map(|(distance, _, _)| *distance)
+        .min()
+        .ok_or(OutputSelectionError::NoOutputs)?;
+    let nearest = ranked
+        .iter()
+        .filter(|(distance, _, _)| *distance == closest_distance)
+        .map(|(_, id, origin)| (*id, *origin))
+        .collect::<Vec<_>>();
+    let has_duplicate_nearest_origin = nearest.iter().enumerate().any(|(index, (_, origin))| {
+        nearest[..index]
+            .iter()
+            .any(|(_, previous)| previous == origin)
+    });
+    if has_duplicate_nearest_origin {
+        return Err(OutputSelectionError::AmbiguousOrigin);
+    }
+    ranked
+        .into_iter()
+        .min_by_key(|(distance, _, origin)| (*distance, origin.0, origin.1))
+        .map(|(_, id, _)| id)
+        .ok_or(OutputSelectionError::NoOutputs)
 }
 
 #[derive(Default)]
@@ -396,8 +487,9 @@ struct AppState {
     screencopy_manager: Option<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1>,
     /// All advertised wl_output globals.
     outputs: Vec<wl_output::WlOutput>,
-    /// Logical output metadata from wl_output events.
-    output_infos: Vec<OutputInfo>,
+    output_infos: BTreeMap<u32, OutputInfo>,
+    xdg_output_manager: Option<zxdg_output_manager_v1::ZxdgOutputManagerV1>,
+    xdg_outputs: Vec<zxdg_output_v1::ZxdgOutputV1>,
     /// Bound wl_shm.
     shm: Option<wl_shm::WlShm>,
     /// Frame buffer parameters received from the compositor.
@@ -406,6 +498,12 @@ struct AppState {
     frame_ready: bool,
     /// Set to true when the compositor sends the `failed` event.
     frame_failed: bool,
+}
+
+impl AppState {
+    fn output_info_mut(&mut self, id: u32) -> &mut OutputInfo {
+        self.output_infos.entry(id).or_insert_with(OutputInfo::new)
+    }
 }
 
 // ─── Registry dispatcher ────────────────────────────────────────────────────
@@ -436,9 +534,35 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppState {
                         );
                     state.screencopy_manager = Some(mgr);
                 }
+                "zxdg_output_manager_v1" if state.xdg_output_manager.is_none() => {
+                    let manager = registry
+                        .bind::<zxdg_output_manager_v1::ZxdgOutputManagerV1, _, _>(
+                            name,
+                            version.min(3),
+                            qh,
+                            (),
+                        );
+                    let xdg_outputs = state
+                        .outputs
+                        .iter()
+                        .map(|output| {
+                            let id = output.id().protocol_id();
+                            manager.get_xdg_output(output, qh, id)
+                        })
+                        .collect::<Vec<_>>();
+                    state.xdg_outputs.extend(xdg_outputs);
+                    state.xdg_output_manager = Some(manager);
+                }
                 "wl_output" => {
                     let output =
                         registry.bind::<wl_output::WlOutput, _, _>(name, version.min(4), qh, ());
+                    let id = output.id().protocol_id();
+                    state.output_info_mut(id);
+                    if let Some(manager) = &state.xdg_output_manager {
+                        state
+                            .xdg_outputs
+                            .push(manager.get_xdg_output(&output, qh, id));
+                    }
                     state.outputs.push(output);
                 }
                 "wl_shm" => {
@@ -463,31 +587,43 @@ impl Dispatch<wl_output::WlOutput, ()> for AppState {
         _: &QueueHandle<Self>,
     ) {
         let id = output.id().protocol_id();
-        let mut ensure = || {
-            if let Some(idx) = state.output_infos.iter().position(|info| info.id == id) {
-                idx
-            } else {
-                state.output_infos.push(OutputInfo {
-                    id,
-                    x: 0,
-                    y: 0,
-                    scale: 1,
-                });
-                state.output_infos.len() - 1
-            }
-        };
-
         match event {
             wl_output::Event::Geometry { x, y, .. } => {
-                let idx = ensure();
-                state.output_infos[idx].x = x;
-                state.output_infos[idx].y = y;
+                state.output_info_mut(id).update_geometry_origin((x, y));
             }
             wl_output::Event::Scale { factor } => {
-                let idx = ensure();
-                state.output_infos[idx].scale = factor.max(1);
+                state.output_info_mut(id).scale = factor.max(1);
             }
             _ => {}
+        }
+    }
+}
+
+impl Dispatch<zxdg_output_manager_v1::ZxdgOutputManagerV1, ()> for AppState {
+    fn event(
+        _: &mut Self,
+        _: &zxdg_output_manager_v1::ZxdgOutputManagerV1,
+        _: zxdg_output_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+impl Dispatch<zxdg_output_v1::ZxdgOutputV1, u32> for AppState {
+    fn event(
+        state: &mut Self,
+        _: &zxdg_output_v1::ZxdgOutputV1,
+        event: zxdg_output_v1::Event,
+        output_id: &u32,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let zxdg_output_v1::Event::LogicalPosition { x, y } = event {
+            state
+                .output_info_mut(*output_id)
+                .update_logical_position((x, y));
         }
     }
 }
@@ -601,5 +737,93 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, ()> for AppState 
 
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn output_info(
+        geometry_origin: (i32, i32),
+        logical_position: Option<(i32, i32)>,
+        scale: i32,
+    ) -> OutputInfo {
+        OutputInfo {
+            geometry_origin,
+            logical_position,
+            scale,
+        }
+    }
+
+    #[test]
+    fn xdg_output_positions_select_outputs_when_core_origins_collide() {
+        let infos = BTreeMap::from([
+            (1, output_info((0, 0), Some((1280, 0)), 1)),
+            (2, output_info((0, 0), Some((0, 0)), 1)),
+        ]);
+        let order = [1, 2];
+
+        assert_eq!(select_output_id(&infos, &order, true, Some((0, 0))), Ok(2));
+        assert_eq!(
+            select_output_id(&infos, &order, true, Some((1280, 0))),
+            Ok(1)
+        );
+    }
+
+    #[test]
+    fn later_core_geometry_does_not_overwrite_xdg_logical_position() {
+        let mut info = OutputInfo::new();
+        info.update_logical_position((1536, 0));
+        info.update_geometry_origin((0, 0));
+        assert_eq!(info.effective_origin(), (1536, 0));
+
+        info.update_geometry_origin((0, 0));
+        assert_eq!(info.effective_origin(), (1536, 0));
+    }
+
+    #[test]
+    fn explicit_capture_rejects_duplicate_fallback_origins() {
+        let infos = BTreeMap::from([
+            (1, output_info((0, 0), None, 1)),
+            (2, output_info((0, 0), None, 1)),
+            (3, output_info((2, 0), None, 1)),
+        ]);
+        let order = [1, 2, 3];
+
+        assert_eq!(
+            select_output_id(&infos, &order, false, Some((1, 0))),
+            Err(OutputSelectionError::AmbiguousOrigin)
+        );
+        assert_eq!(select_output_id(&infos, &order, false, None), Ok(1));
+    }
+
+    #[test]
+    fn negative_logical_positions_remain_unscaled_in_fractional_layouts() {
+        let infos = BTreeMap::from([
+            (1, output_info((0, 0), Some((-1536, 240)), 1)),
+            (2, output_info((0, 0), Some((0, 0)), 2)),
+        ]);
+        let order = [1, 2];
+
+        assert_eq!(
+            select_output_id(&infos, &order, true, Some((-1536, 240))),
+            Ok(1)
+        );
+        assert_eq!(select_output_id(&infos, &order, true, Some((0, 0))), Ok(2));
+    }
+
+    #[test]
+    fn incomplete_xdg_positions_do_not_fall_back_for_explicit_multimonitor_capture() {
+        let infos = BTreeMap::from([
+            (1, output_info((0, 0), Some((0, 0)), 1)),
+            (2, output_info((0, 0), None, 1)),
+        ]);
+        let order = [1, 2];
+
+        assert_eq!(
+            select_output_id(&infos, &order, true, Some((0, 0))),
+            Err(OutputSelectionError::MissingLogicalPosition)
+        );
     }
 }

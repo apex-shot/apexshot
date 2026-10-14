@@ -10,6 +10,8 @@ find_package(X11 REQUIRED COMPONENTS Xtst)
 
 add_executable(apexshot-capture
     src/main.cpp
+    src/CaptureMenuResult.cpp
+    src/CaptureMenuResult.h
     src/ScreenCapture.cpp
     src/ScreenCapture.h
     src/Sandbox.h
@@ -53,6 +55,8 @@ if(APEXSHOT_CAPTURE_BUILD_TESTS)
     enable_testing()
     add_executable(apexshot-capture-tests
         tests/ScreenCaptureTests.cpp
+        src/CaptureMenuResult.cpp
+        src/CaptureMenuResult.h
         src/ScreenCapture.cpp
         src/ScreenCapture.h
         src/Sandbox.h
