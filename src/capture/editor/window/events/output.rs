@@ -217,9 +217,9 @@ pub(super) fn wire_output_lifecycle(
     let app_save = app.downgrade();
     let save_chooser: Rc<RefCell<Option<gtk4::FileChooserNative>>> = Rc::new(RefCell::new(None));
     let save_chooser_open = Rc::new(Cell::new(false));
-    let done_busy = Rc::new(Cell::new(false));
-    let done_spinner = save_spinner.clone();
-    let save_btn_click = save_btn.clone();
+    let export_busy = Rc::new(Cell::new(false));
+    let export_spinner = save_spinner.clone();
+    let export_btn = save_btn.clone();
     save_btn.connect_clicked(move |_| {
         let state_save = state_save.clone();
         let path_save = path_save.clone();
@@ -229,18 +229,19 @@ pub(super) fn wire_output_lifecycle(
         let export_motion = export_motion.clone();
         let save_chooser = save_chooser.clone();
         let save_chooser_open = save_chooser_open.clone();
-        let done_busy = done_busy.clone();
-        let done_spinner = done_spinner.clone();
-        let save_btn_click = save_btn_click.clone();
+        let export_busy = export_busy.clone();
+        let export_spinner = export_spinner.clone();
+        let export_btn = export_btn.clone();
         glib::idle_add_local_once(move || {
-            if done_busy.get() {
+            if export_busy.get() || save_chooser_open.get() {
                 return;
             }
 
+            let config = crate::config::load_config().sanitized();
+            let close_after_export = config.annotate_close_after_export;
+            let overwrite_original = config.annotate_overwrite_original_image;
+
             if in_motion.get() {
-                if save_chooser_open.get() {
-                    return;
-                }
                 let Some(parent) = window_save.upgrade() else {
                     return;
                 };
@@ -272,9 +273,9 @@ pub(super) fn wire_output_lifecycle(
                 let app_resp = app_save.clone();
                 let save_chooser_resp = save_chooser.clone();
                 let save_chooser_open_resp = save_chooser_open.clone();
-                let done_busy_resp = done_busy.clone();
-                let done_spinner_resp = done_spinner.clone();
-                let save_btn_resp = save_btn_click.clone();
+                let export_busy_resp = export_busy.clone();
+                let export_spinner_resp = export_spinner.clone();
+                let export_btn_resp = export_btn.clone();
                 let export_motion = export_motion.clone();
                 chooser.connect_response(move |dialog, response| {
                     dialog.hide();
@@ -290,19 +291,19 @@ pub(super) fn wire_output_lifecycle(
                     };
                     let destination = with_mp4_extension(destination);
 
-                    done_busy_resp.set(true);
-                    save_btn_resp.set_sensitive(false);
-                    done_spinner_resp.set_visible(true);
-                    done_spinner_resp.start();
+                    export_busy_resp.set(true);
+                    export_btn_resp.set_sensitive(false);
+                    export_spinner_resp.set_visible(true);
+                    export_spinner_resp.start();
 
                     let state_resp = state_resp.clone();
                     let path_resp = path_resp.clone();
                     let window_resp = window_resp.clone();
                     let app_resp = app_resp.clone();
                     let export_motion = export_motion.clone();
-                    let done_busy_inner = done_busy_resp.clone();
-                    let done_spinner_inner = done_spinner_resp.clone();
-                    let save_btn_inner = save_btn_resp.clone();
+                    let export_busy_inner = export_busy_resp.clone();
+                    let export_spinner_inner = export_spinner_resp.clone();
+                    let export_btn_inner = export_btn_resp.clone();
                     // One frame for the spinner before the export blocks the main
                     // loop; the window stays up so the spin is visible.
                     glib::timeout_add_local_once(Duration::from_millis(50), move || {
@@ -312,17 +313,44 @@ pub(super) fn wire_output_lifecycle(
                                 if config.remember_video_export_dir(&video_path) {
                                     let _ = crate::config::save_config(&config);
                                 }
-                                let _ =
-                                    persist_image_session(&path_resp, &state_resp.lock().unwrap());
-                                crate::utils::notify::desktop_notification(
-                                    &crate::i18n::t("Export complete"),
-                                    &video_path.display().to_string(),
-                                );
-                                if let Some(window) = window_resp.upgrade() {
-                                    window.close();
-                                }
-                                if let Some(app) = app_resp.upgrade() {
-                                    app.quit();
+                                match persist_image_session(
+                                    &path_resp,
+                                    &state_resp.lock().unwrap(),
+                                ) {
+                                    Ok(()) => {
+                                        crate::utils::notify::desktop_notification(
+                                            &crate::i18n::t("Export complete"),
+                                            &video_path.display().to_string(),
+                                        );
+                                        if close_after_export {
+                                            if let Some(window) = window_resp.upgrade() {
+                                                window.close();
+                                            }
+                                            if let Some(app) = app_resp.upgrade() {
+                                                app.quit();
+                                            }
+                                        } else {
+                                            reset_export_controls(
+                                                &export_busy_inner,
+                                                &export_spinner_inner,
+                                                &export_btn_inner,
+                                            );
+                                        }
+                                    }
+                                    Err(error) => {
+                                        crate::utils::notify::desktop_notification_important(
+                                            &crate::i18n::t("Export complete"),
+                                            &crate::i18n::tfmt(
+                                                "Export completed, but the editing session could not be saved: {error}",
+                                                &[("error", &error.to_string())],
+                                            ),
+                                        );
+                                        reset_export_controls(
+                                            &export_busy_inner,
+                                            &export_spinner_inner,
+                                            &export_btn_inner,
+                                        );
+                                    }
                                 }
                             }
                             Err(error) => {
@@ -331,10 +359,11 @@ pub(super) fn wire_output_lifecycle(
                                     &crate::i18n::t("Export failed"),
                                     &error,
                                 );
-                                done_busy_inner.set(false);
-                                done_spinner_inner.stop();
-                                done_spinner_inner.set_visible(false);
-                                save_btn_inner.set_sensitive(true);
+                                reset_export_controls(
+                                    &export_busy_inner,
+                                    &export_spinner_inner,
+                                    &export_btn_inner,
+                                );
                             }
                         }
                     });
@@ -344,70 +373,73 @@ pub(super) fn wire_output_lifecycle(
                 return;
             }
 
-            if save_chooser_open.get() {
+            if !static_export_needs_chooser(&path_save, overwrite_original) {
+                start_static_export(
+                    state_save,
+                    path_save.clone(),
+                    path_save,
+                    overwrite_original,
+                    close_after_export,
+                    window_save,
+                    app_save,
+                    export_busy,
+                    export_spinner,
+                    export_btn,
+                );
                 return;
             }
 
-            if !done_needs_save_chooser(&path_save) {
-                done_busy.set(true);
-                save_btn_click.set_sensitive(false);
-                done_spinner.set_visible(true);
-                done_spinner.start();
-                // One frame for the spinner before the flatten blocks the main
-                // loop.
-                glib::timeout_add_local_once(Duration::from_millis(50), move || {
-                    let save_result = {
-                        let state = state_save.lock().unwrap();
-                        save_edited_image(&path_save, &state)
-                    };
-                    match save_result {
-                        Ok(()) => {
-                            finish_image_session(&state_save, &path_save, &window_save, &app_save)
-                        }
-                        Err(error) => {
-                            eprintln!("Failed to save edited image: {error}");
-                            done_busy.set(false);
-                            done_spinner.stop();
-                            done_spinner.set_visible(false);
-                            save_btn_click.set_sensitive(true);
-                        }
-                    }
-                });
+            let Some(parent) = window_save.upgrade() else {
                 return;
-            }
-
-            if let Err(error) = save_edited_image(&path_save, &state_save.lock().unwrap()) {
-                eprintln!("Failed to save edited image: {error}");
-                return;
-            }
-
+            };
+            let suggestion = edited_image_suggestion(&path_save, &config);
             save_chooser_open.set(true);
             let save_chooser_open_done = save_chooser_open.clone();
             let save_chooser_done = save_chooser.clone();
             let state_done = state_save.clone();
+            let path_done = path_save.clone();
             let window_done = window_save.clone();
             let app_done = app_save.clone();
-            let chooser = crate::capture::save_dialog::show_save_dialog(
-                window_save
-                    .upgrade()
-                    .as_ref()
-                    .map(|window| window.upcast_ref()),
-                path_save.clone(),
-                move |destination| {
-                    save_chooser_open_done.set(false);
-                    *save_chooser_done.borrow_mut() = None;
+            let busy_done = export_busy.clone();
+            let spinner_done = export_spinner.clone();
+            let button_done = export_btn.clone();
+            let chooser = static_export_chooser(&parent, &suggestion);
+            chooser.connect_response(move |dialog, response| {
+                dialog.hide();
+                save_chooser_open_done.set(false);
+                *save_chooser_done.borrow_mut() = None;
 
-                    let Some(destination) = destination else {
-                        if let Some(window) = window_done.upgrade() {
-                            window.set_visible(true);
-                        }
-                        return;
-                    };
+                let destination = (response == ResponseType::Accept)
+                    .then(|| dialog.file())
+                    .flatten()
+                    .and_then(|file| file.path());
+                let Some(destination) = destination else {
+                    return;
+                };
+                if let Err(error) = ensure_static_export_destination(
+                    &path_done,
+                    &destination,
+                    overwrite_original,
+                ) {
+                    notify_static_export_error(error);
+                    return;
+                }
 
-                    finish_image_session(&state_done, &destination, &window_done, &app_done);
-                },
-            );
-            *save_chooser.borrow_mut() = Some(chooser);
+                start_static_export(
+                    state_done.clone(),
+                    path_done.clone(),
+                    destination,
+                    overwrite_original,
+                    close_after_export,
+                    window_done.clone(),
+                    app_done.clone(),
+                    busy_done.clone(),
+                    spinner_done.clone(),
+                    button_done.clone(),
+                );
+            });
+            *save_chooser.borrow_mut() = Some(chooser.clone());
+            chooser.show();
         });
     });
 
@@ -423,26 +455,228 @@ pub(super) fn wire_output_lifecycle(
     });
 }
 
-/// Done writes back to the file the editor opened; a capture the user has not
-/// saved yet needs a destination from the user instead.
-pub(super) fn done_needs_save_chooser(path: &Path) -> bool {
+fn static_export_needs_chooser(path: &Path, overwrite_original: bool) -> bool {
+    !overwrite_original || is_unsaved_capture(path)
+}
+
+fn is_unsaved_capture(path: &Path) -> bool {
     crate::capture::unsaved::UnsavedCaptureStore::app_owned().owns(path)
 }
 
-/// Persist the session at `path`, honor the after-capture clipboard setting and
-/// close the editor the way Done always has.
-fn finish_image_session(
-    state: &Arc<Mutex<EditorState>>,
-    path: &Path,
-    window: &gtk4::glib::WeakRef<ApplicationWindow>,
-    app: &gtk4::glib::WeakRef<Application>,
-) {
-    if let Err(error) = persist_image_session(path, &state.lock().unwrap()) {
-        eprintln!("[editor] Warning: Failed to save annotations: {error}");
+fn edited_image_suggestion(source: &Path, config: &crate::config::AppConfig) -> PathBuf {
+    let suggestion = if is_unsaved_capture(source) {
+        let store = crate::capture::unsaved::UnsavedCaptureStore::app_owned();
+        let output_dir = crate::capture::save_dialog::save_dialog_folder(config)
+            .filter(|directory| !directory.starts_with(store.dir()))
+            .or_else(|| {
+                crate::capture::SaveConfig::default()
+                    .get_output_dir()
+                    .ok()
+                    .filter(|directory| !directory.starts_with(store.dir()))
+            })
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_else(std::env::temp_dir));
+        let format = crate::capture::ImageFormat::from_setting(&config.screenshot_format);
+        output_dir.join(crate::capture::generate_filename(
+            &crate::capture::SaveConfig::default().with_format(format),
+        ))
+    } else {
+        let parent = source
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let stem = source
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .filter(|stem| !stem.is_empty())
+            .unwrap_or("ApexShot");
+        let extension = source
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .filter(|extension| !extension.is_empty())
+            .unwrap_or("png");
+        parent.join(format!("{stem}-edited.{extension}"))
+    };
+
+    collision_free_suggestion(suggestion)
+}
+
+fn collision_free_suggestion(suggestion: PathBuf) -> PathBuf {
+    if !suggestion.exists() {
+        return suggestion;
     }
 
+    let parent = suggestion
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let stem = suggestion
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or("ApexShot");
+    let extension = suggestion
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .filter(|extension| !extension.is_empty());
+    let mut suffix = 1u64;
+
+    loop {
+        let filename = match extension {
+            Some(extension) => format!("{stem}-{suffix}.{extension}"),
+            None => format!("{stem}-{suffix}"),
+        };
+        let candidate = parent.join(filename);
+        if !candidate.exists() {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn static_export_chooser(parent: &ApplicationWindow, suggestion: &Path) -> gtk4::FileChooserNative {
+    let chooser = gtk4::FileChooserNative::new(
+        Some(&crate::i18n::t("Export")),
+        Some(parent),
+        FileChooserAction::Save,
+        Some(&crate::i18n::t("Export")),
+        Some(&crate::i18n::t("Cancel")),
+    );
+    let filter = FileFilter::new();
+    filter.set_name(Some(&crate::i18n::t("Image files")));
+    for extension in ["png", "jpg", "jpeg", "webp"] {
+        filter.add_pattern(&format!("*.{extension}"));
+    }
+    chooser.add_filter(&filter);
+    if let Some(folder) = suggestion.parent() {
+        let _ = chooser.set_current_folder(Some(&gio::File::for_path(folder)));
+    }
+    if let Some(name) = suggestion.file_name() {
+        chooser.set_current_name(&name.to_string_lossy());
+    }
+    chooser
+}
+
+#[derive(Debug)]
+enum StaticExportError {
+    Image(String),
+    Session(String),
+}
+
+fn ensure_static_export_destination(
+    source: &Path,
+    destination: &Path,
+    overwrite_original: bool,
+) -> Result<(), StaticExportError> {
+    if !overwrite_original && crate::utils::paths_alias(source, destination) {
+        return Err(StaticExportError::Image(crate::i18n::t(
+            "Choose a different destination to keep the original image unchanged.",
+        )));
+    }
+    Ok(())
+}
+
+fn export_static_image(
+    source: &Path,
+    destination: &Path,
+    state: &EditorState,
+    overwrite_original: bool,
+) -> Result<(), StaticExportError> {
+    ensure_static_export_destination(source, destination, overwrite_original)?;
+    save_edited_image(destination, state)
+        .map_err(|error| StaticExportError::Image(error.to_string()))?;
+    persist_image_session(source, state)
+        .map_err(|error| StaticExportError::Session(error.to_string()))?;
+    if !crate::utils::paths_alias(source, destination) {
+        persist_image_session(destination, state)
+            .map_err(|error| StaticExportError::Session(error.to_string()))?;
+    }
+    Ok(())
+}
+
+fn notify_static_export_error(error: StaticExportError) {
+    match error {
+        StaticExportError::Image(error) => {
+            eprintln!("Failed to export edited image: {error}");
+            crate::utils::notify::desktop_notification_important(
+                &crate::i18n::t("Export failed"),
+                &error,
+            );
+        }
+        StaticExportError::Session(error) => {
+            eprintln!("Image exported, but the editing session could not be saved: {error}");
+            crate::utils::notify::desktop_notification_important(
+                &crate::i18n::t("Export complete"),
+                &crate::i18n::tfmt(
+                    "Export completed, but the editing session could not be saved: {error}",
+                    &[("error", &error)],
+                ),
+            );
+        }
+    }
+}
+
+fn reset_export_controls(busy: &Cell<bool>, spinner: &Spinner, button: &Button) {
+    busy.set(false);
+    spinner.stop();
+    spinner.set_visible(false);
+    button.set_sensitive(true);
+}
+
+fn start_static_export(
+    state: Arc<Mutex<EditorState>>,
+    source: PathBuf,
+    destination: PathBuf,
+    overwrite_original: bool,
+    close_after_export: bool,
+    window: gtk4::glib::WeakRef<ApplicationWindow>,
+    app: gtk4::glib::WeakRef<Application>,
+    busy: Rc<Cell<bool>>,
+    spinner: Spinner,
+    button: Button,
+) {
+    busy.set(true);
+    button.set_sensitive(false);
+    spinner.set_visible(true);
+    spinner.start();
+    glib::timeout_add_local_once(Duration::from_millis(50), move || {
+        let result = {
+            let state = state.lock().unwrap();
+            export_static_image(&source, &destination, &state, overwrite_original)
+        };
+        match result {
+            Ok(()) => {
+                crate::utils::notify::desktop_notification(
+                    &crate::i18n::t("Export complete"),
+                    &destination.display().to_string(),
+                );
+                if !finish_image_export(&destination, close_after_export, &window, &app) {
+                    reset_export_controls(&busy, &spinner, &button);
+                }
+            }
+            Err(error) => {
+                let session_failure = matches!(&error, StaticExportError::Session(_));
+                notify_static_export_error(error);
+                if session_failure {
+                    let _ = finish_image_export(&destination, false, &window, &app);
+                }
+                reset_export_controls(&busy, &spinner, &button);
+            }
+        }
+    });
+}
+
+fn finish_image_export(
+    path: &Path,
+    close_after_export: bool,
+    window: &gtk4::glib::WeakRef<ApplicationWindow>,
+    app: &gtk4::glib::WeakRef<Application>,
+) -> bool {
     let config = crate::config::load_config().sanitized();
     crate::daemon::copy_screenshot_to_clipboard(path, &config);
+    if !close_after_export {
+        return false;
+    }
+
     if let Some(window) = window.upgrade() {
         window.close();
     }
@@ -455,6 +689,7 @@ fn finish_image_session(
             eprintln!("[editor] Failed to open preview: {error}");
         }
     }
+    true
 }
 
 /// Where the Motion export chooser opens and what it pre-fills: the same folder
@@ -487,8 +722,29 @@ fn with_mp4_extension(mut destination: PathBuf) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{done_needs_save_chooser, with_mp4_extension};
-    use std::path::PathBuf;
+    use super::{
+        edited_image_suggestion, export_static_image, is_unsaved_capture,
+        static_export_needs_chooser, with_mp4_extension, StaticExportError,
+    };
+    use crate::capture::editor::{
+        state::EditorState,
+        types::{AnnotationAction, DrawColor, Point},
+    };
+    use crate::config::AppConfig;
+    use image::{Rgba, RgbaImage};
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn scratch_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "apexshot-image-export-{name}-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
 
     #[test]
     fn motion_export_forces_an_mp4_extension() {
@@ -524,13 +780,188 @@ mod tests {
     }
 
     #[test]
-    fn done_routes_unsaved_captures_through_the_save_chooser() {
+    fn image_exports_use_a_chooser_unless_overwrite_is_enabled_and_the_source_is_saved() {
         let store = crate::capture::unsaved::UnsavedCaptureStore::app_owned();
+        let unsaved = store.dir().join("unsaved-1.png");
+        let saved = Path::new("/tmp/shot.png");
 
-        assert!(done_needs_save_chooser(&store.dir().join("unsaved-1.png")));
-        assert!(!done_needs_save_chooser(std::path::Path::new(
-            "/tmp/shot.png"
-        )));
+        assert!(is_unsaved_capture(&unsaved));
+        assert!(static_export_needs_chooser(&saved, false));
+        assert!(static_export_needs_chooser(&unsaved, true));
+        assert!(!static_export_needs_chooser(&saved, true));
+    }
+
+    #[test]
+    fn edited_image_suggestion_uses_a_collision_free_source_based_name() {
+        let dir = scratch_dir("suggestion");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("capture.png");
+        let first = dir.join("capture-edited.png");
+        let second = dir.join("capture-edited-1.png");
+        std::fs::write(&first, b"existing").unwrap();
+        assert_eq!(
+            edited_image_suggestion(&source, &AppConfig::default()),
+            second
+        );
+        std::fs::write(&second, b"existing").unwrap();
+        assert_eq!(
+            edited_image_suggestion(&source, &AppConfig::default()),
+            dir.join("capture-edited-2.png")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn unsaved_capture_suggestion_uses_the_configured_export_folder_and_format() {
+        let dir = scratch_dir("unsaved-suggestion");
+        std::fs::create_dir_all(&dir).unwrap();
+        let config = AppConfig {
+            screenshot_export_location: dir.to_string_lossy().into_owned(),
+            screenshot_format: "WebP".into(),
+            ..AppConfig::default()
+        };
+        let store = crate::capture::unsaved::UnsavedCaptureStore::app_owned();
+        let source = store.dir().join("unsaved-1.png");
+
+        let suggestion = edited_image_suggestion(&source, &config);
+
+        assert_eq!(suggestion.parent(), Some(dir.as_path()));
+        assert_ne!(suggestion.parent(), Some(store.dir()));
+        assert!(suggestion
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("ApexShot-"));
+        assert_eq!(
+            suggestion
+                .extension()
+                .and_then(|extension| extension.to_str()),
+            Some("webp")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn default_unsaved_capture_suggestion_is_outside_the_app_owned_store() {
+        let store = crate::capture::unsaved::UnsavedCaptureStore::app_owned();
+        let source = store.dir().join("unsaved-default.png");
+
+        let suggestion = edited_image_suggestion(&source, &AppConfig::default());
+
+        assert_ne!(suggestion.parent(), Some(store.dir()));
+        assert!(suggestion
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("ApexShot-"));
+        assert_eq!(
+            suggestion
+                .extension()
+                .and_then(|extension| extension.to_str()),
+            Some("png")
+        );
+    }
+
+    #[test]
+    fn exporting_a_copy_preserves_the_source_and_reopens_editable_sessions_for_both_files() {
+        let dir = scratch_dir("copy-session");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.png");
+        let destination = dir.join("source-edited.png");
+        let original = RgbaImage::from_pixel(12, 8, Rgba([40, 90, 180, 255]));
+        original.save(&source).unwrap();
+        let source_bytes = std::fs::read(&source).unwrap();
+        let mut state = EditorState::new(original.clone());
+        state.push_action(AnnotationAction::Line {
+            start: Point { x: 1.0, y: 1.0 },
+            end: Point { x: 8.0, y: 6.0 },
+            color: DrawColor::new(1.0, 0.0, 0.0, 1.0),
+            stroke_size: 2.0,
+            shadow: false,
+        });
+
+        export_static_image(&source, &destination, &state, false).unwrap();
+
+        assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+        let source_session = crate::annotations::load_annotations(&source)
+            .unwrap()
+            .expect("source session");
+        let exported_session = crate::annotations::load_annotations(&destination)
+            .unwrap()
+            .expect("exported image session");
+        assert_eq!(source_session.annotations.len(), 1);
+        assert_eq!(exported_session.annotations.len(), 1);
+        assert_eq!(
+            crate::annotations::load_original_image(&destination)
+                .unwrap()
+                .expect("export original image"),
+            original
+        );
+        assert_eq!(
+            image::open(&destination).unwrap().to_rgba8(),
+            state.to_final_image().unwrap()
+        );
+        assert_eq!(state.actions.len(), 1);
+
+        std::fs::write(&destination, b"changed externally").unwrap();
+        assert!(matches!(
+            crate::annotations::load_annotations(&destination),
+            Err(crate::annotations::AnnotationError::HashMismatch)
+        ));
+        assert!(crate::annotations::load_annotations(&source)
+            .unwrap()
+            .is_some());
+
+        let _ = crate::annotations::delete_annotations(&source);
+        let _ = crate::annotations::delete_annotations(&destination);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn default_static_export_rejects_the_opened_image_without_modifying_it() {
+        let dir = scratch_dir("source-alias");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.png");
+        let original = RgbaImage::from_pixel(12, 8, Rgba([40, 90, 180, 255]));
+        original.save(&source).unwrap();
+        let source_bytes = std::fs::read(&source).unwrap();
+        let state = EditorState::new(original);
+
+        let result = export_static_image(&source, &source, &state, false);
+
+        assert!(matches!(result, Err(StaticExportError::Image(_))));
+        assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+        let _ = crate::annotations::delete_annotations(&source);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn extensionless_export_uses_the_confirmed_path_without_overwriting_a_suffixed_neighbor() {
+        let dir = scratch_dir("extensionless-destination");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.png");
+        let selected_destination = dir.join("copy");
+        let suffixed_neighbor = dir.join("copy.png");
+        let original = RgbaImage::from_pixel(12, 8, Rgba([40, 90, 180, 255]));
+        original.save(&source).unwrap();
+        let source_bytes = std::fs::read(&source).unwrap();
+        std::fs::write(&suffixed_neighbor, b"existing neighbor").unwrap();
+        let neighbor_bytes = std::fs::read(&suffixed_neighbor).unwrap();
+        let state = EditorState::new(original);
+
+        export_static_image(&source, &selected_destination, &state, false).unwrap();
+
+        assert!(selected_destination.is_file());
+        assert_eq!(
+            image::open(&selected_destination).unwrap().to_rgba8(),
+            state.to_final_image().unwrap()
+        );
+        assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
+        assert_eq!(std::fs::read(&suffixed_neighbor).unwrap(), neighbor_bytes);
+
+        let _ = crate::annotations::delete_annotations(&source);
+        let _ = crate::annotations::delete_annotations(&selected_destination);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -553,56 +984,80 @@ mod tests {
     }
 
     #[test]
-    fn done_still_flattens_and_persists_session() {
+    fn static_export_chooses_a_destination_before_saving_and_persists_both_sessions() {
         let source = include_str!("output.rs");
         let start = source
             .find("save_btn.connect_clicked(move |_| {")
-            .expect("Done click handler");
-        let handler = &source[start..];
-        let flatten = handler.find("save_edited_image").expect("flatten PNG");
-        let persist = handler
-            .rfind("persist_image_session")
-            .expect("persist session");
+            .expect("Export click handler");
+        let handler = source[start..]
+            .split("let window_close")
+            .next()
+            .expect("export handler");
+        let chooser = handler
+            .find("static_export_chooser(&parent, &suggestion)")
+            .expect("native image chooser");
         assert!(
-            flatten < persist,
-            "Done must flatten before writing the sidecar"
+            !handler.contains("save_edited_image"),
+            "the click handler must not flatten the source before destination selection"
         );
-        assert!(
-            handler.contains("if in_motion.get()")
-                && handler.contains("export_motion(&destination)")
-                && handler.contains("save_edited_image"),
-            "Done in Motion exports MP4 to the chosen path; Done in Static still flattens the PNG"
-        );
+        assert!(!handler.contains("with_image_extension"));
+        assert!(handler.contains("if !static_export_needs_chooser(&path_save, overwrite_original)"));
+        assert!(handler
+            .contains("let Some(destination) = destination else {\n                    return;"));
+        let export = source
+            .split("fn export_static_image(")
+            .nth(1)
+            .expect("image export implementation");
+        let flatten = export
+            .find("save_edited_image(destination, state)")
+            .unwrap();
+        let persist_source = export.find("persist_image_session(source, state)").unwrap();
+        let persist_destination = export
+            .find("persist_image_session(destination, state)")
+            .unwrap();
+        let response = chooser + handler[chooser..].find("chooser.connect_response").unwrap();
+        let destination = response
+            + handler[response..]
+                .find("let Some(destination) = destination else")
+                .unwrap();
+        let start_export = response + handler[response..].find("start_static_export(").unwrap();
+        assert!(chooser < response && response < destination && destination < start_export);
+        assert!(flatten < persist_source && persist_source < persist_destination);
     }
 
     #[test]
-    fn done_releases_the_save_guard_before_finishing_the_session() {
+    fn successful_static_exports_keep_the_editor_open_by_default_and_use_the_exported_path() {
         let source = include_str!("output.rs");
-        let direct_save = source
-            .split("if !done_needs_save_chooser(&path_save) {")
+        let finish = source
+            .split("fn finish_image_export(")
             .nth(1)
-            .expect("direct save branch")
-            .split("if let Err(error) = save_edited_image")
+            .expect("image export completion")
+            .split("fn motion_export_suggestion")
             .next()
-            .expect("direct save handler");
-        let scoped_save = direct_save
-            .find("let save_result = {")
-            .expect("scoped save");
-        let guard_end = scoped_save
-            + direct_save[scoped_save..]
-                .find("};")
-                .expect("save guard scope ends");
-        let dispatch = direct_save
-            .find("match save_result {")
-            .expect("result dispatch");
-        let finish = direct_save
-            .find("finish_image_session(")
-            .expect("finish session");
-        assert!(direct_save[scoped_save..guard_end].contains("state_save.lock().unwrap()"));
-        assert!(
-            direct_save[scoped_save..guard_end].contains("save_edited_image(&path_save, &state)")
-        );
-        assert!(guard_end < dispatch && dispatch < finish);
-        assert!(!direct_save.contains("match save_edited_image("));
+            .expect("finish helper");
+        let keep_open = finish.find("if !close_after_export").unwrap();
+        let quick_access = finish.find("show_preview_via_daemon(path)").unwrap();
+        assert!(keep_open < quick_access);
+        assert!(finish.contains("copy_screenshot_to_clipboard(path, &config)"));
+        assert!(finish.contains("arg(\"preview\").arg(path)"));
+        assert!(source.contains("reset_export_controls(&busy, &spinner, &button)"));
+        assert!(source.contains("if close_after_export"));
+    }
+
+    #[test]
+    fn motion_export_obeys_the_close_preference_and_resets_after_success_when_kept_open() {
+        let source = include_str!("output.rs");
+        let motion = source
+            .split("match export_motion(&destination)")
+            .nth(1)
+            .expect("Motion export completion")
+            .split("Err(error) => {")
+            .next()
+            .expect("Motion export success branch");
+
+        assert!(motion.contains("if close_after_export"));
+        assert!(motion.contains("reset_export_controls"));
+        assert!(motion.contains("window.close()"));
+        assert!(motion.contains("app.quit()"));
     }
 }

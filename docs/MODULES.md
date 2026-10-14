@@ -23,7 +23,7 @@ This document provides detailed information about every module and submodule in 
 - Storage: `export_location`, `screenshot_export_location`, `video_export_location`, `hide_desktop_icons_while_capturing`
 - Screenshots: format, cursor, timer, after-capture actions (`after_capture_save`, `after_capture_copy_file_to_clipboard`, `after_capture_show_quick_access`, `after_capture_open_annotate`)
 - Recording: format, fps, quality, overlays, audio (mic/speaker), countdown
-- Annotation: default colors, tool preferences (`annotate_inverse_arrow`, `annotate_smooth_drawing`, `annotate_draw_shadow`, `annotate_auto_expand`, `annotate_show_color_names`)
+- Annotation: tool preferences, plus image-export lifecycle (`annotate_close_after_export`, `annotate_overwrite_original_image`)
 - Shortcuts: global hotkey bindings per action
 - Advanced: filename patterns, OCR language, clipboard behavior
 - Cloud: `cloud_destination` (`apexshot` | `xbackbone`), ApexShot auth tokens, XBackBone URL/token, upload preferences
@@ -80,7 +80,7 @@ This document provides detailed information about every module and submodule in 
 - `open_image_editor_empty()` — Opens the editor with an empty drop-zone workspace (tray menu / `apexshot image-editor`); loading a PNG/JPEG/WebP via drag-and-drop or the file chooser rebuilds the editor in the same window
 - `copy_file_uri_to_clipboard(path)` — Copies file URI to system clipboard
 
-**Done button behavior:** saves the edited image and annotations, then applies General settings — copies to the clipboard per `after_capture_copy_file_to_clipboard` and `adv_clipboard_mode` (image / file path / both, via `daemon::copy_screenshot_to_clipboard`), and shows the quick access overlay only when `after_capture_show_quick_access` is enabled.
+**Export behavior:** saved images use a native destination chooser and a collision-safe source-based `-edited` name by default, so the opened image stays unchanged and the editor remains open. Unsaved captures still require a destination and use the configured screenshot export folder, filename, and format. Settings → Annotate can opt into replacing the opened image or closing after a successful export; the same close preference applies to Motion exports. The editor persists the editable session for both source and exported image, and clipboard/Quick Access actions use the actual destination; Quick Access is shown only when the editor closes.
 
 **Supported Tools:**
 - Select (0), Crop (x), Pen (P), Box/Rectangle (r), Circle (o), Line (l), Arrow (a), Highlighter (h), Obfuscate (c/b), Number (n), Text (t), Focus (f)

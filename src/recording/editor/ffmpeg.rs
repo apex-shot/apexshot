@@ -543,6 +543,7 @@ fn run_trim_only_cancellable(
     output_path: PathBuf,
     cancellation: Option<&AtomicBool>,
 ) -> anyhow::Result<PathBuf> {
+    ensure_export_destination_is_distinct(state, &output_path)?;
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
         anyhow::bail!("no segments selected for export");
@@ -566,6 +567,7 @@ fn run_convert_cancellable(
     output_path: PathBuf,
     cancellation: Option<&AtomicBool>,
 ) -> anyhow::Result<PathBuf> {
+    ensure_export_destination_is_distinct(state, &output_path)?;
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
         anyhow::bail!("no segments selected for export");
@@ -761,6 +763,7 @@ pub(crate) fn export_edited_to_cancellable(
     if cancellation_requested(cancellation) {
         anyhow::bail!("export cancelled");
     }
+    ensure_export_destination_is_distinct(state, &output_path)?;
     let input_snapshot = super::export_cache::capture_inputs(state);
     sweep_stale_scratch_dirs();
     ensure_export_fits(state, &output_path)?;
@@ -791,6 +794,30 @@ pub(crate) fn export_edited_to_cancellable(
         anyhow::bail!("export cancelled");
     }
     Ok(path)
+}
+
+fn ensure_export_destination_is_distinct(
+    state: &VideoEditState,
+    output_path: &Path,
+) -> anyhow::Result<()> {
+    let background_input = match &state.background {
+        VideoBackground::Wallpaper(path) => Some(path.as_path()),
+        _ => None,
+    };
+
+    for input in std::iter::once(state.metadata.path.as_path())
+        .chain(state.project_media.iter().map(|media| media.path.as_path()))
+        .chain(background_input)
+    {
+        if crate::utils::paths_alias(input, output_path) {
+            anyhow::bail!(
+                "export destination aliases input media: {}",
+                input.display()
+            );
+        }
+    }
+
+    Ok(())
 }
 
 fn build_single_trim_args(
@@ -1753,6 +1780,7 @@ fn escape_filter_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recording::editor::model::{ProjectMedia, ProjectMediaKind};
 
     fn state() -> VideoEditState {
         let metadata = VideoMetadata {
@@ -1768,6 +1796,91 @@ mod tests {
         state.trim_start_seconds = 1.25;
         state.trim_end_seconds = 8.5;
         state
+    }
+
+    fn state_for_path(path: PathBuf) -> VideoEditState {
+        VideoEditState::new(VideoMetadata {
+            path,
+            duration_seconds: 10.0,
+            width: 1920,
+            height: 1080,
+            file_size_bytes: 100,
+            has_audio: true,
+            frame_rate: 30.0,
+        })
+    }
+
+    fn scratch_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "apexshot-video-export-alias-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn distinct_video_export_destination_is_allowed() {
+        let dir = scratch_dir("distinct");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        let destination = dir.join("edited.mp4");
+        std::fs::write(&source, b"source media").unwrap();
+        let state = state_for_path(source.clone());
+
+        assert!(ensure_export_destination_is_distinct(&state, &destination).is_ok());
+        assert_eq!(std::fs::read(&source).unwrap(), b"source media");
+        assert!(!destination.exists());
+
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn video_export_rejects_source_alias_before_touching_original_media() {
+        let dir = scratch_dir("source-alias");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        let hard_link = dir.join("source-hard-link.mp4");
+        std::fs::write(&source, b"original video bytes").unwrap();
+        std::fs::hard_link(&source, &hard_link).unwrap();
+        let state = state_for_path(source.clone());
+
+        let error = export_edited_to_cancellable(&state, hard_link.clone(), None)
+            .expect_err("a hard link to input media must be rejected");
+
+        assert!(error.to_string().contains("aliases input media"));
+        assert_eq!(std::fs::read(&source).unwrap(), b"original video bytes");
+        assert_eq!(std::fs::read(&hard_link).unwrap(), b"original video bytes");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn video_export_rejects_a_project_media_alias() {
+        let dir = scratch_dir("project-media-alias");
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        let project_image = dir.join("project-image.png");
+        let hard_link = dir.join("project-image-hard-link.png");
+        std::fs::write(&source, b"source media").unwrap();
+        std::fs::write(&project_image, b"project image").unwrap();
+        std::fs::hard_link(&project_image, &hard_link).unwrap();
+        let mut state = state_for_path(source);
+        state.project_media.push(ProjectMedia {
+            path: project_image.clone(),
+            display_name: "Project image".into(),
+            kind: ProjectMediaKind::Image,
+            duration_seconds: None,
+        });
+
+        let error = ensure_export_destination_is_distinct(&state, &hard_link)
+            .expect_err("a hard link to project media must be rejected");
+
+        assert!(error.to_string().contains("aliases input media"));
+        assert_eq!(std::fs::read(&project_image).unwrap(), b"project image");
+        assert_eq!(std::fs::read(&hard_link).unwrap(), b"project image");
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

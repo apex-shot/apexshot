@@ -144,7 +144,7 @@ fn show_confirm(
     let (title, body, skip_field) = match kind {
         ConfirmKind::ToMotion => (
             t("Annotations will be applied"),
-            t("Motion will play a snapshot of your annotations. Returning to Static restores the live tools. Your original image is not flattened until Done."),
+            t("Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."),
             "static_to_motion",
         ),
         ConfirmKind::ToStatic => (

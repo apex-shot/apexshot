@@ -2935,3 +2935,21 @@ msgstr "窗口光标仍可编辑，但没有 ApexShot GNOME 扩展时不会记�
 
 msgid "Export Motion video"
 msgstr "导出 Motion 视频"
+
+msgid "Close the editor after a successful export"
+msgstr "导出成功后关闭编辑器"
+
+msgid "Overwrite the opened image instead of saving a copy"
+msgstr "覆盖打开的图像，而不是另存为副本"
+
+msgid "Image files"
+msgstr "图像文件"
+
+msgid "Choose a different destination to keep the original image unchanged."
+msgstr "请选择其他位置，以保持原始图像不变。"
+
+msgid "Export completed, but the editing session could not be saved: {error}"
+msgstr "导出已完成，但无法保存编辑会话：{error}"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
+msgstr "Motion 会播放注释快照。返回 Static 后会恢复实时编辑工具。除非在“设置 → 注释”中启用覆盖，否则原始图像不会更改。"

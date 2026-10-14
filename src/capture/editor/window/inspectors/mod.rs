@@ -286,7 +286,7 @@ mod tests {
             shell.contains("scroll.set_child(Some(&inspector_stack));")
                 && shell.contains("set_propagate_natural_height(false)")
                 && scroll_at < actions_at,
-            "inspector content should scroll; copy, cloud, and Done stay pinned below"
+            "inspector content should scroll; copy, cloud, and Export stay pinned below"
         );
     }
 }

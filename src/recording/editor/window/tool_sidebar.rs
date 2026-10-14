@@ -1183,7 +1183,9 @@ mod tests {
             .unwrap_or_else(|| panic!("09.css must define {class}"));
         let block = &css[start..];
         let end = block.find('}').expect("the rule is closed");
+        assert!(!block[..end].contains("min-height: 0;"));
         for property in [
+            "min-height: 30px;",
             "background: transparent;",
             "background-image: none;",
             "border: none;",
@@ -1194,6 +1196,41 @@ mod tests {
                 "the hex entry must sit flat inside the value row ({property})"
             );
         }
+    }
+
+    #[test]
+    fn shared_color_hex_entry_is_tall_and_focusable_in_both_themes_and_editors() {
+        let css = include_str!("../ui_support_css/09.css");
+        let row_start = css
+            .find(".recording-editor-custom-value-row {")
+            .expect("the color value row is defined");
+        let row_end = row_start + css[row_start..].find('}').unwrap();
+        assert!(css[row_start..row_end].contains("min-height: 34px;"));
+
+        let dark_focus = ".recording-editor-custom-value-row .recording-editor-custom-hex:focus {";
+        let dark_start = css.find(dark_focus).expect("dark focus style");
+        let dark_end = dark_start + css[dark_start..].find('}').unwrap();
+        assert!(css[dark_start..dark_end].contains("background: alpha(white, 0.08);"));
+
+        let light_focus = ".editor-theme-light\n                .recording-editor-custom-value-row\n                .recording-editor-custom-hex:focus {";
+        let light_start = css.find(light_focus).expect("light focus style");
+        let light_end = light_start + css[light_start..].find('}').unwrap();
+        assert!(css[light_start..light_end].contains("background: alpha(#111827, 0.08);"));
+
+        let shared_picker = include_str!("custom_wallpaper_popover.rs");
+        assert!(shared_picker.contains("hex.add_css_class(\"recording-editor-custom-hex\")"));
+        assert!(shared_picker.contains("hex.set_valign(Align::Center);"));
+        assert!(shared_picker.contains("let picker = build_color_picker("));
+
+        let image_picker = include_str!("../../../capture/editor/window/color_picker.rs");
+        assert!(image_picker.contains("build_color_picker as build_shared_color_picker"));
+        assert!(image_picker.contains("build_shared_color_picker("));
+        let image_window = include_str!("../../../capture/editor/window/mod.rs");
+        assert!(
+            image_window.contains("recording::editor::ui_support::install_recording_editor_css()")
+        );
+        let video_ui_support = include_str!("../ui_support.rs");
+        assert!(video_ui_support.contains("include_str!(\"ui_support_css/09.css\")"));
     }
 
     #[test]

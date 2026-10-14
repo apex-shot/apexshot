@@ -2,7 +2,7 @@
 //!
 //! Motion is a mode of the image editor window, not a second app. Annotate
 //! tools stay on Static. Motion plays a composited snapshot; the PNG sidecar
-//! is not flattened until Done.
+//! is not flattened until export.
 
 mod anchor_pad;
 mod appearance;

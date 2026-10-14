@@ -2993,3 +2993,21 @@ msgstr "El cursor de la ventana seguirá siendo editable, pero los clics de Zoom
 
 msgid "Export Motion video"
 msgstr "Exportar vídeo Motion"
+
+msgid "Close the editor after a successful export"
+msgstr "Cerrar el editor después de exportar correctamente"
+
+msgid "Overwrite the opened image instead of saving a copy"
+msgstr "Sobrescribir la imagen abierta en lugar de guardar una copia"
+
+msgid "Image files"
+msgstr "Archivos de imagen"
+
+msgid "Choose a different destination to keep the original image unchanged."
+msgstr "Elige otro destino para mantener la imagen original sin cambios."
+
+msgid "Export completed, but the editing session could not be saved: {error}"
+msgstr "La exportación se completó, pero no se pudo guardar la sesión de edición: {error}"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
+msgstr "Motion mostrará una instantánea de tus anotaciones. Al volver a Static, se restauran las herramientas activas. La imagen original no cambia, salvo que actives la sobrescritura en Configuración → Anotar."

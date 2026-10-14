@@ -77,6 +77,10 @@ pub struct SaveInputs {
     pub annotate_auto_expand: CheckButton,
     pub annotate_show_color_names: CheckButton,
     pub annotate_always_on_top: CheckButton,
+    /// Checkbox controlling whether image and Motion exports close the editor.
+    pub annotate_close_after_export: CheckButton,
+    /// Checkbox controlling whether still-image exports replace their source.
+    pub annotate_overwrite_original_image: CheckButton,
     pub shortcut_open_file: Button,
     pub shortcut_open_from_clipboard: Button,
     pub shortcut_restore_recently_closed: Button,
@@ -241,6 +245,8 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
     config.annotate_auto_expand = inputs.annotate_auto_expand.is_active();
     config.annotate_show_color_names = inputs.annotate_show_color_names.is_active();
     config.annotate_always_on_top = inputs.annotate_always_on_top.is_active();
+    config.annotate_close_after_export = inputs.annotate_close_after_export.is_active();
+    config.annotate_overwrite_original_image = inputs.annotate_overwrite_original_image.is_active();
 
     config.shortcut_open_file = button_label_value(&inputs.shortcut_open_file);
     config.shortcut_open_from_clipboard = button_label_value(&inputs.shortcut_open_from_clipboard);
