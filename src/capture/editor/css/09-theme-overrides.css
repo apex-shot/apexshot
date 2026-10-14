@@ -146,6 +146,7 @@
 
             .editor-root.editor-theme-light .editor-motion-confirm-card {
                 background: #ffffff;
+                border: 1px solid rgba(17, 24, 39, 0.16);
             }
 
             .editor-root.editor-theme-light button.editor-floating-zoom-step {

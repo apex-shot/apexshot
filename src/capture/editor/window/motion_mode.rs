@@ -138,6 +138,44 @@ mod tests {
         assert_eq!(STATIC_PAGE, "static");
     }
 
+    /// The confirm dialog centres itself in the editor: the card expands into
+    /// the scrim so its Center alignment can place it. A card that does not
+    /// expand is handed the wrapped labels' one-line width and left at the
+    /// top, which parked the dialog in the corner.
+    #[test]
+    fn motion_confirm_card_expands_so_it_centres_in_the_editor() {
+        let transition = include_str!("motion_mode/transition.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(
+            transition.contains("card.set_halign(Align::Center)")
+                && transition.contains("card.set_valign(Align::Center)")
+                && transition.contains("card.set_hexpand(true)")
+                && transition.contains("card.set_vexpand(true)"),
+            "the confirm card should expand into the scrim so it centres in the editor"
+        );
+    }
+
+    /// Cancel sits alone on the left of the confirm dialog and the primary
+    /// Continue stays at the far right, instead of the two buttons huddling
+    /// together on the right.
+    #[test]
+    fn motion_confirm_buttons_keep_cancel_on_the_left() {
+        let transition = include_str!("motion_mode/transition.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        assert!(
+            transition.contains("buttons.set_halign(Align::Fill)")
+                && transition.contains("buttons_spacer.set_hexpand(true)")
+                && transition.contains("buttons.append(&cancel)")
+                && transition.contains("buttons.append(&buttons_spacer)")
+                && transition.contains("buttons.append(&cont)"),
+            "Cancel should sit on the left with Continue at the far right"
+        );
+    }
+
     #[test]
     fn default_duration_matches_still_length() {
         assert!((MotionState::default().duration - 6.0).abs() < f64::EPSILON);

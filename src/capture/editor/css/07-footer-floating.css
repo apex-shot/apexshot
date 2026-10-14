@@ -92,6 +92,7 @@
                 padding: 20px 22px 16px;
                 background: #0f0f0f;
                 border-radius: 12px;
+                border: 1px solid rgba(255, 255, 255, 0.16);
             }
 
             .editor-floating-history button.editor-tool-button {
