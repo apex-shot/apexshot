@@ -265,9 +265,7 @@ pub fn launch_update() -> Result<(), String> {
             crate::app_identity::app_id()
         ));
     }
-    let command = format!(
-        "curl -fsSL {UPDATE_SCRIPT_URL} | sh; printf '\\nApexShot update finished. You can close this window.\\n'; exec bash"
-    );
+    let command = update_terminal_command();
 
     let terminals: [(&str, &[&str]); 4] = [
         ("xdg-terminal-exec", &["bash", "-lc"]),
@@ -284,6 +282,25 @@ pub fn launch_update() -> Result<(), String> {
     }
 
     Err("Could not find a supported terminal to run the updater.".to_string())
+}
+
+/// The updater command handed to the terminal.
+///
+/// The script is fetched in full before it runs, matching `apexshot update`:
+/// a transfer that dies mid-body would otherwise hand the shell a truncated
+/// script. Unlike the CLI path this cannot lean on an `EXIT` trap, because
+/// `exec bash` replaces the shell and never fires one, so the temporary
+/// directory is removed explicitly. The trailing `exec bash` runs even when
+/// the download fails, leaving the window open with the error on screen.
+fn update_terminal_command() -> String {
+    format!(
+        "workdir=$(mktemp -d)\n\
+         curl --fail --silent --show-error --location --connect-timeout 10 --max-time 60 \
+         --output \"$workdir/update.sh\" {UPDATE_SCRIPT_URL} && sh \"$workdir/update.sh\"\n\
+         rm -rf \"$workdir\"\n\
+         printf '\\nApexShot update finished. You can close this window.\\n'\n\
+         exec bash"
+    )
 }
 
 #[cfg(test)]
@@ -348,6 +365,20 @@ mod tests {
     #[test]
     fn native_updater_uses_the_public_posix_entrypoint() {
         assert_eq!(UPDATE_SCRIPT_URL, "https://apexshot.org/update");
+    }
+
+    #[test]
+    fn terminal_updater_downloads_the_complete_script_before_running_it() {
+        let command = update_terminal_command();
+        assert!(command.contains("workdir=$(mktemp -d)"));
+        assert!(command.contains(UPDATE_SCRIPT_URL));
+        assert!(command.contains("--fail --silent --show-error --location"));
+        assert!(command.contains("--connect-timeout 10 --max-time 60"));
+        assert!(command.contains("--output \"$workdir/update.sh\""));
+        assert!(command.contains("&& sh \"$workdir/update.sh\""));
+        assert!(command.contains("rm -rf \"$workdir\""));
+        assert!(command.ends_with("exec bash"));
+        assert!(!command.contains("| sh"));
     }
 
     #[test]
