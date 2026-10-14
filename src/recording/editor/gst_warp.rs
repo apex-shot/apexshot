@@ -28,7 +28,9 @@ use std::time::{Duration, Instant};
 /// simple (a `gfloat` field per value); a vector uniform would need a value
 /// array that the property API does not take reliably.
 const FRAGMENT: &str = r#"
+#ifdef GL_ES
 precision highp float;
+#endif
 uniform sampler2D tex;
 uniform float u_w;
 uniform float u_h;
@@ -495,6 +497,14 @@ mod tests {
             window: 1.0,
             clicks,
         }
+    }
+
+    #[test]
+    fn fragment_precision_qualifier_is_gles_only() {
+        assert!(FRAGMENT
+            .starts_with("\n#ifdef GL_ES\nprecision highp float;\n#endif\nuniform sampler2D tex;"));
+        assert!(FRAGMENT.contains("varying vec2 v_texcoord;"));
+        assert!(FRAGMENT.contains("gl_FragColor = texture2D"));
     }
 
     #[test]

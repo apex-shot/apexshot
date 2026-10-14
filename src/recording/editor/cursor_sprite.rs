@@ -52,6 +52,12 @@ const MINIMAL_DEFAULT: &[u8] = include_bytes!("../../../assets/cursors/minimal/d
 const MINIMAL_HAND: &[u8] = include_bytes!("../../../assets/cursors/minimal/hand.png");
 const MINIMAL_TEXT: &[u8] = include_bytes!("../../../assets/cursors/minimal/text.png");
 const MINIMAL_CROSSHAIR: &[u8] = include_bytes!("../../../assets/cursors/minimal/crosshair.png");
+const CURSOR_SHADOW_OFFSET_X: f64 = 2.2;
+const CURSOR_SHADOW_OFFSET_Y: f64 = 3.2;
+const DOT_CURSOR_RADIUS: f64 = 21.0;
+const DOT_CURSOR_SHADOW_BLUR: f64 = 4.0;
+const MAX_CURSOR_SHADOW: f64 = 1.0;
+const PREVIEW_FIT_FRACTION: f64 = 0.9;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SpriteKind {
@@ -323,25 +329,66 @@ fn click_rgb(color: (u8, u8, u8)) -> (f64, f64, f64) {
     )
 }
 
-pub fn draw_centered(cr: &Context, width: f64, height: f64, theme: CursorTheme) {
-    let bitmap = bitmap(theme, "default");
+/// Draw a centered theme-card cursor using the current size, shadow, and alpha.
+pub fn draw_centered(cr: &Context, width: f64, height: f64, settings: CursorSettings, alpha: f64) {
+    let settings = settings.clamped();
+    let Some((scale, x, y)) = centered_preview_layout(width, height, settings) else {
+        return;
+    };
+    let _ = cr.save();
+    cr.translate(width / 2.0 + x * scale, height / 2.0 + y * scale);
+    cr.scale(scale, scale);
+    draw(cr, 0.0, 0.0, 1.0, 1.0, "default", settings, alpha);
+    let _ = cr.restore();
+}
+
+/// Return the theme-card cursor's hotspot in preview coordinates.
+pub fn centered_preview_hotspot(width: f64, height: f64, settings: CursorSettings) -> (f64, f64) {
+    let Some((scale, x, y)) = centered_preview_layout(width, height, settings.clamped()) else {
+        return (width / 2.0, height / 2.0);
+    };
+    (width / 2.0 + x * scale, height / 2.0 + y * scale)
+}
+
+fn centered_preview_layout(
+    width: f64,
+    height: f64,
+    settings: CursorSettings,
+) -> Option<(f64, f64, f64)> {
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let bitmap = bitmap(settings.theme, "default");
     let (bx, by, bw, bh) = opaque_bounds(bitmap);
     if bw <= 0.0 || bh <= 0.0 {
-        return;
+        return None;
     }
-    let scale = ((width / bw).min(height / bh) * 0.78).min(1.35);
-    let x = (width - bw * scale) * 0.5 - bx * scale;
-    let y = (height - bh * scale) * 0.5 - by * scale;
-    let surface = surface_from_rgba(bitmap);
-    let _ = cr.save();
-    cr.translate(x, y);
-    cr.scale(scale, scale);
-    let pattern = SurfacePattern::create(&surface);
-    pattern.set_filter(Filter::Best);
-    let _ = cr.set_source(&pattern);
-    cr.set_antialias(Antialias::Best);
-    let _ = cr.paint();
-    let _ = cr.restore();
+    let (hx, hy) = hotspot(settings.theme, "default");
+    let (max_width, max_height) = max_preview_footprint(settings.theme);
+    let scale = (width / (max_width * MAX_CURSOR_SIZE))
+        .min(height / (max_height * MAX_CURSOR_SIZE))
+        .min(1.0)
+        * PREVIEW_FIT_FRACTION;
+    Some((
+        scale,
+        (hx - bx - bw / 2.0) * settings.size,
+        (hy - by - bh / 2.0) * settings.size,
+    ))
+}
+
+fn max_preview_footprint(theme: CursorTheme) -> (f64, f64) {
+    if theme == CursorTheme::Dot {
+        let extent = DOT_CURSOR_RADIUS
+            + DOT_CURSOR_SHADOW_BLUR * MAX_CURSOR_SHADOW
+            + (CURSOR_SHADOW_OFFSET_X * MAX_CURSOR_SHADOW)
+                .hypot(CURSOR_SHADOW_OFFSET_Y * MAX_CURSOR_SHADOW);
+        (extent * 2.0, extent * 2.0)
+    } else {
+        (
+            48.0 + CURSOR_SHADOW_OFFSET_X * MAX_CURSOR_SHADOW,
+            48.0 + CURSOR_SHADOW_OFFSET_Y * MAX_CURSOR_SHADOW,
+        )
+    }
 }
 
 pub fn write_png(path: &Path, settings: CursorSettings, kind: &str) -> anyhow::Result<(f64, f64)> {
@@ -399,18 +446,21 @@ fn paint_sprite(
     }
     if shadow > 0.01 {
         let _ = cr.save();
-        cr.translate(2.2 * scale * shadow, 3.2 * scale * shadow);
+        cr.translate(
+            CURSOR_SHADOW_OFFSET_X * scale * shadow,
+            CURSOR_SHADOW_OFFSET_Y * scale * shadow,
+        );
         cr.scale(scale, scale);
         cr.set_source_rgba(0.0, 0.0, 0.0, 0.55 * shadow * alpha);
         let _ = cr.mask_surface(surface, -hx, -hy);
         let _ = cr.restore();
     }
     cr.scale(scale, scale);
+    cr.translate(-hx, -hy);
     let pattern = SurfacePattern::create(surface);
     pattern.set_filter(Filter::Best);
     let _ = cr.set_source(&pattern);
     cr.set_antialias(Antialias::Best);
-    cr.translate(-hx, -hy);
     let _ = cr.paint_with_alpha(alpha);
     let _ = cr.restore();
 }
@@ -425,10 +475,10 @@ fn paint_dot_sprite(
     alpha: f64,
 ) {
     if shadow > 0.01 {
-        let radius = 21.0;
-        let offset_x = 2.2 * shadow;
-        let offset_y = 3.2 * shadow;
-        let blur = 4.0 * shadow;
+        let radius = DOT_CURSOR_RADIUS;
+        let offset_x = CURSOR_SHADOW_OFFSET_X * shadow;
+        let offset_y = CURSOR_SHADOW_OFFSET_Y * shadow;
+        let blur = DOT_CURSOR_SHADOW_BLUR * shadow;
         let extent = radius + blur + offset_x.hypot(offset_y);
         let shadow_alpha = 0.16 * shadow * alpha;
         let _ = cr.save();
@@ -716,10 +766,22 @@ mod tests {
     }
 
     fn render_cursor(settings: CursorSettings) -> Vec<u8> {
-        render_cursor_with_scale(settings, 1.0)
+        render_cursor_with_kind(settings, "default")
     }
 
     fn render_cursor_with_scale(settings: CursorSettings, press_scale: f64) -> Vec<u8> {
+        render_cursor_with_kind_and_press_scale(settings, "default", press_scale)
+    }
+
+    fn render_cursor_with_kind(settings: CursorSettings, kind: &str) -> Vec<u8> {
+        render_cursor_with_kind_and_press_scale(settings, kind, 1.0)
+    }
+
+    fn render_cursor_with_kind_and_press_scale(
+        settings: CursorSettings,
+        kind: &str,
+        press_scale: f64,
+    ) -> Vec<u8> {
         let mut surface =
             ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
         {
@@ -730,7 +792,7 @@ mod tests {
                 TEST_SURFACE_SIZE as f64 / 2.0,
                 1.0,
                 press_scale,
-                "default",
+                kind,
                 settings,
                 1.0,
             );
@@ -740,12 +802,59 @@ mod tests {
         pixels
     }
 
+    fn render_cursor_on_canvas(
+        settings: CursorSettings,
+        kind: &str,
+        width: i32,
+        height: i32,
+    ) -> Vec<u8> {
+        let mut surface = ImageSurface::create(Format::ARgb32, width, height).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            draw(
+                &cr,
+                width as f64 / 2.0,
+                height as f64 / 2.0,
+                1.0,
+                1.0,
+                kind,
+                settings,
+                1.0,
+            );
+        }
+        surface.flush();
+        let pixels = surface.data().unwrap().to_vec();
+        pixels
+    }
+
+    fn render_centered_preview(settings: CursorSettings, width: i32, height: i32) -> Vec<u8> {
+        let mut surface = ImageSurface::create(Format::ARgb32, width, height).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            draw_centered(&cr, width as f64, height as f64, settings, 1.0);
+        }
+        surface.flush();
+        let pixels = surface.data().unwrap().to_vec();
+        pixels
+    }
+
     fn alpha_bounds(pixels: &[u8]) -> Option<(usize, usize, usize, usize)> {
-        let size = TEST_SURFACE_SIZE as usize;
+        alpha_bounds_with_size(
+            pixels,
+            TEST_SURFACE_SIZE as usize,
+            TEST_SURFACE_SIZE as usize,
+        )
+    }
+
+    fn alpha_bounds_with_size(
+        pixels: &[u8],
+        width: usize,
+        height: usize,
+    ) -> Option<(usize, usize, usize, usize)> {
         let mut bounds: Option<(usize, usize, usize, usize)> = None;
-        for y in 0..size {
-            for x in 0..size {
-                if pixels[(y * size + x) * 4 + 3] == 0 {
+        for y in 0..height {
+            for x in 0..width {
+                if pixels[(y * width + x) * 4 + 3] == 0 {
                     continue;
                 }
                 bounds = Some(match bounds {
@@ -863,6 +972,228 @@ mod tests {
         let (large_min_x, _, large_max_x, _) = alpha_bounds(&large).unwrap();
         assert!(large_max_x - large_min_x > small_max_x - small_min_x);
         assert_ne!(small, shadowed);
+    }
+
+    #[test]
+    fn size_and_shadow_change_cursor_rendering_for_every_theme_and_kind() {
+        for theme in CursorTheme::ALL {
+            for kind in ["default", "hand", "text", "crosshair"] {
+                let small = render_cursor_with_kind(
+                    CursorSettings {
+                        theme,
+                        size: MIN_CURSOR_SIZE,
+                        shadow: 0.0,
+                        ..CursorSettings::default()
+                    },
+                    kind,
+                );
+                let large = render_cursor_with_kind(
+                    CursorSettings {
+                        theme,
+                        size: MAX_CURSOR_SIZE,
+                        shadow: 0.0,
+                        ..CursorSettings::default()
+                    },
+                    kind,
+                );
+                let shadowed = render_cursor_with_kind(
+                    CursorSettings {
+                        theme,
+                        size: MIN_CURSOR_SIZE,
+                        shadow: 1.0,
+                        ..CursorSettings::default()
+                    },
+                    kind,
+                );
+                let (small_min_x, _, small_max_x, _) = alpha_bounds(&small).unwrap();
+                let (large_min_x, _, large_max_x, _) = alpha_bounds(&large).unwrap();
+                assert!(
+                    large_max_x - large_min_x > small_max_x - small_min_x,
+                    "{theme:?} {kind}: size must change the cursor bounds"
+                );
+                assert_ne!(small, shadowed, "{theme:?} {kind}: shadow must render");
+            }
+        }
+    }
+
+    #[test]
+    fn drawn_cursor_hotspots_and_shadows_stay_aligned_for_every_theme_and_kind() {
+        const CANVAS_SIZE: i32 = 256;
+        let center = CANVAS_SIZE as f64 / 2.0;
+
+        for theme in CursorTheme::ALL {
+            for kind in ["default", "hand", "text", "crosshair"] {
+                let settings = CursorSettings {
+                    theme,
+                    size: 1.0,
+                    shadow: 0.0,
+                    ..CursorSettings::default()
+                };
+                let foreground = render_cursor_on_canvas(settings, kind, CANVAS_SIZE, CANVAS_SIZE);
+                let (min_x, min_y, max_x, max_y) =
+                    alpha_bounds_with_size(&foreground, CANVAS_SIZE as usize, CANVAS_SIZE as usize)
+                        .unwrap_or_else(|| panic!("{theme:?} {kind}: cursor must render"));
+                let sprite = bitmap(theme, kind);
+                let (bitmap_min_x, bitmap_min_y, bitmap_max_x, bitmap_max_y) =
+                    alpha_bounds_with_size(
+                        sprite.as_raw(),
+                        sprite.width() as usize,
+                        sprite.height() as usize,
+                    )
+                    .unwrap_or_else(|| panic!("{theme:?} {kind}: cursor bitmap must render"));
+                let (hotspot_x, hotspot_y) = hotspot(theme, kind);
+                let expected_min_x = center + bitmap_min_x as f64 - hotspot_x;
+                let expected_min_y = center + bitmap_min_y as f64 - hotspot_y;
+                let expected_max_x = center + bitmap_max_x as f64 - hotspot_x;
+                let expected_max_y = center + bitmap_max_y as f64 - hotspot_y;
+
+                assert!(
+                    (min_x as f64 - expected_min_x).abs() <= 2.0
+                        && (max_x as f64 - expected_max_x).abs() <= 2.0
+                        && (min_y as f64 - expected_min_y).abs() <= 2.0
+                        && (max_y as f64 - expected_max_y).abs() <= 2.0,
+                    "{theme:?} {kind}: rendered bounds ({min_x}, {min_y})..({max_x}, {max_y}) should follow hotspot ({hotspot_x}, {hotspot_y})"
+                );
+
+                let shadowed = render_cursor_on_canvas(
+                    CursorSettings {
+                        shadow: 1.0,
+                        ..settings
+                    },
+                    kind,
+                    CANVAS_SIZE,
+                    CANVAS_SIZE,
+                );
+                assert_ne!(foreground, shadowed, "{theme:?} {kind}: shadow must render");
+            }
+        }
+    }
+
+    #[test]
+    fn sprite_shadow_stays_anchored_to_the_hotspot() {
+        const CANVAS_SIZE: i32 = 128;
+        const SPRITE_SIZE: u32 = 24;
+        let center = CANVAS_SIZE as f64 / 2.0;
+        let sprite = RgbaImage::from_pixel(SPRITE_SIZE, SPRITE_SIZE, image::Rgba([255; 4]));
+        let sprite_surface = surface_from_rgba(&sprite);
+        let render = |shadow| {
+            let mut surface =
+                ImageSurface::create(Format::ARgb32, CANVAS_SIZE, CANVAS_SIZE).unwrap();
+            {
+                let cr = Context::new(&surface).unwrap();
+                paint_sprite(
+                    &cr,
+                    &sprite_surface,
+                    center,
+                    center,
+                    SPRITE_SIZE as f64 / 2.0,
+                    SPRITE_SIZE as f64 / 2.0,
+                    1.0,
+                    shadow,
+                    1.0,
+                    0.0,
+                );
+            }
+            surface.flush();
+            let pixels = surface.data().unwrap().to_vec();
+            pixels
+        };
+        let foreground = render(0.0);
+        let shadowed = render(1.0);
+        let foreground_bounds =
+            alpha_bounds_with_size(&foreground, CANVAS_SIZE as usize, CANVAS_SIZE as usize)
+                .unwrap();
+        let shadowed_bounds =
+            alpha_bounds_with_size(&shadowed, CANVAS_SIZE as usize, CANVAS_SIZE as usize).unwrap();
+
+        assert_eq!(shadowed_bounds.0, foreground_bounds.0);
+        assert_eq!(shadowed_bounds.1, foreground_bounds.1);
+        assert!(
+            (1..=5).contains(&(shadowed_bounds.2 as isize - foreground_bounds.2 as isize))
+                && (1..=5)
+                    .contains(&(shadowed_bounds.3 as isize - foreground_bounds.3 as isize)),
+            "shadow should extend the sprite down and right: foreground {foreground_bounds:?}, shadowed {shadowed_bounds:?}"
+        );
+    }
+
+    #[test]
+    fn centered_theme_previews_follow_size_and_shadow_for_every_theme() {
+        for theme in CursorTheme::ALL {
+            let small_settings = CursorSettings {
+                theme,
+                size: MIN_CURSOR_SIZE,
+                shadow: 0.0,
+                ..CursorSettings::default()
+            };
+            let large_settings = CursorSettings {
+                theme,
+                size: MAX_CURSOR_SIZE,
+                shadow: 0.0,
+                ..CursorSettings::default()
+            };
+            let small = render_centered_preview(small_settings, 72, 56);
+            let large = render_centered_preview(large_settings, 72, 56);
+            let shadowed = render_centered_preview(
+                CursorSettings {
+                    theme,
+                    size: MIN_CURSOR_SIZE,
+                    shadow: 1.0,
+                    ..CursorSettings::default()
+                },
+                72,
+                56,
+            );
+            assert_ne!(small, large, "{theme:?}: size must change its preview");
+            assert_ne!(small, shadowed, "{theme:?}: shadow must change its preview");
+            for (size, pixels) in [(MIN_CURSOR_SIZE, &small), (MAX_CURSOR_SIZE, &large)] {
+                let (min_x, min_y, max_x, max_y) = alpha_bounds_with_size(pixels, 72, 56).unwrap();
+                assert!(
+                    (((min_x + max_x) as f64 / 2.0) - 35.5).abs() <= 2.0,
+                    "{theme:?} size {size}: preview artwork must stay centered horizontally"
+                );
+                assert!(
+                    (((min_y + max_y) as f64 / 2.0) - 27.5).abs() <= 2.0,
+                    "{theme:?} size {size}: preview artwork must stay centered vertically"
+                );
+            }
+
+            for (width, height) in [(72, 56), (240, 88)] {
+                let max_size_shadow = render_centered_preview(
+                    CursorSettings {
+                        theme,
+                        size: MAX_CURSOR_SIZE,
+                        shadow: 1.0,
+                        ..CursorSettings::default()
+                    },
+                    width,
+                    height,
+                );
+                let max_size = render_centered_preview(
+                    CursorSettings {
+                        theme,
+                        size: MAX_CURSOR_SIZE,
+                        shadow: 0.0,
+                        ..CursorSettings::default()
+                    },
+                    width,
+                    height,
+                );
+                assert_ne!(
+                    max_size_shadow, max_size,
+                    "{theme:?}: maximum shadow must remain visible in {width}x{height}"
+                );
+                let (min_x, min_y, max_x, max_y) =
+                    alpha_bounds_with_size(&max_size_shadow, width as usize, height as usize)
+                        .unwrap();
+                assert!(
+                    min_x > 0
+                        && min_y > 0
+                        && max_x + 1 < width as usize
+                        && max_y + 1 < height as usize,
+                    "{theme:?}: maximum size and shadow must fit in {width}x{height}"
+                );
+            }
+        }
     }
 
     #[test]

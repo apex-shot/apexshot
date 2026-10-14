@@ -3156,6 +3156,88 @@ fn replay_rewinds_from_the_end_and_keeps_mid_playhead() {
 }
 
 #[test]
+fn edit_reconciliation_preserves_a_valid_head_and_maps_the_trimmed_source() {
+    let mut state = VideoEditState::new(metadata());
+    state.playhead_seconds = 4.0;
+    state.set_trim_start(2.0);
+    assert_eq!(state.reconcile_playhead_after_edit(), Some(6.0));
+    assert_eq!(state.playhead_seconds, 4.0);
+
+    let mut state = VideoEditState::new(metadata());
+    state.playhead_seconds = 4.0;
+    state.set_trim_end(3.0);
+    let source = state
+        .reconcile_playhead_after_edit()
+        .expect("the trimmed clip remains playable");
+    assert!((state.playhead_seconds - 3.0).abs() < 1e-9);
+    assert!((source - (3.0 - 1.0 / 30.0)).abs() < 1e-9);
+}
+
+#[test]
+fn edit_reconciliation_clamps_a_head_in_a_cut_gap_to_the_nearest_boundary() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(3.0);
+    state.add_cut(7.0);
+    state.selected_segment = Some(1);
+    state.remove_selected_clip();
+    state.playhead_seconds = 4.0;
+
+    let source = state
+        .reconcile_playhead_after_edit()
+        .expect("the earlier retained clip remains playable");
+    assert!((state.playhead_seconds - 3.0).abs() < 1e-9);
+    assert!((source - (3.0 - 1.0 / 30.0)).abs() < 1e-9);
+}
+
+#[test]
+fn first_playable_position_tracks_a_moved_retained_clip_and_empty_arrangements() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(4.0);
+    state.set_segment_start(1, 6.0);
+    state.selected_segment = Some(0);
+    state.remove_selected_clip();
+    assert_eq!(state.first_playable_position(), Some((6.0, 4.0)));
+
+    state.selected_segment = Some(1);
+    state.remove_selected_clip();
+    state.playhead_seconds = 8.0;
+    assert_eq!(state.reconcile_playhead_after_edit(), None);
+    assert_eq!(state.playhead_seconds, 0.0);
+    assert_eq!(state.timeline_scroll_seconds, 0.0);
+}
+
+#[test]
+fn edit_reconciliation_keeps_a_freeze_hold_then_clamps_after_it_is_removed() {
+    let mut state = VideoEditState::new(metadata());
+    state.set_trim_end(8.0);
+    assert!(state.extend_last_segment(2.0));
+    state.playhead_seconds = 9.5;
+    assert_eq!(
+        state.reconcile_playhead_after_edit(),
+        Some(8.0 - 1.0 / 30.0)
+    );
+    assert_eq!(state.playhead_seconds, 9.5);
+
+    state.set_trim_end(8.5);
+    let source = state
+        .reconcile_playhead_after_edit()
+        .expect("retained footage remains playable");
+    assert!((state.playhead_seconds - 8.5).abs() < 1e-9);
+    assert!((source - (8.5 - 1.0 / 30.0)).abs() < 1e-9);
+}
+
+#[test]
+fn edit_reconciliation_resolves_the_source_inside_a_retimed_clip() {
+    let mut state = VideoEditState::new(metadata());
+    state.add_cut(4.0);
+    state.selected_segment = Some(1);
+    state.set_selected_clip_speed(2.0);
+    state.playhead_seconds = 5.0;
+    assert_eq!(state.reconcile_playhead_after_edit(), Some(6.0));
+    assert_eq!(state.playhead_seconds, 5.0);
+}
+
+#[test]
 fn media_timestamp_zero_is_valid_once_seek_completes() {
     assert_eq!(usable_media_timestamp_seconds(0, false), Some(0.0));
     assert_eq!(usable_media_timestamp_seconds(1_500_000, false), Some(1.5));
@@ -3292,6 +3374,24 @@ fn a_freeze_after_a_trim_holds_the_trimmed_last_frame() {
         "the trimmed band must preview the footage it would reveal, got {}",
         state.source_playhead()
     );
+}
+
+#[test]
+fn freeze_tail_playback_seeks_the_last_frame_within_the_retained_source() {
+    for (trim_end, expected_frame) in [(6.0, 6.0 - 1.0 / 30.0), (4.0, 4.0 - 1.0 / 30.0)] {
+        let mut source = metadata();
+        source.duration_seconds = 6.0;
+        let mut state = VideoEditState::new(source);
+        state.set_trim_end(trim_end);
+        assert!(state.extend_last_segment(1.0));
+
+        let (footage_end, seek_target) = state
+            .freeze_tail_playback_position()
+            .expect("the retained final segment has a frozen tail");
+        assert!((footage_end - trim_end).abs() < 1e-9);
+        assert!((seek_target - expected_frame).abs() < 1e-9);
+        assert!(seek_target < trim_end, "seek to a decodable frame, not EOF");
+    }
 }
 
 #[test]
