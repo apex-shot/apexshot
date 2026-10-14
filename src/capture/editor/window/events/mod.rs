@@ -2,8 +2,8 @@ use gtk4::{
     glib, prelude::*, Application, ApplicationWindow, Box as GtkBox, Button, CheckButton,
     DrawingArea, Label, Overlay, Scale, ScrolledWindow,
 };
-use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::cell::Cell;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -108,7 +108,6 @@ pub(super) struct EventContext {
     pub sync_picker_for_active_tool: Rc<dyn Fn()>,
     pub sync_picker_from_color: Rc<dyn Fn(DrawColor)>,
     pub apply_picker_color_to_editor: Rc<dyn Fn(DrawColor)>,
-    pub set_background_fill: Rc<RefCell<Option<Rc<dyn Fn(DrawColor)>>>>,
     pub add_color_to_custom_slots: Rc<dyn Fn(DrawColor)>,
     pub set_picker_panel_visibility: Rc<dyn Fn(bool)>,
     pub sync_select_inspector: Rc<dyn Fn()>,
@@ -132,7 +131,7 @@ pub(super) struct EventContext {
     pub stroke_size_button: Button,
     pub stroke_size_list: gtk4::Box,
     pub in_motion: Rc<Cell<bool>>,
-    pub export_motion: Rc<dyn Fn() -> Result<PathBuf, String>>,
+    pub export_motion: Rc<dyn Fn(&Path) -> Result<PathBuf, String>>,
 }
 
 pub(super) fn wire_editor_events(ctx: EventContext) {
@@ -198,7 +197,6 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         sync_picker_for_active_tool,
         sync_picker_from_color,
         apply_picker_color_to_editor,
-        set_background_fill,
         add_color_to_custom_slots,
         set_picker_panel_visibility,
         sync_select_inspector,
@@ -341,10 +339,9 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         &state,
         &drawing_area,
         &sync_picker_from_color,
-        &sync_picker_for_active_tool,
         &sync_size_control,
         &rebuild_effects_async,
-        &set_background_fill,
+        &apply_picker_color_to_editor,
     );
 
     wire_history_buttons(
