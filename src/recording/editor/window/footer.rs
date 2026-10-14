@@ -228,18 +228,37 @@ fn wire_upload_button(
             std::sync::mpsc::channel::<Result<String, crate::cloud::upload::UploadError>>();
         std::thread::spawn(move || {
             let result = (|| {
-                let path = ffmpeg::export_edited_to_cancellable(
-                    &state_snapshot,
-                    state_snapshot.export_path(),
-                    Some(&cancellation_worker),
-                )
-                .map_err(|err| {
-                    crate::cloud::upload::UploadError::Server(format!(
-                        "Export before upload failed: {err}"
-                    ))
-                })?;
                 if cancellation_worker.load(Ordering::Acquire) {
-                    let _ = std::fs::remove_file(&path);
+                    return Err(crate::cloud::upload::UploadError::Server(
+                        "Export cancelled".into(),
+                    ));
+                }
+                // Reuse the last export while every input that shaped it is
+                // unchanged, so uploading costs no second encode.
+                let cached_path = crate::recording::editor::export_cache::find(
+                    &state_snapshot,
+                    Some(&cancellation_worker),
+                );
+                if cancellation_worker.load(Ordering::Acquire) {
+                    return Err(crate::cloud::upload::UploadError::Server(
+                        "Export cancelled".into(),
+                    ));
+                }
+                let path = if let Some(path) = cached_path {
+                    path
+                } else {
+                    ffmpeg::export_edited_to_cancellable(
+                        &state_snapshot,
+                        state_snapshot.export_path(),
+                        Some(&cancellation_worker),
+                    )
+                    .map_err(|err| {
+                        crate::cloud::upload::UploadError::Server(format!(
+                            "Export before upload failed: {err}"
+                        ))
+                    })?
+                };
+                if cancellation_worker.load(Ordering::Acquire) {
                     return Err(crate::cloud::upload::UploadError::Server(
                         "Export cancelled".into(),
                     ));
@@ -518,6 +537,33 @@ mod tests {
         assert!(
             export.contains("export_edited_to_cancellable"),
             "The export worker must observe the editor cancellation token",
+        );
+    }
+
+    /// Uploading reuses the render the editor already produced while every
+    /// input that shaped it is unchanged, and must not delete that file when
+    /// the upload is cancelled between the lookup and the transfer.
+    #[test]
+    fn upload_reuses_an_unchanged_render_without_deleting_it() {
+        let source = include_str!("footer.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        let upload = &source[source.find("fn wire_upload_button").expect("upload wire")..];
+        let cache = upload
+            .find("export_cache::find")
+            .expect("cached export lookup");
+        let render = upload
+            .find("export_edited_to_cancellable")
+            .expect("fresh render fallback");
+        let network = upload.find("upload_file").expect("cloud upload");
+        assert!(
+            cache < render && render < network,
+            "Upload must look for a reusable render before encoding, and only then upload",
+        );
+        assert!(
+            !upload.contains("remove_file(&path)"),
+            "A reused export must survive cancellation between lookup and upload",
         );
     }
 }

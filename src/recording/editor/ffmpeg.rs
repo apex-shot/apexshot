@@ -761,6 +761,7 @@ pub(crate) fn export_edited_to_cancellable(
     if cancellation_requested(cancellation) {
         anyhow::bail!("export cancelled");
     }
+    let input_snapshot = super::export_cache::capture_inputs(state);
     sweep_stale_scratch_dirs();
     ensure_export_fits(state, &output_path)?;
     warn_if_memory_is_tight();
@@ -782,7 +783,14 @@ pub(crate) fn export_edited_to_cancellable(
         let _ = std::fs::remove_file(&output_path);
         anyhow::bail!("export cancelled");
     }
-    result
+    let path = result?;
+    super::export_cache::remember_if_inputs_unchanged(input_snapshot, state, &path, cancellation);
+    if cancellation_requested(cancellation) {
+        super::export_cache::forget(&path);
+        let _ = std::fs::remove_file(&output_path);
+        anyhow::bail!("export cancelled");
+    }
+    Ok(path)
 }
 
 fn build_single_trim_args(
