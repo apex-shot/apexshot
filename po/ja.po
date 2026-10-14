@@ -2938,3 +2938,6 @@ msgstr "選択したポータルではカーソルが動画に埋め込まれる
 
 msgid "The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."
 msgstr "ウィンドウカーソルは編集できますが、ApexShot GNOME 拡張機能がないと自動ズームのクリックは記録されません。"
+
+msgid "Export Motion video"
+msgstr "Motion 動画をエクスポートする"

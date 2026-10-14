@@ -2955,3 +2955,6 @@ msgstr "ستُضمّن البوابة المحددة المؤشر في الفي�
 
 msgid "The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."
 msgstr "سيظل مؤشر النافذة قابلاً للتحرير، لكن نقرات التكبير التلقائي لن تُسجّل دون إضافة GNOME الخاصة بـ ApexShot."
+
+msgid "Export Motion video"
+msgstr "تصدير فيديو Motion"

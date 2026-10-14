@@ -2932,3 +2932,6 @@ msgstr "所选门户会将光标嵌入视频，因此无法单独编辑。"
 
 msgid "The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."
 msgstr "窗口光标仍可编辑，但没有 ApexShot GNOME 扩展时不会记录自动缩放点击。"
+
+msgid "Export Motion video"
+msgstr "导出 Motion 视频"
