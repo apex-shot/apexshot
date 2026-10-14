@@ -50,7 +50,13 @@ impl ApexShotTray {
     }
 }
 
-fn paint_icon_pixel(data: &mut [u8], size: usize, x: i32, y: i32, coverage: f64) {
+/// The arch's stroke colour, #E95420.
+const ARCH_ORANGE: [u8; 3] = [233, 84, 32];
+/// The recording accent the record button and the preview overlay already use,
+/// #e81123.
+const RECORDING_RED: [u8; 3] = [232, 17, 35];
+
+fn paint_icon_pixel(data: &mut [u8], size: usize, x: i32, y: i32, coverage: f64, colour: [u8; 3]) {
     if x < 0 || y < 0 || x >= size as i32 || y >= size as i32 {
         return;
     }
@@ -60,10 +66,10 @@ fn paint_icon_pixel(data: &mut [u8], size: usize, x: i32, y: i32, coverage: f64)
         return;
     }
     // StatusNotifier pixmaps use network-order ARGB bytes.
-    data[index..index + 4].copy_from_slice(&[alpha, 233, 84, 32]);
+    data[index..index + 4].copy_from_slice(&[alpha, colour[0], colour[1], colour[2]]);
 }
 
-fn paint_icon_disc(data: &mut [u8], size: usize, cx: f64, cy: f64, radius: f64) {
+fn paint_icon_disc(data: &mut [u8], size: usize, cx: f64, cy: f64, radius: f64, colour: [u8; 3]) {
     let min_x = (cx - radius - 1.0).floor() as i32;
     let max_x = (cx + radius + 1.0).ceil() as i32;
     let min_y = (cy - radius - 1.0).floor() as i32;
@@ -73,7 +79,7 @@ fn paint_icon_disc(data: &mut [u8], size: usize, cx: f64, cy: f64, radius: f64) 
             let dx = x as f64 + 0.5 - cx;
             let dy = y as f64 + 0.5 - cy;
             let coverage = (radius + 0.75 - dx.hypot(dy)).clamp(0.0, 1.0);
-            paint_icon_pixel(data, size, x, y, coverage);
+            paint_icon_pixel(data, size, x, y, coverage, colour);
         }
     }
 }
@@ -109,9 +115,34 @@ fn icon(size: i32) -> ksni::Icon {
     for (p0, p1, p2, p3) in curves {
         for step in 0..=segments {
             let (x, y) = cubic_point(step as f64 / segments as f64, p0, p1, p2, p3);
-            paint_icon_disc(&mut data, size, x * scale, y * scale, radius);
+            paint_icon_disc(&mut data, size, x * scale, y * scale, radius, ARCH_ORANGE);
         }
     }
+    ksni::Icon {
+        width: size as i32,
+        height: size as i32,
+        data,
+    }
+}
+
+/// The badge a tray host draws over the item while a recording runs.
+///
+/// Hosts pin an overlay icon to a corner of the item and scale it down, so the
+/// disc is drawn with a transparent margin: room for the edge to antialias,
+/// and separation that keeps the dot legible over the icon on light and dark
+/// trays alike.
+fn badge(size: i32) -> ksni::Icon {
+    let size = size.max(1) as usize;
+    let mut data = vec![0; size * size * 4];
+    let centre = size as f64 / 2.0;
+    paint_icon_disc(
+        &mut data,
+        size,
+        centre,
+        centre,
+        centre * 0.82,
+        RECORDING_RED,
+    );
     ksni::Icon {
         width: size as i32,
         height: size as i32,
@@ -122,6 +153,11 @@ fn icon(size: i32) -> ksni::Icon {
 fn tray_icons() -> &'static Vec<ksni::Icon> {
     static ICONS: std::sync::OnceLock<Vec<ksni::Icon>> = std::sync::OnceLock::new();
     ICONS.get_or_init(|| vec![icon(16), icon(22), icon(32)])
+}
+
+fn recording_badges() -> &'static Vec<ksni::Icon> {
+    static BADGES: std::sync::OnceLock<Vec<ksni::Icon>> = std::sync::OnceLock::new();
+    BADGES.get_or_init(|| vec![badge(16), badge(22), badge(32)])
 }
 
 impl ksni::Tray for ApexShotTray {
@@ -143,6 +179,15 @@ impl ksni::Tray for ApexShotTray {
     }
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         tray_icons().clone()
+    }
+    /// Hosts that draw overlay icons badge the item with a red dot while a
+    /// recording runs; hosts that ignore overlays keep showing the plain icon.
+    fn overlay_icon_pixmap(&self) -> Vec<ksni::Icon> {
+        if self.recording {
+            recording_badges().clone()
+        } else {
+            Vec::new()
+        }
     }
     fn title(&self) -> String {
         "ApexShot".to_string()
@@ -298,7 +343,7 @@ mod tests {
 
     #[test]
     fn software_tray_icons_are_valid_argb_pixmaps() {
-        for icon in tray_icons() {
+        for icon in tray_icons().iter().chain(recording_badges()) {
             assert!(icon.width > 0 && icon.height > 0);
             assert_eq!(
                 icon.data.len(),
@@ -306,5 +351,30 @@ mod tests {
             );
             assert!(icon.data.chunks_exact(4).any(|pixel| pixel[0] > 0));
         }
+    }
+
+    #[test]
+    fn the_recording_badge_is_red_and_absent_while_idle() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut tray = ApexShotTray::new(tx);
+
+        assert!(ksni::Tray::overlay_icon_pixmap(&tray).is_empty());
+
+        tray.set_recording(true);
+        let badges = ksni::Tray::overlay_icon_pixmap(&tray);
+        assert_eq!(badges.len(), tray_icons().len());
+        for badge in &badges {
+            // The dot is opaque red at the centre and never the arch orange.
+            let centre =
+                (badge.height as usize / 2) * badge.width as usize + badge.width as usize / 2;
+            let pixel = &badge.data[centre * 4..centre * 4 + 4];
+            assert_eq!(
+                pixel,
+                [255, RECORDING_RED[0], RECORDING_RED[1], RECORDING_RED[2]]
+            );
+        }
+
+        tray.set_recording(false);
+        assert!(ksni::Tray::overlay_icon_pixmap(&tray).is_empty());
     }
 }
