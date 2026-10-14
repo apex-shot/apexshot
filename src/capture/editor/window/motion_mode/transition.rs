@@ -158,7 +158,11 @@ fn show_confirm(
     card.add_css_class("editor-motion-confirm-card");
     card.set_halign(Align::Center);
     card.set_valign(Align::Center);
-    card.set_hexpand(false);
+    // Expand into the scrim so the Center alignment can place the card: a
+    // child that does not expand is handed the wrapped labels' one-line width
+    // and left at the top, which is what parked this dialog in the corner.
+    card.set_hexpand(true);
+    card.set_vexpand(true);
 
     let title_label = Label::new(Some(&title));
     title_label.add_css_class("editor-inspector-title");
@@ -176,14 +180,19 @@ fn show_confirm(
     skip.add_css_class("editor-motion-confirm-skip");
 
     let buttons = GtkBox::new(Orientation::Horizontal, 8);
-    buttons.set_halign(Align::End);
+    buttons.set_halign(Align::Fill);
     let cancel = Button::with_label(&t("Cancel"));
     cancel.set_has_frame(false);
     cancel.add_css_class("editor-sidebar-action-button");
+    // Keep the primary action at the far edge and Cancel alone on the left,
+    // instead of the two buttons huddling together on the right.
+    let buttons_spacer = GtkBox::new(Orientation::Horizontal, 0);
+    buttons_spacer.set_hexpand(true);
     let cont = Button::with_label(&t("Continue"));
     cont.set_has_frame(false);
     cont.add_css_class("editor-done-button");
     buttons.append(&cancel);
+    buttons.append(&buttons_spacer);
     buttons.append(&cont);
 
     card.append(&title_label);

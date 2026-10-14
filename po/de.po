@@ -2995,3 +2995,6 @@ msgstr "Das ausgewählte Portal bettet den Cursor in das Video ein, sodass er ni
 
 msgid "The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."
 msgstr "Der Fenstercursor bleibt bearbeitbar, aber Auto-Zoom-Klicks werden ohne die ApexShot-GNOME-Erweiterung nicht aufgezeichnet."
+
+msgid "Export Motion video"
+msgstr "Motion-Video exportieren"

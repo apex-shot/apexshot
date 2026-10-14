@@ -5,21 +5,66 @@ use gtk4::{
 };
 use std::path::PathBuf;
 
-fn popup_on_editor(parent: &ApplicationWindow, card: &impl IsA<gtk4::Widget>) -> Popover {
+/// The width of the image editor's Motion confirm card, which every dialog in
+/// this editor is sized to.
+const DIALOG_CARD_WIDTH: i32 = 360;
+
+/// The body width that card wraps its own body to.
+const DIALOG_BODY_CHARS: i32 = 44;
+
+pub(super) fn popup_on_editor(
+    parent: &ApplicationWindow,
+    card: &impl IsA<gtk4::Widget>,
+) -> Popover {
+    let popover = prepare_editor_popup(parent, card);
+    present_editor_popup(&popover, parent);
+    popover
+}
+
+pub(super) fn prepare_editor_popup(
+    parent: &ApplicationWindow,
+    card: &impl IsA<gtk4::Widget>,
+) -> Popover {
     let popover = Popover::new();
     popover.set_parent(parent);
     popover.add_css_class("recording-editor-dialog");
+    if let Some(shell) = parent.child() {
+        for class in [
+            "editor-theme-light",
+            "editor-theme-dark",
+            "editor-reduced-transparency",
+        ] {
+            if find_widget_with_class(&shell, class).is_some() {
+                popover.add_css_class(class);
+            }
+        }
+    }
     popover.set_autohide(false);
     popover.set_has_arrow(false);
     popover.set_position(gtk4::PositionType::Bottom);
     popover.set_child(Some(card));
     set_editor_modal_blur(parent, true);
     center_editor_popup(&popover, parent);
+    let parent_weak = parent.downgrade();
+    popover
+        .connect_closed(move |popover| close_editor_popup_with_parent(popover, Some(&parent_weak)));
+    popover
+}
+
+pub(super) fn present_editor_popup(popover: &Popover, parent: &ApplicationWindow) {
+    center_editor_popup(popover, parent);
     popover.popup();
     glib::idle_add_local_once({
-        let popover = popover.clone();
-        let parent = parent.clone();
-        move || center_editor_popup(&popover, &parent)
+        let popover = popover.downgrade();
+        let parent = parent.downgrade();
+        move || {
+            let (Some(popover), Some(parent)) = (popover.upgrade(), parent.upgrade()) else {
+                return;
+            };
+            if popover.parent().is_some() && popover.is_visible() && parent.is_visible() {
+                center_editor_popup(&popover, &parent);
+            }
+        }
     });
     // GTK takes the dialog down without any of its own buttons too: the
     // editor pops every popover down the moment its window loses
@@ -30,8 +75,6 @@ fn popup_on_editor(parent: &ApplicationWindow, card: &impl IsA<gtk4::Widget>) ->
     // was gone, and the editor stayed blurred and dead until it was
     // restarted. Every dismissal funnels through the popover's `closed`
     // signal, so that is where the teardown belongs.
-    popover.connect_closed(close_editor_popup);
-    popover
 }
 
 fn center_editor_popup(popover: &Popover, parent: &ApplicationWindow) {
@@ -46,56 +89,117 @@ fn center_editor_popup(popover: &Popover, parent: &ApplicationWindow) {
     )));
 }
 
-fn close_editor_popup(popover: &Popover) {
-    if let Some(parent) = popover
+pub(super) fn close_editor_popup(popover: &Popover) {
+    let parent = popover
         .parent()
         .and_then(|widget| widget.downcast::<ApplicationWindow>().ok())
-    {
+        .map(|parent| parent.downgrade());
+    close_editor_popup_with_parent(popover, parent.as_ref());
+}
+
+pub(super) fn close_editor_popup_with_parent(
+    popover: &Popover,
+    parent: Option<&glib::WeakRef<ApplicationWindow>>,
+) {
+    if let Some(parent) = parent.and_then(|parent| parent.upgrade()) {
         set_editor_modal_blur(&parent, false);
     }
-    popover.popdown();
-    popover.unparent();
+    if popover.is_visible() {
+        popover.popdown();
+    }
+    if popover.parent().is_some() {
+        popover.unparent();
+    }
 }
 
 fn set_editor_modal_blur(parent: &ApplicationWindow, on: bool) {
     let Some(shell) = parent.child() else {
         return;
     };
-    let mut child = shell.first_child();
-    while let Some(widget) = child {
-        child = widget.next_sibling();
-        if widget.has_css_class("recording-editor-modal-scrim") {
-            widget.set_visible(on);
-            continue;
-        }
+    if let Some(root) = find_widget_with_class(&shell, "recording-editor-root")
+        .or_else(|| find_widget_with_class(&shell, "editor-root"))
+    {
         if on {
-            widget.add_css_class("recording-editor-modal-blur");
+            root.add_css_class("recording-editor-modal-blur");
         } else {
-            widget.remove_css_class("recording-editor-modal-blur");
+            root.remove_css_class("recording-editor-modal-blur");
         }
+    }
+    let Ok(overlay) = shell.clone().downcast::<gtk4::Overlay>() else {
+        return;
+    };
+    let overlay_widget: gtk4::Widget = overlay.clone().upcast();
+    let scrim = find_widget_with_class(&overlay_widget, "recording-editor-modal-scrim")
+        .and_then(|widget| widget.downcast::<GtkBox>().ok())
+        .or_else(|| {
+            if !on {
+                return None;
+            }
+            let scrim = GtkBox::new(Orientation::Vertical, 0);
+            scrim.add_css_class("recording-editor-modal-scrim");
+            scrim.set_halign(Align::Fill);
+            scrim.set_valign(Align::Fill);
+            scrim.set_hexpand(true);
+            scrim.set_vexpand(true);
+            scrim.set_can_target(true);
+            overlay.add_overlay(&scrim);
+            overlay.set_clip_overlay(&scrim, true);
+            Some(scrim)
+        });
+    if let Some(scrim) = scrim {
+        if find_widget_with_class(&shell, "editor-theme-light").is_some() {
+            scrim.add_css_class("editor-theme-light");
+        }
+        scrim.set_visible(on);
     }
 }
 
-fn dialog_card() -> (GtkBox, GtkBox) {
+fn find_widget_with_class(root: &impl IsA<gtk4::Widget>, class: &str) -> Option<gtk4::Widget> {
+    let mut stack = vec![root.clone().upcast::<gtk4::Widget>()];
+    while let Some(widget) = stack.pop() {
+        if widget.has_css_class(class) {
+            return Some(widget);
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            stack.push(current.clone());
+            child = current.next_sibling();
+        }
+    }
+    None
+}
+
+pub(super) fn dialog_card() -> (GtkBox, GtkBox) {
     let root = GtkBox::new(Orientation::Vertical, 12);
     root.add_css_class("recording-editor-dialog-root");
-    root.set_margin_top(24);
-    root.set_margin_bottom(18);
-    root.set_margin_start(24);
-    root.set_margin_end(24);
+    // The image editor's Motion confirm card pads 20px 22px 16px; matching
+    // those insets is what makes this card read as the same dialog.
+    root.set_margin_top(20);
+    root.set_margin_bottom(16);
+    root.set_margin_start(22);
+    root.set_margin_end(22);
     let wrapper = GtkBox::new(Orientation::Vertical, 0);
     wrapper.add_css_class("recording-editor-dialog-bg");
-    wrapper.set_size_request(380, -1);
+    // That card is 360px wide. Keep that as this card's floor, not as content
+    // inside its insets: a floor wide enough for the longer card plus one line
+    // of body text is what strung this dialog out into a shallow strip.
+    wrapper.set_size_request(DIALOG_CARD_WIDTH, -1);
     wrapper.set_hexpand(false);
     wrapper.set_halign(Align::Center);
     wrapper.append(&root);
     (wrapper, root)
 }
 
-fn constrain_dialog_body(body: &Label) {
+/// Keep a dialog body to the width of the image editor's Motion confirm card.
+///
+/// The 44-character cap only holds while the label keeps GTK's default word
+/// wrap: asking for `WrapMode::WordChar` makes the label request its whole line
+/// instead, so a body holding a file name stretched the card to twice the
+/// width of the card this dialog is modelled on. The Motion card's body relies
+/// on the default mode the same way.
+pub(super) fn constrain_dialog_body(body: &Label) {
     body.set_wrap(true);
-    body.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
-    body.set_max_width_chars(44);
+    body.set_max_width_chars(DIALOG_BODY_CHARS);
     body.set_hexpand(false);
 }
 
@@ -123,7 +227,7 @@ pub(super) fn show_success(parent: &ApplicationWindow, path: PathBuf) {
 
     let open_folder = Button::with_label(&t("Open Folder"));
     open_folder.set_has_frame(false);
-    open_folder.add_css_class("recording-editor-secondary-button");
+    open_folder.add_css_class("recording-editor-ghost-button");
 
     let close = Button::with_label(&t("Close"));
     close.set_has_frame(false);
@@ -263,6 +367,34 @@ pub(super) fn show_export_in_progress_close(
 
 #[cfg(test)]
 mod tests {
+    /// Export complete pairs a bare-text secondary with the filled orange
+    /// primary — Open Folder alone on the left, Close at the far right — the
+    /// way the image editor's confirm dialogs read, instead of two filled
+    /// pills huddling together.
+    #[test]
+    fn export_complete_pairs_a_ghost_secondary_with_the_primary() {
+        let source = include_str!("dialogs.rs")
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap();
+        let start = source
+            .find("pub(super) fn show_success")
+            .expect("show_success");
+        let end = source
+            .find("pub(super) fn show_manual_zoom_notice")
+            .expect("show_manual_zoom_notice");
+        let success = &source[start..end];
+        assert!(
+            success.contains("open_folder.add_css_class(\"recording-editor-ghost-button\")")
+                && success.contains("close.add_css_class(\"recording-editor-primary-button\")")
+                && success.contains("spacer.set_hexpand(true)")
+                && success.contains("button_row.append(&open_folder)")
+                && success.contains("button_row.append(&spacer)")
+                && success.contains("button_row.append(&close)"),
+            "Export complete should put a bare-text Open Folder on the left and the orange Close on the right"
+        );
+    }
+
     #[test]
     fn every_dismissal_tears_the_modal_blur_down() {
         // The regression this pins: exporting a video raised the success

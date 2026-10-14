@@ -848,6 +848,20 @@ fn setup_editor_window_full(
     let sync_picker_for_active_tool = color_picker_parts.sync_for_active_tool;
     let sync_picker_from_color = color_picker_parts.sync_picker_from_color;
     let apply_picker_color_to_editor = color_picker_parts.apply_picker_color;
+    let apply_picker_color_for_active_tool = color_picker_parts.apply_picker_color_for_active_tool;
+    let set_picker_target = color_picker_parts.set_target;
+    let set_picker_target_for_active_tool: Rc<dyn Fn()> = Rc::new({
+        let state = state.clone();
+        let set_picker_target = set_picker_target.clone();
+        move || {
+            let target = if state.lock().unwrap().selected_tool == Tool::Background {
+                color_picker::PickerTarget::Background
+            } else {
+                color_picker::PickerTarget::Drawing
+            };
+            set_picker_target(target);
+        }
+    });
     let set_picker_panel_visibility = color_picker_parts.set_picker_panel_visibility;
     let custom_slot_colors = color_picker_parts.custom_slot_colors;
     let refresh_custom_color_slots = color_picker_parts.refresh_custom_color_slots;
@@ -1371,10 +1385,12 @@ fn setup_editor_window_full(
     let static_appearance_slot = Rc::new(RefCell::new(background_inspector.clone()));
 
     let open_color_picker: Rc<dyn Fn()> = Rc::new({
-        let sync_picker_for_active_tool = sync_picker_for_active_tool.clone();
+        let set_picker_target_for_active_tool = set_picker_target_for_active_tool.clone();
         let color_popover = color_popover.downgrade();
         move || {
-            sync_picker_for_active_tool();
+            // The Colors panel edits whichever colour the active tool owns, so
+            // its popover points the shared picker there before it opens.
+            set_picker_target_for_active_tool();
             if let Some(popover) = color_popover.upgrade() {
                 popover.popup();
             }
@@ -1382,7 +1398,7 @@ fn setup_editor_window_full(
     });
     let colors_panel_parts = colors_panel::build_colors_panel(
         state.clone(),
-        apply_picker_color_to_editor.clone(),
+        apply_picker_color_for_active_tool.clone(),
         custom_slot_colors.clone(),
         refresh_custom_color_slots.clone(),
         Rc::new({
@@ -1412,18 +1428,10 @@ fn setup_editor_window_full(
         let _color_status_swatch = color_status_swatch.clone();
         let toolbar_color_css_provider = toolbar_color_css_provider.clone();
         move || {
-            let active_color = {
-                let st = state.lock().unwrap();
-                if st.selected_tool == Tool::Background {
-                    if let BackgroundStyle::PlainColor(color) = st.background_style {
-                        color
-                    } else {
-                        st.selected_color
-                    }
-                } else {
-                    st.selected_color
-                }
-            };
+            // The chip reports the drawing colour the annotation tools paint
+            // with, so it keeps showing the colour the editor remembers even
+            // while the Background tool owns the canvas fill.
+            let active_color = state.lock().unwrap().selected_color;
 
             color_status_label.set_label(&format!("#{}", draw_color_to_hex(active_color)));
             let (r, g, b, _) = draw_color_to_rgba_u8(active_color);
@@ -1734,6 +1742,7 @@ fn setup_editor_window_full(
     {
         let color_popover = color_popover.downgrade();
         let sync_shared_colors_for_active_tool = sync_shared_colors_for_active_tool.clone();
+        let set_picker_target = set_picker_target.clone();
         let chip_click = gtk4::GestureClick::new();
         chip_click.connect_pressed(move |_, _, _, _| {
             let Some(popover) = color_popover.upgrade() else {
@@ -1742,6 +1751,10 @@ fn setup_editor_window_full(
             if popover.is_visible() {
                 popover.popdown();
             } else {
+                // The toolbar chip is the drawing colour control: it never
+                // edits the Background fill, not even while the Background
+                // tool is the selected one.
+                set_picker_target(color_picker::PickerTarget::Drawing);
                 sync_shared_colors_for_active_tool();
                 popover.popup();
             }
@@ -2195,6 +2208,7 @@ fn setup_editor_window_full(
     *sidebar_eyedropper_activation.borrow_mut() = Some(Rc::new({
         let color_popover = color_popover.clone();
         let state = state.clone();
+        let set_picker_target_for_active_tool = set_picker_target_for_active_tool.clone();
         let eyedropper_mode = eyedropper_mode.clone();
         let eyedropper_from_sidebar = eyedropper_from_sidebar.clone();
         let eyedropper_point = eyedropper_point.clone();
@@ -2203,6 +2217,8 @@ fn setup_editor_window_full(
         let drawing_area = drawing_area.clone();
         let window = window.downgrade();
         move || {
+            // Sampling from the sidebar lands in the active tool's colour.
+            set_picker_target_for_active_tool();
             eyedropper_from_sidebar.set(true);
             color_picker::activate_eyedropper(
                 &color_popover,
@@ -2699,7 +2715,6 @@ fn setup_editor_window_full(
         sync_picker_for_active_tool: sync_shared_colors_for_active_tool.clone(),
         sync_picker_from_color: sync_picker_from_color.clone(),
         apply_picker_color_to_editor: apply_picker_color_to_editor.clone(),
-        set_background_fill: background_fill_slot.clone(),
         add_color_to_custom_slots: Rc::new({
             let custom_slot_colors = custom_slot_colors.clone();
             let refresh_custom_color_slots = refresh_custom_color_slots.clone();
@@ -2737,7 +2752,7 @@ fn setup_editor_window_full(
         stroke_size_button: stroke_size_button.clone(),
         stroke_size_list: line_inspector_list.clone(),
         in_motion: in_motion.clone(),
-        export_motion: motion_host.export_callback(path.clone()),
+        export_motion: motion_host.export_callback(),
     });
 
     // Share the video editor's focus-out net: the Motion Appearance popover is
@@ -2878,15 +2893,40 @@ mod tests {
     }
 
     #[test]
-    fn toolbar_color_status_syncs_from_shared_active_color() {
+    fn toolbar_color_status_shows_the_remembered_drawing_color() {
         let source = include_str!("mod.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(
             production_source.contains("editor-toolbar-color-status-swatch")
                 && production_source.contains("color_status_label.set_label")
-                && production_source.contains("BackgroundStyle::PlainColor")
-                && production_source.contains("draw_color_to_hex(active_color)"),
-            "Toolbar color status should mirror the shared active color, including Background plain color",
+                && production_source.contains("draw_color_to_hex(active_color)")
+                && production_source
+                    .contains("let active_color = state.lock().unwrap().selected_color;"),
+            "Toolbar color status should mirror the drawing color the editor remembers",
+        );
+    }
+
+    /// One picker serves both the toolbar chip and the Colors panel, so the
+    /// control that opens it names the colour it edits: the chip is the drawing
+    /// colour the tools paint with, the panel is the active tool's colour,
+    /// Background fill included.
+    #[test]
+    fn one_color_picker_serves_the_chip_and_the_panel_through_explicit_targets() {
+        let source = include_str!("mod.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        let picker_source = include_str!("color_picker.rs");
+        let picker_production = picker_source
+            .split("#[cfg(test)]")
+            .next()
+            .unwrap_or(picker_source);
+        assert!(
+            production_source.contains("set_picker_target(color_picker::PickerTarget::Drawing);")
+                && production_source.contains("set_picker_target_for_active_tool()")
+                && production_source.contains("apply_picker_color_for_active_tool")
+                && picker_production.contains("pub enum PickerTarget {")
+                && picker_production.contains("PickerTarget::Background => active_tool_color(state),")
+                && picker_production.contains("picker_target.get() == PickerTarget::Background"),
+            "the toolbar chip must edit the drawing color while the Colors panel keeps the active tool's"
         );
     }
 

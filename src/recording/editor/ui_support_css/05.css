@@ -247,12 +247,30 @@
                 color: #1d2129;
             }
 
+            .editor-theme-light .recording-editor-ghost-button {
+                background: transparent;
+                color: alpha(#1d2129, 0.86);
+            }
+
+            .editor-theme-light .recording-editor-ghost-button label {
+                color: alpha(#1d2129, 0.86);
+            }
+
+            .editor-theme-light .recording-editor-ghost-button:hover {
+                background: alpha(#111827, 0.10);
+            }
+
+            .editor-theme-light .recording-editor-ghost-button:hover label {
+                color: #1d2129;
+            }
+
             .editor-theme-light.recording-editor-shell {
                 background: @recording-editor-surface-light;
                 border: 1px solid alpha(#111827, 0.18);
             }
 
-            .editor-theme-light .recording-editor-modal-scrim {
+            .editor-theme-light .recording-editor-modal-scrim,
+            .editor-theme-light.recording-editor-modal-scrim {
                 background: alpha(#111827, 0.28);
             }
 
@@ -260,23 +278,33 @@
                 filter: blur(8px) brightness(0.78);
             }
 
-            .editor-theme-light .recording-editor-dialog {
-                background: #ffffff;
-                border-color: alpha(#111827, 0.08);
-                box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+            .editor-theme-light.recording-editor-dialog:not(.recording-editor-crop-dialog),
+            .editor-theme-light .recording-editor-dialog:not(.recording-editor-crop-dialog) {
+                background: transparent;
+                border: none;
+                border-radius: 0;
+                box-shadow: none;
             }
 
             .editor-theme-light .recording-editor-dialog-bg {
                 background: #ffffff;
-                border-color: alpha(#111827, 0.08);
+                border-color: alpha(#111827, 0.16);
             }
 
             .editor-theme-light .recording-editor-dialog-title {
-                color: #1d2129;
+                color: alpha(#1d2129, 0.92);
             }
 
             .editor-theme-light .recording-editor-dialog-body {
-                color: alpha(#1d2129, 0.55);
+                color: alpha(#1d2129, 0.58);
+            }
+
+            .editor-theme-light .recording-editor-dialog-root .recording-editor-primary-button:hover {
+                background: #c06a44;
+            }
+
+            .editor-theme-light .recording-editor-dialog-root .recording-editor-primary-button:active {
+                background: #8a4a2d;
             }
 
             .recording-editor-crop-dialog.editor-theme-light,
@@ -373,4 +401,3 @@
                 padding: 0;
                 background: transparent;
             }
-

@@ -834,13 +834,12 @@ fn draw_text_track(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<M
                 );
                 cr.set_font_size(11.0);
                 cr.move_to(x0 + 28.0, y + clip_h * 0.64);
-                let label = segment.text.trim();
-                let label = if label.is_empty() {
-                    t("Text")
-                } else {
-                    label.to_string()
-                };
-                let _ = cr.show_text(&label);
+                // Name the clip the way the Motion lane names its own clips.
+                // Echoing the typed content here never fit: long strings were
+                // cropped mid-word and short ones left the block looking
+                // half-drawn, while the preview and the Text inspector already
+                // show the real thing.
+                let _ = cr.show_text(&t("Text"));
                 let _ = cr.restore();
             }
             let _ = cr.restore();

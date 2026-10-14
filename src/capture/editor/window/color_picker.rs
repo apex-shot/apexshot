@@ -19,6 +19,17 @@ use crate::recording::editor::window::custom_wallpaper_popover::{
     build_color_picker as build_shared_color_picker, build_color_popover,
 };
 
+/// Which colour the shared picker edits. The control that opens the picker
+/// names the colour it owns, so one picker can serve both the toolbar chip and
+/// the Colors panel without guessing from the selected tool.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PickerTarget {
+    /// The drawing colour every annotation tool paints with.
+    Drawing,
+    /// The Background fill, which the Background tool owns.
+    Background,
+}
+
 pub struct ColorPickerParts {
     pub popover: Popover,
     pub color_buttons: Vec<Button>,
@@ -28,6 +39,13 @@ pub struct ColorPickerParts {
     pub sync_for_active_tool: Rc<dyn Fn()>,
     pub sync_picker_from_color: Rc<dyn Fn(DrawColor)>,
     pub apply_picker_color: Rc<dyn Fn(DrawColor)>,
+    /// Writes through the same path as [`Self::apply_picker_color`], but always
+    /// to the colour the active tool owns. The Colors panel edits the active
+    /// tool, including Background, while the toolbar chip stays on the drawing
+    /// colour.
+    pub apply_picker_color_for_active_tool: Rc<dyn Fn(DrawColor)>,
+    /// Points the shared picker at one colour, updating what it shows.
+    pub set_target: Rc<dyn Fn(PickerTarget)>,
     pub set_picker_panel_visibility: Rc<dyn Fn(bool)>,
     pub custom_slot_colors: Rc<RefCell<Vec<Option<DrawColor>>>>,
     pub refresh_custom_color_slots: Rc<dyn Fn()>,
@@ -96,10 +114,11 @@ pub fn build_color_picker(
         color_buttons.len(),
     )));
     let refresh_custom_color_slots: Rc<dyn Fn()> = Rc::new(|| {});
-    let current_color = Rc::new(Cell::new(active_tool_color(&state.lock().unwrap())));
+    let current_color = Rc::new(Cell::new(state.lock().unwrap().selected_color));
     let external_sync = Rc::new(RefCell::new(None::<Rc<dyn Fn()>>));
+    let picker_target = Rc::new(Cell::new(PickerTarget::Drawing));
 
-    let apply_picker_color_to_editor: Rc<dyn Fn(DrawColor)> = Rc::new({
+    let write_color_to_editor: Rc<dyn Fn(DrawColor, bool)> = Rc::new({
         let state = state.clone();
         let color_buttons = color_buttons.clone();
         let color_picker_dot = color_picker_dot.clone();
@@ -109,11 +128,11 @@ pub fn build_color_picker(
         let set_trigger_dot_exact_color = set_trigger_dot_exact_color.clone();
         let set_background_fill = set_background_fill.clone();
         let canvas_queue_draw_signal = canvas_queue_draw_signal.clone();
-        move |color| {
+        move |color, is_background| {
             current_color.set(color);
             let background_fill = {
                 let mut state = state.lock().unwrap();
-                let background_fill = (state.selected_tool == Tool::Background).then_some(color);
+                let background_fill = is_background.then_some(color);
                 if background_fill.is_none() {
                     state.selected_color = color;
                     if state.active_text_input.is_some() {
@@ -144,6 +163,28 @@ pub fn build_color_picker(
             if let Some(sync) = external_sync.borrow().as_ref() {
                 sync();
             }
+        }
+    });
+
+    let apply_picker_color_to_editor: Rc<dyn Fn(DrawColor)> = Rc::new({
+        let state = state.clone();
+        let picker_target = picker_target.clone();
+        let write_color_to_editor = write_color_to_editor.clone();
+        move |color| {
+            // A picker only reaches the Background fill while the Background
+            // tool is the active one, so a target left behind by the Colors
+            // panel can never paint over the drawing colour's owner.
+            let is_background = picker_target.get() == PickerTarget::Background
+                && state.lock().unwrap().selected_tool == Tool::Background;
+            write_color_to_editor(color, is_background);
+        }
+    });
+    let apply_picker_color_for_active_tool: Rc<dyn Fn(DrawColor)> = Rc::new({
+        let write_color_to_editor = write_color_to_editor.clone();
+        let state = state.clone();
+        move |color| {
+            let is_background = state.lock().unwrap().selected_tool == Tool::Background;
+            write_color_to_editor(color, is_background);
         }
     });
 
@@ -210,11 +251,17 @@ pub fn build_color_picker(
         let sync_picker_from_color = sync_picker_from_color.clone();
         let set_trigger_dot_exact_color = set_trigger_dot_exact_color.clone();
         let clear_trigger_dot_exact_color = clear_trigger_dot_exact_color.clone();
+        let picker_target = picker_target.clone();
         move || {
+            let target = picker_target.get();
             let state = state.lock().unwrap();
-            let color = active_tool_color(&state);
-            let show_palette_state = state.selected_tool != Tool::Background
-                || matches!(&state.background_style, BackgroundStyle::PlainColor(_));
+            let color = picker_color(&state, target);
+            let show_palette_state = match target {
+                PickerTarget::Drawing => true,
+                PickerTarget::Background => {
+                    matches!(&state.background_style, BackgroundStyle::PlainColor(_))
+                }
+            };
             drop(state);
             sync_picker_from_color(color);
             clear_active_color_picker_palette_state(&color_buttons);
@@ -232,6 +279,15 @@ pub fn build_color_picker(
         }
     });
     sync_picker_for_active_tool();
+
+    let set_target: Rc<dyn Fn(PickerTarget)> = Rc::new({
+        let picker_target = picker_target.clone();
+        let sync_picker_for_active_tool = sync_picker_for_active_tool.clone();
+        move |target| {
+            picker_target.set(target);
+            sync_picker_for_active_tool();
+        }
+    });
 
     let register_external_sync: Rc<dyn Fn(Rc<dyn Fn()>)> = Rc::new({
         let external_sync = external_sync.clone();
@@ -259,10 +315,21 @@ pub fn build_color_picker(
         sync_for_active_tool: sync_picker_for_active_tool,
         sync_picker_from_color,
         apply_picker_color: apply_picker_color_to_editor,
+        apply_picker_color_for_active_tool,
+        set_target,
         set_picker_panel_visibility,
         custom_slot_colors,
         refresh_custom_color_slots,
         register_external_sync,
+    }
+}
+
+/// The colour a picker shows for a given target. The drawing colour is the
+/// toolbar's own; the background is the fill the Background tool owns.
+fn picker_color(state: &EditorState, target: PickerTarget) -> DrawColor {
+    match target {
+        PickerTarget::Drawing => state.selected_color,
+        PickerTarget::Background => active_tool_color(state),
     }
 }
 
@@ -371,7 +438,7 @@ pub fn connect_eyedropper_activation(
 
 #[cfg(test)]
 mod tests {
-    use super::{active_tool_color, with_rgb};
+    use super::{picker_color, with_rgb, PickerTarget};
     use crate::capture::editor::state::EditorState;
     use crate::capture::editor::types::{BackgroundStyle, DrawColor, Tool};
 
@@ -388,29 +455,41 @@ mod tests {
     }
 
     #[test]
-    fn picker_reads_the_active_tools_color_including_background_alpha() {
+    fn picker_reads_the_color_its_own_target_owns() {
         let mut state = EditorState::new(image::RgbaImage::new(2, 2));
-        state.selected_color = DrawColor::new(0.1, 0.2, 0.3, 0.4);
+        let drawing = DrawColor::new(0.1, 0.2, 0.3, 0.4);
+        state.selected_color = drawing;
         let background = DrawColor::new(0.9, 0.8, 0.7, 0.6);
         state.background_style = BackgroundStyle::PlainColor(background);
-        for tool in [Tool::Pen, Tool::Text, Tool::Highlighter, Tool::Number] {
+
+        // The toolbar chip's target is the drawing colour under every tool,
+        // including the Background tool that owns the canvas fill.
+        for tool in [
+            Tool::Pen,
+            Tool::Text,
+            Tool::Highlighter,
+            Tool::Number,
+            Tool::Background,
+        ] {
             state.selected_tool = tool;
-            assert_eq!(active_tool_color(&state), state.selected_color);
+            assert_eq!(picker_color(&state, PickerTarget::Drawing), drawing);
         }
+
+        // The Colors panel's target follows the tool it is editing.
         state.selected_tool = Tool::Background;
-        assert_eq!(active_tool_color(&state), background);
+        assert_eq!(picker_color(&state, PickerTarget::Background), background);
         state.background_style = BackgroundStyle::None;
-        assert_eq!(active_tool_color(&state), state.selected_color);
+        assert_eq!(picker_color(&state, PickerTarget::Background), drawing);
     }
 
     #[test]
     fn picker_color_edits_do_not_steal_focus_from_the_popover() {
         let source = include_str!("color_picker.rs");
         let apply = source
-            .split("let apply_picker_color_to_editor: Rc<dyn Fn(DrawColor)>")
+            .split("let write_color_to_editor: Rc<dyn Fn(DrawColor, bool)>")
             .nth(1)
             .unwrap()
-            .split("let picker_repaint:")
+            .split("let apply_picker_color_to_editor:")
             .next()
             .unwrap();
         assert!(apply.contains("state.set_selected_action_color(color)"));

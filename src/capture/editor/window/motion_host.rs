@@ -82,9 +82,14 @@ impl MotionHost {
         self.in_motion.clone()
     }
 
-    pub(super) fn export_callback(&self, path: PathBuf) -> Rc<dyn Fn() -> Result<PathBuf, String>> {
+    /// Motion's Done handler asks for a destination (Save chooser) and hands it
+    /// here, so the export writes where the user pointed instead of guessing
+    /// from the still's folder.
+    pub(super) fn export_callback(
+        &self,
+    ) -> Rc<dyn Fn(&std::path::Path) -> Result<PathBuf, String>> {
         let session = self.session.clone();
-        Rc::new(move || session.export_mp4(&path))
+        Rc::new(move |destination: &std::path::Path| session.export_mp4(destination))
     }
 
     pub(super) fn install(&self, input: MotionHostInstallInputs<'_>) {

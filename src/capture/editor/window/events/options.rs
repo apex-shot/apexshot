@@ -11,7 +11,6 @@ use gtk4::{
     prelude::*, ApplicationWindow, Box as GtkBox, Button, CheckButton, DrawingArea, Entry, Image,
     Popover, Scale,
 };
-use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -20,7 +19,7 @@ use crate::capture::editor::{
     numbering_style::{NumberSize, NumberingStyle},
     pen_weight::{HighlighterMode, PenWeight},
     state::EditorState,
-    types::{ArrowStyle, BackgroundStyle, DrawColor, ObfuscateMethod, Tool},
+    types::{ArrowStyle, DrawColor, ObfuscateMethod, Tool},
     ui_support::{arrow_style_toolbar_icon, set_button_tool_icon, toolbar_icon_size},
 };
 
@@ -123,10 +122,9 @@ pub(super) fn wire_tool_options(
     state: &Arc<Mutex<EditorState>>,
     drawing_area: &DrawingArea,
     sync_picker_from_color: &Rc<dyn Fn(DrawColor)>,
-    sync_picker_for_active_tool: &Rc<dyn Fn()>,
     sync_size_control: &Rc<dyn Fn()>,
     rebuild_effects_async: &Rc<dyn Fn()>,
-    set_background_fill: &Rc<RefCell<Option<Rc<dyn Fn(DrawColor)>>>>,
+    apply_picker_color: &Rc<dyn Fn(DrawColor)>,
 ) {
     let ToolOptionsParts {
         pen_weight_button,
@@ -646,44 +644,23 @@ pub(super) fn wire_tool_options(
 
     for (index, button) in color_buttons.iter().enumerate() {
         let state_color = state.clone();
-        let set_background_fill_sw = set_background_fill.clone();
+        let apply_picker_color_sw = apply_picker_color.clone();
         let drawing_area_color = drawing_area.downgrade();
         let color_buttons_group = color_buttons.to_vec();
         let color_picker_dot_group = color_picker_dot.clone();
         let color_class_names_group = color_class_names.to_vec();
         let set_picker_visible_group = set_picker_panel_visibility.clone();
         let sync_picker_from_color_group = sync_picker_from_color.clone();
-        let sync_picker_for_active_tool_group = sync_picker_for_active_tool.clone();
         button.connect_clicked(move |_| {
-            // Background is owned by the shared Motion runtime; a direct
-            // EditorState write would be reverted by the tick sync.
-            let (has_active_text, switched_background) = {
-                let mut st = state_color.lock().unwrap();
-                let has_active_text = st.active_text_input.is_some();
-                let mut switched_background = false;
-                let background_fill = if st.selected_tool == Tool::Background {
-                    switched_background = true;
-                    Some(DRAW_COLORS[index])
-                } else {
-                    st.set_color_index(index);
-                    None
-                };
-                drop(st);
-                if let Some(fill_color) = background_fill {
-                    if let Some(setter) = set_background_fill_sw.borrow().as_ref() {
-                        setter(fill_color);
-                    } else {
-                        state_color.lock().unwrap().background_style =
-                            BackgroundStyle::PlainColor(fill_color);
-                    }
-                }
-                (has_active_text, switched_background)
-            };
-
+            // A swatch goes to the colour the shared picker is pointed at: the
+            // drawing colour from the toolbar chip, the background fill while
+            // the Colors panel is editing it. The Background fill belongs to
+            // the shared Motion runtime, so that write has to travel through
+            // the picker's own background setter — a direct EditorState write
+            // would be reverted by the tick sync.
+            let has_active_text = state_color.lock().unwrap().active_text_input.is_some();
+            apply_picker_color_sw(DRAW_COLORS[index]);
             sync_picker_from_color_group(DRAW_COLORS[index]);
-            if switched_background {
-                sync_picker_for_active_tool_group();
-            }
 
             color_picker::set_active_color_picker_state(
                 &color_buttons_group,
@@ -736,13 +713,27 @@ mod tests {
                 && production.contains("st.reverse_selected_arrow_action()")
                 && production.contains("set_numbering_style(style)")
                 && production.contains("set_number_size(size)")
-                && production.contains("st.set_color_index(index)")
                 && !production.contains("set_crop_background_color")
-                && production.contains("Some(DRAW_COLORS[index])")
-                && production.contains("BackgroundStyle::PlainColor(fill_color)")
-                && production.contains("set_background_fill_sw")
+                && production.contains("apply_picker_color_sw(DRAW_COLORS[index]);")
                 && production.contains("set_active_size_without_rebuild(value)"),
             "tool options must retain weight, style, direction, numbering, palette, size, and obfuscate policies"
+        );
+    }
+
+    /// The popover's palette writes through the shared picker, so one swatch
+    /// reaches the drawing colour from the toolbar chip and the background fill
+    /// — which the shared Motion runtime owns — from the Colors panel. Keeping
+    /// a second copy of that routing here is what let the palette and the
+    /// picker's own canvas disagree about which colour they were editing.
+    #[test]
+    fn tool_options_palette_defers_to_the_shared_picker_target() {
+        let source = include_str!("options.rs");
+        let production = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production.contains("apply_picker_color_sw(DRAW_COLORS[index]);")
+                && !production.contains("set_background_fill_sw")
+                && !production.contains("st.set_color_index(index)"),
+            "the palette must not re-implement the picker's background routing"
         );
     }
 }

@@ -1,4 +1,7 @@
-use gtk4::{glib, prelude::*, Application, ApplicationWindow, Button, Spinner};
+use gtk4::{
+    gio, glib, prelude::*, Application, ApplicationWindow, Button, FileChooserAction,
+    FileChooserNative, FileFilter, ResponseType, Spinner,
+};
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -42,7 +45,7 @@ pub(super) fn wire_output_lifecycle(
     save_spinner: &Spinner,
     traffic_close: &Button,
     in_motion: Rc<Cell<bool>>,
-    export_motion: Rc<dyn Fn() -> Result<PathBuf, String>>,
+    export_motion: Rc<dyn Fn(&Path) -> Result<PathBuf, String>>,
 ) {
     let state_copy = state.clone();
     copy_btn.connect_clicked(move |_| {
@@ -102,12 +105,28 @@ pub(super) fn wire_output_lifecycle(
                             crate::cloud::upgrade::show_prompt(&window, &message);
                         }
                     }
+                    Err(crate::cloud::upload::UploadError::Server(message))
+                        if message.starts_with("Could not save edits: ") =>
+                    {
+                        let error = &message["Could not save edits: ".len()..];
+                        crate::utils::notify::desktop_notification_important(
+                            &crate::i18n::t("Upload failed"),
+                            &crate::i18n::tfmt(
+                                "Could not save edits: {error}",
+                                &[("error", error)],
+                            ),
+                        );
+                    }
                     Err(_) => {}
                 }
                 glib::ControlFlow::Continue
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                uploading_poll.set(false);
+                upload_btn_poll.set_sensitive(true);
+                glib::ControlFlow::Break
+            }
         }
     });
     let uploading_click = uploading.clone();
@@ -124,20 +143,23 @@ pub(super) fn wire_output_lifecycle(
             return;
         }
 
-        {
+        let final_image = {
             let state = state_upload.lock().unwrap();
-            if let Err(error) = save_edited_image(&path_upload, &state) {
-                eprintln!("[editor] Failed to save edits before upload: {error}");
-                crate::utils::notify::desktop_notification_important(
-                    &crate::i18n::t("Upload failed"),
-                    &crate::i18n::tfmt(
-                        "Could not save edits: {error}",
-                        &[("error", &error.to_string())],
-                    ),
-                );
-                return;
+            match state.to_final_image() {
+                Ok(image) => image,
+                Err(error) => {
+                    eprintln!("[editor] Failed to save edits before upload: {error}");
+                    crate::utils::notify::desktop_notification_important(
+                        &crate::i18n::t("Upload failed"),
+                        &crate::i18n::tfmt(
+                            "Could not save edits: {error}",
+                            &[("error", &error.to_string())],
+                        ),
+                    );
+                    return;
+                }
             }
-        }
+        };
 
         uploading_click.set(true);
         upload_btn_click.set_sensitive(false);
@@ -145,10 +167,46 @@ pub(super) fn wire_output_lifecycle(
         let path = path_upload.clone();
         let upload_done_tx = upload_done_tx.clone();
         std::thread::spawn(move || {
-            let result = crate::cloud::upload::upload_file_with_notifications_without_clipboard(
-                &config, &path,
-            )
-            .map(|result| result.share_url);
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default();
+            let snapshot_dir = dirs::cache_dir()
+                .unwrap_or_else(std::env::temp_dir)
+                .join("apexshot")
+                .join("upload-snapshots")
+                .join(format!("{}-{stamp}", std::process::id()));
+            let snapshot_root = snapshot_dir.parent().unwrap_or(&snapshot_dir);
+            let result = match std::fs::create_dir_all(snapshot_root)
+                .and_then(|()| std::fs::create_dir(&snapshot_dir))
+            {
+                Err(error) => Err(crate::cloud::upload::UploadError::Server(format!(
+                    "Could not save edits: {error}"
+                ))),
+                Ok(()) => {
+                    let filename = path
+                        .file_name()
+                        .unwrap_or_else(|| std::ffi::OsStr::new("upload.png"));
+                    let snapshot_path = snapshot_dir.join(filename);
+                    let result = match crate::capture::editor::io_ops::save_edited_image_snapshot(
+                        &snapshot_path,
+                        final_image,
+                    ) {
+                        Err(error) => Err(crate::cloud::upload::UploadError::Server(format!(
+                            "Could not save edits: {error}"
+                        ))),
+                        Ok(()) => {
+                            crate::cloud::upload::upload_file_with_notifications_without_clipboard(
+                                &config,
+                                &snapshot_path,
+                            )
+                            .map(|result| result.share_url)
+                        }
+                    };
+                    let _ = std::fs::remove_dir_all(&snapshot_dir);
+                    result
+                }
+            };
             let _ = upload_done_tx.send(result);
         });
     });
@@ -180,41 +238,109 @@ pub(super) fn wire_output_lifecycle(
             }
 
             if in_motion.get() {
-                done_busy.set(true);
-                save_btn_click.set_sensitive(false);
-                done_spinner.set_visible(true);
-                done_spinner.start();
-                // One frame for the spinner before the export blocks the main
-                // loop; the window stays up so the spin is visible.
-                glib::timeout_add_local_once(
-                    Duration::from_millis(50),
-                    move || match export_motion() {
-                        Ok(video_path) => {
-                            let _ = persist_image_session(&path_save, &state_save.lock().unwrap());
-                            crate::utils::notify::desktop_notification(
-                                &crate::i18n::t("Export complete"),
-                                &video_path.display().to_string(),
-                            );
-                            if let Some(window) = window_save.upgrade() {
-                                window.close();
-                            }
-                            if let Some(app) = app_save.upgrade() {
-                                app.quit();
-                            }
-                        }
-                        Err(error) => {
-                            eprintln!("Failed to export Motion video: {error}");
-                            crate::utils::notify::desktop_notification_important(
-                                &crate::i18n::t("Export failed"),
-                                &error,
-                            );
-                            done_busy.set(false);
-                            done_spinner.stop();
-                            done_spinner.set_visible(false);
-                            save_btn_click.set_sensitive(true);
-                        }
-                    },
+                if save_chooser_open.get() {
+                    return;
+                }
+                let Some(parent) = window_save.upgrade() else {
+                    return;
+                };
+                let suggestion = motion_export_suggestion(&path_save);
+                save_chooser_open.set(true);
+
+                let chooser = FileChooserNative::new(
+                    Some(&crate::i18n::t("Export Motion video")),
+                    Some(&parent),
+                    FileChooserAction::Save,
+                    Some(&crate::i18n::t("Export")),
+                    Some(&crate::i18n::t("Cancel")),
                 );
+                let filter = FileFilter::new();
+                filter.set_name(Some(&crate::i18n::t("MP4 video")));
+                filter.add_mime_type("video/mp4");
+                filter.add_pattern("*.mp4");
+                chooser.add_filter(&filter);
+                if let Some(folder) = suggestion.parent() {
+                    let _ = chooser.set_current_folder(Some(&gio::File::for_path(folder)));
+                }
+                if let Some(name) = suggestion.file_name() {
+                    chooser.set_current_name(&name.to_string_lossy());
+                }
+
+                let state_resp = state_save.clone();
+                let path_resp = path_save.clone();
+                let window_resp = window_save.clone();
+                let app_resp = app_save.clone();
+                let save_chooser_resp = save_chooser.clone();
+                let save_chooser_open_resp = save_chooser_open.clone();
+                let done_busy_resp = done_busy.clone();
+                let done_spinner_resp = done_spinner.clone();
+                let save_btn_resp = save_btn_click.clone();
+                let export_motion = export_motion.clone();
+                chooser.connect_response(move |dialog, response| {
+                    dialog.hide();
+                    save_chooser_open_resp.set(false);
+                    *save_chooser_resp.borrow_mut() = None;
+
+                    let destination = (response == ResponseType::Accept)
+                        .then(|| dialog.file())
+                        .flatten()
+                        .and_then(|file| file.path());
+                    let Some(destination) = destination else {
+                        return;
+                    };
+                    let destination = with_mp4_extension(destination);
+
+                    done_busy_resp.set(true);
+                    save_btn_resp.set_sensitive(false);
+                    done_spinner_resp.set_visible(true);
+                    done_spinner_resp.start();
+
+                    let state_resp = state_resp.clone();
+                    let path_resp = path_resp.clone();
+                    let window_resp = window_resp.clone();
+                    let app_resp = app_resp.clone();
+                    let export_motion = export_motion.clone();
+                    let done_busy_inner = done_busy_resp.clone();
+                    let done_spinner_inner = done_spinner_resp.clone();
+                    let save_btn_inner = save_btn_resp.clone();
+                    // One frame for the spinner before the export blocks the main
+                    // loop; the window stays up so the spin is visible.
+                    glib::timeout_add_local_once(Duration::from_millis(50), move || {
+                        match export_motion(&destination) {
+                            Ok(video_path) => {
+                                let mut config = crate::config::load_config();
+                                if config.remember_video_export_dir(&video_path) {
+                                    let _ = crate::config::save_config(&config);
+                                }
+                                let _ =
+                                    persist_image_session(&path_resp, &state_resp.lock().unwrap());
+                                crate::utils::notify::desktop_notification(
+                                    &crate::i18n::t("Export complete"),
+                                    &video_path.display().to_string(),
+                                );
+                                if let Some(window) = window_resp.upgrade() {
+                                    window.close();
+                                }
+                                if let Some(app) = app_resp.upgrade() {
+                                    app.quit();
+                                }
+                            }
+                            Err(error) => {
+                                eprintln!("Failed to export Motion video: {error}");
+                                crate::utils::notify::desktop_notification_important(
+                                    &crate::i18n::t("Export failed"),
+                                    &error,
+                                );
+                                done_busy_inner.set(false);
+                                done_spinner_inner.stop();
+                                done_spinner_inner.set_visible(false);
+                                save_btn_inner.set_sensitive(true);
+                            }
+                        }
+                    });
+                });
+                *save_chooser.borrow_mut() = Some(chooser.clone());
+                chooser.show();
                 return;
             }
 
@@ -331,9 +457,54 @@ fn finish_image_session(
     }
 }
 
+/// Where the Motion export chooser opens and what it pre-fills: the same folder
+/// the video editor starts in (remembered export folder, else the Recordings
+/// folder, else XDG Videos), named from the still the editor opened.
+fn motion_export_suggestion(source_image: &Path) -> PathBuf {
+    let config = crate::config::load_config().sanitized();
+    let fallback = crate::recording::recording_output_dir(&config);
+    let dir = config.motion_export_dir(&fallback);
+    let stem = source_image
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("ApexShot");
+    dir.join(format!("{stem} Motion.mp4"))
+}
+
+/// Motion is always encoded as MP4, so an extension-less or mis-typed choice
+/// from the Save chooser is corrected rather than written as-is.
+fn with_mp4_extension(mut destination: PathBuf) -> PathBuf {
+    let is_mp4 = destination
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"));
+    if !is_mp4 {
+        destination.set_extension("mp4");
+    }
+    destination
+}
+
 #[cfg(test)]
 mod tests {
-    use super::done_needs_save_chooser;
+    use super::{done_needs_save_chooser, with_mp4_extension};
+    use std::path::PathBuf;
+
+    #[test]
+    fn motion_export_forces_an_mp4_extension() {
+        assert_eq!(
+            with_mp4_extension(PathBuf::from("/tmp/clip")),
+            PathBuf::from("/tmp/clip.mp4")
+        );
+        assert_eq!(
+            with_mp4_extension(PathBuf::from("/tmp/clip.MOV")),
+            PathBuf::from("/tmp/clip.mp4")
+        );
+        assert_eq!(
+            with_mp4_extension(PathBuf::from("/tmp/clip.mp4")),
+            PathBuf::from("/tmp/clip.mp4")
+        );
+    }
 
     #[test]
     fn editor_copy_exports_current_state_without_saving_the_source_or_opening_a_chooser() {
@@ -398,9 +569,9 @@ mod tests {
         );
         assert!(
             handler.contains("if in_motion.get()")
-                && handler.contains("export_motion()")
+                && handler.contains("export_motion(&destination)")
                 && handler.contains("save_edited_image"),
-            "Done in Motion exports MP4; Done in Static still flattens the PNG"
+            "Done in Motion exports MP4 to the chosen path; Done in Static still flattens the PNG"
         );
     }
 

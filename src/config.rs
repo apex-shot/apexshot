@@ -409,6 +409,20 @@ impl AppConfig {
         fallback.to_path_buf()
     }
 
+    /// Folder the Motion MP4 export starts in. Motion is a video, so it follows
+    /// the video export story instead of the still's folder: the remembered
+    /// export folder when the user keeps one, else the configured Recordings
+    /// folder (`video_export_location`), else `fallback`.
+    pub fn motion_export_dir(&self, fallback: &std::path::Path) -> PathBuf {
+        let configured = self.video_export_location.trim();
+        let recordings = if configured.is_empty() {
+            fallback.to_path_buf()
+        } else {
+            PathBuf::from(configured)
+        };
+        self.video_editor_export_dir(&recordings)
+    }
+
     pub fn remember_video_export_dir(&mut self, file: &std::path::Path) -> bool {
         if !self.rec_remember_export_folder {
             return false;
@@ -1058,6 +1072,31 @@ mod tests {
         cfg.last_video_export_dir.clear();
         assert!(cfg.remember_video_export_dir(&last.join("clip.mp4")));
         assert_eq!(cfg.last_video_export_dir, last.to_string_lossy());
+    }
+
+    #[test]
+    fn motion_export_dir_prefers_remembered_then_recordings_folder() {
+        let fallback = PathBuf::from("/tmp/pictures");
+        let mut cfg = AppConfig::default();
+        // No remember folder, no configured recordings folder: the caller's
+        // fallback (XDG Videos) wins, never the still's folder.
+        assert_eq!(cfg.motion_export_dir(&fallback), fallback);
+
+        cfg.video_export_location = " /mnt/clips ".into();
+        assert_eq!(
+            cfg.motion_export_dir(&fallback),
+            PathBuf::from("/mnt/clips")
+        );
+
+        let last = std::env::temp_dir();
+        cfg.last_video_export_dir = last.to_string_lossy().into_owned();
+        assert_eq!(cfg.motion_export_dir(&fallback), last);
+
+        cfg.rec_remember_export_folder = false;
+        assert_eq!(
+            cfg.motion_export_dir(&fallback),
+            PathBuf::from("/mnt/clips")
+        );
     }
 
     #[test]

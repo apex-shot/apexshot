@@ -2,12 +2,21 @@ use super::state::EditorState;
 use super::types::EditorError;
 use crate::utils::clipboard;
 use image::DynamicImage;
+use image::RgbaImage;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn save_edited_image(path: &Path, state: &EditorState) -> Result<(), EditorError> {
     let final_image = state.to_final_image()?;
+    save_edited_image_snapshot(path, final_image)
+}
+
+/// Encode and save an immutable flattened editor image using the destination format.
+pub(crate) fn save_edited_image_snapshot(
+    path: &Path,
+    final_image: RgbaImage,
+) -> Result<(), EditorError> {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -166,6 +175,27 @@ mod tests {
         let destination = dir.join("invalid");
         assert!(save_clipboard_image(&destination, &invalid).is_err());
         assert!(!destination.exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn flattened_snapshot_saves_the_same_bytes_as_editor_save_for_png_and_jpeg() {
+        let dir = scratch_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let state = EditorState::new(RgbaImage::from_pixel(12, 8, Rgba([40, 90, 180, 255])));
+        let snapshot = state.to_final_image().unwrap();
+
+        for extension in ["png", "jpg"] {
+            let direct = dir.join(format!("direct.{extension}"));
+            let from_snapshot = dir.join(format!("snapshot.{extension}"));
+            save_edited_image(&direct, &state).unwrap();
+            save_edited_image_snapshot(&from_snapshot, snapshot.clone()).unwrap();
+            assert_eq!(
+                std::fs::read(direct).unwrap(),
+                std::fs::read(from_snapshot).unwrap()
+            );
+        }
+
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

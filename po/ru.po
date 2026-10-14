@@ -2981,3 +2981,6 @@ msgstr "Выбранный портал встроит курсор в виде�
 
 msgid "The window cursor remains editable, but Auto Zoom clicks will not be recorded without the ApexShot GNOME extension."
 msgstr "Курсор окна останется редактируемым, но клики для автозума не будут записываться без расширения GNOME ApexShot."
+
+msgid "Export Motion video"
+msgstr "Экспорт видео Motion"

@@ -3,6 +3,7 @@ pub mod click_effect;
 pub mod cursor_export;
 pub mod cursor_sprite;
 pub mod cursor_track;
+pub(crate) mod export_cache;
 pub mod ffmpeg;
 pub mod gst_warp;
 pub(crate) mod hardware_encode;

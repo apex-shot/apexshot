@@ -4,7 +4,9 @@ use super::click_effect::{
     RIPPLE_BAND_01,
 };
 use super::model::{ClickEffect, CursorSettings, CursorTheme, MAX_CURSOR_SIZE, MIN_CURSOR_SIZE};
-use gtk4::cairo::{Antialias, Context, Filter, Format, ImageSurface, SurfacePattern};
+use gtk4::cairo::{
+    Antialias, Context, FillRule, Filter, Format, ImageSurface, RadialGradient, SurfacePattern,
+};
 use image::RgbaImage;
 use std::f64::consts::TAU;
 use std::path::Path;
@@ -87,12 +89,12 @@ pub fn hotspot(theme: CursorTheme, kind: &str) -> (f64, f64) {
         (CursorTheme::Macos, SpriteKind::Text) => (24.2, 24.1),
         (CursorTheme::Macos, SpriteKind::Crosshair) => (24.1, 24.0),
         (CursorTheme::Tahoe, SpriteKind::Default) => (7.9, 4.1),
-        (CursorTheme::Tahoe, SpriteKind::Hand) => (15.8, 5.1),
-        (CursorTheme::Tahoe, SpriteKind::Text) => (24.3, 40.1),
+        (CursorTheme::Tahoe, SpriteKind::Hand) => (21.0, 5.0),
+        (CursorTheme::Tahoe, SpriteKind::Text) => (24.0, 24.0),
         (CursorTheme::Tahoe, SpriteKind::Crosshair) => (24.1, 24.0),
         (CursorTheme::TahoeInverted, SpriteKind::Default) => (7.9, 4.1),
-        (CursorTheme::TahoeInverted, SpriteKind::Hand) => (15.8, 5.1),
-        (CursorTheme::TahoeInverted, SpriteKind::Text) => (24.3, 40.1),
+        (CursorTheme::TahoeInverted, SpriteKind::Hand) => (21.0, 5.0),
+        (CursorTheme::TahoeInverted, SpriteKind::Text) => (24.0, 24.0),
         (CursorTheme::TahoeInverted, SpriteKind::Crosshair) => (24.1, 24.0),
         (CursorTheme::Dot, SpriteKind::Default) => (24.0, 24.0),
         (CursorTheme::Dot, SpriteKind::Hand) => (24.0, 24.0),
@@ -134,6 +136,10 @@ pub fn draw(
     }
     let bitmap = bitmap(settings.theme, kind);
     let surface = surface_from_rgba(bitmap);
+    if settings.theme == CursorTheme::Dot {
+        paint_dot_sprite(cr, &surface, x, y, scale, settings.shadow, alpha);
+        return;
+    }
     let (hx, hy) = hotspot(settings.theme, kind);
     paint_sprite(
         cr,
@@ -405,6 +411,59 @@ fn paint_sprite(
     let _ = cr.set_source(&pattern);
     cr.set_antialias(Antialias::Best);
     cr.translate(-hx, -hy);
+    let _ = cr.paint_with_alpha(alpha);
+    let _ = cr.restore();
+}
+
+fn paint_dot_sprite(
+    cr: &Context,
+    surface: &ImageSurface,
+    x: f64,
+    y: f64,
+    scale: f64,
+    shadow: f64,
+    alpha: f64,
+) {
+    if shadow > 0.01 {
+        let radius = 21.0;
+        let offset_x = 2.2 * shadow;
+        let offset_y = 3.2 * shadow;
+        let blur = 4.0 * shadow;
+        let extent = radius + blur + offset_x.hypot(offset_y);
+        let shadow_alpha = 0.16 * shadow * alpha;
+        let _ = cr.save();
+        cr.translate(x, y);
+        cr.scale(scale, scale);
+        cr.set_antialias(Antialias::Best);
+        cr.new_path();
+        cr.arc(0.0, 0.0, extent, 0.0, TAU);
+        cr.arc(0.0, 0.0, radius, 0.0, TAU);
+        cr.set_fill_rule(FillRule::EvenOdd);
+        cr.clip();
+        cr.arc(offset_x, offset_y, radius + blur, 0.0, TAU);
+        let gradient = RadialGradient::new(
+            offset_x,
+            offset_y,
+            radius,
+            offset_x,
+            offset_y,
+            radius + blur,
+        );
+        gradient.add_color_stop_rgba(0.0, 0.0, 0.0, 0.0, shadow_alpha);
+        gradient.add_color_stop_rgba(1.0, 0.0, 0.0, 0.0, 0.0);
+        let _ = cr.set_source(&gradient);
+        let _ = cr.fill();
+        let _ = cr.restore();
+    }
+
+    let _ = cr.save();
+    cr.translate(x, y);
+    cr.scale(scale, scale);
+    cr.translate(-24.0, -24.0);
+    let pattern = SurfacePattern::create(surface);
+    pattern.set_filter(Filter::Best);
+    let _ = cr.set_source(&pattern);
+    cr.set_antialias(Antialias::Best);
     let _ = cr.paint_with_alpha(alpha);
     let _ = cr.restore();
 }
@@ -959,5 +1018,139 @@ mod tests {
                 "the studied {effect:?} has no colour knob"
             );
         }
+    }
+
+    #[test]
+    fn tahoe_hotspots_land_on_visible_artwork() {
+        for theme in [CursorTheme::Tahoe, CursorTheme::TahoeInverted] {
+            for (kind, expected) in [
+                ("default", (7.9, 4.1)),
+                ("hand", (21.0, 5.0)),
+                ("text", (24.0, 24.0)),
+                ("crosshair", (24.1, 24.0)),
+            ] {
+                let image = bitmap(theme, kind);
+                let actual = hotspot(theme, kind);
+                assert_eq!(actual, expected, "{theme:?} {kind}");
+                assert_eq!((image.width(), image.height()), (48, 48));
+                assert!(
+                    image.get_pixel(actual.0 as u32, actual.1 as u32).0[3] > 0,
+                    "{theme:?} {kind} hotspot must touch the visible artwork"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tahoe_inverted_hand_and_text_keep_the_same_shape() {
+        for kind in ["hand", "text"] {
+            let regular = bitmap(CursorTheme::Tahoe, kind);
+            let inverted = bitmap(CursorTheme::TahoeInverted, kind);
+            assert_eq!(regular.dimensions(), (48, 48));
+            assert_eq!(inverted.dimensions(), regular.dimensions());
+            let (_, _, width, height) = opaque_bounds(regular);
+            if kind == "text" {
+                assert!((17.0..=22.0).contains(&width));
+                assert!((40.0..=43.0).contains(&height));
+            } else {
+                assert!((31.0..=36.0).contains(&width));
+                assert!((38.0..=40.0).contains(&height));
+            }
+            for (light, dark) in regular.pixels().zip(inverted.pixels()) {
+                assert_eq!(light.0[3], dark.0[3], "{kind} alpha mask");
+            }
+            let sample = if kind == "text" { (24, 24) } else { (20, 20) };
+            let light = regular.get_pixel(sample.0, sample.1);
+            let dark = inverted.get_pixel(sample.0, sample.1);
+            assert_eq!(light.0[3], 255, "{kind} light fill");
+            assert_eq!(dark.0[3], 255, "{kind} dark fill");
+            assert!(light.0[0] < 16 && dark.0[0] > 239, "{kind} inverted fill");
+        }
+    }
+
+    #[test]
+    fn dot_art_is_a_translucent_circle_with_a_subtle_rim() {
+        let image = bitmap(CursorTheme::Dot, "default");
+        assert_eq!(image.dimensions(), (48, 48));
+        let (_, _, width, height) = opaque_bounds(image);
+        assert!((40.0..=44.0).contains(&width));
+        assert!((40.0..=44.0).contains(&height));
+
+        let center = image.get_pixel(24, 24);
+        assert!((100..=130).contains(&center.0[3]));
+        assert!((190..=220).contains(&center.0[0]));
+        assert_eq!(image.get_pixel(0, 24).0[3], 0);
+
+        let rim = image.get_pixel(4, 24);
+        assert!(rim.0[0] > 160 && rim.0[0] < center.0[0]);
+    }
+
+    #[test]
+    fn dot_kinds_share_one_centered_sprite() {
+        let default = bitmap(CursorTheme::Dot, "default");
+        assert_eq!(hotspot(CursorTheme::Dot, "default"), (24.0, 24.0));
+        for kind in ["hand", "text", "crosshair"] {
+            assert_eq!(bitmap(CursorTheme::Dot, kind).as_raw(), default.as_raw());
+            assert_eq!(hotspot(CursorTheme::Dot, kind), (24.0, 24.0));
+        }
+    }
+
+    #[test]
+    fn dot_shadow_changes_the_exterior_without_darkening_the_fill() {
+        let render = |shadow| {
+            let mut surface =
+                ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
+            {
+                let cr = Context::new(&surface).unwrap();
+                cr.set_source_rgb(1.0, 1.0, 1.0);
+                let _ = cr.paint();
+                draw(
+                    &cr,
+                    TEST_SURFACE_SIZE as f64 / 2.0,
+                    TEST_SURFACE_SIZE as f64 / 2.0,
+                    1.0,
+                    1.0,
+                    "default",
+                    CursorSettings {
+                        theme: CursorTheme::Dot,
+                        shadow,
+                        ..CursorSettings::default()
+                    },
+                    1.0,
+                );
+            }
+            surface.flush();
+            let stride = surface.stride() as usize;
+            let pixels = surface.data().unwrap().to_vec();
+            (pixels, stride)
+        };
+        let center = (TEST_SURFACE_SIZE / 2) as usize;
+        let read_pixel = |pixels: &[u8], stride, x, y| {
+            let index = y * stride + x * 4;
+            [
+                pixels[index + 2],
+                pixels[index + 1],
+                pixels[index],
+                pixels[index + 3],
+            ]
+        };
+        let (no_shadow, stride) = render(0.0);
+        let (default_shadow, _) = render(0.4);
+        let (full_shadow, _) = render(1.0);
+        assert_eq!(
+            read_pixel(&no_shadow, stride, center, center),
+            read_pixel(&default_shadow, stride, center, center)
+        );
+        assert_eq!(
+            read_pixel(&no_shadow, stride, center, center),
+            read_pixel(&full_shadow, stride, center, center)
+        );
+        let outside = (center, center + 22);
+        let no_shadow_edge = read_pixel(&no_shadow, stride, outside.0, outside.1);
+        let default_shadow_edge = read_pixel(&default_shadow, stride, outside.0, outside.1);
+        let full_shadow_edge = read_pixel(&full_shadow, stride, outside.0, outside.1);
+        assert_ne!(no_shadow_edge, default_shadow_edge);
+        assert_ne!(default_shadow_edge, full_shadow_edge);
+        assert!(full_shadow_edge[0] < default_shadow_edge[0]);
     }
 }

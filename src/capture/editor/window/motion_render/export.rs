@@ -2,7 +2,7 @@ pub fn export_motion_mp4(
     snapshot: &RgbaImage,
     motion: &MotionState,
     prefers_dark: bool,
-    source_image: &Path,
+    destination: &Path,
 ) -> Result<PathBuf, String> {
     crate::recording::editor::ffmpeg::ensure_tools_available()
         .map_err(|error| error.to_string())?;
@@ -36,18 +36,12 @@ pub fn export_motion_mp4(
         .as_deref()
         .and_then(load_motion_background_surface);
 
-    let config = crate::config::load_config().sanitized();
-    let fallback = source_image
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| PathBuf::from("."));
-    let dir = config.video_editor_export_dir(&fallback);
-    let _ = fs::create_dir_all(&dir);
-    let stem = source_image
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .unwrap_or("ApexShot");
-    let output = unique_motion_path(&dir, stem);
+    // The caller owns destination choice (Save chooser), so the export writes
+    // exactly the confirmed path instead of guessing a folder from the still.
+    let output = destination.to_path_buf();
+    if let Some(parent) = output.parent().filter(|dir| !dir.as_os_str().is_empty()) {
+        let _ = fs::create_dir_all(parent);
+    }
 
     let work = std::env::temp_dir().join(format!(
         "apexshot-motion-{}-{}",
@@ -126,20 +120,4 @@ fn motion_frame_output_size(
     source_aspect: f64,
 ) -> (i32, i32) {
     frame.output_size_for(source_aspect)
-}
-
-fn unique_motion_path(dir: &Path, stem: &str) -> PathBuf {
-    let mut n = 0u32;
-    loop {
-        let name = if n == 0 {
-            format!("{stem} Motion.mp4")
-        } else {
-            format!("{stem} Motion {n}.mp4")
-        };
-        let path = dir.join(name);
-        if !path.exists() {
-            return path;
-        }
-        n += 1;
-    }
 }
