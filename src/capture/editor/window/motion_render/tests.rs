@@ -237,7 +237,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&root).unwrap();
         let snapshot = image::RgbaImage::from_pixel(64, 32, image::Rgba([255, 255, 255, 255]));
-        let source = root.join("timestamp-check.png");
+        let output_path = root.join("timestamp-check.mp4");
         let mut motion = motion_with_first_clip();
         motion.set_duration(1.0);
         motion.set_selected_perspective(0.0);
@@ -250,7 +250,7 @@ mod tests {
         motion.frame.preset = MotionFramePreset::Custom;
         motion.frame.custom_width = 320;
         motion.frame.custom_height = 180;
-        let output = super::export_motion_mp4(&snapshot, &motion, true, &source).unwrap();
+        let output = super::export_motion_mp4(&snapshot, &motion, true, &output_path).unwrap();
         let probe = Command::new("ffprobe")
             .args([
                 "-v", "error", "-select_streams", "v:0", "-show_entries",

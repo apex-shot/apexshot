@@ -527,7 +527,7 @@ impl MotionSession {
 
     pub(in crate::capture::editor::window) fn export_mp4(
         &self,
-        source_image: &std::path::Path,
+        destination: &std::path::Path,
     ) -> Result<PathBuf, String> {
         let runtime = self.runtime.borrow();
         let snapshot = runtime
@@ -538,7 +538,7 @@ impl MotionSession {
             snapshot,
             &runtime.motion,
             self.prefers_dark,
-            source_image,
+            destination,
         )
     }
 
