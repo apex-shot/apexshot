@@ -97,6 +97,10 @@ pub struct AppConfig {
     pub annotate_auto_expand: bool,
     pub annotate_show_color_names: bool,
     pub annotate_always_on_top: bool,
+    /// Close the image editor after image or Motion exports succeed.
+    pub annotate_close_after_export: bool,
+    /// Replace the opened image when the image editor exports a still image.
+    pub annotate_overwrite_original_image: bool,
     /// Skip the Static → Motion confirm that annotations will be snapshotted.
     pub skip_static_to_motion_confirm: bool,
     /// Skip the Motion → Static confirm that motion segments will be cleared.
@@ -238,6 +242,8 @@ impl Default for AppConfig {
             annotate_auto_expand: false,
             annotate_show_color_names: false,
             annotate_always_on_top: false,
+            annotate_close_after_export: false,
+            annotate_overwrite_original_image: false,
             skip_static_to_motion_confirm: false,
             skip_motion_to_static_confirm: false,
             wallpaper_mode: "Desktop".to_string(),
@@ -675,6 +681,22 @@ mod tests {
     }
 
     #[test]
+    fn image_export_defaults_keep_the_editor_open_and_preserve_the_source() {
+        let config = AppConfig::default();
+
+        assert!(!config.annotate_close_after_export);
+        assert!(!config.annotate_overwrite_original_image);
+    }
+
+    #[test]
+    fn legacy_config_defaults_new_image_export_preferences_safely() {
+        let loaded: AppConfig = serde_yml::from_str("preview_auto_close_seconds: 12\n").unwrap();
+
+        assert!(!loaded.annotate_close_after_export);
+        assert!(!loaded.annotate_overwrite_original_image);
+    }
+
+    #[test]
     fn default_config_has_public_cloud_backend_url() {
         let cfg = AppConfig::default();
         assert_eq!(cfg.cloud_backend_url, DEFAULT_CLOUD_BACKEND_URL);
@@ -989,6 +1011,8 @@ mod tests {
             annotate_auto_expand: true,
             annotate_show_color_names: true,
             annotate_always_on_top: true,
+            annotate_close_after_export: true,
+            annotate_overwrite_original_image: true,
             ..AppConfig::default()
         };
 
@@ -1012,6 +1036,14 @@ mod tests {
         assert_eq!(
             loaded.annotate_always_on_top,
             original.annotate_always_on_top
+        );
+        assert_eq!(
+            loaded.annotate_close_after_export,
+            original.annotate_close_after_export
+        );
+        assert_eq!(
+            loaded.annotate_overwrite_original_image,
+            original.annotate_overwrite_original_image
         );
     }
 

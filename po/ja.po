@@ -2941,3 +2941,21 @@ msgstr "ウィンドウカーソルは編集できますが、ApexShot GNOME 拡
 
 msgid "Export Motion video"
 msgstr "Motion 動画をエクスポートする"
+
+msgid "Close the editor after a successful export"
+msgstr "エクスポート成功後にエディターを閉じる"
+
+msgid "Overwrite the opened image instead of saving a copy"
+msgstr "コピーを保存せず、開いている画像を上書きする"
+
+msgid "Image files"
+msgstr "画像ファイル"
+
+msgid "Choose a different destination to keep the original image unchanged."
+msgstr "元の画像を変更せずに残すには、別の保存先を選択してください。"
+
+msgid "Export completed, but the editing session could not be saved: {error}"
+msgstr "エクスポートは完了しましたが、編集セッションを保存できませんでした: {error}"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
+msgstr "Motion では注釈のスナップショットが再生されます。Static に戻ると通常のツールが復元されます。設定 → 注釈で上書きを有効にしない限り、元の画像は変更されません。"

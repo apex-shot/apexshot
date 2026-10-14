@@ -180,7 +180,11 @@ GTK4-based settings window with custom chromeless styling and edge-drag resize:
 - `general.rs` — general app settings (sounds, tray, startup, preview timeout)
 - `screenshots.rs` — screenshot format, cursor, timer, naming
 - `recording.rs` — recording format, fps, quality, overlays
-- `annotate.rs` — annotation defaults, colors, tool preferences
+- `annotate.rs` — annotation defaults, colors, tool preferences, and image export
+  preferences. Saved images export as a separate, collision-safe `-edited` copy
+  by default, while unsaved captures use the screenshot save location and naming
+  convention; replacing the opened image or closing the editor requires an
+  explicit setting.
 - `quick_access.rs` — quick-access overlay configuration
 - `advanced.rs` — filename patterns, OCR settings, clipboard options
 - `shortcuts.rs` — global hotkey recording and binding editor

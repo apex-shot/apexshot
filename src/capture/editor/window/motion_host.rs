@@ -82,7 +82,7 @@ impl MotionHost {
         self.in_motion.clone()
     }
 
-    /// Motion's Done handler asks for a destination (Save chooser) and hands it
+    /// Motion's Export handler asks for a destination (Save chooser) and hands it
     /// here, so the export writes where the user pointed instead of guessing
     /// from the still's folder.
     pub(super) fn export_callback(

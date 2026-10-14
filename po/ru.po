@@ -2984,3 +2984,21 @@ msgstr "Курсор окна останется редактируемым, н�
 
 msgid "Export Motion video"
 msgstr "Экспорт видео Motion"
+
+msgid "Close the editor after a successful export"
+msgstr "Закрывать редактор после успешного экспорта"
+
+msgid "Overwrite the opened image instead of saving a copy"
+msgstr "Перезаписывать открытое изображение вместо сохранения копии"
+
+msgid "Image files"
+msgstr "Файлы изображений"
+
+msgid "Choose a different destination to keep the original image unchanged."
+msgstr "Выберите другое место, чтобы исходное изображение осталось без изменений."
+
+msgid "Export completed, but the editing session could not be saved: {error}"
+msgstr "Экспорт завершён, но не удалось сохранить сеанс редактирования: {error}"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
+msgstr "В режиме Motion будет показан снимок аннотаций. При возврате в Static восстановятся обычные инструменты. Исходное изображение останется без изменений, если не включить перезапись в настройках → Аннотации."

@@ -11,6 +11,10 @@ pub struct AnnotateSettingsWidgets {
     pub auto_expand_check: CheckButton,
     pub show_color_names_check: CheckButton,
     pub always_on_top_check: CheckButton,
+    /// Checkbox for closing the editor after a successful export.
+    pub close_after_export_check: CheckButton,
+    /// Checkbox for replacing the opened image during a still export.
+    pub overwrite_original_image_check: CheckButton,
 }
 
 pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
@@ -148,6 +152,41 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
 
     section.append(&window_frame);
 
+    let export_title = Label::new(Some(&t("Export")));
+    export_title.add_css_class("settings-group-title");
+    export_title.set_xalign(0.0);
+    export_title.set_halign(Align::Start);
+    export_title.set_margin_bottom(8);
+    section.append(&export_title);
+
+    let export_frame = build_frame();
+
+    let close_after_export_check = CheckButton::new();
+    close_after_export_check.set_active(config.annotate_close_after_export);
+    let close_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    close_hbox.set_hexpand(true);
+    let close_option = Label::new(Some(&t("Close the editor after a successful export")));
+    close_option.set_xalign(0.0);
+    close_option.set_hexpand(true);
+    close_hbox.append(&close_option);
+    close_hbox.append(&close_after_export_check);
+    export_frame.append(&build_row!(&close_hbox, false));
+
+    let overwrite_original_image_check = CheckButton::new();
+    overwrite_original_image_check.set_active(config.annotate_overwrite_original_image);
+    let overwrite_hbox = GtkBox::new(Orientation::Horizontal, 12);
+    overwrite_hbox.set_hexpand(true);
+    let overwrite_option = Label::new(Some(&t(
+        "Overwrite the opened image instead of saving a copy",
+    )));
+    overwrite_option.set_xalign(0.0);
+    overwrite_option.set_hexpand(true);
+    overwrite_hbox.append(&overwrite_option);
+    overwrite_hbox.append(&overwrite_original_image_check);
+    export_frame.append(&build_row!(&overwrite_hbox, false));
+
+    section.append(&export_frame);
+
     AnnotateSettingsWidgets {
         section,
         inverse_arrow_check,
@@ -156,6 +195,8 @@ pub fn build_annotate_section(config: &AppConfig) -> AnnotateSettingsWidgets {
         auto_expand_check,
         show_color_names_check,
         always_on_top_check,
+        close_after_export_check,
+        overwrite_original_image_check,
     }
 }
 
@@ -166,6 +207,8 @@ mod tests {
         let source = include_str!("annotate.rs");
         let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
         assert!(production_source.contains("Always on top"));
+        assert!(production_source.contains("Close the editor after a successful export"));
+        assert!(production_source.contains("Overwrite the opened image instead of saving a copy"));
         assert!(!production_source.contains("Show Dock icon"));
         assert!(!production_source.contains("show_dock_icon_check"));
     }

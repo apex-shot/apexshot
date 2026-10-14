@@ -2998,3 +2998,21 @@ msgstr "Der Fenstercursor bleibt bearbeitbar, aber Auto-Zoom-Klicks werden ohne 
 
 msgid "Export Motion video"
 msgstr "Motion-Video exportieren"
+
+msgid "Close the editor after a successful export"
+msgstr "Den Editor nach einem erfolgreichen Export schließen"
+
+msgid "Overwrite the opened image instead of saving a copy"
+msgstr "Das geöffnete Bild überschreiben, statt eine Kopie zu speichern"
+
+msgid "Image files"
+msgstr "Bilddateien"
+
+msgid "Choose a different destination to keep the original image unchanged."
+msgstr "Wähle ein anderes Ziel, damit das Originalbild unverändert bleibt."
+
+msgid "Export completed, but the editing session could not be saved: {error}"
+msgstr "Export abgeschlossen, aber die Bearbeitungssitzung konnte nicht gespeichert werden: {error}"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
+msgstr "Motion zeigt eine Momentaufnahme deiner Anmerkungen. Bei der Rückkehr zu Static werden die aktiven Werkzeuge wiederhergestellt. Das Originalbild bleibt unverändert, sofern du das Überschreiben nicht unter Einstellungen → Annotieren aktivierst."

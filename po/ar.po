@@ -2958,3 +2958,21 @@ msgstr "سيظل مؤشر النافذة قابلاً للتحرير، لكن ن
 
 msgid "Export Motion video"
 msgstr "تصدير فيديو Motion"
+
+msgid "Close the editor after a successful export"
+msgstr "إغلاق المحرر بعد التصدير بنجاح"
+
+msgid "Overwrite the opened image instead of saving a copy"
+msgstr "استبدال الصورة المفتوحة بدلاً من حفظ نسخة"
+
+msgid "Image files"
+msgstr "ملفات الصور"
+
+msgid "Choose a different destination to keep the original image unchanged."
+msgstr "اختر وجهة مختلفة للحفاظ على الصورة الأصلية دون تغيير."
+
+msgid "Export completed, but the editing session could not be saved: {error}"
+msgstr "اكتمل التصدير، ولكن تعذر حفظ جلسة التحرير: {error}"
+
+msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
+msgstr "سيعرض Motion لقطة من التعليقات التوضيحية. يؤدي الرجوع إلى الوضع الثابت إلى استعادة الأدوات المباشرة. تظل الصورة الأصلية دون تغيير ما لم تفعّل الاستبدال في الإعدادات ← التعليق التوضيحي."

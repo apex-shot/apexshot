@@ -17,22 +17,77 @@ pub(crate) fn save_edited_image_snapshot(
     path: &Path,
     final_image: RgbaImage,
 ) -> Result<(), EditorError> {
-    let ext = path
+    let temporary_path = temporary_export_path(path)?;
+    let ext = temporary_path
         .extension()
-        .and_then(|e| e.to_str())
+        .and_then(|extension| extension.to_str())
         .unwrap_or("png")
         .to_ascii_lowercase();
 
     let result = match ext.as_str() {
         "jpg" | "jpeg" => {
             let rgb = DynamicImage::ImageRgba8(final_image).to_rgb8();
-            rgb.save_with_format(path, image::ImageFormat::Jpeg)
+            rgb.save_with_format(&temporary_path, image::ImageFormat::Jpeg)
         }
-        "png" => crate::utils::png_io::save_rgba_image(path, &final_image),
-        _ => final_image.save(path),
+        "png" => crate::utils::png_io::save_rgba_image(&temporary_path, &final_image),
+        _ => final_image.save(&temporary_path),
     };
 
-    result.map_err(|e| EditorError::ImageSave(e.to_string()))
+    if let Err(error) = result {
+        let _ = std::fs::remove_file(&temporary_path);
+        return Err(EditorError::ImageSave(error.to_string()));
+    }
+
+    if let Err(error) = std::fs::rename(&temporary_path, path) {
+        let _ = std::fs::remove_file(&temporary_path);
+        return Err(EditorError::ImageSave(error.to_string()));
+    }
+
+    Ok(())
+}
+
+fn temporary_export_path(path: &Path) -> Result<PathBuf, EditorError> {
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let stem = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or("image");
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or("png");
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+
+    for attempt in 0..8 {
+        let temporary_path = parent.join(format!(
+            ".{stem}.apexshot-{}-{stamp}-{attempt}.{extension}",
+            std::process::id()
+        ));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary_path)
+        {
+            Ok(file) => {
+                drop(file);
+                return Ok(temporary_path);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(EditorError::ImageSave(error.to_string())),
+        }
+    }
+
+    Err(EditorError::ImageSave(
+        "could not allocate a temporary image export file".to_string(),
+    ))
 }
 
 pub fn copy_uri_to_clipboard(path: &Path) -> Result<(), String> {
@@ -196,6 +251,24 @@ mod tests {
             );
         }
 
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn failed_export_encoding_preserves_an_existing_destination() {
+        let dir = scratch_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        let destination = dir.join("existing.unsupported");
+        std::fs::write(&destination, b"keep this file").unwrap();
+
+        let result = save_edited_image_snapshot(
+            &destination,
+            RgbaImage::from_pixel(12, 8, Rgba([40, 90, 180, 255])),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"keep this file");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 1);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

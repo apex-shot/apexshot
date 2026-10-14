@@ -568,6 +568,8 @@ fn build_settings_window(app: &Application) {
         annotate_auto_expand: annotate.auto_expand_check.clone(),
         annotate_show_color_names: annotate.show_color_names_check.clone(),
         annotate_always_on_top: annotate.always_on_top_check.clone(),
+        annotate_close_after_export: annotate.close_after_export_check.clone(),
+        annotate_overwrite_original_image: annotate.overwrite_original_image_check.clone(),
         shortcut_open_file: shortcuts.open_file_btn.clone(),
         shortcut_open_from_clipboard: shortcuts.open_clipboard_btn.clone(),
         shortcut_restore_recently_closed: shortcuts.restore_file_btn.clone(),
@@ -801,6 +803,8 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_check(&inputs.annotate_auto_expand);
     wire_check(&inputs.annotate_show_color_names);
     wire_check(&inputs.annotate_always_on_top);
+    wire_check(&inputs.annotate_close_after_export);
+    wire_check(&inputs.annotate_overwrite_original_image);
     wire_shortcut_btn(&inputs.shortcut_open_file);
     wire_shortcut_btn(&inputs.shortcut_open_from_clipboard);
     wire_shortcut_btn(&inputs.shortcut_restore_recently_closed);

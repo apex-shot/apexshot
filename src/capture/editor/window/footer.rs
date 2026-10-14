@@ -110,7 +110,7 @@ pub(super) fn build_footer(copy_icon_name: &str, upload_icon_name: &str) -> Foot
     let (copy_btn, _) = footer_icon_button(copy_icon_name, &t("Copy to clipboard"));
     let (upload_btn, _) = footer_icon_button(upload_icon_name, &t("Upload to cloud"));
 
-    let save_btn = Button::with_label(&t("Done"));
+    let save_btn = Button::with_label(&t("Export"));
     save_btn.set_has_frame(false);
     save_btn.add_css_class("editor-done-button");
     save_btn.add_css_class("body");
