@@ -127,32 +127,34 @@ pub fn tick_playback(
     // otherwise leave the playhead sitting on the final frame for a beat.
     let freeze_tail = {
         let guard = state.lock().unwrap();
-        let footage_end = guard.source_to_timeline(guard.trim_end_seconds);
+        let freeze_position = guard.freeze_tail_playback_position();
         let lead = freeze_hold_lead(guard.metadata.frame_rate);
         let media_done = media
             .borrow()
             .as_ref()
             .is_some_and(|media| media.is_ended());
-        freeze_hold_active(
-            guard.freeze_tail_seconds(),
-            media_done,
-            guard.playhead_seconds,
-            footage_end,
-            lead,
-        )
-        .then(|| {
-            (
-                guard.trim_end_seconds,
-                guard.content_end_seconds(),
-                // Resume from where the playhead is rather than snapping it
-                // forward to the last frame — that snap is itself a visible
-                // jump. The floor keeps a lagging media-end report from
-                // starting the hold more than a lead behind the last frame.
-                guard.playhead_seconds.max(footage_end - lead),
+        freeze_position.and_then(|(footage_end, freeze_frame)| {
+            freeze_hold_active(
+                guard.freeze_tail_seconds(),
+                media_done,
+                guard.playhead_seconds,
+                footage_end,
+                lead,
             )
+            .then(|| {
+                (
+                    freeze_frame,
+                    guard.content_end_seconds(),
+                    // Resume from where the playhead is rather than snapping it
+                    // forward to the last frame — that snap is itself a visible
+                    // jump. The floor keeps a lagging media-end report from
+                    // starting the hold more than a lead behind the last frame.
+                    guard.playhead_seconds.max(footage_end - lead),
+                )
+            })
         })
     };
-    if let Some((trim_end, end, playhead)) = freeze_tail {
+    if let Some((freeze_frame, end, playhead)) = freeze_tail {
         if let Some(media_file) = media.borrow().as_ref() {
             if media_file.is_playing() {
                 media_file.pause();
@@ -163,8 +165,8 @@ pub fn tick_playback(
             // this fire again every tick.
             if !media_file.is_seeking() {
                 let at = media_file.timestamp() as f64 / 1_000_000.0;
-                if at < 0.0 || (at - trim_end).abs() > 0.05 {
-                    media_file.seek((trim_end * 1_000_000.0) as i64);
+                if at < 0.0 || (at - freeze_frame).abs() > 0.05 {
+                    media_file.seek((freeze_frame * 1_000_000.0) as i64);
                 }
             }
         }
@@ -262,21 +264,49 @@ pub fn tick_playback(
 }
 
 fn stop_playback_at_end(
-    _state: &Arc<Mutex<VideoEditState>>,
+    state: &Arc<Mutex<VideoEditState>>,
     media: &Rc<RefCell<Option<MediaFile>>>,
     playing: &Rc<Cell<bool>>,
     play_button: &Button,
     redraw: &Rc<dyn Fn()>,
 ) {
     playing.set(false);
-    // Leave the playhead at the end. Rewinding to zero here is what made the
-    // player look like it "never played the ending"; pressing play again
-    // restarts from the top through `playhead_for_replay` anyway.
+    let first_source = {
+        let mut guard = state.lock().unwrap();
+        let first = guard.first_playable_position();
+        if let Some((timeline, _)) = first {
+            guard.playhead_seconds = timeline;
+            guard.set_timeline_scroll(timeline);
+        } else {
+            guard.playhead_seconds = 0.0;
+            guard.set_timeline_scroll(0.0);
+        }
+        first.map(|(_, source)| source)
+    };
     if let Some(media_file) = media.borrow().as_ref() {
         media_file.pause();
+        if let Some(source) = first_source {
+            media_file.seek((source * 1_000_000.0) as i64);
+        }
     }
     set_play_icon(play_button, "media-playback-start-symbolic");
     redraw();
+}
+
+fn seek_to_reconciled_playhead(
+    state: &Arc<Mutex<VideoEditState>>,
+    media: &Rc<RefCell<Option<MediaFile>>>,
+) {
+    let source = {
+        let mut guard = state.lock().unwrap();
+        if guard.video_locked {
+            return;
+        }
+        guard.reconcile_playhead_after_edit()
+    };
+    if let (Some(source), Some(media_file)) = (source, media.borrow().as_ref()) {
+        media_file.seek((source * 1_000_000.0) as i64);
+    }
 }
 
 pub fn bind_board_hover(
@@ -364,6 +394,7 @@ pub fn bind_video_clip(
     hover: Rc<Cell<Option<usize>>>,
     set_band_hover: Rc<dyn Fn(bool)>,
     dragging: Rc<Cell<Option<usize>>>,
+    pause: Rc<dyn Fn()>,
     redraw: Rc<dyn Fn()>,
 ) {
     let click = GestureClick::new();
@@ -377,10 +408,10 @@ pub fn bind_video_clip(
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
             let mut guard = state.lock().unwrap();
-            if near_playhead(&guard, width, x) {
+            let hit = video_hit(&guard, width, x);
+            if near_playhead(&guard, width, x) && !is_video_resize_hit(&guard, &hit) {
                 return;
             }
-            let hit = video_hit(&guard, width, x);
             select_video(&mut guard, hit.segment);
             drop(guard);
             redraw();
@@ -397,6 +428,7 @@ pub fn bind_video_clip(
         let drag_kind = drag_kind.clone();
         let resize_anchor = resize_anchor.clone();
         let dragging = dragging.clone();
+        let pause = pause.clone();
         let redraw = redraw.clone();
         move |gesture, x, _| {
             let width = gesture
@@ -404,12 +436,12 @@ pub fn bind_video_clip(
                 .map(|widget| widget.allocated_width().max(1) as f64)
                 .unwrap_or(1.0);
             let mut guard = state.lock().unwrap();
-            if near_playhead(&guard, width, x) {
+            let hit = video_hit(&guard, width, x);
+            if near_playhead(&guard, width, x) && !is_video_resize_hit(&guard, &hit) {
                 dragging.set(None);
                 drag_kind.set(Some(ClipDrag::Seek));
                 return;
             }
-            let hit = video_hit(&guard, width, x);
             if let Some(seg) = hit.segment {
                 select_video(&mut guard, Some(seg));
             }
@@ -423,7 +455,21 @@ pub fn bind_video_clip(
             );
             dragging.set(if lift { hit.segment } else { None });
             drag_kind.set(hit.drag);
+            let should_pause = !guard.video_locked
+                && matches!(
+                    hit.drag,
+                    Some(
+                        ClipDrag::Start
+                            | ClipDrag::End
+                            | ClipDrag::Cut(_)
+                            | ClipDrag::Move { .. }
+                            | ClipDrag::Segment { .. }
+                    )
+                );
             drop(guard);
+            if should_pause {
+                pause();
+            }
             redraw();
         }
     });
@@ -479,17 +525,31 @@ pub fn bind_video_clip(
                 Some(ClipDrag::Seek) => seek_to_x(&state, &media, width, x),
                 None => {}
             }
+            if matches!(
+                drag_kind.get(),
+                Some(
+                    ClipDrag::Start
+                        | ClipDrag::End
+                        | ClipDrag::Cut(_)
+                        | ClipDrag::Move { .. }
+                        | ClipDrag::Segment { .. }
+                )
+            ) {
+                seek_to_reconciled_playhead(&state, &media);
+            }
             redraw();
         }
     });
     drag.connect_drag_end({
         let state = state.clone();
+        let media = media.clone();
         let drag_kind = drag_kind.clone();
         let dragging = dragging.clone();
         let redraw = redraw.clone();
         move |_, _, _| {
             if let Some(ClipDrag::Segment { index, .. }) = drag_kind.get() {
                 state.lock().unwrap().settle_segment_start(index);
+                seek_to_reconciled_playhead(&state, &media);
             }
             dragging.set(None);
             redraw();
@@ -503,12 +563,12 @@ pub fn bind_video_clip(
             let set_band_hover = set_band_hover.clone();
             Rc::new(move |width, x| {
                 let guard = state.lock().unwrap();
-                if near_playhead(&guard, width, x) {
+                let hit = video_hit(&guard, width, x);
+                if near_playhead(&guard, width, x) && !is_video_resize_hit(&guard, &hit) {
                     set_band_hover(false);
                     return (TrackCursor::Playhead, None, None);
                 }
                 set_band_hover(in_extend_band(&guard, width, x));
-                let hit = video_hit(&guard, width, x);
                 (hit.cursor, hit.segment, None)
             })
         },
@@ -590,6 +650,7 @@ pub fn bind_zoom_track(
     hover_time: Rc<Cell<Option<f64>>>,
     set_band_hover: Rc<dyn Fn(bool)>,
     dragging: Rc<Cell<Option<usize>>>,
+    pause: Rc<dyn Fn()>,
     redraw: Rc<dyn Fn()>,
 ) {
     let click = GestureClick::new();
@@ -634,6 +695,7 @@ pub fn bind_zoom_track(
         let drag_kind = drag_kind.clone();
         let resize_anchor = resize_anchor.clone();
         let dragging = dragging.clone();
+        let pause = pause.clone();
         move |gesture, x, _| {
             let width = gesture
                 .widget()
@@ -671,6 +733,11 @@ pub fn bind_zoom_track(
                 _ => None,
             });
             drag_kind.set(kind);
+            let should_pause = !guard.video_locked && matches!(kind, Some(ZoomDrag::Extend));
+            drop(guard);
+            if should_pause {
+                pause();
+            }
         }
     });
     drag.connect_drag_update({
@@ -729,6 +796,9 @@ pub fn bind_zoom_track(
                     }
                 }
                 None => {}
+            }
+            if matches!(drag_kind.get(), Some(ZoomDrag::Extend)) {
+                seek_to_reconciled_playhead(&state, &media);
             }
             redraw();
         }
@@ -828,6 +898,7 @@ pub fn bind_hide_track(
     hover_time: Rc<Cell<Option<f64>>>,
     set_band_hover: Rc<dyn Fn(bool)>,
     dragging: Rc<Cell<Option<usize>>>,
+    pause: Rc<dyn Fn()>,
     redraw: Rc<dyn Fn()>,
 ) {
     let click = GestureClick::new();
@@ -871,6 +942,7 @@ pub fn bind_hide_track(
         let drag_kind = drag_kind.clone();
         let resize_anchor = resize_anchor.clone();
         let dragging = dragging.clone();
+        let pause = pause.clone();
         move |gesture, x, _| {
             let width = gesture
                 .widget()
@@ -907,6 +979,11 @@ pub fn bind_hide_track(
                 _ => None,
             });
             drag_kind.set(kind);
+            let should_pause = !guard.video_locked && matches!(kind, Some(HideDrag::Extend));
+            drop(guard);
+            if should_pause {
+                pause();
+            }
         }
     });
     drag.connect_drag_update({
@@ -965,6 +1042,9 @@ pub fn bind_hide_track(
                     }
                 }
                 None => {}
+            }
+            if matches!(drag_kind.get(), Some(HideDrag::Extend)) {
+                seek_to_reconciled_playhead(&state, &media);
             }
             redraw();
         }

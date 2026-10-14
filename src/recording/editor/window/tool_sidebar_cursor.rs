@@ -245,8 +245,11 @@ fn build_cursor_style_tab(
             preview.set_content_width(72);
             preview.set_content_height(56);
             preview.set_hexpand(true);
+            let preview_state = state.clone();
             preview.set_draw_func(move |_, cr, width, height| {
-                cursor_sprite::draw_centered(cr, width as f64, height as f64, theme);
+                let mut settings = preview_state.lock().unwrap().cursor;
+                settings.theme = theme;
+                cursor_sprite::draw_centered(cr, width as f64, height as f64, settings, 1.0);
             });
             let name = Label::new(Some(&t(theme.label())));
             name.add_css_class("recording-editor-cursor-card-label");
@@ -687,22 +690,21 @@ fn draw_click_live_preview(
         cr.set_source_rgba(1.0, 1.0, 1.0, 0.05);
     }
     let _ = cr.fill();
-    let cx = width / 2.0;
-    let cy = height / 2.0;
+    let (hotspot_x, hotspot_y) = cursor_sprite::centered_preview_hotspot(width, height, settings);
     let duration = settings.click_window_seconds().max(0.2);
     let local = t % (duration * 1.35);
     if local <= duration {
         cursor_sprite::draw_click(
             cr,
-            cx,
-            cy,
+            hotspot_x,
+            hotspot_y,
             (local / duration).clamp(0.0, 1.0),
             settings,
             1.0,
             width,
         );
     }
-    cursor_sprite::draw(cr, cx, cy, 1.0, 1.0, "default", settings, 0.95);
+    cursor_sprite::draw_centered(cr, width, height, settings, 0.95);
 }
 
 struct CursorSliderRow {

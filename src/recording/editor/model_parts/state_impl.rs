@@ -117,6 +117,78 @@ impl VideoEditState {
         last
     }
 
+    pub(crate) fn freeze_tail_playback_position(&self) -> Option<(f64, f64)> {
+        if self.freeze_tail_seconds() <= f64::EPSILON {
+            return None;
+        }
+        self.placed_segment_slots()
+            .into_iter()
+            .find_map(|(index, composition_start, _, _)| {
+                if !self.freeze_applies_to_segment(index) {
+                    return None;
+                }
+                let footage_end = composition_start + self.segment_timeline_duration(index);
+                self.playback_position(footage_end)
+            })
+    }
+
+    /// Return the first retained source position and its composition time.
+    pub(crate) fn first_playable_position(&self) -> Option<(f64, f64)> {
+        self.playback_position(0.0)
+    }
+
+    /// Keep the current head when playable, otherwise clamp it to the nearest
+    /// retained boundary and return the source frame to display.
+    pub(crate) fn reconcile_playhead_after_edit(&mut self) -> Option<f64> {
+        let requested = if self.playhead_seconds.is_finite() {
+            self.playhead_seconds.max(0.0)
+        } else {
+            0.0
+        };
+        let Some((timeline, source)) = self.nearest_playback_position(requested) else {
+            self.playhead_seconds = 0.0;
+            self.set_timeline_scroll(0.0);
+            return None;
+        };
+        self.playhead_seconds = timeline;
+        if (timeline - requested).abs() > 1e-9 {
+            let visible = self.visible_span_seconds();
+            if timeline < self.timeline_scroll_seconds {
+                self.set_timeline_scroll(timeline);
+            } else if timeline > self.timeline_scroll_seconds + visible {
+                self.set_timeline_scroll(timeline - visible * 0.9);
+            }
+        }
+        Some(source)
+    }
+
+    fn nearest_playback_position(&self, timeline_t: f64) -> Option<(f64, f64)> {
+        let resolved = self.playback_position(timeline_t)?;
+        if resolved.0 <= timeline_t + 1e-9 {
+            return Some(resolved);
+        }
+        let frame = 1.0 / self.metadata.export_frame_rate().max(1.0);
+        let previous = self
+            .placed_segment_slots()
+            .into_iter()
+            .filter_map(|(index, composition_start, source_start, source_end)| {
+                let hold = if self.freeze_applies_to_segment(index) {
+                    self.freeze_tail_seconds()
+                } else {
+                    0.0
+                };
+                let end = composition_start + self.segment_timeline_duration(index) + hold;
+                (end <= timeline_t + 1e-9).then_some((
+                    end,
+                    (source_end - frame).max(source_start),
+                ))
+            })
+            .max_by(|left, right| left.0.total_cmp(&right.0));
+        previous
+            .filter(|previous| timeline_t - previous.0 <= resolved.0 - timeline_t)
+            .or(Some(resolved))
+    }
+
     pub fn visible_span_seconds(&self) -> f64 {
         let factor = 1.0 + (self.timeline_scale.clamp(0.0, 100.0) / 100.0) * 7.0;
         self.source_duration() / factor

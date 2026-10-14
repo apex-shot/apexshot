@@ -110,6 +110,15 @@ pub fn video_hit(state: &VideoEditState, width: f64, x: f64) -> VideoHit {
     }
 }
 
+/// Whether the hit is an editable trim, cut, or extend handle.
+pub fn is_video_resize_hit(state: &VideoEditState, hit: &VideoHit) -> bool {
+    !state.video_locked
+        && matches!(
+            hit.drag,
+            Some(ClipDrag::Start | ClipDrag::End | ClipDrag::Cut(_))
+        )
+}
+
 pub fn segment_edge_drag(state: &VideoEditState, seg_idx: usize, is_start: bool) -> Option<ClipDrag> {
     let Some(&(start, end)) = state.segment_boundaries().get(seg_idx) else {
         return Some(if is_start {
@@ -241,6 +250,8 @@ pub struct ClipResizeAnchor {
     pub timeline_edge: f64,
     pub speed: f64,
     pub pixels_per_second: f64,
+    /// Playhead snap target captured when the drag starts.
+    pub snap_playhead: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -305,6 +316,7 @@ impl ClipResizeAnchor {
             timeline_edge,
             speed,
             pixels_per_second: pixels_per_second(state, width),
+            snap_playhead: state.playhead_seconds,
         })
     }
 
@@ -322,7 +334,12 @@ pub fn apply_clip_resize(
     offset_x: f64,
 ) {
     let desired = anchor.timeline_edge + offset_x / anchor.pixels_per_second.max(1e-6);
-    let snapped = snap_timeline_to_playhead(state, width, desired.max(0.0));
+    let snapped = snap_to_target(
+        desired,
+        anchor.snap_playhead,
+        playhead_snap_threshold(state, width),
+    )
+    .max(0.0);
     let source = anchor.source_edge + (snapped - anchor.timeline_edge) * anchor.speed;
     match anchor.kind {
         ClipResizeKind::End => state.set_trim_end(source),
@@ -599,8 +616,8 @@ mod tests {
 #[cfg(test)]
 mod freeze_edge_tests {
     use super::{
-        edge_target_at, in_extend_band, video_end_x, video_hit, video_layout, ClipDrag,
-        TrackCursor,
+        edge_target_at, in_extend_band, is_video_resize_hit, near_playhead, video_end_x, video_hit,
+        video_layout, ClipDrag, TrackCursor,
     };
     use crate::recording::editor::model::{VideoEditState, VideoMetadata};
     use std::path::PathBuf;
@@ -759,6 +776,28 @@ mod freeze_edge_tests {
         }
     }
 
+    #[test]
+    fn editable_video_edges_take_priority_over_an_overlapping_playhead() {
+        let mut state = state();
+        state.set_trim_end(6.0);
+        state.playhead_seconds = 6.0;
+        let width = 1000.0;
+        let edge_x = state.time_to_x(6.0, width);
+        let edge = video_hit(&state, width, edge_x);
+        assert!(near_playhead(&state, width, edge_x));
+        assert_eq!(edge.drag, Some(ClipDrag::End));
+        assert!(is_video_resize_hit(&state, &edge));
+
+        let body_x = state.time_to_x(5.0, width);
+        state.playhead_seconds = 5.0;
+        let body = video_hit(&state, width, body_x);
+        assert!(near_playhead(&state, width, body_x));
+        assert!(!is_video_resize_hit(&state, &body));
+
+        state.video_locked = true;
+        assert!(!is_video_resize_hit(&state, &edge));
+    }
+
     /// The band and its mover are matched on every lane, so a drag over the
     /// zoom or hide rows extends the clip instead of depending on the video
     /// lane's own ending edge.
@@ -837,6 +876,26 @@ mod resize_anchor_tests {
         assert!((state.trim_end_seconds - 13.0).abs() < 1e-9);
         assert!((state.freeze_tail_seconds() - 1.0).abs() < 1e-9);
         assert!((state.video_end_seconds() - 11.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn resizing_past_the_playhead_keeps_the_drag_snap_target_stable() {
+        let mut state = state13();
+        state.playhead_seconds = 4.0;
+        let width = 1300.0;
+        let anchor =
+            ClipResizeAnchor::for_video(&state, width, 0, ClipDrag::End).expect("end anchor");
+        for target in [3.8, 3.79, 3.78] {
+            let offset = (target - anchor.timeline_edge) * anchor.pixels_per_second;
+            apply_clip_resize(&mut state, width, &anchor, offset);
+            assert!(state.reconcile_playhead_after_edit().is_some());
+            assert!(
+                (state.trim_end_seconds - target).abs() < 1e-9,
+                "tail must keep following the pointer after the head clamps: {}",
+                state.trim_end_seconds
+            );
+            assert!((state.playhead_seconds - target).abs() < 1e-9);
+        }
     }
 
     #[test]

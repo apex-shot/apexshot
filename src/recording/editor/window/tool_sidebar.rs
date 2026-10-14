@@ -1963,4 +1963,20 @@ mod tests {
         let t = super::fill_slider_progress(5.0, 0.0, 10.0, false);
         assert!((t - 0.5).abs() < 1e-9, "linear progress must stay linear");
     }
+
+    #[test]
+    fn cursor_theme_tiles_preview_the_active_size_and_shadow() {
+        let panel = include_str!("tool_sidebar_cursor.rs");
+        assert!(panel.contains("CursorTheme::ALL"));
+        assert!(panel.contains("let mut settings = preview_state.lock().unwrap().cursor;"));
+        assert!(panel.contains("settings.theme = theme;"));
+        assert!(panel.contains(
+            "cursor_sprite::draw_centered(cr, width as f64, height as f64, settings, 1.0);"
+        ));
+        assert!(panel.contains("cursor_sprite::centered_preview_hotspot(width, height, settings)"));
+        assert!(panel.contains("cursor_sprite::draw_centered(cr, width, height, settings, 0.95);"));
+        assert!(panel.contains("preview.queue_draw();"));
+        assert!(panel.contains("|cursor, value| cursor.size = value"));
+        assert!(panel.contains("|cursor, value| cursor.shadow = value"));
+    }
 }

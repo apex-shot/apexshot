@@ -257,7 +257,9 @@ fn cancellation_requested(cancellation: Option<&AtomicBool>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::recording::editor::model::{AudioMode, CropSelection, VideoMetadata, ZoomClip};
+    use crate::recording::editor::model::{
+        AudioMode, CropSelection, CursorTheme, VideoMetadata, ZoomClip,
+    };
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn scratch_dir() -> PathBuf {
@@ -328,6 +330,12 @@ mod tests {
         assert_ne!(RenderKey::capture(&edited).unwrap(), original);
         edited = state.clone();
         edited.cursor.size += 1.0;
+        assert_ne!(RenderKey::capture(&edited).unwrap(), original);
+        edited = state.clone();
+        edited.cursor.shadow = 0.8;
+        assert_ne!(RenderKey::capture(&edited).unwrap(), original);
+        edited = state.clone();
+        edited.cursor.theme = CursorTheme::Yaru;
         assert_ne!(RenderKey::capture(&edited).unwrap(), original);
         edited = state.clone();
         edited.freeze_tail = 0.5;

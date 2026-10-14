@@ -664,6 +664,7 @@ pub fn build_timeline_card(
         hovered_video.clone(),
         set_band_hover.clone(),
         dragging_video.clone(),
+        pause.clone(),
         redraw.clone(),
     );
     bind_zoom_track(
@@ -674,6 +675,7 @@ pub fn build_timeline_card(
         hover_zoom_time.clone(),
         set_band_hover.clone(),
         dragging_zoom.clone(),
+        pause.clone(),
         redraw.clone(),
     );
     bind_hide_track(
@@ -684,6 +686,7 @@ pub fn build_timeline_card(
         hover_hide_time.clone(),
         set_band_hover.clone(),
         dragging_hide.clone(),
+        pause.clone(),
         redraw.clone(),
     );
 
@@ -1105,6 +1108,14 @@ mod tests {
             "playback resumes the media only when it stalled or ran out"
         );
         assert!(
+            tick.contains("guard.freeze_tail_playback_position()"),
+            "a freeze hold must resolve its seek target from the retained frozen segment"
+        );
+        assert!(
+            tick.contains("media_file.seek((freeze_frame * 1_000_000.0) as i64);"),
+            "a freeze hold must seek to the last decodable frame, not the source EOF"
+        );
+        assert!(
             !tick.contains("if media_file.is_ended() {\n            stop_playback_at_end"),
             "EOF may not stop playback while retained footage remains"
         );
@@ -1149,6 +1160,88 @@ mod tests {
             );
             assert!(bind.contains(drag), "{lane} must keep its own drag kinds");
         }
+    }
+
+    #[test]
+    fn natural_playback_end_rewinds_to_the_first_retained_position() {
+        let interaction = include_str!("interaction.rs");
+        let production = interaction
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the interaction source");
+        let start = production
+            .find("fn stop_playback_at_end(")
+            .expect("the natural-end handler");
+        let stop = &production[start..];
+        assert!(stop.contains("guard.first_playable_position()"));
+        assert!(stop.contains("guard.playhead_seconds = timeline;"));
+        assert!(stop.contains("guard.set_timeline_scroll(timeline);"));
+        assert!(stop.contains("playing.set(false);"));
+        assert!(stop.contains("media_file.pause();"));
+        assert!(stop.contains("media_file.seek((source * 1_000_000.0) as i64);"));
+    }
+
+    #[test]
+    fn video_resize_handles_override_near_playhead_scrubbing() {
+        let interaction = include_str!("interaction.rs");
+        let production = interaction
+            .split("#[cfg(test)]")
+            .next()
+            .expect("the interaction source");
+        let start = production
+            .find("pub fn bind_video_clip(")
+            .expect("the video lane bindings");
+        let rest = &production[start..];
+        let end = rest
+            .find("\npub fn bind_zoom_track(")
+            .expect("the video lane bindings end before Zoom");
+        let video = &rest[..end];
+        assert_eq!(video.matches("!is_video_resize_hit(&guard, &hit)").count(), 3);
+        assert!(video.contains("pause();"));
+        assert!(video.contains("seek_to_reconciled_playhead(&state, &media);"));
+        assert!(
+            video
+                .find("apply_clip_resize(&mut guard, width, &anchor, offset_x)")
+                .expect("the resize mutation")
+                < video
+                    .find("seek_to_reconciled_playhead(&state, &media);")
+                    .expect("the post-edit playhead seek")
+        );
+        assert!(include_str!("shell.rs").contains(
+            "dragging_video.clone(),\n        pause.clone(),\n        redraw.clone(),"
+        ));
+        for (start_marker, end_marker) in [
+            ("pub fn bind_zoom_track(", "\npub fn bind_hide_track("),
+            ("pub fn bind_hide_track(", "\npub fn bind_track_cursor("),
+        ] {
+            let start = production.find(start_marker).expect("the track binding");
+            let rest = &production[start..];
+            let end = rest.find(end_marker).expect("the next track binding");
+            let binding = &rest[..end];
+            assert!(binding.contains("pause();"));
+            assert!(binding.contains("seek_to_reconciled_playhead(&state, &media);"));
+            assert!(
+                binding
+                    .find("apply_clip_resize(&mut guard, width, &anchor, offset_x)")
+                    .expect("the shared extend resize")
+                    < binding
+                        .find("seek_to_reconciled_playhead(&state, &media);")
+                        .expect("the post-resize seek")
+            );
+        }
+
+        let helper_start = production
+            .find("fn seek_to_reconciled_playhead(")
+            .expect("the shared trim preview seek");
+        let helper = &production[helper_start..];
+        assert!(helper.contains("guard.reconcile_playhead_after_edit()"));
+        assert!(helper.contains("media_file.seek((source * 1_000_000.0) as i64);"));
+
+        let ruler_start = production
+            .find("pub fn bind_playhead_drag(")
+            .expect("the ruler scrub handler");
+        let ruler = &production[ruler_start..start];
+        assert!(!ruler.contains("is_video_resize_hit"));
     }
 
     /// Body of the first rule for `selector`, without its braces.
