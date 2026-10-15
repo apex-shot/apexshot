@@ -188,6 +188,8 @@ system_install_paths() {
 /etc/xdg/autostart/apexshot.desktop
 /usr/share/icons/hicolor/scalable/apps/apexshot.svg
 /usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg
+/usr/share/icons/hicolor/scalable/apps/apexshot-recording.svg
+/usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot-recording.svg
 /usr/share/pixmaps/apexshot.svg
 /etc/opt/chrome/NativeMessagingHosts/io.github.codegoddy.apexshot.json
 /etc/chromium/NativeMessagingHosts/io.github.codegoddy.apexshot.json
@@ -320,6 +322,10 @@ install_system_files() {
         /usr/share/icons/hicolor/scalable/apps/apexshot.svg
     $SUDO install -Dm0644 "${REPO_DIR}/packaging/apexshot.svg" \
         /usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg
+    $SUDO install -Dm0644 "${REPO_DIR}/packaging/apexshot-recording.svg" \
+        /usr/share/icons/hicolor/scalable/apps/apexshot-recording.svg
+    $SUDO install -Dm0644 "${REPO_DIR}/packaging/apexshot-recording.svg" \
+        /usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot-recording.svg
     $SUDO install -Dm0644 "${REPO_DIR}/packaging/apexshot.svg" \
         /usr/share/pixmaps/apexshot.svg
 

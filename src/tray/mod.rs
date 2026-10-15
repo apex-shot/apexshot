@@ -174,8 +174,14 @@ impl ksni::Tray for ApexShotTray {
     fn id(&self) -> String {
         status_notifier_id()
     }
+    /// Hosts that read the icon name get the badged icon while a recording
+    /// runs; hosts that read the pixmap get the overlay badge instead.
     fn icon_name(&self) -> String {
-        crate::app_identity::icon_name().to_string()
+        if self.recording {
+            crate::app_identity::recording_icon_name()
+        } else {
+            crate::app_identity::icon_name().to_string()
+        }
     }
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
         tray_icons().clone()
@@ -376,5 +382,36 @@ mod tests {
 
         tray.set_recording(false);
         assert!(ksni::Tray::overlay_icon_pixmap(&tray).is_empty());
+    }
+
+    #[test]
+    fn the_tray_swaps_to_the_badged_icon_while_recording() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut tray = ApexShotTray::new(tx);
+
+        assert_eq!(
+            ksni::Tray::icon_name(&tray),
+            crate::app_identity::icon_name()
+        );
+
+        tray.set_recording(true);
+        assert_eq!(
+            ksni::Tray::icon_name(&tray),
+            crate::app_identity::recording_icon_name()
+        );
+
+        tray.set_recording(false);
+        assert_eq!(
+            ksni::Tray::icon_name(&tray),
+            crate::app_identity::icon_name()
+        );
+    }
+
+    #[test]
+    fn the_badged_icon_ships_in_the_packaging_assets() {
+        // include_str! fails the build if the asset goes missing, so the icon
+        // every package installs cannot drift away from this name.
+        let svg = include_str!("../../packaging/apexshot-recording.svg");
+        assert!(svg.contains("#e81123"));
     }
 }

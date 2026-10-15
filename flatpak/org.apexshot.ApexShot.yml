@@ -195,6 +195,7 @@ modules:
       - install -Dm644 flatpak/org.apexshot.ApexShot.desktop /app/share/applications/org.apexshot.ApexShot.desktop
       - install -Dm644 flatpak/org.apexshot.ApexShot.metainfo.xml /app/share/metainfo/org.apexshot.ApexShot.metainfo.xml
       - install -Dm644 packaging/apexshot.svg /app/share/icons/hicolor/scalable/apps/org.apexshot.ApexShot.svg
+      - install -Dm644 packaging/apexshot-recording.svg /app/share/icons/hicolor/scalable/apps/org.apexshot.ApexShot-recording.svg
       - install -d /app/share/apexshot/background-images
       - install -Dm644 src/capture/editor/background-images/*.jpg /app/share/apexshot/background-images/
       - |

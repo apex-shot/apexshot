@@ -293,6 +293,7 @@ apexshot/
 ├── native-host/                   # Native messaging host manifest
 ├── packaging/                     # Package assets
  │   ├── io.github.codegoddy.apexshot.desktop / apexshot-daemon.desktop / apexshot.svg
+ │   │                                / apexshot-recording.svg (recording tray badge)
 │   ├── deb/ + debian/             # Debian packaging
 │   ├── arch/                      # PKGBUILD + AUR install script
 │   ├── fedora/                    # RPM spec

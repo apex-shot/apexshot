@@ -116,6 +116,13 @@ pub fn icon_name() -> &'static str {
     }
 }
 
+/// The themed icon a tray host draws while a recording runs. Every package
+/// installs it beside the plain icon, so a host that reads `IconName` badges
+/// the item without needing an overlay pixmap.
+pub fn recording_icon_name() -> String {
+    format!("{}-recording", icon_name())
+}
+
 pub fn desktop_file_name() -> String {
     format!("{}.desktop", app_id())
 }
@@ -169,6 +176,11 @@ mod tests {
                 "/usr/bin/apexshot"
             }
         );
+    }
+
+    #[test]
+    fn the_recording_icon_is_the_app_icon_with_a_badge_suffix() {
+        assert_eq!(recording_icon_name(), format!("{}-recording", icon_name()));
     }
 
     #[cfg(feature = "flatpak")]

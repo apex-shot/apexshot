@@ -65,6 +65,8 @@ install -Dm0644 packaging/io.github.codegoddy.apexshot.metainfo.xml %{buildroot}
 install -Dm0644 packaging/apexshot-daemon.desktop %{buildroot}%{_sysconfdir}/xdg/autostart/apexshot.desktop
 install -Dm0644 packaging/apexshot.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/apexshot.svg
 install -Dm0644 packaging/apexshot.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg
+install -Dm0644 packaging/apexshot-recording.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/apexshot-recording.svg
+install -Dm0644 packaging/apexshot-recording.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot-recording.svg
 install -Dm0644 packaging/apexshot.svg %{buildroot}%{_datadir}/pixmaps/apexshot.svg
 
 install -Dm0644 native-host/io.github.codegoddy.apexshot.json %{buildroot}%{_sysconfdir}/opt/chrome/NativeMessagingHosts/io.github.codegoddy.apexshot.json
@@ -124,6 +126,8 @@ fi
 %config %{_sysconfdir}/xdg/autostart/apexshot.desktop
 %{_datadir}/icons/hicolor/scalable/apps/apexshot.svg
 %{_datadir}/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg
+%{_datadir}/icons/hicolor/scalable/apps/apexshot-recording.svg
+%{_datadir}/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot-recording.svg
 %{_datadir}/pixmaps/apexshot.svg
 %{_datadir}/locale/*/LC_MESSAGES/apexshot.mo
 %dir %{_sysconfdir}/opt

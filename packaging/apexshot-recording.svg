@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg height="128" width="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Rounded square background -->
+  <defs>
+    <!-- Punches a ring of transparency around the dot so the badge reads on
+         dark and light panels alike, whatever colour sits behind it. -->
+    <mask id="recording-badge-gap">
+      <rect x="0" y="0" width="128" height="128" fill="#ffffff"/>
+      <circle cx="92" cy="92" r="26" fill="#000000"/>
+    </mask>
+  </defs>
+  <g mask="url(#recording-badge-gap)">
+    <rect x="8" y="8" width="112" height="112" rx="24" ry="24" fill="#E95420"/>
+    <!-- White curved arch shape -->
+    <path
+      d="M 24 96 C 40 96, 48 20, 64 20 C 80 20, 88 96, 104 96"
+      stroke="white"
+      stroke-width="14"
+      stroke-linecap="round"
+      fill="none"
+    />
+  </g>
+  <!-- Recording dot, in the red the record button and preview overlay share -->
+  <circle cx="92" cy="92" r="21" fill="#e81123"/>
+</svg>
