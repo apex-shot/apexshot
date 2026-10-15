@@ -36,6 +36,9 @@ private Q_SLOTS:
     void portalRouteMapsHelperFailure();
     void portalRouteRejectsMismatchedStream();
     void portalRouteFailsWithoutHelper();
+    void portalWindowRoutePreparesAndCapturesThroughHelper();
+    void portalWindowRouteMapsHelperCancellation();
+    void portalWindowRouteMapsHelperFailure();
     void waylandSessionUsesPortalWithX11QtPlatform();
     void nativeX11DoesNotRequestPortal();
     void parsesLayerShellCaptureMenuResult();
@@ -48,6 +51,7 @@ namespace {
 using ScreenCapture::HelperMessage;
 
 const char* kFakeHelperScript = R"SH(#!/bin/sh
+printf '%s\n' "$@" > "$FAKE_HELPER_ARGS_PATH"
 case "$FAKE_HELPER_MODE" in
   cancel) printf '%s\n' '{"error":"user dismissed","cancelled":true}'; exit 0 ;;
   fail) printf '%s\n' '{"error":"portal broke","cancelled":false}'; exit 0 ;;
@@ -67,6 +71,7 @@ struct FakePortalHelper
     QTemporaryDir dir;
     QString helperPath;
     QString framePath;
+    QString argsPath;
 
     bool install()
     {
@@ -75,6 +80,7 @@ struct FakePortalHelper
         }
         helperPath = dir.filePath(QStringLiteral("apexshot-fake-helper"));
         framePath = dir.filePath(QStringLiteral("frame.png"));
+        argsPath = dir.filePath(QStringLiteral("helper-args.txt"));
         QFile script(helperPath);
         if (!script.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
             return false;
@@ -87,6 +93,7 @@ struct FakePortalHelper
                                 | QFile::ReadOther | QFile::ExeOther);
         qputenv("APEXSHOT_PORTAL_HELPER", helperPath.toUtf8());
         qputenv("FAKE_FRAME_PATH", framePath.toUtf8());
+        qputenv("FAKE_HELPER_ARGS_PATH", argsPath.toUtf8());
         qputenv("FLATPAK_ID", QByteArrayLiteral("org.apexshot.ApexShot"));
         return true;
     }
@@ -102,6 +109,7 @@ struct FakePortalHelper
     {
         qunsetenv("APEXSHOT_PORTAL_HELPER");
         qunsetenv("FAKE_FRAME_PATH");
+        qunsetenv("FAKE_HELPER_ARGS_PATH");
         qunsetenv("FAKE_HELPER_MODE");
         qunsetenv("FLATPAK_ID");
     }
@@ -394,6 +402,53 @@ void ScreenCaptureTests::portalRouteFailsWithoutHelper()
     QString error;
     QCOMPARE(session.prepare(QGuiApplication::primaryScreen(), true, error), ScreenCapture::CaptureStatus::Failed);
     QVERIFY(!error.isEmpty());
+}
+
+void ScreenCaptureTests::portalWindowRoutePreparesAndCapturesThroughHelper()
+{
+    FakePortalHelper helper;
+    QVERIFY(helper.install());
+    qputenv("FAKE_HELPER_MODE", QByteArrayLiteral("ready"));
+    helper.writeFrame(8, 6);
+
+    ScreenCapture::CaptureSession session;
+    QString error;
+    QCOMPARE(session.prepareWindow(true, error), ScreenCapture::CaptureStatus::Ok);
+    QVERIFY(session.isPrepared());
+    QFile arguments(helper.argsPath);
+    QVERIFY(arguments.open(QIODevice::ReadOnly));
+    QCOMPARE(arguments.readAll(), QByteArrayLiteral("portal-window-still-internal\n1\n"));
+
+    QImage frame;
+    QCOMPARE(session.captureFresh(frame, error), ScreenCapture::CaptureStatus::Ok);
+    QCOMPARE(frame.size(), QSize(8, 6));
+    QVERIFY(!QFile::exists(helper.framePath));
+}
+
+void ScreenCaptureTests::portalWindowRouteMapsHelperCancellation()
+{
+    FakePortalHelper helper;
+    QVERIFY(helper.install());
+    qputenv("FAKE_HELPER_MODE", QByteArrayLiteral("cancel"));
+
+    ScreenCapture::CaptureSession session;
+    QString error;
+    QCOMPARE(session.prepareWindow(false, error), ScreenCapture::CaptureStatus::Cancelled);
+    QCOMPARE(error, QStringLiteral("user dismissed"));
+    QVERIFY(!session.isPrepared());
+}
+
+void ScreenCaptureTests::portalWindowRouteMapsHelperFailure()
+{
+    FakePortalHelper helper;
+    QVERIFY(helper.install());
+    qputenv("FAKE_HELPER_MODE", QByteArrayLiteral("fail"));
+
+    ScreenCapture::CaptureSession session;
+    QString error;
+    QCOMPARE(session.prepareWindow(false, error), ScreenCapture::CaptureStatus::Failed);
+    QCOMPARE(error, QStringLiteral("portal broke"));
+    QVERIFY(!session.isPrepared());
 }
 
 void ScreenCaptureTests::waylandSessionUsesPortalWithX11QtPlatform()

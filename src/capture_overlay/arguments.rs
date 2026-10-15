@@ -133,6 +133,10 @@ fn build_recording_ui_args(config: &crate::config::AppConfig) -> Vec<String> {
 
 fn build_quick_capture_args(config: &crate::config::AppConfig) -> Vec<String> {
     let mut args = build_area_init_args(config);
+    args.push(format!(
+        "--screenshot-cursor={}",
+        if config.screenshot_show_cursor { 1 } else { 0 }
+    ));
     args.push("--capture-menu".into());
     args
 }

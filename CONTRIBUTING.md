@@ -68,7 +68,7 @@ right starting point for a change.
 |---------------------------------------|-----------------------------------------------------|-------|
 | Rust binary entry point + CLI         | `src/main.rs`                                       | Dispatches `daemon`, `capture`, `record`, `edit`, `preview`, `settings` subcommands. |
 | Background daemon, hotkeys, tray      | `src/daemon/`, `src/hotkeys/`, `src/tray/`          | D-Bus triggers, system tray (`ksni`), global shortcut registration. |
-| Capture backends (X11 / Wayland)      | `src/backend/`                                      | Interactive screenshots prepare a monitor-only ScreenCast session before timers; native X11 / wlr-screencopy remain available. Lower-level backend APIs also retain Screenshot portal fallbacks. |
+| Capture backends (X11 / Wayland)      | `src/backend/`                                      | Display, area, and crosshair screenshots prepare a monitor-only ScreenCast session before timers; Quick Capture Window shots select one window through a non-persistent ScreenCast session. Native X11 / wlr-screencopy remain available. Lower-level backend APIs also retain Screenshot portal fallbacks. |
 | Image editor + annotations            | `src/capture/editor/`                               | GTK4 + Cairo. Pen/highlighter rendering, color palette, selection, crop. |
 | Preview overlay                       | `src/capture/preview_overlay.rs`                    | Quick-access card after capture (drag, edit, copy, save). |
 | Recording pipeline                    | `src/recording/`                                    | Native PipeWire (`pipewire_engine.rs`) + ffmpeg on Wayland; GStreamer ximagesrc on X11. Video encoding, audio source discovery (`pactl`). |
@@ -90,9 +90,11 @@ right starting point for a change.
 A handful of cross-cutting conventions worth knowing up front:
 
 - **Restore-token caches** for the XDG ScreenCast portal live at
-  `~/.cache/apexshot/`. Interactive screenshots use private
+  `~/.cache/apexshot/`. Monitor-based interactive screenshots use private
   `still-monitor-<hash>.token` files scoped to app identity, desktop, chosen
-  output, and display topology. The Qt overlay delegates these sessions to
+  output, and display topology. Quick Capture Window shots request one
+  window-only ScreenCast source without persistence or a restore token, so the
+  chooser appears each time. The Qt overlay delegates both session types to
   the Rust helper rather than keeping its own cache. Lower-level backend APIs
   retain `wayland-screencast-monitor.token` / `-window.token`; recording
   deliberately does not restore a previous source. Tokens rotate after use,

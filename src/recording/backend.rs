@@ -36,6 +36,85 @@ use source::WaylandSource;
 pub(super) use wayland::record_wayland_with_ffmpeg_sync;
 use x11::record_x11_with_gstreamer;
 
+/// Convert a portal window frame to tightly packed RGBA screenshot data.
+pub(crate) fn normalize_window_still_frame(
+    frame: &crate::pipewire_engine::PipeWireFrame,
+) -> Option<crate::backend::CaptureData> {
+    let crop = crop::window_frame_crop(frame)?;
+    let pixels = crop::normalize_window_frame(frame, crop, crop.width, crop.height)?;
+    Some(crate::backend::CaptureData::new(
+        pixels,
+        crop.width,
+        crop.height,
+        crate::backend::PixelFormat::RGBA32,
+    ))
+}
+
+#[cfg(test)]
+mod window_still_frame_tests {
+    use super::normalize_window_still_frame;
+    use crate::pipewire_engine::{
+        ColorSpace, CursorMetadataState, FrameCrop, FrameCropMetadata, PipeWireFrame,
+    };
+
+    #[test]
+    fn window_still_uses_crop_metadata_stride_and_rgba_channel_order() {
+        let mut pixels = vec![0; 3 * 20];
+        pixels[24..28].copy_from_slice(&[30, 20, 10, 255]);
+        pixels[28..32].copy_from_slice(&[60, 50, 40, 255]);
+        pixels[44..48].copy_from_slice(&[90, 80, 70, 255]);
+        pixels[48..52].copy_from_slice(&[120, 110, 100, 255]);
+        let frame = PipeWireFrame {
+            pixels,
+            width: 4,
+            height: 3,
+            stride: 20,
+            video_format: pipewire::spa::param::video::VideoFormat::BGRA,
+            crop: FrameCropMetadata::Present(FrameCrop {
+                x: 1,
+                y: 1,
+                width: 2,
+                height: 2,
+            }),
+            cursor: None,
+            cursor_metadata: CursorMetadataState::Missing,
+            color_space: ColorSpace::default(),
+            captured_at_us: 1,
+        };
+
+        let capture = normalize_window_still_frame(&frame).expect("valid window frame");
+
+        assert_eq!((capture.width, capture.height, capture.stride), (2, 2, 8));
+        assert_eq!(
+            capture.pixels,
+            vec![10, 20, 30, 255, 40, 50, 60, 255, 70, 80, 90, 255, 100, 110, 120, 255,]
+        );
+    }
+
+    #[test]
+    fn window_still_rejects_crop_metadata_outside_frame_bounds() {
+        let frame = PipeWireFrame {
+            pixels: vec![255; 4 * 4 * 4],
+            width: 4,
+            height: 4,
+            stride: 16,
+            video_format: pipewire::spa::param::video::VideoFormat::RGBA,
+            crop: FrameCropMetadata::Present(FrameCrop {
+                x: 3,
+                y: 3,
+                width: 2,
+                height: 2,
+            }),
+            cursor: None,
+            cursor_metadata: CursorMetadataState::Missing,
+            color_space: ColorSpace::default(),
+            captured_at_us: 1,
+        };
+
+        assert!(normalize_window_still_frame(&frame).is_none());
+    }
+}
+
 #[allow(dead_code)]
 pub(super) fn ffmpeg_encoder_available(name: &str) -> bool {
     profile::ffmpeg_encoder_available(name)

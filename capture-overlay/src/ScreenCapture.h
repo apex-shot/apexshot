@@ -8,6 +8,7 @@
 #include <QRect>
 #include <QSize>
 #include <QString>
+#include <QStringList>
 
 #include <memory>
 
@@ -46,16 +47,19 @@ public:
     CaptureSession& operator=(const CaptureSession&) = delete;
 
     CaptureStatus prepare(QScreen* screen, bool includeCursor, QString& outError);
+    CaptureStatus prepareWindow(bool includeCursor, QString& outError);
     CaptureStatus captureFresh(QImage& outImage, QString& outError);
     bool isPrepared() const;
     QRect captureRect() const;
 
 private:
+    CaptureStatus startPortalHelper(const QStringList& arguments, QString& outError);
     void close();
 
     QPointer<QScreen> m_screen;
     QRect m_captureRect;
     bool m_prepared = false;
+    bool m_windowCapture = false;
     std::unique_ptr<QProcess> m_helper;
 };
 
