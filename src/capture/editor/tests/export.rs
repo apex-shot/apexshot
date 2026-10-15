@@ -560,7 +560,7 @@ fn frame_style_presets_resolve_to_distinct_outside_borders() {
     assert_eq!(ring.color, DrawColor::new(0.7, 0.7, 0.7, 1.0));
     assert!(outline.outer2.is_none());
     assert!(outline.backing1.is_none() && outline.backing2.is_none());
-    assert!(FrameStyle::Card.spec().backing1.is_some());
+    assert!(FrameStyle::Card.spec().backing1.is_none());
     assert!(FrameStyle::Card.spec().backing2.is_none());
     assert!(FrameStyle::Stack.spec().backing1.is_some());
     assert!(FrameStyle::Stack.spec().backing2.is_none());
@@ -573,8 +573,86 @@ fn frame_style_presets_resolve_to_distinct_outside_borders() {
     let retro_back = retro.backing1.expect("retro hard shadow behind card");
     assert!(retro_backing_is_solid_down_right(&retro_back));
     assert!(retro.backing2.is_none());
-    assert_eq!(FrameStyle::Default.label(), "Default");
-    assert_eq!(FrameStyle::Stack2.label(), "Stack 2");
+    assert_eq!(FrameStyle::Default.label(), "Clean");
+    assert_eq!(FrameStyle::Stack2.label(), "Cascade");
+}
+
+#[test]
+fn frame_style_labels_are_unique_and_follow_preset_order() {
+    let labels = FrameStyle::ALL.map(FrameStyle::label);
+    assert_eq!(
+        labels,
+        [
+            "Clean", "Frost", "Smoke", "Prism", "Pearl", "Slate", "Halo", "Ink", "Offset", "Bevel",
+            "Tilt", "Cascade",
+        ]
+    );
+    assert_eq!(
+        labels
+            .into_iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        FrameStyle::ALL.len()
+    );
+}
+
+#[test]
+fn frame_style_serde_ids_remain_stable() {
+    let serialized_ids = [
+        (FrameStyle::Default, "\"Default\""),
+        (FrameStyle::GlassLight, "\"GlassLight\""),
+        (FrameStyle::GlassDark, "\"GlassDark\""),
+        (FrameStyle::Liquid, "\"Liquid\""),
+        (FrameStyle::InsetLight, "\"InsetLight\""),
+        (FrameStyle::InsetDark, "\"InsetDark\""),
+        (FrameStyle::Outline, "\"Outline\""),
+        (FrameStyle::Border, "\"Border\""),
+        (FrameStyle::Retro, "\"Retro\""),
+        (FrameStyle::Card, "\"Card\""),
+        (FrameStyle::Stack, "\"Stack\""),
+        (FrameStyle::Stack2, "\"Stack2\""),
+    ];
+    for (style, serialized_id) in serialized_ids {
+        assert_eq!(serde_json::to_string(&style).unwrap(), serialized_id);
+        assert_eq!(
+            serde_json::from_str::<FrameStyle>(serialized_id).unwrap(),
+            style
+        );
+    }
+}
+
+#[test]
+fn bevel_uses_a_two_tone_edge_while_tilt_keeps_its_single_sheet() {
+    let bevel = FrameStyle::Card.spec();
+    assert!((bevel.border_thickness - 1.5).abs() < f64::EPSILON);
+    assert!(!bevel.inset_border && !bevel.liquid && !bevel.frost);
+    assert_eq!(bevel.border_color, DrawColor::new(0.08, 0.09, 0.12, 0.55));
+    assert_eq!(
+        bevel.outer1,
+        Some(FrameOuterStroke {
+            thickness: 0.75,
+            color: DrawColor::new(1.0, 1.0, 1.0, 0.65),
+            gap: 0.0,
+        })
+    );
+    assert!(bevel.outer2.is_none());
+    assert!(bevel.backing1.is_none() && bevel.backing2.is_none());
+
+    let tilt = FrameStyle::Stack.spec();
+    assert_eq!(tilt.border_thickness, 0.0);
+    assert_eq!(tilt.border_color, DrawColor::new(1.0, 1.0, 1.0, 0.0));
+    assert!(tilt.outer1.is_none() && tilt.outer2.is_none());
+    assert_eq!(
+        tilt.backing1,
+        Some(FrameBacking {
+            offset_x: 0.0,
+            offset_y: 0.0,
+            rotation_deg: -2.0,
+            center_pivot: true,
+            color: DrawColor::new(0.75, 0.75, 0.77, 1.0),
+        })
+    );
+    assert!(tilt.backing2.is_none());
 }
 
 #[test]
@@ -613,13 +691,12 @@ fn outline_floats_a_hairline_off_the_card_with_a_gap() {
 }
 
 #[test]
-fn card_preset_draws_a_single_backing_sheet_behind_the_card() {
-    let image = RgbaImage::from_pixel(100, 100, image::Rgba([100, 100, 100, 255]));
+fn bevel_export_draws_a_thin_two_tone_edge_without_backing() {
+    let image = RgbaImage::from_pixel(400, 400, image::Rgba([100, 100, 100, 255]));
     let mut state = EditorState::new(image);
-    state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
-    state.background_padding = 80.0;
+    state.background_style = BackgroundStyle::None;
     state.background_shadow = 0.0;
-    state.background_corner_radius = 0.0;
+    state.background_corner_radius = 24.0;
     state.background_insert = 0.0;
     let spec = FrameStyle::Card.spec();
     state.frame_style = FrameStyle::Card;
@@ -627,22 +704,20 @@ fn card_preset_draws_a_single_backing_sheet_behind_the_card() {
     state.border_color = spec.border_color;
 
     let final_image = state.to_final_image().expect("final image");
-    // Padding 80 at scale 0.25 => 20px base; the framed stack is centered,
-    // so the card sits at (23, 28) with its backing sheet at (17, 12).
-    let sheet = *final_image.get_pixel(20, 60);
-    assert!(
-        sheet[0] > 170
-            && sheet[0] < 230
-            && (sheet[0] as i32 - sheet[1] as i32).abs() < 12
-            && (sheet[0] as i32 - sheet[2] as i32).abs() < 12,
-        "expected gray backing sheet behind card, got pixel {:?}",
-        sheet
-    );
-    // Main image pixels stay intact.
+    assert!(final_image.width() > 400 && final_image.width() <= 406);
+    assert!(final_image.height() > 400 && final_image.height() <= 406);
     assert_eq!(
-        *final_image.get_pixel(70, 70),
+        *final_image.get_pixel(final_image.width() / 2, final_image.height() / 2),
         image::Rgba([100, 100, 100, 255])
     );
+    let y = final_image.height() / 2;
+    let highlight = *final_image.get_pixel(0, y);
+    let bevel_edge = *final_image.get_pixel(1, y);
+    assert!(
+        highlight[3] > 0 && bevel_edge[3] > 0 && highlight[0] > bevel_edge[0],
+        "expected the outer highlight to remain brighter than the charcoal edge: {highlight:?} vs {bevel_edge:?}"
+    );
+    assert_eq!(final_image.get_pixel(0, 0)[3], 0);
 }
 
 #[test]

@@ -415,6 +415,7 @@ fn build_card(state: &Rc<PageState>, id: u64, entry: &CaptureEntry, now: SystemT
         let entry = entry.clone();
         let gesture = gtk4::GestureClick::new();
         gesture.set_button(gtk4::gdk::BUTTON_PRIMARY);
+        gesture.set_propagation_phase(gtk4::PropagationPhase::Capture);
         gesture.connect_pressed(move |_, n_press, _, _| {
             if n_press == 2 {
                 report(&state, super::actions::open_in_default_app(&entry));

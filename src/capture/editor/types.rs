@@ -202,18 +202,18 @@ impl FrameStyle {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Default => "Default",
-            Self::GlassLight => "Glass Light",
-            Self::GlassDark => "Glass Dark",
-            Self::Liquid => "Liquid",
-            Self::InsetLight => "Inset Light",
-            Self::InsetDark => "Inset Dark",
-            Self::Outline => "Outline",
-            Self::Border => "Border",
-            Self::Retro => "Retro",
-            Self::Card => "Card",
-            Self::Stack => "Stack",
-            Self::Stack2 => "Stack 2",
+            Self::Default => "Clean",
+            Self::GlassLight => "Frost",
+            Self::GlassDark => "Smoke",
+            Self::Liquid => "Prism",
+            Self::InsetLight => "Pearl",
+            Self::InsetDark => "Slate",
+            Self::Outline => "Halo",
+            Self::Border => "Ink",
+            Self::Retro => "Offset",
+            Self::Card => "Bevel",
+            Self::Stack => "Tilt",
+            Self::Stack2 => "Cascade",
         }
     }
 
@@ -341,20 +341,18 @@ impl FrameStyle {
                 backing2: None,
             },
             Self::Card => FrameSpec {
-                border_thickness: 0.0,
+                border_thickness: 1.5,
                 inset_border: false,
                 liquid: false,
                 frost: false,
-                border_color: DrawColor::new(1.0, 1.0, 1.0, 0.0),
-                outer1: None,
-                outer2: None,
-                backing1: Some(FrameBacking {
-                    offset_x: -6.0,
-                    offset_y: -16.0,
-                    rotation_deg: -1.5,
-                    center_pivot: false,
-                    color: DrawColor::new(0.78, 0.78, 0.80, 1.0),
+                border_color: DrawColor::new(0.08, 0.09, 0.12, 0.55),
+                outer1: Some(FrameOuterStroke {
+                    thickness: 0.75,
+                    color: DrawColor::new(1.0, 1.0, 1.0, 0.65),
+                    gap: 0.0,
                 }),
+                outer2: None,
+                backing1: None,
                 backing2: None,
             },
             Self::Stack => FrameSpec {
