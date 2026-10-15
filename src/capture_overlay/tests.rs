@@ -506,18 +506,42 @@ mod tests {
             .next()
             .unwrap();
         let window_route = menu_flow.find("if (captureMenuResult.recording").unwrap();
+        let window_shot_route = menu_flow
+            .find("if (captureMenuResult.action == CaptureModeToolbar::Action::Window)")
+            .unwrap();
         let monitor_picker = menu_flow
             .find("MonitorPicker::selectTargetScreen()")
             .unwrap();
         assert!(window_route < monitor_picker);
+        assert!(window_route < window_shot_route);
         let request_path = &menu_flow[..window_route];
         assert!(request_path.contains("CaptureModeToolbar::choose"));
         assert!(!request_path.contains("captureSession.prepare"));
-        let window_request = &menu_flow[window_route..monitor_picker];
-        assert!(window_request.contains("QRect(0, 0, 0, 0)"));
+        let window_recording_request = &menu_flow[window_route..window_shot_route];
+        assert!(window_recording_request.contains("QRect(0, 0, 0, 0)"));
+        assert!(
+            window_recording_request.contains("returnRecordingRequest(QRect(0, 0, 0, 0), true)")
+        );
+        let window_request = &menu_flow[window_shot_route..monitor_picker];
         assert!(menu_flow.contains("captureMenuResult.microphone"));
         assert!(menu_flow.contains("captureMenuResult.speaker"));
-        assert!(window_request.contains("returnRecordingRequest(QRect(0, 0, 0, 0), true)"));
+        let prepare = window_request.find("captureSession.prepareWindow").unwrap();
+        let timer = window_request.find("CaptureCountdownPill::run").unwrap();
+        let fresh_frame = window_request.find("captureSession.captureFresh").unwrap();
+        let cleanup = window_request[fresh_frame..]
+            .find("sessionServer.close()")
+            .unwrap()
+            + fresh_frame;
+        let remove_server = window_request[fresh_frame..]
+            .find("QLocalServer::removeServer(sessionSocketPath)")
+            .unwrap()
+            + fresh_frame;
+        assert!(prepare < timer);
+        assert!(timer < fresh_frame);
+        assert!(fresh_frame < cleanup);
+        assert!(fresh_frame < remove_server);
+        assert!(window_request.contains("captureMenuResult.ocr ? \"ocr\" : nullptr"));
+        assert!(!window_request.contains("MonitorPicker::selectTargetScreen()"));
         assert!(main.contains("\\\"fullscreen\\\":%s,\\\"window\\\":%s"));
 
         let toolbar = include_str!("../../capture-overlay/src/CaptureModeToolbar.cpp");
@@ -554,6 +578,9 @@ mod tests {
         let window_route = quick_capture
             .find("if menu.action == crate::overlay::CaptureMenuAction::Window && menu.recording")
             .unwrap();
+        let window_shot_route = quick_capture
+            .find("if menu.action == crate::overlay::CaptureMenuAction::Window {")
+            .unwrap();
         let monitor_picker = quick_capture
             .find("select_target_monitor_choice()?")
             .unwrap();
@@ -561,11 +588,22 @@ mod tests {
         assert!(quick_capture[cancelled..menu_unmap]
             .contains("return Ok(AreaCapturePathResult::Cancelled);"));
         assert!(menu_unmap < window_route);
-        assert!(window_route < monitor_picker);
+        assert!(window_route < window_shot_route);
+        assert!(window_shot_route < monitor_picker);
         assert!(quick_capture[..window_route].contains("default_target_monitor_choice()?"));
         assert!(!quick_capture[..window_route].contains("MonitorStill::prepare"));
-        assert!(quick_capture[window_route..monitor_picker]
+        assert!(quick_capture[window_route..window_shot_route]
             .contains("recording_request_for_target(menu, None, false, true)"));
+        let window_shot = &quick_capture[window_shot_route..monitor_picker];
+        let portal_prepare = window_shot
+            .find("PortalWindowStillSession::prepare")
+            .unwrap();
+        let countdown = window_shot.find("menu.timer_seconds > 0").unwrap();
+        let fresh_frame = window_shot.find("still.capture()").unwrap();
+        assert!(portal_prepare < countdown);
+        assert!(countdown < fresh_frame);
+        assert!(!window_shot.contains("MonitorStill::prepare"));
+        assert!(window_shot.contains("AreaCapturePathResult::OcrRequested(capture)"));
     }
 
     #[test]
@@ -799,6 +837,14 @@ mod tests {
         let args = build_quick_capture_args(&crate::config::AppConfig::default());
         assert!(args.iter().any(|arg| arg == "--area-init"));
         assert!(args.iter().any(|arg| arg == "--capture-menu"));
+        assert!(args.iter().any(|arg| arg == "--screenshot-cursor=1"));
+
+        let cursor_hidden = crate::config::AppConfig {
+            screenshot_show_cursor: false,
+            ..crate::config::AppConfig::default()
+        };
+        let args = build_quick_capture_args(&cursor_hidden);
+        assert!(args.iter().any(|arg| arg == "--screenshot-cursor=0"));
     }
     #[test]
     fn recording_availability_args_follow_the_platform_gate() {

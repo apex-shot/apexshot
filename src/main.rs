@@ -83,6 +83,13 @@ fn main() {
             }
             return;
         }
+        "portal-window-still-internal" => {
+            if let Err(error) = apexshot::backend::portal_still::run_window_internal_helper(&args) {
+                eprintln!("Portal window still capture failed: {error}");
+                std::process::exit(1);
+            }
+            return;
+        }
         "update" => {
             if let Err(error) = cli::update::run_update(&args) {
                 eprintln!("Update failed: {error}");

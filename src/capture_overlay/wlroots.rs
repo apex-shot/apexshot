@@ -1,4 +1,6 @@
-use crate::backend::portal_still::{PortalStillSession, StillError, StillMonitor};
+use crate::backend::portal_still::{
+    PortalStillSession, PortalWindowStillSession, StillError, StillMonitor,
+};
 
 fn wait_for_layer_shell_overlay_to_unmap() {
     // Layer-shell window destruction is acknowledged by the compositor just
@@ -47,6 +49,13 @@ fn still_selection_error(error: StillError) -> SelectionError {
     match error {
         StillError::Cancelled => SelectionError::Cancelled,
         error => SelectionError::InitError(format!("Monitor capture unavailable: {error}")),
+    }
+}
+
+fn window_still_selection_error(error: StillError) -> SelectionError {
+    match error {
+        StillError::Cancelled => SelectionError::Cancelled,
+        error => SelectionError::InitError(format!("Window capture unavailable: {error}")),
     }
 }
 
@@ -214,10 +223,8 @@ fn open_quick_capture_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathRes
     }
 
     let menu_target = crate::overlay::default_target_monitor_choice()?;
-    let menu = crate::overlay::choose_capture_mode(
-        &menu_target,
-        crate::recording::recording_supported(),
-    );
+    let menu =
+        crate::overlay::choose_capture_mode(&menu_target, crate::recording::recording_supported());
     if menu.action == crate::overlay::CaptureMenuAction::Cancel {
         return Ok(AreaCapturePathResult::Cancelled);
     }
@@ -229,6 +236,32 @@ fn open_quick_capture_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathRes
         return Ok(AreaCapturePathResult::RecordingRequested(
             recording_request_for_target(menu, None, false, true),
         ));
+    }
+    if menu.action == crate::overlay::CaptureMenuAction::Window {
+        let config = crate::config::load_config();
+        let runtime = tokio::runtime::Runtime::new().map_err(|error| {
+            SelectionError::InitError(format!("Portal runtime unavailable: {error}"))
+        })?;
+        let still = runtime
+            .block_on(PortalWindowStillSession::prepare(
+                config.screenshot_show_cursor,
+            ))
+            .map_err(window_still_selection_error)?;
+        if menu.timer_seconds > 0 {
+            std::thread::sleep(std::time::Duration::from_secs(u64::from(
+                menu.timer_seconds,
+            )));
+        }
+        let capture_result = runtime.block_on(still.capture());
+        runtime.block_on(still.close());
+        let capture = capture_result.map_err(|error| {
+            SelectionError::InitError(format!("Window screenshot failed: {error}"))
+        })?;
+        return if menu.ocr {
+            Ok(AreaCapturePathResult::OcrRequested(capture))
+        } else {
+            save_capture_to_temp_png(&capture).map(AreaCapturePathResult::Captured)
+        };
     }
     let monitor_choice = crate::overlay::select_target_monitor_choice()?;
     wait_for_layer_shell_overlay_to_unmap();
@@ -256,9 +289,7 @@ fn open_quick_capture_via_gtk_layer_shell_wlroots() -> Result<AreaCapturePathRes
             ))
         }
         crate::overlay::CaptureMenuAction::Window => Err(SelectionError::InitError(
-            "The native wlroots window picker is unavailable. Use area or display capture here; \
-             Quick Capture > Shot > Window is available on GNOME or X11."
-                .into(),
+            "Window screenshot routing failed before portal capture".into(),
         )),
         crate::overlay::CaptureMenuAction::Area => {
             let still = MonitorStill::prepare(monitor_choice.clone())?;

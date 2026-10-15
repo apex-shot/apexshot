@@ -82,6 +82,65 @@ fn select_options(version: u32, cursor: bool, token: Option<&str>) -> SelectSour
     }
 }
 
+fn window_select_options(version: u32, cursor_mode: Option<CursorMode>) -> SelectSourcesOptions {
+    let options = SelectSourcesOptions::default()
+        .set_sources(ashpd::enumflags2::BitFlags::from(SourceType::Window))
+        .set_multiple(false);
+    let options = if let Some(cursor_mode) = cursor_mode {
+        options.set_cursor_mode(cursor_mode)
+    } else {
+        options
+    };
+    if version >= 4 {
+        options.set_persist_mode(PersistMode::DoNot)
+    } else {
+        options
+    }
+}
+
+fn select_window_cursor_mode(
+    requested: bool,
+    available: ashpd::enumflags2::BitFlags<CursorMode>,
+) -> DisplayResult<CursorMode> {
+    if requested && available.contains(CursorMode::Embedded) {
+        return Ok(CursorMode::Embedded);
+    }
+    if available.contains(CursorMode::Hidden) {
+        return Ok(CursorMode::Hidden);
+    }
+    Err(DisplayError::UnsupportedBackend(
+        "The ScreenCast portal does not offer a supported cursor mode".into(),
+    ))
+}
+
+fn validate_window_source_support(
+    available: ashpd::enumflags2::BitFlags<SourceType>,
+) -> DisplayResult<()> {
+    if available.contains(SourceType::Window) {
+        return Ok(());
+    }
+    Err(DisplayError::UnsupportedBackend(
+        "The ScreenCast portal does not support window capture".into(),
+    ))
+}
+
+fn validate_window_stream(
+    stream_count: usize,
+    source_type: Option<SourceType>,
+) -> DisplayResult<()> {
+    if stream_count != 1 {
+        return Err(DisplayError::UnsupportedBackend(
+            "The ScreenCast portal did not return one selected window stream".into(),
+        ));
+    }
+    if source_type.is_some_and(|source| source != SourceType::Window) {
+        return Err(DisplayError::UnsupportedBackend(
+            "The ScreenCast portal returned a monitor instead of a window".into(),
+        ));
+    }
+    Ok(())
+}
+
 pub struct PortalStillSession {
     session: Session<Screencast>,
     portal: Screencast,
@@ -261,6 +320,156 @@ impl PortalStillSession {
     }
 }
 
+/// A portal-authorized still-capture session for one selected window.
+pub struct PortalWindowStillSession {
+    session: Session<Screencast>,
+    portal: Screencast,
+    node: u32,
+    size: Option<(u32, u32)>,
+}
+
+impl PortalWindowStillSession {
+    /// Request a non-persistent ScreenCast grant for one window.
+    pub async fn prepare(cursor: bool) -> Result<Self, StillError> {
+        let _identity = crate::utils::desktop_env::scoped_portal_capture_identity();
+        let connection = zbus::Connection::session()
+            .await
+            .map_err(ashpd::Error::from)?;
+        if !crate::app_identity::portal_only() {
+            let app_id =
+                ashpd::AppID::try_from(crate::app_identity::app_id()).map_err(portal_error)?;
+            if let Err(error) =
+                ashpd::register_host_app_with_connection(connection.clone(), app_id).await
+            {
+                eprintln!("[capture] Host portal identity registration unavailable: {error}");
+            }
+        }
+        let portal = Screencast::with_connection(connection)
+            .await
+            .map_err(portal_error)?;
+        let available_sources = portal
+            .available_source_types()
+            .await
+            .map_err(portal_error)?;
+        validate_window_source_support(available_sources)?;
+        let cursor_mode = if portal.version() >= 2 {
+            let available_modes = portal
+                .available_cursor_modes()
+                .await
+                .map_err(portal_error)?;
+            Some(select_window_cursor_mode(cursor, available_modes)?)
+        } else {
+            None
+        };
+        let session = portal
+            .create_session(CreateSessionOptions::default())
+            .await
+            .map_err(portal_error)?;
+        let result = async {
+            portal
+                .select_sources(
+                    &session,
+                    window_select_options(portal.version(), cursor_mode),
+                )
+                .await
+                .map_err(portal_error)?
+                .response()
+                .map_err(portal_error)?;
+            let response = portal
+                .start(&session, None, StartCastOptions::default())
+                .await
+                .map_err(portal_error)?
+                .response()
+                .map_err(portal_error)?;
+            validate_window_stream(
+                response.streams().len(),
+                response
+                    .streams()
+                    .first()
+                    .and_then(|stream| stream.source_type()),
+            )?;
+            let stream = &response.streams()[0];
+            let _fd = portal
+                .open_pipe_wire_remote(&session, OpenPipeWireRemoteOptions::default())
+                .await
+                .map_err(|error| {
+                    StillError::Capture(DisplayError::CaptureError(format!(
+                        "Window sharing was approved, but the PipeWire remote is unavailable: {error}"
+                    )))
+                })?;
+            if super::wayland::should_wait_for_portal_dialog_to_close(None) {
+                tokio::time::sleep(Duration::from_millis(650)).await;
+            }
+            Ok((
+                stream.pipe_wire_node_id(),
+                stream.size().and_then(|(width, height)| {
+                    let size = (u32::try_from(width).ok()?, u32::try_from(height).ok()?);
+                    (size.0 > 0 && size.1 > 0).then_some(size)
+                }),
+            ))
+        }
+        .await;
+        match result {
+            Ok((node, size)) => Ok(Self {
+                session,
+                portal,
+                node,
+                size,
+            }),
+            Err(error) => {
+                let _ = tokio::time::timeout(Duration::from_secs(2), session.close()).await;
+                Err(error)
+            }
+        }
+    }
+
+    /// Capture and normalize a fresh frame from the selected window stream.
+    pub async fn capture(&self) -> DisplayResult<CaptureData> {
+        let fd = self
+            .portal
+            .open_pipe_wire_remote(&self.session, OpenPipeWireRemoteOptions::default())
+            .await
+            .map_err(|error| {
+                DisplayError::PortalError(format!("Failed to open PipeWire remote: {error}"))
+            })?;
+        let width = self.size.map(|(width, _)| width);
+        let height = self.size.map(|(_, height)| height);
+        let capture = crate::pipewire_engine::PipeWireCapture::connect_window(
+            fd, self.node, None, width, height, false,
+        )
+        .map_err(|error| {
+            DisplayError::CaptureError(format!("PipeWire window capture failed: {error}"))
+        })?;
+        let deadline = std::time::Instant::now() + Duration::from_secs(8);
+        loop {
+            match capture.try_recv_frame() {
+                Ok(Some(frame)) => {
+                    if let Some(capture) = crate::recording::normalize_window_still_frame(&frame) {
+                        return Ok(capture);
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return Err(DisplayError::CaptureError(format!(
+                        "PipeWire window frame failed: {error}"
+                    )))
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err(DisplayError::CaptureError(
+                    "The selected window did not produce a valid frame within 8 seconds".into(),
+                ));
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    /// Close the portal session and release its source selection.
+    pub async fn close(self) {
+        let _ = tokio::time::timeout(Duration::from_secs(2), self.session.close()).await;
+    }
+}
+
 fn write_message(message: serde_json::Value) -> std::io::Result<()> {
     let mut stdout = std::io::stdout().lock();
     writeln!(stdout, "{message}")?;
@@ -297,6 +506,7 @@ fn capture_to_png(capture: CaptureData) -> anyhow::Result<serde_json::Value> {
 enum StillSource {
     Native(StillMonitor),
     Portal(PortalStillSession),
+    Window(PortalWindowStillSession),
 }
 
 fn named_monitor(
@@ -371,8 +581,42 @@ impl StillSource {
                 Ok(capture)
             }
             Self::Portal(session) => runtime.block_on(session.capture()),
+            Self::Window(session) => runtime.block_on(session.capture()),
         }
     }
+
+    fn close(self, runtime: &tokio::runtime::Runtime) {
+        match self {
+            Self::Native(_) => {}
+            Self::Portal(session) => runtime.block_on(session.close()),
+            Self::Window(session) => runtime.block_on(session.close()),
+        }
+    }
+}
+
+fn run_capture_requests(
+    source: &StillSource,
+    runtime: &tokio::runtime::Runtime,
+    ready: serde_json::Value,
+) -> anyhow::Result<()> {
+    write_message(ready)?;
+    for command in std::io::stdin().lock().lines() {
+        if command? != "capture" {
+            break;
+        }
+        match source
+            .capture(runtime)
+            .map_err(anyhow::Error::from)
+            .and_then(capture_to_png)
+        {
+            Ok(message) => write_message(message)?,
+            Err(error) => {
+                write_message(serde_json::json!({"error": error.to_string(), "cancelled": false}))?;
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
 }
 
 pub fn run_internal_helper(args: &[String]) -> anyhow::Result<()> {
@@ -414,33 +658,35 @@ pub fn run_internal_helper(args: &[String]) -> anyhow::Result<()> {
             }
         }
     };
-    let result = (|| -> anyhow::Result<()> {
-        let position = (requested_monitor.x, requested_monitor.y);
-        let size = (requested_monitor.width, requested_monitor.height);
-        write_message(serde_json::json!({"ready": true, "position": position, "size": size}))?;
-        for command in std::io::stdin().lock().lines() {
-            if command? != "capture" {
-                break;
-            }
-            match source
-                .capture(&runtime)
-                .map_err(anyhow::Error::from)
-                .and_then(capture_to_png)
-            {
-                Ok(message) => write_message(message)?,
-                Err(error) => {
-                    write_message(
-                        serde_json::json!({"error": error.to_string(), "cancelled": false}),
-                    )?;
-                    return Err(error);
-                }
-            }
-        }
-        Ok(())
-    })();
-    if let StillSource::Portal(session) = source {
-        runtime.block_on(session.close());
+    let position = (requested_monitor.x, requested_monitor.y);
+    let size = (requested_monitor.width, requested_monitor.height);
+    let result = run_capture_requests(
+        &source,
+        &runtime,
+        serde_json::json!({"ready": true, "position": position, "size": size}),
+    );
+    source.close(&runtime);
+    result
+}
+
+/// Run the internal helper protocol for portal-authorized window screenshots.
+pub fn run_window_internal_helper(args: &[String]) -> anyhow::Result<()> {
+    if args.len() != 3 {
+        anyhow::bail!("Invalid portal window still helper arguments");
     }
+    let runtime = tokio::runtime::Runtime::new()?;
+    let source = match runtime.block_on(PortalWindowStillSession::prepare(args[2] == "1")) {
+        Ok(session) => StillSource::Window(session),
+        Err(error) => {
+            write_message(serde_json::json!({
+                "error": error.to_string(),
+                "cancelled": matches!(error, StillError::Cancelled)
+            }))?;
+            return Err(error.into());
+        }
+    };
+    let result = run_capture_requests(&source, &runtime, serde_json::json!({"ready": true}));
+    source.close(&runtime);
     result
 }
 
@@ -589,5 +835,75 @@ mod tests {
                 assert!(!values.contains_key("restore_token"));
             }
         }
+    }
+
+    #[test]
+    fn window_options_select_one_window_without_restore_tokens() {
+        use zbus::zvariant::{serialized::Context, to_bytes, OwnedValue, LE};
+
+        for version in [3, 4, 6] {
+            let options = window_select_options(version, Some(CursorMode::Hidden));
+            let data = to_bytes(Context::new_dbus(LE, 0), &options).unwrap();
+            let (values, _): (std::collections::HashMap<String, OwnedValue>, _) =
+                data.deserialize().unwrap();
+            assert_eq!(u32::try_from(values.get("types").unwrap()).unwrap(), 2);
+            assert!(!bool::try_from(values.get("multiple").unwrap()).unwrap());
+            assert_eq!(
+                u32::try_from(values.get("cursor_mode").unwrap()).unwrap(),
+                1
+            );
+            if version >= 4 {
+                assert_eq!(
+                    u32::try_from(values.get("persist_mode").unwrap()).unwrap(),
+                    0
+                );
+                assert!(!values.contains_key("restore_token"));
+            } else {
+                assert!(!values.contains_key("persist_mode"));
+                assert!(!values.contains_key("restore_token"));
+            }
+        }
+
+        let options = window_select_options(1, None);
+        let data = to_bytes(Context::new_dbus(LE, 0), &options).unwrap();
+        let (values, _): (std::collections::HashMap<String, OwnedValue>, _) =
+            data.deserialize().unwrap();
+        assert_eq!(u32::try_from(values.get("types").unwrap()).unwrap(), 2);
+        assert!(!values.contains_key("cursor_mode"));
+        assert!(!values.contains_key("persist_mode"));
+        assert!(!values.contains_key("restore_token"));
+    }
+
+    #[test]
+    fn window_cursor_mode_uses_only_advertised_modes() {
+        use ashpd::enumflags2::BitFlags;
+
+        assert_eq!(
+            select_window_cursor_mode(true, BitFlags::from(CursorMode::Embedded)).unwrap(),
+            CursorMode::Embedded
+        );
+        assert_eq!(
+            select_window_cursor_mode(true, BitFlags::from(CursorMode::Hidden)).unwrap(),
+            CursorMode::Hidden
+        );
+        assert!(select_window_cursor_mode(false, BitFlags::from(CursorMode::Embedded)).is_err());
+        assert!(select_window_cursor_mode(false, BitFlags::empty()).is_err());
+    }
+
+    #[test]
+    fn window_stream_validation_rejects_empty_multiple_and_monitor_streams() {
+        assert!(validate_window_stream(1, Some(SourceType::Window)).is_ok());
+        assert!(validate_window_stream(1, None).is_ok());
+        assert!(validate_window_stream(0, None).is_err());
+        assert!(validate_window_stream(2, Some(SourceType::Window)).is_err());
+        assert!(validate_window_stream(1, Some(SourceType::Monitor)).is_err());
+    }
+
+    #[test]
+    fn window_capture_requires_window_source_support() {
+        use ashpd::enumflags2::BitFlags;
+
+        assert!(validate_window_source_support(BitFlags::from(SourceType::Window)).is_ok());
+        assert!(validate_window_source_support(BitFlags::from(SourceType::Monitor)).is_err());
     }
 }

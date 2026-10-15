@@ -234,6 +234,7 @@ CaptureSession::~CaptureSession()
 CaptureStatus CaptureSession::prepare(QScreen* screen, bool includeCursor, QString& outError)
 {
     close();
+    m_windowCapture = false;
     if (!screen) {
         outError = QStringLiteral("No screen selected for capture");
         return CaptureStatus::Failed;
@@ -247,11 +248,6 @@ CaptureStatus CaptureSession::prepare(QScreen* screen, bool includeCursor, QStri
         return CaptureStatus::Ok;
     }
 
-    const QString program = portalHelperPath(outError);
-    if (program.isEmpty()) {
-        return CaptureStatus::Failed;
-    }
-
     const QStringList arguments = {
         QStringLiteral("portal-still-internal"),
         sessionKey(screen),
@@ -261,7 +257,28 @@ CaptureStatus CaptureSession::prepare(QScreen* screen, bool includeCursor, QStri
         QString::number(m_captureRect.height()),
         includeCursor ? QStringLiteral("1") : QStringLiteral("0"),
     };
+    return startPortalHelper(arguments, outError);
+}
 
+CaptureStatus CaptureSession::prepareWindow(bool includeCursor, QString& outError)
+{
+    close();
+    m_screen = nullptr;
+    m_captureRect = QRect();
+    m_windowCapture = true;
+    const QStringList arguments = {
+        QStringLiteral("portal-window-still-internal"),
+        includeCursor ? QStringLiteral("1") : QStringLiteral("0"),
+    };
+    return startPortalHelper(arguments, outError);
+}
+
+CaptureStatus CaptureSession::startPortalHelper(const QStringList& arguments, QString& outError)
+{
+    const QString program = portalHelperPath(outError);
+    if (program.isEmpty()) {
+        return CaptureStatus::Failed;
+    }
     m_helper = std::make_unique<QProcess>();
     m_helper->setProcessChannelMode(QProcess::ForwardedErrorChannel);
     m_helper->start(program, arguments);
@@ -291,7 +308,7 @@ CaptureStatus CaptureSession::prepare(QScreen* screen, bool includeCursor, QStri
         close();
         return CaptureStatus::Failed;
     }
-    if (!readyMetadataMatches(message, m_captureRect)) {
+    if (!m_windowCapture && !readyMetadataMatches(message, m_captureRect)) {
         outError = QStringLiteral("Portal stream does not match the selected monitor");
         close();
         return CaptureStatus::Failed;
@@ -372,15 +389,15 @@ QRect CaptureSession::captureRect() const
 void CaptureSession::close()
 {
     m_prepared = false;
-    if (!m_helper) {
-        return;
+    if (m_helper) {
+        m_helper->closeWriteChannel();
+        if (!m_helper->waitForFinished(kShutdownTimeoutMs)) {
+            m_helper->kill();
+            m_helper->waitForFinished(kShutdownTimeoutMs);
+        }
+        m_helper.reset();
     }
-    m_helper->closeWriteChannel();
-    if (!m_helper->waitForFinished(kShutdownTimeoutMs)) {
-        m_helper->kill();
-        m_helper->waitForFinished(kShutdownTimeoutMs);
-    }
-    m_helper.reset();
+    m_windowCapture = false;
 }
 
 bool saveImageToTempPng(const QImage& image,

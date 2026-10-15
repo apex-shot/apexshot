@@ -1000,6 +1000,47 @@ int runCaptureJob(QApplication& app, int argc, char* argv[])
             return 0;
         }
 
+        if (captureMenuResult.action == CaptureModeToolbar::Action::Window) {
+            QString error;
+            if (const auto status = captureSession.prepareWindow(screenshotCursor, error);
+                status != ScreenCapture::CaptureStatus::Ok) {
+                sessionServer.close();
+                QLocalServer::removeServer(sessionSocketPath);
+                std::fprintf(stderr,
+                             "apexshot-capture: window capture failed: %s\n",
+                             error.toLocal8Bit().constData());
+                return exitCodeForStatus(status);
+            }
+            if (!CaptureCountdownPill::run(QGuiApplication::primaryScreen(),
+                                           captureMenuResult.timerSeconds)) {
+                sessionServer.close();
+                QLocalServer::removeServer(sessionSocketPath);
+                return 1;
+            }
+
+            QImage image;
+            const auto captureStatus = captureSession.captureFresh(image, error);
+            sessionServer.close();
+            QLocalServer::removeServer(sessionSocketPath);
+            if (captureStatus != ScreenCapture::CaptureStatus::Ok) {
+                std::fprintf(stderr,
+                             "apexshot-capture: window capture failed: %s\n",
+                             error.toLocal8Bit().constData());
+                return exitCodeForStatus(captureStatus);
+            }
+            QString imagePath;
+            QSize imageSize;
+            if (!ScreenCapture::saveImageToTempPng(image, imagePath, imageSize, error)) {
+                std::fprintf(stderr,
+                             "apexshot-capture: window capture failed: %s\n",
+                             error.toLocal8Bit().constData());
+                return 2;
+            }
+            imagePath = persistCaptureForStandaloneTest(imagePath, saveOutput);
+            printCaptureScreenJson(imagePath, imageSize, captureMenuResult.ocr ? "ocr" : nullptr);
+            return 0;
+        }
+
         QScreen* targetScreen = nullptr;
         if (QGuiApplication::screens().size() > 1) {
             targetScreen = MonitorPicker::selectTargetScreen();

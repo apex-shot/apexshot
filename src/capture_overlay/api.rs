@@ -80,8 +80,8 @@ pub fn run_capture_overlay(background_png: Option<&std::path::Path>) -> Selectio
     }
 }
 
-/// Legacy direct window capture is disabled; the GUI picker remains available
-/// through Quick Capture > Shot > Window. Keep this API for compatibility.
+/// Legacy direct window capture is disabled; Quick Capture > Shot > Window uses
+/// desktop portal selection. Keep this API for compatibility.
 pub fn capture_window_file_via_cpp() -> Result<PathBuf, SelectionError> {
     Err(SelectionError::InitError(
         "Legacy direct window capture is disabled. Use Quick Capture > Shot > Window instead."

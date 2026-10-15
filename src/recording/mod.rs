@@ -33,6 +33,8 @@ mod gst_audio;
 mod timeline;
 mod wf_recorder;
 
+pub(crate) use backend::normalize_window_still_frame;
+
 #[derive(Debug, Error)]
 pub enum RecordError {
     #[error("GStreamer initialization failed: {0}")]
