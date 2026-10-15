@@ -6,7 +6,7 @@
          dark and light panels alike, whatever colour sits behind it. -->
     <mask id="recording-badge-gap">
       <rect x="0" y="0" width="128" height="128" fill="#ffffff"/>
-      <circle cx="92" cy="92" r="26" fill="#000000"/>
+      <circle cx="36" cy="92" r="26" fill="#000000"/>
     </mask>
   </defs>
   <g mask="url(#recording-badge-gap)">
@@ -21,5 +21,5 @@
     />
   </g>
   <!-- Recording dot, in the red the record button and preview overlay share -->
-  <circle cx="92" cy="92" r="21" fill="#e81123"/>
+  <circle cx="36" cy="92" r="21" fill="#e81123"/>
 </svg>
