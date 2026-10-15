@@ -15,6 +15,7 @@ on:
       - po/**
       - assets/fonts/**
       - packaging/apexshot.svg
+      - packaging/apexshot-recording.svg
   pull_request:
     branches: [main]
     paths:
@@ -29,6 +30,7 @@ on:
       - po/**
       - assets/fonts/**
       - packaging/apexshot.svg
+      - packaging/apexshot-recording.svg
   workflow_dispatch:
 
 permissions:

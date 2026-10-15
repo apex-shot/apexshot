@@ -16,7 +16,7 @@ mod tests {
         MotionEffectTransformTiming, MotionFrame, MotionState, MotionTransform,
         DEFAULT_MOTION_ZOOM,
     };
-    use gtk4::cairo::{Context, Format, ImageSurface};
+    use gtk4::cairo::{Context, Format, ImageSurface, Operator};
 
     /// Frame presets re-fit the scene into the largest centered rectangle of
     /// the target aspect; Standard (None) keeps the bounds untouched.
@@ -640,6 +640,217 @@ mod tests {
             0,
             "nothing may be painted above the reserved peek"
         );
+    }
+
+    #[test]
+    fn transformed_backing_sheets_keep_rounded_corners_and_offsets() {
+        let card = ImageSurface::create(Format::ARgb32, 160, 100).unwrap();
+        {
+            let context = Context::new(&card).unwrap();
+            context.set_operator(Operator::Clear);
+            context.paint().unwrap();
+        }
+        card.flush();
+        let stage = MotionStage::frame(480.0, 360.0);
+        let opacity = 1.0;
+        let transforms = [
+            MotionTransform {
+                rotation_z: 14.0,
+                scale: 1.35,
+                ..MotionTransform::default()
+            },
+            MotionTransform {
+                rotation_x: 11.0,
+                rotation_y: 17.0,
+                rotation_z: -5.0,
+                perspective: 0.28,
+                scale: 1.35,
+                ..MotionTransform::default()
+            },
+        ];
+
+        for style in [FrameStyle::Stack, FrameStyle::Stack2, FrameStyle::Retro] {
+            for transform in transforms {
+                let sharp_appearance = MotionAppearance {
+                    background_padding: 0.0,
+                    border_thickness: 0.0,
+                    border_radius: 0.0,
+                    frame_style: style,
+                    shadow_opacity: 0.0,
+                    ..MotionAppearance::default()
+                };
+                let mut rounded_appearance = sharp_appearance.clone();
+                rounded_appearance.border_radius = 80.0;
+
+                let (mut sharp, layout) =
+                    render_backing_test_frame(&card, stage, &sharp_appearance, transform, opacity);
+                let (mut rounded, rounded_layout) = render_backing_test_frame(
+                    &card,
+                    stage,
+                    &rounded_appearance,
+                    transform,
+                    opacity,
+                );
+                assert_eq!(layout.cx, rounded_layout.cx);
+                assert_eq!(layout.cy, rounded_layout.cy);
+
+                let spec = style.spec();
+                let backings: Vec<_> = [spec.backing1, spec.backing2]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                assert_eq!(
+                    backings.len(),
+                    if style == FrameStyle::Stack2 { 2 } else { 1 }
+                );
+                for (index, backing) in backings.into_iter().enumerate() {
+                    let corners = project_card_corners(
+                        layout.img_w(),
+                        layout.img_h(),
+                        layout.source_fit(),
+                        layout.transform,
+                        layout.cx,
+                        layout.cy,
+                    );
+                    let (px, py) = if backing.center_pivot {
+                        (
+                            corners.iter().map(|point| point.0).sum::<f64>() / 4.0,
+                            corners.iter().map(|point| point.1).sum::<f64>() / 4.0,
+                        )
+                    } else {
+                        corners[2]
+                    };
+                    let (sin, cos) = backing.rotation_deg.to_radians().sin_cos();
+                    let quad = corners.map(|point| {
+                        let rx = point.0 - px;
+                        let ry = point.1 - py;
+                        (
+                            px + backing.offset_x * layout.canvas_fit + rx * cos - ry * sin,
+                            py + backing.offset_y * layout.canvas_fit + rx * sin + ry * cos,
+                        )
+                    });
+                    let center = (
+                        quad.iter().map(|point| point.0).sum::<f64>() / 4.0,
+                        quad.iter().map(|point| point.1).sum::<f64>() / 4.0,
+                    );
+                    let corner_index = if style == FrameStyle::Stack2 && index == 1 {
+                        2
+                    } else {
+                        0
+                    };
+                    let (dx, dy) = (
+                        center.0 - quad[corner_index].0,
+                        center.1 - quad[corner_index].1,
+                    );
+                    let distance = dx.hypot(dy);
+                    let corner = (
+                        quad[corner_index].0 + dx / distance * 2.0,
+                        quad[corner_index].1 + dy / distance * 2.0,
+                    );
+                    let expected = reference_backing_pixel(backing.color, opacity);
+                    let sharp_corner = frame_pixel(&mut sharp, corner);
+                    let rounded_corner = frame_pixel(&mut rounded, corner);
+                    assert_eq!(
+                        sharp_corner, expected,
+                        "sharp backing color mismatch for {style:?}, pose, sheet {index}"
+                    );
+                    assert_ne!(
+                        rounded_corner, sharp_corner,
+                        "rounded sheet corner remained square for {style:?}, pose, sheet {index}"
+                    );
+                    assert_eq!(
+                        rounded_corner, [0, 0, 0, 0],
+                        "rounded backing corner should expose the transparent canvas for {style:?}, pose, sheet {index}"
+                    );
+
+                    let top = (
+                        quad[0].0 * 0.6 + quad[1].0 * 0.4,
+                        quad[0].1 * 0.6 + quad[1].1 * 0.4,
+                    );
+                    let bottom = (
+                        quad[3].0 * 0.6 + quad[2].0 * 0.4,
+                        quad[3].1 * 0.6 + quad[2].1 * 0.4,
+                    );
+                    let interior = (
+                        top.0 + (bottom.0 - top.0) * 0.04,
+                        top.1 + (bottom.1 - top.1) * 0.04,
+                    );
+                    assert_eq!(
+                        frame_pixel(&mut sharp, interior),
+                        expected,
+                        "sharp sheet interior or offset changed for {style:?}, pose, sheet {index}"
+                    );
+                    assert_eq!(
+                        frame_pixel(&mut rounded, interior),
+                        expected,
+                        "rounded sheet interior or offset changed for {style:?}, pose, sheet {index}"
+                    );
+                }
+            }
+        }
+    }
+
+    fn render_backing_test_frame(
+        card: &ImageSurface,
+        stage: MotionStage,
+        appearance: &MotionAppearance,
+        transform: MotionTransform,
+        opacity: f64,
+    ) -> (ImageSurface, CardLayout) {
+        let layout = card_layout(card, 1.0, stage, appearance, None, transform, (0.5, 0.5));
+        let frame =
+            ImageSurface::create(Format::ARgb32, stage.bounds_w as i32, stage.bounds_h as i32)
+                .unwrap();
+        {
+            let context = Context::new(&frame).unwrap();
+            context.set_operator(Operator::Clear);
+            context.paint().unwrap();
+            context.set_operator(Operator::Over);
+            draw_transformed_card(
+                &context,
+                card,
+                layout,
+                appearance,
+                opacity,
+                8,
+                gtk4::cairo::Filter::Good,
+            );
+        }
+        frame.flush();
+        (frame, layout)
+    }
+
+    fn frame_pixel(frame: &mut ImageSurface, point: (f64, f64)) -> [u8; 4] {
+        let x = point.0.round() as usize;
+        let y = point.1.round() as usize;
+        let stride = frame.stride() as usize;
+        let data = frame.data().unwrap();
+        let offset = y * stride + x * 4;
+        [
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]
+    }
+
+    fn reference_backing_pixel(color: DrawColor, opacity: f64) -> [u8; 4] {
+        let mut reference = ImageSurface::create(Format::ARgb32, 1, 1).unwrap();
+        {
+            let context = Context::new(&reference).unwrap();
+            context.set_operator(Operator::Clear);
+            context.paint().unwrap();
+            context.set_operator(Operator::Over);
+            context.set_source_rgba(
+                color.r,
+                color.g,
+                color.b,
+                (color.a * opacity).clamp(0.0, 1.0),
+            );
+            context.paint().unwrap();
+        }
+        reference.flush();
+        frame_pixel(&mut reference, (0.0, 0.0))
     }
 
     /// The downscaled preview texture must describe the same card as the

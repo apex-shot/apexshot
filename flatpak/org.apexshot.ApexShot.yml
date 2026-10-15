@@ -136,6 +136,8 @@ modules:
     sources:
       - type: archive
         url: https://gstreamer.freedesktop.org/src/gst-plugins-good/gst-plugins-good-1.26.11.tar.xz
+        mirror-urls:
+          - https://mirror.math.princeton.edu/pub/redcorelinux/amd64/distfiles/gst-plugins-good-1.26.11.tar.xz
         sha256: 001deb0876d5d743cd3448abf74a27adec3fd850012fcb1b00994861bd6c1145
 
   - name: wl-clipboard
@@ -156,6 +158,8 @@ modules:
     sources:
       - type: archive
         url: https://www.x.org/releases/individual/lib/libXmu-1.2.1.tar.xz
+        mirror-urls:
+          - https://distfiles.macports.org/xorg-libXmu/libXmu-1.2.1.tar.xz
         sha256: fcb27793248a39e5fcc5b9c4aec40cc0734b3ca76aac3d7d1c264e7f7e14e8b2
 
   - name: xclip
@@ -195,6 +199,7 @@ modules:
       - install -Dm644 flatpak/org.apexshot.ApexShot.desktop /app/share/applications/org.apexshot.ApexShot.desktop
       - install -Dm644 flatpak/org.apexshot.ApexShot.metainfo.xml /app/share/metainfo/org.apexshot.ApexShot.metainfo.xml
       - install -Dm644 packaging/apexshot.svg /app/share/icons/hicolor/scalable/apps/org.apexshot.ApexShot.svg
+      - install -Dm644 packaging/apexshot-recording.svg /app/share/icons/hicolor/scalable/apps/org.apexshot.ApexShot-recording.svg
       - install -d /app/share/apexshot/background-images
       - install -Dm644 src/capture/editor/background-images/*.jpg /app/share/apexshot/background-images/
       - |

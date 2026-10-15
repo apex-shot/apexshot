@@ -176,6 +176,8 @@ assets = [
     ["packaging/apexshot-daemon.desktop", "etc/xdg/autostart/apexshot.desktop", "644"],
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/apexshot.svg", "644"],
     ["packaging/apexshot.svg", "usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg", "644"],
+    ["packaging/apexshot-recording.svg", "usr/share/icons/hicolor/scalable/apps/apexshot-recording.svg", "644"],
+    ["packaging/apexshot-recording.svg", "usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot-recording.svg", "644"],
     ["packaging/apexshot.svg", "usr/share/pixmaps/apexshot.svg", "644"],
     ["target/locale/es/LC_MESSAGES/apexshot.mo", "usr/share/locale/es/LC_MESSAGES/", "644"],
     ["target/locale/fr/LC_MESSAGES/apexshot.mo", "usr/share/locale/fr/LC_MESSAGES/", "644"],

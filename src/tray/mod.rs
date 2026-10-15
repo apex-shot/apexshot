@@ -55,6 +55,11 @@ const ARCH_ORANGE: [u8; 3] = [233, 84, 32];
 /// The recording accent the record button and the preview overlay already use,
 /// #e81123.
 const RECORDING_RED: [u8; 3] = [232, 17, 35];
+/// Recording badge geometry in the 24-unit icon space: the dot sits in the
+/// arch's lower-left opening, where it never meets the stroke, so it needs no
+/// cleared ring and stays legible down to 16px.
+const BADGE_CENTRE: (f64, f64) = (9.0, 18.0);
+const BADGE_RADIUS: f64 = 2.6;
 
 fn paint_icon_pixel(data: &mut [u8], size: usize, x: i32, y: i32, coverage: f64, colour: [u8; 3]) {
     if x < 0 || y < 0 || x >= size as i32 || y >= size as i32 {
@@ -102,7 +107,7 @@ fn cubic_point(
     )
 }
 
-fn icon(size: i32) -> ksni::Icon {
+fn icon(size: i32, recording: bool) -> ksni::Icon {
     let size = size.max(1) as usize;
     let scale = size as f64 / 24.0;
     let mut data = vec![0; size * size * 4];
@@ -118,6 +123,10 @@ fn icon(size: i32) -> ksni::Icon {
             paint_icon_disc(&mut data, size, x * scale, y * scale, radius, ARCH_ORANGE);
         }
     }
+    if recording {
+        let (cx, cy) = (BADGE_CENTRE.0 * scale, BADGE_CENTRE.1 * scale);
+        paint_icon_disc(&mut data, size, cx, cy, BADGE_RADIUS * scale, RECORDING_RED);
+    }
     ksni::Icon {
         width: size as i32,
         height: size as i32,
@@ -125,39 +134,16 @@ fn icon(size: i32) -> ksni::Icon {
     }
 }
 
-/// The badge a tray host draws over the item while a recording runs.
-///
-/// Hosts pin an overlay icon to a corner of the item and scale it down, so the
-/// disc is drawn with a transparent margin: room for the edge to antialias,
-/// and separation that keeps the dot legible over the icon on light and dark
-/// trays alike.
-fn badge(size: i32) -> ksni::Icon {
-    let size = size.max(1) as usize;
-    let mut data = vec![0; size * size * 4];
-    let centre = size as f64 / 2.0;
-    paint_icon_disc(
-        &mut data,
-        size,
-        centre,
-        centre,
-        centre * 0.82,
-        RECORDING_RED,
-    );
-    ksni::Icon {
-        width: size as i32,
-        height: size as i32,
-        data,
+/// The pixmaps a host draws for the item. A host that reads `IconName` takes
+/// the badged themed icon instead, so the two paths never both apply.
+fn tray_icons(recording: bool) -> &'static Vec<ksni::Icon> {
+    static IDLE: std::sync::OnceLock<Vec<ksni::Icon>> = std::sync::OnceLock::new();
+    static RECORDING: std::sync::OnceLock<Vec<ksni::Icon>> = std::sync::OnceLock::new();
+    if recording {
+        RECORDING.get_or_init(|| vec![icon(16, true), icon(22, true), icon(32, true)])
+    } else {
+        IDLE.get_or_init(|| vec![icon(16, false), icon(22, false), icon(32, false)])
     }
-}
-
-fn tray_icons() -> &'static Vec<ksni::Icon> {
-    static ICONS: std::sync::OnceLock<Vec<ksni::Icon>> = std::sync::OnceLock::new();
-    ICONS.get_or_init(|| vec![icon(16), icon(22), icon(32)])
-}
-
-fn recording_badges() -> &'static Vec<ksni::Icon> {
-    static BADGES: std::sync::OnceLock<Vec<ksni::Icon>> = std::sync::OnceLock::new();
-    BADGES.get_or_init(|| vec![badge(16), badge(22), badge(32)])
 }
 
 impl ksni::Tray for ApexShotTray {
@@ -174,28 +160,26 @@ impl ksni::Tray for ApexShotTray {
     fn id(&self) -> String {
         status_notifier_id()
     }
+    /// The badged icon while a recording runs. Hosts that read the pixmap
+    /// instead get the same dot painted into it, so either way the item shows
+    /// the dot in the bottom-left corner and never two of them.
     fn icon_name(&self) -> String {
-        crate::app_identity::icon_name().to_string()
+        if self.recording {
+            crate::app_identity::recording_icon_name()
+        } else {
+            crate::app_identity::icon_name().to_string()
+        }
     }
     fn icon_pixmap(&self) -> Vec<ksni::Icon> {
-        tray_icons().clone()
-    }
-    /// Hosts that draw overlay icons badge the item with a red dot while a
-    /// recording runs; hosts that ignore overlays keep showing the plain icon.
-    fn overlay_icon_pixmap(&self) -> Vec<ksni::Icon> {
-        if self.recording {
-            recording_badges().clone()
-        } else {
-            Vec::new()
-        }
+        tray_icons(self.recording).clone()
     }
     fn title(&self) -> String {
         "ApexShot".to_string()
     }
     fn tool_tip(&self) -> ksni::ToolTip {
         ksni::ToolTip {
-            icon_name: crate::app_identity::icon_name().to_string(),
-            icon_pixmap: vec![tray_icons()[1].clone()],
+            icon_name: self.icon_name(),
+            icon_pixmap: vec![tray_icons(self.recording)[1].clone()],
             title: "ApexShot".to_string(),
             description: "ApexShot".to_string(),
         }
@@ -343,7 +327,7 @@ mod tests {
 
     #[test]
     fn software_tray_icons_are_valid_argb_pixmaps() {
-        for icon in tray_icons().iter().chain(recording_badges()) {
+        for icon in tray_icons(false).iter().chain(tray_icons(true)) {
             assert!(icon.width > 0 && icon.height > 0);
             assert_eq!(
                 icon.data.len(),
@@ -354,27 +338,75 @@ mod tests {
     }
 
     #[test]
-    fn the_recording_badge_is_red_and_absent_while_idle() {
+    fn the_recording_dot_is_red_and_sits_in_the_bottom_left() {
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut tray = ApexShotTray::new(tx);
 
-        assert!(ksni::Tray::overlay_icon_pixmap(&tray).is_empty());
+        let idle = ksni::Tray::icon_pixmap(&tray);
+        assert!(recording_red_bounds(&idle[0]).is_none());
 
         tray.set_recording(true);
-        let badges = ksni::Tray::overlay_icon_pixmap(&tray);
-        assert_eq!(badges.len(), tray_icons().len());
-        for badge in &badges {
-            // The dot is opaque red at the centre and never the arch orange.
-            let centre =
-                (badge.height as usize / 2) * badge.width as usize + badge.width as usize / 2;
-            let pixel = &badge.data[centre * 4..centre * 4 + 4];
-            assert_eq!(
-                pixel,
-                [255, RECORDING_RED[0], RECORDING_RED[1], RECORDING_RED[2]]
+        for icon in &ksni::Tray::icon_pixmap(&tray) {
+            let (left, top, right, _) = recording_red_bounds(icon).expect("the dot is painted");
+            assert!(right < icon.width as usize / 2, "the dot sits on the left");
+            assert!(
+                top >= icon.height as usize / 2,
+                "the dot sits at the bottom"
             );
+            assert!(left > 0, "the dot keeps a margin from the edge");
         }
 
         tray.set_recording(false);
-        assert!(ksni::Tray::overlay_icon_pixmap(&tray).is_empty());
+        let idle = ksni::Tray::icon_pixmap(&tray);
+        assert!(recording_red_bounds(&idle[0]).is_none());
+    }
+
+    /// Bounding box of the fully opaque recording-red pixels, if any.
+    fn recording_red_bounds(icon: &ksni::Icon) -> Option<(usize, usize, usize, usize)> {
+        let width = icon.width as usize;
+        let mut bounds: Option<(usize, usize, usize, usize)> = None;
+        for (index, pixel) in icon.data.chunks_exact(4).enumerate() {
+            if pixel[0] == 255 && pixel[1..4] == RECORDING_RED {
+                let (x, y) = (index % width, index / width);
+                bounds = Some(match bounds {
+                    Some((left, top, right, bottom)) => {
+                        (left.min(x), top.min(y), right.max(x), bottom.max(y))
+                    }
+                    None => (x, y, x, y),
+                });
+            }
+        }
+        bounds
+    }
+
+    #[test]
+    fn the_tray_swaps_to_the_badged_icon_while_recording() {
+        let (tx, _rx) = std::sync::mpsc::channel();
+        let mut tray = ApexShotTray::new(tx);
+
+        assert_eq!(
+            ksni::Tray::icon_name(&tray),
+            crate::app_identity::icon_name()
+        );
+
+        tray.set_recording(true);
+        assert_eq!(
+            ksni::Tray::icon_name(&tray),
+            crate::app_identity::recording_icon_name()
+        );
+
+        tray.set_recording(false);
+        assert_eq!(
+            ksni::Tray::icon_name(&tray),
+            crate::app_identity::icon_name()
+        );
+    }
+
+    #[test]
+    fn the_badged_icon_ships_in_the_packaging_assets() {
+        // include_str! fails the build if the asset goes missing, so the icon
+        // every package installs cannot drift away from this name.
+        let svg = include_str!("../../packaging/apexshot-recording.svg");
+        assert!(svg.contains("#e81123"));
     }
 }

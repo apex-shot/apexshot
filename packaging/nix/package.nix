@@ -54,6 +54,7 @@ let
       ../../packaging/io.github.codegoddy.apexshot.metainfo.xml
       ../../packaging/apexshot-daemon.desktop
       ../../packaging/apexshot.svg
+      ../../packaging/apexshot-recording.svg
     ];
   };
 
@@ -128,6 +129,8 @@ rustPlatform.buildRustPackage {
     install -Dm644 packaging/io.github.codegoddy.apexshot.metainfo.xml -t $out/share/metainfo
     install -Dm644 packaging/apexshot.svg $out/share/icons/hicolor/scalable/apps/apexshot.svg
     install -Dm644 packaging/apexshot.svg $out/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg
+    install -Dm644 packaging/apexshot-recording.svg $out/share/icons/hicolor/scalable/apps/apexshot-recording.svg
+    install -Dm644 packaging/apexshot-recording.svg $out/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot-recording.svg
     install -Dm644 packaging/apexshot.svg $out/share/pixmaps/apexshot.svg
 
     install -Dm644 packaging/io.github.codegoddy.apexshot.desktop \

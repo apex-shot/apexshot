@@ -109,6 +109,10 @@ package() {
         "$pkgdir/usr/share/icons/hicolor/scalable/apps/apexshot.svg"
     install -Dm644 "packaging/apexshot.svg" \
         "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot.svg"
+    install -Dm644 "packaging/apexshot-recording.svg" \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/apexshot-recording.svg"
+    install -Dm644 "packaging/apexshot-recording.svg" \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.codegoddy.apexshot-recording.svg"
     install -Dm644 "packaging/apexshot.svg" \
         "$pkgdir/usr/share/pixmaps/apexshot.svg"
 

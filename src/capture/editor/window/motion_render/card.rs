@@ -61,6 +61,19 @@ fn draw_transformed_card(
             let hw = img_w * fit * transform.scale / 2.0;
             let hh = img_h * fit * transform.scale / 2.0;
             let radius = card_radius;
+            let rounded_outline = if flat {
+                Vec::new()
+            } else {
+                projected_rounded_rect_points(
+                    hw,
+                    hh,
+                    radius,
+                    transform,
+                    card_depth(hw, hh, transform.perspective),
+                    cx,
+                    cy,
+                )
+            };
             for backing in backings {
                 let c = backing.color;
                 let a = (c.a * alpha).clamp(0.0, 1.0);
@@ -96,9 +109,9 @@ fn draw_transformed_card(
                     let theta = backing.rotation_deg.to_radians();
                     let (sin, cos) = theta.sin_cos();
                     let mut first = true;
-                    for corner in &corners {
-                        let rx = corner.0 - px;
-                        let ry = corner.1 - py;
+                    for point in &rounded_outline {
+                        let rx = point.0 - px;
+                        let ry = point.1 - py;
                         let qx = px + backing.offset_x * canvas_fit + rx * cos - ry * sin;
                         let qy = py + backing.offset_y * canvas_fit + rx * sin + ry * cos;
                         if first {
