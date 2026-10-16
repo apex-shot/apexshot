@@ -6,6 +6,10 @@ on:
 
 jobs:
   discord-release:
+    if: >-
+      github.event.release.draft == false &&
+      github.event.release.prerelease == false &&
+      startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - name: Post to changelog and announcements

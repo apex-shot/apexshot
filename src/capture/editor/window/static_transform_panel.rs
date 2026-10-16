@@ -43,6 +43,14 @@ fn build_static_transform_panel_with_controls(
     let on_interact = on_interact.unwrap_or_else(|| Rc::new(|| {}));
     let body = GtkBox::new(Orientation::Vertical, 8);
 
+    let studio_hint = Label::new(Some(&t(
+        "Studio preview. A non-default rendered pose needs activation for final images; backgrounds and normal edits stay free.",
+    )));
+    studio_hint.add_css_class("editor-transform-hint");
+    studio_hint.set_xalign(0.0);
+    studio_hint.set_wrap(true);
+    body.append(&studio_hint);
+
     let rotation_section = motion_settings_section("Rotation & Perspective");
     let (yaw_header, yaw_value, yaw) = angle_slider_row(&t("Yaw"), initial.yaw);
     let (pitch_header, pitch_value, pitch) = angle_slider_row(&t("Pitch"), initial.pitch);

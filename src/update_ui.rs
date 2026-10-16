@@ -20,6 +20,7 @@ const UPDATE_CSS: &str = r#"
     }
     .apexshot-update-title { font-size: 14px; font-weight: 700; }
     .apexshot-update-copy { font-size: 12px; color: rgba(241, 241, 243, 0.64); }
+    .apexshot-update-coverage { font-size: 12px; color: #ffcf9c; }
     button.apexshot-update-close {
         min-width: 28px; min-height: 28px; padding: 0; border-radius: 999px;
         border: none; background: transparent; color: rgba(241, 241, 243, 0.66);
@@ -106,6 +107,15 @@ fn present_card(overlay: &Overlay, update: crate::update::UpdateInfo) {
     copy.set_halign(Align::Start);
     copy.set_xalign(0.0);
 
+    let coverage_notice = crate::update::studio_update_notice(&update).map(|message| {
+        let notice = Label::new(Some(&message));
+        notice.add_css_class("apexshot-update-coverage");
+        notice.set_wrap(true);
+        notice.set_halign(Align::Start);
+        notice.set_xalign(0.0);
+        notice
+    });
+
     let release_notes = Button::with_label("Release notes");
     release_notes.add_css_class("apexshot-update-link");
     release_notes.set_halign(Align::Start);
@@ -130,6 +140,9 @@ fn present_card(overlay: &Overlay, update: crate::update::UpdateInfo) {
 
     surface.append(&heading);
     surface.append(&copy);
+    if let Some(notice) = coverage_notice {
+        surface.append(&notice);
+    }
     surface.append(&actions);
 
     let close_surface = surface.clone();

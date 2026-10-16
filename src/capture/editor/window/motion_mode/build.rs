@@ -125,6 +125,13 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     inspector.add_css_class("editor-motion-inspector");
     inspector.set_hexpand(false);
     inspector.set_vexpand(false);
+    let studio_hint = Label::new(Some(&t(
+        "Studio preview. MP4 export needs activation; local editing and project saves remain free.",
+    )));
+    studio_hint.add_css_class("editor-transform-hint");
+    studio_hint.set_wrap(true);
+    studio_hint.set_xalign(0.0);
+    inspector.append(&studio_hint);
     let composition_section = motion_settings_section("Composition");
     duration_value.set_visible(false);
     composition_section.append(&duration_value);
@@ -310,6 +317,13 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     text_title.add_css_class("editor-inspector-title");
     text_title.set_xalign(0.0);
     text_box.append(&text_title);
+    let text_studio_hint = Label::new(Some(&t(
+        "Motion text and its animation are Studio previews; final MP4 export needs activation.",
+    )));
+    text_studio_hint.add_css_class("editor-transform-hint");
+    text_studio_hint.set_wrap(true);
+    text_studio_hint.set_xalign(0.0);
+    text_box.append(&text_studio_hint);
 
     // Empty state: the page is reachable with nothing selected, so it offers
     // the same add action the timeline does instead of a blank panel.

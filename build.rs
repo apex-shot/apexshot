@@ -113,6 +113,8 @@ fn build_capture_overlay() {
 }
 
 fn main() {
+    println!("cargo:rerun-if-env-changed=APEXSHOT_STUDIO_VERIFY_KEY");
+    println!("cargo:rerun-if-env-changed=APEXSHOT_STUDIO_RELEASE_TIMESTAMP");
     compile_translations();
     println!("cargo:rustc-link-arg-bins=-Wl,-rpath,$ORIGIN/../lib/apexshot");
 

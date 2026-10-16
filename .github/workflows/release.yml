@@ -62,6 +62,7 @@ jobs:
           bash -n scripts/opensuse-install.sh
           python3 scripts/test_distro_dispatch.py
           python3 scripts/test_rpm_assets.py
+          python3 scripts/test_release_gate.py
 
       - name: Reject nested gitlinks
         run: |
@@ -231,22 +232,47 @@ jobs:
       - name: Run tests
         run: cargo test --jobs 2 -- --test-threads=1
 
-  release:
-    name: Build .deb & Release
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    needs: [lint, ci]
+  studio_release_config:
+    name: Validate official Studio build configuration
+    runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
+    outputs:
+      verify_key: ${{ steps.validate.outputs.verify_key }}
+      release_timestamp: ${{ steps.validate.outputs.release_timestamp }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require the configured public key and pinned release marker
+        id: validate
+        env:
+          APEXSHOT_STUDIO_VERIFY_KEY: ${{ vars.APEXSHOT_STUDIO_VERIFY_KEY }}
+          APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ vars.APEXSHOT_STUDIO_RELEASE_TIMESTAMP }}
+        run: |
+          set -euo pipefail
+          python3 scripts/release_gate.py validate-config \
+            "$APEXSHOT_STUDIO_VERIFY_KEY" "$APEXSHOT_STUDIO_RELEASE_TIMESTAMP"
+          printf 'verify_key=%s\n' "$APEXSHOT_STUDIO_VERIFY_KEY" >> "$GITHUB_OUTPUT"
+          printf 'release_timestamp=%s\n' "$APEXSHOT_STUDIO_RELEASE_TIMESTAMP" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: Build Debian package and GNOME extension
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [lint, ci, studio_release_config]
+    if: startsWith(github.ref, 'refs/tags/')
+    env:
+      APEXSHOT_STUDIO_VERIFY_KEY: ${{ needs.studio_release_config.outputs.verify_key }}
+      APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ needs.studio_release_config.outputs.release_timestamp }}
     # Oldest practical LTS baseline for shipped .debs (glibc/deps).
     # 22.04 is claimed on Pop but current GTK4 crate stack targets 24.04+.
     container:
       image: ubuntu:24.04
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_API_URL: ${{ github.api_url }}
         GITHUB_SERVER_URL: ${{ github.server_url }}
         DEBIAN_FRONTEND: noninteractive
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -346,30 +372,31 @@ jobs:
             extension.js metadata.json \
             cursor-classifier.js press-tracker.js shell-overlay.js window-list.js preview-stacking.js daemon-ownership.js
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Debian and GNOME build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: ApexShot ${{ steps.get_version.outputs.VERSION }}
-          generate_release_notes: true
-          files: |
+          name: debian-gnome
+          path: |
             target/debian/*.deb
             gnome-extension/apexshot-gnome-integration.zip
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if-no-files-found: error
+          retention-days: 90
 
   opensuse:
     name: Build openSUSE RPM package
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [lint, ci, release]
+    needs: [lint, ci, studio_release_config, release]
     container:
       image: opensuse/tumbleweed
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_API_URL: ${{ github.api_url }}
         GITHUB_SERVER_URL: ${{ github.server_url }}
+    env:
+      APEXSHOT_STUDIO_VERIFY_KEY: ${{ needs.studio_release_config.outputs.verify_key }}
+      APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ needs.studio_release_config.outputs.release_timestamp }}
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -412,29 +439,31 @@ jobs:
       - name: Build openSUSE RPMs
         run: scripts/build-opensuse-rpm.sh "${{ steps.get_version.outputs.VERSION }}"
 
-      - name: Upload openSUSE RPMs to release
-        uses: softprops/action-gh-release@v2
+      - name: Upload openSUSE RPM build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: ApexShot ${{ steps.get_version.outputs.VERSION }}
-          files: |
-            target/opensuse-rpmbuild/RPMS/*/apexshot-[0-9]*.rpm
+          name: opensuse-rpms
+          path: |
+            target/opensuse-rpmbuild/RPMS/*/*.rpm
             target/opensuse-rpmbuild/SRPMS/*.src.rpm
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if-no-files-found: error
+          retention-days: 90
 
   fedora:
     name: Build Fedora RPM package
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [lint, ci, release]
+    needs: [lint, ci, studio_release_config, release]
     container:
       image: fedora:42
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_API_URL: ${{ github.api_url }}
         GITHUB_SERVER_URL: ${{ github.server_url }}
+    env:
+      APEXSHOT_STUDIO_VERIFY_KEY: ${{ needs.studio_release_config.outputs.verify_key }}
+      APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ needs.studio_release_config.outputs.release_timestamp }}
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -473,25 +502,28 @@ jobs:
       - name: Build Fedora RPMs
         run: scripts/build-fedora-rpm.sh "${{ steps.get_version.outputs.VERSION }}"
 
-      - name: Upload Fedora RPMs to release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Fedora RPM build artifacts
+        uses: actions/upload-artifact@v4
         with:
-          name: ApexShot ${{ steps.get_version.outputs.VERSION }}
-          files: |
+          name: fedora-rpms
+          path: |
             target/fedora-rpmbuild/RPMS/*/*.rpm
             target/fedora-rpmbuild/SRPMS/*.src.rpm
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if-no-files-found: error
+          retention-days: 90
 
   arch:
     name: Build Arch Linux package
     runs-on: blacksmith-4vcpu-ubuntu-2404
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [lint, ci]
+    needs: [lint, ci, studio_release_config]
     container:
       image: archlinux:latest
     permissions:
-      contents: write
+      contents: read
+    env:
+      APEXSHOT_STUDIO_VERIFY_KEY: ${{ needs.studio_release_config.outputs.verify_key }}
+      APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ needs.studio_release_config.outputs.release_timestamp }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -567,115 +599,81 @@ jobs:
           useradd -m builduser
           echo 'builduser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
           chown -R builduser:builduser /__w/apexshot/apexshot
-          sudo -u builduser makepkg -sf --noconfirm
+          sudo -u builduser env \
+            APEXSHOT_STUDIO_VERIFY_KEY="$APEXSHOT_STUDIO_VERIFY_KEY" \
+            APEXSHOT_STUDIO_RELEASE_TIMESTAMP="$APEXSHOT_STUDIO_RELEASE_TIMESTAMP" \
+            makepkg -sf --noconfirm
 
-      - name: Upload Arch package to release
-        uses: softprops/action-gh-release@v2
+      - name: Upload Arch package build artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: ApexShot ${{ steps.get_version.outputs.VERSION }}
-          files: |
+          name: arch-package
+          path: |
             packaging/arch/*.pkg.tar.zst
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          if-no-files-found: error
+          retention-days: 90
 
-  checksums:
-    name: Publish SHA256SUMS
+  stage_release:
+    name: Stage complete draft release
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
-    needs: [release, fedora, opensuse, arch]
+    concurrency:
+      group: stable-release-${{ github.repository }}-${{ github.ref_name }}
+      cancel-in-progress: false
+    needs: [studio_release_config, release, fedora, opensuse, arch]
+    env:
+      APEXSHOT_STUDIO_VERIFY_KEY: ${{ needs.studio_release_config.outputs.verify_key }}
+      APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ needs.studio_release_config.outputs.release_timestamp }}
     permissions:
       contents: write
-    steps:
-      - name: Download release assets and publish SHA256SUMS
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          mkdir -p /tmp/apexshot-assets
-          gh release download "${GITHUB_REF_NAME}" \
-            --repo "${{ github.repository }}" \
-            --dir /tmp/apexshot-assets \
-            --pattern '*'
-          cd /tmp/apexshot-assets
-          rm -f SHA256SUMS
-          sha256sum * > SHA256SUMS
-          cat SHA256SUMS
-          gh release upload "${GITHUB_REF_NAME}" SHA256SUMS \
-            --repo "${{ github.repository }}" \
-            --clobber
-
-  aur:
-    name: Publish AUR package
-    runs-on: blacksmith-4vcpu-ubuntu-2404
-    if: startsWith(github.ref, 'refs/tags/')
-    needs: [arch]
-    container:
-      image: archlinux:latest
-    permissions:
-      contents: read
-    env:
-      AUR_PACKAGE: apexshot
-      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-      AUR_SSH_KNOWN_HOSTS: ${{ secrets.AUR_SSH_KNOWN_HOSTS }}
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Fail when AUR SSH key is not configured
-        if: env.AUR_SSH_PRIVATE_KEY == ''
-        run: |
-          echo "::error title=AUR not published::AUR_SSH_PRIVATE_KEY secret is not configured. Arch package built, but AUR was NOT updated. Add the secret (see docs/AUR_PUBLISHING.md) or remove this job if AUR publish is intentionally disabled."
-          exit 1
+      - name: Download all package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: build-artifacts
 
-      - name: Install AUR publish tools
-        run: |
-          pacman-key --init
-          pacman-key --populate archlinux
-          pacman -Syu --noconfirm base-devel git openssh curl sudo
-          useradd -m builduser
-          echo 'builduser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
-          chown -R builduser:builduser "$GITHUB_WORKSPACE"
-
-      - name: Prepare AUR metadata
-        run: |
-          sudo -u builduser bash -lc "cd '$GITHUB_WORKSPACE' && scripts/aur-prepare.sh '${GITHUB_REF_NAME}'"
-          sudo -u builduser bash -lc "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --verifysource --nobuild"
-
-      - name: Configure SSH
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "${AUR_SSH_PRIVATE_KEY}" > ~/.ssh/aur
-          chmod 600 ~/.ssh/aur
-          if [ -n "${AUR_SSH_KNOWN_HOSTS}" ]; then
-            printf '%s\n' "${AUR_SSH_KNOWN_HOSTS}" > ~/.ssh/known_hosts
-          else
-            ssh-keyscan -t rsa,ed25519 aur.archlinux.org > ~/.ssh/known_hosts
-          fi
-          cat > ~/.ssh/config <<'EOF'
-          Host aur.archlinux.org
-            HostName aur.archlinux.org
-            User aur
-            IdentityFile ~/.ssh/aur
-            IdentitiesOnly yes
-            StrictHostKeyChecking yes
-          EOF
-
-      - name: Publish to AUR
+      - name: Validate, assemble, and checksum the full release set
         run: |
           set -euo pipefail
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          git config --global user.name "apexshot release bot"
-          git config --global user.email "actions@github.com"
-
-          workdir="$(mktemp -d)"
-          git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" "$workdir/${AUR_PACKAGE}"
-          cp packaging/arch/PKGBUILD packaging/arch/.SRCINFO packaging/arch/apexshot.install "$workdir/${AUR_PACKAGE}/"
-
-          cd "$workdir/${AUR_PACKAGE}"
-          git add PKGBUILD .SRCINFO apexshot.install
-          if git diff --cached --quiet; then
-            echo "AUR package is already up to date."
-            exit 0
+          source_commit="$(git rev-parse HEAD)"
+          if [ "$source_commit" != "$GITHUB_SHA" ]; then
+            echo "Checked-out source does not match the tagged workflow commit." >&2
+            exit 1
           fi
-          git commit -m "Update to ${GITHUB_REF_NAME#v}"
-          git push
+          python3 scripts/release_gate.py prepare-assets \
+            build-artifacts staged-assets \
+            "${GITHUB_REF_NAME}" \
+            "$APEXSHOT_STUDIO_VERIFY_KEY" \
+            "${APEXSHOT_STUDIO_RELEASE_TIMESTAMP}" \
+            "$source_commit"
+
+      - name: Create or refresh the unpublished draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          repo="${GITHUB_REPOSITORY}"
+          assets=(staged-assets/*)
+          if gh release view "$tag" --repo "$repo" >/dev/null 2>&1; then
+            draft="$(gh release view "$tag" --repo "$repo" --json isDraft --jq '.isDraft')"
+            if [ "$draft" != "true" ]; then
+              echo "Refusing to overwrite an already published release." >&2
+              exit 1
+            fi
+            while IFS= read -r name; do
+              [ -n "$name" ] && gh release delete-asset "$tag" "$name" --repo "$repo" --yes
+            done < <(gh release view "$tag" --repo "$repo" --json assets --jq '.assets[].name')
+            gh release upload "$tag" "${assets[@]}" --repo "$repo" --clobber
+          else
+            gh release create "$tag" "${assets[@]}" \
+              --repo "$repo" \
+              --title "ApexShot $tag" \
+              --generate-notes \
+              --draft \
+              --verify-tag
+          fi

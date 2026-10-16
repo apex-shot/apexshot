@@ -3008,3 +3008,126 @@ msgstr "A exportação foi concluída, mas não foi possível salvar a sessão d
 
 msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
 msgstr "Motion exibirá uma captura das suas anotações. Ao voltar para Static, as ferramentas de edição são restauradas. A imagem original permanece inalterada, a menos que você ative a substituição em Configurações → Anotar."
+
+msgid "14-day refund on your first purchase."
+msgstr "Reembolso em 14 dias na sua primeira compra."
+
+msgid "Activate"
+msgstr "Ativar"
+
+msgid "Animate your captures with titles and easing, then export as MP4."
+msgstr "Anime suas capturas com títulos e suavização e exporte como MP4."
+
+msgid "Camera controls"
+msgstr "Controles de câmera"
+
+msgid "Capture, annotation, recording and clean exports stay free."
+msgstr "Captura, anotação, gravação e exportações limpas continuam gratuitas."
+
+msgid "Entitlement saved. This build isn't covered by the included updates; install a covered build to use Studio output."
+msgstr "Licença salva. Esta versão não está coberta pelas atualizações incluídas; instale uma versão coberta para usar a saída do Studio."
+
+msgid "I have a license"
+msgstr "Tenho uma licença"
+
+msgid "In this export"
+msgstr "Nesta exportação"
+
+msgid "Includes 12 months of updates. Versions you get keep working forever."
+msgstr "Inclui 12 meses de atualizações. As versões que você obtém continuam funcionando para sempre."
+
+msgid "Instant zooms, speed, smoothness and motion blur for recordings."
+msgstr "Zooms instantâneos, velocidade, suavidade e desfoque de movimento para gravações."
+
+msgid "License saved, but this version is newer than the updates it includes."
+msgstr "Licença salva, mas esta versão é mais recente que as atualizações incluídas."
+
+msgid "Manage license"
+msgstr "Gerenciar licença"
+
+msgid "Motion text and its animation are Studio previews; final MP4 export needs activation."
+msgstr "O texto do Motion e sua animação são prévias do Studio; a exportação final em MP4 exige ativação."
+
+msgid "Motion timeline"
+msgstr "Linha do tempo do Motion"
+
+msgid "Paste Studio entitlement JSON"
+msgstr "Cole o JSON da licença do Studio"
+
+msgid "Paste the signed entitlement you received after purchase. Activation is stored on this device and works offline."
+msgstr "Cole a licença assinada que você recebeu após a compra. A ativação fica salva neste dispositivo e funciona offline."
+
+msgid "Paste your license"
+msgstr "Cole sua licença"
+
+msgid "Perspective and placement"
+msgstr "Perspectiva e posicionamento"
+
+msgid "Professional tools for presenting your captures."
+msgstr "Ferramentas profissionais para apresentar suas capturas."
+
+msgid "Purchase or recover Studio"
+msgstr "Comprar ou recuperar o Studio"
+
+msgid "Recover license"
+msgstr "Recuperar licença"
+
+msgid "Studio"
+msgstr "Studio"
+
+msgid "Studio activated for this build."
+msgstr "Studio ativado para esta versão."
+
+msgid "Studio controls. Default zoom and legacy easing stay free; active exports using non-default camera settings or instant animation need activation."
+msgstr "Controles do Studio. O zoom padrão e a suavização clássica continuam gratuitos; exportações que usam configurações de câmera não padrão ou animação instantânea exigem ativação."
+
+msgid "Studio export unavailable"
+msgstr "Exportação do Studio indisponível"
+
+msgid "Studio is optional. Your free capture, editing, recording, projects, and clean exports remain available without an account or network connection."
+msgstr "O Studio é opcional. Captura, edição, gravação, projetos e exportações limpas gratuitas continuam disponíveis sem conta nem conexão de rede."
+
+msgid "Studio isn't available"
+msgstr "O Studio não está disponível"
+
+msgid "Studio license couldn't be verified"
+msgstr "Não foi possível verificar a licença do Studio"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images; backgrounds and normal edits stay free."
+msgstr "Prévia do Studio. Uma pose renderizada fora do padrão exige ativação para as imagens finais; planos de fundo e edições normais continuam gratuitos."
+
+msgid "Studio preview. MP4 export needs activation; local editing and project saves remain free."
+msgstr "Prévia do Studio. A exportação em MP4 exige ativação; a edição local e o salvamento de projetos continuam gratuitos."
+
+msgid "Studio status"
+msgstr "Status do Studio"
+
+msgid "The license saved on this device couldn't be checked. Paste a valid license to unlock Studio."
+msgstr "Não foi possível verificar a licença salva neste dispositivo. Cole uma licença válida para desbloquear o Studio."
+
+msgid "This build can't verify Studio licenses, so this export can't be completed."
+msgstr "Esta versão não consegue verificar licenças do Studio, então esta exportação não pode ser concluída."
+
+msgid "This build can't verify Studio licenses. Check the official Studio page for build availability or license recovery; buying a license alone can't enable this build."
+msgstr "Esta compilação não consegue verificar licenças do Studio. Consulte a página oficial do Studio para saber se há uma versão compatível ou recuperar uma licença; comprar uma licença, por si só, não habilita esta compilação."
+
+msgid "Check Studio availability"
+msgstr "Verificar disponibilidade do Studio"
+
+msgid "This version is newer than your license"
+msgstr "Esta versão é mais recente que a sua licença"
+
+msgid "Tilt, rotate and position a still inside its background."
+msgstr "Incline, gire e posicione uma imagem estática dentro do plano de fundo."
+
+msgid "Unlock ApexShot Studio"
+msgstr "Desbloquear o ApexShot Studio"
+
+msgid "Upgrade to Studio — $39 once"
+msgstr "Fazer upgrade para Studio — US$ 39, pagamento único"
+
+msgid "Your license includes updates through an earlier release. Versions it covers keep working offline."
+msgstr "Sua licença inclui atualizações até uma versão anterior. As versões cobertas por ela continuam funcionando offline."
+
+msgid "That license couldn't be verified. Make sure you pasted all of it."
+msgstr "Não foi possível verificar essa licença. Confirme que você colou a licença inteira."

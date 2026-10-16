@@ -2959,3 +2959,126 @@ msgstr "エクスポートは完了しましたが、編集セッションを保
 
 msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
 msgstr "Motion では注釈のスナップショットが再生されます。Static に戻ると通常のツールが復元されます。設定 → 注釈で上書きを有効にしない限り、元の画像は変更されません。"
+
+msgid "14-day refund on your first purchase."
+msgstr "初回のご購入は14日間返金に対応します。"
+
+msgid "Activate"
+msgstr "有効化"
+
+msgid "Animate your captures with titles and easing, then export as MP4."
+msgstr "タイトルとイージングでキャプチャをアニメーションさせ、MP4として書き出せます。"
+
+msgid "Camera controls"
+msgstr "カメラコントロール"
+
+msgid "Capture, annotation, recording and clean exports stay free."
+msgstr "キャプチャ、注釈、録画、クリーンな書き出しは引き続き無料です。"
+
+msgid "Entitlement saved. This build isn't covered by the included updates; install a covered build to use Studio output."
+msgstr "ライセンスを保存しました。このビルドは含まれるアップデートの対象外です。Studioの出力を使うには、対象のビルドをインストールしてください。"
+
+msgid "I have a license"
+msgstr "ライセンスを持っています"
+
+msgid "In this export"
+msgstr "この書き出しで使用"
+
+msgid "Includes 12 months of updates. Versions you get keep working forever."
+msgstr "12か月分のアップデートを含みます。入手したバージョンはずっと使い続けられます。"
+
+msgid "Instant zooms, speed, smoothness and motion blur for recordings."
+msgstr "録画向けのインスタントズーム、速度、なめらかさ、モーションブラー。"
+
+msgid "License saved, but this version is newer than the updates it includes."
+msgstr "ライセンスを保存しましたが、このバージョンは含まれるアップデートより新しいものです。"
+
+msgid "Manage license"
+msgstr "ライセンスを管理"
+
+msgid "Motion text and its animation are Studio previews; final MP4 export needs activation."
+msgstr "Motionのテキストとそのアニメーションは Studio のプレビューです。最終的なMP4の書き出しには有効化が必要です。"
+
+msgid "Motion timeline"
+msgstr "Motionタイムライン"
+
+msgid "Paste Studio entitlement JSON"
+msgstr "StudioライセンスのJSONを貼り付け"
+
+msgid "Paste the signed entitlement you received after purchase. Activation is stored on this device and works offline."
+msgstr "購入後に受け取った署名付きライセンスを貼り付けてください。有効化の情報はこのデバイスに保存され、オフラインでも動作します。"
+
+msgid "Paste your license"
+msgstr "ライセンスを貼り付け"
+
+msgid "Perspective and placement"
+msgstr "パースペクティブと配置"
+
+msgid "Professional tools for presenting your captures."
+msgstr "キャプチャを魅力的に見せるためのプロフェッショナルツール。"
+
+msgid "Purchase or recover Studio"
+msgstr "Studioを購入または復元"
+
+msgid "Recover license"
+msgstr "ライセンスを復元"
+
+msgid "Studio"
+msgstr "Studio"
+
+msgid "Studio activated for this build."
+msgstr "このビルドでStudioを有効化しました。"
+
+msgid "Studio controls. Default zoom and legacy easing stay free; active exports using non-default camera settings or instant animation need activation."
+msgstr "Studioのコントロール。デフォルトのズームと従来のイージングは無料です。デフォルト以外のカメラ設定やインスタントアニメーションを使う書き出しには有効化が必要です。"
+
+msgid "Studio export unavailable"
+msgstr "Studioの書き出しは利用できません"
+
+msgid "Studio is optional. Your free capture, editing, recording, projects, and clean exports remain available without an account or network connection."
+msgstr "Studioは任意です。無料のキャプチャ、編集、録画、プロジェクト、クリーンな書き出しは、アカウントやネットワーク接続なしで引き続き利用できます。"
+
+msgid "Studio isn't available"
+msgstr "Studioは利用できません"
+
+msgid "Studio license couldn't be verified"
+msgstr "Studioライセンスを確認できませんでした"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images; backgrounds and normal edits stay free."
+msgstr "Studioプレビュー。デフォルト以外のレンダリング済みポーズを最終画像にするには有効化が必要です。背景と通常の編集は無料です。"
+
+msgid "Studio preview. MP4 export needs activation; local editing and project saves remain free."
+msgstr "Studioプレビュー。MP4の書き出しには有効化が必要です。ローカルでの編集とプロジェクトの保存は無料です。"
+
+msgid "Studio status"
+msgstr "Studioのステータス"
+
+msgid "The license saved on this device couldn't be checked. Paste a valid license to unlock Studio."
+msgstr "このデバイスに保存されたライセンスを確認できませんでした。有効なライセンスを貼り付けてStudioをアンロックしてください。"
+
+msgid "This build can't verify Studio licenses, so this export can't be completed."
+msgstr "このビルドではStudioライセンスを確認できないため、この書き出しを完了できません。"
+
+msgid "This build can't verify Studio licenses. Check the official Studio page for build availability or license recovery; buying a license alone can't enable this build."
+msgstr "このビルドではStudioライセンスを確認できません。公式Studioページで対応版の提供状況を確認するか、ライセンスを復元してください。ライセンスを購入するだけでは、このビルドでStudioを有効にできません。"
+
+msgid "Check Studio availability"
+msgstr "Studio の提供状況を確認"
+
+msgid "This version is newer than your license"
+msgstr "このバージョンはライセンスより新しいものです"
+
+msgid "Tilt, rotate and position a still inside its background."
+msgstr "静止画を背景の中で傾け、回転し、配置できます。"
+
+msgid "Unlock ApexShot Studio"
+msgstr "ApexShot Studioをアンロック"
+
+msgid "Upgrade to Studio — $39 once"
+msgstr "Studio にアップグレード — 39ドル（買い切り）"
+
+msgid "Your license includes updates through an earlier release. Versions it covers keep working offline."
+msgstr "ライセンスには以前のリリースまでのアップデートが含まれています。対象のバージョンはオフラインで使い続けられます。"
+
+msgid "That license couldn't be verified. Make sure you pasted all of it."
+msgstr "このライセンスを確認できませんでした。全体を貼り付けたか確認してください。"

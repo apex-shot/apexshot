@@ -1,85 +1,58 @@
 # AUR Publishing
 
-This repository publishes the `apexshot` AUR package from tagged releases.
+The Arch package is prepared and published to AUR only after a maintainer
+explicitly promotes a complete stable draft release. Pushing a tag only builds
+the packages and stages a draft; it does not publish the stable release or
+change AUR.
 
-## One-Time AUR Setup
+## Required configuration
 
-1. Create or log in to an Arch User Repository account.
-2. Add an SSH public key to the AUR account.
-3. Create a matching private key for GitHub Actions and store it as:
+Configure these GitHub Actions repository variables before preparing an
+official release:
 
-   `AUR_SSH_PRIVATE_KEY`
+- `APEXSHOT_STUDIO_VERIFY_KEY`: the canonical unpadded base64url Ed25519
+  verification key (32 decoded bytes).
+- `APEXSHOT_STUDIO_RELEASE_TIMESTAMP`: the positive Unix UTC seconds marker
+  pinned into this release's binaries.
 
-4. Optionally pin the AUR host key as:
+The tag workflow fails before package builds when either variable is missing
+or malformed. Never put an entitlement signing seed in desktop source,
+packages, workflow variables, or this repository. The AUR recipe contains only
+the public verification key and release timestamp for its specific stable
+version; source builds without those values keep Studio output unavailable.
 
-   `AUR_SSH_KNOWN_HOSTS`
+The workflow also needs `AUR_SSH_PRIVATE_KEY` and a pinned
+`AUR_SSH_KNOWN_HOSTS` entry for `aur.archlinux.org`. It refuses to publish to
+AUR if either is missing; it never trusts an unverified host key discovered
+with `ssh-keyscan`. A stable release can already be published after explicit
+approval, so this failure does not roll back the GitHub release assets.
 
-   You can generate it with:
+## Release flow
 
-   ```bash
-   ssh-keyscan -t rsa,ed25519 aur.archlinux.org
-   ```
+1. A version tag runs CI, validates the official Studio build configuration,
+   builds Debian/GNOME, openSUSE, Fedora, and Arch artifacts, then verifies the
+   complete package set and checksums before creating or refreshing a **draft**
+   release.
+2. Review the draft assets and notes. To publish, dispatch **Promote stable
+   release** from `main`, enter the stable `vMAJOR.MINOR.PATCH` tag, and type
+   `PUBLISH <tag>` exactly.
+3. The workflow permits only the configured maintainer, verifies the tag is
+   reachable from `main`, checks every staged asset and checksum, and requires
+   the release marker to advance beyond the previous stable marker. Configure
+   the `stable-release` GitHub Environment with required reviewers as an
+   additional approval layer; the workflow's actor and exact-confirmation
+   checks remain required even when that environment exists.
+4. Only after the draft is published does the dependent AUR job update
+   `PKGBUILD` and `.SRCINFO`, verify the source archive, and push the recipe.
 
-If `AUR_SSH_PRIVATE_KEY` is not configured, release CI still builds the Arch
-package artifact, but the **Publish AUR package** job fails with an explicit
-error so a green workflow never means “AUR is live” when it is not. Add the
-secret before the next tagged release, or disable the `aur` job if you are
-intentionally not publishing.
+The asset gate includes every RPM produced by both RPM builds, including debug
+variants, along with source RPMs, the Debian package, GNOME extension archive,
+Arch package, and `SHA256SUMS`. A missing or duplicate asset, a checksum
+mismatch, or a stale Studio marker prevents promotion.
 
-## Release Flow
+## Local preparation helper
 
-Tag releases as usual:
-
-```bash
-git tag v0.2.27
-git push origin v0.2.27
-```
-
-The `Publish AUR package` workflow job will:
-
-1. Update `packaging/arch/PKGBUILD` for the tag version.
-2. Download the GitHub source archive and compute its `sha256sum`.
-3. Regenerate `packaging/arch/.SRCINFO`.
-4. Verify the source archive with `makepkg --verifysource --nobuild`.
-5. Push `PKGBUILD`, `.SRCINFO`, and `apexshot.install` to:
-
-   `ssh://aur@aur.archlinux.org/apexshot.git`
-
-## Local Dry Run
-
-Run this on Arch Linux or in an Arch container:
-
-```bash
-scripts/aur-prepare.sh v0.2.27
-cd packaging/arch
-makepkg --verifysource --nobuild
-makepkg --printsrcinfo > .SRCINFO
-```
-
-Then inspect:
-
-```bash
-git diff -- packaging/arch/PKGBUILD packaging/arch/.SRCINFO
-```
-
-## Manual Publish
-
-Use this only if CI publishing fails:
-
-```bash
-scripts/aur-prepare.sh v0.2.27
-git clone ssh://aur@aur.archlinux.org/apexshot.git /tmp/apexshot-aur
-cp packaging/arch/PKGBUILD packaging/arch/.SRCINFO packaging/arch/apexshot.install /tmp/apexshot-aur/
-cd /tmp/apexshot-aur
-git add PKGBUILD .SRCINFO apexshot.install
-git commit -m "Update to 0.2.27"
-git push
-```
-
-## Notes
-
-- The AUR package builds from the GitHub source archive, not from the prebuilt
-  release package.
-- Do not publish `*.pkg.tar.zst` files to AUR.
-- Keep `.SRCINFO` synchronized with `PKGBUILD`; AUR reads package metadata from
-  `.SRCINFO`.
+`scripts/aur-prepare.sh <tag> <public-key> <release-timestamp>` prepares a
+versioned recipe when the public build configuration is available. Without
+the optional values, it prepares a source recipe that compiles without Studio
+unlock configuration. This helper does not publish anything.

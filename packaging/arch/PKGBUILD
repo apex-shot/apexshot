@@ -8,6 +8,8 @@ url="https://github.com/apex-shot/apexshot"
 license=('GPL-3.0-or-later')
 options=('!lto')
 install=apexshot.install
+_APEXSHOT_STUDIO_VERIFY_KEY=''
+_APEXSHOT_STUDIO_RELEASE_TIMESTAMP=''
 depends=(
     'gtk4-layer-shell'
 
@@ -85,6 +87,8 @@ sha256sums=('SKIP')  # Update with actual checksum on release
 
 build() {
     cd "$pkgname-$pkgver"
+    export APEXSHOT_STUDIO_VERIFY_KEY="${_APEXSHOT_STUDIO_VERIFY_KEY:-${APEXSHOT_STUDIO_VERIFY_KEY:-}}"
+    export APEXSHOT_STUDIO_RELEASE_TIMESTAMP="${_APEXSHOT_STUDIO_RELEASE_TIMESTAMP:-${APEXSHOT_STUDIO_RELEASE_TIMESTAMP:-}}"
     cargo build --release
 }
 

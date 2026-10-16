@@ -8,10 +8,33 @@ use super::upload::{guess_content_type, UploadError, UploadResult};
 
 #[derive(Debug, Deserialize)]
 struct CreateUploadResponse {
+    id: String,
     #[serde(alias = "shareUrl")]
     share_url: String,
     #[serde(alias = "uploadUrl")]
     upload_url: String,
+    #[serde(default)]
+    upload_protocol_version: Option<u16>,
+    #[serde(default)]
+    protected_upload: Option<bool>,
+    #[serde(default)]
+    upload_mode: Option<String>,
+    #[serde(default)]
+    upload_headers: Option<UploadHeaders>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UploadHeaders {
+    #[serde(rename = "If-Match")]
+    if_match: String,
+    #[serde(rename = "x-amz-meta-apexshot-upload-token")]
+    upload_token: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CompleteUploadResponse {
+    success: bool,
+    status: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -142,6 +165,7 @@ fn upload_file_with_token(config: &AppConfig, path: &Path) -> Result<UploadResul
     let content_type = guess_content_type(&filename);
 
     let create_body = serde_json::json!({
+        "upload_protocol_version": 2,
         "filename": filename,
         "size_bytes": size_bytes,
         "content_type": content_type,
@@ -160,16 +184,35 @@ fn upload_file_with_token(config: &AppConfig, path: &Path) -> Result<UploadResul
         .into_json()
         .map_err(|e| UploadError::Server(format!("Invalid response: {e}")))?;
 
-    let put_resp = ureq::put(&session.upload_url)
-        .set("Content-Type", &content_type)
-        .send_bytes(&file_bytes)
-        .map_err(|e| UploadError::HttpRequest(e.to_string()))?;
+    let is_local_upload = require_protected_upload_session(&session, &backend_url)?;
 
-    if put_resp.status() >= 400 {
-        return Err(UploadError::Server(format!(
-            "Upload failed with status {}",
-            put_resp.status()
-        )));
+    let mut put_request = ureq::put(&session.upload_url).set("Content-Type", &content_type);
+    if is_local_upload {
+        put_request = put_request.set("Authorization", &format!("Bearer {token}"));
+    } else if let Some(headers) = session.upload_headers.as_ref() {
+        put_request = put_request
+            .set("If-Match", &headers.if_match)
+            .set("x-amz-meta-apexshot-upload-token", &headers.upload_token);
+    }
+    match put_request.send_bytes(&file_bytes) {
+        Ok(_) => match complete_upload_session(&backend_url, token, &session.id) {
+            Ok(true) => {}
+            Ok(false) => {
+                let _ = delete_upload_session(&backend_url, token, &session.id);
+                return Err(UploadError::Server(
+                    "Cloud did not confirm that the upload completed".into(),
+                ));
+            }
+            Err(error) => return Err(UploadError::Server(error)),
+        },
+        Err(upload_error) => match complete_upload_session(&backend_url, token, &session.id) {
+            Ok(true) => {}
+            Ok(false) => {
+                let _ = delete_upload_session(&backend_url, token, &session.id);
+                return Err(map_upload_http_error(upload_error));
+            }
+            Err(_) => return Err(map_upload_http_error(upload_error)),
+        },
     }
 
     Ok(UploadResult {
@@ -190,6 +233,9 @@ fn map_upload_http_error(error: ureq::Error) -> UploadError {
                 Some(body) => {
                     let message = body.error.trim();
                     let detail = format!("HTTP {code}: {message}");
+                    if body.code.as_deref() == Some("client_update_required") {
+                        return UploadError::Server(message.to_string());
+                    }
                     if code == 400
                         && (body.code.as_deref() == Some("upgrade_required")
                             || message.to_ascii_lowercase().contains("upgrade to pro"))
@@ -204,6 +250,60 @@ fn map_upload_http_error(error: ureq::Error) -> UploadError {
         }
         ureq::Error::Transport(transport) => UploadError::HttpRequest(transport.to_string()),
     }
+}
+
+fn require_protected_upload_session(
+    session: &CreateUploadResponse,
+    backend_url: &str,
+) -> Result<bool, UploadError> {
+    if session.upload_protocol_version != Some(2) || session.protected_upload != Some(true) {
+        return Err(UploadError::Server(
+            "This Cloud service does not confirm protected uploads. Update the service and app before retrying.".into(),
+        ));
+    }
+
+    match session.upload_mode.as_deref() {
+        Some("local") if is_backend_local_upload_url(&session.upload_url, backend_url) => {
+            Ok(true)
+        }
+        Some("r2")
+            if !is_backend_local_upload_url(&session.upload_url, backend_url)
+                && session.upload_headers.as_ref().is_some_and(|headers| {
+                    !headers.if_match.is_empty() && !headers.upload_token.is_empty()
+                }) =>
+        {
+            Ok(false)
+        }
+        _ => Err(UploadError::Server(
+            "The Cloud service returned an invalid protected upload session. Update the service and app before retrying.".into(),
+        )),
+    }
+}
+
+fn complete_upload_session(
+    backend_url: &str,
+    token: &str,
+    upload_id: &str,
+) -> Result<bool, String> {
+    let response = match ureq::post(&format!("{backend_url}/v1/uploads/{upload_id}"))
+        .set("Authorization", &format!("Bearer {token}"))
+        .set("Content-Type", "application/json")
+        .send_string("{}")
+    {
+        Ok(response) => response,
+        Err(ureq::Error::Status(409, _)) => return Ok(false),
+        Err(error) => return Err(error.to_string()),
+    };
+    let result: CompleteUploadResponse = response.into_json().map_err(|e| e.to_string())?;
+    Ok(result.success && result.status == "ready")
+}
+
+fn delete_upload_session(backend_url: &str, token: &str, upload_id: &str) -> Result<(), String> {
+    ureq::delete(&format!("{backend_url}/v1/uploads/{upload_id}"))
+        .set("Authorization", &format!("Bearer {token}"))
+        .call()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn normalize_share_url(raw_share_url: &str, backend_url: &str) -> Result<String, UploadError> {
@@ -243,6 +343,41 @@ fn validate_web_share_url(url: url::Url) -> Result<String, UploadError> {
             "Upload response returned a non-web share URL".to_string(),
         )),
     }
+}
+
+fn is_backend_local_upload_url(upload_url: &str, backend_url: &str) -> bool {
+    let (Ok(upload), Ok(backend)) = (url::Url::parse(upload_url), url::Url::parse(backend_url))
+    else {
+        return false;
+    };
+
+    if upload.scheme() != backend.scheme()
+        || upload.host_str() != backend.host_str()
+        || upload.port_or_known_default() != backend.port_or_known_default()
+        || !upload.username().is_empty()
+        || upload.password().is_some()
+        || upload.query().is_some()
+        || upload.fragment().is_some()
+    {
+        return false;
+    }
+
+    let backend_path = backend.path().trim_end_matches('/');
+    let upload_prefix = format!("{backend_path}/v1/uploads/file/");
+    let Some(storage_key) = upload.path().strip_prefix(&upload_prefix) else {
+        return false;
+    };
+    let parts = storage_key.split('/').collect::<Vec<_>>();
+    parts.len() == 3
+        && parts[0] == "users"
+        && parts[1].len() == 36
+        && parts[1]
+            .chars()
+            .all(|ch| ch.is_ascii_hexdigit() || ch == '-')
+        && !parts[2].is_empty()
+        && parts[2]
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-' | '_'))
 }
 
 #[cfg(test)]
@@ -292,17 +427,110 @@ mod tests {
     }
 
     #[test]
+    fn only_authenticates_same_origin_backend_upload_routes() {
+        assert!(is_backend_local_upload_url(
+            "https://api.apexshot.org/v1/uploads/file/users/123e4567-e89b-12d3-a456-426614174000/ab12-file.png",
+            "https://api.apexshot.org",
+        ));
+        assert!(!is_backend_local_upload_url(
+            "https://storage.example/users/123e4567-e89b-12d3-a456-426614174000/ab12-file.png?X-Amz-Signature=opaque",
+            "https://api.apexshot.org",
+        ));
+        assert!(!is_backend_local_upload_url(
+            "https://api.apexshot.org/v1/uploads/file/users/123e4567-e89b-12d3-a456-426614174000/ab12-file.png",
+            "https://api.apexshot.org/api",
+        ));
+        assert!(!is_backend_local_upload_url(
+            "https://api.apexshot.org/v1/uploads/file/users/123e4567-e89b-12d3-a456-426614174000/ab12-file.png?next=https://elsewhere.example",
+            "https://api.apexshot.org",
+        ));
+    }
+
+    #[test]
     fn accepts_camel_case_create_response_fields() {
         let response: CreateUploadResponse = serde_json::from_str(
             r#"{
+                "id": "123e4567-e89b-12d3-a456-426614174000",
                 "shareUrl": "https://apexshot.org/s/7t1NE9mTWw9J",
-                "uploadUrl": "https://storage.example/upload"
+                "uploadUrl": "https://storage.example/upload",
+                "upload_protocol_version": 2,
+                "protected_upload": true,
+                "upload_mode": "r2",
+                "upload_headers": {
+                    "If-Match": "\"slot-etag\"",
+                    "x-amz-meta-apexshot-upload-token": "session-token"
+                }
             }"#,
         )
         .unwrap();
 
+        assert_eq!(response.upload_protocol_version, Some(2));
+        assert_eq!(response.protected_upload, Some(true));
+        assert_eq!(response.upload_mode.as_deref(), Some("r2"));
+        assert_eq!(
+            response.upload_headers.as_ref().unwrap().if_match,
+            "\"slot-etag\""
+        );
         assert_eq!(response.share_url, "https://apexshot.org/s/7t1NE9mTWw9J");
         assert_eq!(response.upload_url, "https://storage.example/upload");
+    }
+
+    #[test]
+    fn refuses_unprotected_responses_from_older_cloud_services() {
+        let old_response: CreateUploadResponse = serde_json::from_str(
+            r#"{
+                "id": "123e4567-e89b-12d3-a456-426614174000",
+                "share_url": "https://apexshot.org/s/7t1NE9mTWw9J",
+                "upload_url": "https://storage.example/upload"
+            }"#,
+        )
+        .unwrap();
+
+        let error = require_protected_upload_session(&old_response, "https://api.apexshot.org")
+            .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("does not confirm protected uploads"));
+    }
+
+    #[test]
+    fn requires_conditional_headers_for_r2_and_local_backend_url_for_fallback() {
+        let r2_without_headers = CreateUploadResponse {
+            id: "id".into(),
+            share_url: "https://apexshot.org/s/id".into(),
+            upload_url: "https://storage.example/upload".into(),
+            upload_protocol_version: Some(2),
+            protected_upload: Some(true),
+            upload_mode: Some("r2".into()),
+            upload_headers: None,
+        };
+        assert!(
+            require_protected_upload_session(&r2_without_headers, "https://api.apexshot.org")
+                .is_err()
+        );
+
+        let local = CreateUploadResponse {
+            id: "id".into(),
+            share_url: "https://apexshot.org/s/id".into(),
+            upload_url: "https://api.apexshot.org/v1/uploads/file/users/123e4567-e89b-12d3-a456-426614174000/42-file.png".into(),
+            upload_protocol_version: Some(2),
+            protected_upload: Some(true),
+            upload_mode: Some("local".into()),
+            upload_headers: None,
+        };
+        assert!(require_protected_upload_session(&local, "https://api.apexshot.org").unwrap());
+    }
+
+    #[test]
+    fn client_update_error_is_not_mapped_to_a_pro_plan_upgrade() {
+        let error = map_upload_http_error(make_status_error(
+            426,
+            r#"{"code":"client_update_required","error":"Update ApexShot to upload securely."}"#,
+        ));
+
+        assert!(
+            matches!(error, UploadError::Server(message) if message.contains("Update ApexShot"))
+        );
     }
 
     #[test]

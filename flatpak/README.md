@@ -18,10 +18,20 @@ flatpak install --user flathub \
 From the repository root, build and install the package for the current user:
 
 ```bash
+export APEXSHOT_STUDIO_VERIFY_KEY='<official public verification key>'
+export APEXSHOT_STUDIO_RELEASE_TIMESTAMP='<pinned official build marker>'
+bash flatpak/prepare-local-build-config.sh
 flatpak-builder --user --install --force-clean .flatpak-builder/build \
   flatpak/org.apexshot.ApexShot.yml
 flatpak run org.apexshot.ApexShot
 ```
+
+The public key and pinned release marker must match the official release
+configuration; neither is a signing secret. The helper validates both using
+the release gate and writes ignored local build inputs consumed by the
+manifest. CI supplies the same repository variables. A package built from
+this local manifest remains a development test package, not a publication
+submission.
 
 The first build downloads the pinned runtime and module sources. Cargo dependencies come from the generated `flatpak/cargo-sources.json`; the build runs with `--offline`, `--locked`, and `CARGO_NET_OFFLINE=true`. After the first successful build, repeat with `--disable-download` to verify all sources are cached:
 

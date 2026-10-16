@@ -1,6 +1,9 @@
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const DEFAULT_PREVIEW_AUTO_CLOSE_SECONDS: u32 = 12;
 pub const MIN_PREVIEW_AUTO_CLOSE_SECONDS: u32 = 3;
@@ -23,6 +26,8 @@ pub const DEFAULT_REC_AFTER_CAPTURE_SAVE: bool = true;
 pub const QUICK_ACCESS_OVERLAY_SCALE_MIN: f64 = 0.5;
 pub const QUICK_ACCESS_OVERLAY_SCALE_BASELINE: f64 = 1.0;
 pub const QUICK_ACCESS_OVERLAY_SCALE_MAX: f64 = 1.5;
+
+static CONFIG_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -505,12 +510,19 @@ pub fn load_config() -> AppConfig {
         return apply_cloud_env_overrides(AppConfig::default());
     };
 
-    let Ok(raw) = std::fs::read_to_string(&path) else {
-        return apply_cloud_env_overrides(AppConfig::default());
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return apply_cloud_env_overrides(AppConfig::default());
+        }
+        Err(_) => {
+            eprintln!("[config] Saved settings could not be read; defaults are active.");
+            return apply_cloud_env_overrides(AppConfig::default());
+        }
     };
 
-    serde_yml::from_str::<AppConfig>(&raw)
-        .map(|config| {
+    match serde_yml::from_str::<AppConfig>(&raw) {
+        Ok(config) => {
             let mut sanitized = config.sanitized();
             if should_migrate_legacy_quick_access_overlay_size(&raw, &sanitized) {
                 sanitized.quick_access_overlay_size = QUICK_ACCESS_OVERLAY_SCALE_BASELINE;
@@ -523,8 +535,14 @@ pub fn load_config() -> AppConfig {
                 let _ = save_config(&sanitized);
             }
             sanitized
-        })
-        .unwrap_or_else(|_| apply_cloud_env_overrides(AppConfig::default()))
+        }
+        Err(_) => {
+            eprintln!(
+                "[config] Saved settings could not be parsed; defaults are active and the original file is retained."
+            );
+            apply_cloud_env_overrides(AppConfig::default())
+        }
+    }
 }
 
 /// Resolve the cloud API base URL for requests.
@@ -651,25 +669,151 @@ fn parse_xbackbone_config_file(content: &str) -> Option<(String, String)> {
 
 pub fn save_config(config: &AppConfig) -> anyhow::Result<PathBuf> {
     let path = config_path().context("Failed to resolve config directory")?;
-
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create config directory {}", parent.display()))?;
-    }
-
     let serialized = serde_yml::to_string(&config.clone().sanitized())
         .context("Failed to serialize configuration")?;
-
-    std::fs::write(&path, serialized)
-        .with_context(|| format!("Failed to write config file {}", path.display()))?;
+    write_config_atomically(&path, &serialized)?;
 
     Ok(path)
 }
+
+fn write_config_atomically(path: &Path, serialized: &str) -> anyhow::Result<()> {
+    serde_yml::from_str::<AppConfig>(serialized).context("Serialized configuration is invalid")?;
+    let parent = path
+        .parent()
+        .context("Configuration path has no parent directory")?;
+    create_private_directory(parent)
+        .with_context(|| format!("Failed to create config directory {}", parent.display()))?;
+    let _lock = lock_config_writes(path)?;
+
+    let sequence = CONFIG_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let temporary = parent.join(format!(".config-{}-{sequence}.tmp", std::process::id()));
+    let result: anyhow::Result<()> = (|| {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        set_private_file_mode(&mut options);
+        let mut file = options.open(&temporary)?;
+        file.write_all(serialized.as_bytes())?;
+        file.sync_all()?;
+
+        preserve_invalid_config(path, parent)?;
+        fs::rename(&temporary, path)?;
+        File::open(parent)?.sync_all()?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result.with_context(|| format!("Failed to write config file {}", path.display()))
+}
+
+fn preserve_invalid_config(path: &Path, parent: &Path) -> anyhow::Result<()> {
+    let raw = match fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    if serde_yml::from_str::<AppConfig>(&raw).is_ok() {
+        return Ok(());
+    }
+
+    let sequence = CONFIG_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let backup = parent.join(format!(
+        "config.yml.invalid-{}-{sequence}",
+        std::process::id()
+    ));
+    fs::copy(path, &backup)?;
+    set_private_file_permissions(&backup)?;
+    File::open(&backup)?.sync_all()?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn lock_config_writes(path: &Path) -> anyhow::Result<File> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let parent = path
+        .parent()
+        .context("Configuration path has no parent directory")?;
+    let lock_path = parent.join(".config.yml.lock");
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).mode(0o600);
+    let file = options.open(&lock_path)?;
+    set_private_file_permissions(&lock_path)?;
+    let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) };
+    if result == -1 {
+        return Err(std::io::Error::last_os_error())
+            .with_context(|| format!("Failed to lock config file {}", path.display()));
+    }
+    Ok(file)
+}
+
+#[cfg(not(unix))]
+fn lock_config_writes(_path: &Path) -> anyhow::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn create_private_directory(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    let mut builder = fs::DirBuilder::new();
+    builder.recursive(true).mode(0o700).create(path)?;
+    set_private_directory_permissions(path)
+}
+
+#[cfg(not(unix))]
+fn create_private_directory(path: &Path) -> anyhow::Result<()> {
+    fs::create_dir_all(path)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_private_directory_permissions(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_directory_permissions(_path: &Path) -> anyhow::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_private_file_permissions(path: &Path) -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn set_private_file_permissions(_path: &Path) -> anyhow::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_private_file_mode(options: &mut OpenOptions) {
+    use std::os::unix::fs::OpenOptionsExt;
+    options.mode(0o600);
+}
+
+#[cfg(not(unix))]
+fn set_private_file_mode(_options: &mut OpenOptions) {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    fn temporary_config_path() -> PathBuf {
+        std::env::temp_dir()
+            .join(format!(
+                "apexshot-config-test-{}-{}",
+                std::process::id(),
+                CONFIG_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+            ))
+            .join("config.yml")
+    }
 
     #[test]
     fn default_config_has_expected_auto_close_seconds() {
@@ -678,6 +822,91 @@ mod tests {
             cfg.preview_auto_close_seconds,
             DEFAULT_PREVIEW_AUTO_CLOSE_SECONDS
         );
+    }
+
+    #[test]
+    fn config_write_is_atomic_private_and_preserves_settings_and_session_tokens() {
+        let path = temporary_config_path();
+        let config = AppConfig {
+            cloud_api_token: "test-access-token".into(),
+            cloud_refresh_token: "test-refresh-token".into(),
+            preview_auto_close_seconds: 42,
+            ..AppConfig::default()
+        };
+        let serialized = serde_yml::to_string(&config).unwrap();
+
+        write_config_atomically(&path, &serialized).unwrap();
+
+        let saved: AppConfig = serde_yml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert!(saved.cloud_api_token == config.cloud_api_token);
+        assert!(saved.cloud_refresh_token == config.cloud_refresh_token);
+        assert_eq!(saved.preview_auto_close_seconds, 42);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(path.parent().unwrap())
+                    .unwrap()
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o700
+            );
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn invalid_config_write_preserves_the_previous_file() {
+        let path = temporary_config_path();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let previous = "preview_auto_close_seconds: 42\n";
+        fs::write(&path, previous).unwrap();
+
+        assert!(write_config_atomically(&path, "[invalid yaml").is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), previous);
+
+        let _ = fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn replacing_malformed_config_retains_a_private_recovery_copy() {
+        let path = temporary_config_path();
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "cloud_api_token: [malformed\n").unwrap();
+        let serialized = serde_yml::to_string(&AppConfig::default()).unwrap();
+
+        write_config_atomically(&path, &serialized).unwrap();
+
+        let backup = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(Result::unwrap)
+            .find(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("config.yml.invalid-")
+            })
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(backup.path()).unwrap(),
+            "cloud_api_token: [malformed\n"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                backup.metadata().unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+
+        let _ = fs::remove_dir_all(path.parent().unwrap());
     }
 
     #[test]

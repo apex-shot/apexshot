@@ -34,6 +34,8 @@ pub mod preview_launch;
 pub mod qr;
 pub mod recording;
 pub mod settings;
+pub(crate) mod studio_entitlement;
+pub(crate) mod studio_upsell;
 #[cfg(test)]
 mod test_support;
 mod typography;

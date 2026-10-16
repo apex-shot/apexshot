@@ -3002,3 +3002,126 @@ msgstr "Экспорт завершён, но не удалось сохрани
 
 msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
 msgstr "В режиме Motion будет показан снимок аннотаций. При возврате в Static восстановятся обычные инструменты. Исходное изображение останется без изменений, если не включить перезапись в настройках → Аннотации."
+
+msgid "14-day refund on your first purchase."
+msgstr "Возврат в течение 14 дней для вашей первой покупки."
+
+msgid "Activate"
+msgstr "Активировать"
+
+msgid "Animate your captures with titles and easing, then export as MP4."
+msgstr "Анимируйте записи с помощью титров и плавности и экспортируйте их в MP4."
+
+msgid "Camera controls"
+msgstr "Управление камерой"
+
+msgid "Capture, annotation, recording and clean exports stay free."
+msgstr "Съёмка, аннотации, запись и чистый экспорт остаются бесплатными."
+
+msgid "Entitlement saved. This build isn't covered by the included updates; install a covered build to use Studio output."
+msgstr "Лицензия сохранена. Эта сборка не входит в период включённых обновлений; установите охваченную сборку, чтобы использовать вывод Studio."
+
+msgid "I have a license"
+msgstr "У меня есть лицензия"
+
+msgid "In this export"
+msgstr "В этом экспорте"
+
+msgid "Includes 12 months of updates. Versions you get keep working forever."
+msgstr "Включает 12 месяцев обновлений. Полученные вами версии продолжают работать навсегда."
+
+msgid "Instant zooms, speed, smoothness and motion blur for recordings."
+msgstr "Мгновенные зумы, скорость, плавность и размытие движения для записей."
+
+msgid "License saved, but this version is newer than the updates it includes."
+msgstr "Лицензия сохранена, но эта версия новее, чем включённые обновления."
+
+msgid "Manage license"
+msgstr "Управление лицензией"
+
+msgid "Motion text and its animation are Studio previews; final MP4 export needs activation."
+msgstr "Текст Motion и его анимация — это предпросмотр Studio; для финального экспорта в MP4 требуется активация."
+
+msgid "Motion timeline"
+msgstr "Таймлайн Motion"
+
+msgid "Paste Studio entitlement JSON"
+msgstr "Вставьте JSON лицензии Studio"
+
+msgid "Paste the signed entitlement you received after purchase. Activation is stored on this device and works offline."
+msgstr "Вставьте подписанную лицензию, полученную после покупки. Активация сохраняется на этом устройстве и работает офлайн."
+
+msgid "Paste your license"
+msgstr "Вставьте вашу лицензию"
+
+msgid "Perspective and placement"
+msgstr "Перспектива и размещение"
+
+msgid "Professional tools for presenting your captures."
+msgstr "Профессиональные инструменты для презентации ваших снимков."
+
+msgid "Purchase or recover Studio"
+msgstr "Купить или восстановить Studio"
+
+msgid "Recover license"
+msgstr "Восстановить лицензию"
+
+msgid "Studio"
+msgstr "Studio"
+
+msgid "Studio activated for this build."
+msgstr "Studio активирована для этой сборки."
+
+msgid "Studio controls. Default zoom and legacy easing stay free; active exports using non-default camera settings or instant animation need activation."
+msgstr "Элементы управления Studio. Масштаб по умолчанию и классическая плавность остаются бесплатными; экспорт с нестандартными настройками камеры или мгновенной анимацией требует активации."
+
+msgid "Studio export unavailable"
+msgstr "Экспорт Studio недоступен"
+
+msgid "Studio is optional. Your free capture, editing, recording, projects, and clean exports remain available without an account or network connection."
+msgstr "Studio необязательна. Бесплатные съёмка, редактирование, запись, проекты и чистый экспорт остаются доступными без аккаунта и подключения к сети."
+
+msgid "Studio isn't available"
+msgstr "Studio недоступна"
+
+msgid "Studio license couldn't be verified"
+msgstr "Не удалось проверить лицензию Studio"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images; backgrounds and normal edits stay free."
+msgstr "Предпросмотр Studio. Для итоговых изображений с нестандартной позой требуется активация; фоны и обычные правки остаются бесплатными."
+
+msgid "Studio preview. MP4 export needs activation; local editing and project saves remain free."
+msgstr "Предпросмотр Studio. Для экспорта в MP4 требуется активация; локальное редактирование и сохранение проектов остаются бесплатными."
+
+msgid "Studio status"
+msgstr "Состояние Studio"
+
+msgid "The license saved on this device couldn't be checked. Paste a valid license to unlock Studio."
+msgstr "Не удалось проверить лицензию, сохранённую на этом устройстве. Вставьте действующую лицензию, чтобы разблокировать Studio."
+
+msgid "This build can't verify Studio licenses, so this export can't be completed."
+msgstr "Эта сборка не может проверять лицензии Studio, поэтому завершить этот экспорт нельзя."
+
+msgid "This build can't verify Studio licenses. Check the official Studio page for build availability or license recovery; buying a license alone can't enable this build."
+msgstr "Эта сборка не может проверять лицензии Studio. На официальной странице Studio можно узнать о доступности совместимой версии или восстановить лицензию; одной покупки недостаточно, чтобы включить Studio в этой сборке."
+
+msgid "Check Studio availability"
+msgstr "Проверить доступность Studio"
+
+msgid "This version is newer than your license"
+msgstr "Эта версия новее вашей лицензии"
+
+msgid "Tilt, rotate and position a still inside its background."
+msgstr "Наклоняйте, поворачивайте и размещайте снимок внутри его фона."
+
+msgid "Unlock ApexShot Studio"
+msgstr "Разблокировать ApexShot Studio"
+
+msgid "Upgrade to Studio — $39 once"
+msgstr "Перейти на Studio — 39 $ единовременно"
+
+msgid "Your license includes updates through an earlier release. Versions it covers keep working offline."
+msgstr "Ваша лицензия включает обновления до более ранней версии. Охваченные ею версии продолжают работать офлайн."
+
+msgid "That license couldn't be verified. Make sure you pasted all of it."
+msgstr "Не удалось проверить эту лицензию. Убедитесь, что вы вставили её полностью."

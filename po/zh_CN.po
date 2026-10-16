@@ -2953,3 +2953,126 @@ msgstr "导出已完成，但无法保存编辑会话：{error}"
 
 msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
 msgstr "Motion 会播放注释快照。返回 Static 后会恢复实时编辑工具。除非在“设置 → 注释”中启用覆盖，否则原始图像不会更改。"
+
+msgid "14-day refund on your first purchase."
+msgstr "首次购买享 14 天退款。"
+
+msgid "Activate"
+msgstr "激活"
+
+msgid "Animate your captures with titles and easing, then export as MP4."
+msgstr "用标题和缓动效果为你的截图添加动画，并导出为 MP4。"
+
+msgid "Camera controls"
+msgstr "镜头控制"
+
+msgid "Capture, annotation, recording and clean exports stay free."
+msgstr "截图、标注、录制和纯净导出依然免费。"
+
+msgid "Entitlement saved. This build isn't covered by the included updates; install a covered build to use Studio output."
+msgstr "许可证已保存。此版本不在所含更新的覆盖范围内；请安装受覆盖的版本以使用 Studio 输出。"
+
+msgid "I have a license"
+msgstr "我已有许可证"
+
+msgid "In this export"
+msgstr "本次导出使用"
+
+msgid "Includes 12 months of updates. Versions you get keep working forever."
+msgstr "包含 12 个月更新。你获得的版本将永远可用。"
+
+msgid "Instant zooms, speed, smoothness and motion blur for recordings."
+msgstr "为录制提供即时缩放、速度、平滑度和运动模糊。"
+
+msgid "License saved, but this version is newer than the updates it includes."
+msgstr "许可证已保存，但此版本晚于所含更新的覆盖范围。"
+
+msgid "Manage license"
+msgstr "管理许可证"
+
+msgid "Motion text and its animation are Studio previews; final MP4 export needs activation."
+msgstr "Motion 文字及其动画属于 Studio 预览；最终 MP4 导出需要激活。"
+
+msgid "Motion timeline"
+msgstr "Motion 时间线"
+
+msgid "Paste Studio entitlement JSON"
+msgstr "粘贴 Studio 许可证 JSON"
+
+msgid "Paste the signed entitlement you received after purchase. Activation is stored on this device and works offline."
+msgstr "粘贴购买后收到的已签名许可证。激活信息保存在此设备上，可离线使用。"
+
+msgid "Paste your license"
+msgstr "粘贴你的许可证"
+
+msgid "Perspective and placement"
+msgstr "透视与位置"
+
+msgid "Professional tools for presenting your captures."
+msgstr "用于展示截图的专业工具。"
+
+msgid "Purchase or recover Studio"
+msgstr "购买或找回 Studio"
+
+msgid "Recover license"
+msgstr "找回许可证"
+
+msgid "Studio"
+msgstr "Studio"
+
+msgid "Studio activated for this build."
+msgstr "已为此版本激活 Studio。"
+
+msgid "Studio controls. Default zoom and legacy easing stay free; active exports using non-default camera settings or instant animation need activation."
+msgstr "Studio 控制。默认缩放和经典缓动保持免费；使用非默认镜头设置或即时动画的导出需要激活。"
+
+msgid "Studio export unavailable"
+msgstr "Studio 导出不可用"
+
+msgid "Studio is optional. Your free capture, editing, recording, projects, and clean exports remain available without an account or network connection."
+msgstr "Studio 为可选项。免费的截图、编辑、录制、项目和纯净导出无需账户或网络连接即可继续使用。"
+
+msgid "Studio isn't available"
+msgstr "Studio 不可用"
+
+msgid "Studio license couldn't be verified"
+msgstr "无法验证 Studio 许可证"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images; backgrounds and normal edits stay free."
+msgstr "Studio 预览。最终图像使用非默认渲染姿态需要激活；背景和常规编辑保持免费。"
+
+msgid "Studio preview. MP4 export needs activation; local editing and project saves remain free."
+msgstr "Studio 预览。MP4 导出需要激活；本地编辑和项目保存保持免费。"
+
+msgid "Studio status"
+msgstr "Studio 状态"
+
+msgid "The license saved on this device couldn't be checked. Paste a valid license to unlock Studio."
+msgstr "无法验证此设备上保存的许可证。请粘贴有效的许可证以解锁 Studio。"
+
+msgid "This build can't verify Studio licenses, so this export can't be completed."
+msgstr "此版本无法验证 Studio 许可证，因此无法完成此次导出。"
+
+msgid "This build can't verify Studio licenses. Check the official Studio page for build availability or license recovery; buying a license alone can't enable this build."
+msgstr "此版本无法验证 Studio 许可证。请查看 Studio 官方页面，了解兼容版本是否可用或找回许可证；仅购买许可证无法在此版本中启用 Studio。"
+
+msgid "Check Studio availability"
+msgstr "查看 Studio 是否可用"
+
+msgid "This version is newer than your license"
+msgstr "此版本比你的许可证更新"
+
+msgid "Tilt, rotate and position a still inside its background."
+msgstr "在背景中倾斜、旋转并定位静态图像。"
+
+msgid "Unlock ApexShot Studio"
+msgstr "解锁 ApexShot Studio"
+
+msgid "Upgrade to Studio — $39 once"
+msgstr "升级到 Studio — 一次性支付 39 美元"
+
+msgid "Your license includes updates through an earlier release. Versions it covers keep working offline."
+msgstr "你的许可证包含截至较早版本的更新。其覆盖的版本可继续离线使用。"
+
+msgid "That license couldn't be verified. Make sure you pasted all of it."
+msgstr "无法验证该许可证。请确认已粘贴完整内容。"

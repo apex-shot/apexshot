@@ -250,6 +250,7 @@ mod tests {
         motion.frame.preset = MotionFramePreset::Custom;
         motion.frame.custom_width = 320;
         motion.frame.custom_height = 180;
+        let _entitlement = crate::studio_entitlement::test_studio_entitlement();
         let output = super::export_motion_mp4(&snapshot, &motion, true, &output_path).unwrap();
         let probe = Command::new("ffprobe")
             .args([
