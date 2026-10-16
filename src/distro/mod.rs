@@ -21,12 +21,27 @@ pub struct DistroInfo {
 }
 
 impl DistroInfo {
-    /// Detect the current Linux distribution from /etc/os-release
+    /// Detect the current Linux distribution from the host's os-release file.
     pub fn detect() -> Option<Self> {
-        Self::detect_with_fallback(
+        Self::detect_with_paths(
+            crate::app_identity::portal_only(),
+            Path::new("/run/host/os-release"),
             Path::new("/etc/os-release"),
             Path::new("/usr/lib/os-release"),
         )
+    }
+
+    fn detect_with_paths(
+        portal_only: bool,
+        host: &Path,
+        primary: &Path,
+        fallback: &Path,
+    ) -> Option<Self> {
+        if portal_only {
+            Self::detect_from_path(host)
+        } else {
+            Self::detect_with_fallback(primary, fallback)
+        }
     }
 
     fn detect_with_fallback(primary: &Path, fallback: &Path) -> Option<Self> {
@@ -484,6 +499,77 @@ mod tests {
 
         fs::write(&primary, "NAME=Unknown\n").unwrap();
         assert!(DistroInfo::detect_with_fallback(&primary, &fallback).is_none());
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn portal_only_detection_uses_host_release_and_recognizes_fedora_derivatives() {
+        let directory = std::env::temp_dir().join(format!(
+            "apexshot-distro-flatpak-host-{}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let host = directory.join("host-os-release");
+        let runtime = directory.join("runtime-os-release");
+        let fallback = directory.join("runtime-fallback-os-release");
+        fs::write(&runtime, "ID=ubuntu\n").unwrap();
+        fs::write(&fallback, "ID=debian\n").unwrap();
+
+        for host_release in [
+            "ID=fedora\n",
+            "ID=custom\nID_LIKE=rhel\n",
+            "ID=custom\nID_LIKE=centos\n",
+        ] {
+            fs::write(&host, host_release).unwrap();
+            let distro = DistroInfo::detect_with_paths(true, &host, &runtime, &fallback).unwrap();
+            assert!(distro.is_fedora(), "{host_release}");
+        }
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn portal_only_detection_does_not_fall_back_to_runtime_release() {
+        let directory = std::env::temp_dir().join(format!(
+            "apexshot-distro-flatpak-missing-host-{}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let host = directory.join("host-os-release");
+        let runtime = directory.join("runtime-os-release");
+        let fallback = directory.join("runtime-fallback-os-release");
+        fs::write(&runtime, "ID=ubuntu\n").unwrap();
+        fs::write(&fallback, "ID=fedora\n").unwrap();
+
+        assert!(DistroInfo::detect_with_paths(true, &host, &runtime, &fallback).is_none());
+
+        fs::write(&host, "NAME=Malformed host release\n").unwrap();
+        assert!(DistroInfo::detect_with_paths(true, &host, &runtime, &fallback).is_none());
+
+        fs::remove_file(&host).unwrap();
+        fs::create_dir(&host).unwrap();
+        assert!(DistroInfo::detect_with_paths(true, &host, &runtime, &fallback).is_none());
+
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn native_detection_keeps_local_release_preferred_over_vendor_release() {
+        let directory = std::env::temp_dir().join(format!(
+            "apexshot-distro-native-priority-{}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let host = directory.join("host-os-release");
+        let primary = directory.join("etc-os-release");
+        let fallback = directory.join("usr-lib-os-release");
+        fs::write(&host, "ID=alpine\n").unwrap();
+        fs::write(&primary, "ID=ubuntu\n").unwrap();
+        fs::write(&fallback, "ID=fedora\n").unwrap();
+
+        let distro = DistroInfo::detect_with_paths(false, &host, &primary, &fallback).unwrap();
+        assert_eq!(distro.family(), DistroFamily::Debian);
+
         fs::remove_dir_all(directory).unwrap();
     }
 
