@@ -73,6 +73,11 @@ already ships `ccache` (4.14 on GNOME 50) and its objects live in
 `.flatpak-builder/ccache`. Without the flag the build points ccache at its
 disabled directory and compiles from scratch.
 
+A finished build leaves its own staging directories in the build directory, so
+a later build can refuse with "App dir ... is not empty". Passing
+`--force-clean` then only discards those, not the module caches under
+`.flatpak-builder/`.
+
 Harnesses that redirect `XDG_DATA_HOME` (some agent and desktop harnesses do)
 resolve `--user` to a private installation the desktop session cannot see, so
 the package never appears to `flatpak run` or the launcher. Unset
@@ -96,12 +101,20 @@ env -u XDG_DATA_HOME -u XDG_CACHE_HOME -u XDG_CONFIG_HOME \
 
 ### Build-tool version notes
 
-`flatpak-builder` supplies the install libdir itself, defaulting to `/app/lib`
-for an application, and passes `--libdir` to `meson setup`. Meson refuses the
-option twice, so the meson modules must not also set `-Dlibdir=lib`. A
-`flatpak-builder` old enough not to pass it falls back to meson's own default,
-which is `lib64` inside the SDK, so confirm where the library landed whenever
-the builder is upgraded:
+The meson modules set `-Dlibdir=lib` and keep doing so. `flatpak-builder` does
+not always supply the install libdir: the builder the packaging workflow uses
+passes none, so without the flag meson installs into the SDK's own default,
+`lib64`, and the Rust build then cannot find the library it asks pkg-config for
+under `/app/lib/pkgconfig`:
+
+```
+The system library `gtk4-layer-shell-0` required by crate `gtk4-layer-shell-sys` was not found.
+```
+
+A meson error saying the option is set twice is the opposite case: that local
+builder passes the libdir itself, so drop the flag for that one build and leave
+the manifest as it is. Confirm where the library landed whenever the builder
+changes:
 
 ```bash
 find .flatpak-builder/build/files -name 'libgtk4-layer-shell.so.0'

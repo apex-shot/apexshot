@@ -50,8 +50,12 @@ expensive (Qt 5 alone is about twenty minutes) and their results are cached in
 - Do not pass `--force-clean` for a routine rebuild. Add `--keep-build-dirs` so
   the application module's Cargo `target/` stays warm and a source change
   rebuilds incrementally.
-- The meson modules must not set `-Dlibdir=lib`: `flatpak-builder` passes the
-  libdir itself and meson rejects the duplicate option.
+- Keep `-Dlibdir=lib` on the meson modules. The builder the packaging workflow
+  uses passes no libdir, so without the flag meson installs into the SDK's
+  `lib64` and the Rust build cannot find `gtk4-layer-shell` in
+  `/app/lib/pkgconfig`. A meson error saying the option is set twice means that
+  local builder is passing the libdir itself: drop the flag for that build
+  only, never in the manifest.
 - Add `--ccache` to a rebuild so compiled C/C++ objects are reused; the SDK
   already ships `ccache` and its objects live in `.flatpak-builder/ccache`.
 - If `flatpak-builder` refuses with "App dir ... is not empty", pass
