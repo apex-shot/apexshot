@@ -2,7 +2,7 @@
 
 Run these against a disposable desktop VM, not an existing user's capture
 configuration. Build/install instructions are in [flatpak/README.md](../../flatpak/README.md).
-This is a test plan, not a claim that every row has passed.
+This is an acceptance plan, not a record of completed validation.
 
 ## GNOME companion installation
 
@@ -41,12 +41,16 @@ archive until a compatible extension release exists.
 | Install and foreground launch | Onboarding/settings, image editor, and video editor render |
 | Screenshot consent | First request prompts when required; approved capture produces a valid image |
 | Screenshot refusal | No image and no direct capture/second permission prompt after cancel/deny |
+| ScreenCast source validation | Screen/area requests use `monitor`, window requests use `window`, and `multiple=false`; unsupported source types, mismatched streams, or multiple returned streams fail safely rather than silently changing the target |
+| ScreenCast cancellation | Cancel/deny ends the request without a broadened-source retry or alternate direct-capture permission path |
 | Capture controls | Area, crosshair, fullscreen, Quick Capture, OCR/QR, and GUI window selection work or state a desktop capability limit |
 | GNOME companion enabled | Mask, preview positioning/stacking, window picker, pointer/click tracking work inside Flatpak |
 | GNOME companion disabled | App remains usable; optional integrations fail safely without claiming installation |
 | D-Bus isolation | Companion names have a different owner connection from `org.gnome.Shell`; sandbox cannot call Shell Eval |
 | Native coexistence | Starting Flatpak does not replace the native daemon or use its capture-helper sockets |
 | Recording consent | Authorized ScreenCast produces decodable video with the chosen source/crop |
+| Host distro detection | Distro detection inside Flatpak reports the host distro and release, not the runtime/SDK base |
+| Fedora recording limit | Current Fedora recording refusal remains explicit; screenshot capture still succeeds |
 | Recording controls | Countdown, stop/save, pause/resume/restart, pointer sidecar, and editor playback/export remain coherent |
 | Audio | Mic and speaker selection/metering work through the allowed socket; output contains requested audio |
 | Clipboard | Text, PNG, and saved-file references paste into another app, including after the capture worker returns |
@@ -58,10 +62,12 @@ archive until a compatible extension release exists.
 | System theme | System follows the host color scheme published by GTK or the Settings portal. If both are unavailable, use the runtime theme; explicit light/dark selections remain usable without dconf access. |
 | Native regression | Default-feature tests and relevant lints remain green; native desktop identities/backends remain unchanged |
 
-Record results separately for GNOME Wayland, GNOME X11, KDE Wayland, and a
-wlroots desktop with its portal backend. Portal features differ across these
-hosts; one VM pass does not establish all-desktop parity. Test x86_64 and
-aarch64 before advertising both architectures.
+Start with GNOME Wayland. For every tested setup, record the distro release,
+GNOME version, `xdg-desktop-portal` and `xdg-desktop-portal-gnome` versions,
+and the actual passed checks; do not generalize one GNOME distro's results to
+all GNOME distributions. Record GNOME X11, KDE Wayland, and wlroots results
+separately as experimental/best-effort until validated, without blocking use.
+Test x86_64 and aarch64 before advertising both architectures.
 
 For native coexistence, compare D-Bus owners for `org.apexshot.Daemon` and
 `org.apexshot.ApexShot.Daemon` and verify their separate saved/configuration paths.

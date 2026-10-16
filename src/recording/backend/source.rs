@@ -76,10 +76,18 @@ fn validate_portal_sources(
 ) -> RecordResult<()> {
     use ashpd::desktop::screencast::SourceType;
 
-    if target == RecordingTarget::Window && !available.contains(SourceType::Window) {
-        return Err(RecordError::UnsupportedBackend(
-            "The ScreenCast portal does not support window capture".into(),
-        ));
+    let requested = match target {
+        RecordingTarget::Window => SourceType::Window,
+        RecordingTarget::Screen | RecordingTarget::Area => SourceType::Monitor,
+    };
+    if !available.contains(requested) {
+        let message = match target {
+            RecordingTarget::Window => "The ScreenCast portal does not support window capture",
+            RecordingTarget::Screen | RecordingTarget::Area => {
+                "The ScreenCast portal does not support monitor capture"
+            }
+        };
+        return Err(RecordError::UnsupportedBackend(message.into()));
     }
     Ok(())
 }
@@ -91,20 +99,30 @@ fn validate_portal_stream(
 ) -> RecordResult<()> {
     use ashpd::desktop::screencast::SourceType;
 
-    if target != RecordingTarget::Window {
-        return if stream_count == 0 {
-            Err(RecordError::PortalError("No streams returned".into()))
-        } else {
-            Ok(())
-        };
-    }
-
     if stream_count != 1 {
+        if target != RecordingTarget::Window && stream_count == 0 {
+            return Err(RecordError::PortalError("No streams returned".into()));
+        }
+        if target != RecordingTarget::Window {
+            return Err(RecordError::UnsupportedBackend(
+                "The ScreenCast portal did not return a single monitor stream".into(),
+            ));
+        }
         return Err(RecordError::UnsupportedBackend(
             "The ScreenCast portal did not return a selected window stream".into(),
         ));
     }
-    if source_type.is_some_and(|source| source != SourceType::Window) {
+
+    let requested = match target {
+        RecordingTarget::Window => SourceType::Window,
+        RecordingTarget::Screen | RecordingTarget::Area => SourceType::Monitor,
+    };
+    if source_type.is_some_and(|source| source != requested) {
+        if target != RecordingTarget::Window {
+            return Err(RecordError::UnsupportedBackend(
+                "The ScreenCast portal returned a window instead of a monitor".into(),
+            ));
+        }
         return Err(RecordError::UnsupportedBackend(
             "The ScreenCast portal returned a monitor instead of a window".into(),
         ));
@@ -208,14 +226,17 @@ pub(in crate::recording) async fn get_wayland_source(
             .map_err(|e| RecordError::PortalError(e.to_string()))?;
 
         let available_cursor_modes = proxy.available_cursor_modes().await.map_err(portal_err)?;
-        if target == RecordingTarget::Window {
-            let available_source_types = proxy.available_source_types().await.map_err(|err| {
-                RecordError::UnsupportedBackend(format!(
-                    "Unable to confirm ScreenCast portal window capture support: {err}"
-                ))
-            })?;
-            validate_portal_sources(target, available_source_types)?;
-        }
+        let available_source_types = proxy.available_source_types().await.map_err(|err| {
+            let source = if target == RecordingTarget::Window {
+                "window"
+            } else {
+                "monitor"
+            };
+            RecordError::UnsupportedBackend(format!(
+                "Unable to confirm ScreenCast portal {source} capture support: {err}"
+            ))
+        })?;
+        validate_portal_sources(target, available_source_types)?;
         let requested_cursor_mode = cursor_mode;
         let cursor_mode = select_portal_cursor_mode(cursor_mode, available_cursor_modes)?;
         if requested_cursor_mode == CursorMode::Metadata && cursor_mode == CursorMode::Embedded {
@@ -437,6 +458,33 @@ mod tests {
             validate_portal_stream(RecordingTarget::Window, 1, Some(SourceType::Window)).is_ok()
         );
         assert!(validate_portal_stream(RecordingTarget::Screen, 1, None).is_ok());
+    }
+
+    #[test]
+    fn monitor_recording_requires_monitor_support_and_one_monitor_stream() {
+        use ashpd::desktop::screencast::SourceType;
+
+        for target in [RecordingTarget::Screen, RecordingTarget::Area] {
+            assert!(matches!(
+                validate_portal_sources(target, SourceType::Window.into()),
+                Err(RecordError::UnsupportedBackend(_))
+            ));
+            assert!(validate_portal_sources(target, SourceType::Monitor.into()).is_ok());
+            assert!(matches!(
+                validate_portal_stream(target, 0, None),
+                Err(RecordError::PortalError(_))
+            ));
+            assert!(matches!(
+                validate_portal_stream(target, 2, Some(SourceType::Monitor)),
+                Err(RecordError::UnsupportedBackend(_))
+            ));
+            assert!(matches!(
+                validate_portal_stream(target, 1, Some(SourceType::Window)),
+                Err(RecordError::UnsupportedBackend(_))
+            ));
+            assert!(validate_portal_stream(target, 1, Some(SourceType::Monitor)).is_ok());
+            assert!(validate_portal_stream(target, 1, None).is_ok());
+        }
     }
 
     #[test]

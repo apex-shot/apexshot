@@ -34,6 +34,17 @@ capture-helper sockets so it does not take over a native installation.
 | Browser companion | Existing native host | Optional host-managed Flatpak launcher for host browsers |
 | Package updates | Existing native updater | Host Flatpak/software-center updates |
 
+## Initial validation priority
+
+GNOME Wayland is the initial Flatpak support/validation priority; that sets the
+validation order, not a blanket claim for every GNOME distribution. An official
+support claim must name the tested distro release, GNOME version,
+`xdg-desktop-portal` and `xdg-desktop-portal-gnome` versions, and the actual
+Flatpak tests passed on that combination. Other desktops remain
+experimental/best-effort until individually validated, but are not blocked.
+This priority does not change native support; the GNOME extension remains
+optional and host-managed.
+
 ## Do not bypass the sandbox
 
 Do not request the whole session/system bus, host spawning, host/home filesystem
@@ -44,6 +55,12 @@ authorized by the ScreenCast portal, not a compositor-private capture path.
 Normal bundled clients such as `pactl` and `wl-copy` run inside the sandbox;
 they are not host escapes. Their audio/display connections still depend on
 the explicit Flatpak permissions and the host compositor's support.
+
+For portal requests that select a capture source, screen and area use `monitor`
+only, window capture uses `window` only, and `multiple` is always false. Area
+selection crops the authorized monitor stream; it is not an area-only portal
+permission. Unsupported sources or unexpected streams must fail safely rather
+than broaden the request.
 
 ## GNOME integration is optional and host-managed
 
