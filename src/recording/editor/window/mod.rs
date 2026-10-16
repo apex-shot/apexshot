@@ -113,7 +113,11 @@ fn build_window(application: &Application, initial_video: InitialVideo) {
         .default_height(900)
         .decorated(false)
         .build();
-    window.set_size_request(1400, 900);
+    // The editor is laid out for 1400x900, but the window also has to be
+    // usable on a 1366x768 display, so the floor sits well below the default.
+    // The transport bar holds the real minimum a little above it, near
+    // 1055x700.
+    window.set_size_request(1000, 700);
     window.add_css_class("editor-window");
 
     let root = GtkBox::new(Orientation::Vertical, 0);
