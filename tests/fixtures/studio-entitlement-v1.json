@@ -1,0 +1,10 @@
+{
+  "release_timestamp": 1792022400,
+  "public_key": "0EqyMnQrtKs6E2i9RhXk5tAiSrcaAWuvhSCjMsl3hzc",
+  "payload_json": "{\"schema_version\":1,\"license_id\":\"123e4567-e89b-12d3-a456-426614174000\",\"product\":\"apexshot-studio\",\"issued_at\":1792022400,\"updates_until\":1823558400}",
+  "envelope": {
+    "key_id": "studio-v1",
+    "payload": "eyJzY2hlbWFfdmVyc2lvbiI6MSwibGljZW5zZV9pZCI6IjEyM2U0NTY3LWU4OWItMTJkMy1hNDU2LTQyNjYxNDE3NDAwMCIsInByb2R1Y3QiOiJhcGV4c2hvdC1zdHVkaW8iLCJpc3N1ZWRfYXQiOjE3OTIwMjI0MDAsInVwZGF0ZXNfdW50aWwiOjE4MjM1NTg0MDB9",
+    "signature": "3wbwlUzjwPrbbqJmGnmnI4Py0nXfGA-_-sXKa7s3cLLt_qLibU0jIT44O2oR8fEBW6yFWXw_BXbmAsMdrpcjCg"
+  }
+}

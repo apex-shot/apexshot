@@ -99,6 +99,12 @@ Do Not Disturb option. Native packages retain that behavior. Direct compositor
 configuration, host package installation, and native updater execution also
 remain native-only operations.
 
+Flatpak usage telemetry remains off by default and requires explicit opt-in.
+When enabled, its payload includes a persistent random install ID, app version,
+distro, desktop, session, and coarse feature counts; it does not include
+screenshots or OCR content. Because the install ID persists, this is not fully
+anonymous. This plan makes no claim about server retention or IP handling.
+
 The tested GNOME 46.2 portal stack exposes the host color-scheme preference
 through the Settings portal when its backends are running. Automatic `System`
 theme following depends on that capability; if the portal is unavailable,

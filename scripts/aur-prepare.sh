@@ -4,15 +4,16 @@ set -euo pipefail
 
 usage() {
     cat <<'USAGE'
-Usage: scripts/aur-prepare.sh <version-or-tag>
+Usage: scripts/aur-prepare.sh <version-or-tag> [studio-verify-key studio-release-timestamp]
 
 Examples:
   scripts/aur-prepare.sh v0.2.26
   scripts/aur-prepare.sh 0.2.26
+  scripts/aur-prepare.sh v1.2.3 <public-verification-key> <pinned-release-timestamp>
 USAGE
 }
 
-if [[ $# -ne 1 ]]; then
+if [[ $# -ne 1 && $# -ne 3 ]]; then
     usage >&2
     exit 2
 fi
@@ -24,11 +25,17 @@ PKGBUILD="${ARCH_DIR}/PKGBUILD"
 SRCINFO="${ARCH_DIR}/.SRCINFO"
 
 tag="$1"
+verify_key="${2:-}"
+release_timestamp="${3:-}"
 pkgver="${tag#v}"
 
 if [[ ! "$pkgver" =~ ^[0-9]+(\.[0-9]+)+([._+-][A-Za-z0-9]+)*$ ]]; then
     echo "Invalid version/tag: ${tag}" >&2
     exit 1
+fi
+
+if [[ $# -eq 3 ]]; then
+    python3 "${ROOT_DIR}/scripts/release_gate.py" validate-config "$verify_key" "$release_timestamp"
 fi
 
 source_url="https://github.com/${REPO}/archive/v${pkgver}.tar.gz"
@@ -50,6 +57,11 @@ sed -i \
     -e "s#^source=.*#source=(\"${archive_name}::${source_url}\")#" \
     -e "s/^sha256sums=.*/sha256sums=('${sha256}')/" \
     "${PKGBUILD}"
+
+if [[ $# -eq 3 ]]; then
+    python3 "${ROOT_DIR}/scripts/release_gate.py" inject-aur-config \
+        "$PKGBUILD" "$verify_key" "$release_timestamp"
+fi
 
 if command -v makepkg >/dev/null 2>&1; then
     echo "Regenerating ${SRCINFO}"

@@ -32,6 +32,9 @@ pub(crate) fn run_update(args: &[String]) -> Result<(), String> {
         );
         return Ok(());
     };
+    if let Some(notice) = apexshot::update::studio_update_notice(&update) {
+        eprintln!("{notice}");
+    }
     println!(
         "Updating ApexShot {} to {}...",
         env!("CARGO_PKG_VERSION"),

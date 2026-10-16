@@ -18,10 +18,23 @@ flatpak install --user flathub \
 From the repository root, build and install the package for the current user:
 
 ```bash
+export APEXSHOT_STUDIO_VERIFY_KEY='<official public verification key>'
+export APEXSHOT_STUDIO_RELEASE_TIMESTAMP='<pinned official build marker>'
+bash flatpak/prepare-local-build-config.sh
 flatpak-builder --user --install --force-clean .flatpak-builder/build \
   flatpak/org.apexshot.ApexShot.yml
 flatpak run org.apexshot.ApexShot
 ```
+
+The public key and pinned release marker must match the official release
+configuration; neither is a signing secret. The helper validates both using
+the release gate and writes ignored local build inputs consumed by the
+manifest. They are optional for this local manifest: CI passes the same
+repository variables whenever the maintainer has configured them, and
+otherwise builds a test package without Studio unlock configuration, where the
+free program works and Studio final output is unavailable. A half-set pair is
+rejected rather than silently ignored. A package built from this local
+manifest remains a development test package, not a publication submission.
 
 The first build downloads the pinned runtime and module sources. Cargo dependencies come from the generated `flatpak/cargo-sources.json`; the build runs with `--offline`, `--locked`, and `CARGO_NET_OFFLINE=true`. After the first successful build, repeat once with `--disable-download` and `--force-clean` to prove every source is cached rather than merely present in the build directory. That is the only rebuild that should clean the build directory:
 

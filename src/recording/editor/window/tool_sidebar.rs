@@ -230,6 +230,14 @@ fn build_zoom_panel(
     instant_row.append(&instant_label);
     instant_row.append(&instant);
 
+    let studio_hint = Label::new(Some(&t(
+        "Studio controls. Default zoom and legacy easing stay free; active exports using non-default camera settings or instant animation need activation.",
+    )));
+    studio_hint.add_css_class("recording-editor-zoom-hint");
+    studio_hint.set_wrap(true);
+    studio_hint.set_xalign(0.0);
+    studio_hint.set_max_width_chars(34);
+
     let camera_hint = Label::new(Some(&t("These settings apply to every zoom.")));
     camera_hint.add_css_class("recording-editor-zoom-hint");
     camera_hint.set_wrap(true);
@@ -299,6 +307,7 @@ fn build_zoom_panel(
     body.append(&mode_hint);
     body.append(&chips);
     body.append(&animation_header);
+    body.append(&studio_hint);
     body.append(&instant_row);
     body.append(&camera_hint);
     body.append(&speed_slider.widget());

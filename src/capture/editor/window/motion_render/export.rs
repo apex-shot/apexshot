@@ -4,6 +4,10 @@ pub fn export_motion_mp4(
     prefers_dark: bool,
     destination: &Path,
 ) -> Result<PathBuf, String> {
+    crate::studio_entitlement::ensure_export_allowed(
+        crate::studio_entitlement::capabilities_for_motion_export(),
+    )
+    .map_err(|error| error.to_string())?;
     crate::recording::editor::ffmpeg::ensure_tools_available()
         .map_err(|error| error.to_string())?;
 

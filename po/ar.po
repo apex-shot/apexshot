@@ -2976,3 +2976,126 @@ msgstr "اكتمل التصدير، ولكن تعذر حفظ جلسة التحر
 
 msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
 msgstr "سيعرض Motion لقطة من التعليقات التوضيحية. يؤدي الرجوع إلى الوضع الثابت إلى استعادة الأدوات المباشرة. تظل الصورة الأصلية دون تغيير ما لم تفعّل الاستبدال في الإعدادات ← التعليق التوضيحي."
+
+msgid "14-day refund on your first purchase."
+msgstr "استرداد المبلغ خلال 14 يومًا عن أول عملية شراء."
+
+msgid "Activate"
+msgstr "تفعيل"
+
+msgid "Animate your captures with titles and easing, then export as MP4."
+msgstr "حرّك لقطاتك بالعناوين ومنحنيات التسارع ثم صدّرها بصيغة MP4."
+
+msgid "Camera controls"
+msgstr "عناصر التحكم في الكاميرا"
+
+msgid "Capture, annotation, recording and clean exports stay free."
+msgstr "الالتقاط والتعليق التوضيحي والتسجيل والتصدير النظيف تبقى مجانية."
+
+msgid "Entitlement saved. This build isn't covered by the included updates; install a covered build to use Studio output."
+msgstr "تم حفظ الترخيص. هذا الإصدار غير مشمول بالتحديثات المتضمنة؛ ثبّت إصدارًا مشمولًا لاستخدام مخرجات Studio."
+
+msgid "I have a license"
+msgstr "لدي ترخيص"
+
+msgid "In this export"
+msgstr "في هذا التصدير"
+
+msgid "Includes 12 months of updates. Versions you get keep working forever."
+msgstr "يتضمن تحديثات لمدة 12 شهرًا. الإصدارات التي تحصل عليها تستمر في العمل إلى الأبد."
+
+msgid "Instant zooms, speed, smoothness and motion blur for recordings."
+msgstr "تكبير فوري، وسرعة، وسلاسة، وضبابية حركة للتسجيلات."
+
+msgid "License saved, but this version is newer than the updates it includes."
+msgstr "تم حفظ الترخيص، لكن هذا الإصدار أحدث من التحديثات المتضمنة."
+
+msgid "Manage license"
+msgstr "إدارة الترخيص"
+
+msgid "Motion text and its animation are Studio previews; final MP4 export needs activation."
+msgstr "نص Motion وحركته معاينات في Studio؛ يتطلب التصدير النهائي بصيغة MP4 التفعيل."
+
+msgid "Motion timeline"
+msgstr "المخطط الزمني لـ Motion"
+
+msgid "Paste Studio entitlement JSON"
+msgstr "الصق JSON ترخيص Studio"
+
+msgid "Paste the signed entitlement you received after purchase. Activation is stored on this device and works offline."
+msgstr "الصق الترخيص الموقّع الذي تلقيته بعد الشراء. يُخزَّن التفعيل على هذا الجهاز ويعمل دون اتصال."
+
+msgid "Paste your license"
+msgstr "الصق ترخيصك"
+
+msgid "Perspective and placement"
+msgstr "المنظور والموضع"
+
+msgid "Professional tools for presenting your captures."
+msgstr "أدوات احترافية لعرض لقطاتك."
+
+msgid "Purchase or recover Studio"
+msgstr "شراء Studio أو استرداده"
+
+msgid "Recover license"
+msgstr "استرداد الترخيص"
+
+msgid "Studio"
+msgstr "Studio"
+
+msgid "Studio activated for this build."
+msgstr "تم تفعيل Studio لهذا الإصدار."
+
+msgid "Studio controls. Default zoom and legacy easing stay free; active exports using non-default camera settings or instant animation need activation."
+msgstr "عناصر تحكم Studio. التكبير الافتراضي ومنحنى التسارع القديم يبقيان مجانيين؛ أما التصدير باستخدام إعدادات كاميرا غير افتراضية أو حركة فورية فيتطلب التفعيل."
+
+msgid "Studio export unavailable"
+msgstr "تصدير Studio غير متاح"
+
+msgid "Studio is optional. Your free capture, editing, recording, projects, and clean exports remain available without an account or network connection."
+msgstr "Studio اختياري. يظل الالتقاط والتحرير والتسجيل والمشاريع والتصدير النظيف المجاني متاحة دون حساب أو اتصال بالشبكة."
+
+msgid "Studio isn't available"
+msgstr "Studio غير متاح"
+
+msgid "Studio license couldn't be verified"
+msgstr "تعذّر التحقق من ترخيص Studio"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images; backgrounds and normal edits stay free."
+msgstr "معاينة Studio. يتطلب الوضع المعروض غير الافتراضي التفعيل للصور النهائية؛ تبقى الخلفيات والتعديلات العادية مجانية."
+
+msgid "Studio preview. MP4 export needs activation; local editing and project saves remain free."
+msgstr "معاينة Studio. يتطلب التصدير بصيغة MP4 التفعيل؛ يبقى التحرير المحلي وحفظ المشاريع مجانيين."
+
+msgid "Studio status"
+msgstr "حالة Studio"
+
+msgid "The license saved on this device couldn't be checked. Paste a valid license to unlock Studio."
+msgstr "تعذّر التحقق من الترخيص المحفوظ على هذا الجهاز. الصق ترخيصًا صالحًا لفتح Studio."
+
+msgid "This build can't verify Studio licenses, so this export can't be completed."
+msgstr "لا يستطيع هذا الإصدار التحقق من تراخيص Studio، لذا لا يمكن إكمال هذا التصدير."
+
+msgid "This build can't verify Studio licenses. Check the official Studio page for build availability or license recovery; buying a license alone can't enable this build."
+msgstr "لا يستطيع هذا الإصدار التحقق من تراخيص Studio. راجع صفحة Studio الرسمية لمعرفة توفر إصدار مناسب أو استرداد الترخيص؛ شراء الترخيص وحده لن يفعّل هذا الإصدار."
+
+msgid "Check Studio availability"
+msgstr "تحقق من توفر Studio"
+
+msgid "This version is newer than your license"
+msgstr "هذا الإصدار أحدث من ترخيصك"
+
+msgid "Tilt, rotate and position a still inside its background."
+msgstr "أمِل لقطة ثابتة وأدرها وضعها داخل خلفيتها."
+
+msgid "Unlock ApexShot Studio"
+msgstr "افتح ApexShot Studio"
+
+msgid "Upgrade to Studio — $39 once"
+msgstr "الترقية إلى Studio — 39 دولارًا لمرة واحدة"
+
+msgid "Your license includes updates through an earlier release. Versions it covers keep working offline."
+msgstr "يتضمن ترخيصك تحديثات حتى إصدار أسبق. الإصدارات التي يغطيها تستمر في العمل دون اتصال."
+
+msgid "That license couldn't be verified. Make sure you pasted all of it."
+msgstr "تعذّر التحقق من هذا الترخيص. تأكد من لصقه بالكامل."

@@ -192,7 +192,14 @@ modules:
   - name: apexshot
     buildsystem: simple
     build-commands:
-      - cargo build --offline --release --locked --features flatpak --verbose
+      # The official Studio build configuration is optional for a test
+      # package: an official package embeds it, and a package without it still
+      # builds and runs as the free program with Studio output unavailable.
+      - >-
+        if [ -f flatpak/.studio-build-config.env ]; then
+        set -a && . flatpak/.studio-build-config.env && set +a;
+        fi &&
+        cargo build --offline --release --locked --features flatpak --verbose
       - install -Dm755 ./target/release/apexshot /app/libexec/apexshot.bin
       - install -Dm755 ./target/release/apexshot-capture /app/bin/apexshot-capture
       - install -Dm755 flatpak/apexshot-launcher.sh /app/bin/apexshot
@@ -220,8 +227,20 @@ modules:
         path: ..
         skip:
           - .git
-          - .flatpak-builder
+          - .env
+          - .env.*
+          - AGENTS.local.md
+          - .agents
+          - .antigravitycli
           - .cache
+          - .claude
+          - .codex
+          - .commandcode
+          - .kilo
+          - .flatpak-builder
+          - .tmp-inspect
+          - .worktrees
+          - apexshot-studio-implementation-prompt.md
           - attached_assets
           - build
           - capture-overlay/build

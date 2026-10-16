@@ -65,6 +65,8 @@ recording tool with Wayland portal and PipeWire support.
 # the caller) must not redirect the release binaries out of %{_builddir},
 # otherwise %install cannot find them.
 export CARGO_TARGET_DIR="%{_builddir}/%{name}-%{version}/target"
+APEXSHOT_STUDIO_VERIFY_KEY="%{getenv:APEXSHOT_STUDIO_VERIFY_KEY}" \
+APEXSHOT_STUDIO_RELEASE_TIMESTAMP="%{getenv:APEXSHOT_STUDIO_RELEASE_TIMESTAMP}" \
 cargo build --release
 
 %install

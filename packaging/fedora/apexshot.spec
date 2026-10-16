@@ -53,6 +53,8 @@ recording tool with Wayland portal and PipeWire support.
 %autosetup -n %{name}-%{version}
 
 %build
+APEXSHOT_STUDIO_VERIFY_KEY="%{getenv:APEXSHOT_STUDIO_VERIFY_KEY}" \
+APEXSHOT_STUDIO_RELEASE_TIMESTAMP="%{getenv:APEXSHOT_STUDIO_RELEASE_TIMESTAMP}" \
 cargo build --release
 
 %install

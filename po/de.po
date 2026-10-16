@@ -3016,3 +3016,126 @@ msgstr "Export abgeschlossen, aber die Bearbeitungssitzung konnte nicht gespeich
 
 msgid "Motion will play a snapshot of your annotations. Returning to Static restores the live tools. The original image stays unchanged unless you enable overwrite in Settings → Annotate."
 msgstr "Motion zeigt eine Momentaufnahme deiner Anmerkungen. Bei der Rückkehr zu Static werden die aktiven Werkzeuge wiederhergestellt. Das Originalbild bleibt unverändert, sofern du das Überschreiben nicht unter Einstellungen → Annotieren aktivierst."
+
+msgid "14-day refund on your first purchase."
+msgstr "14 Tage Rückerstattung für deinen ersten Kauf."
+
+msgid "Activate"
+msgstr "Aktivieren"
+
+msgid "Animate your captures with titles and easing, then export as MP4."
+msgstr "Animiere deine Aufnahmen mit Titeln und Easing und exportiere sie als MP4."
+
+msgid "Camera controls"
+msgstr "Kamerasteuerung"
+
+msgid "Capture, annotation, recording and clean exports stay free."
+msgstr "Aufnahme, Annotation, Bildschirmaufzeichnung und saubere Exporte bleiben kostenlos."
+
+msgid "Entitlement saved. This build isn't covered by the included updates; install a covered build to use Studio output."
+msgstr "Lizenz gespeichert. Dieser Build ist nicht von den enthaltenen Updates abgedeckt; installiere einen abgedeckten Build, um die Studio-Ausgabe zu nutzen."
+
+msgid "I have a license"
+msgstr "Ich habe eine Lizenz"
+
+msgid "In this export"
+msgstr "In diesem Export"
+
+msgid "Includes 12 months of updates. Versions you get keep working forever."
+msgstr "Enthält 12 Monate Updates. Versionen, die du erhältst, funktionieren für immer weiter."
+
+msgid "Instant zooms, speed, smoothness and motion blur for recordings."
+msgstr "Sofortige Zooms, Geschwindigkeit, Weichheit und Bewegungsunschärfe für Aufzeichnungen."
+
+msgid "License saved, but this version is newer than the updates it includes."
+msgstr "Lizenz gespeichert, aber diese Version ist neuer als die enthaltenen Updates."
+
+msgid "Manage license"
+msgstr "Lizenz verwalten"
+
+msgid "Motion text and its animation are Studio previews; final MP4 export needs activation."
+msgstr "Motion-Text und seine Animation sind Studio-Vorschauen; für den finalen MP4-Export ist eine Aktivierung nötig."
+
+msgid "Motion timeline"
+msgstr "Motion-Zeitleiste"
+
+msgid "Paste Studio entitlement JSON"
+msgstr "Studio-Lizenz als JSON einfügen"
+
+msgid "Paste the signed entitlement you received after purchase. Activation is stored on this device and works offline."
+msgstr "Füge die signierte Lizenz ein, die du nach dem Kauf erhalten hast. Die Aktivierung wird auf diesem Gerät gespeichert und funktioniert offline."
+
+msgid "Paste your license"
+msgstr "Lizenz einfügen"
+
+msgid "Perspective and placement"
+msgstr "Perspektive und Platzierung"
+
+msgid "Professional tools for presenting your captures."
+msgstr "Professionelle Werkzeuge, um deine Aufnahmen zu präsentieren."
+
+msgid "Purchase or recover Studio"
+msgstr "Studio kaufen oder wiederherstellen"
+
+msgid "Recover license"
+msgstr "Lizenz wiederherstellen"
+
+msgid "Studio"
+msgstr "Studio"
+
+msgid "Studio activated for this build."
+msgstr "Studio für diesen Build aktiviert."
+
+msgid "Studio controls. Default zoom and legacy easing stay free; active exports using non-default camera settings or instant animation need activation."
+msgstr "Studio-Steuerung. Standardzoom und klassisches Easing bleiben kostenlos; aktive Exporte mit nicht standardmäßigen Kameraeinstellungen oder Sofortanimation erfordern eine Aktivierung."
+
+msgid "Studio export unavailable"
+msgstr "Studio-Export nicht verfügbar"
+
+msgid "Studio is optional. Your free capture, editing, recording, projects, and clean exports remain available without an account or network connection."
+msgstr "Studio ist optional. Aufnahme, Bearbeitung, Bildschirmaufzeichnung, Projekte und saubere Exporte bleiben kostenlos und ohne Konto oder Netzwerkverbindung verfügbar."
+
+msgid "Studio isn't available"
+msgstr "Studio ist nicht verfügbar"
+
+msgid "Studio license couldn't be verified"
+msgstr "Studio-Lizenz konnte nicht überprüft werden"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images; backgrounds and normal edits stay free."
+msgstr "Studio-Vorschau. Eine nicht standardmäßig gerenderte Pose erfordert für finale Bilder eine Aktivierung; Hintergründe und normale Bearbeitungen bleiben kostenlos."
+
+msgid "Studio preview. MP4 export needs activation; local editing and project saves remain free."
+msgstr "Studio-Vorschau. Der MP4-Export erfordert eine Aktivierung; lokale Bearbeitung und Projektspeicherung bleiben kostenlos."
+
+msgid "Studio status"
+msgstr "Studio-Status"
+
+msgid "The license saved on this device couldn't be checked. Paste a valid license to unlock Studio."
+msgstr "Die auf diesem Gerät gespeicherte Lizenz konnte nicht überprüft werden. Füge eine gültige Lizenz ein, um Studio freizuschalten."
+
+msgid "This build can't verify Studio licenses, so this export can't be completed."
+msgstr "Dieser Build kann Studio-Lizenzen nicht überprüfen, daher lässt sich dieser Export nicht abschließen."
+
+msgid "This build can't verify Studio licenses. Check the official Studio page for build availability or license recovery; buying a license alone can't enable this build."
+msgstr "Dieser Build kann Studio-Lizenzen nicht überprüfen. Auf der offiziellen Studio-Seite findest du Informationen zu verfügbaren Builds oder zur Lizenzwiederherstellung; der Kauf allein aktiviert diesen Build nicht."
+
+msgid "Check Studio availability"
+msgstr "Studio-Verfügbarkeit prüfen"
+
+msgid "This version is newer than your license"
+msgstr "Diese Version ist neuer als deine Lizenz"
+
+msgid "Tilt, rotate and position a still inside its background."
+msgstr "Neige, drehe und positioniere ein Standbild innerhalb seines Hintergrunds."
+
+msgid "Unlock ApexShot Studio"
+msgstr "ApexShot Studio freischalten"
+
+msgid "Upgrade to Studio — $39 once"
+msgstr "Auf Studio upgraden — einmalig 39 $"
+
+msgid "Your license includes updates through an earlier release. Versions it covers keep working offline."
+msgstr "Deine Lizenz enthält Updates bis zu einer früheren Version. Versionen, die sie abdeckt, funktionieren weiterhin offline."
+
+msgid "That license couldn't be verified. Make sure you pasted all of it."
+msgstr "Diese Lizenz konnte nicht überprüft werden. Achte darauf, dass du sie vollständig eingefügt hast."

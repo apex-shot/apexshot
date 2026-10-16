@@ -44,6 +44,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Provide the public Studio build configuration
+        env:
+          APEXSHOT_STUDIO_VERIFY_KEY: ${{ vars.APEXSHOT_STUDIO_VERIFY_KEY }}
+          APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ vars.APEXSHOT_STUDIO_RELEASE_TIMESTAMP }}
+        run: bash flatpak/prepare-local-build-config.sh
+
       - name: Install Flatpak build tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends flatpak flatpak-builder elfutils librsvg2-common
 
@@ -66,4 +72,4 @@ jobs:
           build-bundle: false
           upload-artifact: false
           cache: true
-          cache-key: flatpak-${{ hashFiles('flatpak/org.apexshot.ApexShot.yml', 'flatpak/cargo-sources.json', 'Cargo.lock') }}
+          cache-key: flatpak-${{ hashFiles('flatpak/org.apexshot.ApexShot.yml', 'flatpak/cargo-sources.json', 'Cargo.lock', 'flatpak/.studio-build-config.env') }}

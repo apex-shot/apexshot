@@ -543,6 +543,7 @@ fn run_trim_only_cancellable(
     output_path: PathBuf,
     cancellation: Option<&AtomicBool>,
 ) -> anyhow::Result<PathBuf> {
+    ensure_studio_export_allowed(state)?;
     ensure_export_destination_is_distinct(state, &output_path)?;
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
@@ -567,6 +568,7 @@ fn run_convert_cancellable(
     output_path: PathBuf,
     cancellation: Option<&AtomicBool>,
 ) -> anyhow::Result<PathBuf> {
+    ensure_studio_export_allowed(state)?;
     ensure_export_destination_is_distinct(state, &output_path)?;
     let kept = state.ordered_kept_segments();
     if kept.is_empty() {
@@ -760,6 +762,7 @@ pub(crate) fn export_edited_to_cancellable(
     output_path: PathBuf,
     cancellation: Option<&AtomicBool>,
 ) -> anyhow::Result<PathBuf> {
+    ensure_studio_export_allowed(state)?;
     if cancellation_requested(cancellation) {
         anyhow::bail!("export cancelled");
     }
@@ -794,6 +797,13 @@ pub(crate) fn export_edited_to_cancellable(
         anyhow::bail!("export cancelled");
     }
     Ok(path)
+}
+
+fn ensure_studio_export_allowed(state: &VideoEditState) -> anyhow::Result<()> {
+    crate::studio_entitlement::ensure_export_allowed(
+        crate::studio_entitlement::capabilities_for_video(state),
+    )
+    .map_err(|error| anyhow!(error.to_string()))
 }
 
 fn ensure_export_destination_is_distinct(
@@ -2409,6 +2419,7 @@ mod tests {
 
     #[test]
     fn camera_blur_export_streams_the_current_cursor_before_averaging() {
+        let _entitlement = crate::studio_entitlement::test_studio_entitlement();
         use crate::recording::editor::sidecar::{
             CaptureRegion, CursorKind, PointerSample, PointerSidecar,
         };
@@ -3602,6 +3613,7 @@ mod tests {
 
     #[test]
     fn auto_zoom_follow_camera_pans_to_the_pointer_in_the_export() {
+        let _entitlement = crate::studio_entitlement::test_studio_entitlement();
         if Command::new("ffmpeg").arg("-version").output().is_err() {
             return;
         }

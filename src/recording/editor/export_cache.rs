@@ -217,6 +217,10 @@ fn global() -> &'static ExportCache {
 
 /// Return the last successful export when its inputs and output are unchanged.
 pub(crate) fn find(state: &VideoEditState, cancellation: Option<&AtomicBool>) -> Option<PathBuf> {
+    crate::studio_entitlement::ensure_export_allowed(
+        crate::studio_entitlement::capabilities_for_video(state),
+    )
+    .ok()?;
     global().lookup(state, cancellation)
 }
 

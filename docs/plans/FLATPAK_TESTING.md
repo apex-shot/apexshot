@@ -59,6 +59,8 @@ archive until a compatible extension release exists.
 | Background | Autostart consent and revocation are reflected honestly; denial leaves foreground use intact |
 | Browser bridge | Host browser ping/import produces framed protocol replies and opens the image; installer refuses existing native registration by default |
 | Offline launch | Settings/editors and bundled OCR remain useful without cloud/model downloads |
+| Usage telemetry | Off by default and explicit opt-in; verify no collection or heartbeat transmission before opt-in or after opt-out, and verify the persistent random install ID, app version, distro, desktop, session, and coarse feature counts, with no screenshot/OCR content. Do not call it fully anonymous or make unaudited retention/IP claims. |
+| Studio activation | Verify the official key/release marker, valid-token activation, restart and offline output for a covered version, free functionality and unavailable Studio-only output with no configuration, and separate native/Flatpak activation stores |
 | System theme | System follows the host color scheme published by GTK or the Settings portal. If both are unavailable, use the runtime theme; explicit light/dark selections remain usable without dconf access. |
 | Native regression | Default-feature tests and relevant lints remain green; native desktop identities/backends remain unchanged |
 

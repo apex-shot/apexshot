@@ -21,6 +21,7 @@ mod recording;
 mod screenshots;
 pub(crate) mod select;
 mod shortcuts;
+mod studio;
 mod theme_picker;
 pub(crate) mod ui_support;
 pub(crate) mod windowing;
@@ -314,6 +315,7 @@ fn build_settings_window(app: &Application) {
         ("Annotate", custom::APP_ICON_DESIGN_SYMBOLIC),
         ("Cloud", custom::CLOUD_OUTLINE_THIN_SYMBOLIC),
         ("Advanced", custom::SETTINGS_SYMBOLIC),
+        ("Studio", custom::CLAPPERBOARD_SYMBOLIC),
         ("About", custom::INFO_SYMBOLIC),
     ];
 
@@ -401,6 +403,7 @@ fn build_settings_window(app: &Application) {
     let shortcuts = shortcuts::build_shortcuts_section(&config);
     shortcuts::install_shortcut_editors(&shortcuts, &window);
     let quick_access = build_quick_access_section(&config);
+    let studio = studio::build_studio_section();
 
     let screenshot_export_location_entry_pick = screenshots.export_location_entry.clone();
     let window_weak_picker = window.downgrade();
@@ -491,7 +494,8 @@ fn build_settings_window(app: &Application) {
     add_section(&stack, &annotate.section, "5", &t("Annotate"));
     add_section(&stack, &cloud.section, "6", &t("Cloud"));
     add_section(&stack, &advanced.section, "7", &t("Advanced"));
-    add_section(&stack, &about.section, "8", &t("About"));
+    add_section(&stack, &studio, "8", &t("Studio"));
+    add_section(&stack, &about.section, "9", &t("About"));
 
     body_frame.append(&stack);
 

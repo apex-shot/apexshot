@@ -201,8 +201,21 @@ fn wire_upload_button(
 ) {
     button.set_sensitive(state.lock().unwrap().has_source_video());
     let window = window.downgrade();
-    button.connect_clicked(move |_| {
+    button.connect_clicked(move |button| {
         if exporting.get() || !state.lock().unwrap().has_source_video() {
+            return;
+        }
+
+        let state_snapshot = state.lock().unwrap().clone();
+        let Some(gate_window) = window.upgrade() else {
+            return;
+        };
+        let retry = button.clone();
+        if !crate::studio_upsell::gate(
+            &gate_window,
+            crate::studio_entitlement::capabilities_for_video(&state_snapshot),
+            move || retry.emit_clicked(),
+        ) {
             return;
         }
 
@@ -222,7 +235,6 @@ fn wire_upload_button(
         }
 
         // Export with current editor settings first, then upload the result.
-        let state_snapshot = state.lock().unwrap().clone();
         let cancellation_worker = export_cancellation.clone();
         let (sender, receiver) =
             std::sync::mpsc::channel::<Result<String, crate::cloud::upload::UploadError>>();
@@ -233,6 +245,14 @@ fn wire_upload_button(
                         "Export cancelled".into(),
                     ));
                 }
+                crate::studio_entitlement::ensure_export_allowed(
+                    crate::studio_entitlement::capabilities_for_video(&state_snapshot),
+                )
+                .map_err(|error| {
+                    crate::cloud::upload::UploadError::Server(format!(
+                        "Export before upload failed: {error}"
+                    ))
+                })?;
                 // Reuse the last export while every input that shaped it is
                 // unchanged, so uploading costs no second encode.
                 let cached_path = crate::recording::editor::export_cache::find(
@@ -351,14 +371,23 @@ fn wire_export_button(
     let chooser_slot = Rc::new(RefCell::new(None::<FileChooserNative>));
     button.set_sensitive(state.lock().unwrap().has_source_video());
     let chooser_slot_click = chooser_slot.clone();
-    button.connect_clicked(move |_| {
+    button.connect_clicked(move |button| {
         if exporting.get()
             || chooser_slot_click.borrow().is_some()
             || !state.lock().unwrap().has_source_video()
         {
             return;
         }
-        let suggested = state.lock().unwrap().export_path();
+        let state_snapshot = state.lock().unwrap().clone();
+        let retry = button.clone();
+        if !crate::studio_upsell::gate(
+            &window,
+            crate::studio_entitlement::capabilities_for_video(&state_snapshot),
+            move || retry.emit_clicked(),
+        ) {
+            return;
+        }
+        let suggested = state_snapshot.export_path();
         let suggested_dir = crate::config::load_config()
             .video_editor_export_dir(suggested.parent().unwrap_or_else(|| Path::new("")));
         let title = t("Export video");
@@ -553,6 +582,9 @@ mod tests {
         let cache = upload
             .find("export_cache::find")
             .expect("cached export lookup");
+        let entitlement = upload
+            .find("ensure_export_allowed")
+            .expect("Studio entitlement preflight");
         let render = upload
             .find("export_edited_to_cancellable")
             .expect("fresh render fallback");
@@ -560,6 +592,10 @@ mod tests {
         assert!(
             cache < render && render < network,
             "Upload must look for a reusable render before encoding, and only then upload",
+        );
+        assert!(
+            entitlement < cache,
+            "Upload must check the entitlement before reusing a rendered export",
         );
         assert!(
             !upload.contains("remove_file(&path)"),

@@ -48,7 +48,24 @@ pub(super) fn wire_output_lifecycle(
     export_motion: Rc<dyn Fn(&Path) -> Result<PathBuf, String>>,
 ) {
     let state_copy = state.clone();
+    let window_copy = window.downgrade();
+    let copy_retry = copy_btn.downgrade();
     copy_btn.connect_clicked(move |_| {
+        let capabilities = crate::studio_entitlement::capabilities_for_static_image(
+            state_copy.lock().unwrap().static_image_transform,
+        );
+        let Some(window) = window_copy.upgrade() else {
+            return;
+        };
+        let retry = copy_retry.clone();
+        if !crate::studio_upsell::gate(&window, capabilities, move || {
+            if let Some(button) = retry.upgrade() {
+                button.emit_clicked();
+            }
+        }) {
+            return;
+        }
+
         let config = crate::config::load_config().sanitized();
         let mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
             &config.adv_clipboard_mode,
@@ -131,8 +148,26 @@ pub(super) fn wire_output_lifecycle(
     });
     let uploading_click = uploading.clone();
     let upload_btn_click = upload_btn.clone();
+    let window_upload_gate = window.downgrade();
+    let upload_retry = upload_btn.downgrade();
     upload_btn.connect_clicked(move |_| {
         if uploading_click.get() {
+            return;
+        }
+
+        let image_capabilities = {
+            let state = state_upload.lock().unwrap();
+            crate::studio_entitlement::capabilities_for_static_image(state.static_image_transform)
+        };
+        let Some(window) = window_upload_gate.upgrade() else {
+            return;
+        };
+        let retry = upload_retry.clone();
+        if !crate::studio_upsell::gate(&window, image_capabilities, move || {
+            if let Some(button) = retry.upgrade() {
+                button.emit_clicked();
+            }
+        }) {
             return;
         }
 
@@ -234,6 +269,23 @@ pub(super) fn wire_output_lifecycle(
         let export_btn = export_btn.clone();
         glib::idle_add_local_once(move || {
             if export_busy.get() || save_chooser_open.get() {
+                return;
+            }
+
+            let capabilities = if in_motion.get() {
+                crate::studio_entitlement::capabilities_for_motion_export()
+            } else {
+                let state = state_save.lock().unwrap();
+                crate::studio_entitlement::capabilities_for_static_image(
+                    state.static_image_transform,
+                )
+            };
+            let Some(gate_window) = window_save.upgrade() else {
+                return;
+            };
+            let retry = export_btn.clone();
+            if !crate::studio_upsell::gate(&gate_window, capabilities, move || retry.emit_clicked())
+            {
                 return;
             }
 
@@ -786,9 +838,9 @@ mod tests {
         let saved = Path::new("/tmp/shot.png");
 
         assert!(is_unsaved_capture(&unsaved));
-        assert!(static_export_needs_chooser(&saved, false));
+        assert!(static_export_needs_chooser(saved, false));
         assert!(static_export_needs_chooser(&unsaved, true));
-        assert!(!static_export_needs_chooser(&saved, true));
+        assert!(!static_export_needs_chooser(saved, true));
     }
 
     #[test]
@@ -979,9 +1031,17 @@ mod tests {
         let upload_position = upload_handler
             .find("upload_file_with_notifications")
             .expect("upload request");
+        let entitlement_position = upload_handler
+            .find("studio_upsell::gate")
+            .expect("direct-upload entitlement guard");
+        let render_position = upload_handler
+            .find("state.to_final_image()")
+            .expect("flatten before direct upload");
         assert!(
-            save_position < upload_position,
-            "Image editor Upload must persist canvas edits before uploading the file"
+            entitlement_position < render_position
+                && save_position < upload_position
+                && render_position < upload_position,
+            "Image editor Upload must guard, flatten edits, and save before uploading the file"
         );
     }
 

@@ -1,0 +1,222 @@
+name: Promote stable release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Stable draft tag to publish (for example v1.2.3)
+        required: true
+        type: string
+      confirmation:
+        description: Type PUBLISH followed by the exact tag
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  authorize:
+    name: Authorize explicit promotion
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Require the maintainer, main branch, stable tag, and exact confirmation
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+        run: >-
+          python3 scripts/release_gate.py authorize-promotion
+          "$GITHUB_ACTOR" "$GITHUB_REF" "$RELEASE_TAG" "$RELEASE_CONFIRMATION"
+
+  promote:
+    name: Verify staged release and publish it
+    runs-on: ubuntu-latest
+    needs: [authorize]
+    concurrency:
+      group: stable-release-${{ github.repository }}-${{ inputs.tag }}
+      cancel-in-progress: false
+    environment: stable-release
+    outputs:
+      verify_key: ${{ steps.verify.outputs.verify_key }}
+      release_timestamp: ${{ steps.verify.outputs.release_timestamp }}
+      source_commit: ${{ steps.verify.outputs.source_commit }}
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      APEXSHOT_STUDIO_VERIFY_KEY: ${{ vars.APEXSHOT_STUDIO_VERIFY_KEY }}
+      APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ vars.APEXSHOT_STUDIO_RELEASE_TIMESTAMP }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Checkout main and full release history
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download and verify the draft and its complete asset set
+        id: verify
+        run: |
+          set -euo pipefail
+          python3 scripts/release_gate.py validate-config \
+            "$APEXSHOT_STUDIO_VERIFY_KEY" "$APEXSHOT_STUDIO_RELEASE_TIMESTAMP"
+          python3 scripts/release_gate.py authorize-promotion \
+            "$GITHUB_ACTOR" "$GITHUB_REF" "$RELEASE_TAG" "PUBLISH $RELEASE_TAG"
+          git fetch origin main --tags
+          tag_commit="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          git merge-base --is-ancestor "${RELEASE_TAG}^{commit}" origin/main
+          release_json="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName)"
+          jq -e --arg tag "$RELEASE_TAG" \
+            '.tagName == $tag and .isDraft == true and .isPrerelease == false' \
+            <<<"$release_json" >/dev/null
+          mkdir -p staged-assets
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --dir staged-assets
+          python3 scripts/release_gate.py validate-assets staged-assets \
+            --require-stable \
+            --verify-key "$APEXSHOT_STUDIO_VERIFY_KEY" \
+            --release-timestamp "$APEXSHOT_STUDIO_RELEASE_TIMESTAMP" \
+            --source-commit "$tag_commit"
+          printf 'verify_key=%s\n' "$APEXSHOT_STUDIO_VERIFY_KEY" >> "$GITHUB_OUTPUT"
+          printf 'release_timestamp=%s\n' "$APEXSHOT_STUDIO_RELEASE_TIMESTAMP" >> "$GITHUB_OUTPUT"
+          printf 'source_commit=%s\n' "$tag_commit" >> "$GITHUB_OUTPUT"
+          python3 - "$RELEASE_TAG" staged-assets/STUDIO_RELEASE_METADATA.json "$tag_commit" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          tag, path, tag_commit = sys.argv[1:]
+          metadata = json.loads(Path(path).read_text(encoding="utf-8"))
+          if metadata["tag"] != tag or metadata["source_commit"] != tag_commit:
+              raise SystemExit("Staged metadata tag or source commit does not match the requested release")
+          PY
+          previous_tag="$(gh api "/repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name' 2>/dev/null || true)"
+          if [ -n "$previous_tag" ]; then
+            has_metadata="$(gh release view "$previous_tag" --repo "$GITHUB_REPOSITORY" \
+              --json assets --jq '[.assets[].name] | index("STUDIO_RELEASE_METADATA.json") != null')"
+            if [ "$has_metadata" = "true" ]; then
+              mkdir -p previous-assets
+              gh release download "$previous_tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --pattern STUDIO_RELEASE_METADATA.json \
+                --dir previous-assets
+              candidate_timestamp="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["release_timestamp"])' staged-assets/STUDIO_RELEASE_METADATA.json)"
+              previous_timestamp="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["release_timestamp"])' previous-assets/STUDIO_RELEASE_METADATA.json)"
+              candidate_fingerprint="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["verify_key_sha256"])' staged-assets/STUDIO_RELEASE_METADATA.json)"
+              previous_fingerprint="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["verify_key_sha256"])' previous-assets/STUDIO_RELEASE_METADATA.json)"
+              python3 scripts/release_gate.py validate-marker-advances \
+                "$candidate_timestamp" "$previous_timestamp"
+              python3 scripts/release_gate.py validate-key-continuity \
+                "$candidate_fingerprint" "$previous_fingerprint"
+            fi
+          fi
+
+      - name: Publish the verified stable release
+        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+
+  aur:
+    name: Publish AUR after stable promotion
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+    needs: [promote]
+    container:
+      image: archlinux:latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_SOURCE_COMMIT: ${{ needs.promote.outputs.source_commit }}
+      AUR_PACKAGE: apexshot
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+      AUR_SSH_KNOWN_HOSTS: ${{ secrets.AUR_SSH_KNOWN_HOSTS }}
+      APEXSHOT_STUDIO_VERIFY_KEY: ${{ needs.promote.outputs.verify_key }}
+      APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ needs.promote.outputs.release_timestamp }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Checkout the promoted source tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Install release verification tools
+        run: |
+          pacman-key --init
+          pacman-key --populate archlinux
+          pacman -Syu --noconfirm curl git github-cli jq python
+
+      - name: Confirm the stable release is published and configuration is valid
+        run: |
+          set -euo pipefail
+          source_commit="$(git rev-parse HEAD)"
+          if [ "$source_commit" != "$RELEASE_SOURCE_COMMIT" ]; then
+            echo "The promoted tag no longer points to the verified source commit." >&2
+            exit 1
+          fi
+          python3 scripts/release_gate.py authorize-promotion \
+            "$GITHUB_ACTOR" "$GITHUB_REF" "$RELEASE_TAG" "PUBLISH $RELEASE_TAG"
+          python3 scripts/release_gate.py validate-config \
+            "$APEXSHOT_STUDIO_VERIFY_KEY" "$APEXSHOT_STUDIO_RELEASE_TIMESTAMP"
+          release_json="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease,tagName)"
+          jq -e --arg tag "$RELEASE_TAG" \
+            '.tagName == $tag and .isDraft == false and .isPrerelease == false' \
+            <<<"$release_json" >/dev/null
+
+      - name: Require AUR credentials
+        if: env.AUR_SSH_PRIVATE_KEY == '' || env.AUR_SSH_KNOWN_HOSTS == ''
+        run: |
+          echo "AUR_SSH_PRIVATE_KEY and pinned AUR_SSH_KNOWN_HOSTS are required; the stable release is published but AUR was not updated." >&2
+          exit 1
+
+      - name: Install AUR publishing tools
+        run: |
+          pacman -S --noconfirm --needed base-devel git openssh sudo
+          useradd -m builduser
+          echo 'builduser ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+          chown -R builduser:builduser "$GITHUB_WORKSPACE"
+
+      - name: Prepare and validate AUR metadata
+        run: |
+          set -euo pipefail
+          sudo -u builduser env \
+            APEXSHOT_STUDIO_VERIFY_KEY="$APEXSHOT_STUDIO_VERIFY_KEY" \
+            APEXSHOT_STUDIO_RELEASE_TIMESTAMP="$APEXSHOT_STUDIO_RELEASE_TIMESTAMP" \
+            "$GITHUB_WORKSPACE/scripts/aur-prepare.sh" \
+            "$RELEASE_TAG" "$APEXSHOT_STUDIO_VERIFY_KEY" "$APEXSHOT_STUDIO_RELEASE_TIMESTAMP"
+          sudo -u builduser bash -lc "cd '$GITHUB_WORKSPACE/packaging/arch' && makepkg --verifysource --nobuild"
+
+      - name: Configure SSH
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > ~/.ssh/aur
+          chmod 600 ~/.ssh/aur
+          printf '%s\n' "$AUR_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<'EOF'
+          Host aur.archlinux.org
+            HostName aur.archlinux.org
+            User aur
+            IdentityFile ~/.ssh/aur
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+
+      - name: Publish the package recipe to AUR
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config --global user.name "apexshot release bot"
+          git config --global user.email "actions@github.com"
+          workdir="$(mktemp -d)"
+          git clone "ssh://aur@aur.archlinux.org/${AUR_PACKAGE}.git" "$workdir/${AUR_PACKAGE}"
+          cp packaging/arch/PKGBUILD packaging/arch/.SRCINFO packaging/arch/apexshot.install "$workdir/${AUR_PACKAGE}/"
+          cd "$workdir/${AUR_PACKAGE}"
+          git add PKGBUILD .SRCINFO apexshot.install
+          if git diff --cached --quiet; then
+            echo "AUR package is already up to date."
+            exit 0
+          fi
+          git commit -m "Update to ${RELEASE_TAG#v}"
+          git push
