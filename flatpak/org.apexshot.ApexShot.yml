@@ -192,8 +192,13 @@ modules:
   - name: apexshot
     buildsystem: simple
     build-commands:
+      # The official Studio build configuration is optional for a test
+      # package: an official package embeds it, and a package without it still
+      # builds and runs as the free program with Studio output unavailable.
       - >-
-        set -a && . flatpak/.studio-build-config.env && set +a &&
+        if [ -f flatpak/.studio-build-config.env ]; then
+        set -a && . flatpak/.studio-build-config.env && set +a;
+        fi &&
         cargo build --offline --release --locked --features flatpak --verbose
       - install -Dm755 ./target/release/apexshot /app/libexec/apexshot.bin
       - install -Dm755 ./target/release/apexshot-capture /app/bin/apexshot-capture
