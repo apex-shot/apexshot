@@ -104,6 +104,41 @@ impl CaptureTarget {
     }
 }
 
+fn validate_screencast_source_types(
+    target: CaptureTarget,
+    available: ashpd::enumflags2::BitFlags<SourceType>,
+) -> DisplayResult<()> {
+    if !available.contains(target.source_type()) {
+        let requested = match target {
+            CaptureTarget::Monitor => "monitor",
+            CaptureTarget::Window => "window",
+        };
+        return Err(DisplayError::UnsupportedBackend(format!(
+            "The ScreenCast portal does not support {requested} capture"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_screencast_stream(
+    target: CaptureTarget,
+    stream_count: usize,
+    source_type: Option<SourceType>,
+) -> DisplayResult<()> {
+    let requested = target.source_type();
+    if stream_count != 1 {
+        return Err(DisplayError::PortalError(format!(
+            "The ScreenCast portal returned {stream_count} streams; expected exactly one {requested:?} stream"
+        )));
+    }
+    if source_type.is_some_and(|source| source != requested) {
+        return Err(DisplayError::PortalError(format!(
+            "The ScreenCast portal returned {source_type:?} instead of {requested:?}"
+        )));
+    }
+    Ok(())
+}
+
 fn restore_token_path(target: CaptureTarget) -> Option<PathBuf> {
     let mut path = dirs::cache_dir()?;
     path.push("apexshot");
@@ -140,6 +175,7 @@ fn clear_restore_token(target: CaptureTarget) {
 
 enum ScreencastError {
     Cancelled,
+    InvalidSource(DisplayError),
     Failed(DisplayError),
 }
 
@@ -153,8 +189,13 @@ impl ScreencastError {
     fn into_display(self) -> DisplayError {
         match self {
             Self::Cancelled => DisplayError::Cancelled,
+            Self::InvalidSource(error) => error,
             Self::Failed(error) => error,
         }
+    }
+
+    fn allows_fallback(&self) -> bool {
+        matches!(self, Self::Failed(error) if !matches!(error, DisplayError::Cancelled))
     }
 }
 
@@ -447,21 +488,19 @@ impl WaylandBackend {
     async fn capture_via_screencast(
         target: CaptureTarget,
         interactive: bool,
-    ) -> DisplayResult<CaptureData> {
+    ) -> Result<CaptureData, ScreencastError> {
         if !interactive {
             if let Some(token) = load_restore_token(target) {
                 clear_restore_token(target);
                 match Self::capture_screencast_once(target, interactive, Some(token.as_str())).await
                 {
                     Ok(capture) => return Ok(capture),
-                    Err(error @ ScreencastError::Cancelled) => return Err(error.into_display()),
-                    Err(ScreencastError::Failed(_)) => {}
+                    Err(error) if !error.allows_fallback() => return Err(error),
+                    Err(_) => {}
                 }
             }
         }
-        Self::capture_screencast_once(target, interactive, None)
-            .await
-            .map_err(ScreencastError::into_display)
+        Self::capture_screencast_once(target, interactive, None).await
     }
 
     async fn capture_screencast_once(
@@ -483,6 +522,12 @@ impl WaylandBackend {
             .map_err(|e| {
                 DisplayError::PortalError(format!("Failed to create ScreenCast proxy: {e}"))
             })?;
+
+        let available_source_types = screencast.available_source_types().await.map_err(|e| {
+            DisplayError::PortalError(format!("Failed to query ScreenCast source types: {e}"))
+        })?;
+        validate_screencast_source_types(target, available_source_types)
+            .map_err(ScreencastError::InvalidSource)?;
 
         let session = screencast
             .create_session(CreateSessionOptions::default())
@@ -525,9 +570,26 @@ impl WaylandBackend {
             .response()
             .map_err(|e| screencast_response_error("ScreenCast start", e))?;
 
-        let stream = response.streams().first().ok_or_else(|| {
-            DisplayError::PortalError("No streams returned by ScreenCast portal".into())
-        })?;
+        let validation = validate_screencast_stream(
+            target,
+            response.streams().len(),
+            response
+                .streams()
+                .first()
+                .and_then(|stream| stream.source_type()),
+        )
+        .map_err(ScreencastError::InvalidSource);
+        if let Err(error) = validation {
+            let _ = session.close().await;
+            return Err(error);
+        }
+
+        let Some(stream) = response.streams().first() else {
+            let _ = session.close().await;
+            return Err(ScreencastError::InvalidSource(DisplayError::PortalError(
+                "The ScreenCast portal returned no stream after validation".into(),
+            )));
+        };
         let node_id = stream.pipe_wire_node_id();
 
         // Get the actual window size and position within the stream
@@ -663,7 +725,9 @@ impl WaylandBackend {
     fn capture_monitor_via_screencast() -> DisplayResult<CaptureData> {
         let t3_start = std::time::Instant::now();
         let result = block_on_async(async {
-            Self::capture_via_screencast(CaptureTarget::Monitor, false).await
+            Self::capture_via_screencast(CaptureTarget::Monitor, false)
+                .await
+                .map_err(ScreencastError::into_display)
         });
         match &result {
             Ok(d) => eprintln!(
@@ -1007,11 +1071,22 @@ impl DisplayBackend for WaylandBackend {
 
         // Try the ScreenCast portal first (works on GNOME/KDE with proper portal).
         // This shows the portal's own source-selection dialog to the user.
-        let portal_result = block_on_async(async {
-            Self::capture_via_screencast(CaptureTarget::Window, true).await
-        });
+        let (portal_result, allow_fallback) = match block_on_async(async {
+            let result = Self::capture_via_screencast(CaptureTarget::Window, true).await;
+            let allow_fallback = result
+                .as_ref()
+                .err()
+                .is_some_and(ScreencastError::allows_fallback);
+            Ok((
+                result.map_err(ScreencastError::into_display),
+                allow_fallback,
+            ))
+        }) {
+            Ok(result) => result,
+            Err(error) => (Err(error), true),
+        };
 
-        if portal_result.is_ok() || matches!(&portal_result, Err(DisplayError::Cancelled)) {
+        if portal_result.is_ok() || !allow_fallback {
             return portal_result;
         }
 
@@ -1099,6 +1174,62 @@ mod tests {
             ),
             ScreencastError::Failed(_)
         ));
+    }
+
+    #[test]
+    fn screencast_requires_the_requested_source_type_and_one_matching_stream() {
+        assert!(validate_screencast_source_types(
+            CaptureTarget::Monitor,
+            SourceType::Monitor.into()
+        )
+        .is_ok());
+        assert!(
+            validate_screencast_source_types(CaptureTarget::Window, SourceType::Window.into())
+                .is_ok()
+        );
+        assert!(matches!(
+            validate_screencast_source_types(CaptureTarget::Monitor, SourceType::Window.into()),
+            Err(DisplayError::UnsupportedBackend(_))
+        ));
+        assert!(matches!(
+            validate_screencast_source_types(CaptureTarget::Window, SourceType::Monitor.into()),
+            Err(DisplayError::UnsupportedBackend(_))
+        ));
+
+        for target in [CaptureTarget::Monitor, CaptureTarget::Window] {
+            assert!(validate_screencast_stream(target, 1, None).is_ok());
+            assert!(validate_screencast_stream(target, 1, Some(target.source_type())).is_ok());
+            assert!(matches!(
+                validate_screencast_stream(target, 0, None),
+                Err(DisplayError::PortalError(_))
+            ));
+            assert!(matches!(
+                validate_screencast_stream(target, 2, Some(target.source_type())),
+                Err(DisplayError::PortalError(_))
+            ));
+            let wrong = match target {
+                CaptureTarget::Monitor => SourceType::Window,
+                CaptureTarget::Window => SourceType::Monitor,
+            };
+            assert!(matches!(
+                validate_screencast_stream(target, 1, Some(wrong)),
+                Err(DisplayError::PortalError(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn invalid_screencast_sources_do_not_allow_capture_fallbacks() {
+        assert!(!ScreencastError::Cancelled.allows_fallback());
+        assert!(
+            !ScreencastError::InvalidSource(DisplayError::PortalError("wrong source".into()))
+                .allows_fallback()
+        );
+        assert!(
+            ScreencastError::Failed(DisplayError::PortalError("unavailable".into()))
+                .allows_fallback()
+        );
+        assert!(!ScreencastError::Failed(DisplayError::Cancelled).allows_fallback());
     }
 
     #[test]
