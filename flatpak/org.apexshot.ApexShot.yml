@@ -40,6 +40,7 @@ modules:
       - -Dexamples=false
       - -Ddocs=false
       - -Dtests=false
+      - -Dlibdir=lib
     sources:
       - type: archive
         url: https://github.com/wmww/gtk4-layer-shell/archive/refs/tags/v1.0.3.tar.gz
@@ -130,6 +131,7 @@ modules:
       - -Dexamples=disabled
       - -Dtests=disabled
       - -Ddoc=disabled
+      - -Dlibdir=lib
       - -Dximagesrc=enabled
     sources:
       - type: archive

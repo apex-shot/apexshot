@@ -151,8 +151,8 @@ flatpak-builder --user --install --keep-build-dirs .flatpak-builder/build \
 flatpak run org.apexshot.ApexShot
 ```
 
-`flatpak/README.md` covers the first-time setup, the cache rules, and why
-neither `--force-clean` nor `-Dlibdir=lib` belongs in a routine build. Do not
+`flatpak/README.md` covers the first-time setup, the cache rules, and what
+`-Dlibdir=lib` is doing on the meson modules. Do not
 delete `.flatpak-builder/`: it holds the build cache that keeps the dependency
 modules (Qt 5, Tesseract, GStreamer) from recompiling.
 

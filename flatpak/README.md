@@ -88,12 +88,20 @@ env -u XDG_DATA_HOME -u XDG_CACHE_HOME -u XDG_CONFIG_HOME \
 
 ### Build-tool version notes
 
-`flatpak-builder` supplies the install libdir itself, defaulting to `/app/lib`
-for an application, and passes `--libdir` to `meson setup`. Meson refuses the
-option twice, so the meson modules must not also set `-Dlibdir=lib`. A
-`flatpak-builder` old enough not to pass it falls back to meson's own default,
-which is `lib64` inside the SDK, so confirm where the library landed whenever
-the builder is upgraded:
+The meson modules set `-Dlibdir=lib` and keep doing so. `flatpak-builder` does
+not always supply the install libdir: the builder the packaging workflow uses
+passes none, so without the flag meson installs into the SDK's own default,
+`lib64`, and the Rust build then cannot find the library it asks pkg-config for
+under `/app/lib/pkgconfig`:
+
+```
+The system library `gtk4-layer-shell-0` required by crate `gtk4-layer-shell-sys` was not found.
+```
+
+A meson error saying the option is set twice is the opposite case: that local
+builder passes the libdir itself, so drop the flag for that one build and leave
+the manifest as it is. Confirm where the library landed whenever the builder
+changes:
 
 ```bash
 find .flatpak-builder/build/files -name 'libgtk4-layer-shell.so.0'
