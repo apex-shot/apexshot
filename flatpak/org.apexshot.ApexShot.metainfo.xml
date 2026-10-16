@@ -23,20 +23,20 @@
   </content_rating>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.35/media/capture-area.png</image>
-      <caption>Select a screen area to capture</caption>
-    </screenshot>
-    <screenshot>
-      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.35/media/video-recording.png</image>
-      <caption>Configure a screen recording</caption>
+      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.35/media/image-editor.png</image>
+      <caption>Annotate a screenshot before you share it</caption>
     </screenshot>
     <screenshot>
       <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.35/media/video-editor.png</image>
-      <caption>Edit a recorded video</caption>
+      <caption>Trim a recording and add automatic zooms</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.35/media/setting-tray.png</image>
-      <caption>Configure capture settings and tray actions</caption>
+      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.35/media/settings.png</image>
+      <caption>Configure capture and recording behaviour</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/apex-shot/apexshot/v0.2.35/media/history.png</image>
+      <caption>Browse your screenshots, recordings and edits</caption>
     </screenshot>
   </screenshots>
   <url type="homepage">https://apexshot.org/</url>

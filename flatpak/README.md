@@ -23,11 +23,88 @@ flatpak-builder --user --install --force-clean .flatpak-builder/build \
 flatpak run org.apexshot.ApexShot
 ```
 
-The first build downloads the pinned runtime and module sources. Cargo dependencies come from the generated `flatpak/cargo-sources.json`; the build runs with `--offline`, `--locked`, and `CARGO_NET_OFFLINE=true`. After the first successful build, repeat with `--disable-download` to verify all sources are cached:
+The first build downloads the pinned runtime and module sources. Cargo dependencies come from the generated `flatpak/cargo-sources.json`; the build runs with `--offline`, `--locked`, and `CARGO_NET_OFFLINE=true`. After the first successful build, repeat once with `--disable-download` and `--force-clean` to prove every source is cached rather than merely present in the build directory. That is the only rebuild that should clean the build directory:
 
 ```bash
 flatpak-builder --user --disable-download --install --force-clean .flatpak-builder/build \
   flatpak/org.apexshot.ApexShot.yml
+```
+
+### Repeat builds reuse the cache
+
+Do not delete `.flatpak-builder/` between builds, and do not pass
+`--force-clean` on a routine rebuild. `flatpak-builder` keeps two caches there:
+
+- `cache/` — the built result of each dependency module.
+- `downloads/` — every module archive and every crate pinned in
+  `cargo-sources.json`.
+
+A second build therefore does not recompile Qt 5, Tesseract, Leptonica, the
+GStreamer plugin, or the clipboard clients. Editing a module's definition or
+its sources invalidates that module; a change to the top-level `build-options`
+or a newer `flatpak-builder` can invalidate the cache more broadly, so expect
+the first build after such a change to recompile the dependency modules. A
+change to `src/` rebuilds only the application module.
+
+For fast iteration on application code, add `--keep-build-dirs` and drop
+`--force-clean`, so the application module's Cargo `target/` directory survives
+and the next build is incremental instead of cold:
+
+```bash
+flatpak-builder --user --install --keep-build-dirs .flatpak-builder/build \
+  flatpak/org.apexshot.ApexShot.yml
+```
+
+Add `--ccache` so a rebuilt C/C++ module reuses compiled objects: the SDK
+already ships `ccache` (4.14 on GNOME 50) and its objects live in
+`.flatpak-builder/ccache`. Without the flag the build points ccache at its
+disabled directory and compiles from scratch.
+
+A finished build leaves its own staging directories in the build directory, so
+a later build can refuse with "App dir ... is not empty". Passing
+`--force-clean` then only discards those, not the module caches under
+`.flatpak-builder/`.
+
+Harnesses that redirect `XDG_DATA_HOME` (some agent and desktop harnesses do)
+resolve `--user` to a private installation the desktop session cannot see, so
+the package never appears to `flatpak run` or the launcher. Unset
+`XDG_DATA_HOME`, `XDG_CACHE_HOME`, and `XDG_CONFIG_HOME` for the `flatpak` and
+`flatpak-builder` commands, which then use `~/.local/share/flatpak`.
+
+A redirected `XDG_CONFIG_HOME` bites a second time, on `flatpak run`. The
+`xdg-pictures` and `xdg-videos` permissions are resolved through
+`xdg-user-dir`, which reads `$XDG_CONFIG_HOME/user-dirs.dirs`; a redirected
+config home has no such file, so those keywords mount nothing and the sandbox
+silently lacks `~/Pictures` and `~/Videos`. The app then reports host files
+that plainly exist as missing (`recording does not exist:
+/home/<user>/Videos/clip.mp4`). Unset the same three variables for
+`flatpak run` when launching from a harness like that, and confirm the sandbox
+view before blaming the app:
+
+```bash
+env -u XDG_DATA_HOME -u XDG_CACHE_HOME -u XDG_CONFIG_HOME \
+  flatpak run --command=sh org.apexshot.ApexShot -c 'ls ~/Videos'
+```
+
+### Build-tool version notes
+
+The meson modules set `-Dlibdir=lib` and keep doing so. `flatpak-builder` does
+not always supply the install libdir: the builder the packaging workflow uses
+passes none, so without the flag meson installs into the SDK's own default,
+`lib64`, and the Rust build then cannot find the library it asks pkg-config for
+under `/app/lib/pkgconfig`:
+
+```
+The system library `gtk4-layer-shell-0` required by crate `gtk4-layer-shell-sys` was not found.
+```
+
+A meson error saying the option is set twice is the opposite case: that local
+builder passes the libdir itself, so drop the flag for that one build and leave
+the manifest as it is. Confirm where the library landed whenever the builder
+changes:
+
+```bash
+find .flatpak-builder/build/files -name 'libgtk4-layer-shell.so.0'
 ```
 
 Refresh Cargo source pins after changing `Cargo.lock` by running `flatpak/refresh-cargo-sources.sh` with `curl` and `uv` installed. It uses a fixed commit and checksum for the Cargo source generator. Do not hand-edit `cargo-sources.json`.
