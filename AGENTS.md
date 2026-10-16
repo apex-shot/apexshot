@@ -38,3 +38,28 @@ only to point at another product counts too.
 
 Why: we do not want readers to learn where an idea came from. This holds even
 when the mention is flattering or only a comparison.
+
+## Flatpak local builds
+
+`flatpak/README.md` documents the local package. Its dependency modules are
+expensive (Qt 5 alone is about twenty minutes) and their results are cached in
+`.flatpak-builder/`, so a rebuild reuses them instead of recompiling:
+
+- Never delete `.flatpak-builder/`, and never uninstall the runtime or SDK as
+  routine cleanup.
+- Do not pass `--force-clean` for a routine rebuild. Add `--keep-build-dirs` so
+  the application module's Cargo `target/` stays warm and a source change
+  rebuilds incrementally.
+- The meson modules must not set `-Dlibdir=lib`: `flatpak-builder` passes the
+  libdir itself and meson rejects the duplicate option.
+- Add `--ccache` to a rebuild so compiled C/C++ objects are reused; the SDK
+  already ships `ccache` and its objects live in `.flatpak-builder/ccache`.
+- If `flatpak-builder` refuses with "App dir ... is not empty", pass
+  `--force-clean` anyway: a finished build leaves only its own staging
+  directories there, and the module caches in `.flatpak-builder/cache` are
+  untouched.
+- A harness that redirects `XDG_CONFIG_HOME` breaks `flatpak run` as well as
+  `--user`: the `xdg-pictures` and `xdg-videos` permissions resolve through
+  `xdg-user-dir` and then mount nothing, so the sandbox cannot see those
+  folders and the app reports host files as missing. Unset `XDG_DATA_HOME`,
+  `XDG_CACHE_HOME`, and `XDG_CONFIG_HOME` for launch commands too.

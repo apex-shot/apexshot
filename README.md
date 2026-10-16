@@ -100,12 +100,13 @@ support is improving over time.
 - **Multiple Capture Modes** — Full screen, area selection, window capture, and crosshair mode
   ![ApexShot area selection overlay](media/capture-area.png)
 - **Image Editor** — Annotate with arrows, shapes, text, blur, pixelate, highlighter, and more. Open from the tray menu or CLI (`apexshot image-editor`) and load any PNG/JPEG/WebP via drag-and-drop or the file chooser. The Done button saves the edited image and follows your General settings — copy to clipboard (image, file path, or both) and quick access overlay.
+  ![ApexShot image editor with a screenshot marked up using an arrow, a box, text and highlights](media/image-editor.png)
 - **OCR** — Extract text from images using Tesseract and ocrs dual-engine OCR
 - **QR Code Detection** — Automatically detect and copy QR codes from screenshots
 
 ### Screen Recording
 - **Flexible Recording** — Full-screen recording with MP4/WebM output
-  ![ApexShot recording area overlay](media/video-recording.png)
+  ![ApexShot quick capture menu with recording selected](media/video-recording.png)
 - **Audio Monitoring** — Real-time mic and speaker level monitoring via PipeWire
 - **Recording Controls** — Pause, resume, and stop recording with on-screen controls
 - **Video Editor** — Trim, convert dimensions, adjust quality, and change audio mode for MP4 recordings. Open from the tray menu, CLI (`apexshot video-editor`), or a global hotkey. Supports drag-and-drop and file chooser for loading videos.

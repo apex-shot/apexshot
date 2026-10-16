@@ -140,6 +140,22 @@ scripts/package-deb.sh
 # The package will be in target/debian/
 ```
 
+### Building the Flatpak
+
+The local Flatpak package builds from `flatpak/org.apexshot.ApexShot.yml` and
+installs for the current user:
+
+```bash
+flatpak-builder --user --install --keep-build-dirs .flatpak-builder/build \
+  flatpak/org.apexshot.ApexShot.yml
+flatpak run org.apexshot.ApexShot
+```
+
+`flatpak/README.md` covers the first-time setup, the cache rules, and why
+neither `--force-clean` nor `-Dlibdir=lib` belongs in a routine build. Do not
+delete `.flatpak-builder/`: it holds the build cache that keeps the dependency
+modules (Qt 5, Tesseract, GStreamer) from recompiling.
+
 ### Building the C++ capture overlay
 
 The interactive area / window / crosshair selector and the recording
