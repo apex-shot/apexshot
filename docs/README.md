@@ -13,6 +13,8 @@ live in [`plans/`](plans/).
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | Building, running, and debugging from source. |
 | [ARCH_SUPPORT.md](ARCH_SUPPORT.md) | Arch Linux packaging and distribution support. |
 | [AUR_PUBLISHING.md](AUR_PUBLISHING.md) | Release → AUR automation. |
+| [RELEASE_OPERATIONS.md](RELEASE_OPERATIONS.md) | Support path, pre-tag configuration, promotion, and rollback. |
+| [RELEASE_NOTES_CANDIDATE.md](RELEASE_NOTES_CANDIDATE.md) | Release-notes preface for the next stable build. |
 | [CLOUDFLARE_CDN_SETUP.md](CLOUDFLARE_CDN_SETUP.md) | Cloudflare CDN setup for release assets. |
 | [EXPORT_HARDWARE_ENCODING.md](EXPORT_HARDWARE_ENCODING.md) | Hardware-accelerated export paths and limits. |
 | [GPU_CURSOR_COMPOSITING.md](GPU_CURSOR_COMPOSITING.md) | Cursor compositing on GPU capture paths. |
