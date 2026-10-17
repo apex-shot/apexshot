@@ -64,6 +64,10 @@ before installing, especially from a mirror or a third-party download page.
 
 - Confirm the store is serving the same price, update window, and refund terms.
   If it is not, hold the draft; do not publish notes that disagree with checkout.
+- The public Studio page said purchases were not open yet and that activation
+  arrives in the next desktop release. Either this build activates a purchased
+  entitlement and the notes say so, or the notes say plainly that purchases are
+  still closed. Do not imply a working checkout in either case.
 - Replace `vNEXT` with the tagged version.
 - Delete any section that does not apply to the shipped asset set, such as the
   Fedora limit if that distribution is not in the release.
