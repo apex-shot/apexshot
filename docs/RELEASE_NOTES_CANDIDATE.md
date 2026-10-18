@@ -21,13 +21,23 @@ zoom, cursor controls, the existing backgrounds, and clean exports that use no
 new Studio capability remain free and need no account, subscription, or network
 connection.
 
+### In this release
+
+- Small captures can be enhanced for export with neural upscaling. The models
+  ship inside the app and run locally, so enhancement needs no network
+  connection. It is a Studio control.
+- Motion exports now use the editor preview's framing, card proportions, and
+  colour, so what the preview shows is what the exported video contains.
+  Exports stream as they render instead of holding the whole file in memory.
+
 ### ApexShot Studio for US$39 once
 
 Studio adds Motion video export with its animated titles and timing tools,
-non-default static presentation transforms, and the advanced zoom-camera
-controls. It includes 12 months of updates: the builds you receive during that
-window keep working offline afterwards. It is not a lifetime-updates or hosting
-promise, and it does not include Cloud.
+neural upscaling for small captures, non-default static presentation
+transforms, and the advanced zoom-camera controls. It includes 12 months of
+updates: the builds you receive during that window keep working offline
+afterwards. It is not a lifetime-updates or hosting promise, and it does not
+include Cloud.
 
 Studio controls are labelled before you use them. Previewing, editing, and
 saving projects never needs activation; only a final render that actually uses
