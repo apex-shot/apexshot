@@ -313,6 +313,10 @@
                 border-color: #e6e4e0;
             }
 
+            .recording-editor-dialog.recording-editor-crop-dialog.editor-theme-light {
+                box-shadow: 0 16px 48px alpha(#111827, 0.20);
+            }
+
             .recording-editor-crop-dialog.editor-theme-light .recording-editor-crop-header,
             .recording-editor-crop-dialog.editor-theme-light .recording-editor-crop-stage,
             .recording-editor-crop-dialog.editor-theme-light .recording-editor-dialog-bg {

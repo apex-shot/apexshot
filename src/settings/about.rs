@@ -72,7 +72,7 @@ pub fn build_about_section() -> AboutSettingsWidgets {
     update_vbox.set_margin_top(40);
 
     let check_btn = Button::with_label(&t("Check for Updates"));
-    check_btn.add_css_class("primary-settings-button");
+    check_btn.add_css_class("settings-primary-btn");
     check_btn.set_width_request(200);
     check_btn.set_halign(Align::Center);
     check_btn.connect_clicked(|_| {

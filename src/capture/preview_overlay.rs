@@ -523,6 +523,11 @@ fn setup_preview_window(
     chrome.set_widget_name("capture-preview-chrome");
     chrome.set_hexpand(false);
     chrome.set_vexpand(false);
+    // The preview floats over the desktop with no themed window root of its
+    // own, so it carries the theme class itself.
+    if !crate::capture::editor::ui_support::prefers_dark_glass_theme() {
+        chrome.add_css_class("editor-theme-light");
+    }
     chrome.append(&card);
 
     probe.log("after-card-assembly");
@@ -1330,6 +1335,54 @@ fn install_preview_css() {
             button.preview-copy-btn:focus-visible {
                 outline: none;
                 box-shadow: none;
+            }
+
+            /* ── Light theme ──
+             * The preview floats over the desktop with no themed window root,
+             * so these hang off the class the chrome carries itself. */
+            .editor-theme-light #capture-preview-card {
+                background-color: #ffffff;
+                border: 1px solid rgba(17, 24, 39, 0.10);
+                box-shadow: 0 12px 32px rgba(17, 24, 39, 0.18);
+            }
+
+            .editor-theme-light #capture-preview-image-frame {
+                border: 1px solid rgba(17, 24, 39, 0.06);
+            }
+
+            .editor-theme-light button.preview-corner-btn {
+                border-color: rgba(17, 24, 39, 0.12);
+                background: rgba(255, 255, 255, 0.94);
+                color: rgba(29, 33, 41, 0.92);
+            }
+
+            .editor-theme-light button.preview-corner-btn:hover {
+                background: #ffffff;
+                color: #1d2129;
+            }
+
+            .editor-theme-light button.preview-corner-btn:active {
+                background: rgba(17, 24, 39, 0.08);
+                color: #1d2129;
+            }
+
+            .editor-theme-light button.preview-corner-btn.preview-pinned {
+                background: rgba(17, 24, 39, 0.12);
+            }
+
+            .editor-theme-light button.preview-copy-btn {
+                background: #1d2129;
+                color: #ffffff;
+            }
+
+            .editor-theme-light button.preview-copy-btn:hover {
+                background: #2b303b;
+                color: #ffffff;
+            }
+
+            .editor-theme-light button.preview-copy-btn:active {
+                background: #111827;
+                color: #ffffff;
             }
             ",
         );

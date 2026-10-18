@@ -176,6 +176,8 @@ fn build_activation_controls(
     feedback.set_xalign(0.0);
 
     let activate = Button::with_label(&t("Activate"));
+    // The themed primary rules are compound: both classes are required.
+    activate.add_css_class("settings-save-btn");
     activate.add_css_class("settings-save-btn-ready");
 
     activate.connect_clicked({

@@ -453,6 +453,10 @@
                 background: alpha(white, 0.10);
             }
 
+            .editor-theme-light button.recording-editor-custom-close:hover {
+                background: alpha(#111827, 0.08);
+            }
+
             /* The reference's picker has no side padding: the field, bar and
              * hex row all run the popover's full width, with the tabs above
              * them inset the same way. 8px is the card's one inset, so the
@@ -857,4 +861,15 @@
 
             .editor-theme-light .recording-editor-clip-menu-separator {
                 background: alpha(#111827, 0.10);
+            }
+
+            .editor-theme-light button.recording-editor-clip-menu-row-danger,
+            .editor-theme-light button.recording-editor-clip-menu-row-danger label,
+            .editor-theme-light button.recording-editor-clip-menu-row-danger image {
+                color: #b3261e;
+            }
+
+            .editor-theme-light button.recording-editor-clip-menu-row-danger:hover {
+                background: alpha(#b3261e, 0.12);
+                color: #8a2822;
             }

@@ -86,6 +86,42 @@
                 color: alpha(white, 0.96);
             }
 
+            /* ── Light theme: the stage chrome sits on the light video surface ── */
+
+            .editor-theme-light button.recording-editor-stage-chip {
+                color: alpha(#1d2129, 0.72);
+            }
+
+            .editor-theme-light button.recording-editor-stage-chip:hover {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+
+            .editor-theme-light .recording-editor-stage-rule {
+                background: alpha(#111827, 0.14);
+            }
+
+            .editor-theme-light popover.recording-editor-stage-aspect,
+            .editor-theme-light popover.recording-editor-stage-aspect contents,
+            .editor-theme-light popover.recording-editor-stage-aspect > contents,
+            .editor-theme-light popover.recording-editor-stage-aspect > arrow,
+            .editor-theme-light .recording-editor-stage-aspect-list {
+                background: #ffffff;
+            }
+
+            .editor-theme-light .recording-editor-stage-aspect-list {
+                border: 1px solid alpha(#111827, 0.14);
+            }
+
+            .editor-theme-light button.recording-editor-stage-aspect-item {
+                color: alpha(#1d2129, 0.78);
+            }
+
+            .editor-theme-light button.recording-editor-stage-aspect-item:hover {
+                background: alpha(#111827, 0.08);
+                color: #1d2129;
+            }
+
             .recording-editor-timeline-dock {
                 padding: 2px 12px 8px 12px;
                 /* Same surface as the settings sidebar (@recording-editor-surface). */

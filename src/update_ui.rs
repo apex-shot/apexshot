@@ -36,6 +36,26 @@ const UPDATE_CSS: &str = r#"
         color: #d9815e; font-size: 12px;
     }
     button.apexshot-update-link:hover { color: #efa17e; text-decoration: underline; }
+
+    /* Light surfaces. The card is an overlay child of a themed window root,
+       so these are ancestor-qualified the way the settings CSS is. */
+    .editor-theme-light .apexshot-update-surface {
+        background: #ffffff;
+        color: #1d2129;
+        border: 1px solid alpha(#111827, 0.10);
+        box-shadow: 0 18px 50px alpha(#111827, 0.18);
+    }
+    .editor-theme-light .apexshot-update-title { color: #1d2129; }
+    .editor-theme-light .apexshot-update-copy { color: alpha(#1d2129, 0.64); }
+    .editor-theme-light .apexshot-update-coverage { color: #8a4b12; }
+    .editor-theme-light button.apexshot-update-close { color: alpha(#1d2129, 0.66); }
+    .editor-theme-light button.apexshot-update-close:hover {
+        background: alpha(#111827, 0.08); color: #1d2129;
+    }
+    .editor-theme-light button.apexshot-update-link { color: #cf530b; }
+    .editor-theme-light button.apexshot-update-link:hover {
+        color: #b34709; text-decoration: underline;
+    }
 "#;
 
 fn install_css() {
