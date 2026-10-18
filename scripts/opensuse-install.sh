@@ -262,7 +262,7 @@ install_runtime_dependencies() {
 
 resolve_rpm_url() {
     local rpm_path version_no_v version_re
-    # Match only the main binary package, e.g. apexshot-0.2.35-0.x86_64.rpm.
+    # Match only the main binary package, e.g. apexshot-0.2.36-0.x86_64.rpm.
     # The release also carries the debuginfo/debugsource companions and the
     # source RPM; anchoring on "apexshot-<version>-" keeps the installer from
     # grabbing one of those when the release asset order places them first.
