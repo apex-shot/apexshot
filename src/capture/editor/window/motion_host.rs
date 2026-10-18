@@ -13,6 +13,12 @@ use crate::capture::editor::state::EditorState;
 use super::chrome::WindowChrome;
 use super::motion_mode::{self, MotionModeChrome, MotionModeParts, MotionSession};
 
+pub(super) type MotionExport = Rc<
+    dyn Fn(
+        &std::path::Path,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<PathBuf, String>>>>,
+>;
+
 pub(super) struct MotionHost {
     pub(super) parts: MotionModeParts,
     session: Rc<MotionSession>,
@@ -85,11 +91,9 @@ impl MotionHost {
     /// Motion's Export handler asks for a destination (Save chooser) and hands it
     /// here, so the export writes where the user pointed instead of guessing
     /// from the still's folder.
-    pub(super) fn export_callback(
-        &self,
-    ) -> Rc<dyn Fn(&std::path::Path) -> Result<PathBuf, String>> {
+    pub(super) fn export_callback(&self) -> MotionExport {
         let session = self.session.clone();
-        Rc::new(move |destination: &std::path::Path| session.export_mp4(destination))
+        Rc::new(move |destination: &std::path::Path| Box::pin(session.export_mp4(destination)))
     }
 
     pub(super) fn install(&self, input: MotionHostInstallInputs<'_>) {
@@ -112,6 +116,7 @@ impl MotionHost {
             static_appearance_interact,
             static_transform_sync_slot,
         } = input;
+        *self.session.source_state.borrow_mut() = Some(state.clone());
 
         let motion_tabs_revealer = Revealer::new();
         motion_tabs_revealer.set_transition_type(RevealerTransitionType::SlideLeft);

@@ -24,10 +24,37 @@ use crate::recording::editor::window::custom_wallpaper_popover::{
 };
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
+use super::session::MotionRuntime;
 use super::widgets::{
     motion_appearance_slider, motion_reference_percent_slider, motion_rgb888, motion_rgba,
 };
 use super::MotionSession;
+
+fn appearance_frame_size(runtime: &MotionRuntime, motion_export: bool) -> (i32, i32) {
+    let (width, height) = runtime
+        .snapshot
+        .as_ref()
+        .map(|snapshot| (snapshot.width() as i32, snapshot.height() as i32))
+        .or_else(|| {
+            runtime
+                .card
+                .as_ref()
+                .map(|card| (card.width(), card.height()))
+        })
+        .unwrap_or((1920, 1080));
+    if motion_export {
+        return super::super::motion_render::motion_frame_output_size(
+            f64::from(width),
+            f64::from(height),
+            &runtime.motion,
+        );
+    }
+    if runtime.motion.frame.preset == MotionFramePreset::Standard {
+        (width, height)
+    } else {
+        runtime.motion.frame.output_size()
+    }
+}
 
 /// Motion appearance is a scene-level inspector rather than an
 /// Mini preview for one frame-style preset: gray card with the preset's
@@ -214,6 +241,7 @@ fn build_appearance_panel(
     on_interact: Option<Rc<dyn Fn()>>,
     static_transform: Option<GtkBox>,
 ) -> GtkBox {
+    let motion_export = static_transform.is_none();
     // Static image editor: interacting with Appearance must arm the Background
     // tool so a later canvas click previews instead of drawing with a stale
     // Pen/Arrow/etc. Motion callers pass None (no static toolbar to sync).
@@ -649,6 +677,76 @@ fn build_appearance_panel(
     // Paint the Custom summary chip once so it is correct before any edit.
     redraw_summary();
     root.append(&background_section);
+    let export_quality = motion_appearance_section("Export quality");
+    let upscale = gtk4::DropDown::from_strings(&[&t("Off"), &t("Neural 2×"), &t("Neural 4×")]);
+    let initial_upscale = session.runtime.borrow().motion.appearance.source_upscale;
+    upscale.set_selected(match initial_upscale.factor() {
+        2 => 1,
+        4 => 2,
+        _ => 0,
+    });
+    upscale.set_tooltip_text(Some(&t("Neural upscaling for Studio exports")));
+    upscale.connect_selected_notify({
+        let runtime = session.runtime.clone();
+        let source_state = session.source_state.clone();
+        let notify = notify_interact.clone();
+        move |dropdown| {
+            use crate::capture::editor::upscale::SourceUpscale;
+            let mode = match dropdown.selected() {
+                1 => SourceUpscale::Neural2x,
+                2 => SourceUpscale::Neural4x,
+                _ => SourceUpscale::Off,
+            };
+            if runtime.borrow().motion.appearance.source_upscale == mode {
+                return;
+            }
+            notify();
+            let mut runtime = runtime.borrow_mut();
+            runtime.begin_motion_edit();
+            runtime.motion.appearance.source_upscale = mode;
+            drop(runtime);
+            if let Some(state) = source_state.borrow().as_ref() {
+                state.lock().unwrap().source_upscale = mode;
+            }
+        }
+    });
+    export_quality.append(&upscale);
+    let compare = Button::with_label(&t("Compare before / after"));
+    compare.set_tooltip_text(Some(&t(
+        "Preview neural enhancement without a Studio license",
+    )));
+    compare.connect_clicked({
+        let window = window.downgrade();
+        let session = session.clone();
+        move |_| {
+            if let Some(window) = window.upgrade() {
+                super::upscale_preview::show(&window, &session, motion_export);
+            }
+        }
+    });
+    export_quality.append(&compare);
+    export_quality.add_tick_callback({
+        let runtime = session.runtime.clone();
+        let upscale = upscale.clone();
+        move |_, _| {
+            let factor = runtime.borrow().motion.appearance.source_upscale.factor();
+            let selected = match factor {
+                2 => 1,
+                4 => 2,
+                _ => 0,
+            };
+            if upscale.selected() != selected {
+                upscale.set_selected(selected);
+            }
+            glib::ControlFlow::Continue
+        }
+    });
+    let upscale_hint = Label::new(Some(&t("Offline neural enhancement for small images. Image exports grow by 2× or 4×; Motion keeps its Frame size. Compare the export for free before enabling Studio enhancement. Supports up to 1 megapixel. Missing detail cannot always be recovered.")));
+    upscale_hint.set_wrap(true);
+    upscale_hint.set_xalign(0.0);
+    upscale_hint.add_css_class("editor-select-inspector-hint");
+    export_quality.append(&upscale_hint);
+    root.append(&export_quality);
     if let Some(static_transform) = static_transform {
         root.append(&motion_disclosure_row("Transform", &static_transform));
     }
@@ -822,8 +920,8 @@ fn build_appearance_panel(
     root.append(&motion_disclosure_row("Style", &border_section));
 
     // Frame section: collapsed W/H inputs plus an expandable ratio grid.
-    // Collapsed shows the current canvas size (original dims for Standard,
-    // export size otherwise) and an arrow reveals aspect-correct shape tiles.
+    // Collapsed shows the output size for Motion (original dims for Static's
+    // Standard frame) and an arrow reveals aspect-correct shape tiles.
     // The 3-column grid is sized to the fixed sidebar width so expanding
     // never widens the panel. Selection paints only on the diagram itself.
     fn frame_ratio_shape(aspect: f64, selected: Rc<Cell<bool>>) -> DrawingArea {
@@ -865,28 +963,12 @@ fn build_appearance_panel(
         area
     }
     let frame_section = motion_appearance_body();
-    // Original canvas size backs Standard: W/H show the source image, not a
-    // fixed export default, so there is no separate Original button.
-    let (orig_w, orig_h) = {
-        let runtime = session.runtime.borrow();
-        if let Some(snap) = runtime.snapshot.as_ref() {
-            let (w, h) = snap.dimensions();
-            (w as i32, h as i32)
-        } else if let Some(card) = runtime.card.as_ref() {
-            (card.width(), card.height())
-        } else {
-            (1920, 1080)
-        }
-    };
     let initial_frame: MotionFrame = {
         let runtime = session.runtime.borrow();
         runtime.motion.frame.clone()
     };
-    let (initial_out_w, initial_out_h) = if initial_frame.preset == MotionFramePreset::Standard {
-        (orig_w, orig_h)
-    } else {
-        initial_frame.output_size()
-    };
+    let (initial_out_w, initial_out_h) =
+        appearance_frame_size(&session.runtime.borrow(), motion_export);
     // (preset, aspect, selected flag, shape area, button) for diagram-only sync.
     let frame_tiles: Rc<
         RefCell<Vec<(MotionFramePreset, f64, Rc<Cell<bool>>, DrawingArea, Button)>>,
@@ -995,11 +1077,7 @@ fn build_appearance_panel(
                 // worker frame while the new aspect renders.
                 runtime.preview_frame = None;
                 let frame = runtime.motion.frame.clone();
-                let display = if frame.preset == MotionFramePreset::Standard {
-                    (orig_w, orig_h)
-                } else {
-                    frame.output_size()
-                };
+                let display = appearance_frame_size(&runtime, motion_export);
                 (frame, display)
             };
             preview.queue_draw();
@@ -1079,6 +1157,31 @@ fn build_appearance_panel(
         let apply_custom = apply_custom.clone();
         focus.connect_leave(move |_| apply_custom());
         h_entry.add_controller(focus);
+    }
+    if motion_export {
+        root.add_tick_callback({
+            let runtime = session.runtime.clone();
+            let w_entry = w_entry.clone();
+            let h_entry = h_entry.clone();
+            move |_, _| {
+                if !w_entry
+                    .state_flags()
+                    .contains(gtk4::StateFlags::FOCUS_WITHIN)
+                    && !h_entry
+                        .state_flags()
+                        .contains(gtk4::StateFlags::FOCUS_WITHIN)
+                {
+                    let (width, height) = appearance_frame_size(&runtime.borrow(), true);
+                    if w_entry.text().as_str() != width.to_string() {
+                        w_entry.set_text(&width.to_string());
+                    }
+                    if h_entry.text().as_str() != height.to_string() {
+                        h_entry.set_text(&height.to_string());
+                    }
+                }
+                glib::ControlFlow::Continue
+            }
+        });
     }
     let dim_row = GtkBox::new(Orientation::Horizontal, 6);
     dim_row.add_css_class("editor-frame-dim-row");
@@ -2118,6 +2221,31 @@ fn paint_image_row_thumb(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn motion_frame_readout_matches_export_after_appearance_changes() {
+        use crate::recording::editor::model::MotionBackgroundFillType;
+
+        let session = super::MotionSession::new(true, 0.0);
+        let mut runtime = session.runtime.borrow_mut();
+        runtime.snapshot = Some(image::RgbaImage::new(642, 388));
+        assert_eq!(super::appearance_frame_size(&runtime, false), (642, 388));
+        for padding in [0.0, 40.0, 100.0] {
+            runtime.motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+            runtime.motion.appearance.background_padding = padding;
+            let expected = super::super::super::motion_render::motion_frame_output_size(
+                642.0,
+                388.0,
+                &runtime.motion,
+            );
+            assert_eq!(super::appearance_frame_size(&runtime, true), expected);
+            assert_eq!(super::appearance_frame_size(&runtime, false), (642, 388));
+        }
+        runtime.snapshot = Some(image::RgbaImage::new(388, 642));
+        let (width, height) = super::appearance_frame_size(&runtime, true);
+        assert!(height > width);
+        assert_eq!((width % 2, height % 2), (0, 0));
+    }
+
     #[test]
     fn wallpaper_thumbnail_corners_match_the_circular_selection_border() {
         use gtk4::cairo::{Context, Format, ImageSurface};

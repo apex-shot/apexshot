@@ -16,6 +16,7 @@ mod state;
 mod text_detect;
 pub mod types;
 pub(crate) mod ui_support;
+pub(crate) mod upscale;
 #[path = "editor/window/mod.rs"]
 pub mod window;
 

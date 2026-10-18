@@ -216,6 +216,7 @@ enum Feature {
     Motion,
     Placement,
     Camera,
+    Upscale,
 }
 
 impl Feature {
@@ -224,14 +225,20 @@ impl Feature {
             Self::Motion => capabilities.motion_export,
             Self::Placement => capabilities.static_presentation,
             Self::Camera => capabilities.advanced_zoom,
+            Self::Upscale => capabilities.image_upscale,
         }
     }
 }
 
 fn features_for(capabilities: StudioCapabilities) -> Vec<(Feature, bool)> {
-    let mut features = [Feature::Motion, Feature::Placement, Feature::Camera]
-        .map(|feature| (feature, feature.is_used_by(capabilities)))
-        .to_vec();
+    let mut features = [
+        Feature::Motion,
+        Feature::Placement,
+        Feature::Camera,
+        Feature::Upscale,
+    ]
+    .map(|feature| (feature, feature.is_used_by(capabilities)))
+    .to_vec();
     features.sort_by_key(|(_, used)| !used);
     features
 }
@@ -469,6 +476,11 @@ fn feature_panel(capabilities: StudioCapabilities) -> GtkBox {
             Feature::Camera => (
                 t("Camera controls"),
                 t("Instant zooms, speed, smoothness and motion blur for recordings."),
+                custom::SETTINGS_SYMBOLIC,
+            ),
+            Feature::Upscale => (
+                t("Neural upscaling"),
+                t("Enhance small screenshots locally before image and Motion exports."),
                 custom::SETTINGS_SYMBOLIC,
             ),
         };
@@ -756,6 +768,7 @@ mod tests {
                 (Feature::Camera, true),
                 (Feature::Motion, false),
                 (Feature::Placement, false),
+                (Feature::Upscale, false),
             ]
         );
     }
@@ -766,6 +779,7 @@ mod tests {
             motion_export: true,
             static_presentation: true,
             advanced_zoom: false,
+            image_upscale: false,
         });
         assert_eq!(
             features,
@@ -773,6 +787,7 @@ mod tests {
                 (Feature::Motion, true),
                 (Feature::Placement, true),
                 (Feature::Camera, false),
+                (Feature::Upscale, false),
             ]
         );
     }
@@ -781,7 +796,7 @@ mod tests {
     fn no_feature_is_marked_when_the_export_uses_none() {
         let features = features_for(StudioCapabilities::default());
         assert!(features.iter().all(|(_, used)| !used));
-        assert_eq!(features.len(), 3);
+        assert_eq!(features.len(), 4);
     }
 
     #[test]

@@ -490,6 +490,7 @@ pub(super) fn sync_static_appearance_to_motion(
         BackgroundStyle::Blurred(_) => {}
     }
     motion.background_padding = state.background_padding;
+    motion.source_upscale = state.source_upscale;
     motion.background_insert = state.background_insert;
     motion.background_alignment = state.background_alignment;
     motion.background_blur = state.background_blur;
@@ -531,6 +532,7 @@ pub(super) fn sync_motion_appearance_to_static(
         },
     };
     state.background_padding = motion.background_padding;
+    state.source_upscale = motion.source_upscale;
     state.background_insert = motion.background_insert;
     state.background_alignment = motion.background_alignment;
     state.background_blur = motion.background_blur;

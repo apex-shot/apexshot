@@ -30,6 +30,170 @@ mod tests {
         assert_eq!(super::fit_stage_aspect(100.0, 50.0, None), (100.0, 50.0));
     }
 
+    #[test]
+    fn neural_motion_enhancement_preserves_frame_dimensions_and_source_coordinates() {
+        use crate::capture::editor::upscale::SourceUpscale;
+        let mut motion = MotionState::default();
+        let dimensions = super::motion_frame_output_size(624.0, 386.0, &motion);
+        for mode in [SourceUpscale::Neural2x, SourceUpscale::Neural4x] {
+            motion.appearance.source_upscale = mode;
+            assert_eq!(
+                super::motion_frame_output_size(624.0, 386.0, &motion),
+                dimensions
+            );
+            let scale = mode.factor() as i32;
+            let texture = ImageSurface::create(Format::ARgb32, 624 * scale, 386 * scale).unwrap();
+            assert_eq!(
+                super::motion_source_size(&texture, f64::from(scale)),
+                (624.0, 386.0)
+            );
+        }
+    }
+
+    #[test]
+    fn motion_export_preserves_preview_card_proportions() {
+        use crate::recording::editor::model::MotionFramePreset;
+
+        for (source_w, source_h) in [(642, 388), (2560, 1440)] {
+            let card = ImageSurface::create(Format::ARgb32, source_w, source_h).unwrap();
+            for preset in [
+                MotionFramePreset::Standard,
+                MotionFramePreset::Custom,
+                MotionFramePreset::OneOne,
+                MotionFramePreset::NineSixteen,
+            ] {
+                for padding in [0.0, 40.0] {
+                    let mut motion = MotionState::default();
+                    motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+                    motion.appearance.background_padding = padding;
+                    motion.frame.preset = preset;
+                    motion.frame.custom_width = 320;
+                    motion.frame.custom_height = 180;
+                    let (out_w, out_h) = super::motion_frame_output_size(
+                        f64::from(source_w),
+                        f64::from(source_h),
+                        &motion,
+                    );
+                    let preview =
+                        preview_stage(&card, 1000.0, 700.0, &motion.appearance, &motion.frame);
+                    let export = MotionStage::output(f64::from(out_w), f64::from(out_h));
+                    let normalized = |stage: MotionStage| {
+                        let layout = card_layout(
+                            &card,
+                            1.0,
+                            stage,
+                            &motion.appearance,
+                            motion.frame.effective_aspect(),
+                            MotionTransform::default(),
+                            (0.5, 0.5),
+                        );
+                        let top_left = layout.project(0.0, 0.0);
+                        let bottom_right = layout.project(layout.img_w(), layout.img_h());
+                        [
+                            (top_left.0 - stage.center_x) / stage.bounds_w,
+                            (top_left.1 - stage.center_y) / stage.bounds_h,
+                            (bottom_right.0 - top_left.0) / stage.bounds_w,
+                            (bottom_right.1 - top_left.1) / stage.bounds_h,
+                        ]
+                    };
+                    for (preview_value, export_value) in
+                        normalized(preview).into_iter().zip(normalized(export))
+                    {
+                        assert!(
+                            (preview_value - export_value).abs() < 2.0 / f64::from(out_w.min(out_h)),
+                            "{source_w}x{source_h}, {preset:?}, padding {padding}: {preview_value} vs {export_value}",
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn motion_mp4_stream_preserves_framing_and_color_channels() {
+        use crate::recording::editor::model::MotionFramePreset;
+        use std::process::Command;
+
+        if crate::recording::editor::ffmpeg::ensure_tools_available().is_err() {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!(
+            "apexshot-motion-stream-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let output_path = root.join("stream.mp4");
+        let snapshot = image::RgbaImage::from_pixel(32, 20, image::Rgba([240, 40, 20, 255]));
+        let mut motion = MotionState {
+            duration: 0.1,
+            ..MotionState::default()
+        };
+        motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+        motion.appearance.background_color = [0.0, 0.0, 1.0, 1.0];
+        motion.appearance.background_padding = 40.0;
+        motion.appearance.border_radius = 0.0;
+        motion.frame.preset = MotionFramePreset::Custom;
+        motion.frame.custom_width = 320;
+        motion.frame.custom_height = 200;
+        let _entitlement = crate::studio_entitlement::test_studio_entitlement();
+        super::export_motion_mp4(&snapshot, &motion, true, &output_path).unwrap();
+        let decoded = Command::new("ffmpeg")
+            .args(["-v", "error", "-i"])
+            .arg(&output_path)
+            .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"])
+            .output()
+            .unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(decoded.status.success());
+        assert_eq!(decoded.stdout.len(), 320 * 200 * 4 * 3);
+        let composition = super::motion_canvas(32.0, 20.0, &motion.appearance, &motion.frame);
+        let expected_width = composition.image_rect.width / composition.canvas_width;
+        for frame in decoded.stdout.chunks_exact(320 * 200 * 4) {
+            let center = &frame[(100 * 320 + 160) * 4..][..4];
+            assert!(
+                center[0] > 220 && center[1] < 60 && center[2] < 40,
+                "{center:?}"
+            );
+            let corner = &frame[..4];
+            assert!(
+                corner[0] < 10 && corner[1] < 10 && corner[2] > 240,
+                "{corner:?}"
+            );
+            let red_width = frame[100 * 320 * 4..101 * 320 * 4]
+                .chunks_exact(4)
+                .filter(|pixel| pixel[0] > 180 && pixel[2] < 80)
+                .count();
+            assert!((red_width as f64 / 320.0 - expected_width).abs() < 0.02);
+        }
+    }
+
+    #[test]
+    fn motion_mp4_reports_encoder_failure() {
+        use crate::recording::editor::model::MotionFramePreset;
+
+        if crate::recording::editor::ffmpeg::ensure_tools_available().is_err() {
+            return;
+        }
+        let root = std::env::temp_dir().join(format!(
+            "apexshot-motion-failed-stream-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let snapshot = image::RgbaImage::from_pixel(16, 16, image::Rgba([255, 255, 255, 255]));
+        let mut motion = MotionState {
+            duration: 1.0 / 30.0,
+            ..MotionState::default()
+        };
+        motion.frame.preset = MotionFramePreset::Custom;
+        motion.frame.custom_width = 16;
+        motion.frame.custom_height = 16;
+        let _entitlement = crate::studio_entitlement::test_studio_entitlement();
+        let result = super::export_motion_mp4(&snapshot, &motion, true, &root);
+        assert!(root.is_dir());
+        std::fs::remove_dir_all(root).unwrap();
+        assert!(result.is_err());
+    }
+
     /// The appearance the tilted-frame probes lay out with. Corner radius is
     /// not part of the composition, so a probe and the rendered card share
     /// geometry at any radius.
@@ -67,13 +231,26 @@ mod tests {
         };
         let appearance = MotionAppearance::default();
         let layout = card_layout(
-            &card, 1.0, MotionStage::frame(640.0, 360.0), &appearance,
-            None, transform, (0.5, 0.5),
+            &card,
+            1.0,
+            MotionStage::frame(640.0, 360.0),
+            &appearance,
+            None,
+            transform,
+            (0.5, 0.5),
         );
         let mut frame = ImageSurface::create(Format::ARgb32, 640, 360).unwrap();
         {
             let context = Context::new(&frame).unwrap();
-            draw_transformed_card(&context, &card, layout, &appearance, opacity, 8, gtk4::cairo::Filter::Good);
+            draw_transformed_card(
+                &context,
+                &card,
+                layout,
+                &appearance,
+                opacity,
+                8,
+                gtk4::cairo::Filter::Good,
+            );
         }
         frame.flush();
         let inner = [(8.0, 8.0), (504.0, 8.0), (504.0, 280.0), (8.0, 280.0)]
@@ -104,7 +281,10 @@ mod tests {
             }
         }
         assert!(interior > 10000);
-        assert_eq!(mismatches, 0, "mesh seams affect {mismatches}/{interior} interior pixels");
+        assert_eq!(
+            mismatches, 0,
+            "mesh seams affect {mismatches}/{interior} interior pixels"
+        );
         if source_alpha == 1.0 && opacity == 1.0 {
             assert!(edge_pixels > 0, "the exterior must remain antialiased");
         }
@@ -217,8 +397,11 @@ mod tests {
         let pose = motion.sample(time);
         let layout = frame_layout(&card, pose, anchor);
         let expected_x = layout.base_x
-            - (pose.scale - 1.0) * (expected_anchor.0 * 2.0 - 1.0)
-                * layout.img_w() * layout.source_fit() * 0.5;
+            - (pose.scale - 1.0)
+                * (expected_anchor.0 * 2.0 - 1.0)
+                * layout.img_w()
+                * layout.source_fit()
+                * 0.5;
         assert!((layout.cx - expected_x).abs() < 1e-9);
         assert_eq!(motion.zoom_anchor_at(2.0), (0.85, 0.75));
     }
@@ -250,12 +433,20 @@ mod tests {
         motion.frame.preset = MotionFramePreset::Custom;
         motion.frame.custom_width = 320;
         motion.frame.custom_height = 180;
+        motion.appearance.background_fill_type = MotionBackgroundFillType::Color;
+        motion.appearance.background_padding = 600.0;
         let _entitlement = crate::studio_entitlement::test_studio_entitlement();
         let output = super::export_motion_mp4(&snapshot, &motion, true, &output_path).unwrap();
         let probe = Command::new("ffprobe")
             .args([
-                "-v", "error", "-select_streams", "v:0", "-show_entries",
-                "stream=width,height,nb_frames,r_frame_rate,duration", "-of", "json",
+                "-v",
+                "error",
+                "-select_streams",
+                "v:0",
+                "-show_entries",
+                "stream=width,height,nb_frames,r_frame_rate,duration",
+                "-of",
+                "json",
             ])
             .arg(&output)
             .output()
@@ -264,8 +455,15 @@ mod tests {
             .args(["-v", "error", "-i"])
             .arg(&output)
             .args([
-                "-vf", "select=eq(n\\,29)", "-frames:v", "1", "-f", "rawvideo",
-                "-pix_fmt", "rgba", "pipe:1",
+                "-vf",
+                "select=eq(n\\,29)",
+                "-frames:v",
+                "1",
+                "-f",
+                "rawvideo",
+                "-pix_fmt",
+                "rgba",
+                "pipe:1",
             ])
             .output()
             .unwrap();
@@ -294,8 +492,28 @@ mod tests {
         let card = crate::capture::editor::render::rgba_image_to_surface(&snapshot).unwrap();
         let time = 29.0 / 30.0;
         let expected = card_layout(
-            &card, 1.0, MotionStage::frame(320.0, 180.0), &motion.appearance,
-            motion.frame.effective_aspect(), motion.sample(time), motion.zoom_anchor_at(time),
+            &card,
+            1.0,
+            MotionStage::output(320.0, 180.0),
+            &motion.appearance,
+            motion.frame.effective_aspect(),
+            motion.sample(time),
+            motion.zoom_anchor_at(time),
+        );
+        let first = card_layout(
+            &card,
+            1.0,
+            MotionStage::output(320.0, 180.0),
+            &motion.appearance,
+            motion.frame.effective_aspect(),
+            motion.sample(0.0),
+            motion.zoom_anchor_at(0.0),
+        );
+        assert!(
+            (expected.cx - first.cx).abs() > 40.0,
+            "the last frame's pose must differ from the first frame's: {} vs {}",
+            expected.cx,
+            first.cx
         );
         let actual_x = sum_x / f64::from(count);
         assert!(

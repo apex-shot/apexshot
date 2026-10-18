@@ -37,6 +37,8 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 pub struct EditorState {
+    pub source_upscale: super::upscale::SourceUpscale,
+    export_scale: f64,
     pub base_image: Arc<RgbaImage>,
     pub working_image: Arc<RgbaImage>,
     pub working_image_revision: u64,
@@ -223,6 +225,8 @@ impl EditorState {
     pub fn new(base_image: RgbaImage) -> Self {
         let base_image = Arc::new(base_image);
         Self {
+            source_upscale: Default::default(),
+            export_scale: 1.0,
             working_image: Arc::clone(&base_image),
             base_image,
             working_image_revision: 1,

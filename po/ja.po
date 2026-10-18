@@ -3082,3 +3082,78 @@ msgstr "ライセンスには以前のリリースまでのアップデートが
 
 msgid "That license couldn't be verified. Make sure you pasted all of it."
 msgstr "このライセンスを確認できませんでした。全体を貼り付けたか確認してください。"
+
+msgid "Replace license"
+msgstr "ライセンスを置き換える"
+
+msgid "Active"
+msgstr "有効"
+
+msgid "Copy license"
+msgstr "ライセンスをコピー"
+
+msgid "100% displays export pixels at native screen scale"
+msgstr "100% は書き出しピクセルを画面のネイティブ倍率で表示します。"
+
+msgid "ApexShot lost contact with the copy worker."
+msgstr "ApexShot はコピーワーカーとの接続を失いました。"
+
+msgid "Before / after divider"
+msgstr "ビフォー／アフターの分割線"
+
+msgid "Compare before / after"
+msgstr "ビフォー／アフターを比較"
+
+msgid "Compare neural upscaling"
+msgstr "ニューラルアップスケーリングを比較"
+
+msgid "Could not prepare the comparison image."
+msgstr "比較画像を準備できませんでした。"
+
+msgid "Enhance small screenshots locally before image and Motion exports."
+msgstr "画像と Motion の書き出し前に、小さなスクリーンショットをローカルで高画質化します。"
+
+msgid ""
+"Export preview: {width} × {height} pixels. Check text carefully; missing detail may not be recovered."
+msgstr ""
+"書き出しプレビュー: {width} × {height} ピクセル。テキストを注意深く確認してください。欠けている細部は復元できない場合があります。"
+
+msgid "Exporting…"
+msgstr "書き出し中…"
+
+msgid "Load an image before previewing upscaling."
+msgstr "アップスケーリングをプレビューする前に画像を読み込んでください。"
+
+msgid "Neural 2×"
+msgstr "ニューラル 2×"
+
+msgid "Neural 4×"
+msgstr "ニューラル 4×"
+
+msgid "Neural upscaling"
+msgstr "ニューラルアップスケーリング"
+
+msgid "Neural upscaling for Studio exports"
+msgstr "Studio 書き出し用のニューラルアップスケーリング"
+
+msgid ""
+"Offline neural enhancement for small images. Image exports grow by 2× or 4×; Motion keeps its Frame size. Compare the export for free before enabling Studio enhancement. Supports up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr ""
+"小さな画像向けのオフラインニューラル強化。画像の書き出しは 2× または 4× に拡大されますが、Motion はフレームサイズを維持します。Studio 強化を有効にする前に、書き出しを無料で比較できます。最大 1 メガピクセルに対応。欠けている細部は常に復元できるとは限りません。"
+
+msgid "Preparing before / after preview…"
+msgstr "ビフォー／アフターのプレビューを準備中…"
+
+msgid "Preview neural enhancement without a Studio license"
+msgstr "Studio ライセンスなしでニューラル強化をプレビュー"
+
+msgid ""
+"Standard enlargement on the left, neural enhancement on the right. Move the divider and scroll to inspect rendered export pixels before file compression. This preview is free; enhanced exports require Studio."
+msgstr ""
+"左が標準拡大、右がニューラル強化です。分割線を移動し、スクロールして、ファイル圧縮前の書き出しピクセルを確認してください。このプレビューは無料です。強化された書き出しには Studio が必要です。"
+
+msgid "The upscaling preview worker stopped unexpectedly."
+msgstr "アップスケーリングプレビューのワーカーが予期せず停止しました。"
+
+msgid "Use enhancement"
+msgstr "強化を使用"

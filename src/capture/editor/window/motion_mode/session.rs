@@ -2,7 +2,7 @@ use image::RgbaImage;
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::capture::editor::render::rgba_image_to_surface;
@@ -436,6 +436,8 @@ impl MotionRuntime {
 #[derive(Clone)]
 pub(in crate::capture::editor::window) struct MotionSession {
     pub(in crate::capture::editor::window) runtime: Rc<RefCell<MotionRuntime>>,
+    pub(in crate::capture::editor::window) source_state:
+        Rc<RefCell<Option<Arc<Mutex<EditorState>>>>>,
     pub(super) prefers_dark: bool,
 }
 
@@ -456,8 +458,18 @@ impl MotionSession {
         // `capture_snapshot` preserves a Static background when one exists.
         Self {
             runtime,
+            source_state: Rc::new(RefCell::new(None)),
             prefers_dark,
         }
+    }
+
+    pub(in crate::capture::editor::window) fn source_snapshot(
+        &self,
+    ) -> Option<impl FnOnce() -> EditorState + Send + 'static> {
+        self.source_state
+            .borrow()
+            .as_ref()
+            .map(|state| state.lock().unwrap().export_snapshot())
     }
 
     pub(in crate::capture::editor::window) fn has_segments(&self) -> bool {
@@ -528,18 +540,37 @@ impl MotionSession {
     pub(in crate::capture::editor::window) fn export_mp4(
         &self,
         destination: &std::path::Path,
-    ) -> Result<PathBuf, String> {
+    ) -> impl std::future::Future<Output = Result<PathBuf, String>> + 'static {
         let runtime = self.runtime.borrow();
-        let snapshot = runtime
-            .snapshot
-            .as_ref()
-            .ok_or_else(|| "Motion has no still to export".to_string())?;
-        super::super::motion_render::export_motion_mp4(
-            snapshot,
-            &runtime.motion,
-            self.prefers_dark,
-            destination,
-        )
+        let source = self.source_snapshot();
+        let motion = runtime.motion.clone();
+        let prefers_dark = self.prefers_dark;
+        let destination = destination.to_path_buf();
+        let worker = gtk4::gio::spawn_blocking(move || {
+            crate::studio_entitlement::ensure_export_allowed(
+                crate::studio_entitlement::capabilities_for_motion_export(),
+            )
+            .map_err(|error| error.to_string())?;
+            let source = source.ok_or_else(|| "Motion has no still to export".to_string())?;
+            let mode = motion.appearance.source_upscale;
+            let mut state = source();
+            state.source_upscale = mode;
+            let card = state
+                .to_motion_export_card()
+                .map_err(|error| error.to_string())?;
+            super::super::motion_render::export_motion_card_mp4(
+                &card,
+                f64::from(mode.factor()),
+                &motion,
+                prefers_dark,
+                &destination,
+            )
+        });
+        async move {
+            worker
+                .await
+                .map_err(|_| crate::i18n::t("ApexShot lost contact with the export worker."))?
+        }
     }
 
     pub(in crate::capture::editor::window) fn clear_snapshot(&self) {
@@ -1320,6 +1351,7 @@ mod tests {
         runtime.queue_auto_preview(request.0, request.1, request.2, request.3, now);
         let session = MotionSession {
             runtime: Rc::new(RefCell::new(runtime)),
+            source_state: Rc::new(RefCell::new(None)),
             prefers_dark: true,
         };
         session.clear_snapshot();

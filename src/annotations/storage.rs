@@ -101,12 +101,14 @@ pub fn save_annotations(
     background_corner_radius: f64,
     background_aspect_ratio: EditorCropAspectRatio,
     static_image_transform: StaticImageTransform,
+    source_upscale: crate::capture::editor::upscale::SourceUpscale,
 ) -> Result<(), AnnotationError> {
     let annotation_path = annotation_path_for_image(image_path);
     let image_hash = compute_image_hash(image_path)?;
 
     let mut file = AnnotationFile::new(image_path, image_hash, canvas_width, canvas_height);
     file.background = BackgroundSettings {
+        source_upscale,
         style: background_style_to_serializable(background_style),
         padding: background_padding,
         shadow: background_shadow,
@@ -315,10 +317,12 @@ impl ImageSessionSnapshot {
         background_corner_radius: f64,
         background_aspect_ratio: EditorCropAspectRatio,
         static_image_transform: StaticImageTransform,
+        source_upscale: crate::capture::editor::types::SourceUpscale,
     ) -> Self {
         Self {
             annotations: actions.iter().filter_map(action_to_serializable).collect(),
             background: BackgroundSettings {
+                source_upscale,
                 style: background_style_to_serializable(background_style),
                 padding: background_padding,
                 shadow: background_shadow,
@@ -908,6 +912,7 @@ mod tests {
             18.0,
             EditorCropAspectRatio::Original,
             StaticImageTransform::default(),
+            Default::default(),
         )
         .unwrap();
     }
@@ -964,6 +969,7 @@ mod tests {
             18.0,
             EditorCropAspectRatio::Original,
             static_transform,
+            Default::default(),
         )
         .unwrap();
 
@@ -1031,6 +1037,7 @@ mod tests {
             18.0,
             EditorCropAspectRatio::Original,
             StaticImageTransform::default(),
+            Default::default(),
         );
         assert!(empty.is_empty());
         let transformed = ImageSessionSnapshot::from_editor(
@@ -1049,6 +1056,7 @@ mod tests {
                 pos_x: 0.2,
                 ..Default::default()
             },
+            Default::default(),
         );
         assert!(!transformed.is_empty());
         assert_ne!(transformed, empty);

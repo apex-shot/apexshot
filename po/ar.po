@@ -3099,3 +3099,78 @@ msgstr "يتضمن ترخيصك تحديثات حتى إصدار أسبق. ال�
 
 msgid "That license couldn't be verified. Make sure you pasted all of it."
 msgstr "تعذّر التحقق من هذا الترخيص. تأكد من لصقه بالكامل."
+
+msgid "Replace license"
+msgstr "استبدال الترخيص"
+
+msgid "Active"
+msgstr "نشط"
+
+msgid "Copy license"
+msgstr "نسخ الترخيص"
+
+msgid "100% displays export pixels at native screen scale"
+msgstr "يعرض 100% وحدات بكسل التصدير بالحجم الأصلي للشاشة."
+
+msgid "ApexShot lost contact with the copy worker."
+msgstr "فقد ApexShot الاتصال بعامل النسخ."
+
+msgid "Before / after divider"
+msgstr "فاصل قبل/بعد"
+
+msgid "Compare before / after"
+msgstr "مقارنة قبل/بعد"
+
+msgid "Compare neural upscaling"
+msgstr "مقارنة التحسين العصبي للدقة"
+
+msgid "Could not prepare the comparison image."
+msgstr "تعذّر تجهيز صورة المقارنة."
+
+msgid "Enhance small screenshots locally before image and Motion exports."
+msgstr "حسّن لقطات الشاشة الصغيرة محليًا قبل تصدير الصور وMotion."
+
+msgid ""
+"Export preview: {width} × {height} pixels. Check text carefully; missing detail may not be recovered."
+msgstr ""
+"معاينة التصدير: {width} × {height} بكسل. افحص النص بعناية؛ قد لا يمكن استعادة التفاصيل المفقودة."
+
+msgid "Exporting…"
+msgstr "جارٍ التصدير…"
+
+msgid "Load an image before previewing upscaling."
+msgstr "حمّل صورة قبل معاينة التحسين."
+
+msgid "Neural 2×"
+msgstr "عصبي 2×"
+
+msgid "Neural 4×"
+msgstr "عصبي 4×"
+
+msgid "Neural upscaling"
+msgstr "التحسين العصبي للدقة"
+
+msgid "Neural upscaling for Studio exports"
+msgstr "التحسين العصبي للدقة لصادرات Studio"
+
+msgid ""
+"Offline neural enhancement for small images. Image exports grow by 2× or 4×; Motion keeps its Frame size. Compare the export for free before enabling Studio enhancement. Supports up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr ""
+"تحسين عصبي دون اتصال للصور الصغيرة. يزداد تصدير الصور بمقدار 2× أو 4×؛ ويحافظ Motion على حجم إطاره. قارن التصدير مجانًا قبل تفعيل تحسين Studio. يدعم حتى 1 ميغابكسل. لا يمكن دائمًا استعادة التفاصيل المفقودة."
+
+msgid "Preparing before / after preview…"
+msgstr "جارٍ تجهيز معاينة قبل/بعد…"
+
+msgid "Preview neural enhancement without a Studio license"
+msgstr "معاينة التحسين العصبي دون ترخيص Studio"
+
+msgid ""
+"Standard enlargement on the left, neural enhancement on the right. Move the divider and scroll to inspect rendered export pixels before file compression. This preview is free; enhanced exports require Studio."
+msgstr ""
+"التكبير القياسي على اليسار، والتحسين العصبي على اليمين. حرّك الفاصل ومرّر لفحص وحدات بكسل التصدير قبل ضغط الملف. هذه المعاينة مجانية؛ وتتطلب الصادرات المحسّنة ترخيص Studio."
+
+msgid "The upscaling preview worker stopped unexpectedly."
+msgstr "توقف عامل معاينة التحسين بشكل غير متوقع."
+
+msgid "Use enhancement"
+msgstr "استخدام التحسين"

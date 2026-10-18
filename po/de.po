@@ -3139,3 +3139,78 @@ msgstr "Deine Lizenz enthält Updates bis zu einer früheren Version. Versionen,
 
 msgid "That license couldn't be verified. Make sure you pasted all of it."
 msgstr "Diese Lizenz konnte nicht überprüft werden. Achte darauf, dass du sie vollständig eingefügt hast."
+
+msgid "Replace license"
+msgstr "Lizenz ersetzen"
+
+msgid "Active"
+msgstr "Aktiv"
+
+msgid "Copy license"
+msgstr "Lizenz kopieren"
+
+msgid "100% displays export pixels at native screen scale"
+msgstr "100 % zeigen die Exportpixel in der nativen Bildschirmskalierung an."
+
+msgid "ApexShot lost contact with the copy worker."
+msgstr "ApexShot hat die Verbindung zum Kopier-Worker verloren."
+
+msgid "Before / after divider"
+msgstr "Vorher-/Nachher-Trennlinie"
+
+msgid "Compare before / after"
+msgstr "Vorher/Nachher vergleichen"
+
+msgid "Compare neural upscaling"
+msgstr "Neuronale Hochskalierung vergleichen"
+
+msgid "Could not prepare the comparison image."
+msgstr "Das Vergleichsbild konnte nicht vorbereitet werden."
+
+msgid "Enhance small screenshots locally before image and Motion exports."
+msgstr "Verbessere kleine Screenshots lokal vor Bild- und Motion-Exporten."
+
+msgid ""
+"Export preview: {width} × {height} pixels. Check text carefully; missing detail may not be recovered."
+msgstr ""
+"Exportvorschau: {width} × {height} Pixel. Prüfe Text sorgfältig; fehlende Details können möglicherweise nicht wiederhergestellt werden."
+
+msgid "Exporting…"
+msgstr "Exportiere…"
+
+msgid "Load an image before previewing upscaling."
+msgstr "Lade ein Bild, bevor du die Hochskalierung in der Vorschau ansiehst."
+
+msgid "Neural 2×"
+msgstr "Neural 2×"
+
+msgid "Neural 4×"
+msgstr "Neural 4×"
+
+msgid "Neural upscaling"
+msgstr "Neuronale Hochskalierung"
+
+msgid "Neural upscaling for Studio exports"
+msgstr "Neuronale Hochskalierung für Studio-Exporte"
+
+msgid ""
+"Offline neural enhancement for small images. Image exports grow by 2× or 4×; Motion keeps its Frame size. Compare the export for free before enabling Studio enhancement. Supports up to 1 megapixel. Missing detail cannot always be recovered."
+msgstr ""
+"Offline-neuronale Verbesserung für kleine Bilder. Bild-Exporte werden um 2× oder 4× vergrößert; Motion behält seine Frame-Größe. Vergleiche den Export kostenlos, bevor du die Studio-Verbesserung aktivierst. Unterstützt bis zu 1 Megapixel. Fehlende Details können nicht immer wiederhergestellt werden."
+
+msgid "Preparing before / after preview…"
+msgstr "Vorher-/Nachher-Vorschau wird vorbereitet…"
+
+msgid "Preview neural enhancement without a Studio license"
+msgstr "Neuronale Verbesserung ohne Studio-Lizenz ansehen"
+
+msgid ""
+"Standard enlargement on the left, neural enhancement on the right. Move the divider and scroll to inspect rendered export pixels before file compression. This preview is free; enhanced exports require Studio."
+msgstr ""
+"Links die standardmäßige Vergrößerung, rechts die neuronale Verbesserung. Verschiebe die Trennlinie und scrolle, um die gerenderten Exportpixel vor der Dateikomprimierung zu prüfen. Diese Vorschau ist kostenlos; verbesserte Exporte erfordern Studio."
+
+msgid "The upscaling preview worker stopped unexpectedly."
+msgstr "Der Worker für die Hochskalierungsvorschau wurde unerwartet beendet."
+
+msgid "Use enhancement"
+msgstr "Verbesserung verwenden"

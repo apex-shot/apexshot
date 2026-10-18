@@ -24,6 +24,7 @@ fn paint_frame_backings(
     image_rect: &FloatRect,
     radius: f64,
     style: FrameStyle,
+    scale: f64,
 ) -> Result<RgbaImage, EditorError> {
     let spec = style.spec();
     let backings = [spec.backing1, spec.backing2];
@@ -36,8 +37,8 @@ fn paint_frame_backings(
                     let _ = context.save();
                     if backing.center_pivot {
                         context.translate(
-                            image_rect.x + image_rect.width / 2.0 + backing.offset_x,
-                            image_rect.y + image_rect.height / 2.0 + backing.offset_y,
+                            image_rect.x + image_rect.width / 2.0 + backing.offset_x * scale,
+                            image_rect.y + image_rect.height / 2.0 + backing.offset_y * scale,
                         );
                         context.rotate(backing.rotation_deg.to_radians());
                         context.translate(-image_rect.width / 2.0, -image_rect.height / 2.0);
@@ -45,8 +46,8 @@ fn paint_frame_backings(
                         // Pivot at the hidden bottom-right corner so
                         // the slant fans top-left (Stack2).
                         context.translate(
-                            image_rect.x + backing.offset_x + image_rect.width,
-                            image_rect.y + backing.offset_y + image_rect.height,
+                            image_rect.x + backing.offset_x * scale + image_rect.width,
+                            image_rect.y + backing.offset_y * scale + image_rect.height,
                         );
                         context.rotate(backing.rotation_deg.to_radians());
                         context.translate(-image_rect.width, -image_rect.height);
@@ -211,6 +212,70 @@ fn stroke_frame_border(
 }
 
 impl EditorState {
+    /// Snapshot the document for rendering in a worker without transferring GTK widgets.
+    pub(crate) fn export_snapshot(&self) -> impl FnOnce() -> Self + Send + 'static {
+        let source_upscale = self.source_upscale;
+        let export_scale = self.export_scale;
+        let base_image = std::sync::Arc::clone(&self.base_image);
+        let working_image = std::sync::Arc::clone(&self.working_image);
+        let actions = self.actions.clone();
+        let background_style = self.background_style.clone();
+        let background = (
+            self.background_padding,
+            self.background_shadow,
+            self.background_insert,
+            self.auto_balance,
+            self.background_alignment,
+            self.background_corner_radius,
+            self.background_aspect_ratio,
+            self.background_blur,
+            self.background_noise,
+        );
+        let appearance = (
+            self.border_thickness,
+            self.border_color,
+            self.frame_style,
+            self.shadow_opacity,
+            self.shadow_blur,
+            self.shadow_offset_x,
+            self.shadow_offset_y,
+        );
+        let static_image_transform = self.static_image_transform;
+        let scene_shadow = self.scene_shadow.clone();
+        move || {
+            let mut snapshot = Self::new(RgbaImage::new(0, 0));
+            snapshot.source_upscale = source_upscale;
+            snapshot.export_scale = export_scale;
+            snapshot.base_image = base_image;
+            snapshot.working_image = working_image;
+            snapshot.actions = actions;
+            snapshot.background_style = background_style;
+            (
+                snapshot.background_padding,
+                snapshot.background_shadow,
+                snapshot.background_insert,
+                snapshot.auto_balance,
+                snapshot.background_alignment,
+                snapshot.background_corner_radius,
+                snapshot.background_aspect_ratio,
+                snapshot.background_blur,
+                snapshot.background_noise,
+            ) = background;
+            (
+                snapshot.border_thickness,
+                snapshot.border_color,
+                snapshot.frame_style,
+                snapshot.shadow_opacity,
+                snapshot.shadow_blur,
+                snapshot.shadow_offset_x,
+                snapshot.shadow_offset_y,
+            ) = appearance;
+            snapshot.static_image_transform = static_image_transform;
+            snapshot.scene_shadow = scene_shadow;
+            snapshot
+        }
+    }
+
     fn paint_attached_border_underlay(
         &self,
         canvas: RgbaImage,
@@ -284,7 +349,7 @@ impl EditorState {
                 .map_err(|e| EditorError::ImageSave(e.to_string()))?;
 
             if self.border_thickness > 0.0 {
-                let thickness = self.border_thickness.max(0.0);
+                let thickness = self.border_thickness.max(0.0) * self.export_scale;
                 if thickness > 0.01 {
                     paint_attached_frame_border(
                         &context,
@@ -302,6 +367,7 @@ impl EditorState {
                 }
             }
 
+            context.scale(self.export_scale, self.export_scale);
             for action in &self.actions {
                 if matches!(
                     action,
@@ -336,7 +402,13 @@ impl EditorState {
         let canvas_h = layout.canvas_height.round().max(1.0) as u32;
         let mut canvas = RgbaImage::from_pixel(canvas_w, canvas_h, image::Rgba([0, 0, 0, 0]));
         let radius = self.background_corner_radius * layout.scale_factor * layout.draw_scale;
-        canvas = paint_frame_backings(canvas, &layout.image_rect, radius, self.frame_style)?;
+        canvas = paint_frame_backings(
+            canvas,
+            &layout.image_rect,
+            radius,
+            self.frame_style,
+            self.export_scale,
+        )?;
 
         let working: &RgbaImage = self.working_image.as_ref();
         let mut final_shot = if (layout.draw_scale - 1.0).abs() > 0.001 {
@@ -383,6 +455,7 @@ impl EditorState {
             );
             context.translate(layout.image_rect.x, layout.image_rect.y);
             context.scale(layout.draw_scale, layout.draw_scale);
+            context.scale(self.export_scale, self.export_scale);
             for action in self.vector_annotation_actions() {
                 super::super::render::draw_annotation_action(&context, action);
             }
@@ -403,18 +476,62 @@ impl EditorState {
     }
 
     pub fn to_final_image(&self) -> Result<RgbaImage, EditorError> {
-        if !self.static_image_transform.is_identity() {
-            return self.to_static_transformed_image();
+        if self.source_upscale.factor() > 1 {
+            return self.upscaled_export_state(true)?.to_final_image();
         }
-        if self.background_style != BackgroundStyle::None {
+        if self.export_scale > 1.0 {
+            let layout = self.background_layout_for(&self.working_image);
+            if layout.canvas_width * layout.canvas_height > 16_777_216.0
+                || layout.canvas_width.max(layout.canvas_height) > 16_384.0
+            {
+                return Err(EditorError::ImageSave("The enhanced canvas exceeds the 16-megapixel output limit. Reduce upscaling or background padding.".into()));
+            }
+        }
+        let image = if !self.static_image_transform.is_identity() {
+            self.to_static_transformed_image()
+        } else if self.background_style != BackgroundStyle::None {
             // Annotations paint above the background/wallpaper in canvas space,
             // so text/shapes placed on the padding stay visible instead of being
             // baked into the screenshot underneath the wallpaper. Use the clean
             // working image (effects only) for the card, then overlay vectors.
-            return self.render_with_background_and_annotations(&self.working_image);
-        }
+            self.render_with_background_and_annotations(&self.working_image)
+        } else {
+            self.to_rendered_image()
+        }?;
+        Ok(image)
+    }
 
-        self.to_rendered_image()
+    /// Prepare source pixels at export resolution while keeping annotation coordinates native.
+    pub(crate) fn upscaled_export_state(&self, neural: bool) -> Result<Self, EditorError> {
+        let factor = self.source_upscale.factor();
+        let pixels = if neural {
+            super::super::upscale::enhance(&self.working_image, self.source_upscale)
+                .map_err(EditorError::ImageSave)?
+        } else {
+            super::super::upscale::validate_input(&self.working_image, self.source_upscale)
+                .map_err(EditorError::ImageSave)?;
+            image::imageops::resize(
+                &*self.working_image,
+                self.working_image.width() * factor,
+                self.working_image.height() * factor,
+                image::imageops::FilterType::CatmullRom,
+            )
+        };
+        let mut state = self.export_snapshot()();
+        state.source_upscale = super::super::upscale::SourceUpscale::Off;
+        state.export_scale *= f64::from(factor);
+        state.working_image = std::sync::Arc::new(pixels);
+        state.base_image = std::sync::Arc::clone(&state.working_image);
+        Ok(state)
+    }
+
+    /// Render a Motion card with source enhancement before vector annotations.
+    pub(crate) fn to_motion_export_card(&self) -> Result<RgbaImage, EditorError> {
+        if self.source_upscale.factor() > 1 {
+            self.upscaled_export_state(true)?.to_motion_card_image()
+        } else {
+            self.to_motion_card_image()
+        }
     }
 
     fn to_static_transformed_image(&self) -> Result<RgbaImage, EditorError> {
@@ -515,6 +632,7 @@ impl EditorState {
         {
             let context = gtk4::cairo::Context::new(&surface)
                 .map_err(|e| EditorError::ImageSave(e.to_string()))?;
+            context.scale(self.export_scale, self.export_scale);
             for action in self.vector_annotation_actions() {
                 super::super::render::draw_annotation_action(&context, action);
             }
@@ -574,6 +692,7 @@ impl EditorState {
             }
             context.translate(layout.image_rect.x, layout.image_rect.y);
             context.scale(layout.draw_scale, layout.draw_scale);
+            context.scale(self.export_scale, self.export_scale);
             for action in self.vector_annotation_actions() {
                 super::super::render::draw_annotation_action(&context, action);
             }
@@ -607,23 +726,46 @@ impl EditorState {
     }
 
     fn background_layout_for(&self, screenshot: &RgbaImage) -> CompositionLayout {
-        BackgroundComposition::new(screenshot.width() as f64, screenshot.height() as f64)
-            .with_style(self.background_style.clone())
-            .with_padding(self.background_padding)
-            .with_shadow(self.background_shadow)
-            .with_shadow_profile(
-                self.shadow_opacity,
-                self.shadow_blur,
-                self.shadow_offset_x,
-                self.shadow_offset_y,
-            )
-            .with_insert(self.background_insert)
-            .with_alignment(self.background_alignment)
-            .with_corner_radius(self.background_corner_radius)
-            .with_aspect_ratio(self.background_aspect_ratio)
-            .with_frame_style(self.frame_style)
-            .with_frame_border_thickness(self.border_thickness)
-            .compute()
+        let scale = self.export_scale;
+        let mut layout = BackgroundComposition::new(
+            screenshot.width() as f64 / scale,
+            screenshot.height() as f64 / scale,
+        )
+        .with_style(self.background_style.clone())
+        .with_padding(self.background_padding)
+        .with_shadow(self.background_shadow)
+        .with_shadow_profile(
+            self.shadow_opacity,
+            self.shadow_blur,
+            self.shadow_offset_x,
+            self.shadow_offset_y,
+        )
+        .with_insert(self.background_insert)
+        .with_alignment(self.background_alignment)
+        .with_corner_radius(self.background_corner_radius)
+        .with_aspect_ratio(self.background_aspect_ratio)
+        .with_frame_style(self.frame_style)
+        .with_frame_border_thickness(self.border_thickness)
+        .compute();
+        let scale_rect = |rect: FloatRect| FloatRect {
+            x: rect.x * scale,
+            y: rect.y * scale,
+            width: rect.width * scale,
+            height: rect.height * scale,
+        };
+        layout.canvas_width *= scale;
+        layout.canvas_height *= scale;
+        layout.image_rect = scale_rect(layout.image_rect);
+        layout.shadow_rect = layout.shadow_rect.map(scale_rect);
+        layout.shadow = layout.shadow.map(|mut shadow| {
+            shadow.offset_x *= scale;
+            shadow.offset_y *= scale;
+            shadow.blur *= scale;
+            shadow.rect = scale_rect(shadow.rect);
+            shadow
+        });
+        layout.scale_factor *= scale;
+        layout
     }
 
     /// Liquid Glass frame: bend the composited canvas through the glass band
@@ -747,7 +889,7 @@ impl EditorState {
             self.background_style,
             BackgroundStyle::Gradient(_) | BackgroundStyle::Wallpaper(_)
         ) {
-            apply_background_blur(&mut canvas, self.background_blur, 1.0);
+            apply_background_blur(&mut canvas, self.background_blur, self.export_scale);
         }
         if self.background_style != BackgroundStyle::None {
             canvas = apply_background_noise(canvas, self.background_noise);
@@ -862,7 +1004,7 @@ impl EditorState {
             self.background_style,
             BackgroundStyle::Gradient(_) | BackgroundStyle::Wallpaper(_)
         ) {
-            apply_background_blur(&mut canvas, self.background_blur, 1.0);
+            apply_background_blur(&mut canvas, self.background_blur, self.export_scale);
         }
 
         // Background grain belongs to the fill, so it lands before the card,
@@ -878,7 +1020,13 @@ impl EditorState {
         // Backing sheets (Stack looks, Retro window) behind the card.
         {
             let radius = self.background_corner_radius * layout.scale_factor * layout.draw_scale;
-            canvas = paint_frame_backings(canvas, &layout.image_rect, radius, self.frame_style)?;
+            canvas = paint_frame_backings(
+                canvas,
+                &layout.image_rect,
+                radius,
+                self.frame_style,
+                self.export_scale,
+            )?;
         }
 
         let mut final_screenshot = if (layout.draw_scale - 1.0).abs() > 0.001 {

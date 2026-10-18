@@ -8,6 +8,9 @@ pub(crate) struct MotionStage {
     pub bounds_h: f64,
     pub center_x: f64,
     pub center_y: f64,
+    /// Output frames scale the composition up to fill them. Every other stage
+    /// keeps the composition at most its native size, like Static's canvas.
+    output_resolution: bool,
 }
 
 impl MotionStage {
@@ -17,6 +20,16 @@ impl MotionStage {
             bounds_h: height,
             center_x: width / 2.0,
             center_y: height / 2.0,
+            output_resolution: false,
+        }
+    }
+
+    /// The MP4 export and the Motion comparison frame: the composition fills
+    /// the output resolution, so a small source keeps its padding proportions.
+    pub(crate) fn output(width: f64, height: f64) -> Self {
+        Self {
+            output_resolution: true,
+            ..Self::frame(width, height)
         }
     }
 
@@ -28,6 +41,7 @@ impl MotionStage {
             bounds_h: height,
             center_x: x + width / 2.0,
             center_y: y + height / 2.0,
+            output_resolution: false,
         }
     }
 
@@ -41,13 +55,17 @@ impl MotionStage {
             bounds_h,
             center_x: width / 2.0,
             center_y: height / 2.0,
+            output_resolution: false,
         }
     }
 
     fn composition_fit(&self, canvas_w: f64, canvas_h: f64) -> f64 {
-        (self.bounds_w / canvas_w.max(1.0))
-            .min(self.bounds_h / canvas_h.max(1.0))
-            .min(1.0)
+        let fit = (self.bounds_w / canvas_w.max(1.0)).min(self.bounds_h / canvas_h.max(1.0));
+        if self.output_resolution {
+            fit
+        } else {
+            fit.min(1.0)
+        }
     }
 }
 

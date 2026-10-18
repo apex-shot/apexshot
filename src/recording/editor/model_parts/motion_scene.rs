@@ -16,6 +16,7 @@ use crate::capture::editor::types::{BackgroundAlignment, FrameStyle};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MotionAppearance {
+    pub source_upscale: crate::capture::editor::upscale::SourceUpscale,
     pub background_padding: f64,
     /// Legacy card inset (0-200 slider units) and placement inside the
     /// canvas. Motion has no controls for them, but it must render them or a
@@ -47,6 +48,7 @@ pub struct MotionAppearance {
 impl Default for MotionAppearance {
     fn default() -> Self {
         Self {
+            source_upscale: Default::default(),
             // Preserve the established Motion card framing until the user
             // changes it; unlike the fill, there is no recoverable numeric
             // default for this field. Capture's Background tool overrides this

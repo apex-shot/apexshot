@@ -26,11 +26,12 @@ pub struct StudioCapabilities {
     pub motion_export: bool,
     pub static_presentation: bool,
     pub advanced_zoom: bool,
+    pub image_upscale: bool,
 }
 
 impl StudioCapabilities {
     pub fn requires_studio(self) -> bool {
-        self.motion_export || self.static_presentation || self.advanced_zoom
+        self.motion_export || self.static_presentation || self.advanced_zoom || self.image_upscale
     }
 }
 
@@ -137,6 +138,23 @@ pub fn activate_token(token: &str) -> Result<(), StudioEntitlementError> {
     activate_token_at_path(&path, token, &configuration)
 }
 
+/// The entitlement text saved on this device, exactly as it was accepted.
+///
+/// Settings offers it so a license can be carried to another machine without a
+/// trip back to the purchase page. It is deliberately unverified: the caller
+/// wants the stored bytes, and `current_status` already answers whether this
+/// build can use them.
+pub fn stored_token() -> Option<String> {
+    let path = entitlement_path().ok()?;
+    let token = fs::read_to_string(path).ok()?;
+    let token = token.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
+}
+
 fn activate_token_at_path(
     path: &Path,
     token: &str,
@@ -227,6 +245,16 @@ pub fn capabilities_for_static_image(transform: StaticImageTransform) -> StudioC
     StudioCapabilities {
         static_presentation: !transform.sanitized().is_identity(),
         ..StudioCapabilities::default()
+    }
+}
+
+pub fn capabilities_for_image_export(
+    transform: StaticImageTransform,
+    upscale: bool,
+) -> StudioCapabilities {
+    StudioCapabilities {
+        image_upscale: upscale,
+        ..capabilities_for_static_image(transform)
     }
 }
 
@@ -619,6 +647,20 @@ fn signed_token_for_test(signing_key: &ed25519_dalek::SigningKey, payload: &[u8]
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn neural_upscale_requires_studio_without_changing_free_image_exports() {
+        let transform = StaticImageTransform::default();
+        assert!(!capabilities_for_image_export(transform, false).requires_studio());
+        let capabilities = capabilities_for_image_export(transform, true);
+        assert!(capabilities.image_upscale);
+        assert!(capabilities.requires_studio());
+        let path = scratch_path();
+        let _path = test_entitlement_path_scope(path);
+        assert_eq!(
+            ensure_export_allowed(capabilities),
+            Err(StudioEntitlementError::NotActivated)
+        );
+    }
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use ed25519_dalek::{Signer, SigningKey};
     use std::time::{SystemTime, UNIX_EPOCH};
