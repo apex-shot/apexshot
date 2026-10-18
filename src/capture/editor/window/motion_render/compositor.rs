@@ -51,6 +51,7 @@ pub fn scaled_card_preview(card: &ImageSurface) -> Option<(ImageSurface, f64)> {
     Some((surface, f64::from(preview_w) / f64::from(width)))
 }
 
+#[cfg(test)]
 pub fn draw_motion_frame(
     context: &Context,
     width: i32,
@@ -132,9 +133,9 @@ pub(super) fn draw_motion_foreground(
     live_preview: bool,
     card_scale: f64,
 ) {
-    let (source_w, source_h) = motion_source_size(surface, card_scale);
-    let composition = motion_canvas(source_w, source_h, &motion.appearance, &motion.frame);
     let stage = if checkerboard {
+        let (source_w, source_h) = motion_source_size(surface, card_scale);
+        let composition = motion_canvas(source_w, source_h, &motion.appearance, &motion.frame);
         MotionStage::preview(
             f64::from(width),
             f64::from(height),
@@ -144,6 +145,101 @@ pub(super) fn draw_motion_foreground(
     } else {
         MotionStage::frame(f64::from(width), f64::from(height))
     };
+    paint_motion_foreground(
+        context,
+        width,
+        height,
+        stage,
+        surface,
+        motion,
+        watermark_surface,
+        time,
+        checkerboard,
+        live_preview,
+        card_scale,
+    );
+}
+
+/// The Motion foreground at output resolution, shared by the MP4 export and
+/// the free Motion comparison. The composition fills the output frame.
+pub(super) fn draw_motion_output_foreground(
+    context: &Context,
+    width: i32,
+    height: i32,
+    surface: &ImageSurface,
+    motion: &MotionState,
+    watermark_surface: Option<&ImageSurface>,
+    time: f64,
+    card_scale: f64,
+) {
+    paint_motion_foreground(
+        context,
+        width,
+        height,
+        MotionStage::output(f64::from(width), f64::from(height)),
+        surface,
+        motion,
+        watermark_surface,
+        time,
+        false,
+        false,
+        card_scale,
+    );
+}
+
+/// The full Motion frame at output resolution: the backdrop and the output
+/// foreground, painted the way the MP4 export paints each of its frames.
+pub(super) fn draw_motion_output_frame(
+    context: &Context,
+    width: i32,
+    height: i32,
+    surface: &ImageSurface,
+    motion: &MotionState,
+    background_surface: Option<&ImageSurface>,
+    watermark_surface: Option<&ImageSurface>,
+    time: f64,
+    prefers_dark: bool,
+    card_scale: f64,
+) {
+    let (source_w, source_h) = motion_source_size(surface, card_scale);
+    let canvas = motion_canvas(source_w, source_h, &motion.appearance, &motion.frame);
+    draw_motion_backdrop(
+        context,
+        width,
+        height,
+        motion,
+        background_surface,
+        false,
+        prefers_dark,
+        Some((canvas.canvas_width, canvas.canvas_height)),
+    );
+    draw_motion_output_foreground(
+        context,
+        width,
+        height,
+        surface,
+        motion,
+        watermark_surface,
+        time,
+        card_scale,
+    );
+}
+
+fn paint_motion_foreground(
+    context: &Context,
+    width: i32,
+    height: i32,
+    stage: MotionStage,
+    surface: &ImageSurface,
+    motion: &MotionState,
+    watermark_surface: Option<&ImageSurface>,
+    time: f64,
+    checkerboard: bool,
+    live_preview: bool,
+    card_scale: f64,
+) {
+    let (source_w, source_h) = motion_source_size(surface, card_scale);
+    let composition = motion_canvas(source_w, source_h, &motion.appearance, &motion.frame);
     let _ = context.save();
     context.rectangle(
         stage.center_x - stage.bounds_w * 0.5,

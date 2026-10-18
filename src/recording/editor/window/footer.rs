@@ -417,6 +417,8 @@ fn wire_export_button(
         let spinner = spinner.clone();
         let exporting = exporting.clone();
         let window = window.clone();
+        let export_button = button.clone();
+        let idle_label = button.label().unwrap_or_else(|| t("Export").into());
         export_cancellation.store(false, Ordering::Release);
         let chooser_slot_response = Rc::downgrade(&chooser_slot_click);
         let export_cancellation_response = export_cancellation.clone();
@@ -449,6 +451,7 @@ fn wire_export_button(
             }
 
             exporting.set(true);
+            export_button.set_label(&t("Exporting…"));
             spinner.set_visible(true);
             spinner.start();
             for control in &controls {
@@ -471,11 +474,14 @@ fn wire_export_button(
             let spinner = spinner.clone();
             let exporting = exporting.clone();
             let window = window.clone();
+            let export_button = export_button.clone();
+            let idle_label = idle_label.clone();
             let export_cancellation = export_cancellation_response.clone();
             glib::timeout_add_local(Duration::from_millis(100), move || {
                 match receiver.try_recv() {
                     Ok(result) => {
                         exporting.set(false);
+                        export_button.set_label(&idle_label);
                         spinner.stop();
                         spinner.set_visible(false);
                         for control in &controls {
@@ -507,6 +513,7 @@ fn wire_export_button(
                     Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                         exporting.set(false);
+                        export_button.set_label(&idle_label);
                         spinner.stop();
                         spinner.set_visible(false);
                         for control in &controls {
@@ -530,6 +537,22 @@ fn wire_export_button(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn video_export_shows_busy_feedback_and_restores_it_on_completion_or_worker_failure() {
+        let source = include_str!("footer.rs");
+        let source = source.split("#[cfg(test)]").next().unwrap();
+        let export = source.split("fn wire_export_button(").nth(1).unwrap();
+        assert!(export.contains("if exporting.get()"));
+        assert!(export.contains("export_button.set_label(&t(\"Exporting…\"))"));
+        assert_eq!(
+            export
+                .matches("export_button.set_label(&idle_label)")
+                .count(),
+            2
+        );
+        assert!(export.contains("control.set_sensitive(false)"));
+    }
+
     #[test]
     fn cloud_and_export_require_video_and_upload_applies_edits() {
         let source = include_str!("footer.rs")

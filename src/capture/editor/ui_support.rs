@@ -245,6 +245,7 @@ const EDITOR_CSS: &str = concat!(
     include_str!("css/11-background-sidebar.css"),
     include_str!("css/12-background-choices.css"),
     include_str!("css/13-text-modal.css"),
+    include_str!("css/14-upscale-preview.css"),
 );
 
 pub fn install_editor_css() {

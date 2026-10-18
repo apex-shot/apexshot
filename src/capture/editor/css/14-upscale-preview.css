@@ -1,0 +1,357 @@
+            /* ─────────────────────────────────────────────────────────────
+               Neural upscaling comparison dialog.
+
+               Opened from the Motion editor, so it borrows that surface
+               system: #141414 cards, 10–14px radii, hairline white rims,
+               muted secondary copy, and the #ff670d action colour. The
+               global editor rules scope to .editor-root, which left this
+               standalone window on platform defaults.
+               ───────────────────────────────────────────────────────────── */
+
+            .editor-upscale-window {
+                font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+                color: #f1f1f3;
+                background-color: #141414;
+                border: 1px solid alpha(white, 0.10);
+                border-radius: 14px;
+                box-shadow: 0 18px 48px alpha(black, 0.45);
+            }
+
+            .editor-upscale-window .editor-upscale-titlebar {
+                padding: 14px 18px 10px;
+                background: transparent;
+            }
+
+            .editor-upscale-window .editor-upscale-title {
+                color: #f1f1f3;
+                font-size: 15px;
+                font-weight: 600;
+                letter-spacing: -0.2px;
+            }
+
+            .editor-upscale-window .editor-upscale-subtitle {
+                color: rgba(255, 255, 255, 0.50);
+                font-size: 11px;
+            }
+
+            .editor-upscale-window button.editor-upscale-close {
+                min-width: 30px;
+                min-height: 30px;
+                padding: 0;
+                border: none;
+                border-radius: 999px;
+                background: transparent;
+                background-image: none;
+                box-shadow: none;
+                color: rgba(255, 255, 255, 0.62);
+            }
+
+            .editor-upscale-window button.editor-upscale-close:hover {
+                background: alpha(white, 0.10);
+                color: #ffffff;
+            }
+
+            .editor-upscale-window button.editor-upscale-close:active {
+                background: alpha(white, 0.14);
+                color: #ffffff;
+            }
+
+            /* The content sits directly under the custom titlebar, so the
+               shared editor root must not paint a second rounded surface. */
+            .editor-upscale-window .editor-upscale-body {
+                padding: 0 18px 18px;
+                background: transparent;
+                border: none;
+                border-radius: 0;
+                box-shadow: none;
+            }
+
+            .editor-upscale-window .editor-upscale-note {
+                padding: 10px 12px;
+                border: 1px solid alpha(#ff670d, 0.14);
+                border-radius: 8px;
+                background-color: alpha(#ff670d, 0.07);
+                color: rgba(255, 255, 255, 0.66);
+                font-size: 11px;
+                line-height: 1.4;
+            }
+
+            .editor-upscale-window .editor-upscale-note label {
+                color: inherit;
+            }
+
+            .editor-upscale-window .editor-upscale-note image {
+                color: #ff9a5c;
+            }
+
+            .editor-upscale-window .editor-upscale-controls {
+                margin-top: 14px;
+            }
+
+            .editor-upscale-window .editor-upscale-field-label {
+                color: rgba(255, 255, 255, 0.45);
+                font-size: 11px;
+                font-weight: 500;
+            }
+
+            /* The app's own dropdown recipe: a 6px chip at alpha(white,
+               0.06) over a flat #1a1a1a menu, with a check rather than a
+               filled selection row. */
+            .editor-upscale-window dropdown.editor-upscale-dropdown > button {
+                min-width: 116px;
+                min-height: 28px;
+                padding: 0 8px;
+                border: none;
+                border-radius: 6px;
+                background-color: alpha(white, 0.06);
+                background-image: none;
+                color: #f1f1f3;
+                box-shadow: none;
+                text-shadow: none;
+            }
+
+            .editor-upscale-window dropdown.editor-upscale-dropdown > button:hover,
+            .editor-upscale-window dropdown.editor-upscale-dropdown > button:active,
+            .editor-upscale-window dropdown.editor-upscale-dropdown > button:checked {
+                background-color: alpha(white, 0.10);
+                background-image: none;
+                box-shadow: none;
+                outline: none;
+            }
+
+            .editor-upscale-window dropdown.editor-upscale-dropdown > button label {
+                color: #f1f1f3;
+                font-size: 12px;
+                font-weight: 500;
+            }
+
+            .editor-upscale-window dropdown.editor-upscale-dropdown > button image {
+                color: alpha(white, 0.45);
+                -gtk-icon-size: 10px;
+            }
+
+            .editor-upscale-window dropdown.editor-upscale-dropdown popover {
+                background: transparent;
+                box-shadow: none;
+            }
+
+            .editor-upscale-window dropdown.editor-upscale-dropdown popover > contents {
+                padding: 4px;
+                border: 1px solid alpha(white, 0.08);
+                border-radius: 8px;
+                background-color: #1a1a1a;
+                box-shadow: none;
+            }
+
+            .editor-upscale-window dropdown.editor-upscale-dropdown popover listview,
+            .editor-upscale-window dropdown.editor-upscale-dropdown popover scrolledwindow {
+                background: transparent;
+            }
+
+            .editor-upscale-window dropdown.editor-upscale-dropdown popover listview row {
+                min-height: 28px;
+                padding: 0 8px;
+                border-radius: 6px;
+                color: #f1f1f3;
+                font-size: 12px;
+            }
+
+            .editor-upscale-window dropdown.editor-upscale-dropdown popover listview row image {
+                color: inherit;
+            }
+
+            .editor-upscale-window dropdown.editor-upscale-dropdown popover listview row:hover {
+                background-color: alpha(white, 0.06);
+            }
+
+            .editor-upscale-window dropdown.editor-upscale-dropdown popover listview row:selected {
+                background-color: transparent;
+                color: #f1f1f3;
+            }
+
+            .editor-upscale-window dropdown.editor-upscale-dropdown popover listview row:selected:hover {
+                background-color: alpha(white, 0.06);
+            }
+
+            .editor-upscale-window .editor-upscale-stage {
+                min-height: 260px;
+                margin-top: 16px;
+                border: 1px solid alpha(white, 0.10);
+                border-radius: 10px;
+                background-color: #0d0d0d;
+            }
+
+            .editor-upscale-window .editor-upscale-scroll {
+                background: transparent;
+            }
+
+            .editor-upscale-window .editor-upscale-stage-badge {
+                padding: 4px 9px;
+                border: 1px solid alpha(white, 0.14);
+                border-radius: 999px;
+                background-color: alpha(black, 0.62);
+                color: rgba(255, 255, 255, 0.92);
+                font-size: 10px;
+                font-weight: 700;
+                box-shadow: 0 2px 8px alpha(black, 0.25);
+            }
+
+            .editor-upscale-window .editor-upscale-status-row {
+                min-height: 16px;
+                margin-top: 8px;
+            }
+
+            .editor-upscale-window .editor-upscale-status {
+                color: rgba(255, 255, 255, 0.55);
+                font-size: 11px;
+            }
+
+            .editor-upscale-window spinner {
+                color: #ff670d;
+            }
+
+            .editor-upscale-window .editor-upscale-footer {
+                margin-top: 16px;
+                padding-top: 14px;
+                border-top: 1px solid alpha(white, 0.07);
+            }
+
+            .editor-upscale-window button.editor-upscale-secondary {
+                min-height: 34px;
+                padding: 0 14px;
+                border-radius: 7px;
+                color: rgba(255, 255, 255, 0.78);
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .editor-upscale-window button.editor-upscale-primary {
+                min-width: 148px;
+                min-height: 34px;
+                padding: 0 16px;
+                border-radius: 7px;
+                font-size: 12px;
+                font-weight: 600;
+            }
+
+            .editor-upscale-window button.editor-upscale-primary:disabled {
+                background: alpha(white, 0.06);
+                color: rgba(255, 255, 255, 0.35);
+            }
+
+            .editor-upscale-window button.editor-upscale-primary:disabled label {
+                color: rgba(255, 255, 255, 0.35);
+            }
+
+            /* ── Light theme, mirroring the editor's palette ── */
+
+            .editor-upscale-window.editor-theme-light {
+                color: #1d2129;
+                background-color: #f6f7fb;
+                border-color: alpha(#111827, 0.10);
+            }
+
+            .editor-upscale-window.editor-theme-light .editor-upscale-title {
+                color: #1d2129;
+            }
+
+            .editor-upscale-window.editor-theme-light .editor-upscale-subtitle {
+                color: rgba(29, 33, 41, 0.52);
+            }
+
+            .editor-upscale-window.editor-theme-light button.editor-upscale-close {
+                color: rgba(29, 33, 41, 0.55);
+            }
+
+            .editor-upscale-window.editor-theme-light button.editor-upscale-close:hover {
+                background: alpha(#111827, 0.07);
+                color: #1d2129;
+            }
+
+            .editor-upscale-window.editor-theme-light button.editor-upscale-close:active {
+                background: alpha(#111827, 0.11);
+                color: #1d2129;
+            }
+
+            .editor-upscale-window.editor-theme-light .editor-upscale-note {
+                border-color: alpha(#ff670d, 0.20);
+                background-color: alpha(#ff670d, 0.08);
+                color: rgba(29, 33, 41, 0.68);
+            }
+
+            .editor-upscale-window.editor-theme-light .editor-upscale-note image {
+                color: #d15b12;
+            }
+
+            .editor-upscale-window.editor-theme-light .editor-upscale-field-label {
+                color: rgba(29, 33, 41, 0.48);
+            }
+
+            .editor-upscale-window.editor-theme-light dropdown.editor-upscale-dropdown > button {
+                border: none;
+                background-color: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+
+            .editor-upscale-window.editor-theme-light dropdown.editor-upscale-dropdown > button:hover,
+            .editor-upscale-window.editor-theme-light dropdown.editor-upscale-dropdown > button:active,
+            .editor-upscale-window.editor-theme-light dropdown.editor-upscale-dropdown > button:checked {
+                background-color: alpha(#111827, 0.10);
+                border: none;
+            }
+
+            .editor-upscale-window.editor-theme-light dropdown.editor-upscale-dropdown > button label {
+                color: #1d2129;
+            }
+
+            .editor-upscale-window.editor-theme-light dropdown.editor-upscale-dropdown > button image {
+                color: alpha(#1d2129, 0.45);
+            }
+
+            .editor-upscale-window.editor-theme-light dropdown.editor-upscale-dropdown popover > contents {
+                border-color: alpha(#111827, 0.08);
+                background-color: #ffffff;
+            }
+
+            .editor-upscale-window.editor-theme-light dropdown.editor-upscale-dropdown popover listview row {
+                color: #1d2129;
+            }
+
+            .editor-upscale-window.editor-theme-light dropdown.editor-upscale-dropdown popover listview row:hover {
+                background-color: alpha(#111827, 0.06);
+            }
+
+            .editor-upscale-window.editor-theme-light dropdown.editor-upscale-dropdown popover listview row:selected {
+                background-color: transparent;
+                color: #1d2129;
+            }
+
+            .editor-upscale-window.editor-theme-light dropdown.editor-upscale-dropdown popover listview row:selected:hover {
+                background-color: alpha(#111827, 0.06);
+            }
+
+            .editor-upscale-window.editor-theme-light .editor-upscale-stage {
+                border-color: alpha(#111827, 0.10);
+                background-color: #eef0f5;
+            }
+
+            .editor-upscale-window.editor-theme-light .editor-upscale-status {
+                color: rgba(29, 33, 41, 0.56);
+            }
+
+            .editor-upscale-window.editor-theme-light .editor-upscale-footer {
+                border-top-color: alpha(#111827, 0.08);
+            }
+
+            .editor-upscale-window.editor-theme-light button.editor-upscale-secondary {
+                color: rgba(29, 33, 41, 0.72);
+            }
+
+            .editor-upscale-window.editor-theme-light button.editor-upscale-primary:disabled {
+                background: alpha(#111827, 0.05);
+                color: rgba(29, 33, 41, 0.35);
+            }
+
+            .editor-upscale-window.editor-theme-light button.editor-upscale-primary:disabled label {
+                color: rgba(29, 33, 41, 0.35);
+            }

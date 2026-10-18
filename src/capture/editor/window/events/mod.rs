@@ -3,7 +3,7 @@ use gtk4::{
     DrawingArea, Label, Overlay, Scale, ScrolledWindow,
 };
 use std::cell::Cell;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
@@ -131,7 +131,7 @@ pub(super) struct EventContext {
     pub stroke_size_button: Button,
     pub stroke_size_list: gtk4::Box,
     pub in_motion: Rc<Cell<bool>>,
-    pub export_motion: Rc<dyn Fn(&Path) -> Result<PathBuf, String>>,
+    pub export_motion: super::motion_host::MotionExport,
 }
 
 pub(super) fn wire_editor_events(ctx: EventContext) {

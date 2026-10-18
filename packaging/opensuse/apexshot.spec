@@ -108,6 +108,9 @@ for snd in assets/sounds/*.ogg; do
     install -Dm0644 "${snd}" "%{buildroot}%{_datadir}/apexshot/sounds/$(basename "${snd}")"
 done
 
+install -Dm0644 assets/upscaling/LICENSE %{buildroot}%{_licensedir}/%{name}/upscaling.LICENSE
+install -Dm0644 assets/upscaling/README.md %{buildroot}%{_docdir}/%{name}/upscaling.md
+
 if [ -d target/locale ]; then
     for mo in target/locale/*/LC_MESSAGES/apexshot.mo; do
         [ -f "$mo" ] || continue
@@ -128,7 +131,9 @@ fi
 
 %files
 %license LICENSE
+%license %{_licensedir}/%{name}/upscaling.LICENSE
 %doc README.md
+%doc %{_docdir}/%{name}/upscaling.md
 %{_bindir}/apexshot
 %{_bindir}/apexshot-capture
 %{_bindir}/apexshot-native-host

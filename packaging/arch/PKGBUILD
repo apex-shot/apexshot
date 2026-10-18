@@ -153,6 +153,9 @@ package() {
         [ -f "$snd" ] && install -Dm644 "$snd" "$snd_dir/$(basename "$snd")"
     done
 
+    install -Dm644 assets/upscaling/LICENSE "$pkgdir/usr/share/licenses/$pkgname/upscaling.LICENSE"
+    install -Dm644 assets/upscaling/README.md "$pkgdir/usr/share/doc/$pkgname/upscaling.md"
+
     if [[ -d target/locale ]]; then
         for mo in target/locale/*/LC_MESSAGES/apexshot.mo; do
             [[ -f "$mo" ]] || continue

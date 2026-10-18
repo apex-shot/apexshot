@@ -16,6 +16,7 @@ mod session;
 mod text_pad;
 mod transition;
 mod typography;
+mod upscale_preview;
 mod watermark;
 mod widgets;
 

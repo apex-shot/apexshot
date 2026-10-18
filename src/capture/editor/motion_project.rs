@@ -307,6 +307,8 @@ pub struct MotionTextSegmentFile {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MotionAppearanceFile {
+    #[serde(default)]
+    pub source_upscale: crate::capture::editor::upscale::SourceUpscale,
     pub background_padding: f64,
     /// Absent in files written before Motion carried it; the zero/Center
     /// defaults reproduce the old framing exactly.
@@ -719,6 +721,7 @@ impl From<&MotionTextSegmentFile> for MotionTextSegment {
 impl From<&MotionAppearance> for MotionAppearanceFile {
     fn from(value: &MotionAppearance) -> Self {
         Self {
+            source_upscale: value.source_upscale,
             background_padding: value.background_padding,
             background_insert: value.background_insert,
             background_alignment: value.background_alignment,
@@ -749,6 +752,7 @@ impl From<&MotionAppearanceFile> for MotionAppearance {
     fn from(value: &MotionAppearanceFile) -> Self {
         let gradient = gradient_from_file(value);
         Self {
+            source_upscale: value.source_upscale,
             background_padding: value.background_padding,
             background_insert: value.background_insert,
             background_alignment: value.background_alignment,
@@ -1210,6 +1214,26 @@ pub fn list_projects() -> Vec<MotionProjectFile> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn source_upscale_round_trips_and_legacy_projects_default_to_off() {
+        use crate::capture::editor::upscale::SourceUpscale;
+        let mut motion = crate::recording::editor::model::MotionState::default();
+        motion.appearance.source_upscale = SourceUpscale::Neural4x;
+        let project = super::to_project(&motion, std::path::Path::new("sample.png"));
+        let mut value = serde_json::to_value(&project).unwrap();
+        let restored: super::MotionProjectFile = serde_json::from_value(value.clone()).unwrap();
+        let mut state = crate::recording::editor::model::MotionState::default();
+        restored.apply_to(&mut state);
+        assert_eq!(state.appearance.source_upscale, SourceUpscale::Neural4x);
+        value["appearance"]
+            .as_object_mut()
+            .unwrap()
+            .remove("source_upscale");
+        let legacy: super::MotionProjectFile = serde_json::from_value(value).unwrap();
+        legacy.apply_to(&mut state);
+        assert_eq!(state.appearance.source_upscale, SourceUpscale::Off);
+    }
+
     use super::*;
     use crate::capture::editor::types::BackgroundAlignment;
     use crate::recording::editor::model::{

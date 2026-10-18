@@ -218,6 +218,8 @@ modules:
           done
         fi
       - install -Dm644 assets/fonts/InterVariable.ttf /app/share/fonts/InterVariable.ttf
+      - install -Dm644 assets/upscaling/LICENSE /app/share/licenses/apexshot/upscaling.LICENSE
+      - install -Dm644 assets/upscaling/README.md /app/share/licenses/apexshot/upscaling.md
       - rm -rf /app/include /app/lib/cmake /app/lib/pkgconfig /app/mkspecs /app/doc /app/examples /app/tests /app/translations /app/qml /app/libexec/qt* /app/share/doc /app/share/man
       - rm -f /app/lib/libQt5WaylandCompositor.*
       - rm -f /app/bin/qmake /app/bin/moc /app/bin/rcc /app/bin/uic /app/bin/qtpaths /app/bin/qdbuscpp2xml /app/bin/qdbusxml2cpp

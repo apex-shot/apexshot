@@ -51,6 +51,21 @@
                 letter-spacing: 0.5px;
             }
 
+            .settings-status-pill {
+                background-color: alpha(#ff7c2f, 0.14);
+                color: #ff7c2f;
+                border-radius: 999px;
+                padding: 2px 11px;
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 0.02em;
+            }
+
+            .editor-root.editor-theme-light .settings-status-pill {
+                background-color: alpha(#ff670d, 0.12);
+                color: #cf530b;
+            }
+
             .settings-sub-option {
                 font-size: 12px;
                 opacity: 0.64;

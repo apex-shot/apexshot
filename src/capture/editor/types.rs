@@ -1,4 +1,5 @@
 use super::numbering_style::{NumberSize, NumberingStyle};
+pub use super::upscale::SourceUpscale;
 use crate::recording::editor::model::VideoGradient;
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;

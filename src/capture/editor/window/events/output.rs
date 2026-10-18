@@ -13,6 +13,7 @@ use crate::annotations::{save_annotations, AnnotationError};
 use crate::capture::editor::{
     io_ops::{save_clipboard_image, save_edited_image},
     state::EditorState,
+    types::EditorError,
 };
 
 pub fn persist_image_session(path: &Path, state: &EditorState) -> Result<(), AnnotationError> {
@@ -31,6 +32,7 @@ pub fn persist_image_session(path: &Path, state: &EditorState) -> Result<(), Ann
         state.background_corner_radius,
         state.background_aspect_ratio,
         state.static_image_transform,
+        state.source_upscale,
     )
 }
 
@@ -45,15 +47,24 @@ pub(super) fn wire_output_lifecycle(
     save_spinner: &Spinner,
     traffic_close: &Button,
     in_motion: Rc<Cell<bool>>,
-    export_motion: Rc<dyn Fn(&Path) -> Result<PathBuf, String>>,
+    export_motion: super::super::motion_host::MotionExport,
 ) {
     let state_copy = state.clone();
     let window_copy = window.downgrade();
     let copy_retry = copy_btn.downgrade();
+    let copying = Rc::new(Cell::new(false));
+    let copy_btn_click = copy_btn.clone();
     copy_btn.connect_clicked(move |_| {
-        let capabilities = crate::studio_entitlement::capabilities_for_static_image(
-            state_copy.lock().unwrap().static_image_transform,
-        );
+        if copying.get() {
+            return;
+        }
+        let capabilities = {
+            let state = state_copy.lock().unwrap();
+            crate::studio_entitlement::capabilities_for_image_export(
+                state.static_image_transform,
+                state.source_upscale.factor() > 1,
+            )
+        };
         let Some(window) = window_copy.upgrade() else {
             return;
         };
@@ -70,29 +81,41 @@ pub(super) fn wire_output_lifecycle(
         let mode = crate::utils::clipboard::ScreenshotClipboardMode::from_config_value(
             &config.adv_clipboard_mode,
         );
-        let snapshot = {
-            let state = state_copy.lock().unwrap();
-            save_clipboard_image(
-                crate::capture::unsaved::UnsavedCaptureStore::app_owned().dir(),
-                &state,
-            )
-        };
-        let result = snapshot
-            .map_err(|error| error.to_string())
-            .and_then(|snapshot| {
+        let snapshot = state_copy.lock().unwrap().export_snapshot();
+        let directory = crate::capture::unsaved::UnsavedCaptureStore::app_owned()
+            .dir()
+            .to_path_buf();
+        copying.set(true);
+        copy_btn_click.set_sensitive(false);
+        let copying_done = copying.clone();
+        let copy_btn_done = copy_btn_click.clone();
+        glib::MainContext::default().spawn_local(async move {
+            let rendered =
+                gio::spawn_blocking(move || save_clipboard_image(&directory, &snapshot()))
+                    .await
+                    .unwrap_or_else(|_| {
+                        Err(EditorError::ImageSave(crate::i18n::t(
+                            "ApexShot lost contact with the copy worker.",
+                        )))
+                    })
+                    .map_err(|error| error.to_string());
+            copying_done.set(false);
+            copy_btn_done.set_sensitive(true);
+            let result = rendered.and_then(|snapshot| {
                 let result = crate::utils::clipboard::copy_screenshot_with_mode(&snapshot, mode);
                 if result.is_err() {
                     let _ = std::fs::remove_file(snapshot);
                 }
                 result
             });
-        if let Err(error) = result {
-            eprintln!("Copy failed: {error}");
-            crate::utils::notify::desktop_notification_important(
-                &crate::i18n::t("Copy failed"),
-                &error,
-            );
-        }
+            if let Err(error) = result {
+                eprintln!("Copy failed: {error}");
+                crate::utils::notify::desktop_notification_important(
+                    &crate::i18n::t("Copy failed"),
+                    &error,
+                );
+            }
+        });
     });
 
     let path_upload = path.to_path_buf();
@@ -157,7 +180,10 @@ pub(super) fn wire_output_lifecycle(
 
         let image_capabilities = {
             let state = state_upload.lock().unwrap();
-            crate::studio_entitlement::capabilities_for_static_image(state.static_image_transform)
+            crate::studio_entitlement::capabilities_for_image_export(
+                state.static_image_transform,
+                state.source_upscale.factor() > 1,
+            )
         };
         let Some(window) = window_upload_gate.upgrade() else {
             return;
@@ -178,23 +204,7 @@ pub(super) fn wire_output_lifecycle(
             return;
         }
 
-        let final_image = {
-            let state = state_upload.lock().unwrap();
-            match state.to_final_image() {
-                Ok(image) => image,
-                Err(error) => {
-                    eprintln!("[editor] Failed to save edits before upload: {error}");
-                    crate::utils::notify::desktop_notification_important(
-                        &crate::i18n::t("Upload failed"),
-                        &crate::i18n::tfmt(
-                            "Could not save edits: {error}",
-                            &[("error", &error.to_string())],
-                        ),
-                    );
-                    return;
-                }
-            }
-        };
+        let snapshot = state_upload.lock().unwrap().export_snapshot();
 
         uploading_click.set(true);
         upload_btn_click.set_sensitive(false);
@@ -202,6 +212,17 @@ pub(super) fn wire_output_lifecycle(
         let path = path_upload.clone();
         let upload_done_tx = upload_done_tx.clone();
         std::thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let state = snapshot();
+                let final_image = match state.to_final_image() {
+                    Ok(image) => image,
+                    Err(error) => {
+                        eprintln!("[editor] Failed to save edits before upload: {error}");
+                        return Err(crate::cloud::upload::UploadError::Server(format!(
+                            "Could not save edits: {error}"
+                        )));
+                    }
+                };
             let stamp = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|duration| duration.as_nanos())
@@ -212,7 +233,7 @@ pub(super) fn wire_output_lifecycle(
                 .join("upload-snapshots")
                 .join(format!("{}-{stamp}", std::process::id()));
             let snapshot_root = snapshot_dir.parent().unwrap_or(&snapshot_dir);
-            let result = match std::fs::create_dir_all(snapshot_root)
+            match std::fs::create_dir_all(snapshot_root)
                 .and_then(|()| std::fs::create_dir(&snapshot_dir))
             {
                 Err(error) => Err(crate::cloud::upload::UploadError::Server(format!(
@@ -241,7 +262,13 @@ pub(super) fn wire_output_lifecycle(
                     let _ = std::fs::remove_dir_all(&snapshot_dir);
                     result
                 }
-            };
+            }
+            }))
+            .unwrap_or_else(|_| {
+                Err(crate::cloud::upload::UploadError::Server(
+                    "Could not save edits: the upload worker stopped unexpectedly.".into(),
+                ))
+            });
             let _ = upload_done_tx.send(result);
         });
     });
@@ -276,8 +303,9 @@ pub(super) fn wire_output_lifecycle(
                 crate::studio_entitlement::capabilities_for_motion_export()
             } else {
                 let state = state_save.lock().unwrap();
-                crate::studio_entitlement::capabilities_for_static_image(
+                crate::studio_entitlement::capabilities_for_image_export(
                     state.static_image_transform,
+                    state.source_upscale.factor() > 1,
                 )
             };
             let Some(gate_window) = window_save.upgrade() else {
@@ -343,10 +371,10 @@ pub(super) fn wire_output_lifecycle(
                     };
                     let destination = with_mp4_extension(destination);
 
-                    export_busy_resp.set(true);
-                    export_btn_resp.set_sensitive(false);
-                    export_spinner_resp.set_visible(true);
-                    export_spinner_resp.start();
+                    if export_busy_resp.get() {
+                        return;
+                    }
+                    start_export_controls(&export_busy_resp, &export_spinner_resp, &export_btn_resp);
 
                     let state_resp = state_resp.clone();
                     let path_resp = path_resp.clone();
@@ -356,10 +384,8 @@ pub(super) fn wire_output_lifecycle(
                     let export_busy_inner = export_busy_resp.clone();
                     let export_spinner_inner = export_spinner_resp.clone();
                     let export_btn_inner = export_btn_resp.clone();
-                    // One frame for the spinner before the export blocks the main
-                    // loop; the window stays up so the spin is visible.
-                    glib::timeout_add_local_once(Duration::from_millis(50), move || {
-                        match export_motion(&destination) {
+                    glib::MainContext::default().spawn_local(async move {
+                        match export_motion(&destination).await {
                             Ok(video_path) => {
                                 let mut config = crate::config::load_config();
                                 if config.remember_video_export_dir(&video_path) {
@@ -671,7 +697,16 @@ fn reset_export_controls(busy: &Cell<bool>, spinner: &Spinner, button: &Button) 
     busy.set(false);
     spinner.stop();
     spinner.set_visible(false);
+    button.set_label(&crate::i18n::t("Export"));
     button.set_sensitive(true);
+}
+
+fn start_export_controls(busy: &Cell<bool>, spinner: &Spinner, button: &Button) {
+    busy.set(true);
+    button.set_label(&crate::i18n::t("Exporting…"));
+    button.set_sensitive(false);
+    spinner.set_visible(true);
+    spinner.start();
 }
 
 fn start_static_export(
@@ -686,15 +721,27 @@ fn start_static_export(
     spinner: Spinner,
     button: Button,
 ) {
-    busy.set(true);
-    button.set_sensitive(false);
-    spinner.set_visible(true);
-    spinner.start();
-    glib::timeout_add_local_once(Duration::from_millis(50), move || {
-        let result = {
-            let state = state.lock().unwrap();
-            export_static_image(&source, &destination, &state, overwrite_original)
-        };
+    if busy.get() {
+        return;
+    }
+    start_export_controls(&busy, &spinner, &button);
+    let snapshot = state.lock().unwrap().export_snapshot();
+    glib::MainContext::default().spawn_local(async move {
+        let worker_destination = destination.clone();
+        let result = gio::spawn_blocking(move || {
+            export_static_image(
+                &source,
+                &worker_destination,
+                &snapshot(),
+                overwrite_original,
+            )
+        })
+        .await
+        .unwrap_or_else(|_| {
+            Err(StaticExportError::Image(crate::i18n::t(
+                "ApexShot lost contact with the export worker.",
+            )))
+        });
         match result {
             Ok(()) => {
                 crate::utils::notify::desktop_notification(
@@ -799,6 +846,22 @@ mod tests {
     }
 
     #[test]
+    fn image_and_motion_exports_show_busy_feedback_without_blocking_the_main_loop() {
+        let source = include_str!("output.rs");
+        let source = source.split("#[cfg(test)]").next().unwrap();
+        let controls = source.split("fn start_export_controls(").nth(1).unwrap();
+        assert!(controls.contains("busy.set(true)"));
+        assert!(controls.contains("Exporting…"));
+        assert!(controls.contains("button.set_sensitive(false)"));
+        assert!(controls.contains("spinner.start()"));
+        assert!(source.contains("match export_motion(&destination).await"));
+        let image = source.split("fn start_static_export(").nth(1).unwrap();
+        assert!(image.contains("if busy.get()"));
+        assert!(image.contains("gio::spawn_blocking(move ||"));
+        assert!(image.contains("reset_export_controls(&busy, &spinner, &button)"));
+    }
+
+    #[test]
     fn motion_export_forces_an_mp4_extension() {
         assert_eq!(
             with_mp4_extension(PathBuf::from("/tmp/clip")),
@@ -829,6 +892,52 @@ mod tests {
         assert!(handler.contains("copy_screenshot_with_mode(&snapshot, mode)"));
         assert!(!handler.contains("save_edited_image"));
         assert!(!handler.contains("show_save_dialog"));
+    }
+
+    #[test]
+    fn editor_copy_renders_on_a_worker_and_restores_the_button_after_any_outcome() {
+        let source = include_str!("output.rs");
+        let handler = source
+            .split("copy_btn.connect_clicked(move |_| {")
+            .nth(1)
+            .unwrap()
+            .split("let path_upload")
+            .next()
+            .unwrap();
+        let (on_gtk_thread, worker) = handler
+            .split_once("gio::spawn_blocking(")
+            .expect("copy render worker");
+        assert!(on_gtk_thread.contains("if copying.get()"));
+        assert!(on_gtk_thread.contains("export_snapshot()"));
+        assert!(on_gtk_thread.contains("copy_btn_click.set_sensitive(false)"));
+        assert!(!on_gtk_thread.contains("save_clipboard_image("));
+        assert!(worker.contains("save_clipboard_image(&directory, &snapshot())"));
+        let restore = worker
+            .find("copy_btn_done.set_sensitive(true)")
+            .expect("copy button restore");
+        assert!(worker.find(".await").unwrap() < restore);
+    }
+
+    #[test]
+    fn editor_upload_renders_on_its_worker_and_cannot_leave_the_button_busy() {
+        let source = include_str!("output.rs");
+        let handler = source
+            .split("upload_btn.connect_clicked(move |_| {")
+            .nth(1)
+            .unwrap()
+            .split("let state_save")
+            .next()
+            .unwrap();
+        let (on_gtk_thread, worker) = handler
+            .split_once("std::thread::spawn(")
+            .expect("upload worker");
+        assert!(on_gtk_thread.contains("export_snapshot()"));
+        assert!(!on_gtk_thread.contains("to_final_image"));
+        assert!(on_gtk_thread.contains("uploading_click.set(true)"));
+        assert!(on_gtk_thread.contains("upload_btn_click.set_sensitive(false)"));
+        assert!(worker.contains("catch_unwind"));
+        assert!(worker.contains("state.to_final_image()"));
+        assert!(worker.contains("upload_done_tx.send(result)"));
     }
 
     #[test]

@@ -43,6 +43,8 @@ pub struct CanvasSize {
 /// Persisted background composition settings
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct BackgroundSettings {
+    #[serde(default)]
+    pub source_upscale: crate::capture::editor::upscale::SourceUpscale,
     pub style: BackgroundStyle,
     pub padding: f64,
     pub shadow: f64,
@@ -56,6 +58,7 @@ pub struct BackgroundSettings {
 impl Default for BackgroundSettings {
     fn default() -> Self {
         Self {
+            source_upscale: Default::default(),
             style: BackgroundStyle::None,
             padding: 0.0,
             shadow: 15.0,
@@ -379,6 +382,21 @@ impl AnnotationFile {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn background_upscaling_round_trips_and_legacy_files_default_to_off() {
+        use crate::capture::editor::types::SourceUpscale;
+        let settings = super::BackgroundSettings {
+            source_upscale: SourceUpscale::Neural4x,
+            ..Default::default()
+        };
+        let mut value = serde_json::to_value(&settings).unwrap();
+        let restored: super::BackgroundSettings = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(restored, settings);
+        value.as_object_mut().unwrap().remove("source_upscale");
+        let legacy: super::BackgroundSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(legacy.source_upscale, SourceUpscale::Off);
+    }
+
     use super::*;
 
     #[test]
@@ -459,6 +477,7 @@ mod tests {
             720,
         );
         file.background = BackgroundSettings {
+            source_upscale: Default::default(),
             style: BackgroundStyle::Gradient {
                 index: 4,
                 gradient: None,

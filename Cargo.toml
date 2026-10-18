@@ -170,6 +170,8 @@ assets = [
     ["target/release/apexshot", "usr/bin/", "755"],
     ["target/deb-staging/libgtk4-layer-shell.so.0", "usr/lib/apexshot/", "644"],
     ["packaging/debian/gtk4-layer-shell.MIT-LICENSE", "usr/share/doc/apexshot/gtk4-layer-shell.LICENSE", "644"],
+    ["assets/upscaling/LICENSE", "usr/share/doc/apexshot/upscaling.LICENSE", "644"],
+    ["assets/upscaling/README.md", "usr/share/doc/apexshot/upscaling.md", "644"],
     ["packaging/deb/apexshot-capture", "usr/bin/", "755"],
     ["packaging/deb/apexshot-native-host", "usr/bin/", "755"],
     ["packaging/io.github.codegoddy.apexshot.desktop", "usr/share/applications/io.github.codegoddy.apexshot.desktop", "644"],

@@ -151,6 +151,8 @@ rustPlatform.buildRustPackage {
 
     install -Dm644 src/capture/editor/background-images/*.jpg -t $out/share/apexshot/background-images
     install -Dm644 assets/sounds/*.ogg -t $out/share/apexshot/sounds
+    install -Dm644 assets/upscaling/LICENSE $out/share/licenses/apexshot/upscaling.LICENSE
+    install -Dm644 assets/upscaling/README.md $out/share/doc/apexshot/upscaling.md
 
     test -d ${releaseDir}/locale
     cp -r ${releaseDir}/locale $out/share/locale

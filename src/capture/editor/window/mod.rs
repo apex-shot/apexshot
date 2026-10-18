@@ -647,6 +647,7 @@ fn setup_editor_window_full(
                 // so it restores when the same image is reopened. Only the
                 // global prefs value is ignored (see `EditorPreferences`).
                 st.background_padding = annotation_file.background.padding;
+                st.source_upscale = annotation_file.background.source_upscale;
                 st.background_shadow = annotation_file.background.shadow;
                 st.background_insert = annotation_file.background.insert;
                 st.auto_balance = annotation_file.background.auto_balance;
@@ -1273,6 +1274,13 @@ fn setup_editor_window_full(
     );
     {
         let st = state.lock().unwrap();
+        motion_host
+            .session()
+            .runtime
+            .borrow_mut()
+            .motion
+            .appearance
+            .source_upscale = st.source_upscale;
         // Fresh images (None) stay on None so Motion looks like Static;
         // images with a saved background import it so both start in sync.
         if st.background_style != BackgroundStyle::None {
@@ -2812,6 +2820,7 @@ fn image_session_snapshot(state: &EditorState) -> crate::annotations::ImageSessi
         state.background_corner_radius,
         state.background_aspect_ratio,
         state.static_image_transform,
+        state.source_upscale,
     )
 }
 

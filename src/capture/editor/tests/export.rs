@@ -6,6 +6,113 @@ use crate::capture::editor::render::{
 };
 
 #[test]
+fn neural_image_export_grows_the_result_without_modifying_the_document() {
+    let mut state = EditorState::new(RgbaImage::from_pixel(
+        12,
+        8,
+        image::Rgba([200, 100, 50, 255]),
+    ));
+    state.source_upscale = SourceUpscale::Neural2x;
+    let result = state.to_final_image().unwrap();
+    assert_eq!(result.dimensions(), (24, 16));
+    assert_eq!(state.base_image.dimensions(), (12, 8));
+    assert_eq!(state.working_image.dimensions(), (12, 8));
+    let snapshot = state.export_snapshot();
+    let result = std::thread::spawn(move || snapshot().to_final_image().unwrap())
+        .join()
+        .unwrap();
+    assert_eq!(result.dimensions(), (24, 16));
+}
+
+#[test]
+fn neural_exports_draw_vector_annotations_over_the_enhanced_source() {
+    let line = AnnotationAction::Line {
+        start: Point { x: 2.0, y: 4.0 },
+        end: Point { x: 10.0, y: 4.0 },
+        color: DrawColor::new(1.0, 0.0, 0.0, 1.0),
+        stroke_size: 2.0,
+        shadow: false,
+    };
+    let mut state = EditorState::new(RgbaImage::from_pixel(
+        12,
+        8,
+        image::Rgba([200, 100, 50, 255]),
+    ));
+    state.actions.push(line);
+    state.source_upscale = SourceUpscale::Neural2x;
+
+    let static_result = state.to_final_image().unwrap();
+    assert_eq!(static_result.dimensions(), (24, 16));
+    let center = static_result.get_pixel(12, 8);
+    assert!(
+        center[0] >= 250 && center[1] <= 5 && center[2] <= 5,
+        "{center:?}"
+    );
+
+    let motion_card = state.to_motion_export_card().unwrap();
+    assert_eq!(motion_card.dimensions(), (24, 16));
+    let center = motion_card.get_pixel(12, 8);
+    assert!(
+        center[0] >= 250 && center[1] <= 5 && center[2] <= 5,
+        "{center:?}"
+    );
+
+    assert_eq!(state.working_image.dimensions(), (12, 8));
+    assert_eq!(state.actions.len(), 1);
+}
+
+#[test]
+fn disabled_upscale_keeps_motion_annotations_at_source_pixels() {
+    let mut state = EditorState::new(RgbaImage::from_pixel(
+        12,
+        8,
+        image::Rgba([200, 100, 50, 255]),
+    ));
+    state.actions.push(AnnotationAction::Line {
+        start: Point { x: 2.0, y: 4.0 },
+        end: Point { x: 10.0, y: 4.0 },
+        color: DrawColor::new(1.0, 0.0, 0.0, 1.0),
+        stroke_size: 2.0,
+        shadow: false,
+    });
+    let card = state.to_motion_export_card().unwrap();
+    assert_eq!(card.dimensions(), (12, 8));
+    let center = card.get_pixel(6, 4);
+    assert!(
+        center[0] >= 250 && center[1] <= 5 && center[2] <= 5,
+        "{center:?}"
+    );
+}
+
+#[test]
+fn image_export_snapshot_renders_in_a_worker_without_live_editor_state() {
+    let mut state = EditorState::new(RgbaImage::from_pixel(
+        48,
+        32,
+        image::Rgba([180, 120, 60, 255]),
+    ));
+    state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.1, 0.2, 0.3, 1.0));
+    state.background_padding = 40.0;
+    state.background_corner_radius = 12.0;
+    state.background_noise = 0.1;
+    state.frame_style = FrameStyle::Border;
+    state.border_thickness = 4.0;
+    state.border_color = DrawColor::new(0.9, 0.1, 0.2, 1.0);
+    state.shadow_opacity = 0.4;
+    state.shadow_blur = 6.0;
+    state.shadow_offset_x = 2.0;
+    state.shadow_offset_y = 5.0;
+    let expected = state.to_final_image().unwrap();
+    let snapshot = state.export_snapshot();
+    state.background_padding = 100.0;
+    state.actions.clear();
+    let actual = std::thread::spawn(move || snapshot().to_final_image().unwrap())
+        .join()
+        .unwrap();
+    assert_eq!(actual, expected);
+}
+
+#[test]
 fn final_image_applies_focus_overlay() {
     let mut image = RgbaImage::new(12, 12);
     for y in 0..12 {
