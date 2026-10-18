@@ -859,8 +859,8 @@ fn copy_cpu_frame(
     }
     if kind == spa::buffer::DataType::MemFd {
         let map_offset = data.as_raw().mapoffset as usize;
-        let mut mapped = mmap_memfd(data.fd(), max_size, map_offset)?;
-        return copy_circular_chunk(&mut mapped, chunk_offset, chunk_size);
+        let mapped = mmap_memfd(data.fd(), max_size, map_offset)?;
+        return copy_circular_chunk(&mapped, chunk_offset, chunk_size);
     }
     None
 }
@@ -1344,16 +1344,13 @@ mod tests {
             std::ptr::write(base.cast::<spa_sys::spa_meta_cursor>(), cursor);
             if let Some((bitmap, bytes)) = bitmap {
                 let bitmap_start = cursor.bitmap_offset as usize;
-                let bitmap_header_end = bitmap_start
-                    .checked_add(std::mem::size_of::<spa_sys::spa_meta_bitmap>())
-                    .unwrap_or(usize::MAX);
+                let bitmap_header_end =
+                    bitmap_start.saturating_add(std::mem::size_of::<spa_sys::spa_meta_bitmap>());
                 if bitmap_header_end <= metadata_size {
                     let bitmap_ptr = base.add(bitmap_start).cast::<spa_sys::spa_meta_bitmap>();
                     std::ptr::write(bitmap_ptr, bitmap);
-                    let pixel_start = bitmap_start
-                        .checked_add(bitmap.offset as usize)
-                        .unwrap_or(usize::MAX);
-                    let pixel_end = pixel_start.checked_add(bytes.len()).unwrap_or(usize::MAX);
+                    let pixel_start = bitmap_start.saturating_add(bitmap.offset as usize);
+                    let pixel_end = pixel_start.saturating_add(bytes.len());
                     if pixel_end <= metadata_size {
                         std::ptr::copy_nonoverlapping(
                             bytes.as_ptr(),
