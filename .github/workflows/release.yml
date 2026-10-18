@@ -423,6 +423,7 @@ jobs:
             libqt5-qtx11extras-devel \
             libXtst-devel \
             tesseract-ocr-devel \
+            libcurl-devel \
             gstreamer-devel \
             gstreamer-plugins-base-devel \
             rpm-build \
