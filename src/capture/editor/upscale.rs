@@ -121,10 +121,17 @@ pub(crate) fn enhance(image: &RgbaImage, mode: SourceUpscale) -> Result<RgbaImag
 }
 
 pub(crate) fn validate_input(image: &RgbaImage, mode: SourceUpscale) -> Result<(), String> {
+    validate_input_dimensions(image.width(), image.height(), mode)
+}
+
+pub(crate) fn validate_input_dimensions(
+    width: u32,
+    height: u32,
+    mode: SourceUpscale,
+) -> Result<(), String> {
     if mode == SourceUpscale::Off {
         return Ok(());
     }
-    let (width, height) = image.dimensions();
     if width == 0 || height == 0 {
         return Err("Cannot upscale an empty image.".into());
     }

@@ -12,6 +12,7 @@ mod pad_handle;
 mod parts;
 pub(in crate::capture::editor::window) mod position_pad;
 mod preview;
+mod select;
 mod session;
 mod text_pad;
 mod transition;

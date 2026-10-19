@@ -9,8 +9,7 @@ use std::{sync::mpsc, time::Duration};
 
 const UPDATE_CSS: &str = r#"
     .apexshot-update-surface {
-        /* Matches .settings-table-frame: #141414 behind alpha(white, 0.04). */
-        background: #1d1d1d;
+        background: #0f0f0f;
         color: #f1f1f3;
         border: 1px solid rgba(255, 255, 255, 0.10);
         border-radius: 14px;

@@ -991,7 +991,7 @@ msgid "Auto-balance"
 msgstr "Équilibrage automatique"
 
 msgid "Background"
-msgstr "Contexte"
+msgstr "Arrière-plan"
 
 msgid "Before recording"
 msgstr "Avant l'enregistrement"
@@ -1670,6 +1670,75 @@ msgstr "PRÉRÉGLAGE"
 
 msgid "Padding"
 msgstr "Rembourrage"
+
+msgid "Composition"
+msgstr "Composition"
+
+msgid "Motion Blur"
+msgstr "Flou de mouvement"
+
+msgid "Rotation & Perspective"
+msgstr "Rotation et perspective"
+
+msgid "Scene Shadows"
+msgstr "Ombres de scène"
+
+msgid "Timing"
+msgstr "Synchronisation"
+
+msgid "Transform"
+msgstr "Transformation"
+
+msgid "day"
+msgstr "jour"
+
+msgid "hour"
+msgstr "heure"
+
+msgid "minute"
+msgstr "minute"
+
+msgid "Background blur"
+msgstr "Flou d’arrière-plan"
+
+msgid "Background noise"
+msgstr "Bruit d’arrière-plan"
+
+msgid "Border Radius"
+msgstr "Rayon des bordures"
+
+msgid "Highlight mode"
+msgstr "Mode de surbrillance"
+
+msgid "Marker size"
+msgstr "Taille du marqueur"
+
+msgid "Numbering style"
+msgstr "Style de numérotation"
+
+msgid "Shadow blur"
+msgstr "Flou de l’ombre"
+
+msgid "Shadow opacity"
+msgstr "Opacité de l’ombre"
+
+msgid "Shadow position X"
+msgstr "Position X de l’ombre"
+
+msgid "Shadow position Y"
+msgstr "Position Y de l’ombre"
+
+msgid "Watermark inset"
+msgstr "Marge du filigrane"
+
+msgid "Watermark position X"
+msgstr "Position X du filigrane"
+
+msgid "Watermark position Y"
+msgstr "Position Y du filigrane"
+
+msgid "Watermark size"
+msgstr "Taille du filigrane"
 
 msgid "Palette"
 msgstr "Palette"
@@ -3216,3 +3285,112 @@ msgstr ""
 
 msgid "Use enhancement"
 msgstr "Utiliser l’amélioration"
+
+msgid "Add a background"
+msgstr "Ajouter un arrière-plan"
+
+msgid "Add a background so the shadow appears in the exported result."
+msgstr ""
+"Ajoutez un arrière-plan pour que l’ombre apparaisse dans le résultat exporté."
+
+msgid "Add a background to enable padding and noise."
+msgstr "Ajoutez un arrière-plan pour activer la marge et le bruit."
+
+msgid "Add a background to use Scene Shadows in image mode."
+msgstr "Ajoutez un arrière-plan pour utiliser Scene Shadows en mode image."
+
+msgid "Add a background to use this control."
+msgstr "Ajoutez un arrière-plan pour utiliser ce contrôle."
+
+msgid ""
+"Add a background, choose an outer frame style, or transform the image to round its corners."
+msgstr ""
+"Ajoutez un arrière-plan, choisissez un style de cadre extérieur ou transformez l’image pour arrondir ses coins."
+
+msgid "Background blur needs a gradient, wallpaper, or image."
+msgstr ""
+"Le flou d’arrière-plan nécessite un dégradé, un fond d’écran ou une image."
+
+msgid "Background blur needs a wallpaper or image in Motion."
+msgstr ""
+"Le flou d’arrière-plan nécessite un fond d’écran ou une image dans Motion."
+
+msgid ""
+"Border Radius needs a background, an outer frame style, or a transformed image."
+msgstr ""
+"Le rayon des coins nécessite un arrière-plan, un style de cadre extérieur ou une image transformée."
+
+msgid "Choose a Scene Shadows preset before adjusting opacity."
+msgstr "Choisissez un préréglage Scene Shadows avant de régler l’opacité."
+
+msgid "Choose a preset to enable Scene Shadows opacity and placement."
+msgstr ""
+"Choisissez un préréglage pour activer l’opacité et le placement de Scene Shadows."
+
+msgid "Could not open that image. Choose a PNG, JPEG, or WebP file."
+msgstr ""
+"Impossible d’ouvrir cette image. Choisissez un fichier PNG, JPEG ou WebP."
+
+msgid ""
+"Custom sizes use even pixels. Sizes over a 1920-pixel long edge are scaled down."
+msgstr ""
+"Les tailles personnalisées utilisent des pixels pairs. Les tailles dont le grand côté dépasse 1920 pixels sont réduites."
+
+msgid "Frame"
+msgstr "Cadre"
+
+msgid ""
+"Frame sizes need a background in image mode. Add one to change the canvas size."
+msgstr ""
+"Les tailles de cadre nécessitent un arrière-plan en mode image. Ajoutez-en un pour modifier la taille de la toile."
+
+msgid "Image export height; select a preset to change the aspect ratio"
+msgstr ""
+"Hauteur d’export de l’image ; sélectionnez un préréglage pour modifier le format d’image"
+
+msgid "Image export width; select a preset to change the aspect ratio"
+msgstr ""
+"Largeur d’export de l’image ; sélectionnez un préréglage pour modifier le format d’image"
+
+msgid ""
+"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
+msgstr ""
+"Les préréglages d’image modifient le format d’image, pas une taille de pixels fixe. W/H indique la taille d’export. Cliquez à nouveau sur le préréglage sélectionné pour réinitialiser."
+
+msgid ""
+"Increase Scene Shadows opacity to see the effect and change its placement."
+msgstr ""
+"Augmentez l’opacité de Scene Shadows pour voir l’effet et modifier son placement."
+
+msgid "Increase Shadow opacity to enable blur and position."
+msgstr "Augmentez l’opacité de l’ombre pour activer le flou et la position."
+
+msgid "Neural 4× is unavailable: {reason}"
+msgstr "L’agrandissement neuronal 4× n’est pas disponible : {reason}"
+
+msgid ""
+"That size was not applied. Width and height must be between 16 and 7680 pixels."
+msgstr ""
+"Cette taille n’a pas été appliquée. La largeur et la hauteur doivent être comprises entre 16 et 7680 pixels."
+
+msgid ""
+"The enhanced canvas exceeds the 16-megapixel output limit. Reduce upscaling or background padding."
+msgstr ""
+"La toile améliorée dépasse la limite de sortie de 16 mégapixels. Réduisez l’agrandissement ou la marge d’arrière-plan."
+
+msgid "Tilt the image with Yaw or Pitch before adjusting perspective."
+msgstr ""
+"Inclinez l’image avec le lacet ou le tangage avant d’ajuster la perspective."
+
+msgid ""
+"Without a background, Underlay is hidden in video exports. Choose Overlay to shade the image."
+msgstr ""
+"Sans arrière-plan, la Sous-couche est masquée dans les exports vidéo. Choisissez Superposition pour ombrer l’image."
+
+msgid "{name}: {ratio} image aspect ratio"
+msgstr "{name} : {ratio} — format d’image"
+
+msgid ""
+"{reason} This image is {width} × {height} pixels. Crop it or choose a smaller image to enable enhancement."
+msgstr ""
+"{reason} Cette image fait {width} × {height} pixels. Recadrez-la ou choisissez une image plus petite pour activer l’amélioration."

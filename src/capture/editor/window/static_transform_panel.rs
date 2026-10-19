@@ -64,6 +64,16 @@ fn build_static_transform_panel_with_controls(
     rotation_section.append(&roll.widget());
     rotation_section.append(&perspective_value);
     rotation_section.append(&perspective.widget());
+    let perspective_hint = Label::new(Some(&t(
+        "Tilt the image with Yaw or Pitch before adjusting perspective.",
+    )));
+    perspective_hint.add_css_class("editor-transform-hint");
+    perspective_hint.set_wrap(true);
+    perspective_hint.set_xalign(0.0);
+    let initially_tilted = initial.yaw.abs() > 1e-7 || initial.pitch.abs() > 1e-7;
+    perspective.set_sensitive(initially_tilted);
+    perspective_hint.set_visible(!initially_tilted);
+    rotation_section.append(&perspective_hint);
     body.append(&rotation_section);
 
     let position_section = motion_settings_section("Position");
@@ -113,6 +123,7 @@ fn build_static_transform_panel_with_controls(
         let pos_x_value = pos_x_value.clone();
         let pos_y_value = pos_y_value.clone();
         let edit_hint = edit_hint.clone();
+        let perspective_hint = perspective_hint.clone();
         Rc::new(move |transform| {
             let transform = transform.sanitized();
             syncing.set(true);
@@ -120,6 +131,9 @@ fn build_static_transform_panel_with_controls(
             controls.pitch.set_value(transform.pitch);
             controls.roll.set_value(transform.roll);
             controls.perspective.set_value(transform.perspective);
+            let tilted = transform.yaw.abs() > 1e-7 || transform.pitch.abs() > 1e-7;
+            controls.perspective.set_sensitive(tilted);
+            perspective_hint.set_visible(!tilted);
             controls
                 .position_pad
                 .set_position(transform.pos_x, transform.pos_y);

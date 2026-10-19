@@ -498,6 +498,7 @@ pub fn setup_editor_window(app: &Application, path: PathBuf) {
 /// lean shell lets GTK paint immediately while the worker reads the image,
 /// then the normal editor is built exactly once with the decoded pixels.
 fn setup_image_loading_shell(app: &Application, initial_image_path: Option<PathBuf>) {
+    crate::capture::editor::ui_support::apply_theme_to_gtk();
     install_editor_css();
     crate::recording::editor::ui_support::install_recording_editor_css();
     // Match the normal editor's established default size. The loading shell
@@ -769,19 +770,10 @@ fn setup_editor_window_full(
     window.set_size_request(EDITOR_MIN_WINDOW_WIDTH, -1);
 
     let root = GtkBox::new(Orientation::Vertical, 0);
-    root.add_css_class("editor-root");
     root.set_overflow(gtk4::Overflow::Hidden);
 
     let prefers_dark = prefers_dark_glass_theme();
     let reduced_transparency = prefers_reduced_transparency();
-    if prefers_dark {
-        root.add_css_class("editor-theme-dark");
-    } else {
-        root.add_css_class("editor-theme-light");
-    }
-    if reduced_transparency {
-        root.add_css_class("editor-reduced-transparency");
-    }
 
     let toolbar::ToolbarBaseParts {
         root: toolbar,
@@ -2291,6 +2283,16 @@ fn setup_editor_window_full(
 
     // Keep window-wide transient UI above the editor layout.
     let root_overlay = Overlay::new();
+    root_overlay.add_css_class("editor-root");
+    root_overlay.add_css_class(if prefers_dark {
+        "editor-theme-dark"
+    } else {
+        "editor-theme-light"
+    });
+    if reduced_transparency {
+        root_overlay.add_css_class("editor-reduced-transparency");
+    }
+    root_overlay.set_overflow(gtk4::Overflow::Hidden);
     root_overlay.set_child(Some(&root));
 
     let window_chrome = chrome::install_window_chrome(chrome::WindowChromeInputs {

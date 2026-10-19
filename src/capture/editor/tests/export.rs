@@ -6,6 +6,77 @@ use crate::capture::editor::render::{
 };
 
 #[test]
+fn appearance_export_dimensions_match_rendered_frames() {
+    use crate::capture::editor::types::{BackgroundStyle, DrawColor, FrameStyle};
+    for style in FrameStyle::ALL {
+        for filled in [false, true] {
+            for tilted in [false, true] {
+                let mut state = EditorState::new(RgbaImage::from_pixel(
+                    32,
+                    20,
+                    image::Rgba([180, 90, 40, 255]),
+                ));
+                state.frame_style = style;
+                state.border_thickness = style.spec().border_thickness;
+                state.background_corner_radius = 8.0;
+                state.background_padding = 24.0;
+                if filled {
+                    state.background_style =
+                        BackgroundStyle::PlainColor(DrawColor::new(0.2, 0.3, 0.4, 1.0));
+                }
+                if tilted {
+                    state.static_image_transform.yaw = 12.0;
+                }
+                for aspect in [CropAspectRatio::Original, CropAspectRatio::Square] {
+                    state.background_aspect_ratio = aspect;
+                    for upscale in [
+                        SourceUpscale::Off,
+                        SourceUpscale::Neural2x,
+                        SourceUpscale::Neural4x,
+                    ] {
+                        state.source_upscale = upscale;
+                        let rendered = state
+                            .upscaled_export_state(false)
+                            .unwrap()
+                            .to_final_image()
+                            .unwrap();
+                        assert_eq!(state.export_dimensions(upscale), rendered.dimensions(), "{style:?}, filled={filled}, tilted={tilted}, aspect={aspect:?}, upscale={upscale:?}");
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn appearance_upscale_checks_the_final_canvas_before_inference() {
+    use crate::capture::editor::types::{BackgroundStyle, DrawColor};
+    let mut state = EditorState::new(RgbaImage::new(1024, 1024));
+    assert_eq!(
+        state.export_dimensions(SourceUpscale::Neural4x),
+        (4096, 4096)
+    );
+    assert!(state
+        .validate_upscale_export(SourceUpscale::Neural4x)
+        .is_ok());
+    state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.2, 0.3, 0.4, 1.0));
+    state.background_padding = 160.0;
+    assert!(state
+        .validate_upscale_export(SourceUpscale::Neural2x)
+        .is_ok());
+    assert!(state
+        .validate_upscale_export(SourceUpscale::Neural4x)
+        .unwrap_err()
+        .contains("16-megapixel"));
+    state.source_upscale = SourceUpscale::Neural4x;
+    assert!(state
+        .to_final_image()
+        .unwrap_err()
+        .to_string()
+        .contains("16-megapixel"));
+}
+
+#[test]
 fn neural_image_export_grows_the_result_without_modifying_the_document() {
     let mut state = EditorState::new(RgbaImage::from_pixel(
         12,

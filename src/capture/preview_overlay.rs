@@ -306,6 +306,7 @@ pub fn show_capture_preview_overlay_on_display(
     let probe_activate = probe.clone();
     app.connect_activate(move |app| {
         probe_activate.log("activate-enter");
+        crate::capture::editor::ui_support::apply_theme_to_gtk();
         let pid = std::process::id();
         let preview_id = generate_preview_id(pid);
         probe_activate.log("before-setup-preview-window");
