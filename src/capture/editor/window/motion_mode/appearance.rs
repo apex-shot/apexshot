@@ -14,9 +14,9 @@ use std::time::Duration;
 
 use crate::capture::editor::types::FrameStyle;
 use crate::capture::editor::window::icon_names;
-use crate::i18n::t;
+use crate::i18n::{t, tfmt};
 use crate::recording::editor::model::{
-    GradientStop, MotionBackgroundFillType, MotionFrame, MotionFramePreset,
+    GradientStop, MotionAppearance, MotionBackgroundFillType, MotionFrame, MotionFramePreset,
     MotionSceneShadowPlacement, MotionSceneShadowPreset, VideoGradient,
 };
 use crate::recording::editor::window::custom_wallpaper_popover::{
@@ -24,11 +24,34 @@ use crate::recording::editor::window::custom_wallpaper_popover::{
 };
 use crate::recording::editor::window::tool_sidebar::FillSlider;
 
+use super::select::MotionSelect;
 use super::session::MotionRuntime;
 use super::widgets::{
     motion_appearance_slider, motion_reference_percent_slider, motion_rgb888, motion_rgba,
 };
 use super::MotionSession;
+
+fn appearance_has_background(appearance: &MotionAppearance) -> bool {
+    match appearance.background_fill_type {
+        MotionBackgroundFillType::None => false,
+        MotionBackgroundFillType::Wallpaper => appearance.wallpaper_image_name.is_some(),
+        MotionBackgroundFillType::Image => appearance.custom_background_image.is_some(),
+        _ => true,
+    }
+}
+
+fn appearance_hint(text: &str) -> Label {
+    let hint = Label::new(Some(&t(text)));
+    hint.add_css_class("editor-select-inspector-hint");
+    hint.set_wrap(true);
+    hint.set_xalign(0.0);
+    hint
+}
+
+fn set_slider_availability(slider: &FillSlider, reason: Option<&str>) {
+    slider.set_sensitive(reason.is_none());
+    slider.widget().set_tooltip_text(reason.map(t).as_deref());
+}
 
 fn appearance_frame_size(runtime: &MotionRuntime, motion_export: bool) -> (i32, i32) {
     let (width, height) = runtime
@@ -242,6 +265,9 @@ fn build_appearance_panel(
     static_transform: Option<GtkBox>,
 ) -> GtkBox {
     let motion_export = static_transform.is_none();
+    // Hand-painted diagrams on this panel need the same theme decision the
+    // CSS surfaces get.
+    let light_theme = !crate::capture::editor::ui_support::prefers_dark_glass_theme();
     // Static image editor: interacting with Appearance must arm the Background
     // tool so a later canvas click previews instead of drawing with a stale
     // Pen/Arrow/etc. Motion callers pass None (no static toolbar to sync).
@@ -616,6 +642,8 @@ fn build_appearance_panel(
     // The Edit pill opens the video editor's Custom Wallpaper popover, so the
     // two editors share one card, one Color page, and one Gradient editor.
     // Motion's fields sit behind the shared fill closures.
+    let frame_background_color = fill_ops.set_color.clone();
+    let frame_background_changed = fill_changed.clone();
     build_custom_fill_popover(
         &custom_page,
         &custom_edit,
@@ -673,30 +701,49 @@ fn build_appearance_panel(
         }
     });
     background_section.append(&radius.widget());
+    let radius_hint = appearance_hint(
+        "Border Radius needs a background, an outer frame style, or a transformed image.",
+    );
+    background_section.append(&radius_hint);
     background_section.append(&noise.widget());
+    let background_hint = appearance_hint("Add a background to enable padding and noise.");
+    let blur_hint = appearance_hint("");
+    background_section.append(&background_hint);
+    background_section.append(&blur_hint);
     // Paint the Custom summary chip once so it is correct before any edit.
     redraw_summary();
     root.append(&background_section);
     let export_quality = motion_appearance_section("Export quality");
-    let upscale = gtk4::DropDown::from_strings(&[&t("Off"), &t("Neural 2×"), &t("Neural 4×")]);
     let initial_upscale = session.runtime.borrow().motion.appearance.source_upscale;
-    upscale.set_selected(match initial_upscale.factor() {
-        2 => 1,
-        4 => 2,
-        _ => 0,
-    });
-    upscale.set_tooltip_text(Some(&t("Neural upscaling for Studio exports")));
-    upscale.connect_selected_notify({
+    let upscale = MotionSelect::new(
+        &[&t("Off"), &t("Neural 2×"), &t("Neural 4×")],
+        match initial_upscale.factor() {
+            2 => 1,
+            4 => 2,
+            _ => 0,
+        },
+    );
+    upscale
+        .widget()
+        .set_tooltip_text(Some(&t("Neural upscaling for Studio exports")));
+    upscale.connect_changed({
         let runtime = session.runtime.clone();
         let source_state = session.source_state.clone();
+        let session = session.clone();
         let notify = notify_interact.clone();
-        move |dropdown| {
+        move |selected| {
             use crate::capture::editor::upscale::SourceUpscale;
-            let mode = match dropdown.selected() {
+            let mode = match selected {
                 1 => SourceUpscale::Neural2x,
                 2 => SourceUpscale::Neural4x,
                 _ => SourceUpscale::Off,
             };
+            if mode != SourceUpscale::Off
+                && super::upscale_preview::unavailable_reason(&session, mode, motion_export)
+                    .is_some()
+            {
+                return;
+            }
             if runtime.borrow().motion.appearance.source_upscale == mode {
                 return;
             }
@@ -710,7 +757,7 @@ fn build_appearance_panel(
             }
         }
     });
-    export_quality.append(&upscale);
+    export_quality.append(upscale.widget());
     let compare = Button::with_label(&t("Compare before / after"));
     compare.set_tooltip_text(Some(&t(
         "Preview neural enhancement without a Studio license",
@@ -725,10 +772,58 @@ fn build_appearance_panel(
         }
     });
     export_quality.append(&compare);
+    let upscale_hint = Label::new(None);
+    upscale_hint.set_wrap(true);
+    upscale_hint.set_xalign(0.0);
+    upscale_hint.add_css_class("editor-select-inspector-hint");
+    export_quality.append(&upscale_hint);
+    let refresh_upscale: Rc<dyn Fn()> = Rc::new({
+        let session = session.clone();
+        let upscale = upscale.clone();
+        let compare = compare.clone();
+        let hint = upscale_hint.clone();
+        let previous = Cell::new(None);
+        move || {
+            let dimensions = (
+                super::upscale_preview::source_dimensions(&session),
+                super::upscale_preview::output_dimensions(
+                    &session,
+                    crate::capture::editor::upscale::SourceUpscale::Off,
+                ),
+            );
+            if previous.replace(Some(dimensions)) == Some(dimensions) {
+                return;
+            }
+            let reason_2x = super::upscale_preview::unavailable_reason(
+                &session,
+                crate::capture::editor::upscale::SourceUpscale::Neural2x,
+                motion_export,
+            );
+            let reason_4x = super::upscale_preview::unavailable_reason(
+                &session,
+                crate::capture::editor::upscale::SourceUpscale::Neural4x,
+                motion_export,
+            );
+            let available = reason_2x.is_none();
+            upscale.set_option_sensitive(1, reason_2x.is_none());
+            upscale.set_option_sensitive(2, reason_4x.is_none());
+            compare.set_sensitive(available);
+            let reason = reason_2x.or_else(|| {
+                reason_4x.map(|reason| {
+                    tfmt("Neural 4× is unavailable: {reason}", &[("reason", &reason)])
+                })
+            });
+            upscale.widget().set_tooltip_text(reason.as_deref());
+            compare.set_tooltip_text(if available { None } else { reason.as_deref() });
+            hint.set_text(&reason.unwrap_or_else(|| t("Offline neural enhancement for small images. Image exports grow by 2× or 4×; Motion keeps its Frame size. Compare the export for free before enabling Studio enhancement. Supports up to 1 megapixel. Missing detail cannot always be recovered.")));
+        }
+    });
+    refresh_upscale();
     export_quality.add_tick_callback({
         let runtime = session.runtime.clone();
         let upscale = upscale.clone();
         move |_, _| {
+            refresh_upscale();
             let factor = runtime.borrow().motion.appearance.source_upscale.factor();
             let selected = match factor {
                 2 => 1,
@@ -741,11 +836,6 @@ fn build_appearance_panel(
             glib::ControlFlow::Continue
         }
     });
-    let upscale_hint = Label::new(Some(&t("Offline neural enhancement for small images. Image exports grow by 2× or 4×; Motion keeps its Frame size. Compare the export for free before enabling Studio enhancement. Supports up to 1 megapixel. Missing detail cannot always be recovered.")));
-    upscale_hint.set_wrap(true);
-    upscale_hint.set_xalign(0.0);
-    upscale_hint.add_css_class("editor-select-inspector-hint");
-    export_quality.append(&upscale_hint);
     root.append(&export_quality);
     if let Some(static_transform) = static_transform {
         root.append(&motion_disclosure_row("Transform", &static_transform));
@@ -829,6 +919,9 @@ fn build_appearance_panel(
         }
     });
     shadow_section.append(&shadow_y.widget());
+    let card_shadow_opacity = shadow_opacity.clone();
+    let card_shadow_hint = appearance_hint("");
+    shadow_section.prepend(&card_shadow_hint);
     root.append(&motion_disclosure_row("Shadow", &shadow_section));
 
     let border_section = motion_appearance_body();
@@ -924,7 +1017,7 @@ fn build_appearance_panel(
     // Standard frame) and an arrow reveals aspect-correct shape tiles.
     // The 3-column grid is sized to the fixed sidebar width so expanding
     // never widens the panel. Selection paints only on the diagram itself.
-    fn frame_ratio_shape(aspect: f64, selected: Rc<Cell<bool>>) -> DrawingArea {
+    fn frame_ratio_shape(aspect: f64, selected: Rc<Cell<bool>>, light: bool) -> DrawingArea {
         const MAX_W: f64 = 44.0;
         const MAX_H: f64 = 46.0;
         let (w, h) = if aspect >= 1.0 {
@@ -946,10 +1039,13 @@ fn build_appearance_panel(
             let is_selected = selected.get();
             let w = f64::from(width);
             let h = f64::from(height);
+            // The tiles sit directly on the inspector surface, which is light
+            // in the light theme, so the diagram has to invert with it.
+            let tone = if light { 0.07 } else { 1.0 };
             if is_selected {
-                cr.set_source_rgba(1.0, 1.0, 1.0, 0.18);
+                cr.set_source_rgba(tone, tone, tone, if light { 0.16 } else { 0.18 });
             } else {
-                cr.set_source_rgba(1.0, 1.0, 1.0, 0.13);
+                cr.set_source_rgba(tone, tone, tone, if light { 0.10 } else { 0.13 });
             }
             motion_thumbnail_rounded_rectangle(cr, 0.5, 0.5, w - 1.0, h - 1.0, 8.0);
             cr.fill().ok();
@@ -1043,6 +1139,8 @@ fn build_appearance_panel(
     w_entry.set_halign(Align::Fill);
     w_entry.add_css_class("editor-frame-dim-entry");
     w_entry.set_tooltip_text(Some(&t("Frame width in pixels")));
+    w_entry.set_editable(motion_export);
+    w_entry.set_focusable(motion_export);
     let h_entry = Entry::new();
     h_entry.set_text(&initial_out_h.to_string());
     h_entry.set_width_chars(4);
@@ -1051,6 +1149,25 @@ fn build_appearance_panel(
     h_entry.set_halign(Align::Fill);
     h_entry.add_css_class("editor-frame-dim-entry");
     h_entry.set_tooltip_text(Some(&t("Frame height in pixels")));
+    h_entry.set_editable(motion_export);
+    h_entry.set_focusable(motion_export);
+    let frame_size_hint = appearance_hint(if motion_export {
+        "Custom sizes use even pixels. Sizes over a 1920-pixel long edge are scaled down."
+    } else {
+        "Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
+    });
+    frame_section.append(&frame_size_hint);
+    let frame_error = appearance_hint("");
+    frame_error.set_visible(false);
+    frame_section.append(&frame_error);
+    if !motion_export {
+        w_entry.set_tooltip_text(Some(&t(
+            "Image export width; select a preset to change the aspect ratio",
+        )));
+        h_entry.set_tooltip_text(Some(&t(
+            "Image export height; select a preset to change the aspect ratio",
+        )));
+    }
     // Clicking the active tile toggles back to Standard (original canvas),
     // so no separate Original button is needed. Toggle is exact-preset:
     // same-aspect social sizes switch size instead of resetting.
@@ -1061,7 +1178,9 @@ fn build_appearance_panel(
         let h_entry = h_entry.clone();
         let sync_frame_selection = sync_frame_selection.clone();
         let notify = notify_interact.clone();
+        let frame_error = frame_error.clone();
         Rc::new(move |preset| {
+            frame_error.set_visible(false);
             notify();
             let (frame, display) = {
                 let mut runtime = runtime.borrow_mut();
@@ -1082,6 +1201,9 @@ fn build_appearance_panel(
             };
             preview.queue_draw();
             sync_frame_selection(&frame);
+            if !motion_export {
+                return;
+            }
             let (w, h) = display;
             if w_entry.text().as_str() != w.to_string() {
                 w_entry.set_text(&w.to_string());
@@ -1098,7 +1220,11 @@ fn build_appearance_panel(
         let h_entry = h_entry.clone();
         let sync_frame_selection = sync_frame_selection.clone();
         let notify = notify_interact.clone();
+        let frame_error = frame_error.clone();
         Rc::new(move || {
+            if !motion_export {
+                return;
+            }
             notify();
             fn parse_dim(text: &str) -> Option<u32> {
                 text.trim()
@@ -1109,8 +1235,11 @@ fn build_appearance_panel(
             let w_text = w_entry.text().to_string();
             let h_text = h_entry.text().to_string();
             let (Some(w), Some(h)) = (parse_dim(&w_text), parse_dim(&h_text)) else {
+                frame_error.set_text(&t("That size was not applied. Width and height must be between 16 and 7680 pixels."));
+                frame_error.set_visible(true);
                 return;
             };
+            frame_error.set_visible(false);
             let frame = {
                 let mut runtime = runtime.borrow_mut();
                 if runtime.motion.frame.preset == MotionFramePreset::Custom
@@ -1172,6 +1301,25 @@ fn build_appearance_panel(
                         .contains(gtk4::StateFlags::FOCUS_WITHIN)
                 {
                     let (width, height) = appearance_frame_size(&runtime.borrow(), true);
+                    if w_entry.text().as_str() != width.to_string() {
+                        w_entry.set_text(&width.to_string());
+                    }
+                    if h_entry.text().as_str() != height.to_string() {
+                        h_entry.set_text(&height.to_string());
+                    }
+                }
+                glib::ControlFlow::Continue
+            }
+        });
+    } else {
+        root.add_tick_callback({
+            let source_state = session.source_state.clone();
+            let w_entry = w_entry.clone();
+            let h_entry = h_entry.clone();
+            move |_, _| {
+                if let Some(source) = source_state.borrow().as_ref() {
+                    let state = source.lock().unwrap();
+                    let (width, height) = state.export_dimensions(state.source_upscale);
                     if w_entry.text().as_str() != width.to_string() {
                         w_entry.set_text(&width.to_string());
                     }
@@ -1251,6 +1399,19 @@ fn build_appearance_panel(
             let button = Button::new();
             button.set_has_frame(false);
             button.add_css_class("editor-frame-tile");
+            let tooltip = if motion_export {
+                tooltip
+            } else {
+                let ratio =
+                    super::super::background_panel::frame_preset_to_crop_ratio(&MotionFrame {
+                        preset,
+                        ..MotionFrame::default()
+                    });
+                tfmt(
+                    "{name}: {ratio} image aspect ratio",
+                    &[("name", &line1), ("ratio", ratio.label())],
+                )
+            };
             button.set_tooltip_text(Some(&tooltip));
             button.set_hexpand(false);
             button.set_halign(Align::Center);
@@ -1259,7 +1420,7 @@ fn build_appearance_panel(
             cell.set_halign(Align::Center);
             cell.add_css_class("editor-frame-tile-cell");
             let selected: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-            let shape = frame_ratio_shape(aspect, selected.clone());
+            let shape = frame_ratio_shape(aspect, selected.clone(), light_theme);
             cell.append(&shape);
             let top = Label::new(Some(&line1));
             top.add_css_class("editor-frame-tile-label");
@@ -1544,7 +1705,55 @@ fn build_appearance_panel(
     sync_frame_selection(&initial_frame);
     frame_section.append(&dim_row);
     frame_section.append(&frame_revealer);
-    root.append(&motion_disclosure_row("Frame", &frame_section));
+    let frame_row = motion_disclosure_row("Frame", &frame_section);
+    let frame_notice = GtkBox::new(Orientation::Vertical, 6);
+    let frame_hint = Label::new(Some(&t(
+        "Frame sizes need a background in image mode. Add one to change the canvas size.",
+    )));
+    frame_hint.add_css_class("editor-select-inspector-hint");
+    frame_hint.set_wrap(true);
+    frame_hint.set_xalign(0.0);
+    frame_notice.append(&frame_hint);
+    let add_background = Button::with_label(&t("Add a background"));
+    add_background.set_has_frame(false);
+    add_background.add_css_class("editor-sidebar-action-button");
+    add_background.connect_clicked({
+        let runtime = session.runtime.clone();
+        let custom_tab = custom_tab.clone();
+        move |_| {
+            let color = motion_rgb888(motion_rgba(
+                runtime.borrow().motion.appearance.background_color,
+            ));
+            frame_background_color(color);
+            frame_background_changed();
+            custom_tab.set_active(true);
+        }
+    });
+    frame_notice.append(&add_background);
+    frame_row.insert_child_after(&frame_notice, frame_row.first_child().as_ref());
+    let refresh_frame_availability: Rc<dyn Fn()> = Rc::new({
+        let runtime = session.runtime.clone();
+        let dim_row = dim_row.clone();
+        let frame_revealer = frame_revealer.clone();
+        let frame_notice = frame_notice.clone();
+        let previous = Cell::new(None);
+        move || {
+            let needs_background =
+                !motion_export && !appearance_has_background(&runtime.borrow().motion.appearance);
+            if previous.replace(Some(needs_background)) == Some(needs_background) {
+                return;
+            }
+            dim_row.set_sensitive(!needs_background);
+            frame_revealer.set_sensitive(!needs_background);
+            frame_notice.set_visible(needs_background);
+        }
+    });
+    refresh_frame_availability();
+    frame_row.add_tick_callback(move |_, _| {
+        refresh_frame_availability();
+        glib::ControlFlow::Continue
+    });
+    root.append(&frame_row);
 
     // Scene Shadows: an independent overlay layer with its own
     // preset id, opacity, and above/below-card placement — deliberately not
@@ -1554,10 +1763,7 @@ fn build_appearance_panel(
     // Exports render an unset background fill as a solid black scene, so a
     // dark shadow over it cannot be seen. Say so instead of leaving users to
     // discover a missing effect in their MP4.
-    let shadow_hint = Label::new(Some(&t("Needs a background fill to appear in exports")));
-    shadow_hint.add_css_class("editor-select-inspector-hint");
-    shadow_hint.set_xalign(0.0);
-    shadow_hint.set_ellipsize(gtk4::pango::EllipsizeMode::End);
+    let shadow_hint = appearance_hint("");
     scene_shadow_section.append(&shadow_hint);
     let initial_scene_shadow = {
         let runtime = session.runtime.borrow();
@@ -1677,6 +1883,129 @@ fn build_appearance_panel(
         placement_row.append(&button);
     }
     scene_shadow_section.append(&placement_row);
+    let scene_opacity = shadow_opacity.clone();
+    let refresh_dependencies: Rc<dyn Fn()> = Rc::new({
+        let session = session.clone();
+        let previous = Cell::new(None);
+        move || {
+            let transformed = session
+                .source_state
+                .borrow()
+                .as_ref()
+                .is_some_and(|source| !source.lock().unwrap().static_image_transform.is_identity());
+            let (
+                has_background,
+                can_blur,
+                can_radius,
+                can_shadow,
+                shadow_on,
+                scene_on,
+                scene_visible,
+                scene_underlay,
+            ) = {
+                let runtime = session.runtime.borrow();
+                let appearance = &runtime.motion.appearance;
+                let has_background = appearance_has_background(appearance);
+                (
+                    has_background,
+                    has_background
+                        && (matches!(
+                            appearance.background_fill_type,
+                            MotionBackgroundFillType::Wallpaper | MotionBackgroundFillType::Image
+                        ) || (!motion_export
+                            && appearance.background_fill_type
+                                == MotionBackgroundFillType::Gradient)),
+                    motion_export
+                        || has_background
+                        || transformed
+                        || crate::capture::editor::types::frame_needs_canvas(
+                            appearance.frame_style,
+                            appearance.border_thickness,
+                        ),
+                    has_background || (!motion_export && transformed),
+                    appearance.shadow_opacity > 0.0,
+                    runtime.motion.scene_shadow.preset != MotionSceneShadowPreset::None,
+                    runtime.motion.scene_shadow.opacity > 0.001,
+                    runtime.motion.scene_shadow.placement == MotionSceneShadowPlacement::Underlay,
+                )
+            };
+            let key = (
+                has_background,
+                can_blur,
+                can_radius,
+                can_shadow,
+                shadow_on,
+                scene_on,
+                scene_visible,
+                scene_underlay,
+            );
+            if previous.replace(Some(key)) == Some(key) {
+                return;
+            }
+            let background_reason =
+                (!has_background).then_some("Add a background to use this control.");
+            set_slider_availability(&padding, background_reason);
+            set_slider_availability(&noise, background_reason);
+            background_hint.set_visible(!has_background);
+            let blur_reason = (!can_blur).then_some(if motion_export {
+                "Background blur needs a wallpaper or image in Motion."
+            } else {
+                "Background blur needs a gradient, wallpaper, or image."
+            });
+            set_slider_availability(&blur, blur_reason);
+            blur_hint.set_visible(has_background && !can_blur);
+            if let Some(reason) = blur_reason {
+                blur_hint.set_text(&t(reason));
+            }
+            set_slider_availability(&radius, (!can_radius).then_some("Add a background, choose an outer frame style, or transform the image to round its corners."));
+            radius_hint.set_visible(!can_radius);
+            let shadow_reason = (!can_shadow)
+                .then_some("Add a background so the shadow appears in the exported result.");
+            set_slider_availability(&card_shadow_opacity, shadow_reason);
+            let shadow_detail_reason = shadow_reason.or_else(|| {
+                (!shadow_on).then_some("Increase Shadow opacity to enable blur and position.")
+            });
+            for slider in [&shadow_blur, &shadow_x, &shadow_y] {
+                set_slider_availability(slider, shadow_detail_reason);
+            }
+            card_shadow_hint.set_visible(shadow_detail_reason.is_some());
+            if let Some(reason) = shadow_detail_reason {
+                card_shadow_hint.set_text(&t(reason));
+            }
+            let scene_available = motion_export || has_background;
+            shadow_preset_rows.set_sensitive(scene_available);
+            set_slider_availability(
+                &scene_opacity,
+                (!scene_available)
+                    .then_some("Add a background to use Scene Shadows in image mode.")
+                    .or_else(|| {
+                        (!scene_on)
+                            .then_some("Choose a Scene Shadows preset before adjusting opacity.")
+                    }),
+            );
+            placement_row.set_sensitive(scene_available && scene_on && scene_visible);
+            let scene_reason = if !scene_available {
+                Some("Add a background to use Scene Shadows in image mode.")
+            } else if !scene_on {
+                Some("Choose a preset to enable Scene Shadows opacity and placement.")
+            } else if !scene_visible {
+                Some("Increase Scene Shadows opacity to see the effect and change its placement.")
+            } else if !has_background && scene_underlay {
+                Some("Without a background, Underlay is hidden in video exports. Choose Overlay to shade the image.")
+            } else {
+                None
+            };
+            shadow_hint.set_visible(scene_reason.is_some());
+            if let Some(reason) = scene_reason {
+                shadow_hint.set_text(&t(reason));
+            }
+        }
+    });
+    refresh_dependencies();
+    root.add_tick_callback(move |_, _| {
+        refresh_dependencies();
+        glib::ControlFlow::Continue
+    });
     root.append(&motion_disclosure_row(
         "Scene Shadows",
         &scene_shadow_section,
@@ -2128,6 +2457,10 @@ fn motion_image_section(
     inner.append(&icon);
     row.set_child(Some(&inner));
     page.append(&row);
+    let image_error = appearance_hint("");
+    image_error.set_visible(false);
+    page.append(&image_error);
+    let chooser_slot = Rc::new(RefCell::new(None::<FileChooserNative>));
 
     // The picker writes the image fill and decodes its preview exactly as the
     // old Choose… button did; only the row's chrome changed.
@@ -2139,7 +2472,12 @@ fn motion_image_section(
         let thumb = thumb.clone();
         let notify = on_interact.clone();
         let sync_tiles = sync_tiles.clone();
+        let chooser_slot = chooser_slot.clone();
+        let image_error = image_error.clone();
         move |_| {
+            if chooser_slot.borrow().is_some() {
+                return;
+            }
             notify();
             let chooser = FileChooserNative::new(
                 Some(&t("Choose Background Image")),
@@ -2160,15 +2498,34 @@ fn motion_image_section(
             let thumb = thumb.clone();
             let notify_response = notify.clone();
             let sync_tiles = sync_tiles.clone();
+            let image_error = image_error.clone();
+            let chooser_slot_response = Rc::downgrade(&chooser_slot);
             chooser.connect_response(move |dialog, response| {
-                notify_response();
-                if response != ResponseType::Accept {
-                    return;
+                let path = (response == ResponseType::Accept)
+                    .then(|| dialog.file().and_then(|file| file.path()))
+                    .flatten();
+                dialog.destroy();
+                if let Some(slot) = chooser_slot_response.upgrade() {
+                    slot.borrow_mut().take();
                 }
-                let Some(path) = dialog.file().and_then(|file| file.path()) else {
+                let Some(path) = path else {
                     return;
                 };
                 let path = path.to_string_lossy().into_owned();
+                let Some(surface) =
+                    super::super::motion_render::load_motion_background_preview_surface(
+                        &path,
+                        PREVIEW_WALLPAPER_MAX_EDGE,
+                    )
+                else {
+                    image_error.set_text(&t(
+                        "Could not open that image. Choose a PNG, JPEG, or WebP file.",
+                    ));
+                    image_error.set_visible(true);
+                    return;
+                };
+                image_error.set_visible(false);
+                notify_response();
                 let mut runtime = session.runtime.borrow_mut();
                 runtime.begin_motion_edit();
                 runtime.motion.appearance.custom_background_image = Some(path.clone());
@@ -2177,11 +2534,7 @@ fn motion_image_section(
                 // Decode at the preview edge and hand the pixels to the shared
                 // runtime, so the canvas, this chip, and Motion all paint the
                 // same file.
-                let surface = super::super::motion_render::load_motion_background_preview_surface(
-                    &path,
-                    PREVIEW_WALLPAPER_MAX_EDGE,
-                );
-                runtime.set_background_surface(Some(path), surface, false);
+                runtime.set_background_surface(Some(path), Some(surface), false);
                 drop(runtime);
                 none_button.remove_css_class("active-background-option");
                 // An image is not a wallpaper, so no tile may stay ringed.
@@ -2189,7 +2542,32 @@ fn motion_image_section(
                 thumb.queue_draw();
                 preview.queue_draw();
             });
+            *chooser_slot.borrow_mut() = Some(chooser.clone());
             chooser.show();
+        }
+    });
+    page.add_tick_callback({
+        let runtime = session.runtime.clone();
+        let previous: RefCell<Option<String>> = RefCell::new(None);
+        let row = row.downgrade();
+        move |_, _| {
+            let runtime = runtime.borrow();
+            let path = (runtime.motion.appearance.background_fill_type
+                == MotionBackgroundFillType::Image)
+                .then_some(runtime.motion.appearance.custom_background_image.as_deref())
+                .flatten();
+            if previous.borrow().as_deref() != path {
+                *previous.borrow_mut() = path.map(str::to_owned);
+                let name = path
+                    .and_then(|path| std::path::Path::new(path).file_name())
+                    .and_then(|name| name.to_str());
+                label.set_text(name.unwrap_or(&t("Select image...")));
+                if let Some(row) = row.upgrade() {
+                    row.set_tooltip_text(name);
+                }
+                thumb.queue_draw();
+            }
+            glib::ControlFlow::Continue
         }
     });
     page

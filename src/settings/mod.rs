@@ -122,6 +122,7 @@ pub fn show_settings_window() -> anyhow::Result<()> {
         .build();
 
     app.connect_activate(|application| {
+        crate::capture::editor::ui_support::apply_theme_to_gtk();
         // Check if a window already exists (single-instance behavior)
         // If yes, just present it instead of creating a new one
         let windows = application.windows();

@@ -1636,6 +1636,75 @@ msgstr "プリセット"
 msgid "Padding"
 msgstr "パディング"
 
+msgid "Composition"
+msgstr "構成"
+
+msgid "Motion Blur"
+msgstr "モーションブラー"
+
+msgid "Rotation & Perspective"
+msgstr "回転と遠近法"
+
+msgid "Scene Shadows"
+msgstr "シーンの影"
+
+msgid "Timing"
+msgstr "タイミング"
+
+msgid "Transform"
+msgstr "変形"
+
+msgid "day"
+msgstr "日"
+
+msgid "hour"
+msgstr "時間"
+
+msgid "minute"
+msgstr "分"
+
+msgid "Background blur"
+msgstr "背景ぼかし"
+
+msgid "Background noise"
+msgstr "背景ノイズ"
+
+msgid "Border Radius"
+msgstr "角丸"
+
+msgid "Highlight mode"
+msgstr "ハイライトモード"
+
+msgid "Marker size"
+msgstr "マーカーサイズ"
+
+msgid "Numbering style"
+msgstr "番号のスタイル"
+
+msgid "Shadow blur"
+msgstr "影のぼかし"
+
+msgid "Shadow opacity"
+msgstr "影の不透明度"
+
+msgid "Shadow position X"
+msgstr "影の位置 X"
+
+msgid "Shadow position Y"
+msgstr "影の位置 Y"
+
+msgid "Watermark inset"
+msgstr "透かしの余白"
+
+msgid "Watermark position X"
+msgstr "透かしの位置 X"
+
+msgid "Watermark position Y"
+msgstr "透かしの位置 Y"
+
+msgid "Watermark size"
+msgstr "透かしのサイズ"
+
 msgid "Palette"
 msgstr "パレット"
 
@@ -3157,3 +3226,96 @@ msgstr "アップスケーリングプレビューのワーカーが予期せず
 
 msgid "Use enhancement"
 msgstr "強化を使用"
+
+msgid "Add a background"
+msgstr "背景を追加"
+
+msgid "Add a background so the shadow appears in the exported result."
+msgstr "背景を追加すると、書き出した結果に影が表示されます。"
+
+msgid "Add a background to enable padding and noise."
+msgstr "背景を追加すると、余白とノイズを有効にできます。"
+
+msgid "Add a background to use Scene Shadows in image mode."
+msgstr "背景を追加すると、画像モードで Scene Shadows を使用できます。"
+
+msgid "Add a background to use this control."
+msgstr "このコントロールを使用するには背景を追加してください。"
+
+msgid ""
+"Add a background, choose an outer frame style, or transform the image to round its corners."
+msgstr "背景を追加するか、外側フレームのスタイルを選択するか、画像を変形して角を丸めてください。"
+
+msgid "Background blur needs a gradient, wallpaper, or image."
+msgstr "背景のぼかしにはグラデーション、壁紙、または画像が必要です。"
+
+msgid "Background blur needs a wallpaper or image in Motion."
+msgstr "Motion では、背景のぼかしに壁紙または画像が必要です。"
+
+msgid ""
+"Border Radius needs a background, an outer frame style, or a transformed image."
+msgstr "角丸には背景、外側フレームのスタイル、または変形した画像が必要です。"
+
+msgid "Choose a Scene Shadows preset before adjusting opacity."
+msgstr "不透明度を調整する前に、Scene Shadows のプリセットを選択してください。"
+
+msgid "Choose a preset to enable Scene Shadows opacity and placement."
+msgstr "プリセットを選択すると、Scene Shadows の不透明度と配置を有効にできます。"
+
+msgid "Could not open that image. Choose a PNG, JPEG, or WebP file."
+msgstr "その画像を開けませんでした。PNG、JPEG、WebP ファイルを選択してください。"
+
+msgid ""
+"Custom sizes use even pixels. Sizes over a 1920-pixel long edge are scaled down."
+msgstr "カスタムサイズは偶数ピクセルを使用します。長辺が 1920 ピクセルを超えるサイズは縮小されます。"
+
+msgid "Frame"
+msgstr "フレーム"
+
+msgid ""
+"Frame sizes need a background in image mode. Add one to change the canvas size."
+msgstr "画像モードでは、フレームサイズの変更に背景が必要です。背景を追加してキャンバスサイズを変更してください。"
+
+msgid "Image export height; select a preset to change the aspect ratio"
+msgstr "画像の書き出し高さ。プリセットを選択するとアスペクト比を変更できます"
+
+msgid "Image export width; select a preset to change the aspect ratio"
+msgstr "画像の書き出し幅。プリセットを選択するとアスペクト比を変更できます"
+
+msgid ""
+"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
+msgstr ""
+"画像プリセットは固定のピクセルサイズではなくアスペクト比を変更します。W/H は書き出しサイズを示します。選択中のプリセットをもう一度クリックするとリセットされます。"
+
+msgid ""
+"Increase Scene Shadows opacity to see the effect and change its placement."
+msgstr "Scene Shadows の不透明度を上げると、効果を確認して配置を変更できます。"
+
+msgid "Increase Shadow opacity to enable blur and position."
+msgstr "影の不透明度を上げると、ぼかしと位置を有効にできます。"
+
+msgid "Neural 4× is unavailable: {reason}"
+msgstr "ニューラル 4× は利用できません：{reason}"
+
+msgid ""
+"That size was not applied. Width and height must be between 16 and 7680 pixels."
+msgstr "そのサイズは適用されませんでした。幅と高さは 16～7680 ピクセルの範囲で指定してください。"
+
+msgid ""
+"The enhanced canvas exceeds the 16-megapixel output limit. Reduce upscaling or background padding."
+msgstr "強化後のキャンバスが 1600 万ピクセルの出力上限を超えています。アップスケーリングまたは背景の余白を減らしてください。"
+
+msgid "Tilt the image with Yaw or Pitch before adjusting perspective."
+msgstr "パースを調整する前に、ヨーまたはピッチで画像を傾けてください。"
+
+msgid ""
+"Without a background, Underlay is hidden in video exports. Choose Overlay to shade the image."
+msgstr "背景がない場合、下地は動画の書き出しで表示されません。オーバーレイを選択して画像に影を付けます。"
+
+msgid "{name}: {ratio} image aspect ratio"
+msgstr "{name}：{ratio} の画像アスペクト比"
+
+msgid ""
+"{reason} This image is {width} × {height} pixels. Crop it or choose a smaller image to enable enhancement."
+msgstr ""
+"{reason} この画像は {width} × {height} ピクセルです。トリミングするか、より小さい画像を選択すると強化を有効にできます。"

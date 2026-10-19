@@ -47,6 +47,7 @@ pub fn open_empty() -> anyhow::Result<()> {
     let initial = InitialVideo::None;
     app.connect_activate(move |application| {
         install_recording_editor_icons();
+        crate::capture::editor::ui_support::apply_theme_to_gtk();
         crate::capture::editor::ui_support::install_editor_css();
         install_recording_editor_css();
         build_window(application, initial.clone());
@@ -85,6 +86,7 @@ pub fn open_with_path(path: PathBuf) -> anyhow::Result<()> {
     let initial = InitialVideo::AsyncLoad(path);
     app.connect_activate(move |application| {
         install_recording_editor_icons();
+        crate::capture::editor::ui_support::apply_theme_to_gtk();
         crate::capture::editor::ui_support::install_editor_css();
         install_recording_editor_css();
         build_window(application, initial.clone());

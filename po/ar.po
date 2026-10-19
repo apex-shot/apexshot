@@ -1129,7 +1129,7 @@ msgid "Countdown"
 msgstr "العد التنازلي"
 
 msgid "Crop"
-msgstr "المحصول"
+msgstr "الاقتصاص"
 
 msgid "Crop video"
 msgstr "قص الفيديو"
@@ -1647,6 +1647,72 @@ msgstr "الإعداد المسبق"
 
 msgid "Padding"
 msgstr "الحشو"
+
+msgid "Motion Blur"
+msgstr "ضبابية الحركة"
+
+msgid "Rotation & Perspective"
+msgstr "التدوير والمنظور"
+
+msgid "Scene Shadows"
+msgstr "ظلال المشهد"
+
+msgid "Timing"
+msgstr "التوقيت"
+
+msgid "Transform"
+msgstr "تحويل"
+
+msgid "day"
+msgstr "يوم"
+
+msgid "hour"
+msgstr "ساعة"
+
+msgid "minute"
+msgstr "دقيقة"
+
+msgid "Background blur"
+msgstr "ضبابية الخلفية"
+
+msgid "Background noise"
+msgstr "ضوضاء الخلفية"
+
+msgid "Border Radius"
+msgstr "نصف قطر الحواف"
+
+msgid "Highlight mode"
+msgstr "وضع التمييز"
+
+msgid "Marker size"
+msgstr "حجم العلامة"
+
+msgid "Numbering style"
+msgstr "نمط الترقيم"
+
+msgid "Shadow blur"
+msgstr "ضبابية الظل"
+
+msgid "Shadow opacity"
+msgstr "عتامة الظل"
+
+msgid "Shadow position X"
+msgstr "موضع الظل X"
+
+msgid "Shadow position Y"
+msgstr "موضع الظل Y"
+
+msgid "Watermark inset"
+msgstr "هامش العلامة المائية"
+
+msgid "Watermark position X"
+msgstr "موضع العلامة المائية X"
+
+msgid "Watermark position Y"
+msgstr "موضع العلامة المائية Y"
+
+msgid "Watermark size"
+msgstr "حجم العلامة المائية"
 
 msgid "Palette"
 msgstr "لوحة الألوان"
@@ -3174,3 +3240,103 @@ msgstr "توقف عامل معاينة التحسين بشكل غير متوقع
 
 msgid "Use enhancement"
 msgstr "استخدام التحسين"
+
+msgid "Add a background"
+msgstr "إضافة خلفية"
+
+msgid "Add a background so the shadow appears in the exported result."
+msgstr "أضف خلفية لتظهر الظل في النتيجة المصدَّرة."
+
+msgid "Add a background to enable padding and noise."
+msgstr "أضف خلفية لتفعيل الحشو والضجيج."
+
+msgid "Add a background to use Scene Shadows in image mode."
+msgstr "أضف خلفية لاستخدام Scene Shadows في وضع الصور."
+
+msgid "Add a background to use this control."
+msgstr "أضف خلفية لاستخدام هذا العنصر."
+
+msgid ""
+"Add a background, choose an outer frame style, or transform the image to round its corners."
+msgstr "أضف خلفية أو اختر نمط إطار خارجي أو حوِّل الصورة لتدوير زواياها."
+
+msgid "Background blur needs a gradient, wallpaper, or image."
+msgstr "يحتاج تمويه الخلفية إلى تدرج أو خلفية أو صورة."
+
+msgid "Background blur needs a wallpaper or image in Motion."
+msgstr "في Motion، يحتاج تمويه الخلفية إلى خلفية أو صورة."
+
+msgid ""
+"Border Radius needs a background, an outer frame style, or a transformed image."
+msgstr "يحتاج نصف قطر الزوايا إلى خلفية أو نمط إطار خارجي أو صورة محوَّلة."
+
+msgid "Choose a Scene Shadows preset before adjusting opacity."
+msgstr "اختر إعدادًا مسبقًا لـ Scene Shadows قبل ضبط العتامة."
+
+msgid "Choose a preset to enable Scene Shadows opacity and placement."
+msgstr "اختر إعدادًا مسبقًا لتفعيل عتامة Scene Shadows وموضعه."
+
+msgid "Could not open that image. Choose a PNG, JPEG, or WebP file."
+msgstr "تعذّر فتح هذه الصورة. اختر ملفًا بصيغة PNG أو JPEG أو WebP."
+
+msgid ""
+"Custom sizes use even pixels. Sizes over a 1920-pixel long edge are scaled down."
+msgstr ""
+"تستخدم الأحجام المخصصة بكسلات زوجية. يتم تصغير الأحجام التي يتجاوز ضلعها الأطول 1920 بكسل."
+
+msgid "Frame"
+msgstr "الإطار"
+
+msgid ""
+"Frame sizes need a background in image mode. Add one to change the canvas size."
+msgstr ""
+"تحتاج أحجام الإطار إلى خلفية في وضع الصور. أضف واحدة لتغيير حجم لوحة الرسم."
+
+msgid "Image export height; select a preset to change the aspect ratio"
+msgstr "ارتفاع تصدير الصورة؛ اختر إعدادًا مسبقًا لتغيير نسبة العرض إلى الارتفاع"
+
+msgid "Image export width; select a preset to change the aspect ratio"
+msgstr "عرض تصدير الصورة؛ اختر إعدادًا مسبقًا لتغيير نسبة العرض إلى الارتفاع"
+
+msgid ""
+"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
+msgstr ""
+"تغيّر إعدادات الصورة المسبقة نسبة العرض إلى الارتفاع، وليس حجمًا ثابتًا بالبكسل. يعرض W/H حجم التصدير. انقر على الإعداد المسبق المحدد مرة أخرى لإعادة الضبط."
+
+msgid ""
+"Increase Scene Shadows opacity to see the effect and change its placement."
+msgstr "زد عتامة Scene Shadows لرؤية التأثير وتغيير موضعه."
+
+msgid "Increase Shadow opacity to enable blur and position."
+msgstr "زد عتامة الظل لتفعيل التمويه والموضع."
+
+msgid "Neural 4× is unavailable: {reason}"
+msgstr "عصبي 4× غير متاح: {reason}"
+
+msgid ""
+"That size was not applied. Width and height must be between 16 and 7680 pixels."
+msgstr "لم يتم تطبيق هذا الحجم. يجب أن يكون العرض والارتفاع بين 16 و7680 بكسل."
+
+msgid ""
+"The enhanced canvas exceeds the 16-megapixel output limit. Reduce upscaling or background padding."
+msgstr ""
+"تتجاوز لوحة الرسم المحسَّنة حد الإخراج البالغ 16 ميغابكسل. قلّل التحجيم أو حشو الخلفية."
+
+msgid "Tilt the image with Yaw or Pitch before adjusting perspective."
+msgstr "أمِل الصورة باستخدام الانعراج أو الميل قبل ضبط المنظور."
+
+msgid ""
+"Without a background, Underlay is hidden in video exports. Choose Overlay to shade the image."
+msgstr ""
+"بدون خلفية، تُخفى الطبقة السفلية في تصدير الفيديو. اختر الطبقة لتظليل الصورة."
+
+msgid "{name}: {ratio} image aspect ratio"
+msgstr "{name}: {ratio} نسبة العرض إلى الارتفاع للصورة"
+
+msgid ""
+"{reason} This image is {width} × {height} pixels. Crop it or choose a smaller image to enable enhancement."
+msgstr ""
+"{reason} حجم هذه الصورة {width} × {height} بكسل. اقتطعها أو اختر صورة أصغر لتفعيل التحسين."
+
+msgid "Composition"
+msgstr "التكوين"

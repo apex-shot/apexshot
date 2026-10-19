@@ -72,7 +72,10 @@ fn paint_backdrop(
                 w.ceil().max(1.0) as u32,
                 h.ceil().max(1.0) as u32,
             );
-            let surface = crate::recording::editor::window::custom_wallpaper_popover::bitmap_to_surface(&bitmap);
+            let surface =
+                crate::recording::editor::window::custom_wallpaper_popover::bitmap_to_surface(
+                    &bitmap,
+                );
             let _ = context.save();
             context.translate(x, y);
             context.set_source_surface(&surface, 0.0, 0.0).ok();
@@ -107,14 +110,16 @@ fn paint_backdrop(
     }
     // Same grain field as the static canvas and the static export, so the
     // Background tool reads identically in both editors.
-    crate::capture::editor::render::paint_background_noise(
-        context,
-        0.0,
-        0.0,
-        f64::from(width),
-        f64::from(height),
-        appearance.background_noise,
-    );
+    if appearance.background_fill_type != MotionBackgroundFillType::None {
+        crate::capture::editor::render::paint_background_noise(
+            context,
+            0.0,
+            0.0,
+            f64::from(width),
+            f64::from(height),
+            appearance.background_noise,
+        );
+    }
     context.restore().ok();
 }
 

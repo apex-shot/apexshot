@@ -1,8 +1,8 @@
 use gtk4::cairo::{Context, Filter, Format, ImageSurface};
 use gtk4::{
-    gdk, gio, glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, DropDown,
-    EventControllerMotion, GestureDrag, Image, Label, Orientation, Overflow, Overlay, PolicyType,
-    ScrolledWindow, Spinner, Window,
+    gdk, gio, glib, prelude::*, Align, Box as GtkBox, Button, DrawingArea, EventControllerMotion,
+    GestureDrag, Image, Label, Orientation, Overflow, Overlay, PolicyType, ScrolledWindow, Spinner,
+    Window,
 };
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use super::super::motion_render;
+use super::select::MotionSelect;
 use super::MotionSession;
 use crate::capture::editor::{render, state::EditorState, upscale::SourceUpscale};
 use crate::i18n::{t, tfmt};
@@ -22,6 +23,9 @@ struct Comparison {
 }
 
 pub(super) fn show(parent: &gtk4::ApplicationWindow, session: &MotionSession, motion_export: bool) {
+    if unavailable_reason(session, SourceUpscale::Neural2x, motion_export).is_some() {
+        return;
+    }
     let window = Window::builder()
         .title(t("Compare neural upscaling"))
         .transient_for(parent)
@@ -89,27 +93,28 @@ pub(super) fn show(parent: &gtk4::ApplicationWindow, session: &MotionSession, mo
     note.append(&note_text);
     body.append(&note);
 
-    let mode = DropDown::from_strings(&[&t("Neural 2×"), &t("Neural 4×")]);
-    mode.set_selected(u32::from(
-        session
-            .runtime
-            .borrow()
-            .motion
-            .appearance
-            .source_upscale
-            .factor()
-            == 4,
-    ));
-    mode.add_css_class("editor-upscale-dropdown");
-    let zoom = DropDown::from_strings(&["100%", "200%"]);
-    zoom.add_css_class("editor-upscale-dropdown");
-    zoom.set_tooltip_text(Some(&t(
+    let mode = MotionSelect::new(
+        &[&t("Neural 2×"), &t("Neural 4×")],
+        usize::from(
+            session
+                .runtime
+                .borrow()
+                .motion
+                .appearance
+                .source_upscale
+                .factor()
+                == 4
+                && unavailable_reason(session, SourceUpscale::Neural4x, motion_export).is_none(),
+        ),
+    );
+    let zoom = MotionSelect::new(&["100%", "200%"], 0);
+    zoom.widget().set_tooltip_text(Some(&t(
         "100% displays export pixels at native screen scale",
     )));
     let controls = GtkBox::new(Orientation::Horizontal, 18);
     controls.add_css_class("editor-upscale-controls");
-    controls.append(&labeled_control(&t("Neural upscaling"), &mode));
-    controls.append(&labeled_control(&t("Zoom"), &zoom));
+    controls.append(&labeled_control(&t("Neural upscaling"), mode.widget()));
+    controls.append(&labeled_control(&t("Zoom"), zoom.widget()));
     body.append(&controls);
 
     let images: Rc<RefCell<Option<Comparison>>> = Rc::new(RefCell::new(None));
@@ -287,6 +292,15 @@ pub(super) fn show(parent: &gtk4::ApplicationWindow, session: &MotionSession, mo
     stage_overlay.set_hexpand(true);
     stage_overlay.set_vexpand(true);
     stage_overlay.set_child(Some(&scroll));
+    let message = Label::new(Some(&t("Preparing before / after preview…")));
+    message.set_wrap(true);
+    message.set_max_width_chars(64);
+    message.set_justify(gtk4::Justification::Center);
+    message.set_halign(Align::Center);
+    message.set_valign(Align::Center);
+    message.add_css_class("editor-upscale-message");
+    stage_overlay.add_overlay(&message);
+    scroll.set_visible(false);
     let before_badge = stage_badge(&t("Original"));
     before_badge.set_halign(Align::Start);
     before_badge.set_valign(Align::Start);
@@ -295,6 +309,8 @@ pub(super) fn show(parent: &gtk4::ApplicationWindow, session: &MotionSession, mo
     after_badge.set_valign(Align::Start);
     stage_overlay.add_overlay(&before_badge);
     stage_overlay.add_overlay(&after_badge);
+    before_badge.set_visible(false);
+    after_badge.set_visible(false);
     stage.append(&stage_overlay);
     body.append(&stage);
 
@@ -311,12 +327,12 @@ pub(super) fn show(parent: &gtk4::ApplicationWindow, session: &MotionSession, mo
     status_row.append(&status);
     body.append(&status_row);
 
-    zoom.connect_selected_notify({
+    zoom.connect_changed({
         let drawing = drawing.clone();
         let images = images.clone();
         let zoom_factor = zoom_factor.clone();
-        move |dropdown| {
-            let scale = if dropdown.selected() == 1 { 2.0 } else { 1.0 };
+        move |selected| {
+            let scale = if selected == 1 { 2.0 } else { 1.0 };
             zoom_factor.set(scale);
             resize_canvas(&drawing, &images.borrow(), scale);
         }
@@ -395,6 +411,9 @@ pub(super) fn show(parent: &gtk4::ApplicationWindow, session: &MotionSession, mo
         let window = window.downgrade();
         let mode = mode.clone();
         let after_badge = after_badge.clone();
+        let before_badge = before_badge.clone();
+        let message = message.clone();
+        let scroll = scroll.clone();
         let spinner = spinner.clone();
         let status = status.clone();
         let apply = apply.clone();
@@ -405,8 +424,29 @@ pub(super) fn show(parent: &gtk4::ApplicationWindow, session: &MotionSession, mo
         move || {
             let selected = selected_mode(&mode);
             after_badge.set_text(&mode_label(selected));
+            apply.set_sensitive(false);
+            before_badge.set_visible(false);
+            after_badge.set_visible(false);
+            scroll.set_visible(false);
+            message.set_visible(true);
+            *images.borrow_mut() = None;
+            for (index, mode_value) in [SourceUpscale::Neural2x, SourceUpscale::Neural4x]
+                .into_iter()
+                .enumerate()
+            {
+                mode.set_option_sensitive(
+                    index,
+                    unavailable_reason(&session, mode_value, motion_export).is_none(),
+                );
+            }
+            if let Some(reason) = unavailable_reason(&session, selected, motion_export) {
+                message.set_text(&reason);
+                status.set_text(&reason);
+                return;
+            }
             let Some(source) = session.source_snapshot() else {
                 status.set_text(&t("Load an image before previewing upscaling."));
+                message.set_text(&t("Load an image before previewing upscaling."));
                 return;
             };
             let cancel = Arc::new(AtomicBool::new(false));
@@ -415,11 +455,12 @@ pub(super) fn show(parent: &gtk4::ApplicationWindow, session: &MotionSession, mo
             }
             let motion = motion_export.then(|| session.motion_state());
             let prefers_dark = session.prefers_dark;
-            mode.set_sensitive(false);
+            mode.widget().set_sensitive(false);
             apply.set_sensitive(false);
             spinner.set_visible(true);
             spinner.start();
             status.set_text(&t("Preparing before / after preview…"));
+            message.set_text(&t("Preparing before / after preview…"));
             *images.borrow_mut() = None;
             drawing.queue_draw();
             let worker = {
@@ -436,10 +477,14 @@ pub(super) fn show(parent: &gtk4::ApplicationWindow, session: &MotionSession, mo
             let drawing = drawing.clone();
             let images = images.clone();
             let zoom_factor = zoom_factor.clone();
+            let before_badge = before_badge.clone();
+            let after_badge = after_badge.clone();
+            let message = message.clone();
+            let scroll = scroll.clone();
             glib::MainContext::default().spawn_local(async move {
                 let result = worker.await.unwrap_or_else(|_| Err(t("The upscaling preview worker stopped unexpectedly.")));
                 if cancel.load(Ordering::Relaxed) || window.upgrade().is_none() { return; }
-                mode.set_sensitive(true);
+                mode.widget().set_sensitive(true);
                 spinner.stop();
                 spinner.set_visible(false);
                 let result = result.and_then(|(before, after)| {
@@ -454,14 +499,21 @@ pub(super) fn show(parent: &gtk4::ApplicationWindow, session: &MotionSession, mo
                         *images.borrow_mut() = Some(comparison);
                         resize_canvas(&drawing, &images.borrow(), zoom_factor.get());
                         apply.set_sensitive(true);
+                        message.set_visible(false);
+                        scroll.set_visible(true);
+                        before_badge.set_visible(true);
+                        after_badge.set_visible(true);
                         drawing.queue_draw();
                     }
-                    Err(error) => status.set_text(&error),
+                    Err(error) => {
+                        status.set_text(&error);
+                        message.set_text(&error);
+                    },
                 }
             });
         }
     });
-    mode.connect_selected_notify({
+    mode.connect_changed({
         let request = Rc::downgrade(&request);
         move |_| {
             if let Some(request) = request.upgrade() {
@@ -546,12 +598,60 @@ fn install_titlebar_drag(zone: &GtkBox, window: &Window) {
     zone.add_controller(drag);
 }
 
-fn selected_mode(dropdown: &DropDown) -> SourceUpscale {
+fn selected_mode(dropdown: &MotionSelect) -> SourceUpscale {
     if dropdown.selected() == 1 {
         SourceUpscale::Neural4x
     } else {
         SourceUpscale::Neural2x
     }
+}
+
+pub(super) fn source_dimensions(session: &MotionSession) -> (u32, u32) {
+    session
+        .source_state
+        .borrow()
+        .as_ref()
+        .map(|source| source.lock().unwrap().working_image.dimensions())
+        .unwrap_or((0, 0))
+}
+
+pub(super) fn input_unavailable_reason((width, height): (u32, u32)) -> Option<String> {
+    if width == 0 || height == 0 {
+        return Some(t("Load an image before previewing upscaling."));
+    }
+    crate::capture::editor::upscale::validate_input_dimensions(width, height, SourceUpscale::Neural2x)
+        .err()
+        .map(|reason| tfmt("{reason} This image is {width} × {height} pixels. Crop it or choose a smaller image to enable enhancement.", &[("reason", &t(&reason)), ("width", &width.to_string()), ("height", &height.to_string())]))
+}
+
+pub(super) fn output_dimensions(session: &MotionSession, mode: SourceUpscale) -> (u32, u32) {
+    session
+        .source_state
+        .borrow()
+        .as_ref()
+        .map(|source| source.lock().unwrap().export_dimensions(mode))
+        .unwrap_or((0, 0))
+}
+
+pub(super) fn unavailable_reason(
+    session: &MotionSession,
+    mode: SourceUpscale,
+    motion_export: bool,
+) -> Option<String> {
+    if let Some(reason) = input_unavailable_reason(source_dimensions(session)) {
+        return Some(reason);
+    }
+    if motion_export {
+        return None;
+    }
+    session.source_state.borrow().as_ref().and_then(|source| {
+        source
+            .lock()
+            .unwrap()
+            .validate_upscale_export(mode)
+            .err()
+            .map(|reason| t(&reason))
+    })
 }
 
 fn resize_canvas(area: &DrawingArea, images: &Option<Comparison>, zoom: f64) {

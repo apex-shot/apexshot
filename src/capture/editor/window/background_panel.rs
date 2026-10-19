@@ -353,7 +353,7 @@ pub(super) fn detect_system_wallpaper_path() -> Option<PathBuf> {
 /// crop list covers the picker grid. Legacy X (1.91:1 link-card) has no
 /// static twin, so it falls back to 16:9. Custom matches by nearest aspect
 /// so a manual W/H still previews close to its Motion output.
-fn frame_preset_to_crop_ratio(
+pub(super) fn frame_preset_to_crop_ratio(
     frame: &crate::recording::editor::model::MotionFrame,
 ) -> CropAspectRatio {
     use crate::recording::editor::model::MotionFramePreset as Preset;

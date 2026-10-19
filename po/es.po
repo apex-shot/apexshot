@@ -992,7 +992,7 @@ msgid "Auto-balance"
 msgstr "Equilibrio automático"
 
 msgid "Background"
-msgstr "Antecedentes"
+msgstr "Fondo"
 
 msgid "Before recording"
 msgstr "Antes de grabar"
@@ -1670,6 +1670,75 @@ msgstr "PREAJUSTE"
 
 msgid "Padding"
 msgstr "Relleno"
+
+msgid "Composition"
+msgstr "Composición"
+
+msgid "Motion Blur"
+msgstr "Desenfoque de movimiento"
+
+msgid "Rotation & Perspective"
+msgstr "Rotación y perspectiva"
+
+msgid "Scene Shadows"
+msgstr "Sombras de escena"
+
+msgid "Timing"
+msgstr "Tiempo"
+
+msgid "Transform"
+msgstr "Transformar"
+
+msgid "day"
+msgstr "día"
+
+msgid "hour"
+msgstr "hora"
+
+msgid "minute"
+msgstr "minuto"
+
+msgid "Background blur"
+msgstr "Desenfoque del fondo"
+
+msgid "Background noise"
+msgstr "Ruido de fondo"
+
+msgid "Border Radius"
+msgstr "Radio del borde"
+
+msgid "Highlight mode"
+msgstr "Modo de resaltado"
+
+msgid "Marker size"
+msgstr "Tamaño del marcador"
+
+msgid "Numbering style"
+msgstr "Estilo de numeración"
+
+msgid "Shadow blur"
+msgstr "Desenfoque de sombra"
+
+msgid "Shadow opacity"
+msgstr "Opacidad de la sombra"
+
+msgid "Shadow position X"
+msgstr "Posición X de la sombra"
+
+msgid "Shadow position Y"
+msgstr "Posición Y de la sombra"
+
+msgid "Watermark inset"
+msgstr "Margen de marca de agua"
+
+msgid "Watermark position X"
+msgstr "Posición X de marca de agua"
+
+msgid "Watermark position Y"
+msgstr "Posición Y de marca de agua"
+
+msgid "Watermark size"
+msgstr "Tamaño de marca de agua"
 
 msgid "Palette"
 msgstr "Paleta"
@@ -3211,3 +3280,111 @@ msgstr "El proceso de vista previa del escalado se detuvo inesperadamente."
 
 msgid "Use enhancement"
 msgstr "Usar mejora"
+
+msgid "Add a background"
+msgstr "Añadir un fondo"
+
+msgid "Add a background so the shadow appears in the exported result."
+msgstr "Añade un fondo para que la sombra aparezca en el resultado exportado."
+
+msgid "Add a background to enable padding and noise."
+msgstr "Añade un fondo para activar el relleno y el ruido."
+
+msgid "Add a background to use Scene Shadows in image mode."
+msgstr "Añade un fondo para usar Scene Shadows en el modo de imagen."
+
+msgid "Add a background to use this control."
+msgstr "Añade un fondo para usar este control."
+
+msgid ""
+"Add a background, choose an outer frame style, or transform the image to round its corners."
+msgstr ""
+"Añade un fondo, elige un estilo de marco exterior o transforma la imagen para redondear sus esquinas."
+
+msgid "Background blur needs a gradient, wallpaper, or image."
+msgstr ""
+"El desenfoque del fondo necesita un degradado, un fondo de pantalla o una imagen."
+
+msgid "Background blur needs a wallpaper or image in Motion."
+msgstr ""
+"El desenfoque del fondo necesita un fondo de pantalla o una imagen en Motion."
+
+msgid ""
+"Border Radius needs a background, an outer frame style, or a transformed image."
+msgstr ""
+"El radio de las esquinas necesita un fondo, un estilo de marco exterior o una imagen transformada."
+
+msgid "Choose a Scene Shadows preset before adjusting opacity."
+msgstr "Elige un preajuste de Scene Shadows antes de ajustar la opacidad."
+
+msgid "Choose a preset to enable Scene Shadows opacity and placement."
+msgstr ""
+"Elige un preajuste para activar la opacidad y la posición de Scene Shadows."
+
+msgid "Could not open that image. Choose a PNG, JPEG, or WebP file."
+msgstr "No se pudo abrir esa imagen. Elige un archivo PNG, JPEG o WebP."
+
+msgid ""
+"Custom sizes use even pixels. Sizes over a 1920-pixel long edge are scaled down."
+msgstr ""
+"Los tamaños personalizados usan píxeles pares. Los tamaños con un lado largo superior a 1920 píxeles se reducen."
+
+msgid "Frame"
+msgstr "Marco"
+
+msgid ""
+"Frame sizes need a background in image mode. Add one to change the canvas size."
+msgstr ""
+"Los tamaños de marco necesitan un fondo en el modo de imagen. Añade uno para cambiar el tamaño del lienzo."
+
+msgid "Image export height; select a preset to change the aspect ratio"
+msgstr ""
+"Alto de exportación de la imagen; selecciona un preajuste para cambiar la relación de aspecto"
+
+msgid "Image export width; select a preset to change the aspect ratio"
+msgstr ""
+"Ancho de exportación de la imagen; selecciona un preajuste para cambiar la relación de aspecto"
+
+msgid ""
+"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
+msgstr ""
+"Los preajustes de imagen cambian la relación de aspecto, no un tamaño de píxeles fijo. W/H muestra el tamaño de exportación. Vuelve a hacer clic en el preajuste seleccionado para restablecer."
+
+msgid ""
+"Increase Scene Shadows opacity to see the effect and change its placement."
+msgstr ""
+"Aumenta la opacidad de Scene Shadows para ver el efecto y cambiar su posición."
+
+msgid "Increase Shadow opacity to enable blur and position."
+msgstr ""
+"Aumenta la opacidad de la sombra para activar el desenfoque y la posición."
+
+msgid "Neural 4× is unavailable: {reason}"
+msgstr "El escalado neuronal 4× no está disponible: {reason}"
+
+msgid ""
+"That size was not applied. Width and height must be between 16 and 7680 pixels."
+msgstr ""
+"Ese tamaño no se aplicó. El ancho y el alto deben estar entre 16 y 7680 píxeles."
+
+msgid ""
+"The enhanced canvas exceeds the 16-megapixel output limit. Reduce upscaling or background padding."
+msgstr ""
+"El lienzo mejorado supera el límite de salida de 16 megapíxeles. Reduce el escalado o el relleno del fondo."
+
+msgid "Tilt the image with Yaw or Pitch before adjusting perspective."
+msgstr ""
+"Inclina la imagen con la guiñada o el cabeceo antes de ajustar la perspectiva."
+
+msgid ""
+"Without a background, Underlay is hidden in video exports. Choose Overlay to shade the image."
+msgstr ""
+"Sin un fondo, la Base se oculta en las exportaciones de vídeo. Elige Superposición para sombrear la imagen."
+
+msgid "{name}: {ratio} image aspect ratio"
+msgstr "{name}: {ratio}, relación de aspecto de la imagen"
+
+msgid ""
+"{reason} This image is {width} × {height} pixels. Crop it or choose a smaller image to enable enhancement."
+msgstr ""
+"{reason} Esta imagen mide {width} × {height} píxeles. Recórtala o elige una imagen más pequeña para activar la mejora."

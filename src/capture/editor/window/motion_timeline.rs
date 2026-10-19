@@ -97,13 +97,17 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     toolbar.append(&center);
     toolbar.append(&right);
 
+    // The ruler and playhead are painted by hand rather than styled, so they
+    // need the same light/dark decision the themed surfaces get.
+    let light_theme = !crate::capture::editor::ui_support::prefers_dark_glass_theme();
+
     let ruler = DrawingArea::new();
     ruler.add_css_class("recording-editor-card-ruler");
     ruler.set_hexpand(true);
     ruler.set_size_request(-1, 36);
     ruler.set_draw_func({
         let runtime = runtime.clone();
-        move |_, cr, width, height| draw_ruler(cr, width, height, &runtime)
+        move |_, cr, width, height| draw_ruler(cr, width, height, &runtime, light_theme)
     });
 
     // The source is a real timeline clip, not an implied backdrop. An earlier
@@ -164,7 +168,7 @@ pub(super) fn build_motion_timeline(runtime: Rc<RefCell<MotionRuntime>>) -> Moti
     playhead.set_draw_func({
         let runtime = runtime.clone();
         move |_, cr, width, height| {
-            draw_playhead(cr, width, height, &runtime);
+            draw_playhead(cr, width, height, &runtime, light_theme);
         }
     });
     // Hover read-out: a red hairline under the playhead. It tracks the pointer
@@ -373,7 +377,13 @@ fn time_to_x(time: f64, duration: f64, width: f64) -> f64 {
     (time / duration.max(0.001)).clamp(0.0, 1.0) * width
 }
 
-fn draw_ruler(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<MotionRuntime>>) {
+fn draw_ruler(
+    cr: &Context,
+    width: i32,
+    height: i32,
+    runtime: &Rc<RefCell<MotionRuntime>>,
+    light: bool,
+) {
     let runtime = runtime.borrow();
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
@@ -394,14 +404,37 @@ fn draw_ruler(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<Motion
     while t <= duration + 0.0001 {
         let x = time_to_x(t, duration, w).floor() + 0.5;
         let on_major = ((t / major) - (t / major).round()).abs() < 0.02;
-        cr.set_source_rgba(1.0, 1.0, 1.0, if on_major { 0.28 } else { 0.10 });
+        let (tick_r, tick_g, tick_b) = if light {
+            (0.07, 0.08, 0.09)
+        } else {
+            (1.0, 1.0, 1.0)
+        };
+        let tick_alpha = if on_major {
+            if light {
+                0.24
+            } else {
+                0.28
+            }
+        } else if light {
+            0.08
+        } else {
+            0.10
+        };
+        cr.set_source_rgba(tick_r, tick_g, tick_b, tick_alpha);
         cr.move_to(x, if on_major { h - 11.0 } else { h - 5.0 });
         cr.line_to(x, h);
         let _ = cr.stroke();
         if on_major {
             let label = format_ruler_label(t, major);
             let near_playhead = (t - playhead).abs() < major * 0.08;
-            cr.set_source_rgba(1.0, 1.0, 1.0, if near_playhead { 0.92 } else { 0.52 });
+            let label_alpha = if near_playhead {
+                0.92
+            } else if light {
+                0.60
+            } else {
+                0.52
+            };
+            cr.set_source_rgba(tick_r, tick_g, tick_b, label_alpha);
             if let Ok(ext) = cr.text_extents(&label) {
                 let label_x = if t <= 0.001 {
                     0.0
@@ -886,14 +919,26 @@ fn draw_hover_playhead(
     let _ = cr.stroke();
 }
 
-fn draw_playhead(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<MotionRuntime>>) {
+fn draw_playhead(
+    cr: &Context,
+    width: i32,
+    height: i32,
+    runtime: &Rc<RefCell<MotionRuntime>>,
+    light: bool,
+) {
     let runtime = runtime.borrow();
     let w = width.max(1) as f64;
     let h = height.max(1) as f64;
     let x = time_to_x(runtime.motion.playhead, runtime.motion.duration, w).floor() + 0.5;
 
-    // Stem: thin light line running from the handle to the bottom of the board.
-    cr.set_source_rgba(0.86, 0.90, 0.98, 0.9);
+    // Stem: thin line running from the handle to the bottom of the board. The
+    // recording editor paints the same mark black on its light timeline.
+    let (stem_r, stem_g, stem_b) = if light {
+        (0.07, 0.08, 0.09)
+    } else {
+        (0.86, 0.90, 0.98)
+    };
+    cr.set_source_rgba(stem_r, stem_g, stem_b, 0.9);
     cr.set_line_width(1.5);
     cr.move_to(x, PLAYHEAD_HANDLE_TOP + PLAYHEAD_HANDLE_H);
     cr.line_to(x, h);
@@ -913,9 +958,13 @@ fn draw_playhead(cr: &Context, width: i32, height: i32, runtime: &Rc<RefCell<Mot
         PLAYHEAD_HANDLE_H,
         PLAYHEAD_HANDLE_H / 2.0,
     );
-    cr.set_source_rgba(0.04, 0.05, 0.07, 1.0);
+    if light {
+        cr.set_source_rgba(0.94, 0.96, 1.0, 1.0);
+    } else {
+        cr.set_source_rgba(0.04, 0.05, 0.07, 1.0);
+    }
     let _ = cr.fill_preserve();
-    cr.set_source_rgba(0.86, 0.90, 0.98, 1.0);
+    cr.set_source_rgba(stem_r, stem_g, stem_b, 1.0);
     cr.set_line_width(1.5);
     let _ = cr.stroke();
 }

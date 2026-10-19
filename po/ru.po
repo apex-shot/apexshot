@@ -986,7 +986,7 @@ msgid "Auto-balance"
 msgstr "Автоматическая балансировка"
 
 msgid "Background"
-msgstr "Общая информация"
+msgstr "Фон"
 
 msgid "Before recording"
 msgstr "Перед записью"
@@ -1140,7 +1140,7 @@ msgid "Countdown"
 msgstr "Обратный отсчёт"
 
 msgid "Crop"
-msgstr "Урожай"
+msgstr "Обрезка"
 
 msgid "Crop video"
 msgstr "Обрезать видео"
@@ -1664,7 +1664,76 @@ msgid "PRESET"
 msgstr "ПРЕДУСТАНОВКА"
 
 msgid "Padding"
-msgstr "Набивка"
+msgstr "Отступ"
+
+msgid "Composition"
+msgstr "Композиция"
+
+msgid "Motion Blur"
+msgstr "Размытие движения"
+
+msgid "Rotation & Perspective"
+msgstr "Поворот и перспектива"
+
+msgid "Scene Shadows"
+msgstr "Тени сцены"
+
+msgid "Timing"
+msgstr "Тайминг"
+
+msgid "Transform"
+msgstr "Трансформация"
+
+msgid "day"
+msgstr "день"
+
+msgid "hour"
+msgstr "час"
+
+msgid "minute"
+msgstr "минута"
+
+msgid "Background blur"
+msgstr "Размытие фона"
+
+msgid "Background noise"
+msgstr "Шум фона"
+
+msgid "Border Radius"
+msgstr "Радиус скругления"
+
+msgid "Highlight mode"
+msgstr "Режим выделения"
+
+msgid "Marker size"
+msgstr "Размер маркера"
+
+msgid "Numbering style"
+msgstr "Стиль нумерации"
+
+msgid "Shadow blur"
+msgstr "Размытие тени"
+
+msgid "Shadow opacity"
+msgstr "Непрозрачность тени"
+
+msgid "Shadow position X"
+msgstr "Положение тени X"
+
+msgid "Shadow position Y"
+msgstr "Положение тени Y"
+
+msgid "Watermark inset"
+msgstr "Отступ водяного знака"
+
+msgid "Watermark position X"
+msgstr "Положение водяного знака X"
+
+msgid "Watermark position Y"
+msgstr "Положение водяного знака Y"
+
+msgid "Watermark size"
+msgstr "Размер водяного знака"
 
 msgid "Palette"
 msgstr "Палитра"
@@ -3201,3 +3270,109 @@ msgstr "Процесс предпросмотра масштабирования
 
 msgid "Use enhancement"
 msgstr "Использовать улучшение"
+
+msgid "Add a background"
+msgstr "Добавить фон"
+
+msgid "Add a background so the shadow appears in the exported result."
+msgstr "Добавьте фон, чтобы тень появилась в экспортированном результате."
+
+msgid "Add a background to enable padding and noise."
+msgstr "Добавьте фон, чтобы включить отступы и шум."
+
+msgid "Add a background to use Scene Shadows in image mode."
+msgstr "Добавьте фон, чтобы использовать Scene Shadows в режиме изображения."
+
+msgid "Add a background to use this control."
+msgstr "Добавьте фон, чтобы использовать этот элемент управления."
+
+msgid ""
+"Add a background, choose an outer frame style, or transform the image to round its corners."
+msgstr ""
+"Добавьте фон, выберите стиль внешней рамки или преобразуйте изображение, чтобы скруглить его углы."
+
+msgid "Background blur needs a gradient, wallpaper, or image."
+msgstr "Для размытия фона нужен градиент, обои или изображение."
+
+msgid "Background blur needs a wallpaper or image in Motion."
+msgstr "В Motion для размытия фона нужны обои или изображение."
+
+msgid ""
+"Border Radius needs a background, an outer frame style, or a transformed image."
+msgstr ""
+"Радиус скругления требует фона, стиля внешней рамки или преобразованного изображения."
+
+msgid "Choose a Scene Shadows preset before adjusting opacity."
+msgstr ""
+"Выберите предустановку Scene Shadows, прежде чем настраивать непрозрачность."
+
+msgid "Choose a preset to enable Scene Shadows opacity and placement."
+msgstr ""
+"Выберите предустановку, чтобы включить непрозрачность и размещение Scene Shadows."
+
+msgid "Could not open that image. Choose a PNG, JPEG, or WebP file."
+msgstr "Не удалось открыть это изображение. Выберите файл PNG, JPEG или WebP."
+
+msgid ""
+"Custom sizes use even pixels. Sizes over a 1920-pixel long edge are scaled down."
+msgstr ""
+"Свои размеры используют чётные пиксели. Размеры с длинной стороной более 1920 пикселей уменьшаются."
+
+msgid "Frame"
+msgstr "Кадр"
+
+msgid ""
+"Frame sizes need a background in image mode. Add one to change the canvas size."
+msgstr ""
+"В режиме изображения для размеров кадра нужен фон. Добавьте его, чтобы изменить размер холста."
+
+msgid "Image export height; select a preset to change the aspect ratio"
+msgstr ""
+"Высота экспорта изображения; выберите предустановку, чтобы изменить соотношение сторон"
+
+msgid "Image export width; select a preset to change the aspect ratio"
+msgstr ""
+"Ширина экспорта изображения; выберите предустановку, чтобы изменить соотношение сторон"
+
+msgid ""
+"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
+msgstr ""
+"Пресеты изображения меняют соотношение сторон, а не фиксированный размер в пикселях. W/H показывает размер экспорта. Нажмите выбранный пресет ещё раз, чтобы сбросить."
+
+msgid ""
+"Increase Scene Shadows opacity to see the effect and change its placement."
+msgstr ""
+"Увеличьте непрозрачность Scene Shadows, чтобы увидеть эффект и изменить размещение."
+
+msgid "Increase Shadow opacity to enable blur and position."
+msgstr "Увеличьте непрозрачность тени, чтобы включить размытие и положение."
+
+msgid "Neural 4× is unavailable: {reason}"
+msgstr "Нейро 4× недоступно: {reason}"
+
+msgid ""
+"That size was not applied. Width and height must be between 16 and 7680 pixels."
+msgstr ""
+"Этот размер не применён. Ширина и высота должны быть от 16 до 7680 пикселей."
+
+msgid ""
+"The enhanced canvas exceeds the 16-megapixel output limit. Reduce upscaling or background padding."
+msgstr ""
+"Улучшенный холст превышает выходной лимит в 16 мегапикселей. Уменьшите масштабирование или отступы фона."
+
+msgid "Tilt the image with Yaw or Pitch before adjusting perspective."
+msgstr ""
+"Наклоните изображение с помощью рыскания или тангажа, прежде чем менять перспективу."
+
+msgid ""
+"Without a background, Underlay is hidden in video exports. Choose Overlay to shade the image."
+msgstr ""
+"Без фона Подложка скрывается в видеоэкспорте. Выберите Оверлей, чтобы затенять изображение."
+
+msgid "{name}: {ratio} image aspect ratio"
+msgstr "{name}: {ratio} — соотношение сторон изображения"
+
+msgid ""
+"{reason} This image is {width} × {height} pixels. Crop it or choose a smaller image to enable enhancement."
+msgstr ""
+"{reason} Размер этого изображения — {width} × {height} пикселей. Обрежьте его или выберите изображение меньшего размера, чтобы включить улучшение."

@@ -1634,6 +1634,75 @@ msgstr "预设"
 msgid "Padding"
 msgstr "填充"
 
+msgid "Composition"
+msgstr "构图"
+
+msgid "Motion Blur"
+msgstr "运动模糊"
+
+msgid "Rotation & Perspective"
+msgstr "旋转与透视"
+
+msgid "Scene Shadows"
+msgstr "场景阴影"
+
+msgid "Timing"
+msgstr "时序"
+
+msgid "Transform"
+msgstr "变换"
+
+msgid "day"
+msgstr "天"
+
+msgid "hour"
+msgstr "小时"
+
+msgid "minute"
+msgstr "分钟"
+
+msgid "Background blur"
+msgstr "背景模糊"
+
+msgid "Background noise"
+msgstr "背景噪点"
+
+msgid "Border Radius"
+msgstr "圆角半径"
+
+msgid "Highlight mode"
+msgstr "高亮模式"
+
+msgid "Marker size"
+msgstr "标记大小"
+
+msgid "Numbering style"
+msgstr "编号样式"
+
+msgid "Shadow blur"
+msgstr "阴影模糊"
+
+msgid "Shadow opacity"
+msgstr "阴影不透明度"
+
+msgid "Shadow position X"
+msgstr "阴影位置 X"
+
+msgid "Shadow position Y"
+msgstr "阴影位置 Y"
+
+msgid "Watermark inset"
+msgstr "水印内边距"
+
+msgid "Watermark position X"
+msgstr "水印位置 X"
+
+msgid "Watermark position Y"
+msgstr "水印位置 Y"
+
+msgid "Watermark size"
+msgstr "水印大小"
+
 msgid "Palette"
 msgstr "调色板"
 
@@ -3149,3 +3218,94 @@ msgstr "放大预览工作进程意外停止。"
 
 msgid "Use enhancement"
 msgstr "使用增强"
+
+msgid "Add a background"
+msgstr "添加背景"
+
+msgid "Add a background so the shadow appears in the exported result."
+msgstr "添加背景，阴影才会出现在导出结果中。"
+
+msgid "Add a background to enable padding and noise."
+msgstr "添加背景以启用填充和噪点。"
+
+msgid "Add a background to use Scene Shadows in image mode."
+msgstr "添加背景以在图像模式下使用 Scene Shadows。"
+
+msgid "Add a background to use this control."
+msgstr "添加背景后即可使用此控件。"
+
+msgid ""
+"Add a background, choose an outer frame style, or transform the image to round its corners."
+msgstr "请添加背景、选择外框样式，或变换图像以圆化其边角。"
+
+msgid "Background blur needs a gradient, wallpaper, or image."
+msgstr "背景模糊需要渐变、壁纸或图像。"
+
+msgid "Background blur needs a wallpaper or image in Motion."
+msgstr "在 Motion 中，背景模糊需要壁纸或图像。"
+
+msgid ""
+"Border Radius needs a background, an outer frame style, or a transformed image."
+msgstr "圆角需要背景、外框样式或变换后的图像。"
+
+msgid "Choose a Scene Shadows preset before adjusting opacity."
+msgstr "调整不透明度前，请先选择 Scene Shadows 预设。"
+
+msgid "Choose a preset to enable Scene Shadows opacity and placement."
+msgstr "选择预设以启用 Scene Shadows 的不透明度和位置。"
+
+msgid "Could not open that image. Choose a PNG, JPEG, or WebP file."
+msgstr "无法打开该图像。请选择 PNG、JPEG 或 WebP 文件。"
+
+msgid ""
+"Custom sizes use even pixels. Sizes over a 1920-pixel long edge are scaled down."
+msgstr "自定义尺寸使用偶数像素。长边超过 1920 像素的尺寸会被缩小。"
+
+msgid "Frame"
+msgstr "画框"
+
+msgid ""
+"Frame sizes need a background in image mode. Add one to change the canvas size."
+msgstr "在图像模式下，画框尺寸需要背景。添加背景即可更改画布大小。"
+
+msgid "Image export height; select a preset to change the aspect ratio"
+msgstr "图像导出高度；选择预设可更改宽高比"
+
+msgid "Image export width; select a preset to change the aspect ratio"
+msgstr "图像导出宽度；选择预设可更改宽高比"
+
+msgid ""
+"Image presets change the aspect ratio, not a fixed pixel size. W/H shows the export size. Click the selected preset again to reset."
+msgstr "图像预设会更改宽高比，而不是固定的像素尺寸。W/H 显示导出尺寸。再次点击已选预设即可重置。"
+
+msgid ""
+"Increase Scene Shadows opacity to see the effect and change its placement."
+msgstr "提高 Scene Shadows 的不透明度以查看效果并更改其位置。"
+
+msgid "Increase Shadow opacity to enable blur and position."
+msgstr "提高阴影不透明度以启用模糊和位置。"
+
+msgid "Neural 4× is unavailable: {reason}"
+msgstr "神经网络 4× 不可用：{reason}"
+
+msgid ""
+"That size was not applied. Width and height must be between 16 and 7680 pixels."
+msgstr "未应用该尺寸。宽度和高度必须介于 16 到 7680 像素之间。"
+
+msgid ""
+"The enhanced canvas exceeds the 16-megapixel output limit. Reduce upscaling or background padding."
+msgstr "增强后的画布超出了 1600 万像素的输出上限。请降低放大倍数或背景填充。"
+
+msgid "Tilt the image with Yaw or Pitch before adjusting perspective."
+msgstr "调整透视前，请先用偏航或俯仰倾斜图像。"
+
+msgid ""
+"Without a background, Underlay is hidden in video exports. Choose Overlay to shade the image."
+msgstr "没有背景时，底衬会在视频导出中隐藏。请选择浮层为图像添加阴影。"
+
+msgid "{name}: {ratio} image aspect ratio"
+msgstr "{name}：{ratio} 图像宽高比"
+
+msgid ""
+"{reason} This image is {width} × {height} pixels. Crop it or choose a smaller image to enable enhancement."
+msgstr "{reason} 此图像为 {width} × {height} 像素。请裁剪图像或选择更小的图像以启用增强。"

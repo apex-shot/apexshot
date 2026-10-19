@@ -475,17 +475,57 @@ impl EditorState {
         ))
     }
 
+    /// Report the rendered canvas size without running source enhancement.
+    pub(crate) fn export_dimensions(
+        &self,
+        upscale: super::super::upscale::SourceUpscale,
+    ) -> (u32, u32) {
+        let factor = f64::from(upscale.factor());
+        if self.background_style == BackgroundStyle::None
+            && !crate::capture::editor::types::frame_needs_canvas(
+                self.frame_style,
+                self.border_thickness,
+            )
+        {
+            return (
+                self.working_image.width().saturating_mul(upscale.factor()),
+                self.working_image.height().saturating_mul(upscale.factor()),
+            );
+        }
+        let layout = self.background_layout_for(&self.working_image);
+        let (width, height) = (layout.canvas_width * factor, layout.canvas_height * factor);
+        if self.background_style == BackgroundStyle::None
+            && self.static_image_transform.is_identity()
+        {
+            (
+                width.round().max(1.0) as u32,
+                height.round().max(1.0) as u32,
+            )
+        } else {
+            (width as u32, height as u32)
+        }
+    }
+
+    /// Reject unsupported source and enhanced canvas sizes before inference.
+    pub(crate) fn validate_upscale_export(
+        &self,
+        upscale: super::super::upscale::SourceUpscale,
+    ) -> Result<(), String> {
+        super::super::upscale::validate_input(&self.working_image, upscale)?;
+        if upscale.factor() > 1 || self.export_scale > 1.0 {
+            let (width, height) = self.export_dimensions(upscale);
+            if u64::from(width) * u64::from(height) > 16_777_216 || width.max(height) > 16_384 {
+                return Err("The enhanced canvas exceeds the 16-megapixel output limit. Reduce upscaling or background padding.".into());
+            }
+        }
+        Ok(())
+    }
+
     pub fn to_final_image(&self) -> Result<RgbaImage, EditorError> {
+        self.validate_upscale_export(self.source_upscale)
+            .map_err(EditorError::ImageSave)?;
         if self.source_upscale.factor() > 1 {
             return self.upscaled_export_state(true)?.to_final_image();
-        }
-        if self.export_scale > 1.0 {
-            let layout = self.background_layout_for(&self.working_image);
-            if layout.canvas_width * layout.canvas_height > 16_777_216.0
-                || layout.canvas_width.max(layout.canvas_height) > 16_384.0
-            {
-                return Err(EditorError::ImageSave("The enhanced canvas exceeds the 16-megapixel output limit. Reduce upscaling or background padding.".into()));
-            }
         }
         let image = if !self.static_image_transform.is_identity() {
             self.to_static_transformed_image()

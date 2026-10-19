@@ -157,6 +157,32 @@ fn portal_prefers_dark_theme() -> Option<bool> {
     })
 }
 
+/// Align the platform widget theme with the theme the app resolved.
+///
+/// The editors paint their own surfaces, but stock widgets — dropdowns,
+/// entries, popovers, menus, tooltips, scrollbars — keep the desktop theme.
+/// On a desktop that prefers dark, every one of them stayed dark inside a
+/// light-themed editor. A named dark theme also ignores the prefer-dark flag,
+/// so its light sibling is selected by name.
+pub fn apply_theme_to_gtk() {
+    let Some(settings) = gtk4::Settings::default() else {
+        return;
+    };
+    let dark = prefers_dark_glass_theme();
+    settings.set_property("gtk-application-prefer-dark-theme", dark);
+    if dark {
+        return;
+    }
+    let name = settings
+        .property::<Option<String>>("gtk-theme-name")
+        .unwrap_or_default();
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with("-dark") {
+        let light_name = name[..name.len() - "-dark".len()].to_string();
+        settings.set_property("gtk-theme-name", light_name);
+    }
+}
+
 pub fn prefers_dark_glass_theme() -> bool {
     // Settings → General → Theme wins over the desktop preference. Only
     // `system` falls through to the GTK / gsettings probes below.
@@ -764,6 +790,13 @@ mod tests {
     };
     use crate::capture::editor::types::ArrowStyle;
     use gtk4::prelude::StaticType;
+
+    #[test]
+    fn editor_window_transparency_does_not_leak_into_native_dialogs() {
+        let window_style = EDITOR_CSS.split(".editor-root").next().unwrap();
+        assert!(window_style.contains("window.editor-window"));
+        assert!(!window_style.trim_start().starts_with("window,"));
+    }
 
     #[test]
     fn editor_toolbar_inherits_the_root_surface_in_both_themes() {

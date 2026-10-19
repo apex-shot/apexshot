@@ -1,5 +1,33 @@
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn background_noise_without_a_fill_matches_the_preview_and_export() {
+        use gtk4::cairo::{Context, Format, ImageSurface};
+        for checkerboard in [false, true] {
+            let render = |noise| {
+                let mut motion = crate::recording::editor::model::MotionState::default();
+                motion.appearance.background_noise = noise;
+                let mut surface = ImageSurface::create(Format::ARgb32, 64, 48).unwrap();
+                {
+                    let context = Context::new(&surface).unwrap();
+                    super::paint_backdrop(
+                        &context,
+                        64,
+                        48,
+                        &motion,
+                        None,
+                        checkerboard,
+                        true,
+                        None,
+                    );
+                }
+                surface.flush();
+                let pixels = surface.data().unwrap().to_vec();
+                pixels
+            };
+            assert_eq!(render(0.0), render(1.0));
+        }
+    }
     use super::{
         draw_motion_backdrop, draw_motion_foreground, draw_motion_frame, draw_transformed_card,
         motion_text_contains_view_point, motion_text_revealed_bytes, paint_card_shadow,

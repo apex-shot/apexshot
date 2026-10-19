@@ -149,6 +149,10 @@
                 border: 1px solid rgba(17, 24, 39, 0.16);
             }
 
+            .editor-root.editor-theme-light .editor-motion-confirm-card .editor-select-inspector-hint {
+                color: alpha(#1d2129, 0.72);
+            }
+
             .editor-root.editor-theme-light button.editor-floating-zoom-step {
                 color: alpha(#1d2129, 0.78);
             }
@@ -160,10 +164,18 @@
 
             .editor-root.editor-theme-light button.editor-sidebar-action-button {
                 background: transparent;
+                /* Frame-less buttons otherwise keep the platform's dark
+                   button colour and vanish against the light panel. */
+                color: #1d2129;
             }
 
             .editor-root.editor-theme-light button.editor-sidebar-action-button:hover {
                 background: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.editor-sidebar-action-button:disabled {
+                color: alpha(#1d2129, 0.38);
             }
 
             .editor-root.editor-theme-light .editor-footer-zoom-popup {
@@ -525,6 +537,97 @@
             }
             .editor-root.editor-theme-light dropdown.editor-background-ratio-dropdown popover listview row:selected {
                 background-color: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+
+            /* Motion → Frame picker: W/H pills, expand arrow, ratio tiles and
+               the social subheads. The shapes are drawn in code; these rules
+               cover the text and the pill fills around them. */
+            .editor-root.editor-theme-light .editor-frame-dim-pill {
+                background: alpha(#111827, 0.06);
+            }
+            .editor-root.editor-theme-light .editor-frame-dim-pill:focus-within {
+                background: alpha(#111827, 0.09);
+            }
+            .editor-root.editor-theme-light .editor-frame-dim-unit {
+                color: alpha(#1d2129, 0.52);
+            }
+            .editor-root.editor-theme-light entry.editor-frame-dim-entry,
+            .editor-root.editor-theme-light entry.editor-frame-dim-entry:hover,
+            .editor-root.editor-theme-light entry.editor-frame-dim-entry:focus,
+            .editor-root.editor-theme-light entry.editor-frame-dim-entry:focus-visible {
+                color: alpha(#1d2129, 0.90);
+            }
+            .editor-root.editor-theme-light button.editor-frame-expand-button {
+                background: alpha(#111827, 0.06);
+                color: alpha(#1d2129, 0.80);
+            }
+            .editor-root.editor-theme-light button.editor-frame-expand-button:hover {
+                background: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light button.editor-frame-tile:hover {
+                background: alpha(#111827, 0.05);
+            }
+            .editor-root.editor-theme-light .editor-frame-tile-label {
+                color: alpha(#1d2129, 0.78);
+            }
+            .editor-root.editor-theme-light .editor-frame-tile-sublabel {
+                color: alpha(#1d2129, 0.48);
+            }
+            .editor-root.editor-theme-light .editor-frame-subheader {
+                color: alpha(#1d2129, 0.86);
+            }
+            .editor-root.editor-theme-light .editor-frame-separator {
+                background: alpha(#111827, 0.10);
+            }
+
+            /* Motion → Export quality upscaling dropdown. It is a stock
+               GtkDropDown, so it keeps the platform's dark widget recipe
+               unless the light theme repaints it here. */
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown > button {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+                border-color: alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown > button:hover {
+                background: alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown > button:active,
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown > button:checked,
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown > button:focus-visible {
+                background: alpha(#111827, 0.14);
+            }
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown > button label {
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown > button image {
+                color: alpha(#1d2129, 0.55);
+            }
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown popover,
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown popover > arrow {
+                background-color: #ffffff;
+            }
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown popover > contents {
+                background-color: #ffffff;
+                color: #1d2129;
+                border-color: alpha(#111827, 0.10);
+            }
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown popover listview row {
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown popover listview row:hover {
+                background-color: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown popover listview row:selected {
+                background-color: alpha(#111827, 0.10);
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown popover listview row:selected label {
+                color: #1d2129;
+            }
+            .editor-root.editor-theme-light dropdown.editor-motion-upscale-dropdown popover listview row check {
                 color: #1d2129;
             }
 
