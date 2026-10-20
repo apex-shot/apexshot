@@ -1,5 +1,7 @@
 use crate::i18n::t;
-use crate::studio_entitlement::{activate_token, current_status, StudioStatus};
+use crate::studio_entitlement::{
+    activate_token, current_status, StudioEntitlementError, StudioStatus,
+};
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, Entry, Expander, Label, Orientation};
 
@@ -124,8 +126,11 @@ pub fn build_studio_section() -> GtkBox {
                 manage_row.append(&copy);
             }
             frame.append(&manage_row);
+            frame.append(&build_device_id_row());
         }
-        StudioStatus::NotActivated | StudioStatus::InvalidEntitlement => {
+        StudioStatus::NotActivated
+        | StudioStatus::InvalidEntitlement
+        | StudioStatus::DeviceMismatch => {
             let studio_page = Button::with_label(&studio_page_action_label(status_snapshot));
             let controls = build_activation_controls(&status, &studio_page, || {});
 
@@ -140,6 +145,7 @@ pub fn build_studio_section() -> GtkBox {
             activation_row.append(&actions);
             activation_row.append(&controls.feedback);
             frame.append(&activation_row);
+            frame.append(&build_device_id_row());
         }
     }
 
@@ -203,7 +209,10 @@ fn build_activation_controls(
             }
             Err(error) => {
                 status.set_text(&current_status().message());
-                feedback.set_text(&error.to_string());
+                feedback.set_text(&match error {
+                    StudioEntitlementError::DeviceMismatch => StudioStatus::DeviceMismatch.message(),
+                    error => error.to_string(),
+                });
             }
         }
     });
@@ -225,10 +234,62 @@ fn build_activation_controls(
     }
 }
 
+/// The value a buyer pastes on apexshot.org/studio when claiming a licence for
+/// this machine. Shown even before activation, because it is needed first.
+fn build_device_id_row() -> GtkBox {
+    let row = GtkBox::new(Orientation::Vertical, 4);
+    row.add_css_class("settings-table-row");
+
+    let heading = GtkBox::new(Orientation::Horizontal, 8);
+    let title = Label::new(Some(&t("Device ID")));
+    title.add_css_class("settings-group-title");
+    title.set_xalign(0.0);
+    title.set_hexpand(true);
+    let copy = Button::with_label(&t("Copy"));
+    copy.set_hexpand(false);
+    heading.append(&title);
+    heading.append(&copy);
+
+    let value = Label::new(Some(
+        &crate::studio_entitlement::device_id().unwrap_or_else(|| t("Unavailable on this system")),
+    ));
+    value.add_css_class("dim-label");
+    value.set_selectable(true);
+    value.set_xalign(0.0);
+    value.set_wrap(true);
+
+    let hint = Label::new(Some(&t(
+        "Paste this at apexshot.org/studio to claim a Studio licence for this device.",
+    )));
+    hint.add_css_class("dim-label");
+    hint.set_xalign(0.0);
+    hint.set_wrap(true);
+
+    let device_id = crate::studio_entitlement::device_id();
+    copy.connect_clicked(move |button| {
+        let Some(device_id) = device_id.as_deref() else {
+            return;
+        };
+        if crate::utils::clipboard::copy_text_to_clipboard(device_id).is_ok() {
+            button.set_label(&t("Copied"));
+            let button = button.clone();
+            gtk4::glib::timeout_add_local_once(std::time::Duration::from_secs(2), move || {
+                button.set_label(&t("Copy"))
+            });
+        }
+    });
+
+    row.append(&heading);
+    row.append(&value);
+    row.append(&hint);
+    row
+}
+
 fn studio_page_action_label(status: StudioStatus) -> String {
     match status {
         StudioStatus::NotActivated => t("Upgrade to Studio — $39 once"),
         StudioStatus::InvalidEntitlement => t("Recover license"),
+        StudioStatus::DeviceMismatch => t("Claim for this device"),
         StudioStatus::UpdateAccessEnded { .. } | StudioStatus::Active { .. } => t("Manage license"),
         StudioStatus::ConfigurationUnavailable => t("Check Studio availability"),
     }

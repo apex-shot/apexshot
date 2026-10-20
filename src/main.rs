@@ -143,6 +143,22 @@ fn main() {
             }
             return;
         }
+        "studio-device-id" => {
+            match apexshot::device_id() {
+                Some(id) => println!("{id}"),
+                None => {
+                    eprintln!("Could not read or create this machine's Studio device ID");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
+        "studio-status" => {
+            // Support asks for this line so a licence problem can be identified
+            // without the customer pasting a credential.
+            println!("{}", apexshot::studio_status_line());
+            return;
+        }
         "video-editor" => {
             let result = if args.len() < 3 {
                 open_empty_recording_editor()
@@ -647,6 +663,8 @@ pub(crate) fn print_usage() {
     println!("  edit <image>      Open image editor window");
     println!("  show-last-preview Reopen the last capture preview via daemon");
     println!("  settings          Open settings window");
+    println!("  studio-status     Print this build's Studio licence state");
+    println!("  studio-device-id  Print this machine's Studio device ID");
     println!("  history           Open capture history window");
     println!("  login             Sign in to ApexShot Cloud (device authorization)");
     println!("  logout            Sign out of ApexShot Cloud");
