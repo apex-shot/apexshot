@@ -3,7 +3,7 @@
 use crate::capture::editor::window::icon_names::custom;
 use crate::i18n::t;
 use crate::studio_entitlement::{
-    activate_token, ensure_export_allowed, StudioCapabilities, StudioEntitlementError,
+    activate_token, ensure_export_allowed, StudioCapabilities, StudioEntitlementError, StudioStatus,
 };
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, Entry,
@@ -134,6 +134,7 @@ enum Kind {
     Purchase,
     InvalidLicense,
     UpdatesEnded,
+    DeviceMismatch,
     ConfigurationUnavailable,
     StorageUnavailable,
 }
@@ -143,6 +144,7 @@ fn kind_for(error: &StudioEntitlementError) -> Kind {
         StudioEntitlementError::NotActivated => Kind::Purchase,
         StudioEntitlementError::InvalidEntitlement => Kind::InvalidLicense,
         StudioEntitlementError::UpdateAccessEnded => Kind::UpdatesEnded,
+        StudioEntitlementError::DeviceMismatch => Kind::DeviceMismatch,
         StudioEntitlementError::ConfigurationUnavailable => Kind::ConfigurationUnavailable,
         StudioEntitlementError::Storage(_) => Kind::StorageUnavailable,
     }
@@ -160,7 +162,7 @@ enum PrimaryAction {
 impl PrimaryAction {
     fn label(self) -> String {
         match self {
-            Self::Upgrade => t("Upgrade to Studio — $39 once"),
+            Self::Upgrade => t("Upgrade to Studio — $39 with 12 months of updates"),
             Self::GetStudioReadyBuild => t("Check Studio availability"),
             Self::RecoverLicense => t("Recover license"),
             Self::ManageLicense => t("Manage license"),
@@ -183,6 +185,7 @@ fn primary_action(error: &StudioEntitlementError) -> PrimaryAction {
     match kind_for(error) {
         Kind::Purchase => PrimaryAction::Upgrade,
         Kind::InvalidLicense => PrimaryAction::RecoverLicense,
+        Kind::DeviceMismatch => PrimaryAction::RecoverLicense,
         Kind::UpdatesEnded => PrimaryAction::ManageLicense,
         Kind::ConfigurationUnavailable => PrimaryAction::GetStudioReadyBuild,
         Kind::StorageUnavailable => PrimaryAction::KeepEditing,
@@ -198,6 +201,10 @@ fn card_copy(error: &StudioEntitlementError) -> (String, String) {
         (Kind::InvalidLicense, _) => (
             t("Studio license couldn't be verified"),
             t("The license saved on this device couldn't be checked. Paste a valid license to unlock Studio."),
+        ),
+        (Kind::DeviceMismatch, _) => (
+            t("This license belongs to another device"),
+            t("Copy this machine's Device ID from Settings → Studio and claim the license for it at apexshot.org/studio. Your other device keeps working."),
         ),
         (Kind::UpdatesEnded, _) => (
             t("This version is newer than your license"),
@@ -427,6 +434,12 @@ fn build_card(
             actions.append(&primary);
             license_row.entry.clone().upcast()
         }
+        Kind::DeviceMismatch => {
+            actions.append(&spacer);
+            actions.append(&keep);
+            actions.append(&primary);
+            license_row.entry.clone().upcast()
+        }
         Kind::UpdatesEnded => {
             actions.append(&keep);
             actions.append(&spacer);
@@ -578,6 +591,9 @@ fn license_entry(
                 }
                 Err(error) => error.to_string(),
                 Ok(()) => match ensure_export_allowed(capabilities) {
+                    Err(StudioEntitlementError::DeviceMismatch) => {
+                        StudioStatus::DeviceMismatch.message()
+                    }
                     Ok(()) => {
                         settled.set(true);
                         dismiss();
@@ -702,7 +718,7 @@ mod tests {
             (
                 StudioEntitlementError::NotActivated,
                 PrimaryAction::Upgrade,
-                t("Upgrade to Studio — $39 once"),
+                t("Upgrade to Studio — $39 with 12 months of updates"),
                 Some(STUDIO_URL),
             ),
             (

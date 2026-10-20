@@ -40,8 +40,14 @@ pub enum StudioStatus {
     ConfigurationUnavailable,
     NotActivated,
     InvalidEntitlement,
-    Active { updates_until: i64 },
-    UpdateAccessEnded { updates_until: i64 },
+    /// Schema 2 licence issued to a different machine.
+    DeviceMismatch,
+    Active {
+        updates_until: i64,
+    },
+    UpdateAccessEnded {
+        updates_until: i64,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +64,7 @@ impl StudioStatus {
             Self::ConfigurationUnavailable => "Studio isn't available in this build configuration. Free capture and editing remain available.".into(),
             Self::NotActivated => "Studio isn't activated. Free capture, editing, recording, and clean exports continue to work offline.".into(),
             Self::InvalidEntitlement => "The saved Studio entitlement couldn't be verified. Import a valid entitlement to activate this build.".into(),
+            Self::DeviceMismatch => "This licence is bound to another device. Open the Studio settings on this machine, copy its Device ID, and claim the licence for it at apexshot.org/studio.".into(),
             Self::Active { updates_until } => format!(
                 "Studio is active for this build. Included updates run through {}.",
                 format_timestamp(updates_until)
@@ -78,6 +85,8 @@ pub enum StudioEntitlementError {
     NotActivated,
     #[error("The Studio entitlement is invalid or could not be verified")]
     InvalidEntitlement,
+    #[error("This Studio licence is bound to a different device")]
+    DeviceMismatch,
     #[error("This build is outside the entitlement's included update period")]
     UpdateAccessEnded,
     #[error("Studio entitlement storage failed: {0}")]
@@ -106,6 +115,14 @@ struct EntitlementPayload {
     product: String,
     issued_at: i64,
     updates_until: i64,
+    // Schema 2 only. Optional so schema 1 tokens still deserialize; `deny_unknown_fields`
+    // would otherwise reject every licence issued before device binding existed.
+    #[serde(default)]
+    install_id: Option<String>,
+    #[serde(default)]
+    licensee: Option<String>,
+    #[serde(default)]
+    devices_max: Option<u8>,
 }
 
 pub fn current_status() -> StudioStatus {
@@ -128,6 +145,7 @@ pub fn current_status() -> StudioStatus {
             updates_until: entitlement.updates_until,
         },
         Ok(None) => StudioStatus::NotActivated,
+        Err(StudioEntitlementError::DeviceMismatch) => StudioStatus::DeviceMismatch,
         Err(_) => StudioStatus::InvalidEntitlement,
     }
 }
@@ -165,7 +183,13 @@ fn activate_token_at_path(
     if bytes.is_empty() || bytes.len() > MAX_TOKEN_BYTES {
         return Err(StudioEntitlementError::InvalidEntitlement);
     }
-    verify_token(token, &configuration.verifying_key)?;
+    let entitlement = verify_token(token, &configuration.verifying_key)?;
+    let local = crate::usage_telemetry::ensure_install_id();
+    if bound_to_other_device(&entitlement, local.as_deref()) {
+        // Saving it would leave the app permanently mismatched with no way to
+        // tell the user why, so this is refused outright.
+        return Err(StudioEntitlementError::DeviceMismatch);
+    }
     write_token_atomically(path, token)
 }
 
@@ -430,15 +454,92 @@ fn verify_token(
 
     let entitlement: EntitlementPayload =
         serde_json::from_slice(&payload).map_err(|_| StudioEntitlementError::InvalidEntitlement)?;
-    if entitlement.schema_version != 1
-        || entitlement.product != PRODUCT
+    if entitlement.product != PRODUCT
         || !is_uuid(&entitlement.license_id)
         || entitlement.issued_at <= 0
         || entitlement.updates_until < entitlement.issued_at
     {
         return Err(StudioEntitlementError::InvalidEntitlement);
     }
+    match entitlement.schema_version {
+        // Schema 1 predates device binding; those licences stay valid everywhere.
+        1 => {
+            if entitlement.install_id.is_some()
+                || entitlement.licensee.is_some()
+                || entitlement.devices_max.is_some()
+            {
+                return Err(StudioEntitlementError::InvalidEntitlement);
+            }
+        }
+        2 => {
+            let install_id = entitlement
+                .install_id
+                .as_deref()
+                .ok_or(StudioEntitlementError::InvalidEntitlement)?;
+            if !is_uuid(install_id)
+                || entitlement
+                    .licensee
+                    .as_deref()
+                    .unwrap_or("")
+                    .trim()
+                    .is_empty()
+                || !matches!(entitlement.devices_max, Some(1..=16))
+            {
+                return Err(StudioEntitlementError::InvalidEntitlement);
+            }
+        }
+        _ => return Err(StudioEntitlementError::InvalidEntitlement),
+    }
     Ok(entitlement)
+}
+
+/// This machine's Studio device ID, created on first use.
+///
+/// The website needs it before a licence exists, and the Studio settings page
+/// offers it for copying, so it has to be readable without an entitlement.
+pub fn device_id() -> Option<String> {
+    crate::usage_telemetry::ensure_install_id()
+}
+
+/// One line a customer can paste into a support request: the licence state and
+/// whether this build can verify licences at all. Never includes the token.
+pub fn studio_status_line() -> String {
+    match current_status() {
+        StudioStatus::ConfigurationUnavailable => {
+            "studio: unavailable (this build cannot verify licences)".to_string()
+        }
+        StudioStatus::NotActivated => "studio: not activated".to_string(),
+        StudioStatus::InvalidEntitlement => {
+            "studio: saved licence could not be verified".to_string()
+        }
+        StudioStatus::DeviceMismatch => {
+            "studio: licence is bound to a different device".to_string()
+        }
+        StudioStatus::Active { updates_until } => {
+            format!("studio: active (updates through {updates_until})")
+        }
+        StudioStatus::UpdateAccessEnded { updates_until } => {
+            format!("studio: build newer than licence (updates through {updates_until})")
+        }
+    }
+}
+
+/// Whether a verified entitlement was issued for a machine other than this one.
+///
+/// Schema 1 licences carry no binding and always pass; only schema 2 binds.
+fn bound_to_other_device(entitlement: &EntitlementPayload, local_install_id: Option<&str>) -> bool {
+    if entitlement.schema_version != 2 {
+        return false;
+    }
+    let Some(bound) = entitlement.install_id.as_deref() else {
+        return false;
+    };
+    match local_install_id {
+        Some(local) => !local.eq_ignore_ascii_case(bound),
+        // A build that cannot read its own install id cannot prove the binding
+        // either way; refuse rather than silently granting a shared licence.
+        None => true,
+    }
 }
 
 fn decode_base64url(encoded: &str) -> Result<Vec<u8>, StudioEntitlementError> {
@@ -503,7 +604,12 @@ fn read_entitlement(
     if token.len() > MAX_TOKEN_BYTES {
         return Err(StudioEntitlementError::InvalidEntitlement);
     }
-    verify_token(token.trim(), &configuration.verifying_key).map(Some)
+    let entitlement = verify_token(token.trim(), &configuration.verifying_key)?;
+    let local = crate::usage_telemetry::ensure_install_id();
+    if bound_to_other_device(&entitlement, local.as_deref()) {
+        return Err(StudioEntitlementError::DeviceMismatch);
+    }
+    Ok(Some(entitlement))
 }
 
 fn write_token_atomically(path: &Path, token: &str) -> Result<(), StudioEntitlementError> {
@@ -1196,5 +1302,130 @@ mod tests {
     fn motion_export_is_studio_but_project_preview_is_not_a_capability_check() {
         assert!(capabilities_for_motion_export().motion_export);
         assert!(!StudioCapabilities::default().requires_studio());
+    }
+
+    fn verify_synthetic(
+        payload: serde_json::Value,
+    ) -> Result<EntitlementPayload, StudioEntitlementError> {
+        let token = signed_token_for_test(&synthetic_signing_key(), payload.to_string().as_bytes());
+        verify_token(&token, &synthetic_signing_key().verifying_key())
+    }
+
+    fn schema1_payload() -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": 1,
+            "license_id": "550e8400-e29b-41d4-a716-446655440000",
+            "product": PRODUCT,
+            "issued_at": 100,
+            "updates_until": 3_000_000_000_i64,
+        })
+    }
+
+    fn schema2_payload(install_id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "schema_version": 2,
+            "license_id": "550e8400-e29b-41d4-a716-446655440000",
+            "product": PRODUCT,
+            "issued_at": 100,
+            "updates_until": 3_000_000_000_i64,
+            "install_id": install_id,
+            "licensee": "buyer@example.com",
+            "devices_max": 3,
+        })
+    }
+
+    #[test]
+    fn schema1_licences_still_verify_after_device_binding_lands() {
+        // Regression: deny_unknown_fields means a non-optional v2 field would
+        // lock every pre-existing customer out on upgrade.
+        let entitlement = verify_synthetic(schema1_payload()).expect("v1 must still verify");
+        assert_eq!(entitlement.schema_version, 1);
+        assert!(!bound_to_other_device(&entitlement, Some("any-device")));
+        assert!(!bound_to_other_device(&entitlement, None));
+    }
+
+    #[test]
+    fn schema2_licence_matches_only_the_device_it_was_issued_to() {
+        let device = "8f14e45f-ceea-467f-a1b2-3c5d6e7f8a9b";
+        let entitlement = verify_synthetic(schema2_payload(device)).expect("v2 verifies");
+        assert!(!bound_to_other_device(&entitlement, Some(device)));
+        assert!(!bound_to_other_device(
+            &entitlement,
+            Some(&device.to_ascii_uppercase())
+        ));
+        assert!(bound_to_other_device(
+            &entitlement,
+            Some("11111111-2222-3333-4444-555555555555")
+        ));
+        // A machine that cannot read its own id must not be granted the licence.
+        assert!(bound_to_other_device(&entitlement, None));
+    }
+
+    #[test]
+    fn schema2_requires_a_well_formed_binding() {
+        for broken in [
+            serde_json::json!({
+                "schema_version": 2, "license_id": "550e8400-e29b-41d4-a716-446655440000",
+                "product": PRODUCT, "issued_at": 100, "updates_until": 3_000_000_000_i64,
+                "licensee": "buyer@example.com", "devices_max": 3,
+            }),
+            schema2_payload("not-a-uuid"),
+            serde_json::json!({
+                "schema_version": 2, "license_id": "550e8400-e29b-41d4-a716-446655440000",
+                "product": PRODUCT, "issued_at": 100, "updates_until": 3_000_000_000_i64,
+                "install_id": "8f14e45f-ceea-467f-a1b2-3c5d6e7f8a9b",
+                "licensee": "   ", "devices_max": 3,
+            }),
+            serde_json::json!({
+                "schema_version": 2, "license_id": "550e8400-e29b-41d4-a716-446655440000",
+                "product": PRODUCT, "issued_at": 100, "updates_until": 3_000_000_000_i64,
+                "install_id": "8f14e45f-ceea-467f-a1b2-3c5d6e7f8a9b",
+                "licensee": "buyer@example.com", "devices_max": 0,
+            }),
+            serde_json::json!({
+                "schema_version": 2, "license_id": "550e8400-e29b-41d4-a716-446655440000",
+                "product": PRODUCT, "issued_at": 100, "updates_until": 3_000_000_000_i64,
+                "install_id": "8f14e45f-ceea-467f-a1b2-3c5d6e7f8a9b",
+                "licensee": "buyer@example.com", "devices_max": 17,
+            }),
+        ] {
+            assert_eq!(
+                verify_synthetic(broken),
+                Err(StudioEntitlementError::InvalidEntitlement)
+            );
+        }
+    }
+
+    #[test]
+    fn schema1_rejects_binding_fields_and_unknown_versions() {
+        let mut with_binding = schema1_payload();
+        with_binding["install_id"] = serde_json::json!("8f14e45f-ceea-467f-a1b2-3c5d6e7f8a9b");
+        assert_eq!(
+            verify_synthetic(with_binding),
+            Err(StudioEntitlementError::InvalidEntitlement)
+        );
+
+        let mut unknown = schema1_payload();
+        unknown["schema_version"] = serde_json::json!(3);
+        assert_eq!(
+            verify_synthetic(unknown),
+            Err(StudioEntitlementError::InvalidEntitlement)
+        );
+    }
+
+    #[test]
+    fn a_token_for_another_device_is_never_saved() {
+        let path = scratch_path();
+        let configuration = build_configuration().expect("test build config");
+        let other = "11111111-2222-3333-4444-555555555555";
+        let token = signed_token_for_test(
+            &synthetic_signing_key(),
+            schema2_payload(other).to_string().as_bytes(),
+        );
+        let result = activate_token_at_path(&path, &token, &configuration);
+        // Either the local id differs (mismatch) or cannot be read (also refused);
+        // both must leave nothing on disk.
+        assert_eq!(result, Err(StudioEntitlementError::DeviceMismatch));
+        assert!(!path.exists());
     }
 }

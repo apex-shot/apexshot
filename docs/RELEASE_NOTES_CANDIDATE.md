@@ -30,7 +30,7 @@ connection.
   colour, so what the preview shows is what the exported video contains.
   Exports stream as they render instead of holding the whole file in memory.
 
-### ApexShot Studio for US$39 once
+### ApexShot Studio for US$39, with 12 months of updates
 
 Studio adds Motion video export with its animated titles and timing tools,
 neural upscaling for small captures, non-default static presentation
