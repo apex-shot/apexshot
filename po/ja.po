@@ -3319,3 +3319,24 @@ msgid ""
 "{reason} This image is {width} × {height} pixels. Crop it or choose a smaller image to enable enhancement."
 msgstr ""
 "{reason} この画像は {width} × {height} ピクセルです。トリミングするか、より小さい画像を選択すると強化を有効にできます。"
+
+msgid "Device ID"
+msgstr "デバイス ID"
+
+msgid "Copy this machine's Device ID from Settings → Studio and claim the license for it at apexshot.org/studio. Your other device keeps working."
+msgstr "設定 → Studio でこのマシンのデバイス ID をコピーし、apexshot.org/studio でこのデバイス用にライセンスを申請してください。もう一方のデバイスは引き続き利用できます。"
+
+msgid "Paste this at apexshot.org/studio to claim a Studio licence for this device."
+msgstr "apexshot.org/studio にこれを貼り付けて、このデバイス用の Studio ライセンスを申請してください。"
+
+msgid "Claim for this device"
+msgstr "このデバイス用に申請"
+
+msgid "Unavailable on this system"
+msgstr "このシステムでは利用できません"
+
+msgid "This license belongs to another device"
+msgstr "このライセンスは別のデバイスのものです"
+
+msgid "Upgrade to Studio — $39 with 12 months of updates"
+msgstr "Studio にアップグレード — 39 ドル（12 か月のアップデート付き）"

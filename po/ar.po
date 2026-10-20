@@ -3340,3 +3340,24 @@ msgstr ""
 
 msgid "Composition"
 msgstr "التكوين"
+
+msgid "Device ID"
+msgstr "معرّف الجهاز"
+
+msgid "Copy this machine's Device ID from Settings → Studio and claim the license for it at apexshot.org/studio. Your other device keeps working."
+msgstr "انسخ معرّف هذا الجهاز من الإعدادات ← Studio ثم اطلب الترخيص له على apexshot.org/studio. سيظل جهازك الآخر يعمل."
+
+msgid "Paste this at apexshot.org/studio to claim a Studio licence for this device."
+msgstr "الصق هذا في apexshot.org/studio للحصول على ترخيص Studio لهذا الجهاز."
+
+msgid "Claim for this device"
+msgstr "اطلب لهذا الجهاز"
+
+msgid "Unavailable on this system"
+msgstr "غير متاح على هذا النظام"
+
+msgid "This license belongs to another device"
+msgstr "هذا الترخيص يخص جهازًا آخر"
+
+msgid "Upgrade to Studio — $39 with 12 months of updates"
+msgstr "الترقية إلى Studio — 39 دولارًا مع 12 شهرًا من التحديثات"

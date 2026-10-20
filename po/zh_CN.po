@@ -3309,3 +3309,24 @@ msgstr "{name}：{ratio} 图像宽高比"
 msgid ""
 "{reason} This image is {width} × {height} pixels. Crop it or choose a smaller image to enable enhancement."
 msgstr "{reason} 此图像为 {width} × {height} 像素。请裁剪图像或选择更小的图像以启用增强。"
+
+msgid "Device ID"
+msgstr "设备 ID"
+
+msgid "Copy this machine's Device ID from Settings → Studio and claim the license for it at apexshot.org/studio. Your other device keeps working."
+msgstr "请在“设置 → Studio”中复制此设备的 ID，然后在 apexshot.org/studio 为此设备申请许可证。你的另一台设备仍可继续使用。"
+
+msgid "Paste this at apexshot.org/studio to claim a Studio licence for this device."
+msgstr "将此内容粘贴到 apexshot.org/studio，为此设备申请 Studio 许可证。"
+
+msgid "Claim for this device"
+msgstr "为此设备申请"
+
+msgid "Unavailable on this system"
+msgstr "此系统上不可用"
+
+msgid "This license belongs to another device"
+msgstr "此许可证属于另一台设备"
+
+msgid "Upgrade to Studio — $39 with 12 months of updates"
+msgstr "升级到 Studio — 39 美元，含 12 个月更新"
