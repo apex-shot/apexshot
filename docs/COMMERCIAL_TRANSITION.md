@@ -10,13 +10,14 @@ exports that do not use a new Studio capability. Free use stays local-first:
 no account, subscription, network connection, recording interruption, or
 watermark is required.
 
-The official desktop build offers optional **ApexShot Studio for US$39 once**.
-It adds Motion video export and its animated titles/timing tools, offline
-neural upscaling for small captures, non-default static presentation
-transforms, and the genuinely new advanced zoom-camera controls. Studio
-includes 12 months of updates; a build whose immutable release
-marker is covered by the entitlement continues to work offline after that
-period. It is not a promise of lifetime future updates or hosting.
+The official desktop build offers optional **ApexShot Studio for US$39, including
+12 months of updates**. It adds Motion video export and its animated titles/timing
+tools, offline neural upscaling for small captures, non-default static presentation
+transforms, and the genuinely new advanced zoom-camera controls. A build whose
+immutable release marker is covered by the entitlement continues to work offline
+after that period. Releases published after the window need another 12 months of
+eligibility to use Studio. It is not a promise of lifetime future updates or
+hosting.
 
 GPL rights remain unchanged. Payment does not restrict commercial use of the
 GPL program, source access, modification, or redistribution. There is no

@@ -162,7 +162,7 @@ enum PrimaryAction {
 impl PrimaryAction {
     fn label(self) -> String {
         match self {
-            Self::Upgrade => t("Upgrade to Studio — $39 once"),
+            Self::Upgrade => t("Upgrade to Studio — $39 with 12 months of updates"),
             Self::GetStudioReadyBuild => t("Check Studio availability"),
             Self::RecoverLicense => t("Recover license"),
             Self::ManageLicense => t("Manage license"),
@@ -718,7 +718,7 @@ mod tests {
             (
                 StudioEntitlementError::NotActivated,
                 PrimaryAction::Upgrade,
-                t("Upgrade to Studio — $39 once"),
+                t("Upgrade to Studio — $39 with 12 months of updates"),
                 Some(STUDIO_URL),
             ),
             (

@@ -287,7 +287,7 @@ fn build_device_id_row() -> GtkBox {
 
 fn studio_page_action_label(status: StudioStatus) -> String {
     match status {
-        StudioStatus::NotActivated => t("Upgrade to Studio — $39 once"),
+        StudioStatus::NotActivated => t("Upgrade to Studio — $39 with 12 months of updates"),
         StudioStatus::InvalidEntitlement => t("Recover license"),
         StudioStatus::DeviceMismatch => t("Claim for this device"),
         StudioStatus::UpdateAccessEnded { .. } | StudioStatus::Active { .. } => t("Manage license"),
@@ -303,7 +303,7 @@ mod tests {
     fn settings_page_routes_each_license_state_without_a_repurchase_pitch() {
         assert_eq!(
             studio_page_action_label(StudioStatus::NotActivated),
-            t("Upgrade to Studio — $39 once")
+            t("Upgrade to Studio — $39 with 12 months of updates")
         );
         assert_eq!(
             studio_page_action_label(StudioStatus::InvalidEntitlement),
