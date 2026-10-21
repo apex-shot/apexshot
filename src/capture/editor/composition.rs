@@ -49,7 +49,6 @@ pub struct BackgroundComposition {
     screenshot_h: f64,
     style: BackgroundStyle,
     padding: f64,
-    shadow: f64,
     insert: f64,
     alignment: BackgroundAlignment,
     corner_radius: f64,
@@ -59,10 +58,10 @@ pub struct BackgroundComposition {
     canvas_aspect: Option<f64>,
     frame_style: FrameStyle,
     frame_border_thickness: f64,
-    /// Explicit drop-shadow from the shared Appearance panel, in the same
+    /// The card's drop shadow from the shared Appearance panel, in the same
     /// 400px reference units as `corner_radius`: (opacity, blur, offset_x,
-    /// offset_y). When set it replaces the legacy single-strength `shadow`
-    /// profile, so Static and Motion read the same controls.
+    /// offset_y). Static and Motion read the same controls, so there is no
+    /// second, single-strength shadow model left to fall back to.
     shadow_profile: Option<(f64, f64, f64, f64)>,
 }
 
@@ -73,7 +72,6 @@ impl BackgroundComposition {
             screenshot_h,
             style: BackgroundStyle::None,
             padding: 0.0,
-            shadow: 15.0,
             insert: 0.0,
             alignment: BackgroundAlignment::Center,
             corner_radius: 18.0,
@@ -92,11 +90,6 @@ impl BackgroundComposition {
 
     pub fn with_padding(mut self, padding: f64) -> Self {
         self.padding = padding;
-        self
-    }
-
-    pub fn with_shadow(mut self, shadow: f64) -> Self {
-        self.shadow = shadow;
         self
     }
 
@@ -278,8 +271,8 @@ impl BackgroundComposition {
             height: draw_height,
         };
 
-        // Appearance drives the shadow when it is set (Static and Motion share
-        // the panel); otherwise the legacy single-strength scalar still applies.
+        // The shared Appearance controls are the only shadow model; without
+        // them (a bare composition) there is no shadow to draw.
         let params = if self.style == BackgroundStyle::None {
             None
         } else if let Some((opacity, blur, offset_x, offset_y)) = self.shadow_profile {
@@ -292,15 +285,6 @@ impl BackgroundComposition {
                     opacity.clamp(0.0, 1.0),
                 )
             })
-        } else if self.shadow > 0.0 {
-            let shadow_strength = (self.shadow / 100.0).clamp(0.0, 1.0);
-            let size_scale = (ref_size / 1200.0).sqrt().clamp(0.85, 1.8);
-            Some((
-                0.0,
-                (6.0 + shadow_strength * 10.0) * size_scale * draw_scale,
-                (16.0 + shadow_strength * 18.0) * size_scale * draw_scale,
-                0.16 + shadow_strength * 0.12,
-            ))
         } else {
             None
         };
@@ -426,7 +410,6 @@ mod tests {
                 1.0, 1.0, 1.0, 1.0,
             )))
             .with_padding(24.0)
-            .with_shadow(20.0)
             .with_insert(0.0)
             .with_alignment(BackgroundAlignment::TopCenter)
             .with_corner_radius(18.0)
@@ -445,7 +428,7 @@ mod tests {
                 0.0, 0.0, 0.0, 1.0,
             )))
             .with_padding(32.0)
-            .with_shadow(40.0)
+            .with_shadow_profile(0.5, 24.0, 12.0, -18.0)
             .with_insert(0.0)
             .with_alignment(BackgroundAlignment::Center)
             .with_corner_radius(24.0)
@@ -467,7 +450,6 @@ mod tests {
                 1.0, 1.0, 1.0, 1.0,
             )))
             .with_padding(10.0)
-            .with_shadow(0.0)
             .with_insert(0.0)
             .with_alignment(BackgroundAlignment::Center)
             .with_corner_radius(0.0)
@@ -478,7 +460,6 @@ mod tests {
                 1.0, 1.0, 1.0, 1.0,
             )))
             .with_padding(10.0)
-            .with_shadow(0.0)
             .with_insert(0.0)
             .with_alignment(BackgroundAlignment::Center)
             .with_corner_radius(0.0)
@@ -569,30 +550,28 @@ mod tests {
             .with_style(BackgroundStyle::PlainColor(DrawColor::new(
                 1.0, 1.0, 1.0, 1.0,
             )))
-            .with_shadow(50.0)
             .with_shadow_profile(0.0, 24.0, 0.0, 20.0)
             .compute();
 
         assert!(
             layout.shadow.is_none(),
-            "a zero-opacity Appearance shadow must override the legacy strength",
+            "a zero-opacity shadow must draw nothing",
         );
     }
 
+    /// The shared Appearance profile is the only shadow model; a composition
+    /// built without one has no shadow to draw and must not invent one.
     #[test]
-    fn composition_shadow_matches_soft_cards_profile() {
+    fn composition_without_a_profile_draws_no_shadow() {
         let layout = BackgroundComposition::new(1200.0, 800.0)
             .with_style(BackgroundStyle::PlainColor(DrawColor::new(
                 1.0, 1.0, 1.0, 1.0,
             )))
-            .with_shadow(50.0)
             .with_insert(0.0)
             .with_alignment(BackgroundAlignment::Center)
             .compute();
 
-        let shadow = layout.shadow.expect("shadow");
-        assert!(shadow.offset_x.abs() <= 0.75);
-        assert!(shadow.opacity < 0.24);
-        assert!(shadow.blur > shadow.offset_y * 2.0);
+        assert!(layout.shadow.is_none());
+        assert!(layout.shadow_rect.is_none());
     }
 }

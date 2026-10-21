@@ -17,6 +17,8 @@ use crate::capture::editor::{
 };
 
 pub fn persist_image_session(path: &Path, state: &EditorState) -> Result<(), AnnotationError> {
+    let (shadow_profile, cast_light) =
+        crate::capture::editor::window::background_panel::persisted_shadows(state);
     save_annotations(
         path,
         state.base_image.width(),
@@ -25,7 +27,8 @@ pub fn persist_image_session(path: &Path, state: &EditorState) -> Result<(), Ann
         &state.base_image,
         &state.background_style,
         state.background_padding,
-        state.background_shadow,
+        shadow_profile,
+        cast_light,
         state.background_insert,
         state.auto_balance,
         state.background_alignment,

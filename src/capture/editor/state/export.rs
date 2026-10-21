@@ -8,12 +8,9 @@ use super::super::render::{
 use super::super::types::{
     AnnotationAction, BackgroundStyle, DrawColor, EditorError, FrameStyle, Rect,
 };
-use super::super::window::motion_render::{
-    draw_frozen_card, paint_motion_scene_shadow, static_card_appearance, MotionStage,
-};
+use super::super::window::motion_render::{draw_frozen_card, static_card_appearance, MotionStage};
 use super::EditorState;
 use crate::recording::editor::model::background_render::render_gradient;
-use crate::recording::editor::model::MotionSceneShadow;
 use image::RgbaImage;
 use std::path::Path;
 
@@ -84,40 +81,6 @@ fn paint_frame_backings(
                 surface_data.as_ref(),
             );
         }
-    }
-    Ok(canvas)
-}
-
-/// The Scene Shadows layer over the composed canvas. It calls the same
-/// painter as the Motion compositor and the canvas preview, so the still
-/// export cannot drift from what the editor shows. The `underlay` pass lands
-/// on the fill (below the backings, drop shadow and card); the overlay pass
-/// is composited above the annotations.
-fn paint_scene_shadow_layer(
-    mut canvas: RgbaImage,
-    shadow: &MotionSceneShadow,
-    underlay: bool,
-) -> Result<RgbaImage, EditorError> {
-    let (width, height) = (canvas.width(), canvas.height());
-    if let Some(mut surface) = rgba_image_to_surface(&canvas) {
-        {
-            let context = gtk4::cairo::Context::new(&surface)
-                .map_err(|e| EditorError::ImageSave(e.to_string()))?;
-            paint_motion_scene_shadow(
-                &context,
-                MotionStage::frame(f64::from(width), f64::from(height)),
-                shadow,
-                underlay,
-            );
-        }
-        surface.flush();
-        let stride = gtk4::cairo::Format::ARgb32
-            .stride_for_width(width)
-            .map_err(|e| EditorError::ImageSave(e.to_string()))?;
-        let surface_data = surface
-            .data()
-            .map_err(|e| EditorError::ImageSave(e.to_string()))?;
-        canvas = cairo_argb_to_rgba_image(width, height, stride as usize, surface_data.as_ref());
     }
     Ok(canvas)
 }
@@ -222,7 +185,6 @@ impl EditorState {
         let background_style = self.background_style.clone();
         let background = (
             self.background_padding,
-            self.background_shadow,
             self.background_insert,
             self.auto_balance,
             self.background_alignment,
@@ -252,7 +214,6 @@ impl EditorState {
             snapshot.background_style = background_style;
             (
                 snapshot.background_padding,
-                snapshot.background_shadow,
                 snapshot.background_insert,
                 snapshot.auto_balance,
                 snapshot.background_alignment,
@@ -638,9 +599,6 @@ impl EditorState {
             stride as usize,
             surface_data.as_ref(),
         );
-        if self.background_style != BackgroundStyle::None {
-            background = paint_scene_shadow_layer(background, &self.scene_shadow, false)?;
-        }
         Ok(background)
     }
 
@@ -760,9 +718,7 @@ impl EditorState {
         let layout = self.background_layout_for(clean_screenshot);
         let canvas =
             self.paint_vector_annotations_on_canvas(canvas, &layout, glass_backdrop.as_ref())?;
-        // Scene Shadows overlay: above the card and the annotations. The still
-        // has no watermark layer, so nothing sits on top of it here.
-        paint_scene_shadow_layer(canvas, &self.scene_shadow, false)
+        Ok(canvas)
     }
 
     fn background_layout_for(&self, screenshot: &RgbaImage) -> CompositionLayout {
@@ -773,7 +729,6 @@ impl EditorState {
         )
         .with_style(self.background_style.clone())
         .with_padding(self.background_padding)
-        .with_shadow(self.background_shadow)
         .with_shadow_profile(
             self.shadow_opacity,
             self.shadow_blur,
@@ -933,7 +888,6 @@ impl EditorState {
         }
         if self.background_style != BackgroundStyle::None {
             canvas = apply_background_noise(canvas, self.background_noise);
-            canvas = paint_scene_shadow_layer(canvas, &self.scene_shadow, true)?;
         }
         let glass_backdrop = (self.frame_style.spec().liquid
             && self.background_style != BackgroundStyle::None)
@@ -1052,9 +1006,6 @@ impl EditorState {
         // and the Motion renderer use.
         canvas = apply_background_noise(canvas, self.background_noise);
 
-        // Scene Shadows underlay: on the fill, under the card backings, the
-        // drop shadow, and the card itself.
-        canvas = paint_scene_shadow_layer(canvas, &self.scene_shadow, true)?;
         let glass_backdrop = self.frame_style.spec().liquid.then(|| canvas.clone());
 
         // Backing sheets (Stack looks, Retro window) behind the card.

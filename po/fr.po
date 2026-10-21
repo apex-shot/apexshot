@@ -3415,3 +3415,60 @@ msgstr "Cette licence appartient à un autre appareil"
 
 msgid "Upgrade to Studio — $39 with 12 months of updates"
 msgstr "Passer à Studio — 39 $ avec 12 mois de mises à jour"
+
+msgid "Shadow softness"
+msgstr "Douceur de l’ombre"
+
+msgid "Shadow rotation"
+msgstr "Rotation de l’ombre"
+
+msgid "Shadow size"
+msgstr "Taille de l’ombre"
+
+msgid "Shadow horizontal offset"
+msgstr "Décalage horizontal de l’ombre"
+
+msgid "Shadow vertical offset"
+msgstr "Décalage vertical de l’ombre"
+
+msgid "Reset every Scene Shadows control."
+msgstr "Réinitialise tous les réglages des Ombres de scène."
+
+msgid "Card shadow"
+msgstr "Ombre de la carte"
+
+msgid "Cast light"
+msgstr "Lumière projetée"
+
+msgid "Light strength"
+msgstr "Intensité lumineuse"
+
+msgid "Reset every Cast light control."
+msgstr "Réinitialise tous les réglages de la lumière projetée."
+
+msgid "Add a background to use Cast light in image mode."
+msgstr "Ajoutez un arrière-plan pour utiliser la lumière projetée en mode image."
+
+msgid "Choose a Cast light preset before adjusting its strength."
+msgstr "Choisissez un préréglage de lumière projetée avant de régler son intensité."
+
+msgid "Choose a Cast light preset before adjusting its shape."
+msgstr "Choisissez un préréglage de lumière projetée avant de régler sa forme."
+
+msgid "Choose a preset to enable Cast light strength and placement."
+msgstr "Choisissez un préréglage pour activer l'intensité et le placement de la lumière projetée."
+
+msgid "Increase Cast light strength to see the effect and change its placement."
+msgstr "Augmentez l'intensité lumineuse pour voir l'effet et changer son placement."
+
+msgid "Spread"
+msgstr "Étendu"
+
+msgid "Hug"
+msgstr "Collé"
+
+msgid "Adaptive"
+msgstr "Adaptatif"
+
+msgid "Adjust Light"
+msgstr "Ajuster la lumière"

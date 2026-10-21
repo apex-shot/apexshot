@@ -40,6 +40,10 @@ pub struct MotionAppearance {
     pub border_thickness: f64,
     pub border_fill_color: [f64; 4],
     pub frame_style: FrameStyle,
+    /// The compositor's card-shadow inputs. Derived from the shadow layer by
+    /// `MotionSceneShadow::resolved` (see `EditorState::sync_shadow_fields` and
+    /// the Appearance panel); no control writes them directly, so the layer is
+    /// the only shadow description in the app.
     pub shadow_blur: f64,
     pub shadow_opacity: f64,
     pub shadow_position: (f64, f64),
@@ -326,63 +330,65 @@ impl MotionFrame {
     }
 }
 
-/// The `sceneShadowPresetId` concept. Its shipped `Shadow-01` …
-/// `Shadow-14` assets are not recoverable, so the shapes below are Apexshot's
-/// own procedurally drawn shading presets.
+/// How the image's shadow falls on the background. The image is the window:
+/// the shadow is cast by the card's own rectangle, never by a pattern drawn
+/// across the scene.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MotionSceneShadowPreset {
     #[default]
     None,
-    Diagonal,
-    Window,
-    Top,
-    Bottom,
-    Vignette,
-    Side,
+    /// A wide, soft cast that reaches well past the card.
+    Spread,
+    /// A tight contact shadow that follows the card's edge.
+    Hug,
+    /// A middle falloff: soft like Spread, held as close as Hug.
+    Adaptive,
 }
 
+/// Light position on the adjustment pad, `-1..=1` on both axes, y down. The
+/// shadow falls opposite the light, so a dot at the bottom left casts toward
+/// the top right.
+pub const MIN_SCENE_SHADOW_LIGHT: f64 = -1.0;
+pub const MAX_SCENE_SHADOW_LIGHT: f64 = 1.0;
+
 impl MotionSceneShadowPreset {
-    pub const ALL: [Self; 7] = [
-        Self::None,
-        Self::Diagonal,
-        Self::Window,
-        Self::Top,
-        Self::Bottom,
-        Self::Vignette,
-        Self::Side,
-    ];
+    pub const ALL: [Self; 4] = [Self::None, Self::Spread, Self::Hug, Self::Adaptive];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::None => "None",
-            Self::Diagonal => "Diagonal",
-            Self::Window => "Window",
-            Self::Top => "Top",
-            Self::Bottom => "Bottom",
-            Self::Vignette => "Vignette",
-            Self::Side => "Side",
+            Self::Spread => "Spread",
+            Self::Hug => "Hug",
+            Self::Adaptive => "Adaptive",
+        }
+    }
+
+    /// Geometry for this style, as fractions of the card's short edge:
+    /// `(blur, offset, alpha)`.
+    ///
+    /// Spread is wide and soft; Hug keeps a short falloff so the shadow reads
+    /// as contact; Adaptive sits between them and gives up some strength so it
+    /// stays readable on both light and dark backgrounds.
+    pub fn style(self) -> (f64, f64, f64) {
+        match self {
+            Self::None => (0.0, 0.0, 0.0),
+            Self::Spread => (0.22, 0.10, 1.0),
+            Self::Hug => (0.045, 0.02, 1.0),
+            Self::Adaptive => (0.12, 0.06, 0.75),
         }
     }
 }
 
-/// The scene shadow stores a `placement` with distinct `Shadow-Overlay`
-/// and `Shadow-Underlay` render layers; their enum values were not recovered,
-/// so the above/below-card split below is the Apexshot interpretation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum MotionSceneShadowPlacement {
-    #[default]
-    Underlay,
-    Overlay,
-}
-
-/// A separately persisted Scene Shadows layer, matching the
-/// `sceneShadowSnapshot` contract: preset id, opacity, and placement. This is
-/// deliberately not an extension of the card's drop shadow.
+/// The image's shadow: the style it is drawn with, how strong it is, and where
+/// the light sits. One layer shared by both editors; the card is always the
+/// occluder, so the shadow falls behind it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct MotionSceneShadow {
     pub preset: MotionSceneShadowPreset,
     pub opacity: f64,
-    pub placement: MotionSceneShadowPlacement,
+    /// Light position on the pad in `-1..1`, y down. `(0, 0)` is a light
+    /// straight on, which leaves the shadow centred under the card.
+    pub light: (f64, f64),
 }
 
 impl Default for MotionSceneShadow {
@@ -390,8 +396,72 @@ impl Default for MotionSceneShadow {
         Self {
             preset: MotionSceneShadowPreset::None,
             opacity: 1.0,
-            placement: MotionSceneShadowPlacement::Underlay,
+            // Light from the lower right: the cast falls toward the upper
+            // left, which is the shipped look of the adjustment pad.
+            light: (0.65, 0.65),
         }
+    }
+}
+
+impl MotionSceneShadow {
+    /// Adopt a style. Opacity and the light position belong to the user, so a
+    /// style change leaves them alone.
+    pub fn select_preset(&mut self, preset: MotionSceneShadowPreset) {
+        self.preset = preset;
+    }
+
+    /// Restore every control to its shipped default: no shadow, full strength,
+    /// light at the lower right.
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+
+    /// Resolve this shadow into the compositor's card-shadow fields for a card
+    /// `short` pixels across: `(opacity, blur, offset)`. Blur and offset are
+    /// canvas units, so a style keeps its proportions at any image size.
+    pub fn resolved(&self, short: f64) -> (f64, f64, (f64, f64)) {
+        let (blur, offset, alpha) = self.preset.style();
+        let short = short.max(1.0);
+        (
+            self.opacity.clamp(0.0, 1.0) * alpha,
+            blur * short,
+            (
+                -self.light.0 * offset * short,
+                -self.light.1 * offset * short,
+            ),
+        )
+    }
+
+    /// Clamp every stored value into the range the painter expects.
+    pub fn clamped(&self) -> Self {
+        Self {
+            preset: self.preset,
+            opacity: if self.opacity.is_finite() {
+                self.opacity.clamp(0.0, 1.0)
+            } else {
+                1.0
+            },
+            light: (
+                finite_clamped(
+                    self.light.0,
+                    MIN_SCENE_SHADOW_LIGHT,
+                    MAX_SCENE_SHADOW_LIGHT,
+                ),
+                finite_clamped(
+                    self.light.1,
+                    MIN_SCENE_SHADOW_LIGHT,
+                    MAX_SCENE_SHADOW_LIGHT,
+                ),
+            ),
+        }
+    }
+}
+
+fn finite_clamped(value: f64, min: f64, max: f64) -> f64 {
+    if value.is_finite() {
+        value.clamp(min, max)
+    } else {
+        0.0
     }
 }
 

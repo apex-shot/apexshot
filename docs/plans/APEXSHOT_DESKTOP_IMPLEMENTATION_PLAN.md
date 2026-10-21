@@ -657,7 +657,7 @@ Team funnel and individual Cloud MRR are cloud-owned.
 | Desktop | release hardening, AUR, EGO, Flatpak, channel marker, desktop workspace support |
 | Cloud backend (sibling) | leads, metrics, tenancy, authorization, billing, reaper/data safety |
 | Cloud frontend (sibling) | public funnel, Team form, protected scorecard, shared-library UI |
-| Operations | Dodo/WorkOS/Cloudflare configuration, backups, submissions, customer onboarding |
+| Operations | Polar/WorkOS/Cloudflare configuration, backups, submissions, customer onboarding |
 
 Weekly 30-minute review:
 

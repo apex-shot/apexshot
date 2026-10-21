@@ -23,10 +23,10 @@ use crate::capture::editor::types::{BackgroundAlignment, FrameStyle};
 use crate::recording::editor::model::{
     GradientStop, MotionAppearance, MotionBackgroundFillType, MotionBlurSettings,
     MotionEffectTransformTiming, MotionFrame, MotionFramePreset, MotionSceneShadow,
-    MotionSceneShadowPlacement, MotionSceneShadowPreset, MotionSegment, MotionState,
-    MotionTextAlignment, MotionTextAnimation, MotionTextCoordinateSpace, MotionTextFormat,
-    MotionTextScope, MotionTextSegment, MotionTimingKind, MotionTransform, MotionWatermark,
-    MotionZoomMode, VideoGradient, DEFAULT_MOTION_TEXT_TRANSITION_SECONDS,
+    MotionSceneShadowPreset, MotionSegment, MotionState, MotionTextAlignment, MotionTextAnimation,
+    MotionTextCoordinateSpace, MotionTextFormat, MotionTextScope, MotionTextSegment,
+    MotionTimingKind, MotionTransform, MotionWatermark, MotionZoomMode, VideoGradient,
+    DEFAULT_MOTION_TEXT_TRANSITION_SECONDS,
 };
 
 pub const MOTION_PROJECT_VERSION: u32 = 1;
@@ -112,20 +112,14 @@ pub enum MotionFramePresetFile {
 pub enum MotionSceneShadowPresetFile {
     #[default]
     None,
-    Diagonal,
-    Window,
-    Top,
-    Bottom,
-    Vignette,
-    Side,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MotionSceneShadowPlacementFile {
-    #[default]
-    Underlay,
-    Overlay,
+    /// Retired pattern ids load as a soft cast instead of failing to parse.
+    #[serde(alias = "diagonal", alias = "window", alias = "vignette")]
+    Spread,
+    /// The directional ids were edge casts; a contact shadow is the closest
+    /// surviving look.
+    #[serde(alias = "top", alias = "bottom", alias = "side")]
+    Hug,
+    Adaptive,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -357,11 +351,21 @@ pub struct MotionFrameFile {
     pub custom_height: u32,
 }
 
+/// The image's shadow on disk: style, strength, and where the light sits.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MotionSceneShadowFile {
+    #[serde(default)]
     pub preset: MotionSceneShadowPresetFile,
+    #[serde(default = "default_one")]
     pub opacity: f64,
-    pub placement: MotionSceneShadowPlacementFile,
+    #[serde(default = "default_scene_shadow_light")]
+    pub light_x: f64,
+    #[serde(default = "default_scene_shadow_light")]
+    pub light_y: f64,
+}
+
+fn default_scene_shadow_light() -> f64 {
+    0.65
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -918,12 +922,9 @@ impl From<MotionSceneShadowPreset> for MotionSceneShadowPresetFile {
     fn from(value: MotionSceneShadowPreset) -> Self {
         match value {
             MotionSceneShadowPreset::None => Self::None,
-            MotionSceneShadowPreset::Diagonal => Self::Diagonal,
-            MotionSceneShadowPreset::Window => Self::Window,
-            MotionSceneShadowPreset::Top => Self::Top,
-            MotionSceneShadowPreset::Bottom => Self::Bottom,
-            MotionSceneShadowPreset::Vignette => Self::Vignette,
-            MotionSceneShadowPreset::Side => Self::Side,
+            MotionSceneShadowPreset::Spread => Self::Spread,
+            MotionSceneShadowPreset::Hug => Self::Hug,
+            MotionSceneShadowPreset::Adaptive => Self::Adaptive,
         }
     }
 }
@@ -932,30 +933,9 @@ impl From<MotionSceneShadowPresetFile> for MotionSceneShadowPreset {
     fn from(value: MotionSceneShadowPresetFile) -> Self {
         match value {
             MotionSceneShadowPresetFile::None => Self::None,
-            MotionSceneShadowPresetFile::Diagonal => Self::Diagonal,
-            MotionSceneShadowPresetFile::Window => Self::Window,
-            MotionSceneShadowPresetFile::Top => Self::Top,
-            MotionSceneShadowPresetFile::Bottom => Self::Bottom,
-            MotionSceneShadowPresetFile::Vignette => Self::Vignette,
-            MotionSceneShadowPresetFile::Side => Self::Side,
-        }
-    }
-}
-
-impl From<MotionSceneShadowPlacement> for MotionSceneShadowPlacementFile {
-    fn from(value: MotionSceneShadowPlacement) -> Self {
-        match value {
-            MotionSceneShadowPlacement::Underlay => Self::Underlay,
-            MotionSceneShadowPlacement::Overlay => Self::Overlay,
-        }
-    }
-}
-
-impl From<MotionSceneShadowPlacementFile> for MotionSceneShadowPlacement {
-    fn from(value: MotionSceneShadowPlacementFile) -> Self {
-        match value {
-            MotionSceneShadowPlacementFile::Underlay => Self::Underlay,
-            MotionSceneShadowPlacementFile::Overlay => Self::Overlay,
+            MotionSceneShadowPresetFile::Spread => Self::Spread,
+            MotionSceneShadowPresetFile::Hug => Self::Hug,
+            MotionSceneShadowPresetFile::Adaptive => Self::Adaptive,
         }
     }
 }
@@ -965,7 +945,8 @@ impl From<&MotionSceneShadow> for MotionSceneShadowFile {
         Self {
             preset: value.preset.into(),
             opacity: value.opacity,
-            placement: value.placement.into(),
+            light_x: value.light.0,
+            light_y: value.light.1,
         }
     }
 }
@@ -975,7 +956,7 @@ impl From<&MotionSceneShadowFile> for MotionSceneShadow {
         Self {
             preset: value.preset.into(),
             opacity: value.opacity,
-            placement: value.placement.into(),
+            light: (value.light_x, value.light_y),
         }
     }
 }
@@ -1372,8 +1353,9 @@ mod tests {
         motion.frame.preset = MotionFramePreset::NineSixteen;
         motion.frame.custom_width = 1080;
         motion.frame.custom_height = 1920;
-        motion.scene_shadow.preset = MotionSceneShadowPreset::Diagonal;
+        motion.scene_shadow.preset = MotionSceneShadowPreset::Spread;
         motion.scene_shadow.opacity = 0.5;
+        motion.scene_shadow.light = (0.15, -0.25);
         motion.watermark.image_file_name = Some("mark.png".into());
         motion.segments.push(MotionSegment {
             start: 0.0,
@@ -1411,8 +1393,10 @@ mod tests {
         assert_eq!(restored.frame.custom_height, 1920);
         assert_eq!(
             restored.scene_shadow.preset,
-            MotionSceneShadowPreset::Diagonal
+            MotionSceneShadowPreset::Spread
         );
+        assert_eq!(restored.scene_shadow.opacity, 0.5);
+        assert_eq!(restored.scene_shadow.light, (0.15, -0.25));
         assert_eq!(
             restored.watermark.image_file_name.as_deref(),
             Some("mark.png")
@@ -1611,6 +1595,30 @@ mod tests {
             (segment.transition_duration - DEFAULT_MOTION_TEXT_TRANSITION_SECONDS).abs()
                 < f64::EPSILON
         );
+    }
+
+    /// A sidecar written by the retired pattern presets still loads: the id
+    /// maps to the closest surviving style, and the fields it carried are
+    /// ignored instead of failing the parse.
+    #[test]
+    fn retired_shadow_ids_load_as_a_surviving_style() {
+        let json = serde_json::json!({
+            "preset": "window",
+            "opacity": 0.75,
+            "softness": 0.3,
+            "rotation": -22.5,
+            "scale": 1.4,
+            "offset_x": 0.15,
+            "offset_y": -0.25,
+            "placement": "overlay"
+        });
+        let file: MotionSceneShadowFile =
+            serde_json::from_value(json).expect("retired shadow parses");
+        let layer: MotionSceneShadow = (&file).into();
+        assert_eq!(layer.preset, MotionSceneShadowPreset::Spread);
+        assert_eq!(layer.opacity, 0.75);
+        // Missing light fields fall back to the shipped pad position.
+        assert_eq!(layer.light, (0.65, 0.65));
     }
 
     /// A Canvas headline stores and restores every formatting field, including

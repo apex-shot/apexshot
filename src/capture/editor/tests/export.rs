@@ -220,7 +220,7 @@ fn final_image_shadow_does_not_replace_background_with_black_mask() {
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
     state.background_padding = 40.0;
-    state.background_shadow = 45.0;
+    state.shadow_opacity = 0.45;
 
     let final_image = state.to_final_image().expect("final image");
     let corner = *final_image.get_pixel(0, 0);
@@ -237,7 +237,7 @@ fn final_image_background_keeps_screenshot_at_native_scale_by_default() {
 
     let mut state = EditorState::new(image.clone());
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
 
     let final_image = state.to_final_image().expect("final image");
@@ -255,7 +255,7 @@ fn final_image_background_keeps_screenshot_at_native_scale_by_default() {
 }
 
 #[test]
-fn final_image_background_shadow_visibly_darkens_pixels_below_card() {
+fn final_image_card_shadow_visibly_darkens_pixels_below_card() {
     let image = RgbaImage::from_pixel(400, 240, image::Rgba([220, 220, 220, 255]));
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
@@ -289,7 +289,7 @@ fn final_image_draws_annotations_on_top_of_background_padding() {
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
     state.background_padding = 40.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
     state.background_insert = 0.0;
     state.actions.push(AnnotationAction::Pen {
@@ -314,7 +314,7 @@ fn annotation_canvas_bounds_include_wallpaper_padding() {
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
     state.background_padding = 40.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
 
     let (min_x, min_y, max_x, max_y) = state.annotation_canvas_bounds();
@@ -338,7 +338,7 @@ fn number_marker_can_be_placed_on_background_padding() {
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
     state.background_padding = 40.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
 
     let (min_x, _, _, _) = state.annotation_canvas_bounds();
@@ -371,7 +371,7 @@ fn final_image_draws_border_on_top_of_wallpaper_background() {
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
     state.background_padding = 40.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
     state.background_insert = 0.0;
     state.border_thickness = 6.0;
@@ -403,7 +403,7 @@ fn retro_draws_thin_border_with_solid_window_behind_card() {
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 0.0, 0.0, 1.0));
     state.background_padding = 80.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
     state.background_insert = 0.0;
     let spec = FrameStyle::Retro.spec();
@@ -543,7 +543,7 @@ fn inset_border_paints_inside_the_card_edge() {
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 0.0, 0.0, 1.0));
     state.background_padding = 80.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
     state.background_insert = 0.0;
     for style in [FrameStyle::InsetLight, FrameStyle::InsetDark] {
@@ -594,7 +594,7 @@ fn attached_outside_borders_have_no_background_seam_at_rounded_corners() {
         ));
         state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.0, 1.0, 0.0, 1.0));
         state.background_padding = 50.0;
-        state.background_shadow = 0.0;
+        state.shadow_opacity = 0.0;
         state.background_corner_radius = 20.0;
         state.frame_style = style;
         state.border_thickness = spec.border_thickness;
@@ -647,7 +647,7 @@ fn attached_inset_borders_cover_the_images_rounded_corner_edge() {
         ));
         state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.0, 1.0, 0.0, 1.0));
         state.background_padding = 50.0;
-        state.background_shadow = 0.0;
+        state.shadow_opacity = 0.0;
         state.background_corner_radius = 20.0;
         state.frame_style = style;
         state.border_thickness = spec.border_thickness;
@@ -839,7 +839,7 @@ fn outline_floats_a_hairline_off_the_card_with_a_gap() {
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 0.0, 0.0, 1.0));
     state.background_padding = 80.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
     state.background_insert = 0.0;
     let spec = FrameStyle::Outline.spec();
@@ -873,7 +873,7 @@ fn bevel_export_draws_a_thin_two_tone_edge_without_backing() {
     let image = RgbaImage::from_pixel(400, 400, image::Rgba([100, 100, 100, 255]));
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::None;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 24.0;
     state.background_insert = 0.0;
     let spec = FrameStyle::Card.spec();
@@ -904,7 +904,7 @@ fn stack_preset_fans_diagonally_top_right_and_bottom_left() {
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
     state.background_padding = 80.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
     state.background_insert = 0.0;
     let spec = FrameStyle::Stack.spec();
@@ -951,7 +951,7 @@ fn stack2_preset_draws_two_backing_sheets_like_stacked_prints() {
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 0.0, 0.0, 1.0));
     state.background_padding = 80.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
     state.background_insert = 0.0;
     let spec = FrameStyle::Stack2.spec();
@@ -995,7 +995,7 @@ fn liquid_glass_lights_the_band_from_the_top_and_stays_translucent() {
     let mut state = EditorState::new(image);
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 0.0, 0.0, 1.0));
     state.background_padding = 80.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
     state.background_insert = 0.0;
     let spec = FrameStyle::Liquid.spec();
@@ -1394,7 +1394,7 @@ fn liquid_glass_body_samples_the_background_before_the_card_shadow() {
     ));
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.6, 0.3, 0.8, 1.0));
     state.background_padding = 80.0;
-    state.background_shadow = 20.0;
+    state.shadow_opacity = 0.45;
     state.background_corner_radius = 20.0;
     state.frame_style = FrameStyle::Liquid;
     state.border_thickness = FrameStyle::Liquid.spec().border_thickness;
@@ -1472,7 +1472,7 @@ fn glass_frost_siblings_share_the_3px_edge_with_opposite_tints() {
         let mut state = EditorState::new(image);
         state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.5, 0.5, 0.5, 1.0));
         state.background_padding = 80.0;
-        state.background_shadow = 0.0;
+        state.shadow_opacity = 0.0;
         state.background_corner_radius = 0.0;
         state.background_insert = 0.0;
         state.frame_style = style;
@@ -1625,7 +1625,7 @@ fn dump_liquid_glass_preview() {
         let mut state = EditorState::new(image.clone());
         state.background_style = style;
         state.background_padding = padding;
-        state.background_shadow = 20.0;
+        state.shadow_opacity = 0.45;
         state.background_corner_radius = 20.0;
         state.frame_style = FrameStyle::Liquid;
         state.border_thickness = spec.border_thickness;
@@ -1650,7 +1650,7 @@ fn dump_liquid_glass_preview() {
             let mut state = EditorState::new(image.clone());
             state.background_style = BackgroundStyle::Wallpaper(background.clone().into());
             state.background_padding = padding;
-            state.background_shadow = 20.0;
+            state.shadow_opacity = 0.45;
             state.background_corner_radius = 20.0;
             state.frame_style = style;
             state.border_thickness = spec.border_thickness;
@@ -1689,7 +1689,7 @@ fn dump_liquid_glass_preview() {
         let mut state = EditorState::new(image.clone());
         state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.05, 0.05, 0.06, 1.0));
         state.background_padding = padding;
-        state.background_shadow = 20.0;
+        state.shadow_opacity = 0.45;
         state.background_corner_radius = 20.0;
         state.frame_style = style;
         state.border_thickness = spec.border_thickness;
@@ -1733,7 +1733,7 @@ fn final_image_background_noise_grains_the_fill_but_not_the_card() {
     state.background_style = BackgroundStyle::PlainColor(DrawColor::new(0.08, 0.08, 0.08, 1.0));
     state.background_padding = 40.0;
     state.background_insert = 0.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
 
     let flat = state.to_final_image().expect("final image");
@@ -1796,7 +1796,7 @@ fn final_image_background_blur_softens_the_fill_and_keeps_grain_crisp() {
     state.background_style = BackgroundStyle::Wallpaper(path.clone());
     state.background_padding = 30.0;
     state.background_insert = 0.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
 
     // Row 2 sits in the top padding band, so it is fill only.
@@ -1880,7 +1880,7 @@ fn final_image_renders_a_gradient_background_from_its_spec() {
     });
     state.background_padding = 30.0;
     state.background_insert = 0.0;
-    state.background_shadow = 0.0;
+    state.shadow_opacity = 0.0;
     state.background_corner_radius = 0.0;
 
     let out = state.to_final_image().expect("final image");
@@ -1896,4 +1896,87 @@ fn final_image_renders_a_gradient_background_from_its_spec() {
         right[2] > 200 && right[0] < 60,
         "the last stop should paint the right edge, got {right:?}",
     );
+}
+
+/// A Cast light layer survives the export snapshot with every field, and
+/// the still export renders it, so the worker that owns the export sees the
+/// same layer the editor does.
+#[test]
+fn scene_shadow_survives_the_export_snapshot() {
+    use crate::recording::editor::model::{MotionSceneShadow, MotionSceneShadowPreset};
+
+    let mut state = EditorState::new(RgbaImage::from_pixel(
+        120,
+        90,
+        image::Rgba([200, 200, 200, 255]),
+    ));
+    state.background_style = BackgroundStyle::PlainColor(DrawColor::new(1.0, 1.0, 1.0, 1.0));
+    state.background_padding = 30.0;
+    state.shadow_opacity = 0.0;
+    state.scene_shadow = MotionSceneShadow {
+        preset: MotionSceneShadowPreset::Hug,
+        opacity: 0.8,
+        light: (0.3, 0.4),
+    };
+
+    let snapshot = state.export_snapshot()();
+    assert_eq!(
+        snapshot.scene_shadow, state.scene_shadow,
+        "the export snapshot must carry the whole layer, not just the preset"
+    );
+
+    // The exported still shades its fill, so the layer is really painted and
+    // not merely carried along.
+    let out = state.to_final_image().expect("final image");
+    let shaded =
+        (0..out.height()).any(|y| (0..out.width()).any(|x| out.get_pixel(x, y).0[0] < 250));
+    assert!(shaded, "the exported still must show the Cast light layer");
+}
+
+/// Writes one PNG per shadow style and light position so the cast can be
+/// judged on screen. Always passes; `APEXSHOT_SCENE_SHADOW_OUTPUT` changes the
+/// directory.
+#[test]
+fn dump_scene_shadow_styles() {
+    use crate::recording::editor::model::{MotionSceneShadow, MotionSceneShadowPreset};
+
+    let output = std::env::var_os("APEXSHOT_SCENE_SHADOW_OUTPUT")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp/opencode"));
+    std::fs::create_dir_all(&output).expect("sample output directory");
+
+    let mut image = RgbaImage::new(1000, 600);
+    for (x, y, pixel) in image.enumerate_pixels_mut() {
+        let t = x as f32 / 999.0;
+        let u = y as f32 / 599.0;
+        *pixel = image::Rgba([
+            (120.0 + 110.0 * t) as u8,
+            (60.0 + 60.0 * u) as u8,
+            (30.0 + 40.0 * t) as u8,
+            255,
+        ]);
+    }
+
+    for preset in MotionSceneShadowPreset::ALL {
+        for (name, light) in [("light-br", (0.7, 0.7)), ("light-tl", (-0.7, -0.7))] {
+            let mut state = EditorState::new(image.clone());
+            state.background_style = crate::capture::editor::types::BackgroundStyle::PlainColor(
+                crate::capture::editor::types::DrawColor::new(0.98, 0.5, 0.16, 1.0),
+            );
+            state.background_padding = 40.0;
+            state.background_corner_radius = 14.0;
+            state.scene_shadow = MotionSceneShadow {
+                preset,
+                opacity: 0.85,
+                light,
+            };
+            state.sync_shadow_fields();
+
+            let still = state.to_final_image().expect("still renders");
+            let label = format!("shadow-{:?}-{name}.png", preset).to_lowercase();
+            still
+                .save(output.join(label))
+                .expect("shadow sample writes");
+        }
+    }
 }

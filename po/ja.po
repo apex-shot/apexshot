@@ -3340,3 +3340,60 @@ msgstr "このライセンスは別のデバイスのものです"
 
 msgid "Upgrade to Studio — $39 with 12 months of updates"
 msgstr "Studio にアップグレード — 39 ドル（12 か月のアップデート付き）"
+
+msgid "Shadow softness"
+msgstr "影のやわらかさ"
+
+msgid "Shadow rotation"
+msgstr "影の回転"
+
+msgid "Shadow size"
+msgstr "影のサイズ"
+
+msgid "Shadow horizontal offset"
+msgstr "影の水平オフセット"
+
+msgid "Shadow vertical offset"
+msgstr "影の垂直オフセット"
+
+msgid "Reset every Scene Shadows control."
+msgstr "シーンの影の設定をすべてリセットします。"
+
+msgid "Card shadow"
+msgstr "カードの影"
+
+msgid "Cast light"
+msgstr "投影ライト"
+
+msgid "Light strength"
+msgstr "光の強さ"
+
+msgid "Reset every Cast light control."
+msgstr "投影ライトのすべての設定をリセットします。"
+
+msgid "Add a background to use Cast light in image mode."
+msgstr "画像モードで投影ライトを使うには背景を追加してください。"
+
+msgid "Choose a Cast light preset before adjusting its strength."
+msgstr "強さを調整する前に投影ライトのプリセットを選択してください。"
+
+msgid "Choose a Cast light preset before adjusting its shape."
+msgstr "形を調整する前に投影ライトのプリセットを選択してください。"
+
+msgid "Choose a preset to enable Cast light strength and placement."
+msgstr "プリセットを選択すると、光の強さと配置を変更できます。"
+
+msgid "Increase Cast light strength to see the effect and change its placement."
+msgstr "光の強さを上げると効果が表示され、配置を変更できます。"
+
+msgid "Spread"
+msgstr "広がり"
+
+msgid "Hug"
+msgstr "密着"
+
+msgid "Adaptive"
+msgstr "適応"
+
+msgid "Adjust Light"
+msgstr "光を調整"

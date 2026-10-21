@@ -7,7 +7,7 @@ mod arrow;
 mod crop;
 mod drag_draw;
 mod effects;
-mod export;
+pub(crate) mod export;
 mod history;
 mod selection;
 mod text_input;
@@ -92,7 +92,6 @@ pub struct EditorState {
     pub background_style: BackgroundStyle,
     pub static_image_transform: StaticImageTransform,
     pub background_padding: f64,
-    pub background_shadow: f64,
     pub background_insert: f64,
     pub auto_balance: bool,
     pub background_alignment: BackgroundAlignment,
@@ -107,7 +106,7 @@ pub struct EditorState {
     pub shadow_blur: f64,
     pub shadow_offset_x: f64,
     pub shadow_offset_y: f64,
-    /// Scene Shadows overlay/underlay layer (not the card drop shadow above).
+    /// Cast light overlay/underlay layer (not the card drop shadow above).
     pub scene_shadow: MotionSceneShadow,
     pub active_text_drag_start_bounds: Option<Rect>,
     pub active_text_is_resizing: bool,
@@ -280,7 +279,6 @@ impl EditorState {
             background_style: BackgroundStyle::None,
             static_image_transform: StaticImageTransform::default(),
             background_padding: 0.0,
-            background_shadow: 15.0,
             background_insert: 0.0,
             auto_balance: false,
             background_alignment: BackgroundAlignment::Center,
@@ -399,6 +397,51 @@ impl EditorState {
         };
     }
 
+    /// Adopt the background record saved with this image. A file written before
+    /// the shared shadow controls carries only the strength scalar, so the card
+    /// profile derives from it and the Cast light layer stays off rather than
+    /// the whole record being dropped.
+    pub fn apply_persisted_background(
+        &mut self,
+        background: &crate::annotations::BackgroundSettings,
+    ) {
+        self.background_style =
+            crate::annotations::background_style_from_serializable(&background.style);
+        self.background_padding = background.padding;
+        self.source_upscale = background.source_upscale;
+        let shadow = background.effective_shadow_profile();
+        self.shadow_opacity = shadow.opacity;
+        self.shadow_blur = shadow.blur;
+        self.shadow_offset_x = shadow.offset_x;
+        self.shadow_offset_y = shadow.offset_y;
+        self.scene_shadow = background
+            .cast_light
+            .as_ref()
+            .map(crate::recording::editor::model::MotionSceneShadow::from)
+            .unwrap_or_default();
+        self.background_insert = background.insert;
+        self.auto_balance = background.auto_balance;
+        self.background_alignment =
+            crate::annotations::background_alignment_from_serializable(background.alignment);
+        self.background_corner_radius = background.corner_radius;
+        self.background_aspect_ratio =
+            crate::annotations::crop_aspect_ratio_from_serializable(background.aspect_ratio);
+        self.sync_shadow_fields();
+    }
+
+    /// Re-derive the compositor's card-shadow fields from the shadow layer.
+    /// The layer is what the user edits; these three values are what the
+    /// preview and the export painting read, and they are fractions of the
+    /// card's short edge rather than absolute pixels.
+    pub fn sync_shadow_fields(&mut self) {
+        let short = f64::from(self.base_image.width().min(self.base_image.height())).max(1.0);
+        let (opacity, blur, offset) = self.scene_shadow.clamped().resolved(short);
+        self.shadow_opacity = opacity;
+        self.shadow_blur = blur;
+        self.shadow_offset_x = offset.0;
+        self.shadow_offset_y = offset.1;
+    }
+
     /// Editable canvas bounds in screenshot pixels. Without a background this
     /// is exactly the screenshot; with a wallpaper/padding the surround maps to
     /// negative / overflow coordinates so static tools can address the background
@@ -412,7 +455,6 @@ impl EditorState {
         let layout = crate::capture::editor::composition::BackgroundComposition::new(w, h)
             .with_style(self.background_style.clone())
             .with_padding(self.background_padding)
-            .with_shadow(self.background_shadow)
             .with_shadow_profile(
                 self.shadow_opacity,
                 self.shadow_blur,

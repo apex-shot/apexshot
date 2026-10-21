@@ -1,8 +1,8 @@
 use gtk4::cairo::{Context, Format, ImageSurface};
 use gtk4::{
     glib, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, DrawingArea, Entry,
-    FileChooserAction, FileChooserNative, FileFilter, GestureClick, Grid, Image, Label,
-    Orientation, PolicyType, ResponseType, Revealer, RevealerTransitionType, ScrolledWindow,
+    FileChooserAction, FileChooserNative, FileFilter, GestureClick, GestureDrag, Grid, Image,
+    Label, Orientation, PolicyType, ResponseType, Revealer, RevealerTransitionType, ScrolledWindow,
     Separator, Stack, ToggleButton,
 };
 use std::cell::{Cell, RefCell};
@@ -17,7 +17,7 @@ use crate::capture::editor::window::icon_names;
 use crate::i18n::{t, tfmt};
 use crate::recording::editor::model::{
     GradientStop, MotionAppearance, MotionBackgroundFillType, MotionFrame, MotionFramePreset,
-    MotionSceneShadowPlacement, MotionSceneShadowPreset, VideoGradient,
+    MotionSceneShadow, MotionSceneShadowPreset, VideoGradient,
 };
 use crate::recording::editor::window::custom_wallpaper_popover::{
     build_custom_fill_popover, FillOps,
@@ -51,6 +51,152 @@ fn appearance_hint(text: &str) -> Label {
 fn set_slider_availability(slider: &FillSlider, reason: Option<&str>) {
     slider.set_sensitive(reason.is_none());
     slider.widget().set_tooltip_text(reason.map(t).as_deref());
+}
+
+/// Seat a slider on a model value without echoing the write back. A settled
+/// frame already holds the model value, so the comparison keeps the check free
+/// and stops the tick from fighting a slider the user is dragging.
+fn seat_scene_shadow_slider(slider: &FillSlider, value: f64) {
+    if (slider.value() - value).abs() > 1e-9 {
+        slider.set_value(value);
+    }
+}
+
+/// The card's short edge in canvas units, which every shadow style is a
+/// fraction of. Falls back to the panel's 400px reference when the source size
+/// is not readable yet.
+fn card_short_edge(session: &MotionSession) -> f64 {
+    session
+        .source_state
+        .borrow()
+        .as_ref()
+        .and_then(|state| {
+            state
+                .lock()
+                .ok()
+                .map(|state| f64::from(state.base_image.width().min(state.base_image.height())))
+        })
+        .filter(|short| *short > 1.0)
+        .unwrap_or(400.0)
+}
+
+/// The "Adjust Light" pad: a dark rounded square with a draggable dot. The dot
+/// is the light, so the cast falls on the opposite side of the card.
+fn build_light_pad(
+    light: Rc<Cell<(f64, f64)>>,
+    on_grab: impl Fn() + 'static,
+    on_change: impl Fn((f64, f64)) + 'static,
+) -> DrawingArea {
+    let area = DrawingArea::new();
+    area.set_size_request(136, 136);
+    area.set_halign(Align::Center);
+    area.add_css_class("editor-light-pad");
+    let on_change = Rc::new(on_change);
+    let on_grab = Rc::new(on_grab);
+    // Pointer events arrive faster than the shadow can be rebuilt, and the dot
+    // only has to track the cursor. Queue the position and apply it once per
+    // frame, so a fast drag cannot pile up full shadow renders.
+    let pending: Rc<Cell<Option<(f64, f64)>>> = Rc::new(Cell::new(None));
+    area.add_tick_callback({
+        let pending = pending.clone();
+        let on_change = on_change.clone();
+        let on_grab = on_grab.clone();
+        move |_, _| {
+            if let Some(position) = pending.take() {
+                // Refresh the interaction burst once per frame as well: the
+                // canvas keeps its cheap shadow path alive for the whole drag
+                // without switching tools on every pointer event.
+                on_grab();
+                on_change(position);
+            }
+            glib::ControlFlow::Continue
+        }
+    });
+
+    area.set_draw_func({
+        let light = light.clone();
+        move |_, context, width, height| {
+            let size = f64::from(width.min(height));
+            let pad_x = (f64::from(width) - size) * 0.5;
+            let pad_y = (f64::from(height) - size) * 0.5;
+            crate::capture::editor::render::rounded_rect_path(
+                context,
+                pad_x,
+                pad_y,
+                size,
+                size,
+                size * 0.10,
+            );
+            context.set_source_rgba(0.0, 0.0, 0.0, 0.35);
+            context.fill().ok();
+
+            let (lx, ly) = light.get();
+            let dot = size * 0.072;
+            let travel = (size * 0.5 - dot * 2.0).max(1.0);
+            context.arc(
+                pad_x + size * 0.5 + lx.clamp(-1.0, 1.0) * travel,
+                pad_y + size * 0.5 + ly.clamp(-1.0, 1.0) * travel,
+                dot,
+                0.0,
+                std::f64::consts::TAU,
+            );
+            context.set_source_rgba(0.86, 0.86, 0.88, 1.0);
+            context.fill().ok();
+        }
+    });
+
+    let move_light = {
+        let area = area.clone();
+        let light = light.clone();
+        let pending = pending.clone();
+        move |x: f64, y: f64| {
+            let position = light_from_point(x, y, area.width(), area.height());
+            light.set(position);
+            area.queue_draw();
+            pending.set(Some(position));
+        }
+    };
+
+    let drag = GestureDrag::new();
+    drag.connect_drag_begin({
+        let move_light = move_light.clone();
+        let on_grab = on_grab.clone();
+        move |_, x, y| {
+            on_grab();
+            move_light(x, y);
+        }
+    });
+    drag.connect_drag_update({
+        let move_light = move_light.clone();
+        move |gesture, offset_x, offset_y| {
+            if let Some((start_x, start_y)) = gesture.start_point() {
+                move_light(start_x + offset_x, start_y + offset_y);
+            }
+        }
+    });
+    area.add_controller(drag);
+
+    let click = GestureClick::new();
+    click.connect_pressed(move |_, _, x, y| {
+        on_grab();
+        move_light(x, y);
+    });
+    area.add_controller(click);
+
+    area
+}
+
+/// Pad coordinates to a normalized light position in `-1..=1`.
+fn light_from_point(x: f64, y: f64, width: i32, height: i32) -> (f64, f64) {
+    let size = f64::from(width.min(height)).max(1.0);
+    let origin_x = (f64::from(width) - size) * 0.5;
+    let origin_y = (f64::from(height) - size) * 0.5;
+    let dot = size * 0.072;
+    let travel = (size * 0.5 - dot * 2.0).max(1.0);
+    (
+        ((x - origin_x - size * 0.5) / travel).clamp(-1.0, 1.0),
+        ((y - origin_y - size * 0.5) / travel).clamp(-1.0, 1.0),
+    )
 }
 
 fn appearance_frame_size(runtime: &MotionRuntime, motion_export: bool) -> (i32, i32) {
@@ -274,9 +420,6 @@ fn build_appearance_panel(
     let notify_interact: Rc<dyn Fn()> = on_interact.unwrap_or_else(|| Rc::new(|| {}));
     let (
         initial_frame_style,
-        initial_shadow_opacity,
-        initial_shadow_blur,
-        initial_shadow_position,
         initial_fill_type,
         initial_padding,
         initial_background_blur,
@@ -287,9 +430,6 @@ fn build_appearance_panel(
         let appearance = &runtime.motion.appearance;
         (
             appearance.frame_style,
-            appearance.shadow_opacity,
-            appearance.shadow_blur,
-            appearance.shadow_position,
             appearance.background_fill_type.clone(),
             appearance.background_padding,
             appearance.background_blur,
@@ -842,86 +982,117 @@ fn build_appearance_panel(
     }
 
     let shadow_section = motion_appearance_body();
-    let shadow_opacity =
-        motion_appearance_slider("Shadow opacity", 0.0, 1.0, initial_shadow_opacity, "%");
-    shadow_opacity.connect_value_changed({
+    // One shadow, cast by the image onto the background. The image is the
+    // window, so nothing is drawn across the scene on its own: every style is
+    // the card's own silhouette, blurred and pushed away from the light.
+    let shadow_syncing = Rc::new(Cell::new(false));
+    let initial_shadow = {
+        let runtime = session.runtime.borrow();
+        runtime.motion.scene_shadow.clamped()
+    };
+    let shadow_card_short = card_short_edge(session);
+    // The model is the shadow. The compositor's card-shadow fields are derived
+    // from it here, so preview, still export and MP4 all read one description.
+    let apply_shadow: Rc<dyn Fn(MotionSceneShadow)> = Rc::new({
         let runtime = session.runtime.clone();
         let preview = preview.clone();
-        let notify = notify_interact.clone();
-        move |slider| {
-            notify();
+        move |layer| {
+            let (opacity, blur, offset) = layer.resolved(shadow_card_short);
             let mut runtime = runtime.borrow_mut();
             runtime.begin_motion_edit();
-            runtime.motion.appearance.shadow_opacity = slider.value();
+            runtime.motion.scene_shadow = layer;
+            runtime.motion.appearance.shadow_opacity = opacity;
+            runtime.motion.appearance.shadow_blur = blur;
+            runtime.motion.appearance.shadow_position = offset;
             runtime.preview_frame = None;
             preview.queue_draw();
+        }
+    });
+    let current_shadow: Rc<dyn Fn() -> MotionSceneShadow> = Rc::new({
+        let runtime = session.runtime.clone();
+        move || runtime.borrow().motion.scene_shadow.clamped()
+    });
+
+    let shadow_preset_buttons: Rc<RefCell<Vec<(MotionSceneShadowPreset, ToggleButton)>>> =
+        Rc::new(RefCell::new(Vec::new()));
+    let preset_row = GtkBox::new(Orientation::Horizontal, 6);
+    preset_row.set_homogeneous(true);
+    for preset in MotionSceneShadowPreset::ALL {
+        let button = ToggleButton::with_label(&t(preset.label()));
+        button.set_has_frame(false);
+        button.set_hexpand(true);
+        button.add_css_class("recording-editor-zoom-easing-btn");
+        button.set_active(initial_shadow.preset == preset);
+        button.connect_toggled({
+            let syncing = shadow_syncing.clone();
+            let current = current_shadow.clone();
+            let apply = apply_shadow.clone();
+            let notify = notify_interact.clone();
+            move |button| {
+                if !button.is_active() || syncing.get() {
+                    return;
+                }
+                notify();
+                let mut layer = current();
+                layer.select_preset(preset);
+                apply(layer);
+            }
+        });
+        if let Some((_, first)) = shadow_preset_buttons.borrow().first() {
+            button.set_group(Some(first));
+        }
+        shadow_preset_buttons
+            .borrow_mut()
+            .push((preset, button.clone()));
+        preset_row.append(&button);
+    }
+    shadow_section.append(&preset_row);
+
+    let shadow_opacity = motion_appearance_slider("Opacity", 0.0, 1.0, initial_shadow.opacity, "%");
+    shadow_opacity.connect_value_changed({
+        let syncing = shadow_syncing.clone();
+        let current = current_shadow.clone();
+        let apply = apply_shadow.clone();
+        let notify = notify_interact.clone();
+        move |slider| {
+            if syncing.get() {
+                return;
+            }
+            notify();
+            let mut layer = current();
+            layer.opacity = slider.value();
+            apply(layer);
         }
     });
     shadow_section.append(&shadow_opacity.widget());
 
-    let shadow_blur =
-        motion_appearance_slider("Shadow blur", 0.0, 120.0, initial_shadow_blur, "px");
-    shadow_blur.connect_value_changed({
-        let runtime = session.runtime.clone();
-        let preview = preview.clone();
-        let notify = notify_interact.clone();
-        move |slider| {
-            notify();
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.appearance.shadow_blur = slider.value();
-            runtime.preview_frame = None;
-            preview.queue_draw();
-        }
-    });
-    shadow_section.append(&shadow_blur.widget());
-
-    let shadow_x = motion_appearance_slider(
-        "Shadow position X",
-        -200.0,
-        200.0,
-        initial_shadow_position.0,
-        "px",
+    // Adjust Light: the pad's dot is the light. The shadow falls opposite it,
+    // so a dot at the bottom left casts toward the top right.
+    let light_title = Label::new(Some(&t("Adjust Light")));
+    light_title.add_css_class("editor-background-section-title");
+    light_title.set_xalign(0.0);
+    shadow_section.append(&light_title);
+    let light = Rc::new(Cell::new(initial_shadow.light));
+    let light_pad = build_light_pad(
+        light.clone(),
+        {
+            let notify = notify_interact.clone();
+            move || notify()
+        },
+        {
+            let current = current_shadow.clone();
+            let apply = apply_shadow.clone();
+            move |position| {
+                let mut layer = current();
+                layer.light = position;
+                apply(layer);
+            }
+        },
     );
-    shadow_x.connect_value_changed({
-        let runtime = session.runtime.clone();
-        let preview = preview.clone();
-        let notify = notify_interact.clone();
-        move |slider| {
-            notify();
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.appearance.shadow_position.0 = slider.value();
-            runtime.preview_frame = None;
-            preview.queue_draw();
-        }
-    });
-    shadow_section.append(&shadow_x.widget());
-
-    let shadow_y = motion_appearance_slider(
-        "Shadow position Y",
-        -200.0,
-        200.0,
-        initial_shadow_position.1,
-        "px",
-    );
-    shadow_y.connect_value_changed({
-        let runtime = session.runtime.clone();
-        let preview = preview.clone();
-        let notify = notify_interact.clone();
-        move |slider| {
-            notify();
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.appearance.shadow_position.1 = slider.value();
-            runtime.preview_frame = None;
-            preview.queue_draw();
-        }
-    });
-    shadow_section.append(&shadow_y.widget());
-    let card_shadow_opacity = shadow_opacity.clone();
-    let card_shadow_hint = appearance_hint("");
-    shadow_section.prepend(&card_shadow_hint);
+    light_pad.set_hexpand(true);
+    shadow_section.append(&light_pad);
+    let shadow_hint = appearance_hint("");
+    shadow_section.append(&shadow_hint);
     root.append(&motion_disclosure_row("Shadow", &shadow_section));
 
     let border_section = motion_appearance_body();
@@ -1755,154 +1926,18 @@ fn build_appearance_panel(
     });
     root.append(&frame_row);
 
-    // Scene Shadows: an independent overlay layer with its own
-    // preset id, opacity, and above/below-card placement — deliberately not
-    // the card's Border/Shadow drop shadow. The presets are procedural
-    // shading.
-    let scene_shadow_section = motion_appearance_body();
-    // Exports render an unset background fill as a solid black scene, so a
-    // dark shadow over it cannot be seen. Say so instead of leaving users to
-    // discover a missing effect in their MP4.
-    let shadow_hint = appearance_hint("");
-    scene_shadow_section.append(&shadow_hint);
-    let initial_scene_shadow = {
-        let runtime = session.runtime.borrow();
-        runtime.motion.scene_shadow.clone()
-    };
-    let shadow_preset_buttons: Rc<RefCell<Vec<(MotionSceneShadowPreset, ToggleButton)>>> =
-        Rc::new(RefCell::new(Vec::new()));
-    let shadow_preset_rows = GtkBox::new(Orientation::Vertical, 6);
-    let mut shadow_row: Option<GtkBox> = None;
-    for (index, preset) in MotionSceneShadowPreset::ALL.iter().enumerate() {
-        if index % 2 == 0 {
-            let row = GtkBox::new(Orientation::Horizontal, 6);
-            row.set_homogeneous(true);
-            shadow_preset_rows.append(&row);
-            shadow_row = Some(row);
-        }
-        let button = ToggleButton::with_label(&t(preset.label()));
-        button.set_has_frame(false);
-        button.set_hexpand(true);
-        button.add_css_class("recording-editor-zoom-easing-btn");
-        button.set_active(initial_scene_shadow.preset == *preset);
-        button.connect_toggled({
-            let runtime = session.runtime.clone();
-            let preview = preview.clone();
-            let notify = notify_interact.clone();
-            move |button| {
-                if !button.is_active() {
-                    return;
-                }
-                notify();
-                {
-                    let mut runtime = runtime.borrow_mut();
-                    runtime.begin_motion_edit();
-                    runtime.motion.scene_shadow.preset = *preset;
-                    preview.queue_draw();
-                }
-            }
-        });
-        if let Some((_, first)) = shadow_preset_buttons.borrow().first() {
-            button.set_group(Some(first));
-        }
-        shadow_preset_buttons
-            .borrow_mut()
-            .push((*preset, button.clone()));
-        if let Some(row) = shadow_row.as_ref() {
-            row.append(&button);
-        }
-    }
-    scene_shadow_section.append(&shadow_preset_rows);
-
-    let shadow_opacity = motion_appearance_slider(
-        "Shadow opacity",
-        0.0,
-        1.0,
-        initial_scene_shadow.opacity,
-        "%",
-    );
-    shadow_opacity.connect_value_changed({
-        let runtime = session.runtime.clone();
-        let preview = preview.clone();
-        let notify = notify_interact.clone();
-        move |slider| {
-            notify();
-            let mut runtime = runtime.borrow_mut();
-            runtime.begin_motion_edit();
-            runtime.motion.scene_shadow.opacity = slider.value();
-            preview.queue_draw();
-        }
-    });
-    scene_shadow_section.append(&shadow_opacity.widget());
-
-    let shadow_placement_buttons: Rc<RefCell<Vec<(MotionSceneShadowPlacement, ToggleButton)>>> =
-        Rc::new(RefCell::new(Vec::new()));
-    let placement_row = GtkBox::new(Orientation::Horizontal, 6);
-    placement_row.set_homogeneous(true);
-    for (placement, label, tooltip) in [
-        (
-            MotionSceneShadowPlacement::Underlay,
-            t("Underlay"),
-            t("Shade beneath the card"),
-        ),
-        (
-            MotionSceneShadowPlacement::Overlay,
-            t("Overlay"),
-            t("Shade above the card"),
-        ),
-    ] {
-        let button = ToggleButton::with_label(&label);
-        button.set_has_frame(false);
-        button.set_hexpand(true);
-        button.add_css_class("recording-editor-zoom-easing-btn");
-        button.set_tooltip_text(Some(&tooltip));
-        button.set_active(initial_scene_shadow.placement == placement);
-        button.connect_toggled({
-            let runtime = session.runtime.clone();
-            let preview = preview.clone();
-            let notify = notify_interact.clone();
-            move |button| {
-                if !button.is_active() {
-                    return;
-                }
-                notify();
-                {
-                    let mut runtime = runtime.borrow_mut();
-                    runtime.begin_motion_edit();
-                    runtime.motion.scene_shadow.placement = placement;
-                    preview.queue_draw();
-                }
-            }
-        });
-        if let Some((_, first)) = shadow_placement_buttons.borrow().first() {
-            button.set_group(Some(first));
-        }
-        shadow_placement_buttons
-            .borrow_mut()
-            .push((placement, button.clone()));
-        placement_row.append(&button);
-    }
-    scene_shadow_section.append(&placement_row);
-    let scene_opacity = shadow_opacity.clone();
     let refresh_dependencies: Rc<dyn Fn()> = Rc::new({
         let session = session.clone();
         let previous = Cell::new(None);
+        let light_value = light.clone();
+        let pad = light_pad.clone();
         move || {
             let transformed = session
                 .source_state
                 .borrow()
                 .as_ref()
                 .is_some_and(|source| !source.lock().unwrap().static_image_transform.is_identity());
-            let (
-                has_background,
-                can_blur,
-                can_radius,
-                can_shadow,
-                shadow_on,
-                scene_on,
-                scene_visible,
-                scene_underlay,
-            ) = {
+            let (has_background, can_blur, can_radius, can_shadow, shadow_on) = {
                 let runtime = session.runtime.borrow();
                 let appearance = &runtime.motion.appearance;
                 let has_background = appearance_has_background(appearance);
@@ -1923,22 +1958,27 @@ fn build_appearance_panel(
                             appearance.border_thickness,
                         ),
                     has_background || (!motion_export && transformed),
-                    appearance.shadow_opacity > 0.0,
                     runtime.motion.scene_shadow.preset != MotionSceneShadowPreset::None,
-                    runtime.motion.scene_shadow.opacity > 0.001,
-                    runtime.motion.scene_shadow.placement == MotionSceneShadowPlacement::Underlay,
                 )
             };
-            let key = (
-                has_background,
-                can_blur,
-                can_radius,
-                can_shadow,
-                shadow_on,
-                scene_on,
-                scene_visible,
-                scene_underlay,
-            );
+            let key = (has_background, can_blur, can_radius, can_shadow, shadow_on);
+            // Undo, redo and a preset click all change the model without
+            // touching a widget, so keep the controls seated on it before the
+            // availability pass can return early on an unchanged key.
+            {
+                let runtime = session.runtime.borrow();
+                let layer = runtime.motion.scene_shadow.clamped();
+                shadow_syncing.set(true);
+                seat_scene_shadow_slider(&shadow_opacity, layer.opacity);
+                for (preset, button) in shadow_preset_buttons.borrow().iter() {
+                    button.set_active(*preset == layer.preset);
+                }
+                shadow_syncing.set(false);
+                if light_value.get() != layer.light {
+                    light_value.set(layer.light);
+                    pad.queue_draw();
+                }
+            }
             if previous.replace(Some(key)) == Some(key) {
                 return;
             }
@@ -1961,42 +2001,9 @@ fn build_appearance_panel(
             radius_hint.set_visible(!can_radius);
             let shadow_reason = (!can_shadow)
                 .then_some("Add a background so the shadow appears in the exported result.");
-            set_slider_availability(&card_shadow_opacity, shadow_reason);
-            let shadow_detail_reason = shadow_reason.or_else(|| {
-                (!shadow_on).then_some("Increase Shadow opacity to enable blur and position.")
-            });
-            for slider in [&shadow_blur, &shadow_x, &shadow_y] {
-                set_slider_availability(slider, shadow_detail_reason);
-            }
-            card_shadow_hint.set_visible(shadow_detail_reason.is_some());
-            if let Some(reason) = shadow_detail_reason {
-                card_shadow_hint.set_text(&t(reason));
-            }
-            let scene_available = motion_export || has_background;
-            shadow_preset_rows.set_sensitive(scene_available);
-            set_slider_availability(
-                &scene_opacity,
-                (!scene_available)
-                    .then_some("Add a background to use Scene Shadows in image mode.")
-                    .or_else(|| {
-                        (!scene_on)
-                            .then_some("Choose a Scene Shadows preset before adjusting opacity.")
-                    }),
-            );
-            placement_row.set_sensitive(scene_available && scene_on && scene_visible);
-            let scene_reason = if !scene_available {
-                Some("Add a background to use Scene Shadows in image mode.")
-            } else if !scene_on {
-                Some("Choose a preset to enable Scene Shadows opacity and placement.")
-            } else if !scene_visible {
-                Some("Increase Scene Shadows opacity to see the effect and change its placement.")
-            } else if !has_background && scene_underlay {
-                Some("Without a background, Underlay is hidden in video exports. Choose Overlay to shade the image.")
-            } else {
-                None
-            };
-            shadow_hint.set_visible(scene_reason.is_some());
-            if let Some(reason) = scene_reason {
+            set_slider_availability(&shadow_opacity, shadow_reason);
+            shadow_hint.set_visible(shadow_reason.is_some());
+            if let Some(reason) = shadow_reason {
                 shadow_hint.set_text(&t(reason));
             }
         }
@@ -2006,10 +2013,6 @@ fn build_appearance_panel(
         refresh_dependencies();
         glib::ControlFlow::Continue
     });
-    root.append(&motion_disclosure_row(
-        "Scene Shadows",
-        &scene_shadow_section,
-    ));
     root
 }
 
@@ -2910,5 +2913,37 @@ mod tests {
             production_source.matches("sync_tiles();").count() >= 2,
             "the catalog and the image picker must resync the tile rings too",
         );
+    }
+
+    /// The Shadow section offers exactly the four styles and nothing else: the
+    /// retired pattern presets, the card's separate opacity/blur/position
+    /// sliders and the placement split are gone.
+    #[test]
+    fn the_shadow_section_offers_the_four_styles_only() {
+        let source = include_str!("appearance.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("for preset in MotionSceneShadowPreset::ALL"),
+            "the styles drive the preset row",
+        );
+        assert!(
+            production_source.contains("build_light_pad("),
+            "the light position is chosen on the pad, not with offset sliders",
+        );
+        for retired in [
+            "MotionSceneShadowPlacement",
+            "Shadow position X",
+            "Shadow position Y",
+            "Shadow softness",
+            "Shadow rotation",
+            "Shadow size",
+            "Diagonal",
+            "Vignette",
+        ] {
+            assert!(
+                !production_source.contains(retired),
+                "{retired} must not survive the redesign",
+            );
+        }
     }
 }

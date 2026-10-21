@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 
 use gtk4::{
     prelude::*, Align, Box as GtkBox, Button, DrawingArea, Entry, GestureClick, GestureDrag, Grid,
-    Image, Label, Orientation, Popover, ToggleButton, Widget,
+    Image, Label, Orientation, Popover, ScrolledWindow, ToggleButton, Widget,
 };
 
 use crate::i18n::t;
@@ -327,6 +327,61 @@ fn reconciled_hsv(
 
 // ── Popover ──
 
+/// Take a picker down when the panel that seats it scrolls.
+///
+/// The panel-hosted pickers parent to a row inside the inspector's
+/// `ScrolledWindow`. GTK re-seats a popover whenever its parent moves, so a
+/// scroll with the card open walks it up the panel; once the row leaves the
+/// viewport the card has nowhere legal to sit and the compositor parks it at the
+/// window's top-left corner, over the toolbar and whatever else is behind the
+/// editor. The picker has no scrolling content of its own (the hex entry is the
+/// only thing that takes focus), so a scroll gesture while it is up can only be
+/// aimed at the panel behind it: close the card instead of letting it slide
+/// away. The seat is re-read from the Edit pill on the next open, so scrolling
+/// first and opening after still lands the card on its row.
+///
+/// Installed on the first show, because the panel has not been attached to the
+/// scroller yet when the popover is built. A popover with no scrolling ancestor
+/// (the toolbar chip, which hangs off the canvas overlay) simply keeps the
+/// behavior it had.
+fn dismiss_on_scroll(popover: &Popover) {
+    let installed = Rc::new(Cell::new(false));
+    popover.connect_show({
+        let popover = popover.downgrade();
+        move |_| {
+            if installed.get() {
+                return;
+            }
+            let Some(popover) = popover.upgrade() else {
+                return;
+            };
+            let mut ancestor = popover.parent();
+            while let Some(widget) = ancestor {
+                if let Ok(scroller) = widget.clone().downcast::<ScrolledWindow>() {
+                    let dismiss = |adjustment: &gtk4::Adjustment| {
+                        let popover = popover.downgrade();
+                        adjustment.connect_value_changed(move |_| {
+                            if let Some(popover) = popover.upgrade() {
+                                if popover.is_visible() {
+                                    popover.popdown();
+                                }
+                            }
+                        });
+                    };
+                    // Both axes: the inspector only scrolls vertically today,
+                    // but the popover is seated off a panel edge and would slide
+                    // the same way if a horizontal scroll were ever added.
+                    dismiss(&scroller.vadjustment());
+                    dismiss(&scroller.hadjustment());
+                    installed.set(true);
+                    break;
+                }
+                ancestor = widget.parent();
+            }
+        }
+    });
+}
+
 pub(crate) fn build_custom_fill_popover(
     sidebar: &GtkBox,
     edit: &Button,
@@ -567,6 +622,7 @@ pub(crate) fn build_custom_fill_popover(
     });
 
     popover.set_child(Some(&root));
+    dismiss_on_scroll(&popover);
     popover
 }
 
@@ -638,6 +694,7 @@ pub(crate) fn build_color_popover(
         let repaint = picker.repaint.clone();
         move |_| repaint()
     });
+    dismiss_on_scroll(&popover);
     popover
 }
 
@@ -3119,6 +3176,129 @@ mod tests {
         assert!(
             reads_state < closes && closes < opens,
             "the chip must read the dropdown's state, close it while it is up and open it while it is down"
+        );
+    }
+
+    #[test]
+    fn scrolling_the_panel_takes_the_custom_fill_popover_down() {
+        // The card is seated off a row inside the inspector's scroller. GTK
+        // re-seats it on every scroll step, and once the row leaves the
+        // viewport the compositor parks the card at the window's top-left
+        // corner. The panel scroll is the gesture that used to walk the card
+        // off its row, so it has to take the card down instead.
+        use super::{build_custom_fill_popover, FillOps};
+        use crate::recording::editor::model::VideoGradient;
+        use gtk4::prelude::*;
+        use gtk4::{Box as GtkBox, Button, Orientation, ScrolledWindow};
+        use std::rc::Rc;
+
+        let Some((opened, closed)) = crate::test_support::with_gtk(|| {
+            let window = gtk4::Window::new();
+            let scroller = ScrolledWindow::new();
+            let panel = GtkBox::new(Orientation::Vertical, 0);
+            panel.set_height_request(1200);
+            let edit = Button::new();
+            panel.append(&edit);
+            scroller.set_child(Some(&panel));
+            window.set_child(Some(&scroller));
+            let adjustment = scroller.vadjustment();
+            // A real range, so setting a value is a scroll rather than a no-op
+            // clamped back to zero.
+            adjustment.configure(0.0, 0.0, 2000.0, 400.0, 100.0, 300.0);
+            window.present();
+            let pump = || {
+                let ctx = gtk4::glib::MainContext::default();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+                while std::time::Instant::now() < deadline {
+                    while ctx.iteration(false) {}
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            };
+            pump();
+            let popover = build_custom_fill_popover(
+                &panel,
+                &edit,
+                "Custom",
+                FillOps {
+                    get_color: Rc::new(|| (0, 0, 0)),
+                    set_color: Rc::new(|_: (u8, u8, u8)| {}),
+                    get_gradient: Rc::new(VideoGradient::default),
+                    set_gradient: Rc::new(|_: VideoGradient| {}),
+                },
+                Rc::new(|| {}),
+            );
+            popover.popup();
+            let opened = popover.is_visible();
+            adjustment.set_value(120.0);
+            let closed = !popover.is_visible();
+            popover.unparent();
+            window.destroy();
+            (opened, closed)
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+        assert!(opened, "the popover must be up before the scroll is tested");
+        assert!(
+            closed,
+            "scrolling the panel must close the card instead of re-seating it off its row"
+        );
+    }
+
+    #[test]
+    fn scrolling_the_panel_takes_the_shared_color_popover_down() {
+        // The text inspector's color chip seats the same shared picker on a row
+        // inside a scroller, so it needs the same dismissal as the Custom fill
+        // card. The toolbar chip's picker has no scrolling ancestor and keeps
+        // its behavior.
+        use super::{build_color_picker, build_color_popover};
+        use gtk4::prelude::*;
+        use gtk4::{Box as GtkBox, Button, Orientation, ScrolledWindow};
+        use std::rc::Rc;
+
+        let Some((opened, closed)) = crate::test_support::with_gtk(|| {
+            let window = gtk4::Window::new();
+            let scroller = ScrolledWindow::new();
+            let panel = GtkBox::new(Orientation::Vertical, 0);
+            panel.set_height_request(1200);
+            let chip = Button::new();
+            panel.append(&chip);
+            scroller.set_child(Some(&panel));
+            window.set_child(Some(&scroller));
+            let adjustment = scroller.vadjustment();
+            adjustment.configure(0.0, 0.0, 2000.0, 400.0, 100.0, 300.0);
+            window.present();
+            let pump = || {
+                let ctx = gtk4::glib::MainContext::default();
+                let deadline = std::time::Instant::now() + std::time::Duration::from_millis(250);
+                while std::time::Instant::now() < deadline {
+                    while ctx.iteration(false) {}
+                    std::thread::sleep(std::time::Duration::from_millis(2));
+                }
+            };
+            pump();
+            let picker = build_color_picker(
+                Rc::new(|| (0, 0, 0)),
+                Rc::new(|_: (u8, u8, u8)| {}),
+                Rc::new(|| {}),
+            );
+            let popover = build_color_popover("Text color", &picker, None);
+            popover.set_parent(&panel);
+            popover.popup();
+            let opened = popover.is_visible();
+            adjustment.set_value(120.0);
+            let closed = !popover.is_visible();
+            popover.unparent();
+            window.destroy();
+            (opened, closed)
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+        assert!(opened, "the popover must be up before the scroll is tested");
+        assert!(
+            closed,
+            "scrolling the panel must close the color card instead of moving it"
         );
     }
 }

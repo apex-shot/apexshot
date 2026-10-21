@@ -3330,3 +3330,60 @@ msgstr "此许可证属于另一台设备"
 
 msgid "Upgrade to Studio — $39 with 12 months of updates"
 msgstr "升级到 Studio — 39 美元，含 12 个月更新"
+
+msgid "Shadow softness"
+msgstr "阴影柔和度"
+
+msgid "Shadow rotation"
+msgstr "阴影旋转"
+
+msgid "Shadow size"
+msgstr "阴影尺寸"
+
+msgid "Shadow horizontal offset"
+msgstr "阴影水平偏移"
+
+msgid "Shadow vertical offset"
+msgstr "阴影垂直偏移"
+
+msgid "Reset every Scene Shadows control."
+msgstr "重置所有场景阴影控件。"
+
+msgid "Card shadow"
+msgstr "卡片阴影"
+
+msgid "Cast light"
+msgstr "投影光"
+
+msgid "Light strength"
+msgstr "光线强度"
+
+msgid "Reset every Cast light control."
+msgstr "重置所有投影光设置。"
+
+msgid "Add a background to use Cast light in image mode."
+msgstr "添加背景后即可在图像模式中使用投影光。"
+
+msgid "Choose a Cast light preset before adjusting its strength."
+msgstr "请先选择投影光预设，再调整其强度。"
+
+msgid "Choose a Cast light preset before adjusting its shape."
+msgstr "请先选择投影光预设，再调整其形状。"
+
+msgid "Choose a preset to enable Cast light strength and placement."
+msgstr "选择预设后即可调整光线强度和位置。"
+
+msgid "Increase Cast light strength to see the effect and change its placement."
+msgstr "提高光线强度即可看到效果并更改位置。"
+
+msgid "Spread"
+msgstr "扩散"
+
+msgid "Hug"
+msgstr "贴合"
+
+msgid "Adaptive"
+msgstr "自适应"
+
+msgid "Adjust Light"
+msgstr "调整光源"

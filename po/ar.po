@@ -3361,3 +3361,60 @@ msgstr "هذا الترخيص يخص جهازًا آخر"
 
 msgid "Upgrade to Studio — $39 with 12 months of updates"
 msgstr "الترقية إلى Studio — 39 دولارًا مع 12 شهرًا من التحديثات"
+
+msgid "Shadow softness"
+msgstr "نعومة الظل"
+
+msgid "Shadow rotation"
+msgstr "دوران الظل"
+
+msgid "Shadow size"
+msgstr "حجم الظل"
+
+msgid "Shadow horizontal offset"
+msgstr "إزاحة الظل الأفقي"
+
+msgid "Shadow vertical offset"
+msgstr "إزاحة الظل العمودي"
+
+msgid "Reset every Scene Shadows control."
+msgstr "إعادة ضبط كل عناصر تحكم ظلال المشهد."
+
+msgid "Card shadow"
+msgstr "ظل البطاقة"
+
+msgid "Cast light"
+msgstr "الضوء المسقط"
+
+msgid "Light strength"
+msgstr "قوة الضوء"
+
+msgid "Reset every Cast light control."
+msgstr "يعيد ضبط كل عناصر الضوء المسقط."
+
+msgid "Add a background to use Cast light in image mode."
+msgstr "أضف خلفية لاستخدام الضوء المسقط في وضع الصورة."
+
+msgid "Choose a Cast light preset before adjusting its strength."
+msgstr "اختر إعدادًا مسبقًا للضوء المسقط قبل ضبط قوته."
+
+msgid "Choose a Cast light preset before adjusting its shape."
+msgstr "اختر إعدادًا مسبقًا للضوء المسقط قبل ضبط شكله."
+
+msgid "Choose a preset to enable Cast light strength and placement."
+msgstr "اختر إعدادًا مسبقًا لتفعيل قوة الضوء وموضعه."
+
+msgid "Increase Cast light strength to see the effect and change its placement."
+msgstr "زد قوة الضوء لرؤية التأثير وتغيير موضعه."
+
+msgid "Spread"
+msgstr "منتشر"
+
+msgid "Hug"
+msgstr "ملاصق"
+
+msgid "Adaptive"
+msgstr "متكيف"
+
+msgid "Adjust Light"
+msgstr "ضبط الضوء"

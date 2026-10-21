@@ -39,7 +39,6 @@ pub struct EditorPreferences {
     /// state. Padding comes from the image's own sidecar (0px for a fresh
     /// image), not from the global preferences.
     background_padding: f64,
-    background_shadow: f64,
     background_insert: f64,
     auto_balance: bool,
     background_alignment: BackgroundAlignment,
@@ -68,7 +67,6 @@ impl Default for EditorPreferences {
             focus_intensity: DEFAULT_FOCUS_INTENSITY,
             arrow_style: ArrowStyle::Standard,
             background_padding: 0.0,
-            background_shadow: 15.0,
             background_insert: 0.0,
             auto_balance: false,
             background_alignment: BackgroundAlignment::Center,
@@ -98,7 +96,6 @@ impl EditorPreferences {
             focus_intensity: state.focus_intensity,
             arrow_style: state.arrow_style,
             background_padding: state.background_padding,
-            background_shadow: state.background_shadow,
             background_insert: state.background_insert,
             auto_balance: state.auto_balance,
             background_alignment: state.background_alignment,
@@ -131,7 +128,6 @@ impl EditorPreferences {
         // The global prefs padding is never applied back: a fresh image opens
         // at 0px and a reopened image restores its own sidecar padding.
         state.background_padding = 0.0;
-        state.background_shadow = self.background_shadow;
         state.background_insert = self.background_insert;
         state.auto_balance = self.auto_balance;
         state.background_alignment = self.background_alignment;

@@ -5,9 +5,10 @@
 
 use super::schema::{
     AnnotationFile, BackgroundAlignment, BackgroundSettings, BackgroundStyle, CropAspectRatio,
-    Point, Rect, SerializableAnnotation,
+    Point, Rect, SerializableAnnotation, ShadowProfileSettings,
 };
 use crate::capture::editor::image_transform::StaticImageTransform;
+use crate::capture::editor::motion_project::MotionSceneShadowFile;
 use crate::capture::editor::types::{
     AnnotationAction, ArrowStyle as EditorArrowStyle,
     BackgroundAlignment as EditorBackgroundAlignment, BackgroundStyle as EditorBackgroundStyle,
@@ -85,6 +86,18 @@ pub fn compute_image_hash(image_path: &Path) -> Result<String, AnnotationError> 
     Ok(format!("sha256:{}", hash))
 }
 
+/// Persistable form of the card shadow: the strength scalar older builds read
+/// and the profile this build reads. An untouched panel keeps the scalar's own
+/// default and omits the profile, so a session that changed nothing still
+/// compares equal to `BackgroundSettings::default()` and writes no sidecar.
+fn persisted_shadow(profile: ShadowProfileSettings) -> (f64, Option<ShadowProfileSettings>) {
+    if profile == ShadowProfileSettings::default() {
+        (15.0, None)
+    } else {
+        ((profile.opacity * 30.0).clamp(0.0, 60.0), Some(profile))
+    }
+}
+
 /// Save annotations for an image, along with the original base image
 pub fn save_annotations(
     image_path: &Path,
@@ -94,7 +107,8 @@ pub fn save_annotations(
     original_base_image: &RgbaImage,
     background_style: &EditorBackgroundStyle,
     background_padding: f64,
-    background_shadow: f64,
+    shadow_profile: ShadowProfileSettings,
+    cast_light: Option<MotionSceneShadowFile>,
     background_insert: f64,
     auto_balance: bool,
     background_alignment: EditorBackgroundAlignment,
@@ -107,11 +121,14 @@ pub fn save_annotations(
     let image_hash = compute_image_hash(image_path)?;
 
     let mut file = AnnotationFile::new(image_path, image_hash, canvas_width, canvas_height);
+    let (shadow, shadow_profile) = persisted_shadow(shadow_profile);
     file.background = BackgroundSettings {
         source_upscale,
         style: background_style_to_serializable(background_style),
         padding: background_padding,
-        shadow: background_shadow,
+        shadow,
+        shadow_profile,
+        cast_light,
         insert: background_insert,
         auto_balance,
         alignment: background_alignment_to_serializable(background_alignment),
@@ -310,7 +327,8 @@ impl ImageSessionSnapshot {
         actions: &[AnnotationAction],
         background_style: &EditorBackgroundStyle,
         background_padding: f64,
-        background_shadow: f64,
+        shadow_profile: ShadowProfileSettings,
+        cast_light: Option<MotionSceneShadowFile>,
         background_insert: f64,
         auto_balance: bool,
         background_alignment: EditorBackgroundAlignment,
@@ -319,13 +337,16 @@ impl ImageSessionSnapshot {
         static_image_transform: StaticImageTransform,
         source_upscale: crate::capture::editor::types::SourceUpscale,
     ) -> Self {
+        let (shadow, shadow_profile) = persisted_shadow(shadow_profile);
         Self {
             annotations: actions.iter().filter_map(action_to_serializable).collect(),
             background: BackgroundSettings {
                 source_upscale,
                 style: background_style_to_serializable(background_style),
                 padding: background_padding,
-                shadow: background_shadow,
+                shadow,
+                shadow_profile,
+                cast_light,
                 insert: background_insert,
                 auto_balance,
                 alignment: background_alignment_to_serializable(background_alignment),
@@ -905,7 +926,8 @@ mod tests {
             image,
             &EditorBackgroundStyle::None,
             24.0,
-            15.0,
+            ShadowProfileSettings::default(),
+            None,
             0.0,
             false,
             EditorBackgroundAlignment::Center,
@@ -962,7 +984,8 @@ mod tests {
             &image,
             &EditorBackgroundStyle::None,
             42.0,
-            15.0,
+            ShadowProfileSettings::default(),
+            None,
             0.0,
             false,
             EditorBackgroundAlignment::Center,
@@ -1030,7 +1053,8 @@ mod tests {
             &[],
             &EditorBackgroundStyle::None,
             0.0,
-            15.0,
+            ShadowProfileSettings::default(),
+            None,
             0.0,
             false,
             EditorBackgroundAlignment::Center,
@@ -1046,7 +1070,8 @@ mod tests {
             &[],
             &EditorBackgroundStyle::None,
             0.0,
-            15.0,
+            ShadowProfileSettings::default(),
+            None,
             0.0,
             false,
             EditorBackgroundAlignment::Center,
