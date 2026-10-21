@@ -17,7 +17,8 @@ use std::sync::{Arc, Mutex};
 use super::super::state::EditorState;
 use super::super::types::{BackgroundStyle, CropAspectRatio, DrawColor};
 use crate::recording::editor::model::{
-    MotionAppearance, MotionBackgroundFillType, MotionFrame, MotionFramePreset,
+    MotionAppearance, MotionBackgroundFillType, MotionFrame, MotionFramePreset, MotionSceneShadow,
+    MotionSceneShadowPreset,
 };
 
 pub(super) const BACKGROUND_SIDEBAR_WIDTH: i32 = 210;
@@ -438,6 +439,7 @@ pub(super) fn sync_static_appearance_to_motion(
     state: &EditorState,
     motion: &mut MotionAppearance,
     frame: &mut MotionFrame,
+    scene_shadow: &mut MotionSceneShadow,
 ) {
     frame.preset = match state.background_aspect_ratio {
         CropAspectRatio::Freeform | CropAspectRatio::Original => MotionFramePreset::Standard,
@@ -504,9 +506,14 @@ pub(super) fn sync_static_appearance_to_motion(
         state.border_color.b,
         state.border_color.a,
     ];
-    motion.shadow_opacity = state.shadow_opacity;
-    motion.shadow_blur = state.shadow_blur;
-    motion.shadow_position = (state.shadow_offset_x, state.shadow_offset_y);
+    // The shadow model is the source of truth. Derive the compositor's fields
+    // here so a restored or scripted layer still renders without the panel.
+    let shadow_short = card_short_edge(state);
+    let (opacity, blur, offset) = state.scene_shadow.clamped().resolved(shadow_short);
+    motion.shadow_opacity = opacity;
+    motion.shadow_blur = blur;
+    motion.shadow_position = offset;
+    *scene_shadow = state.scene_shadow.clone();
 }
 
 pub(super) fn sync_motion_appearance_to_static(
@@ -548,13 +555,43 @@ pub(super) fn sync_motion_appearance_to_static(
     state.shadow_blur = motion.shadow_blur;
     state.shadow_offset_x = motion.shadow_position.0;
     state.shadow_offset_y = motion.shadow_position.1;
-    // Keep legacy single-value shadow driving current static render.
-    state.background_shadow = (motion.shadow_opacity * 30.0).clamp(0.0, 60.0);
-    // Scene Shadows are an independent layer of their own; without this the
-    // shared Scene Shadows controls edit the Motion runtime only and the
-    // static preview/export show nothing.
     state.scene_shadow = scene_shadow.clone();
+    // The layer, not the derived fields, is what the user edits, so re-derive
+    // here: the static preview and the still export read these three values.
+    let shadow_short = card_short_edge(state);
+    let (opacity, blur, offset) = scene_shadow.clamped().resolved(shadow_short);
+    state.shadow_opacity = opacity;
+    state.shadow_blur = blur;
+    state.shadow_offset_x = offset.0;
+    state.shadow_offset_y = offset.1;
     state.background_aspect_ratio = frame_preset_to_crop_ratio(frame);
+}
+
+/// The card's short edge in canvas units: every shadow style is a fraction of
+/// it, so the derived fields keep their proportions at any image size.
+fn card_short_edge(state: &EditorState) -> f64 {
+    f64::from(state.base_image.width().min(state.base_image.height())).max(1.0)
+}
+
+/// The two shadows the still's own sidecar owns. One place builds them, so the
+/// file that is written and the session baseline that decides whether to write
+/// it cannot drift apart.
+pub(in crate::capture::editor::window) fn persisted_shadows(
+    state: &EditorState,
+) -> (
+    crate::annotations::ShadowProfileSettings,
+    Option<crate::capture::editor::motion_project::MotionSceneShadowFile>,
+) {
+    let profile = crate::annotations::ShadowProfileSettings {
+        opacity: state.shadow_opacity,
+        blur: state.shadow_blur,
+        offset_x: state.shadow_offset_x,
+        offset_y: state.shadow_offset_y,
+    };
+    let cast_light = (state.scene_shadow.preset != MotionSceneShadowPreset::None).then(|| {
+        crate::capture::editor::motion_project::MotionSceneShadowFile::from(&state.scene_shadow)
+    });
+    (profile, cast_light)
 }
 
 /// Build the static Background inspector with the Motion Appearance builder,
@@ -590,14 +627,14 @@ pub(super) fn build_shared_background_panel(
 mod tests {
     use super::{motion_wallpaper_preview_asset_path, EditorState, MOTION_WALLPAPER_FILES};
 
-    /// The Scene Shadows controls live in the shared Appearance panel, so the
+    /// The Cast light controls live in the shared Appearance panel, so the
     /// mirror into EditorState has to carry the layer or the static preview and
     /// the still export silently show nothing while Motion does.
     #[test]
     fn scene_shadow_mirrors_into_the_static_still() {
         use crate::recording::editor::model::{
             MotionAppearance, MotionBackgroundFillType, MotionFrame, MotionSceneShadow,
-            MotionSceneShadowPlacement, MotionSceneShadowPreset,
+            MotionSceneShadowPreset,
         };
         let appearance = MotionAppearance {
             background_fill_type: MotionBackgroundFillType::Color,
@@ -608,10 +645,12 @@ mod tests {
             ..Default::default()
         };
 
+        // A non-default shape, so the mirror is proven to carry every field and not
+        // just the preset id: the static still and the Motion preview must agree.
         let shadow = MotionSceneShadow {
-            preset: MotionSceneShadowPreset::Vignette,
+            preset: MotionSceneShadowPreset::Spread,
             opacity: 1.0,
-            placement: MotionSceneShadowPlacement::Underlay,
+            light: (-0.5, -0.5),
         };
 
         let mut state = EditorState::new(image::RgbaImage::from_pixel(
@@ -638,10 +677,22 @@ mod tests {
         );
 
         let still = state.to_final_image().expect("final renders");
-        let corner = still.get_pixel(0, 0).0;
+        // The shape is deliberately non-default (rotated, scaled, offset), so
+        // the shaded region is not anchored to one corner. Scan the fill band
+        // for shading at all instead of pinning a single pixel.
+        let shaded_fill = (0..still.height()).any(|y| {
+            (0..still.width()).any(|x| {
+                let pixel = still.get_pixel(x, y).0;
+                // Corner-adjacent pixels on a white fill; the card interior is
+                // excluded by only looking at the 20px border band.
+                let in_border_band =
+                    x < 20 || y < 20 || x + 20 >= still.width() || y + 20 >= still.height();
+                in_border_band && pixel[0] < 255
+            })
+        });
         let center = still.get_pixel(still.width() / 2, still.height() / 2).0;
         assert!(
-            corner[0] < 255,
+            shaded_fill,
             "the static still must shade its fill like the Motion preview"
         );
         assert_eq!(
@@ -884,7 +935,8 @@ mod tests {
 
         let mut motion = MotionAppearance::default();
         let mut frame = MotionFrame::default();
-        super::sync_static_appearance_to_motion(&state, &mut motion, &mut frame);
+        let mut scene_shadow = MotionSceneShadow::default();
+        super::sync_static_appearance_to_motion(&state, &mut motion, &mut frame, &mut scene_shadow);
         assert!((motion.background_insert - 55.0).abs() < f64::EPSILON);
         assert_eq!(motion.background_alignment, BackgroundAlignment::TopRight);
 
@@ -904,7 +956,7 @@ mod tests {
         use crate::capture::editor::state::EditorState;
         use crate::capture::editor::types::{BackgroundStyle, DrawColor};
         use crate::recording::editor::model::{
-            MotionAppearance, MotionBackgroundFillType, MotionFrame,
+            MotionAppearance, MotionBackgroundFillType, MotionFrame, MotionSceneShadow,
         };
         use image::RgbaImage;
 
@@ -916,7 +968,8 @@ mod tests {
 
         let mut motion = MotionAppearance::default();
         let mut frame = MotionFrame::default();
-        super::sync_static_appearance_to_motion(&state, &mut motion, &mut frame);
+        let mut scene_shadow = MotionSceneShadow::default();
+        super::sync_static_appearance_to_motion(&state, &mut motion, &mut frame, &mut scene_shadow);
         assert_eq!(motion.background_fill_type, MotionBackgroundFillType::Color);
         assert!((motion.background_padding - 40.0).abs() < f64::EPSILON);
         assert!((motion.border_radius - 22.0).abs() < f64::EPSILON);
@@ -930,7 +983,13 @@ mod tests {
             ..MotionAppearance::default()
         };
         let mut keep_frame = MotionFrame::default();
-        super::sync_static_appearance_to_motion(&fresh, &mut keep, &mut keep_frame);
+        let mut keep_shadow = MotionSceneShadow::default();
+        super::sync_static_appearance_to_motion(
+            &fresh,
+            &mut keep,
+            &mut keep_frame,
+            &mut keep_shadow,
+        );
         assert_eq!(keep.background_fill_type, MotionBackgroundFillType::None);
         assert_eq!(keep.wallpaper_image_name, None);
     }

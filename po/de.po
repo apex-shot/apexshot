@@ -3413,3 +3413,60 @@ msgstr "Diese Lizenz gehört zu einem anderen Gerät"
 
 msgid "Upgrade to Studio — $39 with 12 months of updates"
 msgstr "Auf Studio upgraden — 39 $ inklusive 12 Monaten Updates"
+
+msgid "Shadow softness"
+msgstr "Schattenweichheit"
+
+msgid "Shadow rotation"
+msgstr "Schatten-Drehung"
+
+msgid "Shadow size"
+msgstr "Schattengröße"
+
+msgid "Shadow horizontal offset"
+msgstr "Horizontaler Schattenversatz"
+
+msgid "Shadow vertical offset"
+msgstr "Vertikaler Schattenversatz"
+
+msgid "Reset every Scene Shadows control."
+msgstr "Setzt alle Szenenschatten-Regler zurück."
+
+msgid "Card shadow"
+msgstr "Kartenschatten"
+
+msgid "Cast light"
+msgstr "Lichtwurf"
+
+msgid "Light strength"
+msgstr "Lichtstärke"
+
+msgid "Reset every Cast light control."
+msgstr "Setzt alle Lichtwurf-Regler zurück."
+
+msgid "Add a background to use Cast light in image mode."
+msgstr "Füge einen Hintergrund hinzu, um den Lichtwurf im Bildmodus zu verwenden."
+
+msgid "Choose a Cast light preset before adjusting its strength."
+msgstr "Wähle eine Lichtwurf-Vorgabe, bevor du ihre Stärke anpasst."
+
+msgid "Choose a Cast light preset before adjusting its shape."
+msgstr "Wähle eine Lichtwurf-Vorgabe, bevor du ihre Form anpasst."
+
+msgid "Choose a preset to enable Cast light strength and placement."
+msgstr "Wähle eine Vorgabe, um Lichtstärke und Platzierung des Lichtwurfs zu aktivieren."
+
+msgid "Increase Cast light strength to see the effect and change its placement."
+msgstr "Erhöhe die Lichtstärke, um den Effekt zu sehen und seine Platzierung zu ändern."
+
+msgid "Spread"
+msgstr "Weit"
+
+msgid "Hug"
+msgstr "Anliegend"
+
+msgid "Adaptive"
+msgstr "Adaptiv"
+
+msgid "Adjust Light"
+msgstr "Licht anpassen"

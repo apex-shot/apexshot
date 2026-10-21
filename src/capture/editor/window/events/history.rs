@@ -15,6 +15,8 @@ pub(super) fn wire_history_buttons(
     sync_select_inspector: &Rc<dyn Fn()>,
     sync_motion_crop_history: &Rc<dyn Fn()>,
     sync_static_transform: &Rc<dyn Fn()>,
+    motion_undo: &Rc<dyn Fn() -> bool>,
+    motion_redo: &Rc<dyn Fn() -> bool>,
 ) {
     let state_undo = state.clone();
     let drawing_area_undo = drawing_area.downgrade();
@@ -22,8 +24,15 @@ pub(super) fn wire_history_buttons(
     let rebuild_effects_async_undo = rebuild_effects_async.clone();
     let sync_motion_crop_history_undo = sync_motion_crop_history.clone();
     let sync_static_transform_undo = sync_static_transform.clone();
+    let motion_undo_undo = motion_undo.clone();
     undo_btn.connect_clicked(move |_| {
-        let changed = state_undo.lock().unwrap().undo_without_rebuild();
+        // The still's own stack holds canvas edits; Appearance edits live in the
+        // Motion history, because both modes edit one shared runtime. Static
+        // goes first so a drawn annotation undoes before a panel change.
+        // Drop the state guard before the Motion fallback: the runtime can
+        // reach back into the same editor state.
+        let static_changed = state_undo.lock().unwrap().undo_without_rebuild();
+        let changed = static_changed || motion_undo_undo();
         if changed {
             sync_motion_crop_history_undo();
             sync_static_transform_undo();
@@ -41,8 +50,10 @@ pub(super) fn wire_history_buttons(
     let rebuild_effects_async_redo = rebuild_effects_async.clone();
     let sync_motion_crop_history_redo = sync_motion_crop_history.clone();
     let sync_static_transform_redo = sync_static_transform.clone();
+    let motion_redo_redo = motion_redo.clone();
     redo_btn.connect_clicked(move |_| {
-        let changed = state_redo.lock().unwrap().redo_without_rebuild();
+        let static_changed = state_redo.lock().unwrap().redo_without_rebuild();
+        let changed = static_changed || motion_redo_redo();
         if changed {
             sync_motion_crop_history_redo();
             sync_static_transform_redo();

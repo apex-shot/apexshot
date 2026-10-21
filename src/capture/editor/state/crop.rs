@@ -24,7 +24,6 @@ impl EditorState {
         let layout = BackgroundComposition::new(width as f64, height as f64)
             .with_style(self.background_style.clone())
             .with_padding(self.background_padding)
-            .with_shadow(self.background_shadow)
             .with_shadow_profile(
                 self.shadow_opacity,
                 self.shadow_blur,

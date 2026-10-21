@@ -16,7 +16,9 @@
 //! ```ignore
 //! use apexshot::annotations::{save_annotations, load_annotations, load_original_image, serializable_to_action};
 //!
-//! // Save annotations when user clicks "Done"
+//! // Save annotations when user clicks "Done". The two shadows are read
+//! // through the same helper the editor persists with.
+//! let (shadow_profile, cast_light) = persisted_shadows(&editor_state);
 //! save_annotations(
 //!     &image_path,
 //!     width,
@@ -25,7 +27,8 @@
 //!     &editor_state.base_image,
 //!     &editor_state.background_style,
 //!     editor_state.background_padding,
-//!     editor_state.background_shadow,
+//!     shadow_profile,
+//!     cast_light,
 //!     editor_state.background_insert,
 //!     editor_state.auto_balance,
 //!     editor_state.background_alignment,
@@ -54,7 +57,8 @@ mod storage;
 pub use schema::{
     AnnotationFile, ArrowStyle, BackgroundAlignment, BackgroundSettings, BackgroundStyle,
     CanvasSize, Color, CropAspectRatio, FontSettings, FontStyle, NumberSize, NumberingStyle,
-    ObfuscateMethod, Point, Rect, SerializableAnnotation, TextAlignment, TextDecoration,
+    ObfuscateMethod, Point, Rect, SerializableAnnotation, ShadowProfileSettings, TextAlignment,
+    TextDecoration,
 };
 pub use storage::{
     annotations_exist, background_alignment_from_serializable, background_style_from_serializable,

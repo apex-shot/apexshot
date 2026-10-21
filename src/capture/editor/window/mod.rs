@@ -323,7 +323,7 @@ mod highlighter_bar;
 mod inspectors;
 mod motion_host;
 pub(in crate::capture::editor::window) mod motion_mode;
-// Scene Shadows painter is shared with the static preview/export paths.
+// Cast light painter is shared with the static preview/export paths.
 pub(crate) mod motion_render;
 mod motion_timeline;
 mod number_bar;
@@ -641,26 +641,9 @@ fn setup_editor_window_full(
             crate::annotations::load_annotations(&path)
         } {
             Ok(Some(annotation_file)) => {
-                st.background_style = crate::annotations::background_style_from_serializable(
-                    &annotation_file.background.style,
-                );
-                // Per-image padding is part of that image's saved composition,
-                // so it restores when the same image is reopened. Only the
-                // global prefs value is ignored (see `EditorPreferences`).
-                st.background_padding = annotation_file.background.padding;
-                st.source_upscale = annotation_file.background.source_upscale;
-                st.background_shadow = annotation_file.background.shadow;
-                st.background_insert = annotation_file.background.insert;
-                st.auto_balance = annotation_file.background.auto_balance;
-                st.background_alignment =
-                    crate::annotations::background_alignment_from_serializable(
-                        annotation_file.background.alignment,
-                    );
-                st.background_corner_radius = annotation_file.background.corner_radius;
-                st.background_aspect_ratio =
-                    crate::annotations::crop_aspect_ratio_from_serializable(
-                        annotation_file.background.aspect_ratio,
-                    );
+                // Per-image composition: padding, both shadows and the rest are
+                // part of this image's saved record, not the global prefs.
+                st.apply_persisted_background(&annotation_file.background);
                 st.static_image_transform = annotation_file.static_image_transform.sanitized();
 
                 // Load annotations into state
@@ -1278,11 +1261,20 @@ fn setup_editor_window_full(
         if st.background_style != BackgroundStyle::None {
             let session = motion_host.session();
             let mut runtime = session.runtime.borrow_mut();
-            let (appearance, frame) = {
+            let (appearance, frame, scene_shadow) = {
                 let motion = &mut runtime.motion;
-                (&mut motion.appearance, &mut motion.frame)
+                (
+                    &mut motion.appearance,
+                    &mut motion.frame,
+                    &mut motion.scene_shadow,
+                )
             };
-            background_panel::sync_static_appearance_to_motion(&st, appearance, frame);
+            background_panel::sync_static_appearance_to_motion(
+                &st,
+                appearance,
+                frame,
+                scene_shadow,
+            );
             runtime.refresh_motion_surfaces();
         }
     }
@@ -2678,6 +2670,14 @@ fn setup_editor_window_full(
         crop_apply_btn: crop_apply_btn.clone(),
         crop_cancel_btn: crop_cancel_btn.clone(),
         sync_motion_crop_history: sync_motion_crop_history.clone(),
+        undo_motion_history: Rc::new({
+            let session = motion_host.session();
+            move || session.runtime.borrow_mut().undo_motion()
+        }),
+        redo_motion_history: Rc::new({
+            let session = motion_host.session();
+            move || session.runtime.borrow_mut().redo_motion()
+        }),
         draw_btn: draw_btn.clone(),
         arrow_btn: arrow_btn.clone(),
         line_btn: line_btn.clone(),
@@ -2809,13 +2809,15 @@ fn setup_editor_window_full(
 }
 
 fn image_session_snapshot(state: &EditorState) -> crate::annotations::ImageSessionSnapshot {
+    let (shadow_profile, cast_light) = background_panel::persisted_shadows(state);
     crate::annotations::ImageSessionSnapshot::from_editor(
         state.base_image.width(),
         state.base_image.height(),
         &state.actions,
         &state.background_style,
         state.background_padding,
-        state.background_shadow,
+        shadow_profile,
+        cast_light,
         state.background_insert,
         state.auto_balance,
         state.background_alignment,

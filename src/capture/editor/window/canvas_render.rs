@@ -39,8 +39,7 @@ use crate::recording::editor::window::custom_wallpaper_popover::bitmap_to_surfac
 
 use super::motion_mode::MotionRuntime;
 use super::motion_render::{
-    draw_frozen_card, paint_card_shadow, paint_motion_scene_shadow, static_card_appearance,
-    MotionStage,
+    draw_frozen_card, paint_card_shadow, static_card_appearance, MotionStage,
 };
 
 /// Working width for the on-screen gradient fill. A gradient is smooth, so the
@@ -405,6 +404,13 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
     let wallpaper_cache = wallpaper_cache.clone();
     let motion_runtime = motion_runtime.clone();
     drawing_area.set_draw_func(move |_, context, width, height| {
+        // Appearance edits live in the Motion history, so the toolbar's Undo has
+        // to stay reachable while the still's own stack is empty. Read it before
+        // taking the state lock to keep one borrow order.
+        let (motion_can_undo, motion_can_redo) = motion_runtime
+            .try_borrow()
+            .map(|runtime| runtime.motion_history_availability())
+            .unwrap_or((false, false));
         // IMPORTANT: do not hold the state mutex while performing cairo drawing.
         // The async effects pipeline also locks this mutex on the GTK thread to apply results;
         // holding it here can cause UI stalls/deadlocks.
@@ -422,7 +428,6 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             background_aspect_ratio,
             background_insert,
             background_alignment,
-            background_shadow,
             shadow_opacity,
             shadow_blur,
             shadow_offset_x,
@@ -433,7 +438,6 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             border_thickness,
             border_color,
             frame_style,
-            scene_shadow,
             selected_tool,
             crop_rect,
             selected_action,
@@ -463,7 +467,6 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 st.background_aspect_ratio,
                 st.background_insert,
                 st.background_alignment,
-                st.background_shadow,
                 st.shadow_opacity,
                 st.shadow_blur,
                 st.shadow_offset_x,
@@ -474,7 +477,6 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                 st.border_thickness,
                 st.border_color,
                 st.frame_style,
-                st.scene_shadow.clone(),
                 st.selected_tool,
                 st.crop_rect,
                 st.selected_action().cloned(),
@@ -498,8 +500,8 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             )
         };
 
-        undo_btn_draw.set_sensitive(can_undo);
-        redo_btn_draw.set_sensitive(can_redo);
+        undo_btn_draw.set_sensitive(can_undo || motion_can_undo);
+        redo_btn_draw.set_sensitive(can_redo || motion_can_redo);
         delete_selected_btn_draw.set_sensitive(can_delete);
 
         let image_width = working_image.width() as f64;
@@ -521,7 +523,6 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
             let layout = BackgroundComposition::new(image_width, image_height)
                 .with_style(background_style.clone())
                 .with_padding(background_padding)
-                .with_shadow(background_shadow)
                 .with_shadow_profile(
                     shadow_opacity,
                     shadow_blur,
@@ -605,7 +606,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         let canvas_t = t;
 
         // The rectangle the background fill covers is the static scene, the
-        // same rectangle the Motion stage bounds the card in. Scene Shadows
+        // same rectangle the Motion stage bounds the card in. Cast light
         // shade it in both passes.
         let scene_stage = MotionStage::rect_at(
             canvas_t.offset_x,
@@ -860,10 +861,6 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                     virtual_h * canvas_t.scale,
                     background_noise,
                 );
-                // Scene Shadows underlay: over the fill, under the card, its
-                // backings and its drop shadow. No fill means no scene to read
-                // the shading against (the inspector says so), so it is skipped.
-                paint_motion_scene_shadow(context, scene_stage, &scene_shadow, true);
             }
 
             if liquid_group {
@@ -905,9 +902,6 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                     shadow_offset_y,
                 );
                 *transform_draw.lock().unwrap() = t;
-                if has_background {
-                    paint_motion_scene_shadow(context, scene_stage, &scene_shadow, false);
-                }
                 return;
             }
 
@@ -998,6 +992,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
                         shadow_opacity,
                         shadow_blur,
                         (shadow_offset_x, shadow_offset_y),
+                        interactive_frame,
                     );
                 }
             } else {
@@ -1298,14 +1293,7 @@ pub(super) fn install_canvas_draw_func(input: CanvasDrawInputs<'_>) {
         }
         let _ = context.restore();
 
-        // Scene Shadows overlay: above the card and its annotations, matching
-        // the Motion overlay pass. Handles and edit outlines are editor
-        // chrome, not content, so they must not dim under the shade: drop back
-        // to view space for the pass, then carry on in image space.
         let _ = context.restore();
-        if has_background {
-            paint_motion_scene_shadow(context, scene_stage, &scene_shadow, false);
-        }
         let _ = context.save();
         context.translate(t.offset_x, t.offset_y);
         context.scale(t.scale, t.scale);

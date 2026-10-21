@@ -60,6 +60,8 @@ pub(super) struct EventContext {
     pub crop_apply_btn: Button,
     pub crop_cancel_btn: Button,
     pub sync_motion_crop_history: Rc<dyn Fn()>,
+    pub undo_motion_history: Rc<dyn Fn() -> bool>,
+    pub redo_motion_history: Rc<dyn Fn() -> bool>,
     pub draw_btn: Button,
     pub arrow_btn: Button,
     pub line_btn: Button,
@@ -150,6 +152,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         crop_apply_btn,
         crop_cancel_btn,
         sync_motion_crop_history,
+        undo_motion_history,
+        redo_motion_history,
         draw_btn,
         arrow_btn,
         line_btn,
@@ -355,6 +359,8 @@ pub(super) fn wire_editor_events(ctx: EventContext) {
         &sync_select_inspector,
         &sync_motion_crop_history,
         &sync_static_transform,
+        &undo_motion_history,
+        &redo_motion_history,
     );
 
     wire_canvas_drag(

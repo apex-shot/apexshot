@@ -3409,3 +3409,60 @@ msgstr "Esta licencia pertenece a otro dispositivo"
 
 msgid "Upgrade to Studio — $39 with 12 months of updates"
 msgstr "Actualiza a Studio — 39 $ con 12 meses de actualizaciones"
+
+msgid "Shadow softness"
+msgstr "Suavidad de la sombra"
+
+msgid "Shadow rotation"
+msgstr "Rotación de la sombra"
+
+msgid "Shadow size"
+msgstr "Tamaño de la sombra"
+
+msgid "Shadow horizontal offset"
+msgstr "Desplazamiento horizontal de la sombra"
+
+msgid "Shadow vertical offset"
+msgstr "Desplazamiento vertical de la sombra"
+
+msgid "Reset every Scene Shadows control."
+msgstr "Restablece todos los controles de Sombras de escena."
+
+msgid "Card shadow"
+msgstr "Sombra de la tarjeta"
+
+msgid "Cast light"
+msgstr "Luz proyectada"
+
+msgid "Light strength"
+msgstr "Intensidad de la luz"
+
+msgid "Reset every Cast light control."
+msgstr "Restablece todos los controles de la luz proyectada."
+
+msgid "Add a background to use Cast light in image mode."
+msgstr "Añade un fondo para usar la luz proyectada en modo imagen."
+
+msgid "Choose a Cast light preset before adjusting its strength."
+msgstr "Elige un ajuste de luz proyectada antes de cambiar su intensidad."
+
+msgid "Choose a Cast light preset before adjusting its shape."
+msgstr "Elige un ajuste de luz proyectada antes de cambiar su forma."
+
+msgid "Choose a preset to enable Cast light strength and placement."
+msgstr "Elige un ajuste para activar la intensidad y la posición de la luz proyectada."
+
+msgid "Increase Cast light strength to see the effect and change its placement."
+msgstr "Aumenta la intensidad de la luz para ver el efecto y cambiar su posición."
+
+msgid "Spread"
+msgstr "Amplio"
+
+msgid "Hug"
+msgstr "Ajustado"
+
+msgid "Adaptive"
+msgstr "Adaptativo"
+
+msgid "Adjust Light"
+msgstr "Ajustar la luz"

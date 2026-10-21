@@ -47,12 +47,72 @@ pub struct BackgroundSettings {
     pub source_upscale: crate::capture::editor::upscale::SourceUpscale,
     pub style: BackgroundStyle,
     pub padding: f64,
+    /// Legacy single-strength drop shadow. New files still write a value
+    /// derived from `shadow_profile` so builds that predate the shared
+    /// controls keep showing a shadow; it is only read when the profile is
+    /// absent.
+    #[serde(default = "default_legacy_shadow")]
     pub shadow: f64,
+    /// The card's drop shadow as the shared Appearance controls describe it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shadow_profile: Option<ShadowProfileSettings>,
+    /// The Cast light layer, stored in the same shape as the Motion sidecar so
+    /// both files describe one layer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cast_light: Option<crate::capture::editor::motion_project::MotionSceneShadowFile>,
     pub insert: f64,
     pub auto_balance: bool,
     pub alignment: BackgroundAlignment,
     pub corner_radius: f64,
     pub aspect_ratio: CropAspectRatio,
+}
+
+fn default_legacy_shadow() -> f64 {
+    15.0
+}
+
+/// The card's drop shadow, in the units the shared Appearance panel uses.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct ShadowProfileSettings {
+    pub opacity: f64,
+    pub blur: f64,
+    pub offset_x: f64,
+    pub offset_y: f64,
+}
+
+impl Default for ShadowProfileSettings {
+    fn default() -> Self {
+        // The shipped MotionAppearance shadow, so a file without a profile
+        // restores the shadow the panel itself starts from.
+        Self {
+            opacity: 0.0,
+            blur: 16.0,
+            offset_x: 0.0,
+            offset_y: 16.0,
+        }
+    }
+}
+
+impl BackgroundSettings {
+    /// The card shadow this file describes. A file written before the shared
+    /// controls has only the strength scalar, so its opacity is that scalar's
+    /// own 0-60 range mapped back to 0-1 and its blur and offset take the
+    /// shipped defaults. The scalar's shipped default of 15 means "never set":
+    /// the shared controls never rendered it, so restoring 0.5 from it would
+    /// add a shadow the file never showed.
+    pub fn effective_shadow_profile(&self) -> ShadowProfileSettings {
+        self.shadow_profile.unwrap_or_else(|| {
+            let untouched = (self.shadow - default_legacy_shadow()).abs() < f64::EPSILON;
+            ShadowProfileSettings {
+                opacity: if untouched {
+                    ShadowProfileSettings::default().opacity
+                } else {
+                    (self.shadow / 30.0).clamp(0.0, 1.0)
+                },
+                ..ShadowProfileSettings::default()
+            }
+        })
+    }
 }
 
 impl Default for BackgroundSettings {
@@ -62,6 +122,8 @@ impl Default for BackgroundSettings {
             style: BackgroundStyle::None,
             padding: 0.0,
             shadow: 15.0,
+            shadow_profile: None,
+            cast_light: None,
             insert: 0.0,
             auto_balance: false,
             alignment: BackgroundAlignment::Center,
@@ -477,7 +539,6 @@ mod tests {
             720,
         );
         file.background = BackgroundSettings {
-            source_upscale: Default::default(),
             style: BackgroundStyle::Gradient {
                 index: 4,
                 gradient: None,
@@ -489,11 +550,82 @@ mod tests {
             alignment: BackgroundAlignment::BottomRight,
             corner_radius: 32.0,
             aspect_ratio: CropAspectRatio::SixteenNine,
+            ..Default::default()
         };
 
         let json = serde_json::to_string_pretty(&file).unwrap();
         let parsed: AnnotationFile = serde_json::from_str(&json).unwrap();
 
         assert_eq!(parsed.background, file.background);
+    }
+
+    /// The card shadow profile and the Cast light layer must survive the still's
+    /// own sidecar, so a reopened image does not depend on the Motion sidecar
+    /// for either.
+    #[test]
+    fn background_persists_the_shadow_profile_and_the_cast_light_layer() {
+        use crate::capture::editor::motion_project::MotionSceneShadowFile;
+        use crate::recording::editor::model::{MotionSceneShadow, MotionSceneShadowPreset};
+
+        let layer = MotionSceneShadow {
+            preset: MotionSceneShadowPreset::Hug,
+            opacity: 0.6,
+            light: (-0.4, 0.2),
+        };
+        let settings = BackgroundSettings {
+            shadow_profile: Some(ShadowProfileSettings {
+                opacity: 0.7,
+                blur: 22.0,
+                offset_x: 8.0,
+                offset_y: -4.0,
+            }),
+            cast_light: Some(MotionSceneShadowFile::from(&layer)),
+            ..Default::default()
+        };
+
+        let value = serde_json::to_value(&settings).unwrap();
+        let restored: BackgroundSettings = serde_json::from_value(value).unwrap();
+
+        assert_eq!(restored, settings);
+        assert_eq!(
+            restored.effective_shadow_profile(),
+            ShadowProfileSettings {
+                opacity: 0.7,
+                blur: 22.0,
+                offset_x: 8.0,
+                offset_y: -4.0,
+            }
+        );
+        let restored_layer = MotionSceneShadow::from(restored.cast_light.as_ref().unwrap());
+        assert_eq!(restored_layer, layer);
+    }
+
+    /// A sidecar written before the shared controls existed has only the
+    /// strength scalar: its opacity comes back from that scalar and the layer
+    /// is off, instead of the file failing to parse.
+    #[test]
+    fn a_legacy_background_derives_its_shadow_from_the_strength_scalar() {
+        let json = serde_json::json!({
+            "style": { "type": "none" },
+            "padding": 24.0,
+            "shadow": 30.0,
+            "insert": 0.0,
+            "auto_balance": false,
+            "alignment": "center",
+            "corner_radius": 18.0,
+            "aspect_ratio": "original"
+        });
+        let settings: BackgroundSettings = serde_json::from_value(json).unwrap();
+
+        assert!(settings.cast_light.is_none());
+        let profile = settings.effective_shadow_profile();
+        assert!((profile.opacity - 1.0).abs() < f64::EPSILON);
+        assert_eq!(profile.blur, ShadowProfileSettings::default().blur);
+        assert_eq!(profile.offset_y, ShadowProfileSettings::default().offset_y);
+
+        // The scalar's shipped default means "never set": it must not
+        // resurrect a shadow the file never showed.
+        let untouched = BackgroundSettings::default();
+        assert!((untouched.effective_shadow_profile().opacity).abs() < f64::EPSILON);
     }
 }

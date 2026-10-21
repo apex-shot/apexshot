@@ -39,6 +39,10 @@ fn draw_transformed_card(
             appearance.shadow_opacity,
             appearance.shadow_blur,
             appearance.shadow_position,
+            // A live preview or scrub already downsamples the card texture, so
+            // a coarser shadow mask is invisible against it and keeps the
+            // frame cheap.
+            filter == Filter::Bilinear,
         );
     }
 
@@ -406,6 +410,10 @@ fn rounded_motion_surface(surface: &ImageSurface, radius: f64) -> Option<ImageSu
 /// number of on-screen pixels of blur and offset at any window size.
 /// `radius` is the card's own corner radius in that same space, so the
 /// silhouette follows the rounded card instead of showing square corners.
+/// `interactive` asks for a cheaper mask: a pointer-driven control (the light
+/// pad) repaints this on every frame, and the full-resolution mask costs more
+/// than the movement is worth while the gesture is in flight. The settled
+/// frame still paints at full resolution.
 pub(crate) fn paint_card_shadow(
     context: &Context,
     stage: MotionStage,
@@ -414,6 +422,7 @@ pub(crate) fn paint_card_shadow(
     opacity: f64,
     blur: f64,
     position: (f64, f64),
+    interactive: bool,
 ) {
     let blur = blur.max(0.0);
     let opacity = opacity.clamp(0.0, 1.0);
@@ -451,7 +460,8 @@ pub(crate) fn paint_card_shadow(
     // Rasterize one shadow silhouette, then blur its alpha mask. The previous
     // implementation painted concentric polygon copies, leaving staircase
     // edges and making blur look like a larger solid shadow.
-    let render_scale = (720.0 / stage.bounds_w.max(stage.bounds_h)).min(1.0);
+    let mask_edge = if interactive { 320.0 } else { 720.0 };
+    let render_scale = (mask_edge / stage.bounds_w.max(stage.bounds_h)).min(1.0);
     let mask_w = (stage.bounds_w * render_scale).ceil().max(1.0) as i32;
     let mask_h = (stage.bounds_h * render_scale).ceil().max(1.0) as i32;
     let blurred_surface = (|| {

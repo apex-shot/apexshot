@@ -3397,3 +3397,60 @@ msgstr "Эта лицензия принадлежит другому устро
 
 msgid "Upgrade to Studio — $39 with 12 months of updates"
 msgstr "Перейти на Studio — 39 $ с обновлениями на 12 месяцев"
+
+msgid "Shadow softness"
+msgstr "Мягкость тени"
+
+msgid "Shadow rotation"
+msgstr "Поворот тени"
+
+msgid "Shadow size"
+msgstr "Размер тени"
+
+msgid "Shadow horizontal offset"
+msgstr "Горизонтальное смещение тени"
+
+msgid "Shadow vertical offset"
+msgstr "Вертикальное смещение тени"
+
+msgid "Reset every Scene Shadows control."
+msgstr "Сбрасывает все настройки теней сцены."
+
+msgid "Card shadow"
+msgstr "Тень карточки"
+
+msgid "Cast light"
+msgstr "Проецируемый свет"
+
+msgid "Light strength"
+msgstr "Сила света"
+
+msgid "Reset every Cast light control."
+msgstr "Сбрасывает все параметры проецируемого света."
+
+msgid "Add a background to use Cast light in image mode."
+msgstr "Добавьте фон, чтобы использовать проецируемый свет в режиме изображения."
+
+msgid "Choose a Cast light preset before adjusting its strength."
+msgstr "Выберите шаблон проецируемого света, прежде чем менять его силу."
+
+msgid "Choose a Cast light preset before adjusting its shape."
+msgstr "Выберите шаблон проецируемого света, прежде чем менять его форму."
+
+msgid "Choose a preset to enable Cast light strength and placement."
+msgstr "Выберите шаблон, чтобы включить силу света и его размещение."
+
+msgid "Increase Cast light strength to see the effect and change its placement."
+msgstr "Увеличьте силу света, чтобы увидеть эффект и изменить его размещение."
+
+msgid "Spread"
+msgstr "Широкий"
+
+msgid "Hug"
+msgstr "Прилегающая"
+
+msgid "Adaptive"
+msgstr "Адаптивная"
+
+msgid "Adjust Light"
+msgstr "Настроить свет"
