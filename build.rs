@@ -56,6 +56,8 @@ fn build_capture_overlay() {
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/recording.h");
     #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/recording_settings.h");
+    #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/main.cpp");
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/quick_access.cpp");
@@ -63,6 +65,16 @@ fn build_capture_overlay() {
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/quick_access.h");
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/recording.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/recording_settings.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/settings_store.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/settings_store.h");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/capture_sound.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/capture_sound.h");
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/recording_controls.cpp");
     #[rustfmt::skip]
@@ -90,7 +102,19 @@ fn build_capture_overlay() {
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/ocr.cpp");
     #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/ocr.h");
+    #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/qr.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/qr.h");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/third_party/quirc/decode.c");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/third_party/quirc/identify.c");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/third_party/quirc/quirc.c");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/third_party/quirc/version_db.c");
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/win_util.h");
     #[rustfmt::skip]
