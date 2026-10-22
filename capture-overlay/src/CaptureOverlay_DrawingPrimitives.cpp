@@ -12,6 +12,12 @@
 #include <algorithm>
 #include <cmath>
 
+// MSVC does not define M_PI without _USE_MATH_DEFINES. The value matches the
+// one <cmath> exposes on glibc, so Linux output is unchanged.
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 void roundedRectPath(QPainterPath& path, double x, double y,
                      double w, double h, double r)
 {

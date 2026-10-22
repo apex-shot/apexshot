@@ -6,6 +6,73 @@ use gtk4::{
     Image, Label, Orientation, ResponseType,
 };
 
+#[cfg(target_os = "windows")]
+fn raise_shortcut_dialog(dialog: &Dialog) {
+    use windows_sys::core::BOOL;
+    use windows_sys::Win32::Foundation::{HWND, LPARAM};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowTextW, GetWindowThreadProcessId, SetForegroundWindow, SetWindowPos,
+        HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+    };
+
+    struct Search {
+        pid: u32,
+        title: String,
+        found: HWND,
+    }
+
+    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let search = &mut *(lparam as *mut Search);
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(hwnd, &mut pid);
+        if pid != search.pid {
+            return 1;
+        }
+
+        let mut buffer = [0u16; 256];
+        let len = GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32);
+        if len <= 0 {
+            return 1;
+        }
+        let title = String::from_utf16_lossy(&buffer[..len as usize]);
+        if !search.title.is_empty() && title == search.title {
+            search.found = hwnd;
+            return 0;
+        }
+        1
+    }
+
+    let mut search = Search {
+        pid: std::process::id(),
+        title: dialog
+            .title()
+            .map(|title| title.to_string())
+            .unwrap_or_else(|| "Set Shortcut".to_string()),
+        found: std::ptr::null_mut(),
+    };
+
+    unsafe {
+        EnumWindows(Some(enum_proc), &mut search as *mut Search as LPARAM);
+        if search.found.is_null() {
+            return;
+        }
+        SetWindowPos(
+            search.found,
+            HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+        );
+        SetForegroundWindow(search.found);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
+fn raise_shortcut_dialog(_dialog: &Dialog) {}
+
 fn normalize_shortcut_key_name(key_name: &str) -> Option<String> {
     let trimmed = key_name.trim();
     if trimmed.is_empty() {
@@ -125,12 +192,18 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
 
         let dialog = Dialog::builder()
             .transient_for(&parent)
-            .modal(true)
+            // Non-modal on Windows: if the owned window is ever obscured, the
+            // user can still close Settings instead of being trapped.
+            .modal(!cfg!(target_os = "windows"))
             .title(t("Set Shortcut"))
             .deletable(false)
             .default_width(400)
             .default_height(290)
             .build();
+        // Windows: closing Settings must take the dialog with it. On Linux the
+        // modal dialog already blocks that close path, so leave it untouched.
+        #[cfg(target_os = "windows")]
+        dialog.set_destroy_with_parent(true);
         dialog.add_css_class("shortcut-capture-dialog");
         if !prefers_dark_glass_theme() {
             dialog.add_css_class("editor-theme-light");
@@ -310,6 +383,15 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
         let stack_for_present = stack.clone();
         let suppression_ready_for_present = suppression_ready.clone();
         dialog_for_present.present();
+        #[cfg(target_os = "windows")]
+        {
+            // The GTK surface may not have its native window yet on the same
+            // frame; raise it once the dialog has been mapped.
+            let dialog_for_raise = dialog_for_present.clone();
+            gtk4::glib::timeout_add_local_once(std::time::Duration::from_millis(60), move || {
+                raise_shortcut_dialog(&dialog_for_raise);
+            });
+        }
         stack_for_present.set_visible_child_name("listening");
         suppression_ready_for_present.set(true);
         request_hotkey_suppressed(true);

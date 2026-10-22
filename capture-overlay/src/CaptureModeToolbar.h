@@ -28,6 +28,7 @@ public:
         bool recording = false;
         bool microphone = false;
         bool speaker = false;
+        bool scroll = false;
     };
 
     // When a display was chosen before opening the toolbar, keep the toolbar
@@ -36,9 +37,18 @@ public:
     // `recordingAvailable` is false on platforms that refuse video recording
     // (Fedora). The Video item then stays visible but disabled and says why,
     // rather than accepting a click the recorder will reject.
+    //
+    // `allowAreaRecording` lets a host that has no recording panel of its own
+    // record the Area item. The Linux overlay keeps the default: its recording
+    // panel selects the region, so the toolbar's Area slot stays a screenshot
+    // action there.
+    // `enableScrollCapture` adds a Scroll mode that combines with Window or
+    // Area. It is opt-in so the Linux overlay keeps its existing toolbar.
     static Result choose(QLocalServer* controlServer = nullptr,
                          QScreen* targetScreen = nullptr,
-                         bool recordingAvailable = true);
+                         bool recordingAvailable = true,
+                         bool allowAreaRecording = false,
+                         bool enableScrollCapture = false);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -49,8 +59,13 @@ protected:
 
 private:
     explicit CaptureModeToolbar(QScreen* screen, bool screenIsLocked = false,
-                                bool recordingAvailable = true);
+                                bool recordingAvailable = true,
+                                bool allowAreaRecording = false,
+                                bool enableScrollCapture = false);
 
+    int itemCount() const;
+    int itemWidth(int index) const;
+    QString labelFor(int index) const;
     QRectF itemRect(int index) const;
     int hitTest(const QPoint& point) const;
     void focusAndRaise();
@@ -60,6 +75,8 @@ private:
     QScreen* m_screen;
     bool m_screenIsLocked = false;
     bool m_recordingAvailable = true;
+    bool m_allowAreaRecording = false;
+    bool m_enableScrollCapture = false;
     Action m_action = Action::Cancel;
     int m_hovered = -1;
     bool m_finished = false;
@@ -68,4 +85,5 @@ private:
     bool m_recording = false;
     bool m_microphone = false;
     bool m_speaker = false;
+    bool m_scroll = false;
 };

@@ -2,6 +2,7 @@ use crate::config::AppConfig;
 use crate::i18n::t;
 use gtk4::prelude::*;
 use gtk4::{glib, Align, Box as GtkBox, Button, CheckButton, Entry, Label, Orientation};
+#[cfg(not(target_os = "windows"))]
 use std::process::Command;
 
 pub struct CloudSettingsWidgets {
@@ -497,6 +498,18 @@ fn initial(email: &str) -> String {
 /// Start the device-code login in a terminal so the user never has to sign in
 /// again through a browser session of their own. Shared with the History
 /// window's Cloud page, which watches the config for the session to land.
+#[cfg(target_os = "windows")]
+pub(crate) fn spawn_apexshot_login() {
+    crate::utils::notify::desktop_notification(
+        "ApexShot Cloud",
+        "Cloud sign-in is not available in the Windows build yet.",
+    );
+}
+
+/// Start the device-code login in a terminal so the user never has to sign in
+/// again through a browser session of their own. Shared with the History
+/// window's Cloud page, which watches the config for the session to land.
+#[cfg(not(target_os = "windows"))]
 pub(crate) fn spawn_apexshot_login() {
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
     // Try a few terminal launchers; the first one that spawns wins.

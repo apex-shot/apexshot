@@ -11,7 +11,7 @@ pub fn build_studio_section() -> GtkBox {
     section.set_halign(Align::Fill);
     section.set_valign(Align::Start);
     section.set_hexpand(true);
-    section.set_margin_top(20);
+    section.set_margin_top(super::PAGE_TOP_MARGIN);
     section.set_margin_bottom(8);
 
     let intro = Label::new(Some(&t(

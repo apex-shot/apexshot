@@ -1,0 +1,40 @@
+[package]
+name = "apexshot-windows-settings"
+version = "0.2.36"
+edition = "2021"
+description = "GTK4 settings window for the Windows build of ApexShot"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/apex-shot/apexshot"
+
+[lib]
+name = "apexshot_settings"
+path = "src/lib.rs"
+
+[[bin]]
+name = "apexshot-settings"
+path = "src/main.rs"
+
+[dependencies]
+gtk4 = { version = "0.10", features = ["v4_10"] }
+relm4-icons = "0.10.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_yml = "0.0.12"
+serde_json = "1.0"
+anyhow = "1.0"
+dirs = "6.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Graphics_Gdi",
+    "Win32_UI_HiDpi",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+relm4-icons-build = "0.10.1"
+
+[dev-dependencies]
+pretty_assertions = "1.4"
+
+[features]
+flatpak = []
