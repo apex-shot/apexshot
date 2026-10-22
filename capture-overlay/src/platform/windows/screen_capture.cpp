@@ -323,6 +323,23 @@ bool captureWindowPixels(HWND hwnd,
 
 } // namespace
 
+QRect clientRect(quintptr id)
+{
+    const HWND hwnd = reinterpret_cast<HWND>(id);
+    if (!hwnd || !IsWindow(hwnd))
+        return {};
+
+    RECT client{};
+    if (!GetClientRect(hwnd, &client))
+        return {};
+    POINT origin{0, 0};
+    if (!ClientToScreen(hwnd, &origin))
+        return {};
+
+    return QRect(QPoint(origin.x, origin.y),
+                 QSize(client.right - client.left, client.bottom - client.top));
+}
+
 bool captureWindow(quintptr id, bool includeCursor, CaptureResult& out, QString& outError)
 {
     const HWND hwnd = reinterpret_cast<HWND>(id);

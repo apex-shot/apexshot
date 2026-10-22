@@ -67,6 +67,10 @@ bool captureRegion(const QRect& region, bool includeCursor, CaptureResult& out, 
 /// Grab one window by its WindowInfo::id.
 bool captureWindow(quintptr id, bool includeCursor, CaptureResult& out, QString& outError);
 
+/// Client area of a window in device pixels, excluding its frame, menu bar,
+/// and title bar. Empty when the window or its client rect is unavailable.
+QRect clientRect(quintptr id);
+
 /// Grab the bounding box of every display, for selections that span monitors.
 bool captureVirtualDesktop(bool includeCursor, CaptureResult& out, QString& outError);
 

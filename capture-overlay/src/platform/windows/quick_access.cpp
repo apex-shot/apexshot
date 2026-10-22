@@ -9,6 +9,8 @@
 #include "platform/windows/recording_controls.h"
 #include "platform/windows/recording_countdown.h"
 #include "platform/windows/recording_mask.h"
+#include "platform/windows/scroll_capture.h"
+#include "platform/windows/scroll_controls.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -256,12 +258,13 @@ void paintPanel(QPainter& painter, const QRectF& rect, const QColor& fill, qreal
     painter.drawPath(body);
 }
 
-QString sizeLabel(const QImage& image, const QString& path)
+QString sizeLabel(const QImage& image, const QString& path, const QSize& originalSize = QSize())
 {
+    const QSize size = originalSize.isValid() ? originalSize : image.size();
     const qint64 bytes = path.isEmpty() ? 0 : QFileInfo(path).size();
     return QStringLiteral("%1 \u00D7 %2   -   %3 KB")
-        .arg(image.width())
-        .arg(image.height())
+        .arg(size.width())
+        .arg(size.height())
         .arg(bytes / 1024);
 }
 
@@ -1112,7 +1115,7 @@ class ResultCard : public QWidget
 {
 public:
     ResultCard(const QImage& image, const QString& path, const QString& ocrText,
-               const QString& hintText)
+               const QString& hintText, const QSize& originalSize = QSize())
     {
         setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
         setAttribute(Qt::WA_TranslucentBackground, true);
@@ -1123,12 +1126,20 @@ public:
         layout->setSpacing(8);
 
         auto* thumb = new QLabel;
-        thumb->setPixmap(QPixmap::fromImage(image).scaled(
+        QImage preview = image;
+        // A scrolling capture is much taller than it is wide; showing all of
+        // it in the card turns into a hairline. Preview its first screenful.
+        if (image.height() > image.width() * 2) {
+            const int previewHeight =
+                std::min(image.height(), std::max(1, image.width() * 9 / 16));
+            preview = image.copy(0, 0, image.width(), previewHeight);
+        }
+        thumb->setPixmap(QPixmap::fromImage(preview).scaled(
             420, 240, Qt::KeepAspectRatio, Qt::SmoothTransformation));
         thumb->setAlignment(Qt::AlignCenter);
         layout->addWidget(thumb);
 
-        auto* info = new QLabel(sizeLabel(image, path));
+        auto* info = new QLabel(sizeLabel(image, path, originalSize));
         info->setFont(uiFont(12));
         info->setStyleSheet(QStringLiteral("color:#a4a4ac;"));
         layout->addWidget(info);
@@ -1218,6 +1229,7 @@ struct CaptureOptions {
     bool recording = false;
     bool microphone = false;
     bool speaker = false;
+    bool scroll = false;
 };
 
 class Shell : public QObject
@@ -1331,6 +1343,38 @@ public:
         chooseWindow(options);
     }
 
+    void scrollWindow()
+    {
+        CaptureOptions options;
+        options.scroll = true;
+        chooseWindow(options);
+    }
+
+    void scrollArea()
+    {
+        CaptureOptions options;
+        options.scroll = true;
+        captureArea(options);
+    }
+
+    void demoScrollWindow()
+    {
+        const QString needle =
+            qEnvironmentVariable("APEXSHOT_SCROLL_TITLE", QStringLiteral("Notepad"));
+        for (const Platform::WindowInfo& window : Platform::windows()) {
+            if (!window.title.contains(needle, Qt::CaseInsensitive))
+                continue;
+            const QRect client = Platform::clientRect(window.id);
+            startScrollCapture(client.isEmpty() ? window.geometry : client, window.id);
+            QTimer::singleShot(30000, this, [this] {
+                if (m_scrollSession)
+                    m_scrollSession->stop();
+            });
+            return;
+        }
+        debugLog(QStringLiteral("scroll demo: no window matching '%1'").arg(needle));
+    }
+
     void demoRecord()
     {
         CaptureOptions options;
@@ -1439,9 +1483,11 @@ private:
                                                                         const QRect& selection) {
                 if (selection.isEmpty() || cropped.isNull())
                     return;
-                if (options.recording) {
-                    const QRect desktop(selection.topLeft() + frozen.geometry.topLeft(),
-                                        selection.size());
+                const QRect desktop(selection.topLeft() + frozen.geometry.topLeft(),
+                                    selection.size());
+                if (options.scroll) {
+                    startScrollCapture(desktop, 0);
+                } else if (options.recording) {
                     startRecording(desktop, cropped, options);
                 } else {
                     present(cropped, options);
@@ -1509,7 +1555,10 @@ private:
             QString error;
             if (!Platform::captureWindow(window.id, false, capture, error))
                 return;
-            if (options.recording) {
+            if (options.scroll) {
+                const QRect client = Platform::clientRect(window.id);
+                startScrollCapture(client.isEmpty() ? window.geometry : client, window.id);
+            } else if (options.recording) {
                 startRecording(window.geometry,
                                capture.image,
                                options,
@@ -1646,6 +1695,113 @@ private:
         controls->raise();
     }
 
+    void startScrollCapture(const QRect& region, quintptr windowId = 0)
+    {
+        if (region.isEmpty())
+            return;
+        if (m_scrollSession && m_scrollSession->isActive()) {
+            debugLog(QStringLiteral("scroll ignored: a capture is already running"));
+            return;
+        }
+        if (m_activeSession && m_activeSession->isActive()) {
+            debugLog(QStringLiteral("scroll ignored: a recording is running"));
+            return;
+        }
+        if (m_countdownPill)
+            return;
+
+        const int seconds = recordingCountdownSeconds();
+        if (seconds > 0) {
+            m_countdownPill = new RecordingCountdown(
+                seconds,
+                region,
+                [this, region, windowId] {
+                    m_countdownPill = nullptr;
+                    beginScrollCapture(region, windowId);
+                });
+            m_countdownPill->show();
+            return;
+        }
+
+        beginScrollCapture(region, windowId);
+    }
+
+    void beginScrollCapture(const QRect& region, quintptr windowId)
+    {
+        if (m_scrollSession && m_scrollSession->isActive())
+            return;
+        if (m_activeSession && m_activeSession->isActive())
+            return;
+
+        auto* session = new Platform::ScrollCaptureSession(this);
+        m_scrollSession = session;
+
+        connect(session,
+                &Platform::ScrollCaptureSession::statusChanged,
+                this,
+                [](const QString& status) {
+                    debugLog(QStringLiteral("scroll: %1").arg(status));
+                });
+        connect(session,
+                &Platform::ScrollCaptureSession::finished,
+                this,
+                [this, session](bool ok, const QImage& image, const QString& error) {
+                    if (m_scrollSession == session)
+                        m_scrollSession = nullptr;
+                    if (m_scrollMask) {
+                        m_scrollMask->close();
+                        m_scrollMask = nullptr;
+                    }
+                    session->deleteLater();
+                    if (ok)
+                        presentScroll(image);
+                    else if (!error.isEmpty())
+                        QMessageBox::warning(nullptr, QStringLiteral("Scroll capture"), error);
+                });
+
+        QString error;
+        if (!session->start(region, windowId, error)) {
+            if (m_scrollSession == session)
+                m_scrollSession = nullptr;
+            session->deleteLater();
+            QMessageBox::warning(nullptr, QStringLiteral("Scroll capture"), error);
+            return;
+        }
+
+        // The session resolves the scrollable UI element first; the mask is
+        // shown afterwards so ElementFromPoint sees the target window.
+        m_scrollMask = new RecordingMask(region);
+        m_scrollMask->show();
+        m_scrollMask->raise();
+
+        debugLog(QStringLiteral("scroll: region=%1,%2 %3x%4 window=%5")
+                     .arg(region.x())
+                     .arg(region.y())
+                     .arg(region.width())
+                     .arg(region.height())
+                     .arg(windowId));
+
+        auto* controls = new ScrollControls(session, region);
+        controls->show();
+        controls->raise();
+    }
+
+    void presentScroll(const QImage& image)
+    {
+        if (image.isNull())
+            return;
+        const QString path = saveCapture(image);
+        QGuiApplication::clipboard()->setImage(image);
+        auto* card = new ResultCard(image,
+                                    path,
+                                    QString(),
+                                    QStringLiteral("Scroll capture saved"),
+                                    image.size());
+        card->show();
+        card->raise();
+        card->activateWindow();
+    }
+
     void presentRecording(const QImage& thumbnail, const QString& path)
     {
         const QImage thumb = thumbnail.isNull()
@@ -1717,6 +1873,8 @@ private:
     Platform::RecordingSession* m_activeSession = nullptr;
     QPointer<RecordingCountdown> m_countdownPill;
     QPointer<RecordingMask> m_recordingMask;
+    QPointer<Platform::ScrollCaptureSession> m_scrollSession;
+    QPointer<RecordingMask> m_scrollMask;
 };
 
 } // namespace
@@ -1783,6 +1941,10 @@ int run(QApplication& app)
         QTimer::singleShot(0, shell, [shell] { shell->demoRecordArea(); });
         return app.exec();
     }
+    if (arguments.contains(QStringLiteral("--demo-scroll-window"))) {
+        QTimer::singleShot(0, shell, [shell] { shell->demoScrollWindow(); });
+        return app.exec();
+    }
 
     auto* tray = new QSystemTrayIcon(appIcon(), &app);
     tray->setToolTip(QStringLiteral("ApexShot"));
@@ -1811,6 +1973,12 @@ int run(QApplication& app)
     recordMenu->setToolTipsVisible(true);
     if (!recordingAvailable)
         recordMenu->setToolTip(recordingError);
+
+    QMenu* scrollMenu = menu->addMenu(QStringLiteral("Scroll capture"));
+    QAction* scrollWindowAction = scrollMenu->addAction(QStringLiteral("Window"));
+    QAction* scrollAreaAction = scrollMenu->addAction(QStringLiteral("Area"));
+    scrollMenu->setToolTipsVisible(true);
+    scrollMenu->setToolTip(QStringLiteral("Stitch a tall window or area into one image"));
 
     recordMenu->addSeparator();
     QMenu* countdownMenu = recordMenu->addMenu(QStringLiteral("Countdown"));
@@ -1842,6 +2010,10 @@ int run(QApplication& app)
                      [shell] { shell->recordArea(); });
     QObject::connect(recordWindow, &QAction::triggered, shell,
                      [shell] { shell->recordWindow(); });
+    QObject::connect(scrollWindowAction, &QAction::triggered, shell,
+                     [shell] { shell->scrollWindow(); });
+    QObject::connect(scrollAreaAction, &QAction::triggered, shell,
+                     [shell] { shell->scrollArea(); });
     QObject::connect(quit, &QAction::triggered, &app, [shell, &app] {
         // A quit would destroy the session and discard its segments. Save
         // first; the next Quit, once the result card is up, exits.

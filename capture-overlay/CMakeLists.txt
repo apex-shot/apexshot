@@ -24,6 +24,10 @@ if(WIN32)
         src/platform/windows/recording_countdown.h
         src/platform/windows/recording_mask.cpp
         src/platform/windows/recording_mask.h
+        src/platform/windows/scroll_capture.cpp
+        src/platform/windows/scroll_capture.h
+        src/platform/windows/scroll_controls.cpp
+        src/platform/windows/scroll_controls.h
         src/platform/windows/screen_capture.cpp
         src/platform/windows/window_list.cpp
         src/platform/windows/ocr.cpp
@@ -59,7 +63,7 @@ if(WIN32)
 
     target_link_libraries(apexshot-capture
         PRIVATE Qt5::Widgets Qt5::DBus Qt5::Network
-            windowsapp runtimeobject dwmapi
+            windowsapp runtimeobject dwmapi uiautomationcore
     )
 
     if(MSVC)
