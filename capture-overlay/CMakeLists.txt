@@ -22,6 +22,8 @@ if(WIN32)
         src/platform/windows/recording_controls.h
         src/platform/windows/recording_countdown.cpp
         src/platform/windows/recording_countdown.h
+        src/platform/windows/recording_mask.cpp
+        src/platform/windows/recording_mask.h
         src/platform/windows/screen_capture.cpp
         src/platform/windows/window_list.cpp
         src/platform/windows/ocr.cpp

@@ -121,8 +121,14 @@ after a successful save or discard.
 - A segmented recording bar follows the Linux controls: an inset stop/timer
   segment in the app's danger red, then pause/resume and discard separated by
   hairline rules. It stays above other windows with `Platform::keepTopmost` and
-  is marked `WDA_EXCLUDEFROMCAPTURE`, so a full-screen recording does not
-  contain its own controls.
+  is marked `WDA_EXCLUDEFROMCAPTURE`, so the recording does not contain its own
+  controls.
+- Area and window recordings dim the rest of the desktop through a
+  click-through, capture-excluded mask, leaving the recorded rectangle clear
+  with a thin accent border.
+- The bar prefers the dimmed space below the selection, then above it. When
+  neither side fits it moves inside the recording at the top, so the bottom of
+  the area stays readable.
 - On save, the existing result card shows the capture thumbnail, dimensions,
   file size, Open, and Show in folder.
 

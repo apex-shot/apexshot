@@ -332,12 +332,24 @@ void RecordingControls::positionOnScreen()
         x = available.center().x() - width() / 2;
         y = available.top() + kMargin;
     } else {
+        constexpr int gap = 12;
+        const int minY = available.top() + kMargin;
+        const int maxY = available.bottom() - height() - kMargin;
+
         x = region.center().x() - width() / 2;
-        y = region.center().y() - height() / 2;
+
+        // Prefer the dimmed space below the selection, then above it. Only
+        // when neither side fits does the bar move inside the recording, and
+        // then it stays at the top so the bottom of the area stays readable.
+        y = region.bottom() + 1 + gap;
+        if (y > maxY) {
+            const int above = region.top() - gap - height();
+            y = above >= minY ? above : region.top() + kMargin;
+        }
+
         x = std::max(available.left() + kMargin,
                      std::min(x, available.right() - width() - kMargin));
-        y = std::max(available.top() + kMargin,
-                     std::min(y, available.bottom() - height() - kMargin));
+        y = std::max(minY, std::min(y, maxY));
     }
     move(x, y);
 }

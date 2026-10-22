@@ -8,6 +8,7 @@
 #include "platform/windows/qr.h"
 #include "platform/windows/recording_controls.h"
 #include "platform/windows/recording_countdown.h"
+#include "platform/windows/recording_mask.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -1341,6 +1342,24 @@ public:
         });
     }
 
+    void demoRecordArea()
+    {
+        CaptureOptions options;
+        options.recording = true;
+        const QRect region(360, 220, 900, 520);
+        Platform::CaptureResult still;
+        QString error;
+        Platform::captureRegion(region, false, still, error);
+        startRecording(region,
+                       still.image,
+                       options,
+                       Platform::RecordingRequest::Target::Area);
+        QTimer::singleShot((recordingCountdownSeconds() + 5) * 1000, this, [this] {
+            if (m_activeSession)
+                m_activeSession->stop();
+        });
+    }
+
     bool hasActiveRecording() const
     {
         return m_activeSession && m_activeSession->isActive();
@@ -1552,6 +1571,14 @@ private:
             return;
         }
 
+        // Area and window recordings leave the rest of the desktop dimmed, so
+        // the recorded region reads as the live one.
+        if (target != Platform::RecordingRequest::Target::Screen && !m_recordingMask) {
+            m_recordingMask = new RecordingMask(region);
+            m_recordingMask->show();
+            m_recordingMask->raise();
+        }
+
         auto* session = new Platform::RecordingSession(this);
         m_activeSession = session;
 
@@ -1581,6 +1608,10 @@ private:
                                            const QString& error) {
                     if (m_activeSession == session)
                         m_activeSession = nullptr;
+                    if (m_recordingMask) {
+                        m_recordingMask->close();
+                        m_recordingMask = nullptr;
+                    }
                     session->deleteLater();
                     if (kept)
                         presentRecording(thumbnail, path);
@@ -1592,6 +1623,10 @@ private:
         if (!session->start(request, error)) {
             if (m_activeSession == session)
                 m_activeSession = nullptr;
+            if (m_recordingMask) {
+                m_recordingMask->close();
+                m_recordingMask = nullptr;
+            }
             session->deleteLater();
             QMessageBox::warning(nullptr, QStringLiteral("Recording"), error);
             return;
@@ -1681,6 +1716,7 @@ private:
     bool m_menuOpen = false;
     Platform::RecordingSession* m_activeSession = nullptr;
     QPointer<RecordingCountdown> m_countdownPill;
+    QPointer<RecordingMask> m_recordingMask;
 };
 
 } // namespace
@@ -1741,6 +1777,10 @@ int run(QApplication& app)
     }
     if (arguments.contains(QStringLiteral("--demo-record"))) {
         QTimer::singleShot(0, shell, [shell] { shell->demoRecord(); });
+        return app.exec();
+    }
+    if (arguments.contains(QStringLiteral("--demo-record-area"))) {
+        QTimer::singleShot(0, shell, [shell] { shell->demoRecordArea(); });
         return app.exec();
     }
 
