@@ -66,7 +66,10 @@ repetitive text from matching one line off.
 
 ## UI
 
-- Tray **Scroll capture → Window / Area**.
+- The capture toolbar gains a **Scroll** cell, next to Window and Area. While
+  armed, Display, OCR, and Timer are disabled; Window and Area choose the
+  source. The tray keeps **Scroll capture → Window / Area** for direct access.
+  The cell is opt-in, so the Linux overlay's 8-item toolbar is unchanged.
 - The same large countdown circle used by recording, so the target can be
   arranged before the first frame.
 - A click-through, capture-excluded mask dims everything outside the scroll

@@ -32,15 +32,16 @@ constexpr QColor kMuted(164, 164, 172);
 constexpr int kPanelHeight = 82;
 constexpr int kOuterPad = 8;
 constexpr int kItemHeight = 66;
-constexpr int kItemWidths[] = {66, 58, 76, 76, 66, 62, 68, 52};
-constexpr int kItemCount = sizeof(kItemWidths) / sizeof(kItemWidths[0]);
-const char* kLabels[] = {"Shot", "Video", "Display", "Window", "Area", "OCR", "Timer", ""};
+constexpr int kItemWidths[] = {66, 58, 76, 76, 66, 62, 68, 58, 52};
+const char* kLabels[] = {"Shot", "Video", "Display", "Window", "Area", "OCR", "Timer",
+                         "Scroll", ""};
 
-int toolbarWidth()
+int toolbarWidth(bool enableScrollCapture)
 {
+    const int count = enableScrollCapture ? 9 : 8;
     int width = kOuterPad * 2;
-    for (const int itemWidth : kItemWidths) {
-        width += itemWidth;
+    for (int i = 0; i < count; ++i) {
+        width += (i == count - 1) ? 52 : kItemWidths[i];
     }
     return width + 3 * 13;
 }
@@ -66,18 +67,20 @@ Qt::WindowFlags toolbarFlags()
 
 CaptureModeToolbar::CaptureModeToolbar(QScreen* screen, bool screenIsLocked,
                                        bool recordingAvailable,
-                                       bool allowAreaRecording)
+                                       bool allowAreaRecording,
+                                       bool enableScrollCapture)
     : QWidget(nullptr, toolbarFlags())
     , m_screen(screen)
     , m_screenIsLocked(screenIsLocked)
     , m_recordingAvailable(recordingAvailable)
     , m_allowAreaRecording(allowAreaRecording)
+    , m_enableScrollCapture(enableScrollCapture)
 {
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose, false);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
-    setFixedSize(toolbarWidth(), kPanelHeight);
+    setFixedSize(toolbarWidth(m_enableScrollCapture), kPanelHeight);
     setWindowTitle(QStringLiteral("ApexShot Capture"));
 
     const QRect available = screen ? screen->availableGeometry() : QRect(0, 0, width(), height());
@@ -87,7 +90,8 @@ CaptureModeToolbar::CaptureModeToolbar(QScreen* screen, bool screenIsLocked,
 CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServer,
                                                        QScreen* targetScreen,
                                                        bool recordingAvailable,
-                                                       bool allowAreaRecording)
+                                                       bool allowAreaRecording,
+                                                       bool enableScrollCapture)
 {
     QScreen* screen = targetScreen;
     if (!screen) {
@@ -98,7 +102,7 @@ CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServe
     }
 
     CaptureModeToolbar toolbar(screen, targetScreen != nullptr, recordingAvailable,
-                               allowAreaRecording);
+                               allowAreaRecording, enableScrollCapture);
     QEventLoop loop;
     QObject::connect(&toolbar, &QObject::destroyed, &loop, &QEventLoop::quit);
     if (controlServer) {
@@ -149,7 +153,8 @@ CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServe
             toolbar.m_timerSeconds,
             toolbar.m_recording,
             toolbar.m_microphone,
-            toolbar.m_speaker};
+            toolbar.m_speaker,
+            toolbar.m_scroll};
 }
 
 void CaptureModeToolbar::focusAndRaise()
@@ -169,21 +174,40 @@ void CaptureModeToolbar::focusAndRaise()
     requestShellOverlayFocus(windowTitle());
 }
 
+int CaptureModeToolbar::itemCount() const
+{
+    return m_enableScrollCapture ? 9 : 8;
+}
+
+int CaptureModeToolbar::itemWidth(int index) const
+{
+    return index == itemCount() - 1 ? 52 : kItemWidths[index];
+}
+
+QString CaptureModeToolbar::labelFor(int index) const
+{
+    if (index == itemCount() - 1)
+        return QString();
+    if (m_enableScrollCapture && index == 7)
+        return QStringLiteral("Scroll");
+    return QString::fromLatin1(kLabels[index]);
+}
+
 QRectF CaptureModeToolbar::itemRect(int index) const
 {
     qreal x = kOuterPad;
     for (int i = 0; i < index; ++i) {
-        x += kItemWidths[i];
+        x += itemWidth(i);
         if (separatorAfter(i)) {
             x += 13;
         }
     }
-    return QRectF(x, kOuterPad, kItemWidths[index], kItemHeight);
+    return QRectF(x, kOuterPad, itemWidth(index), kItemHeight);
 }
 
 int CaptureModeToolbar::hitTest(const QPoint& point) const
 {
-    for (int i = 0; i < kItemCount; ++i) {
+    for (int i = 0; i < itemCount(); ++i) {
         if (itemRect(i).contains(point)) {
             return i;
         }
@@ -227,19 +251,21 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
     painter.setBrush(Qt::NoBrush);
     painter.drawPath(modeGroupPath);
 
-    for (int i = 0; i < kItemCount; ++i) {
+    for (int i = 0; i < itemCount(); ++i) {
         const QRectF cell = itemRect(i);
         const bool disabled = (!m_recordingAvailable && i == 1)
             || (m_recording && i == 4 && !m_allowAreaRecording)
-            || (!m_recording && i == 2 && m_ocr)
-            || (!m_recording && i == 3 && (m_timerSeconds > 0 || m_ocr))
-            || (!m_recording && i == 4 && m_timerSeconds > 0)
-            || (!m_recording && i == 5 && m_timerSeconds > 0)
-            || (!m_recording && i == 6 && m_ocr);
-        const bool active = (i == 0 && !m_recording)
+            || (m_scroll && (i == 2 || i == 5 || i == 6))
+            || (!m_recording && !m_scroll && i == 2 && m_ocr)
+            || (!m_recording && !m_scroll && i == 3 && (m_timerSeconds > 0 || m_ocr))
+            || (!m_recording && !m_scroll && i == 4 && m_timerSeconds > 0)
+            || (!m_recording && !m_scroll && i == 5 && m_timerSeconds > 0)
+            || (!m_recording && !m_scroll && i == 6 && m_ocr);
+        const bool active = (i == 0 && !m_recording && !m_scroll)
             || (i == 1 && m_recording)
-            || (!m_recording && i == 5 && m_ocr)
-            || (!m_recording && i == 6 && m_timerSeconds > 0)
+            || (m_enableScrollCapture && i == 7 && m_scroll)
+            || (!m_recording && !m_scroll && i == 5 && m_ocr)
+            || (!m_recording && !m_scroll && i == 6 && m_timerSeconds > 0)
             || (m_recording && i == 5 && m_microphone)
             || (m_recording && i == 6 && m_speaker);
         const bool hovered = i == m_hovered && !disabled;
@@ -258,21 +284,22 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
         }
 
         QColor color = active ? Qt::white : (disabled ? QColor(115, 115, 122) : kText);
-        const qreal iconY = i == 7 ? cell.center().y() : cell.y() + 25;
+        const bool isClose = i == itemCount() - 1;
+        const qreal iconY = isClose ? cell.center().y() : cell.y() + 25;
         drawIcon(painter, i, QPointF(cell.center().x(), iconY), color);
 
-        if (i != 7) {
+        if (!isClose) {
             QFont font(QStringLiteral("Inter"));
             font.setPixelSize(11);
             font.setWeight(active ? QFont::DemiBold : QFont::Medium);
             painter.setFont(font);
             painter.setPen(active ? Qt::white : (disabled ? QColor(115, 115, 122) : kMuted));
-            QString label = QString::fromLatin1(kLabels[i]);
+            QString label = labelFor(i);
             if (m_recording && i == 5) {
                 label = QStringLiteral("Mic");
             } else if (m_recording && i == 6) {
                 label = QStringLiteral("Speaker");
-            } else if (!m_recording && i == 6 && m_timerSeconds > 0) {
+            } else if (!m_recording && !m_scroll && i == 6 && m_timerSeconds > 0) {
                 label = QStringLiteral("%1s").arg(m_timerSeconds);
             }
             painter.drawText(QRectF(cell.x(), cell.y() + 40, cell.width(), 18), Qt::AlignCenter, label);
@@ -374,7 +401,19 @@ void CaptureModeToolbar::drawIcon(QPainter& painter,
         painter.drawLine(QPointF(x, y + 1), QPointF(x, y - 4));
         painter.drawLine(QPointF(x, y + 1), QPointF(x + 4, y + 3));
         break;
-    case 7: // Close
+    case 7: // Scroll (Quick Access) or Close (8-item toolbar)
+        if (m_enableScrollCapture) {
+            painter.drawRoundedRect(QRectF(x - 6, y - 10, 12, 20), 6, 6);
+            painter.drawLine(QPointF(x, y - 10), QPointF(x, y - 4));
+            painter.drawLine(QPointF(x - 4, y + 2), QPointF(x, y + 6));
+            painter.drawLine(QPointF(x + 4, y + 2), QPointF(x, y + 6));
+            break;
+        }
+        painter.setPen(QPen(color, 2.6, Qt::SolidLine, Qt::RoundCap));
+        painter.drawLine(QPointF(x - 6, y - 6), QPointF(x + 6, y + 6));
+        painter.drawLine(QPointF(x + 6, y - 6), QPointF(x - 6, y + 6));
+        break;
+    case 8: // Close, when Scroll occupies 7
         painter.setPen(QPen(color, 2.6, Qt::SolidLine, Qt::RoundCap));
         painter.drawLine(QPointF(x - 6, y - 6), QPointF(x + 6, y + 6));
         painter.drawLine(QPointF(x + 6, y - 6), QPointF(x - 6, y + 6));
@@ -390,11 +429,12 @@ void CaptureModeToolbar::mouseMoveEvent(QMouseEvent* event)
         m_hovered = hovered;
         const bool disabled = (!m_recordingAvailable && hovered == 1)
             || (m_recording && hovered == 4 && !m_allowAreaRecording)
-            || (!m_recording && hovered == 2 && m_ocr)
-            || (!m_recording && hovered == 3 && (m_timerSeconds > 0 || m_ocr))
-            || (!m_recording && hovered == 4 && m_timerSeconds > 0)
-            || (!m_recording && hovered == 5 && m_timerSeconds > 0)
-            || (!m_recording && hovered == 6 && m_ocr);
+            || (m_scroll && (hovered == 2 || hovered == 5 || hovered == 6))
+            || (!m_recording && !m_scroll && hovered == 2 && m_ocr)
+            || (!m_recording && !m_scroll && hovered == 3 && (m_timerSeconds > 0 || m_ocr))
+            || (!m_recording && !m_scroll && hovered == 4 && m_timerSeconds > 0)
+            || (!m_recording && !m_scroll && hovered == 5 && m_timerSeconds > 0)
+            || (!m_recording && !m_scroll && hovered == 6 && m_ocr);
         setCursor(disabled || hovered < 0 ? Qt::ArrowCursor : Qt::PointingHandCursor);
         // A disabled item never hovers, so explain the Video slot on itself.
         if (!m_recordingAvailable && hovered == 1) {
@@ -410,24 +450,47 @@ void CaptureModeToolbar::mouseMoveEvent(QMouseEvent* event)
 
 void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
 {
-    if (event->button() != Qt::LeftButton) {
+    if (event->button() != Qt::LeftButton)
+        return;
+
+    const int index = hitTest(event->pos());
+    if (index < 0)
+        return;
+
+    if (index == itemCount() - 1) {
+        finish(Action::Cancel);
         return;
     }
-    switch (hitTest(event->pos())) {
+
+    if (m_enableScrollCapture && index == 7) {
+        m_recording = false;
+        m_scroll = !m_scroll;
+        if (m_scroll) {
+            m_ocr = false;
+            m_timerSeconds = 0;
+        }
+        update();
+        return;
+    }
+
+    switch (index) {
     case 0:
         m_recording = false;
+        m_scroll = false;
         update();
         break;
     case 1:
-        if (!m_recordingAvailable) {
+        if (!m_recordingAvailable)
             break;
-        }
+        m_scroll = false;
         m_recording = true;
         m_ocr = false;
         m_timerSeconds = 0;
         update();
         break;
     case 2:
+        if (m_scroll)
+            break;
         if (m_recording || !m_ocr) {
             QScreen* currentScreen = m_screenIsLocked
                 ? nullptr
@@ -439,21 +502,19 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         }
         break;
     case 3:
-        if (m_recording || (m_timerSeconds == 0 && !m_ocr)) {
+        if (m_scroll || m_recording || (m_timerSeconds == 0 && !m_ocr))
             finish(Action::Window);
-        }
         break;
     case 4:
-        if ((!m_recording && m_timerSeconds == 0)
-            || (m_recording && m_allowAreaRecording)) {
+        if ((!m_recording && !m_scroll && m_timerSeconds == 0)
+            || ((m_recording || m_scroll) && m_allowAreaRecording))
             finish(Action::Area);
-        }
         break;
     case 5:
         if (m_recording) {
             m_microphone = !m_microphone;
             update();
-        } else if (m_timerSeconds == 0) {
+        } else if (!m_scroll && m_timerSeconds == 0) {
             m_ocr = !m_ocr;
             update();
         }
@@ -462,13 +523,10 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         if (m_recording) {
             m_speaker = !m_speaker;
             update();
-        } else if (!m_ocr) {
+        } else if (!m_scroll && !m_ocr) {
             m_timerSeconds = m_timerSeconds == 0 ? 3 : (m_timerSeconds == 3 ? 5 : (m_timerSeconds == 5 ? 10 : 0));
             update();
         }
-        break;
-    case 7:
-        finish(Action::Cancel);
         break;
     default:
         break;

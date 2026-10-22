@@ -1243,10 +1243,10 @@ public:
 
         QString recordingError;
         const bool recordingAvailable = Platform::RecordingSession::available(&recordingError);
-        // Quick Access has no recording panel of its own, so the toolbar's
-        // Area slot is how an area recording is chosen.
+        // Quick Access has no recording panel or tray-first scroll entry, so
+        // the toolbar exposes both Area recording and the Scroll mode.
         const CaptureModeToolbar::Result result =
-            CaptureModeToolbar::choose(nullptr, nullptr, recordingAvailable, true);
+            CaptureModeToolbar::choose(nullptr, nullptr, recordingAvailable, true, true);
 
         m_menuOpen = false;
 
@@ -1256,6 +1256,7 @@ public:
         options.recording = result.recording;
         options.microphone = result.microphone;
         options.speaker = result.speaker;
+        options.scroll = result.scroll;
         if (options.recording && !recordingAvailable) {
             debugLog(QStringLiteral("recording unavailable: %1").arg(recordingError));
             return;
@@ -1263,6 +1264,10 @@ public:
 
         switch (result.action) {
         case CaptureModeToolbar::Action::Display:
+            // Display is disabled in Scroll mode; it only becomes reachable
+            // here when the mode toggle is off.
+            if (options.scroll)
+                break;
             withCountdown(options, [this, options] { captureDisplay(options); });
             break;
         case CaptureModeToolbar::Action::Window:
