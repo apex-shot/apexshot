@@ -15,8 +15,9 @@ class ScrollCaptureSession;
 /// Floating control bar for a scrolling capture.
 ///
 /// Matches the recording bar: an inset status/frame-count segment, then a
-/// Done action and a discard button. Done stops scrolling and stitches what
-/// has been captured so far.
+/// Finish action and a discard button. The capture saves automatically when
+/// the scroll reaches the end; Finish stops early and stitches the portion
+/// captured so far.
 class ScrollControls : public QWidget
 {
     Q_OBJECT
@@ -36,11 +37,11 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
-    enum class Button { None, Body, Done, Discard };
+    enum class Button { None, Body, Finish, Discard };
 
     Button hitTest(const QPoint& point) const;
     QRectF segmentRect() const;
-    QRectF doneRect() const;
+    QRectF finishRect() const;
     QRectF discardRect() const;
     void positionOnScreen();
 

@@ -13,13 +13,14 @@
 #include <QScreen>
 #include <QShowEvent>
 #include <QTimer>
+#include <QToolTip>
 
 #include <algorithm>
 #include <cmath>
 
 namespace {
 
-constexpr int kWidth = 284;
+constexpr int kWidth = 272;
 constexpr int kHeight = 62;
 constexpr int kMargin = 24;
 
@@ -52,18 +53,6 @@ QScreen* screenForRegion(const QRect& deviceRect)
             return screen;
     }
     return QGuiApplication::primaryScreen();
-}
-
-void drawScrollGlyph(QPainter& painter, const QPointF& center)
-{
-    painter.setPen(QPen(kMuted, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawRoundedRect(
-        QRectF(center.x() - 7.0, center.y() - 10.0, 14.0, 20.0), 6.0, 6.0);
-    painter.drawLine(QPointF(center.x(), center.y() - 10.0),
-                     QPointF(center.x(), center.y() - 5.0));
-    painter.drawLine(QPointF(center.x(), center.y() + 5.0),
-                     QPointF(center.x(), center.y() + 10.0));
 }
 
 void drawTrashIcon(QPainter& painter, const QRectF& rect)
@@ -116,23 +105,23 @@ ScrollControls::ScrollControls(Platform::ScrollCaptureSession* session,
 
 QRectF ScrollControls::segmentRect() const
 {
-    return QRectF(6, 5, 150, 52);
+    return QRectF(6, 5, 136, 52);
 }
 
-QRectF ScrollControls::doneRect() const
+QRectF ScrollControls::finishRect() const
 {
-    return QRectF(162, 14, 70, 34);
+    return QRectF(148, 14, 72, 34);
 }
 
 QRectF ScrollControls::discardRect() const
 {
-    return QRectF(238, 5, 40, 52);
+    return QRectF(226, 5, 40, 52);
 }
 
 ScrollControls::Button ScrollControls::hitTest(const QPoint& point) const
 {
-    if (doneRect().contains(point))
-        return Button::Done;
+    if (finishRect().contains(point))
+        return Button::Finish;
     if (discardRect().contains(point))
         return Button::Discard;
     return Button::Body;
@@ -160,11 +149,9 @@ void ScrollControls::paintEvent(QPaintEvent*)
     painter.setBrush(kSegment);
     painter.drawRoundedRect(segment, 8, 8);
 
-    drawScrollGlyph(painter, QPointF(27.0, segment.center().y()));
-
     painter.setFont(uiFont(9, true));
     painter.setPen(kMuted);
-    painter.drawText(QRectF(44.0, 10.0, 106.0, 12.0),
+    painter.drawText(QRectF(18.0, 10.0, 118.0, 12.0),
                      Qt::AlignLeft | Qt::AlignVCenter,
                      QStringLiteral("SCROLL"));
 
@@ -174,23 +161,23 @@ void ScrollControls::paintEvent(QPaintEvent*)
         ? QStringLiteral("Stitching...")
         : (m_frames <= 0 ? QStringLiteral("Starting...")
                          : QStringLiteral("%1 frames").arg(m_frames));
-    painter.drawText(QRectF(44.0, 24.0, 106.0, 22.0),
+    painter.drawText(QRectF(18.0, 24.0, 118.0, 22.0),
                      Qt::AlignLeft | Qt::AlignVCenter,
                      label);
 
     painter.setPen(QPen(kSeparator, 1.0));
-    painter.drawLine(QPointF(158.5, 18.0), QPointF(158.5, kHeight - 18.0));
-    painter.drawLine(QPointF(234.5, 18.0), QPointF(234.5, kHeight - 18.0));
+    painter.drawLine(QPointF(145.5, 18.0), QPointF(145.5, kHeight - 18.0));
+    painter.drawLine(QPointF(223.5, 18.0), QPointF(223.5, kHeight - 18.0));
 
-    const QRectF done = doneRect();
+    const QRectF finish = finishRect();
     painter.setPen(Qt::NoPen);
     painter.setBrush(m_closing
                          ? QColor(70, 70, 76)
-                         : (m_hovered == Button::Done ? kAccentHover : kAccent));
-    painter.drawRoundedRect(done, 10, 10);
+                         : (m_hovered == Button::Finish ? kAccentHover : kAccent));
+    painter.drawRoundedRect(finish, 10, 10);
     painter.setFont(uiFont(12, true));
     painter.setPen(m_closing ? kMuted : Qt::white);
-    painter.drawText(done, Qt::AlignCenter, QStringLiteral("Done"));
+    painter.drawText(finish, Qt::AlignCenter, QStringLiteral("Finish"));
 
     if (m_hovered == Button::Discard && !m_closing) {
         painter.setPen(Qt::NoPen);
@@ -208,7 +195,7 @@ void ScrollControls::mousePressEvent(QMouseEvent* event)
     }
 
     switch (hitTest(event->pos())) {
-    case Button::Done:
+    case Button::Finish:
         if (m_closing)
             return;
         m_closing = true;
@@ -242,6 +229,13 @@ void ScrollControls::mouseMoveEvent(QMouseEvent* event)
     if (hovered != m_hovered) {
         m_hovered = hovered;
         setCursor(hovered == Button::Body ? Qt::SizeAllCursor : Qt::PointingHandCursor);
+        if (hovered == Button::Finish && !m_closing) {
+            QToolTip::showText(event->globalPos(),
+                               QStringLiteral("Stop now and stitch what has been captured"),
+                               this);
+        } else {
+            QToolTip::hideText();
+        }
         update();
     }
 }
@@ -255,6 +249,7 @@ void ScrollControls::mouseReleaseEvent(QMouseEvent* event)
 void ScrollControls::leaveEvent(QEvent* event)
 {
     m_hovered = Button::None;
+    QToolTip::hideText();
     update();
     QWidget::leaveEvent(event);
 }

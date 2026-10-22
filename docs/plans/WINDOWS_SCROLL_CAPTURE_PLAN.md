@@ -74,8 +74,9 @@ repetitive text from matching one line off.
   arranged before the first frame.
 - A click-through, capture-excluded mask dims everything outside the scroll
   region.
-- A segmented bar shows the frame count with **Done** and a discard button.
-  Done stitches what has been captured so far.
+- A segmented bar shows the frame count with **Finish** and a discard button.
+  The capture saves automatically when scrolling reaches the end; Finish stops
+  early and stitches the portion captured so far.
 - The result card previews the first screenful of the tall image, reports its
   true dimensions and file size, opens the PNG, and copies the image to the
   clipboard. The file is written to the temp capture directory.

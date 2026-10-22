@@ -403,10 +403,11 @@ void CaptureModeToolbar::drawIcon(QPainter& painter,
         break;
     case 7: // Scroll (Quick Access) or Close (8-item toolbar)
         if (m_enableScrollCapture) {
-            painter.drawRoundedRect(QRectF(x - 6, y - 10, 12, 20), 6, 6);
-            painter.drawLine(QPointF(x, y - 10), QPointF(x, y - 4));
-            painter.drawLine(QPointF(x - 4, y + 2), QPointF(x, y + 6));
-            painter.drawLine(QPointF(x + 4, y + 2), QPointF(x, y + 6));
+            // Two downward chevrons, matching the toolbar's line style.
+            painter.drawLine(QPointF(x - 7, y - 7), QPointF(x, y));
+            painter.drawLine(QPointF(x + 7, y - 7), QPointF(x, y));
+            painter.drawLine(QPointF(x - 7, y + 1), QPointF(x, y + 8));
+            painter.drawLine(QPointF(x + 7, y + 1), QPointF(x, y + 8));
             break;
         }
         painter.setPen(QPen(color, 2.6, Qt::SolidLine, Qt::RoundCap));
