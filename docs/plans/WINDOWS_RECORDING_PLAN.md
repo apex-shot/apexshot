@@ -208,6 +208,7 @@ source list is unchanged.
 - **Video editor, cursor track, and click effects.** Those live in the Rust
   editor and wait for the Rust crate to build on Windows.
 - **Recording settings surface.** Frame rate, resolution cap, quality tier, and
-  mono are persisted and applied, but the shell has no controls for them yet.
+  mono are persisted and applied, and the Rust settings window now edits them.
   Output folder and filename pattern remain fixed at Videos/ApexShotRec and the
-  timestamped default.
+  timestamped default there; the settings page exposes them and the shell reads
+  them from `settings.json`.

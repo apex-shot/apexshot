@@ -20,6 +20,10 @@ if(WIN32)
         src/platform/recording_settings.h
         src/platform/windows/recording.cpp
         src/platform/windows/recording_settings.cpp
+        src/platform/windows/settings_store.cpp
+        src/platform/windows/settings_store.h
+        src/platform/windows/capture_sound.cpp
+        src/platform/windows/capture_sound.h
         src/platform/windows/recording_controls.cpp
         src/platform/windows/recording_controls.h
         src/platform/windows/recording_countdown.cpp
@@ -60,12 +64,13 @@ if(WIN32)
 
     target_compile_definitions(apexshot-capture PRIVATE
         APEXSHOT_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts"
+        APEXSHOT_SOUND_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../assets/sounds"
         APEXSHOT_VERSION="${APEXSHOT_VERSION}"
     )
 
     target_link_libraries(apexshot-capture
         PRIVATE Qt5::Widgets Qt5::DBus Qt5::Network
-            windowsapp runtimeobject dwmapi uiautomationcore
+            windowsapp runtimeobject dwmapi uiautomationcore winmm
     )
 
     if(MSVC)
@@ -81,6 +86,8 @@ if(WIN32)
             src/platform/recording_settings.h
             src/platform/windows/recording.cpp
             src/platform/windows/recording_settings.cpp
+            src/platform/windows/settings_store.cpp
+            src/platform/windows/settings_store.h
         )
         target_include_directories(apexshot-recording-tests PRIVATE src)
         target_link_libraries(apexshot-recording-tests PRIVATE Qt5::Core Qt5::Gui)
@@ -97,6 +104,18 @@ if(WIN32)
         target_link_libraries(apexshot-recording-settings-tests PRIVATE Qt5::Core)
         add_test(NAME apexshot-recording-settings-tests
             COMMAND apexshot-recording-settings-tests)
+
+        add_executable(apexshot-settings-store-tests
+            tests/SettingsStoreTests.cpp
+            src/platform/recording_settings.h
+            src/platform/windows/recording_settings.cpp
+            src/platform/windows/settings_store.cpp
+            src/platform/windows/settings_store.h
+        )
+        target_include_directories(apexshot-settings-store-tests PRIVATE src)
+        target_link_libraries(apexshot-settings-store-tests PRIVATE Qt5::Core Qt5::Gui)
+        add_test(NAME apexshot-settings-store-tests
+            COMMAND apexshot-settings-store-tests)
     endif()
 
     install(TARGETS apexshot-capture

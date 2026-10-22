@@ -1,5 +1,6 @@
 # Rust / Cargo
 /target/
+/windows-ui/target/
 *.rs.bk
 
 # Pasted chat screenshots — references only, never committed

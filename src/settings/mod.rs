@@ -26,6 +26,10 @@ mod theme_picker;
 pub(crate) mod ui_support;
 pub(crate) mod windowing;
 
+/// Top inset for page content. The Windows surface removes the page-title row,
+/// so the first section needs only a hairline of breathing room.
+pub(crate) const PAGE_TOP_MARGIN: i32 = if cfg!(target_os = "windows") { 4 } else { 20 };
+
 use self::{
     actions::{install_checkbox_behaviors, save_settings, SaveInputs},
     after_capture::build_after_capture_section,

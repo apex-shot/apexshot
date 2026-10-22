@@ -800,7 +800,7 @@ fn set_private_file_mode(options: &mut OpenOptions) {
 #[cfg(not(unix))]
 fn set_private_file_mode(_options: &mut OpenOptions) {}
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;

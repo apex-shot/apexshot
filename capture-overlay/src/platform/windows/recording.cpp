@@ -1,6 +1,7 @@
 #include "platform/recording.h"
 
 #include "platform/recording_settings.h"
+#include "platform/windows/settings_store.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -167,16 +168,11 @@ QString loopbackDevice()
 
 QString defaultOutputPath()
 {
-    QString directory = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
-    if (directory.isEmpty())
-        directory = QDir::home().filePath(QStringLiteral("Videos"));
-    directory = QDir(directory).filePath(QStringLiteral("ApexShotRec"));
-    QDir().mkpath(directory);
-
-    const QString name = QStringLiteral("ApexShot Recording %1.mp4")
-                             .arg(QDateTime::currentDateTime().toString(
-                                 QStringLiteral("yyyy-MM-dd HH-mm-ss")));
-    return QDir(directory).filePath(name);
+    const Platform::ShellSettings settings = Platform::loadShellSettings();
+    const QString path =
+        Platform::shellRecordingOutputPath(settings, QDateTime::currentDateTime());
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    return path;
 }
 
 QString concatListPath(const QString& workDir)

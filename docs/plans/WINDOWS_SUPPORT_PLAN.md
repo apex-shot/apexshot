@@ -1,8 +1,8 @@
 # Windows Support Plan
 
 Status: in progress. The audit, the verification build, the Windows capture
-backends, and the Quick Access shell are done. Recording follows its own plan
-in [WINDOWS_RECORDING_PLAN.md](WINDOWS_RECORDING_PLAN.md).
+backends, the Quick Access shell, and the Rust settings surface are done.
+Recording follows its own plan in [WINDOWS_RECORDING_PLAN.md](WINDOWS_RECORDING_PLAN.md).
 
 ## Goal
 
@@ -163,14 +163,46 @@ in this repository.
 Note: use `/Z7` or a Release configuration with sccache. Debug `/Zi` makes
 parallel `cl.exe` runs collide on `vc140.pdb` (C1041).
 
+## Settings surface
+
+`windows-ui/` is a small Rust crate that builds `apexshot-settings.exe` with
+GTK4. It includes the Linux settings pages through `#[path]` rather than
+duplicating them, and supplies the Windows-only pieces (DPI handling, font
+registration, login autostart, Cloud/Studio facades, and the window shell).
+
+- The window is borderless with the app's own title bar, rounded corners, and a
+  single outline.
+- The full page list is present: General, Shortcuts, Quick Access, Recording,
+  Screenshots, Annotate, Cloud, Advanced, Studio, About. Pages whose runtime is
+  not implemented on Windows say so at the top and still persist their config.
+- Theme (System/Light/Dark) follows the Windows app theme for System and
+  applies immediately to the settings window.
+- Capture sounds are enabled: `assets/sounds/*.wav` are played by the C++ shell
+  through `PlaySoundW` when a capture freezes.
+- Saves write the usual YAML config plus `%APPDATA%/apexshot/settings.json`.
+  The C++ shell reads that JSON (`settings_store.cpp`) so the two processes
+  agree without a YAML dependency in Qt.
+
+Build (MSVC GTK4 from the gvsbuild release archive):
+
+```powershell
+. C:\dev\tools\devshell.ps1
+$env:PKG_CONFIG_PATH = 'C:/gtk/lib/pkgconfig'
+$env:PKG_CONFIG = 'C:\gtk\bin\pkg-config.exe'
+$env:PATH = "C:\gtk\bin;$env:PATH"
+cargo build --manifest-path windows-ui/Cargo.toml
+```
+
+The Qt capture shell launches the resulting executable from the tray's
+**Settings...** action, preferring `APEXSHOT_SETTINGS`, then a sibling
+`apexshot-settings.exe`.
+
 ## Deliberately out of scope
 
-- The GTK editor, preview overlay, settings, and onboarding. Those are 100% GTK
-  and stay Linux-only until a separate decision is made. The first Windows
-  release is capture, annotate-in-overlay, OCR, and save.
+- The GTK image editor, preview overlay, and onboarding. The settings surface
+  is the first Rust UI on Windows; the others need their own port.
 - GNOME extension, Flatpak, and Nix packaging.
-- Recording. The pipeline is PipeWire and GStreamer ximagesrc; it needs its own
-  plan. See [WINDOWS_RECORDING_PLAN.md](WINDOWS_RECORDING_PLAN.md).
+- Recording internals, which follow their own plan.
 
 ## Open decisions
 

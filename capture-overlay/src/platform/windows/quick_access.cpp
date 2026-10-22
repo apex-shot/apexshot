@@ -7,16 +7,19 @@
 #include "platform/recording_settings.h"
 #include "platform/windows/ocr.h"
 #include "platform/windows/qr.h"
+#include "platform/windows/capture_sound.h"
 #include "platform/windows/recording_controls.h"
 #include "platform/windows/recording_countdown.h"
 #include "platform/windows/recording_mask.h"
 #include "platform/windows/scroll_capture.h"
 #include "platform/windows/scroll_controls.h"
+#include "platform/windows/settings_store.h"
 
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
+#include <QCoreApplication>
 #include <QCursor>
 #include <QDateTime>
 #include <QDesktopServices>
@@ -37,6 +40,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPointer>
+#include <QProcess>
 #include <QRegion>
 #include <QScreen>
 #include <QSettings>
@@ -175,32 +179,54 @@ void debugLog(const QString& text)
     }
 }
 
-QString saveCapture(const QImage& image)
+qreal screenDprForPoint(const QPoint& point)
 {
-    const QString name = QStringLiteral("apexshot-quick-%1.png")
-                             .arg(QDateTime::currentDateTime().toString(
-                                 QStringLiteral("yyyyMMdd-HHmmss-zzz")));
-    const QString path = QDir(QDir::tempPath()).filePath(name);
-    return image.save(path, "PNG") ? path : QString();
+    if (QScreen* screen = QGuiApplication::screenAt(point))
+        return screen->devicePixelRatio();
+    if (QScreen* screen = QGuiApplication::primaryScreen())
+        return screen->devicePixelRatio();
+    return 1.0;
+}
+
+/// Write a capture using the folder, format, and HiDPI suffix from Settings.
+/// A capture the user asked not to keep still gets a temporary file so the
+/// result card can open it and the file-URL clipboard mode still works.
+QString saveCapture(const QImage& image, bool persist)
+{
+    const Platform::ShellSettings settings = Platform::loadShellSettings();
+    const QString directory =
+        persist ? Platform::shellScreenshotOutputDir(settings)
+                : QDir(QDir::tempPath()).filePath(QStringLiteral("ApexShot"));
+
+    QString path;
+    QString error;
+    if (!Platform::saveScreenshotImage(image,
+                                      settings,
+                                      directory,
+                                      screenDprForPoint(QCursor::pos()),
+                                      path,
+                                      error)) {
+        debugLog(QStringLiteral("save failed: %1").arg(error));
+        return QString();
+    }
+    return path;
 }
 
 QString videoOutputPath()
 {
-    QString directory = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
-    if (directory.isEmpty())
-        directory = QDir::home().filePath(QStringLiteral("Videos"));
-    directory = QDir(directory).filePath(QStringLiteral("ApexShotRec"));
-
-    const QString name = QStringLiteral("ApexShot Recording %1.mp4")
-                             .arg(QDateTime::currentDateTime().toString(
-                                 QStringLiteral("yyyy-MM-dd HH-mm-ss")));
-    return QDir(directory).filePath(name);
+    const Platform::ShellSettings settings = Platform::loadShellSettings();
+    const QString path = Platform::shellRecordingOutputPath(settings, QDateTime::currentDateTime());
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    return path;
 }
 
 constexpr int kDefaultRecordingCountdown = 3;
 
 int recordingCountdownSeconds()
 {
+    if (!Platform::loadShellSettings().recording.showCountdown)
+        return 0;
+
     QSettings settings;
     const int seconds =
         settings.value(QStringLiteral("recording/countdown"), kDefaultRecordingCountdown).toInt();
@@ -219,6 +245,29 @@ void setRecordingCountdownSeconds(int seconds)
 {
     QSettings settings;
     settings.setValue(QStringLiteral("recording/countdown"), seconds);
+}
+
+void openSettingsWindow()
+{
+    QString executable = qEnvironmentVariable("APEXSHOT_SETTINGS");
+    if (executable.isEmpty()) {
+        const QString sibling =
+            QDir(QCoreApplication::applicationDirPath())
+                .filePath(QStringLiteral("apexshot-settings.exe"));
+        if (QFileInfo::exists(sibling))
+            executable = sibling;
+    }
+    if (executable.isEmpty())
+        executable = QStringLiteral("apexshot-settings.exe");
+
+    if (!QProcess::startDetached(executable, {})) {
+        QMessageBox::warning(
+            nullptr,
+            QStringLiteral("ApexShot Settings"),
+            QStringLiteral("Could not start the settings window:\n%1\n\n"
+                           "Set APEXSHOT_SETTINGS to the settings executable.")
+                .arg(QDir::toNativeSeparators(executable)));
+    }
 }
 
 QIcon appIcon()
@@ -1122,6 +1171,11 @@ public:
         setAttribute(Qt::WA_TranslucentBackground, true);
         setAttribute(Qt::WA_DeleteOnClose, true);
 
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
+        const qreal scale = settings.quickAccess.overlayScale;
+        const int previewWidth = qMax(180, qRound(420 * scale));
+        const int previewHeight = qMax(100, qRound(240 * scale));
+
         auto* layout = new QVBoxLayout(this);
         layout->setContentsMargins(24, 22, 24, 24);
         layout->setSpacing(8);
@@ -1131,12 +1185,12 @@ public:
         // A scrolling capture is much taller than it is wide; showing all of
         // it in the card turns into a hairline. Preview its first screenful.
         if (image.height() > image.width() * 2) {
-            const int previewHeight =
+            const int previewHeightPixels =
                 std::min(image.height(), std::max(1, image.width() * 9 / 16));
-            preview = image.copy(0, 0, image.width(), previewHeight);
+            preview = image.copy(0, 0, image.width(), previewHeightPixels);
         }
         thumb->setPixmap(QPixmap::fromImage(preview).scaled(
-            420, 240, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+            previewWidth, previewHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation));
         thumb->setAlignment(Qt::AlignCenter);
         layout->addWidget(thumb);
 
@@ -1207,12 +1261,22 @@ public:
 
         adjustSize();
 
-        if (QScreen* screen = QGuiApplication::primaryScreen()) {
+        QScreen* screen = QGuiApplication::screenAt(QCursor::pos());
+        if (!screen)
+            screen = QGuiApplication::primaryScreen();
+        if (screen) {
             const QRect work = screen->availableGeometry();
-            move(work.right() - width() - 20, work.top() + 20);
+            const int x = settings.quickAccess.position == QLatin1String("Left")
+                ? work.left() + 20
+                : work.right() - width() - 20;
+            move(x, work.top() + 20);
         }
 
-        QTimer::singleShot(15000, this, &QWidget::close);
+        if (settings.quickAccess.autoCloseEnabled) {
+            QTimer::singleShot(settings.quickAccess.autoCloseSeconds * 1000,
+                               this,
+                               &QWidget::close);
+        }
     }
 
 protected:
@@ -1330,22 +1394,31 @@ public:
 
     void recordScreen()
     {
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
         CaptureOptions options;
         options.recording = true;
+        options.microphone = settings.recording.includeMicrophone;
+        options.speaker = settings.recording.includeSpeaker;
         captureDisplay(options);
     }
 
     void recordArea()
     {
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
         CaptureOptions options;
         options.recording = true;
+        options.microphone = settings.recording.includeMicrophone;
+        options.speaker = settings.recording.includeSpeaker;
         captureArea(options);
     }
 
     void recordWindow()
     {
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
         CaptureOptions options;
         options.recording = true;
+        options.microphone = settings.recording.includeMicrophone;
+        options.speaker = settings.recording.includeSpeaker;
         chooseWindow(options);
     }
 
@@ -1435,6 +1508,7 @@ private:
 
     void captureDisplay(const CaptureOptions& options)
     {
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
         const Platform::MonitorInfo target = Platform::monitorAt(QCursor::pos());
         const QVector<Platform::MonitorInfo> all = Platform::monitors();
         int index = 0;
@@ -1448,7 +1522,7 @@ private:
         if (options.recording) {
             Platform::CaptureResult still;
             QString stillError;
-            Platform::captureMonitor(index, false, still, stillError);
+            Platform::captureMonitor(index, settings.screenshots.showCursor, still, stillError);
             startRecording(target.geometry,
                            still.image,
                            options,
@@ -1458,8 +1532,9 @@ private:
 
         Platform::CaptureResult capture;
         QString error;
-        if (!Platform::captureMonitor(index, false, capture, error))
+        if (!Platform::captureMonitor(index, settings.screenshots.showCursor, capture, error))
             return;
+        Platform::playShutterSound();
         present(capture.image, options);
     }
 
@@ -1469,6 +1544,8 @@ private:
         QString error;
         if (!Platform::captureVirtualDesktop(false, frozen, error))
             return;
+        if (!options.recording && !options.scroll)
+            Platform::playShutterSound();
         startArea(frozen, AreaSelector::Mode::Area, options);
     }
 
@@ -1478,6 +1555,8 @@ private:
         QString error;
         if (!Platform::captureVirtualDesktop(false, frozen, error))
             return;
+        if (!options.recording && !options.scroll)
+            Platform::playShutterSound();
         startArea(frozen, AreaSelector::Mode::Crosshair, options);
     }
 
@@ -1526,6 +1605,7 @@ private:
 
     void chooseWindow(const CaptureOptions& options)
     {
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
         const QVector<Platform::WindowInfo> windows = Platform::windows();
         debugLog(QStringLiteral("chooseWindow: enumerated=%1").arg(windows.size()));
         if (windows.isEmpty())
@@ -1553,14 +1633,19 @@ private:
             debugLog(QStringLiteral("  window[%1] %2").arg(i).arg(items.at(i)));
 
         const QRect anchor(QCursor::pos(), QSize(1, 1));
-        auto* popup = new ListPopup(items, anchor, 460, [this, eligible, options](int index) {
+        auto* popup = new ListPopup(items, anchor, 460, [this, eligible, options, settings](int index) {
             if (index < 0 || index >= eligible.size())
                 return;
             const Platform::WindowInfo& window = eligible.at(index);
             Platform::CaptureResult capture;
             QString error;
-            if (!Platform::captureWindow(window.id, false, capture, error))
+            if (!Platform::captureWindow(window.id,
+                                         settings.screenshots.showCursor,
+                                         capture,
+                                         error))
                 return;
+            if (!options.recording && !options.scroll)
+                Platform::playShutterSound();
             if (options.scroll) {
                 const QRect client = Platform::clientRect(window.id);
                 startScrollCapture(client.isEmpty() ? window.geometry : client, window.id);
@@ -1637,19 +1722,20 @@ private:
         auto* session = new Platform::RecordingSession(this);
         m_activeSession = session;
 
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
+
         Platform::RecordingRequest request;
         request.target = target;
         request.region = region;
         request.windowId = windowId;
         request.outputPath = videoOutputPath();
-        request.includeCursor = true;
+        request.includeCursor = settings.recording.showCursor;
         request.includeMicrophone = options.microphone;
         request.includeSpeaker = options.speaker;
 
-        // Video settings come from the shared recording settings store. Quick
-        // Access has no controls for them yet; a settings surface will write
-        // the same values.
-        const Platform::RecordingSettings videoSettings = Platform::loadRecordingSettings();
+        // Video settings come from the shared settings store the Rust settings
+        // window writes.
+        const Platform::RecordingSettings videoSettings = settings.recording.values;
         const QSize maxResolution =
             Platform::recordingMaxResolutionForIndex(videoSettings.maxResolutionIndex);
         request.fps = Platform::recordingFpsForIndex(videoSettings.fpsIndex);
@@ -1813,13 +1899,21 @@ private:
     {
         if (image.isNull())
             return;
-        const QString path = saveCapture(image);
-        QGuiApplication::clipboard()->setImage(image);
-        auto* card = new ResultCard(image,
-                                    path,
-                                    QString(),
-                                    QStringLiteral("Scroll capture saved"),
-                                    image.size());
+
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
+        const QString path = saveCapture(image, settings.screenshots.afterSave);
+
+        if (settings.screenshots.afterCopyToClipboard)
+            Platform::copyCaptureToClipboard(image, path, settings.screenshots.clipboardMode);
+
+        if (!settings.screenshots.afterShowResult)
+            return;
+
+        const QString hint = settings.screenshots.afterCopyToClipboard
+            ? QStringLiteral("Scroll capture copied")
+            : QStringLiteral("Scroll capture saved");
+
+        auto* card = new ResultCard(image, path, QString(), hint, image.size());
         card->show();
         card->raise();
         card->activateWindow();
@@ -1844,7 +1938,9 @@ private:
         if (image.isNull())
             return;
 
-        const QString path = saveCapture(image);
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
+        const bool persist = settings.screenshots.afterSave;
+        const QString path = saveCapture(image, persist);
 
         QString text;
         bool ocrFailed = false;
@@ -1869,7 +1965,7 @@ private:
             }
         }
 
-        QString hint = QStringLiteral("Copied to clipboard");
+        QString hint = QStringLiteral("Ready");
         if (options.ocr) {
             if (isQr) {
                 QGuiApplication::clipboard()->setText(text);
@@ -1878,13 +1974,20 @@ private:
                 QGuiApplication::clipboard()->setText(text);
                 hint = QStringLiteral("Text copied to clipboard");
             } else {
-                QGuiApplication::clipboard()->setImage(image);
+                Platform::copyCaptureToClipboard(
+                    image, path, settings.screenshots.clipboardMode);
                 hint = ocrFailed ? QStringLiteral("OCR unavailable - image copied")
                                  : QStringLiteral("No text found - image copied");
             }
+        } else if (settings.screenshots.afterCopyToClipboard) {
+            Platform::copyCaptureToClipboard(image, path, settings.screenshots.clipboardMode);
+            hint = QStringLiteral("Copied to clipboard");
         } else {
-            QGuiApplication::clipboard()->setImage(image);
+            hint = persist ? QStringLiteral("Saved") : QStringLiteral("Ready");
         }
+
+        if (!settings.screenshots.afterShowResult)
+            return;
 
         auto* card = new ResultCard(image, path, text, hint);
         card->show();
@@ -2013,16 +2116,35 @@ int run(QApplication& app)
             seconds == 0 ? QStringLiteral("Off")
                          : QStringLiteral("%1 seconds").arg(seconds));
         action->setCheckable(true);
+        action->setData(seconds);
         action->setChecked(seconds == currentCountdown);
         countdownGroup->addAction(action);
         QObject::connect(action, &QAction::triggered, action,
                          [seconds] { setRecordingCountdownSeconds(seconds); });
     }
 
+    // The Rust settings window can turn the countdown off entirely; keep the
+    // submenu honest without restarting the shell.
+    QObject::connect(menu, &QMenu::aboutToShow, menu, [countdownMenu, countdownGroup] {
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
+        countdownMenu->setEnabled(settings.recording.showCountdown);
+        const int current = recordingCountdownSeconds();
+        for (QAction* action : countdownGroup->actions()) {
+            if (action->data().isValid())
+                action->setChecked(action->data().toInt() == current);
+        }
+    });
+
+    menu->addSeparator();
+    QAction* settingsAction = menu->addAction(QStringLiteral("Settings..."));
     menu->addSeparator();
     QAction* quit = menu->addAction(QStringLiteral("Quit"));
     tray->setContextMenu(menu);
     tray->show();
+
+    QObject::connect(settingsAction, &QAction::triggered, shell, [] {
+        openSettingsWindow();
+    });
 
     QObject::connect(capture, &QAction::triggered, shell, [shell] { shell->openMenu(); });
     QObject::connect(crosshair, &QAction::triggered, shell,

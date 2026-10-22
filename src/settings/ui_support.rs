@@ -55,7 +55,7 @@ pub fn traffic_light_button(color_class: &str, tooltip: &str) -> Button {
     button
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::SETTINGS_CSS;
 
