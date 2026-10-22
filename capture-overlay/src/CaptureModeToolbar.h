@@ -36,9 +36,15 @@ public:
     // `recordingAvailable` is false on platforms that refuse video recording
     // (Fedora). The Video item then stays visible but disabled and says why,
     // rather than accepting a click the recorder will reject.
+    //
+    // `allowAreaRecording` lets a host that has no recording panel of its own
+    // record the Area item. The Linux overlay keeps the default: its recording
+    // panel selects the region, so the toolbar's Area slot stays a screenshot
+    // action there.
     static Result choose(QLocalServer* controlServer = nullptr,
                          QScreen* targetScreen = nullptr,
-                         bool recordingAvailable = true);
+                         bool recordingAvailable = true,
+                         bool allowAreaRecording = false);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -49,7 +55,8 @@ protected:
 
 private:
     explicit CaptureModeToolbar(QScreen* screen, bool screenIsLocked = false,
-                                bool recordingAvailable = true);
+                                bool recordingAvailable = true,
+                                bool allowAreaRecording = false);
 
     QRectF itemRect(int index) const;
     int hitTest(const QPoint& point) const;
@@ -60,6 +67,7 @@ private:
     QScreen* m_screen;
     bool m_screenIsLocked = false;
     bool m_recordingAvailable = true;
+    bool m_allowAreaRecording = false;
     Action m_action = Action::Cancel;
     int m_hovered = -1;
     bool m_finished = false;

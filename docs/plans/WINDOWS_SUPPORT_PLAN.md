@@ -1,7 +1,8 @@
 # Windows Support Plan
 
-Status: proposed. Only the audit and the verification build below are done;
-no application code has changed.
+Status: in progress. The audit, the verification build, the Windows capture
+backends, and the Quick Access shell are done. Recording follows its own plan
+in [WINDOWS_RECORDING_PLAN.md](WINDOWS_RECORDING_PLAN.md).
 
 ## Goal
 
@@ -169,7 +170,7 @@ parallel `cl.exe` runs collide on `vc140.pdb` (C1041).
   release is capture, annotate-in-overlay, OCR, and save.
 - GNOME extension, Flatpak, and Nix packaging.
 - Recording. The pipeline is PipeWire and GStreamer ximagesrc; it needs its own
-  plan.
+  plan. See [WINDOWS_RECORDING_PLAN.md](WINDOWS_RECORDING_PLAN.md).
 
 ## Open decisions
 

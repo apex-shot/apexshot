@@ -3,8 +3,10 @@
 #include "CaptureModeToolbar.h"
 #include "CaptureOverlay_DrawingPrimitives_p.h"
 #include "platform/platform.h"
+#include "platform/recording.h"
 #include "platform/windows/ocr.h"
 #include "platform/windows/qr.h"
+#include "platform/windows/recording_controls.h"
 
 #include <QAction>
 #include <QApplication>
@@ -24,11 +26,13 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
 #include <QRegion>
 #include <QScreen>
+#include <QStandardPaths>
 #include <QSystemTrayIcon>
 #include <QTimer>
 #include <QToolButton>
@@ -170,6 +174,19 @@ QString saveCapture(const QImage& image)
                                  QStringLiteral("yyyyMMdd-HHmmss-zzz")));
     const QString path = QDir(QDir::tempPath()).filePath(name);
     return image.save(path, "PNG") ? path : QString();
+}
+
+QString videoOutputPath()
+{
+    QString directory = QStandardPaths::writableLocation(QStandardPaths::MoviesLocation);
+    if (directory.isEmpty())
+        directory = QDir::home().filePath(QStringLiteral("Videos"));
+    directory = QDir(directory).filePath(QStringLiteral("ApexShotRec"));
+
+    const QString name = QStringLiteral("ApexShot Recording %1.mp4")
+                             .arg(QDateTime::currentDateTime().toString(
+                                 QStringLiteral("yyyy-MM-dd HH-mm-ss")));
+    return QDir(directory).filePath(name);
 }
 
 QIcon appIcon()
@@ -392,7 +409,9 @@ private:
 class AreaSelector : public QWidget
 {
 public:
-    using Done = std::function<void(const QImage&)>;
+    /// The image is the cropped selection; the rectangle is that selection in
+    /// frozen-image pixels, which the recorder maps back to desktop pixels.
+    using Done = std::function<void(const QImage&, const QRect&)>;
     enum class Mode { Area, Crosshair };
 
     AreaSelector(QImage frozen, Mode mode, Done done)
@@ -930,8 +949,9 @@ private:
 
     void finish(const QImage& result)
     {
+        const QRect selection = selectionInImage();
         if (m_done)
-            m_done(result);
+            m_done(result, selection);
         close();
     }
 
@@ -1166,6 +1186,9 @@ protected:
 struct CaptureOptions {
     int timerSeconds = 0;
     bool ocr = false;
+    bool recording = false;
+    bool microphone = false;
+    bool speaker = false;
 };
 
 class Shell : public QObject
@@ -1177,14 +1200,25 @@ public:
             return;
         m_menuOpen = true;
 
+        QString recordingError;
+        const bool recordingAvailable = Platform::RecordingSession::available(&recordingError);
+        // Quick Access has no recording panel of its own, so the toolbar's
+        // Area slot is how an area recording is chosen.
         const CaptureModeToolbar::Result result =
-            CaptureModeToolbar::choose(nullptr, nullptr, false);
+            CaptureModeToolbar::choose(nullptr, nullptr, recordingAvailable, true);
 
         m_menuOpen = false;
 
         CaptureOptions options;
         options.timerSeconds = result.timerSeconds;
         options.ocr = result.ocr;
+        options.recording = result.recording;
+        options.microphone = result.microphone;
+        options.speaker = result.speaker;
+        if (options.recording && !recordingAvailable) {
+            debugLog(QStringLiteral("recording unavailable: %1").arg(recordingError));
+            return;
+        }
 
         switch (result.action) {
         case CaptureModeToolbar::Action::Display:
@@ -1247,6 +1281,50 @@ public:
         chooseWindow(CaptureOptions{});
     }
 
+    void recordScreen()
+    {
+        CaptureOptions options;
+        options.recording = true;
+        captureDisplay(options);
+    }
+
+    void recordArea()
+    {
+        CaptureOptions options;
+        options.recording = true;
+        captureArea(options);
+    }
+
+    void recordWindow()
+    {
+        CaptureOptions options;
+        options.recording = true;
+        chooseWindow(options);
+    }
+
+    void demoRecord()
+    {
+        CaptureOptions options;
+        options.recording = true;
+        captureDisplay(options);
+        QTimer::singleShot(3000, this, [this] {
+            if (m_activeSession)
+                m_activeSession->stop();
+        });
+    }
+
+    bool hasActiveRecording() const
+    {
+        return m_activeSession && m_activeSession->isActive();
+    }
+
+    /// Save the current recording before the app is allowed to quit.
+    void stopActiveRecording()
+    {
+        if (m_activeSession)
+            m_activeSession->stop();
+    }
+
 private:
     void withCountdown(const CaptureOptions& options, std::function<void()> action)
     {
@@ -1268,6 +1346,17 @@ private:
                 index = i;
                 break;
             }
+        }
+
+        if (options.recording) {
+            Platform::CaptureResult still;
+            QString stillError;
+            Platform::captureMonitor(index, false, still, stillError);
+            startRecording(target.geometry,
+                           still.image,
+                           options,
+                           Platform::RecordingRequest::Target::Screen);
+            return;
         }
 
         Platform::CaptureResult capture;
@@ -1298,9 +1387,19 @@ private:
     void startArea(const Platform::CaptureResult& frozen, AreaSelector::Mode mode,
                    const CaptureOptions& options)
     {
-        auto* selector = new AreaSelector(frozen.image, mode, [this, options](const QImage& cropped) {
-            present(cropped, options);
-        });
+        auto* selector =
+            new AreaSelector(frozen.image, mode, [this, options, frozen](const QImage& cropped,
+                                                                        const QRect& selection) {
+                if (selection.isEmpty() || cropped.isNull())
+                    return;
+                if (options.recording) {
+                    const QRect desktop(selection.topLeft() + frozen.geometry.topLeft(),
+                                        selection.size());
+                    startRecording(desktop, cropped, options);
+                } else {
+                    present(cropped, options);
+                }
+            });
 
         QRect virtualGeometry;
         for (const QScreen* screen : QGuiApplication::screens())
@@ -1358,14 +1457,110 @@ private:
         auto* popup = new ListPopup(items, anchor, 460, [this, eligible, options](int index) {
             if (index < 0 || index >= eligible.size())
                 return;
+            const Platform::WindowInfo& window = eligible.at(index);
             Platform::CaptureResult capture;
             QString error;
-            if (!Platform::captureWindow(eligible.at(index).id, false, capture, error))
+            if (!Platform::captureWindow(window.id, false, capture, error))
                 return;
-            present(capture.image, options);
+            if (options.recording) {
+                startRecording(window.geometry,
+                               capture.image,
+                               options,
+                               Platform::RecordingRequest::Target::Window,
+                               window.id);
+            } else {
+                present(capture.image, options);
+            }
         });
         popup->show();
         popup->raise();
+    }
+
+    void startRecording(
+        const QRect& region,
+        const QImage& thumbnail,
+        const CaptureOptions& options,
+        Platform::RecordingRequest::Target target = Platform::RecordingRequest::Target::Area,
+        quintptr windowId = 0)
+    {
+        if (region.isEmpty())
+            return;
+        if (m_activeSession && m_activeSession->isActive()) {
+            debugLog(QStringLiteral("recording ignored: a session is already active"));
+            return;
+        }
+
+        auto* session = new Platform::RecordingSession(this);
+        m_activeSession = session;
+
+        Platform::RecordingRequest request;
+        request.target = target;
+        request.region = region;
+        request.windowId = windowId;
+        request.outputPath = videoOutputPath();
+        request.includeCursor = true;
+        request.includeMicrophone = options.microphone;
+        request.includeSpeaker = options.speaker;
+        request.fps = 30;
+        request.crf = 20;
+
+        connect(session,
+                &Platform::RecordingSession::warning,
+                this,
+                [](const QString& message) {
+                    QMessageBox::information(nullptr, QStringLiteral("Recording"), message);
+                });
+
+        connect(session,
+                &Platform::RecordingSession::finished,
+                this,
+                [this, session, thumbnail](bool kept,
+                                           const QString& path,
+                                           const QString& error) {
+                    if (m_activeSession == session)
+                        m_activeSession = nullptr;
+                    session->deleteLater();
+                    if (kept)
+                        presentRecording(thumbnail, path);
+                    else if (!error.isEmpty())
+                        QMessageBox::warning(nullptr, QStringLiteral("Recording"), error);
+                });
+
+        QString error;
+        if (!session->start(request, error)) {
+            if (m_activeSession == session)
+                m_activeSession = nullptr;
+            session->deleteLater();
+            QMessageBox::warning(nullptr, QStringLiteral("Recording"), error);
+            return;
+        }
+
+        debugLog(QStringLiteral("recording: %1,%2 %3x%4 mic=%5 speaker=%6 -> %7")
+                     .arg(region.x())
+                     .arg(region.y())
+                     .arg(region.width())
+                     .arg(region.height())
+                     .arg(options.microphone ? 1 : 0)
+                     .arg(options.speaker ? 1 : 0)
+                     .arg(request.outputPath));
+
+        auto* controls = new RecordingControls(session, region);
+        controls->show();
+        controls->raise();
+    }
+
+    void presentRecording(const QImage& thumbnail, const QString& path)
+    {
+        const QImage thumb = thumbnail.isNull()
+            ? QImage(2, 2, QImage::Format_ARGB32)
+            : thumbnail;
+        auto* card = new ResultCard(thumb,
+                                    path,
+                                    QString(),
+                                    QStringLiteral("Recording saved"));
+        card->show();
+        card->raise();
+        card->activateWindow();
     }
 
     void present(const QImage& image, const CaptureOptions& options)
@@ -1422,6 +1617,7 @@ private:
     }
 
     bool m_menuOpen = false;
+    Platform::RecordingSession* m_activeSession = nullptr;
 };
 
 } // namespace
@@ -1480,6 +1676,10 @@ int run(QApplication& app)
         QTimer::singleShot(0, shell, [shell] { shell->demoTimer(); });
         return app.exec();
     }
+    if (arguments.contains(QStringLiteral("--demo-record"))) {
+        QTimer::singleShot(0, shell, [shell] { shell->demoRecord(); });
+        return app.exec();
+    }
 
     auto* tray = new QSystemTrayIcon(appIcon(), &app);
     tray->setToolTip(QStringLiteral("ApexShot"));
@@ -1494,6 +1694,21 @@ int run(QApplication& app)
 
     QAction* capture = menu->addAction(QStringLiteral("Capture..."));
     QAction* crosshair = menu->addAction(QStringLiteral("Crosshair capture"));
+
+    QString recordingError;
+    const bool recordingAvailable = Platform::RecordingSession::available(&recordingError);
+    if (!recordingAvailable)
+        debugLog(QStringLiteral("recording disabled: %1").arg(recordingError));
+
+    QMenu* recordMenu = menu->addMenu(QStringLiteral("Record"));
+    QAction* recordScreen = recordMenu->addAction(QStringLiteral("Screen"));
+    QAction* recordArea = recordMenu->addAction(QStringLiteral("Area"));
+    QAction* recordWindow = recordMenu->addAction(QStringLiteral("Window"));
+    recordMenu->setEnabled(recordingAvailable);
+    recordMenu->setToolTipsVisible(true);
+    if (!recordingAvailable)
+        recordMenu->setToolTip(recordingError);
+
     menu->addSeparator();
     QAction* quit = menu->addAction(QStringLiteral("Quit"));
     tray->setContextMenu(menu);
@@ -1502,7 +1717,21 @@ int run(QApplication& app)
     QObject::connect(capture, &QAction::triggered, shell, [shell] { shell->openMenu(); });
     QObject::connect(crosshair, &QAction::triggered, shell,
                      [shell] { shell->demoCrosshair(); });
-    QObject::connect(quit, &QAction::triggered, &app, &QCoreApplication::quit);
+    QObject::connect(recordScreen, &QAction::triggered, shell,
+                     [shell] { shell->recordScreen(); });
+    QObject::connect(recordArea, &QAction::triggered, shell,
+                     [shell] { shell->recordArea(); });
+    QObject::connect(recordWindow, &QAction::triggered, shell,
+                     [shell] { shell->recordWindow(); });
+    QObject::connect(quit, &QAction::triggered, &app, [shell, &app] {
+        // A quit would destroy the session and discard its segments. Save
+        // first; the next Quit, once the result card is up, exits.
+        if (shell->hasActiveRecording()) {
+            shell->stopActiveRecording();
+            return;
+        }
+        app.quit();
+    });
     QObject::connect(tray, &QSystemTrayIcon::activated, shell,
                      [shell](QSystemTrayIcon::ActivationReason reason) {
                          if (reason == QSystemTrayIcon::Trigger)

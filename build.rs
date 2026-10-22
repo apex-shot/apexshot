@@ -52,6 +52,33 @@ fn build_capture_overlay() {
     println!("cargo:rerun-if-changed=capture-overlay/src/Sandbox.h");
     println!("cargo:rerun-if-changed=capture-overlay/src/MonitorPicker.cpp");
     println!("cargo:rerun-if-changed=capture-overlay/src/MonitorPicker.h");
+    // Windows platform sources (the Quick Access shell and its seams).
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/recording.h");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/main.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/quick_access.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/quick_access.h");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/recording.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/recording_controls.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/recording_controls.h");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/screen_capture.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/window_list.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/ocr.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/qr.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/win_util.h");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/assets/fonts");
 
     // Create build dir
     std::fs::create_dir_all(&build_dir).expect("Failed to create C++ build dir");

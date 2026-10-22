@@ -393,6 +393,18 @@ bool captureVirtualDesktop(bool includeCursor, CaptureResult& out, QString& outE
     return grabScreenRect(bounds, includeCursor, out, outError);
 }
 
+void excludeFromCapture(quintptr nativeId)
+{
+    const HWND hwnd = reinterpret_cast<HWND>(nativeId);
+    if (!hwnd)
+        return;
+
+    // WDA_EXCLUDEFROMCAPTURE, Windows 10 version 2004 and later. Older builds
+    // return FALSE and the controls stay visible in the recording.
+    constexpr DWORD kExcludeFromCapture = 0x00000011;
+    SetWindowDisplayAffinity(hwnd, kExcludeFromCapture);
+}
+
 void keepTopmost(quintptr nativeId)
 {
     if (!nativeId)
