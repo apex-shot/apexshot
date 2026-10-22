@@ -8,13 +8,12 @@
 
 class QCloseEvent;
 class QShowEvent;
-class QTimer;
 
-/// Floating recording pill for the Quick Access shell.
+/// Floating recording bar for the Quick Access shell.
 ///
-/// Shows the elapsed time and offers pause/resume, a labelled stop button, and
-/// discard. It never owns the session: closing the pill saves a recording that
-/// is still running.
+/// Follows the Linux recording controls: an inset stop/timer segment, then
+/// quiet pause and discard buttons separated by hairline rules. It never owns
+/// the session; closing the bar saves a recording that is still running.
 class RecordingControls : public QWidget
 {
     Q_OBJECT
@@ -34,11 +33,11 @@ protected:
     void closeEvent(QCloseEvent* event) override;
 
 private:
-    enum class Button { None, Body, Pause, Stop, Discard };
+    enum class Button { None, Body, Stop, Pause, Discard };
 
     Button hitTest(const QPoint& point) const;
-    QRectF pauseRect() const;
     QRectF stopRect() const;
+    QRectF pauseRect() const;
     QRectF discardRect() const;
     QString elapsedText() const;
     void positionOnScreen();
@@ -51,6 +50,4 @@ private:
     QPoint m_dragOffset;
     bool m_finished = false;
     bool m_closing = false;
-    bool m_pulse = false;
-    QTimer* m_pulseTimer = nullptr;
 };

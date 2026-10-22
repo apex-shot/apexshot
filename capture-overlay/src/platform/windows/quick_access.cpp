@@ -7,6 +7,7 @@
 #include "platform/windows/ocr.h"
 #include "platform/windows/qr.h"
 #include "platform/windows/recording_controls.h"
+#include "platform/windows/recording_countdown.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -1525,8 +1526,9 @@ private:
         // to arrange the screen before the first frame.
         const int seconds = recordingCountdownSeconds();
         if (seconds > 0) {
-            m_countdownPill = new CountdownPill(
+            m_countdownPill = new RecordingCountdown(
                 seconds,
+                region,
                 [this, region, thumbnail, options, target, windowId] {
                     m_countdownPill = nullptr;
                     beginRecording(region, thumbnail, options, target, windowId);
@@ -1678,7 +1680,7 @@ private:
 
     bool m_menuOpen = false;
     Platform::RecordingSession* m_activeSession = nullptr;
-    QPointer<CountdownPill> m_countdownPill;
+    QPointer<RecordingCountdown> m_countdownPill;
 };
 
 } // namespace

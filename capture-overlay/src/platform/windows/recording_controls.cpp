@@ -18,24 +18,21 @@
 
 namespace {
 
-constexpr int kWidth = 318;
-constexpr int kHeight = 56;
-constexpr int kPauseSize = 34;
-constexpr int kStopWidth = 78;
-constexpr int kStopHeight = 32;
-constexpr int kDiscardSize = 30;
-constexpr int kRightPad = 12;
-constexpr int kGap = 8;
+constexpr int kWidth = 260;
+constexpr int kHeight = 62;
+constexpr int kMargin = 24;
 
-// Tokens shared with the Quick Access shell and the result card.
-const QColor kCard(18, 18, 18, 240);
-const QColor kText(245, 245, 247);
-const QColor kMuted(164, 164, 172);
-const QColor kRim(255, 255, 255, 54);
+// Same chrome and control tokens as the Linux recording bar.
+const QColor kChrome(20, 20, 20);
+const QColor kChromeRim(255, 255, 255, 26);
+const QColor kSegment(30, 31, 34);
+const QColor kSegmentHover(40, 41, 44);
+const QColor kText(245, 245, 246);
+const QColor kMuted(160, 160, 165);
 const QColor kHover(255, 255, 255, 22);
-const QColor kDanger(232, 17, 35);
-const QColor kDangerHover(240, 34, 52);
-const QColor kRecording(232, 17, 35);
+const QColor kPressed(255, 255, 255, 34);
+const QColor kSeparator(255, 255, 255, 20);
+const QColor kRecord(244, 99, 87);
 
 QFont uiFont(int pixelSize, bool bold)
 {
@@ -56,6 +53,39 @@ QScreen* screenForRegion(const QRect& deviceRect)
             return screen;
     }
     return QGuiApplication::primaryScreen();
+}
+
+void drawPauseIcon(QPainter& painter, const QRectF& rect, bool paused)
+{
+    painter.setPen(QPen(kText, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    const QPointF c = rect.center();
+    const qreal r = 10.0;
+    painter.drawEllipse(QRectF(c.x() - r, c.y() - r, r * 2.0, r * 2.0));
+
+    if (paused) {
+        QPainterPath triangle;
+        triangle.moveTo(c.x() - 3.0, c.y() - 5.5);
+        triangle.lineTo(c.x() + 5.0, c.y());
+        triangle.lineTo(c.x() - 3.0, c.y() + 5.5);
+        triangle.closeSubpath();
+        painter.fillPath(triangle, kText);
+    } else {
+        painter.drawLine(QPointF(c.x() - 3.5, c.y() - 5.5), QPointF(c.x() - 3.5, c.y() + 5.5));
+        painter.drawLine(QPointF(c.x() + 3.5, c.y() - 5.5), QPointF(c.x() + 3.5, c.y() + 5.5));
+    }
+}
+
+void drawTrashIcon(QPainter& painter, const QRectF& rect)
+{
+    painter.setPen(QPen(kText, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+    painter.setBrush(Qt::NoBrush);
+    const QPointF c = rect.center();
+    painter.drawRoundedRect(QRectF(c.x() - 5.5, c.y() - 3.0, 11.0, 12.5), 1.5, 1.5);
+    painter.drawLine(QPointF(c.x() - 8.0, c.y() - 5.0), QPointF(c.x() + 8.0, c.y() - 5.0));
+    painter.drawRoundedRect(QRectF(c.x() - 2.5, c.y() - 7.5, 5.0, 2.5), 0.8, 0.8);
+    painter.drawLine(QPointF(c.x() - 2.0, c.y() - 1.0), QPointF(c.x() - 2.0, c.y() + 6.0));
+    painter.drawLine(QPointF(c.x() + 2.0, c.y() - 1.0), QPointF(c.x() + 2.0, c.y() + 6.0));
 }
 
 } // namespace
@@ -88,14 +118,6 @@ RecordingControls::RecordingControls(Platform::RecordingSession* session,
                 m_finished = true;
                 close();
             });
-
-    m_pulseTimer = new QTimer(this);
-    m_pulseTimer->setInterval(700);
-    connect(m_pulseTimer, &QTimer::timeout, this, [this] {
-        m_pulse = !m_pulse;
-        update();
-    });
-    m_pulseTimer->start();
 }
 
 QString RecordingControls::elapsedText() const
@@ -111,40 +133,31 @@ QString RecordingControls::elapsedText() const
             .arg(seconds, 2, 10, QLatin1Char('0'));
     }
     return QStringLiteral("%1:%2")
-        .arg(minutes, 2, 10, QLatin1Char('0'))
+        .arg(minutes)
         .arg(seconds, 2, 10, QLatin1Char('0'));
-}
-
-QRectF RecordingControls::discardRect() const
-{
-    return QRectF(kWidth - kRightPad - kDiscardSize,
-                  (kHeight - kDiscardSize) / 2.0,
-                  kDiscardSize,
-                  kDiscardSize);
 }
 
 QRectF RecordingControls::stopRect() const
 {
-    return QRectF(discardRect().left() - kGap - kStopWidth,
-                  (kHeight - kStopHeight) / 2.0,
-                  kStopWidth,
-                  kStopHeight);
+    return QRectF(6, 5, 130, 52);
 }
 
 QRectF RecordingControls::pauseRect() const
 {
-    return QRectF(stopRect().left() - kGap - kPauseSize,
-                  (kHeight - kPauseSize) / 2.0,
-                  kPauseSize,
-                  kPauseSize);
+    return QRectF(141, 5, 56, 52);
+}
+
+QRectF RecordingControls::discardRect() const
+{
+    return QRectF(202, 5, 56, 52);
 }
 
 RecordingControls::Button RecordingControls::hitTest(const QPoint& point) const
 {
-    if (pauseRect().contains(point))
-        return Button::Pause;
     if (stopRect().contains(point))
         return Button::Stop;
+    if (pauseRect().contains(point))
+        return Button::Pause;
     if (discardRect().contains(point))
         return Button::Discard;
     return Button::Body;
@@ -155,95 +168,62 @@ void RecordingControls::paintEvent(QPaintEvent*)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
-    const QRectF body = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
-
+    // Chrome: the same 20,20,20 bar with a hairline rim the Linux controls use.
+    const QRectF chrome = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
     QPainterPath shadow;
-    shadow.addRoundedRect(body.translated(0, 4), 18, 18);
-    painter.fillPath(shadow, QColor(0, 0, 0, 120));
+    shadow.addRoundedRect(chrome.translated(0, 3), 12, 12);
+    painter.fillPath(shadow, QColor(0, 0, 0, 105));
 
-    QPainterPath panel;
-    panel.addRoundedRect(body, 18, 18);
-    painter.fillPath(panel, kCard);
-    painter.setPen(QPen(kRim, 1.0));
+    QPainterPath chromePath;
+    chromePath.addRoundedRect(chrome, 12, 12);
+    painter.fillPath(chromePath, kChrome);
+    painter.setPen(QPen(kChromeRim, 1.0));
     painter.setBrush(Qt::NoBrush);
-    painter.drawPath(panel);
+    painter.drawPath(chromePath);
 
-    // Recording lamp: a soft outer glow and a solid core, dimmed once the
-    // session is saving or paused.
-    const bool paused = m_session->isPaused();
-    const QPointF lamp(21.0, kHeight / 2.0);
-    const int glowAlpha = m_closing || paused ? 20 : (m_pulse ? 70 : 38);
+    // Stop + timer segment.
+    const QRectF stop = stopRect();
     painter.setPen(Qt::NoPen);
-    painter.setBrush(QColor(kRecording.red(), kRecording.green(), kRecording.blue(), glowAlpha));
-    painter.drawEllipse(lamp, 8.0, 8.0);
-    painter.setBrush(m_closing || paused ? kMuted : kRecording);
-    painter.drawEllipse(lamp, 4.5, 4.5);
+    painter.setBrush(m_hovered == Button::Stop && !m_closing ? kSegmentHover : kSegment);
+    painter.drawRoundedRect(stop, 8, 8);
 
-    const qreal textX = 36.0;
-    painter.setFont(uiFont(9, true));
-    painter.setPen(m_closing ? kMuted : QColor(255, 132, 132));
-    painter.drawText(QRectF(textX, 10.0, 110.0, 12.0),
-                     Qt::AlignLeft | Qt::AlignVCenter,
-                     m_closing ? QStringLiteral("SAVING") : QStringLiteral("REC"));
+    const QPointF stopCenter(stop.left() + 26.0, stop.center().y());
+    const QColor recordColor = m_closing ? kMuted : kRecord;
+    painter.setPen(QPen(recordColor, 1.8));
+    painter.setBrush(Qt::NoBrush);
+    painter.drawEllipse(stopCenter, 10.0, 10.0);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(recordColor);
+    painter.drawRoundedRect(
+        QRectF(stopCenter - QPointF(4.0, 4.0), QSizeF(8.0, 8.0)), 1.5, 1.5);
 
-    painter.setFont(uiFont(15, true));
-    painter.setPen(kText);
-    painter.drawText(QRectF(textX, 24.0, 118.0, 22.0),
-                     Qt::AlignLeft | Qt::AlignVCenter,
-                     elapsedText());
+    painter.setFont(uiFont(19, true));
+    painter.setPen(m_closing ? kMuted : kRecord);
+    painter.drawText(QRectF(stop.left() + 48.0, stop.top(), stop.width() - 56.0, stop.height()),
+                     Qt::AlignVCenter | Qt::AlignLeft,
+                     m_closing ? QStringLiteral("Saving") : elapsedText());
 
-    // Pause / resume.
     if (!m_closing) {
+        // Hairline rules matching the Linux bar.
+        painter.setPen(QPen(kSeparator, 1.0));
+        painter.drawLine(QPointF(138.5, 18.0), QPointF(138.5, kHeight - 18.0));
+        painter.drawLine(QPointF(200.5, 18.0), QPointF(200.5, kHeight - 18.0));
+
+        // Pause / resume.
         if (m_hovered == Button::Pause) {
             painter.setPen(Qt::NoPen);
             painter.setBrush(kHover);
-            painter.drawEllipse(pauseRect().center(), kPauseSize / 2.0 - 1.0,
-                                kPauseSize / 2.0 - 1.0);
+            painter.drawRoundedRect(pauseRect().adjusted(2, 2, -2, -2), 10, 10);
         }
-        painter.setPen(QPen(kText, 2.0, Qt::SolidLine, Qt::RoundCap));
-        painter.setBrush(Qt::NoBrush);
-        const QPointF center = pauseRect().center();
-        if (paused) {
-            QPainterPath triangle;
-            triangle.moveTo(center.x() - 3.5, center.y() - 5.5);
-            triangle.lineTo(center.x() + 5.5, center.y());
-            triangle.lineTo(center.x() - 3.5, center.y() + 5.5);
-            triangle.closeSubpath();
-            painter.fillPath(triangle, kText);
-        } else {
-            painter.drawLine(QPointF(center.x() - 3.5, center.y() - 5.5),
-                             QPointF(center.x() - 3.5, center.y() + 5.5));
-            painter.drawLine(QPointF(center.x() + 3.5, center.y() - 5.5),
-                             QPointF(center.x() + 3.5, center.y() + 5.5));
-        }
-    }
+        drawPauseIcon(painter, pauseRect(), m_session->isPaused());
 
-    // Labelled stop button: the primary action, in the app's danger colour.
-    const bool stopHovered = m_hovered == Button::Stop && !m_closing;
-    const QRectF stop = stopRect();
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(m_closing ? QColor(70, 70, 76) : (stopHovered ? kDangerHover : kDanger));
-    painter.drawRoundedRect(stop, 10, 10);
-    painter.setFont(uiFont(12, true));
-    painter.setPen(m_closing ? kMuted : Qt::white);
-    painter.drawText(stop, Qt::AlignCenter,
-                     m_closing ? QStringLiteral("Saving") : QStringLiteral("Stop"));
-
-    // Discard.
-    if (!m_closing) {
+        // Discard.
         if (m_hovered == Button::Discard) {
             painter.setPen(Qt::NoPen);
             painter.setBrush(kHover);
-            painter.drawEllipse(discardRect().center(), kDiscardSize / 2.0 - 1.0,
-                                kDiscardSize / 2.0 - 1.0);
+            painter.drawRoundedRect(discardRect().adjusted(2, 2, -2, -2), 10, 10);
         }
-        painter.setPen(QPen(m_hovered == Button::Discard ? kText : kMuted,
-                            1.8,
-                            Qt::SolidLine,
-                            Qt::RoundCap));
-        const QPointF center = discardRect().center();
-        painter.drawLine(center + QPointF(-3.5, -3.5), center + QPointF(3.5, 3.5));
-        painter.drawLine(center + QPointF(-3.5, 3.5), center + QPointF(3.5, -3.5));
+        drawTrashIcon(painter, discardRect());
     }
 }
 
@@ -255,6 +235,13 @@ void RecordingControls::mousePressEvent(QMouseEvent* event)
     }
 
     switch (hitTest(event->pos())) {
+    case Button::Stop:
+        if (m_closing)
+            return;
+        m_closing = true;
+        m_session->stop();
+        update();
+        return;
     case Button::Pause:
         if (m_closing)
             return;
@@ -262,13 +249,6 @@ void RecordingControls::mousePressEvent(QMouseEvent* event)
             m_session->resume();
         else
             m_session->pause();
-        update();
-        return;
-    case Button::Stop:
-        if (m_closing)
-            return;
-        m_closing = true;
-        m_session->stop();
         update();
         return;
     case Button::Discard:
@@ -297,12 +277,7 @@ void RecordingControls::mouseMoveEvent(QMouseEvent* event)
     const Button hovered = hitTest(event->pos());
     if (hovered != m_hovered) {
         m_hovered = hovered;
-        if (hovered == Button::Stop)
-            setCursor(Qt::PointingHandCursor);
-        else if (hovered == Button::Pause || hovered == Button::Discard)
-            setCursor(Qt::PointingHandCursor);
-        else
-            setCursor(Qt::SizeAllCursor);
+        setCursor(hovered == Button::Body ? Qt::SizeAllCursor : Qt::PointingHandCursor);
         update();
     }
 }
@@ -344,18 +319,26 @@ void RecordingControls::positionOnScreen()
     const QRect available = screen ? screen->availableGeometry() : QRect(0, 0, 1920, 1080);
     const qreal dpr = screen ? screen->devicePixelRatio() : 1.0;
 
-    const QRect logical(
+    const QRect region(
         QPoint(qRound(m_captureRegion.x() / dpr), qRound(m_captureRegion.y() / dpr)),
         QSize(qRound(m_captureRegion.width() / dpr), qRound(m_captureRegion.height() / dpr)));
 
-    int x = logical.center().x() - width() / 2;
-    int y = logical.top() - height() - 12;
-    if (y < available.top() + 8)
-        y = logical.bottom() + 12;
-    if (y + height() > available.bottom() - 8)
-        y = available.top() + 8;
+    const bool fullscreen =
+        region.width() >= available.width() - 8 && region.height() >= available.height() - 8;
 
-    x = std::max(available.left() + 8, std::min(x, available.right() - width() - 8));
+    int x = 0;
+    int y = 0;
+    if (fullscreen || region.isEmpty()) {
+        x = available.center().x() - width() / 2;
+        y = available.top() + kMargin;
+    } else {
+        x = region.center().x() - width() / 2;
+        y = region.center().y() - height() / 2;
+        x = std::max(available.left() + kMargin,
+                     std::min(x, available.right() - width() - kMargin));
+        y = std::max(available.top() + kMargin,
+                     std::min(y, available.bottom() - height() - kMargin));
+    }
     move(x, y);
 }
 

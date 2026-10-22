@@ -112,14 +112,17 @@ after a successful save or discard.
   `CaptureOptions`; display, area, and window then start a recording instead of
   presenting a still.
 - A recording countdown runs after the source is chosen, so area and window
-  selections finish first. The tray Record submenu offers Off, 3, 5, and 10
+  selections finish first. It is the large centred circle from the Linux
+  recording flow: the remaining seconds, an accent ring that drains, and a
+  click-to-cancel state. The tray Record submenu offers Off, 3, 5, and 10
   seconds; the choice is persisted with QSettings and defaults to 3 seconds.
 - The tray gains a Record submenu (Screen, Area, Window) so recording does not
   require toggling Video inside the capture toolbar.
-- A floating controls pill shows elapsed time and provides pause/resume,
-  stop/save, and discard. It stays above other windows with
-  `Platform::keepTopmost` and is marked `WDA_EXCLUDEFROMCAPTURE`, so a
-  full-screen recording does not contain its own timer.
+- A segmented recording bar follows the Linux controls: an inset stop/timer
+  segment in the app's danger red, then pause/resume and discard separated by
+  hairline rules. It stays above other windows with `Platform::keepTopmost` and
+  is marked `WDA_EXCLUDEFROMCAPTURE`, so a full-screen recording does not
+  contain its own controls.
 - On save, the existing result card shows the capture thumbnail, dimensions,
   file size, Open, and Show in folder.
 
