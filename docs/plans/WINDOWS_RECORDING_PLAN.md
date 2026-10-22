@@ -75,8 +75,11 @@ Capture:
 
 Encode:
 
-- `libx264`, `veryfast`, CRF 20 (the High tier), `yuv420p`, output frame rate
-  equal to the capture rate.
+- `libx264`, `veryfast`, `yuv420p`, output frame rate equal to the capture rate.
+- Frame rate, resolution cap, and quality tier come from the recording settings
+  described below. The quality tier selects the CRF base (Balanced 23, High 20,
+  Ultra 16), and smaller outputs get the same resolution compensation as Linux
+  (up to -10 CRF below a 2000 px diagonal).
 - Dimensions are forced even; an optional maximum resolution uses
   `force_original_aspect_ratio=decrease` and never upscales.
 - `-movflags +faststart` so the file plays before it is fully copied.
@@ -89,7 +92,7 @@ Audio:
   `virtual-audio-capturer`, `CABLE Output`). ffmpeg's dshow input has no WASAPI
   loopback of its own, so a missing device means the track is omitted rather
   than fabricated.
-- `aac`, 160 kbps, stereo.
+- `aac`, 160 kbps; stereo, or mono when the setting asks for it.
 
 Pause and resume:
 
@@ -102,6 +105,26 @@ Pause and resume:
 
 The work directory is `%TEMP%/apexshot-recording-<pid>-<timestamp>/`, removed
 after a successful save or discard.
+
+## Recording settings
+
+The recorder reads the Linux Settings → Video values from QSettings. Each one
+is an option index with the same table as its Linux config field, so a value
+keeps its meaning across platforms:
+
+| Setting | QSettings key | Values |
+|---|---|---|
+| Frame rate | `recording/video_fps` | 0 = 24, 1 = 30, 2 = 50, 3 = 60 |
+| Maximum resolution | `recording/video_max_res` | 0 = Original, 1 = 1080p, 2 = 720p, 3 = 1440p, 4 = 900p, 5 = 480p, 6 = 2160p |
+| Recording quality | `recording/video_quality` | 0 = Balanced, 1 = High, 2 = Ultra |
+| Mono audio | `recording/video_mono` | bool |
+
+`platform/recording_settings.h` owns the tables, the index-to-value mappings,
+the resolution fit, and load/save. Missing or out-of-range values read as the
+defaults (30 fps, Original, High, stereo), so a stale or hand-edited config
+cannot reach the encoder. Quick Access deliberately has no controls for these
+yet; the settings surface will write the same keys through
+`saveRecordingSettings`.
 
 ## Quick Access integration
 
@@ -144,6 +167,10 @@ cmake -S capture-overlay -B capture-overlay/build `
 cmake --build capture-overlay/build
 ```
 
+With `-DAPEXSHOT_CAPTURE_BUILD_TESTS=ON`, `ctest` runs the recording-settings
+table and persistence checks, plus the ffmpeg smoke test (skipped when ffmpeg is
+not installed).
+
 Manual pass:
 
 1. Record a display, an area, and a window for a few seconds each.
@@ -180,6 +207,7 @@ source list is unchanged.
 - **Restart and delete-last-segment** controls, now that segments exist.
 - **Video editor, cursor track, and click effects.** Those live in the Rust
   editor and wait for the Rust crate to build on Windows.
-- **Recording settings.** Frame rate, resolution cap, quality tier, and output
-  folder are currently fixed at 30 fps, native, CRF 20, and
-  Videos/ApexShotRec. The shell has no settings surface yet.
+- **Recording settings surface.** Frame rate, resolution cap, quality tier, and
+  mono are persisted and applied, but the shell has no controls for them yet.
+  Output folder and filename pattern remain fixed at Videos/ApexShotRec and the
+  timestamped default.

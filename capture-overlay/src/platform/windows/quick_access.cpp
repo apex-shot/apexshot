@@ -4,6 +4,7 @@
 #include "CaptureOverlay_DrawingPrimitives_p.h"
 #include "platform/platform.h"
 #include "platform/recording.h"
+#include "platform/recording_settings.h"
 #include "platform/windows/ocr.h"
 #include "platform/windows/qr.h"
 #include "platform/windows/recording_controls.h"
@@ -1644,8 +1645,18 @@ private:
         request.includeCursor = true;
         request.includeMicrophone = options.microphone;
         request.includeSpeaker = options.speaker;
-        request.fps = 30;
-        request.crf = 20;
+
+        // Video settings come from the shared recording settings store. Quick
+        // Access has no controls for them yet; a settings surface will write
+        // the same values.
+        const Platform::RecordingSettings videoSettings = Platform::loadRecordingSettings();
+        const QSize maxResolution =
+            Platform::recordingMaxResolutionForIndex(videoSettings.maxResolutionIndex);
+        request.fps = Platform::recordingFpsForIndex(videoSettings.fpsIndex);
+        request.crf = Platform::recordingCrfForQualityIndex(videoSettings.qualityIndex);
+        request.maxWidth = maxResolution.width();
+        request.maxHeight = maxResolution.height();
+        request.monoAudio = videoSettings.monoAudio;
 
         connect(session,
                 &Platform::RecordingSession::warning,
@@ -1686,13 +1697,20 @@ private:
             return;
         }
 
-        debugLog(QStringLiteral("recording: %1,%2 %3x%4 mic=%5 speaker=%6 -> %7")
+        debugLog(QStringLiteral(
+                     "recording: %1,%2 %3x%4 mic=%5 speaker=%6 %7fps crf=%8 max=%9x%10 mono=%11 "
+                     "-> %12")
                      .arg(region.x())
                      .arg(region.y())
                      .arg(region.width())
                      .arg(region.height())
                      .arg(options.microphone ? 1 : 0)
                      .arg(options.speaker ? 1 : 0)
+                     .arg(request.fps)
+                     .arg(request.crf)
+                     .arg(request.maxWidth)
+                     .arg(request.maxHeight)
+                     .arg(request.monoAudio ? 1 : 0)
                      .arg(request.outputPath));
 
         auto* controls = new RecordingControls(session, region);

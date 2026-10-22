@@ -1,5 +1,7 @@
 #include "platform/recording.h"
 
+#include "platform/recording_settings.h"
+
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDebug>
@@ -320,10 +322,23 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
     }
     args << QStringLiteral("-vf") << scale;
 
-    const int crf = request.crf > 0 ? request.crf : 20;
+    const int crfBase = request.crf > 0 ? request.crf : 20;
+    // Same resolution compensation as the Linux encoder: smaller outputs get a
+    // lower CRF so they do not turn to mush. The source size is the capture
+    // region; the maximum is already enforced by the scale filter above.
+    const QSize outputSize =
+        fitWithinMaxResolution(QSize(request.region.width(), request.region.height()),
+                               QSize(request.maxWidth, request.maxHeight));
+    const int reduction =
+        !outputSize.isEmpty()
+            ? recordingCrfResolutionReduction(outputSize.width(), outputSize.height())
+            : 0;
+    const int crf = std::max(1, crfBase - reduction);
     args << QStringLiteral("-c:v") << QStringLiteral("libx264") << QStringLiteral("-preset")
-         << QStringLiteral("veryfast") << QStringLiteral("-crf") << QString::number(crf)
-         << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p") << QStringLiteral("-r")
+         << QStringLiteral("veryfast") << QStringLiteral("-profile:v") << QStringLiteral("high")
+         << QStringLiteral("-crf") << QString::number(crf) << QStringLiteral("-pix_fmt")
+         << QStringLiteral("yuv420p") << QStringLiteral("-g") << QString::number(fps * 2)
+         << QStringLiteral("-bf") << QStringLiteral("2") << QStringLiteral("-r")
          << QString::number(fps);
 
     const bool hasAudio = audioArguments.contains(QStringLiteral("-i"));
@@ -339,7 +354,8 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
                  << QStringLiteral("1:a");
         }
         args << QStringLiteral("-c:a") << QStringLiteral("aac") << QStringLiteral("-b:a")
-             << QStringLiteral("160k") << QStringLiteral("-ac") << QStringLiteral("2");
+             << QStringLiteral("160k") << QStringLiteral("-ac")
+             << (request.monoAudio ? QStringLiteral("1") : QStringLiteral("2"));
     }
 
     args << QStringLiteral("-movflags") << QStringLiteral("+faststart") << segmentPath;

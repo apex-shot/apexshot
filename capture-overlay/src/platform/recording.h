@@ -33,6 +33,8 @@ struct RecordingRequest {
     bool includeCursor = true;
     bool includeMicrophone = false;
     bool includeSpeaker = false;
+    /// Mix the recorded audio down to a single channel.
+    bool monoAudio = false;
     /// Frames per second. 0 falls back to 30.
     int fps = 30;
     /// Maximum output size. Zero means native resolution.

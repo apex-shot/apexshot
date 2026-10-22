@@ -17,7 +17,9 @@ if(WIN32)
         src/platform/windows/quick_access.cpp
         src/platform/windows/quick_access.h
         src/platform/recording.h
+        src/platform/recording_settings.h
         src/platform/windows/recording.cpp
+        src/platform/windows/recording_settings.cpp
         src/platform/windows/recording_controls.cpp
         src/platform/windows/recording_controls.h
         src/platform/windows/recording_countdown.cpp
@@ -76,11 +78,25 @@ if(WIN32)
         add_executable(apexshot-recording-tests
             tests/WindowsRecordingTests.cpp
             src/platform/recording.h
+            src/platform/recording_settings.h
             src/platform/windows/recording.cpp
+            src/platform/windows/recording_settings.cpp
         )
         target_include_directories(apexshot-recording-tests PRIVATE src)
         target_link_libraries(apexshot-recording-tests PRIVATE Qt5::Core Qt5::Gui)
         add_test(NAME apexshot-recording-tests COMMAND apexshot-recording-tests)
+        # The smoke test reports 77 when ffmpeg is absent instead of failing.
+        set_tests_properties(apexshot-recording-tests PROPERTIES SKIP_RETURN_CODE 77)
+
+        add_executable(apexshot-recording-settings-tests
+            tests/RecordingSettingsTests.cpp
+            src/platform/recording_settings.h
+            src/platform/windows/recording_settings.cpp
+        )
+        target_include_directories(apexshot-recording-settings-tests PRIVATE src)
+        target_link_libraries(apexshot-recording-settings-tests PRIVATE Qt5::Core)
+        add_test(NAME apexshot-recording-settings-tests
+            COMMAND apexshot-recording-settings-tests)
     endif()
 
     install(TARGETS apexshot-capture
