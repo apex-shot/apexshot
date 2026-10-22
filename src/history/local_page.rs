@@ -72,10 +72,23 @@ pub fn build_local_page(
     scroller.set_hexpand(true);
 
     let column = GtkBox::new(Orientation::Vertical, 0);
-    column.set_margin_top(20);
-    column.set_margin_bottom(32);
-    column.set_margin_start(28);
-    column.set_margin_end(28);
+    let scale = super::window_scale();
+    let top = if cfg!(target_os = "windows") {
+        (2.0 * scale).round() as i32
+    } else {
+        20
+    };
+    let bottom = (if cfg!(target_os = "windows") {
+        24.0
+    } else {
+        32.0
+    } * scale)
+        .round() as i32;
+    let side = (28.0 * scale).round() as i32;
+    column.set_margin_top(top);
+    column.set_margin_bottom(bottom);
+    column.set_margin_start(side);
+    column.set_margin_end(side);
 
     // Header: gallery title + live count subtitle. Search and refresh live in
     // the window's header bar, GNOME-Settings-style, not on the page itself.
@@ -97,6 +110,7 @@ pub fn build_local_page(
     header.append(&title);
     header.append(&subtitle);
 
+    #[cfg(not(target_os = "windows"))]
     column.append(&header);
 
     // The card grid.

@@ -14,6 +14,7 @@ pub mod cloud;
 #[path = "../../src/config.rs"]
 pub mod config;
 pub mod daemon;
+pub mod history;
 pub mod i18n;
 pub mod platform;
 pub mod recording;
