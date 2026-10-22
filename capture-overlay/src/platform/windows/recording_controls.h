@@ -3,15 +3,18 @@
 #include "platform/recording.h"
 
 #include <QRect>
+#include <QRectF>
 #include <QWidget>
 
 class QCloseEvent;
 class QShowEvent;
+class QTimer;
 
 /// Floating recording pill for the Quick Access shell.
 ///
-/// Shows elapsed time and offers pause/resume, stop/save, and discard. It
-/// never owns the session: closing the pill saves an active recording.
+/// Shows the elapsed time and offers pause/resume, a labelled stop button, and
+/// discard. It never owns the session: closing the pill saves a recording that
+/// is still running.
 class RecordingControls : public QWidget
 {
     Q_OBJECT
@@ -48,4 +51,6 @@ private:
     QPoint m_dragOffset;
     bool m_finished = false;
     bool m_closing = false;
+    bool m_pulse = false;
+    QTimer* m_pulseTimer = nullptr;
 };
