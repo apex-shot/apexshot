@@ -42,8 +42,9 @@ fails:
 A provider that exposes a pattern but ignores `SetScrollPercent` gets one
 wheel attempt before the capture is declared finished.
 
-ShareX's scrolling capture uses the same wheel + row-match strategy; its
-fallback ordering and fixed-bottom handling informed this design.
+The scrolling capture implementation we studied uses the same wheel +
+row-match strategy; its fallback ordering and fixed-bottom handling informed
+this design.
 
 ## Stitching
 
