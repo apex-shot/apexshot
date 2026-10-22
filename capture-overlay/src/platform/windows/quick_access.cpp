@@ -9,6 +9,7 @@
 #include "platform/windows/recording_controls.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
 #include <QCursor>
@@ -30,8 +31,10 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QPointer>
 #include <QRegion>
 #include <QScreen>
+#include <QSettings>
 #include <QStandardPaths>
 #include <QSystemTrayIcon>
 #include <QTimer>
@@ -187,6 +190,30 @@ QString videoOutputPath()
                              .arg(QDateTime::currentDateTime().toString(
                                  QStringLiteral("yyyy-MM-dd HH-mm-ss")));
     return QDir(directory).filePath(name);
+}
+
+constexpr int kDefaultRecordingCountdown = 3;
+
+int recordingCountdownSeconds()
+{
+    QSettings settings;
+    const int seconds =
+        settings.value(QStringLiteral("recording/countdown"), kDefaultRecordingCountdown).toInt();
+    switch (seconds) {
+    case 0:
+    case 3:
+    case 5:
+    case 10:
+        return seconds;
+    default:
+        return kDefaultRecordingCountdown;
+    }
+}
+
+void setRecordingCountdownSeconds(int seconds)
+{
+    QSettings settings;
+    settings.setValue(QStringLiteral("recording/countdown"), seconds);
 }
 
 QIcon appIcon()
@@ -1307,7 +1334,7 @@ public:
         CaptureOptions options;
         options.recording = true;
         captureDisplay(options);
-        QTimer::singleShot(3000, this, [this] {
+        QTimer::singleShot((recordingCountdownSeconds() + 3) * 1000, this, [this] {
             if (m_activeSession)
                 m_activeSession->stop();
         });
@@ -1489,6 +1516,39 @@ private:
             debugLog(QStringLiteral("recording ignored: a session is already active"));
             return;
         }
+        if (m_countdownPill) {
+            debugLog(QStringLiteral("recording ignored: a countdown is already running"));
+            return;
+        }
+
+        // The countdown runs after the source is chosen, so the user has time
+        // to arrange the screen before the first frame.
+        const int seconds = recordingCountdownSeconds();
+        if (seconds > 0) {
+            m_countdownPill = new CountdownPill(
+                seconds,
+                [this, region, thumbnail, options, target, windowId] {
+                    m_countdownPill = nullptr;
+                    beginRecording(region, thumbnail, options, target, windowId);
+                });
+            m_countdownPill->show();
+            return;
+        }
+
+        beginRecording(region, thumbnail, options, target, windowId);
+    }
+
+    void beginRecording(
+        const QRect& region,
+        const QImage& thumbnail,
+        const CaptureOptions& options,
+        Platform::RecordingRequest::Target target,
+        quintptr windowId)
+    {
+        if (m_activeSession && m_activeSession->isActive()) {
+            debugLog(QStringLiteral("recording ignored: a session is already active"));
+            return;
+        }
 
         auto* session = new Platform::RecordingSession(this);
         m_activeSession = session;
@@ -1618,6 +1678,7 @@ private:
 
     bool m_menuOpen = false;
     Platform::RecordingSession* m_activeSession = nullptr;
+    QPointer<CountdownPill> m_countdownPill;
 };
 
 } // namespace
@@ -1708,6 +1769,22 @@ int run(QApplication& app)
     recordMenu->setToolTipsVisible(true);
     if (!recordingAvailable)
         recordMenu->setToolTip(recordingError);
+
+    recordMenu->addSeparator();
+    QMenu* countdownMenu = recordMenu->addMenu(QStringLiteral("Countdown"));
+    auto* countdownGroup = new QActionGroup(countdownMenu);
+    countdownGroup->setExclusive(true);
+    const int currentCountdown = recordingCountdownSeconds();
+    for (const int seconds : {0, 3, 5, 10}) {
+        QAction* action = countdownMenu->addAction(
+            seconds == 0 ? QStringLiteral("Off")
+                         : QStringLiteral("%1 seconds").arg(seconds));
+        action->setCheckable(true);
+        action->setChecked(seconds == currentCountdown);
+        countdownGroup->addAction(action);
+        QObject::connect(action, &QAction::triggered, action,
+                         [seconds] { setRecordingCountdownSeconds(seconds); });
+    }
 
     menu->addSeparator();
     QAction* quit = menu->addAction(QStringLiteral("Quit"));

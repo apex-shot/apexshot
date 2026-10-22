@@ -111,6 +111,9 @@ after a successful save or discard.
 - The toolbar's `recording`, `microphone`, and `speaker` flags flow into
   `CaptureOptions`; display, area, and window then start a recording instead of
   presenting a still.
+- A recording countdown runs after the source is chosen, so area and window
+  selections finish first. The tray Record submenu offers Off, 3, 5, and 10
+  seconds; the choice is persisted with QSettings and defaults to 3 seconds.
 - The tray gains a Record submenu (Screen, Area, Window) so recording does not
   require toggling Video inside the capture toolbar.
 - A floating controls pill shows elapsed time and provides pause/resume,
