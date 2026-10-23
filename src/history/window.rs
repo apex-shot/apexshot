@@ -16,7 +16,9 @@ use gtk4::{
 };
 
 use crate::i18n::t;
-use crate::settings::ui_support::{install_settings_css, traffic_light_button};
+use crate::settings::ui_support::{
+    install_settings_css, window_control_button, WindowControl, TITLE_BAR_HEIGHT,
+};
 use crate::settings::windowing::{
     install_edge_resize, install_window_drag, prefers_dark_glass_theme,
     prefers_reduced_transparency,
@@ -154,7 +156,7 @@ pub fn build_history_window(app: &Application) {
     // (GNOME Settings / Files), with the drag handle filling the space between.
     let toolbar = GtkBox::new(Orientation::Horizontal, 0);
     toolbar.add_css_class("settings-window-controls");
-    toolbar.set_size_request(-1, (52.0 * ui_scale).round() as i32);
+    toolbar.set_size_request(-1, (TITLE_BAR_HEIGHT * ui_scale).round() as i32);
 
     // Expanding drag spacers on both sides center the search entry in the
     // header bar, Files-style, and stay draggable.
@@ -180,27 +182,17 @@ pub fn build_history_window(app: &Application) {
     refresh_btn.set_valign(Align::Center);
     toolbar.append(&refresh_btn);
 
-    let close_btn = traffic_light_button("traffic-light-red", &t("Close"));
-    close_btn.remove_css_class("recent-captures-wm-btn");
-    close_btn.remove_css_class("recent-captures-wm-close");
-    close_btn.add_css_class("recording-editor-traffic-btn");
+    let close_btn = window_control_button(WindowControl::Close, &t("Close"), ui_scale);
     let win_clone = window.clone();
     close_btn.connect_clicked(move |_| win_clone.close());
 
-    let min_btn = traffic_light_button("traffic-light-yellow", &t("Minimize"));
-    min_btn.remove_css_class("recent-captures-wm-btn");
-    min_btn.add_css_class("recording-editor-traffic-btn");
+    let min_btn = window_control_button(WindowControl::Minimize, &t("Minimize"), ui_scale);
     let win_clone = window.clone();
     min_btn.connect_clicked(move |_| win_clone.minimize());
 
-    for button in [&close_btn, &min_btn] {
-        let size = (28.0 * ui_scale).round() as i32;
-        button.set_size_request(size, size);
-        button.set_valign(Align::Center);
-    }
-
-    let right_box = GtkBox::new(Orientation::Horizontal, 6);
+    let right_box = GtkBox::new(Orientation::Horizontal, 0);
     right_box.set_halign(Align::End);
+    right_box.set_valign(Align::Fill);
     right_box.append(&min_btn);
     right_box.append(&close_btn);
     toolbar.append(&right_box);

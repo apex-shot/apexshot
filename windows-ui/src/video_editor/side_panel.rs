@@ -3,10 +3,14 @@
 //! These panels own their presentation and local control state. Connecting the
 //! values to playback and export is the next backend slice.
 
+use super::background::{self, Background};
 use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
+use crate::recording::editor::cursor_sprite;
+use crate::recording::editor::model::{ClickEffect, CursorSettings, CursorTheme};
 use gtk4::cairo::{FontSlant, FontWeight};
 use gtk4::gdk;
+use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
 use gtk4::{
     Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DrawingArea,
@@ -20,42 +24,11 @@ use std::rc::Rc;
 
 pub(super) const TOOL_COLUMN_WIDTH: i32 = 288;
 
-const WALLPAPERS: [&[u8]; 32] = [
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-001.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-002.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-003.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-004.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-005.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-006.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-007.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-008.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-009.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-010.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-011.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-012.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-013.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-014.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-015.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-016.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-017.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-018.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-019.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-020.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-021.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-022.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-023.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-024.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-025.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-026.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-027.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-028.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-029.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-030.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-031.jpg"),
-    include_bytes!("../../../src/capture/editor/background-images/wallpaper-032.jpg"),
-];
-
-pub(super) fn build_tools_column(scale: f64, window: &ApplicationWindow) -> GtkBox {
+pub(super) fn build_tools_column(
+    scale: f64,
+    window: &ApplicationWindow,
+    background: Background,
+) -> GtkBox {
     let column = GtkBox::new(Orientation::Vertical, 0);
     column.add_css_class("recording-editor-tools-column");
     column.set_hexpand(false);
@@ -71,10 +44,12 @@ pub(super) fn build_tools_column(scale: f64, window: &ApplicationWindow) -> GtkB
     pages.set_hexpand(false);
     pages.set_vexpand(true);
     pages.set_size_request((TOOL_COLUMN_WIDTH as f64 * scale).round() as i32, -1);
-    pages.add_named(&build_background_panel(scale, window), Some("background"));
+    pages.add_named(
+        &build_background_panel(scale, window, background),
+        Some("background"),
+    );
     pages.add_named(&build_cursor_panel(scale), Some("cursor"));
     pages.add_named(&build_frames_panel(scale), Some("frames"));
-    pages.add_named(&build_takes_panel(scale), Some("takes"));
     pages.set_visible_child_name("background");
 
     let buttons = Rc::new(RefCell::new(Vec::<ToggleButton>::new()));
@@ -83,26 +58,39 @@ pub(super) fn build_tools_column(scale: f64, window: &ApplicationWindow) -> GtkB
             "background",
             icon_names::custom::IMAGE_ALT_SYMBOLIC,
             t("Background"),
+            None,
         ),
         (
             "cursor",
-            icon_names::custom::SELECT_MODE_SYMBOLIC,
+            icon_names::POINTER_PRIMARY_CLICK,
             t("Cursor"),
+            None,
         ),
         (
             "frames",
             icon_names::custom::OVERLAPPING_WINDOWS_SYMBOLIC,
             t("Frames"),
+            None,
         ),
-        ("takes", icon_names::custom::MARKER_SYMBOLIC, t("Takes")),
+        (
+            "takes",
+            icon_names::custom::MARKER_SYMBOLIC,
+            t("Takes"),
+            Some(t("Takes — coming soon")),
+        ),
     ];
 
-    for (index, (page_name, icon_name, label)) in tools.into_iter().enumerate() {
+    for (index, (page_name, icon_name, label, unavailable_tooltip)) in tools.into_iter().enumerate()
+    {
         let button = ToggleButton::new();
         button.add_css_class("recording-editor-tool-section-btn");
         button.set_has_frame(false);
         button.set_hexpand(true);
-        button.set_tooltip_text(Some(&label));
+        button.set_tooltip_text(Some(unavailable_tooltip.as_deref().unwrap_or(&label)));
+        // The take library is not built yet; the icon marks where it goes.
+        if unavailable_tooltip.is_some() {
+            button.set_sensitive(false);
+        }
         button.set_active(index == 0);
         let icon = Image::from_icon_name(icon_name);
         icon.set_pixel_size((18.0 * scale).round() as i32);
@@ -133,7 +121,11 @@ pub(super) fn build_tools_column(scale: f64, window: &ApplicationWindow) -> GtkB
     column
 }
 
-fn build_background_panel(scale: f64, window: &ApplicationWindow) -> GtkBox {
+fn build_background_panel(
+    scale: f64,
+    window: &ApplicationWindow,
+    background: Background,
+) -> GtkBox {
     let body = panel_body();
     body.set_vexpand(false);
     body.set_valign(Align::Start);
@@ -153,33 +145,27 @@ fn build_background_panel(scale: f64, window: &ApplicationWindow) -> GtkBox {
     source_tabs.append(&image_tab);
     body.append(&source_tabs);
 
-    let none = ToggleButton::with_label(&t("None"));
+    let none = Button::with_label(&t("None"));
     none.add_css_class("recording-editor-bg-none-row");
     none.add_css_class("video-editor-background-none");
     none.set_has_frame(false);
-    none.set_active(true);
-    none.add_css_class("active-background-option");
     body.append(&none);
-    none.connect_clicked(|none| {
-        if !none.is_active() {
-            none.set_active(true);
-        }
-    });
 
     let source_pages = GtkBox::new(Orientation::Vertical, 0);
     source_pages.set_vexpand(false);
     source_pages.set_valign(Align::Start);
     source_pages.set_hexpand(true);
-    let (wallpaper_page, wallpaper_scroll) = build_wallpaper_page(scale, choice_buttons.clone());
+    let (wallpaper_page, wallpaper_scroll) =
+        build_wallpaper_page(scale, choice_buttons.clone(), background.clone());
     wallpaper_page.set_visible(true);
     let select_custom = {
-        let none = none.clone();
         let choices = choice_buttons.clone();
+        let background = background.clone();
         Rc::new(move || {
-            none.set_active(false);
             for card in choices.borrow().iter() {
                 card.set_active(false);
             }
+            background.select(None);
         }) as Rc<dyn Fn()>
     };
     let custom_page = super::custom_fill::build_custom_page(scale, select_custom);
@@ -232,11 +218,9 @@ fn build_background_panel(scale: f64, window: &ApplicationWindow) -> GtkBox {
     body.append(&source_pages);
 
     for card in choice_buttons.borrow().iter() {
-        let none = none.clone();
         let clear_custom = custom_page.clear.clone();
         card.connect_clicked(move |card| {
             if card.is_active() {
-                none.set_active(false);
                 clear_custom();
             }
         });
@@ -245,39 +229,45 @@ fn build_background_panel(scale: f64, window: &ApplicationWindow) -> GtkBox {
     let choices_for_none = choice_buttons.clone();
     let clear_custom = custom_page.clear.clone();
     let wallpaper_scroll_for_none = wallpaper_scroll.clone();
-    none.connect_toggled(move |none| {
-        if none.is_active() {
-            for card in choices_for_none.borrow().iter() {
-                card.set_active(false);
-            }
-            clear_custom();
-            let adjustment = wallpaper_scroll_for_none.vadjustment();
-            adjustment.set_value(adjustment.lower());
-            none.add_css_class("active-background-option");
-        } else {
-            none.remove_css_class("active-background-option");
+    let background_for_none = background.clone();
+    none.connect_clicked(move |_| {
+        for card in choices_for_none.borrow().iter() {
+            card.set_active(false);
         }
+        clear_custom();
+        background_for_none.select(None);
+        let adjustment = wallpaper_scroll_for_none.vadjustment();
+        adjustment.set_value(adjustment.lower());
     });
 
     let options = GtkBox::new(Orientation::Vertical, 8);
     options.add_css_class("recording-editor-bg-options");
-    options.append(&value_slider_row(
+    let padding = background.padding();
+    options.append(&value_slider_row_with(
         &t("Padding"),
         0.0,
         80.0,
-        24.0,
+        padding,
         1.0,
         0,
         scale,
+        {
+            let background = background.clone();
+            move |value| background.set_padding(value)
+        },
     ));
-    options.append(&value_slider_row(
+    options.append(&value_slider_row_with(
         &t("Radius"),
         0.0,
         40.0,
-        12.0,
+        background.radius(),
         1.0,
         0,
         scale,
+        {
+            let background = background.clone();
+            move |value| background.set_radius(value)
+        },
     ));
     body.append(&options);
     panel_frame(&t("Background"), body)
@@ -286,6 +276,7 @@ fn build_background_panel(scale: f64, window: &ApplicationWindow) -> GtkBox {
 fn build_wallpaper_page(
     scale: f64,
     choices: Rc<RefCell<Vec<ToggleButton>>>,
+    background: Background,
 ) -> (GtkBox, ScrolledWindow) {
     let page = GtkBox::new(Orientation::Vertical, 0);
     page.set_hexpand(true);
@@ -296,35 +287,39 @@ fn build_wallpaper_page(
     grid.set_column_homogeneous(true);
     grid.set_hexpand(true);
 
+    let card_size = (56.0 * scale).round() as i32;
     let mut first_button = None::<ToggleButton>;
-    for (index, bytes) in WALLPAPERS.into_iter().enumerate() {
+    for (index, file_name) in background::WALLPAPERS.into_iter().enumerate() {
         let card = ToggleButton::new();
         card.add_css_class("video-editor-wallpaper-card");
         card.set_has_frame(false);
         card.set_hexpand(true);
         card.set_halign(Align::Fill);
         card.set_valign(Align::Fill);
-        card.set_size_request((56.0 * scale).round() as i32, (56.0 * scale).round() as i32);
+        card.set_size_request(card_size, card_size);
         let preview = DrawingArea::new();
-        preview.set_size_request((56.0 * scale).round() as i32, (56.0 * scale).round() as i32);
-        preview.set_content_width((56.0 * scale).round() as i32);
-        preview.set_content_height((56.0 * scale).round() as i32);
+        preview.set_size_request(card_size, card_size);
+        preview.set_content_width(card_size);
+        preview.set_content_height(card_size);
         preview.set_hexpand(true);
         preview.set_vexpand(true);
         preview.set_halign(Align::Fill);
         preview.set_valign(Align::Fill);
-        let thumbnail = wallpaper_thumbnail(
-            bytes,
-            (112.0 * scale).round() as i32,
-            (112.0 * scale).round() as i32,
-        );
-        if let Some(thumbnail) = thumbnail {
-            preview.set_draw_func(move |_, context, width, height| {
-                draw_wallpaper_thumbnail(context, width, height, &thumbnail);
-            });
-        } else {
-            preview.set_draw_func(move |_, context, width, height| {
-                draw_wallpaper_fallback(context, width, height);
+        preview.set_draw_func(move |_, context, width, height| {
+            draw_wallpaper_fallback(context, width, height);
+        });
+        // Decoding sixty previews up front would stall the panel; each card
+        // fills in on the next idle instead.
+        let pixbuf = background::thumb_path(file_name).and_then(|path| {
+            Pixbuf::from_file_at_scale(&path, card_size * 2, card_size * 2, true).ok()
+        });
+        if let Some(pixbuf) = pixbuf {
+            let preview = preview.clone();
+            gtk4::glib::idle_add_local_once(move || {
+                preview.set_draw_func(move |_, context, width, height| {
+                    draw_wallpaper_thumbnail(context, width, height, &pixbuf);
+                });
+                preview.queue_draw();
             });
         }
         card.set_child(Some(&preview));
@@ -333,6 +328,15 @@ fn build_wallpaper_page(
         } else {
             first_button = Some(card.clone());
         }
+        let selected = file_name.to_owned();
+        card.connect_clicked({
+            let background = background.clone();
+            move |card| {
+                if card.is_active() {
+                    background.select(Some(&selected));
+                }
+            }
+        });
         choices.borrow_mut().push(card.clone());
         grid.attach(&card, (index % 4) as i32, (index / 4) as i32, 1, 1);
     }
@@ -343,6 +347,10 @@ fn build_wallpaper_page(
     grid_scroll.set_max_content_height((320.0 * scale).round() as i32);
     grid_scroll.set_hexpand(true);
     grid_scroll.set_child(Some(&grid));
+    {
+        let adjustment = grid_scroll.vadjustment();
+        gtk4::glib::idle_add_local_once(move || adjustment.set_value(adjustment.lower()));
+    }
     page.append(&grid_scroll);
     (page, grid_scroll)
 }
@@ -377,9 +385,15 @@ fn build_image_page(scale: f64, window: &ApplicationWindow) -> GtkBox {
 }
 
 fn build_cursor_panel(scale: f64) -> GtkBox {
-    let body = panel_body();
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+    panel.add_css_class("recording-editor-zoom-panel");
+    panel.set_hexpand(true);
+    panel.set_vexpand(true);
+    panel.append(&panel_header(&t("Cursor")));
+
     let tabs = GtkBox::new(Orientation::Horizontal, 0);
     tabs.add_css_class("recording-editor-cursor-tabs");
+    tabs.set_hexpand(true);
     tabs.set_homogeneous(true);
     let style_tab = tab_button(&t("Style"), "recording-editor-cursor-tab");
     let follow_tab = tab_button(&t("Follow"), "recording-editor-cursor-tab");
@@ -390,7 +404,7 @@ fn build_cursor_panel(scale: f64) -> GtkBox {
     tabs.append(&style_tab);
     tabs.append(&follow_tab);
     tabs.append(&effects_tab);
-    body.append(&tabs);
+    panel.append(&tabs);
 
     let pages = Stack::new();
     pages.set_transition_type(StackTransitionType::Crossfade);
@@ -399,9 +413,24 @@ fn build_cursor_panel(scale: f64) -> GtkBox {
     pages.add_named(&build_cursor_follow_page(scale), Some("follow"));
     pages.add_named(&build_cursor_effects_page(scale), Some("effects"));
     pages.set_visible_child_name("style");
-    connect_tabs(&pages, [&style_tab, &follow_tab, &effects_tab]);
-    body.append(&pages);
-    panel_frame(&t("Cursor"), body)
+    connect_tabs(
+        &pages,
+        [
+            (&style_tab, "style"),
+            (&follow_tab, "follow"),
+            (&effects_tab, "effects"),
+        ],
+    );
+
+    let scroll = ScrolledWindow::new();
+    scroll.add_css_class("recording-editor-zoom-scroll");
+    scroll.add_css_class("video-editor-side-scroll");
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    scroll.set_vexpand(true);
+    scroll.set_hexpand(true);
+    scroll.set_child(Some(&pages));
+    panel.append(&scroll);
+    panel
 }
 
 fn build_cursor_style_page(scale: f64) -> GtkBox {
@@ -413,28 +442,22 @@ fn build_cursor_style_page(scale: f64) -> GtkBox {
     page.append(&hint);
 
     let grid = Grid::new();
+    grid.add_css_class("recording-editor-cursor-grid");
     grid.set_column_spacing((8.0 * scale).round() as u32);
     grid.set_row_spacing((8.0 * scale).round() as u32);
     grid.set_column_homogeneous(true);
     grid.set_hexpand(true);
-    let styles = [
-        (t("Arrow"), CursorGlyph::Arrow),
-        (t("System"), CursorGlyph::System),
-        (t("Dark"), CursorGlyph::Dark),
-        (t("Dot"), CursorGlyph::Dot),
-    ];
-    let first = Rc::new(RefCell::new(None::<ToggleButton>));
-    for (index, (label, glyph)) in styles.into_iter().enumerate() {
-        let card = cursor_card(&label, glyph, scale);
-        let group_first = first.borrow().clone();
-        if let Some(group_first) = group_first {
-            card.set_group(Some(&group_first));
+    let mut first = None::<ToggleButton>;
+    for (index, theme) in CursorTheme::ALL.into_iter().enumerate() {
+        let card = cursor_card(theme, scale);
+        if let Some(first) = &first {
+            card.set_group(Some(first));
         } else {
-            *first.borrow_mut() = Some(card.clone());
+            first = Some(card.clone());
         }
         grid.attach(&card, (index % 2) as i32, (index / 2) as i32, 1, 1);
     }
-    if let Some(first) = first.borrow().as_ref() {
+    if let Some(first) = &first {
         first.set_active(true);
     }
     page.append(&grid);
@@ -513,57 +536,83 @@ fn build_cursor_follow_page(scale: f64) -> GtkBox {
 
 fn build_cursor_effects_page(scale: f64) -> GtkBox {
     let page = tab_body();
+
+    let effect = Rc::new(Cell::new(ClickEffect::Ripple));
+    let anim_t = Rc::new(Cell::new(0.0));
+    let live = DrawingArea::new();
+    live.add_css_class("recording-editor-click-live-preview");
+    live.set_content_width((240.0 * scale).round() as i32);
+    live.set_content_height((88.0 * scale).round() as i32);
+    live.set_hexpand(true);
+    {
+        let effect = effect.clone();
+        let anim_t = anim_t.clone();
+        live.set_draw_func(move |widget, context, width, height| {
+            let settings = CursorSettings {
+                click_effect: effect.get(),
+                ..CursorSettings::default()
+            };
+            draw_click_live_preview(
+                widget,
+                context,
+                f64::from(width),
+                f64::from(height),
+                settings,
+                anim_t.get(),
+            );
+        });
+    }
+    page.append(&live);
+
     let label = Label::new(Some(&t("CLICK EFFECT")));
     label.add_css_class("recording-editor-zoom-kicker");
     label.set_xalign(0.0);
     page.append(&label);
 
-    let grid = Grid::new();
-    grid.set_column_spacing((8.0 * scale).round() as u32);
-    grid.set_row_spacing((8.0 * scale).round() as u32);
-    grid.set_column_homogeneous(true);
-    let effects = [
-        t("None"),
-        t("Spotlight"),
-        t("Ripple"),
-        t("Circle"),
-        t("Echo"),
-    ];
-    let first = Rc::new(RefCell::new(None::<ToggleButton>));
-    for (index, label) in effects.into_iter().enumerate() {
-        let card = ToggleButton::new();
-        card.add_css_class("recording-editor-click-effect-card");
-        card.set_has_frame(false);
-        card.set_hexpand(true);
-        card.set_child(Some(&Label::new(Some(&label))));
-        let group_first = first.borrow().clone();
-        if let Some(group_first) = group_first {
-            card.set_group(Some(&group_first));
-        } else {
-            *first.borrow_mut() = Some(card.clone());
-        }
-        grid.attach(&card, (index % 2) as i32, (index / 2) as i32, 1, 1);
-    }
-    if let Some(ripple) = first.borrow().as_ref() {
-        // The second card is Ripple; selecting it matches the editor default.
-        if let Some(row) = grid.first_child().and_then(|widget| widget.next_sibling()) {
-            if let Ok(button) = row.downcast::<ToggleButton>() {
-                button.set_active(true);
-            } else {
-                ripple.set_active(true);
+    let click_row = GtkBox::new(Orientation::Horizontal, (6.0 * scale).round() as i32);
+    click_row.add_css_class("recording-editor-click-effect-row");
+    click_row.set_hexpand(true);
+    click_row.set_homogeneous(true);
+    let none_btn = click_effect_card(ClickEffect::None, scale);
+    let ripple_btn = click_effect_card(ClickEffect::Ripple, scale);
+    let circle_btn = click_effect_card(ClickEffect::Circle, scale);
+    ripple_btn.set_group(Some(&none_btn));
+    circle_btn.set_group(Some(&none_btn));
+    ripple_btn.set_active(true);
+    click_row.append(&none_btn);
+    click_row.append(&ripple_btn);
+    click_row.append(&circle_btn);
+    page.append(&click_row);
+
+    for (button, choice) in [
+        (none_btn, ClickEffect::None),
+        (ripple_btn, ClickEffect::Ripple),
+        (circle_btn, ClickEffect::Circle),
+    ] {
+        let effect = effect.clone();
+        let live = live.clone();
+        button.connect_clicked(move |button| {
+            if !button.is_active() {
+                return;
             }
-        }
+            effect.set(choice);
+            live.queue_draw();
+        });
     }
-    page.append(&grid);
-    page.append(&value_slider_row(
-        &t("Intensity"),
-        0.0,
-        1.0,
-        0.7,
-        0.05,
-        1,
-        scale,
-    ));
+
+    let preview = live.downgrade();
+    let anim_t = anim_t.clone();
+    gtk4::glib::timeout_add_local(std::time::Duration::from_millis(16), move || {
+        let Some(preview) = preview.upgrade() else {
+            return gtk4::glib::ControlFlow::Break;
+        };
+        if preview.is_mapped() {
+            anim_t.set((anim_t.get() + 0.016) % 1.35);
+            preview.queue_draw();
+        }
+        gtk4::glib::ControlFlow::Continue
+    });
+
     page
 }
 
@@ -656,63 +705,24 @@ fn build_frames_panel(scale: f64) -> GtkBox {
     panel_frame(&t("Frames"), body)
 }
 
-fn build_takes_panel(scale: f64) -> GtkBox {
-    let body = panel_body();
-    let empty = GtkBox::new(Orientation::Vertical, 10);
-    empty.add_css_class("video-editor-takes-empty");
-    empty.set_halign(Align::Center);
-    empty.set_valign(Align::Center);
-    empty.set_vexpand(true);
-
-    let icon_shell = GtkBox::new(Orientation::Vertical, 0);
-    icon_shell.add_css_class("video-editor-takes-icon");
-    icon_shell.set_halign(Align::Center);
-    icon_shell.set_size_request((52.0 * scale).round() as i32, (52.0 * scale).round() as i32);
-    let icon = Image::from_icon_name(icon_names::custom::MARKER_SYMBOLIC);
-    icon.set_pixel_size((22.0 * scale).round() as i32);
-    icon.set_halign(Align::Center);
-    icon.set_valign(Align::Center);
-    icon_shell.append(&icon);
-    empty.append(&icon_shell);
-
-    let title = Label::new(Some(&t("No saved takes")));
-    title.add_css_class("video-editor-takes-title");
-    title.set_halign(Align::Center);
-    empty.append(&title);
-
-    let detail = Label::new(Some(&t(
-        "Takes let you keep alternate versions of the same recording.",
-    )));
-    detail.add_css_class("video-editor-takes-detail");
-    detail.set_wrap(true);
-    detail.set_justify(gtk4::Justification::Center);
-    detail.set_halign(Align::Center);
-    empty.append(&detail);
-
-    let save = Button::with_label(&t("Save current take"));
-    save.add_css_class("video-editor-secondary-button");
-    save.set_halign(Align::Center);
-    save.set_sensitive(false);
-    save.set_tooltip_text(Some(&t("Available when video preview is connected.")));
-    empty.append(&save);
-    body.append(&empty);
-    panel_frame(&t("Takes"), body)
+fn panel_header(title: &str) -> GtkBox {
+    let header = GtkBox::new(Orientation::Horizontal, 8);
+    header.add_css_class("recording-editor-zoom-header");
+    header.set_hexpand(true);
+    let label = Label::new(Some(title));
+    label.add_css_class("recording-editor-zoom-title");
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    header.append(&label);
+    header
 }
 
 fn panel_frame(title: &str, body: GtkBox) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
-    panel.add_css_class("video-editor-side-panel");
     panel.set_hexpand(true);
     panel.set_vexpand(true);
-
-    let header = GtkBox::new(Orientation::Horizontal, 8);
-    header.add_css_class("recording-editor-zoom-header");
-    let title = Label::new(Some(title));
-    title.add_css_class("recording-editor-zoom-title");
-    title.set_xalign(0.0);
-    header.append(&title);
-    panel.append(&header);
+    panel.append(&panel_header(title));
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -728,13 +738,13 @@ fn panel_frame(title: &str, body: GtkBox) -> GtkBox {
 fn panel_body() -> GtkBox {
     let body = GtkBox::new(Orientation::Vertical, 8);
     body.add_css_class("recording-editor-zoom-body");
-    body.add_css_class("video-editor-panel-body");
     body.set_hexpand(true);
     body
 }
 
 fn tab_body() -> GtkBox {
     let body = GtkBox::new(Orientation::Vertical, 8);
+    body.add_css_class("recording-editor-zoom-body");
     body.add_css_class("recording-editor-cursor-tab-body");
     body.set_hexpand(true);
     body
@@ -748,12 +758,8 @@ fn tab_button(label: &str, class: &str) -> ToggleButton {
     button
 }
 
-fn connect_tabs<const N: usize>(stack: &Stack, tabs: [&ToggleButton; N]) {
-    let names = match N {
-        3 => ["wallpaper", "custom", "image"],
-        _ => ["style", "follow", "effects"],
-    };
-    for (tab, name) in tabs.into_iter().zip(names) {
+fn connect_tabs(stack: &Stack, tabs: [(&ToggleButton, &str); 3]) {
+    for (tab, name) in tabs {
         let stack = stack.clone();
         let name = name.to_owned();
         tab.connect_toggled(move |tab| {
@@ -776,6 +782,23 @@ fn value_slider_row(
     FilledSlider::new(label, min, max, initial, step, decimals, scale).widget()
 }
 
+/// A slider row whose value is reported as it is dragged, for controls the
+/// preview reacts to immediately.
+fn value_slider_row_with(
+    label: &str,
+    min: f64,
+    max: f64,
+    initial: f64,
+    step: f64,
+    decimals: usize,
+    scale: f64,
+    on_change: impl Fn(f64) + 'static,
+) -> DrawingArea {
+    let slider = FilledSlider::new(label, min, max, initial, step, decimals, scale);
+    slider.on_change(Rc::new(on_change));
+    slider.widget()
+}
+
 fn format_value(value: f64, decimals: usize) -> String {
     match decimals {
         0 => format!("{value:.0}"),
@@ -795,6 +818,7 @@ struct FilledSlider {
     scale: f64,
     hovered: Rc<Cell<bool>>,
     dragging: Rc<Cell<bool>>,
+    on_change: Rc<RefCell<Option<Rc<dyn Fn(f64)>>>>,
 }
 
 impl FilledSlider {
@@ -821,6 +845,7 @@ impl FilledSlider {
             scale,
             hovered: Rc::new(Cell::new(false)),
             dragging: Rc::new(Cell::new(false)),
+            on_change: Rc::new(RefCell::new(None)),
         };
         area.set_draw_func({
             let slider = slider.clone();
@@ -882,6 +907,10 @@ impl FilledSlider {
         self.area.clone()
     }
 
+    fn on_change(&self, callback: Rc<dyn Fn(f64)>) {
+        *self.on_change.borrow_mut() = Some(callback);
+    }
+
     fn apply_x(&self, gesture: &GestureDrag, x: f64) {
         let width = gesture
             .widget()
@@ -894,7 +923,15 @@ impl FilledSlider {
         } else {
             raw
         };
-        self.value.set(value.clamp(self.min, self.max));
+        let value = value.clamp(self.min, self.max);
+        if (self.value.get() - value).abs() < 1e-9 {
+            return;
+        }
+        self.value.set(value);
+        let callback = self.on_change.borrow().clone();
+        if let Some(callback) = callback {
+            callback(value);
+        }
         self.area.queue_draw();
     }
 
@@ -993,25 +1030,162 @@ fn widget_is_light(widget: &impl IsA<gtk4::Widget>) -> bool {
     false
 }
 
-fn cursor_card(label: &str, glyph: CursorGlyph, scale: f64) -> ToggleButton {
+fn cursor_card(theme: CursorTheme, scale: f64) -> ToggleButton {
     let card = ToggleButton::new();
     card.add_css_class("recording-editor-cursor-card");
     card.set_has_frame(false);
     card.set_hexpand(true);
-    let body = GtkBox::new(Orientation::Vertical, 5);
+    let body = GtkBox::new(Orientation::Vertical, (6.0 * scale).round() as i32);
+    body.set_halign(Align::Fill);
     let preview = DrawingArea::new();
+    preview.add_css_class("recording-editor-cursor-preview");
+    preview.set_content_width((72.0 * scale).round() as i32);
+    preview.set_content_height((56.0 * scale).round() as i32);
     preview.set_hexpand(true);
-    preview.set_content_height((54.0 * scale).round() as i32);
+    let settings = CursorSettings {
+        theme,
+        ..CursorSettings::default()
+    };
     preview.set_draw_func(move |_, context, width, height| {
-        draw_cursor_glyph(context, width, height, glyph);
+        cursor_sprite::draw_centered(context, f64::from(width), f64::from(height), settings, 1.0);
     });
-    let label = Label::new(Some(label));
+    let label = Label::new(Some(&t(theme.label())));
     label.add_css_class("recording-editor-cursor-card-label");
-    label.set_halign(Align::Center);
+    label.set_xalign(0.5);
     body.append(&preview);
     body.append(&label);
     card.set_child(Some(&body));
     card
+}
+
+fn click_effect_card(effect: ClickEffect, scale: f64) -> ToggleButton {
+    let card = ToggleButton::new();
+    card.add_css_class("recording-editor-click-effect-card");
+    card.set_has_frame(false);
+    card.set_hexpand(true);
+    let column = GtkBox::new(Orientation::Vertical, (4.0 * scale).round() as i32);
+    column.set_halign(Align::Center);
+    column.set_valign(Align::Center);
+    let preview = DrawingArea::new();
+    preview.set_content_width((40.0 * scale).round() as i32);
+    preview.set_content_height((30.0 * scale).round() as i32);
+    preview.set_can_target(false);
+    preview.set_draw_func(move |widget, context, width, height| {
+        draw_click_effect_icon(widget, context, f64::from(width), f64::from(height), effect);
+    });
+    column.append(&preview);
+    let name = Label::new(Some(&t(effect.label())));
+    name.add_css_class("recording-editor-click-effect-label");
+    name.set_xalign(0.5);
+    column.append(&name);
+    card.set_child(Some(&column));
+    card
+}
+
+fn draw_click_effect_icon(
+    widget: &DrawingArea,
+    context: &gtk4::cairo::Context,
+    width: f64,
+    height: f64,
+    effect: ClickEffect,
+) {
+    let cx = width / 2.0;
+    let cy = height / 2.0;
+    let light = widget_is_light(widget);
+    let (r, g, b) = if light {
+        (0.15, 0.16, 0.18)
+    } else {
+        (1.0, 1.0, 1.0)
+    };
+    context.set_line_cap(gtk4::cairo::LineCap::Round);
+    context.set_line_join(gtk4::cairo::LineJoin::Round);
+    let s = width.min(height) / 48.0;
+    match effect {
+        ClickEffect::None => {
+            let s = width.min(height) / 40.0;
+            context.set_line_width(1.8 * s);
+            context.set_source_rgba(r, g, b, 0.75);
+            context.arc(cx, cy, 11.5 * s, 0.0, PI * 2.0);
+            let _ = context.stroke();
+            context.set_line_width(2.2 * s);
+            context.set_source_rgba(r, g, b, 0.92);
+            context.move_to(cx - 7.5 * s, cy + 7.5 * s);
+            context.line_to(cx + 7.5 * s, cy - 7.5 * s);
+            let _ = context.stroke();
+        }
+        ClickEffect::Spotlight => {
+            context.set_line_width(1.5 * s);
+            context.set_source_rgba(r, g, b, 0.3);
+            context.arc(cx, cy, 13.5 * s, 0.0, PI * 2.0);
+            let _ = context.stroke();
+            context.set_line_width(1.7 * s);
+            context.set_source_rgba(r, g, b, 0.56);
+            context.arc(cx, cy, 9.75 * s, 0.0, PI * 2.0);
+            let _ = context.stroke();
+        }
+        ClickEffect::Ripple => {
+            context.set_line_width(2.0 * s);
+            context.set_source_rgba(r, g, b, 0.72);
+            context.arc(cx, cy, 13.0 * s, 0.0, PI * 2.0);
+            let _ = context.stroke();
+        }
+        ClickEffect::Circle => {
+            context.set_source_rgba(r, g, b, 0.22);
+            context.arc(cx, cy, 12.0 * s, 0.0, PI * 2.0);
+            let _ = context.fill();
+            context.set_line_width(1.6 * s);
+            context.set_source_rgba(r, g, b, 0.72);
+            context.arc(cx, cy, 12.0 * s, 0.0, PI * 2.0);
+            let _ = context.stroke();
+        }
+        ClickEffect::Echo => {
+            context.set_line_width(1.8 * s);
+            context.set_source_rgba(r, g, b, 0.72);
+            context.arc(cx, cy, 9.0 * s, 0.0, PI * 2.0);
+            let _ = context.stroke();
+            context.set_line_width(1.5 * s);
+            context.set_source_rgba(r, g, b, 0.4);
+            context.arc(cx, cy, 14.5 * s, 0.0, PI * 2.0);
+            let _ = context.stroke();
+            context.set_source_rgba(r, g, b, 0.22);
+            context.arc(cx, cy, 4.25 * s, 0.0, PI * 2.0);
+            let _ = context.fill();
+        }
+    }
+}
+
+fn draw_click_live_preview(
+    widget: &DrawingArea,
+    context: &gtk4::cairo::Context,
+    width: f64,
+    height: f64,
+    settings: CursorSettings,
+    t: f64,
+) {
+    let settings = settings.clamped();
+    let light = widget_is_light(widget);
+    rounded_rect(context, 0.0, 0.0, width, height, 10.0);
+    if light {
+        context.set_source_rgba(0.11, 0.13, 0.16, 0.08);
+    } else {
+        context.set_source_rgba(1.0, 1.0, 1.0, 0.05);
+    }
+    let _ = context.fill();
+    let (hotspot_x, hotspot_y) = cursor_sprite::centered_preview_hotspot(width, height, settings);
+    let duration = settings.click_window_seconds().max(0.2);
+    let local = t % (duration * 1.35);
+    if local <= duration {
+        cursor_sprite::draw_click(
+            context,
+            hotspot_x,
+            hotspot_y,
+            (local / duration).clamp(0.0, 1.0),
+            settings,
+            1.0,
+            width,
+        );
+    }
+    cursor_sprite::draw_centered(context, width, height, settings, 0.95);
 }
 
 fn preset_card(title: &str, hint: &str, scale: f64) -> ToggleButton {
@@ -1019,12 +1193,14 @@ fn preset_card(title: &str, hint: &str, scale: f64) -> ToggleButton {
     card.add_css_class("recording-editor-motion-preset");
     card.set_has_frame(false);
     card.set_hexpand(true);
-    let body = GtkBox::new(Orientation::Vertical, 3);
-    body.set_size_request(-1, (50.0 * scale).round() as i32);
+    let body = GtkBox::new(Orientation::Vertical, (3.0 * scale).round() as i32);
+    body.set_valign(Align::Center);
     let title = Label::new(Some(title));
     title.add_css_class("recording-editor-motion-preset-label");
+    title.set_xalign(0.5);
     let hint = Label::new(Some(hint));
     hint.add_css_class("recording-editor-motion-preset-hint");
+    hint.set_xalign(0.5);
     body.append(&title);
     body.append(&hint);
     card.set_child(Some(&body));
@@ -1055,36 +1231,12 @@ fn choose_background_image(window: &ApplicationWindow, label: &Label) {
     chooser.show();
 }
 
-#[derive(Clone, Copy)]
-enum CursorGlyph {
-    Arrow,
-    System,
-    Dark,
-    Dot,
-}
-
 fn draw_wallpaper_fallback(context: &gtk4::cairo::Context, width: i32, height: i32) {
     let width = f64::from(width);
     let height = f64::from(height);
     rounded_rect(context, 0.5, 0.5, width - 1.0, height - 1.0, 8.0);
     context.set_source_rgb(0.18, 0.20, 0.24);
     let _ = context.fill();
-}
-
-fn wallpaper_thumbnail(
-    bytes: &'static [u8],
-    width: i32,
-    height: i32,
-) -> Option<gtk4::gdk_pixbuf::Pixbuf> {
-    let bytes = gtk4::glib::Bytes::from_static(bytes);
-    let stream = gtk4::gio::MemoryInputStream::from_bytes(&bytes);
-    let pixbuf =
-        gtk4::gdk_pixbuf::Pixbuf::from_stream(&stream, None::<&gtk4::gio::Cancellable>).ok()?;
-    pixbuf.scale_simple(
-        width.max(1),
-        height.max(1),
-        gtk4::gdk_pixbuf::InterpType::Bilinear,
-    )
 }
 
 fn draw_wallpaper_thumbnail(
@@ -1106,42 +1258,6 @@ fn draw_wallpaper_thumbnail(
     context.scale(scale, scale);
     context.set_source_pixbuf(thumbnail, 0.0, 0.0);
     let _ = context.paint();
-}
-
-fn draw_cursor_glyph(context: &gtk4::cairo::Context, width: i32, height: i32, glyph: CursorGlyph) {
-    let width = f64::from(width);
-    let height = f64::from(height);
-    context.select_font_face("Inter", FontSlant::Normal, FontWeight::Normal);
-    context.set_line_width(1.4);
-    context.set_line_join(gtk4::cairo::LineJoin::Round);
-    let fill = match glyph {
-        CursorGlyph::Dark => (0.05, 0.05, 0.06),
-        _ => (0.96, 0.96, 0.97),
-    };
-    context.set_source_rgb(fill.0, fill.1, fill.2);
-    if matches!(glyph, CursorGlyph::Dot) {
-        context.arc(width * 0.5, height * 0.5, height * 0.15, 0.0, PI * 2.0);
-        let _ = context.fill_preserve();
-        context.set_source_rgb(0.08, 0.08, 0.09);
-        let _ = context.stroke();
-        return;
-    }
-
-    let inset = width * 0.38;
-    context.move_to(inset, height * 0.18);
-    context.line_to(width - inset + 2.0, height * 0.52);
-    context.line_to(width * 0.55, height * 0.56);
-    context.line_to(width * 0.48, height * 0.82);
-    context.close_path();
-    let _ = context.fill_preserve();
-    context.set_source_rgb(0.08, 0.08, 0.09);
-    let _ = context.stroke();
-
-    if matches!(glyph, CursorGlyph::System) {
-        context.set_source_rgb(0.20, 0.54, 0.96);
-        context.arc(width * 0.68, height * 0.34, 2.6, 0.0, PI * 2.0);
-        let _ = context.fill();
-    }
 }
 
 fn rounded_rect(
@@ -1170,14 +1286,8 @@ pub(super) fn install_css() {
     let px = |value: f64| (value * scale).round() as i32;
     let css = format!(
         r#"
-        .video-editor-side-panel {{
-            margin-top: 2px;
-        }}
         .video-editor-side-scroll {{
             background: transparent;
-        }}
-        .video-editor-panel-body {{
-            padding: {body_top}px {body_side}px {body_bottom}px {body_side}px;
         }}
         .video-editor-wallpaper-scroll {{
             margin: {grid_top}px 0 {grid_bottom}px 0;
@@ -1242,37 +1352,7 @@ pub(super) fn install_css() {
             font-size: {secondary_text}px;
             font-weight: 500;
         }}
-        .video-editor-takes-empty {{
-            padding: {takes_pad}px {takes_side}px;
-        }}
-        .video-editor-takes-icon {{
-            border-radius: {takes_icon_radius}px;
-            background: alpha(white, 0.05);
-            color: alpha(white, 0.62);
-        }}
-        .editor-theme-light .video-editor-takes-icon {{
-            background: alpha(#111827, 0.05);
-            color: alpha(#111827, 0.58);
-        }}
-        .video-editor-takes-title {{
-            color: alpha(white, 0.88);
-            font-size: {takes_title}px;
-            font-weight: 600;
-        }}
-        .editor-theme-light .video-editor-takes-title {{
-            color: alpha(#111827, 0.88);
-        }}
-        .video-editor-takes-detail {{
-            color: alpha(white, 0.42);
-            font-size: {takes_detail}px;
-        }}
-        .editor-theme-light .video-editor-takes-detail {{
-            color: alpha(#111827, 0.48);
-        }}
         "#,
-        body_top = px(4.0),
-        body_side = px(14.0),
-        body_bottom = px(14.0),
         grid_top = px(6.0),
         grid_bottom = px(14.0),
         card_h = px(56.0),
@@ -1288,11 +1368,6 @@ pub(super) fn install_css() {
         secondary_x = px(14.0),
         secondary_radius = px(8.0),
         secondary_text = px(12.0),
-        takes_pad = px(32.0),
-        takes_side = px(18.0),
-        takes_icon_radius = px(16.0),
-        takes_title = px(15.0),
-        takes_detail = px(12.0),
     );
     let provider = CssProvider::new();
     provider.load_from_data(&css);
@@ -1305,17 +1380,12 @@ pub(super) fn install_css() {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_value, WALLPAPERS};
+    use super::format_value;
 
     #[test]
     fn value_labels_use_the_requested_precision() {
         assert_eq!(format_value(24.4, 0), "24");
         assert_eq!(format_value(0.35, 1), "0.3");
         assert_eq!(format_value(0.456, 2), "0.46");
-    }
-
-    #[test]
-    fn background_palettes_are_complete() {
-        assert_eq!(WALLPAPERS.len(), 32);
     }
 }

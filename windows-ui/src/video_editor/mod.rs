@@ -6,8 +6,12 @@
 
 use gtk4::prelude::*;
 use gtk4::Application;
+mod background;
 mod custom_fill;
+mod preview;
+mod rounded_clip;
 mod side_panel;
+mod timeline;
 mod ui_support;
 mod window;
 

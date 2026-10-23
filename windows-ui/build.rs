@@ -8,6 +8,18 @@ fn main() {
         Some("com.apexshot.editor"),
         None::<&str>,
         Some("../data/icons"),
-        ["chevron-down-regular", "chevron-right-regular"],
+        [
+            "chevron-down-regular",
+            "chevron-right-regular",
+            "pointer-primary-click",
+            // The clip menu's rows use the same fluent glyphs as the Linux
+            // editor, so a right-click reads the same on both platforms.
+            "copy-regular",
+            "copy-arrow-right-regular",
+            "cut-regular",
+            "clipboard-paste-regular",
+            "eye-regular",
+            "eye-off-regular",
+        ],
     );
 }
