@@ -4,6 +4,7 @@
 //! editor. Gradient stops open their own color picker, mirroring the shared
 //! editor's two-level interaction.
 
+use super::background::Background;
 use crate::i18n::t;
 use gtk4::cairo::{LinearGradient, RadialGradient};
 use gtk4::prelude::*;
@@ -20,6 +21,8 @@ type Color = (u8, u8, u8);
 const COLOR_RADIUS: f64 = 8.0;
 const HANDLE_RADIUS: f64 = 8.0;
 const SPECTRUM_BAR_THICKNESS: f64 = 10.0;
+/// The clear gap between the stop picker's card and the card it inspects.
+const PICKER_CARD_GAP: f64 = 6.0;
 
 #[derive(Clone)]
 enum FillValue {
@@ -86,7 +89,12 @@ pub(super) struct CustomFillPage {
     pub clear: Rc<dyn Fn()>,
 }
 
-pub(super) fn build_custom_page(scale: f64, on_selected: Rc<dyn Fn()>) -> CustomFillPage {
+pub(super) fn build_custom_page(
+    scale: f64,
+    column: &GtkBox,
+    background: &Background,
+    on_selected: Rc<dyn Fn()>,
+) -> CustomFillPage {
     let state = Rc::new(RefCell::new(FillValue::Empty));
 
     let row = GtkBox::new(Orientation::Horizontal, 10);
@@ -146,10 +154,30 @@ pub(super) fn build_custom_page(scale: f64, on_selected: Rc<dyn Fn()>) -> Custom
         }) as Rc<dyn Fn()>
     };
 
+    // Hand the stage a painter for whatever the tab now holds, so the picked
+    // color or gradient is what the preview sits on. Rebuilt on every change
+    // because the stage redraws with the value it was handed: this is what makes
+    // a drag in the picker live on the stage as well as in the panel.
+    let publish_fill = {
+        let background = background.clone();
+        let state = state.clone();
+        move || {
+            let value = state.borrow().clone();
+            let paint: Option<super::background::FillPainter> = match value {
+                FillValue::Empty => None,
+                value => Some(Rc::new(move |context, width, height| {
+                    paint_fill(context, width, height, &value);
+                })),
+            };
+            background.set_custom_fill(paint);
+        }
+    };
     let refresh_internal: Rc<dyn Fn()> = {
         let refresh_summary = refresh_summary.clone();
         let repainters = repainters.clone();
+        let publish_fill = publish_fill.clone();
         Rc::new(move || {
+            publish_fill();
             refresh_summary();
             for repaint in repainters.borrow().iter() {
                 repaint();
@@ -166,7 +194,7 @@ pub(super) fn build_custom_page(scale: f64, on_selected: Rc<dyn Fn()>) -> Custom
     };
 
     let (popover, refresh_popover) =
-        build_custom_popover(&edit, state.clone(), notify.clone(), scale);
+        build_custom_popover(&edit, column, state.clone(), notify.clone(), scale);
     repainters.borrow_mut().push(refresh_popover);
     refresh_internal();
 
@@ -196,6 +224,7 @@ pub(super) fn build_custom_page(scale: f64, on_selected: Rc<dyn Fn()>) -> Custom
 
 fn build_custom_popover(
     edit: &Button,
+    column: &GtkBox,
     state: Rc<RefCell<FillValue>>,
     notify: Rc<dyn Fn()>,
     scale: f64,
@@ -204,11 +233,25 @@ fn build_custom_popover(
     popover.add_css_class("recording-editor-custom-popover");
     popover.set_has_arrow(false);
     popover.set_position(PositionType::Left);
-    popover.set_parent(edit);
+    popover.set_parent(column);
+    popover.connect_show({
+        let edit = edit.clone();
+        let column = column.clone();
+        move |popover| {
+            if let Some(bounds) = edit.compute_bounds(&column) {
+                popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+                    0,
+                    (bounds.y() + bounds.height() / 2.0).round() as i32,
+                    1,
+                    1,
+                )));
+            }
+        }
+    });
 
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("recording-editor-custom-body");
-    root.set_size_request((210.0 * scale).round() as i32, -1);
+    root.set_size_request((184.0 * scale).round() as i32, -1);
 
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("recording-editor-custom-header");
@@ -259,7 +302,7 @@ fn build_custom_popover(
     };
     let color_picker = build_color_picker(get_color, set_color, notify.clone(), scale);
 
-    let gradient_page = build_gradient_page(state.clone(), notify.clone(), scale);
+    let gradient_page = build_gradient_page(root.clone(), state.clone(), notify.clone(), scale);
 
     let pages = gtk4::Stack::new();
     pages.set_transition_type(gtk4::StackTransitionType::Crossfade);
@@ -322,21 +365,21 @@ fn build_color_picker(
 
     let field = DrawingArea::new();
     field.add_css_class("recording-editor-custom-field");
-    field.set_content_height((190.0 * scale).round() as i32);
+    field.set_content_height((132.0 * scale).round() as i32);
     field.set_hexpand(true);
     field.set_cursor(gtk4::gdk::Cursor::from_name("crosshair", None).as_ref());
 
     let spectrum = DrawingArea::new();
     spectrum.add_css_class("recording-editor-custom-spectrum");
-    spectrum.set_content_height((22.0 * scale).round() as i32);
+    spectrum.set_content_height((18.0 * scale).round() as i32);
     spectrum.set_hexpand(true);
 
     let value_row = GtkBox::new(Orientation::Horizontal, 8);
     value_row.add_css_class("recording-editor-custom-value-row");
     let swatch = DrawingArea::new();
     swatch.add_css_class("recording-editor-custom-swatch");
-    swatch.set_content_width((22.0 * scale).round() as i32);
-    swatch.set_content_height((22.0 * scale).round() as i32);
+    swatch.set_content_width((18.0 * scale).round() as i32);
+    swatch.set_content_height((18.0 * scale).round() as i32);
     swatch.set_valign(Align::Center);
     swatch.set_can_target(false);
 
@@ -477,6 +520,7 @@ struct GradientView {
 }
 
 fn build_gradient_page(
+    card_body: GtkBox,
     state: Rc<RefCell<FillValue>>,
     notify: Rc<dyn Fn()>,
     scale: f64,
@@ -606,6 +650,8 @@ fn build_gradient_page(
         let refresh_ramp = refresh_ramp.clone();
         let add = add.clone();
         let selected = selected.clone();
+        let card_body = card_body.clone();
+        let rebuild_slot = rebuild_slot.clone();
         let scale = scale;
         Rc::new(move || {
             while let Some(child) = stops.first_child() {
@@ -657,10 +703,42 @@ fn build_gradient_page(
 
                 row.append(&swatch);
                 row.append(&hex);
+
+                let remove = Button::new();
+                remove.add_css_class("recording-editor-gradient-remove");
+                remove.set_has_frame(false);
+                remove.set_tooltip_text(Some(&t("Remove stop")));
+                let remove_icon = Image::from_icon_name("window-close-symbolic");
+                remove_icon.set_pixel_size((10.0 * scale).round() as i32);
+                remove.set_child(Some(&remove_icon));
+                // A gradient is at least two stops, so the last pair keeps no way
+                // out and the row gives its width back to the hex field.
+                remove.set_visible(gradient.stops.len() > 2);
+                remove.connect_clicked({
+                    let state = state.clone();
+                    let notify = notify.clone();
+                    let rebuild_slot = rebuild_slot.clone();
+                    move |_| {
+                        {
+                            let mut guard = state.borrow_mut();
+                            let mut gradient = ensure_gradient(&mut guard);
+                            if gradient.stops.len() <= 2 || index >= gradient.stops.len() {
+                                return;
+                            }
+                            gradient.stops.remove(index);
+                            *guard = FillValue::Gradient(gradient.normalized());
+                        }
+                        if let Some(rebuild) = rebuild_slot.borrow().clone() {
+                            rebuild();
+                        }
+                        notify();
+                    }
+                });
+                row.append(&remove);
                 stops.append(&row);
 
                 let stop_picker =
-                    build_stop_picker(&swatch, state.clone(), index, notify.clone(), scale);
+                    build_stop_picker(&card_body, state.clone(), index, notify.clone(), scale);
                 swatch.connect_clicked({
                     let stop_picker = stop_picker.clone();
                     let selected = selected.clone();
@@ -776,7 +854,7 @@ fn build_gradient_page(
 }
 
 fn build_stop_picker(
-    swatch: &Button,
+    card_body: &GtkBox,
     state: Rc<RefCell<FillValue>>,
     index: usize,
     notify: Rc<dyn Fn()>,
@@ -785,14 +863,24 @@ fn build_stop_picker(
     let popover = Popover::new();
     popover.add_css_class("recording-editor-gradient-picker-popover");
     popover.set_has_arrow(false);
-    popover.set_position(PositionType::Bottom);
-    popover.set_parent(swatch);
+    popover.set_position(PositionType::Left);
+    // GTK seats a left popover's corner on the pointing rect's own corner
+    // rather than on the edge's centre, so START is what keeps the two cards'
+    // tops level instead of parking this one half its height higher.
+    popover.set_valign(Align::Start);
+    popover.set_parent(card_body);
+    popover.connect_show({
+        let gap = (PICKER_CARD_GAP * scale).round() as i32;
+        move |popover| {
+            popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(-gap, 0, 1, 1)));
+        }
+    });
 
     let body = GtkBox::new(Orientation::Vertical, 0);
     body.add_css_class("recording-editor-gradient-picker-card");
     let header = GtkBox::new(Orientation::Horizontal, 8);
     header.add_css_class("recording-editor-gradient-picker-header");
-    let title = Label::new(Some(&t("Stop color")));
+    let title = Label::new(Some(&t("Color")));
     title.add_css_class("recording-editor-custom-title");
     title.set_xalign(0.0);
     title.set_hexpand(true);
@@ -819,9 +907,25 @@ fn build_stop_picker(
                 .map_or((255, 255, 255), |stop| stop.color)
         }) as Rc<dyn Fn() -> Color>
     };
+    // This card owns the only copy of its picker, so nothing else repaints it:
+    // the parent's refresh list holds the Color page's picker and the ramp, not
+    // this one. Without a slot holding its own repaint, a drag inside the card
+    // updated the gradient while the handle and the hex field stayed where they
+    // were until the card was closed and reopened.
+    let repaint_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let notify_repainting: Rc<dyn Fn()> = {
+        let slot = repaint_slot.clone();
+        let notify = notify.clone();
+        Rc::new(move || {
+            if let Some(repaint) = slot.borrow().clone() {
+                repaint();
+            }
+            notify();
+        })
+    };
     let set = {
         let state = state.clone();
-        let notify = notify.clone();
+        let notify = notify_repainting.clone();
         Rc::new(move |color| {
             let mut guard = state.borrow_mut();
             let mut gradient = ensure_gradient(&mut guard);
@@ -833,7 +937,8 @@ fn build_stop_picker(
             notify();
         }) as Rc<dyn Fn(Color)>
     };
-    let picker = build_color_picker(get, set, notify, scale);
+    let picker = build_color_picker(get, set, notify_repainting, scale);
+    *repaint_slot.borrow_mut() = Some(picker.repaint.clone());
     body.append(&picker.widget);
     popover.set_child(Some(&body));
     popover.connect_show(move |_| (picker.repaint)());
@@ -1263,6 +1368,29 @@ fn attach_stop_drag(
     bar.add_controller(drag);
 }
 
+/// Paint the chosen fill over a whole surface: the stage behind the video.
+///
+/// Unlike [`draw_fill_chip`] this is full bleed — no half-pixel inset and no
+/// corner radius — because the fill is the canvas there, and an inset edge would
+/// leave a hairline of stage showing around it.
+fn paint_fill(context: &gtk4::cairo::Context, width: i32, height: i32, value: &FillValue) {
+    match value {
+        FillValue::Empty => {}
+        FillValue::Plain(color) => fill_rounded(
+            context,
+            0.0,
+            0.0,
+            f64::from(width),
+            f64::from(height),
+            0.0,
+            *color,
+        ),
+        FillValue::Gradient(gradient) => {
+            draw_gradient(context, f64::from(width), f64::from(height), gradient, 0.0);
+        }
+    }
+}
+
 fn draw_fill_chip(
     context: &gtk4::cairo::Context,
     width: i32,
@@ -1427,10 +1555,16 @@ fn draw_plane(context: &gtk4::cairo::Context, width: f64, height: f64, hsv: (f64
     context.fill().ok();
     context.restore().ok();
 
-    let x = (1.0 - saturation) * width;
-    let y = (1.0 - value) * height;
+    let radius = 7.0;
+    let x =
+        ((1.0 - saturation.clamp(0.0, 1.0)) * width).clamp(radius, (width - radius).max(radius));
+    let y = ((1.0 - value.clamp(0.0, 1.0)) * height).clamp(radius, (height - radius).max(radius));
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.35);
+    context.set_line_width(1.0);
+    context.arc(x, y, radius + 0.5, 0.0, TAU);
+    context.stroke().ok();
     context.set_source_rgb(1.0, 1.0, 1.0);
-    context.arc(x, y, 7.0, 0.0, TAU);
+    context.arc(x, y, radius, 0.0, TAU);
     context.fill().ok();
     let color = hsv_to_rgb(hue, saturation, value);
     context.set_source_rgb(

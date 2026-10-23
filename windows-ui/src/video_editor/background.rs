@@ -9,7 +9,7 @@ use gtk4::cairo::Context;
 use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
 use std::cell::{Cell, RefCell};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 /// The Wallpaper tab's catalog, in the reference editor's order.
@@ -105,11 +105,17 @@ pub(super) fn effective_padding(padding: f64) -> f64 {
     }
 }
 
+/// A fill the panel paints itself, drawn over the whole canvas. The Custom tab
+/// owns the color and gradient model, so it hands the stage a painter instead of
+/// its state: the stage needs pixels, not a fill type.
+pub(super) type FillPainter = Rc<dyn Fn(&Context, i32, i32)>;
+
 /// The fill chosen in the Background panel. Shared by the panel, which sets
 /// it, and the stage, which paints it behind the video.
 #[derive(Clone)]
 pub(super) struct Background {
     selection: Rc<RefCell<Option<String>>>,
+    custom_fill: Rc<RefCell<Option<FillPainter>>>,
     padding: Rc<Cell<f64>>,
     radius: Rc<Cell<f64>>,
     listeners: Rc<RefCell<Vec<Rc<dyn Fn()>>>>,
@@ -119,6 +125,7 @@ impl Default for Background {
     fn default() -> Self {
         Self {
             selection: Rc::new(RefCell::new(None)),
+            custom_fill: Rc::new(RefCell::new(None)),
             padding: Rc::new(Cell::new(DEFAULT_PADDING)),
             radius: Rc::new(Cell::new(DEFAULT_RADIUS)),
             listeners: Rc::new(RefCell::new(Vec::new())),
@@ -133,6 +140,7 @@ impl Background {
     pub fn state(&self) -> BackgroundState {
         BackgroundState {
             selection: self.selection.clone(),
+            custom_fill: self.custom_fill.clone(),
             padding: self.padding.clone(),
             radius: self.radius.clone(),
         }
@@ -144,7 +152,23 @@ impl Background {
         if current == next {
             return;
         }
+        // The two fills are exclusive: a wallpaper replaces a custom one, so the
+        // stage never has to decide which of them wins.
+        if next.is_some() {
+            *self.custom_fill.borrow_mut() = None;
+        }
         *self.selection.borrow_mut() = next;
+        self.notify();
+    }
+
+    /// Install the panel's own painter, or clear it. Setting one drops the
+    /// wallpaper selection for the same reason [`select`](Self::select) drops it.
+    pub fn set_custom_fill(&self, paint: Option<FillPainter>) {
+        let picking = paint.is_some();
+        *self.custom_fill.borrow_mut() = paint;
+        if picking {
+            *self.selection.borrow_mut() = None;
+        }
         self.notify();
     }
 
@@ -191,6 +215,7 @@ impl Background {
 #[derive(Clone)]
 pub(super) struct BackgroundState {
     selection: Rc<RefCell<Option<String>>>,
+    custom_fill: Rc<RefCell<Option<FillPainter>>>,
     padding: Rc<Cell<f64>>,
     radius: Rc<Cell<f64>>,
 }
@@ -200,10 +225,16 @@ impl BackgroundState {
         self.selection.borrow().clone()
     }
 
-    /// True while a fill is picked. The stage insets and grows the canvas only
-    /// then, so an empty background leaves the video edge to edge.
+    /// True while a fill is picked, whether a wallpaper or the panel's own
+    /// painter. The stage insets and grows the canvas only then, so an empty
+    /// background leaves the video edge to edge.
     pub fn has_fill(&self) -> bool {
-        self.selection.borrow().is_some()
+        self.selection.borrow().is_some() || self.custom_fill.borrow().is_some()
+    }
+
+    /// The panel's own fill, for a stage with no wallpaper picked.
+    pub fn custom_fill(&self) -> Option<FillPainter> {
+        self.custom_fill.borrow().clone()
     }
 
     pub fn padding(&self) -> f64 {
@@ -253,6 +284,12 @@ pub(super) fn thumb_path(file_name: &str) -> Option<PathBuf> {
 fn thumb_file_name(file_name: &str) -> Option<String> {
     let suffix = file_name.strip_prefix("wallpaper-")?;
     Some(format!("wallpaper-thumb-{suffix}"))
+}
+
+/// A picture the user picked as the stage's background, decoded once and kept
+/// by the painter that draws it.
+pub(super) fn load_picture(path: &Path) -> Option<Pixbuf> {
+    Pixbuf::from_file(path).ok()
 }
 
 /// The full-size wallpaper as a pixbuf, for the stage behind the video.

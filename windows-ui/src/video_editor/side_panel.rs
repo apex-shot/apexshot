@@ -14,12 +14,13 @@ use gtk4::gdk_pixbuf::Pixbuf;
 use gtk4::prelude::*;
 use gtk4::{
     Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DrawingArea,
-    EventControllerMotion, FileChooserAction, FileChooserNative, GestureDrag, Grid, Image, Label,
-    Orientation, PolicyType, ResponseType, ScrolledWindow, Stack, StackTransitionType, Switch,
-    ToggleButton,
+    EventControllerMotion, FileChooserAction, FileChooserNative, FileFilter, GestureDrag, Grid,
+    Image, Label, Orientation, PolicyType, ResponseType, ScrolledWindow, Stack,
+    StackTransitionType, Switch, ToggleButton,
 };
 use std::cell::{Cell, RefCell};
 use std::f64::consts::{FRAC_PI_2, PI};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 pub(super) const TOOL_COLUMN_WIDTH: i32 = 288;
@@ -45,7 +46,7 @@ pub(super) fn build_tools_column(
     pages.set_vexpand(true);
     pages.set_size_request((TOOL_COLUMN_WIDTH as f64 * scale).round() as i32, -1);
     pages.add_named(
-        &build_background_panel(scale, window, background),
+        &build_background_panel(scale, window, background, &column),
         Some("background"),
     );
     pages.add_named(&build_cursor_panel(scale), Some("cursor"));
@@ -125,6 +126,7 @@ fn build_background_panel(
     scale: f64,
     window: &ApplicationWindow,
     background: Background,
+    column: &GtkBox,
 ) -> GtkBox {
     let body = panel_body();
     body.set_vexpand(false);
@@ -168,9 +170,10 @@ fn build_background_panel(
             background.select(None);
         }) as Rc<dyn Fn()>
     };
-    let custom_page = super::custom_fill::build_custom_page(scale, select_custom);
+    let custom_page =
+        super::custom_fill::build_custom_page(scale, column, &background, select_custom);
     custom_page.widget.set_visible(false);
-    let image_page = build_image_page(scale, window);
+    let (image_page, reset_image) = build_image_page(scale, window, &background);
     image_page.set_visible(false);
     source_pages.append(&wallpaper_page);
     source_pages.append(&custom_page.widget);
@@ -226,16 +229,37 @@ fn build_background_panel(
         });
     }
 
+    // None is an option of its own, not just a reset: it carries the panel's
+    // selected tint exactly while no fill is picked, and the model is what says
+    // so — a wallpaper, a custom color, or a gradient each clear it.
+    let background_for_none_state = background.state();
+    let none_for_selection = none.clone();
+    let sync_none: Rc<dyn Fn()> = Rc::new(move || {
+        if background_for_none_state.has_fill() {
+            none_for_selection.remove_css_class("active-background-option");
+        } else {
+            none_for_selection.add_css_class("active-background-option");
+        }
+    });
+    {
+        let sync_none = sync_none.clone();
+        background.connect(Rc::new(move || sync_none()));
+    }
+
     let choices_for_none = choice_buttons.clone();
     let clear_custom = custom_page.clear.clone();
     let wallpaper_scroll_for_none = wallpaper_scroll.clone();
     let background_for_none = background.clone();
+    let sync_none_for_click = sync_none.clone();
+    let reset_image_for_none = reset_image.clone();
     none.connect_clicked(move |_| {
         for card in choices_for_none.borrow().iter() {
             card.set_active(false);
         }
         clear_custom();
+        reset_image_for_none();
         background_for_none.select(None);
+        sync_none_for_click();
         let adjustment = wallpaper_scroll_for_none.vadjustment();
         adjustment.set_value(adjustment.lower());
     });
@@ -355,7 +379,11 @@ fn build_wallpaper_page(
     (page, grid_scroll)
 }
 
-fn build_image_page(scale: f64, window: &ApplicationWindow) -> GtkBox {
+fn build_image_page(
+    scale: f64,
+    window: &ApplicationWindow,
+    background: &Background,
+) -> (GtkBox, Rc<dyn Fn()>) {
     let page = GtkBox::new(Orientation::Vertical, 8);
     page.set_hexpand(true);
     let picker = Button::new();
@@ -376,12 +404,56 @@ fn build_image_page(scale: f64, window: &ApplicationWindow) -> GtkBox {
     picker.set_child(Some(&inner));
     page.append(&picker);
 
-    let window = window.clone();
-    let label_for_pick = label.clone();
-    picker.connect_clicked(move |_| {
-        choose_background_image(&window, &label_for_pick);
-    });
-    page
+    let reset: Rc<dyn Fn()> = {
+        let label = label.clone();
+        let icon = icon.clone();
+        let scale = scale;
+        Rc::new(move || {
+            label.set_text(&t("Select image…"));
+            icon.set_icon_name(Some(icon_names::custom::IMAGE_ALT_SYMBOLIC));
+            icon.set_pixel_size((15.0 * scale).round() as i32);
+        })
+    };
+    let choose = {
+        let window = window.clone();
+        let label = label.clone();
+        let icon = icon.clone();
+        let background = background.clone();
+        let scale = scale;
+        Rc::new(move || {
+            let label = label.clone();
+            let icon = icon.clone();
+            let background = background.clone();
+            let scale = scale;
+            choose_background_image(&window, move |picked| {
+                let pixbuf = super::background::load_picture(&picked);
+                let Some(pixbuf) = pixbuf else {
+                    return;
+                };
+                label.set_text(&picked.file_name().map_or_else(
+                    || t("Background image"),
+                    |name| name.to_string_lossy().to_string(),
+                ));
+                icon.set_from_pixbuf(Some(&thumbnail_pixbuf(&pixbuf, scale)));
+                // The stage paints the picture itself from here: the same slot the
+                // Custom tab uses, so a picture and a color never both apply.
+                background.set_custom_fill(Some(Rc::new(move |context, width, height| {
+                    super::background::paint_cover(context, width, height, &pixbuf);
+                })));
+            });
+        })
+    };
+    picker.connect_clicked(move |_| choose());
+    (page, reset)
+}
+
+/// The row's own preview of the picked picture, small enough to sit where the
+/// image glyph was.
+fn thumbnail_pixbuf(pixbuf: &gtk4::gdk_pixbuf::Pixbuf, scale: f64) -> gtk4::gdk_pixbuf::Pixbuf {
+    let size = (15.0 * scale).round() as i32;
+    pixbuf
+        .scale_simple(size, size, gtk4::gdk_pixbuf::InterpType::Bilinear)
+        .unwrap_or_else(|| pixbuf.clone())
 }
 
 fn build_cursor_panel(scale: f64) -> GtkBox {
@@ -1207,7 +1279,12 @@ fn preset_card(title: &str, hint: &str, scale: f64) -> ToggleButton {
     card
 }
 
-fn choose_background_image(window: &ApplicationWindow, label: &Label) {
+/// Pick a background picture and hand its path to `picked`.
+///
+/// Pictures only: the filter lists the formats the bundled gdk-pixbuf loaders
+/// decode, and the extension is checked again on the way out because a file
+/// chooser will take a typed path whatever the filter says.
+fn choose_background_image(window: &ApplicationWindow, picked: impl Fn(PathBuf) + 'static) {
     let chooser = FileChooserNative::new(
         Some(&t("Select background image")),
         Some(window),
@@ -1215,20 +1292,36 @@ fn choose_background_image(window: &ApplicationWindow, label: &Label) {
         Some(&t("Select")),
         Some(&t("Cancel")),
     );
-    let label = label.clone();
+    let filter = FileFilter::new();
+    filter.set_name(Some(&t("Images")));
+    for pattern in [
+        "*.png", "*.PNG", "*.jpg", "*.JPG", "*.jpeg", "*.JPEG", "*.bmp", "*.BMP",
+    ] {
+        filter.add_pattern(pattern);
+    }
+    chooser.set_filter(&filter);
     chooser.connect_response(move |chooser, response| {
         if response == ResponseType::Accept {
-            if let Some(name) = chooser
-                .file()
-                .and_then(|file| file.path())
-                .and_then(|path| path.file_name().map(|name| name.to_owned()))
-            {
-                label.set_text(&name.to_string_lossy());
+            if let Some(path) = chooser.file().and_then(|file| file.path()) {
+                if is_picture(&path) {
+                    picked(path);
+                }
             }
         }
         chooser.hide();
     });
     chooser.show();
+}
+
+fn is_picture(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "bmp"
+            )
+        })
 }
 
 fn draw_wallpaper_fallback(context: &gtk4::cairo::Context, width: i32, height: i32) {
@@ -1288,6 +1381,43 @@ pub(super) fn install_css() {
         r#"
         .video-editor-side-scroll {{
             background: transparent;
+        }}
+        .recording-editor-custom-popover {{
+            min-width: {custom_popover_min_w}px;
+        }}
+        .recording-editor-custom-body {{
+            min-height: {custom_body_min_h}px;
+        }}
+        .recording-editor-gradient-picker-card {{
+            min-width: {custom_popover_min_w}px;
+        }}
+        /* The row's corners follow the chip and hex inside it, and the list keeps
+         * the card's own radius clear at the bottom: at the shared 6px inset the
+         * card's 10px corner curve cut into the last row's corners. */
+        .recording-editor-gradient-step {{
+            border-radius: {stop_row_radius}px;
+        }}
+        .recording-editor-gradient-steps {{
+            margin: 0 8px {stop_list_bottom}px 8px;
+        }}
+        button.recording-editor-gradient-remove {{
+            min-width: {stop_remove_size}px;
+            min-height: {stop_remove_size}px;
+            padding: 0;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            color: alpha(white, 0.50);
+        }}
+        button.recording-editor-gradient-remove:hover {{
+            background: alpha(white, 0.10);
+            color: alpha(white, 0.92);
+        }}
+        .recording-editor-gradient-editor {{
+            min-width: {custom_gradient_editor_min_w}px;
+        }}
+        .recording-editor-custom-value-row {{
+            min-height: {custom_value_h}px;
         }}
         .video-editor-wallpaper-scroll {{
             margin: {grid_top}px 0 {grid_bottom}px 0;
@@ -1354,6 +1484,13 @@ pub(super) fn install_css() {
         }}
         "#,
         grid_top = px(6.0),
+        custom_popover_min_w = px(184.0),
+        stop_row_radius = px(8.0),
+        stop_list_bottom = px(10.0),
+        stop_remove_size = px(22.0),
+        custom_body_min_h = px(184.0),
+        custom_gradient_editor_min_w = px(182.0),
+        custom_value_h = px(30.0),
         grid_bottom = px(14.0),
         card_h = px(56.0),
         card_radius = px(9.0),

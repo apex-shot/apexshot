@@ -557,6 +557,7 @@ struct Stage {
     background: super::background::BackgroundState,
     background_layer: DrawingArea,
     background_pixbuf: Rc<RefCell<Option<Pixbuf>>>,
+    background_fill: Rc<RefCell<Option<super::background::FillPainter>>>,
     background_selection: Rc<RefCell<Option<String>>>,
     source_size: Rc<Cell<Option<(u32, u32)>>>,
     clip: super::rounded_clip::RoundedClip,
@@ -649,8 +650,12 @@ impl Stage {
                 .and_then(super::background::load_pixbuf);
             *self.background_pixbuf.borrow_mut() = pixbuf;
             *self.background_selection.borrow_mut() = selection;
-            self.background_layer.queue_draw();
         }
+        // Copied every time rather than diffed: the panel rebuilds its painter
+        // on each edit, so a new handle is the signal, and a drag repaints the
+        // stage through it.
+        *self.background_fill.borrow_mut() = self.background.custom_fill();
+        self.background_layer.queue_draw();
         self.apply_geometry();
     }
 
@@ -726,12 +731,18 @@ fn build_stage(scale: f64, background: super::background::Background) -> Stage {
     // The layer stays visible with nothing to paint so its allocation always
     // tracks the stage; the draw func no-ops while no fill is picked.
     let background_pixbuf = Rc::new(RefCell::new(None::<Pixbuf>));
+    let background_fill: Rc<RefCell<Option<super::background::FillPainter>>> =
+        Rc::new(RefCell::new(None));
     background_layer.set_draw_func({
         let background_pixbuf = background_pixbuf.clone();
+        let background_fill = background_fill.clone();
         move |_, context, width, height| {
-            let pixbuf = background_pixbuf.borrow();
-            if let Some(pixbuf) = pixbuf.as_ref() {
+            if let Some(pixbuf) = background_pixbuf.borrow().as_ref() {
                 super::background::paint_cover(context, width, height, pixbuf);
+                return;
+            }
+            if let Some(paint) = background_fill.borrow().as_ref() {
+                paint(context, width, height);
             }
         }
     });
@@ -841,6 +852,7 @@ fn build_stage(scale: f64, background: super::background::Background) -> Stage {
         background: background.state(),
         background_layer: background_layer.clone(),
         background_pixbuf,
+        background_fill,
         background_selection: Rc::new(RefCell::new(None)),
         source_size,
         clip,
