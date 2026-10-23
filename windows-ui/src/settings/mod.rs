@@ -37,8 +37,8 @@ mod studio;
 #[path = "../../../src/settings/theme_picker.rs"]
 mod theme_picker;
 #[path = "../../../src/settings/ui_support.rs"]
-mod ui_support;
-mod windowing;
+pub(crate) mod ui_support;
+pub(crate) mod windowing;
 
 /// Top inset for page content. The Windows surface removes the page-title row,
 /// so the first section needs only a hairline of breathing room.
@@ -791,7 +791,7 @@ fn build_settings_window(app: &Application) {
     window.present();
 }
 
-fn install_window_css() {
+pub(crate) fn install_window_css() {
     use gtk4::CssProvider;
     let Some(display) = gtk4::gdk::Display::default() else {
         return;
@@ -799,7 +799,7 @@ fn install_window_css() {
 
     let scale = crate::platform::ui_scale();
     let px = |value: f64| (value * scale).round() as i32;
-    let css = format!(
+    let mut css = format!(
         "window.editor-window {{ background-color:transparent; border:none; box-shadow:none; }} \
          .editor-root {{ border:1px solid rgba(255,255,255,0.12); border-radius:12px; font-size:{}px; }} \
          .editor-root.editor-theme-light {{ border:1px solid rgba(17,24,39,0.12); }} \
@@ -839,6 +839,24 @@ fn install_window_css() {
         px(1.0),
         px(12.0),
     );
+    css.push_str(&format!(
+        " window.editor-window.history-window {{ padding:1px; border:1px solid rgba(255,255,255,0.12); border-radius:12px; }} \
+         window.editor-window.history-window.editor-theme-light {{ border:1px solid rgba(17,24,39,0.12); }} \
+         .history-root {{ border:none; border-radius:12px; font-family:'Inter','Noto Sans',system-ui,sans-serif; }} \
+         .history-root .history-header-search {{ font-size:{}px; min-height:{}px; }} \
+         .history-root .recent-captures-title {{ font-size:{}px; font-weight:600; letter-spacing:-0.1px; opacity:0.85; }} \
+         .history-root .history-page-subtitle {{ font-size:{}px; }} \
+         .history-root .recent-captures-card-title {{ font-size:{}px; font-weight:500; }} \
+         .history-root .recent-captures-empty-title {{ font-size:{}px; }} \
+         .history-root .recent-captures-empty-detail {{ font-size:{}px; }}",
+        px(13.0),
+        px(30.0),
+        px(14.0),
+        px(13.0),
+        px(13.0),
+        px(18.0),
+        px(14.0),
+    ));
 
     let provider = CssProvider::new();
     provider.load_from_data(&css);

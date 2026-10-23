@@ -3418,3 +3418,12 @@ msgstr "متكيف"
 
 msgid "Adjust Light"
 msgstr "ضبط الضوء"
+
+msgid "Motion editing is not available in the Windows build yet."
+msgstr "تحرير الحركة غير متاح في إصدار Windows بعد."
+
+msgid "Video editing is not available in the Windows build yet."
+msgstr "تحرير الفيديو غير متاح في إصدار Windows بعد."
+
+msgid "Cloud browsing and sign-in are not available in the Windows build yet."
+msgstr "تصفح السحابة وتسجيل الدخول غير متاحين في إصدار Windows بعد."

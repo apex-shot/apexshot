@@ -22,9 +22,13 @@ use crate::settings::windowing::{
     prefers_reduced_transparency,
 };
 
+#[cfg(not(target_os = "windows"))]
 use super::cloud_page::build_cloud_page;
+#[cfg(not(target_os = "windows"))]
 use super::edits_page::{build_edits_page, EditsKind};
 use super::local_page::build_local_page;
+#[cfg(target_os = "windows")]
+use super::placeholder_page::build_placeholder_page;
 use super::scan::MediaKind;
 
 /// Toast severity, matching the Settings toast palette.
@@ -97,20 +101,24 @@ pub fn build_history_window(app: &Application) {
     });
 
     install_settings_css();
+    super::install_platform_window_css();
 
     let prefers_dark = prefers_dark_glass_theme();
     let reduced_transparency = prefers_reduced_transparency();
+    let ui_scale = super::window_scale();
 
     let window = ApplicationWindow::builder()
         .application(app)
         .title(t("ApexShot History"))
         .icon_name(crate::app_identity::icon_name())
-        .default_width(1020)
-        .default_height(840)
+        .default_width((940.0 * ui_scale).round() as i32)
+        .default_height((680.0 * ui_scale).round() as i32)
         .build();
 
     window.set_decorated(false);
     window.add_css_class("editor-window");
+    #[cfg(target_os = "windows")]
+    window.add_css_class("history-window");
 
     let root_box = GtkBox::new(Orientation::Vertical, 0);
     root_box.add_css_class("editor-root");
@@ -119,6 +127,8 @@ pub fn build_history_window(app: &Application) {
     root_box.add_css_class("history-root");
     if !prefers_dark {
         root_box.add_css_class("editor-theme-light");
+        #[cfg(target_os = "windows")]
+        window.add_css_class("editor-theme-light");
     }
     if reduced_transparency {
         root_box.add_css_class("editor-reduced-transparency");
@@ -144,7 +154,7 @@ pub fn build_history_window(app: &Application) {
     // (GNOME Settings / Files), with the drag handle filling the space between.
     let toolbar = GtkBox::new(Orientation::Horizontal, 0);
     toolbar.add_css_class("settings-window-controls");
-    toolbar.set_size_request(-1, 46);
+    toolbar.set_size_request(-1, (52.0 * ui_scale).round() as i32);
 
     // Expanding drag spacers on both sides center the search entry in the
     // header bar, Files-style, and stay draggable.
@@ -184,7 +194,8 @@ pub fn build_history_window(app: &Application) {
     min_btn.connect_clicked(move |_| win_clone.minimize());
 
     for button in [&close_btn, &min_btn] {
-        button.set_size_request(28, 28);
+        let size = (28.0 * ui_scale).round() as i32;
+        button.set_size_request(size, size);
         button.set_valign(Align::Center);
     }
 
@@ -254,7 +265,7 @@ pub fn build_history_window(app: &Application) {
     sidebar_wrapper.set_hexpand(false);
 
     let sidebar_head = GtkBox::new(Orientation::Horizontal, 0);
-    sidebar_head.set_size_request(-1, 46);
+    sidebar_head.set_size_request(-1, (52.0 * ui_scale).round() as i32);
 
     let sidebar_title = Label::new(Some(&t("History")));
     sidebar_title.add_css_class("settings-sidebar-title");
@@ -350,13 +361,32 @@ pub fn build_history_window(app: &Application) {
     body_frame.set_vexpand(true);
     body_frame.set_hexpand(true);
 
-    let pages = [
+    #[allow(unused_mut, clippy::useless_vec)]
+    let mut pages = vec![
         build_local_page(MediaKind::Image, toast.clone(), &search),
         build_local_page(MediaKind::Video, toast.clone(), &search),
+    ];
+    #[cfg(target_os = "windows")]
+    pages.extend([
+        build_placeholder_page(
+            custom::SCREENSHOOTER_SYMBOLIC,
+            &t("Motion editing is not available in the Windows build yet."),
+        ),
+        build_placeholder_page(
+            custom::RECORD_SCREEN_SYMBOLIC,
+            &t("Video editing is not available in the Windows build yet."),
+        ),
+        build_placeholder_page(
+            custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
+            &t("Cloud browsing and sign-in are not available in the Windows build yet."),
+        ),
+    ]);
+    #[cfg(not(target_os = "windows"))]
+    pages.extend([
         build_edits_page(EditsKind::Motion, toast.clone(), &search),
         build_edits_page(EditsKind::Video, toast.clone(), &search),
         build_cloud_page(toast.clone()),
-    ];
+    ]);
 
     // Hooks the header bar drives: refresh reloads the visible page, and the
     // shared search entry takes each page's placeholder and sensitivity.
@@ -367,11 +397,10 @@ pub fn build_history_window(app: &Application) {
         .map(|page| (page.searchable, page.search_placeholder.clone()))
         .collect();
 
-    stack.add_titled(&pages[0].widget, Some("0"), &t("Screenshots"));
-    stack.add_titled(&pages[1].widget, Some("1"), &t("Recordings"));
-    stack.add_titled(&pages[2].widget, Some("2"), &t("Motion Edits"));
-    stack.add_titled(&pages[3].widget, Some("3"), &t("Video Edits"));
-    stack.add_titled(&pages[4].widget, Some("4"), &t("Cloud"));
+    for (index, page) in pages.iter().enumerate() {
+        let name = index.to_string();
+        stack.add_titled(&page.widget, Some(&name), &labels[index].0);
+    }
 
     {
         let stack = stack.clone();
@@ -429,5 +458,6 @@ pub fn build_history_window(app: &Application) {
     window.set_child(Some(&window_overlay));
 
     window.present();
+    #[cfg(not(target_os = "windows"))]
     crate::update_ui::present_if_needed(&window_overlay);
 }

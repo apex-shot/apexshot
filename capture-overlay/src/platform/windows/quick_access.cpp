@@ -270,6 +270,29 @@ void openSettingsWindow()
     }
 }
 
+void openHistoryWindow()
+{
+    QString executable = qEnvironmentVariable("APEXSHOT_HISTORY");
+    if (executable.isEmpty()) {
+        const QString sibling =
+            QDir(QCoreApplication::applicationDirPath())
+                .filePath(QStringLiteral("apexshot-history.exe"));
+        if (QFileInfo::exists(sibling))
+            executable = sibling;
+    }
+    if (executable.isEmpty())
+        executable = QStringLiteral("apexshot-history.exe");
+
+    if (!QProcess::startDetached(executable, {})) {
+        QMessageBox::warning(
+            nullptr,
+            QStringLiteral("ApexShot History"),
+            QStringLiteral("Could not start the history window:\n%1\n\n"
+                           "Set APEXSHOT_HISTORY to the history executable.")
+                .arg(QDir::toNativeSeparators(executable)));
+    }
+}
+
 QIcon appIcon()
 {
     QPixmap pixmap(64, 64);
@@ -2136,6 +2159,7 @@ int run(QApplication& app)
     });
 
     menu->addSeparator();
+    QAction* historyAction = menu->addAction(QStringLiteral("History..."));
     QAction* settingsAction = menu->addAction(QStringLiteral("Settings..."));
     menu->addSeparator();
     QAction* quit = menu->addAction(QStringLiteral("Quit"));
@@ -2144,6 +2168,9 @@ int run(QApplication& app)
 
     QObject::connect(settingsAction, &QAction::triggered, shell, [] {
         openSettingsWindow();
+    });
+    QObject::connect(historyAction, &QAction::triggered, shell, [] {
+        openHistoryWindow();
     });
 
     QObject::connect(capture, &QAction::triggered, shell, [shell] { shell->openMenu(); });

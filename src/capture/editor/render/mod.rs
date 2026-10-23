@@ -1470,20 +1470,33 @@ mod tests {
             .expect("target surface");
         let scale = 1400.0 / 3840.0;
 
+        // Best of a few passes per filter, with a throwaway warm-up first. A cold
+        // first blit pays page faults, allocating the filter's scratch buffers and
+        // a cold CPU, and on a shared runner that overhead can be larger than the
+        // resample this test is about — a single sample then measures the setup
+        // cost rather than the filter. The minimum over repeated passes is the
+        // filter's own cost, because noise only ever adds time.
         let time_blit = |filter: gtk4::cairo::Filter| {
-            let context = gtk4::cairo::Context::new(&target).expect("target context");
-            let start = std::time::Instant::now();
-            for _ in 0..3 {
-                context.save().unwrap();
-                context.scale(scale, scale);
-                context.set_source_surface(&source, 0.0, 0.0).unwrap();
-                context.source().set_filter(filter);
-                context.paint().unwrap();
-                let _ = context.restore();
+            let mut best = std::time::Duration::MAX;
+            for pass in 0..4 {
+                let context = gtk4::cairo::Context::new(&target).expect("target context");
+                let start = std::time::Instant::now();
+                for _ in 0..3 {
+                    context.save().unwrap();
+                    context.scale(scale, scale);
+                    context.set_source_surface(&source, 0.0, 0.0).unwrap();
+                    context.source().set_filter(filter);
+                    context.paint().unwrap();
+                    let _ = context.restore();
+                }
+                if pass > 0 {
+                    best = best.min(start.elapsed() / 3);
+                }
             }
-            start.elapsed() / 3
+            best
         };
 
+        time_blit(editor_image_filter_for_scale(scale));
         let interactive = time_blit(editor_interactive_image_filter());
         let quality = time_blit(editor_image_filter_for_scale(scale));
         assert!(
