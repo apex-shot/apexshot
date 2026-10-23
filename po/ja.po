@@ -3397,3 +3397,12 @@ msgstr "適応"
 
 msgid "Adjust Light"
 msgstr "光を調整"
+
+msgid "Motion editing is not available in the Windows build yet."
+msgstr "モーション編集は Windows 版ではまだ利用できません。"
+
+msgid "Video editing is not available in the Windows build yet."
+msgstr "動画編集は Windows 版ではまだ利用できません。"
+
+msgid "Cloud browsing and sign-in are not available in the Windows build yet."
+msgstr "クラウドの閲覧とサインインは Windows 版ではまだ利用できません。"
