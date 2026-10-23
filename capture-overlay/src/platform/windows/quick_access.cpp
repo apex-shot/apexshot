@@ -293,6 +293,29 @@ void openHistoryWindow()
     }
 }
 
+void openVideoEditorWindow()
+{
+    QString executable = qEnvironmentVariable("APEXSHOT_VIDEO_EDITOR");
+    if (executable.isEmpty()) {
+        const QString sibling =
+            QDir(QCoreApplication::applicationDirPath())
+                .filePath(QStringLiteral("apexshot-video-editor.exe"));
+        if (QFileInfo::exists(sibling))
+            executable = sibling;
+    }
+    if (executable.isEmpty())
+        executable = QStringLiteral("apexshot-video-editor.exe");
+
+    if (!QProcess::startDetached(executable, {})) {
+        QMessageBox::warning(
+            nullptr,
+            QStringLiteral("ApexShot Video Editor"),
+            QStringLiteral("Could not start the video editor:\n%1\n\n"
+                           "Set APEXSHOT_VIDEO_EDITOR to the editor executable.")
+                .arg(QDir::toNativeSeparators(executable)));
+    }
+}
+
 QIcon appIcon()
 {
     QPixmap pixmap(64, 64);
@@ -2159,6 +2182,7 @@ int run(QApplication& app)
     });
 
     menu->addSeparator();
+    QAction* videoEditorAction = menu->addAction(QStringLiteral("Video Editor..."));
     QAction* historyAction = menu->addAction(QStringLiteral("History..."));
     QAction* settingsAction = menu->addAction(QStringLiteral("Settings..."));
     menu->addSeparator();
@@ -2171,6 +2195,9 @@ int run(QApplication& app)
     });
     QObject::connect(historyAction, &QAction::triggered, shell, [] {
         openHistoryWindow();
+    });
+    QObject::connect(videoEditorAction, &QAction::triggered, shell, [] {
+        openVideoEditorWindow();
     });
 
     QObject::connect(capture, &QAction::triggered, shell, [shell] { shell->openMenu(); });

@@ -165,10 +165,11 @@ parallel `cl.exe` runs collide on `vc140.pdb` (C1041).
 
 ## Settings surface
 
-`windows-ui/` is a small Rust crate that builds `apexshot-settings.exe` with
-GTK4. It includes the Linux settings pages through `#[path]` rather than
-duplicating them, and supplies the Windows-only pieces (DPI handling, font
-registration, login autostart, Cloud/Studio facades, and the window shell).
+`windows-ui/` is a small Rust crate that builds the Windows Settings, History,
+and video-editor executables with GTK4. It includes shared pages and styling
+through `#[path]` rather than duplicating them, and supplies the Windows-only
+pieces (DPI handling, font registration, login autostart, facades, and the
+window shells).
 
 - The window is borderless with the app's own title bar, rounded corners, and a
   single outline.
@@ -199,8 +200,9 @@ The Qt capture shell launches the resulting executable from the tray's
 
 ## Deliberately out of scope
 
-- The GTK image editor, preview overlay, and onboarding. The settings surface
-  is the first Rust UI on Windows; the others need their own port.
+- The GTK image editor, preview overlay, and onboarding. Settings and History
+  are implemented, and the video editor has its window shell and tool-specific
+  side panels; playback and the editing pipeline still need their own port.
 - GNOME extension, Flatpak, and Nix packaging.
 - Recording internals, which follow their own plan.
 
