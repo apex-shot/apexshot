@@ -3470,3 +3470,12 @@ msgstr "Adaptiv"
 
 msgid "Adjust Light"
 msgstr "Licht anpassen"
+
+msgid "Motion editing is not available in the Windows build yet."
+msgstr "Die Bewegungsbearbeitung ist in der Windows-Version noch nicht verfügbar."
+
+msgid "Video editing is not available in the Windows build yet."
+msgstr "Die Videobearbeitung ist in der Windows-Version noch nicht verfügbar."
+
+msgid "Cloud browsing and sign-in are not available in the Windows build yet."
+msgstr "Cloud-Browsing und Anmeldung sind in der Windows-Version noch nicht verfügbar."
