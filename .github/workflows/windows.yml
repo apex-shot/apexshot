@@ -5,7 +5,7 @@ name: Windows UI
 # by CI at all.
 on:
   push:
-    branches: [main]
+    branches: [main, ci/windows-verify]
     paths:
       - .github/workflows/windows.yml
       - windows-ui/**
@@ -42,6 +42,12 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
+      # rustfmt.toml asks for Unix newlines, and a default Windows checkout
+      # hands rustfmt CRLF, which it reports as a formatting failure.
+      - name: Keep the checkout's line endings
+        shell: bash
+        run: git config --global core.autocrlf false
+
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -52,12 +58,12 @@ jobs:
       - name: Install GTK4
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: false
           install: >-
-            mingw-w64-x86_64-gtk4
-            mingw-w64-x86_64-pkgconf
-            mingw-w64-x86_64-gcc
+            mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-gcc
 
       # The MSVC toolchain cannot link against the MinGW GTK import libraries,
       # so the crate is built for the GNU target that matches them.
@@ -86,6 +92,9 @@ jobs:
         shell: msys2 {0}
         working-directory: windows-ui
         run: |
+          export PATH="$(cygpath -u "$USERPROFILE")/.cargo/bin:$PATH"
+          cargo --version
+          rustc -vV | grep host
           cargo fmt --all -- --check
           cargo clippy --all-targets
           cargo test
