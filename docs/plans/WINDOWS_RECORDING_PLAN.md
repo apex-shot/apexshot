@@ -205,8 +205,11 @@ source list is unchanged.
 - **`ddagrab`.** Faster per-output capture once the DXGI output-to-monitor
   mapping is settled.
 - **Restart and delete-last-segment** controls, now that segments exist.
-- **Video editor, cursor track, and click effects.** Those live in the Rust
-  editor and wait for the Rust crate to build on Windows.
+- **Video editor backend, cursor track, and click effects.** The standalone
+  Windows editor window and its Background, Cursor, Frames, and Takes side
+  panels are implemented as interactive UI. Playback, binding those controls
+  to footage, project persistence, export, and rendered click effects remain
+  follow-up slices.
 - **Recording settings surface.** Frame rate, resolution cap, quality tier, and
   mono are persisted and applied, and the Rust settings window now edits them.
   Output folder and filename pattern remain fixed at Videos/ApexShotRec and the

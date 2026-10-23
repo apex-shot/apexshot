@@ -439,7 +439,9 @@ fn build_settings_window(app: &Application) {
     recordings.rec_remember_export_folder.set_sensitive(false);
     recordings
         .rec_remember_export_folder
-        .set_tooltip_text(Some(&t("The Windows video editor is not available yet.")));
+        .set_tooltip_text(Some(&t(
+            "Video export from the Windows editor is not available yet.",
+        )));
     quick_access.close_after_dragging_check.set_sensitive(false);
     quick_access
         .close_after_dragging_check
