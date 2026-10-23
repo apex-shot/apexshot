@@ -17,7 +17,8 @@ on:
       - packaging/apexshot.svg
       - packaging/apexshot-recording.svg
   pull_request:
-    branches: [main]
+    # Every pull request, not only those aimed at main: this repo stacks
+    # feature branches, and a base-branch filter silently skipped the layer.
     paths:
       - .github/workflows/flatpak.yml
       - Cargo.toml
