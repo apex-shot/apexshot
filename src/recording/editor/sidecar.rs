@@ -31,8 +31,14 @@ pub enum CursorKind {
     Hand,
     Text,
     Crosshair,
+    Move,
     Wait,
-    Resize,
+    #[serde(rename = "resize_h", alias = "resize")]
+    ResizeH,
+    #[serde(rename = "resize_v")]
+    ResizeV,
+    #[serde(rename = "resize_diag")]
+    ResizeDiag,
 }
 
 impl CursorKind {
@@ -41,8 +47,11 @@ impl CursorKind {
             "hand" => Self::Hand,
             "text" => Self::Text,
             "crosshair" => Self::Crosshair,
-            "wait" => Self::Wait,
-            "resize" => Self::Resize,
+            "move" | "fleur" | "all-scroll" => Self::Move,
+            "wait" | "watch" | "busy" => Self::Wait,
+            "resize" | "resize_h" | "ew-resize" | "col-resize" => Self::ResizeH,
+            "resize_v" | "ns-resize" | "row-resize" => Self::ResizeV,
+            "resize_diag" | "nwse-resize" | "nesw-resize" => Self::ResizeDiag,
             _ => Self::Default,
         }
     }
@@ -53,8 +62,11 @@ impl CursorKind {
             Self::Hand => "hand",
             Self::Text => "text",
             Self::Crosshair => "crosshair",
+            Self::Move => "move",
             Self::Wait => "wait",
-            Self::Resize => "resize",
+            Self::ResizeH => "resize_h",
+            Self::ResizeV => "resize_v",
+            Self::ResizeDiag => "resize_diag",
         }
     }
 }
@@ -684,6 +696,52 @@ pub fn delete_recording_outputs(video_path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cursor_kinds_round_trip_through_strings_and_serde() {
+        let kinds = [
+            CursorKind::Default,
+            CursorKind::Hand,
+            CursorKind::Text,
+            CursorKind::Crosshair,
+            CursorKind::Move,
+            CursorKind::Wait,
+            CursorKind::ResizeH,
+            CursorKind::ResizeV,
+            CursorKind::ResizeDiag,
+        ];
+
+        for kind in kinds {
+            let encoded = serde_json::to_string(&kind).unwrap();
+            let decoded: CursorKind = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(decoded, kind);
+            assert_eq!(CursorKind::parse(kind.as_str()), kind);
+        }
+
+        let legacy: PointerSample =
+            serde_json::from_str(r#"{"t":0.0,"x":0.0,"y":0.0,"kind":"resize"}"#).unwrap();
+        assert_eq!(legacy.kind, CursorKind::ResizeH);
+    }
+
+    #[test]
+    fn cursor_kind_parser_accepts_cursor_aliases_case_insensitively() {
+        for (value, expected) in [
+            (" FLEUR ", CursorKind::Move),
+            ("all-scroll", CursorKind::Move),
+            ("WATCH", CursorKind::Wait),
+            ("busy", CursorKind::Wait),
+            ("ew-resize", CursorKind::ResizeH),
+            ("col-resize", CursorKind::ResizeH),
+            ("resize_v", CursorKind::ResizeV),
+            ("ns-resize", CursorKind::ResizeV),
+            ("row-resize", CursorKind::ResizeV),
+            ("resize_diag", CursorKind::ResizeDiag),
+            ("nwse-resize", CursorKind::ResizeDiag),
+            ("nesw-resize", CursorKind::ResizeDiag),
+        ] {
+            assert_eq!(CursorKind::parse(value), expected, "{value}");
+        }
+    }
 
     #[test]
     fn legacy_json_defaults_to_recorded_pointer_data() {
