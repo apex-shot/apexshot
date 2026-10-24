@@ -7,7 +7,9 @@ use super::background::{self, Background};
 use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
 use crate::recording::editor::cursor_sprite;
-use crate::recording::editor::model::{ClickEffect, CursorSettings, CursorTheme};
+use crate::recording::editor::model::{
+    ClickEffect, CursorMotionStyle, CursorSettings, CursorTheme,
+};
 use gtk4::cairo::{FontSlant, FontWeight};
 use gtk4::gdk;
 use gtk4::gdk_pixbuf::Pixbuf;
@@ -29,6 +31,8 @@ pub(super) fn build_tools_column(
     scale: f64,
     window: &ApplicationWindow,
     background: Background,
+    cursor: super::cursor::CursorModel,
+    cursor_repaint: Rc<dyn Fn()>,
 ) -> GtkBox {
     let column = GtkBox::new(Orientation::Vertical, 0);
     column.add_css_class("recording-editor-tools-column");
@@ -49,7 +53,10 @@ pub(super) fn build_tools_column(
         &build_background_panel(scale, window, background, &column),
         Some("background"),
     );
-    pages.add_named(&build_cursor_panel(scale), Some("cursor"));
+    pages.add_named(
+        &build_cursor_panel(scale, cursor, cursor_repaint),
+        Some("cursor"),
+    );
     pages.add_named(&build_frames_panel(scale), Some("frames"));
     pages.set_visible_child_name("background");
 
@@ -456,7 +463,22 @@ fn thumbnail_pixbuf(pixbuf: &gtk4::gdk_pixbuf::Pixbuf, scale: f64) -> gtk4::gdk_
         .unwrap_or_else(|| pixbuf.clone())
 }
 
-fn build_cursor_panel(scale: f64) -> GtkBox {
+fn update_cursor_settings(
+    cursor: &super::cursor::CursorModel,
+    repaint: &Rc<dyn Fn()>,
+    update: impl FnOnce(&mut CursorSettings),
+) {
+    let mut settings = cursor.settings();
+    update(&mut settings);
+    cursor.set_settings(settings);
+    repaint();
+}
+
+fn build_cursor_panel(
+    scale: f64,
+    cursor: super::cursor::CursorModel,
+    repaint: Rc<dyn Fn()>,
+) -> GtkBox {
     let panel = GtkBox::new(Orientation::Vertical, 0);
     panel.add_css_class("recording-editor-zoom-panel");
     panel.set_hexpand(true);
@@ -481,9 +503,16 @@ fn build_cursor_panel(scale: f64) -> GtkBox {
     let pages = Stack::new();
     pages.set_transition_type(StackTransitionType::Crossfade);
     pages.set_transition_duration(120);
-    pages.add_named(&build_cursor_style_page(scale), Some("style"));
-    pages.add_named(&build_cursor_follow_page(scale), Some("follow"));
-    pages.add_named(&build_cursor_effects_page(scale), Some("effects"));
+    let (style_page, size_slider) = build_cursor_style_page(scale, cursor.clone(), repaint.clone());
+    pages.add_named(&style_page, Some("style"));
+    pages.add_named(
+        &build_cursor_follow_page(scale, cursor.clone(), repaint.clone(), size_slider),
+        Some("follow"),
+    );
+    pages.add_named(
+        &build_cursor_effects_page(scale, cursor, repaint),
+        Some("effects"),
+    );
     pages.set_visible_child_name("style");
     connect_tabs(
         &pages,
@@ -505,7 +534,11 @@ fn build_cursor_panel(scale: f64) -> GtkBox {
     panel
 }
 
-fn build_cursor_style_page(scale: f64) -> GtkBox {
+fn build_cursor_style_page(
+    scale: f64,
+    cursor: super::cursor::CursorModel,
+    repaint: Rc<dyn Fn()>,
+) -> (GtkBox, FilledSlider) {
     let page = tab_body();
     let hint = Label::new(Some(&t("Shown over the recording in preview and export")));
     hint.add_css_class("recording-editor-zoom-hint");
@@ -519,6 +552,7 @@ fn build_cursor_style_page(scale: f64) -> GtkBox {
     grid.set_row_spacing((8.0 * scale).round() as u32);
     grid.set_column_homogeneous(true);
     grid.set_hexpand(true);
+    let settings = cursor.settings();
     let mut first = None::<ToggleButton>;
     for (index, theme) in CursorTheme::ALL.into_iter().enumerate() {
         let card = cursor_card(theme, scale);
@@ -527,27 +561,61 @@ fn build_cursor_style_page(scale: f64) -> GtkBox {
         } else {
             first = Some(card.clone());
         }
+        card.set_active(theme == settings.theme);
+        card.connect_clicked({
+            let cursor = cursor.clone();
+            let repaint = repaint.clone();
+            move |card| {
+                if card.is_active() {
+                    update_cursor_settings(&cursor, &repaint, |settings| settings.theme = theme);
+                }
+            }
+        });
         grid.attach(&card, (index % 2) as i32, (index / 2) as i32, 1, 1);
     }
-    if let Some(first) = &first {
-        first.set_active(true);
-    }
     page.append(&grid);
-    page.append(&value_slider_row(&t("Size"), 0.5, 3.0, 1.0, 0.05, 1, scale));
-    page.append(&value_slider_row(
-        &t("Shadow"),
-        0.0,
-        1.0,
-        0.4,
+    // The sprite art is 48 pixels across, so anything past 2x is a magnified
+    // picture; the shared model still clamps to 3.0 for platforms with finer
+    // art.
+    let size_slider = cursor_slider(
+        &t("Size"),
+        0.5,
+        2.0,
+        settings.size,
         0.05,
         1,
         scale,
-    ));
-    page
+        cursor.clone(),
+        repaint.clone(),
+        |settings, value| settings.size = value,
+    );
+    page.append(&size_slider.widget());
+    page.append(
+        &cursor_slider(
+            &t("Shadow"),
+            0.0,
+            1.0,
+            settings.shadow,
+            0.05,
+            1,
+            scale,
+            cursor,
+            repaint,
+            |settings, value| settings.shadow = value,
+        )
+        .widget(),
+    );
+    (page, size_slider)
 }
 
-fn build_cursor_follow_page(scale: f64) -> GtkBox {
+fn build_cursor_follow_page(
+    scale: f64,
+    cursor: super::cursor::CursorModel,
+    repaint: Rc<dyn Fn()>,
+    size_slider: FilledSlider,
+) -> GtkBox {
     let page = tab_body();
+    let settings = cursor.settings();
     let preset_label = Label::new(Some(&t("PRESET")));
     preset_label.add_css_class("recording-editor-zoom-kicker");
     preset_label.set_xalign(0.0);
@@ -558,28 +626,63 @@ fn build_cursor_follow_page(scale: f64) -> GtkBox {
     let focused = preset_card(&t("Focused"), &t("Tighter, faster"), scale);
     let smooth = preset_card(&t("Smooth"), &t("Softer follow"), scale);
     smooth.set_group(Some(&focused));
-    focused.set_active(true);
+    let active_preset = settings.matching_motion_preset();
+    focused.set_active(active_preset == Some(CursorMotionStyle::Focused));
+    smooth.set_active(active_preset == Some(CursorMotionStyle::Smooth));
     presets.append(&focused);
     presets.append(&smooth);
     page.append(&presets);
-    page.append(&value_slider_row(
+    let smoothing_slider = cursor_slider(
         &t("Smoothing"),
         0.0,
         1.0,
-        0.35,
+        settings.smooth,
         0.05,
         1,
         scale,
-    ));
-    page.append(&value_slider_row(
+        cursor.clone(),
+        repaint.clone(),
+        |settings, value| settings.smooth = value,
+    );
+    page.append(&smoothing_slider.widget());
+    let speed_slider = cursor_slider(
         &t("Speed"),
         0.25,
         3.0,
-        1.0,
+        settings.speed,
         0.05,
         1,
         scale,
-    ));
+        cursor.clone(),
+        repaint.clone(),
+        |settings, value| settings.speed = value,
+    );
+    page.append(&speed_slider.widget());
+
+    for (button, style) in [
+        (focused, CursorMotionStyle::Focused),
+        (smooth, CursorMotionStyle::Smooth),
+    ] {
+        button.connect_clicked({
+            let cursor = cursor.clone();
+            let repaint = repaint.clone();
+            let size_slider = size_slider.clone();
+            let smoothing_slider = smoothing_slider.clone();
+            let speed_slider = speed_slider.clone();
+            move |button| {
+                if !button.is_active() {
+                    return;
+                }
+                let mut settings = cursor.settings();
+                settings.apply_motion_preset(style);
+                cursor.set_settings(settings);
+                size_slider.set_value(settings.size);
+                smoothing_slider.set_value(settings.smooth);
+                speed_slider.set_value(settings.speed);
+                repaint();
+            }
+        });
+    }
 
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");
@@ -589,27 +692,44 @@ fn build_cursor_follow_page(scale: f64) -> GtkBox {
     idle_label.set_xalign(0.0);
     let idle = Switch::new();
     idle.add_css_class("recording-editor-zoom-switch");
-    idle.set_active(true);
+    idle.set_active(settings.hide_idle);
     idle.set_halign(Align::End);
+    idle.connect_state_set({
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        move |_, hide_idle| {
+            update_cursor_settings(&cursor, &repaint, |settings| settings.hide_idle = hide_idle);
+            gtk4::glib::Propagation::Proceed
+        }
+    });
     idle_row.append(&idle_label);
     idle_row.append(&idle);
     page.append(&idle_row);
-    page.append(&value_slider_row(
-        &t("Idle delay"),
-        120.0,
-        4000.0,
-        800.0,
-        40.0,
-        0,
-        scale,
-    ));
+    page.append(
+        &cursor_slider(
+            &t("Idle delay"),
+            120.0,
+            4000.0,
+            settings.idle_ms,
+            40.0,
+            0,
+            scale,
+            cursor,
+            repaint,
+            |settings, value| settings.idle_ms = value,
+        )
+        .widget(),
+    );
     page
 }
 
-fn build_cursor_effects_page(scale: f64) -> GtkBox {
+fn build_cursor_effects_page(
+    scale: f64,
+    cursor: super::cursor::CursorModel,
+    repaint: Rc<dyn Fn()>,
+) -> GtkBox {
     let page = tab_body();
 
-    let effect = Rc::new(Cell::new(ClickEffect::Ripple));
     let anim_t = Rc::new(Cell::new(0.0));
     let live = DrawingArea::new();
     live.add_css_class("recording-editor-click-live-preview");
@@ -617,19 +737,15 @@ fn build_cursor_effects_page(scale: f64) -> GtkBox {
     live.set_content_height((88.0 * scale).round() as i32);
     live.set_hexpand(true);
     {
-        let effect = effect.clone();
+        let cursor = cursor.clone();
         let anim_t = anim_t.clone();
         live.set_draw_func(move |widget, context, width, height| {
-            let settings = CursorSettings {
-                click_effect: effect.get(),
-                ..CursorSettings::default()
-            };
             draw_click_live_preview(
                 widget,
                 context,
                 f64::from(width),
                 f64::from(height),
-                settings,
+                cursor.settings(),
                 anim_t.get(),
             );
         });
@@ -650,7 +766,12 @@ fn build_cursor_effects_page(scale: f64) -> GtkBox {
     let circle_btn = click_effect_card(ClickEffect::Circle, scale);
     ripple_btn.set_group(Some(&none_btn));
     circle_btn.set_group(Some(&none_btn));
-    ripple_btn.set_active(true);
+    match cursor.settings().click_effect {
+        ClickEffect::None => none_btn.set_active(true),
+        ClickEffect::Ripple => ripple_btn.set_active(true),
+        ClickEffect::Circle => circle_btn.set_active(true),
+        ClickEffect::Spotlight | ClickEffect::Echo => {}
+    }
     click_row.append(&none_btn);
     click_row.append(&ripple_btn);
     click_row.append(&circle_btn);
@@ -661,13 +782,14 @@ fn build_cursor_effects_page(scale: f64) -> GtkBox {
         (ripple_btn, ClickEffect::Ripple),
         (circle_btn, ClickEffect::Circle),
     ] {
-        let effect = effect.clone();
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
         let live = live.clone();
         button.connect_clicked(move |button| {
             if !button.is_active() {
                 return;
             }
-            effect.set(choice);
+            update_cursor_settings(&cursor, &repaint, |settings| settings.click_effect = choice);
             live.queue_draw();
         });
     }
@@ -866,9 +988,48 @@ fn value_slider_row_with(
     scale: f64,
     on_change: impl Fn(f64) + 'static,
 ) -> DrawingArea {
+    value_slider_control(label, min, max, initial, step, decimals, scale, on_change).widget()
+}
+
+fn value_slider_control(
+    label: &str,
+    min: f64,
+    max: f64,
+    initial: f64,
+    step: f64,
+    decimals: usize,
+    scale: f64,
+    on_change: impl Fn(f64) + 'static,
+) -> FilledSlider {
     let slider = FilledSlider::new(label, min, max, initial, step, decimals, scale);
     slider.on_change(Rc::new(on_change));
-    slider.widget()
+    slider
+}
+
+fn cursor_slider(
+    label: &str,
+    min: f64,
+    max: f64,
+    initial: f64,
+    step: f64,
+    decimals: usize,
+    scale: f64,
+    cursor: super::cursor::CursorModel,
+    repaint: Rc<dyn Fn()>,
+    update: impl Fn(&mut CursorSettings, f64) + 'static,
+) -> FilledSlider {
+    value_slider_control(
+        label,
+        min,
+        max,
+        initial,
+        step,
+        decimals,
+        scale,
+        move |value| {
+            update_cursor_settings(&cursor, &repaint, |settings| update(settings, value));
+        },
+    )
 }
 
 fn format_value(value: f64, decimals: usize) -> String {
@@ -977,6 +1138,11 @@ impl FilledSlider {
 
     fn widget(&self) -> DrawingArea {
         self.area.clone()
+    }
+
+    fn set_value(&self, value: f64) {
+        self.value.set(value.clamp(self.min, self.max));
+        self.area.queue_draw();
     }
 
     fn on_change(&self, callback: Rc<dyn Fn(f64)>) {

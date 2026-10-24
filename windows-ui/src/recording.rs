@@ -36,6 +36,22 @@ pub mod editor {
     #[rustfmt::skip]
     pub mod cursor_sprite;
 
+    #[allow(dead_code)]
+    #[path = "../../../../src/recording/editor/sidecar.rs"]
+    #[rustfmt::skip]
+    pub mod sidecar;
+
+    #[allow(dead_code)]
+    #[path = "../../../../src/recording/editor/auto_zoom.rs"]
+    #[rustfmt::skip]
+    pub mod auto_zoom;
+
+    /// The live click ripple's frame warp, shared with the Linux editor.
+    #[allow(dead_code)]
+    #[path = "../../../../src/recording/editor/ripple_preview.rs"]
+    #[rustfmt::skip]
+    pub mod ripple_preview;
+
     pub mod ffmpeg {
         use std::path::{Path, PathBuf};
         use std::process::Command;
@@ -191,7 +207,64 @@ pub mod editor {
             command
         }
 
-        fn ffmpeg_executable() -> PathBuf {
+        /// The recording's frame rate, from the container's video stream.
+        /// Falls back to the "30 fps" banner in ffmpeg's stream info.
+        pub fn probe_frame_rate(source: &Path) -> Option<f64> {
+            if let Ok(output) = Command::new(ffprobe_executable())
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=r_frame_rate",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                ])
+                .arg(source)
+                .output()
+            {
+                if output.status.success() {
+                    let rate = String::from_utf8_lossy(&output.stdout);
+                    if let Some(fps) = parse_rate(rate.trim()) {
+                        return Some(fps);
+                    }
+                }
+            }
+            let output = Command::new(ffmpeg_executable())
+                .args(["-hide_banner", "-i"])
+                .arg(source)
+                .output()
+                .ok()?;
+            parse_fps_line(&String::from_utf8_lossy(&output.stderr))
+        }
+
+        fn parse_rate(text: &str) -> Option<f64> {
+            let (numerator, denominator) = text.trim().split_once('/')?;
+            let numerator: f64 = numerator.trim().parse().ok()?;
+            let denominator: f64 = denominator.trim().parse().ok()?;
+            (numerator.is_finite()
+                && denominator.is_finite()
+                && numerator > 0.0
+                && denominator > 0.0)
+                .then(|| numerator / denominator)
+        }
+
+        fn parse_fps_line(stderr: &str) -> Option<f64> {
+            for (index, _) in stderr.match_indices(" fps") {
+                let token = stderr[..index]
+                    .rsplit([',', ' '])
+                    .find(|token| !token.is_empty())?;
+                if let Ok(fps) = token.parse::<f64>() {
+                    if fps.is_finite() && fps > 0.0 {
+                        return Some(fps);
+                    }
+                }
+            }
+            None
+        }
+
+        pub fn ffmpeg_executable() -> PathBuf {
             if let Some(path) = std::env::var_os("APEXSHOT_FFMPEG") {
                 let path = PathBuf::from(path);
                 if path.is_file() {
@@ -213,9 +286,32 @@ pub mod editor {
             PathBuf::from("ffmpeg.exe")
         }
 
+        pub fn ffprobe_executable() -> PathBuf {
+            if let Some(path) = std::env::var_os("APEXSHOT_FFPROBE") {
+                let path = PathBuf::from(path);
+                if path.is_file() {
+                    return path;
+                }
+            }
+            let ffmpeg = ffmpeg_executable();
+            if ffmpeg.components().count() > 1 {
+                let name = if cfg!(windows) {
+                    "ffprobe.exe"
+                } else {
+                    "ffprobe"
+                };
+                return ffmpeg.with_file_name(name);
+            }
+            PathBuf::from(if cfg!(windows) {
+                "ffprobe.exe"
+            } else {
+                "ffprobe"
+            })
+        }
+
         #[cfg(test)]
         mod tests {
-            use super::parse_duration;
+            use super::{parse_duration, parse_fps_line, parse_rate};
 
             #[test]
             fn ffmpeg_duration_lines_become_seconds() {
@@ -233,6 +329,19 @@ pub mod editor {
             fn missing_duration_is_not_guessed() {
                 assert!(parse_duration("Duration: N/A, start: 0.0").is_none());
                 assert!(parse_duration("Input #0, mov, from 'clip.mp4':").is_none());
+            }
+
+            #[test]
+            fn frame_rates_come_from_the_stream_or_the_banner() {
+                assert!((parse_rate("30/1").unwrap() - 30.0).abs() < 1e-9);
+                assert!((parse_rate("30000/1001").unwrap() - 30000.0 / 1001.0).abs() < 1e-9);
+                assert!(parse_rate("0/0").is_none());
+                assert!(parse_rate("30").is_none());
+                let banner = "  Stream #0:0: Video: h264, yuv420p, 1920x1080, 30 fps, 30 tbr\n";
+                assert!((parse_fps_line(banner).unwrap() - 30.0).abs() < 1e-9);
+                let other = "  Stream #0:0: Video: h264, yuv420p, 1280x720, 59.94 fps, 59.94 tbr";
+                assert!((parse_fps_line(other).unwrap() - 59.94).abs() < 1e-6);
+                assert!(parse_fps_line("no rate here").is_none());
             }
         }
     }

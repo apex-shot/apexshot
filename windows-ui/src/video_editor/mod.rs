@@ -7,13 +7,17 @@
 use gtk4::prelude::*;
 use gtk4::Application;
 mod background;
+mod cursor;
 mod custom_fill;
+mod export;
+mod press;
 mod preview;
 mod rounded_clip;
 mod side_panel;
 mod timeline;
 mod ui_support;
 mod window;
+mod zoom;
 
 use std::ffi::OsString;
 use std::path::PathBuf;

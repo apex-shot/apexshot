@@ -11,14 +11,21 @@ use gtk4::prelude::*;
 use gtk4::{
     Align, Application, ApplicationWindow, AspectFrame, Box as GtkBox, Button, CssProvider,
     DrawingArea, DropTarget, FileChooserAction, FileChooserNative, FileFilter, Image, Label,
-    Orientation, Overlay, Picture, Popover, ResponseType, Separator,
+    Orientation, Overlay, Picture, Popover, ProgressBar, ResponseType, Separator, Window,
 };
 use std::cell::{Cell, RefCell};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::sync::mpsc::TryRecvError;
 use std::sync::Once;
+use std::time::Duration;
 
 type UpdateDocument = Rc<dyn Fn(Option<&Path>)>;
+type CameraTransform = (f64, f64, f64, f64);
+
+const IDENTITY_CAMERA_TRANSFORM: CameraTransform = (0.0, 0.0, 1.0, 1.0);
+const IDENTITY_CAMERA_CSS: &str = ".recording-editor-video { transform: none; }";
+const CAMERA_TRANSFORM_EPSILON: f64 = 1e-6;
 
 pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     static INIT_ICONS: Once = Once::new();
@@ -61,7 +68,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     }
 
     let document_title = Rc::new(RefCell::new(document_title(initial)));
-    let title_bar = build_title_bar(&window, document_title.clone(), scale);
+    let (title_bar, export_button) = build_title_bar(&window, document_title.clone(), scale);
     root.append(&title_bar);
 
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
@@ -70,23 +77,44 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     workspace.set_vexpand(true);
 
     let background = super::background::Background::default();
-    let stage = build_stage(scale, background.clone());
+    let stage = build_stage(scale, background.clone(), export_button);
     workspace.append(&stage.root);
 
-    let tools_column = super::side_panel::build_tools_column(scale, &window, background);
+    let cursor_layer = stage.cursor_layer.clone();
+    let cursor_repaint: Rc<dyn Fn()> = Rc::new(move || cursor_layer.queue_draw());
+    let tools_column = super::side_panel::build_tools_column(
+        scale,
+        &window,
+        background,
+        stage.cursor.clone(),
+        cursor_repaint,
+    );
     workspace.append(&tools_column);
     root.append(&workspace);
 
-    let timeline = super::timeline::build(&window, &stage.canvas, scale, prefers_dark);
+    let timeline = super::timeline::build(
+        &window,
+        &stage.canvas,
+        scale,
+        prefers_dark,
+        stage.cursor.clone(),
+        stage.source_size.clone(),
+    );
     root.append(&timeline.root);
     timeline.set_frame_sink({
-        let preview = stage.preview.clone();
-        let estimate = stage.estimate.clone();
-        Rc::new(move |seconds, composition_seconds, playing| {
-            preview.show_time(seconds, playing);
-            estimate.set_composition_seconds(composition_seconds);
+        let stage = stage.clone();
+        Rc::new(move |seconds, composition_seconds, playing, camera| {
+            stage.source_seconds.set(seconds);
+            stage.preview.show_time(seconds, playing);
+            stage.estimate.set_composition_seconds(composition_seconds);
+            stage.set_camera(camera);
+            let ripple = stage.cursor.ripple_at(seconds, stage.source_size.get());
+            stage.preview.set_ripple(ripple);
+            stage.cursor_layer.queue_draw();
         })
     });
+
+    wire_export(&window, &stage, &timeline);
 
     window.set_child(Some(&root));
 
@@ -143,7 +171,7 @@ fn build_title_bar(
     window: &ApplicationWindow,
     document_title: Rc<RefCell<String>>,
     scale: f64,
-) -> GtkBox {
+) -> (GtkBox, Button) {
     let bar = GtkBox::new(Orientation::Horizontal, 0);
     bar.add_css_class("settings-window-controls");
     bar.add_css_class("video-editor-titlebar");
@@ -206,9 +234,39 @@ fn build_title_bar(
     let close_window = window.clone();
     close.connect_clicked(move |_| close_window.close());
 
+    let export_button = Button::new();
+    export_button.set_has_frame(false);
+    export_button.add_css_class("recording-editor-primary-button");
+    // The shared primary action's 5px padding and the theme's 34px minimum
+    // height do not fit the Windows caption bar, which is 32px at 100%: the
+    // button would overhang the window edge. Cap the height for that bar only.
+    let export_provider = CssProvider::new();
+    export_provider.load_from_data(&format!(
+        ".video-editor-title-export {{ min-height: 0; padding: {}px {}px; }}",
+        (3.0 * scale).round() as i32,
+        (12.0 * scale).round() as i32
+    ));
+    if let Some(display) = gdk::Display::default() {
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &export_provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 6,
+        );
+    }
+    export_button.add_css_class("video-editor-title-export");
+    export_button.set_valign(Align::Center);
+    export_button.set_tooltip_text(Some(&t("Export the edited MP4")));
+    let export_label = Label::new(Some(&t("Export")));
+    export_label.set_halign(Align::Center);
+    export_label.set_valign(Align::Center);
+    export_button.set_child(Some(&export_label));
+    export_button.set_sensitive(false);
+    export_button.set_margin_end((8.0 * scale).round() as i32);
+
     let actions = GtkBox::new(Orientation::Horizontal, 0);
     actions.set_halign(Align::End);
     actions.set_valign(Align::Fill);
+    actions.append(&export_button);
     actions.append(&minimize);
     actions.append(&maximize);
     actions.append(&close);
@@ -228,7 +286,7 @@ fn build_title_bar(
 
     windowing::install_window_drag(&left_spacer, window);
     windowing::install_window_drag(&right_spacer, window);
-    bar
+    (bar, export_button)
 }
 
 fn set_title_bar_text(bar: &GtkBox, title: &str) {
@@ -554,14 +612,23 @@ struct Stage {
     aspect: Rc<Cell<FrameAspect>>,
     preview: Rc<super::preview::Preview>,
     estimate: Estimate,
+    quality: Rc<Cell<QualityTier>>,
+    export_button: Button,
     background: super::background::BackgroundState,
     background_layer: DrawingArea,
+    cursor_layer: DrawingArea,
+    cursor: super::cursor::CursorModel,
+    source_seconds: Rc<Cell<f64>>,
     background_pixbuf: Rc<RefCell<Option<Pixbuf>>>,
     background_fill: Rc<RefCell<Option<super::background::FillPainter>>>,
     background_selection: Rc<RefCell<Option<String>>>,
     source_size: Rc<Cell<Option<(u32, u32)>>>,
     clip: super::rounded_clip::RoundedClip,
     clip_margins: Rc<RefCell<(i32, i32, i32, i32)>>,
+    camera_view: Rc<Cell<Option<super::zoom::ViewRect>>>,
+    zoom_provider: CssProvider,
+    last_zoom_transform: Rc<Cell<CameraTransform>>,
+    last_zoom_css: Rc<RefCell<String>>,
 }
 
 impl Stage {
@@ -639,6 +706,64 @@ impl Stage {
         self.clip.set_margin_bottom(0);
     }
 
+    fn set_camera(&self, camera: super::zoom::Camera) {
+        let source_size = self.source_size.get();
+        let view = source_size.map(|(width, height)| {
+            super::zoom::view_rect(camera.0, camera.1, (f64::from(width), f64::from(height)))
+        });
+        self.camera_view.set(view);
+
+        let transform = match (source_size, view) {
+            (Some((width, height)), Some(view)) => {
+                let clip_width = f64::from(self.clip.allocated_width().max(0));
+                let clip_height = f64::from(self.clip.allocated_height().max(0));
+                if clip_width < 2.0 || clip_height < 2.0 {
+                    return;
+                }
+                super::zoom::camera_transform(
+                    view,
+                    f64::from(width),
+                    f64::from(height),
+                    clip_width,
+                    clip_height,
+                )
+            }
+            _ => IDENTITY_CAMERA_TRANSFORM,
+        };
+        self.update_camera_transform(transform);
+    }
+
+    fn reset_camera(&self) {
+        self.camera_view.set(None);
+        self.update_camera_transform(IDENTITY_CAMERA_TRANSFORM);
+    }
+
+    fn update_camera_transform(&self, transform: CameraTransform) {
+        let transform = if is_identity_camera_transform(transform) {
+            IDENTITY_CAMERA_TRANSFORM
+        } else {
+            transform
+        };
+        let previous = self.last_zoom_transform.get();
+        if camera_transforms_equal(previous, transform) {
+            return;
+        }
+
+        let css = if transform == IDENTITY_CAMERA_TRANSFORM {
+            IDENTITY_CAMERA_CSS.to_string()
+        } else {
+            let (tx, ty, sx, sy) = transform;
+            format!(
+                ".recording-editor-video {{ transform-origin: 0px 0px; transform: translate({tx:.6}px, {ty:.6}px) scale({sx:.6}, {sy:.6}); }}"
+            )
+        };
+        if *self.last_zoom_css.borrow() != css {
+            self.zoom_provider.load_from_data(&css);
+            self.last_zoom_css.replace(css);
+        }
+        self.last_zoom_transform.set(transform);
+    }
+
     /// Paint the picked wallpaper behind the video. The video keeps its own
     /// aspect and sits inset by the panel's Padding, so the wallpaper shows
     /// around it exactly as it does in the export.
@@ -671,7 +796,12 @@ impl Stage {
     }
 
     fn show_document(&self, path: Option<&Path>, source_seconds: f64, composition_seconds: f64) {
+        self.reset_camera();
+        self.cursor.load(path);
+        self.source_seconds.set(0.0);
+        self.cursor_layer.queue_draw();
         let Some((texture, width, height)) = path.and_then(poster_texture) else {
+            self.export_button.set_sensitive(false);
             self.picture.set_visible(false);
             self.hint.set_visible(true);
             self.source_size.set(None);
@@ -684,7 +814,10 @@ impl Stage {
         self.picture.set_visible(true);
         self.hint.set_visible(false);
         self.source_size.set(Some((width, height)));
+        self.export_button.set_sensitive(true);
         self.apply_geometry();
+        self.set_camera((1.0, (f64::from(width) / 2.0, f64::from(height) / 2.0)));
+        self.cursor_layer.queue_draw();
         if let Some(path) = path {
             self.preview.set_document(Some(path), width, height);
             self.estimate.set_pixels(width, height);
@@ -694,7 +827,25 @@ impl Stage {
     }
 }
 
-fn build_stage(scale: f64, background: super::background::Background) -> Stage {
+fn is_identity_camera_transform(transform: CameraTransform) -> bool {
+    transform.0.abs() < 0.5
+        && transform.1.abs() < 0.5
+        && (transform.2 - 1.0).abs() < 0.002
+        && (transform.3 - 1.0).abs() < 0.002
+}
+
+fn camera_transforms_equal(left: CameraTransform, right: CameraTransform) -> bool {
+    (left.0 - right.0).abs() <= CAMERA_TRANSFORM_EPSILON
+        && (left.1 - right.1).abs() <= CAMERA_TRANSFORM_EPSILON
+        && (left.2 - right.2).abs() <= CAMERA_TRANSFORM_EPSILON
+        && (left.3 - right.3).abs() <= CAMERA_TRANSFORM_EPSILON
+}
+
+fn build_stage(
+    scale: f64,
+    background: super::background::Background,
+    export_button: Button,
+) -> Stage {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("recording-editor-stage");
     root.set_hexpand(true);
@@ -748,6 +899,22 @@ fn build_stage(scale: f64, background: super::background::Background) -> Stage {
     });
     overlay.set_child(Some(&background_layer));
 
+    let source_size = Rc::new(Cell::new(None::<(u32, u32)>));
+    let source_seconds = Rc::new(Cell::new(0.0));
+    let cursor = super::cursor::CursorModel::new();
+    let zoom_provider = CssProvider::new();
+    zoom_provider.load_from_data(IDENTITY_CAMERA_CSS);
+    if let Some(display) = gdk::Display::default() {
+        gtk4::style_context_add_provider_for_display(
+            &display,
+            &zoom_provider,
+            gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 5,
+        );
+    }
+    let last_zoom_transform = Rc::new(Cell::new(IDENTITY_CAMERA_TRANSFORM));
+    let last_zoom_css = Rc::new(RefCell::new(IDENTITY_CAMERA_CSS.to_string()));
+    let camera_view = Rc::new(Cell::new(None::<super::zoom::ViewRect>));
+
     let picture = Picture::new();
     picture.add_css_class("recording-editor-video");
     picture.set_hexpand(true);
@@ -762,6 +929,28 @@ fn build_stage(scale: f64, background: super::background::Background) -> Stage {
     clip.set_vexpand(true);
     overlay.add_overlay(&clip);
 
+    let cursor_layer = DrawingArea::new();
+    cursor_layer.set_hexpand(true);
+    cursor_layer.set_vexpand(true);
+    cursor_layer.set_can_target(false);
+    cursor_layer.set_draw_func({
+        let cursor = cursor.clone();
+        let source_size = source_size.clone();
+        let source_seconds = source_seconds.clone();
+        let camera_view = camera_view.clone();
+        move |_, context, width, height| {
+            cursor.draw(
+                context,
+                width,
+                height,
+                source_seconds.get(),
+                source_size.get(),
+                camera_view.get(),
+            );
+        }
+    });
+    overlay.add_overlay(&cursor_layer);
+
     let hint = Label::new(Some(&t("Click to open a video, or drop one here")));
     hint.add_css_class("recording-editor-empty-preview-hint");
     hint.set_halign(Align::Center);
@@ -775,7 +964,6 @@ fn build_stage(scale: f64, background: super::background::Background) -> Stage {
     frame.append(&workspace);
 
     let aspect = Rc::new(Cell::new(FrameAspect::Original));
-    let source_size = Rc::new(Cell::new(None::<(u32, u32)>));
     let preview = super::preview::Preview::new(picture.clone());
     let stage_aspect_label = Label::new(Some(&FrameAspect::Original.label()));
     stage_aspect_label.add_css_class("recording-editor-stage-chip-label");
@@ -849,14 +1037,23 @@ fn build_stage(scale: f64, background: super::background::Background) -> Stage {
         aspect: aspect.clone(),
         preview,
         estimate: estimate.clone(),
+        quality: quality.clone(),
+        export_button: export_button.clone(),
         background: background.state(),
         background_layer: background_layer.clone(),
+        cursor_layer,
+        cursor,
+        source_seconds,
         background_pixbuf,
         background_fill,
         background_selection: Rc::new(RefCell::new(None)),
         source_size,
         clip,
         clip_margins: Rc::new(RefCell::new((i32::MIN, 0, 0, 0))),
+        camera_view,
+        zoom_provider,
+        last_zoom_transform,
+        last_zoom_css,
     };
 
     let apply_aspect: Rc<dyn Fn(FrameAspect)> = {
@@ -1004,6 +1201,188 @@ fn choose_recording(window: &ApplicationWindow, update_document: UpdateDocument)
         chooser.hide();
     });
     chooser.show();
+}
+
+/// The composition an export should write, read fresh when the user commits a
+/// destination so a last-second trim or zoom is included.
+fn export_model(
+    stage: &Stage,
+    timeline: &super::timeline::Timeline,
+) -> Option<super::export::ExportModel> {
+    let (source, trim_start, trim_end, cuts, zooms) = timeline.export_footage()?;
+    let source_size = stage.source_size.get()?;
+    Some(super::export::ExportModel {
+        source,
+        source_size,
+        trim_start,
+        trim_end,
+        cuts,
+        zooms,
+        cursor: stage.cursor.settings(),
+        sidecar: stage.cursor.sidecar(),
+        crf: stage.quality.get().crf(),
+    })
+}
+
+fn wire_export(window: &ApplicationWindow, stage: &Stage, timeline: &super::timeline::Timeline) {
+    let window = window.clone();
+    let stage_handle = stage.clone();
+    let timeline = timeline.clone();
+    stage.export_button.connect_clicked(move |_| {
+        let Some((source, _, _, _, _)) = timeline.export_footage() else {
+            return;
+        };
+        let stage = stage_handle.clone();
+        let timeline = timeline.clone();
+        let dialog_window = window.clone();
+        choose_export_path(
+            &window,
+            &source,
+            Rc::new(move |output| {
+                let Some(model) = export_model(&stage, &timeline) else {
+                    return;
+                };
+                run_export(&dialog_window, model, output);
+            }),
+        );
+    });
+}
+
+/// Ask where the MP4 goes, defaulting to the recording's folder and a name
+/// derived from the recording.
+fn choose_export_path(window: &ApplicationWindow, source: &Path, then: Rc<dyn Fn(PathBuf)>) {
+    let chooser = FileChooserNative::new(
+        Some(&t("Export video")),
+        Some(window),
+        FileChooserAction::Save,
+        Some(&t("Export")),
+        Some(&t("Cancel")),
+    );
+    if let Some(folder) = source.parent() {
+        let _ = chooser.set_current_folder(Some(&gio::File::for_path(folder)));
+    }
+    let stem = source
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.trim().is_empty())
+        .unwrap_or("recording");
+    chooser.set_current_name(&format!("{stem}-edited.mp4"));
+    let filter = FileFilter::new();
+    filter.set_name(Some(&t("MP4 video")));
+    filter.add_pattern("*.mp4");
+    filter.add_pattern("*.MP4");
+    chooser.set_filter(&filter);
+    chooser.connect_response(move |chooser, response| {
+        if response == ResponseType::Accept {
+            if let Some(mut path) = chooser.file().and_then(|file| file.path()) {
+                let has_mp4 = path
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("mp4"));
+                if !has_mp4 {
+                    path.set_extension("mp4");
+                }
+                then(path);
+            }
+        }
+        chooser.hide();
+    });
+    chooser.show();
+}
+
+/// Run the export with progress, and cancel it — killing the encoder and the
+/// decoder and deleting the partial file — when the user asks.
+fn run_export(parent: &ApplicationWindow, model: super::export::ExportModel, output: PathBuf) {
+    let window = Window::builder()
+        .transient_for(parent)
+        .modal(true)
+        .title(t("Exporting video"))
+        .deletable(false)
+        .resizable(false)
+        .build();
+    let content = GtkBox::new(Orientation::Vertical, 12);
+    content.set_margin_top(20);
+    content.set_margin_bottom(20);
+    content.set_margin_start(20);
+    content.set_margin_end(20);
+
+    let bar = ProgressBar::new();
+    bar.set_show_text(true);
+    bar.set_fraction(0.0);
+    bar.set_text(Some(&t("Preparing the encoder")));
+    let status = Label::new(Some(&output.display().to_string()));
+    status.set_wrap(true);
+    status.set_selectable(true);
+    status.set_xalign(0.0);
+    let action = Button::with_label(&t("Cancel"));
+    action.set_halign(Align::End);
+    content.append(&bar);
+    content.append(&status);
+    content.append(&action);
+    window.set_child(Some(&content));
+
+    let handle = Rc::new(super::export::start_export(model, output));
+    let finished = Rc::new(Cell::new(false));
+
+    action.connect_clicked({
+        let handle = handle.clone();
+        let finished = finished.clone();
+        let window = window.clone();
+        move |button| {
+            if finished.get() {
+                window.close();
+                return;
+            }
+            handle.cancel();
+            button.set_sensitive(false);
+            button.set_label(&t("Cancelling…"));
+        }
+    });
+
+    gtk4::glib::timeout_add_local(Duration::from_millis(100), {
+        let handle = handle.clone();
+        let window = window.clone();
+        let bar = bar.clone();
+        let status = status.clone();
+        let action = action.clone();
+        let finished = finished.clone();
+        move || match handle.receiver.try_recv() {
+            Ok(super::export::ExportUpdate::Progress { done, total }) => {
+                bar.set_fraction(done as f64 / total.max(1) as f64);
+                bar.set_text(Some(&format!("{done} / {total} frames")));
+                gtk4::glib::ControlFlow::Continue
+            }
+            Ok(super::export::ExportUpdate::Finished(path)) => {
+                bar.set_fraction(1.0);
+                bar.set_text(Some(&t("Export complete")));
+                status.set_text(&path.display().to_string());
+                action.set_label(&t("Close"));
+                finished.set(true);
+                gtk4::glib::ControlFlow::Break
+            }
+            Ok(super::export::ExportUpdate::Failed(message)) => {
+                bar.set_text(Some(&t("Export failed")));
+                status.set_text(&message);
+                action.set_label(&t("Close"));
+                finished.set(true);
+                gtk4::glib::ControlFlow::Break
+            }
+            Ok(super::export::ExportUpdate::Cancelled) => {
+                window.close();
+                gtk4::glib::ControlFlow::Break
+            }
+            Err(TryRecvError::Empty) => gtk4::glib::ControlFlow::Continue,
+            Err(TryRecvError::Disconnected) => {
+                bar.set_text(Some(&t("Export failed")));
+                status.set_text(&t("The export stopped unexpectedly."));
+                action.set_label(&t("Close"));
+                finished.set(true);
+                gtk4::glib::ControlFlow::Break
+            }
+        }
+    });
+
+    window.present();
 }
 
 fn document_title(path: Option<&Path>) -> String {

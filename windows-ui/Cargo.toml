@@ -28,10 +28,12 @@ relm4-icons = "0.10.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_yml = "0.0.12"
 serde_json = "1.0"
+sha2 = "0.10"
 anyhow = "1.0"
 dirs = "6.0"
 image = { version = "0.24.9", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 chrono = "0.4"
+rayon = "1.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
@@ -49,3 +51,9 @@ pretty_assertions = "1.4"
 
 [features]
 flatpak = []
+
+# The editor composites frames itself on export (crop, scale, ripple warp,
+# cursor), so an unoptimized build turns a few minutes of video into an
+# hour. Optimize this package in dev without rebuilding every dependency.
+[profile.dev.package.apexshot-windows-settings]
+opt-level = 2

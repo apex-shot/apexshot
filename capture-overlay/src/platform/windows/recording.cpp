@@ -1,6 +1,7 @@
 #include "platform/recording.h"
 
 #include "platform/recording_settings.h"
+#include "platform/windows/pointer_tracker.h"
 #include "platform/windows/settings_store.h"
 
 #include <QCoreApplication>
@@ -224,6 +225,7 @@ public:
                         bool keepWorkDir = false);
     void fail(const QString& reason);
     void cleanupWorkDir();
+    void removeDiscardedSidecar();
     [[nodiscard]] qint64 elapsedMs() const;
     [[nodiscard]] QStringList buildArguments(const QString& segmentPath) const;
     [[nodiscard]] QStringList buildAudioArguments(QStringList& warnings) const;
@@ -235,9 +237,11 @@ public:
     QProcess* process = nullptr;
     QProcess* concat = nullptr;
     QTimer* tick = nullptr;
+    PointerTracker pointerTracker;
     QElapsedTimer active;
     qint64 elapsedBeforeMs = 0;
     QString workDir;
+    QString existingSidecarPath;
     QStringList segments;
     int segmentIndex = 0;
     bool discardRequested = false;
@@ -472,6 +476,7 @@ void RecordingSession::Private::requestQuit(int timeoutMs)
 void RecordingSession::Private::fail(const QString& reason)
 {
     tick->stop();
+    pointerTracker.discard();
     state = State::Failed;
     qWarning().noquote() << "[recording]" << reason;
     if (process) {
@@ -496,6 +501,15 @@ void RecordingSession::Private::cleanupWorkDir()
     workDir.clear();
 }
 
+void RecordingSession::Private::removeDiscardedSidecar()
+{
+    QString path = existingSidecarPath;
+    if (path.isEmpty())
+        path = sidecarPathFor(request.outputPath);
+    if (!path.isEmpty())
+        QFile::remove(path);
+}
+
 void RecordingSession::Private::cleanupAndEmit(bool kept,
                                                const QString& path,
                                                const QString& failure,
@@ -505,6 +519,15 @@ void RecordingSession::Private::cleanupAndEmit(bool kept,
         return;
     finishedEmitted = true;
     tick->stop();
+    if (kept && !path.isEmpty() && QFileInfo(path).isFile()) {
+        pointerTracker.stop(elapsedMs());
+        QString sidecarError;
+        if (!pointerTracker.writeSidecar(path, &sidecarError))
+            qWarning().noquote() << "[recording] could not write pointer sidecar:" << sidecarError;
+    } else if (!kept && discardRequested) {
+        pointerTracker.discard();
+        removeDiscardedSidecar();
+    }
     if (!kept && !keepWorkDir)
         cleanupWorkDir();
     emit q->finished(kept, kept ? path : QString(), failure);
@@ -694,6 +717,9 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         error = QStringLiteral("No output path was selected.");
         return false;
     }
+    d->existingSidecarPath = QFileInfo::exists(d->request.outputPath)
+        ? sidecarPathFor(d->request.outputPath)
+        : QString();
     if (d->request.fps <= 0)
         d->request.fps = 30;
     if (d->request.crf <= 0)
@@ -731,6 +757,9 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
 
     d->state = Private::State::Recording;
     d->active.start();
+    d->pointerTracker.start(d->request.region,
+                            d->request.fps,
+                            [d = d] { return d->elapsedMs(); });
     d->tick->start();
     emit stateChanged();
     emit elapsedChanged(0);
@@ -743,6 +772,7 @@ void RecordingSession::pause()
         return;
 
     d->elapsedBeforeMs += d->active.elapsed();
+    d->pointerTracker.pause(d->elapsedBeforeMs);
     d->tick->stop();
     d->state = Private::State::Pausing;
     emit stateChanged();
@@ -774,6 +804,7 @@ void RecordingSession::resume()
 
     d->state = Private::State::Recording;
     d->active.start();
+    d->pointerTracker.resume();
     d->tick->start();
     emit stateChanged();
     emit elapsedChanged(d->elapsedBeforeMs);
@@ -788,6 +819,7 @@ void RecordingSession::stop()
 
     if (d->state == Private::State::Recording)
         d->elapsedBeforeMs += d->active.elapsed();
+    d->pointerTracker.stop(d->elapsedBeforeMs);
     d->tick->stop();
     d->discardRequested = false;
     d->resumeAfterPause = false;
@@ -812,6 +844,7 @@ void RecordingSession::discard()
 
     if (d->state == Private::State::Recording)
         d->elapsedBeforeMs += d->active.elapsed();
+    d->pointerTracker.discard();
     d->tick->stop();
     d->discardRequested = true;
     d->resumeAfterPause = false;
