@@ -4,11 +4,10 @@
 //!
 //! The spring integrates on a fixed 1/60 s grid anchored at the clip's start,
 //! and each step is cached, so a scrub backwards replays the same path.
-//! Settings stay at the shared defaults, speed 1.0 and smoothness 0.5; add the
-//! camera-setting controls here when they arrive. This Windows slice has no UI
-//! for them.
+//! [`ZoomCameraSettings`] carries the camera-wide knobs — spring speed and
+//! smoothness, plus the early lead-in — that the Zoom panel edits.
 
-use super::timeline::ZoomClip;
+use super::timeline::{ZoomClip, ZoomMode};
 use crate::recording::editor::sidecar::PointerSidecar;
 
 const ZOOM_CAMERA_STEP: f64 = 1.0 / 60.0;
@@ -19,6 +18,69 @@ pub(super) const CAMERA_FOLLOW_SPRING: CameraSpring = CameraSpring {
     damping: 12.0,
     mass: 1.5,
 };
+
+/// Camera-wide zoom settings, the counterpart of the shared editor's
+/// `ZoomCameraSettings`. Only the knobs this editor implements are here:
+/// motion blur needs the preview to blend several camera positions into one
+/// frame, which a picture transform cannot do.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct ZoomCameraSettings {
+    pub speed: f64,
+    pub smoothness: f64,
+    pub start_early: bool,
+}
+
+impl Default for ZoomCameraSettings {
+    fn default() -> Self {
+        Self {
+            speed: 1.0,
+            smoothness: 0.5,
+            start_early: false,
+        }
+    }
+}
+
+impl ZoomCameraSettings {
+    /// The settings the camera actually runs with. Non-finite values fall back
+    /// to the defaults instead of poisoning the spring.
+    pub(super) fn clamped(self) -> Self {
+        let defaults = Self::default();
+        Self {
+            speed: if self.speed.is_finite() {
+                self.speed.clamp(0.25, 3.0)
+            } else {
+                defaults.speed
+            },
+            smoothness: if self.smoothness.is_finite() {
+                self.smoothness.clamp(0.0, 1.0)
+            } else {
+                defaults.smoothness
+            },
+            start_early: self.start_early,
+        }
+    }
+
+    /// The follow spring these knobs describe, on the same scale as the shared
+    /// editor: stiffness `125·speed²`, damping `(4 + 16·smoothness)·speed`.
+    pub(super) fn spring(self) -> CameraSpring {
+        let settings = self.clamped();
+        CameraSpring {
+            stiffness: 125.0 * settings.speed * settings.speed,
+            damping: (4.0 + 16.0 * settings.smoothness) * settings.speed,
+            mass: 1.5,
+        }
+    }
+
+    /// How long before a clip the camera starts moving when the lead-in is on.
+    pub(super) fn lead_in_seconds(self) -> f64 {
+        if self.start_early {
+            0.35
+        } else {
+            0.0
+        }
+    }
+}
+
 const MAX_CAMERA_SCALE: f64 = 5.0;
 const EASE_SECONDS: f64 = 0.6;
 /// Auto zooms at most this far apart share one continuous move.
@@ -137,6 +199,7 @@ struct ZoomCameraPlan {
     frame: (f64, f64),
     clips: Vec<ZoomClip>,
     zooms: Vec<CameraZoom>,
+    settings: ZoomCameraSettings,
     start_time: Option<f64>,
     boundaries: Vec<f64>,
     frames: Vec<CameraMotion>,
@@ -147,6 +210,7 @@ pub(super) struct ZoomCameraCache {
     clips: Option<Vec<ZoomClip>>,
     frame: Option<(f64, f64)>,
     mapping: Option<TimeMapping>,
+    settings: Option<ZoomCameraSettings>,
     plan: Option<ZoomCameraPlan>,
 }
 
@@ -155,6 +219,7 @@ impl ZoomCameraCache {
         self.clips = None;
         self.frame = None;
         self.mapping = None;
+        self.settings = None;
         self.plan = None;
     }
 
@@ -163,19 +228,29 @@ impl ZoomCameraCache {
         clips: &[ZoomClip],
         frame: (f64, f64),
         mapping: &TimeMapping,
+        settings: ZoomCameraSettings,
         time: f64,
         sidecar: impl FnOnce() -> Option<PointerSidecar>,
     ) -> Camera {
+        let settings = settings.clamped();
         if self.clips.as_deref() != Some(clips)
             || self.frame != Some(frame)
             || self.mapping.as_ref() != Some(mapping)
+            || self.settings != Some(settings)
             || self.plan.is_none()
         {
             let sidecar = sidecar();
-            self.plan = Some(ZoomCameraPlan::new(clips, sidecar.as_ref(), frame, mapping));
+            self.plan = Some(ZoomCameraPlan::new(
+                clips,
+                sidecar.as_ref(),
+                frame,
+                mapping,
+                settings,
+            ));
             self.clips = Some(clips.to_vec());
             self.frame = Some(frame);
             self.mapping = Some(mapping.clone());
+            self.settings = Some(settings);
         }
         self.plan
             .as_mut()
@@ -190,6 +265,7 @@ impl ZoomCameraPlan {
         sidecar: Option<&PointerSidecar>,
         frame: (f64, f64),
         mapping: &TimeMapping,
+        settings: ZoomCameraSettings,
     ) -> Self {
         let mut clips = clips.to_vec();
         clips.sort_by(|left, right| left.start.total_cmp(&right.start));
@@ -220,7 +296,7 @@ impl ZoomCameraPlan {
                     && clip.scale.is_finite()
             })
             .map(|clip| {
-                let groups = if clip.auto {
+                let groups = if clip.mode == ZoomMode::Auto {
                     let points = follow_points(&samples, mapping, clip);
                     group_centers(&movement_groups(
                         &points,
@@ -236,14 +312,20 @@ impl ZoomCameraPlan {
                 }
             })
             .collect::<Vec<_>>();
+        let lead_in = settings.lead_in_seconds();
         let start_time = zooms
             .iter()
             .filter(|zoom| !zoom.groups.is_empty())
-            .map(|zoom| zoom.clip.start)
+            .map(|zoom| (zoom.clip.start - lead_in).max(0.0))
             .min_by(f64::total_cmp);
         let mut boundaries = Vec::new();
         for zoom in &zooms {
-            boundaries.extend([zoom.clip.start, exit_start(&zoom.clip), zoom.clip.end]);
+            boundaries.extend([
+                (zoom.clip.start - lead_in).max(0.0),
+                zoom.clip.start,
+                exit_start(&zoom.clip),
+                zoom.clip.end,
+            ]);
         }
         boundaries.sort_by(f64::total_cmp);
         boundaries.dedup();
@@ -254,6 +336,7 @@ impl ZoomCameraPlan {
             frame,
             clips,
             zooms,
+            settings,
             start_time,
             boundaries,
             frames,
@@ -267,6 +350,16 @@ impl ZoomCameraPlan {
             .rposition(|zoom| time >= zoom.clip.start && time <= zoom.clip.end)
         {
             return Some(index);
+        }
+        // With the lead-in on, the camera starts moving towards a clip before
+        // that clip begins, so the move is already under way at its first frame.
+        if self.settings.start_early {
+            let lead_in = self.settings.lead_in_seconds();
+            if let Some(index) = self.zooms.iter().position(|zoom| {
+                !zoom.clip.instant && time >= zoom.clip.start - lead_in && time < zoom.clip.start
+            }) {
+                return Some(index);
+            }
         }
         // A playhead in a morph gap holds the clip it just left.
         self.zooms
@@ -288,7 +381,11 @@ impl ZoomCameraPlan {
         if !zoom.holds_for_next && time >= exit_start(&zoom.clip) {
             return full_rect(self.frame);
         }
-        let center = if zoom.clip.auto {
+        // A lead-in sample sits before the clip; frame it where the clip
+        // itself starts rather than reading a movement group that has not
+        // begun yet.
+        let time = time.max(zoom.clip.start);
+        let center = if zoom.clip.mode == ZoomMode::Auto {
             group_center_at(&zoom.groups, time).unwrap_or(zoom.clip.center)
         } else {
             zoom.clip.center
@@ -304,24 +401,35 @@ impl ZoomCameraPlan {
             .filter(|event| *event > from && *event < to)
             .collect();
         events.push(to);
+        let spring = self.settings.spring();
         for end in events {
             let sample_time = (from + end) / 2.0;
             if let Some(index) = self.target_index_at(sample_time) {
                 let zoom = &self.zooms[index];
-                if zoom.groups.is_empty() {
+                if zoom.clip.instant {
+                    // An instant zoom is a cut: the camera is already at its
+                    // target instead of travelling there on the spring.
+                    motion = CameraMotion::parked(self.target_rect(index, sample_time));
+                } else if zoom.groups.is_empty() {
                     motion = CameraMotion::parked(camera_rect(
                         static_camera_at(&self.clips, sample_time, self.frame),
                         self.frame,
                     ));
                 } else {
-                    motion = motion.advance(
-                        self.target_rect(index, sample_time),
-                        camera_spring(),
-                        end - from,
-                    );
+                    motion =
+                        motion.advance(self.target_rect(index, sample_time), spring, end - from);
                 }
             } else {
-                motion = motion.advance(full_rect(self.frame), camera_spring(), end - from);
+                // An instant clip releases just as abruptly as it enters.
+                let released_instantly = self
+                    .zooms
+                    .iter()
+                    .any(|zoom| zoom.clip.instant && (from - zoom.clip.end).abs() < 1e-9);
+                motion = if released_instantly {
+                    CameraMotion::parked(full_rect(self.frame))
+                } else {
+                    motion.advance(full_rect(self.frame), spring, end - from)
+                };
             }
             from = end;
         }
@@ -334,6 +442,9 @@ impl ZoomCameraPlan {
         }
         let time = time.max(0.0);
         if let Some(index) = self.target_index_at(time) {
+            if self.zooms[index].clip.instant {
+                return frame_for_rect(self.target_rect(index, time), self.frame);
+            }
             if self.zooms[index].groups.is_empty() {
                 return static_camera_at(&self.clips, time, self.frame);
             }
@@ -388,6 +499,11 @@ pub(super) fn static_camera_at(clips: &[ZoomClip], time: f64, frame: (f64, f64))
 
     let clip = &clips[index];
     let to_scale = clip.scale.max(1.0);
+    // An instant clip has no ramp at either end: it is at its framing on its
+    // first frame and back to the full frame on the frame after its last.
+    if clip.instant {
+        return (to_scale, clip.center);
+    }
     let ease = EASE_SECONDS.min((clip.end - clip.start) / 2.0);
     if ease <= f64::EPSILON {
         return (to_scale, clip.center);
@@ -475,8 +591,60 @@ pub(super) fn source_to_stage(
     )
 }
 
-pub(super) fn camera_spring() -> CameraSpring {
-    CAMERA_FOLLOW_SPRING
+/// The outlined region a Manual zoom at `scale` will frame, mapped into the
+/// rectangle the video occupies inside the preview widget. `view` is the source
+/// region on screen, which is the whole frame while the outline is up.
+pub(super) fn placement_rect(
+    scale: f64,
+    center: (f64, f64),
+    view: ViewRect,
+    video: [f64; 4],
+) -> [f64; 4] {
+    let scale = if scale.is_finite() {
+        scale.max(1.0)
+    } else {
+        1.0
+    };
+    let width = video[2];
+    let height = video[3];
+    let rect_w = width / scale;
+    let rect_h = height / scale;
+    let center_x = if center.0.is_finite() {
+        video[0] + ((center.0 - view.0) / view.2.max(1.0)) * width
+    } else {
+        video[0] + width / 2.0
+    };
+    let center_y = if center.1.is_finite() {
+        video[1] + ((center.1 - view.1) / view.3.max(1.0)) * height
+    } else {
+        video[1] + height / 2.0
+    };
+    let x = if rect_w >= width {
+        video[0] + (width - rect_w) / 2.0
+    } else {
+        (center_x - rect_w / 2.0).clamp(video[0], video[0] + width - rect_w)
+    };
+    let y = if rect_h >= height {
+        video[1] + (height - rect_h) / 2.0
+    } else {
+        (center_y - rect_h / 2.0).clamp(video[1], video[1] + height - rect_h)
+    };
+    [x, y, rect_w, rect_h]
+}
+
+/// A point in the preview widget as a source pixel, through the view the
+/// preview shows and the rectangle the video occupies. This is the inverse of
+/// [`source_to_stage`] for the focus drag, which places a point rather than
+/// projecting one.
+pub(super) fn stage_point_to_source(
+    point: (f64, f64),
+    view: ViewRect,
+    video: [f64; 4],
+) -> (f64, f64) {
+    (
+        view.0 + ((point.0 - video[0]) / video[2].max(1.0)) * view.2,
+        view.1 + ((point.1 - video[1]) / video[3].max(1.0)) * view.3,
+    )
 }
 
 fn camera_rect(camera: Camera, frame: (f64, f64)) -> [f64; 4] {
@@ -533,11 +701,11 @@ fn frame_for_rect(rect: [f64; 4], frame: (f64, f64)) -> Camera {
 }
 
 /// The closest earlier auto zoom that `index` morphs from: it must end
-/// within the morph gap, and both clips must be auto. A hidden clip never
-/// contributes, and neither does a manual one.
+/// within the morph gap, and both clips must be auto and animated. A hidden
+/// clip never contributes, and neither does a manual or an instant one.
 fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
     let clip = &clips[index];
-    if !clip.auto {
+    if clip.mode != ZoomMode::Auto || clip.instant {
         return None;
     }
     clips
@@ -545,7 +713,8 @@ fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
         .enumerate()
         .filter(|(other, previous)| {
             *other != index
-                && previous.auto
+                && previous.mode == ZoomMode::Auto
+                && !previous.instant
                 && !previous.hidden
                 && previous.end <= clip.start
                 && clip.start - previous.end <= MORPH_GAP_SECONDS
@@ -557,11 +726,13 @@ fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
 /// True when a later auto zoom morphs from `clip`, so it holds its framing
 /// through its own ease-out instead of returning to the full frame.
 fn morphs_into_neighbour(clips: &[ZoomClip], clip: ZoomClip) -> bool {
-    clip.auto
+    clip.mode == ZoomMode::Auto
+        && !clip.instant
         && !clip.hidden
         && clips.iter().any(|next| {
             *next != clip
-                && next.auto
+                && next.mode == ZoomMode::Auto
+                && !next.instant
                 && !next.hidden
                 && next.start >= clip.end
                 && next.start - clip.end <= MORPH_GAP_SECONDS
@@ -574,7 +745,11 @@ fn gap_hold_predecessor(clips: &[ZoomClip], time: f64) -> Option<usize> {
         .iter()
         .enumerate()
         .filter(|(_, clip)| {
-            clip.auto && !clip.hidden && clip.end <= time && time - clip.end <= MORPH_GAP_SECONDS
+            clip.mode == ZoomMode::Auto
+                && !clip.instant
+                && !clip.hidden
+                && clip.end <= time
+                && time - clip.end <= MORPH_GAP_SECONDS
         })
         .max_by(|(_, left), (_, right)| left.end.total_cmp(&right.end))
         .map(|(previous, _)| previous)
@@ -764,13 +939,13 @@ fn valid_frame(frame: (f64, f64)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        camera_transform, source_to_stage, static_camera_at, view_rect, Camera, TimeMapping,
-        ZoomCameraCache,
+        camera_transform, placement_rect, source_to_stage, stage_point_to_source, static_camera_at,
+        view_rect, Camera, TimeMapping, ZoomCameraCache, ZoomCameraSettings,
     };
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
     };
-    use crate::video_editor::timeline::ZoomClip;
+    use crate::video_editor::timeline::{ZoomClip, ZoomMode};
 
     fn auto_clip(start: f64, end: f64, scale: f64, center: (f64, f64)) -> ZoomClip {
         ZoomClip {
@@ -779,13 +954,15 @@ mod tests {
             scale,
             center,
             hidden: false,
-            auto: true,
+            mode: ZoomMode::Auto,
+            instant: false,
+            anchor: None,
         }
     }
 
     fn manual_clip(start: f64, end: f64, scale: f64, center: (f64, f64)) -> ZoomClip {
         ZoomClip {
-            auto: false,
+            mode: ZoomMode::Manual,
             ..auto_clip(start, end, scale, center)
         }
     }
@@ -818,9 +995,14 @@ mod tests {
         time: f64,
     ) -> Camera {
         let mut cache = ZoomCameraCache::default();
-        cache.evaluate(clips, frame, &TimeMapping::default(), time, || {
-            Some(sidecar.clone())
-        })
+        cache.evaluate(
+            clips,
+            frame,
+            &TimeMapping::default(),
+            ZoomCameraSettings::default(),
+            time,
+            || Some(sidecar.clone()),
+        )
     }
 
     #[test]
@@ -940,6 +1122,7 @@ mod tests {
                     &clips,
                     (640.0, 480.0),
                     &TimeMapping::default(),
+                    ZoomCameraSettings::default(),
                     time,
                     || Some(sidecar.clone()),
                 )
@@ -977,13 +1160,23 @@ mod tests {
         let sidecar = sidecar((640, 480), &[(4.0, 520.0, 240.0), (5.5, 520.0, 240.0)]);
         let mapping = TimeMapping::new(vec![(0.0, 2.0, 3.5, 5.5)]);
         let mut cache = ZoomCameraCache::default();
-        let (_, center) = cache.evaluate(&clips, (640.0, 480.0), &mapping, 1.2, || {
-            Some(sidecar.clone())
-        });
+        let (_, center) = cache.evaluate(
+            &clips,
+            (640.0, 480.0),
+            &mapping,
+            ZoomCameraSettings::default(),
+            1.2,
+            || Some(sidecar.clone()),
+        );
         assert!((center.0 - 480.0).abs() < 10.0, "center={center:?}");
-        let identity = cache.evaluate(&clips, (640.0, 480.0), &TimeMapping::default(), 1.2, || {
-            Some(sidecar.clone())
-        });
+        let identity = cache.evaluate(
+            &clips,
+            (640.0, 480.0),
+            &TimeMapping::default(),
+            ZoomCameraSettings::default(),
+            1.2,
+            || Some(sidecar.clone()),
+        );
         assert!(
             (identity.1 .0 - center.0).abs() > 100.0,
             "unmapped windows must not find source samples: {identity:?} vs {center:?}"
@@ -998,18 +1191,33 @@ mod tests {
         let second_sidecar = sidecar((640, 480), &[(0.5, 120.0, 240.0), (3.0, 120.0, 240.0)]);
         let mut cache = ZoomCameraCache::default();
         let identity = TimeMapping::default();
-        let first = cache.evaluate(&clips, frame, &identity, 2.0, || {
-            Some(first_sidecar.clone())
-        });
+        let first = cache.evaluate(
+            &clips,
+            frame,
+            &identity,
+            ZoomCameraSettings::default(),
+            2.0,
+            || Some(first_sidecar.clone()),
+        );
         let changed_clip = [auto_clip(0.5, 4.0, 3.0, (320.0, 240.0))];
-        let changed = cache.evaluate(&changed_clip, frame, &identity, 2.0, || {
-            Some(first_sidecar.clone())
-        });
+        let changed = cache.evaluate(
+            &changed_clip,
+            frame,
+            &identity,
+            ZoomCameraSettings::default(),
+            2.0,
+            || Some(first_sidecar.clone()),
+        );
         assert!(changed.0 > first.0 + 0.5);
         cache.clear();
-        let changed_document = cache.evaluate(&clips, frame, &identity, 2.0, || {
-            Some(second_sidecar.clone())
-        });
+        let changed_document = cache.evaluate(
+            &clips,
+            frame,
+            &identity,
+            ZoomCameraSettings::default(),
+            2.0,
+            || Some(second_sidecar.clone()),
+        );
         assert!(changed_document.1 .0 < first.1 .0 - 100.0);
     }
 
@@ -1184,6 +1392,140 @@ mod tests {
         assert!(
             (center.0 - sweep_midpoint).abs() > (center.0 - 200.0).abs(),
             "camera settled mid-sweep: {center:?}"
+        );
+    }
+
+    #[test]
+    fn the_focus_outline_shows_the_region_a_manual_zoom_will_frame() {
+        let video = [0.0, 0.0, 640.0, 480.0];
+        assert_eq!(
+            placement_rect(2.0, (320.0, 240.0), (0.0, 0.0, 640.0, 480.0), video),
+            [160.0, 120.0, 320.0, 240.0]
+        );
+        // A corner focus point keeps the outline inside the picture.
+        assert_eq!(
+            placement_rect(2.0, (0.0, 0.0), (0.0, 0.0, 640.0, 480.0), video),
+            [0.0, 0.0, 320.0, 240.0]
+        );
+        // At 1x the outline is the whole picture.
+        assert_eq!(
+            placement_rect(1.0, (400.0, 300.0), (0.0, 0.0, 640.0, 480.0), video),
+            [0.0, 0.0, 640.0, 480.0]
+        );
+    }
+
+    #[test]
+    fn the_focus_outline_maps_through_a_letterboxed_video_rect() {
+        // A portrait video inside a landscape widget: 270x480 centred.
+        let video = [185.0, 0.0, 270.0, 480.0];
+        let view = (0.0, 0.0, 270.0, 480.0);
+        let (x, y) = stage_point_to_source((185.0 + 135.0, 240.0), view, video);
+        assert!((x - 135.0).abs() < 1e-9, "x={x}");
+        assert!((y - 240.0).abs() < 1e-9, "y={y}");
+        assert_eq!(
+            placement_rect(2.0, (135.0, 240.0), view, video),
+            [252.5, 120.0, 135.0, 240.0]
+        );
+    }
+
+    #[test]
+    fn an_instant_zoom_snaps_with_no_ramp_at_either_end() {
+        let mut clip = auto_clip(1.0, 4.0, 3.0, (320.0, 240.0));
+        clip.instant = true;
+        let sidecar = sidecar((640, 480), &[]);
+        assert_eq!(
+            evaluate(&[clip], &sidecar, (640.0, 480.0), 1.0),
+            (3.0, (320.0, 240.0))
+        );
+        assert_eq!(
+            evaluate(&[clip], &sidecar, (640.0, 480.0), 2.5),
+            (3.0, (320.0, 240.0))
+        );
+        assert_eq!(
+            evaluate(&[clip], &sidecar, (640.0, 480.0), 4.1),
+            (1.0, (320.0, 240.0))
+        );
+    }
+
+    #[test]
+    fn an_instant_zoom_does_not_chase_the_pointer_on_the_spring() {
+        let frame = (640.0, 480.0);
+        let points = &[(1.0, 500.0, 300.0), (3.0, 500.0, 300.0)];
+        let mut instant = auto_clip(1.0, 4.0, 2.0, (320.0, 240.0));
+        instant.instant = true;
+        let eased = auto_clip(1.0, 4.0, 2.0, (320.0, 240.0));
+        let instant_sidecar = sidecar((640, 480), points);
+        let eased_sidecar = sidecar((640, 480), points);
+        let snapped = evaluate(&[instant], &instant_sidecar, frame, 1.1);
+        let travelling = evaluate(&[eased], &eased_sidecar, frame, 1.1);
+        assert!(
+            (snapped.0 - 2.0).abs() < 1e-9,
+            "an instant zoom is at its scale on the first frame: {snapped:?}"
+        );
+        assert!(
+            travelling.0 < 1.9,
+            "an animated zoom is still travelling there: {travelling:?}"
+        );
+    }
+
+    #[test]
+    fn the_camera_spring_follows_its_speed_and_smoothness() {
+        let frame = (640.0, 480.0);
+        let clips = [auto_clip(1.0, 4.0, 2.0, (320.0, 240.0))];
+        let sidecar = sidecar((640, 480), &[(1.0, 500.0, 300.0), (3.0, 500.0, 300.0)]);
+        let settle = |settings: ZoomCameraSettings| {
+            let mut cache = ZoomCameraCache::default();
+            cache
+                .evaluate(
+                    &clips,
+                    frame,
+                    &TimeMapping::default(),
+                    settings,
+                    1.25,
+                    || Some(sidecar.clone()),
+                )
+                .0
+        };
+        let fast = settle(ZoomCameraSettings {
+            speed: 3.0,
+            ..ZoomCameraSettings::default()
+        });
+        let slow = settle(ZoomCameraSettings {
+            speed: 0.5,
+            ..ZoomCameraSettings::default()
+        });
+        assert!(
+            fast > slow + 0.05,
+            "a faster camera must be closer to its target by the same instant: fast={fast} slow={slow}"
+        );
+    }
+
+    #[test]
+    fn the_early_lead_in_starts_the_move_before_the_clip() {
+        let frame = (640.0, 480.0);
+        let clips = [auto_clip(2.0, 4.0, 2.0, (320.0, 240.0))];
+        let sidecar = sidecar((640, 480), &[(2.0, 500.0, 240.0), (3.5, 500.0, 240.0)]);
+        let at = |settings: ZoomCameraSettings| {
+            let mut cache = ZoomCameraCache::default();
+            cache
+                .evaluate(
+                    &clips,
+                    frame,
+                    &TimeMapping::default(),
+                    settings,
+                    1.8,
+                    || Some(sidecar.clone()),
+                )
+                .0
+        };
+        assert_eq!(at(ZoomCameraSettings::default()), 1.0);
+        let early = at(ZoomCameraSettings {
+            start_early: true,
+            ..ZoomCameraSettings::default()
+        });
+        assert!(
+            early > 1.02,
+            "the lead-in must have moved the camera before the clip starts: {early}"
         );
     }
 }

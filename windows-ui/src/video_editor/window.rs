@@ -80,16 +80,9 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
 
     let cursor_layer = stage.cursor_layer.clone();
     let cursor_repaint: Rc<dyn Fn()> = Rc::new(move || cursor_layer.queue_draw());
-    let tools_column = super::side_panel::build_tools_column(
-        scale,
-        &window,
-        background,
-        stage.cursor.clone(),
-        cursor_repaint,
-    );
-    workspace.append(&tools_column);
-    root.append(&workspace);
 
+    // The timeline is built first because the Zoom panel reads and writes the
+    // zoom track through it.
     let timeline = super::timeline::build(
         &window,
         &stage.canvas,
@@ -98,18 +91,38 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         stage.cursor.clone(),
         stage.source_size.clone(),
     );
+
+    let tools_column = super::side_panel::build_tools_column(
+        scale,
+        &window,
+        background,
+        stage.cursor.clone(),
+        cursor_repaint,
+        &timeline,
+    );
+    workspace.append(&tools_column);
+    root.append(&workspace);
     root.append(&timeline.root);
     timeline.set_frame_sink({
         let stage = stage.clone();
-        Rc::new(move |seconds, composition_seconds, playing, camera| {
-            stage.source_seconds.set(seconds);
-            stage.preview.show_time(seconds, playing);
-            stage.estimate.set_composition_seconds(composition_seconds);
-            stage.set_camera(camera);
-            let ripple = stage.cursor.ripple_at(seconds, stage.source_size.get());
+        Rc::new(move |frame| {
+            stage.source_seconds.set(frame.source_seconds);
+            stage.preview.show_time(frame.source_seconds, frame.playing);
+            stage
+                .estimate
+                .set_composition_seconds(frame.composition_seconds);
+            stage.set_placement(frame.placement);
+            stage.set_camera(frame.camera);
+            let ripple = stage
+                .cursor
+                .ripple_at(frame.source_seconds, stage.source_size.get());
             stage.preview.set_ripple(ripple);
             stage.cursor_layer.queue_draw();
         })
+    });
+    stage.connect_placement({
+        let timeline = timeline.clone();
+        Rc::new(move |center| timeline.set_selected_zoom_center(center))
     });
 
     // The whole editor sits inside one overlay so the export card can float
@@ -630,6 +643,8 @@ struct Stage {
     clip: super::rounded_clip::RoundedClip,
     clip_margins: Rc<RefCell<(i32, i32, i32, i32)>>,
     camera_view: Rc<Cell<Option<super::zoom::ViewRect>>>,
+    /// The Manual zoom outline the preview shows, as `(scale, focus point)`.
+    placement: Rc<Cell<Option<(f64, (f64, f64))>>>,
     zoom_provider: CssProvider,
     last_zoom_transform: Rc<Cell<CameraTransform>>,
     last_zoom_css: Rc<RefCell<String>>,
@@ -788,6 +803,70 @@ impl Stage {
         self.apply_geometry();
     }
 
+    /// Show or clear the Manual zoom outline. While it is up the preview is
+    /// unzoomed, so the outline says where the zoom will look before you see it.
+    fn set_placement(&self, placement: Option<(f64, (f64, f64))>) {
+        if self.placement.get() == placement {
+            return;
+        }
+        self.placement.set(placement);
+        self.canvas
+            .set_cursor_from_name(placement.map(|_| "crosshair"));
+        self.cursor_layer.queue_draw();
+    }
+
+    /// Dragging the preview places the selected Manual zoom's focus point.
+    fn connect_placement(&self, place: Rc<dyn Fn((f64, f64))>) {
+        let canvas = self.canvas.clone();
+        let source_size = self.source_size.clone();
+        let camera_view = self.camera_view.clone();
+        let placement = self.placement.clone();
+        let place_point: Rc<dyn Fn(f64, f64)> = Rc::new(move |x: f64, y: f64| {
+            // The outline is only up while a Manual zoom is selected and the
+            // transport is stopped; a drag at any other time is not a placement.
+            if placement.get().is_none() {
+                return;
+            }
+            let Some((source_width, source_height)) = source_size.get() else {
+                return;
+            };
+            let (width, height) = (
+                f64::from(canvas.allocated_width().max(1)),
+                f64::from(canvas.allocated_height().max(1)),
+            );
+            let (source_width, source_height) = (f64::from(source_width), f64::from(source_height));
+            let Some(video) =
+                super::cursor::video_rect_for(width, height, source_width, source_height)
+            else {
+                return;
+            };
+            let view = camera_view
+                .get()
+                .unwrap_or((0.0, 0.0, source_width, source_height));
+            place(super::zoom::stage_point_to_source(
+                (x, y),
+                view,
+                [video.x, video.y, video.width, video.height],
+            ));
+        });
+
+        let drag = gtk4::GestureDrag::new();
+        drag.set_button(1);
+        drag.connect_drag_begin({
+            let place = place_point.clone();
+            move |_, x, y| place(x, y)
+        });
+        drag.connect_drag_update({
+            let place = place_point.clone();
+            move |gesture, offset_x, offset_y| {
+                if let Some((start_x, start_y)) = gesture.start_point() {
+                    place(start_x + offset_x, start_y + offset_y);
+                }
+            }
+        });
+        self.canvas.add_controller(drag);
+    }
+
     fn connect_open(&self, open: Rc<dyn Fn()>) {
         let picture = self.picture.clone();
         let click = gtk4::GestureClick::new();
@@ -829,6 +908,45 @@ impl Stage {
                 .set_source(Some(path), source_seconds, composition_seconds);
         }
     }
+}
+
+/// The orange outline a Manual zoom shows over an unzoomed preview: the region
+/// its focus point and scale will frame.
+fn draw_placement_outline(
+    context: &gtk4::cairo::Context,
+    width: i32,
+    height: i32,
+    source_size: Option<(u32, u32)>,
+    view: Option<super::zoom::ViewRect>,
+    placement: Option<(f64, (f64, f64))>,
+    scale: f64,
+) {
+    let (Some((source_width, source_height)), Some(view), Some((zoom_scale, center))) =
+        (source_size, view, placement)
+    else {
+        return;
+    };
+    let (source_width, source_height) = (f64::from(source_width), f64::from(source_height));
+    let Some(video) = super::cursor::video_rect_for(
+        f64::from(width),
+        f64::from(height),
+        source_width,
+        source_height,
+    ) else {
+        return;
+    };
+    let [x, y, rect_width, rect_height] = super::zoom::placement_rect(
+        zoom_scale,
+        center,
+        view,
+        [video.x, video.y, video.width, video.height],
+    );
+    context.set_source_rgba(1.0, 0.48, 0.12, 0.22);
+    context.rectangle(x, y, rect_width, rect_height);
+    let _ = context.fill_preserve();
+    context.set_source_rgba(1.0, 0.62, 0.20, 0.95);
+    context.set_line_width(2.0 * scale);
+    let _ = context.stroke();
 }
 
 fn is_identity_camera_transform(transform: CameraTransform) -> bool {
@@ -937,11 +1055,13 @@ fn build_stage(
     cursor_layer.set_hexpand(true);
     cursor_layer.set_vexpand(true);
     cursor_layer.set_can_target(false);
+    let placement: Rc<Cell<Option<(f64, (f64, f64))>>> = Rc::new(Cell::new(None));
     cursor_layer.set_draw_func({
         let cursor = cursor.clone();
         let source_size = source_size.clone();
         let source_seconds = source_seconds.clone();
         let camera_view = camera_view.clone();
+        let placement = placement.clone();
         move |_, context, width, height| {
             cursor.draw(
                 context,
@@ -950,6 +1070,15 @@ fn build_stage(
                 source_seconds.get(),
                 source_size.get(),
                 camera_view.get(),
+            );
+            draw_placement_outline(
+                context,
+                width,
+                height,
+                source_size.get(),
+                camera_view.get(),
+                placement.get(),
+                scale,
             );
         }
     });
@@ -1055,6 +1184,7 @@ fn build_stage(
         clip,
         clip_margins: Rc::new(RefCell::new((i32::MIN, 0, 0, 0))),
         camera_view,
+        placement,
         zoom_provider,
         last_zoom_transform,
         last_zoom_css,
@@ -1213,15 +1343,16 @@ fn export_model(
     stage: &Stage,
     timeline: &super::timeline::Timeline,
 ) -> Option<super::export::ExportModel> {
-    let (source, trim_start, trim_end, cuts, zooms) = timeline.export_footage()?;
+    let footage = timeline.export_footage()?;
     let source_size = stage.source_size.get()?;
     Some(super::export::ExportModel {
-        source,
+        source: footage.source,
         source_size,
-        trim_start,
-        trim_end,
-        cuts,
-        zooms,
+        trim_start: footage.trim_start,
+        trim_end: footage.trim_end,
+        cuts: footage.cuts,
+        zooms: footage.zooms,
+        zoom_camera: footage.zoom_camera,
         cursor: stage.cursor.settings(),
         sidecar: stage.cursor.sidecar(),
         crf: stage.quality.get().crf(),
@@ -1239,9 +1370,10 @@ fn wire_export(
     let timeline = timeline.clone();
     let shell = shell.clone();
     stage.export_button.connect_clicked(move |_| {
-        let Some((source, _, _, _, _)) = timeline.export_footage() else {
+        let Some(footage) = timeline.export_footage() else {
             return;
         };
+        let source = footage.source;
         let stage = stage_handle.clone();
         let timeline = timeline.clone();
         let shell = shell.clone();

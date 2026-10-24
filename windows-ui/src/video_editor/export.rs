@@ -37,6 +37,9 @@ pub(super) struct ExportModel {
     pub trim_end: f64,
     pub cuts: Vec<f64>,
     pub zooms: Vec<ZoomClip>,
+    /// The camera settings the preview is using, so the export's camera is the
+    /// same camera.
+    pub zoom_camera: zoom::ZoomCameraSettings,
     pub cursor: CursorSettings,
     pub sidecar: Option<PointerSidecar>,
     pub crf: u32,
@@ -358,10 +361,14 @@ fn render(
                 .ok_or_else(|| End::Failed("the frame plan ran out of frames".to_string()))?;
             let composition_time = done as f64 / fps;
             span_frame += 1;
-            let camera_value =
-                camera.evaluate(&model.zooms, source, &mapping, composition_time, || {
-                    model.sidecar.clone()
-                });
+            let camera_value = camera.evaluate(
+                &model.zooms,
+                source,
+                &mapping,
+                model.zoom_camera,
+                composition_time,
+                || model.sidecar.clone(),
+            );
             let view = zoom::view_rect(camera_value.0, camera_value.1, source);
             let cropped = !(view_is_full(view, source) && size == model.source_size);
             if cropped {
@@ -1002,8 +1009,11 @@ mod tests {
                 scale: 1.5,
                 center: (960.0, 540.0),
                 hidden: false,
-                auto: false,
+                mode: crate::video_editor::timeline::ZoomMode::Manual,
+                instant: false,
+                anchor: None,
             }],
+            zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings {
                 hide_idle: false,
                 ..CursorSettings::default()
@@ -1058,6 +1068,7 @@ mod tests {
             trim_end: 60.0,
             cuts: Vec::new(),
             zooms: Vec::new(),
+            zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
             sidecar: None,
             crf: 23,
@@ -1383,7 +1394,9 @@ mod tests {
             scale: 1.6,
             center: (960.0, 540.0),
             hidden: false,
-            auto: false,
+            mode: crate::video_editor::timeline::ZoomMode::Manual,
+            instant: false,
+            anchor: None,
         };
         for (label, zooms) in [("no zoom", Vec::new()), ("zoom 1.6x", vec![zoom])] {
             let output = dir.join(format!("out-{}.mp4", label.replace(' ', "-")));
@@ -1395,6 +1408,7 @@ mod tests {
                 trim_end: 10.0,
                 cuts: Vec::new(),
                 zooms,
+                zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
                 cursor: CursorSettings::default(),
                 sidecar: None,
                 crf: 20,
