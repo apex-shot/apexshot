@@ -52,6 +52,58 @@ const MINIMAL_DEFAULT: &[u8] = include_bytes!("../../../assets/cursors/minimal/d
 const MINIMAL_HAND: &[u8] = include_bytes!("../../../assets/cursors/minimal/hand.png");
 const MINIMAL_TEXT: &[u8] = include_bytes!("../../../assets/cursors/minimal/text.png");
 const MINIMAL_CROSSHAIR: &[u8] = include_bytes!("../../../assets/cursors/minimal/crosshair.png");
+const ADWAITA_MOVE: &[u8] = include_bytes!("../../../assets/cursors/adwaita/move.png");
+const ADWAITA_WAIT: &[u8] = include_bytes!("../../../assets/cursors/adwaita/wait.png");
+const ADWAITA_RESIZE_H: &[u8] = include_bytes!("../../../assets/cursors/adwaita/resize_h.png");
+const ADWAITA_RESIZE_V: &[u8] = include_bytes!("../../../assets/cursors/adwaita/resize_v.png");
+const ADWAITA_RESIZE_DIAG: &[u8] =
+    include_bytes!("../../../assets/cursors/adwaita/resize_diag.png");
+const YARU_MOVE: &[u8] = include_bytes!("../../../assets/cursors/yaru/move.png");
+const YARU_WAIT: &[u8] = include_bytes!("../../../assets/cursors/yaru/wait.png");
+const YARU_RESIZE_H: &[u8] = include_bytes!("../../../assets/cursors/yaru/resize_h.png");
+const YARU_RESIZE_V: &[u8] = include_bytes!("../../../assets/cursors/yaru/resize_v.png");
+const YARU_RESIZE_DIAG: &[u8] = include_bytes!("../../../assets/cursors/yaru/resize_diag.png");
+const WHITE_MOVE: &[u8] = include_bytes!("../../../assets/cursors/white/move.png");
+const WHITE_WAIT: &[u8] = include_bytes!("../../../assets/cursors/white/wait.png");
+const WHITE_RESIZE_H: &[u8] = include_bytes!("../../../assets/cursors/white/resize_h.png");
+const WHITE_RESIZE_V: &[u8] = include_bytes!("../../../assets/cursors/white/resize_v.png");
+const WHITE_RESIZE_DIAG: &[u8] = include_bytes!("../../../assets/cursors/white/resize_diag.png");
+const BLACK_MOVE: &[u8] = include_bytes!("../../../assets/cursors/black/move.png");
+const BLACK_WAIT: &[u8] = include_bytes!("../../../assets/cursors/black/wait.png");
+const BLACK_RESIZE_H: &[u8] = include_bytes!("../../../assets/cursors/black/resize_h.png");
+const BLACK_RESIZE_V: &[u8] = include_bytes!("../../../assets/cursors/black/resize_v.png");
+const BLACK_RESIZE_DIAG: &[u8] = include_bytes!("../../../assets/cursors/black/resize_diag.png");
+const MACOS_MOVE: &[u8] = include_bytes!("../../../assets/cursors/macos/move.png");
+const MACOS_WAIT: &[u8] = include_bytes!("../../../assets/cursors/macos/wait.png");
+const MACOS_RESIZE_H: &[u8] = include_bytes!("../../../assets/cursors/macos/resize_h.png");
+const MACOS_RESIZE_V: &[u8] = include_bytes!("../../../assets/cursors/macos/resize_v.png");
+const MACOS_RESIZE_DIAG: &[u8] = include_bytes!("../../../assets/cursors/macos/resize_diag.png");
+const TAHOE_MOVE: &[u8] = include_bytes!("../../../assets/cursors/tahoe/move.png");
+const TAHOE_WAIT: &[u8] = include_bytes!("../../../assets/cursors/tahoe/wait.png");
+const TAHOE_RESIZE_H: &[u8] = include_bytes!("../../../assets/cursors/tahoe/resize_h.png");
+const TAHOE_RESIZE_V: &[u8] = include_bytes!("../../../assets/cursors/tahoe/resize_v.png");
+const TAHOE_RESIZE_DIAG: &[u8] = include_bytes!("../../../assets/cursors/tahoe/resize_diag.png");
+const TAHOE_INVERTED_MOVE: &[u8] =
+    include_bytes!("../../../assets/cursors/tahoe_inverted/move.png");
+const TAHOE_INVERTED_WAIT: &[u8] =
+    include_bytes!("../../../assets/cursors/tahoe_inverted/wait.png");
+const TAHOE_INVERTED_RESIZE_H: &[u8] =
+    include_bytes!("../../../assets/cursors/tahoe_inverted/resize_h.png");
+const TAHOE_INVERTED_RESIZE_V: &[u8] =
+    include_bytes!("../../../assets/cursors/tahoe_inverted/resize_v.png");
+const TAHOE_INVERTED_RESIZE_DIAG: &[u8] =
+    include_bytes!("../../../assets/cursors/tahoe_inverted/resize_diag.png");
+const DOT_MOVE: &[u8] = include_bytes!("../../../assets/cursors/dot/move.png");
+const DOT_WAIT: &[u8] = include_bytes!("../../../assets/cursors/dot/wait.png");
+const DOT_RESIZE_H: &[u8] = include_bytes!("../../../assets/cursors/dot/resize_h.png");
+const DOT_RESIZE_V: &[u8] = include_bytes!("../../../assets/cursors/dot/resize_v.png");
+const DOT_RESIZE_DIAG: &[u8] = include_bytes!("../../../assets/cursors/dot/resize_diag.png");
+const MINIMAL_MOVE: &[u8] = include_bytes!("../../../assets/cursors/minimal/move.png");
+const MINIMAL_WAIT: &[u8] = include_bytes!("../../../assets/cursors/minimal/wait.png");
+const MINIMAL_RESIZE_H: &[u8] = include_bytes!("../../../assets/cursors/minimal/resize_h.png");
+const MINIMAL_RESIZE_V: &[u8] = include_bytes!("../../../assets/cursors/minimal/resize_v.png");
+const MINIMAL_RESIZE_DIAG: &[u8] =
+    include_bytes!("../../../assets/cursors/minimal/resize_diag.png");
 const CURSOR_SHADOW_OFFSET_X: f64 = 2.2;
 const CURSOR_SHADOW_OFFSET_Y: f64 = 3.2;
 const DOT_CURSOR_RADIUS: f64 = 21.0;
@@ -65,6 +117,11 @@ enum SpriteKind {
     Hand,
     Text,
     Crosshair,
+    Move,
+    Wait,
+    ResizeH,
+    ResizeV,
+    ResizeDiag,
 }
 
 pub fn overlay_scale(size: f64, zoom: f64) -> f64 {
@@ -78,38 +135,83 @@ pub fn hotspot(theme: CursorTheme, kind: &str) -> (f64, f64) {
         (CursorTheme::Adwaita, SpriteKind::Hand) => (14.0, 10.0),
         (CursorTheme::Adwaita, SpriteKind::Text) => (22.0, 24.0),
         (CursorTheme::Adwaita, SpriteKind::Crosshair) => (22.0, 22.0),
+        (CursorTheme::Adwaita, SpriteKind::Move) => (24.0, 22.0),
+        (CursorTheme::Adwaita, SpriteKind::Wait) => (22.0, 22.0),
+        (CursorTheme::Adwaita, SpriteKind::ResizeH) => (24.0, 24.0),
+        (CursorTheme::Adwaita, SpriteKind::ResizeV) => (24.0, 26.0),
+        (CursorTheme::Adwaita, SpriteKind::ResizeDiag) => (22.0, 22.0),
         (CursorTheme::Yaru, SpriteKind::Default) => (7.0, 7.0),
         (CursorTheme::Yaru, SpriteKind::Hand) => (15.0, 9.0),
         (CursorTheme::Yaru, SpriteKind::Text) => (21.0, 23.0),
         (CursorTheme::Yaru, SpriteKind::Crosshair) => (22.0, 22.0),
+        (CursorTheme::Yaru, SpriteKind::Move) => (24.0, 22.0),
+        (CursorTheme::Yaru, SpriteKind::Wait) => (22.0, 22.0),
+        (CursorTheme::Yaru, SpriteKind::ResizeH) => (24.0, 23.0),
+        (CursorTheme::Yaru, SpriteKind::ResizeV) => (23.0, 25.0),
+        (CursorTheme::Yaru, SpriteKind::ResizeDiag) => (21.0, 21.0),
         (CursorTheme::White, SpriteKind::Default) => (14.0, 8.0),
         (CursorTheme::White, SpriteKind::Hand) => (18.0, 10.0),
         (CursorTheme::White, SpriteKind::Text) => (22.0, 22.0),
         (CursorTheme::White, SpriteKind::Crosshair) => (22.0, 22.0),
+        (CursorTheme::White, SpriteKind::Move) => (24.0, 24.0),
+        (CursorTheme::White, SpriteKind::Wait) => (24.0, 24.0),
+        (CursorTheme::White, SpriteKind::ResizeH) => (22.0, 22.0),
+        (CursorTheme::White, SpriteKind::ResizeV) => (22.0, 22.0),
+        (CursorTheme::White, SpriteKind::ResizeDiag) => (22.0, 22.0),
         (CursorTheme::Black, SpriteKind::Default) => (14.0, 8.0),
         (CursorTheme::Black, SpriteKind::Hand) => (18.0, 10.0),
         (CursorTheme::Black, SpriteKind::Text) => (22.0, 22.0),
         (CursorTheme::Black, SpriteKind::Crosshair) => (22.0, 22.0),
+        (CursorTheme::Black, SpriteKind::Move) => (24.0, 24.0),
+        (CursorTheme::Black, SpriteKind::Wait) => (24.0, 24.0),
+        (CursorTheme::Black, SpriteKind::ResizeH) => (22.0, 22.0),
+        (CursorTheme::Black, SpriteKind::ResizeV) => (22.0, 22.0),
+        (CursorTheme::Black, SpriteKind::ResizeDiag) => (22.0, 22.0),
         (CursorTheme::Macos, SpriteKind::Default) => (7.8, 4.1),
         (CursorTheme::Macos, SpriteKind::Hand) => (16.5, 6.2),
         (CursorTheme::Macos, SpriteKind::Text) => (24.2, 24.1),
         (CursorTheme::Macos, SpriteKind::Crosshair) => (24.1, 24.0),
+        (CursorTheme::Macos, SpriteKind::Move) => (24.0, 24.0),
+        (CursorTheme::Macos, SpriteKind::Wait) => (24.0, 24.0),
+        (CursorTheme::Macos, SpriteKind::ResizeH) => (24.0, 24.0),
+        (CursorTheme::Macos, SpriteKind::ResizeV) => (24.0, 24.0),
+        (CursorTheme::Macos, SpriteKind::ResizeDiag) => (24.0, 24.0),
         (CursorTheme::Tahoe, SpriteKind::Default) => (7.9, 4.1),
         (CursorTheme::Tahoe, SpriteKind::Hand) => (21.0, 5.0),
         (CursorTheme::Tahoe, SpriteKind::Text) => (24.0, 24.0),
         (CursorTheme::Tahoe, SpriteKind::Crosshair) => (24.1, 24.0),
+        (CursorTheme::Tahoe, SpriteKind::Move) => (24.0, 24.0),
+        (CursorTheme::Tahoe, SpriteKind::Wait) => (24.0, 24.0),
+        (CursorTheme::Tahoe, SpriteKind::ResizeH) => (24.0, 24.0),
+        (CursorTheme::Tahoe, SpriteKind::ResizeV) => (24.0, 24.0),
+        (CursorTheme::Tahoe, SpriteKind::ResizeDiag) => (24.0, 24.0),
         (CursorTheme::TahoeInverted, SpriteKind::Default) => (7.9, 4.1),
         (CursorTheme::TahoeInverted, SpriteKind::Hand) => (21.0, 5.0),
         (CursorTheme::TahoeInverted, SpriteKind::Text) => (24.0, 24.0),
         (CursorTheme::TahoeInverted, SpriteKind::Crosshair) => (24.1, 24.0),
+        (CursorTheme::TahoeInverted, SpriteKind::Move) => (24.0, 24.0),
+        (CursorTheme::TahoeInverted, SpriteKind::Wait) => (24.0, 24.0),
+        (CursorTheme::TahoeInverted, SpriteKind::ResizeH) => (24.0, 24.0),
+        (CursorTheme::TahoeInverted, SpriteKind::ResizeV) => (24.0, 24.0),
+        (CursorTheme::TahoeInverted, SpriteKind::ResizeDiag) => (24.0, 24.0),
         (CursorTheme::Dot, SpriteKind::Default) => (24.0, 24.0),
         (CursorTheme::Dot, SpriteKind::Hand) => (24.0, 24.0),
         (CursorTheme::Dot, SpriteKind::Text) => (24.0, 24.0),
         (CursorTheme::Dot, SpriteKind::Crosshair) => (24.0, 24.0),
+        (CursorTheme::Dot, SpriteKind::Move) => (24.0, 24.0),
+        (CursorTheme::Dot, SpriteKind::Wait) => (24.0, 24.0),
+        (CursorTheme::Dot, SpriteKind::ResizeH) => (24.0, 24.0),
+        (CursorTheme::Dot, SpriteKind::ResizeV) => (24.0, 24.0),
+        (CursorTheme::Dot, SpriteKind::ResizeDiag) => (24.0, 24.0),
         (CursorTheme::Minimal, SpriteKind::Default) => (7.0, 3.0),
         (CursorTheme::Minimal, SpriteKind::Hand) => (7.0, 3.0),
         (CursorTheme::Minimal, SpriteKind::Text) => (7.0, 3.0),
         (CursorTheme::Minimal, SpriteKind::Crosshair) => (7.0, 3.0),
+        (CursorTheme::Minimal, SpriteKind::Move) => (7.0, 3.0),
+        (CursorTheme::Minimal, SpriteKind::Wait) => (7.0, 3.0),
+        (CursorTheme::Minimal, SpriteKind::ResizeH) => (7.0, 3.0),
+        (CursorTheme::Minimal, SpriteKind::ResizeV) => (7.0, 3.0),
+        (CursorTheme::Minimal, SpriteKind::ResizeDiag) => (7.0, 3.0),
     }
 }
 
@@ -523,6 +625,11 @@ fn sprite_kind(kind: &str) -> SpriteKind {
         "hand" => SpriteKind::Hand,
         "text" => SpriteKind::Text,
         "crosshair" => SpriteKind::Crosshair,
+        "move" => SpriteKind::Move,
+        "wait" => SpriteKind::Wait,
+        "resize_h" => SpriteKind::ResizeH,
+        "resize_v" => SpriteKind::ResizeV,
+        "resize_diag" => SpriteKind::ResizeDiag,
         _ => SpriteKind::Default,
     }
 }
@@ -532,6 +639,12 @@ fn bitmap(theme: CursorTheme, kind: &str) -> &'static RgbaImage {
         image::load_from_memory(bytes)
             .expect("cursor png")
             .to_rgba8()
+    }
+    macro_rules! cached_image {
+        ($bytes:expr) => {{
+            static IMG: OnceLock<RgbaImage> = OnceLock::new();
+            IMG.get_or_init(|| decode($bytes))
+        }};
     }
     let kind = sprite_kind(kind);
     match (theme, kind) {
@@ -679,6 +792,57 @@ fn bitmap(theme: CursorTheme, kind: &str) -> &'static RgbaImage {
             static IMG: OnceLock<RgbaImage> = OnceLock::new();
             IMG.get_or_init(|| decode(MINIMAL_CROSSHAIR))
         }
+        (CursorTheme::Adwaita, SpriteKind::Move) => cached_image!(ADWAITA_MOVE),
+        (CursorTheme::Adwaita, SpriteKind::Wait) => cached_image!(ADWAITA_WAIT),
+        (CursorTheme::Adwaita, SpriteKind::ResizeH) => cached_image!(ADWAITA_RESIZE_H),
+        (CursorTheme::Adwaita, SpriteKind::ResizeV) => cached_image!(ADWAITA_RESIZE_V),
+        (CursorTheme::Adwaita, SpriteKind::ResizeDiag) => cached_image!(ADWAITA_RESIZE_DIAG),
+        (CursorTheme::Yaru, SpriteKind::Move) => cached_image!(YARU_MOVE),
+        (CursorTheme::Yaru, SpriteKind::Wait) => cached_image!(YARU_WAIT),
+        (CursorTheme::Yaru, SpriteKind::ResizeH) => cached_image!(YARU_RESIZE_H),
+        (CursorTheme::Yaru, SpriteKind::ResizeV) => cached_image!(YARU_RESIZE_V),
+        (CursorTheme::Yaru, SpriteKind::ResizeDiag) => cached_image!(YARU_RESIZE_DIAG),
+        (CursorTheme::White, SpriteKind::Move) => cached_image!(WHITE_MOVE),
+        (CursorTheme::White, SpriteKind::Wait) => cached_image!(WHITE_WAIT),
+        (CursorTheme::White, SpriteKind::ResizeH) => cached_image!(WHITE_RESIZE_H),
+        (CursorTheme::White, SpriteKind::ResizeV) => cached_image!(WHITE_RESIZE_V),
+        (CursorTheme::White, SpriteKind::ResizeDiag) => cached_image!(WHITE_RESIZE_DIAG),
+        (CursorTheme::Black, SpriteKind::Move) => cached_image!(BLACK_MOVE),
+        (CursorTheme::Black, SpriteKind::Wait) => cached_image!(BLACK_WAIT),
+        (CursorTheme::Black, SpriteKind::ResizeH) => cached_image!(BLACK_RESIZE_H),
+        (CursorTheme::Black, SpriteKind::ResizeV) => cached_image!(BLACK_RESIZE_V),
+        (CursorTheme::Black, SpriteKind::ResizeDiag) => cached_image!(BLACK_RESIZE_DIAG),
+        (CursorTheme::Macos, SpriteKind::Move) => cached_image!(MACOS_MOVE),
+        (CursorTheme::Macos, SpriteKind::Wait) => cached_image!(MACOS_WAIT),
+        (CursorTheme::Macos, SpriteKind::ResizeH) => cached_image!(MACOS_RESIZE_H),
+        (CursorTheme::Macos, SpriteKind::ResizeV) => cached_image!(MACOS_RESIZE_V),
+        (CursorTheme::Macos, SpriteKind::ResizeDiag) => cached_image!(MACOS_RESIZE_DIAG),
+        (CursorTheme::Tahoe, SpriteKind::Move) => cached_image!(TAHOE_MOVE),
+        (CursorTheme::Tahoe, SpriteKind::Wait) => cached_image!(TAHOE_WAIT),
+        (CursorTheme::Tahoe, SpriteKind::ResizeH) => cached_image!(TAHOE_RESIZE_H),
+        (CursorTheme::Tahoe, SpriteKind::ResizeV) => cached_image!(TAHOE_RESIZE_V),
+        (CursorTheme::Tahoe, SpriteKind::ResizeDiag) => cached_image!(TAHOE_RESIZE_DIAG),
+        (CursorTheme::TahoeInverted, SpriteKind::Move) => cached_image!(TAHOE_INVERTED_MOVE),
+        (CursorTheme::TahoeInverted, SpriteKind::Wait) => cached_image!(TAHOE_INVERTED_WAIT),
+        (CursorTheme::TahoeInverted, SpriteKind::ResizeH) => {
+            cached_image!(TAHOE_INVERTED_RESIZE_H)
+        }
+        (CursorTheme::TahoeInverted, SpriteKind::ResizeV) => {
+            cached_image!(TAHOE_INVERTED_RESIZE_V)
+        }
+        (CursorTheme::TahoeInverted, SpriteKind::ResizeDiag) => {
+            cached_image!(TAHOE_INVERTED_RESIZE_DIAG)
+        }
+        (CursorTheme::Dot, SpriteKind::Move) => cached_image!(DOT_MOVE),
+        (CursorTheme::Dot, SpriteKind::Wait) => cached_image!(DOT_WAIT),
+        (CursorTheme::Dot, SpriteKind::ResizeH) => cached_image!(DOT_RESIZE_H),
+        (CursorTheme::Dot, SpriteKind::ResizeV) => cached_image!(DOT_RESIZE_V),
+        (CursorTheme::Dot, SpriteKind::ResizeDiag) => cached_image!(DOT_RESIZE_DIAG),
+        (CursorTheme::Minimal, SpriteKind::Move) => cached_image!(MINIMAL_MOVE),
+        (CursorTheme::Minimal, SpriteKind::Wait) => cached_image!(MINIMAL_WAIT),
+        (CursorTheme::Minimal, SpriteKind::ResizeH) => cached_image!(MINIMAL_RESIZE_H),
+        (CursorTheme::Minimal, SpriteKind::ResizeV) => cached_image!(MINIMAL_RESIZE_V),
+        (CursorTheme::Minimal, SpriteKind::ResizeDiag) => cached_image!(MINIMAL_RESIZE_DIAG),
     }
 }
 
@@ -735,6 +899,17 @@ mod tests {
     use super::*;
 
     const TEST_SURFACE_SIZE: i32 = 192;
+    const CURSOR_KINDS: [&str; 9] = [
+        "default",
+        "hand",
+        "text",
+        "crosshair",
+        "move",
+        "wait",
+        "resize_h",
+        "resize_v",
+        "resize_diag",
+    ];
 
     fn render_click(settings: CursorSettings) -> Vec<u8> {
         render_click_at(
@@ -931,9 +1106,13 @@ mod tests {
     #[test]
     fn every_theme_has_renderable_cursor_kinds() {
         for theme in CursorTheme::ALL {
-            for kind in ["default", "hand", "text", "crosshair"] {
+            for kind in CURSOR_KINDS {
                 let image = bitmap(theme, kind);
-                assert!(image.width() > 0 && image.height() > 0, "{theme:?} {kind}");
+                assert_eq!(
+                    (image.width(), image.height()),
+                    (48, 48),
+                    "{theme:?} {kind}"
+                );
                 assert!(
                     image.pixels().any(|pixel| pixel.0[3] > 0),
                     "{theme:?} {kind}"
@@ -948,6 +1127,22 @@ mod tests {
                     "{theme:?} {kind}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn dot_theme_uses_one_disc_for_every_cursor_kind() {
+        let default = bitmap(CursorTheme::Dot, "default");
+        for kind in CURSOR_KINDS {
+            assert_eq!(bitmap(CursorTheme::Dot, kind), default, "{kind}");
+        }
+    }
+
+    #[test]
+    fn minimal_theme_uses_one_arrow_for_every_cursor_kind() {
+        let default = bitmap(CursorTheme::Minimal, "default");
+        for kind in CURSOR_KINDS {
+            assert_eq!(bitmap(CursorTheme::Minimal, kind), default, "{kind}");
         }
     }
 
@@ -977,7 +1172,7 @@ mod tests {
     #[test]
     fn size_and_shadow_change_cursor_rendering_for_every_theme_and_kind() {
         for theme in CursorTheme::ALL {
-            for kind in ["default", "hand", "text", "crosshair"] {
+            for kind in CURSOR_KINDS {
                 let small = render_cursor_with_kind(
                     CursorSettings {
                         theme,
@@ -1022,7 +1217,7 @@ mod tests {
         let center = CANVAS_SIZE as f64 / 2.0;
 
         for theme in CursorTheme::ALL {
-            for kind in ["default", "hand", "text", "crosshair"] {
+            for kind in CURSOR_KINDS {
                 let settings = CursorSettings {
                     theme,
                     size: 1.0,

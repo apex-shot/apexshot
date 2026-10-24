@@ -1,9 +1,9 @@
 Cursor bitmaps are extracted from system icon themes:
 
-- adwaita/ — GNOME Adwaita (LGPL-3.0 / CC-BY-SA-3.0)
-- yaru/ — Ubuntu Yaru (CC-BY-SA-4.0)
-- white/, black/ — DMZ cursors (CC-BY-SA)
-- macos/, tahoe/default.png, tahoe/crosshair.png, tahoe_inverted/default.png, tahoe_inverted/crosshair.png — macOS-style cursor artwork (AGPL-3.0)
+- adwaita/ — GNOME Adwaita (LGPL-3.0 / CC-BY-SA-3.0); the new move, wait, and resize sprites come from the corresponding 48px Xcursor images
+- yaru/ — Ubuntu Yaru (CC-BY-SA-4.0); the new move, wait, and resize sprites come from the corresponding 48px Xcursor images
+- white/, black/ — DMZ cursors (CC-BY-SA); the new move sprites are original artwork matching those themes, and the wait and resize sprites come from the corresponding 48px Xcursor images
+- macos/, tahoe/default.png, tahoe/crosshair.png, tahoe_inverted/default.png, tahoe_inverted/crosshair.png — cursor artwork (AGPL-3.0); the new move, wait, and resize sprites are original artwork
 - tahoe/hand.png, tahoe/text.png, tahoe_inverted/hand.png, tahoe_inverted/text.png — rasterized from `cursors/src/svg/{pointer,text}.svg` and `cursors/src/svg-dark/{pointer,text}.svg` at [839848b9a8a38a92a6936e30c4abe35cc6f2546d](https://github.com/vinceliuice/MacTahoe-icon-theme/tree/839848b9a8a38a92a6936e30c4abe35cc6f2546d/cursors) (GPL-3.0; `COPYING`)
-- dot/ — original translucent circular cursor artwork based on the user-provided reference
-- minimal/ — minimal cursor artwork (AGPL-3.0)
+- dot/ — original translucent circular cursor artwork based on the user-provided reference; the five new sprites repeat the theme's single-disc artwork
+- minimal/ — minimal cursor artwork (AGPL-3.0); the five new sprites repeat the theme's single arrow glyph
