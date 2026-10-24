@@ -969,6 +969,32 @@ fn eval_zoom_at_groups_each_zoom_from_its_own_window() {
 }
 
 #[test]
+fn zoom_camera_settles_to_its_target_once_the_spring_is_done() {
+    let mut state = VideoEditState::new(metadata());
+    let index = state.add_zoom_at(0.5).expect("zoom fits");
+    state.zoom_clips[index].end = 5.0;
+    state.zoom_clips[index].scale = 2.0;
+    state.zoom_clips[index].center = (1300.0, 600.0);
+    state.zoom_clips[index].mode = ZoomMode::Manual;
+
+    let start = state.zoom_clips[index].start;
+    let target = (state.zoom_clips[index].scale, state.zoom_clips[index].center);
+    let samples: Vec<_> = (0..=90)
+        .map(|frame| {
+            let time = start + frame as f64 / 60.0;
+            state.eval_zoom_at(time, state.timeline_to_source(time))
+        })
+        .collect();
+    let settled_frame = (0..samples.len())
+        .find(|&frame| samples[frame..].iter().all(|sample| *sample == samples[frame]))
+        .expect("the camera should settle within 1.5 seconds of the zoom start");
+
+    assert!(settled_frame <= 90, "settled at frame {settled_frame}");
+    assert_eq!(samples[settled_frame], target);
+    assert!(samples[settled_frame..].iter().all(|sample| *sample == target));
+}
+
+#[test]
 fn spring_step_moves_toward_the_target() {
     let spring = CAMERA_FOLLOW_SPRING;
     let (value, velocity) = spring_step(0.0, 0.0, 100.0, spring, 1.0 / 120.0);
