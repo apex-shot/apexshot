@@ -150,6 +150,13 @@ pub fn current_status() -> StudioStatus {
     }
 }
 
+/// Whether an active licence already covers this build, so an export that needs
+/// Studio would not stop for activation. Panels use it to skip the "needs
+/// activation" preview copy instead of demanding a step the user has taken.
+pub fn studio_unlocked() -> bool {
+    matches!(current_status(), StudioStatus::Active { .. })
+}
+
 pub fn activate_token(token: &str) -> Result<(), StudioEntitlementError> {
     let configuration = build_configuration()?;
     let path = entitlement_path()?;

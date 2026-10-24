@@ -128,6 +128,7 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     let studio_hint = Label::new(Some(&t(
         "Studio preview. MP4 export needs activation; local editing and project saves remain free.",
     )));
+    studio_hint.set_visible(!crate::studio_entitlement::studio_unlocked());
     studio_hint.add_css_class("editor-transform-hint");
     studio_hint.set_wrap(true);
     studio_hint.set_xalign(0.0);
@@ -320,6 +321,7 @@ pub(in crate::capture::editor::window) fn build_motion_mode(
     let text_studio_hint = Label::new(Some(&t(
         "Motion text and its animation are Studio previews; final MP4 export needs activation.",
     )));
+    text_studio_hint.set_visible(!crate::studio_entitlement::studio_unlocked());
     text_studio_hint.add_css_class("editor-transform-hint");
     text_studio_hint.set_wrap(true);
     text_studio_hint.set_xalign(0.0);

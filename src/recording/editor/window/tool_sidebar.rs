@@ -233,6 +233,7 @@ fn build_zoom_panel(
     let studio_hint = Label::new(Some(&t(
         "Studio controls. Default zoom and legacy easing stay free; active exports using non-default camera settings or instant animation need activation.",
     )));
+    studio_hint.set_visible(!crate::studio_entitlement::studio_unlocked());
     studio_hint.add_css_class("recording-editor-zoom-hint");
     studio_hint.set_wrap(true);
     studio_hint.set_xalign(0.0);
