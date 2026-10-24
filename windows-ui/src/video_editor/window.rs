@@ -11,14 +11,12 @@ use gtk4::prelude::*;
 use gtk4::{
     Align, Application, ApplicationWindow, AspectFrame, Box as GtkBox, Button, CssProvider,
     DrawingArea, DropTarget, FileChooserAction, FileChooserNative, FileFilter, Image, Label,
-    Orientation, Overlay, Picture, Popover, ProgressBar, ResponseType, Separator, Window,
+    Orientation, Overlay, Picture, Popover, ResponseType, Separator,
 };
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::mpsc::TryRecvError;
 use std::sync::Once;
-use std::time::Duration;
 
 type UpdateDocument = Rc<dyn Fn(Option<&Path>)>;
 type CameraTransform = (f64, f64, f64, f64);
@@ -114,9 +112,16 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         })
     });
 
-    wire_export(&window, &stage, &timeline);
+    // The whole editor sits inside one overlay so the export card can float
+    // over it; wrapping the assembled layout keeps every child parented to the
+    // boxes that already own it.
+    let shell = Overlay::new();
+    shell.add_css_class("video-editor-shell");
+    shell.set_child(Some(&root));
 
-    window.set_child(Some(&root));
+    wire_export(&window, &stage, &timeline, &shell);
+
+    window.set_child(Some(&shell));
 
     let update_document: UpdateDocument = {
         let document_title = document_title.clone();
@@ -355,9 +360,8 @@ impl QualityTier {
         }
     }
 
-    /// x264 CRF the exporter encodes with for this tier. Nothing writes an
-    /// export yet, so only the tests read it for now.
-    #[allow(dead_code)]
+    /// x264 CRF the exporter encodes with for this tier, shared with the
+    /// recorder's own quality scale.
     fn crf(self) -> u32 {
         crate::recording::crf_for_quality(self.tier())
     }
@@ -1224,17 +1228,23 @@ fn export_model(
     })
 }
 
-fn wire_export(window: &ApplicationWindow, stage: &Stage, timeline: &super::timeline::Timeline) {
+fn wire_export(
+    window: &ApplicationWindow,
+    stage: &Stage,
+    timeline: &super::timeline::Timeline,
+    shell: &Overlay,
+) {
     let window = window.clone();
     let stage_handle = stage.clone();
     let timeline = timeline.clone();
+    let shell = shell.clone();
     stage.export_button.connect_clicked(move |_| {
         let Some((source, _, _, _, _)) = timeline.export_footage() else {
             return;
         };
         let stage = stage_handle.clone();
         let timeline = timeline.clone();
-        let dialog_window = window.clone();
+        let shell = shell.clone();
         choose_export_path(
             &window,
             &source,
@@ -1242,7 +1252,7 @@ fn wire_export(window: &ApplicationWindow, stage: &Stage, timeline: &super::time
                 let Some(model) = export_model(&stage, &timeline) else {
                     return;
                 };
-                run_export(&dialog_window, model, output);
+                super::export_card::show(&shell, model, output);
             }),
         );
     });
@@ -1288,101 +1298,6 @@ fn choose_export_path(window: &ApplicationWindow, source: &Path, then: Rc<dyn Fn
         chooser.hide();
     });
     chooser.show();
-}
-
-/// Run the export with progress, and cancel it — killing the encoder and the
-/// decoder and deleting the partial file — when the user asks.
-fn run_export(parent: &ApplicationWindow, model: super::export::ExportModel, output: PathBuf) {
-    let window = Window::builder()
-        .transient_for(parent)
-        .modal(true)
-        .title(t("Exporting video"))
-        .deletable(false)
-        .resizable(false)
-        .build();
-    let content = GtkBox::new(Orientation::Vertical, 12);
-    content.set_margin_top(20);
-    content.set_margin_bottom(20);
-    content.set_margin_start(20);
-    content.set_margin_end(20);
-
-    let bar = ProgressBar::new();
-    bar.set_show_text(true);
-    bar.set_fraction(0.0);
-    bar.set_text(Some(&t("Preparing the encoder")));
-    let status = Label::new(Some(&output.display().to_string()));
-    status.set_wrap(true);
-    status.set_selectable(true);
-    status.set_xalign(0.0);
-    let action = Button::with_label(&t("Cancel"));
-    action.set_halign(Align::End);
-    content.append(&bar);
-    content.append(&status);
-    content.append(&action);
-    window.set_child(Some(&content));
-
-    let handle = Rc::new(super::export::start_export(model, output));
-    let finished = Rc::new(Cell::new(false));
-
-    action.connect_clicked({
-        let handle = handle.clone();
-        let finished = finished.clone();
-        let window = window.clone();
-        move |button| {
-            if finished.get() {
-                window.close();
-                return;
-            }
-            handle.cancel();
-            button.set_sensitive(false);
-            button.set_label(&t("Cancelling…"));
-        }
-    });
-
-    gtk4::glib::timeout_add_local(Duration::from_millis(100), {
-        let handle = handle.clone();
-        let window = window.clone();
-        let bar = bar.clone();
-        let status = status.clone();
-        let action = action.clone();
-        let finished = finished.clone();
-        move || match handle.receiver.try_recv() {
-            Ok(super::export::ExportUpdate::Progress { done, total }) => {
-                bar.set_fraction(done as f64 / total.max(1) as f64);
-                bar.set_text(Some(&format!("{done} / {total} frames")));
-                gtk4::glib::ControlFlow::Continue
-            }
-            Ok(super::export::ExportUpdate::Finished(path)) => {
-                bar.set_fraction(1.0);
-                bar.set_text(Some(&t("Export complete")));
-                status.set_text(&path.display().to_string());
-                action.set_label(&t("Close"));
-                finished.set(true);
-                gtk4::glib::ControlFlow::Break
-            }
-            Ok(super::export::ExportUpdate::Failed(message)) => {
-                bar.set_text(Some(&t("Export failed")));
-                status.set_text(&message);
-                action.set_label(&t("Close"));
-                finished.set(true);
-                gtk4::glib::ControlFlow::Break
-            }
-            Ok(super::export::ExportUpdate::Cancelled) => {
-                window.close();
-                gtk4::glib::ControlFlow::Break
-            }
-            Err(TryRecvError::Empty) => gtk4::glib::ControlFlow::Continue,
-            Err(TryRecvError::Disconnected) => {
-                bar.set_text(Some(&t("Export failed")));
-                status.set_text(&t("The export stopped unexpectedly."));
-                action.set_label(&t("Close"));
-                finished.set(true);
-                gtk4::glib::ControlFlow::Break
-            }
-        }
-    });
-
-    window.present();
 }
 
 fn document_title(path: Option<&Path>) -> String {
@@ -1434,6 +1349,7 @@ fn install_css() {
     crate::settings::install_window_css();
     super::ui_support::install_recording_editor_css();
     super::side_panel::install_css();
+    super::export_card::install_css();
 
     let Some(display) = gdk::Display::default() else {
         return;

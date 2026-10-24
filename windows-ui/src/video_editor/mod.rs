@@ -10,6 +10,8 @@ mod background;
 mod cursor;
 mod custom_fill;
 mod export;
+mod export_card;
+mod pixels;
 mod press;
 mod preview;
 mod rounded_clip;

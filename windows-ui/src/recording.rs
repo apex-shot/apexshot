@@ -73,6 +73,47 @@ pub mod editor {
             directory
         }
 
+        /// The stream's colour matrix and range, as ffprobe names them.
+        ///
+        /// The export converts its composed RGBA back to YUV, so it has to use
+        /// the same matrix the decoder used to produce that RGBA. Unknown or
+        /// missing metadata comes back as `None`, which the caller treats the
+        /// way ffmpeg does for an untagged stream.
+        pub fn probe_color_space(source: &Path) -> (Option<String>, Option<String>) {
+            let Ok(output) = Command::new(ffprobe_executable())
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-show_entries",
+                    "stream=color_space,color_range",
+                    "-of",
+                    "default=noprint_wrappers=1",
+                ])
+                .arg(source)
+                .output()
+            else {
+                return (None, None);
+            };
+            let text = String::from_utf8_lossy(&output.stdout);
+            let mut color_space = None;
+            let mut color_range = None;
+            for line in text.lines() {
+                let Some((key, value)) = line.split_once('=') else {
+                    continue;
+                };
+                let value = value.trim();
+                let value = (!value.is_empty() && value != "unknown").then(|| value.to_string());
+                match key.trim() {
+                    "color_space" => color_space = value,
+                    "color_range" => color_range = value,
+                    _ => {}
+                }
+            }
+            (color_space, color_range)
+        }
+
         /// Read the container duration without decoding the stream.
         pub fn probe_duration(source: &Path) -> Result<f64, String> {
             let output = Command::new(ffmpeg_executable())

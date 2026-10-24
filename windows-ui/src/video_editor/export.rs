@@ -8,6 +8,7 @@
 //! part of this path.
 
 use super::cursor::preview_ripple;
+use super::pixels::{Nv12Converter, YuvSpace};
 use super::press::press_cursor_scale;
 use super::timeline::ZoomClip;
 use super::zoom::{self, TimeMapping, ViewRect, ZoomCameraCache};
@@ -23,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 const DEFAULT_FPS: f64 = 30.0;
@@ -142,8 +143,19 @@ pub(super) fn start_export(model: ExportModel, output: PathBuf) -> ExportHandle 
     let (sender, receiver) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     let thread_cancel = cancel.clone();
-    std::thread::spawn(
-        move || match render(&model, &output, &sender, &thread_cancel) {
+    std::thread::spawn(move || {
+        let encoder = Encoder::fastest();
+        let mut result = render(&model, &output, &sender, &thread_cancel, encoder);
+        if encoder != Encoder::X264 {
+            if let Err(End::Failed(message)) = &result {
+                eprintln!(
+                    "[export] {} failed ({message}); retrying with libx264",
+                    encoder.codec()
+                );
+                result = render(&model, &output, &sender, &thread_cancel, Encoder::X264);
+            }
+        }
+        match result {
             Ok(()) => {
                 let _ = sender.send(ExportUpdate::Finished(output));
             }
@@ -155,9 +167,92 @@ pub(super) fn start_export(model: ExportModel, output: PathBuf) -> ExportHandle 
                 let _ = std::fs::remove_file(&output);
                 let _ = sender.send(ExportUpdate::Failed(message));
             }
-        },
-    );
+        }
+    });
     ExportHandle { receiver, cancel }
+}
+
+/// The H.264 encoders an export can use, in the order they are tried: the
+/// GPU's own encoder when the machine has one that opens, then x264 on the
+/// CPU, which also takes over if a hardware encoder fails mid-export.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Encoder {
+    Nvenc,
+    QuickSync,
+    Amf,
+    X264,
+}
+
+impl Encoder {
+    /// The fastest encoder this machine can open, probed once per process.
+    fn fastest() -> Self {
+        static FASTEST: OnceLock<Encoder> = OnceLock::new();
+        *FASTEST.get_or_init(|| {
+            let chosen = [Self::Nvenc, Self::QuickSync, Self::Amf]
+                .into_iter()
+                .find(|encoder| encoder.opens())
+                .unwrap_or(Self::X264);
+            eprintln!("[export] encoder: {}", chosen.codec());
+            chosen
+        })
+    }
+
+    fn codec(self) -> &'static str {
+        match self {
+            Self::Nvenc => "h264_nvenc",
+            Self::QuickSync => "h264_qsv",
+            Self::Amf => "h264_amf",
+            Self::X264 => "libx264",
+        }
+    }
+
+    /// The codec, constant-quality rate control at the editor's CRF, and the
+    /// pixel format the encoder takes without another conversion.
+    fn args(self, crf: u32) -> Vec<String> {
+        let crf = crf.to_string();
+        let crf = crf.as_str();
+        let settings: Vec<&str> = match self {
+            Self::Nvenc => vec![
+                "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", crf, "-b:v", "0", "-pix_fmt",
+                "nv12",
+            ],
+            Self::QuickSync => vec![
+                "-preset",
+                "medium",
+                "-global_quality",
+                crf,
+                "-pix_fmt",
+                "nv12",
+            ],
+            Self::Amf => vec![
+                "-quality", "balanced", "-rc", "cqp", "-qp_i", crf, "-qp_p", crf, "-qp_b", crf,
+                "-pix_fmt", "nv12",
+            ],
+            Self::X264 => vec!["-preset", "veryfast", "-crf", crf, "-pix_fmt", "yuv420p"],
+        };
+        ["-c:v", self.codec()]
+            .into_iter()
+            .chain(settings)
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Whether ffmpeg can open this encoder here: a build lists every GPU
+    /// encoder it was compiled with, whether or not the machine has the
+    /// hardware or a new enough driver for it.
+    fn opens(self) -> bool {
+        Command::new(ffmpeg::ffmpeg_executable())
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
+            .args(["-f", "lavfi", "-i", "color=c=black:s=320x240:r=30"])
+            .args(["-frames:v", "2"])
+            .args(self.args(23))
+            .args(["-f", "null", "-"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
 }
 
 enum End {
@@ -170,6 +265,7 @@ fn render(
     output: &Path,
     sender: &Sender<ExportUpdate>,
     cancel: &Arc<AtomicBool>,
+    encoder: Encoder,
 ) -> Result<(), End> {
     let fps = ffmpeg::probe_frame_rate(&model.source)
         .filter(|fps| fps.is_finite() && *fps > 0.0)
@@ -202,13 +298,21 @@ fn render(
             .collect(),
     );
 
-    let mut encoder = spawn_encoder(output, size, fps, model.crf)?;
-    let mut encoder_input = encoder
+    let probed = ffmpeg::probe_color_space(&model.source);
+    let converter = Nv12Converter::new(YuvSpace::from_probe(
+        probed.0.as_deref(),
+        probed.1.as_deref(),
+    ));
+    let mut encoder = spawn_encoder(output, size, fps, model.crf, encoder)?;
+    let encoder_input = encoder
         .stdin
         .take()
         .ok_or_else(|| End::Failed("the encoder did not open its input".to_string()))?;
+    let frame_bytes = size.0 as usize * size.1 as usize * 3 / 2;
+    let pipe = EncoderPipe::new(encoder_input, frame_bytes, pipe_depth(frame_bytes));
     let mut camera = ZoomCameraCache::default();
     let mut decoded = vec![0u8; model.source_size.0 as usize * model.source_size.1 as usize * 4];
+    let mut packed = vec![0u8; model.source_size.0 as usize * model.source_size.1 as usize * 3 / 2];
     let mut scaled = vec![0u8; size.0 as usize * size.1 as usize * 4];
     let mut cursor_layer = match &model.sidecar {
         Some(_) => Some(
@@ -246,9 +350,10 @@ fn render(
                 stop(&mut encoder);
                 return Err(End::Cancelled);
             }
-            if stdout.read_exact(&mut decoded).is_err() {
+            if stdout.read_exact(&mut packed).is_err() {
                 break;
             }
+            converter.to_rgba_into(&packed, model.source_size, &mut decoded);
             let source_time = frame_source_time(&spans, done, fps)
                 .ok_or_else(|| End::Failed("the frame plan ran out of frames".to_string()))?;
             let composition_time = done as f64 / fps;
@@ -300,11 +405,13 @@ fn render(
                 );
             }
 
-            if let Err(error) = encoder_input.write_all(frame) {
+            let mut nv12 = pipe.buffer();
+            converter.convert_into(frame, size, &mut nv12);
+            if let Err(error) = pipe.submit(nv12) {
                 let _ = decoder.kill();
                 let _ = decoder.wait();
                 stop(&mut encoder);
-                return Err(End::Failed(format!("could not feed the encoder: {error}")));
+                return Err(error);
             }
             done += 1;
             if done % 100 == 0 || done == total {
@@ -326,10 +433,13 @@ fn render(
         }
     }
 
-    drop(encoder_input);
     if cancel.load(Ordering::Relaxed) {
         stop(&mut encoder);
         return Err(End::Cancelled);
+    }
+    if let Err(error) = pipe.finish() {
+        stop(&mut encoder);
+        return Err(error);
     }
     let result = encoder
         .wait_with_output()
@@ -365,21 +475,27 @@ fn spawn_decoder(
         .arg("-an")
         .args(["-vf", &format!("scale={}:{},fps={fps}", size.0, size.1)])
         .args(["-frames:v", &span.frames.to_string()])
-        .args(["-f", "rawvideo", "-pix_fmt", "rgba", "pipe:1"])
+        .args(["-f", "rawvideo", "-pix_fmt", "nv12", "pipe:1"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
         .map_err(|error| End::Failed(format!("could not start decoding: {error}")))
 }
 
-fn spawn_encoder(output: &Path, size: (u32, u32), fps: f64, crf: u32) -> Result<Child, End> {
+fn spawn_encoder(
+    output: &Path,
+    size: (u32, u32),
+    fps: f64,
+    crf: u32,
+    encoder: Encoder,
+) -> Result<Child, End> {
     Command::new(ffmpeg::ffmpeg_executable())
         .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"])
         .args([
             "-f",
             "rawvideo",
             "-pix_fmt",
-            "rgba",
+            "nv12",
             "-s",
             &format!("{}x{}", size.0, size.1),
             "-r",
@@ -388,15 +504,101 @@ fn spawn_encoder(output: &Path, size: (u32, u32), fps: f64, crf: u32) -> Result<
             "pipe:0",
         ])
         .arg("-an")
-        .args(["-c:v", "libx264", "-preset", "veryfast"])
-        .args(["-crf", &crf.to_string()])
-        .args(["-pix_fmt", "yuv420p", "-movflags", "+faststart"])
+        .args(encoder.args(crf))
+        .args(["-movflags", "+faststart"])
         .arg(output)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| End::Failed(format!("could not start the encoder: {error}")))
+}
+
+/// How many finished frames may wait for the encoder.
+///
+/// x264 wants frames faster than the compositor can usually make them, so a
+/// short queue is enough to keep both sides busy; the cap keeps the memory a
+/// 4K export holds for buffering around 25 MB rather than a frame apiece for
+/// every core.
+fn pipe_depth(frame_bytes: usize) -> usize {
+    const BUDGET: usize = 32 * 1024 * 1024;
+    (BUDGET / frame_bytes.max(1)).clamp(2, 4)
+}
+
+/// Hands finished frames to the encoder from a writer thread.
+///
+/// Writing on the compositor thread would make the two stages take turns:
+/// a Windows pipe holds about 64 KB, so `write_all` blocks as soon as the
+/// encoder is a frame behind. A writer thread and a small pool of recycled
+/// buffers let the encoder drain frame N while the compositor builds N+1.
+struct EncoderPipe {
+    queue: Option<mpsc::SyncSender<Vec<u8>>>,
+    recycled: Receiver<Vec<u8>>,
+    writer: Option<std::thread::JoinHandle<std::io::Result<()>>>,
+    frame_bytes: usize,
+}
+
+impl EncoderPipe {
+    fn new<W: Write + Send + 'static>(mut input: W, frame_bytes: usize, depth: usize) -> Self {
+        let (queue, pending) = mpsc::sync_channel::<Vec<u8>>(depth);
+        let (back, recycled) = mpsc::channel::<Vec<u8>>();
+        let writer = std::thread::spawn(move || {
+            while let Ok(frame) = pending.recv() {
+                input.write_all(&frame)?;
+                let _ = back.send(frame);
+            }
+            input.flush()
+        });
+        Self {
+            queue: Some(queue),
+            recycled,
+            writer: Some(writer),
+            frame_bytes,
+        }
+    }
+
+    /// A buffer to composite into: a recycled one when the writer has handed
+    /// one back, otherwise a fresh allocation. At most `depth + 1` exist.
+    fn buffer(&self) -> Vec<u8> {
+        self.recycled
+            .try_recv()
+            .unwrap_or_else(|_| vec![0u8; self.frame_bytes])
+    }
+
+    /// Queue a finished frame, blocking while the encoder is `depth` frames
+    /// behind.
+    fn submit(&self, frame: Vec<u8>) -> Result<(), End> {
+        let Some(queue) = self.queue.as_ref() else {
+            return Err(End::Failed(
+                "the encoder stopped accepting frames".to_string(),
+            ));
+        };
+        queue
+            .send(frame)
+            .map_err(|_| End::Failed("the encoder stopped accepting frames".to_string()))
+    }
+
+    /// Close the pipe and wait for the writer, reporting the first write
+    /// error the encoder caused.
+    fn finish(mut self) -> Result<(), End> {
+        self.queue.take();
+        match self.writer.take().map(|writer| writer.join()) {
+            Some(Ok(Ok(()))) | None => Ok(()),
+            Some(Ok(Err(error))) => {
+                Err(End::Failed(format!("could not feed the encoder: {error}")))
+            }
+            Some(Err(_)) => Err(End::Failed("the encoder writer panicked".to_string())),
+        }
+    }
+}
+
+impl Drop for EncoderPipe {
+    fn drop(&mut self) {
+        self.queue.take();
+        if let Some(writer) = self.writer.take() {
+            let _ = writer.join();
+        }
+    }
 }
 
 fn view_is_full(view: ViewRect, source: (f64, f64)) -> bool {
@@ -409,8 +611,11 @@ fn view_is_full(view: ViewRect, source: (f64, f64)) -> bool {
 /// Bilinear crop from the source frame to the camera view, at export size.
 ///
 /// Rows are independent, so the whole pass runs in parallel over the one
-/// reused output buffer and the sampling maths stays identical to a
-/// single-threaded loop.
+/// reused output buffer. The weights are fixed point rather than `f64`: at 4K
+/// the float version spent more time converting bytes to doubles than sampling
+/// them, and 16-bit weights land on the same pixel a float bilinear does to
+/// within one level. Alpha is written as opaque because the decoder only ever
+/// produces opaque frames.
 fn crop_scale_into(
     pixels: &[u8],
     size: (u32, u32),
@@ -418,6 +623,8 @@ fn crop_scale_into(
     out: (u32, u32),
     output: &mut [u8],
 ) {
+    const ONE: i64 = 1 << 16;
+    const ROUND: i64 = (ONE * ONE) / 2;
     let width = size.0 as usize;
     let height = size.1 as usize;
     let out_width = out.0 as usize;
@@ -425,12 +632,16 @@ fn crop_scale_into(
     let step_y = view.3 / f64::from(out.1);
     // The horizontal taps are the same for every row, so each column's
     // neighbours and weight are computed once instead of per sampled pixel.
-    let columns: Vec<(usize, usize, f64)> = (0..out_width)
+    let columns: Vec<(usize, usize, i64)> = (0..out_width)
         .map(|x| {
             let source_x = (view.0 + (x as f64 + 0.5) * step_x - 0.5)
                 .clamp(0.0, width.saturating_sub(1) as f64);
             let x0 = source_x as usize;
-            (x0, (x0 + 1).min(width - 1), source_x - x0 as f64)
+            (
+                x0,
+                (x0 + 1).min(width - 1),
+                ((source_x - x0 as f64) * ONE as f64).round() as i64,
+            )
         })
         .collect();
     output
@@ -441,18 +652,22 @@ fn crop_scale_into(
                 .clamp(0.0, height.saturating_sub(1) as f64);
             let y0 = source_y as usize;
             let y1 = (y0 + 1).min(height - 1);
-            let fy = source_y - y0 as f64;
+            let fy = ((source_y - y0 as f64) * ONE as f64).round() as i64;
+            let inv_y = ONE - fy;
             let top_row = &pixels[y0 * width * 4..];
             let bottom_row = &pixels[y1 * width * 4..];
             for (x, &(x0, x1, fx)) in columns.iter().enumerate() {
                 let (left, right) = (x0 * 4, x1 * 4);
-                for channel in 0..4 {
-                    let top = f64::from(top_row[left + channel]) * (1.0 - fx)
-                        + f64::from(top_row[right + channel]) * fx;
-                    let bottom = f64::from(bottom_row[left + channel]) * (1.0 - fx)
-                        + f64::from(bottom_row[right + channel]) * fx;
-                    row[x * 4 + channel] = (top * (1.0 - fy) + bottom * fy + 0.5) as u8;
+                let inv_x = ONE - fx;
+                let offset = x * 4;
+                for channel in 0..3 {
+                    let top = i64::from(top_row[left + channel]) * inv_x
+                        + i64::from(top_row[right + channel]) * fx;
+                    let bottom = i64::from(bottom_row[left + channel]) * inv_x
+                        + i64::from(bottom_row[right + channel]) * fx;
+                    row[offset + channel] = ((top * inv_y + bottom * fy + ROUND) >> 32) as u8;
                 }
+                row[offset + 3] = 255;
             }
         });
 }
@@ -638,6 +853,45 @@ mod tests {
     use crate::recording::editor::model::CursorSettings;
     use std::path::PathBuf;
     use std::time::Duration;
+
+    #[test]
+    fn the_encoder_pipe_writes_frames_in_order_and_recycles_buffers() {
+        use std::io::Write;
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone, Default)]
+        struct Sink(Arc<Mutex<Vec<u8>>>);
+
+        impl Write for Sink {
+            fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buffer);
+                Ok(buffer.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let sink = Sink::default();
+        let pipe = super::EncoderPipe::new(sink.clone(), 4, 2);
+        for index in 0..8u8 {
+            let mut frame = pipe.buffer();
+            assert_eq!(frame.len(), 4);
+            frame.copy_from_slice(&[index; 4]);
+            assert!(pipe.submit(frame).is_ok(), "the frame is queued");
+        }
+        assert!(pipe.finish().is_ok(), "the writer finishes cleanly");
+
+        let expected: Vec<u8> = (0..8u8).flat_map(|index| [index; 4]).collect();
+        assert_eq!(*sink.0.lock().unwrap(), expected);
+    }
+
+    #[test]
+    fn the_pipe_holds_only_a_few_frames_of_a_large_export() {
+        assert_eq!(super::pipe_depth(1920 * 1080 * 3 / 2), 4);
+        assert_eq!(super::pipe_depth(3840 * 2160 * 3 / 2), 2);
+        assert_eq!(super::pipe_depth(1), 4);
+    }
 
     #[test]
     fn kept_spans_skip_cuts_without_gaps_or_repeats() {
@@ -849,7 +1103,19 @@ mod tests {
         let mut cropped = vec![0u8; out.0 as usize * out.1 as usize * 4];
         super::crop_scale_into(&pixels, size, view, out, &mut cropped);
         let reference = reference_crop(&pixels, size, view, out);
-        assert_eq!(cropped, reference);
+        assert_eq!(cropped.len(), reference.len());
+        // Fixed-point weights may land one level from the float reference;
+        // alpha is written opaque.
+        for (index, (got, want)) in cropped.iter().zip(&reference).enumerate() {
+            if index % 4 == 3 {
+                assert_eq!(*got, 255, "alpha at byte {index}");
+            } else {
+                assert!(
+                    got.abs_diff(*want) <= 1,
+                    "byte {index}: crop {got}, reference {want}"
+                );
+            }
+        }
     }
 
     fn reference_crop(
@@ -1061,6 +1327,102 @@ mod tests {
         assert_eq!(parse_span("20:20"), None);
         assert_eq!(parse_span("abc"), None);
         assert_eq!(parse_span("-1:20"), None);
+    }
+
+    /// End-to-end export throughput on a generated 1080p clip, with and
+    /// without a zoom, printed as ms/frame.
+    /// Ignored because it shells out to ffmpeg and runs for a few seconds; run
+    /// it explicitly when changing the export pipeline:
+    ///
+    /// ```text
+    /// cargo test --release --lib -- --ignored --nocapture export_throughput
+    /// ```
+    #[test]
+    #[ignore = "benchmark: shells out to ffmpeg"]
+    fn export_throughput_benchmark() {
+        use super::{start_export, ExportModel, ExportUpdate};
+        use crate::recording::editor::model::CursorSettings;
+        use crate::video_editor::timeline::ZoomClip;
+
+        let dir = std::env::temp_dir().join("apexshot-export-bench");
+        std::fs::create_dir_all(&dir).expect("benchmark scratch dir");
+        let source = dir.join("src1080p30.mp4");
+        if !source.is_file() {
+            let status =
+                std::process::Command::new(crate::recording::editor::ffmpeg::ffmpeg_executable())
+                    .args([
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-y",
+                        "-f",
+                        "lavfi",
+                        "-i",
+                        "testsrc2=size=1920x1080:rate=30",
+                        "-frames:v",
+                        "300",
+                        "-c:v",
+                        "libx264",
+                        "-preset",
+                        "ultrafast",
+                        "-crf",
+                        "16",
+                    ])
+                    .arg(&source)
+                    .status()
+                    .expect("generate benchmark clip");
+            assert!(
+                status.success(),
+                "ffmpeg could not build the benchmark clip"
+            );
+        }
+
+        let zoom = ZoomClip {
+            start: 0.0,
+            end: 10.0,
+            scale: 1.6,
+            center: (960.0, 540.0),
+            hidden: false,
+            auto: false,
+        };
+        for (label, zooms) in [("no zoom", Vec::new()), ("zoom 1.6x", vec![zoom])] {
+            let output = dir.join(format!("out-{}.mp4", label.replace(' ', "-")));
+            let _ = std::fs::remove_file(&output);
+            let model = ExportModel {
+                source: source.clone(),
+                source_size: (1920, 1080),
+                trim_start: 0.0,
+                trim_end: 10.0,
+                cuts: Vec::new(),
+                zooms,
+                cursor: CursorSettings::default(),
+                sidecar: None,
+                crf: 20,
+            };
+            let started = std::time::Instant::now();
+            let handle = start_export(model, output.clone());
+            let total = loop {
+                match handle.receiver.recv_timeout(Duration::from_secs(300)) {
+                    Ok(ExportUpdate::Finished(_)) => break 300.0,
+                    Ok(ExportUpdate::Progress { total, .. }) => {
+                        if total > 0 {
+                            continue;
+                        }
+                    }
+                    Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
+                    Ok(ExportUpdate::Cancelled) => panic!("export cancelled"),
+                    Err(error) => panic!("export stalled: {error}"),
+                }
+            };
+            let elapsed = started.elapsed().as_secs_f64();
+            eprintln!(
+                "[bench] {label}: {:.1} ms/frame ({:.0} fps) over {total:.0} frames",
+                elapsed * 1000.0 / total,
+                total / elapsed
+            );
+            let bytes = std::fs::metadata(&output).expect("output written").len();
+            assert!(bytes > 1000, "{label}: output looks empty ({bytes} bytes)");
+        }
     }
 
     fn probe_duration(path: &std::path::Path) -> Option<f64> {
