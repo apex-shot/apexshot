@@ -29,8 +29,6 @@ use super::cloud_page::build_cloud_page;
 #[cfg(not(target_os = "windows"))]
 use super::edits_page::{build_edits_page, EditsKind};
 use super::local_page::build_local_page;
-#[cfg(target_os = "windows")]
-use super::placeholder_page::build_placeholder_page;
 use super::scan::MediaKind;
 
 /// Toast severity, matching the Settings toast palette.
@@ -359,17 +357,7 @@ pub fn build_history_window(app: &Application) {
         build_local_page(MediaKind::Video, toast.clone(), &search),
     ];
     #[cfg(target_os = "windows")]
-    pages.extend([
-        build_placeholder_page(
-            custom::SCREENSHOOTER_SYMBOLIC,
-            &t("Motion editing is not available in the Windows build yet."),
-        ),
-        super::video_edits_page::build_video_edits_page(toast.clone(), &search),
-        build_placeholder_page(
-            custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
-            &t("Cloud browsing and sign-in are not available in the Windows build yet."),
-        ),
-    ]);
+    pages.extend(super::windows_history_pages(toast.clone(), &search));
     #[cfg(not(target_os = "windows"))]
     pages.extend([
         build_edits_page(EditsKind::Motion, toast.clone(), &search),

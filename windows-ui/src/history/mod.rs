@@ -40,6 +40,33 @@ pub struct HistoryPage {
     pub searchable: bool,
 }
 
+/// The Windows page set: placeholders for the surfaces this build does not
+/// have yet, around the page the video editor's saved lists feed.
+///
+/// It lives here rather than in the shared window so the copy a Windows-only
+/// branch shows stays in the crate that shows it — the Linux catalog check
+/// reads `src/` and would otherwise demand translations for strings no Linux
+/// build can display.
+pub fn windows_history_pages(
+    toast: window::HistoryToast,
+    search: &gtk4::Entry,
+) -> [HistoryPage; 3] {
+    use crate::capture::editor::window::icon_names::custom;
+    use crate::i18n::t;
+
+    [
+        placeholder_page::build_placeholder_page(
+            custom::SCREENSHOOTER_SYMBOLIC,
+            &t("Motion editing is not available in the Windows build yet."),
+        ),
+        video_edits_page::build_video_edits_page(toast, search),
+        placeholder_page::build_placeholder_page(
+            custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
+            &t("Cloud browsing and sign-in are not available in the Windows build yet."),
+        ),
+    ]
+}
+
 /// Open the History window as its own GTK application.
 pub fn show_history_window() -> anyhow::Result<()> {
     let app = Application::builder()
