@@ -141,21 +141,26 @@ fn capture_preferred(prefer_origin: Option<(i32, i32)>) -> DisplayResult<Option<
         .flush()
         .map_err(|e| DisplayError::CaptureError(format!("Wayland flush failed: {e}")))?;
 
-    // The compositor will send a `buffer` event describing the frame format,
-    // followed by `buffer_done`.  We loop until we know the dimensions.
+    // The compositor sends one `buffer` event per offered shm format, followed
+    // by `buffer_done` on manager version 3. We loop until a supported format
+    // is committed, the format list completes, or the deadline expires.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
         event_queue
             .blocking_dispatch(&mut state)
             .map_err(|e| DisplayError::CaptureError(format!("Wayland dispatch failed: {e}")))?;
 
-        if state.frame_info.is_some() || state.frame_failed {
+        if state.frame_info.is_some() || state.frame_failed || state.frame_list_complete {
             break;
         }
         if std::time::Instant::now() > deadline {
-            return Err(DisplayError::CaptureError(
-                "Timed out waiting for screencopy buffer event".into(),
-            ));
+            if state.frame_candidates.is_empty() {
+                return Err(DisplayError::CaptureError(
+                    "Timed out waiting for screencopy buffer event".into(),
+                ));
+            }
+            state.frame_info = choose_frame_format(&state.frame_candidates);
+            break;
         }
     }
 
@@ -166,12 +171,16 @@ fn capture_preferred(prefer_origin: Option<(i32, i32)>) -> DisplayResult<Option<
     }
 
     let info = state.frame_info.take().ok_or_else(|| {
-        DisplayError::CaptureError("No frame info received from compositor".into())
+        let offered =
+            describe_offered_formats(&state.frame_candidates, &state.frame_unknown_formats);
+        DisplayError::UnsupportedBackend(format!(
+            "Compositor offered no supported shm pixel format (offered: {offered})"
+        ))
     })?;
 
-    // Create a shared-memory pool big enough for one RGBA frame.
+    // Reject unsupported formats and inconsistent geometry before we mmap.
+    let (_, _, size) = frame_geometry(info.width, info.height, info.stride, info.format)?;
     let stride = info.stride;
-    let size = (stride * info.height) as usize;
 
     let shm_file = create_shm_file(size)
         .map_err(|e| DisplayError::CaptureError(format!("Failed to create shm file: {e}")))?;
@@ -240,10 +249,11 @@ fn capture_preferred(prefer_origin: Option<(i32, i32)>) -> DisplayResult<Option<
     // Copy pixels out of shared memory before unmapping.
     let pixels_slice = unsafe { std::slice::from_raw_parts(mmap as *const u8, size) };
 
-    // wl_shm XRGB8888 is stored as B G R X in little-endian memory.
-    // We convert to RGBA32 (R G B A) so the rest of the pipeline is uniform.
+    // wl_shm format names follow the DRM fourcc names, so bytes land in the
+    // source buffer in reverse order of the name. We convert to RGBA32 (R G B A)
+    // so the rest of the pipeline is uniform.
     let pixel_format = info.format;
-    let pixels = convert_to_rgba(pixels_slice, info.width, info.height, stride, pixel_format);
+    let pixels = convert_to_rgba(pixels_slice, info.width, info.height, stride, pixel_format)?;
 
     unsafe { libc::munmap(mmap, size) };
 
@@ -270,70 +280,138 @@ fn capture_preferred(prefer_origin: Option<(i32, i32)>) -> DisplayResult<Option<
 // Pixel format conversion
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Bytes per pixel and preference rank for the shm formats this backend can
+/// convert. Lower ranks are preferred when the compositor offers several.
+fn shm_format_info(format: wl_shm::Format) -> Option<(usize, usize)> {
+    match format {
+        wl_shm::Format::Xrgb8888 => Some((4, 0)),
+        wl_shm::Format::Argb8888 => Some((4, 1)),
+        wl_shm::Format::Abgr8888 => Some((4, 2)),
+        wl_shm::Format::Xbgr8888 => Some((4, 2)),
+        wl_shm::Format::Bgra8888 => Some((4, 2)),
+        wl_shm::Format::Bgrx8888 => Some((4, 2)),
+        wl_shm::Format::Rgba8888 => Some((4, 2)),
+        wl_shm::Format::Rgbx8888 => Some((4, 2)),
+        wl_shm::Format::Rgb888 => Some((3, 3)),
+        wl_shm::Format::Bgr888 => Some((3, 3)),
+        _ => None,
+    }
+}
+
+/// Validate a frame's geometry, returning its source bytes per pixel, row
+/// length, and total buffer size in bytes.
+fn frame_geometry(
+    width: u32,
+    height: u32,
+    stride: u32,
+    format: wl_shm::Format,
+) -> Result<(usize, usize, usize), DisplayError> {
+    let (bpp, _) = shm_format_info(format).ok_or_else(|| {
+        DisplayError::UnsupportedBackend(format!(
+            "wl_shm pixel format {format:?} is not supported for screencopy"
+        ))
+    })?;
+    let row_len = (width as usize).checked_mul(bpp).ok_or_else(|| {
+        DisplayError::CaptureError("Screencopy frame row length overflows".into())
+    })?;
+    if (stride as usize) < row_len {
+        return Err(DisplayError::CaptureError(format!(
+            "Screencopy frame stride {stride} is smaller than the {row_len} bytes its {width} {format:?} pixels need"
+        )));
+    }
+    let size = (stride as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| DisplayError::CaptureError("Screencopy frame size overflows".into()))?;
+    Ok((bpp, row_len, size))
+}
+
+/// The RGBA channels for one pixel's worth of memory bytes.
+///
+/// wl_shm format names follow the DRM fourcc names, so on little-endian memory
+/// the bytes are stored in reverse order of the name (for example `Xrgb8888`
+/// is laid out B G R X).
+fn pixel_channels(format: wl_shm::Format, px: &[u8]) -> (u8, u8, u8, u8) {
+    match format {
+        wl_shm::Format::Argb8888 => (px[2], px[1], px[0], px[3]),
+        wl_shm::Format::Xrgb8888 => (px[2], px[1], px[0], 255),
+        wl_shm::Format::Abgr8888 => (px[0], px[1], px[2], px[3]),
+        wl_shm::Format::Xbgr8888 => (px[0], px[1], px[2], 255),
+        wl_shm::Format::Bgra8888 => (px[1], px[2], px[3], px[0]),
+        wl_shm::Format::Bgrx8888 => (px[1], px[2], px[3], 255),
+        wl_shm::Format::Rgba8888 => (px[3], px[2], px[1], px[0]),
+        wl_shm::Format::Rgbx8888 => (px[3], px[2], px[1], 255),
+        wl_shm::Format::Bgr888 => (px[2], px[1], px[0], 255),
+        wl_shm::Format::Rgb888 => (px[0], px[1], px[2], 255),
+        _ => unreachable!("unsupported shm formats are rejected before pixel conversion"),
+    }
+}
+
 /// Convert a raw wl_shm buffer to packed RGBA32 bytes.
 ///
-/// Handles the two most common formats the compositor will negotiate:
-/// - `XRGB8888` (wl_shm::Format::Xrgb8888) — stored as B G R X
-/// - `ARGB8888` (wl_shm::Format::Argb8888) — stored as B G R A
-///
-/// All other formats fall back to a transparent black row (should not occur
-/// in practice because we only accept shm buffers the compositor offers).
+/// The output contract is RGBA32 (R G B A per pixel) with stride `width * 4`,
+/// whatever the source format. Unsupported formats and inconsistent geometry
+/// are refused instead of producing a blank frame.
 fn convert_to_rgba(
     src: &[u8],
     width: u32,
     height: u32,
     stride: u32,
     format: wl_shm::Format,
-) -> Vec<u8> {
-    let row_len = width as usize * 4;
-    let mut out = vec![0u8; row_len * height as usize];
+) -> Result<Vec<u8>, DisplayError> {
+    let (bpp, row_len, size) = frame_geometry(width, height, stride, format)?;
+    if src.len() != size {
+        return Err(DisplayError::CaptureError(format!(
+            "Screencopy frame expects {size} bytes, but the shared buffer holds {}",
+            src.len()
+        )));
+    }
 
-    for row in 0..height as usize {
-        let src_row = &src[row * stride as usize..row * stride as usize + row_len];
-        let dst_row = &mut out[row * row_len..row * row_len + row_len];
+    let width = width as usize;
+    let height = height as usize;
+    let stride = stride as usize;
+    let out_row_len = width * 4;
+    let mut out = vec![0u8; out_row_len * height];
 
-        match format {
-            // XRGB8888 / ARGB8888 on little-endian: bytes in memory are B G R X/A
-            wl_shm::Format::Xrgb8888 => {
-                for (src_px, dst_px) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
-                    dst_px[0] = src_px[2]; // R ← B slot (little-endian)
-                    dst_px[1] = src_px[1]; // G
-                    dst_px[2] = src_px[0]; // B ← R slot
-                    dst_px[3] = 255; // A (fully opaque)
-                }
-            }
-            wl_shm::Format::Argb8888 => {
-                for (src_px, dst_px) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
-                    dst_px[0] = src_px[2]; // R
-                    dst_px[1] = src_px[1]; // G
-                    dst_px[2] = src_px[0]; // B
-                    dst_px[3] = src_px[3]; // A
-                }
-            }
-            // BGR / BGRA variants (some compositors prefer these)
-            wl_shm::Format::Bgr888 => {
-                for (i, src_px) in src_row.chunks_exact(3).enumerate() {
-                    let d = &mut dst_row[i * 4..i * 4 + 4];
-                    d[0] = src_px[2]; // R
-                    d[1] = src_px[1]; // G
-                    d[2] = src_px[0]; // B
-                    d[3] = 255;
-                }
-            }
-            wl_shm::Format::Bgra8888 => {
-                for (src_px, dst_px) in src_row.chunks_exact(4).zip(dst_row.chunks_exact_mut(4)) {
-                    dst_px[0] = src_px[2]; // R
-                    dst_px[1] = src_px[1]; // G
-                    dst_px[2] = src_px[0]; // B
-                    dst_px[3] = src_px[3]; // A
-                }
-            }
-            // Fallback: leave row as transparent black
-            _ => {}
+    for row in 0..height {
+        let src_row = &src[row * stride..row * stride + row_len];
+        let dst_row = &mut out[row * out_row_len..row * out_row_len + out_row_len];
+        for i in 0..width {
+            let (r, g, b, a) = pixel_channels(format, &src_row[i * bpp..i * bpp + bpp]);
+            dst_row[i * 4] = r;
+            dst_row[i * 4 + 1] = g;
+            dst_row[i * 4 + 2] = b;
+            dst_row[i * 4 + 3] = a;
         }
     }
 
-    out
+    Ok(out)
+}
+
+/// Pick the best supported candidate the compositor offered, preferring
+/// Xrgb8888, Argb8888, the other 32bpp variants, then the 24bpp variants.
+/// Ties keep the order the compositor offered them.
+fn choose_frame_format(candidates: &[FrameInfo]) -> Option<FrameInfo> {
+    candidates
+        .iter()
+        .filter_map(|candidate| {
+            shm_format_info(candidate.format).map(|(_, rank)| (*candidate, rank))
+        })
+        .min_by_key(|(_, rank)| *rank)
+        .map(|(candidate, _)| candidate)
+}
+
+/// A human-readable list of every format the compositor offered, for errors.
+fn describe_offered_formats(candidates: &[FrameInfo], unknown: &[u32]) -> String {
+    let mut names: Vec<String> = candidates
+        .iter()
+        .map(|candidate| format!("{:?}", candidate.format))
+        .collect();
+    names.extend(unknown.iter().map(|raw| format!("0x{raw:08x}")));
+    if names.is_empty() {
+        "none".to_string()
+    } else {
+        names.join(", ")
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -367,7 +445,7 @@ fn create_shm_file(size: usize) -> Result<OwnedFd, std::io::Error> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Information received from the compositor via the `buffer` event.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 struct FrameInfo {
     width: u32,
     height: u32,
@@ -492,8 +570,16 @@ struct AppState {
     xdg_outputs: Vec<zxdg_output_v1::ZxdgOutputV1>,
     /// Bound wl_shm.
     shm: Option<wl_shm::WlShm>,
+    /// Bound screencopy manager version, capped at 3 (the highest we bind).
+    screencopy_version: u32,
+    /// Buffer events received from the compositor, one per offered format.
+    frame_candidates: Vec<FrameInfo>,
+    /// Raw values of offered formats the wayland-client crate does not name.
+    frame_unknown_formats: Vec<u32>,
     /// Frame buffer parameters received from the compositor.
     frame_info: Option<FrameInfo>,
+    /// Set once the compositor finished listing formats (v3 `buffer_done`).
+    frame_list_complete: bool,
     /// Set to true when the compositor sends the `ready` event.
     frame_ready: bool,
     /// Set to true when the compositor sends the `failed` event.
@@ -525,14 +611,16 @@ impl Dispatch<wl_registry::WlRegistry, ()> for AppState {
         {
             match interface.as_str() {
                 "zwlr_screencopy_manager_v1" => {
+                    let bound_version = version.min(3);
                     let mgr = registry
                         .bind::<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, _, _>(
                             name,
-                            version.min(3),
+                            bound_version,
                             qh,
                             (),
                         );
                     state.screencopy_manager = Some(mgr);
+                    state.screencopy_version = bound_version;
                 }
                 "zxdg_output_manager_v1" if state.xdg_output_manager.is_none() => {
                     let manager = registry
@@ -693,27 +781,42 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, ()> for AppState 
         _: &QueueHandle<Self>,
     ) {
         match event {
-            // The compositor tells us the buffer parameters we must use.
+            // The compositor sends one Buffer event per format it can write.
+            // Collect them and commit to a supported one once the list is
+            // complete, or immediately on manager versions below 3 that never
+            // send buffer_done.
             zwlr_screencopy_frame_v1::Event::Buffer {
-                format: wayland_client::WEnum::Value(fmt),
+                format,
                 width,
                 height,
                 stride,
-            } if state.frame_info.is_none() => {
-                // Only store if this looks like a useful shm format.
-                // Prefer XRGB8888 / ARGB8888; accept anything the
-                // compositor offers — convert_to_rgba handles it.
-                state.frame_info = Some(FrameInfo {
-                    width,
-                    height,
-                    stride,
-                    format: fmt,
-                });
-            }
-            zwlr_screencopy_frame_v1::Event::Buffer { .. } => {}
+            } => match format {
+                wayland_client::WEnum::Value(fmt) => {
+                    let candidate = FrameInfo {
+                        width,
+                        height,
+                        stride,
+                        format: fmt,
+                    };
+                    if state.screencopy_version < 3
+                        && state.frame_info.is_none()
+                        && shm_format_info(fmt).is_some()
+                    {
+                        state.frame_info = Some(candidate);
+                    }
+                    state.frame_candidates.push(candidate);
+                }
+                wayland_client::WEnum::Unknown(raw) => {
+                    state.frame_unknown_formats.push(raw);
+                }
+            },
             // v3+ compositors send this after all Buffer events are done.
-            // We don't need special handling — frame_info is already set.
-            zwlr_screencopy_frame_v1::Event::BufferDone => {}
+            zwlr_screencopy_frame_v1::Event::BufferDone => {
+                state.frame_list_complete = true;
+                if state.frame_info.is_none() {
+                    state.frame_info = choose_frame_format(&state.frame_candidates);
+                }
+            }
 
             // Frame is ready to read.
             zwlr_screencopy_frame_v1::Event::Ready { .. } => {
@@ -825,5 +928,261 @@ mod tests {
             select_output_id(&infos, &order, true, Some((0, 0))),
             Err(OutputSelectionError::MissingLogicalPosition)
         );
+    }
+
+    fn shm_buffer(width: usize, height: usize, stride: usize, bpp: usize, pixel: &[u8]) -> Vec<u8> {
+        let mut buffer = vec![0u8; stride * height];
+        for row in 0..height {
+            for x in 0..width {
+                let offset = row * stride + x * bpp;
+                buffer[offset..offset + bpp].copy_from_slice(pixel);
+            }
+        }
+        buffer
+    }
+
+    fn assert_32bpp_conversion(format: wl_shm::Format, memory: [u8; 4], expected: [u8; 4]) {
+        let src = shm_buffer(3, 2, 3 * 4, 4, &memory);
+        let out = convert_to_rgba(&src, 3, 2, 3 * 4, format).unwrap();
+        assert_eq!(out.len(), 3 * 2 * 4);
+        for px in 0..6 {
+            assert_eq!(&out[px * 4..px * 4 + 4], &expected);
+        }
+    }
+
+    #[test]
+    fn bgr888_2560x1440_padded_stride_does_not_panic() {
+        const WIDTH: usize = 2560;
+        const HEIGHT: usize = 1440;
+        const STRIDE: usize = 10240;
+        // The reported frame: 2560 wide, stride 10240, 24bpp Bgr888. A 24bpp
+        // row is 7680 bytes, padded to 10240, so the source is stride * height.
+        let src = shm_buffer(WIDTH, HEIGHT, STRIDE, 3, &[0x10, 0x20, 0x30]);
+        let out = convert_to_rgba(
+            &src,
+            WIDTH as u32,
+            HEIGHT as u32,
+            STRIDE as u32,
+            wl_shm::Format::Bgr888,
+        )
+        .unwrap();
+        assert_eq!(out.len(), WIDTH * HEIGHT * 4);
+        // B G R -> R G B A.
+        assert_eq!(&out[0..4], &[0x30, 0x20, 0x10, 0xff]);
+        let last_pixel = (HEIGHT - 1) * WIDTH + (WIDTH - 1);
+        assert_eq!(
+            &out[last_pixel * 4..last_pixel * 4 + 4],
+            &[0x30, 0x20, 0x10, 0xff]
+        );
+    }
+
+    #[test]
+    fn bgr888_2560x1440_minimum_stride_does_not_panic() {
+        const WIDTH: usize = 2560;
+        const HEIGHT: usize = 1440;
+        const BPP: usize = 3;
+        const STRIDE: usize = WIDTH * BPP; // 7680, wlroots' minimum 24bpp stride
+        let mut src = vec![0u8; STRIDE * HEIGHT];
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let px = &mut src[y * STRIDE + x * BPP..y * STRIDE + x * BPP + BPP];
+                px[0] = (x & 0xff) as u8; // B
+                px[1] = (y & 0xff) as u8; // G
+                px[2] = 0xc0; // R
+            }
+        }
+        let out = convert_to_rgba(
+            &src,
+            WIDTH as u32,
+            HEIGHT as u32,
+            STRIDE as u32,
+            wl_shm::Format::Bgr888,
+        )
+        .unwrap();
+        assert_eq!(out.len(), WIDTH * HEIGHT * 4);
+
+        let pixel = |x: usize, y: usize| &out[(y * WIDTH + x) * 4..(y * WIDTH + x) * 4 + 4];
+        // B G R -> R G B A, with per-pixel channels so row indexing is proven.
+        assert_eq!(pixel(0, 0), &[0xc0, 0x00, 0x00, 0xff]);
+        assert_eq!(pixel(WIDTH / 2, HEIGHT / 2), &[0xc0, 0xd0, 0x00, 0xff]);
+        assert_eq!(pixel(WIDTH - 1, HEIGHT - 1), &[0xc0, 0x9f, 0xff, 0xff]);
+    }
+
+    #[test]
+    fn argb8888_channel_order() {
+        assert_32bpp_conversion(
+            wl_shm::Format::Argb8888,
+            [0x11, 0x22, 0x33, 0x44],
+            [0x33, 0x22, 0x11, 0x44],
+        );
+    }
+
+    #[test]
+    fn xrgb8888_channel_order() {
+        assert_32bpp_conversion(
+            wl_shm::Format::Xrgb8888,
+            [0x11, 0x22, 0x33, 0x44],
+            [0x33, 0x22, 0x11, 0xff],
+        );
+    }
+
+    #[test]
+    fn abgr8888_channel_order() {
+        assert_32bpp_conversion(
+            wl_shm::Format::Abgr8888,
+            [0x11, 0x22, 0x33, 0x44],
+            [0x11, 0x22, 0x33, 0x44],
+        );
+    }
+
+    #[test]
+    fn xbgr8888_channel_order() {
+        assert_32bpp_conversion(
+            wl_shm::Format::Xbgr8888,
+            [0x11, 0x22, 0x33, 0x44],
+            [0x11, 0x22, 0x33, 0xff],
+        );
+    }
+
+    #[test]
+    fn bgra8888_channel_order() {
+        assert_32bpp_conversion(
+            wl_shm::Format::Bgra8888,
+            [0x11, 0x22, 0x33, 0x44],
+            [0x22, 0x33, 0x44, 0x11],
+        );
+    }
+
+    #[test]
+    fn bgrx8888_channel_order() {
+        assert_32bpp_conversion(
+            wl_shm::Format::Bgrx8888,
+            [0x11, 0x22, 0x33, 0x44],
+            [0x22, 0x33, 0x44, 0xff],
+        );
+    }
+
+    #[test]
+    fn rgba8888_channel_order() {
+        assert_32bpp_conversion(
+            wl_shm::Format::Rgba8888,
+            [0x11, 0x22, 0x33, 0x44],
+            [0x44, 0x33, 0x22, 0x11],
+        );
+    }
+
+    #[test]
+    fn rgbx8888_channel_order() {
+        assert_32bpp_conversion(
+            wl_shm::Format::Rgbx8888,
+            [0x11, 0x22, 0x33, 0x44],
+            [0x44, 0x33, 0x22, 0xff],
+        );
+    }
+
+    #[test]
+    fn rgb888_channel_order() {
+        let src = shm_buffer(4, 1, 4 * 3, 3, &[0x11, 0x22, 0x33]);
+        let out = convert_to_rgba(&src, 4, 1, 4 * 3, wl_shm::Format::Rgb888).unwrap();
+        assert_eq!(
+            out,
+            vec![
+                0x11, 0x22, 0x33, 0xff, 0x11, 0x22, 0x33, 0xff, 0x11, 0x22, 0x33, 0xff, 0x11, 0x22,
+                0x33, 0xff,
+            ]
+        );
+    }
+
+    #[test]
+    fn padded_stride_is_read_per_row() {
+        const WIDTH: usize = 4;
+        const HEIGHT: usize = 2;
+        const BPP: usize = 4;
+        const STRIDE: usize = WIDTH * BPP + 8;
+        let mut src = shm_buffer(WIDTH, HEIGHT, STRIDE, BPP, &[0x11, 0x22, 0x33, 0x44]);
+        // Poison the padding bytes so reading them would show up in the output.
+        for row in 0..HEIGHT {
+            for offset in WIDTH * BPP..STRIDE {
+                src[row * STRIDE + offset] = 0xee;
+            }
+        }
+        let out = convert_to_rgba(
+            &src,
+            WIDTH as u32,
+            HEIGHT as u32,
+            STRIDE as u32,
+            wl_shm::Format::Argb8888,
+        )
+        .unwrap();
+        for px in 0..WIDTH * HEIGHT {
+            assert_eq!(&out[px * 4..px * 4 + 4], &[0x33, 0x22, 0x11, 0x44]);
+        }
+    }
+
+    #[test]
+    fn unsupported_format_is_refused_not_blank() {
+        let src = shm_buffer(2, 2, 2 * 2, 2, &[0x00, 0x00]);
+        let result = convert_to_rgba(&src, 2, 2, 2 * 2, wl_shm::Format::Rgb565);
+        assert!(matches!(result, Err(DisplayError::UnsupportedBackend(_))));
+    }
+
+    #[test]
+    fn undersized_stride_is_refused() {
+        let src = shm_buffer(4, 1, 4 * 4, 4, &[0x11, 0x22, 0x33, 0x44]);
+        // A 4-pixel 32bpp row needs 16 bytes; a 12-byte stride cannot hold it.
+        let result = convert_to_rgba(&src, 4, 1, 12, wl_shm::Format::Argb8888);
+        assert!(matches!(result, Err(DisplayError::CaptureError(_))));
+    }
+
+    #[test]
+    fn mismatched_buffer_size_is_refused() {
+        let src = shm_buffer(4, 2, 4 * 4, 4, &[0x11, 0x22, 0x33, 0x44]);
+        let result = convert_to_rgba(&src[..src.len() - 4], 4, 2, 16, wl_shm::Format::Argb8888);
+        assert!(matches!(result, Err(DisplayError::CaptureError(_))));
+    }
+
+    #[test]
+    fn format_selection_prefers_supported_candidate() {
+        let candidates = [
+            FrameInfo {
+                width: 10,
+                height: 10,
+                stride: 40,
+                format: wl_shm::Format::Rgb565,
+            },
+            FrameInfo {
+                width: 10,
+                height: 10,
+                stride: 40,
+                format: wl_shm::Format::Argb8888,
+            },
+            FrameInfo {
+                width: 10,
+                height: 10,
+                stride: 40,
+                format: wl_shm::Format::Xrgb8888,
+            },
+        ];
+        let chosen = choose_frame_format(&candidates).unwrap();
+        assert!(matches!(chosen.format, wl_shm::Format::Xrgb8888));
+    }
+
+    #[test]
+    fn format_selection_refuses_when_nothing_supported() {
+        let candidates = [
+            FrameInfo {
+                width: 10,
+                height: 10,
+                stride: 20,
+                format: wl_shm::Format::Rgb565,
+            },
+            FrameInfo {
+                width: 10,
+                height: 10,
+                stride: 20,
+                format: wl_shm::Format::Bgr565,
+            },
+        ];
+        assert!(choose_frame_format(&candidates).is_none());
     }
 }
