@@ -28,7 +28,7 @@ BuildRequires:  pkgconfig(gstreamer-app-1.0)
 BuildRequires:  pkgconfig(gstreamer-video-1.0)
 
 Requires:       curl
-Requires:       ffmpeg-free
+Requires:       (ffmpeg-free or ffmpeg)
 Requires:       gstreamer1-plugins-base
 Requires:       gstreamer1-plugins-good
 Requires:       gstreamer1-plugins-bad-free
