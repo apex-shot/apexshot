@@ -74,6 +74,10 @@ if [[ -z "${CARGO_BUILD_JOBS:-}" ]]; then
   cargo_jobs_args=(-j "$(default_cargo_jobs)")
 fi
 
+# option_env! embeds Studio configuration at compile time; this dev loop must
+# produce a Studio-capable package.
+source "$ROOT_DIR/scripts/studio-build-env.sh"
+
 echo "Building ApexShot .deb..."
 if [[ "$CARGO_INCREMENTAL" == "1" ]]; then
   echo "→ cargo release (incremental; see note above)"
