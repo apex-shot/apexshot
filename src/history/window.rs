@@ -364,10 +364,7 @@ pub fn build_history_window(app: &Application) {
             custom::SCREENSHOOTER_SYMBOLIC,
             &t("Motion editing is not available in the Windows build yet."),
         ),
-        build_placeholder_page(
-            custom::RECORD_SCREEN_SYMBOLIC,
-            &t("Video editing is not available in the Windows build yet."),
-        ),
+        super::video_edits_page::build_video_edits_page(toast.clone(), &search),
         build_placeholder_page(
             custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
             &t("Cloud browsing and sign-in are not available in the Windows build yet."),

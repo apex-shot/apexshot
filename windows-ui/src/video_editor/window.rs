@@ -182,6 +182,17 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     });
     stage.root.add_controller(drop_target);
 
+    // Closing the window is the last chance to keep the session: the autosave
+    // tick only runs while the editor is up, so the edits are written here
+    // rather than a tick later.
+    window.connect_close_request({
+        let timeline = timeline.clone();
+        move |_| {
+            timeline.flush_project();
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+
     window.present();
 }
 

@@ -56,7 +56,7 @@ pub(super) enum ZoomMode {
     Manual,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct ZoomClip {
     pub(super) start: f64,
     pub(super) end: f64,
@@ -147,6 +147,61 @@ struct Data {
     /// is extended past the source, exactly as the source editor's freeze
     /// tail does.
     freeze_tail: f64,
+}
+
+impl ZoomClip {
+    fn to_file(self) -> super::project::ZoomClipFile {
+        super::project::ZoomClipFile {
+            start: self.start,
+            end: self.end,
+            scale: self.scale,
+            center: self.center,
+            mode: match self.mode {
+                ZoomMode::Auto => super::project::ZoomModeFile::Auto,
+                ZoomMode::Manual => super::project::ZoomModeFile::Manual,
+            },
+            instant: self.instant,
+            hidden: self.hidden,
+            anchor: self.anchor.map(
+                |(source_start, source_end)| super::project::ZoomAnchorFile {
+                    source_start,
+                    source_end,
+                },
+            ),
+        }
+    }
+
+    /// Read one clip back, dropping anything that could not be drawn: a span
+    /// shorter than a pill, a scale past the camera's range, a centre that is
+    /// not a number.
+    fn from_file(file: &super::project::ZoomClipFile) -> Option<Self> {
+        let span_ok = file.start.is_finite()
+            && file.end.is_finite()
+            && file.end - file.start >= MIN_CLIP_SECONDS;
+        let center_ok = file.center.0.is_finite() && file.center.1.is_finite();
+        let anchor_ok = file
+            .anchor
+            .is_none_or(|anchor| anchor.source_start.is_finite() && anchor.source_end.is_finite());
+        (span_ok && center_ok && anchor_ok).then(|| Self {
+            start: file.start.max(0.0),
+            end: file.end,
+            scale: if file.scale.is_finite() {
+                file.scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE)
+            } else {
+                DEFAULT_ZOOM_SCALE
+            },
+            center: file.center,
+            hidden: file.hidden,
+            mode: match file.mode {
+                super::project::ZoomModeFile::Auto => ZoomMode::Auto,
+                super::project::ZoomModeFile::Manual => ZoomMode::Manual,
+            },
+            instant: file.instant,
+            anchor: file
+                .anchor
+                .map(|anchor| (anchor.source_start, anchor.source_end)),
+        })
+    }
 }
 
 impl Data {
@@ -456,6 +511,129 @@ impl Data {
         self.segment_starts.clear();
         self.moving_segment = None;
         self.freeze_tail = 0.0;
+    }
+
+    /// The edits as they should be written for this recording, or `None` when
+    /// the session still matches a freshly opened video — a file that records
+    /// "nothing changed" would only put an empty card in History.
+    fn project_file(&self) -> Option<super::project::EditorProjectFile> {
+        let path = self.path.as_ref()?;
+        let pristine = self.cuts.is_empty()
+            && self.zoom_clips.is_empty()
+            && self.hide_clips.is_empty()
+            && self.freeze_tail <= f64::EPSILON
+            && self.trim_start.abs() <= 0.001
+            && (self.duration - self.trim_end).abs() <= 0.001
+            && self.zoom_camera == super::zoom::ZoomCameraSettings::default();
+        if pristine {
+            return None;
+        }
+        let (source_size, source_mtime_secs) = super::project::fingerprint(path)?;
+        Some(super::project::EditorProjectFile {
+            version: super::project::PROJECT_VERSION,
+            source_path: path.clone(),
+            source_size,
+            source_mtime_secs,
+            trim_start_seconds: self.trim_start,
+            trim_end_seconds: self.trim_end,
+            cuts: self.cuts.clone(),
+            segment_starts: self.segment_starts.clone(),
+            freeze_tail: self.freeze_tail,
+            zoom_clips: self.zoom_clips.iter().map(|clip| clip.to_file()).collect(),
+            zoom_camera: super::project::ZoomCameraFile {
+                speed: self.zoom_camera.speed,
+                smoothness: self.zoom_camera.smoothness,
+                start_early: self.zoom_camera.start_early,
+            },
+            cursor_hide_clips: self
+                .hide_clips
+                .iter()
+                .map(|clip| super::project::HideClipFile {
+                    start: clip.start,
+                    end: clip.end,
+                    hidden: clip.hidden,
+                })
+                .collect(),
+            playhead_seconds: self.playhead,
+            timeline_scale: self.scale,
+            timeline_scroll_seconds: self.scroll,
+        })
+    }
+
+    /// Restore a saved edit list onto freshly loaded media. Every value is
+    /// clamped to the recording that is on disk, so a project written against
+    /// different footage — or one hand-edited into nonsense — still lands
+    /// inside the composition instead of dragging the board off it.
+    fn apply_project(&mut self, file: &super::project::EditorProjectFile) {
+        let duration = self.duration.max(0.0);
+        self.trim_start = file.trim_start_seconds.clamp(0.0, duration);
+        self.trim_end = file.trim_end_seconds.clamp(self.trim_start, duration);
+        self.cuts = file
+            .cuts
+            .iter()
+            .copied()
+            .filter(|cut| {
+                cut.is_finite()
+                    && *cut > self.trim_start + MIN_CLIP_SECONDS
+                    && *cut < self.trim_end - MIN_CLIP_SECONDS
+            })
+            .collect();
+        self.cuts.sort_by(f64::total_cmp);
+        self.segment_starts = file
+            .segment_starts
+            .iter()
+            .copied()
+            .filter(|start| start.is_finite() && *start >= 0.0)
+            .collect();
+        self.freeze_tail = if file.freeze_tail.is_finite() {
+            file.freeze_tail.max(0.0)
+        } else {
+            0.0
+        };
+        self.zoom_clips = file
+            .zoom_clips
+            .iter()
+            .filter_map(ZoomClip::from_file)
+            .collect();
+        self.hide_clips = file
+            .cursor_hide_clips
+            .iter()
+            .filter_map(|clip| {
+                let span_ok = clip.start.is_finite()
+                    && clip.end.is_finite()
+                    && clip.end - clip.start >= MIN_CLIP_SECONDS;
+                span_ok.then(|| HideClip {
+                    start: clip.start.max(0.0),
+                    end: clip.end,
+                    hidden: clip.hidden,
+                })
+            })
+            .collect();
+        self.zoom_camera = super::zoom::ZoomCameraSettings {
+            speed: file.zoom_camera.speed,
+            smoothness: file.zoom_camera.smoothness,
+            start_early: file.zoom_camera.start_early,
+        }
+        .clamped();
+        self.scale = if file.timeline_scale.is_finite() {
+            file.timeline_scale.clamp(0.0, 100.0)
+        } else {
+            0.0
+        };
+        self.scroll = if file.timeline_scroll_seconds.is_finite() {
+            file.timeline_scroll_seconds
+        } else {
+            0.0
+        };
+        self.playhead = if file.playhead_seconds.is_finite() {
+            file.playhead_seconds
+        } else {
+            0.0
+        };
+        self.clamp_cuts();
+        self.clamp_effects();
+        self.clamp_scroll();
+        self.clamp_playhead();
     }
 
     /// Source-time spans of the video lane's segments. With no cuts there is
@@ -1248,6 +1426,9 @@ pub(super) struct Timeline {
     repaint: Rc<dyn Fn()>,
     frame_sink: Rc<RefCell<Option<Rc<dyn Fn(PreviewFrame)>>>>,
     zoom_listener: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
+    /// The saved edit list: what was last written, and whether the editor has
+    /// repainted since, which is when it may need writing again.
+    project: super::project::ProjectSync,
 }
 
 impl Timeline {
@@ -1437,9 +1618,21 @@ impl Timeline {
         ))
     }
 
+    /// Write this recording's edits now. Called when another recording replaces
+    /// this one and when the window closes, both of which land before the
+    /// repaint-driven autosave's next tick.
+    pub fn flush_project(&self) {
+        let snapshot = self.data.borrow().project_file();
+        self.project.sync(snapshot, true);
+    }
+
     /// Swap the recording the timeline describes. `None` returns it to the
     /// empty placeholder scale.
+    ///
+    /// The outgoing recording's edits are written first, then the incoming
+    /// recording's saved edit list is restored on top of its probed lengths.
     pub fn set_document(&self, path: Option<&Path>) {
+        self.flush_project();
         self.camera_cache.borrow_mut().clear();
         let source = path.filter(|path| path.is_file()).map(Path::to_path_buf);
         self.generation.set(self.generation.get() + 1);
@@ -1447,18 +1640,27 @@ impl Timeline {
         let mut data = self.data.borrow_mut();
         data.reset_media();
         let mut duration = 0.0;
+        let mut restored = None;
         if let Some(source) = &source {
             duration = ffmpeg::probe_duration(source).unwrap_or(0.0);
             data.path = Some(source.clone());
             data.duration = duration;
             data.trim_end = duration;
+            if duration > 0.0 {
+                restored = super::project::load_project(source);
+                if let Some(file) = &restored {
+                    data.apply_project(file);
+                }
+            }
         }
         data.clamp_cuts();
         data.clamp_scroll();
         data.clamp_playhead();
+        let scale = data.scale;
         drop(data);
 
-        self.zoom_scale.set_value(0.0);
+        self.project.adopt(restored);
+        self.zoom_scale.set_value(scale);
         (self.repaint)();
         if let Some(source) = source {
             if duration > 0.0 {
@@ -1510,6 +1712,7 @@ pub(super) fn build(
 ) -> Timeline {
     let data = Rc::new(RefCell::new(Data::default()));
     let camera_cache = Rc::new(RefCell::new(super::zoom::ZoomCameraCache::default()));
+    let project = super::project::ProjectSync::default();
 
     let dock = GtkBox::new(Orientation::Vertical, 0);
     dock.add_css_class("recording-editor-timeline-dock");
@@ -1741,6 +1944,7 @@ pub(super) fn build(
         let adjustment = adjustment.clone();
         let scroll_syncing = scroll_syncing.clone();
         let zoom_listener = zoom_listener.clone();
+        let project = project.clone();
         Rc::new(move || {
             {
                 let data = data.borrow();
@@ -1761,8 +1965,26 @@ pub(super) fn build(
             if let Some(listener) = zoom_listener.borrow().as_ref() {
                 listener();
             }
+            // Every mutation repaints, so this is the one place that can tell
+            // the autosave a change may be waiting to be written.
+            project.mark_changed();
         })
     };
+
+    // Autosave. The repaint above only notes that something may have changed;
+    // this tick decides whether it is worth a write by comparing against the
+    // file on disk, so a hover, a scroll or a playhead tick never rewrites it.
+    {
+        let data = data.clone();
+        let project = project.clone();
+        gtk4::glib::timeout_add_local(Duration::from_secs(2), move || {
+            if project.take_changed() {
+                let snapshot = data.borrow().project_file();
+                project.sync(snapshot, false);
+            }
+            gtk4::glib::ControlFlow::Continue
+        });
+    }
 
     let sync_play_icon = {
         let data = data.clone();
@@ -2117,6 +2339,7 @@ pub(super) fn build(
         repaint,
         frame_sink,
         zoom_listener,
+        project,
     }
 }
 
@@ -4072,6 +4295,7 @@ fn rounded_rect(context: &Context, x: f64, y: f64, width: f64, height: f64, radi
 
 #[cfg(test)]
 mod tests {
+    use super::super::project;
     use super::*;
     use gtk4::cairo::{Format, ImageSurface};
 
@@ -4082,6 +4306,122 @@ mod tests {
         data.frame_size = Some((1920, 1080));
         data.trim_end = 10.0;
         data
+    }
+
+    /// A recording on disk, which is what a project file is keyed to.
+    fn recording(name: &str) -> PathBuf {
+        let directory = std::env::temp_dir().join(format!(
+            "apexshot-timeline-project-{name}-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&directory).unwrap();
+        let video = directory.join("clip.mp4");
+        std::fs::write(&video, b"footage").unwrap();
+        video
+    }
+
+    #[test]
+    fn a_fresh_session_has_nothing_to_save_and_an_edit_does() {
+        let video = recording("fresh");
+        let mut data = loaded();
+        data.path = Some(video.clone());
+
+        assert!(data.project_file().is_none());
+
+        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
+        let file = data.project_file().expect("an edited session is saved");
+        assert_eq!(file.zoom_clips.len(), 1);
+        assert_eq!(file.source_path, video);
+    }
+
+    #[test]
+    fn a_saved_session_restores_onto_the_recording_that_is_open() {
+        let mut data = loaded();
+        data.apply_project(&project::EditorProjectFile {
+            version: project::PROJECT_VERSION,
+            source_path: PathBuf::from("clip.mp4"),
+            source_size: 0,
+            source_mtime_secs: 0,
+            trim_start_seconds: 2.0,
+            trim_end_seconds: 40.0,
+            cuts: vec![1.0, 5.0, 50.0],
+            segment_starts: vec![0.0, 2.5],
+            freeze_tail: 0.5,
+            zoom_clips: vec![
+                project::ZoomClipFile {
+                    start: 0.5,
+                    end: 2.0,
+                    scale: 2.0,
+                    center: (640.0, 360.0),
+                    mode: project::ZoomModeFile::Auto,
+                    instant: true,
+                    hidden: false,
+                    anchor: Some(project::ZoomAnchorFile {
+                        source_start: 2.5,
+                        source_end: 4.0,
+                    }),
+                },
+                // Shorter than a pill: nothing could be drawn for it.
+                project::ZoomClipFile {
+                    start: 3.0,
+                    end: 3.01,
+                    scale: 2.0,
+                    center: (0.0, 0.0),
+                    mode: project::ZoomModeFile::Manual,
+                    instant: false,
+                    hidden: false,
+                    anchor: None,
+                },
+            ],
+            zoom_camera: project::ZoomCameraFile {
+                speed: 9.0,
+                smoothness: -1.0,
+                start_early: true,
+            },
+            cursor_hide_clips: vec![project::HideClipFile {
+                start: 1.0,
+                end: 4.0,
+                hidden: false,
+            }],
+            playhead_seconds: 99.0,
+            timeline_scale: 400.0,
+            timeline_scroll_seconds: 12.0,
+        });
+
+        // The recording is 10s: the project's tail past it is clamped, and a
+        // cut inside the head margin or past the tail goes with it.
+        assert!((data.trim_start - 2.0).abs() < 1e-9);
+        assert!((data.trim_end - 10.0).abs() < 1e-9);
+        assert_eq!(data.cuts, vec![5.0]);
+        assert_eq!(data.segment_starts, vec![0.0, 2.5]);
+        assert!((data.freeze_tail - 0.5).abs() < 1e-9);
+        assert_eq!(data.zoom_clips.len(), 1);
+        assert_eq!(data.zoom_clips[0].mode, ZoomMode::Auto);
+        assert!(data.zoom_clips[0].instant);
+        assert_eq!(data.zoom_clips[0].anchor, Some((2.5, 4.0)));
+        assert_eq!(data.hide_clips.len(), 1);
+        assert!((data.zoom_camera.speed - 3.0).abs() < 1e-9);
+        assert!(data.zoom_camera.smoothness.abs() < 1e-9);
+        assert!(data.zoom_camera.start_early);
+        assert!((data.scale - 100.0).abs() < 1e-9);
+        assert!(data.playhead <= data.total_duration());
+        assert!(data.scroll <= data.max_scroll());
+    }
+
+    #[test]
+    fn a_zoom_keeps_everything_it_carries_through_the_file() {
+        let clip = ZoomClip {
+            start: 1.0,
+            end: 3.0,
+            scale: 2.5,
+            center: (400.0, 300.0),
+            hidden: true,
+            mode: ZoomMode::Auto,
+            instant: true,
+            anchor: Some((2.0, 4.0)),
+        };
+
+        assert_eq!(ZoomClip::from_file(&clip.to_file()), Some(clip));
     }
 
     #[test]

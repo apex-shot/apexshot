@@ -13,6 +13,7 @@ pub mod placeholder_page;
 pub mod scan;
 #[path = "../../../src/history/thumbnails.rs"]
 pub mod thumbnails;
+pub mod video_edits_page;
 #[path = "../../../src/history/window.rs"]
 pub mod window;
 

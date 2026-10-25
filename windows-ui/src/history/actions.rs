@@ -1,8 +1,6 @@
 //! File and clipboard actions for Windows History cards.
 
-use std::path::Path;
-#[cfg(test)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use gtk4::prelude::*;
 
@@ -17,8 +15,48 @@ pub fn open_in_default_app(entry: &CaptureEntry) -> Result<String, String> {
 
 pub fn open_in_apexshot_editor(entry: &CaptureEntry) -> Result<String, String> {
     ensure_exists(&entry.path)?;
-    Err(t(
-        "The ApexShot editor is not available in the Windows build yet",
+    match entry.kind {
+        MediaKind::Video => launch_video_editor(&entry.path),
+        MediaKind::Image => Err(t(
+            "The image editor is not available in the Windows build yet",
+        )),
+    }
+}
+
+/// Start the video editor on a recording.
+///
+/// The executable resolves the way the capture shell's tray action resolves
+/// it: an explicit override, then a sibling of this binary, then the bare name
+/// for anything that put it on `PATH`.
+pub fn launch_video_editor(path: &Path) -> Result<String, String> {
+    ensure_exists(path)?;
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|current| current.parent().map(Path::to_path_buf))
+        .map(|directory| directory.join("apexshot-video-editor.exe"))
+        .filter(|sibling| sibling.is_file());
+    let executable = std::env::var_os("APEXSHOT_VIDEO_EDITOR")
+        .map(PathBuf::from)
+        .or(sibling)
+        .unwrap_or_else(|| PathBuf::from("apexshot-video-editor.exe"));
+
+    std::process::Command::new(&executable)
+        .arg(path)
+        .spawn()
+        .map_err(|error| {
+            tfmt(
+                "Could not start the video editor: {message}",
+                &[("message", &error.to_string())],
+            )
+        })?;
+
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    Ok(tfmt(
+        "Opened {name} in the video editor",
+        &[("name", &name)],
     ))
 }
 
