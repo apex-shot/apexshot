@@ -1305,6 +1305,13 @@ fn build_zoom_commands(state: &VideoEditState, start: f64, end: f64) -> (String,
     }
 }
 
+/// The per-frame `sendcmd` schedule that drives the camera's `scale`/`crop`.
+///
+/// Command times are written with microsecond precision on purpose. `sendcmd`
+/// fires a command on the first frame at or after its timestamp, so at 60 fps
+/// (16.667 ms) millisecond rounding pushes every third command past its own
+/// frame and lets it collapse into the next one, which leaves a stale frame in
+/// the camera and reads as the footage stuttering twice then holding.
 fn build_camera_commands(
     state: &VideoEditState,
     start: f64,
@@ -1343,7 +1350,7 @@ fn build_camera_commands(
             let x = ((x * scaled_w as f64 / source_w).round() as u32).min(scaled_w - video_w) & !1;
             let y = ((y * scaled_h as f64 / source_h).round() as u32).min(scaled_h - video_h) & !1;
             lines.push_str(&format!(
-                "{local_t:.3} scale@{target}s w {scaled_w};\n{local_t:.3} scale@{target}s h {scaled_h};\n{local_t:.3} crop@{target} x {x};\n{local_t:.3} crop@{target} y {y};\n"
+                "{local_t:.6} scale@{target}s w {scaled_w};\n{local_t:.6} scale@{target}s h {scaled_h};\n{local_t:.6} crop@{target} x {x};\n{local_t:.6} crop@{target} y {y};\n"
             ));
         }
     }
@@ -2139,9 +2146,9 @@ mod tests {
         let cmd = build_sendcmd(&state, 1.25, 2.25);
         let timestamps: Vec<&str> = cmd.lines().step_by(4).collect();
         assert_eq!(timestamps.len(), 60);
-        assert!(timestamps[0].starts_with("0.000 "));
+        assert!(timestamps[0].starts_with("0.000000 "));
         assert!(
-            timestamps[1].starts_with("0.017 "),
+            timestamps[1].starts_with("0.016666") || timestamps[1].starts_with("0.016667"),
             "second command must land one frame in: {:?}",
             timestamps[1]
         );
@@ -2227,6 +2234,35 @@ mod tests {
     }
 
     #[test]
+    fn camera_commands_land_on_their_own_frame_at_sixty_fps() {
+        let state = moving_camera_state();
+        let commands = build_sendcmd(&state, 0.0, 1.0);
+        let times: Vec<f64> = commands
+            .lines()
+            .map(|line| {
+                line.split_once(' ')
+                    .expect("a command line starts with its time")
+                    .0
+                    .parse()
+                    .expect("the time parses")
+            })
+            .collect();
+        assert_eq!(
+            times.len(),
+            ((state.metadata.export_frame_rate().ceil() as usize).max(1)) * 4
+        );
+        for (index, time) in times.iter().enumerate() {
+            let fps = state.metadata.export_frame_rate();
+            let frame = index / 4;
+            assert!(
+                (time - frame as f64 / fps).abs() < 1e-6,
+                "frame {frame} was scheduled at {time}; millisecond rounding lets a command \
+                 collapse into the next frame and stalls the camera"
+            );
+        }
+    }
+
+    #[test]
     fn camera_blur_export_clock_advances_through_a_speed_adjusted_freeze() {
         let mut state = moving_camera_state();
         state.timeline_offset_seconds = 2.0;
@@ -2244,7 +2280,7 @@ mod tests {
         state.zoom_clips[0].end = 2.0;
         state.zoom_clips[0].instant = true;
         let commands = build_sendcmd(&state, 0.0, 1.0);
-        assert!(commands.starts_with("0.000 scale@zs w 640;\n0.000 scale@zs h 480;\n0.000 crop@z x 260;\n0.000 crop@z y 120;"));
+        assert!(commands.starts_with("0.000000 scale@zs w 640;\n0.000000 scale@zs h 480;\n0.000000 crop@z x 260;\n0.000000 crop@z y 120;"));
         assert!(!commands.contains("crop@z w ") && !commands.contains("crop@z h "));
         let graph = composite_graph(&state);
         assert!(graph.contains("scale@zs=320:240,crop@z=w=320:h=240:x=0:y=0"));
@@ -2269,7 +2305,11 @@ mod tests {
             .map(|line| line.split_once(' ').unwrap().0)
             .collect();
         assert_eq!(sharp_times, blurred_times);
-        assert_eq!(sharp_times[1], "0.017");
+        assert!(
+            sharp_times[1].starts_with("0.01666"),
+            "one frame in, at microsecond precision: {:?}",
+            sharp_times[1]
+        );
         let sharp_current: Vec<_> = sharp.lines().collect();
         let blurred_current: Vec<_> = blurred
             .lines()

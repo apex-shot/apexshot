@@ -2270,6 +2270,47 @@ fn even_crop_stays_inside_frame() {
 }
 
 #[test]
+fn float_crop_preserves_fractional_dimensions_and_origin() {
+    let (x, y, w, h) = float_crop_rect(1.7, (960.0, 540.0), 1920, 1080);
+    assert!((w - 1920.0 / 1.7).abs() < 1e-9);
+    assert!((h - 1080.0 / 1.7).abs() < 1e-9);
+    assert!((x - (960.0 - w / 2.0)).abs() < 1e-9);
+    assert!((y - (540.0 - h / 2.0)).abs() < 1e-9);
+
+    let (even_x, even_y, even_w, even_h) = even_crop_rect(1.7, (960.0, 540.0), 1920, 1080);
+    assert_ne!((x, y, w, h), (even_x as f64, even_y as f64, even_w as f64, even_h as f64));
+
+    let integral = float_crop_rect(2.0, (960.0, 540.0), 1920, 1080);
+    assert_eq!(integral, (480.0, 270.0, 960.0, 540.0));
+    let even_integral = even_crop_rect(2.0, (960.0, 540.0), 1920, 1080);
+    assert_eq!(
+        integral,
+        (
+            even_integral.0 as f64,
+            even_integral.1 as f64,
+            even_integral.2 as f64,
+            even_integral.3 as f64,
+        )
+    );
+}
+
+#[test]
+fn float_crop_clamps_to_source_edges() {
+    assert_eq!(
+        float_crop_rect(2.0, (0.0, 0.0), 1920, 1080),
+        (0.0, 0.0, 960.0, 540.0)
+    );
+    assert_eq!(
+        float_crop_rect(2.0, (1920.0, 1080.0), 1920, 1080),
+        (960.0, 540.0, 960.0, 540.0)
+    );
+    assert_eq!(
+        float_crop_rect(1.0, (960.0, 540.0), 1920, 1080),
+        (0.0, 0.0, 1920.0, 1080.0)
+    );
+}
+
+#[test]
 fn estimate_size_scales_with_trim_duration() {
     let full = VideoEditState::new(metadata());
     let mut half = full.clone();
