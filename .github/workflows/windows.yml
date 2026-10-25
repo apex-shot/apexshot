@@ -54,6 +54,9 @@ jobs:
         with:
           msystem: MINGW64
           update: false
+          # The job installs its own toolchain into ~/.cargo/bin, which the
+          # MSYS2 shell does not see under its default strict PATH.
+          path-type: inherit
           install: >-
             mingw-w64-x86_64-gtk4
             mingw-w64-x86_64-pkgconf
