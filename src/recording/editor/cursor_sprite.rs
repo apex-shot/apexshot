@@ -472,7 +472,11 @@ fn supersampled_bitmap(theme: CursorTheme, kind: &str) -> RgbaImage {
         let [r, g, b, a] = pixel.0;
         let alpha = u16::from(a);
         let premultiply = |channel: u8| ((u16::from(channel) * alpha) / 255) as u8;
-        premultiplied.put_pixel(x, y, image::Rgba([premultiply(r), premultiply(g), premultiply(b), a]));
+        premultiplied.put_pixel(
+            x,
+            y,
+            image::Rgba([premultiply(r), premultiply(g), premultiply(b), a]),
+        );
     }
     let width = base.width() * SUPERSAMPLE_FACTOR;
     let height = base.height() * SUPERSAMPLE_FACTOR;
