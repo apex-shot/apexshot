@@ -27,18 +27,23 @@ git add flake.nix flake.lock packaging/nix && nix build .#apexshot   # after sta
 
 ### Rust and LLVM pairing
 
-This package uses nixpkgs' `rustPlatform` from its `rustPackages`. Rust 1.96+ emits
-`llvm.x86.avx512.vpdpbusd.512` with LLVM 22 operand types, but nixpkgs builds rustc against
-the tree-default `llvmPackages` (LLVM 21). Crates referencing it fail module verification with:
+This package uses nixpkgs' `rustPlatform` from its `rustPackages`. Rust 1.96
+and newer bind `llvm.x86.avx512.vpdpbusd.512` with LLVM 22 operand types, but
+nixpkgs builds rustc against the tree-default `llvmPackages` (LLVM 21). Crates
+referencing it fail module verification with:
 
 ```text
 error: intrinsic signature mismatch for llvm.x86.avx512.vpdpbusd.512: expected signature <16 x i32> (<16 x i32>, <16 x i32>, <16 x i32>), found <16 x i32> (<16 x i32>, <64 x i8>, <64 x i8>)
 ```
 
-`rten-gemm`, pulled in through `rten` for OCR, references it. The pinned flake resolves Rust to 1.95 (LLVM 21 operand types), so plain `nix build` works.
-With newer nixpkgs, pass `packaging/nix/package.nix` a `rustPlatform` built from a toolchain linked to LLVM 22 (`rust-overlay`'s `rust-bin` is usual) until nixpkgs moves the default (PR #524570).
-Lowering `CARGO_PROFILE_RELEASE_OPT_LEVEL` or bumping `rten` does not help: rten 0.25, 0.26, and 0.27 still call the intrinsic.
-This is an LLVM module-verifier rejection, not an optimisation decision.
+`rten-gemm`, pulled in through `rten` for OCR, references it. The pinned flake
+resolves Rust to 1.95 (LLVM 21 operand types), so plain `nix build` works.
+With newer nixpkgs, pass `packaging/nix/package.nix` a `rustPlatform` built
+from a toolchain linked to LLVM 22 (`rust-overlay`'s `rust-bin` is the usual
+source) until nixpkgs moves the default (nixpkgs PR #524570). Lowering
+`CARGO_PROFILE_RELEASE_OPT_LEVEL` or bumping `rten` does not help: rten 0.25,
+0.26, and 0.27 still call the intrinsic. This is an LLVM module-verifier
+rejection, not an optimisation decision.
 
 ## Using it in a NixOS configuration
 
