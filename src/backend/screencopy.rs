@@ -340,8 +340,8 @@ fn pixel_channels(format: wl_shm::Format, px: &[u8]) -> (u8, u8, u8, u8) {
         wl_shm::Format::Bgrx8888 => (px[1], px[2], px[3], 255),
         wl_shm::Format::Rgba8888 => (px[3], px[2], px[1], px[0]),
         wl_shm::Format::Rgbx8888 => (px[3], px[2], px[1], 255),
-        wl_shm::Format::Bgr888 => (px[2], px[1], px[0], 255),
-        wl_shm::Format::Rgb888 => (px[0], px[1], px[2], 255),
+        wl_shm::Format::Bgr888 => (px[0], px[1], px[2], 255),
+        wl_shm::Format::Rgb888 => (px[2], px[1], px[0], 255),
         _ => unreachable!("unsupported shm formats are rejected before pixel conversion"),
     }
 }
@@ -967,12 +967,12 @@ mod tests {
         )
         .unwrap();
         assert_eq!(out.len(), WIDTH * HEIGHT * 4);
-        // B G R -> R G B A.
-        assert_eq!(&out[0..4], &[0x30, 0x20, 0x10, 0xff]);
+        // R G B -> R G B A.
+        assert_eq!(&out[0..4], &[0x10, 0x20, 0x30, 0xff]);
         let last_pixel = (HEIGHT - 1) * WIDTH + (WIDTH - 1);
         assert_eq!(
             &out[last_pixel * 4..last_pixel * 4 + 4],
-            &[0x30, 0x20, 0x10, 0xff]
+            &[0x10, 0x20, 0x30, 0xff]
         );
     }
 
@@ -986,9 +986,9 @@ mod tests {
         for y in 0..HEIGHT {
             for x in 0..WIDTH {
                 let px = &mut src[y * STRIDE + x * BPP..y * STRIDE + x * BPP + BPP];
-                px[0] = (x & 0xff) as u8; // B
+                px[0] = (x & 0xff) as u8; // R
                 px[1] = (y & 0xff) as u8; // G
-                px[2] = 0xc0; // R
+                px[2] = 0xc0; // B
             }
         }
         let out = convert_to_rgba(
@@ -1002,10 +1002,10 @@ mod tests {
         assert_eq!(out.len(), WIDTH * HEIGHT * 4);
 
         let pixel = |x: usize, y: usize| &out[(y * WIDTH + x) * 4..(y * WIDTH + x) * 4 + 4];
-        // B G R -> R G B A, with per-pixel channels so row indexing is proven.
-        assert_eq!(pixel(0, 0), &[0xc0, 0x00, 0x00, 0xff]);
-        assert_eq!(pixel(WIDTH / 2, HEIGHT / 2), &[0xc0, 0xd0, 0x00, 0xff]);
-        assert_eq!(pixel(WIDTH - 1, HEIGHT - 1), &[0xc0, 0x9f, 0xff, 0xff]);
+        // R G B -> R G B A, with per-pixel channels so row indexing is proven.
+        assert_eq!(pixel(0, 0), &[0x00, 0x00, 0xc0, 0xff]);
+        assert_eq!(pixel(WIDTH / 2, HEIGHT / 2), &[0x00, 0xd0, 0xc0, 0xff]);
+        assert_eq!(pixel(WIDTH - 1, HEIGHT - 1), &[0xff, 0x9f, 0xc0, 0xff]);
     }
 
     #[test]
@@ -1087,10 +1087,33 @@ mod tests {
         assert_eq!(
             out,
             vec![
-                0x11, 0x22, 0x33, 0xff, 0x11, 0x22, 0x33, 0xff, 0x11, 0x22, 0x33, 0xff, 0x11, 0x22,
-                0x33, 0xff,
+                0x33, 0x22, 0x11, 0xff, 0x33, 0x22, 0x11, 0xff, 0x33, 0x22, 0x11, 0xff, 0x33, 0x22,
+                0x11, 0xff,
             ]
         );
+    }
+
+    #[test]
+    fn twenty_four_bit_formats_keep_red_and_blue_in_place() {
+        for (format, red, blue) in [
+            (
+                wl_shm::Format::Bgr888,
+                [0xff, 0x00, 0x00],
+                [0x00, 0x00, 0xff],
+            ),
+            (
+                wl_shm::Format::Rgb888,
+                [0x00, 0x00, 0xff],
+                [0xff, 0x00, 0x00],
+            ),
+        ] {
+            let mut src = Vec::new();
+            src.extend_from_slice(&red);
+            src.extend_from_slice(&blue);
+            let out = convert_to_rgba(&src, 2, 1, 6, format).unwrap();
+            assert_eq!(&out[0..4], &[0xff, 0x00, 0x00, 0xff], "{format:?} red");
+            assert_eq!(&out[4..8], &[0x00, 0x00, 0xff, 0xff], "{format:?} blue");
+        }
     }
 
     #[test]
