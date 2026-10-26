@@ -263,3 +263,44 @@ pub(super) fn build_webcam_group(config: &AppConfig) -> (GtkBox, WebcamInputs) {
         },
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_webcam_group_offers_the_camera_layer_settings() {
+        let Some(found) = crate::test_support::with_gtk(|| {
+            let config = AppConfig::default();
+            let (group, inputs) = build_webcam_group(&config);
+            let mut rows = 0;
+            if let Some(frame) = group.last_child() {
+                let mut child = frame.first_child();
+                while let Some(widget) = child {
+                    rows += 1;
+                    child = widget.next_sibling();
+                }
+            }
+            (
+                rows,
+                inputs.enabled.is_active(),
+                inputs.size.active_id(),
+                inputs.shape.active_id(),
+                inputs.position.active_id(),
+                inputs.flip.is_active(),
+            )
+        }) else {
+            return;
+        };
+
+        assert_eq!(
+            found.0, 6,
+            "enable, camera, size, shape, position and mirror"
+        );
+        assert!(!found.1, "the layer is off by default");
+        assert_eq!(found.2.as_deref(), Some("1"));
+        assert_eq!(found.3.as_deref(), Some("0"));
+        assert_eq!(found.4.as_deref(), Some("bottom_right"));
+        assert!(!found.5);
+    }
+}

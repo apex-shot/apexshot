@@ -32,6 +32,20 @@ use sha2::{Digest, Sha256};
 /// keep working through the `#[serde(default)]` on every optional key.
 pub(super) const PROJECT_VERSION: u32 = 1;
 
+/// The camera layer as the project file stores it: fractions of the frame, a
+/// corner radius as a fraction of the shorter side, and the two switches.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(super) struct WebcamLayerFile {
+    pub enabled: bool,
+    pub fullscreen: bool,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+    pub radius: f64,
+    pub mirror: bool,
+}
+
 /// One recording's saved edits.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(super) struct EditorProjectFile {
@@ -53,6 +67,10 @@ pub(super) struct EditorProjectFile {
     pub zoom_camera: ZoomCameraFile,
     #[serde(default)]
     pub cursor_hide_clips: Vec<HideClipFile>,
+    /// The camera layer once it has been moved away from what the recording
+    /// captured. Absent means the recording's own placement is still in use.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webcam: Option<WebcamLayerFile>,
     #[serde(default)]
     pub playhead_seconds: f64,
     #[serde(default)]
@@ -385,6 +403,16 @@ mod tests {
                 end: 4.0,
                 hidden: false,
             }],
+            webcam: Some(WebcamLayerFile {
+                enabled: true,
+                fullscreen: false,
+                x: 0.62,
+                y: 0.31,
+                w: 0.18,
+                h: 0.24,
+                radius: 0.5,
+                mirror: true,
+            }),
             playhead_seconds: 3.5,
             timeline_scale: 42.0,
             timeline_scroll_seconds: 1.25,
@@ -450,6 +478,29 @@ mod tests {
             ..saved.clone()
         };
         assert!(!saved.same_content(&rezoomed));
+
+        let moved_camera = EditorProjectFile {
+            webcam: None,
+            ..saved.clone()
+        };
+        assert!(!saved.same_content(&moved_camera));
+    }
+
+    #[test]
+    fn a_project_without_a_camera_still_opens() {
+        let directory = scratch("no-webcam");
+        let video = recording(&directory);
+        let path = directory.join("no-webcam.json");
+        let file = project(&video);
+        let mut json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&file).unwrap()).unwrap();
+        // A project written before the camera layer existed has no key at all.
+        json.as_object_mut().unwrap().remove("webcam");
+        fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert!(loaded.webcam.is_none());
+        assert_eq!(loaded.trim_start_seconds, file.trim_start_seconds);
     }
 
     #[test]

@@ -152,6 +152,9 @@ struct Data {
     /// Ctrl+Z and Ctrl+Shift+Z. Runtime-only: a reopened recording starts with
     /// nothing to take back.
     history: EditHistory<EditSnapshot>,
+    /// The camera layer, set once the editor has built one. Absent on a
+    /// recording with no camera track.
+    webcam: Option<super::webcam::WebcamModel>,
 }
 
 /// The document as one undo step restores it.
@@ -175,6 +178,9 @@ struct EditSnapshot {
     zoom_clips: Vec<ZoomClip>,
     hide_clips: Vec<HideClip>,
     zoom_camera: super::zoom::ZoomCameraSettings,
+    /// The camera layer, which lives in the webcam model rather than here;
+    /// the snapshot keeps the value so undo can put the bubble back.
+    webcam: Option<super::webcam::LayerSettings>,
     selected: bool,
     selected_zoom: Option<usize>,
     selected_hide: Option<usize>,
@@ -563,6 +569,7 @@ impl Data {
             zoom_clips: self.zoom_clips.clone(),
             hide_clips: self.hide_clips.clone(),
             zoom_camera: self.zoom_camera,
+            webcam: self.webcam.as_ref().and_then(|model| model.settings()),
             selected: self.selected,
             selected_zoom: self.selected_zoom,
             selected_hide: self.selected_hide,
@@ -629,6 +636,9 @@ impl Data {
         self.zoom_clips = snapshot.zoom_clips;
         self.hide_clips = snapshot.hide_clips;
         self.zoom_camera = snapshot.zoom_camera;
+        if let (Some(webcam), Some(layer)) = (self.webcam.as_ref(), snapshot.webcam) {
+            webcam.set_settings(layer);
+        }
         self.selected = snapshot.selected;
         self.selected_zoom = snapshot.selected_zoom;
         self.selected_hide = snapshot.selected_hide;
@@ -648,7 +658,23 @@ impl Data {
     /// "nothing changed" would only put an empty card in History.
     fn project_file(&self) -> Option<super::project::EditorProjectFile> {
         let path = self.path.as_ref()?;
-        let pristine = self.cuts.is_empty()
+        let webcam = self
+            .webcam
+            .as_ref()
+            .filter(|model| model.edited())
+            .and_then(|model| model.settings())
+            .map(|layer| super::project::WebcamLayerFile {
+                enabled: layer.enabled,
+                fullscreen: layer.fullscreen,
+                x: layer.x,
+                y: layer.y,
+                w: layer.w,
+                h: layer.h,
+                radius: layer.radius,
+                mirror: layer.mirror,
+            });
+        let pristine = webcam.is_none()
+            && self.cuts.is_empty()
             && self.zoom_clips.is_empty()
             && self.hide_clips.is_empty()
             && self.freeze_tail <= f64::EPSILON
@@ -684,6 +710,7 @@ impl Data {
                     hidden: clip.hidden,
                 })
                 .collect(),
+            webcam,
             playhead_seconds: self.playhead,
             timeline_scale: self.scale,
             timeline_scroll_seconds: self.scroll,
@@ -745,6 +772,18 @@ impl Data {
             start_early: file.zoom_camera.start_early,
         }
         .clamped();
+        if let (Some(webcam), Some(layer)) = (self.webcam.as_ref(), file.webcam.as_ref()) {
+            webcam.set_settings(super::webcam::LayerSettings {
+                enabled: layer.enabled,
+                fullscreen: layer.fullscreen,
+                x: layer.x,
+                y: layer.y,
+                w: layer.w,
+                h: layer.h,
+                radius: layer.radius,
+                mirror: layer.mirror,
+            });
+        }
         self.scale = if file.timeline_scale.is_finite() {
             file.timeline_scale.clamp(0.0, 100.0)
         } else {
@@ -1615,6 +1654,7 @@ pub(super) struct Timeline {
     repaint: Rc<dyn Fn()>,
     frame_sink: Rc<RefCell<Option<Rc<dyn Fn(PreviewFrame)>>>>,
     zoom_listener: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
+    webcam_listener: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
     /// The saved edit list: what was last written, and whether the editor has
     /// repainted since, which is when it may need writing again.
     project: super::project::ProjectSync,
@@ -1718,6 +1758,46 @@ impl Timeline {
     /// delivers the state already on screen.
     pub fn set_zoom_listener(&self, listener: Rc<dyn Fn()>) {
         *self.zoom_listener.borrow_mut() = Some(listener.clone());
+        listener();
+    }
+
+    /// The camera layer this document carries, or `None` when the recording
+    /// has no camera track to place.
+    pub fn webcam_settings(&self) -> Option<super::webcam::LayerSettings> {
+        let webcam = self.data.borrow().webcam.clone()?;
+        webcam.settings()
+    }
+
+    /// Change the camera layer: the preview redraws from it and the autosave
+    /// writes it, both because every mutation passes through the repaint.
+    pub fn update_webcam(&self, update: impl FnOnce(&mut super::webcam::LayerSettings)) {
+        let webcam = self.data.borrow().webcam.clone();
+        let Some(webcam) = webcam else { return };
+        let Some(mut settings) = webcam.settings() else {
+            return;
+        };
+        update(&mut settings);
+        self.data.borrow_mut().record_continuous_edit();
+        webcam.set_settings(settings);
+        (self.repaint)();
+    }
+
+    /// Put the layer back where the recording captured it.
+    pub fn reset_webcam(&self) {
+        let webcam = self.data.borrow().webcam.clone();
+        let Some(webcam) = webcam else { return };
+        {
+            let mut data = self.data.borrow_mut();
+            data.record_continuous_edit();
+        }
+        webcam.reset();
+        (self.repaint)();
+    }
+
+    /// Ask to be told whenever the camera layer changes, including when a
+    /// document opens onto a saved one.
+    pub fn set_webcam_listener(&self, listener: Rc<dyn Fn()>) {
+        *self.webcam_listener.borrow_mut() = Some(listener.clone());
         listener();
     }
 
@@ -1861,12 +1941,21 @@ impl Timeline {
             data.path = Some(source.clone());
             data.duration = duration;
             data.trim_end = duration;
+            // The camera layer follows the document: its own track, its own
+            // length, and the placement the recording captured, which the
+            // project file then overrides.
+            if let Some(webcam) = data.webcam.clone() {
+                webcam.load(Some(source), duration);
+            }
             if duration > 0.0 {
                 restored = super::project::load_project(source);
                 if let Some(file) = &restored {
                     data.apply_project(file);
                 }
             }
+        } else if let Some(webcam) = data.webcam.clone() {
+            // Closing the document takes the camera layer with it.
+            webcam.load(None, 0.0);
         }
         data.clamp_cuts();
         data.clamp_scroll();
@@ -1923,9 +2012,13 @@ pub(super) fn build(
     scale: f64,
     prefers_dark: bool,
     cursor: super::cursor::CursorModel,
+    webcam: super::webcam::WebcamModel,
     source_size: Rc<Cell<Option<(u32, u32)>>>,
 ) -> Timeline {
     let data = Rc::new(RefCell::new(Data::default()));
+    // The document needs the camera layer even when this recording has no
+    // track: opening a different one has to be able to load it.
+    data.borrow_mut().webcam = Some(webcam);
     let camera_cache = Rc::new(RefCell::new(super::zoom::ZoomCameraCache::default()));
     let project = super::project::ProjectSync::default();
 
@@ -2146,6 +2239,7 @@ pub(super) fn build(
     // The Zoom panel follows every change to the zoom track or its selection.
     // Repainting is the one place every mutation already passes through.
     let zoom_listener: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let webcam_listener: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
     let repaint: Rc<dyn Fn()> = {
         let data = data.clone();
         let ruler = ruler.clone();
@@ -2159,6 +2253,7 @@ pub(super) fn build(
         let adjustment = adjustment.clone();
         let scroll_syncing = scroll_syncing.clone();
         let zoom_listener = zoom_listener.clone();
+        let webcam_listener = webcam_listener.clone();
         let project = project.clone();
         Rc::new(move || {
             {
@@ -2178,6 +2273,9 @@ pub(super) fn build(
             extend.queue_draw();
             playhead.queue_draw();
             if let Some(listener) = zoom_listener.borrow().as_ref() {
+                listener();
+            }
+            if let Some(listener) = webcam_listener.borrow().as_ref() {
                 listener();
             }
             // Every mutation repaints, so this is the one place that can tell
@@ -2560,6 +2658,7 @@ pub(super) fn build(
         repaint,
         frame_sink,
         zoom_listener,
+        webcam_listener,
         project,
     }
 }
@@ -4604,6 +4703,7 @@ mod tests {
                 end: 4.0,
                 hidden: false,
             }],
+            webcam: None,
             playhead_seconds: 99.0,
             timeline_scale: 400.0,
             timeline_scroll_seconds: 12.0,

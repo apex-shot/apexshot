@@ -62,6 +62,8 @@ pub(super) fn build_tools_column(
         Some("cursor"),
     );
     pages.add_named(&build_frames_panel(scale), Some("frames"));
+    let (webcam_page, refresh_webcam) = build_webcam_panel(scale, timeline.clone());
+    pages.add_named(&webcam_page, Some("webcam"));
 
     let buttons = Rc::new(RefCell::new(Vec::<ToggleButton>::new()));
     // Selecting a zoom pill reveals its own panel. There is no rail icon for
@@ -82,45 +84,29 @@ pub(super) fn build_tools_column(
     pages.add_named(&zoom_page, Some("zoom"));
     pages.set_visible_child_name("background");
     timeline.set_zoom_listener(refresh_zoom);
+    timeline.set_webcam_listener(refresh_webcam);
 
     let tools = [
         (
             "background",
             icon_names::custom::IMAGE_ALT_SYMBOLIC,
             t("Background"),
-            None,
         ),
-        (
-            "cursor",
-            icon_names::POINTER_PRIMARY_CLICK,
-            t("Cursor"),
-            None,
-        ),
+        ("cursor", icon_names::POINTER_PRIMARY_CLICK, t("Cursor")),
         (
             "frames",
             icon_names::custom::OVERLAPPING_WINDOWS_SYMBOLIC,
             t("Frames"),
-            None,
         ),
-        (
-            "takes",
-            icon_names::custom::MARKER_SYMBOLIC,
-            t("Takes"),
-            Some(t("Takes — coming soon")),
-        ),
+        ("webcam", icon_names::custom::WEBCAM_SYMBOLIC, t("Webcam")),
     ];
 
-    for (index, (page_name, icon_name, label, unavailable_tooltip)) in tools.into_iter().enumerate()
-    {
+    for (index, (page_name, icon_name, label)) in tools.into_iter().enumerate() {
         let button = ToggleButton::new();
         button.add_css_class("recording-editor-tool-section-btn");
         button.set_has_frame(false);
         button.set_hexpand(true);
-        button.set_tooltip_text(Some(unavailable_tooltip.as_deref().unwrap_or(&label)));
-        // The take library is not built yet; the icon marks where it goes.
-        if unavailable_tooltip.is_some() {
-            button.set_sensitive(false);
-        }
+        button.set_tooltip_text(Some(&label));
         button.set_active(index == 0);
         let icon = Image::from_icon_name(icon_name);
         icon.set_pixel_size((18.0 * scale).round() as i32);
@@ -1115,6 +1101,317 @@ fn build_zoom_panel(
     };
 
     (panel, refresh)
+}
+
+/// The camera shapes the panel offers, named the way the recorder's Settings
+/// page names them.
+const WEBCAM_SHAPES: [&str; 4] = ["Circle", "Square", "Rectangle", "Vertical"];
+
+/// The Webcam panel: where the camera track sits in the frame, how big it is,
+/// and what shape and finish it is cut to. Every control writes into the
+/// timeline, so the preview and the export read the same layer.
+fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBox, Rc<dyn Fn()>) {
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+    panel.add_css_class("recording-editor-zoom-panel");
+    panel.set_hexpand(true);
+    panel.set_vexpand(true);
+
+    let header = panel_header(&t("Webcam"));
+    let reset = Button::with_label(&t("Reset"));
+    reset.add_css_class("recording-editor-zoom-reset");
+    reset.set_has_frame(false);
+    reset.set_halign(Align::End);
+    reset.set_tooltip_text(Some(&t(
+        "Put the camera back where the recording captured it.",
+    )));
+    header.append(&reset);
+    panel.append(&header);
+
+    let body = panel_body();
+    let syncing = Rc::new(Cell::new(false));
+    let initial = timeline.webcam_settings();
+
+    let hint = Label::new(None);
+    hint.add_css_class("recording-editor-zoom-hint");
+    hint.set_wrap(true);
+    hint.set_xalign(0.0);
+    hint.set_max_width_chars(34);
+    body.append(&hint);
+
+    let (show_row, show) = setting_switch_row(
+        &t("Show camera"),
+        &t("Hide the camera without removing its track."),
+    );
+    body.append(&show_row);
+    let (fullscreen_row, fullscreen) = setting_switch_row(
+        &t("Fullscreen"),
+        &t("Fill the frame with the camera instead of the bubble."),
+    );
+    body.append(&fullscreen_row);
+
+    body.append(&panel_kicker(&t("SIZE")));
+    let size = value_slider_control(
+        &t("Size"),
+        super::webcam::MIN_SIZE * 100.0,
+        super::webcam::MAX_SIZE * 100.0,
+        initial.map_or(20.0, |layer| layer.w * 100.0),
+        1.0,
+        0,
+        scale,
+        {
+            let timeline = timeline.clone();
+            move |value| {
+                timeline.update_webcam(|layer| {
+                    let aspect = if layer.w > 0.0 {
+                        layer.h / layer.w
+                    } else {
+                        1.0
+                    };
+                    layer.w = value / 100.0;
+                    layer.h = layer.w * aspect;
+                });
+            }
+        },
+    );
+    body.append(&size.widget());
+
+    body.append(&panel_kicker(&t("SHAPE")));
+    let shape_row = GtkBox::new(Orientation::Horizontal, (4.0 * scale).round() as i32);
+    shape_row.add_css_class("recording-editor-zoom-chips");
+    shape_row.set_hexpand(true);
+    shape_row.set_homogeneous(true);
+    let shape_buttons: Vec<ToggleButton> = WEBCAM_SHAPES
+        .iter()
+        .map(|label| tab_button(&t(label), "recording-editor-zoom-chip"))
+        .collect();
+    for button in shape_buttons.iter().skip(1) {
+        button.set_group(Some(&shape_buttons[0]));
+    }
+    for button in shape_buttons.iter() {
+        shape_row.append(button);
+    }
+    body.append(&shape_row);
+    for (index, button) in shape_buttons.iter().enumerate() {
+        let timeline = timeline.clone();
+        let syncing = syncing.clone();
+        let shape = index as u8;
+        button.connect_toggled(move |button| {
+            if syncing.get() || !button.is_active() {
+                return;
+            }
+            timeline.update_webcam(|layer| {
+                layer.radius = super::webcam::radius_for_shape(shape);
+                layer.h = layer.w * super::webcam::aspect_for_shape(shape);
+            });
+        });
+    }
+
+    let radius_slider = value_slider_control(
+        &t("Corner radius"),
+        0.0,
+        100.0,
+        initial.map_or(12.0, |layer| layer.radius * 100.0),
+        1.0,
+        0,
+        scale,
+        {
+            let timeline = timeline.clone();
+            move |value| timeline.update_webcam(|layer| layer.radius = value / 100.0)
+        },
+    );
+    body.append(&radius_slider.widget());
+
+    body.append(&panel_kicker(&t("POSITION")));
+    let x_slider = value_slider_control(
+        &t("Horizontal"),
+        0.0,
+        100.0,
+        initial.map_or(70.0, |layer| layer.x * 100.0),
+        1.0,
+        0,
+        scale,
+        {
+            let timeline = timeline.clone();
+            move |value| timeline.update_webcam(|layer| layer.x = value / 100.0)
+        },
+    );
+    body.append(&x_slider.widget());
+    let y_slider = value_slider_control(
+        &t("Vertical"),
+        0.0,
+        100.0,
+        initial.map_or(55.0, |layer| layer.y * 100.0),
+        1.0,
+        0,
+        scale,
+        {
+            let timeline = timeline.clone();
+            move |value| timeline.update_webcam(|layer| layer.y = value / 100.0)
+        },
+    );
+    body.append(&y_slider.widget());
+
+    body.append(&panel_kicker(&t("FINISH")));
+    let (mirror_row, mirror) = setting_switch_row(
+        &t("Mirror camera"),
+        &t("Flip the camera left to right, the way a mirror shows it."),
+    );
+    body.append(&mirror_row);
+
+    show.connect_state_set({
+        let timeline = timeline.clone();
+        let syncing = syncing.clone();
+        move |_, active| {
+            if !syncing.get() {
+                timeline.update_webcam(|layer| layer.enabled = active);
+            }
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    fullscreen.connect_state_set({
+        let timeline = timeline.clone();
+        let syncing = syncing.clone();
+        move |_, active| {
+            if !syncing.get() {
+                timeline.update_webcam(|layer| layer.fullscreen = active);
+            }
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    mirror.connect_state_set({
+        let timeline = timeline.clone();
+        let syncing = syncing.clone();
+        move |_, active| {
+            if !syncing.get() {
+                timeline.update_webcam(|layer| layer.mirror = active);
+            }
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    reset.connect_clicked({
+        let timeline = timeline.clone();
+        move |_| timeline.reset_webcam()
+    });
+
+    let scroll = ScrolledWindow::new();
+    scroll.add_css_class("recording-editor-zoom-scroll");
+    scroll.add_css_class("video-editor-side-scroll");
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    scroll.set_vexpand(true);
+    scroll.set_hexpand(true);
+    scroll.set_child(Some(&body));
+    panel.append(&scroll);
+
+    // Playback repaints twenty times a second, so the refresh compares first:
+    // nothing here changes while the playhead moves.
+    let last = Rc::new(RefCell::new(None::<Option<super::webcam::LayerSettings>>));
+    let refresh: Rc<dyn Fn()> = {
+        let last = last.clone();
+        let syncing = syncing.clone();
+        let hint = hint.clone();
+        let show = show.clone();
+        let fullscreen = fullscreen.clone();
+        let mirror = mirror.clone();
+        let reset = reset.clone();
+        let size = size.clone();
+        let radius_slider = radius_slider.clone();
+        let x_slider = x_slider.clone();
+        let y_slider = y_slider.clone();
+        let shape_buttons = shape_buttons.clone();
+        Rc::new(move || {
+            let state = timeline.webcam_settings();
+            if *last.borrow() == Some(state) {
+                return;
+            }
+            *last.borrow_mut() = Some(state);
+            syncing.set(true);
+            let Some(layer) = state else {
+                hint.set_text(&t("This recording has no camera track."));
+                show.set_sensitive(false);
+                fullscreen.set_sensitive(false);
+                mirror.set_sensitive(false);
+                reset.set_sensitive(false);
+                size.widget().set_sensitive(false);
+                radius_slider.widget().set_sensitive(false);
+                x_slider.widget().set_sensitive(false);
+                y_slider.widget().set_sensitive(false);
+                for button in shape_buttons.iter() {
+                    button.set_sensitive(false);
+                }
+                syncing.set(false);
+                return;
+            };
+            hint.set_text(&t("Shown over the recording in preview and export"));
+            show.set_sensitive(true);
+            show.set_active(layer.enabled);
+            mirror.set_sensitive(layer.enabled);
+            mirror.set_active(layer.mirror);
+            reset.set_sensitive(true);
+            // A fullscreen camera fills the frame, so nothing that places the
+            // bubble applies until it goes back to one.
+            let bubble = layer.enabled && !layer.fullscreen;
+            fullscreen.set_sensitive(layer.enabled);
+            fullscreen.set_active(layer.fullscreen);
+            size.widget().set_sensitive(bubble);
+            radius_slider.widget().set_sensitive(bubble);
+            x_slider.widget().set_sensitive(bubble);
+            y_slider.widget().set_sensitive(bubble);
+            size.set_value(layer.w * 100.0);
+            radius_slider.set_value(layer.radius * 100.0);
+            x_slider.set_value(layer.x * 100.0);
+            y_slider.set_value(layer.y * 100.0);
+            let shape = webcam_shape_index(&layer);
+            for (index, button) in shape_buttons.iter().enumerate() {
+                button.set_sensitive(bubble);
+                button.set_active(shape == Some(index));
+            }
+            syncing.set(false);
+        }) as Rc<dyn Fn()>
+    };
+
+    (panel, refresh)
+}
+
+/// Which shape chip a layer matches, so a hand-tuned radius or aspect leaves
+/// every chip clear instead of lighting the nearest one.
+fn webcam_shape_index(layer: &super::webcam::LayerSettings) -> Option<usize> {
+    let aspect = if layer.w > 0.0 {
+        layer.h / layer.w
+    } else {
+        1.0
+    };
+    (0..WEBCAM_SHAPES.len()).find(|&index| {
+        let shape = index as u8;
+        (layer.radius - super::webcam::radius_for_shape(shape)).abs() < 0.02
+            && (aspect - super::webcam::aspect_for_shape(shape)).abs() < 0.02
+    })
+}
+
+/// A labelled switch row, the shape every panel uses for an on/off setting.
+fn setting_switch_row(label: &str, tooltip: &str) -> (GtkBox, Switch) {
+    let row = GtkBox::new(Orientation::Horizontal, 8);
+    row.add_css_class("recording-editor-zoom-classic");
+    row.set_hexpand(true);
+    let text = Label::new(Some(label));
+    text.add_css_class("recording-editor-zoom-classic-label");
+    text.set_xalign(0.0);
+    text.set_hexpand(true);
+    let switch = Switch::new();
+    switch.add_css_class("recording-editor-zoom-switch");
+    switch.set_valign(Align::Center);
+    switch.set_halign(Align::End);
+    switch.set_tooltip_text(Some(tooltip));
+    row.append(&text);
+    row.append(&switch);
+    (row, switch)
+}
+
+/// The small all-caps heading that groups a panel's rows.
+fn panel_kicker(label: &str) -> Label {
+    let kicker = Label::new(Some(label));
+    kicker.add_css_class("recording-editor-zoom-kicker");
+    kicker.set_xalign(0.0);
+    kicker
 }
 
 fn build_frames_panel(scale: f64) -> GtkBox {

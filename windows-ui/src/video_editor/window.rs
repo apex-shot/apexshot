@@ -89,6 +89,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         scale,
         prefers_dark,
         stage.cursor.clone(),
+        stage.webcam.clone(),
         stage.source_size.clone(),
     );
 
@@ -895,7 +896,6 @@ impl Stage {
     fn show_document(&self, path: Option<&Path>, source_seconds: f64, composition_seconds: f64) {
         self.reset_camera();
         self.cursor.load(path);
-        self.webcam.load(path, source_seconds);
         self.source_seconds.set(0.0);
         self.cursor_layer.queue_draw();
         let Some((texture, width, height)) = path.and_then(poster_texture) else {
@@ -1379,6 +1379,7 @@ fn export_model(
         zoom_camera: footage.zoom_camera,
         cursor: stage.cursor.settings(),
         sidecar: stage.cursor.sidecar(),
+        webcam: stage.webcam.export(),
         crf: stage.quality.get().crf(),
     })
 }

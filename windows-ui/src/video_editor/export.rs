@@ -17,7 +17,7 @@ use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::ffmpeg;
 use crate::recording::editor::model::ClickEffect;
 use crate::recording::editor::model::CursorSettings;
-use crate::recording::editor::sidecar::{CursorMotion, PointerSidecar, WebcamTrack};
+use crate::recording::editor::sidecar::{CursorMotion, PointerSidecar};
 use gtk4::cairo::{Context, Format, ImageSurface};
 use rayon::prelude::*;
 use std::io::{Read, Write};
@@ -43,6 +43,8 @@ pub(super) struct ExportModel {
     pub zoom_camera: zoom::ZoomCameraSettings,
     pub cursor: CursorSettings,
     pub sidecar: Option<PointerSidecar>,
+    /// The camera layer to bake, when the recording has one.
+    pub webcam: Option<webcam::WebcamExport>,
     pub crf: u32,
 }
 
@@ -326,15 +328,7 @@ fn render(
         ),
         None => None,
     };
-    let webcam = model.sidecar.as_ref().and_then(|sidecar| {
-        let track = sidecar.webcam.clone().filter(WebcamTrack::is_valid)?;
-        let path = sidecar.webcam_path(&model.source)?;
-        Some((track, path))
-    });
-    let video_seconds = webcam
-        .as_ref()
-        .map(|_| ffmpeg::probe_duration(&model.source).unwrap_or(0.0))
-        .unwrap_or(0.0);
+    let webcam = model.webcam.clone();
     let mut done = 0u64;
     let started = Instant::now();
 
@@ -355,14 +349,20 @@ fn render(
                     return Err(error);
                 }
             };
-        let mut track_reader = webcam.as_ref().and_then(|(track, path)| {
-            let start = track.track_seconds(span.source_start, video_seconds);
+        let mut track_reader = webcam.as_ref().and_then(|webcam| {
+            let start = webcam.track_at(span.source_start);
             let duration = span.frames as f64 / fps;
+            let rect = webcam.settings.rect_in(webcam::Rect {
+                x: 0.0,
+                y: 0.0,
+                width: f64::from(size.0),
+                height: f64::from(size.1),
+            });
             let decode = (
-                (track.w * f64::from(size.0)).round().clamp(2.0, 4096.0) as u32,
-                (track.h * f64::from(size.1)).round().clamp(2.0, 4096.0) as u32,
+                rect.width.round().clamp(2.0, 4096.0) as u32,
+                rect.height.round().clamp(2.0, 4096.0) as u32,
             );
-            webcam::TrackReader::open(path, start, duration, fps, decode)
+            webcam::TrackReader::open(&webcam.path, start, duration, fps, decode)
         });
         let mut span_frame = 0u64;
         while span_frame < span.frames {
@@ -432,9 +432,9 @@ fn render(
             }
             // The camera layer sits over the cursor, the way the bubble window
             // sat over the desktop while the recording ran.
-            if let (Some((track, _)), Some(reader)) = (webcam.as_ref(), track_reader.as_mut()) {
+            if let (Some(layer), Some(reader)) = (webcam.as_ref(), track_reader.as_mut()) {
                 if let Some((camera, camera_size)) = reader.next_frame() {
-                    webcam::composite_into(frame, size, track, camera, camera_size);
+                    webcam::composite_into(frame, size, layer.settings, camera, camera_size);
                 }
             }
 
@@ -1045,6 +1045,7 @@ mod tests {
                 ..CursorSettings::default()
             },
             sidecar,
+            webcam: None,
             crf: 23,
         };
         let handle = start_export(model, output.clone());
@@ -1097,6 +1098,7 @@ mod tests {
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
             sidecar: None,
+            webcam: None,
             crf: 23,
         };
         let handle = start_export(model, output.clone());
@@ -1437,6 +1439,7 @@ mod tests {
                 zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
                 cursor: CursorSettings::default(),
                 sidecar: None,
+                webcam: None,
                 crf: 20,
             };
             let started = std::time::Instant::now();
@@ -1487,6 +1490,7 @@ mod tests {
 mod webcam_export_tests {
     use super::*;
     use crate::recording::editor::sidecar::WebcamTrack;
+    use crate::video_editor::webcam::LayerSettings;
     use std::fs;
     use std::time::Duration;
 
@@ -1524,8 +1528,88 @@ mod webcam_export_tests {
         [frame[offset], frame[offset + 1], frame[offset + 2]]
     }
 
+    /// A clip whose left half is red and whose right half is green, so a
+    /// mirrored layer reads as swapped colours.
+    fn split_clip(path: &Path, size: &str, seconds: f64) -> bool {
+        let mut parts = size.split('x');
+        let half = parts
+            .next()
+            .and_then(|width| width.parse::<u32>().ok())
+            .map(|width| width / 2)
+            .unwrap_or(160);
+        let height = parts
+            .next()
+            .and_then(|height| height.parse::<u32>().ok())
+            .unwrap_or(320);
+        let status = Command::new(ffmpeg::ffmpeg_executable())
+            .args(["-y", "-hide_banner", "-loglevel", "error"])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c=red:s={half}x{height}:d={seconds}:r=30"),
+            ])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c=lime:s={half}x{height}:d={seconds}:r=30"),
+            ])
+            .args(["-filter_complex", "hstack=inputs=2", "-pix_fmt", "yuv420p"])
+            .arg(path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        matches!(status, Ok(status) if status.success())
+    }
+
+    /// Export one frame of `source` with `layer` baked in, of `name`.mp4.
+    fn exported_frame(
+        dir: &Path,
+        source: &Path,
+        track_path: &Path,
+        name: &str,
+        layer: LayerSettings,
+    ) -> Vec<u8> {
+        let output = dir.join(format!("{name}.mp4"));
+        let model = ExportModel {
+            source: source.to_path_buf(),
+            source_size: (320, 240),
+            trim_start: 0.0,
+            trim_end: 1.5,
+            cuts: Vec::new(),
+            zooms: Vec::new(),
+            zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: PointerSidecar::load_next_to_video(source),
+            webcam: Some(webcam::WebcamExport {
+                path: track_path.to_path_buf(),
+                settings: layer,
+                track_seconds: 2.0,
+                video_seconds: 2.0,
+            }),
+            crf: 30,
+        };
+        let handle = start_export(model, output.clone());
+        loop {
+            match handle.receiver.recv_timeout(Duration::from_secs(120)) {
+                Ok(ExportUpdate::Progress { .. }) => {}
+                Ok(ExportUpdate::Finished(path)) => {
+                    assert_eq!(path, output);
+                    break;
+                }
+                Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
+                Ok(ExportUpdate::Cancelled) => panic!("export cancelled itself"),
+                Err(error) => panic!("export did not report back: {error}"),
+            }
+        }
+        let frame = frame_rgb(&output, 0.5, (320, 240)).expect("the export should decode");
+        let _ = fs::remove_file(&output);
+        frame
+    }
+
     #[test]
-    fn a_webcam_track_is_composited_into_the_exported_frames() {
+    fn the_webcam_layer_composites_where_the_panel_puts_it() {
         let dir = std::env::temp_dir().join(format!(
             "apexshot-webcam-export-{}-{:?}",
             std::process::id(),
@@ -1540,15 +1624,14 @@ mod webcam_export_tests {
             eprintln!("skipping the webcam export test: ffmpeg is unavailable");
             return;
         }
-        let track_path = webcam_track_file(&source);
-        let Some(track_path) = track_path else {
+        let Some(track_path) = webcam_track_file(&source) else {
             eprintln!("skipping the webcam export test: no sidecar directory");
             return;
         };
         if let Some(parent) = track_path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        if !solid_clip(&track_path, "0x00ff00", "320x320", 2.0) {
+        if !split_clip(&track_path, "320x320", 2.0) {
             return;
         }
 
@@ -1577,48 +1660,63 @@ mod webcam_export_tests {
             return;
         }
 
-        let output = dir.join("export.mp4");
-        let model = ExportModel {
-            source: source.clone(),
-            source_size: (320, 240),
-            trim_start: 0.0,
-            trim_end: 1.5,
-            cuts: Vec::new(),
-            zooms: Vec::new(),
-            zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
-            cursor: CursorSettings::default(),
-            sidecar: Some(sidecar),
-            crf: 30,
+        // The bubble covers 0.6..0.95 of the frame, so half of it starts 8px in
+        // and the other half ends 16px from the right edge.
+        let bubble = LayerSettings {
+            x: 0.6,
+            y: 0.6,
+            w: 0.35,
+            h: 0.35,
+            radius: 0.08,
+            ..Default::default()
         };
-        let handle = start_export(model, output.clone());
-        loop {
-            match handle.receiver.recv_timeout(Duration::from_secs(120)) {
-                Ok(ExportUpdate::Progress { .. }) => {}
-                Ok(ExportUpdate::Finished(path)) => {
-                    assert_eq!(path, output);
-                    break;
-                }
-                Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
-                Ok(ExportUpdate::Cancelled) => panic!("export cancelled itself"),
-                Err(error) => panic!("export did not report back: {error}"),
-            }
-        }
-
-        let frame = frame_rgb(&output, 0.5, (320, 240)).expect("the export should decode");
-        // The bubble covers 0.6..0.95 of the frame; its middle is the camera.
-        let inside = pixel(&frame, 320, 240, 180);
+        let frame = exported_frame(&dir, &source, &track_path, "bubble", bubble);
+        let left = pixel(&frame, 320, 200, 180);
+        let right = pixel(&frame, 320, 280, 180);
         assert!(
-            inside[1] > 150 && inside[0] < 90,
-            "the camera should be composited at the bubble: {inside:?}"
+            left[0] > 150 && left[1] < 90,
+            "the camera's left half should sit inside the bubble: {left:?}"
         );
-        // The footage outside it is still the recording.
+        assert!(
+            right[1] > 150 && right[0] < 90,
+            "the camera's right half should sit inside the bubble: {right:?}"
+        );
         let outside = pixel(&frame, 320, 20, 20);
         assert!(
             outside[0] < 70 && outside[2] < 70,
             "the footage should be untouched outside the bubble: {outside:?}"
         );
 
-        let _ = fs::remove_file(&output);
+        // Mirroring swaps the two halves without moving the bubble.
+        let mirrored = LayerSettings {
+            mirror: true,
+            ..bubble
+        };
+        let frame = exported_frame(&dir, &source, &track_path, "mirror", mirrored);
+        let left = pixel(&frame, 320, 200, 180);
+        let right = pixel(&frame, 320, 280, 180);
+        assert!(
+            left[1] > 150 && left[0] < 90,
+            "a mirrored camera shows its right half on the left: {left:?}"
+        );
+        assert!(
+            right[0] > 150 && right[1] < 90,
+            "a mirrored camera shows its left half on the right: {right:?}"
+        );
+
+        // A fullscreen camera covers the frame instead of sitting in it, so the
+        // corner the footage owns in every other layer is the camera here.
+        let fullscreen = LayerSettings {
+            fullscreen: true,
+            ..bubble
+        };
+        let frame = exported_frame(&dir, &source, &track_path, "fullscreen", fullscreen);
+        let corner = pixel(&frame, 320, 10, 10);
+        assert!(
+            corner[0] > 150,
+            "a fullscreen camera should reach the corner of the frame: {corner:?}"
+        );
+
         let _ = fs::remove_file(&sidecar_path);
         let _ = fs::remove_file(&track_path);
         let _ = fs::remove_dir_all(&dir);
