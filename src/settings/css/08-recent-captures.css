@@ -151,8 +151,8 @@
             .recent-captures-empty-state {
                 padding: 48px 20px;
                 border-radius: 12px;
-                background: alpha(white, 0.03);
-                border: 1px solid alpha(white, 0.08);
+                background: transparent;
+                border: none;
             }
 
             .recent-captures-empty-title {
@@ -480,8 +480,8 @@
                 background-color: alpha(#111827, 0.06);
             }
             .editor-root.editor-theme-light .recent-captures-empty-state {
-                background: alpha(#111827, 0.03);
-                border-color: alpha(#111827, 0.08);
+                background: transparent;
+                border: none;
             }
 
             .editor-root.editor-theme-light .recent-captures-icon-btn {

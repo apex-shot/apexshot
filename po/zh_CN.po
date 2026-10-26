@@ -3387,3 +3387,12 @@ msgstr "自适应"
 
 msgid "Adjust Light"
 msgstr "调整光源"
+
+msgid "Motion editing is not available in the Windows build yet."
+msgstr "Windows 版本尚不支持动态编辑。"
+
+msgid "Video editing is not available in the Windows build yet."
+msgstr "Windows 版本尚不支持视频编辑。"
+
+msgid "Cloud browsing and sign-in are not available in the Windows build yet."
+msgstr "Windows 版本尚不支持云端浏览和登录。"

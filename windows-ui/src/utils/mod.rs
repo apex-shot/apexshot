@@ -29,3 +29,6 @@ pub mod open {
         Ok(())
     }
 }
+
+#[path = "../../../src/utils/png_io.rs"]
+pub mod png_io;
