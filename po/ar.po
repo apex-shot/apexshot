@@ -3418,3 +3418,244 @@ msgstr "متكيف"
 
 msgid "Adjust Light"
 msgstr "ضبط الضوء"
+
+msgid "16:9"
+msgstr "16:9"
+
+msgid "9:16"
+msgstr "9:16"
+
+msgid "Add gradient stop"
+msgstr "إضافة نقطة تدرّج"
+
+msgid "ApexShot Video Editor"
+msgstr "محرر الفيديو ApexShot"
+
+msgid "Background image"
+msgstr "صورة الخلفية"
+
+msgid "Bottom left"
+msgstr "أسفل اليسار"
+
+msgid "Bottom right"
+msgstr "أسفل اليمين"
+
+msgid "Cloud browsing and sign-in are not available in the Windows build yet."
+msgstr "تصفح السحابة وتسجيل الدخول غير متاحين بعد في إصدار Windows."
+
+msgid "Cloud uploads are not available in the Windows build yet"
+msgstr "الرفع إلى السحابة غير متاح بعد في إصدار Windows"
+
+msgid ""
+"Cloud uploads are not wired in the Windows build yet. Destination and XBackBone settings are saved for a future release."
+msgstr ""
+"الرفع إلى السحابة غير موصول بعد في إصدار Windows. تُحفظ إعدادات الوجهة وXBackBone لإصدار مستقبلي."
+
+msgid "Corner radius"
+msgstr "نصف قطر الزوايا"
+
+msgid "Could not access the Windows clipboard"
+msgstr "تعذّر الوصول إلى حافظة Windows"
+
+msgid "Could not copy file: {message}"
+msgstr "تعذّر نسخ الملف: {message}"
+
+msgid "Could not copy image: {message}"
+msgstr "تعذّر نسخ الصورة: {message}"
+
+msgid "Could not open Explorer: {message}"
+msgstr "تعذّر فتح مستكشف الملفات: {message}"
+
+msgid "Could not start the video editor: {message}"
+msgstr "تعذّر تشغيل محرر الفيديو: {message}"
+
+msgid "Do Not Disturb integration is not available on Windows yet."
+msgstr "تكامل وضع عدم الإزعاج غير متاح بعد في Windows."
+
+msgid "Dragging the result card out of the app is not available on Windows yet."
+msgstr "سحب بطاقة النتيجة خارج التطبيق غير متاح بعد في Windows."
+
+msgid "Edits you save in the video editor will show up here."
+msgstr "ستظهر هنا التعديلات التي تحفظها في محرر الفيديو."
+
+msgid "Export failed."
+msgstr "فشل التصدير."
+
+msgid "Exported successfully."
+msgstr "تم التصدير بنجاح."
+
+msgid "FINISH"
+msgstr "اللمسات الأخيرة"
+
+msgid "Fill the frame with the camera instead of the bubble."
+msgstr "يملأ الإطار بالكاميرا بدلًا من الفقاعة."
+
+msgid "First available camera"
+msgstr "أول كاميرا متاحة"
+
+msgid "Flip the camera left to right, the way a mirror shows it."
+msgstr "يعكس الكاميرا من اليسار إلى اليمين كما في المرآة."
+
+msgid "Frame changes keep the source footage centred in the preview."
+msgstr "تغييرات الإطار تُبقي المادة الأصلية في وسط المعاينة."
+
+msgid ""
+"Global shortcuts are not available in the Windows build yet. Bindings are saved for a future release."
+msgstr ""
+"الاختصارات العامة غير متاحة بعد في إصدار Windows. تُحفظ التعيينات لإصدار مستقبلي."
+
+msgid "Hide the camera without removing its track."
+msgstr "يخفي الكاميرا دون إزالة مسارها."
+
+msgid "Horizontal"
+msgstr "أفقي"
+
+msgid "Huge"
+msgstr "ضخم"
+
+msgid "If enabled, the zoom is applied instantly without any animation."
+msgstr "عند التفعيل، يُطبَّق التكبير فورًا دون أي حركة."
+
+msgid "Instant"
+msgstr "فوري"
+
+msgid "MP4 recordings"
+msgstr "تسجيلات MP4"
+
+msgid "Maximize"
+msgstr "تكبير النافذة"
+
+msgid "Mirror camera"
+msgstr "عكس الكاميرا"
+
+msgid "Mirror the picture"
+msgstr "عكس الصورة"
+
+msgid "Motion editing is not available in the Windows build yet."
+msgstr "تحرير الحركة غير متاح بعد في إصدار Windows."
+
+msgid "Open recording"
+msgstr "فتح تسجيل"
+
+msgid "Opened {name} in the video editor"
+msgstr "تم فتح {name} في محرر الفيديو"
+
+msgid "POSITION"
+msgstr "الموضع"
+
+msgid "Put the camera back where the recording captured it."
+msgstr "يعيد الكاميرا إلى مكان التقاطها في التسجيل."
+
+msgid "Record a webcam track"
+msgstr "تسجيل مسار كاميرا ويب"
+
+msgid "Rectangle"
+msgstr "مستطيل"
+
+msgid "Remove stop"
+msgstr "إزالة نقطة التوقف"
+
+msgid "Reverse gradient"
+msgstr "عكس التدرّج"
+
+msgid "SHAPE"
+msgstr "الشكل"
+
+msgid "SIZE"
+msgstr "الحجم"
+
+msgid "STEPS"
+msgstr "الخطوات"
+
+msgid "Search isn't available on this page"
+msgstr "البحث غير متاح في هذه الصفحة"
+
+msgid "Select a zoom clip on the timeline"
+msgstr "اختر مقطع تكبير على الخط الزمني"
+
+msgid "Select image…"
+msgstr "اختيار صورة…"
+
+msgid "Shape"
+msgstr "الشكل"
+
+msgid "Show camera"
+msgstr "إظهار الكاميرا"
+
+msgid "Show in Explorer"
+msgstr "إظهار في مستكشف الملفات"
+
+msgid "Strength"
+msgstr "القوة"
+
+msgid "TRANSITION"
+msgstr "الانتقال"
+
+msgid "The Windows recorder always captures at native display resolution."
+msgstr "يسجّل المسجّل في Windows دائمًا بدقة الشاشة الأصلية."
+
+msgid "The Windows recorder always shows its controls."
+msgstr "يعرض المسجّل في Windows عناصر التحكم دائمًا."
+
+msgid ""
+"The Windows shell needs its tray icon until global shortcuts are available."
+msgstr "يحتاج غلاف Windows إلى أيقونته في الشريط إلى أن تتوفر الاختصارات العامة."
+
+msgid ""
+"The annotate editor is not available in the Windows build yet. These preferences are saved for a future release."
+msgstr ""
+"محرر التعليقات غير متاح بعد في إصدار Windows. تُحفظ هذه التفضيلات لإصدار مستقبلي."
+
+msgid "The annotate editor is not available on Windows yet."
+msgstr "محرر التعليقات غير متاح بعد في Windows."
+
+msgid "The export stopped unexpectedly."
+msgstr "توقف التصدير بشكل غير متوقع."
+
+msgid "The image editor is not available in the Windows build yet"
+msgstr "محرر الصور غير متاح بعد في إصدار Windows"
+
+msgid "This recording has no camera track."
+msgstr "لا يحتوي هذا التسجيل على مسار كاميرا."
+
+msgid "Top left"
+msgstr "أعلى اليسار"
+
+msgid "Top right"
+msgstr "أعلى اليمين"
+
+msgid "Transition"
+msgstr "الانتقال"
+
+msgid "Untitled recording"
+msgstr "تسجيل بلا عنوان"
+
+msgid "Uploading from the result card is not available on Windows yet."
+msgstr "الرفع من بطاقة النتيجة غير متاح بعد في Windows."
+
+msgid "Usage telemetry is not sent from the Windows build."
+msgstr "لا يرسل إصدار Windows بيانات قياس الاستخدام."
+
+msgid "Vertical"
+msgstr "رأسي"
+
+msgid "Video export from the Windows editor is not available yet."
+msgstr "تصدير الفيديو من محرر Windows غير متاح بعد."
+
+msgid "Webcam"
+msgstr "كاميرا الويب"
+
+msgid "Windows UI translations are not available yet."
+msgstr "ترجمات واجهة Windows غير متاحة بعد."
+
+msgid "ZOOM"
+msgstr "تكبير"
+
+msgid "cancelling…"
+msgstr "جارٍ الإلغاء…"
+
+msgid "estimated:"
+msgstr "المقدّر:"
+
+msgid "finishing…"
+msgstr "جارٍ الإنهاء…"

@@ -65,6 +65,11 @@ jobs:
           python3 scripts/test_rpm_assets.py
           python3 scripts/test_release_gate.py
 
+      # Every UI string has to reach every shipped catalog, so a new control
+      # cannot land untranslated. Covers the Linux app and the Windows app.
+      - name: UI translation catalogs
+        run: python3 scripts/check-i18n-catalogs.py
+
       - name: Reject nested gitlinks
         run: |
           set -euo pipefail

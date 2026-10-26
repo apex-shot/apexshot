@@ -3397,3 +3397,241 @@ msgstr "適応"
 
 msgid "Adjust Light"
 msgstr "光を調整"
+
+msgid "16:9"
+msgstr "16:9"
+
+msgid "9:16"
+msgstr "9:16"
+
+msgid "Add gradient stop"
+msgstr "グラデーションの停止位置を追加"
+
+msgid "ApexShot Video Editor"
+msgstr "ApexShot 動画エディタ"
+
+msgid "Background image"
+msgstr "背景画像"
+
+msgid "Bottom left"
+msgstr "左下"
+
+msgid "Bottom right"
+msgstr "右下"
+
+msgid "Cloud browsing and sign-in are not available in the Windows build yet."
+msgstr "Windows 版ではクラウドの閲覧とサインインはまだ利用できません。"
+
+msgid "Cloud uploads are not available in the Windows build yet"
+msgstr "Windows 版ではクラウドへのアップロードはまだ利用できません"
+
+msgid ""
+"Cloud uploads are not wired in the Windows build yet. Destination and XBackBone settings are saved for a future release."
+msgstr "Windows 版ではクラウドへのアップロードはまだ接続されていません。保存先と XBackBone の設定は今後のリリース用に保存されます。"
+
+msgid "Corner radius"
+msgstr "角の丸み"
+
+msgid "Could not access the Windows clipboard"
+msgstr "Windows のクリップボードにアクセスできませんでした"
+
+msgid "Could not copy file: {message}"
+msgstr "ファイルをコピーできませんでした: {message}"
+
+msgid "Could not copy image: {message}"
+msgstr "画像をコピーできませんでした: {message}"
+
+msgid "Could not open Explorer: {message}"
+msgstr "エクスプローラーを開けませんでした: {message}"
+
+msgid "Could not start the video editor: {message}"
+msgstr "動画エディタを起動できませんでした: {message}"
+
+msgid "Do Not Disturb integration is not available on Windows yet."
+msgstr "Windows では集中モードとの連携はまだ利用できません。"
+
+msgid "Dragging the result card out of the app is not available on Windows yet."
+msgstr "Windows では結果カードをアプリの外へドラッグする操作はまだ利用できません。"
+
+msgid "Edits you save in the video editor will show up here."
+msgstr "動画エディタで保存した編集内容がここに表示されます。"
+
+msgid "Export failed."
+msgstr "書き出しに失敗しました。"
+
+msgid "Exported successfully."
+msgstr "書き出しに成功しました。"
+
+msgid "FINISH"
+msgstr "仕上げ"
+
+msgid "Fill the frame with the camera instead of the bubble."
+msgstr "吹き出しではなくカメラでフレームを埋めます。"
+
+msgid "First available camera"
+msgstr "最初に利用可能なカメラ"
+
+msgid "Flip the camera left to right, the way a mirror shows it."
+msgstr "鏡のようにカメラの映像を左右反転します。"
+
+msgid "Frame changes keep the source footage centred in the preview."
+msgstr "フレームを変えても元の映像はプレビューの中央に保たれます。"
+
+msgid ""
+"Global shortcuts are not available in the Windows build yet. Bindings are saved for a future release."
+msgstr "Windows 版ではグローバルショートカットはまだ利用できません。割り当ては今後のリリース用に保存されます。"
+
+msgid "Hide the camera without removing its track."
+msgstr "トラックを残したままカメラを非表示にします。"
+
+msgid "Horizontal"
+msgstr "横"
+
+msgid "Huge"
+msgstr "特大"
+
+msgid "If enabled, the zoom is applied instantly without any animation."
+msgstr "有効にすると、ズームはアニメーションなしで即座に適用されます。"
+
+msgid "Instant"
+msgstr "即時"
+
+msgid "MP4 recordings"
+msgstr "MP4 録画"
+
+msgid "Maximize"
+msgstr "最大化"
+
+msgid "Mirror camera"
+msgstr "カメラを左右反転"
+
+msgid "Mirror the picture"
+msgstr "画像を左右反転"
+
+msgid "Motion editing is not available in the Windows build yet."
+msgstr "Windows 版ではモーション編集はまだ利用できません。"
+
+msgid "Open recording"
+msgstr "録画を開く"
+
+msgid "Opened {name} in the video editor"
+msgstr "{name} を動画エディタで開きました"
+
+msgid "POSITION"
+msgstr "位置"
+
+msgid "Put the camera back where the recording captured it."
+msgstr "カメラを録画時の位置に戻します。"
+
+msgid "Record a webcam track"
+msgstr "ウェブカメラのトラックを録画"
+
+msgid "Rectangle"
+msgstr "長方形"
+
+msgid "Remove stop"
+msgstr "停止位置を削除"
+
+msgid "Reverse gradient"
+msgstr "グラデーションを反転"
+
+msgid "SHAPE"
+msgstr "形状"
+
+msgid "SIZE"
+msgstr "サイズ"
+
+msgid "STEPS"
+msgstr "ステップ"
+
+msgid "Search isn't available on this page"
+msgstr "このページでは検索を利用できません"
+
+msgid "Select a zoom clip on the timeline"
+msgstr "タイムラインでズームクリップを選択してください"
+
+msgid "Select image…"
+msgstr "画像を選択…"
+
+msgid "Shape"
+msgstr "形状"
+
+msgid "Show camera"
+msgstr "カメラを表示"
+
+msgid "Show in Explorer"
+msgstr "エクスプローラーで表示"
+
+msgid "Strength"
+msgstr "強さ"
+
+msgid "TRANSITION"
+msgstr "トランジション"
+
+msgid "The Windows recorder always captures at native display resolution."
+msgstr "Windows レコーダーは常にディスプレイのネイティブ解像度で録画します。"
+
+msgid "The Windows recorder always shows its controls."
+msgstr "Windows レコーダーは常に操作パネルを表示します。"
+
+msgid ""
+"The Windows shell needs its tray icon until global shortcuts are available."
+msgstr "グローバルショートカットが利用できるまで、Windows シェルにはトレイアイコンが必要です。"
+
+msgid ""
+"The annotate editor is not available in the Windows build yet. These preferences are saved for a future release."
+msgstr "Windows 版では注釈エディタはまだ利用できません。これらの設定は今後のリリース用に保存されます。"
+
+msgid "The annotate editor is not available on Windows yet."
+msgstr "Windows では注釈エディタはまだ利用できません。"
+
+msgid "The export stopped unexpectedly."
+msgstr "書き出しが予期せず停止しました。"
+
+msgid "The image editor is not available in the Windows build yet"
+msgstr "Windows 版では画像エディタはまだ利用できません"
+
+msgid "This recording has no camera track."
+msgstr "この録画にはカメラトラックがありません。"
+
+msgid "Top left"
+msgstr "左上"
+
+msgid "Top right"
+msgstr "右上"
+
+msgid "Transition"
+msgstr "トランジション"
+
+msgid "Untitled recording"
+msgstr "無題の録画"
+
+msgid "Uploading from the result card is not available on Windows yet."
+msgstr "Windows では結果カードからのアップロードはまだ利用できません。"
+
+msgid "Usage telemetry is not sent from the Windows build."
+msgstr "Windows 版は利用状況のテレメトリを送信しません。"
+
+msgid "Vertical"
+msgstr "縦"
+
+msgid "Video export from the Windows editor is not available yet."
+msgstr "Windows エディタからの動画書き出しはまだ利用できません。"
+
+msgid "Webcam"
+msgstr "ウェブカメラ"
+
+msgid "Windows UI translations are not available yet."
+msgstr "Windows の UI 翻訳はまだ利用できません。"
+
+msgid "ZOOM"
+msgstr "ズーム"
+
+msgid "cancelling…"
+msgstr "キャンセル中…"
+
+msgid "estimated:"
+msgstr "推定:"
+
+msgid "finishing…"
+msgstr "完了処理中…"

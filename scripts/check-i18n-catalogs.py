@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Fail if a registered UI message is missing from any shipped PO catalog."""
+"""Fail if a registered UI message is missing from any shipped PO catalog.
+
+Both UIs are checked: the Linux app in `src/` and the Windows app in
+`windows-ui/src/`, which reuses the same catalogs even though the Windows
+package does not yet ship them.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,7 @@ import re
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
+SRC = [ROOT / "src", ROOT / "windows-ui" / "src"]
 PO = ROOT / "po"
 SHIPPED = ["ar", "de", "es", "fr", "ja", "pt_BR", "ru", "zh_CN"]
 SKIP = {"", "+", "-", "⌄"}
@@ -165,7 +170,9 @@ def unescape_rust(value: str) -> str:
 
 def registered_messages() -> list[str]:
     found: set[str] = set()
-    sources = [path.read_text(encoding="utf-8") for path in SRC.rglob("*.rs")]
+    sources = [
+        path.read_text(encoding="utf-8") for root in SRC for path in root.rglob("*.rs")
+    ]
     definitions = [definition for text in sources for definition in function_definitions(text)]
     translated = translated_parameter_positions(definitions)
     for text in sources:

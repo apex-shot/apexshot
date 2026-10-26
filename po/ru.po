@@ -3454,3 +3454,248 @@ msgstr "Адаптивная"
 
 msgid "Adjust Light"
 msgstr "Настроить свет"
+
+msgid "16:9"
+msgstr "16:9"
+
+msgid "9:16"
+msgstr "9:16"
+
+msgid "Add gradient stop"
+msgstr "Добавить точку градиента"
+
+msgid "ApexShot Video Editor"
+msgstr "Видеоредактор ApexShot"
+
+msgid "Background image"
+msgstr "Фоновое изображение"
+
+msgid "Bottom left"
+msgstr "Снизу слева"
+
+msgid "Bottom right"
+msgstr "Снизу справа"
+
+msgid "Cloud browsing and sign-in are not available in the Windows build yet."
+msgstr "В сборке для Windows просмотр облака и вход пока недоступны."
+
+msgid "Cloud uploads are not available in the Windows build yet"
+msgstr "В сборке для Windows загрузка в облако пока недоступна"
+
+msgid ""
+"Cloud uploads are not wired in the Windows build yet. Destination and XBackBone settings are saved for a future release."
+msgstr ""
+"В сборке для Windows загрузка в облако ещё не подключена. Настройки назначения и XBackBone сохраняются для будущего выпуска."
+
+msgid "Corner radius"
+msgstr "Радиус углов"
+
+msgid "Could not access the Windows clipboard"
+msgstr "Не удалось получить доступ к буферу обмена Windows"
+
+msgid "Could not copy file: {message}"
+msgstr "Не удалось скопировать файл: {message}"
+
+msgid "Could not copy image: {message}"
+msgstr "Не удалось скопировать изображение: {message}"
+
+msgid "Could not open Explorer: {message}"
+msgstr "Не удалось открыть Проводник: {message}"
+
+msgid "Could not start the video editor: {message}"
+msgstr "Не удалось запустить видеоредактор: {message}"
+
+msgid "Do Not Disturb integration is not available on Windows yet."
+msgstr "Интеграция с режимом «Не беспокоить» пока недоступна в Windows."
+
+msgid "Dragging the result card out of the app is not available on Windows yet."
+msgstr ""
+"Перетаскивание карточки результата за пределы приложения пока недоступно в Windows."
+
+msgid "Edits you save in the video editor will show up here."
+msgstr "Правки, сохранённые в видеоредакторе, появятся здесь."
+
+msgid "Export failed."
+msgstr "Экспорт не удался."
+
+msgid "Exported successfully."
+msgstr "Экспорт выполнен."
+
+msgid "FINISH"
+msgstr "ОТДЕЛКА"
+
+msgid "Fill the frame with the camera instead of the bubble."
+msgstr "Заполняет кадр камерой вместо пузыря."
+
+msgid "First available camera"
+msgstr "Первая доступная камера"
+
+msgid "Flip the camera left to right, the way a mirror shows it."
+msgstr "Отражает камеру слева направо, как в зеркале."
+
+msgid "Frame changes keep the source footage centred in the preview."
+msgstr "При смене кадра исходная запись остаётся по центру предпросмотра."
+
+msgid ""
+"Global shortcuts are not available in the Windows build yet. Bindings are saved for a future release."
+msgstr ""
+"В сборке для Windows глобальные сочетания пока недоступны. Назначения сохраняются для будущего выпуска."
+
+msgid "Hide the camera without removing its track."
+msgstr "Скрывает камеру, не удаляя её дорожку."
+
+msgid "Horizontal"
+msgstr "По горизонтали"
+
+msgid "Huge"
+msgstr "Огромный"
+
+msgid "If enabled, the zoom is applied instantly without any animation."
+msgstr "Если включено, масштаб применяется мгновенно, без анимации."
+
+msgid "Instant"
+msgstr "Мгновенно"
+
+msgid "MP4 recordings"
+msgstr "Записи MP4"
+
+msgid "Maximize"
+msgstr "Развернуть"
+
+msgid "Mirror camera"
+msgstr "Зеркальная камера"
+
+msgid "Mirror the picture"
+msgstr "Отразить изображение"
+
+msgid "Motion editing is not available in the Windows build yet."
+msgstr "В сборке для Windows редактирование движения пока недоступно."
+
+msgid "Open recording"
+msgstr "Открыть запись"
+
+msgid "Opened {name} in the video editor"
+msgstr "{name} открыт в видеоредакторе"
+
+msgid "POSITION"
+msgstr "ПОЛОЖЕНИЕ"
+
+msgid "Put the camera back where the recording captured it."
+msgstr "Возвращает камеру туда, где её сняла запись."
+
+msgid "Record a webcam track"
+msgstr "Записать дорожку веб-камеры"
+
+msgid "Rectangle"
+msgstr "Прямоугольник"
+
+msgid "Remove stop"
+msgstr "Удалить точку"
+
+msgid "Reverse gradient"
+msgstr "Обратить градиент"
+
+msgid "SHAPE"
+msgstr "ФОРМА"
+
+msgid "SIZE"
+msgstr "РАЗМЕР"
+
+msgid "STEPS"
+msgstr "ШАГИ"
+
+msgid "Search isn't available on this page"
+msgstr "Поиск недоступен на этой странице"
+
+msgid "Select a zoom clip on the timeline"
+msgstr "Выберите клип масштабирования на таймлайне"
+
+msgid "Select image…"
+msgstr "Выбрать изображение…"
+
+msgid "Shape"
+msgstr "Форма"
+
+msgid "Show camera"
+msgstr "Показать камеру"
+
+msgid "Show in Explorer"
+msgstr "Показать в Проводнике"
+
+msgid "Strength"
+msgstr "Сила"
+
+msgid "TRANSITION"
+msgstr "ПЕРЕХОД"
+
+msgid "The Windows recorder always captures at native display resolution."
+msgstr ""
+"Записывающее устройство Windows всегда снимает в собственном разрешении экрана."
+
+msgid "The Windows recorder always shows its controls."
+msgstr ""
+"Записывающее устройство Windows всегда показывает свои элементы управления."
+
+msgid ""
+"The Windows shell needs its tray icon until global shortcuts are available."
+msgstr ""
+"Оболочке Windows нужен значок в трее, пока глобальные сочетания недоступны."
+
+msgid ""
+"The annotate editor is not available in the Windows build yet. These preferences are saved for a future release."
+msgstr ""
+"В сборке для Windows редактор аннотаций пока недоступен. Эти настройки сохраняются для будущего выпуска."
+
+msgid "The annotate editor is not available on Windows yet."
+msgstr "Редактор аннотаций пока недоступен в Windows."
+
+msgid "The export stopped unexpectedly."
+msgstr "Экспорт неожиданно остановился."
+
+msgid "The image editor is not available in the Windows build yet"
+msgstr "В сборке для Windows редактор изображений пока недоступен"
+
+msgid "This recording has no camera track."
+msgstr "В этой записи нет дорожки камеры."
+
+msgid "Top left"
+msgstr "Сверху слева"
+
+msgid "Top right"
+msgstr "Сверху справа"
+
+msgid "Transition"
+msgstr "Переход"
+
+msgid "Untitled recording"
+msgstr "Запись без названия"
+
+msgid "Uploading from the result card is not available on Windows yet."
+msgstr "Загрузка из карточки результата пока недоступна в Windows."
+
+msgid "Usage telemetry is not sent from the Windows build."
+msgstr "Сборка для Windows не отправляет телеметрию использования."
+
+msgid "Vertical"
+msgstr "Вертикальный"
+
+msgid "Video export from the Windows editor is not available yet."
+msgstr "Экспорт видео из редактора Windows пока недоступен."
+
+msgid "Webcam"
+msgstr "Веб-камера"
+
+msgid "Windows UI translations are not available yet."
+msgstr "Переводы интерфейса Windows пока недоступны."
+
+msgid "ZOOM"
+msgstr "МАСШТАБ"
+
+msgid "cancelling…"
+msgstr "отмена…"
+
+msgid "estimated:"
+msgstr "оценка:"
+
+msgid "finishing…"
+msgstr "завершение…"
