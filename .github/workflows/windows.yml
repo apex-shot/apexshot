@@ -1,0 +1,105 @@
+name: Windows UI
+
+# The Windows surface is its own crate (windows-ui) and never compiles under the
+# Linux jobs in release.yml, so without a job of its own nothing here is checked
+# by CI at all.
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/windows.yml
+      - windows-ui/**
+      - src/**
+      - data/**
+      - Cargo.toml
+      - Cargo.lock
+      - build.rs
+  pull_request:
+    paths:
+      - .github/workflows/windows.yml
+      - windows-ui/**
+      - src/**
+      - data/**
+      - Cargo.toml
+      - Cargo.lock
+      - build.rs
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  windows-ui:
+    name: Lint & test the Windows UI
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Windows runners default to core.autocrlf=true, so the working tree
+      # arrives with CRLF in every text file and rustfmt's newline rule fails on
+      # all of them — files this branch never touched included. Rewrite the tree
+      # the way the repository stores it before anything formats it.
+      - name: Check out the line endings the repository stores
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git rm --cached -r --quiet .
+          git reset --hard --quiet
+
+      # GTK4 for the crate's gtk4/pango/gdk bindings, plus pkg-config and the
+      # GNU linker the GNU Rust toolchain below drives. The MinGW packages are
+      # the supported way to get GTK4 headers and DLLs onto a Windows runner
+      # without building GTK from source.
+      - name: Install GTK4
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          # The job installs its own toolchain into ~/.cargo/bin, which the
+          # MSYS2 shell does not see under its default strict PATH.
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gtk4
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-gcc
+
+      # The MSVC toolchain cannot link against the MinGW GTK import libraries,
+      # so the crate is built for the GNU target that matches them.
+      - name: Install the GNU Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal \
+            --component rustfmt,clippy
+          rustup default stable-x86_64-pc-windows-gnu
+
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            windows-ui/target/
+          key: windows-cargo-${{ hashFiles('windows-ui/Cargo.lock') }}
+          restore-keys: |
+            windows-cargo-
+
+      # Run inside the MSYS2 shell so pkg-config finds the MinGW GTK4 .pc files
+      # and the test binaries find the GTK DLLs at run time.
+      - name: Format, lint, and test
+        shell: msys2 {0}
+        working-directory: windows-ui
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets
+          cargo test

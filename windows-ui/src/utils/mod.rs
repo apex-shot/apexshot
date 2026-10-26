@@ -21,6 +21,8 @@ pub mod notify {
 }
 
 pub mod open {
+    use std::path::Path;
+
     /// Open a URL with the default Windows handler.
     pub fn open_url(url: &str) -> anyhow::Result<()> {
         std::process::Command::new("cmd")
@@ -28,4 +30,17 @@ pub mod open {
             .spawn()?;
         Ok(())
     }
+
+    /// Show `path` in Explorer with the file itself selected. Explorer reports
+    /// a failure exit code even when it succeeds, so only the spawn counts.
+    pub fn reveal_in_file_manager(path: &Path) -> anyhow::Result<()> {
+        std::process::Command::new("explorer.exe")
+            .arg("/select,")
+            .arg(path)
+            .spawn()?;
+        Ok(())
+    }
 }
+
+#[path = "../../../src/utils/png_io.rs"]
+pub mod png_io;

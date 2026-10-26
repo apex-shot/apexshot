@@ -77,6 +77,20 @@ pub struct AppConfig {
     pub rec_noise_suppression: bool,
     pub rec_mic: bool,
     pub rec_speaker: bool,
+    // Webcam track. The Windows recorder writes the camera to its own file and
+    // the editor composites it, so these are layer settings rather than
+    // encoder ones.
+    pub rec_webcam_enabled: bool,
+    /// The dshow camera's friendly name. Empty means the first camera.
+    pub rec_webcam_device: String,
+    /// Size preset: 0 small, 1 medium, 2 large, 3 huge.
+    pub rec_webcam_size: u8,
+    /// Shape preset: 0 circle, 1 square, 2 rectangle, 3 vertical.
+    pub rec_webcam_shape: u8,
+    pub rec_webcam_flip: bool,
+    /// Bubble position across the capture: x left to right, y bottom to top.
+    pub rec_webcam_rel_x: f64,
+    pub rec_webcam_rel_y: f64,
     // Quick Access settings
     pub quick_access_position: String,
     pub quick_access_multi_display: bool,
@@ -225,6 +239,13 @@ impl Default for AppConfig {
             rec_noise_suppression: false,
             rec_mic: false,
             rec_speaker: false,
+            rec_webcam_enabled: false,
+            rec_webcam_device: String::new(),
+            rec_webcam_size: 1,
+            rec_webcam_shape: 0,
+            rec_webcam_flip: false,
+            rec_webcam_rel_x: 1.0,
+            rec_webcam_rel_y: 0.0,
             quick_access_position: "Left".to_string(),
             quick_access_multi_display: true,
             quick_access_overlay_size: QUICK_ACCESS_OVERLAY_SCALE_BASELINE,
@@ -338,6 +359,13 @@ impl AppConfig {
             self.after_capture_show_quick_access = DEFAULT_AFTER_CAPTURE_SHOW_QUICK_ACCESS;
         }
         self.rec_video_format = self.rec_video_format.min(1);
+        // The webcam layer's tables have four entries each, and the recorder
+        // and the editor both index them directly.
+        self.rec_webcam_size = self.rec_webcam_size.min(3);
+        self.rec_webcam_shape = self.rec_webcam_shape.min(3);
+        self.rec_webcam_rel_x = self.rec_webcam_rel_x.clamp(0.0, 1.0);
+        self.rec_webcam_rel_y = self.rec_webcam_rel_y.clamp(0.0, 1.0);
+        self.rec_webcam_device = self.rec_webcam_device.trim().chars().take(240).collect();
         // A config edited by hand must not point outside the option table that
         // Settings offers. Unknown values fall back to Original, the same way
         // `max_resolution_for_setting` reads them.
@@ -1365,6 +1393,53 @@ mod tests {
         let cfg = AppConfig::default();
         assert!(!cfg.rec_mic);
         assert!(!cfg.rec_speaker);
+    }
+
+    #[test]
+    fn webcam_layer_defaults_to_a_medium_circle_in_the_bottom_right() {
+        let cfg = AppConfig::default();
+        assert!(!cfg.rec_webcam_enabled);
+        assert!(cfg.rec_webcam_device.is_empty());
+        assert_eq!(cfg.rec_webcam_size, 1);
+        assert_eq!(cfg.rec_webcam_shape, 0);
+        assert!(!cfg.rec_webcam_flip);
+        assert_eq!(cfg.rec_webcam_rel_x, 1.0);
+        assert_eq!(cfg.rec_webcam_rel_y, 0.0);
+    }
+
+    #[test]
+    fn webcam_layer_settings_round_trip_through_yaml() {
+        let original = AppConfig {
+            rec_webcam_enabled: true,
+            rec_webcam_device: "Integrated Camera".to_string(),
+            rec_webcam_size: 3,
+            rec_webcam_shape: 2,
+            rec_webcam_flip: true,
+            rec_webcam_rel_x: 0.25,
+            rec_webcam_rel_y: 0.75,
+            ..AppConfig::default()
+        };
+
+        let yaml = serde_yml::to_string(&original).unwrap();
+        let loaded: AppConfig = serde_yml::from_str(&yaml).unwrap();
+
+        assert!(loaded.rec_webcam_enabled);
+        assert_eq!(loaded.rec_webcam_device, "Integrated Camera");
+        assert_eq!(loaded.rec_webcam_size, 3);
+        assert_eq!(loaded.rec_webcam_shape, 2);
+        assert!(loaded.rec_webcam_flip);
+        assert_eq!(loaded.rec_webcam_rel_x, 0.25);
+        assert_eq!(loaded.rec_webcam_rel_y, 0.75);
+    }
+
+    #[test]
+    fn a_hand_edited_webcam_layer_is_clamped_to_the_tables() {
+        let yaml = "rec_webcam_size: 9\nrec_webcam_shape: 7\nrec_webcam_rel_x: 4.0\nrec_webcam_rel_y: -2.0\n";
+        let cfg: AppConfig = serde_yml::from_str::<AppConfig>(yaml).unwrap().sanitized();
+        assert_eq!(cfg.rec_webcam_size, 3);
+        assert_eq!(cfg.rec_webcam_shape, 3);
+        assert_eq!(cfg.rec_webcam_rel_x, 1.0);
+        assert_eq!(cfg.rec_webcam_rel_y, 0.0);
     }
 
     #[test]

@@ -37,8 +37,9 @@ mod studio;
 #[path = "../../../src/settings/theme_picker.rs"]
 mod theme_picker;
 #[path = "../../../src/settings/ui_support.rs"]
-mod ui_support;
-mod windowing;
+pub(crate) mod ui_support;
+mod webcam;
+pub(crate) mod windowing;
 
 /// Top inset for page content. The Windows surface removes the page-title row,
 /// so the first section needs only a hairline of breathing room.
@@ -50,7 +51,10 @@ use self::{
     general::build_general_section,
     quick_access::build_quick_access_section,
     screenshots::build_screenshots_section,
-    ui_support::{install_settings_css, traffic_light_button},
+    ui_support::{
+        install_settings_css, window_control_button, WindowControl, CAPTION_BUTTON_WIDTH,
+        TITLE_BAR_HEIGHT,
+    },
     windowing::{prefers_dark_glass_theme, prefers_reduced_transparency},
 };
 
@@ -230,7 +234,7 @@ fn build_settings_window(app: &Application) {
     sidebar_wrapper.set_hexpand(false);
 
     let sidebar_head = GtkBox::new(Orientation::Horizontal, 0);
-    sidebar_head.set_size_request(-1, (52.0 * ui_scale).round() as i32);
+    sidebar_head.set_size_request(-1, (TITLE_BAR_HEIGHT * ui_scale).round() as i32);
 
     let sidebar_title = Label::new(Some(&t("Settings")));
     sidebar_title.add_css_class("settings-sidebar-title");
@@ -344,7 +348,7 @@ fn build_settings_window(app: &Application) {
     // the Linux window. The sidebar head beside it is draggable too.
     let toolbar = GtkBox::new(Orientation::Horizontal, 0);
     toolbar.add_css_class("settings-window-controls");
-    toolbar.set_size_request(-1, (52.0 * ui_scale).round() as i32);
+    toolbar.set_size_request(-1, (TITLE_BAR_HEIGHT * ui_scale).round() as i32);
 
     let drag_handle = GtkBox::new(Orientation::Horizontal, 0);
     drag_handle.set_hexpand(true);
@@ -352,27 +356,17 @@ fn build_settings_window(app: &Application) {
     drag_handle.set_vexpand(false);
     toolbar.append(&drag_handle);
 
-    let close_btn = traffic_light_button("traffic-light-red", &t("Close"));
-    close_btn.remove_css_class("recent-captures-wm-btn");
-    close_btn.remove_css_class("recent-captures-wm-close");
-    close_btn.add_css_class("recording-editor-traffic-btn");
+    let close_btn = window_control_button(WindowControl::Close, &t("Close"), ui_scale);
     let win_clone = window.clone();
     close_btn.connect_clicked(move |_| win_clone.close());
 
-    let min_btn = traffic_light_button("traffic-light-yellow", &t("Minimize"));
-    min_btn.remove_css_class("recent-captures-wm-btn");
-    min_btn.add_css_class("recording-editor-traffic-btn");
+    let min_btn = window_control_button(WindowControl::Minimize, &t("Minimize"), ui_scale);
     let win_clone = window.clone();
     min_btn.connect_clicked(move |_| win_clone.minimize());
 
-    for button in [&close_btn, &min_btn] {
-        let size = (28.0 * ui_scale).round() as i32;
-        button.set_size_request(size, size);
-        button.set_valign(Align::Center);
-    }
-
-    let right_box = GtkBox::new(Orientation::Horizontal, 6);
+    let right_box = GtkBox::new(Orientation::Horizontal, 0);
     right_box.set_halign(Align::End);
+    right_box.set_valign(Align::Fill);
     right_box.append(&min_btn);
     right_box.append(&close_btn);
     toolbar.append(&right_box);
@@ -383,6 +377,8 @@ fn build_settings_window(app: &Application) {
     let general = build_general_section(&config);
     let after_capture = build_after_capture_section(&config);
     let recordings = recording::build_recording_section(&config);
+    let webcam = webcam::build_webcam_group(&config);
+    recordings.section.append(&webcam.0);
     let screenshots = build_screenshots_section(&config);
     let advanced = advanced::build_advanced_section(&config);
     let about = about::build_about_section();
@@ -439,7 +435,9 @@ fn build_settings_window(app: &Application) {
     recordings.rec_remember_export_folder.set_sensitive(false);
     recordings
         .rec_remember_export_folder
-        .set_tooltip_text(Some(&t("The Windows video editor is not available yet.")));
+        .set_tooltip_text(Some(&t(
+            "Video export from the Windows editor is not available yet.",
+        )));
     quick_access.close_after_dragging_check.set_sensitive(false);
     quick_access
         .close_after_dragging_check
@@ -610,6 +608,7 @@ fn build_settings_window(app: &Application) {
         rec_video_fps: recordings.rec_video_fps.clone(),
         rec_video_quality: recordings.rec_video_quality.clone(),
         rec_video_mono: recordings.rec_video_mono.clone(),
+        webcam: webcam.1,
         screenshot_quick_access: after_capture.screenshot_after_capture_checks[0].clone(),
         screenshot_copy_to_clipboard: after_capture.screenshot_after_capture_checks[1].clone(),
         screenshot_save: after_capture.screenshot_after_capture_checks[2].clone(),
@@ -791,7 +790,7 @@ fn build_settings_window(app: &Application) {
     window.present();
 }
 
-fn install_window_css() {
+pub(crate) fn install_window_css() {
     use gtk4::CssProvider;
     let Some(display) = gtk4::gdk::Display::default() else {
         return;
@@ -799,7 +798,7 @@ fn install_window_css() {
 
     let scale = crate::platform::ui_scale();
     let px = |value: f64| (value * scale).round() as i32;
-    let css = format!(
+    let mut css = format!(
         "window.editor-window {{ background-color:transparent; border:none; box-shadow:none; }} \
          .editor-root {{ border:1px solid rgba(255,255,255,0.12); border-radius:12px; font-size:{}px; }} \
          .editor-root.editor-theme-light {{ border:1px solid rgba(17,24,39,0.12); }} \
@@ -839,6 +838,24 @@ fn install_window_css() {
         px(1.0),
         px(12.0),
     );
+    css.push_str(&format!(
+        " window.editor-window.history-window {{ padding:1px; border:1px solid rgba(255,255,255,0.12); border-radius:12px; }} \
+         window.editor-window.history-window.editor-theme-light {{ border:1px solid rgba(17,24,39,0.12); }} \
+         .history-root {{ border:none; border-radius:12px; font-family:'Inter','Noto Sans',system-ui,sans-serif; }} \
+         .history-root .history-header-search {{ font-size:{}px; min-height:{}px; }} \
+         .history-root .recent-captures-title {{ font-size:{}px; font-weight:600; letter-spacing:-0.1px; opacity:0.85; }} \
+         .history-root .history-page-subtitle {{ font-size:{}px; }} \
+         .history-root .recent-captures-card-title {{ font-size:{}px; font-weight:500; }} \
+         .history-root .recent-captures-empty-title {{ font-size:{}px; }} \
+         .history-root .recent-captures-empty-detail {{ font-size:{}px; }}",
+        px(13.0),
+        px(30.0),
+        px(14.0),
+        px(13.0),
+        px(13.0),
+        px(18.0),
+        px(14.0),
+    ));
 
     let provider = CssProvider::new();
     provider.load_from_data(&css);
@@ -846,6 +863,50 @@ fn install_window_css() {
         &display,
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+    );
+
+    // Caption buttons: the flat, full-height targets the system draws in a
+    // title bar's top-right corner, packed against each other at the bar's
+    // height. Installed last so the editor sheets' pill styling cannot win.
+    let caption_css = format!(
+        " .settings-window-controls {{ min-height:{}px; padding:0; }} \
+         button.caption-btn {{ \
+             min-width:{}px; min-height:{}px; padding:0; margin:0; \
+             border:none; border-radius:0; box-shadow:none; \
+             background:transparent; background-image:none; \
+             color:alpha(white, 0.90); }} \
+         button.caption-btn:hover {{ \
+             background:rgba(255,255,255,0.08); background-image:none; \
+             border:none; color:#ffffff; }} \
+         button.caption-btn:active {{ \
+             background:rgba(255,255,255,0.12); background-image:none; \
+             border:none; color:#ffffff; }} \
+         button.caption-btn:focus, button.caption-btn:hover:focus {{ \
+             background-image:none; border:none; box-shadow:none; outline:none; }} \
+         button.caption-btn-close {{ border-radius:0 12px 0 0; }} \
+         button.caption-btn-close:hover, button.caption-btn-close:hover:focus {{ \
+             background:#e81123; border-radius:0 12px 0 0; color:#ffffff; }} \
+         button.caption-btn-close:active {{ \
+             background:#c50f1f; border-radius:0 12px 0 0; color:#ffffff; }} \
+         .editor-theme-light button.caption-btn {{ color:alpha(#111827, 0.80); }} \
+         .editor-theme-light button.caption-btn:hover {{ \
+             background:alpha(#111827, 0.10); color:alpha(#111827, 0.92); }} \
+         .editor-theme-light button.caption-btn:active {{ \
+             background:alpha(#111827, 0.14); color:alpha(#111827, 0.92); }} \
+         .editor-theme-light button.caption-btn-close:hover, \
+         .editor-theme-light button.caption-btn-close:hover:focus, \
+         .editor-theme-light button.caption-btn-close:active {{ \
+             background:#e81123; color:#ffffff; }}",
+        px(TITLE_BAR_HEIGHT),
+        px(CAPTION_BUTTON_WIDTH),
+        px(TITLE_BAR_HEIGHT),
+    );
+    let caption_provider = CssProvider::new();
+    caption_provider.load_from_data(&caption_css);
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &caption_provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 8,
     );
 }
 

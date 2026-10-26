@@ -3387,3 +3387,244 @@ msgstr "自适应"
 
 msgid "Adjust Light"
 msgstr "调整光源"
+
+msgid "16:9"
+msgstr "16:9"
+
+msgid "9:16"
+msgstr "9:16"
+
+msgid "Add gradient stop"
+msgstr "添加渐变停止点"
+
+msgid "ApexShot Video Editor"
+msgstr "ApexShot 视频编辑器"
+
+msgid "Background image"
+msgstr "背景图片"
+
+msgid "Bottom left"
+msgstr "左下"
+
+msgid "Bottom right"
+msgstr "右下"
+
+msgid "Cloud browsing and sign-in are not available in the Windows build yet."
+msgstr "Windows 版本尚不支持浏览云端和登录。"
+
+msgid "Cloud uploads are not available in the Windows build yet"
+msgstr "Windows 版本尚不支持云端上传"
+
+msgid ""
+"Cloud uploads are not wired in the Windows build yet. Destination and XBackBone settings are saved for a future release."
+msgstr "Windows 版本尚未接入云端上传。目标与 XBackBone 设置会保留供后续版本使用。"
+
+msgid "Corner radius"
+msgstr "圆角半径"
+
+msgid "Could not access the Windows clipboard"
+msgstr "无法访问 Windows 剪贴板"
+
+msgid "Could not copy file: {message}"
+msgstr "无法复制文件：{message}"
+
+msgid "Could not copy image: {message}"
+msgstr "无法复制图像：{message}"
+
+msgid "Could not open Explorer: {message}"
+msgstr "无法打开资源管理器：{message}"
+
+msgid "Could not start the video editor: {message}"
+msgstr "无法启动视频编辑器：{message}"
+
+msgid "Do Not Disturb integration is not available on Windows yet."
+msgstr "Windows 尚不支持勿扰模式集成。"
+
+msgid "Dragging the result card out of the app is not available on Windows yet."
+msgstr "Windows 尚不支持将结果卡片拖出应用。"
+
+msgid "Edits you save in the video editor will show up here."
+msgstr "你在视频编辑器中保存的修改会显示在这里。"
+
+msgid "Export failed."
+msgstr "导出失败。"
+
+msgid "Exported successfully."
+msgstr "导出成功。"
+
+msgid "FINISH"
+msgstr "外观"
+
+msgid "Fill the frame with the camera instead of the bubble."
+msgstr "让摄像头铺满画面，而不是显示为气泡。"
+
+msgid "First available camera"
+msgstr "第一个可用摄像头"
+
+msgid "Flip the camera left to right, the way a mirror shows it."
+msgstr "像照镜子一样左右翻转摄像头画面。"
+
+msgid "Frame changes keep the source footage centred in the preview."
+msgstr "更改画框时，源素材会保持在预览中央。"
+
+msgid ""
+"Global shortcuts are not available in the Windows build yet. Bindings are saved for a future release."
+msgstr "Windows 版本尚不支持全局快捷键。按键组合会保留供后续版本使用。"
+
+msgid "Hide the camera without removing its track."
+msgstr "隐藏摄像头，但保留其轨道。"
+
+msgid "Horizontal"
+msgstr "水平"
+
+msgid "Huge"
+msgstr "超大"
+
+msgid "If enabled, the zoom is applied instantly without any animation."
+msgstr "启用后，缩放会立即生效，没有任何动画。"
+
+msgid "Instant"
+msgstr "立即"
+
+msgid "MP4 recordings"
+msgstr "MP4 录制"
+
+msgid "Maximize"
+msgstr "最大化"
+
+msgid "Mirror camera"
+msgstr "镜像摄像头"
+
+msgid "Mirror the picture"
+msgstr "镜像画面"
+
+msgid "Motion editing is not available in the Windows build yet."
+msgstr "Windows 版本尚不支持动态编辑。"
+
+msgid "Open recording"
+msgstr "打开录制"
+
+msgid "Opened {name} in the video editor"
+msgstr "已在视频编辑器中打开 {name}"
+
+msgid "POSITION"
+msgstr "位置"
+
+msgid "Put the camera back where the recording captured it."
+msgstr "将摄像头恢复到录制时的位置。"
+
+msgid "Record a webcam track"
+msgstr "录制摄像头轨道"
+
+msgid "Rectangle"
+msgstr "矩形"
+
+msgid "Remove stop"
+msgstr "删除停止点"
+
+msgid "Reverse gradient"
+msgstr "反转渐变"
+
+msgid "SHAPE"
+msgstr "形状"
+
+msgid "SIZE"
+msgstr "尺寸"
+
+msgid "STEPS"
+msgstr "步骤"
+
+msgid "Search isn't available on this page"
+msgstr "此页面不支持搜索"
+
+msgid "Select a zoom clip on the timeline"
+msgstr "在时间线上选择一个缩放片段"
+
+msgid "Select image…"
+msgstr "选择图片…"
+
+msgid "Shape"
+msgstr "形状"
+
+msgid "Show camera"
+msgstr "显示摄像头"
+
+msgid "Show in Explorer"
+msgstr "在资源管理器中显示"
+
+msgid "Strength"
+msgstr "强度"
+
+msgid "TRANSITION"
+msgstr "过渡"
+
+msgid "The Windows recorder always captures at native display resolution."
+msgstr "Windows 录制器始终以显示器原生分辨率录制。"
+
+msgid "The Windows recorder always shows its controls."
+msgstr "Windows 录制器始终显示其控件。"
+
+msgid ""
+"The Windows shell needs its tray icon until global shortcuts are available."
+msgstr "在全局快捷键可用之前，Windows 外壳需要保留托盘图标。"
+
+msgid ""
+"The annotate editor is not available in the Windows build yet. These preferences are saved for a future release."
+msgstr "Windows 版本尚不支持标注编辑器。这些偏好会保留供后续版本使用。"
+
+msgid "The annotate editor is not available on Windows yet."
+msgstr "Windows 尚不支持标注编辑器。"
+
+msgid "The export stopped unexpectedly."
+msgstr "导出意外停止。"
+
+msgid "The image editor is not available in the Windows build yet"
+msgstr "Windows 版本尚不支持图像编辑器"
+
+msgid "This recording has no camera track."
+msgstr "此录制没有摄像头轨道。"
+
+msgid "Top left"
+msgstr "左上"
+
+msgid "Top right"
+msgstr "右上"
+
+msgid "Transition"
+msgstr "过渡"
+
+msgid "Untitled recording"
+msgstr "未命名录制"
+
+msgid "Uploading from the result card is not available on Windows yet."
+msgstr "Windows 尚不支持从结果卡片上传。"
+
+msgid "Usage telemetry is not sent from the Windows build."
+msgstr "Windows 版本不会发送使用情况遥测。"
+
+msgid "Vertical"
+msgstr "垂直"
+
+msgid "Video export from the Windows editor is not available yet."
+msgstr "Windows 编辑器尚不支持视频导出。"
+
+msgid "Webcam"
+msgstr "摄像头"
+
+msgid "Windows UI translations are not available yet."
+msgstr "Windows 界面翻译尚不可用。"
+
+msgid "ZOOM"
+msgstr "缩放"
+
+msgid "cancelling…"
+msgstr "正在取消…"
+
+msgid "estimated:"
+msgstr "预计："
+
+msgid "finishing…"
+msgstr "正在完成…"
+
+msgid "Video editing is not available in the Windows build yet."
+msgstr "Windows 版本尚不支持视频编辑。"

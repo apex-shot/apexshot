@@ -11,6 +11,7 @@
 #include "platform/windows/recording_controls.h"
 #include "platform/windows/recording_countdown.h"
 #include "platform/windows/recording_mask.h"
+#include "platform/windows/webcam_bubble.h"
 #include "platform/windows/scroll_capture.h"
 #include "platform/windows/scroll_controls.h"
 #include "platform/windows/settings_store.h"
@@ -22,6 +23,7 @@
 #include <QCoreApplication>
 #include <QCursor>
 #include <QDateTime>
+#include <QDebug>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
@@ -266,6 +268,52 @@ void openSettingsWindow()
             QStringLiteral("ApexShot Settings"),
             QStringLiteral("Could not start the settings window:\n%1\n\n"
                            "Set APEXSHOT_SETTINGS to the settings executable.")
+                .arg(QDir::toNativeSeparators(executable)));
+    }
+}
+
+void openHistoryWindow()
+{
+    QString executable = qEnvironmentVariable("APEXSHOT_HISTORY");
+    if (executable.isEmpty()) {
+        const QString sibling =
+            QDir(QCoreApplication::applicationDirPath())
+                .filePath(QStringLiteral("apexshot-history.exe"));
+        if (QFileInfo::exists(sibling))
+            executable = sibling;
+    }
+    if (executable.isEmpty())
+        executable = QStringLiteral("apexshot-history.exe");
+
+    if (!QProcess::startDetached(executable, {})) {
+        QMessageBox::warning(
+            nullptr,
+            QStringLiteral("ApexShot History"),
+            QStringLiteral("Could not start the history window:\n%1\n\n"
+                           "Set APEXSHOT_HISTORY to the history executable.")
+                .arg(QDir::toNativeSeparators(executable)));
+    }
+}
+
+void openVideoEditorWindow()
+{
+    QString executable = qEnvironmentVariable("APEXSHOT_VIDEO_EDITOR");
+    if (executable.isEmpty()) {
+        const QString sibling =
+            QDir(QCoreApplication::applicationDirPath())
+                .filePath(QStringLiteral("apexshot-video-editor.exe"));
+        if (QFileInfo::exists(sibling))
+            executable = sibling;
+    }
+    if (executable.isEmpty())
+        executable = QStringLiteral("apexshot-video-editor.exe");
+
+    if (!QProcess::startDetached(executable, {})) {
+        QMessageBox::warning(
+            nullptr,
+            QStringLiteral("ApexShot Video Editor"),
+            QStringLiteral("Could not start the video editor:\n%1\n\n"
+                           "Set APEXSHOT_VIDEO_EDITOR to the editor executable.")
                 .arg(QDir::toNativeSeparators(executable)));
     }
 }
@@ -1729,7 +1777,10 @@ private:
         request.region = region;
         request.windowId = windowId;
         request.outputPath = videoOutputPath();
-        request.includeCursor = settings.recording.showCursor;
+        // The recorder writes the pointer track beside the video and the editor
+        // draws the cursor from it, so the frames never carry a baked-in
+        // pointer that would double up with the one the editor paints.
+        request.includeCursor = false;
         request.includeMicrophone = options.microphone;
         request.includeSpeaker = options.speaker;
 
@@ -1744,12 +1795,65 @@ private:
         request.maxHeight = maxResolution.height();
         request.monoAudio = videoSettings.monoAudio;
 
+        // The camera records to its own track and the editor composites it, so
+        // what this window shows is a preview of that layer: it is excluded
+        // from capture and leaves no pixels in the recording.
+        const Platform::ShellSettings::Webcam& webcam = settings.recording.webcam;
+        QRect webcamRect;
+        if (webcam.enabled) {
+            request.webcamEnabled = true;
+            request.webcamDevice = webcam.device.trimmed();
+            webcamRect = Platform::webcamBubbleRect(region,
+                                                    webcam.sizeIndex,
+                                                    webcam.shapeIndex,
+                                                    webcam.relX,
+                                                    webcam.relY);
+            request.webcamLayout = Platform::webcamLayoutFor(region,
+                                                             webcam.sizeIndex,
+                                                             webcam.shapeIndex,
+                                                             webcam.relX,
+                                                             webcam.relY,
+                                                             webcam.flip);
+        }
+
         connect(session,
                 &Platform::RecordingSession::warning,
                 this,
                 [](const QString& message) {
                     QMessageBox::information(nullptr, QStringLiteral("Recording"), message);
                 });
+
+        if (!request.webcamDevice.isEmpty()) {
+            m_webcamBubble = new Platform::WebcamBubble(request.webcamLayout.shape,
+                                                        request.webcamLayout.flip);
+            m_webcamBubble->placeAt(webcamRect);
+            QPointer<Platform::WebcamBubble> bubble = m_webcamBubble;
+            connect(session,
+                    &Platform::RecordingSession::webcamFrame,
+                    m_webcamBubble,
+                    [bubble](const QImage& frame) {
+                        if (!bubble)
+                            return;
+                        bubble->setFrame(frame);
+                        // A camera that never answers leaves no bubble at all.
+                        if (!bubble->isVisible())
+                            bubble->show();
+                    });
+            // A paused recording is not part of the footage, and the camera
+            // stops with it, so the bubble goes away with the pause too.
+            connect(session,
+                    &Platform::RecordingSession::stateChanged,
+                    m_webcamBubble,
+                    [session, bubble] {
+                        if (!bubble)
+                            return;
+                        if (session->isActive() && !session->isPaused()
+                            && bubble->hasFrame())
+                            bubble->show();
+                        else
+                            bubble->hide();
+                    });
+        }
 
         connect(session,
                 &Platform::RecordingSession::finished,
@@ -1762,6 +1866,10 @@ private:
                     if (m_recordingMask) {
                         m_recordingMask->close();
                         m_recordingMask = nullptr;
+                    }
+                    if (m_webcamBubble) {
+                        m_webcamBubble->close();
+                        m_webcamBubble = nullptr;
                     }
                     session->deleteLater();
                     if (kept)
@@ -1777,6 +1885,10 @@ private:
             if (m_recordingMask) {
                 m_recordingMask->close();
                 m_recordingMask = nullptr;
+            }
+            if (m_webcamBubble) {
+                m_webcamBubble->close();
+                m_webcamBubble = nullptr;
             }
             session->deleteLater();
             QMessageBox::warning(nullptr, QStringLiteral("Recording"), error);
@@ -1999,6 +2111,7 @@ private:
     Platform::RecordingSession* m_activeSession = nullptr;
     QPointer<RecordingCountdown> m_countdownPill;
     QPointer<RecordingMask> m_recordingMask;
+    QPointer<Platform::WebcamBubble> m_webcamBubble;
     QPointer<Platform::ScrollCaptureSession> m_scrollSession;
     QPointer<RecordingMask> m_scrollMask;
 };
@@ -2136,6 +2249,8 @@ int run(QApplication& app)
     });
 
     menu->addSeparator();
+    QAction* videoEditorAction = menu->addAction(QStringLiteral("Video Editor..."));
+    QAction* historyAction = menu->addAction(QStringLiteral("History..."));
     QAction* settingsAction = menu->addAction(QStringLiteral("Settings..."));
     menu->addSeparator();
     QAction* quit = menu->addAction(QStringLiteral("Quit"));
@@ -2144,6 +2259,12 @@ int run(QApplication& app)
 
     QObject::connect(settingsAction, &QAction::triggered, shell, [] {
         openSettingsWindow();
+    });
+    QObject::connect(historyAction, &QAction::triggered, shell, [] {
+        openHistoryWindow();
+    });
+    QObject::connect(videoEditorAction, &QAction::triggered, shell, [] {
+        openVideoEditorWindow();
     });
 
     QObject::connect(capture, &QAction::triggered, shell, [shell] { shell->openMenu(); });

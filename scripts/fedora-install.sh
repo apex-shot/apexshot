@@ -239,7 +239,6 @@ install_runtime_dependencies() {
 
     local deps=(
         curl
-        ffmpeg-free
         gstreamer1-plugins-base
         gstreamer1-plugins-good
         gstreamer1-plugins-bad-free
@@ -255,6 +254,10 @@ install_runtime_dependencies() {
         desktop-file-utils
         hicolor-icon-theme
     )
+
+    if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+        deps+=(ffmpeg-free)
+    fi
 
     prime_sudo
     run_spinner "Installing Fedora runtime packages" \

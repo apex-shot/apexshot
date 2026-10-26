@@ -64,6 +64,13 @@ void checkDefaults(const QTemporaryDir& dir)
     CHECK(!settings.recording.values.monoAudio);
     CHECK(!settings.recording.includeMicrophone);
     CHECK(settings.recording.showCursor);
+    CHECK(!settings.recording.webcam.enabled);
+    CHECK(settings.recording.webcam.device.isEmpty());
+    CHECK(settings.recording.webcam.sizeIndex == 1);
+    CHECK(settings.recording.webcam.shapeIndex == 0);
+    CHECK(!settings.recording.webcam.flip);
+    CHECK(qFuzzyCompare(settings.recording.webcam.relX, 1.0));
+    CHECK(qFuzzyCompare(settings.recording.webcam.relY, 0.0));
     CHECK(settings.quickAccess.position == QStringLiteral("Left"));
     CHECK(qFuzzyCompare(settings.quickAccess.overlayScale, 1.0));
     CHECK(!settings.quickAccess.autoCloseEnabled);
@@ -99,7 +106,16 @@ void checkParsing(const QTemporaryDir& dir)
     "include_microphone": true,
     "include_speaker": true,
     "show_cursor": false,
-    "after_show_result": false
+    "after_show_result": false,
+    "webcam": {
+      "enabled": true,
+      "device": " Integrated Camera ",
+      "size_index": 3,
+      "shape_index": 2,
+      "flip": true,
+      "rel_x": 0.25,
+      "rel_y": 0.8
+    }
   },
   "quick_access": {
     "position": "Right",
@@ -134,6 +150,13 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(settings.recording.includeSpeaker);
     CHECK(!settings.recording.showCursor);
     CHECK(!settings.recording.afterShowResult);
+    CHECK(settings.recording.webcam.enabled);
+    CHECK(settings.recording.webcam.device == QStringLiteral("Integrated Camera"));
+    CHECK(settings.recording.webcam.sizeIndex == 3);
+    CHECK(settings.recording.webcam.shapeIndex == 2);
+    CHECK(settings.recording.webcam.flip);
+    CHECK(qFuzzyCompare(settings.recording.webcam.relX, 0.25));
+    CHECK(qFuzzyCompare(settings.recording.webcam.relY, 0.8));
     CHECK(settings.quickAccess.position == QStringLiteral("Right"));
     CHECK(qFuzzyCompare(settings.quickAccess.overlayScale, 1.2));
     CHECK(settings.quickAccess.autoCloseEnabled);
@@ -148,7 +171,9 @@ void checkSanitizing(const QTemporaryDir& dir)
                   R"({
   "screenshots": { "format": "GIF", "timer_interval": 7 },
   "recording": { "fps_index": 99, "max_resolution_index": 99, "quality_index": 99,
-                 "filename_pattern": "   " },
+                 "filename_pattern": "   ",
+                 "webcam": { "size_index": 9, "shape_index": -4,
+                             "rel_x": 4.5, "rel_y": -1.0 } },
   "quick_access": { "position": "Middle", "overlay_scale": 9,
                     "auto_close_seconds": 1 },
   "ocr": { "language": "  " }
@@ -162,6 +187,10 @@ void checkSanitizing(const QTemporaryDir& dir)
     CHECK(settings.recording.values.qualityIndex == 1);
     CHECK(settings.recording.filenamePattern
           == QStringLiteral("ApexShot Recording {Date} at {Time}"));
+    CHECK(settings.recording.webcam.sizeIndex == 3);
+    CHECK(settings.recording.webcam.shapeIndex == 0);
+    CHECK(qFuzzyCompare(settings.recording.webcam.relX, 1.0));
+    CHECK(qFuzzyCompare(settings.recording.webcam.relY, 0.0));
     CHECK(settings.quickAccess.position == QStringLiteral("Right"));
     CHECK(qFuzzyCompare(settings.quickAccess.overlayScale, 1.5));
     CHECK(settings.quickAccess.autoCloseSeconds == 5);

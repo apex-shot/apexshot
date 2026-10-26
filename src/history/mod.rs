@@ -27,6 +27,14 @@ use gtk4::Application;
 
 use crate::config::load_config;
 
+/// Native History keeps its existing logical dimensions.
+pub(super) fn window_scale() -> f64 {
+    1.0
+}
+
+/// Native History uses the shared stylesheet without a platform override.
+pub(super) fn install_platform_window_css() {}
+
 /// One page of the History stack plus the hooks the window shell needs to
 /// drive it from the shared header bar.
 pub struct HistoryPage {

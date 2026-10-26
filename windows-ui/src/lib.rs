@@ -14,6 +14,7 @@ pub mod cloud;
 #[path = "../../src/config.rs"]
 pub mod config;
 pub mod daemon;
+pub mod history;
 pub mod i18n;
 pub mod platform;
 pub mod recording;
@@ -22,3 +23,4 @@ pub mod studio_entitlement;
 #[path = "../../src/test_support.rs"]
 pub mod test_support;
 pub mod utils;
+pub mod video_editor;

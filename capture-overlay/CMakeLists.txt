@@ -19,6 +19,8 @@ if(WIN32)
         src/platform/recording.h
         src/platform/recording_settings.h
         src/platform/windows/recording.cpp
+        src/platform/windows/pointer_tracker.cpp
+        src/platform/windows/pointer_tracker.h
         src/platform/windows/recording_settings.cpp
         src/platform/windows/settings_store.cpp
         src/platform/windows/settings_store.h
@@ -34,6 +36,10 @@ if(WIN32)
         src/platform/windows/scroll_capture.h
         src/platform/windows/scroll_controls.cpp
         src/platform/windows/scroll_controls.h
+        src/platform/windows/webcam_bubble.cpp
+        src/platform/windows/webcam_bubble.h
+        src/platform/windows/webcam_layout.cpp
+        src/platform/windows/webcam_layout.h
         src/platform/windows/screen_capture.cpp
         src/platform/windows/window_list.cpp
         src/platform/windows/ocr.cpp
@@ -85,9 +91,13 @@ if(WIN32)
             src/platform/recording.h
             src/platform/recording_settings.h
             src/platform/windows/recording.cpp
+            src/platform/windows/pointer_tracker.cpp
+            src/platform/windows/pointer_tracker.h
             src/platform/windows/recording_settings.cpp
             src/platform/windows/settings_store.cpp
             src/platform/windows/settings_store.h
+            src/platform/windows/webcam_layout.cpp
+            src/platform/windows/webcam_layout.h
         )
         target_include_directories(apexshot-recording-tests PRIVATE src)
         target_link_libraries(apexshot-recording-tests PRIVATE Qt5::Core Qt5::Gui)

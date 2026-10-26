@@ -21,6 +21,14 @@ pub mod auth {
     }
 }
 
+pub mod listing {
+    use std::path::PathBuf;
+
+    pub fn cached_thumbnail(_url: &str) -> Result<PathBuf, String> {
+        Err("Cloud thumbnails are not available in the Windows build yet".to_string())
+    }
+}
+
 pub mod xbackbone {
     use crate::config::AppConfig;
 

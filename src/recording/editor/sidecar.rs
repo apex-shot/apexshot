@@ -175,6 +175,63 @@ impl PressSample {
     }
 }
 
+/// The camera track recorded beside a video.
+///
+/// `file` names a file in the pointer sidecar's own directory, and the fractions
+/// place the bubble in the recorded region: they hold at any output resolution,
+/// which is what lets the editor re-render the layer instead of replaying a
+/// burn-in. `duration` is the track's own length: the camera's clock is not the
+/// desktop's, so the editor scales video time by it to find the same instant.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct WebcamTrack {
+    pub file: String,
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
+    #[serde(default)]
+    pub duration: f64,
+    #[serde(default)]
+    pub x: f64,
+    #[serde(default)]
+    pub y: f64,
+    #[serde(default)]
+    pub w: f64,
+    #[serde(default)]
+    pub h: f64,
+    /// 0 circle, 1 square, 2 rectangle, 3 vertical: the shared shape table.
+    #[serde(default)]
+    pub shape: u8,
+    #[serde(default)]
+    pub flip: bool,
+}
+
+impl WebcamTrack {
+    /// Whether the block describes a track the editor can draw.
+    pub fn is_valid(&self) -> bool {
+        !self.file.is_empty() && self.width > 0 && self.height > 0 && self.w > 0.0 && self.h > 0.0
+    }
+
+    /// The bubble's fractional rect, clamped so a hand-edited sidecar cannot
+    /// place the layer outside the footage.
+    pub fn rect(&self) -> (f64, f64, f64, f64) {
+        let x = self.x.clamp(0.0, 1.0);
+        let y = self.y.clamp(0.0, 1.0);
+        let w = self.w.clamp(0.0, 1.0 - x);
+        let h = self.h.clamp(0.0, 1.0 - y);
+        (x, y, w, h)
+    }
+
+    /// A video instant as a time in the track. A track of unknown length is
+    /// played one to one, which is what a camera that kept up records anyway.
+    pub fn track_seconds(&self, video_seconds: f64, video_duration: f64) -> f64 {
+        if video_duration > 0.0 && self.duration > 0.0 {
+            return (video_seconds * (self.duration / video_duration)).max(0.0);
+        }
+        video_seconds.max(0.0)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PointerSidecar {
     pub version: u32,
@@ -194,6 +251,9 @@ pub struct PointerSidecar {
     pub presses: Vec<PressSample>,
     #[serde(default)]
     pub source: PointerDataSource,
+    /// The camera layer, absent for a recording made without one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webcam: Option<WebcamTrack>,
 }
 
 impl PointerSidecar {
@@ -207,6 +267,7 @@ impl PointerSidecar {
             visibility: Vec::new(),
             presses: Vec::new(),
             source: PointerDataSource::Recorded,
+            webcam: None,
         }
     }
 
@@ -255,6 +316,15 @@ impl PointerSidecar {
         let bytes = std::fs::read(path)?;
         let sidecar: Self = serde_json::from_slice(&bytes)?;
         Ok(sidecar)
+    }
+
+    /// The camera track's file, resolved beside this sidecar. The recorder
+    /// keeps the two together, so the pair is found from the video path alone.
+    pub fn webcam_path(&self, video_path: &Path) -> Option<PathBuf> {
+        let track = self.webcam.as_ref().filter(|track| track.is_valid())?;
+        let directory = Self::sidecar_path(video_path).parent()?.to_path_buf();
+        let path = directory.join(&track.file);
+        path.is_file().then_some(path)
     }
 
     pub fn load_next_to_video(video_path: &Path) -> Option<Self> {
@@ -1669,5 +1739,94 @@ mod tests {
         assert!(!video.exists());
         assert!(!PointerSidecar::sidecar_path(&video).exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod webcam_tests {
+    use super::*;
+
+    const TRACK_JSON: &str = r#"{
+        "file": "4f2a.webcam.mp4",
+        "width": 1280,
+        "height": 720,
+        "duration": 9.5,
+        "x": 0.7,
+        "y": 0.55,
+        "w": 0.2,
+        "h": 0.25,
+        "shape": 3,
+        "flip": true
+    }"#;
+
+    #[test]
+    fn a_sidecar_without_a_webcam_block_has_no_layer() {
+        let sidecar = PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        assert!(sidecar.webcam.is_none());
+        let encoded = serde_json::to_vec(&sidecar).unwrap();
+        let text = String::from_utf8(encoded).unwrap();
+        assert!(!text.contains("webcam"));
+    }
+
+    #[test]
+    fn a_webcam_block_loads_with_its_geometry() {
+        let track: WebcamTrack = serde_json::from_str(TRACK_JSON).unwrap();
+        assert_eq!(track.file, "4f2a.webcam.mp4");
+        assert_eq!(track.width, 1280);
+        assert_eq!(track.height, 720);
+        assert_eq!(track.duration, 9.5);
+        assert_eq!(track.shape, 3);
+        assert!(track.flip);
+        assert!(track.is_valid());
+        assert_eq!(track.rect(), (0.7, 0.55, 0.2, 0.25));
+    }
+
+    #[test]
+    fn a_webcam_block_without_pixels_or_fractions_is_not_drawn() {
+        let missing = WebcamTrack {
+            file: String::new(),
+            ..WebcamTrack::default()
+        };
+        assert!(!missing.is_valid());
+        let flat = WebcamTrack {
+            file: "track.mp4".to_string(),
+            width: 640,
+            height: 480,
+            w: 0.0,
+            h: 0.2,
+            ..WebcamTrack::default()
+        };
+        assert!(!flat.is_valid());
+    }
+
+    #[test]
+    fn a_hand_edited_rect_stays_inside_the_footage() {
+        let track = WebcamTrack {
+            x: 0.9,
+            y: 1.4,
+            w: 0.5,
+            h: 0.5,
+            ..WebcamTrack::default()
+        };
+        let (x, y, w, h) = track.rect();
+        assert!((x - 0.9).abs() < 1e-9);
+        assert!((y - 1.0).abs() < 1e-9);
+        assert!((w - 0.1).abs() < 1e-9);
+        assert!((h - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_video_instant_maps_onto_the_tracks_own_clock() {
+        let track = WebcamTrack {
+            duration: 8.0,
+            ..WebcamTrack::default()
+        };
+        // The camera fell behind the screen by a fifth, so a video second is
+        // four fifths of a second into the track.
+        assert!((track.track_seconds(1.0, 10.0) - 0.8).abs() < 1e-9);
+        assert!((track.track_seconds(12.5, 10.0) - 10.0).abs() < 1e-9);
+        // An unknown length plays one to one rather than freezing the layer.
+        let unknown = WebcamTrack::default();
+        assert!((unknown.track_seconds(3.6, 10.0) - 3.6).abs() < 1e-9);
     }
 }

@@ -5,7 +5,8 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    # Every pull request, not only those aimed at main: this repo stacks
+    # feature branches, and a base-branch filter silently skipped the layer.
   workflow_dispatch:
 
 concurrency:
@@ -63,6 +64,12 @@ jobs:
           python3 scripts/test_distro_dispatch.py
           python3 scripts/test_rpm_assets.py
           python3 scripts/test_release_gate.py
+          python3 scripts/test_fedora_dependencies.py
+
+      # Every UI string has to reach every shipped catalog, so a new control
+      # cannot land untranslated. Covers the Linux app and the Windows app.
+      - name: UI translation catalogs
+        run: python3 scripts/check-i18n-catalogs.py
 
       - name: Reject nested gitlinks
         run: |

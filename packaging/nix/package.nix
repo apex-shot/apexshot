@@ -43,6 +43,7 @@ let
       ../../Cargo.lock
       ../../build.rs
       ../../.cargo
+      ../../agent-skills
       ../../src
       ../../data
       ../../po
