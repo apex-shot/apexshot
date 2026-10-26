@@ -113,7 +113,13 @@ tiny.png
 .claude/
 .kilo/
 .commandcode/
+# The maintainer's private working agreement: names local machines, absolute
+# paths, and evidence locations that must not be published.
+AGENTS.local.md
 
 # Python
 __pycache__/
 *.py[cod]
+
+# Chat-run attachments staged by local tooling
+.ara-run-chat-attachments/

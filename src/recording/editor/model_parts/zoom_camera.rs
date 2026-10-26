@@ -1,6 +1,14 @@
 use std::hash::{Hash, Hasher};
 
 const ZOOM_CAMERA_STEP: f64 = 1.0 / 60.0;
+/// The exporter quantizes the camera window to an even pixel grid, so a camera
+/// that keeps creeping keeps re-quantizing and visibly pops the frame. Park
+/// once the remaining motion sits inside that grid, where the snap itself
+/// cannot be seen: 0.75 source px is under half of the grid's 2 px step.
+const ZOOM_CAMERA_SETTLE_PX: f64 = 0.75;
+/// Source pixels per second. At 60 fps this is a sixteenth of a pixel a frame,
+/// so the camera is already still to the eye when it parks.
+const ZOOM_CAMERA_SETTLE_VELOCITY: f64 = 4.0;
 const ZOOM_BLUR_SAMPLES: usize = 8;
 
 #[derive(Debug, Clone, Copy)]
@@ -31,6 +39,14 @@ impl CameraMotion {
                     spring,
                     dt,
                 );
+            }
+        }
+        for (axis, target) in target.iter().enumerate() {
+            if (motion.rect[axis] - target).abs() <= ZOOM_CAMERA_SETTLE_PX
+                && motion.velocity[axis].abs() <= ZOOM_CAMERA_SETTLE_VELOCITY
+            {
+                motion.rect[axis] = *target;
+                motion.velocity[axis] = 0.0;
             }
         }
         motion

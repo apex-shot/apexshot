@@ -330,6 +330,10 @@
                 margin: 0 0 8px 0;
             }
 
+            .recording-editor-zoom-slider-spacing .recording-editor-fill-slider {
+                margin: 8px 0 0 0;
+            }
+
             .recording-editor-tool-sidebar {
                 min-width: 288px;
                 max-width: 288px;

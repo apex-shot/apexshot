@@ -2,9 +2,9 @@ use super::squircle_clip::{relative_camera_transform, SquircleClip};
 use super::{crop_dialog, footer};
 use crate::recording::editor::model::background_render::render_gradient;
 use crate::recording::editor::model::{
-    format_timecode, source_to_zoomed_point, view_to_source, zoom_camera_transform, ClickEffect,
-    CursorSettings, ExportQuality, VideoBackground, VideoEditState, VideoGradient, ZoomClip,
-    ZoomMode, FRAME_ASPECT_RATIOS,
+    float_crop_rect, format_timecode, source_to_zoomed_point, view_to_source,
+    zoom_camera_transform, ClickEffect, CursorSettings, ExportQuality, VideoBackground,
+    VideoEditState, VideoGradient, ZoomClip, ZoomMode, FRAME_ASPECT_RATIOS,
 };
 use crate::recording::editor::ripple_preview::{PreviewRipple, PreviewRippleClick};
 use crate::recording::editor::sidecar::CursorMotion;
@@ -902,7 +902,24 @@ fn visible_source_view(
     if placing {
         return (cx, cy, cw, ch);
     }
-    crate::recording::editor::ffmpeg::zoom_blur_view(state, timeline_t, source_t, 0)
+    preview_zoom_blur_view(state, timeline_t, source_t, 0)
+}
+
+fn preview_zoom_blur_view(
+    state: &VideoEditState,
+    timeline_t: f64,
+    source_t: f64,
+    sample_index: usize,
+) -> (f64, f64, f64, f64) {
+    let (cx, cy, cw, ch) = state.crop_or_full();
+    let (scale, center) = state.eval_zoom_blur_sample_at(timeline_t, source_t, sample_index);
+    let (x, y, w, h) = float_crop_rect(
+        scale,
+        (center.0 - cx, center.1 - cy),
+        cw.max(2.0) as u32,
+        ch.max(2.0) as u32,
+    );
+    (cx + x, cy + y, w, h)
 }
 
 fn placing_manual(state: &VideoEditState, playing: bool) -> bool {
@@ -944,11 +961,7 @@ fn apply_preview_view(
             Vec::new()
         } else {
             (1..state.zoom_blur_sample_count().min(8))
-                .map(|index| {
-                    crate::recording::editor::ffmpeg::zoom_blur_view(
-                        &state, timeline_t, source_t, index,
-                    )
-                })
+                .map(|index| preview_zoom_blur_view(&state, timeline_t, source_t, index))
                 .collect()
         };
         (
@@ -1331,7 +1344,9 @@ mod tests {
     }
     #[test]
     fn manual_focus_placement_uses_the_unzoomed_source_view_with_blur_enabled() {
-        use crate::recording::editor::model::{VideoEditState, VideoMetadata, ZoomClip, ZoomMode};
+        use crate::recording::editor::model::{
+            float_crop_rect, VideoEditState, VideoMetadata, ZoomClip, ZoomMode,
+        };
         let mut state = VideoEditState::new(VideoMetadata {
             path: std::path::PathBuf::from("/tmp/manual-focus.mp4"),
             duration_seconds: 1.0,
@@ -1354,11 +1369,76 @@ mod tests {
             super::visible_source_view(&state, 0.4, 0.4, true),
             state.crop_or_full()
         );
-        assert_eq!(
-            super::visible_source_view(&state, 0.4, 0.4, false),
-            crate::recording::editor::ffmpeg::zoom_blur_view(&state, 0.4, 0.4, 0),
+        let (cx, cy, cw, ch) = state.crop_or_full();
+        let (scale, center) = state.eval_zoom_blur_sample_at(0.4, 0.4, 0);
+        let (x, y, w, h) = float_crop_rect(
+            scale,
+            (center.0 - cx, center.1 - cy),
+            cw.max(2.0) as u32,
+            ch.max(2.0) as u32,
         );
-        assert!(super::visible_source_view(&state, 0.4, 0.4, false).2 < 320.0);
+        let preview_view = super::visible_source_view(&state, 0.4, 0.4, false);
+        assert_eq!(preview_view, (cx + x, cy + y, w, h));
+        assert_ne!(
+            preview_view,
+            crate::recording::editor::ffmpeg::zoom_blur_view(&state, 0.4, 0.4, 0)
+        );
+        assert!(preview_view.2 < 320.0);
+    }
+
+    #[test]
+    fn preview_view_tracks_camera_drift_between_source_pixels() {
+        use crate::recording::editor::model::{VideoEditState, VideoMetadata, ZoomClip, ZoomMode};
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, CursorKind, PointerSample, PointerSidecar,
+        };
+        let mut state = VideoEditState::new(VideoMetadata {
+            path: std::path::PathBuf::from("/tmp/preview-camera-drift.mp4"),
+            duration_seconds: 2.0,
+            width: 1920,
+            height: 1080,
+            file_size_bytes: 100,
+            has_audio: false,
+            frame_rate: 60.0,
+        });
+        let mut sidecar = PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 1920,
+                h: 1080,
+            },
+        );
+        for (t, x) in [(0.0, 960.0), (0.4, 964.0), (0.8, 968.0), (1.2, 972.0)] {
+            sidecar.pointer.push(PointerSample {
+                t,
+                x,
+                y: 540.0,
+                kind: CursorKind::Default,
+            });
+        }
+        state.sidecar = Some(sidecar);
+        state.zoom_clips.push(ZoomClip {
+            start: 0.0,
+            end: 2.0,
+            scale: 2.0,
+            center: (960.0, 540.0),
+            ease_ms: 0,
+            mode: ZoomMode::Auto,
+            ..Default::default()
+        });
+
+        let t = 0.8;
+        let first = super::preview_zoom_blur_view(&state, t, t, 0);
+        let second = super::preview_zoom_blur_view(&state, t + 1.0 / 60.0, t + 1.0 / 60.0, 0);
+        let first_center = first.0 + first.2 / 2.0;
+        let second_center = second.0 + second.2 / 2.0;
+        assert!((second_center - first_center).abs() < 1.0);
+        assert!(
+            (first_center / 2.0 - (first_center / 2.0).round()).abs() > 1e-3,
+            "preview centre should retain fractional source coordinates, got {first_center}"
+        );
     }
 
     #[test]

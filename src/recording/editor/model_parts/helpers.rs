@@ -819,6 +819,23 @@ pub fn even_crop_rect(
     )
 }
 
+/// Crop a source frame around `center` without rounding its size or origin.
+pub fn float_crop_rect(
+    scale: f64,
+    center: (f64, f64),
+    src_w: u32,
+    src_h: u32,
+) -> (f64, f64, f64, f64) {
+    let src_w = src_w.max(2) as f64;
+    let src_h = src_h.max(2) as f64;
+    let scale = scale.max(1.0);
+    let crop_w = (src_w / scale).clamp(2.0, src_w);
+    let crop_h = (src_h / scale).clamp(2.0, src_h);
+    let x = (center.0 - crop_w / 2.0).clamp(0.0, src_w - crop_w);
+    let y = (center.1 - crop_h / 2.0).clamp(0.0, src_h - crop_h);
+    (x, y, crop_w, crop_h)
+}
+
 /// Size and offset a full-source picture so `view` fills `clip`.
 /// Returns (picture_w, picture_h, margin_x, margin_y).
 pub fn picture_layout(
