@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QImage>
 #include <QObject>
 #include <QRect>
 #include <QString>
@@ -11,6 +12,21 @@ class QElapsedTimer;
 /// The Windows build implements this over a bundled ffmpeg. The Linux build
 /// keeps its existing recorder in the Rust binary and never links this seam.
 namespace Platform {
+
+/// Where the webcam bubble sat inside the captured region.
+///
+/// The recorder stores these fractions in the sidecar instead of the bubble's
+/// pixel size, so the editor can rebuild the layer at any output resolution and
+/// a recording made on one display looks the same on another.
+struct WebcamLayout {
+    double x = 0.0;
+    double y = 0.0;
+    double w = 0.0;
+    double h = 0.0;
+    /// The shared shape table: 0 circle, 1 square, 2 rectangle, 3 vertical.
+    int shape = 0;
+    bool flip = false;
+};
 
 struct RecordingRequest {
     enum class Target {
@@ -42,6 +58,14 @@ struct RecordingRequest {
     int maxHeight = 0;
     /// x264 CRF. 0 falls back to 20.
     int crf = 20;
+    /// Record a camera track beside the video. A camera that cannot be opened
+    /// is reported through `warning` and leaves the recording without a track
+    /// rather than failing it.
+    bool webcamEnabled = false;
+    /// The dshow camera to record. Empty means the machine's first camera.
+    QString webcamDevice;
+    /// Where the bubble sat in `region`, for the editor's layer.
+    WebcamLayout webcamLayout;
 };
 
 class RecordingSession : public QObject
@@ -75,6 +99,10 @@ public:
 signals:
     void elapsedChanged(qint64 elapsedMs);
     void stateChanged();
+    /// One live frame from the webcam track, for the bubble window. The frames
+    /// are small (the preview is scaled down) and arrive at the recording's
+    /// frame rate; they are not the frames that reach the track file.
+    void webcamFrame(const QImage& frame);
     /// A non-fatal problem, such as a requested audio device that does not
     /// exist. Recording continues without that track.
     void warning(const QString& message);

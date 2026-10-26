@@ -20,6 +20,7 @@ mod rounded_clip;
 mod side_panel;
 mod timeline;
 mod ui_support;
+mod webcam;
 mod window;
 mod zoom;
 

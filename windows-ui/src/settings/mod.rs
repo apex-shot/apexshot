@@ -38,6 +38,7 @@ mod studio;
 mod theme_picker;
 #[path = "../../../src/settings/ui_support.rs"]
 pub(crate) mod ui_support;
+mod webcam;
 pub(crate) mod windowing;
 
 /// Top inset for page content. The Windows surface removes the page-title row,
@@ -376,6 +377,8 @@ fn build_settings_window(app: &Application) {
     let general = build_general_section(&config);
     let after_capture = build_after_capture_section(&config);
     let recordings = recording::build_recording_section(&config);
+    let webcam = webcam::build_webcam_group(&config);
+    recordings.section.append(&webcam.0);
     let screenshots = build_screenshots_section(&config);
     let advanced = advanced::build_advanced_section(&config);
     let about = about::build_about_section();
@@ -605,6 +608,7 @@ fn build_settings_window(app: &Application) {
         rec_video_fps: recordings.rec_video_fps.clone(),
         rec_video_quality: recordings.rec_video_quality.clone(),
         rec_video_mono: recordings.rec_video_mono.clone(),
+        webcam: webcam.1,
         screenshot_quick_access: after_capture.screenshot_after_capture_checks[0].clone(),
         screenshot_copy_to_clipboard: after_capture.screenshot_after_capture_checks[1].clone(),
         screenshot_save: after_capture.screenshot_after_capture_checks[2].clone(),

@@ -27,6 +27,7 @@ pub struct SaveInputs {
     pub rec_video_fps: SettingsSelect,
     pub rec_video_quality: SettingsSelect,
     pub rec_video_mono: CheckButton,
+    pub webcam: super::webcam::WebcamInputs,
     pub screenshot_quick_access: CheckButton,
     pub screenshot_copy_to_clipboard: CheckButton,
     pub screenshot_save: CheckButton,
@@ -187,6 +188,25 @@ pub fn save_settings(inputs: &SaveInputs) -> anyhow::Result<SaveOutcome> {
         .unwrap_or(1);
     config.rec_video_mono = inputs.rec_video_mono.is_active();
 
+    config.rec_webcam_enabled = inputs.webcam.enabled.is_active();
+    config.rec_webcam_device = inputs.webcam.device.borrow().clone();
+    config.rec_webcam_size = inputs
+        .webcam
+        .size
+        .active_id()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(1);
+    config.rec_webcam_shape = inputs
+        .webcam
+        .shape
+        .active_id()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    config.rec_webcam_flip = inputs.webcam.flip.is_active();
+    let (rel_x, rel_y) = inputs.webcam.position();
+    config.rec_webcam_rel_x = rel_x;
+    config.rec_webcam_rel_y = rel_y;
+
     config.after_capture_show_quick_access = inputs.screenshot_quick_access.is_active();
     config.after_capture_copy_file_to_clipboard = inputs.screenshot_copy_to_clipboard.is_active();
     config.after_capture_save = inputs.screenshot_save.is_active();
@@ -340,6 +360,15 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
             "include_speaker": config.rec_speaker,
             "show_cursor": config.rec_cursor,
             "after_show_result": true,
+            "webcam": {
+                "enabled": config.rec_webcam_enabled,
+                "device": config.rec_webcam_device,
+                "size_index": config.rec_webcam_size,
+                "shape_index": config.rec_webcam_shape,
+                "flip": config.rec_webcam_flip,
+                "rel_x": config.rec_webcam_rel_x,
+                "rel_y": config.rec_webcam_rel_y,
+            },
         },
         "quick_access": {
             "position": config.quick_access_position,
@@ -394,6 +423,13 @@ mod tests {
             rec_mic: true,
             rec_speaker: true,
             rec_cursor: false,
+            rec_webcam_enabled: true,
+            rec_webcam_device: "Integrated Camera".into(),
+            rec_webcam_size: 2,
+            rec_webcam_shape: 3,
+            rec_webcam_flip: true,
+            rec_webcam_rel_x: 0.0,
+            rec_webcam_rel_y: 1.0,
             play_sounds: false,
             shutter_sound: "Pop".into(),
             quick_access_position: "Right".into(),
@@ -425,6 +461,13 @@ mod tests {
         assert_eq!(value["recording"]["include_microphone"], true);
         assert_eq!(value["recording"]["include_speaker"], true);
         assert_eq!(value["recording"]["show_cursor"], false);
+        assert_eq!(value["recording"]["webcam"]["enabled"], true);
+        assert_eq!(value["recording"]["webcam"]["device"], "Integrated Camera");
+        assert_eq!(value["recording"]["webcam"]["size_index"], 2);
+        assert_eq!(value["recording"]["webcam"]["shape_index"], 3);
+        assert_eq!(value["recording"]["webcam"]["flip"], true);
+        assert_eq!(value["recording"]["webcam"]["rel_x"], 0.0);
+        assert_eq!(value["recording"]["webcam"]["rel_y"], 1.0);
         assert_eq!(value["quick_access"]["position"], "Right");
         assert_eq!(value["quick_access"]["overlay_scale"], 1.2);
         assert_eq!(value["quick_access"]["auto_close_enabled"], true);

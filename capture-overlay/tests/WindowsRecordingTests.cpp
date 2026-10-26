@@ -6,6 +6,7 @@
 
 #include "platform/recording.h"
 #include "platform/windows/pointer_tracker.h"
+#include "platform/windows/webcam_layout.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -432,6 +433,137 @@ int recordOnce(bool pauseAndResume)
 
 } // namespace
 
+/// Record a short clip with the webcam track enabled and check the track, the
+/// sidecar block and the live frames the bubble draws.
+///
+/// The camera name comes from APEXSHOT_TEST_CAMERA so the test uses the machine
+/// it runs on instead of guessing a friendly name.
+int recordWithWebcam()
+{
+    const QString camera = qEnvironmentVariable("APEXSHOT_TEST_CAMERA").trimmed();
+    if (camera.isEmpty()) {
+        std::printf("SKIP: set APEXSHOT_TEST_CAMERA to check the webcam track\n");
+        return 77;
+    }
+
+    Platform::RecordingSession session;
+    const QString path =
+        QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-record-webcam.mp4"));
+    const QString existingSidecar = Platform::sidecarPathFor(path);
+    if (!existingSidecar.isEmpty())
+        QFile::remove(existingSidecar);
+    QFile::remove(path);
+
+    const Platform::WebcamLayout layout =
+        Platform::webcamLayoutFor(kRegion, 2, 1, 0.0, 1.0, true);
+
+    Platform::RecordingRequest request;
+    request.region = kRegion;
+    request.outputPath = path;
+    request.includeCursor = false;
+    request.fps = 30;
+    request.crf = 28;
+    request.webcamEnabled = true;
+    request.webcamDevice = camera;
+    request.webcamLayout = layout;
+
+    int frames = 0;
+    QSize frameSize;
+    QObject::connect(&session,
+                     &Platform::RecordingSession::webcamFrame,
+                     &session,
+                     [&](const QImage& frame) {
+                         ++frames;
+                         frameSize = frame.size();
+                     });
+    QObject::connect(&session,
+                     &Platform::RecordingSession::warning,
+                     &session,
+                     [](const QString& message) {
+                         std::printf("WARN: %s\n", qPrintable(message));
+                     });
+
+    int result = 1;
+    QEventLoop loop;
+    QObject::connect(&session,
+                     &Platform::RecordingSession::finished,
+                     &session,
+                     [&](bool kept, const QString& output, const QString& error) {
+                         loop.quit();
+                         if (!kept || !QFileInfo(output).isFile()) {
+                             std::printf("FAIL webcam recording was not kept: %s\n",
+                                         qPrintable(error));
+                             return;
+                         }
+                         const QString track = Platform::webcamTrackPathFor(output);
+                         if (track.isEmpty() || !QFileInfo(track).isFile()
+                             || QFileInfo(track).size() == 0) {
+                             std::printf("FAIL webcam track was not written\n");
+                             return;
+                         }
+                         QFile file(Platform::sidecarPathFor(output));
+                         if (!file.open(QIODevice::ReadOnly)) {
+                             std::printf("FAIL webcam sidecar was not written\n");
+                             return;
+                         }
+                         const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+                         const QJsonObject webcam =
+                             document.object().value(QStringLiteral("webcam")).toObject();
+                         if (webcam.isEmpty()) {
+                             // The recorder keeps the footage when a camera will
+                             // not open, which is a skip for this check.
+                             std::puts("SKIP: the camera did not open");
+                             result = 77;
+                             return;
+                         }
+                         const auto closeEnough = [](double value, double expected) {
+                             return std::abs(value - expected) < 0.01;
+                         };
+                         if (webcam.value(QStringLiteral("file")).toString().isEmpty()
+                             || webcam.value(QStringLiteral("width")).toInt() <= 0
+                             || webcam.value(QStringLiteral("height")).toInt() <= 0
+                             || !closeEnough(webcam.value(QStringLiteral("x")).toDouble(), layout.x)
+                             || !closeEnough(webcam.value(QStringLiteral("y")).toDouble(), layout.y)
+                             || !closeEnough(webcam.value(QStringLiteral("w")).toDouble(), layout.w)
+                             || !closeEnough(webcam.value(QStringLiteral("h")).toDouble(), layout.h)
+                             || webcam.value(QStringLiteral("shape")).toInt() != 1
+                             || !webcam.value(QStringLiteral("flip")).toBool()) {
+                             std::printf("FAIL webcam sidecar block is wrong: %s\n",
+                                         qPrintable(QString::fromUtf8(
+                                             QJsonDocument(webcam).toJson(QJsonDocument::Compact))));
+                             return;
+                         }
+                         if (frames <= 0 || frameSize.isEmpty()) {
+                             std::printf("FAIL no live webcam frames reached the bubble\n");
+                             return;
+                         }
+                         std::printf("WEBCAM_TRACK=%s\n", qPrintable(track));
+                         std::printf("WEBCAM_FRAMES=%d preview=%dx%d track=%dx%d\n",
+                                     frames,
+                                     frameSize.width(),
+                                     frameSize.height(),
+                                     webcam.value(QStringLiteral("width")).toInt(),
+                                     webcam.value(QStringLiteral("height")).toInt());
+                         std::printf("WEBCAM_LAYOUT x=%.3f y=%.3f w=%.3f h=%.3f shape=%d flip=%d\n",
+                                     layout.x,
+                                     layout.y,
+                                     layout.w,
+                                     layout.h,
+                                     layout.shape,
+                                     layout.flip ? 1 : 0);
+                         result = 0;
+                     });
+
+    QString error;
+    if (!session.start(request, error)) {
+        std::printf("SKIP: the webcam recording did not start: %s\n", qPrintable(error));
+        return 77;
+    }
+    QTimer::singleShot(2500, &session, [&session] { session.stop(); });
+    loop.exec();
+    return result;
+}
+
 int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
@@ -445,8 +577,19 @@ int main(int argc, char** argv)
         return 77;
     }
 
+    // The cursor checks need a desktop that accepts input injection, which a
+    // locked or game-focused session refuses; the camera path can still run.
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WEBCAM_ONLY"))
+        return recordWithWebcam();
+
     int result = recordOnce(false);
     if (result == 0)
         result = recordOnce(true);
+    if (result == 0) {
+        const int webcam = recordWithWebcam();
+        // 77 is the camera-absent skip, which is not a failure of the recorder.
+        if (webcam != 77)
+            result = webcam;
+    }
     return result;
 }

@@ -3471,11 +3471,250 @@ msgstr "Adaptiv"
 msgid "Adjust Light"
 msgstr "Licht anpassen"
 
+msgid "16:9"
+msgstr "16:9"
+
+msgid "9:16"
+msgstr "9:16"
+
+msgid "Add gradient stop"
+msgstr "Verlaufspunkt hinzufügen"
+
+msgid "ApexShot Video Editor"
+msgstr "ApexShot-Videoeditor"
+
+msgid "Background image"
+msgstr "Hintergrundbild"
+
+msgid "Bottom left"
+msgstr "Unten links"
+
+msgid "Bottom right"
+msgstr "Unten rechts"
+
+msgid "Cloud browsing and sign-in are not available in the Windows build yet."
+msgstr "Cloud-Browser und Anmeldung sind im Windows-Build noch nicht verfügbar."
+
+msgid "Cloud uploads are not available in the Windows build yet"
+msgstr "Cloud-Uploads sind im Windows-Build noch nicht verfügbar"
+
+msgid ""
+"Cloud uploads are not wired in the Windows build yet. Destination and XBackBone settings are saved for a future release."
+msgstr ""
+"Cloud-Uploads sind im Windows-Build noch nicht angebunden. Ziel- und XBackBone-Einstellungen werden für eine spätere Version gespeichert."
+
+msgid "Corner radius"
+msgstr "Eckenradius"
+
+msgid "Could not access the Windows clipboard"
+msgstr "Auf die Windows-Zwischenablage konnte nicht zugegriffen werden"
+
+msgid "Could not copy file: {message}"
+msgstr "Datei konnte nicht kopiert werden: {message}"
+
+msgid "Could not copy image: {message}"
+msgstr "Bild konnte nicht kopiert werden: {message}"
+
+msgid "Could not open Explorer: {message}"
+msgstr "Explorer konnte nicht geöffnet werden: {message}"
+
+msgid "Could not start the video editor: {message}"
+msgstr "Videoeditor konnte nicht gestartet werden: {message}"
+
+msgid "Do Not Disturb integration is not available on Windows yet."
+msgstr ""
+"Die Integration mit „Nicht stören“ ist unter Windows noch nicht verfügbar."
+
+msgid "Dragging the result card out of the app is not available on Windows yet."
+msgstr ""
+"Das Ziehen der Ergebnis-Karte aus der App heraus ist unter Windows noch nicht möglich."
+
+msgid "Edits you save in the video editor will show up here."
+msgstr "Bearbeitungen aus dem Videoeditor erscheinen hier."
+
+msgid "Export failed."
+msgstr "Export fehlgeschlagen."
+
+msgid "Exported successfully."
+msgstr "Erfolgreich exportiert."
+
+msgid "FINISH"
+msgstr "ABSCHLUSS"
+
+msgid "Fill the frame with the camera instead of the bubble."
+msgstr "Füllt den Rahmen mit der Kamera statt mit der Blase."
+
+msgid "First available camera"
+msgstr "Erste verfügbare Kamera"
+
+msgid "Flip the camera left to right, the way a mirror shows it."
+msgstr "Spiegelt die Kamera von links nach rechts, wie im Spiegel."
+
+msgid "Frame changes keep the source footage centred in the preview."
+msgstr "Rahmenänderungen halten das Ausgangsmaterial in der Vorschau zentriert."
+
+msgid ""
+"Global shortcuts are not available in the Windows build yet. Bindings are saved for a future release."
+msgstr ""
+"Globale Kürzel sind im Windows-Build noch nicht verfügbar. Belegungen werden für eine spätere Version gespeichert."
+
+msgid "Hide the camera without removing its track."
+msgstr "Blendet die Kamera aus, ohne ihre Spur zu entfernen."
+
+msgid "Horizontal"
+msgstr "Horizontal"
+
+msgid "Huge"
+msgstr "Sehr groß"
+
+msgid "If enabled, the zoom is applied instantly without any animation."
+msgstr "Wenn aktiviert, wird der Zoom sofort und ohne Animation angewendet."
+
+msgid "Instant"
+msgstr "Sofort"
+
+msgid "MP4 recordings"
+msgstr "MP4-Aufnahmen"
+
+msgid "Maximize"
+msgstr "Maximieren"
+
+msgid "Mirror camera"
+msgstr "Kamera spiegeln"
+
+msgid "Mirror the picture"
+msgstr "Bild spiegeln"
+
 msgid "Motion editing is not available in the Windows build yet."
-msgstr "Die Bewegungsbearbeitung ist in der Windows-Version noch nicht verfügbar."
+msgstr "Bewegungsbearbeitung ist im Windows-Build noch nicht verfügbar."
+
+msgid "Open recording"
+msgstr "Aufnahme öffnen"
+
+msgid "Opened {name} in the video editor"
+msgstr "{name} im Videoeditor geöffnet"
+
+msgid "POSITION"
+msgstr "POSITION"
+
+msgid "Put the camera back where the recording captured it."
+msgstr "Setzt die Kamera dorthin zurück, wo die Aufnahme sie erfasst hat."
+
+msgid "Record a webcam track"
+msgstr "Webcam-Spur aufnehmen"
+
+msgid "Rectangle"
+msgstr "Rechteck"
+
+msgid "Remove stop"
+msgstr "Punkt entfernen"
+
+msgid "Reverse gradient"
+msgstr "Verlauf umkehren"
+
+msgid "SHAPE"
+msgstr "FORM"
+
+msgid "SIZE"
+msgstr "GRÖSSE"
+
+msgid "STEPS"
+msgstr "SCHRITTE"
+
+msgid "Search isn't available on this page"
+msgstr "Die Suche ist auf dieser Seite nicht verfügbar"
+
+msgid "Select a zoom clip on the timeline"
+msgstr "Wähle einen Zoom-Clip in der Zeitleiste"
+
+msgid "Select image…"
+msgstr "Bild auswählen…"
+
+msgid "Shape"
+msgstr "Form"
+
+msgid "Show camera"
+msgstr "Kamera anzeigen"
+
+msgid "Show in Explorer"
+msgstr "Im Explorer zeigen"
+
+msgid "Strength"
+msgstr "Stärke"
+
+msgid "TRANSITION"
+msgstr "ÜBERGANG"
+
+msgid "The Windows recorder always captures at native display resolution."
+msgstr "Der Windows-Recorder nimmt immer in der nativen Bildschirmauflösung auf."
+
+msgid "The Windows recorder always shows its controls."
+msgstr "Der Windows-Recorder zeigt seine Steuerelemente immer an."
+
+msgid ""
+"The Windows shell needs its tray icon until global shortcuts are available."
+msgstr ""
+"Die Windows-Shell braucht ihr Taskleisten-Symbol, bis globale Kürzel verfügbar sind."
+
+msgid ""
+"The annotate editor is not available in the Windows build yet. These preferences are saved for a future release."
+msgstr ""
+"Der Anmerkungseditor ist im Windows-Build noch nicht verfügbar. Diese Einstellungen werden für eine spätere Version gespeichert."
+
+msgid "The annotate editor is not available on Windows yet."
+msgstr "Der Anmerkungseditor ist unter Windows noch nicht verfügbar."
+
+msgid "The export stopped unexpectedly."
+msgstr "Der Export wurde unerwartet beendet."
+
+msgid "The image editor is not available in the Windows build yet"
+msgstr "Der Bildeditor ist im Windows-Build noch nicht verfügbar"
+
+msgid "This recording has no camera track."
+msgstr "Diese Aufnahme hat keine Kameraspur."
+
+msgid "Top left"
+msgstr "Oben links"
+
+msgid "Top right"
+msgstr "Oben rechts"
+
+msgid "Transition"
+msgstr "Übergang"
+
+msgid "Untitled recording"
+msgstr "Unbenannte Aufnahme"
+
+msgid "Uploading from the result card is not available on Windows yet."
+msgstr ""
+"Das Hochladen aus der Ergebnis-Karte ist unter Windows noch nicht möglich."
+
+msgid "Usage telemetry is not sent from the Windows build."
+msgstr "Der Windows-Build sendet keine Nutzungstelemetrie."
+
+msgid "Vertical"
+msgstr "Vertikal"
+
+msgid "Video export from the Windows editor is not available yet."
+msgstr "Der Videoexport aus dem Windows-Editor ist noch nicht verfügbar."
+
+msgid "Webcam"
+msgstr "Webcam"
+
+msgid "Windows UI translations are not available yet."
+msgstr "Übersetzungen der Windows-Oberfläche sind noch nicht verfügbar."
+
+msgid "ZOOM"
+msgstr "ZOOM"
+
+msgid "cancelling…"
+msgstr "wird abgebrochen…"
+
+msgid "estimated:"
+msgstr "geschätzt:"
+
+msgid "finishing…"
+msgstr "wird abgeschlossen…"
 
 msgid "Video editing is not available in the Windows build yet."
 msgstr "Die Videobearbeitung ist in der Windows-Version noch nicht verfügbar."
-
-msgid "Cloud browsing and sign-in are not available in the Windows build yet."
-msgstr "Cloud-Browsing und Anmeldung sind in der Windows-Version noch nicht verfügbar."

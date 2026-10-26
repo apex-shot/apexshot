@@ -11,6 +11,7 @@
 #include "platform/windows/recording_controls.h"
 #include "platform/windows/recording_countdown.h"
 #include "platform/windows/recording_mask.h"
+#include "platform/windows/webcam_bubble.h"
 #include "platform/windows/scroll_capture.h"
 #include "platform/windows/scroll_controls.h"
 #include "platform/windows/settings_store.h"
@@ -22,6 +23,7 @@
 #include <QCoreApplication>
 #include <QCursor>
 #include <QDateTime>
+#include <QDebug>
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
@@ -1793,12 +1795,65 @@ private:
         request.maxHeight = maxResolution.height();
         request.monoAudio = videoSettings.monoAudio;
 
+        // The camera records to its own track and the editor composites it, so
+        // what this window shows is a preview of that layer: it is excluded
+        // from capture and leaves no pixels in the recording.
+        const Platform::ShellSettings::Webcam& webcam = settings.recording.webcam;
+        QRect webcamRect;
+        if (webcam.enabled) {
+            request.webcamEnabled = true;
+            request.webcamDevice = webcam.device.trimmed();
+            webcamRect = Platform::webcamBubbleRect(region,
+                                                    webcam.sizeIndex,
+                                                    webcam.shapeIndex,
+                                                    webcam.relX,
+                                                    webcam.relY);
+            request.webcamLayout = Platform::webcamLayoutFor(region,
+                                                             webcam.sizeIndex,
+                                                             webcam.shapeIndex,
+                                                             webcam.relX,
+                                                             webcam.relY,
+                                                             webcam.flip);
+        }
+
         connect(session,
                 &Platform::RecordingSession::warning,
                 this,
                 [](const QString& message) {
                     QMessageBox::information(nullptr, QStringLiteral("Recording"), message);
                 });
+
+        if (!request.webcamDevice.isEmpty()) {
+            m_webcamBubble = new Platform::WebcamBubble(request.webcamLayout.shape,
+                                                        request.webcamLayout.flip);
+            m_webcamBubble->placeAt(webcamRect);
+            QPointer<Platform::WebcamBubble> bubble = m_webcamBubble;
+            connect(session,
+                    &Platform::RecordingSession::webcamFrame,
+                    m_webcamBubble,
+                    [bubble](const QImage& frame) {
+                        if (!bubble)
+                            return;
+                        bubble->setFrame(frame);
+                        // A camera that never answers leaves no bubble at all.
+                        if (!bubble->isVisible())
+                            bubble->show();
+                    });
+            // A paused recording is not part of the footage, and the camera
+            // stops with it, so the bubble goes away with the pause too.
+            connect(session,
+                    &Platform::RecordingSession::stateChanged,
+                    m_webcamBubble,
+                    [session, bubble] {
+                        if (!bubble)
+                            return;
+                        if (session->isActive() && !session->isPaused()
+                            && bubble->hasFrame())
+                            bubble->show();
+                        else
+                            bubble->hide();
+                    });
+        }
 
         connect(session,
                 &Platform::RecordingSession::finished,
@@ -1811,6 +1866,10 @@ private:
                     if (m_recordingMask) {
                         m_recordingMask->close();
                         m_recordingMask = nullptr;
+                    }
+                    if (m_webcamBubble) {
+                        m_webcamBubble->close();
+                        m_webcamBubble = nullptr;
                     }
                     session->deleteLater();
                     if (kept)
@@ -1826,6 +1885,10 @@ private:
             if (m_recordingMask) {
                 m_recordingMask->close();
                 m_recordingMask = nullptr;
+            }
+            if (m_webcamBubble) {
+                m_webcamBubble->close();
+                m_webcamBubble = nullptr;
             }
             session->deleteLater();
             QMessageBox::warning(nullptr, QStringLiteral("Recording"), error);
@@ -2048,6 +2111,7 @@ private:
     Platform::RecordingSession* m_activeSession = nullptr;
     QPointer<RecordingCountdown> m_countdownPill;
     QPointer<RecordingMask> m_recordingMask;
+    QPointer<Platform::WebcamBubble> m_webcamBubble;
     QPointer<Platform::ScrollCaptureSession> m_scrollSession;
     QPointer<RecordingMask> m_scrollMask;
 };

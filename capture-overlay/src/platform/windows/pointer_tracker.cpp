@@ -298,7 +298,9 @@ void PointerTracker::closePresses(qint64 mediaTimeMs)
     }
 }
 
-bool PointerTracker::writeSidecar(const QString& videoPath, QString* error) const
+bool PointerTracker::writeSidecar(const QString& videoPath,
+                                  const WebcamTrack& webcam,
+                                  QString* error) const
 {
     const QString path = sidecarFilePath(videoPath);
     if (path.isEmpty()) {
@@ -335,6 +337,22 @@ bool PointerTracker::writeSidecar(const QString& videoPath, QString* error) cons
         {QStringLiteral("presses"), presses},
         {QStringLiteral("source"), QStringLiteral("recorded")},
     };
+    QJsonObject document = sidecar;
+    if (webcam.is_valid()) {
+        document.insert(QStringLiteral("webcam"),
+                        QJsonObject{
+                            {QStringLiteral("file"), QFileInfo(webcam.file).fileName()},
+                            {QStringLiteral("width"), webcam.width},
+                            {QStringLiteral("height"), webcam.height},
+                            {QStringLiteral("duration"), webcam.duration},
+                            {QStringLiteral("x"), webcam.x},
+                            {QStringLiteral("y"), webcam.y},
+                            {QStringLiteral("w"), webcam.w},
+                            {QStringLiteral("h"), webcam.h},
+                            {QStringLiteral("shape"), webcam.shape},
+                            {QStringLiteral("flip"), webcam.flip},
+                        });
+    }
 
     const QFileInfo info(path);
     if (!QDir().mkpath(info.absolutePath())) {
@@ -349,7 +367,7 @@ bool PointerTracker::writeSidecar(const QString& videoPath, QString* error) cons
             *error = file.errorString();
         return false;
     }
-    const QByteArray json = QJsonDocument(sidecar).toJson(QJsonDocument::Indented);
+    const QByteArray json = QJsonDocument(document).toJson(QJsonDocument::Indented);
     if (file.write(json) != json.size() || !file.commit()) {
         if (error)
             *error = file.errorString();
@@ -393,6 +411,14 @@ QString canonicalVideoPathFor(const QString& videoPath)
 QString sidecarPathFor(const QString& videoPath)
 {
     return sidecarFilePath(videoPath);
+}
+
+QString webcamTrackPathFor(const QString& videoPath)
+{
+    const QString sidecar = sidecarFilePath(videoPath);
+    if (sidecar.isEmpty())
+        return QString();
+    return sidecar + QStringLiteral(".webcam.mp4");
 }
 
 QString cursorKindName(CursorKind kind)
