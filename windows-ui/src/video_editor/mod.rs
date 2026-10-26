@@ -11,6 +11,7 @@ mod cursor;
 mod custom_fill;
 mod export;
 mod export_card;
+mod history;
 mod pixels;
 mod press;
 mod preview;

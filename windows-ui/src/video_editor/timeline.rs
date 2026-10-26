@@ -25,6 +25,8 @@ use crate::i18n::t;
 use crate::recording::editor::auto_zoom;
 use crate::recording::editor::ffmpeg;
 
+use super::history::EditHistory;
+
 const PLACEHOLDER_SECONDS: f64 = 30.0;
 const FIT_SCALE_RANGE: f64 = 7.0;
 const MIN_CLIP_SECONDS: f64 = 0.1;
@@ -79,7 +81,7 @@ pub(super) struct ZoomClip {
     pub(super) anchor: Option<(f64, f64)>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 struct HideClip {
     start: f64,
     end: f64,
@@ -88,7 +90,7 @@ struct HideClip {
 
 /// One cut or copied effect, waiting for Paste. The paste lands at the
 /// playhead on the track it came from, as the source editor's clipboard does.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 struct ClipTemplate {
     track: EffectTrack,
     duration: f64,
@@ -147,6 +149,36 @@ struct Data {
     /// is extended past the source, exactly as the source editor's freeze
     /// tail does.
     freeze_tail: f64,
+    /// Ctrl+Z and Ctrl+Shift+Z. Runtime-only: a reopened recording starts with
+    /// nothing to take back.
+    history: EditHistory<EditSnapshot>,
+}
+
+/// The document as one undo step restores it.
+///
+/// The media identity travels with the edits because Delete on the video clip
+/// empties the whole composition: undoing it has to put the recording back,
+/// not just drop the effects it carried. Everything here is either plain data
+/// or a refcounted handle (the filmstrip's pixbufs), so a snapshot is cheap
+/// enough to take on the first motion event of a drag.
+#[derive(Clone, PartialEq)]
+struct EditSnapshot {
+    path: Option<PathBuf>,
+    duration: f64,
+    frame_size: Option<(u32, u32)>,
+    frames: Vec<gtk4::gdk_pixbuf::Pixbuf>,
+    trim_start: f64,
+    trim_end: f64,
+    cuts: Vec<f64>,
+    segment_starts: Vec<f64>,
+    freeze_tail: f64,
+    zoom_clips: Vec<ZoomClip>,
+    hide_clips: Vec<HideClip>,
+    zoom_camera: super::zoom::ZoomCameraSettings,
+    selected: bool,
+    selected_zoom: Option<usize>,
+    selected_hide: Option<usize>,
+    clipboard: Option<ClipTemplate>,
 }
 
 impl ZoomClip {
@@ -315,6 +347,7 @@ impl Data {
         if index >= self.segment_count() {
             return;
         }
+        self.record_continuous_edit();
         let start = if self.segment_count() <= 1 || !start.is_finite() {
             0.0
         } else {
@@ -444,6 +477,7 @@ impl Data {
     /// Move the in-point. Every piece after it slides earlier in composition
     /// time, so anchored zooms follow their footage instead of drifting off it.
     fn set_trim_start(&mut self, start: f64) {
+        self.record_continuous_edit();
         self.trim_start = start.clamp(0.0, (self.trim_end - MIN_CLIP_SECONDS).max(0.0));
         self.clamp_playhead();
         self.clamp_cuts();
@@ -459,6 +493,7 @@ impl Data {
         if !self.has_media() {
             return;
         }
+        self.record_continuous_edit();
         let duration = self.duration.max(0.0);
         let final_cut = self.cuts.last().copied().unwrap_or(self.trim_start);
         let floor = (self.trim_start + MIN_CLIP_SECONDS)
@@ -511,6 +546,101 @@ impl Data {
         self.segment_starts.clear();
         self.moving_segment = None;
         self.freeze_tail = 0.0;
+    }
+
+    /// The editable state, as one undo step keeps it.
+    fn snapshot(&self) -> EditSnapshot {
+        EditSnapshot {
+            path: self.path.clone(),
+            duration: self.duration,
+            frame_size: self.frame_size,
+            frames: self.frames.clone(),
+            trim_start: self.trim_start,
+            trim_end: self.trim_end,
+            cuts: self.cuts.clone(),
+            segment_starts: self.segment_starts.clone(),
+            freeze_tail: self.freeze_tail,
+            zoom_clips: self.zoom_clips.clone(),
+            hide_clips: self.hide_clips.clone(),
+            zoom_camera: self.zoom_camera,
+            selected: self.selected,
+            selected_zoom: self.selected_zoom,
+            selected_hide: self.selected_hide,
+            clipboard: self.clipboard,
+        }
+    }
+
+    /// Take the step a continuous edit is about to change.
+    ///
+    /// One trim drag or one slider sweep arrives as a stream of updates, so
+    /// the step is taken on the first of the burst and the rest leave it
+    /// alone.
+    fn record_continuous_edit(&mut self) {
+        let before = self.snapshot();
+        self.history.record_continuous(before);
+    }
+
+    /// Record a step for a command that has already been applied, so an edit
+    /// the document refused leaves nothing to undo.
+    fn record_edit(&mut self, before: EditSnapshot) {
+        self.history.record_command(before);
+    }
+
+    /// Restore the document to how it stood before the last edit.
+    ///
+    /// Returns `false` when there is nothing left to take back, which leaves
+    /// the document untouched.
+    fn undo_edit(&mut self) -> bool {
+        let current = self.snapshot();
+        let Some(previous) = self.history.undo(current) else {
+            return false;
+        };
+        self.restore(previous);
+        true
+    }
+
+    /// Replay the edit the last undo took back.
+    fn redo_edit(&mut self) -> bool {
+        let current = self.snapshot();
+        let Some(next) = self.history.redo(current) else {
+            return false;
+        };
+        self.restore(next);
+        true
+    }
+
+    /// Put a step back on the document. The values were clamped when the step
+    /// was captured, but the recording under them may have changed since, so
+    /// the same clamps the saved edit list runs on load run again here.
+    fn restore(&mut self, snapshot: EditSnapshot) {
+        // The filmstrip is a view of the recording, not an edit: keep the one
+        // on screen unless the step is putting a different recording back.
+        if self.path != snapshot.path {
+            self.frames = snapshot.frames;
+        }
+        self.path = snapshot.path;
+        self.duration = snapshot.duration;
+        self.frame_size = snapshot.frame_size;
+        self.trim_start = snapshot.trim_start;
+        self.trim_end = snapshot.trim_end;
+        self.cuts = snapshot.cuts;
+        self.segment_starts = snapshot.segment_starts;
+        self.freeze_tail = snapshot.freeze_tail;
+        self.zoom_clips = snapshot.zoom_clips;
+        self.hide_clips = snapshot.hide_clips;
+        self.zoom_camera = snapshot.zoom_camera;
+        self.selected = snapshot.selected;
+        self.selected_zoom = snapshot.selected_zoom;
+        self.selected_hide = snapshot.selected_hide;
+        self.clipboard = snapshot.clipboard;
+        self.playing = false;
+        // A restored selection is a new one for the panel, which reveals
+        // itself when the epoch changes.
+        self.zoom_selection_epoch = self.zoom_selection_epoch.wrapping_add(1);
+        self.clamp_cuts();
+        self.clamp_effects();
+        self.clamp_scroll();
+        self.clamp_playhead();
     }
 
     /// The edits as they should be written for this recording, or `None` when
@@ -670,6 +800,7 @@ impl Data {
         if self.cuts.iter().any(|&cut| (cut - source).abs() < 0.1) {
             return false;
         }
+        let before = self.snapshot();
         let split_index = self.cuts.partition_point(|&cut| cut < source);
         let boundaries = self.segment_boundaries();
         let left_start = self.segment_start(split_index);
@@ -685,6 +816,7 @@ impl Data {
         self.segment_starts.insert(split_index + 1, right_start);
         self.normalize_segment_starts();
         self.reproject_anchored_zooms();
+        self.record_edit(before);
         true
     }
 
@@ -753,6 +885,10 @@ impl Data {
     }
 
     fn set_effect_hidden(&mut self, track: EffectTrack, index: usize, hidden: bool) {
+        if self.effect_span(track, index).is_none() {
+            return;
+        }
+        let before = self.snapshot();
         match track {
             EffectTrack::Zoom => {
                 if let Some(clip) = self.zoom_clips.get_mut(index) {
@@ -765,6 +901,7 @@ impl Data {
                 }
             }
         }
+        self.record_edit(before);
     }
 
     fn selected_effect(&self, track: EffectTrack) -> Option<usize> {
@@ -800,8 +937,10 @@ impl Data {
         }
         let start = start.clamp(0.0, (limit - MIN_CLIP_SECONDS).max(0.0));
         let end = (start + DEFAULT_EFFECT_SECONDS).min(limit);
+        let before = self.snapshot();
         let index = self.insert_effect(track, start, end, DEFAULT_ZOOM_SCALE, false)?;
         self.select_effect(track, Some(index));
+        self.record_edit(before);
         Some(index)
     }
 
@@ -881,10 +1020,18 @@ impl Data {
 
     /// Cut is copy-then-remove: the clipboard keeps the clip for Paste.
     fn cut_effect(&mut self, track: EffectTrack, index: usize) -> bool {
+        if self.effect_span(track, index).is_none() {
+            return false;
+        }
+        // The clipboard travels with the step, so undoing the cut drops the
+        // paste it was waiting for instead of leaving the lane dimmed for an
+        // action the user just took back.
+        let before = self.snapshot();
         if !self.copy_effect(track, index) {
             return false;
         }
-        self.remove_effect(track, index);
+        self.remove_effect_at(track, index);
+        self.record_edit(before);
         true
     }
 
@@ -928,6 +1075,7 @@ impl Data {
         if template.track != track {
             return None;
         }
+        let before = self.snapshot();
         let index = self.insert_effect(
             track,
             start,
@@ -943,6 +1091,7 @@ impl Data {
         }
         self.clipboard = None;
         self.select_effect(track, Some(index));
+        self.record_edit(before);
         Some(index)
     }
 
@@ -978,6 +1127,7 @@ impl Data {
             .get(index)
             .filter(|_| track == EffectTrack::Zoom)
             .copied();
+        let before = self.snapshot();
         let new_index = self.insert_effect(
             track,
             end,
@@ -997,10 +1147,21 @@ impl Data {
             self.zoom_clips[new_index].anchor = None;
         }
         self.select_effect(track, Some(new_index));
+        self.record_edit(before);
         Some(new_index)
     }
 
     fn remove_effect(&mut self, track: EffectTrack, index: usize) {
+        if self.effect_span(track, index).is_none() {
+            return;
+        }
+        let before = self.snapshot();
+        self.remove_effect_at(track, index);
+        self.record_edit(before);
+    }
+
+    /// Remove one clip without taking a step; the caller owns the step.
+    fn remove_effect_at(&mut self, track: EffectTrack, index: usize) {
         match track {
             EffectTrack::Zoom => {
                 if index >= self.zoom_clips.len() {
@@ -1045,7 +1206,7 @@ impl Data {
                 f64::from(extent) / 2.0
             }
         };
-        let Some(clip) = self.zoom_clips.get_mut(index) else {
+        let Some(clip) = self.zoom_clips.get(index) else {
             return false;
         };
         if clip.mode != ZoomMode::Manual {
@@ -1061,7 +1222,8 @@ impl Data {
         if clip.center == center {
             return false;
         }
-        clip.center = center;
+        self.record_continuous_edit();
+        self.zoom_clips[index].center = center;
         true
     }
 
@@ -1069,37 +1231,48 @@ impl Data {
         let Some(index) = self.selected_zoom else {
             return;
         };
-        let Some(clip) = self.zoom_clips.get_mut(index) else {
+        let Some(clip) = self.zoom_clips.get(index) else {
             return;
         };
         if clip.mode == mode {
             return;
         }
+        let before = self.snapshot();
         if let Some(center) = visible_center {
-            clip.center = center;
+            self.zoom_clips[index].center = center;
         }
-        clip.mode = mode;
+        self.zoom_clips[index].mode = mode;
+        self.record_edit(before);
     }
 
     fn set_selected_zoom_scale(&mut self, scale: f64) {
         let Some(index) = self.selected_zoom else {
             return;
         };
-        if let Some(clip) = self.zoom_clips.get_mut(index) {
-            clip.scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+        if self.zoom_clips.get(index).is_none() {
+            return;
         }
+        self.record_continuous_edit();
+        self.zoom_clips[index].scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
     }
 
     fn set_selected_zoom_instant(&mut self, instant: bool) {
         let Some(index) = self.selected_zoom else {
             return;
         };
-        if let Some(clip) = self.zoom_clips.get_mut(index) {
-            clip.instant = instant;
+        let Some(clip) = self.zoom_clips.get(index) else {
+            return;
+        };
+        if clip.instant == instant {
+            return;
         }
+        let before = self.snapshot();
+        self.zoom_clips[index].instant = instant;
+        self.record_edit(before);
     }
 
     fn reset_zoom_animation(&mut self) {
+        let before = self.snapshot();
         self.zoom_camera = super::zoom::ZoomCameraSettings::default();
         if let Some(clip) = self
             .selected_zoom
@@ -1107,18 +1280,30 @@ impl Data {
         {
             clip.instant = false;
         }
+        self.record_edit(before);
     }
 
     fn update_zoom_camera(&mut self, update: impl FnOnce(&mut super::zoom::ZoomCameraSettings)) {
         let mut settings = self.zoom_camera;
         update(&mut settings);
-        self.zoom_camera = settings.clamped();
+        let settings = settings.clamped();
+        if settings == self.zoom_camera {
+            return;
+        }
+        self.record_continuous_edit();
+        self.zoom_camera = settings;
     }
 
     /// Delete on the video clip empties the composition. The window still has
-    /// the document open, so reloading the recording brings the clip back.
+    /// the document open, so reloading the recording brings the clip back;
+    /// undo also brings it back, which is why the media travels in the step.
     fn remove_video_clip(&mut self) {
+        if !self.has_media() {
+            return;
+        }
+        let before = self.snapshot();
         self.reset_media();
+        self.record_edit(before);
     }
 
     /// Where a source interval sits in composition time, for placing a detected
@@ -1262,6 +1447,10 @@ impl Data {
     /// Resizing a zoom pill by hand takes it off its anchor: the user said
     /// where it belongs.
     fn set_effect_range(&mut self, track: EffectTrack, index: usize, start: f64, end: f64) {
+        if self.effect_span(track, index).is_none() {
+            return;
+        }
+        self.record_continuous_edit();
         let limit = self.total_duration();
         let lower = if index > 0 {
             self.effect_span(track, index - 1)
@@ -1626,6 +1815,29 @@ impl Timeline {
         self.project.sync(snapshot, true);
     }
 
+    /// Take the document back to how it stood before the last edit.
+    ///
+    /// Returns `false` when there is nothing left to take back, so the key
+    /// that asked can travel on to whoever else might handle it.
+    pub fn undo(&self) -> bool {
+        let changed = self.data.borrow_mut().undo_edit();
+        if changed {
+            (self.repaint)();
+            self.publish_frame();
+        }
+        changed
+    }
+
+    /// Replay the edit the last undo took back.
+    pub fn redo(&self) -> bool {
+        let changed = self.data.borrow_mut().redo_edit();
+        if changed {
+            (self.repaint)();
+            self.publish_frame();
+        }
+        changed
+    }
+
     /// Swap the recording the timeline describes. `None` returns it to the
     /// empty placeholder scale.
     ///
@@ -1639,6 +1851,9 @@ impl Timeline {
 
         let mut data = self.data.borrow_mut();
         data.reset_media();
+        // Steps belong to the recording they were taken on; the incoming one
+        // starts with nothing to take back.
+        data.history.clear();
         let mut duration = 0.0;
         let mut restored = None;
         if let Some(source) = &source {
@@ -2108,6 +2323,9 @@ pub(super) fn build(
                     return;
                 }
                 let placements = place_auto_zooms(&data.zoom_clips, &detections, (width, height));
+                // One Detect is one step: undoing has to put the track back
+                // the way a single click found it, not clip by clip.
+                let before = data.snapshot();
                 let mut inserted = 0;
                 for placement in placements {
                     let anchor = data.source_anchor(placement.start, placement.end);
@@ -2124,6 +2342,9 @@ pub(super) fn build(
                         data.zoom_clips[index].anchor = anchor;
                         inserted += 1;
                     }
+                }
+                if inserted > 0 {
+                    data.record_edit(before);
                 }
                 inserted
             };
@@ -5039,5 +5260,104 @@ mod tests {
         assert!(data.paste_effect_at(EffectTrack::Hide, 4.0).is_none());
         // The copy is still waiting for its own lane.
         assert!(data.clipboard.is_some());
+    }
+
+    #[test]
+    fn undoing_a_trim_brings_back_the_zoom_it_removed() {
+        let mut data = loaded();
+        anchored_zoom(&mut data, 6.0, 8.0);
+
+        // Trim the head past the footage the zoom was placed for: the clip has
+        // nothing left to follow and the composition drops it.
+        data.set_trim_start(9.0);
+        assert!(data.zoom_clips.is_empty());
+
+        assert!(data.undo_edit());
+        assert!(data.trim_start.abs() < 1e-9);
+        assert_eq!(data.zoom_clips.len(), 1);
+        assert_eq!(data.zoom_clips[0].anchor, Some((6.0, 8.0)));
+        assert!((data.zoom_clips[0].start - 6.0).abs() < 1e-9);
+
+        assert!(data.redo_edit());
+        assert!(data.zoom_clips.is_empty());
+        assert!((data.trim_start - 9.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_trim_drag_is_one_undo_step() {
+        let mut data = loaded();
+        // A drag arrives as a stream of positions; one drag is one step, not
+        // one per pointer event.
+        for step in 1..=5 {
+            data.set_trim_start(step as f64 * 0.2);
+        }
+        assert!((data.trim_start - 1.0).abs() < 1e-9);
+
+        assert!(data.undo_edit());
+        assert!(data.trim_start.abs() < 1e-9);
+        // The drag is the only step, so there is nothing older to take back.
+        assert!(!data.undo_edit());
+    }
+
+    #[test]
+    fn undoing_a_delete_brings_the_recording_and_its_edits_back() {
+        let mut data = loaded();
+        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
+        data.remove_video_clip();
+        assert!(data.path.is_none());
+        assert_eq!(data.duration, 0.0);
+
+        assert!(data.undo_edit());
+        assert_eq!(data.path.as_deref(), Some(Path::new("clip.mp4")));
+        assert!((data.duration - 10.0).abs() < 1e-9);
+        assert!((data.trim_end - 10.0).abs() < 1e-9);
+        assert_eq!(data.zoom_clips.len(), 1);
+    }
+
+    #[test]
+    fn a_refused_edit_leaves_nothing_to_undo() {
+        let mut data = loaded();
+        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
+        // The lane has no room here; the refused drop must not bury the add
+        // under a step that changed nothing.
+        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_none());
+
+        assert!(data.undo_edit());
+        assert!(data.zoom_clips.is_empty());
+        assert!(!data.undo_edit());
+    }
+
+    #[test]
+    fn undoing_a_cut_drops_the_pending_paste() {
+        let mut data = loaded();
+        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
+        assert!(data.cut_effect(EffectTrack::Zoom, 0));
+        assert!(data.zoom_clips.is_empty());
+        assert!(data.can_paste());
+
+        assert!(data.undo_edit());
+        assert_eq!(data.zoom_clips.len(), 1);
+        // A clip back on the track with a paste still pending would leave the
+        // lane dimmed for an action the user just took back.
+        assert!(!data.can_paste());
+    }
+
+    #[test]
+    fn a_zoom_slider_sweep_is_one_undo_step() {
+        let mut data = loaded();
+        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_some());
+        data.selected_zoom = Some(0);
+        let original = data.zoom_clips[0].scale;
+        for step in 1..=5 {
+            data.set_selected_zoom_scale(original + step as f64 * 0.1);
+        }
+        assert!((data.zoom_clips[0].scale - (original + 0.5)).abs() < 1e-9);
+
+        assert!(data.undo_edit());
+        assert!((data.zoom_clips[0].scale - original).abs() < 1e-9);
+        // The add is the step below the sweep, and nothing is left after it.
+        assert!(data.undo_edit());
+        assert!(data.zoom_clips.is_empty());
+        assert!(!data.undo_edit());
     }
 }

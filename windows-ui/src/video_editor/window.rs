@@ -133,6 +133,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     shell.set_child(Some(&root));
 
     wire_export(&window, &stage, &timeline, &shell);
+    wire_history_keys(&window, &timeline);
 
     window.set_child(Some(&shell));
 
@@ -1370,6 +1371,58 @@ fn export_model(
     })
 }
 
+/// What a Ctrl+key combination asks the document's history to do.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum HistoryKey {
+    Undo,
+    Redo,
+}
+
+/// Map a key press to a history action.
+///
+/// The key is read through its Unicode value rather than the `gdk::Key`
+/// variant, so Ctrl+Shift+Z works whether the backend reports it as `z` or
+/// `Z`, and Ctrl+Y is accepted alongside it.
+fn history_key(key: gdk::Key, modifiers: gdk::ModifierType) -> Option<HistoryKey> {
+    if !modifiers.contains(gdk::ModifierType::CONTROL_MASK) {
+        return None;
+    }
+    let redo = modifiers.contains(gdk::ModifierType::SHIFT_MASK);
+    match key.to_unicode().map(|c| c.to_ascii_lowercase()) {
+        Some('z') if redo => Some(HistoryKey::Redo),
+        Some('z') => Some(HistoryKey::Undo),
+        Some('y') => Some(HistoryKey::Redo),
+        _ => None,
+    }
+}
+
+/// Ctrl+Z / Ctrl+Shift+Z / Ctrl+Y for the document's undo history.
+///
+/// The controller sits on the window and runs in the bubble phase: a focused
+/// text entry keeps its own Ctrl+Z, because GTK offers the key to the focused
+/// widget's controllers first.
+fn wire_history_keys(window: &ApplicationWindow, timeline: &super::timeline::Timeline) {
+    let keys = gtk4::EventControllerKey::new();
+    let timeline = timeline.clone();
+    keys.connect_key_pressed(move |_, key, _, modifiers| {
+        let Some(action) = history_key(key, modifiers) else {
+            return gtk4::glib::Propagation::Proceed;
+        };
+        let changed = match action {
+            HistoryKey::Undo => timeline.undo(),
+            HistoryKey::Redo => timeline.redo(),
+        };
+        if changed {
+            gtk4::glib::Propagation::Stop
+        } else {
+            // Nothing left to take back: let the key travel on rather than
+            // swallowing it for a handler that might have work to do.
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    window.add_controller(keys);
+}
+
 fn wire_export(
     window: &ApplicationWindow,
     stage: &Stage,
@@ -1586,9 +1639,35 @@ fn install_css() {
 #[cfg(test)]
 mod tests {
     use super::{
-        canvas_dimensions, card_radius, estimated_size_bytes, format_size, output_dimensions,
-        padding_px, video_rect_dimensions, FrameAspect, QualityTier,
+        canvas_dimensions, card_radius, estimated_size_bytes, format_size, history_key,
+        output_dimensions, padding_px, video_rect_dimensions, FrameAspect, HistoryKey, QualityTier,
     };
+
+    #[test]
+    fn ctrl_z_undoes_and_ctrl_shift_z_or_ctrl_y_redoes() {
+        use gtk4::gdk::{Key, ModifierType};
+        let ctrl = ModifierType::CONTROL_MASK;
+        let shift = ModifierType::SHIFT_MASK;
+
+        assert_eq!(history_key(Key::z, ctrl), Some(HistoryKey::Undo));
+        // Backends differ on whether Shift folds into the keyval, so both
+        // spellings of redo have to land on redo.
+        assert_eq!(history_key(Key::z, ctrl | shift), Some(HistoryKey::Redo));
+        assert_eq!(history_key(Key::Z, ctrl | shift), Some(HistoryKey::Redo));
+        assert_eq!(history_key(Key::y, ctrl), Some(HistoryKey::Redo));
+        // Without Ctrl the key belongs to whatever has focus, and an unrelated
+        // Ctrl shortcut is not ours either.
+        assert_eq!(history_key(Key::z, ModifierType::empty()), None);
+        assert_eq!(history_key(Key::Escape, ctrl), None);
+
+        // Nothing here can press a key, so pin the installation itself.
+        let source = include_str!("window.rs");
+        let production = &source[..source.find("\n#[cfg(test)]").expect("tests module")];
+        assert!(
+            production.contains("wire_history_keys(&window, &timeline)"),
+            "the editor window must install the undo shortcut"
+        );
+    }
 
     #[test]
     fn quality_tiers_match_the_recorder_scale() {
