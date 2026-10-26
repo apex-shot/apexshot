@@ -19,6 +19,8 @@ if(WIN32)
         src/platform/recording.h
         src/platform/recording_settings.h
         src/platform/windows/recording.cpp
+        src/platform/windows/pointer_tracker.cpp
+        src/platform/windows/pointer_tracker.h
         src/platform/windows/recording_settings.cpp
         src/platform/windows/settings_store.cpp
         src/platform/windows/settings_store.h
@@ -85,6 +87,8 @@ if(WIN32)
             src/platform/recording.h
             src/platform/recording_settings.h
             src/platform/windows/recording.cpp
+            src/platform/windows/pointer_tracker.cpp
+            src/platform/windows/pointer_tracker.h
             src/platform/windows/recording_settings.cpp
             src/platform/windows/settings_store.cpp
             src/platform/windows/settings_store.h

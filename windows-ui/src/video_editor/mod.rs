@@ -1,19 +1,26 @@
 //! Windows video-editor shell.
 //!
-//! This pass establishes the standalone window, tool-specific side panels, and
-//! launch contract. Playback, the editing model, project persistence, and export
-//! remain separate slices.
+//! The shell, the tool-specific side panels and the launch contract live here;
+//! playback, the editing model and export are their own slices, and the saved
+//! edit list is [`project`].
 
 use gtk4::prelude::*;
 use gtk4::Application;
 mod background;
+mod cursor;
 mod custom_fill;
+mod export;
+mod export_card;
+mod pixels;
+mod press;
 mod preview;
+mod project;
 mod rounded_clip;
 mod side_panel;
 mod timeline;
 mod ui_support;
 mod window;
+mod zoom;
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -36,6 +43,23 @@ pub fn show_video_editor_window(initial: Option<PathBuf>) -> anyhow::Result<()> 
 
     let _ = app.run_with_args::<String>(&[]);
     Ok(())
+}
+
+/// One saved edit list, as the History window sees it.
+pub(crate) struct SavedEdit {
+    pub name: String,
+    pub source_path: PathBuf,
+}
+
+/// Every saved edit whose recording is still on disk, newest edit first.
+pub(crate) fn saved_edits() -> Vec<SavedEdit> {
+    project::list_projects()
+        .into_iter()
+        .map(|file| SavedEdit {
+            name: file.display_name(),
+            source_path: file.source_path,
+        })
+        .collect()
 }
 
 /// The first non-option argument is the recording path, matching the shared

@@ -1775,7 +1775,10 @@ private:
         request.region = region;
         request.windowId = windowId;
         request.outputPath = videoOutputPath();
-        request.includeCursor = settings.recording.showCursor;
+        // The recorder writes the pointer track beside the video and the editor
+        // draws the cursor from it, so the frames never carry a baked-in
+        // pointer that would double up with the one the editor paints.
+        request.includeCursor = false;
         request.includeMicrophone = options.microphone;
         request.includeSpeaker = options.speaker;
 

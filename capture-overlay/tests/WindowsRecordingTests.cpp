@@ -5,19 +5,263 @@
 // console output; this is not part of the shipped binary.
 
 #include "platform/recording.h"
+#include "platform/windows/pointer_tracker.h"
 
 #include <QCoreApplication>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QRegularExpression>
+#include <QStringList>
 #include <QTimer>
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+
+#include <cmath>
 #include <cstdio>
 
 namespace {
 
 const QRect kRegion(24, 24, 320, 240);
+
+bool moveCursor(const QPoint& position)
+{
+    return SetCursorPos(position.x(), position.y()) != 0;
+}
+
+bool setLeftButton(bool down)
+{
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+    return SendInput(1, &input, sizeof(input)) == 1;
+}
+
+/// A cursor an application installed itself: a handle that is none of the
+/// standard system cursors, which is what a browser's custom hand or a
+/// toolkit's drawn resize handle reports.
+HCURSOR createApplicationCursor()
+{
+    ICONINFO info{};
+    info.fIcon = FALSE;
+    info.hbmMask = CreateBitmap(32, 32, 1, 1, nullptr);
+    info.hbmColor = CreateBitmap(32, 32, 1, 1, nullptr);
+    HCURSOR cursor = info.hbmMask && info.hbmColor ? CreateIconIndirect(&info) : nullptr;
+    if (info.hbmMask)
+        DeleteObject(info.hbmMask);
+    if (info.hbmColor)
+        DeleteObject(info.hbmColor);
+    return cursor;
+}
+
+/// The sidecar's kind string is what the editor parses, so it must be one of
+/// the shared names and nothing else.
+bool checkCursorKinds()
+{
+    struct Expectation {
+        LPCSTR id;
+        const char* name;
+        const char* kind;
+    };
+    const Expectation expectations[] = {
+        {IDC_HAND, "IDC_HAND", "hand"},
+        {IDC_IBEAM, "IDC_IBEAM", "text"},
+        {IDC_CROSS, "IDC_CROSS", "crosshair"},
+        {IDC_WAIT, "IDC_WAIT", "wait"},
+        {IDC_APPSTARTING, "IDC_APPSTARTING", "wait"},
+        {IDC_SIZEWE, "IDC_SIZEWE", "resize"},
+        {IDC_SIZENS, "IDC_SIZENS", "resize"},
+        {IDC_SIZENWSE, "IDC_SIZENWSE", "resize"},
+        {IDC_SIZENESW, "IDC_SIZENESW", "resize"},
+        {IDC_SIZEALL, "IDC_SIZEALL", "resize"},
+        // Standard cursors with no shared shape stay on the neutral kind.
+        {IDC_ARROW, "IDC_ARROW", "default"},
+        {IDC_UPARROW, "IDC_UPARROW", "default"},
+        {IDC_NO, "IDC_NO", "default"},
+    };
+    for (const Expectation& expectation : expectations) {
+        // The build defines no UNICODE, so the IDC_* macros are char resource
+        // pointers and the ANSI entry point is the one that takes them directly.
+        const Platform::CursorKind actual =
+            Platform::cursorKindFor(LoadCursorA(nullptr, expectation.id));
+        const QString kind = Platform::cursorKindName(actual);
+        if (kind != QLatin1String(expectation.kind)) {
+            std::printf("FAIL %s maps to %s, expected %s\n",
+                        expectation.name,
+                        qPrintable(kind),
+                        expectation.kind);
+            return false;
+        }
+    }
+
+    if (Platform::cursorKindFor(nullptr) != Platform::CursorKind::Default) {
+        std::printf("FAIL a null cursor handle is not default\n");
+        return false;
+    }
+
+    const HCURSOR applicationCursor = createApplicationCursor();
+    if (applicationCursor) {
+        const QString kind = Platform::cursorKindName(Platform::cursorKindFor(applicationCursor));
+        DestroyCursor(applicationCursor);
+        if (kind != QStringLiteral("default")) {
+            std::printf("FAIL an application cursor maps to %s, expected default\n",
+                        qPrintable(kind));
+            return false;
+        }
+    } else {
+        std::printf("SKIP: could not create an application cursor for the default check\n");
+    }
+
+    std::printf("CURSOR_KINDS=ok\n");
+    return true;
+}
+
+bool validateSidecar(const QString& videoPath, double recordedSeconds)
+{
+    const QString canonicalPath = Platform::canonicalVideoPathFor(videoPath);
+    const QString path = Platform::sidecarPathFor(videoPath);
+    if (!canonicalPath.startsWith(QStringLiteral("\\\\?\\"))) {
+        std::printf("FAIL canonical path lacks the Windows verbatim prefix: %s\n",
+                    qPrintable(canonicalPath));
+        return false;
+    }
+    if (path.isEmpty() || !QFileInfo::exists(path)) {
+        std::printf("FAIL sidecar does not exist: %s\n", qPrintable(path));
+        return false;
+    }
+
+    const QFileInfo sidecarInfo(path);
+    static const QRegularExpression hashName(QStringLiteral("^[0-9a-f]{64}$"));
+    QDir directory = sidecarInfo.dir();
+    if (!hashName.match(sidecarInfo.fileName()).hasMatch()
+        || directory.dirName() != QStringLiteral("pointer-sidecars")) {
+        std::printf("FAIL sidecar hash path is malformed: %s\n", qPrintable(path));
+        return false;
+    }
+    directory.cdUp();
+    if (directory.dirName() != QStringLiteral("apexshot")
+        || QDir::cleanPath(directory.absolutePath())
+            != QDir::cleanPath(QDir(qEnvironmentVariable("LOCALAPPDATA"))
+                                   .filePath(QStringLiteral("apexshot")))) {
+        std::printf("FAIL sidecar is outside LOCALAPPDATA/apexshot: %s\n", qPrintable(path));
+        return false;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        std::printf("FAIL could not read sidecar: %s\n", qPrintable(path));
+        return false;
+    }
+    const QByteArray bytes = file.readAll();
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(bytes, &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        std::printf("FAIL sidecar JSON parse: %s\n", qPrintable(parseError.errorString()));
+        return false;
+    }
+
+    const QJsonObject object = document.object();
+    const QJsonObject region = object.value(QStringLiteral("region")).toObject();
+    const QJsonArray pointer = object.value(QStringLiteral("pointer")).toArray();
+    const QJsonArray clicks = object.value(QStringLiteral("clicks")).toArray();
+    const QJsonArray presses = object.value(QStringLiteral("presses")).toArray();
+    if (object.value(QStringLiteral("version")).toInt() != 2 || pointer.size() < 10
+        || clicks.isEmpty() || presses.isEmpty()
+        || !object.value(QStringLiteral("t0_monotonic_us")).isDouble()
+        || object.value(QStringLiteral("t0_monotonic_us")).toDouble() <= 0.0
+        || region.value(QStringLiteral("x")).toInt() != kRegion.x()
+        || region.value(QStringLiteral("y")).toInt() != kRegion.y()
+        || region.value(QStringLiteral("w")).toInt() != kRegion.width()
+        || region.value(QStringLiteral("h")).toInt() != kRegion.height()
+        || !object.value(QStringLiteral("visibility")).toArray().isEmpty()
+        || object.value(QStringLiteral("source")).toString() != QStringLiteral("recorded")) {
+        std::printf("FAIL sidecar version or sample counts are invalid\n");
+        return false;
+    }
+    if (clicks.first().toObject().value(QStringLiteral("button")).toInt() != 1
+        || presses.first().toObject().value(QStringLiteral("button")).toInt() != 1) {
+        std::printf("FAIL left mouse button did not use sidecar button 1\n");
+        return false;
+    }
+
+    const double latestTime = recordedSeconds + 0.5;
+    const auto validTime = [latestTime](double t) {
+        return std::isfinite(t) && t >= 0.0 && t <= latestTime;
+    };
+    const auto validPosition = [](const QJsonObject& sample) {
+        const double x = sample.value(QStringLiteral("x")).toDouble();
+        const double y = sample.value(QStringLiteral("y")).toDouble();
+        return std::isfinite(x) && std::isfinite(y) && x >= -64.0
+            && x <= kRegion.width() + 64.0 && y >= -64.0 && y <= kRegion.height() + 64.0;
+    };
+    // The editor's kind parse falls back to default for anything it does not
+    // know, so a sample has to carry one of the six shared names exactly.
+    static const QStringList sharedKinds = {QStringLiteral("default"),
+                                            QStringLiteral("hand"),
+                                            QStringLiteral("text"),
+                                            QStringLiteral("crosshair"),
+                                            QStringLiteral("wait"),
+                                            QStringLiteral("resize")};
+    int defaultKinds = 0;
+    for (const QJsonValue& value : pointer) {
+        const QJsonObject sample = value.toObject();
+        if (!validTime(sample.value(QStringLiteral("t")).toDouble()) || !validPosition(sample)) {
+            std::printf("FAIL pointer sample has an invalid time or position\n");
+            return false;
+        }
+        const QJsonValue kind = sample.value(QStringLiteral("kind"));
+        if (!kind.isString() || !sharedKinds.contains(kind.toString())) {
+            std::printf("FAIL pointer sample kind is not a shared cursor kind: %s\n",
+                        qPrintable(kind.toVariant().toString()));
+            return false;
+        }
+        if (kind.toString() == QStringLiteral("default"))
+            ++defaultKinds;
+    }
+    for (const QJsonValue& value : clicks) {
+        const QJsonObject sample = value.toObject();
+        if (!validTime(sample.value(QStringLiteral("t")).toDouble()) || !validPosition(sample)) {
+            std::printf("FAIL click sample has an invalid time or position\n");
+            return false;
+        }
+    }
+    for (const QJsonValue& value : presses) {
+        const QJsonObject sample = value.toObject();
+        if (!validTime(sample.value(QStringLiteral("down")).toDouble())
+            || !validTime(sample.value(QStringLiteral("up")).toDouble())
+            || sample.value(QStringLiteral("up")).toDouble()
+                < sample.value(QStringLiteral("down")).toDouble()) {
+            std::printf("FAIL press interval has an invalid time\n");
+            return false;
+        }
+    }
+
+    QJsonObject excerpt;
+    excerpt.insert(QStringLiteral("pointer_first"), pointer.first().toObject());
+    excerpt.insert(QStringLiteral("clicks_tail"), clicks.last().toObject());
+    excerpt.insert(QStringLiteral("presses_tail"), presses.last().toObject());
+    std::printf("SIDECAR_PATH=%s\n", qPrintable(path));
+    std::printf("SIDECAR_BYTES=%lld\n", static_cast<long long>(bytes.size()));
+    std::printf("SIDECAR_JSON=valid\n");
+    std::printf("SIDECAR_COUNTS pointer=%d clicks=%d presses=%d\n",
+                pointer.size(),
+                clicks.size(),
+                presses.size());
+    std::printf("SIDECAR_KINDS default=%d shaped=%d\n",
+                defaultKinds,
+                pointer.size() - defaultKinds);
+    std::printf("SIDECAR_EXCERPT:\n%s\n",
+                qPrintable(QString::fromUtf8(
+                    QJsonDocument(excerpt).toJson(QJsonDocument::Indented))));
+    return true;
+}
 
 int recordOnce(bool pauseAndResume)
 {
@@ -26,17 +270,52 @@ int recordOnce(bool pauseAndResume)
                              .filePath(pauseAndResume
                                            ? QStringLiteral("apexshot-record-pause.mp4")
                                            : QStringLiteral("apexshot-record-basic.mp4"));
+    const QString oldSidecarPath = Platform::sidecarPathFor(path);
+    if (!oldSidecarPath.isEmpty())
+        QFile::remove(oldSidecarPath);
     QFile::remove(path);
+
+    // The test drives the real pointer, so put it back where it was found.
+    POINT originalCursor{};
+    const bool haveOriginalCursor = GetCursorPos(&originalCursor) != 0;
+    const auto restoreCursor = [haveOriginalCursor, originalCursor] {
+        if (haveOriginalCursor)
+            SetCursorPos(originalCursor.x, originalCursor.y);
+    };
+
+    QPoint guardedCursorPosition(kRegion.x() + 80, kRegion.y() + 80);
+    if (!pauseAndResume
+        && !moveCursor(guardedCursorPosition)) {
+        std::printf("SKIP: desktop session refused SetCursorPos input injection\n");
+        return 77;
+    }
 
     Platform::RecordingRequest request;
     request.region = kRegion;
     request.outputPath = path;
-    request.includeCursor = true;
+    // The editor draws the pointer from the sidecar, so the frames carry none.
+    request.includeCursor = false;
     request.includeMicrophone = !qEnvironmentVariableIsEmpty("APEXSHOT_TEST_MIC");
     request.fps = 30;
     request.crf = 28;
 
     int result = 1;
+    bool inputInjectionRefused = false;
+    QString inputRefusalReason;
+    double recordedSeconds = 0.0;
+    QElapsedTimer recordingClock;
+    bool leftButtonDownInjected = false;
+    QTimer cursorGuard;
+    cursorGuard.setTimerType(Qt::PreciseTimer);
+    cursorGuard.setInterval(10);
+    QObject::connect(&cursorGuard, &QTimer::timeout, &session, [&] {
+        if (!moveCursor(guardedCursorPosition)) {
+            inputInjectionRefused = true;
+            inputRefusalReason = QStringLiteral("SetCursorPos");
+            cursorGuard.stop();
+            session.discard();
+        }
+    });
     QEventLoop loop;
 
     QObject::connect(&session,
@@ -44,6 +323,14 @@ int recordOnce(bool pauseAndResume)
                      &session,
                      [&](bool kept, const QString& output, const QString& error) {
                          const QFileInfo info(output);
+                         if (inputInjectionRefused) {
+                             std::printf("SKIP: desktop session refused %s input injection\n",
+                                         qPrintable(inputRefusalReason));
+                             result = 77;
+                             QFile::remove(output);
+                             loop.quit();
+                             return;
+                         }
                          if (!kept || output.isEmpty() || !info.exists() || info.size() <= 0) {
                              std::printf("FAIL %s: %s\n",
                                          pauseAndResume ? "pause/resume" : "basic",
@@ -55,8 +342,16 @@ int recordOnce(bool pauseAndResume)
                                          qPrintable(output),
                                          static_cast<long long>(info.size()));
                              result = 0;
+                             if (!pauseAndResume
+                                 && !validateSidecar(output, recordedSeconds))
+                                 result = 1;
                              if (qEnvironmentVariableIsEmpty("APEXSHOT_KEEP_TEST_OUTPUT"))
                                  QFile::remove(output);
+                             if (qEnvironmentVariableIsEmpty("APEXSHOT_KEEP_TEST_OUTPUT")) {
+                                 const QString sidecar = Platform::sidecarPathFor(output);
+                                 if (!sidecar.isEmpty())
+                                     QFile::remove(sidecar);
+                             }
                          }
                          loop.quit();
                      });
@@ -66,13 +361,63 @@ int recordOnce(bool pauseAndResume)
         std::printf("FAIL start: %s\n", qPrintable(error));
         return 1;
     }
+    recordingClock.start();
+    if (!pauseAndResume)
+        cursorGuard.start();
 
     if (pauseAndResume) {
         QTimer::singleShot(800, &session, [&session] { session.pause(); });
         QTimer::singleShot(1800, &session, [&session] { session.resume(); });
         QTimer::singleShot(2800, &session, [&session] { session.stop(); });
     } else {
-        QTimer::singleShot(2000, &session, [&session] { session.stop(); });
+        const auto inject = [&session,
+                             &inputInjectionRefused,
+                             &inputRefusalReason,
+                             &leftButtonDownInjected,
+                             &guardedCursorPosition](int delay,
+                                                    QPoint position,
+                                                    int buttonAction) {
+            QTimer::singleShot(delay, &session, [&session,
+                                                 &inputInjectionRefused,
+                                                 &inputRefusalReason,
+                                                 &leftButtonDownInjected,
+                                                 &guardedCursorPosition,
+                                                 position,
+                                                 buttonAction] {
+                guardedCursorPosition = position;
+                bool ok = moveCursor(position);
+                if (!ok)
+                    inputRefusalReason = QStringLiteral("SetCursorPos");
+                if (ok && buttonAction != 0) {
+                    ok = setLeftButton(buttonAction > 0);
+                    if (!ok)
+                        inputRefusalReason = QStringLiteral("SendInput");
+                    else
+                        leftButtonDownInjected = buttonAction > 0;
+                }
+                if (!ok) {
+                    inputInjectionRefused = true;
+                    if (leftButtonDownInjected) {
+                        setLeftButton(false);
+                        leftButtonDownInjected = false;
+                    }
+                    session.discard();
+                }
+            });
+        };
+        inject(200, QPoint(kRegion.x() + 90, kRegion.y() + 90), 0);
+        inject(450, QPoint(kRegion.x() + 120, kRegion.y() + 110), 0);
+        inject(700, QPoint(kRegion.x() + 140, kRegion.y() + 130), 1);
+        inject(1000, QPoint(kRegion.x() + 175, kRegion.y() + 160), 0);
+        inject(1250, QPoint(kRegion.x() + 175, kRegion.y() + 160), -1);
+        inject(1450, QPoint(kRegion.x() + 230, kRegion.y() + 180), 0);
+        QTimer::singleShot(2400,
+                           &session,
+                           [&session, &recordingClock, &recordedSeconds, &cursorGuard] {
+            recordedSeconds = recordingClock.elapsed() / 1000.0;
+            cursorGuard.stop();
+            session.stop();
+        });
     }
 
     QTimer::singleShot(20000, &session, [&loop] {
@@ -81,6 +426,7 @@ int recordOnce(bool pauseAndResume)
     });
 
     loop.exec();
+    restoreCursor();
     return result;
 }
 
@@ -89,6 +435,9 @@ int recordOnce(bool pauseAndResume)
 int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
+
+    if (!checkCursorKinds())
+        return 1;
 
     QString error;
     if (!Platform::RecordingSession::available(&error)) {

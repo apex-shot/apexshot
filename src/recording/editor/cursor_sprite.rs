@@ -8,8 +8,11 @@ use gtk4::cairo::{
     Antialias, Context, FillRule, Filter, Format, ImageSurface, RadialGradient, SurfacePattern,
 };
 use image::RgbaImage;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::f64::consts::TAU;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::OnceLock;
 
 const ADWAITA_DEFAULT: &[u8] = include_bytes!("../../../assets/cursors/adwaita/default.png");
@@ -140,12 +143,14 @@ pub fn draw(
         cr.arc(x, y, 16.0 * scale, 0.0, TAU);
         let _ = cr.fill();
     }
-    let bitmap = bitmap(settings.theme, kind);
-    let surface = surface_from_rgba(bitmap);
     if settings.theme == CursorTheme::Dot {
+        let surface = surface_from_rgba(bitmap(settings.theme, kind));
         paint_dot_sprite(cr, &surface, x, y, scale, settings.shadow, alpha);
         return;
     }
+    // A large cursor magnifies the sprite past its own pixels, so the art is
+    // supersampled first; `art` is how many source pixels one hotspot unit is.
+    let (surface, art) = sprite_art(settings.theme, kind, scale);
     let (hx, hy) = hotspot(settings.theme, kind);
     paint_sprite(
         cr,
@@ -158,6 +163,7 @@ pub fn draw(
         settings.shadow,
         alpha,
         0.0,
+        art,
     );
 }
 
@@ -427,6 +433,79 @@ pub fn write_png(path: &Path, settings: CursorSettings, kind: &str) -> anyhow::R
     Ok(out_hot)
 }
 
+// Supersampled sprite surfaces for the current thread. `ImageSurface` is
+// neither `Send` nor `Sync`, and drawing happens on the one thread that owns
+// the cairo context, so the cache is thread-local.
+thread_local! {
+    static SUPERSAMPLED: RefCell<HashMap<(u8, u8), Rc<ImageSurface>>> =
+        RefCell::new(HashMap::new());
+}
+
+/// The sprite art is 48 pixels across. Anything drawn larger than its own
+/// pixels shows them, so past this factor the draw path samples a supersampled
+/// copy: the edges read as continuous instead of as magnified blocks.
+const SUPERSAMPLE_ABOVE: f64 = 1.2;
+const SUPERSAMPLE_FACTOR: u32 = 4;
+
+fn sprite_art(theme: CursorTheme, kind: &str, scale: f64) -> (Rc<ImageSurface>, f64) {
+    if scale <= SUPERSAMPLE_ABOVE {
+        return (Rc::new(surface_from_rgba(bitmap(theme, kind))), 1.0);
+    }
+    let key = (theme as u8, sprite_kind(kind) as u8);
+    let surface = SUPERSAMPLED.with(|cache| {
+        if let Some(surface) = cache.borrow().get(&key) {
+            return Rc::clone(surface);
+        }
+        let surface = Rc::new(surface_from_rgba(&supersampled_bitmap(theme, kind)));
+        cache.borrow_mut().insert(key, Rc::clone(&surface));
+        surface
+    });
+    (surface, f64::from(SUPERSAMPLE_FACTOR))
+}
+
+/// Enlarge the sprite with a smooth resampler, in premultiplied alpha so the
+/// transparent surround does not bleed dark edges into the outline.
+fn supersampled_bitmap(theme: CursorTheme, kind: &str) -> RgbaImage {
+    let base = bitmap(theme, kind);
+    let mut premultiplied = RgbaImage::new(base.width(), base.height());
+    for (x, y, pixel) in base.enumerate_pixels() {
+        let [r, g, b, a] = pixel.0;
+        let alpha = u16::from(a);
+        let premultiply = |channel: u8| ((u16::from(channel) * alpha) / 255) as u8;
+        premultiplied.put_pixel(
+            x,
+            y,
+            image::Rgba([premultiply(r), premultiply(g), premultiply(b), a]),
+        );
+    }
+    let width = base.width() * SUPERSAMPLE_FACTOR;
+    let height = base.height() * SUPERSAMPLE_FACTOR;
+    let resized = image::imageops::resize(
+        &premultiplied,
+        width,
+        height,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let mut out = RgbaImage::new(width, height);
+    for (x, y, pixel) in resized.enumerate_pixels() {
+        let [r, g, b, a] = pixel.0;
+        let alpha = u16::from(a);
+        let unpremultiply = |channel: u8| {
+            if alpha == 0 {
+                0
+            } else {
+                ((u16::from(channel) * 255) / alpha).min(255) as u8
+            }
+        };
+        out.put_pixel(
+            x,
+            y,
+            image::Rgba([unpremultiply(r), unpremultiply(g), unpremultiply(b), a]),
+        );
+    }
+    out
+}
+
 fn paint_sprite(
     cr: &Context,
     surface: &ImageSurface,
@@ -438,7 +517,10 @@ fn paint_sprite(
     shadow: f64,
     alpha: f64,
     tilt: f64,
+    art: f64,
 ) {
+    let art = art.max(1.0);
+    let sprite_scale = scale / art;
     let _ = cr.save();
     cr.translate(x, y);
     if tilt.abs() > 0.001 {
@@ -450,13 +532,13 @@ fn paint_sprite(
             CURSOR_SHADOW_OFFSET_X * scale * shadow,
             CURSOR_SHADOW_OFFSET_Y * scale * shadow,
         );
-        cr.scale(scale, scale);
+        cr.scale(sprite_scale, sprite_scale);
         cr.set_source_rgba(0.0, 0.0, 0.0, 0.55 * shadow * alpha);
-        let _ = cr.mask_surface(surface, -hx, -hy);
+        let _ = cr.mask_surface(surface, -hx * art, -hy * art);
         let _ = cr.restore();
     }
-    cr.scale(scale, scale);
-    cr.translate(-hx, -hy);
+    cr.scale(sprite_scale, sprite_scale);
+    cr.translate(-hx * art, -hy * art);
     let pattern = SurfacePattern::create(surface);
     pattern.set_filter(Filter::Best);
     let _ = cr.set_source(&pattern);
@@ -1092,6 +1174,7 @@ mod tests {
                     shadow,
                     1.0,
                     0.0,
+                    1.0,
                 );
             }
             surface.flush();

@@ -5,7 +5,7 @@ name: Windows UI
 # by CI at all.
 on:
   push:
-    branches: [main, ci/windows-verify]
+    branches: [main]
     paths:
       - .github/workflows/windows.yml
       - windows-ui/**
@@ -42,14 +42,19 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
-      # rustfmt.toml asks for Unix newlines, and a default Windows checkout
-      # hands rustfmt CRLF, which it reports as a formatting failure.
-      - name: Keep the checkout's line endings
-        shell: bash
-        run: git config --global core.autocrlf false
-
       - name: Checkout
         uses: actions/checkout@v4
+
+      # Windows runners default to core.autocrlf=true, so the working tree
+      # arrives with CRLF in every text file and rustfmt's newline rule fails on
+      # all of them — files this branch never touched included. Rewrite the tree
+      # the way the repository stores it before anything formats it.
+      - name: Check out the line endings the repository stores
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git rm --cached -r --quiet .
+          git reset --hard --quiet
 
       # GTK4 for the crate's gtk4/pango/gdk bindings, plus pkg-config and the
       # GNU linker the GNU Rust toolchain below drives. The MinGW packages are
@@ -58,12 +63,15 @@ jobs:
       - name: Install GTK4
         uses: msys2/setup-msys2@v2
         with:
-          msystem: UCRT64
+          msystem: MINGW64
           update: false
+          # The job installs its own toolchain into ~/.cargo/bin, which the
+          # MSYS2 shell does not see under its default strict PATH.
+          path-type: inherit
           install: >-
-            mingw-w64-ucrt-x86_64-gtk4
-            mingw-w64-ucrt-x86_64-pkgconf
-            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-x86_64-gtk4
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-gcc
 
       # The MSVC toolchain cannot link against the MinGW GTK import libraries,
       # so the crate is built for the GNU target that matches them.
@@ -92,9 +100,6 @@ jobs:
         shell: msys2 {0}
         working-directory: windows-ui
         run: |
-          export PATH="$(cygpath -u "$USERPROFILE")/.cargo/bin:$PATH"
-          cargo --version
-          rustc -vV | grep host
           cargo fmt --all -- --check
           cargo clippy --all-targets
           cargo test
