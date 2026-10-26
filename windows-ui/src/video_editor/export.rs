@@ -11,12 +11,13 @@ use super::cursor::preview_ripple;
 use super::pixels::{Nv12Converter, YuvSpace};
 use super::press::press_cursor_scale;
 use super::timeline::ZoomClip;
+use super::webcam;
 use super::zoom::{self, TimeMapping, ViewRect, ZoomCameraCache};
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::ffmpeg;
 use crate::recording::editor::model::ClickEffect;
 use crate::recording::editor::model::CursorSettings;
-use crate::recording::editor::sidecar::{CursorMotion, PointerSidecar};
+use crate::recording::editor::sidecar::{CursorMotion, PointerSidecar, WebcamTrack};
 use gtk4::cairo::{Context, Format, ImageSurface};
 use rayon::prelude::*;
 use std::io::{Read, Write};
@@ -325,6 +326,15 @@ fn render(
         ),
         None => None,
     };
+    let webcam = model.sidecar.as_ref().and_then(|sidecar| {
+        let track = sidecar.webcam.clone().filter(WebcamTrack::is_valid)?;
+        let path = sidecar.webcam_path(&model.source)?;
+        Some((track, path))
+    });
+    let video_seconds = webcam
+        .as_ref()
+        .map(|_| ffmpeg::probe_duration(&model.source).unwrap_or(0.0))
+        .unwrap_or(0.0);
     let mut done = 0u64;
     let started = Instant::now();
 
@@ -345,6 +355,15 @@ fn render(
                     return Err(error);
                 }
             };
+        let mut track_reader = webcam.as_ref().and_then(|(track, path)| {
+            let start = track.track_seconds(span.source_start, video_seconds);
+            let duration = span.frames as f64 / fps;
+            let decode = (
+                (track.w * f64::from(size.0)).round().clamp(2.0, 4096.0) as u32,
+                (track.h * f64::from(size.1)).round().clamp(2.0, 4096.0) as u32,
+            );
+            webcam::TrackReader::open(path, start, duration, fps, decode)
+        });
         let mut span_frame = 0u64;
         while span_frame < span.frames {
             if cancel.load(Ordering::Relaxed) {
@@ -410,6 +429,13 @@ fn render(
                     model.source_size,
                     layer,
                 );
+            }
+            // The camera layer sits over the cursor, the way the bubble window
+            // sat over the desktop while the recording ran.
+            if let (Some((track, _)), Some(reader)) = (webcam.as_ref(), track_reader.as_mut()) {
+                if let Some((camera, camera_size)) = reader.next_frame() {
+                    webcam::composite_into(frame, size, track, camera, camera_size);
+                }
             }
 
             let mut nv12 = pipe.buffer();
@@ -1454,5 +1480,155 @@ mod tests {
                 .output()
                 .ok()?;
         String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+    }
+}
+
+#[cfg(test)]
+mod webcam_export_tests {
+    use super::*;
+    use crate::recording::editor::sidecar::WebcamTrack;
+    use std::fs;
+    use std::time::Duration;
+
+    /// Generate a solid clip with the bundled ffmpeg, or None when there is
+    /// none to run.
+    fn solid_clip(path: &Path, colour: &str, size: &str, seconds: f64) -> bool {
+        let status = Command::new(ffmpeg::ffmpeg_executable())
+            .args(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi"])
+            .args(["-i", &format!("color=c={colour}:s={size}:d={seconds}:r=30")])
+            .args(["-pix_fmt", "yuv420p"])
+            .arg(path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        matches!(status, Ok(status) if status.success())
+    }
+
+    /// One frame of the file as RGB rows, for pixel checks.
+    fn frame_rgb(path: &Path, seconds: f64, size: (u32, u32)) -> Option<Vec<u8>> {
+        let output = Command::new(ffmpeg::ffmpeg_executable())
+            .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
+            .args(["-ss", &format!("{seconds:.3}")])
+            .arg("-i")
+            .arg(path)
+            .args(["-frames:v", "1"])
+            .args(["-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"])
+            .output()
+            .ok()?;
+        let expected = size.0 as usize * size.1 as usize * 3;
+        (output.stdout.len() >= expected).then(|| output.stdout[..expected].to_vec())
+    }
+
+    fn pixel(frame: &[u8], width: u32, x: u32, y: u32) -> [u8; 3] {
+        let offset = (y as usize * width as usize + x as usize) * 3;
+        [frame[offset], frame[offset + 1], frame[offset + 2]]
+    }
+
+    #[test]
+    fn a_webcam_track_is_composited_into_the_exported_frames() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-webcam-export-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let source = dir.join("screen.mp4");
+        if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
+            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            return;
+        }
+        let track_path = webcam_track_file(&source);
+        let Some(track_path) = track_path else {
+            eprintln!("skipping the webcam export test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = track_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !solid_clip(&track_path, "0x00ff00", "320x320", 2.0) {
+            return;
+        }
+
+        let track = WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 320,
+            height: 320,
+            duration: 2.0,
+            x: 0.6,
+            y: 0.6,
+            w: 0.35,
+            h: 0.35,
+            shape: 1,
+            flip: false,
+        };
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+        );
+        sidecar.webcam = Some(track);
+        let sidecar_path = PointerSidecar::sidecar_path(&source);
+        if sidecar.write(&sidecar_path).is_err() {
+            return;
+        }
+
+        let output = dir.join("export.mp4");
+        let model = ExportModel {
+            source: source.clone(),
+            source_size: (320, 240),
+            trim_start: 0.0,
+            trim_end: 1.5,
+            cuts: Vec::new(),
+            zooms: Vec::new(),
+            zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: Some(sidecar),
+            crf: 30,
+        };
+        let handle = start_export(model, output.clone());
+        loop {
+            match handle.receiver.recv_timeout(Duration::from_secs(120)) {
+                Ok(ExportUpdate::Progress { .. }) => {}
+                Ok(ExportUpdate::Finished(path)) => {
+                    assert_eq!(path, output);
+                    break;
+                }
+                Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
+                Ok(ExportUpdate::Cancelled) => panic!("export cancelled itself"),
+                Err(error) => panic!("export did not report back: {error}"),
+            }
+        }
+
+        let frame = frame_rgb(&output, 0.5, (320, 240)).expect("the export should decode");
+        // The bubble covers 0.6..0.95 of the frame; its middle is the camera.
+        let inside = pixel(&frame, 320, 240, 180);
+        assert!(
+            inside[1] > 150 && inside[0] < 90,
+            "the camera should be composited at the bubble: {inside:?}"
+        );
+        // The footage outside it is still the recording.
+        let outside = pixel(&frame, 320, 20, 20);
+        assert!(
+            outside[0] < 70 && outside[2] < 70,
+            "the footage should be untouched outside the bubble: {outside:?}"
+        );
+
+        let _ = fs::remove_file(&output);
+        let _ = fs::remove_file(&sidecar_path);
+        let _ = fs::remove_file(&track_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// The track lands beside the pointer sidecar, exactly as the recorder
+    /// writes it.
+    fn webcam_track_file(source: &Path) -> Option<PathBuf> {
+        PointerSidecar::sidecar_path(source)
+            .parent()
+            .map(|dir| dir.join("apexshot-webcam-export-test.mp4"))
     }
 }

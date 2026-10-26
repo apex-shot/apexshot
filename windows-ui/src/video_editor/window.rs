@@ -107,6 +107,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let stage = stage.clone();
         Rc::new(move |frame| {
             stage.source_seconds.set(frame.source_seconds);
+            stage.webcam.request(frame.source_seconds);
             stage.preview.show_time(frame.source_seconds, frame.playing);
             stage
                 .estimate
@@ -647,6 +648,7 @@ struct Stage {
     background_layer: DrawingArea,
     cursor_layer: DrawingArea,
     cursor: super::cursor::CursorModel,
+    webcam: super::webcam::WebcamModel,
     source_seconds: Rc<Cell<f64>>,
     background_pixbuf: Rc<RefCell<Option<Pixbuf>>>,
     background_fill: Rc<RefCell<Option<super::background::FillPainter>>>,
@@ -893,6 +895,7 @@ impl Stage {
     fn show_document(&self, path: Option<&Path>, source_seconds: f64, composition_seconds: f64) {
         self.reset_camera();
         self.cursor.load(path);
+        self.webcam.load(path, source_seconds);
         self.source_seconds.set(0.0);
         self.cursor_layer.queue_draw();
         let Some((texture, width, height)) = path.and_then(poster_texture) else {
@@ -1067,9 +1070,16 @@ fn build_stage(
     cursor_layer.set_hexpand(true);
     cursor_layer.set_vexpand(true);
     cursor_layer.set_can_target(false);
+    // A still playhead gets one repaint when its camera frame lands; playback
+    // repaints on every preview frame anyway.
+    let webcam = super::webcam::WebcamModel::new(Rc::new({
+        let layer = cursor_layer.clone();
+        move || layer.queue_draw()
+    }));
     let placement: Rc<Cell<Option<(f64, (f64, f64))>>> = Rc::new(Cell::new(None));
     cursor_layer.set_draw_func({
         let cursor = cursor.clone();
+        let webcam = webcam.clone();
         let source_size = source_size.clone();
         let source_seconds = source_seconds.clone();
         let camera_view = camera_view.clone();
@@ -1083,6 +1093,7 @@ fn build_stage(
                 source_size.get(),
                 camera_view.get(),
             );
+            webcam.draw(context, width, height, source_size.get());
             draw_placement_outline(
                 context,
                 width,
@@ -1188,6 +1199,7 @@ fn build_stage(
         background_layer: background_layer.clone(),
         cursor_layer,
         cursor,
+        webcam,
         source_seconds,
         background_pixbuf,
         background_fill,

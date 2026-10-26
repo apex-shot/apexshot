@@ -30,6 +30,32 @@ enum class CursorKind {
     Resize,
 };
 
+/// The webcam track recorded beside a video.
+///
+/// The recorder writes the camera into its own file so the editor can composite
+/// it as a layer instead of a burn-in, and records the bubble's position in
+/// fractions of the captured region. Fractions keep the layer at the same place
+/// and size whatever resolution the recording was made at, and let the editor
+/// re-render it at any output size.
+struct WebcamTrack {
+    /// File name inside the pointer sidecar's directory.
+    QString file;
+    int width = 0;
+    int height = 0;
+    /// The track's own length. The camera's clock is not the desktop's, so the
+    /// editor maps a video time onto the track by scaling with it.
+    double duration = 0.0;
+    double x = 0.0;
+    double y = 0.0;
+    double w = 0.0;
+    double h = 0.0;
+    /// The shared shape table: 0 circle, 1 square, 2 rectangle, 3 vertical.
+    int shape = 0;
+    bool flip = false;
+
+    bool is_valid() const { return !file.isEmpty() && width > 0 && height > 0; }
+};
+
 class PointerTracker final : public QObject
 {
 public:
@@ -43,7 +69,11 @@ public:
     void resume();
     void stop(qint64 mediaTimeMs);
     void discard();
-    bool writeSidecar(const QString& videoPath, QString* error = nullptr) const;
+    /// Write the sidecar. `webcam` is written as the `webcam` block when it is
+    /// valid, so a recording without a camera carries no camera keys at all.
+    bool writeSidecar(const QString& videoPath,
+                      const WebcamTrack& webcam,
+                      QString* error = nullptr) const;
 
 private:
     struct Press {
@@ -69,6 +99,11 @@ QString canonicalVideoPathFor(const QString& videoPath);
 
 /// Returns the app-data sidecar path for an existing video file.
 QString sidecarPathFor(const QString& videoPath);
+
+/// Returns the app-data path of the webcam track recorded beside a video. The
+/// track lives next to the pointer sidecar, so both are found from the video
+/// path alone and neither can be mistaken for user footage.
+QString webcamTrackPathFor(const QString& videoPath);
 
 /// Returns the sidecar name of a cursor kind: "default", "hand", "text",
 /// "crosshair", "wait", or "resize".

@@ -37,6 +37,21 @@ struct ShellSettings {
         bool highDpiSuffix = false;
     } screenshots;
 
+    /// The webcam layer, mirroring the Rust config's `rec_webcam_*` fields.
+    struct Webcam {
+        bool enabled = false;
+        /// dshow friendly name. Empty asks the recorder for the first camera.
+        QString device;
+        /// 0 small, 1 medium, 2 large, 3 huge.
+        int sizeIndex = 1;
+        /// 0 circle, 1 square, 2 rectangle, 3 vertical.
+        int shapeIndex = 0;
+        bool flip = false;
+        /// Bubble position across the capture: x left to right, y bottom to top.
+        double relX = 1.0;
+        double relY = 0.0;
+    };
+
     struct Recording {
         bool showCountdown = true;
         QString exportLocation;
@@ -46,6 +61,7 @@ struct ShellSettings {
         bool includeSpeaker = false;
         bool showCursor = true;
         bool afterShowResult = true;
+        Webcam webcam;
     } recording;
 
     struct QuickAccess {

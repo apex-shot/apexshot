@@ -180,6 +180,22 @@ ShellSettings loadShellSettings()
     out.recording.afterShowResult =
         recording.value(QStringLiteral("after_show_result")).toBool(out.recording.afterShowResult);
 
+    const QJsonObject webcam = recording.value(QStringLiteral("webcam")).toObject();
+    out.recording.webcam.enabled =
+        webcam.value(QStringLiteral("enabled")).toBool(out.recording.webcam.enabled);
+    out.recording.webcam.device =
+        webcam.value(QStringLiteral("device")).toString(out.recording.webcam.device).trimmed();
+    out.recording.webcam.sizeIndex =
+        webcam.value(QStringLiteral("size_index")).toInt(out.recording.webcam.sizeIndex);
+    out.recording.webcam.shapeIndex =
+        webcam.value(QStringLiteral("shape_index")).toInt(out.recording.webcam.shapeIndex);
+    out.recording.webcam.flip =
+        webcam.value(QStringLiteral("flip")).toBool(out.recording.webcam.flip);
+    out.recording.webcam.relX =
+        webcam.value(QStringLiteral("rel_x")).toDouble(out.recording.webcam.relX);
+    out.recording.webcam.relY =
+        webcam.value(QStringLiteral("rel_y")).toDouble(out.recording.webcam.relY);
+
     const QJsonObject quickAccess = root.value(QStringLiteral("quick_access")).toObject();
     out.quickAccess.position =
         quickAccess.value(QStringLiteral("position")).toString(out.quickAccess.position);
@@ -204,6 +220,12 @@ ShellSettings loadShellSettings()
         out.screenshots.timerInterval = 0;
 
     out.recording.values.sanitize();
+    // The recorder indexes the shared shape and size tables with these, so a
+    // stale mirror must not send it off the end of either.
+    out.recording.webcam.sizeIndex = std::clamp(out.recording.webcam.sizeIndex, 0, 3);
+    out.recording.webcam.shapeIndex = std::clamp(out.recording.webcam.shapeIndex, 0, 3);
+    out.recording.webcam.relX = std::clamp(out.recording.webcam.relX, 0.0, 1.0);
+    out.recording.webcam.relY = std::clamp(out.recording.webcam.relY, 0.0, 1.0);
     const QString pattern = out.recording.filenamePattern.trimmed();
     out.recording.filenamePattern =
         pattern.isEmpty() ? defaultRecordingPattern() : pattern;
