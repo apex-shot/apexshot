@@ -1435,7 +1435,7 @@ mod tests {
     #[test]
     fn a_hand_edited_webcam_layer_is_clamped_to_the_tables() {
         let yaml = "rec_webcam_size: 9\nrec_webcam_shape: 7\nrec_webcam_rel_x: 4.0\nrec_webcam_rel_y: -2.0\n";
-        let cfg: AppConfig = serde_yml::from_str(yaml).unwrap().sanitized();
+        let cfg: AppConfig = serde_yml::from_str::<AppConfig>(yaml).unwrap().sanitized();
         assert_eq!(cfg.rec_webcam_size, 3);
         assert_eq!(cfg.rec_webcam_shape, 3);
         assert_eq!(cfg.rec_webcam_rel_x, 1.0);
