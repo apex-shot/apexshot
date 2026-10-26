@@ -197,11 +197,7 @@ pub struct WebcamTrack {
 impl WebcamTrack {
     /// Whether the block describes a track the editor can draw.
     pub fn is_valid(&self) -> bool {
-        !self.file.is_empty()
-            && self.width > 0
-            && self.height > 0
-            && self.w > 0.0
-            && self.h > 0.0
+        !self.file.is_empty() && self.width > 0 && self.height > 0 && self.w > 0.0 && self.h > 0.0
     }
 
     /// The bubble's fractional rect, clamped so a hand-edited sidecar cannot
@@ -313,10 +309,7 @@ impl PointerSidecar {
     /// The camera track's file, resolved beside this sidecar. The recorder
     /// keeps the two together, so the pair is found from the video path alone.
     pub fn webcam_path(&self, video_path: &Path) -> Option<PathBuf> {
-        let track = self
-            .webcam
-            .as_ref()
-            .filter(|track| track.is_valid())?;
+        let track = self.webcam.as_ref().filter(|track| track.is_valid())?;
         let directory = Self::sidecar_path(video_path).parent()?.to_path_buf();
         let path = directory.join(&track.file);
         path.is_file().then_some(path)
