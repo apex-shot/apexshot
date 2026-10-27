@@ -3625,3 +3625,6 @@ msgstr "预计："
 
 msgid "finishing…"
 msgstr "正在完成…"
+
+msgid "Video editing is not available in the Windows build yet."
+msgstr "Windows 版本尚不支持视频编辑。"

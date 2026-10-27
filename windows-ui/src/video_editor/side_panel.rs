@@ -872,6 +872,7 @@ fn build_zoom_panel(
     panel.append(&panel_header(&t("Zoom")));
 
     let body = panel_body();
+    body.add_css_class("recording-editor-zoom-slider-spacing");
     let syncing = Rc::new(Cell::new(false));
 
     let mode_row = GtkBox::new(Orientation::Horizontal, 0);

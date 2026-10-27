@@ -969,6 +969,32 @@ fn eval_zoom_at_groups_each_zoom_from_its_own_window() {
 }
 
 #[test]
+fn zoom_camera_settles_to_its_target_once_the_spring_is_done() {
+    let mut state = VideoEditState::new(metadata());
+    let index = state.add_zoom_at(0.5).expect("zoom fits");
+    state.zoom_clips[index].end = 5.0;
+    state.zoom_clips[index].scale = 2.0;
+    state.zoom_clips[index].center = (1300.0, 600.0);
+    state.zoom_clips[index].mode = ZoomMode::Manual;
+
+    let start = state.zoom_clips[index].start;
+    let target = (state.zoom_clips[index].scale, state.zoom_clips[index].center);
+    let samples: Vec<_> = (0..=90)
+        .map(|frame| {
+            let time = start + frame as f64 / 60.0;
+            state.eval_zoom_at(time, state.timeline_to_source(time))
+        })
+        .collect();
+    let settled_frame = (0..samples.len())
+        .find(|&frame| samples[frame..].iter().all(|sample| *sample == samples[frame]))
+        .expect("the camera should settle within 1.5 seconds of the zoom start");
+
+    assert!(settled_frame <= 90, "settled at frame {settled_frame}");
+    assert_eq!(samples[settled_frame], target);
+    assert!(samples[settled_frame..].iter().all(|sample| *sample == target));
+}
+
+#[test]
 fn spring_step_moves_toward_the_target() {
     let spring = CAMERA_FOLLOW_SPRING;
     let (value, velocity) = spring_step(0.0, 0.0, 100.0, spring, 1.0 / 120.0);
@@ -2241,6 +2267,47 @@ fn even_crop_stays_inside_frame() {
     assert!(x + w <= 1920);
     assert!(y + h <= 1080);
     assert!(w < 1920 && h < 1080);
+}
+
+#[test]
+fn float_crop_preserves_fractional_dimensions_and_origin() {
+    let (x, y, w, h) = float_crop_rect(1.7, (960.0, 540.0), 1920, 1080);
+    assert!((w - 1920.0 / 1.7).abs() < 1e-9);
+    assert!((h - 1080.0 / 1.7).abs() < 1e-9);
+    assert!((x - (960.0 - w / 2.0)).abs() < 1e-9);
+    assert!((y - (540.0 - h / 2.0)).abs() < 1e-9);
+
+    let (even_x, even_y, even_w, even_h) = even_crop_rect(1.7, (960.0, 540.0), 1920, 1080);
+    assert_ne!((x, y, w, h), (even_x as f64, even_y as f64, even_w as f64, even_h as f64));
+
+    let integral = float_crop_rect(2.0, (960.0, 540.0), 1920, 1080);
+    assert_eq!(integral, (480.0, 270.0, 960.0, 540.0));
+    let even_integral = even_crop_rect(2.0, (960.0, 540.0), 1920, 1080);
+    assert_eq!(
+        integral,
+        (
+            even_integral.0 as f64,
+            even_integral.1 as f64,
+            even_integral.2 as f64,
+            even_integral.3 as f64,
+        )
+    );
+}
+
+#[test]
+fn float_crop_clamps_to_source_edges() {
+    assert_eq!(
+        float_crop_rect(2.0, (0.0, 0.0), 1920, 1080),
+        (0.0, 0.0, 960.0, 540.0)
+    );
+    assert_eq!(
+        float_crop_rect(2.0, (1920.0, 1080.0), 1920, 1080),
+        (960.0, 540.0, 960.0, 540.0)
+    );
+    assert_eq!(
+        float_crop_rect(1.0, (960.0, 540.0), 1920, 1080),
+        (0.0, 0.0, 1920.0, 1080.0)
+    );
 }
 
 #[test]

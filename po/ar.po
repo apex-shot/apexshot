@@ -3659,3 +3659,6 @@ msgstr "المقدّر:"
 
 msgid "finishing…"
 msgstr "جارٍ الإنهاء…"
+
+msgid "Video editing is not available in the Windows build yet."
+msgstr "تحرير الفيديو غير متاح في إصدار Windows بعد."

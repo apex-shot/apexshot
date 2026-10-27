@@ -3714,3 +3714,6 @@ msgstr "estimado:"
 
 msgid "finishing…"
 msgstr "terminando…"
+
+msgid "Video editing is not available in the Windows build yet."
+msgstr "La edición de vídeo aún no está disponible en la versión para Windows."

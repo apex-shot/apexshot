@@ -64,6 +64,7 @@ jobs:
           python3 scripts/test_distro_dispatch.py
           python3 scripts/test_rpm_assets.py
           python3 scripts/test_release_gate.py
+          python3 scripts/test_fedora_dependencies.py
 
       # Every UI string has to reach every shipped catalog, so a new control
       # cannot land untranslated. Covers the Linux app and the Windows app.

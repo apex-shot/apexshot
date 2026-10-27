@@ -3635,3 +3635,6 @@ msgstr "推定:"
 
 msgid "finishing…"
 msgstr "完了処理中…"
+
+msgid "Video editing is not available in the Windows build yet."
+msgstr "動画編集は Windows 版ではまだ利用できません。"

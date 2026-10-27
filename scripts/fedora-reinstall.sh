@@ -281,6 +281,9 @@ build_local() {
 
     (
         cd "$REPO_DIR"
+        # option_env! embeds Studio configuration at compile time; this local
+        # build must produce a Studio-capable package.
+        source "$REPO_DIR/scripts/studio-build-env.sh"
         cargo build --release
     )
 

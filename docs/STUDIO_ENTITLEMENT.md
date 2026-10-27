@@ -51,6 +51,15 @@ Official builds read these build-time environment variables:
 - `APEXSHOT_STUDIO_RELEASE_TIMESTAMP`: a positive `i64` Unix UTC seconds
   marker pinned for this official build.
 
+Because the app reads these values with `option_env!` at compile time, a build
+made without the pair ships with Studio configuration unavailable. The
+repository's local build scripts (`reinstall-dev-deb.sh` and
+`scripts/fedora-reinstall.sh`) resolve the pair through
+`scripts/studio-build-env.sh`, checking the environment first, then the
+untracked `.env`, then the repository variables via `gh`; they refuse to
+compile without it. Set `APEXSHOT_ALLOW_NO_STUDIO=1` to explicitly opt out and
+build without Studio configuration. The official workflows are unaffected.
+
 The tag workflow validates both GitHub Actions repository variables before
 building any release packages. One validated pair is passed to every package
 build and recorded with the staged release. Promotion verifies that the draft

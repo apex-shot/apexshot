@@ -46,6 +46,7 @@ fn build_static_transform_panel_with_controls(
     let studio_hint = Label::new(Some(&t(
         "Studio preview. A non-default rendered pose needs activation for final images; backgrounds and normal edits stay free.",
     )));
+    studio_hint.set_visible(!crate::studio_entitlement::studio_unlocked());
     studio_hint.add_css_class("editor-transform-hint");
     studio_hint.set_xalign(0.0);
     studio_hint.set_wrap(true);

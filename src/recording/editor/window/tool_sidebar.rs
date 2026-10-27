@@ -131,6 +131,7 @@ fn build_zoom_panel(
 
     let body = GtkBox::new(Orientation::Vertical, 0);
     body.add_css_class("recording-editor-zoom-body");
+    body.add_css_class("recording-editor-zoom-slider-spacing");
     body.set_hexpand(true);
 
     let mode_row = GtkBox::new(Orientation::Horizontal, 0);
@@ -233,6 +234,7 @@ fn build_zoom_panel(
     let studio_hint = Label::new(Some(&t(
         "Studio controls. Default zoom and legacy easing stay free; active exports using non-default camera settings or instant animation need activation.",
     )));
+    studio_hint.set_visible(!crate::studio_entitlement::studio_unlocked());
     studio_hint.add_css_class("recording-editor-zoom-hint");
     studio_hint.set_wrap(true);
     studio_hint.set_xalign(0.0);
@@ -2024,5 +2026,35 @@ mod tests {
         assert!(panel.contains("preview.queue_draw();"));
         assert!(panel.contains("|cursor, value| cursor.size = value"));
         assert!(panel.contains("|cursor, value| cursor.shadow = value"));
+    }
+
+    #[test]
+    fn zoom_slider_spacing_belongs_to_the_zoom_panel_alone() {
+        let zoom = include_str!("tool_sidebar.rs");
+        let css = include_str!("../ui_support_css/07.css");
+
+        assert_eq!(
+            zoom.matches("body.add_css_class(\"recording-editor-zoom-slider-spacing\");")
+                .count(),
+            1,
+            "only the zoom panel body opts in to the zoom slider spacing"
+        );
+        assert!(
+            css.contains(".recording-editor-zoom-slider-spacing .recording-editor-fill-slider {"),
+            "the zoom slider margin must follow the zoom body marker"
+        );
+        assert!(
+            !css.contains(".recording-editor-zoom-body .recording-editor-fill-slider {"),
+            "the shared zoom body must not move every panel's sliders"
+        );
+        for panel in [
+            include_str!("tool_sidebar_cursor.rs"),
+            include_str!("tool_sidebar_background.rs"),
+        ] {
+            assert!(
+                !panel.contains("recording-editor-zoom-slider-spacing"),
+                "cursor and background panels keep the shared slider margin"
+            );
+        }
     }
 }

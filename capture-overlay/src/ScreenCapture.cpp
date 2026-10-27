@@ -118,6 +118,14 @@ bool readHelperLine(QProcess& helper, int timeoutMs, QByteArray& outLine)
     return true;
 }
 
+QString helperExitFailureMessage(const QProcess& helper)
+{
+    if (helper.exitStatus() == QProcess::CrashExit) {
+        return QStringLiteral("Portal helper crashed");
+    }
+    return QStringLiteral("Portal helper exited with code %1").arg(helper.exitCode());
+}
+
 bool readIntPair(const QJsonValue& value, int& outFirst, int& outSecond)
 {
     if (!value.isArray()) {
@@ -291,7 +299,11 @@ CaptureStatus CaptureSession::startPortalHelper(const QStringList& arguments, QS
 
     QByteArray line;
     if (!readHelperLine(*m_helper, kReadyTimeoutMs, line)) {
-        outError = QStringLiteral("Portal helper did not report ready");
+        if (m_helper->state() == QProcess::NotRunning) {
+            outError = helperExitFailureMessage(*m_helper);
+        } else {
+            outError = QStringLiteral("Portal helper did not report ready");
+        }
         close();
         return CaptureStatus::Failed;
     }

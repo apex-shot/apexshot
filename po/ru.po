@@ -3699,3 +3699,6 @@ msgstr "оценка:"
 
 msgid "finishing…"
 msgstr "завершение…"
+
+msgid "Video editing is not available in the Windows build yet."
+msgstr "Редактирование видео пока недоступно в версии для Windows."
