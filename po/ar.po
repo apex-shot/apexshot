@@ -3662,3 +3662,87 @@ msgstr "جارٍ الإنهاء…"
 
 msgid "Video editing is not available in the Windows build yet."
 msgstr "تحرير الفيديو غير متاح في إصدار Windows بعد."
+
+msgid "Add a layout change at the playhead."
+msgstr "أضف تغيير تخطيط عند رأس التشغيل."
+
+msgid "CAMERA"
+msgstr "الكاميرا"
+
+msgid "Camera layout changes"
+msgstr "تغييرات تخطيط الكاميرا"
+
+msgid "Change"
+msgstr "تغيير"
+
+msgid "Change {time}"
+msgstr "تغيير {time}"
+
+msgid "Default"
+msgstr "افتراضي"
+
+msgid "Default layout"
+msgstr "التخطيط الافتراضي"
+
+msgid "Delete this layout change."
+msgstr "احذف تغيير التخطيط هذا."
+
+msgid "Drag to set the camera's position in the frame; double-click to centre it"
+msgstr "اسحب لتحديد موضع الكاميرا في الإطار؛ وانقر نقرًا مزدوجًا لتوسيطها"
+
+msgid "Edit the default layout for the whole recording."
+msgstr "حرّر التخطيط الافتراضي للتسجيل بأكمله."
+
+msgid "Edit the selected layout change."
+msgstr "حرّر تغيير التخطيط المحدد."
+
+msgid "Layout change"
+msgstr "تغيير التخطيط"
+
+msgid "Move this change to another time. A time that collides with another change is rejected."
+msgstr "انقل هذا التغيير إلى وقت آخر. يُرفض الوقت الذي يتعارض مع تغيير آخر."
+
+msgid "Percentage of the frame width."
+msgstr "نسبة من عرض الإطار."
+
+msgid "Percentage of the free space around the bubble."
+msgstr "نسبة من المساحة الحرة حول الفقاعة."
+
+msgid "SCREEN SHARE"
+msgstr "مشاركة الشاشة"
+
+msgid "Select a layout change in the timeline to edit it."
+msgstr "اختر تغيير تخطيط في الخط الزمني لتحريره."
+
+msgid "Select the layout change at the playhead."
+msgstr "اختر تغيير التخطيط عند رأس التشغيل."
+
+msgid "Shared by every camera layout."
+msgstr "مشترك بين جميع تخطيطات الكاميرا."
+
+msgid "Shared by every cutout layout."
+msgstr "مشترك بين جميع تخطيطات القص."
+
+msgid "Shared by every layout change."
+msgstr "مشترك بين جميع تغييرات التخطيط."
+
+msgid "Shared by every overlay."
+msgstr "مشترك بين جميع الطبقات."
+
+msgid "Shared by every split layout."
+msgstr "مشترك بين جميع تخطيطات سبليت."
+
+msgid "The bubble's width, as a percentage of the frame."
+msgstr "عرض الفقاعة كنسبة من الإطار."
+
+msgid "The camera layer reported: {error}"
+msgstr "أبلغت طبقة الكاميرا: {error}"
+
+msgid "The screen's share of the split, as a percentage."
+msgstr "حصة الشاشة من الانقسام كنسبة مئوية."
+
+msgid "Time"
+msgstr "الوقت"
+
+msgid "{time} · {layout}"
+msgstr "{time} · {layout}"

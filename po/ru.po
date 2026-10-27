@@ -3702,3 +3702,87 @@ msgstr "завершение…"
 
 msgid "Video editing is not available in the Windows build yet."
 msgstr "Редактирование видео пока недоступно в версии для Windows."
+
+msgid "Add a layout change at the playhead."
+msgstr "Добавьте изменение раскладки в позиции курсора воспроизведения."
+
+msgid "CAMERA"
+msgstr "КАМЕРА"
+
+msgid "Camera layout changes"
+msgstr "Изменения раскладки камеры"
+
+msgid "Change"
+msgstr "Изменение"
+
+msgid "Change {time}"
+msgstr "Изменить {time}"
+
+msgid "Default"
+msgstr "По умолчанию"
+
+msgid "Default layout"
+msgstr "Раскладка по умолчанию"
+
+msgid "Delete this layout change."
+msgstr "Удалить это изменение раскладки."
+
+msgid "Drag to set the camera's position in the frame; double-click to centre it"
+msgstr "Перетащите, чтобы задать положение камеры в кадре; двойной щелчок центрирует её"
+
+msgid "Edit the default layout for the whole recording."
+msgstr "Изменить раскладку по умолчанию для всей записи."
+
+msgid "Edit the selected layout change."
+msgstr "Изменить выбранное изменение раскладки."
+
+msgid "Layout change"
+msgstr "Изменение раскладки"
+
+msgid "Move this change to another time. A time that collides with another change is rejected."
+msgstr "Переместите это изменение на другое время. Время, совпадающее с другим изменением, отклоняется."
+
+msgid "Percentage of the frame width."
+msgstr "Процент от ширины кадра."
+
+msgid "Percentage of the free space around the bubble."
+msgstr "Процент свободного пространства вокруг пузыря."
+
+msgid "SCREEN SHARE"
+msgstr "ДЕМОНСТРАЦИЯ ЭКРАНА"
+
+msgid "Select a layout change in the timeline to edit it."
+msgstr "Выберите изменение раскладки на таймлайне, чтобы изменить его."
+
+msgid "Select the layout change at the playhead."
+msgstr "Выберите изменение раскладки в позиции курсора воспроизведения."
+
+msgid "Shared by every camera layout."
+msgstr "Общее для всех раскладок камеры."
+
+msgid "Shared by every cutout layout."
+msgstr "Общее для всех раскладок выреза."
+
+msgid "Shared by every layout change."
+msgstr "Общее для всех изменений раскладки."
+
+msgid "Shared by every overlay."
+msgstr "Общее для всех оверлеев."
+
+msgid "Shared by every split layout."
+msgstr "Общее для всех раскладок Сплит."
+
+msgid "The bubble's width, as a percentage of the frame."
+msgstr "Ширина пузыря в процентах от ширины кадра."
+
+msgid "The camera layer reported: {error}"
+msgstr "Слой камеры сообщил: {error}"
+
+msgid "The screen's share of the split, as a percentage."
+msgstr "Доля экрана в сплите, в процентах."
+
+msgid "Time"
+msgstr "Время"
+
+msgid "{time} · {layout}"
+msgstr "{time} · {layout}"
