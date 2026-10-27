@@ -1,23 +1,29 @@
 //! The recording editor's timeline card.
 //!
 //! The chrome (tool row, transport, ruler, lanes, playhead, zoom pill) mirrors
-//! the source editor. The video lane holds the trimmed, filmstripped clip; the
-//! zoom and cursor-hide lanes hold the effect pills the tool row drops at the
-//! playhead. The playhead scrubs, playback advances the clocks, and the zoom
-//! pill (or the wheel and scrollbar) scales and pans the whole board.
+//! the source editor. A narrow gutter names each lane, and every lane is a
+//! flat, full-width row beside it, so time zero lands on one x for the ruler,
+//! the filmstrip, the effect pills and the camera lane. The video lane holds
+//! the trimmed, filmstripped clip; the zoom and cursor-hide lanes always stay
+//! open so clips can be dropped into them, and a recording with a camera track
+//! gets a compact camera-layout lane beneath them whose chips select the
+//! layout changes the Webcam panel edits. The playhead scrubs, playback
+//! advances the clocks, and the zoom pill (or the wheel and scrollbar) scales
+//! and pans the whole board.
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gtk4::cairo::{Context, FontSlant, FontWeight, LinearGradient};
 use gtk4::prelude::*;
 use gtk4::{
-    Adjustment, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, DrawingArea,
-    EventControllerMotion, EventControllerScroll, EventControllerScrollFlags, GestureClick,
-    GestureDrag, Image, Label, Orientation, Overlay, Popover, PositionType, Scale, Scrollbar,
+    Adjustment, Align, ApplicationWindow, AspectFrame, Box as GtkBox, Button, CssProvider,
+    DrawingArea, EventControllerMotion, EventControllerScroll, EventControllerScrollFlags,
+    GestureClick, GestureDrag, Image, Label, Orientation, Overlay, Popover, PositionType, Scale,
+    Scrollbar,
 };
 
 use crate::capture::editor::window::icon_names;
@@ -43,11 +49,61 @@ const PLAYHEAD_HIT: f64 = 6.0;
 const EXTEND_MOVER_INSET: f64 = 10.0;
 /// Pixels within which a drop point snaps onto the playhead.
 const PLAYHEAD_SNAP: f64 = 12.0;
+/// Layout change times closer than this are the same cue, so adding one twice
+/// at a resting playhead selects the first instead of stacking a second.
+const LAYOUT_CUE_EPSILON: f64 = 0.01;
+/// Width of the label gutter left of the lanes, in unscaled pixels. It is its
+/// own widget column, so the lanes' drawing starts at their left edge and the
+/// gutter never enters the timeline's coordinate mapping.
+const LANE_GUTTER_WIDTH: f64 = 84.0;
+/// Height of the ruler row, in unscaled pixels.
+const RULER_HEIGHT: f64 = 36.0;
+/// Height of the filmstrip lane, in unscaled pixels.
+const VIDEO_LANE_HEIGHT: f64 = 56.0;
+/// Height of one effect lane, in unscaled pixels.
+const EFFECT_LANE_HEIGHT: f64 = 56.0;
+/// Height of the compact camera-layout lane, in unscaled pixels.
+const LAYOUT_LANE_HEIGHT: f64 = 34.0;
+/// Gap between rows, in unscaled pixels.
+const LANE_GAP: f64 = 10.0;
+/// The smallest chip a layout change draws, in unscaled pixels.
+const LAYOUT_CHIP_MIN_WIDTH: f64 = 56.0;
+/// Horizontal room a chip gives its label, in unscaled pixels.
+const LAYOUT_CHIP_LABEL_PADDING: f64 = 22.0;
+/// The seam a chip leaves before the next cue, in unscaled pixels.
+const LAYOUT_CHIP_GAP: f64 = 4.0;
+/// Top and bottom inset of a layout chip, matching the effect pills.
+const LAYOUT_CHIP_INSET: f64 = 7.0;
+/// Corner radius of a layout chip, matching the effect pills.
+const LAYOUT_CHIP_RADIUS: f64 = 5.0;
+/// Clickable radius around a chip's cue edge.
+const LAYOUT_CHIP_HIT: f64 = 9.0;
+/// Rough per-glyph width used to size a chip's hit bounds without a Cairo
+/// context. The drawn chip measures real text; this only has to be close
+/// enough that a click on the visible body lands on the chip.
+const LAYOUT_CHIP_GLYPH_ESTIMATE: f64 = 6.0;
+/// A layout slider reports as it is dragged. Sweeps closer together than this
+/// share a step, matching the history's own burst window.
+const LAYOUT_EDIT_COALESCE: Duration = Duration::from_millis(350);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum EffectTrack {
     Zoom,
     Hide,
+}
+
+/// What the lane stack shows: which rows are present and which one carries
+/// the selection. Playback never changes it, so the layout cannot breathe in
+/// and out while the playhead moves.
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+struct LaneState {
+    camera: bool,
+    zoom: bool,
+    hide: bool,
+    video_selected: bool,
+    camera_selected: bool,
+    zoom_selected: bool,
+    hide_selected: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -155,6 +211,15 @@ struct Data {
     /// The camera layer, set once the editor has built one. Absent on a
     /// recording with no camera track.
     webcam: Option<super::webcam::WebcamModel>,
+    /// The layout change the Webcam panel is editing, when one is selected.
+    selected_layout: Option<usize>,
+    /// Bumped every time a layout change is selected, including a repeated
+    /// click on the change already selected. The panel reveals itself on a
+    /// new selection, and a counter is what tells that apart from a repaint.
+    layout_selection_epoch: u64,
+    /// When a layout slider last reported. One sweep is one undo step, and it
+    /// must not fold into a geometry sweep that just ended.
+    layout_burst: Option<Instant>,
 }
 
 /// The document as one undo step restores it.
@@ -181,9 +246,13 @@ struct EditSnapshot {
     /// The camera layer, which lives in the webcam model rather than here;
     /// the snapshot keeps the value so undo can put the bubble back.
     webcam: Option<super::webcam::LayerSettings>,
+    /// The layout timeline, also kept in the webcam model. It is `Clone` rather
+    /// than `Copy` because of the cue list, so the step carries its own copy.
+    webcam_layouts: Option<super::webcam::LayoutSettings>,
     selected: bool,
     selected_zoom: Option<usize>,
     selected_hide: Option<usize>,
+    selected_layout: Option<usize>,
     clipboard: Option<ClipTemplate>,
 }
 
@@ -265,6 +334,16 @@ impl Data {
         self.frame_size
             .map(|(width, height)| (f64::from(width) / 2.0, f64::from(height) / 2.0))
             .unwrap_or((0.0, 0.0))
+    }
+
+    /// The recording frame's width over height, for a shape that reads the
+    /// same on this footage. 16:9 while the frame size is unknown.
+    fn frame_aspect(&self) -> f64 {
+        self.frame_size
+            .filter(|(width, height)| *width > 0 && *height > 0)
+            .map(|(width, height)| f64::from(width) / f64::from(height))
+            .filter(|aspect| aspect.is_finite() && *aspect > 0.0)
+            .unwrap_or(16.0 / 9.0)
     }
 
     fn has_media(&self) -> bool {
@@ -552,6 +631,9 @@ impl Data {
         self.segment_starts.clear();
         self.moving_segment = None;
         self.freeze_tail = 0.0;
+        self.selected_layout = None;
+        self.layout_selection_epoch = 0;
+        self.layout_burst = None;
     }
 
     /// The editable state, as one undo step keeps it.
@@ -570,9 +652,11 @@ impl Data {
             hide_clips: self.hide_clips.clone(),
             zoom_camera: self.zoom_camera,
             webcam: self.webcam.as_ref().and_then(|model| model.settings()),
+            webcam_layouts: self.webcam_layouts(),
             selected: self.selected,
             selected_zoom: self.selected_zoom,
             selected_hide: self.selected_hide,
+            selected_layout: self.selected_layout,
             clipboard: self.clipboard,
         }
     }
@@ -581,8 +665,10 @@ impl Data {
     ///
     /// One trim drag or one slider sweep arrives as a stream of updates, so
     /// the step is taken on the first of the burst and the rest leave it
-    /// alone.
+    /// alone. It also closes any layout sweep, because a different control
+    /// reporting means that sweep is over and the next one is its own step.
     fn record_continuous_edit(&mut self) {
+        self.layout_burst = None;
         let before = self.snapshot();
         self.history.record_continuous(before);
     }
@@ -590,6 +676,31 @@ impl Data {
     /// Record a step for a command that has already been applied, so an edit
     /// the document refused leaves nothing to undo.
     fn record_edit(&mut self, before: EditSnapshot) {
+        self.layout_burst = None;
+        self.history.record_command(before);
+    }
+
+    /// Take the step a layout edit is about to change.
+    ///
+    /// The transition and split sliders report continuously, so a sweep is one
+    /// step. Every report restarts the burst window, so a drag longer than the
+    /// window stays one step instead of splitting once per window. A sweep
+    /// always opens a step of its own even when a geometry slider was the last
+    /// thing to report: the two controls are separate edits, and folding them
+    /// together would make one undo take back both.
+    fn record_layout_edit(&mut self, continuous: bool) {
+        if continuous {
+            let fresh = self
+                .layout_burst
+                .is_none_or(|at| at.elapsed() > LAYOUT_EDIT_COALESCE);
+            self.layout_burst = Some(Instant::now());
+            if !fresh {
+                return;
+            }
+        } else {
+            self.layout_burst = None;
+        }
+        let before = self.snapshot();
         self.history.record_command(before);
     }
 
@@ -639,10 +750,15 @@ impl Data {
         if let (Some(webcam), Some(layer)) = (self.webcam.as_ref(), snapshot.webcam) {
             webcam.set_settings(layer);
         }
+        if let (Some(webcam), Some(layouts)) = (self.webcam.as_ref(), snapshot.webcam_layouts) {
+            webcam.set_layouts(layouts);
+        }
         self.selected = snapshot.selected;
         self.selected_zoom = snapshot.selected_zoom;
         self.selected_hide = snapshot.selected_hide;
+        self.selected_layout = snapshot.selected_layout;
         self.clipboard = snapshot.clipboard;
+        self.layout_burst = None;
         self.playing = false;
         // A restored selection is a new one for the panel, which reveals
         // itself when the epoch changes.
@@ -658,20 +774,18 @@ impl Data {
     /// "nothing changed" would only put an empty card in History.
     fn project_file(&self) -> Option<super::project::EditorProjectFile> {
         let path = self.path.as_ref()?;
+        let layouts = self.webcam_layouts();
+        let layouts_edited = layouts
+            .as_ref()
+            .is_some_and(|layouts| *layouts != super::webcam::LayoutSettings::default());
         let webcam = self
             .webcam
             .as_ref()
-            .filter(|model| model.edited())
+            .filter(|model| model.edited() || layouts_edited)
             .and_then(|model| model.settings())
-            .map(|layer| super::project::WebcamLayerFile {
-                enabled: layer.enabled,
-                fullscreen: layer.fullscreen,
-                x: layer.x,
-                y: layer.y,
-                w: layer.w,
-                h: layer.h,
-                radius: layer.radius,
-                mirror: layer.mirror,
+            .map(|layer| {
+                let layouts = layouts.clone().unwrap_or_default();
+                super::project::WebcamLayerFile::from_layer(layer, &layouts)
             });
         let pristine = webcam.is_none()
             && self.cuts.is_empty()
@@ -721,6 +835,11 @@ impl Data {
     /// clamped to the recording that is on disk, so a project written against
     /// different footage — or one hand-edited into nonsense — still lands
     /// inside the composition instead of dragging the board off it.
+    ///
+    /// A camera block is read through its resolved layouts, so an older file
+    /// written before layouts existed still opens on the picture its two
+    /// switches described. The layer itself stays available even for a
+    /// screen-only start, so a later cue can bring the camera back.
     fn apply_project(&mut self, file: &super::project::EditorProjectFile) {
         let duration = self.duration.max(0.0);
         self.trim_start = file.trim_start_seconds.clamp(0.0, duration);
@@ -773,9 +892,10 @@ impl Data {
         }
         .clamped();
         if let (Some(webcam), Some(layer)) = (self.webcam.as_ref(), file.webcam.as_ref()) {
+            let layouts = layer.resolved_layouts();
             webcam.set_settings(super::webcam::LayerSettings {
-                enabled: layer.enabled,
-                fullscreen: layer.fullscreen,
+                enabled: true,
+                fullscreen: false,
                 x: layer.x,
                 y: layer.y,
                 w: layer.w,
@@ -783,7 +903,11 @@ impl Data {
                 radius: layer.radius,
                 mirror: layer.mirror,
             });
+            webcam.set_layouts(layouts);
+        } else if let Some(webcam) = self.webcam.as_ref() {
+            webcam.set_layouts(super::webcam::LayoutSettings::default());
         }
+        self.selected_layout = None;
         self.scale = if file.timeline_scale.is_finite() {
             file.timeline_scale.clamp(0.0, 100.0)
         } else {
@@ -1142,6 +1266,24 @@ impl Data {
             .map(|template| template.duration)
     }
 
+    /// The lane and gutter flags come from one snapshot, so the two columns
+    /// cannot disagree about which rows exist. Both effect rows are permanent
+    /// drop targets: an empty lane still shows where a clip can go.
+    fn lane_state(&self) -> LaneState {
+        LaneState {
+            camera: self
+                .webcam
+                .as_ref()
+                .is_some_and(|webcam| webcam.has_track()),
+            zoom: true,
+            hide: true,
+            video_selected: self.selected,
+            camera_selected: self.selected_layout.is_some(),
+            zoom_selected: self.selected_zoom.is_some(),
+            hide_selected: self.selected_hide.is_some(),
+        }
+    }
+
     fn hover_time(&self, track: EffectTrack) -> Option<f64> {
         match track {
             EffectTrack::Zoom => self.hover_zoom,
@@ -1342,6 +1484,7 @@ impl Data {
         }
         let before = self.snapshot();
         self.reset_media();
+        self.clamp_layout_cues();
         self.record_edit(before);
     }
 
@@ -1573,6 +1716,309 @@ impl Data {
         {
             self.selected_hide = None;
         }
+        self.clamp_layout_cues();
+    }
+
+    /// Keep the layout changes inside the composition, and remember which one
+    /// is selected.
+    fn clamp_layout_cues(&mut self) {
+        let Some(webcam) = self.webcam.clone() else {
+            self.selected_layout = None;
+            return;
+        };
+        if !webcam.has_track() {
+            self.selected_layout = None;
+            return;
+        }
+        let layouts = webcam.layouts();
+        let selected = self
+            .selected_layout
+            .and_then(|index| layouts.cues.get(index))
+            .map(|cue| (cue.at, cue.layout));
+        let mut cues = layouts.cues.clone();
+        normalize_layout_cues(&mut cues, self.total_duration());
+        if cues != layouts.cues {
+            webcam.set_layouts(super::webcam::LayoutSettings { cues, ..layouts });
+        }
+        let current = webcam.layouts();
+        self.selected_layout = selected.and_then(|(at, layout)| {
+            current
+                .cues
+                .iter()
+                .position(|cue| (cue.at - at).abs() <= LAYOUT_CUE_EPSILON && cue.layout == layout)
+        });
+    }
+
+    /// The camera layer's layout timeline, or `None` when the recording has no
+    /// camera track to place.
+    fn webcam_layouts(&self) -> Option<super::webcam::LayoutSettings> {
+        let webcam = self.webcam.as_ref()?;
+        webcam.has_track().then(|| webcam.layouts())
+    }
+
+    /// Edit the layout timeline. Slider sweeps pass `continuous`, so one drag
+    /// is one undo step. Returns whether the timeline changed.
+    fn update_layouts(
+        &mut self,
+        update: impl FnOnce(&mut super::webcam::LayoutSettings),
+        continuous: bool,
+    ) -> bool {
+        let Some(webcam) = self.webcam.clone() else {
+            return false;
+        };
+        if !webcam.has_track() {
+            return false;
+        }
+        let current = webcam.layouts();
+        let mut next = current.clone();
+        update(&mut next);
+        let next = next.clamped();
+        if next == current {
+            return false;
+        }
+        self.record_layout_edit(continuous);
+        webcam.set_layouts(next);
+        self.clamp_layout_cues();
+        true
+    }
+
+    /// Add a layout change at `at` and select it. The new cue keeps the layout
+    /// already in force at that time, so adding one changes nothing on screen
+    /// until a mode is chosen for it. A cue already starting there is selected
+    /// instead of duplicated; either way the answer is its index.
+    fn add_layout_cue(&mut self, at: f64) -> Option<usize> {
+        let webcam = self.webcam.clone()?;
+        if !webcam.has_track() {
+            return None;
+        }
+        let layouts = webcam.layouts();
+        let at = at.clamp(0.0, self.total_duration());
+        if let Some(index) = layouts
+            .cues
+            .iter()
+            .position(|cue| (cue.at - at).abs() <= LAYOUT_CUE_EPSILON)
+        {
+            self.selected_layout = Some(index);
+            self.layout_selection_epoch = self.layout_selection_epoch.wrapping_add(1);
+            return Some(index);
+        }
+        let mut next = layouts.clone();
+        next.cues.push(super::webcam::LayoutCue {
+            at,
+            layout: layouts.layout_at(at),
+        });
+        let next = next.clamped();
+        let index = next
+            .cues
+            .iter()
+            .position(|cue| (cue.at - at).abs() <= LAYOUT_CUE_EPSILON);
+        self.record_layout_edit(false);
+        self.selected_layout = index;
+        if index.is_some() {
+            self.layout_selection_epoch = self.layout_selection_epoch.wrapping_add(1);
+        }
+        webcam.set_layouts(next);
+        index
+    }
+
+    /// Remove one layout change. The playhead stays where it is.
+    fn remove_layout_cue(&mut self, index: usize) -> bool {
+        let Some(webcam) = self.webcam.clone() else {
+            return false;
+        };
+        if !webcam.has_track() {
+            return false;
+        }
+        let layouts = webcam.layouts();
+        if index >= layouts.cues.len() {
+            return false;
+        }
+        let mut next = layouts;
+        next.cues.remove(index);
+        self.record_layout_edit(false);
+        self.selected_layout = shift_selection(self.selected_layout, index);
+        webcam.set_layouts(next);
+        true
+    }
+
+    /// Give one layout change a different mode, in place. The change keeps its
+    /// time, and no other cue is touched.
+    fn set_layout_cue_layout(&mut self, index: usize, layout: super::webcam::CameraLayout) -> bool {
+        let Some(webcam) = self.webcam.clone() else {
+            return false;
+        };
+        if !webcam.has_track() {
+            return false;
+        }
+        let layouts = webcam.layouts();
+        if layouts
+            .cues
+            .get(index)
+            .is_none_or(|cue| cue.layout == layout)
+        {
+            return false;
+        }
+        let mut next = layouts;
+        next.cues[index].layout = layout;
+        self.record_layout_edit(false);
+        webcam.set_layouts(next);
+        true
+    }
+
+    /// Select a layout change and put the playhead on it. The playhead is a
+    /// view, not content, so this is not an undo step.
+    fn select_layout_cue(&mut self, index: usize) -> bool {
+        let Some(layouts) = self.webcam_layouts() else {
+            return false;
+        };
+        let Some(cue) = layouts.cues.get(index).copied() else {
+            return false;
+        };
+        self.playing = false;
+        self.selected_layout = Some(index);
+        self.layout_selection_epoch = self.layout_selection_epoch.wrapping_add(1);
+        self.playhead = cue.at.clamp(0.0, self.total_duration());
+        true
+    }
+
+    /// Drop the layout-change selection without moving the playhead and
+    /// without taking an undo step.
+    fn clear_layout_cue_selection(&mut self) -> bool {
+        self.selected_layout.take().is_some()
+    }
+
+    /// Move one layout change to another composition instant.
+    ///
+    /// A time outside the composition is pulled back to its edge, and a time
+    /// within one cue epsilon of another change is refused: one instant has
+    /// one layout. The list stays ordered and whichever change was selected
+    /// keeps that selection. A successful move pauses and seeks to the cue.
+    fn set_layout_cue_time(&mut self, index: usize, at: f64) -> bool {
+        let Some(webcam) = self.webcam.clone() else {
+            return false;
+        };
+        if !webcam.has_track() {
+            return false;
+        }
+        let layouts = webcam.layouts();
+        if self
+            .selected_layout
+            .is_some_and(|selected| selected >= layouts.cues.len())
+        {
+            self.selected_layout = None;
+        }
+        let Some(cue) = layouts.cues.get(index).copied() else {
+            return false;
+        };
+        if !at.is_finite() {
+            return false;
+        }
+        let limit = self.total_duration();
+        if !limit.is_finite() || limit <= 0.0 {
+            return false;
+        }
+        let at = at.clamp(0.0, limit);
+        if (cue.at - at).abs() <= 1e-9 {
+            return false;
+        }
+        if layouts.cues.iter().enumerate().any(|(other, other_cue)| {
+            other != index && (other_cue.at - at).abs() <= LAYOUT_CUE_EPSILON
+        }) {
+            return false;
+        }
+        let selected = self
+            .selected_layout
+            .and_then(|selected| layouts.cues.get(selected))
+            .map(|cue| (cue.at, cue.layout));
+        let mut next = layouts;
+        next.cues[index].at = at;
+        let next = next.clamped();
+        let selected = if self.selected_layout == Some(index) {
+            Some((at, cue.layout))
+        } else {
+            selected
+        };
+        self.record_layout_edit(false);
+        webcam.set_layouts(next);
+        self.selected_layout = selected.and_then(|(at, layout)| {
+            self.webcam_layouts().and_then(|layouts| {
+                layouts
+                    .cues
+                    .iter()
+                    .position(|cue| (cue.at - at).abs() <= 1e-9 && cue.layout == layout)
+            })
+        });
+        self.playing = false;
+        self.playhead = at.clamp(0.0, self.total_duration());
+        self.clamp_layout_cues();
+        true
+    }
+
+    /// Give the selected layout change a mode, or the default layout when no
+    /// valid change is selected. An explicit overlay shape also updates the
+    /// camera layer's global shape, as one undo step with the layout.
+    ///
+    /// The shape is fitted to the recording's frame aspect so a circle stays
+    /// round on screen, and both dimensions scale together to stay inside the
+    /// layer's size bounds. The layer keeps the alignment it had, so a preset
+    /// taken at an edge stays on that edge instead of drifting off it.
+    fn set_webcam_editing_layout(
+        &mut self,
+        layout: super::webcam::CameraLayout,
+        overlay_shape: Option<u8>,
+    ) -> bool {
+        let Some(webcam) = self.webcam.clone() else {
+            return false;
+        };
+        if !webcam.has_track() {
+            return false;
+        }
+        let layouts = webcam.layouts();
+        let mut selection_changed = false;
+        if self
+            .selected_layout
+            .is_some_and(|selected| selected >= layouts.cues.len())
+        {
+            self.selected_layout = None;
+            selection_changed = true;
+        }
+        let selected = self.selected_layout;
+        if let Some(index) = selected.filter(|_| overlay_shape.is_none()) {
+            let changed = self.set_layout_cue_layout(index, layout);
+            return changed || selection_changed;
+        }
+        let mut next = layouts.clone();
+        match selected {
+            Some(index) => next.cues[index].layout = layout,
+            None => next.default_layout = layout,
+        }
+        let layouts_changed = next != layouts;
+
+        let mut next_layer = webcam.settings();
+        let mut layer_changed = false;
+        if let (Some(shape), Some(layer)) = (overlay_shape, next_layer.as_mut()) {
+            let previous = (layer.w, layer.h, layer.radius);
+            let radius = super::webcam::radius_for_shape(shape);
+            layer.resize_overlay(
+                layer.w,
+                self.frame_aspect() * super::webcam::aspect_for_shape(shape),
+            );
+            layer.radius = radius;
+            layer_changed = (layer.w - previous.0).abs() > f64::EPSILON
+                || (layer.h - previous.1).abs() > f64::EPSILON
+                || (layer.radius - previous.2).abs() > f64::EPSILON;
+        }
+
+        if !layouts_changed && !layer_changed {
+            return selection_changed;
+        }
+        self.record_layout_edit(false);
+        if let (true, Some(layer)) = (layer_changed, next_layer) {
+            webcam.set_settings(layer);
+        }
+        webcam.set_layouts(next);
+        self.clamp_layout_cues();
+        true
     }
 
     fn filmstrip_tiles(&self) -> Vec<(f64, f64)> {
@@ -1595,6 +2041,31 @@ impl Data {
     }
 }
 
+/// Keep a layout change list usable: finite times inside the composition, in
+/// order, with one cue per instant.
+///
+/// A cue marks the instant a layout begins, so a cue past the last frame can
+/// never be reached. Trimming that footage away drops the cue rather than
+/// pinning it to the final moment, where it would silently take over the end of
+/// the recording; undo puts it back with the trim it belonged to. Two cues at
+/// the same instant keep the later one, so a single moment has one answer.
+fn normalize_layout_cues(cues: &mut Vec<super::webcam::LayoutCue>, limit: f64) {
+    if limit <= 0.0 {
+        cues.clear();
+        return;
+    }
+    cues.retain(|cue| cue.at.is_finite() && cue.at >= 0.0 && cue.at <= limit + LAYOUT_CUE_EPSILON);
+    cues.sort_by(|left, right| left.at.total_cmp(&right.at));
+    let mut ordered: Vec<super::webcam::LayoutCue> = Vec::with_capacity(cues.len());
+    for cue in cues.drain(..) {
+        match ordered.last_mut() {
+            Some(last) if cue.at - last.at <= LAYOUT_CUE_EPSILON => *last = cue,
+            _ => ordered.push(cue),
+        }
+    }
+    *cues = ordered;
+}
+
 /// Sample time for a filmstrip frame. The last one stops just before the
 /// reported end so ffmpeg still decodes a real frame.
 fn thumbnail_timestamp(duration: f64, index: usize, count: usize) -> f64 {
@@ -1612,6 +2083,9 @@ pub(super) struct PreviewFrame {
     pub source_seconds: f64,
     /// The composition's length, for the export size estimate.
     pub composition_seconds: f64,
+    /// Where the playhead stands in composition time, which is the clock the
+    /// timed camera layouts run on.
+    pub composition_time: f64,
     pub playing: bool,
     pub camera: super::zoom::Camera,
     /// Set while a Manual zoom's focus point is being placed: the clip's scale
@@ -1631,6 +2105,39 @@ pub(super) struct ZoomPanelState {
     pub clip: Option<ZoomClip>,
     pub camera: super::zoom::ZoomCameraSettings,
     pub auto_available: bool,
+}
+
+/// What the Webcam panel shows: the layer, its layout timeline, and where the
+/// playhead and the cue selection stand. The playhead is part of the state so
+/// the panel's "at the playhead" line follows a scrub or playback.
+#[derive(Clone, PartialEq)]
+pub(super) struct WebcamPanelState {
+    /// The camera layer, absent when the recording has no camera track.
+    pub layer: Option<super::webcam::LayerSettings>,
+    /// The layout timeline, absent with no camera track.
+    pub layouts: Option<super::webcam::LayoutSettings>,
+    pub playhead: f64,
+    /// The composition's length, which decides whether a change can be added.
+    pub duration: f64,
+    /// The recording frame's width over height, so the panel can show and
+    /// label an overlay shape the way the frame will draw it. 16:9 when the
+    /// frame size is unknown.
+    pub frame_aspect: f64,
+    /// The layout change the cue chooser edits.
+    pub selected: Option<usize>,
+    /// Changes on every selection of a layout change, including a second click
+    /// on the change already selected.
+    pub selection_epoch: u64,
+    /// Whether playback is running, so the "starts at the playhead" line only
+    /// appears for a resting playhead instead of flashing past a cue.
+    pub playing: bool,
+    /// The layout the composition shows at the playhead.
+    pub effective: super::webcam::CameraLayout,
+    /// A layout change starting at the playhead, when one is there.
+    pub cue_at_playhead: Option<usize>,
+    /// The camera layer's last decode or person-matte failure. Part of the
+    /// state so the panel notices a failure appearing or clearing.
+    pub error: Option<String>,
 }
 
 /// The composition an export reads.
@@ -1674,6 +2181,9 @@ impl Timeline {
     /// slider is on screen in the same event instead of at the next tick.
     fn current_frame(&self) -> PreviewFrame {
         let data = self.data.borrow();
+        if let Some(webcam) = data.webcam.clone() {
+            webcam.set_composition_time(data.playhead);
+        }
         let placement = data.placement();
         let camera = match placement {
             Some(_) => (1.0, data.frame_center()),
@@ -1695,6 +2205,7 @@ impl Timeline {
         PreviewFrame {
             source_seconds: data.playhead_source_time(),
             composition_seconds: data.total_duration(),
+            composition_time: data.playhead,
             playing: data.playing,
             camera,
             placement,
@@ -1782,15 +2293,22 @@ impl Timeline {
         (self.repaint)();
     }
 
-    /// Put the layer back where the recording captured it.
+    /// Put the layer back where the recording captured it. The layout
+    /// timeline is not a placement, so a reset leaves the default layout and
+    /// its changes alone.
     pub fn reset_webcam(&self) {
         let webcam = self.data.borrow().webcam.clone();
         let Some(webcam) = webcam else { return };
+        if !webcam.has_track() {
+            return;
+        }
+        let layouts = webcam.layouts();
         {
             let mut data = self.data.borrow_mut();
             data.record_continuous_edit();
         }
         webcam.reset();
+        webcam.set_layouts(layouts);
         (self.repaint)();
     }
 
@@ -1799,6 +2317,172 @@ impl Timeline {
     pub fn set_webcam_listener(&self, listener: Rc<dyn Fn()>) {
         *self.webcam_listener.borrow_mut() = Some(listener.clone());
         listener();
+    }
+
+    /// The camera layer's layout timeline, or `None` when this recording has
+    /// no camera track to place.
+    pub fn webcam_layouts(&self) -> Option<super::webcam::LayoutSettings> {
+        self.data.borrow().webcam_layouts()
+    }
+
+    /// The camera layer's last decode or person-matte failure, if it has one.
+    /// The panel shows it in place of its usual hint.
+    pub fn webcam_error(&self) -> Option<String> {
+        let webcam = self.data.borrow().webcam.clone()?;
+        webcam.error()
+    }
+
+    /// Everything the Webcam panel shows.
+    pub fn webcam_panel_state(&self) -> WebcamPanelState {
+        let layer = self.webcam_settings();
+        let error = self.webcam_error();
+        let layouts = self.webcam_layouts();
+        let data = self.data.borrow();
+        let playhead = data.playhead;
+        WebcamPanelState {
+            layer,
+            error,
+            selected: data.selected_layout,
+            selection_epoch: data.layout_selection_epoch,
+            playing: data.playing,
+            effective: layouts
+                .as_ref()
+                .map(|layouts| layouts.layout_at(playhead))
+                .unwrap_or(super::webcam::CameraLayout::CameraOverlay),
+            cue_at_playhead: layouts.as_ref().and_then(|layouts| {
+                layouts
+                    .cues
+                    .iter()
+                    .position(|cue| (cue.at - playhead).abs() <= LAYOUT_CUE_EPSILON)
+            }),
+            layouts,
+            playhead,
+            duration: data.total_duration(),
+            frame_aspect: data.frame_aspect(),
+        }
+    }
+
+    /// Change the layout timeline as one undo step. The mode choosers use
+    /// this, so each click is its own step.
+    pub fn update_webcam_layouts(&self, update: impl FnOnce(&mut super::webcam::LayoutSettings)) {
+        self.apply_webcam_layouts(update, false);
+    }
+
+    /// Change the layout timeline from a slider, which reports continuously:
+    /// one sweep is one undo step, and it never joins a geometry sweep.
+    pub fn update_webcam_layouts_continuous(
+        &self,
+        update: impl FnOnce(&mut super::webcam::LayoutSettings),
+    ) {
+        self.apply_webcam_layouts(update, true);
+    }
+
+    fn apply_webcam_layouts(
+        &self,
+        update: impl FnOnce(&mut super::webcam::LayoutSettings),
+        continuous: bool,
+    ) {
+        let changed = {
+            let mut data = self.data.borrow_mut();
+            data.update_layouts(update, continuous)
+        };
+        if changed {
+            (self.repaint)();
+        }
+    }
+
+    /// Add a layout change at the playhead, or select the one already there.
+    /// The new cue starts on the layout that is already in force, so the
+    /// picture only changes once a mode is chosen for it. Adding pauses the
+    /// transport, because the next thing to do is choose that mode.
+    pub fn add_webcam_layout_cue(&self) {
+        let selected = {
+            let mut data = self.data.borrow_mut();
+            let at = data.playhead;
+            let index = data.add_layout_cue(at);
+            if index.is_some() {
+                data.playing = false;
+            }
+            index.is_some()
+        };
+        if selected {
+            (self.repaint)();
+        }
+    }
+
+    /// Put the playhead on a layout change and select it for editing.
+    pub fn select_webcam_layout_cue(&self, index: usize) {
+        let selected = {
+            let mut data = self.data.borrow_mut();
+            data.select_layout_cue(index)
+        };
+        if selected {
+            (self.repaint)();
+            self.publish_frame();
+        }
+    }
+
+    /// Remove one layout change. The playhead stays where it is.
+    pub fn remove_webcam_layout_cue(&self, index: usize) {
+        let removed = {
+            let mut data = self.data.borrow_mut();
+            data.remove_layout_cue(index)
+        };
+        if removed {
+            (self.repaint)();
+        }
+    }
+
+    /// Drop the layout-change selection. This moves no playhead and takes no
+    /// undo step; it repaints only when there was a selection to clear.
+    /// Returns whether there was one.
+    pub fn clear_webcam_layout_cue_selection(&self) -> bool {
+        let changed = self.data.borrow_mut().clear_layout_cue_selection();
+        if changed {
+            (self.repaint)();
+        }
+        changed
+    }
+
+    /// Give the selected layout change a mode, or the default layout when no
+    /// valid change is selected. An optional overlay shape also updates the
+    /// camera layer's global radius and height, fitted to the recording's
+    /// frame aspect and anchored where the layer already sits.
+    ///
+    /// Both halves are one undo step, so undo puts the layout and the layer
+    /// geometry back together. Returns whether anything changed.
+    pub fn set_webcam_editing_layout(
+        &self,
+        layout: super::webcam::CameraLayout,
+        overlay_shape: Option<u8>,
+    ) -> bool {
+        let changed = {
+            let mut data = self.data.borrow_mut();
+            data.set_webcam_editing_layout(layout, overlay_shape)
+        };
+        if changed {
+            (self.repaint)();
+            self.publish_frame();
+        }
+        changed
+    }
+
+    /// Move a layout change to another composition instant. A time outside the
+    /// composition is pulled back to its edge, and a collision with another
+    /// change is refused, leaving the document and the undo history untouched.
+    ///
+    /// A successful move pauses, seeks to the change, and repaints so the
+    /// inspector and the time read-outs follow it.
+    pub fn set_webcam_layout_cue_time(&self, index: usize, at: f64) -> bool {
+        let changed = {
+            let mut data = self.data.borrow_mut();
+            data.set_layout_cue_time(index, at)
+        };
+        if changed {
+            (self.repaint)();
+            self.publish_frame();
+        }
+        changed
     }
 
     /// Follow the pointer, or hold the focus point the clip carries.
@@ -1943,9 +2627,9 @@ impl Timeline {
             data.trim_end = duration;
             // The camera layer follows the document: its own track, its own
             // length, and the placement the recording captured, which the
-            // project file then overrides.
             if let Some(webcam) = data.webcam.clone() {
                 webcam.load(Some(source), duration);
+                webcam.set_layouts(super::webcam::LayoutSettings::default());
             }
             if duration > 0.0 {
                 restored = super::project::load_project(source);
@@ -1956,6 +2640,7 @@ impl Timeline {
         } else if let Some(webcam) = data.webcam.clone() {
             // Closing the document takes the camera layer with it.
             webcam.load(None, 0.0);
+            webcam.set_layouts(super::webcam::LayoutSettings::default());
         }
         data.clamp_cuts();
         data.clamp_scroll();
@@ -2016,6 +2701,10 @@ pub(super) fn build(
     source_size: Rc<Cell<Option<(u32, u32)>>>,
 ) -> Timeline {
     let data = Rc::new(RefCell::new(Data::default()));
+    // The shared sheet sizes the board and the filmstrip/effect lanes for this
+    // card, but it has no camera-lane rule. The scoped sheet below fills that
+    // gap and adds the gutter type for this window only.
+    install_timeline_css(scale);
     // The document needs the camera layer even when this recording has no
     // track: opening a different one has to be able to load it.
     data.borrow_mut().webcam = Some(webcam);
@@ -2024,6 +2713,7 @@ pub(super) fn build(
 
     let dock = GtkBox::new(Orientation::Vertical, 0);
     dock.add_css_class("recording-editor-timeline-dock");
+    dock.add_css_class("recording-editor-timeline-compact");
     dock.set_valign(Align::End);
 
     let card = GtkBox::new(Orientation::Vertical, 0);
@@ -2102,7 +2792,7 @@ pub(super) fn build(
     let ruler = DrawingArea::new();
     ruler.add_css_class("recording-editor-card-ruler");
     ruler.set_hexpand(true);
-    ruler.set_size_request(-1, (36.0 * scale).round() as i32);
+    ruler.set_size_request(-1, (RULER_HEIGHT * scale).round() as i32);
     ruler.set_draw_func({
         let data = data.clone();
         move |_, context, width, height| {
@@ -2113,7 +2803,7 @@ pub(super) fn build(
     let video_track = DrawingArea::new();
     video_track.add_css_class("recording-editor-card-video-track");
     video_track.set_hexpand(true);
-    video_track.set_size_request(-1, (56.0 * scale).round() as i32);
+    video_track.set_size_request(-1, (VIDEO_LANE_HEIGHT * scale).round() as i32);
     video_track.set_draw_func({
         let data = data.clone();
         move |_, context, width, height| {
@@ -2124,7 +2814,7 @@ pub(super) fn build(
     let zoom_track_lane = DrawingArea::new();
     zoom_track_lane.add_css_class("recording-editor-card-zoom-track");
     zoom_track_lane.set_hexpand(true);
-    zoom_track_lane.set_size_request(-1, (56.0 * scale).round() as i32);
+    zoom_track_lane.set_size_request(-1, (EFFECT_LANE_HEIGHT * scale).round() as i32);
     zoom_track_lane.set_draw_func({
         let data = data.clone();
         move |_, context, width, height| {
@@ -2143,7 +2833,7 @@ pub(super) fn build(
     let hide_track = DrawingArea::new();
     hide_track.add_css_class("recording-editor-card-hide-track");
     hide_track.set_hexpand(true);
-    hide_track.set_size_request(-1, (56.0 * scale).round() as i32);
+    hide_track.set_size_request(-1, (EFFECT_LANE_HEIGHT * scale).round() as i32);
     hide_track.set_draw_func({
         let data = data.clone();
         move |_, context, width, height| {
@@ -2159,17 +2849,72 @@ pub(super) fn build(
         }
     });
 
-    let lanes = GtkBox::new(Orientation::Vertical, (10.0 * scale).round() as i32);
+    let layout_track = DrawingArea::new();
+    layout_track.add_css_class("recording-editor-card-layout-track");
+    layout_track.set_hexpand(true);
+    layout_track.set_size_request(-1, (LAYOUT_LANE_HEIGHT * scale).round() as i32);
+    layout_track.set_visible(false);
+    layout_track.set_tooltip_text(Some(&t("Camera layout changes")));
+    layout_track.set_draw_func({
+        let data = data.clone();
+        move |_, context, width, height| {
+            draw_layout_lane(context, width, height, &data.borrow(), prefers_dark, scale);
+        }
+    });
+
+    // The gutter is its own column: every lane's drawing area begins where the
+    // ruler's begins, so time zero maps to one x across the whole card and the
+    // camera row appearing or disappearing cannot shift a lane's coordinate.
+    let ruler_gutter = GtkBox::new(Orientation::Vertical, 0);
+    ruler_gutter.set_size_request(-1, (RULER_HEIGHT * scale).round() as i32);
+    let video_gutter = LaneGutterRow::new(
+        icon_names::custom::CLAPPERBOARD_SYMBOLIC,
+        &t("Video"),
+        (VIDEO_LANE_HEIGHT * scale).round() as i32,
+        scale,
+    );
+    let zoom_gutter = LaneGutterRow::new(
+        "zoom-fit-best-symbolic",
+        &t("Zoom"),
+        (EFFECT_LANE_HEIGHT * scale).round() as i32,
+        scale,
+    );
+    let hide_gutter = LaneGutterRow::new(
+        "view-conceal-symbolic",
+        &t("Hide"),
+        (EFFECT_LANE_HEIGHT * scale).round() as i32,
+        scale,
+    );
+    let camera_gutter = LaneGutterRow::new(
+        icon_names::custom::WEBCAM_SYMBOLIC,
+        &t("Camera"),
+        (LAYOUT_LANE_HEIGHT * scale).round() as i32,
+        scale,
+    );
+    camera_gutter.row.set_visible(false);
+
+    let gutter = GtkBox::new(Orientation::Vertical, (LANE_GAP * scale).round() as i32);
+    gutter.add_css_class("recording-editor-timeline-gutter");
+    gutter.set_size_request((LANE_GUTTER_WIDTH * scale).round() as i32, -1);
+    gutter.set_valign(Align::Start);
+    gutter.append(&ruler_gutter);
+    gutter.append(&video_gutter.row);
+    gutter.append(&zoom_gutter.row);
+    gutter.append(&hide_gutter.row);
+    gutter.append(&camera_gutter.row);
+
+    let lanes = GtkBox::new(Orientation::Vertical, (LANE_GAP * scale).round() as i32);
     lanes.add_css_class("recording-editor-card-tracks");
     lanes.set_hexpand(true);
     lanes.append(&video_track);
     lanes.append(&zoom_track_lane);
     lanes.append(&hide_track);
+    lanes.append(&layout_track);
 
-    // The frosted extend area is one layer over the three lanes, so it spans
-    // the video, zoom and hide rows (and the gaps between them) instead of
-    // stopping at the video lane's seam. It sits above the lanes but lets
-    // input through, because the lanes own the pointer.
+    // The frosted extend area is one layer over the lanes, so it spans the
+    // video, zoom, hide and camera-layout rows (and the gaps between them)
+    // instead of stopping at the video lane's seam. It sits above the lanes
+    // but lets input through, because the lanes own the pointer.
     let band_hover = Rc::new(Cell::new(false));
     let extend = DrawingArea::new();
     extend.add_css_class("recording-editor-card-extend");
@@ -2197,16 +2942,10 @@ pub(super) fn build(
     lanes_overlay.set_child(Some(&lanes));
     lanes_overlay.add_overlay(&extend);
 
-    let tracks = GtkBox::new(Orientation::Vertical, (10.0 * scale).round() as i32);
-    tracks.add_css_class("recording-editor-card-tracks");
-    tracks.set_hexpand(true);
-    tracks.append(&ruler);
-    tracks.append(&lanes_overlay);
-
-    let board = Overlay::new();
-    board.add_css_class("recording-editor-card-board");
-    board.set_hexpand(true);
-    board.set_child(Some(&tracks));
+    let content = GtkBox::new(Orientation::Vertical, (LANE_GAP * scale).round() as i32);
+    content.set_hexpand(true);
+    content.append(&ruler);
+    content.append(&lanes_overlay);
 
     let playhead = DrawingArea::new();
     playhead.add_css_class("recording-editor-card-playhead");
@@ -2219,7 +2958,25 @@ pub(super) fn build(
             draw_playhead(context, width, height, &data.borrow(), prefers_dark, scale);
         }
     });
-    board.add_overlay(&playhead);
+
+    // The playhead covers the content column, not the gutter, so its one line
+    // crosses the ruler and every visible row at the same coordinate the lanes
+    // use. The board keeps the padding below it.
+    let content_overlay = Overlay::new();
+    content_overlay.set_hexpand(true);
+    content_overlay.set_child(Some(&content));
+    content_overlay.add_overlay(&playhead);
+
+    let tracks = GtkBox::new(Orientation::Horizontal, 0);
+    tracks.add_css_class("recording-editor-card-tracks");
+    tracks.set_hexpand(true);
+    tracks.append(&gutter);
+    tracks.append(&content_overlay);
+
+    let board = Overlay::new();
+    board.add_css_class("recording-editor-card-board");
+    board.set_hexpand(true);
+    board.set_child(Some(&tracks));
 
     let well = GtkBox::new(Orientation::Vertical, 0);
     well.add_css_class("recording-editor-timeline-well");
@@ -2236,6 +2993,7 @@ pub(super) fn build(
     dock.append(&card);
 
     let scroll_syncing = Rc::new(Cell::new(false));
+    let lane_state: Rc<Cell<Option<LaneState>>> = Rc::new(Cell::new(None));
     // The Zoom panel follows every change to the zoom track or its selection.
     // Repainting is the one place every mutation already passes through.
     let zoom_listener: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
@@ -2246,17 +3004,23 @@ pub(super) fn build(
         let video_track = video_track.clone();
         let zoom_track_lane = zoom_track_lane.clone();
         let hide_track = hide_track.clone();
+        let layout_track = layout_track.clone();
         let playhead = playhead.clone();
         let extend = extend.clone();
         let playhead_clock = playhead_clock.clone();
         let duration_clock = duration_clock.clone();
         let adjustment = adjustment.clone();
         let scroll_syncing = scroll_syncing.clone();
+        let lane_state = lane_state.clone();
+        let video_gutter = video_gutter.clone();
+        let camera_gutter = camera_gutter.clone();
+        let zoom_gutter = zoom_gutter.clone();
+        let hide_gutter = hide_gutter.clone();
         let zoom_listener = zoom_listener.clone();
         let webcam_listener = webcam_listener.clone();
         let project = project.clone();
         Rc::new(move || {
-            {
+            let state = {
                 let data = data.borrow();
                 playhead_clock.set_text(&format_clock(data.playhead));
                 duration_clock.set_text(&format_clock(data.total_duration()));
@@ -2265,13 +3029,31 @@ pub(super) fn build(
                 adjustment.set_page_size(data.visible_span().max(0.001));
                 adjustment.set_value(data.scroll);
                 scroll_syncing.set(false);
-            }
+                data.lane_state()
+            };
             ruler.queue_draw();
             video_track.queue_draw();
             zoom_track_lane.queue_draw();
             hide_track.queue_draw();
+            layout_track.queue_draw();
             extend.queue_draw();
             playhead.queue_draw();
+            // The camera row follows the track; the two effect rows never
+            // move. A playback tick leaves the state alone and with it the
+            // lane heights.
+            if lane_state.get() != Some(state) {
+                lane_state.set(Some(state));
+                apply_lane_state(
+                    state,
+                    &video_gutter,
+                    &camera_gutter,
+                    &zoom_gutter,
+                    &hide_gutter,
+                    &layout_track,
+                    &zoom_track_lane,
+                    &hide_track,
+                );
+            }
             if let Some(listener) = zoom_listener.borrow().as_ref() {
                 listener();
             }
@@ -2322,7 +3104,7 @@ pub(super) fn build(
         scale,
     );
     bind_board_hover(
-        &tracks,
+        &content,
         data.clone(),
         playhead.clone(),
         extend.clone(),
@@ -2601,6 +3383,9 @@ pub(super) fn build(
                     }
                 }
                 let composition_time = data.playhead;
+                if let Some(webcam) = data.webcam.clone() {
+                    webcam.set_composition_time(composition_time);
+                }
                 let placement = data.placement();
                 let camera = match placement {
                     Some(_) => (1.0, data.frame_center()),
@@ -2625,6 +3410,7 @@ pub(super) fn build(
                     PreviewFrame {
                         source_seconds: data.playhead_source_time(),
                         composition_seconds: data.total_duration(),
+                        composition_time,
                         playing: data.playing,
                         camera,
                         placement,
@@ -2648,9 +3434,9 @@ pub(super) fn build(
 
     (repaint)();
 
-    Timeline {
+    let timeline = Timeline {
         root: dock,
-        data,
+        data: data.clone(),
         cursor,
         camera_cache,
         generation: Rc::new(Cell::new(0)),
@@ -2660,7 +3446,146 @@ pub(super) fn build(
         zoom_listener,
         webcam_listener,
         project,
+    };
+    bind_layout_lane(&layout_track, data, timeline.clone(), sync_play_icon, scale);
+    timeline
+}
+
+/// One row of the timeline's label gutter: a small symbolic glyph and the
+/// track's short name, sized to match the lane beside it.
+#[derive(Clone)]
+struct LaneGutterRow {
+    row: GtkBox,
+    icon: Image,
+    label: Label,
+}
+
+impl LaneGutterRow {
+    fn new(icon_name: &str, text: &str, height: i32, scale: f64) -> Self {
+        let row = GtkBox::new(Orientation::Horizontal, (6.0 * scale).round() as i32);
+        row.add_css_class("recording-editor-timeline-gutter-row");
+        row.set_size_request(-1, height);
+        let icon = Image::from_icon_name(icon_name);
+        icon.set_pixel_size((14.0 * scale).round() as i32);
+        icon.set_valign(Align::Center);
+        icon.add_css_class("recording-editor-timeline-gutter-icon");
+        let label = Label::new(Some(text));
+        label.add_css_class("recording-editor-timeline-gutter-label");
+        label.set_xalign(0.0);
+        label.set_valign(Align::Center);
+        row.append(&icon);
+        row.append(&label);
+        Self { row, icon, label }
     }
+
+    fn set_selected(&self, selected: bool) {
+        if selected {
+            self.label
+                .add_css_class("recording-editor-timeline-gutter-label-selected");
+        } else {
+            self.label
+                .remove_css_class("recording-editor-timeline-gutter-label-selected");
+        }
+    }
+}
+
+/// Apply a lane snapshot to the gutter and the drawing areas. Only called when
+/// the snapshot changes, so playback never re-measures the card.
+fn apply_lane_state(
+    state: LaneState,
+    video: &LaneGutterRow,
+    camera: &LaneGutterRow,
+    zoom: &LaneGutterRow,
+    hide: &LaneGutterRow,
+    layout_track: &DrawingArea,
+    zoom_track: &DrawingArea,
+    hide_track: &DrawingArea,
+) {
+    camera.row.set_visible(state.camera);
+    layout_track.set_visible(state.camera);
+    // Both effect lanes are permanent drop targets, so their rows never
+    // collapse, even while empty.
+    zoom.row.set_visible(state.zoom);
+    zoom_track.set_visible(state.zoom);
+    hide.row.set_visible(state.hide);
+    hide_track.set_visible(state.hide);
+    set_effect_gutter(zoom, EffectTrack::Zoom);
+    set_effect_gutter(hide, EffectTrack::Hide);
+
+    video.set_selected(state.video_selected);
+    camera.set_selected(state.camera_selected);
+    zoom.set_selected(state.zoom_selected);
+    hide.set_selected(state.hide_selected);
+}
+
+fn set_effect_gutter(row: &LaneGutterRow, track: EffectTrack) {
+    let (label, icon) = match track {
+        EffectTrack::Zoom => (t("Zoom"), "zoom-fit-best-symbolic"),
+        EffectTrack::Hide => (t("Hide"), "view-conceal-symbolic"),
+    };
+    row.label.set_text(&label);
+    row.icon.set_icon_name(Some(icon));
+}
+
+/// The one stylesheet this card adds on top of the shared editor sheet.
+///
+/// It is scoped to the timeline dock and uses only properties this theme
+/// parser accepts: `min-height`, `padding`, `border-bottom`, `color` and
+/// `font-size`. The shared sheet already sizes the board, ruler, filmstrip and
+/// effect lanes; only the camera lane has no shared rule, so it is the one
+/// lane minimum set here.
+fn timeline_css(scale: f64) -> String {
+    let px = |value: f64| format!("{}px", (value * scale).round() as i32);
+    format!(
+        "
+.recording-editor-timeline-compact .recording-editor-card-layout-track {{
+    min-height: {camera};
+}}
+.recording-editor-timeline-compact .recording-editor-timeline-toolbar {{
+    border-bottom: 1px solid alpha(white, 0.08);
+}}
+.recording-editor-timeline-compact .recording-editor-timeline-gutter-row {{
+    padding: 0 10px 0 6px;
+}}
+.recording-editor-timeline-compact .recording-editor-timeline-gutter-label {{
+    font-size: {label};
+    color: alpha(white, 0.55);
+}}
+.recording-editor-timeline-compact .recording-editor-timeline-gutter-label-selected {{
+    color: alpha(white, 0.94);
+}}
+.recording-editor-timeline-compact .recording-editor-timeline-gutter-icon {{
+    color: alpha(white, 0.50);
+}}
+.editor-theme-light .recording-editor-timeline-compact .recording-editor-timeline-toolbar {{
+    border-bottom-color: alpha(#111827, 0.10);
+}}
+.editor-theme-light .recording-editor-timeline-compact .recording-editor-timeline-gutter-label {{
+    color: alpha(#111827, 0.55);
+}}
+.editor-theme-light .recording-editor-timeline-compact .recording-editor-timeline-gutter-label-selected {{
+    color: alpha(#111827, 0.92);
+}}
+.editor-theme-light .recording-editor-timeline-compact .recording-editor-timeline-gutter-icon {{
+    color: alpha(#111827, 0.50);
+}}
+",
+        camera = px(LAYOUT_LANE_HEIGHT),
+        label = px(11.0),
+    )
+}
+
+fn install_timeline_css(scale: f64) {
+    let Some(display) = gtk4::gdk::Display::default() else {
+        return;
+    };
+    let provider = CssProvider::new();
+    provider.load_from_data(&timeline_css(scale));
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 3,
+    );
 }
 
 fn transport_button(icon_name: &str, tooltip: &str) -> (Button, Image) {
@@ -3168,11 +4093,12 @@ fn bind_clip(
     lane.add_controller(drag);
 }
 
-/// The red read-out line belongs to the board, not to one lane: motion over
-/// the ruler, a gap, a lane or a pill all report the same time, so the line
-/// stays put as the pointer crosses between them instead of blinking out.
+/// The red read-out line belongs to the content column, not to one lane:
+/// motion over the ruler, a gap, a lane or a pill all report the same time, so
+/// the line stays put as the pointer crosses between them instead of blinking
+/// out. The label gutter is outside this column, so it never reports a time.
 fn bind_board_hover(
-    tracks: &GtkBox,
+    content: &GtkBox,
     data: Rc<RefCell<Data>>,
     playhead: DrawingArea,
     extend: DrawingArea,
@@ -3182,12 +4108,12 @@ fn bind_board_hover(
     let motion = EventControllerMotion::new();
     motion.connect_motion({
         let data = data.clone();
-        let tracks = tracks.clone();
+        let content = content.clone();
         let playhead = playhead.clone();
         let extend = extend.clone();
         let band_hover = band_hover.clone();
         move |_, x, _| {
-            let width = tracks.allocated_width().max(1) as f64;
+            let width = content.allocated_width().max(1) as f64;
             let band = {
                 let mut data = data.borrow_mut();
                 data.hover = Some(data.x_to_time(x, width));
@@ -3214,7 +4140,7 @@ fn bind_board_hover(
             playhead.queue_draw();
         }
     });
-    tracks.add_controller(motion);
+    content.add_controller(motion);
 }
 
 fn bind_clip_cursor(lane: &DrawingArea, data: Rc<RefCell<Data>>, scale: f64) {
@@ -3610,6 +4536,74 @@ fn bind_effect_lane(
             data.borrow_mut().set_hover_time(track, None);
             lane.set_cursor_from_name(None);
             lane.queue_draw();
+        }
+    });
+    lane.add_controller(motion);
+}
+
+/// Make the camera-layout lane's chips select their change through the same
+/// path the panel uses: pause, seek, select, and reveal the inspector on the
+/// new selection epoch.
+fn bind_layout_lane(
+    lane: &DrawingArea,
+    data: Rc<RefCell<Data>>,
+    timeline: Timeline,
+    sync_play_icon: Rc<dyn Fn()>,
+    scale: f64,
+) {
+    let click = GestureClick::new();
+    click.set_button(1);
+    click.connect_pressed({
+        let lane = lane.clone();
+        let data = data.clone();
+        let timeline = timeline.clone();
+        let sync_play_icon = sync_play_icon.clone();
+        move |_, _, x, _| {
+            let width = lane.allocated_width().max(1) as f64;
+            let hit = {
+                let data = data.borrow();
+                layout_cue_at(&data, width, x, scale)
+            };
+            if let Some(index) = hit {
+                timeline.select_webcam_layout_cue(index);
+                sync_play_icon();
+            } else {
+                timeline.clear_webcam_layout_cue_selection();
+            }
+        }
+    });
+    lane.add_controller(click);
+
+    let motion = EventControllerMotion::new();
+    motion.connect_motion({
+        let lane = lane.clone();
+        let data = data.clone();
+        move |_, x, _| {
+            let width = lane.allocated_width().max(1) as f64;
+            let (cursor, tooltip) = {
+                let data = data.borrow();
+                let hit = layout_cue_at(&data, width, x, scale);
+                let default = hit.is_none() && layout_default_at(&data, width, x);
+                let cursor = if hit.is_some() || default {
+                    "pointer"
+                } else {
+                    "default"
+                };
+                let tooltip = layout_lane_tooltip(&data, width, x, scale);
+                (cursor, tooltip)
+            };
+            lane.set_cursor_from_name(Some(cursor));
+            let current = lane.tooltip_text().map(|text| text.to_string());
+            if current != tooltip {
+                lane.set_tooltip_text(tooltip.as_deref());
+            }
+        }
+    });
+    motion.connect_leave({
+        let lane = lane.clone();
+        move |_| {
+            lane.set_cursor_from_name(None);
+            lane.set_tooltip_text(None);
         }
     });
     lane.add_controller(motion);
@@ -4155,6 +5149,331 @@ fn effect_tone(track: EffectTrack, prefers_dark: bool, hidden: bool) -> ClipTone
     tone
 }
 
+/// The short layout names the camera lane uses on its chips and in its
+/// tooltips.
+fn layout_lane_label(layout: super::webcam::CameraLayout) -> &'static str {
+    match layout {
+        super::webcam::CameraLayout::CameraOverlay => "Overlay",
+        super::webcam::CameraLayout::FullscreenCamera => "Fullscreen",
+        super::webcam::CameraLayout::SplitScreen => "Split",
+        super::webcam::CameraLayout::ScreenOnly => "Screen",
+        super::webcam::CameraLayout::CameraCutout => "Cutout",
+    }
+}
+
+/// `m:ss.s`, the clock the camera lane and its tooltips use.
+fn format_layout_clock(seconds: f64) -> String {
+    let tenths = (seconds.max(0.0) * 10.0).round() as u64;
+    format!("{}:{:02}.{}", tenths / 600, (tenths / 10) % 60, tenths % 10)
+}
+
+/// The width a layout chip takes from its text and the distance to the next
+/// cue. The gap is a ceiling, never a target: a short label stays a short chip,
+/// and neighbouring chips keep a seam between them.
+fn layout_chip_width(text_width: f64, gap: f64, scale: f64) -> f64 {
+    let scale = scale.max(0.0);
+    let ceiling = (gap - LAYOUT_CHIP_GAP * scale).max(0.0);
+    let floor = (LAYOUT_CHIP_MIN_WIDTH * scale).min(ceiling);
+    (text_width + LAYOUT_CHIP_LABEL_PADDING * scale).clamp(floor, ceiling)
+}
+
+/// A rough text width for hit testing. The painter sizes the chip from the
+/// real extents; the pointer only needs the body's neighbourhood.
+fn layout_chip_text_estimate(label: &str, scale: f64) -> f64 {
+    label.chars().count() as f64 * LAYOUT_CHIP_GLYPH_ESTIMATE * scale.max(0.0)
+}
+
+/// Pixel bounds of one layout-change chip, from its cue time to its label
+/// width, stopped short of the next cue.
+fn layout_chip_bounds(
+    data: &Data,
+    width: f64,
+    index: usize,
+    text_width: f64,
+    scale: f64,
+) -> Option<(f64, f64)> {
+    let layouts = data.webcam_layouts()?;
+    let cue = layouts.cues.get(index)?;
+    let duration = data.total_duration();
+    if duration <= 0.0 {
+        return None;
+    }
+    let start = data.time_to_x(cue.at, width);
+    let next = layouts
+        .cues
+        .get(index + 1)
+        .map(|next| next.at)
+        .unwrap_or(duration);
+    let gap = data.time_to_x(next, width) - start;
+    let chip = layout_chip_width(text_width, gap, scale);
+    Some((start, start + chip))
+}
+
+/// The layout change whose chip sits under `x`. A click near the cue time
+/// still lands on a chip too narrow to show its label.
+fn layout_cue_at(data: &Data, width: f64, x: f64, scale: f64) -> Option<usize> {
+    if !x.is_finite() || width <= 0.0 || x < 0.0 || x > width {
+        return None;
+    }
+    let layouts = data.webcam_layouts()?;
+    if data.total_duration() <= 0.0 {
+        return None;
+    }
+    let reach = LAYOUT_CHIP_HIT * scale.max(0.0);
+    layouts
+        .cues
+        .iter()
+        .enumerate()
+        .filter_map(|(index, cue)| {
+            let label = t(layout_lane_label(cue.layout));
+            let text_width = layout_chip_text_estimate(&label, scale);
+            let (start, end) = layout_chip_bounds(data, width, index, text_width, scale)?;
+            let hit_start = start - reach;
+            let hit_end = end.max(start + reach);
+            (x >= hit_start && x <= hit_end).then_some(((x - start).abs(), index))
+        })
+        .min_by(|(after, _), (before, _)| after.total_cmp(before))
+        .map(|(_, index)| index)
+}
+
+/// Where the default chip ends: the first cue, or the composition's end when
+/// no cue has been placed.
+fn layout_default_end(data: &Data, width: f64) -> Option<f64> {
+    let layouts = data.webcam_layouts()?;
+    let duration = data.total_duration();
+    if duration <= 0.0 {
+        return None;
+    }
+    let end = layouts.cues.first().map(|cue| cue.at).unwrap_or(duration);
+    Some(data.time_to_x(end, width))
+}
+
+/// Whether `x` sits on the muted default chip.
+fn layout_default_at(data: &Data, width: f64, x: f64) -> bool {
+    if !x.is_finite() || width <= 0.0 {
+        return false;
+    }
+    let Some(end) = layout_default_end(data, width) else {
+        return false;
+    };
+    let start = data.time_to_x(0.0, width).max(0.0);
+    let end = end.min(width);
+    start < end && x >= start && x <= end
+}
+
+fn layout_lane_tooltip(data: &Data, width: f64, x: f64, scale: f64) -> Option<String> {
+    let layouts = data.webcam_layouts()?;
+    if let Some(index) = layout_cue_at(data, width, x, scale) {
+        let cue = layouts.cues.get(index)?;
+        return Some(format!(
+            "{} {} · {}",
+            t("Layout change"),
+            format_layout_clock(cue.at),
+            t(layout_lane_label(cue.layout))
+        ));
+    }
+    layout_default_at(data, width, x).then(|| {
+        format!(
+            "{} · {}",
+            t("Default layout"),
+            t(layout_lane_label(layouts.default_layout))
+        )
+    })
+}
+
+/// Solid fill for a layout chip. The camera lane has its own teal instead of
+/// the theme accent — a colour the accent already marks as selected elsewhere,
+/// and one that sits too close to the Zoom lane's blue. The selected chip is
+/// the saturated end of the hue; a placed change sits in a deeper, quieter
+/// version of it so it does not read as selected.
+fn layout_chip_fill(selected: bool, prefers_dark: bool) -> (f64, f64, f64, f64) {
+    match (selected, prefers_dark) {
+        (true, true) => (0.15, 0.46, 0.41, 1.0),
+        (true, false) => (0.10, 0.40, 0.35, 1.0),
+        (false, true) => (0.13, 0.28, 0.26, 1.0),
+        (false, false) => (0.80, 0.89, 0.87, 1.0),
+    }
+}
+
+/// The one-pixel ring the selected chip carries. It is the same hue as the
+/// fill, lifted until it reads against it on either theme, rather than the
+/// near-white that used to outline an accent chip.
+fn layout_chip_ring(prefers_dark: bool) -> (f64, f64, f64, f64) {
+    if prefers_dark {
+        (0.72, 0.96, 0.90, 0.95)
+    } else {
+        (0.86, 1.0, 0.96, 0.95)
+    }
+}
+
+fn layout_chip_label_color(selected: bool, prefers_dark: bool) -> (f64, f64, f64, f64) {
+    match (selected, prefers_dark) {
+        (true, _) => (1.0, 1.0, 1.0, 0.98),
+        (false, true) => (0.90, 0.98, 0.96, 0.92),
+        (false, false) => (0.07, 0.22, 0.20, 0.88),
+    }
+}
+
+/// Truncate `text` to `max_width` with an ellipsis. `None` means not even the
+/// ellipsis fits, so the chip stays bare.
+fn ellipsized_text(context: &Context, text: &str, max_width: f64) -> Option<String> {
+    if !max_width.is_finite() || max_width <= 0.0 {
+        return None;
+    }
+    let width = |value: &str| {
+        context
+            .text_extents(value)
+            .map(|extents| extents.width())
+            .unwrap_or(f64::INFINITY)
+    };
+    if width(text) <= max_width {
+        return Some(text.to_owned());
+    }
+    let ellipsis_width = width("…");
+    if !ellipsis_width.is_finite() || ellipsis_width > max_width {
+        return None;
+    }
+    let mut fitted = String::new();
+    for character in text.chars() {
+        let mut candidate = fitted.clone();
+        candidate.push(character);
+        candidate.push('…');
+        if width(&candidate) > max_width {
+            break;
+        }
+        fitted.push(character);
+    }
+    (!fitted.is_empty()).then(|| format!("{fitted}…"))
+}
+
+fn draw_layout_lane(
+    context: &Context,
+    width: i32,
+    height: i32,
+    data: &Data,
+    prefers_dark: bool,
+    scale: f64,
+) {
+    let Some(layouts) = data.webcam_layouts() else {
+        return;
+    };
+    let width = width.max(1) as f64;
+    let height = height.max(1) as f64;
+    if data.total_duration() <= 0.0 {
+        return;
+    }
+    // The same pill inset, height and radius as the Zoom and Hide lanes, so
+    // the camera row reads as one of the same family of tracks.
+    let y = LAYOUT_CHIP_INSET * scale;
+    let pill_height = (height - LAYOUT_CHIP_INSET * 2.0 * scale).max(10.0);
+    let radius = LAYOUT_CHIP_RADIUS * scale;
+    context.select_font_face("Inter", FontSlant::Normal, FontWeight::Normal);
+    context.set_font_size((11.0 * scale).round());
+
+    // The default chip runs from zero to the first change. With no changes it
+    // is the whole row.
+    let start_x = data.time_to_x(0.0, width);
+    let default_end_x = layout_default_end(data, width).unwrap_or(start_x);
+    let default_width = default_end_x - start_x;
+    if default_width > 1.0 {
+        rounded_rect(
+            context,
+            start_x,
+            y,
+            default_width.max(2.0),
+            pill_height,
+            radius,
+        );
+        if prefers_dark {
+            context.set_source_rgba(0.10, 0.155, 0.15, 1.0);
+        } else {
+            context.set_source_rgba(0.87, 0.915, 0.905, 1.0);
+        }
+        let _ = context.fill();
+
+        let default_label = format!(
+            "{} · {}",
+            t("Default"),
+            t(layout_lane_label(layouts.default_layout))
+        );
+        if let Ok(extents) = context.text_extents(&default_label) {
+            let visible_start = start_x.max(0.0);
+            let visible_width = default_end_x.min(width) - visible_start;
+            if visible_width > extents.width() + LAYOUT_CHIP_LABEL_PADDING * scale {
+                if prefers_dark {
+                    context.set_source_rgba(1.0, 1.0, 1.0, 0.56);
+                } else {
+                    context.set_source_rgba(0.10, 0.12, 0.15, 0.55);
+                }
+                context.move_to(
+                    visible_start + LAYOUT_CHIP_LABEL_PADDING * 0.5 * scale,
+                    y + pill_height * 0.62,
+                );
+                let _ = context.show_text(&default_label);
+            }
+        }
+    }
+
+    // One discrete chip per layout change, sized by its label and stopped
+    // before the next change. The gap after the last chip is the row surface,
+    // not a stretched span.
+    for (index, cue) in layouts.cues.iter().enumerate() {
+        let label = t(layout_lane_label(cue.layout));
+        let text_width = context
+            .text_extents(&label)
+            .map(|extents| extents.width())
+            .unwrap_or_else(|_| layout_chip_text_estimate(&label, scale));
+        let Some((chip_x, chip_end)) = layout_chip_bounds(data, width, index, text_width, scale)
+        else {
+            continue;
+        };
+        if chip_end < 0.0 || chip_x > width {
+            continue;
+        }
+        let selected = data.selected_layout == Some(index);
+        let chip_width = chip_end - chip_x;
+        if chip_width <= 0.0 {
+            continue;
+        }
+
+        rounded_rect(context, chip_x, y, chip_width, pill_height, radius);
+        let (fill_r, fill_g, fill_b, fill_a) = layout_chip_fill(selected, prefers_dark);
+        context.set_source_rgba(fill_r, fill_g, fill_b, fill_a);
+        let _ = context.fill();
+
+        if selected {
+            // The selected chip alone carries the lane's colour, lifted into a
+            // one-pixel ring at its edge.
+            rounded_rect(
+                context,
+                chip_x + 0.5,
+                y + 0.5,
+                (chip_width - 1.0).max(0.0),
+                (pill_height - 1.0).max(0.0),
+                (radius - 0.5).max(0.0),
+            );
+            let (ring_r, ring_g, ring_b, ring_a) = layout_chip_ring(prefers_dark);
+            context.set_source_rgba(ring_r, ring_g, ring_b, ring_a);
+            context.set_line_width(1.0);
+            let _ = context.stroke();
+        }
+
+        let visible_start = chip_x.max(0.0);
+        let visible_width = chip_end.min(width) - visible_start;
+        let label_width = visible_width - LAYOUT_CHIP_LABEL_PADDING * scale;
+        let Some(fitted) = ellipsized_text(context, &label, label_width) else {
+            continue;
+        };
+        let (r, g, b, a) = layout_chip_label_color(selected, prefers_dark);
+        context.set_source_rgba(r, g, b, a);
+        context.move_to(
+            visible_start + LAYOUT_CHIP_LABEL_PADDING * 0.5 * scale,
+            y + pill_height * 0.62,
+        );
+        let _ = context.show_text(&fitted);
+    }
+}
+
 /// The scale presets the Zoom panel offers, on the same stops as the shared
 /// editor. Anything between two stops keeps its own scale; the panel then
 /// lights no chip rather than rounding the clip to a value nobody picked.
@@ -4536,7 +5855,7 @@ fn draw_playhead(
         if (hover_x - data.time_to_x(data.playhead, width)).abs() > 1.0 {
             let x = hover_x.floor() + 0.5;
             context.set_source_rgba(0.80, 0.22, 0.20, 0.95);
-            context.set_line_width(2.0);
+            context.set_line_width(1.0);
             context.move_to(x, 0.0);
             context.line_to(x, height);
             let _ = context.stroke();
@@ -4553,7 +5872,7 @@ fn draw_playhead(
     let handle_top = (2.0 * scale).round();
 
     context.set_source_rgba(stem_r, stem_g, stem_b, 0.9);
-    context.set_line_width(1.5);
+    context.set_line_width(1.0);
     context.move_to(x, handle_top + handle_h);
     context.line_to(x, height);
     let _ = context.stroke();
@@ -4616,7 +5935,9 @@ fn rounded_rect(context: &Context, x: f64, y: f64, width: f64, height: f64, radi
 #[cfg(test)]
 mod tests {
     use super::super::project;
+    use super::super::webcam::{CameraLayout, LayoutSettings};
     use super::*;
+    use crate::recording::editor::sidecar::{CaptureRegion, PointerSidecar, WebcamTrack};
     use gtk4::cairo::{Format, ImageSurface};
 
     fn loaded() -> Data {
@@ -5459,5 +6780,888 @@ mod tests {
         assert!(data.undo_edit());
         assert!(data.zoom_clips.is_empty());
         assert!(!data.undo_edit());
+    }
+
+    /// A document with the camera track the recorder would have written, so
+    /// the layout timeline has a model to live in. The returned paths are the
+    /// scratch files the test has to remove.
+    fn webcam_loaded(name: &str) -> (Data, Vec<PathBuf>) {
+        let directory = std::env::temp_dir().join(format!(
+            "apexshot-timeline-layouts-{name}-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        let video = directory.join("clip.mp4");
+        std::fs::write(&video, b"footage").unwrap();
+
+        let sidecar_path = PointerSidecar::sidecar_path(&video);
+        let track_path = sidecar_path
+            .parent()
+            .map(|parent| parent.join(format!("camera-layout-{name}.mp4")))
+            .unwrap_or_else(|| directory.join("camera-layout.mp4"));
+        if let Some(parent) = track_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        std::fs::write(&track_path, b"track").unwrap();
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.webcam = Some(WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|file| file.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 640,
+            height: 480,
+            duration: 10.0,
+            x: 0.7,
+            y: 0.55,
+            w: 0.2,
+            h: 0.25,
+            shape: 0,
+            flip: false,
+        });
+        sidecar.write(&sidecar_path).unwrap();
+
+        let model = super::super::webcam::WebcamModel::new(Rc::new(|| {}));
+        model.load(Some(&video), 10.0);
+        let mut data = loaded();
+        data.path = Some(video);
+        data.webcam = Some(model);
+        (data, vec![sidecar_path, track_path, directory])
+    }
+
+    fn saved_layouts(data: &Data) -> LayoutSettings {
+        data.webcam_layouts()
+            .expect("the camera track carries a layout timeline")
+    }
+
+    fn clean_up(paths: Vec<PathBuf>) {
+        for path in paths {
+            if path.is_dir() {
+                let _ = std::fs::remove_dir_all(path);
+            } else {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+    }
+
+    #[test]
+    fn layout_changes_keep_only_the_moments_the_composition_can_reach() {
+        let mut cues = vec![
+            super::super::webcam::LayoutCue {
+                at: 8.0,
+                layout: CameraLayout::SplitScreen,
+            },
+            super::super::webcam::LayoutCue {
+                at: 1.0,
+                layout: CameraLayout::ScreenOnly,
+            },
+            super::super::webcam::LayoutCue {
+                at: f64::NAN,
+                layout: CameraLayout::CameraOverlay,
+            },
+            super::super::webcam::LayoutCue {
+                at: 4.0,
+                layout: CameraLayout::CameraOverlay,
+            },
+            super::super::webcam::LayoutCue {
+                at: 4.004,
+                layout: CameraLayout::FullscreenCamera,
+            },
+            super::super::webcam::LayoutCue {
+                at: 40.0,
+                layout: CameraLayout::SplitScreen,
+            },
+        ];
+        normalize_layout_cues(&mut cues, 10.0);
+
+        let times: Vec<f64> = cues.iter().map(|cue| cue.at).collect();
+        assert_eq!(times, vec![1.0, 4.004, 8.0]);
+        assert_eq!(cues[1].layout, CameraLayout::FullscreenCamera);
+
+        normalize_layout_cues(&mut cues, 0.0);
+        assert!(cues.is_empty());
+    }
+
+    #[test]
+    fn a_layout_change_keeps_the_layout_in_force_where_it_was_added() {
+        let (mut data, scratch) = webcam_loaded("add");
+        assert!(data.update_layouts(
+            |layouts| layouts.default_layout = CameraLayout::SplitScreen,
+            false
+        ));
+        data.playhead = 5.0;
+
+        let index = data.add_layout_cue(5.0).expect("the track takes a cue");
+        assert_eq!(data.selected_layout, Some(index));
+        let layouts = saved_layouts(&data);
+        assert!((layouts.cues[index].at - 5.0).abs() < 1e-9);
+        assert_eq!(layouts.cues[index].layout, CameraLayout::SplitScreen);
+
+        assert_eq!(data.add_layout_cue(5.0), Some(index));
+        assert_eq!(saved_layouts(&data).cues.len(), 1);
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_cue_edit_touches_only_the_cue_it_was_given() {
+        let (mut data, scratch) = webcam_loaded("target");
+        let first = data.add_layout_cue(2.0).expect("the first cue");
+        let second = data.add_layout_cue(6.0).expect("the second cue");
+        assert_ne!(first, second);
+
+        assert!(data.set_layout_cue_layout(second, CameraLayout::ScreenOnly));
+        let layouts = saved_layouts(&data);
+        assert_eq!(layouts.cues[first].layout, CameraLayout::CameraOverlay);
+        assert_eq!(layouts.cues[second].layout, CameraLayout::ScreenOnly);
+
+        assert!(!data.set_layout_cue_layout(second, CameraLayout::ScreenOnly));
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn selecting_a_layout_change_puts_the_playhead_on_it() {
+        let (mut data, scratch) = webcam_loaded("seek");
+        let index = data.add_layout_cue(3.5).expect("the cue");
+        data.playhead = 0.0;
+        data.selected_layout = None;
+
+        assert!(data.select_layout_cue(index));
+        assert!((data.playhead - 3.5).abs() < 1e-9);
+        assert_eq!(data.selected_layout, Some(index));
+        assert!(!data.select_layout_cue(99));
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_layout_change_undoes_and_redoes() {
+        let (mut data, scratch) = webcam_loaded("undo");
+        let index = data.add_layout_cue(3.0).expect("the cue");
+        assert!(data.set_layout_cue_layout(index, CameraLayout::FullscreenCamera));
+        assert_eq!(
+            saved_layouts(&data).cues[0].layout,
+            CameraLayout::FullscreenCamera
+        );
+
+        assert!(data.undo_edit());
+        assert_eq!(
+            saved_layouts(&data).cues[0].layout,
+            CameraLayout::CameraOverlay
+        );
+        assert!(data.undo_edit());
+        assert!(saved_layouts(&data).cues.is_empty());
+        assert_eq!(data.selected_layout, None);
+
+        assert!(data.redo_edit());
+        assert_eq!(saved_layouts(&data).cues.len(), 1);
+        assert!(data.redo_edit());
+        assert_eq!(
+            saved_layouts(&data).cues[0].layout,
+            CameraLayout::FullscreenCamera
+        );
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_layout_sweep_is_its_own_step_after_a_geometry_sweep() {
+        let (mut data, scratch) = webcam_loaded("sweep");
+        data.record_continuous_edit();
+        data.trim_start = 1.0;
+        assert!(data.update_layouts(|layouts| layouts.transition_seconds = 0.8, true));
+        assert!(data.update_layouts(|layouts| layouts.transition_seconds = 1.0, true));
+        assert!((saved_layouts(&data).transition_seconds - 1.0).abs() < 1e-9);
+
+        assert!(data.undo_edit());
+        assert!((saved_layouts(&data).transition_seconds - 0.45).abs() < 1e-9);
+        assert!((data.trim_start - 1.0).abs() < 1e-9);
+
+        assert!(data.undo_edit());
+        assert!(data.trim_start.abs() < 1e-9);
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_coalesced_layout_report_restarts_the_burst_window() {
+        let (mut data, scratch) = webcam_loaded("window");
+        let before = Instant::now();
+        data.layout_burst = Some(before - Duration::from_millis(300));
+
+        assert!(data.update_layouts(|layouts| layouts.transition_seconds = 0.6, true));
+        let refreshed = data.layout_burst.expect("the sweep stays open");
+        assert!(
+            refreshed >= before,
+            "a coalesced report must restart the burst window"
+        );
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_long_layout_sweep_stays_one_undo_step() {
+        let (mut data, scratch) = webcam_loaded("long-sweep");
+        for step in 1..=6 {
+            let value = 0.5 + step as f64 * 0.05;
+            assert!(data.update_layouts(|layouts| layouts.transition_seconds = value, true));
+            let opened = data.layout_burst.expect("the sweep stays open");
+            data.layout_burst = Some(opened - Duration::from_millis(200));
+        }
+        assert!((saved_layouts(&data).transition_seconds - 0.8).abs() < 1e-9);
+
+        assert!(data.undo_edit());
+        assert!((saved_layouts(&data).transition_seconds - 0.45).abs() < 1e-9);
+        assert!(!data.undo_edit());
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_recording_without_a_camera_has_no_layout_timeline() {
+        let mut data = loaded();
+        assert!(data.webcam.is_none());
+        assert!(data.webcam_layouts().is_none());
+        assert_eq!(data.add_layout_cue(2.0), None);
+        assert!(!data.update_layouts(|layouts| layouts.transition_seconds = 1.0, false));
+        assert!(!data.update_layouts(|layouts| layouts.transition_seconds = 1.0, true));
+        assert!(!data.remove_layout_cue(0));
+        assert!(!data.select_layout_cue(0));
+    }
+
+    #[test]
+    fn a_layout_only_edit_is_saved_with_the_placement_it_did_not_touch() {
+        let (mut data, scratch) = webcam_loaded("saved");
+        assert!(data.project_file().is_none());
+
+        assert!(data.update_layouts(|layouts| layouts.transition_seconds = 0.8, false));
+        let file = data.project_file().expect("a layout edit is saved");
+        let webcam = file.webcam.expect("the camera block is written");
+        let group = webcam.layouts.expect("the layout timeline is written");
+        assert!((group.transition_seconds - 0.8).abs() < 1e-9);
+        assert!((webcam.x - 0.7).abs() < 1e-9);
+        assert!((webcam.y - 0.55).abs() < 1e-9);
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn trimming_drops_layout_changes_it_can_no_longer_reach() {
+        let (mut data, scratch) = webcam_loaded("trim");
+        data.add_layout_cue(2.0);
+        data.add_layout_cue(8.0);
+        assert_eq!(data.selected_layout, Some(1));
+
+        data.set_visible_length(5.0);
+        let layouts = saved_layouts(&data);
+        assert_eq!(layouts.cues.len(), 1);
+        assert!((layouts.cues[0].at - 2.0).abs() < 1e-9);
+        assert_eq!(data.selected_layout, None);
+
+        assert!(data.undo_edit());
+        assert_eq!(saved_layouts(&data).cues.len(), 2);
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_legacy_project_restores_the_layout_its_switches_describe() {
+        let (mut data, scratch) = webcam_loaded("legacy");
+        data.apply_project(&project::EditorProjectFile {
+            version: project::PROJECT_VERSION,
+            source_path: PathBuf::from("clip.mp4"),
+            source_size: 0,
+            source_mtime_secs: 0,
+            trim_start_seconds: 0.0,
+            trim_end_seconds: 10.0,
+            cuts: Vec::new(),
+            segment_starts: Vec::new(),
+            freeze_tail: 0.0,
+            zoom_clips: Vec::new(),
+            zoom_camera: project::ZoomCameraFile::default(),
+            cursor_hide_clips: Vec::new(),
+            webcam: Some(project::WebcamLayerFile {
+                enabled: false,
+                fullscreen: false,
+                x: 0.6,
+                y: 0.4,
+                w: 0.25,
+                h: 0.25,
+                radius: 0.5,
+                mirror: true,
+                layouts: None,
+            }),
+            playhead_seconds: 0.0,
+            timeline_scale: 0.0,
+            timeline_scroll_seconds: 0.0,
+        });
+
+        let layouts = saved_layouts(&data);
+        assert_eq!(layouts.default_layout, CameraLayout::ScreenOnly);
+        assert!(layouts.cues.is_empty());
+        let layer = data
+            .webcam
+            .as_ref()
+            .and_then(|model| model.settings())
+            .expect("the track still has a layer");
+        assert!(layer.enabled);
+        assert!(!layer.fullscreen);
+        assert!(layer.mirror);
+        assert!((layer.x - 0.6).abs() < 1e-9);
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn layout_chips_follow_zoom_and_scroll_and_stay_inside_the_view() {
+        let (mut data, scratch) = webcam_loaded("chips");
+        for at in [2.0, 5.0, 9.0] {
+            data.add_layout_cue(at).expect("the track takes a cue");
+        }
+        let width = 1000.0;
+        let text_width = layout_chip_text_estimate(&t("Overlay"), 1.0);
+        let (first_start, first_end) =
+            layout_chip_bounds(&data, width, 0, text_width, 1.0).expect("the first chip");
+        assert!(
+            first_end - first_start < 300.0,
+            "the chip does not fill the gap"
+        );
+        assert_eq!(
+            layout_cue_at(&data, width, first_start + 20.0, 1.0),
+            Some(0)
+        );
+        assert_eq!(layout_cue_at(&data, width, first_start + 9.0, 1.0), Some(0));
+        assert_eq!(layout_cue_at(&data, width, 400.0, 1.0), None);
+        assert_eq!(layout_cue_at(&data, width, 500.0, 1.0), Some(1));
+        let cue_tooltip =
+            layout_lane_tooltip(&data, width, 200.0, 1.0).expect("a cue has a tooltip");
+        assert!(cue_tooltip.contains(format_layout_clock(2.0).as_str()));
+        assert!(cue_tooltip.contains(t("Overlay").as_str()));
+        let default_tooltip =
+            layout_lane_tooltip(&data, width, 50.0, 1.0).expect("default has a tooltip");
+        assert!(default_tooltip.contains(t("Default layout").as_str()));
+        assert!(layout_lane_tooltip(&data, width, 400.0, 1.0).is_none());
+
+        data.scale = 100.0;
+        data.scroll = 4.0;
+        assert_eq!(layout_cue_at(&data, width, 800.0, 1.0), Some(1));
+        assert_eq!(layout_cue_at(&data, width, 0.0, 1.0), None);
+        assert_eq!(layout_cue_at(&data, width, width, 1.0), None);
+
+        data.scroll = 5.0;
+        assert_eq!(layout_cue_at(&data, width, 0.0, 1.0), Some(1));
+        data.scroll = 3.75;
+        assert_eq!(layout_cue_at(&data, width, width, 1.0), Some(1));
+        assert_eq!(layout_cue_at(&data, width, width + 0.1, 1.0), None);
+        assert_eq!(layout_cue_at(&data, width, -0.1, 1.0), None);
+        assert_eq!(layout_cue_at(&data, width, f64::NAN, 1.0), None);
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn selecting_a_layout_chip_pauses_and_announces_every_click() {
+        let (mut data, scratch) = webcam_loaded("epoch");
+        let index = data.add_layout_cue(3.5).expect("the cue");
+        let after_add = data.layout_selection_epoch;
+        data.selected_layout = None;
+        data.playhead = 0.0;
+        data.playing = true;
+
+        assert!(data.select_layout_cue(index));
+        assert!(!data.playing);
+        assert_eq!(data.selected_layout, Some(index));
+        assert!((data.playhead - 3.5).abs() < 1e-9);
+        assert_eq!(data.layout_selection_epoch, after_add + 1);
+
+        data.playing = true;
+        assert!(data.select_layout_cue(index));
+        assert!(!data.playing);
+        assert_eq!(data.layout_selection_epoch, after_add + 2);
+
+        let before_add = data.layout_selection_epoch;
+        assert_eq!(data.add_layout_cue(3.5), Some(index));
+        assert_eq!(data.layout_selection_epoch, before_add + 1);
+
+        data.playhead = 1.0;
+        data.playing = true;
+        assert!(data.clear_layout_cue_selection());
+        assert_eq!(data.selected_layout, None);
+        assert!((data.playhead - 1.0).abs() < 1e-9);
+        assert!(data.playing);
+        assert!(!data.clear_layout_cue_selection());
+        assert!(data.undo_edit());
+        assert!(saved_layouts(&data).cues.is_empty());
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_layout_preset_edits_the_cue_and_global_shape_as_one_step() {
+        let (mut data, scratch) = webcam_loaded("preset");
+        let before = data
+            .webcam
+            .as_ref()
+            .and_then(|model| model.settings())
+            .expect("the track has a layer");
+        let cue = data.add_layout_cue(2.0).expect("the cue");
+        assert_eq!(data.selected_layout, Some(cue));
+
+        assert!(data.set_webcam_editing_layout(CameraLayout::SplitScreen, Some(2)));
+        let layouts = saved_layouts(&data);
+        assert_eq!(layouts.default_layout, CameraLayout::CameraOverlay);
+        assert_eq!(layouts.cues[cue].layout, CameraLayout::SplitScreen);
+        let after = data
+            .webcam
+            .as_ref()
+            .and_then(|model| model.settings())
+            .expect("the track has a layer");
+        assert!((after.radius - super::super::webcam::radius_for_shape(2)).abs() < 1e-9);
+        let expected_height =
+            after.w * data.frame_aspect() * super::super::webcam::aspect_for_shape(2);
+        assert!((after.h - expected_height).abs() < 1e-9);
+        assert!((after.w - before.w).abs() < 1e-9);
+        assert!((after.x - before.x).abs() < 1e-9);
+        let (before_x, before_y) = before.overlay_alignment();
+        let (after_x, after_y) = after.overlay_alignment();
+        assert!((after_x - before_x).abs() < 1e-9);
+        assert!(
+            (after_y - before_y).abs() < 1e-9,
+            "the taller shape keeps the layer's alignment instead of drifting"
+        );
+        assert_eq!(after.mirror, before.mirror);
+
+        assert!(data.undo_edit());
+        assert_eq!(
+            saved_layouts(&data).cues[cue].layout,
+            CameraLayout::CameraOverlay
+        );
+        let restored = data
+            .webcam
+            .as_ref()
+            .and_then(|model| model.settings())
+            .expect("the track has a layer");
+        assert!((restored.radius - before.radius).abs() < 1e-9);
+        assert!((restored.h - before.h).abs() < 1e-9);
+        assert!((restored.w - before.w).abs() < 1e-9);
+        assert!((restored.x - before.x).abs() < 1e-9);
+        assert!((restored.y - before.y).abs() < 1e-9);
+        assert_eq!(restored.mirror, before.mirror);
+
+        assert!(data.redo_edit());
+        assert_eq!(
+            saved_layouts(&data).cues[cue].layout,
+            CameraLayout::SplitScreen
+        );
+        assert!(data.undo_edit());
+        assert!(data.undo_edit());
+        assert!(saved_layouts(&data).cues.is_empty());
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_layout_preset_targets_the_selection_or_the_default() {
+        let (mut data, scratch) = webcam_loaded("scope");
+        let cue = data.add_layout_cue(2.0).expect("the cue");
+
+        assert!(data.set_webcam_editing_layout(CameraLayout::ScreenOnly, None));
+        let layouts = saved_layouts(&data);
+        assert_eq!(layouts.default_layout, CameraLayout::CameraOverlay);
+        assert_eq!(layouts.cues[cue].layout, CameraLayout::ScreenOnly);
+
+        data.selected_layout = Some(99);
+        assert!(data.set_webcam_editing_layout(CameraLayout::SplitScreen, None));
+        assert_eq!(data.selected_layout, None);
+        let layouts = saved_layouts(&data);
+        assert_eq!(layouts.default_layout, CameraLayout::SplitScreen);
+        assert_eq!(layouts.cues[cue].layout, CameraLayout::ScreenOnly);
+
+        assert!(!data.set_webcam_editing_layout(CameraLayout::SplitScreen, None));
+        assert!(data.undo_edit());
+        let layouts = saved_layouts(&data);
+        assert_eq!(layouts.default_layout, CameraLayout::CameraOverlay);
+        assert_eq!(layouts.cues[cue].layout, CameraLayout::ScreenOnly);
+        assert!(data.undo_edit());
+        assert_eq!(
+            saved_layouts(&data).cues[cue].layout,
+            CameraLayout::CameraOverlay
+        );
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_circle_preset_follows_the_frame_aspect_and_fits_the_layer_bounds() {
+        let (mut data, scratch) = webcam_loaded("shape");
+        data.selected_layout = None;
+        assert!(data.set_webcam_editing_layout(CameraLayout::CameraOverlay, Some(0)));
+        let layer = data
+            .webcam
+            .as_ref()
+            .and_then(|model| model.settings())
+            .expect("the track has a layer");
+        assert!((layer.radius - 1.0).abs() < 1e-9);
+        assert!((layer.h - layer.w * data.frame_aspect()).abs() < 1e-9);
+
+        let model = data.webcam.clone().expect("the track has a model");
+        let mut settings = model.settings().expect("the track has a layer");
+        settings.w = 0.9;
+        settings.h = 0.5;
+        model.set_settings(settings);
+        assert!(data.set_webcam_editing_layout(CameraLayout::CameraOverlay, Some(0)));
+        let layer = model.settings().expect("the track has a layer");
+        let max = super::super::webcam::MAX_SIZE;
+        assert!(layer.w <= max + 1e-9);
+        assert!(layer.h <= max + 1e-9);
+        assert!((layer.h - layer.w * data.frame_aspect()).abs() < 1e-9);
+        assert!((layer.h - max).abs() < 1e-9);
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_shape_preset_keeps_the_alignment_the_layer_had() {
+        let (mut data, scratch) = webcam_loaded("anchored");
+        let model = data.webcam.clone().expect("the track has a model");
+        let mut corner = model.settings().expect("the track has a layer");
+        corner.w = 0.2;
+        corner.h = 0.25;
+        corner.x = 0.8;
+        corner.y = 0.75;
+        model.set_settings(corner);
+        let corner = model.settings().expect("the track has a layer");
+        assert_eq!(corner.overlay_alignment(), (1.0, 1.0));
+
+        assert!(data.set_webcam_editing_layout(CameraLayout::CameraOverlay, Some(2)));
+        let shaped = model.settings().expect("the track has a layer");
+        let (x, y) = shaped.overlay_alignment();
+        assert!((x - 1.0).abs() < 1e-9, "the shape stays on the right edge");
+        assert!((y - 1.0).abs() < 1e-9, "the shape stays on the bottom edge");
+        assert!((shaped.x + shaped.w - 1.0).abs() < 1e-9);
+        assert!((shaped.y + shaped.h - 1.0).abs() < 1e-9);
+        assert!((shaped.w - corner.w).abs() < 1e-9);
+
+        let mut centred = shaped;
+        centred.set_overlay_alignment(0.5, 0.5);
+        model.set_settings(centred);
+        assert!(data.set_webcam_editing_layout(CameraLayout::CameraOverlay, Some(3)));
+        let shaped = model.settings().expect("the track has a layer");
+        let (x, y) = shaped.overlay_alignment();
+        assert!((x - 0.5).abs() < 1e-9, "the shape stays centred across");
+        assert!((y - 0.5).abs() < 1e-9, "the shape stays centred down");
+        assert!((shaped.x + shaped.w / 2.0 - 0.5).abs() < 1e-9);
+        assert!((shaped.y + shaped.h / 2.0 - 0.5).abs() < 1e-9);
+
+        let mut wide = shaped;
+        wide.w = 0.9;
+        wide.h = 0.9;
+        wide.x = 0.1;
+        wide.y = 0.1;
+        model.set_settings(wide);
+        assert!(data.set_webcam_editing_layout(CameraLayout::CameraOverlay, Some(0)));
+        let fitted = model.settings().expect("the track has a layer");
+        let max = super::super::webcam::MAX_SIZE;
+        let min = super::super::webcam::MIN_SIZE;
+        assert!(fitted.w <= max + 1e-9 && fitted.h <= max + 1e-9);
+        assert!(fitted.w >= min && fitted.h >= min);
+        assert!((fitted.h - fitted.w * data.frame_aspect()).abs() < 1e-9);
+        assert!((fitted.overlay_alignment().0 - 1.0).abs() < 1e-9);
+        assert!((fitted.overlay_alignment().1 - 1.0).abs() < 1e-9);
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_cutout_placement_undoes_and_redoes_with_the_project() {
+        let (mut data, scratch) = webcam_loaded("cutout-position");
+        assert!((saved_layouts(&data).cutout_position_x - 0.5).abs() < 1e-9);
+
+        assert!(data.update_layouts(|layouts| layouts.cutout_position_x = 0.2, false));
+        assert!((saved_layouts(&data).cutout_position_x - 0.2).abs() < 1e-9);
+        let saved = data.project_file().expect("the layout edit is saved");
+        assert!(
+            (saved
+                .webcam
+                .expect("the camera block is written")
+                .layouts
+                .expect("the layout timeline is written")
+                .cutout_position_x
+                - 0.2)
+                .abs()
+                < 1e-9
+        );
+
+        assert!(data.undo_edit());
+        assert!((saved_layouts(&data).cutout_position_x - 0.5).abs() < 1e-9);
+        assert!(data.redo_edit());
+        assert!((saved_layouts(&data).cutout_position_x - 0.2).abs() < 1e-9);
+
+        assert!(data.update_layouts(|layouts| layouts.cutout_position_x = 4.0, false));
+        assert!((saved_layouts(&data).cutout_position_x - 1.0).abs() < 1e-9);
+        assert!(!data.update_layouts(|layouts| layouts.cutout_position_x = 1.5, false));
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn moving_a_layout_change_keeps_the_order_and_refuses_collisions() {
+        let (mut data, scratch) = webcam_loaded("move");
+        let first = data.add_layout_cue(2.0).expect("the first cue");
+        let second = data.add_layout_cue(5.0).expect("the second cue");
+        data.selected_layout = Some(first);
+        data.playing = true;
+
+        assert!(data.set_layout_cue_time(first, 8.0));
+        let layouts = saved_layouts(&data);
+        let times: Vec<f64> = layouts.cues.iter().map(|cue| cue.at).collect();
+        assert_eq!(times, vec![5.0, 8.0]);
+        assert_eq!(data.selected_layout, Some(1));
+        assert!(!data.playing);
+        assert!((data.playhead - 8.0).abs() < 1e-9);
+
+        let moved = data.selected_layout.expect("the moved cue stays selected");
+        assert!(!data.set_layout_cue_time(moved, 5.0));
+        assert!(!data.set_layout_cue_time(moved, 5.004));
+        assert!(!data.set_layout_cue_time(moved, f64::NAN));
+        assert!(!data.set_layout_cue_time(moved, 8.0));
+        assert!(data.undo_edit());
+        let layouts = saved_layouts(&data);
+        let times: Vec<f64> = layouts.cues.iter().map(|cue| cue.at).collect();
+        assert_eq!(times, vec![2.0, 5.0]);
+        assert_eq!(data.selected_layout, Some(first));
+
+        assert!(data.set_layout_cue_time(second, 99.0));
+        let layouts = saved_layouts(&data);
+        let times: Vec<f64> = layouts.cues.iter().map(|cue| cue.at).collect();
+        assert_eq!(times, vec![2.0, 10.0]);
+        assert_eq!(data.selected_layout, Some(first));
+
+        data.selected_layout = Some(1);
+        assert!(data.set_layout_cue_time(1, 1.0));
+        let layouts = saved_layouts(&data);
+        let times: Vec<f64> = layouts.cues.iter().map(|cue| cue.at).collect();
+        assert_eq!(times, vec![1.0, 2.0]);
+        assert_eq!(data.selected_layout, Some(0));
+        assert!((data.playhead - 1.0).abs() < 1e-9);
+
+        assert!(data.set_layout_cue_time(0, -4.0));
+        let layouts = saved_layouts(&data);
+        assert!((layouts.cues[0].at - 0.0).abs() < 1e-9);
+        assert_eq!(data.selected_layout, Some(0));
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn both_effect_lanes_and_gutters_stay_open_without_clips() {
+        // The lane flags drive the drawing area and its gutter row together,
+        // so both true means both drop targets are on screen from the start.
+        let data = loaded();
+        let state = data.lane_state();
+        assert!(state.zoom);
+        assert!(state.hide);
+        assert!(!state.camera);
+    }
+
+    #[test]
+    fn a_clip_still_draws_in_its_lane() {
+        for track in [EffectTrack::Zoom, EffectTrack::Hide] {
+            let [_, _, _, alpha] = pill_pixel(track);
+            assert_eq!(alpha, 255, "the pill covers the lane pixel");
+        }
+    }
+
+    #[test]
+    fn the_camera_row_appears_only_with_a_camera_track() {
+        let data = loaded();
+        assert!(!data.lane_state().camera);
+        let (data, scratch) = webcam_loaded("lane-camera");
+        assert!(data.lane_state().camera);
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn the_gutter_leaves_lane_coordinates_on_the_rulers_origin() {
+        let (mut data, scratch) = webcam_loaded("gutter");
+        for at in [1.0, 4.0, 7.0] {
+            data.add_layout_cue(at).expect("the track takes a cue");
+        }
+        assert!(data.add_effect(EffectTrack::Zoom, 0.0).is_some());
+        // What a lane actually gets: the content column beside the gutter.
+        let width = 900.0;
+
+        for (scale, scroll) in [(0.0, 0.0), (40.0, 0.5), (80.0, 0.5)] {
+            data.scale = scale;
+            data.scroll = scroll;
+            let origin = data.time_to_x(0.0, width);
+            assert!(
+                (data.time_to_x(data.segment_start(0), width) - origin).abs() < 1e-9,
+                "the filmstrip starts on the ruler's origin"
+            );
+            let effect_start = data
+                .effect_span(EffectTrack::Zoom, 0)
+                .expect("the zoom pill is there")
+                .0;
+            assert!(
+                (data.time_to_x(effect_start, width) - origin).abs() < 1e-9,
+                "the pill lane uses the same origin"
+            );
+            assert!((data.x_to_time(origin, width) - 0.0).abs() < 1e-9);
+
+            let layouts = saved_layouts(&data);
+            let text_width = layout_chip_text_estimate(&t("Overlay"), 1.0);
+            for (index, _cue) in layouts.cues.iter().enumerate() {
+                let Some((start, end)) = layout_chip_bounds(&data, width, index, text_width, 1.0)
+                else {
+                    continue;
+                };
+                let visible_start = start.max(0.0);
+                let visible_end = end.min(width);
+                if visible_end > visible_start {
+                    let probe = (visible_start + visible_end) / 2.0;
+                    assert_eq!(
+                        layout_cue_at(&data, width, probe, 1.0),
+                        Some(index),
+                        "the camera chip uses the lane's own coordinate"
+                    );
+                }
+            }
+
+            // The playhead and the first cue chip share that one coordinate.
+            data.playhead = 1.0;
+            let playhead_x = data.time_to_x(data.playhead, width);
+            let (chip_start, chip_end) = layout_chip_bounds(&data, width, 0, text_width, 1.0)
+                .expect("the first cue is there");
+            let reach = LAYOUT_CHIP_HIT;
+            if playhead_x >= chip_start - reach && playhead_x <= chip_end.max(chip_start + reach) {
+                assert_eq!(layout_cue_at(&data, width, playhead_x, 1.0), Some(0));
+            }
+        }
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn a_wide_gap_leaves_a_chip_narrower_than_the_gap() {
+        let gap = 300.0;
+        let chip = layout_chip_width(40.0, gap, 1.0);
+        assert!((chip - 62.0).abs() < 1e-9, "the label sets the width");
+        assert!(chip < gap, "the chip never stretches to the next cue");
+    }
+
+    #[test]
+    fn adjacent_cues_keep_their_chips_apart() {
+        let (mut data, scratch) = webcam_loaded("adjacent-chips");
+        data.add_layout_cue(1.0).expect("the first cue");
+        data.add_layout_cue(1.4).expect("the second cue");
+        let width = 1000.0;
+        let (first_start, first_end) =
+            layout_chip_bounds(&data, width, 0, 200.0, 1.0).expect("the first chip");
+        let (second_start, _) =
+            layout_chip_bounds(&data, width, 1, 200.0, 1.0).expect("the second chip");
+        assert!(first_end > first_start);
+        assert!(
+            first_end <= second_start - LAYOUT_CHIP_GAP + 1e-9,
+            "adjacent chips leave their seam"
+        );
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn only_the_selected_chip_uses_the_lane_colour() {
+        // The camera lane used to borrow the theme accent, so its selected chip
+        // matched the selection colour of every other surface and sat close to
+        // the Zoom lane's blue. The lane carries its own teal now: the selected
+        // chip is the saturated end of it, and a placed change keeps the hue at
+        // a depth that cannot be mistaken for selected.
+        let selected_dark = layout_chip_fill(true, true);
+        let selected_light = layout_chip_fill(true, false);
+        assert_eq!(selected_dark, (0.15, 0.46, 0.41, 1.0));
+        assert_eq!(selected_light, (0.10, 0.40, 0.35, 1.0));
+        assert_eq!(selected_dark.3, 1.0, "the fill is solid");
+        assert_eq!(selected_light.3, 1.0, "the fill is solid");
+
+        let unselected_dark = layout_chip_fill(false, true);
+        let unselected_light = layout_chip_fill(false, false);
+        assert_eq!(unselected_dark, (0.13, 0.28, 0.26, 1.0));
+        assert_eq!(unselected_light, (0.80, 0.89, 0.87, 1.0));
+        assert_ne!(
+            unselected_dark, selected_dark,
+            "the selected chip is a deeper teal than its neighbours"
+        );
+        assert_ne!(
+            unselected_light, selected_light,
+            "selection reads on the light theme too"
+        );
+
+        let accent = (1.0, 0.404, 0.051, 1.0);
+        let zoom = (0.0, 0.0, 1.0, 1.0);
+        let hide = (0.4, 0.0, 0.2, 1.0);
+        for (theme, selected) in [("dark", selected_dark), ("light", selected_light)] {
+            assert_ne!(
+                selected, accent,
+                "the accent orange is not the camera lane's colour ({theme})"
+            );
+            assert_ne!(
+                selected, zoom,
+                "the camera lane stays clear of the Zoom lane's blue ({theme})"
+            );
+            assert_ne!(
+                selected, hide,
+                "the camera lane stays clear of the Hide lane's red ({theme})"
+            );
+        }
+    }
+
+    #[test]
+    fn a_click_on_a_narrow_chip_body_selects_its_cue() {
+        let (mut data, scratch) = webcam_loaded("narrow-chip");
+        data.add_layout_cue(1.0).expect("the first cue");
+        data.add_layout_cue(1.4).expect("the second cue");
+        let width = 1000.0;
+        let text_width = layout_chip_text_estimate(&t("Overlay"), 1.0);
+        let (start, end) =
+            layout_chip_bounds(&data, width, 0, text_width, 1.0).expect("the first chip");
+        assert!(
+            end - start < LAYOUT_CHIP_MIN_WIDTH,
+            "the chip is below the old minimum"
+        );
+        let probe = start + (end - start) / 2.0;
+        assert_eq!(layout_cue_at(&data, width, probe, 1.0), Some(0));
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn the_scoped_stylesheet_keeps_only_the_camera_lane_floor() {
+        let css = timeline_css(1.25);
+        assert!(css.contains("recording-editor-card-layout-track"));
+        assert!(css.contains("min-height: 43px"), "the camera lane is 34px");
+        assert!(!css.contains("recording-editor-card-board"));
+        assert!(!css.contains("recording-editor-card-video-track"));
+        assert!(!css.contains("recording-editor-card-zoom-track"));
+        assert!(!css.contains("recording-editor-card-hide-track"));
+        assert!(!css.contains("min-height: 0"));
+        assert!(css.contains("font-size: 14px"), "an 11px label at 1.25x");
+        for rejected in ["max-height", "max-width", "overflow"] {
+            assert!(
+                !css.contains(rejected),
+                "{rejected} is rejected by this theme parser"
+            );
+        }
+    }
+
+    #[test]
+    fn the_layout_lane_needs_a_track_and_its_default_survives_without_cues() {
+        let data = loaded();
+        let width = 1000.0;
+        assert_eq!(layout_cue_at(&data, width, 0.0, 1.0), None);
+        assert!(!layout_default_at(&data, width, 0.0));
+        assert!(layout_lane_tooltip(&data, width, 0.0, 1.0).is_none());
+
+        let (data, scratch) = webcam_loaded("empty-lane");
+        assert!(saved_layouts(&data).cues.is_empty());
+        assert_eq!(layout_cue_at(&data, width, 500.0, 1.0), None);
+        assert!(layout_default_at(&data, width, 500.0));
+        let tooltip =
+            layout_lane_tooltip(&data, width, 500.0, 1.0).expect("the default has a tooltip");
+        assert!(tooltip.contains(t("Default layout").as_str()));
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn frame_aspect_falls_back_when_the_source_size_is_unknown() {
+        let mut data = loaded();
+        assert!((data.frame_aspect() - 16.0 / 9.0).abs() < 1e-9);
+        data.frame_size = Some((1080, 1920));
+        assert!((data.frame_aspect() - 9.0 / 16.0).abs() < 1e-9);
+        data.frame_size = None;
+        assert!((data.frame_aspect() - 16.0 / 9.0).abs() < 1e-9);
+        data.frame_size = Some((0, 1080));
+        assert!((data.frame_aspect() - 16.0 / 9.0).abs() < 1e-9);
     }
 }
