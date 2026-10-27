@@ -3712,3 +3712,21 @@ msgstr "时间"
 
 msgid "{time} · {layout}"
 msgstr "{time} · {layout}"
+
+msgid "Camera layer"
+msgstr "摄像头图层"
+
+msgid "Delete change"
+msgstr "删除更改"
+
+msgid "Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."
+msgstr "将摄像头绘制在屏幕上方。关闭后只显示屏幕，并保留你的布局更改。"
+
+msgid "Turn camera off"
+msgstr "关闭摄像头"
+
+msgid "Turn camera on"
+msgstr "开启摄像头"
+
+msgid "Add change at playhead"
+msgstr "在播放头处添加更改"

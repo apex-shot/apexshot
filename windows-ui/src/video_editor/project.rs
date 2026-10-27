@@ -30,13 +30,23 @@ use sha2::{Digest, Sha256};
 
 /// Format version of the file. Bumped when a field changes meaning; readers
 /// keep working through the `#[serde(default)]` on every optional key.
-pub(super) const PROJECT_VERSION: u32 = 1;
+///
+/// Version 2 gives the camera layer's `enabled` switch its own meaning — the
+/// layer draws at all — where version 1 files used it to say the default
+/// layout was the screen alone.
+pub(super) const PROJECT_VERSION: u32 = 2;
 
 /// The camera layer as the project file stores it: fractions of the frame, a
 /// corner radius as a fraction of the shorter side, and the two switches.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(super) struct WebcamLayerFile {
+    /// Whether the layer draws at all. A file from before the layouts block
+    /// used this to say the camera was not in the picture, which the
+    /// screen-only default already covers; those files read as an enabled
+    /// layer.
     pub enabled: bool,
+    /// Whether the layer fills the frame instead of sitting in a bubble. Read
+    /// only by a file that has no layouts block.
     pub fullscreen: bool,
     pub x: f64,
     pub y: f64,
@@ -78,15 +88,15 @@ impl WebcamLayerFile {
         }
     }
 
-    /// A layer and its layout timeline as the file stores them. The two legacy
-    /// switches describe the default layout, so a build that only knows them
-    /// still opens on the same starting picture.
+    /// A layer and its layout timeline as the file stores them. `fullscreen`
+    /// still describes the default layout, so a build that only knows that
+    /// switch opens on the same starting picture.
     pub(super) fn from_layer(
         layer: super::webcam::LayerSettings,
         layouts: &super::webcam::LayoutSettings,
     ) -> Self {
         Self {
-            enabled: layouts.default_layout != super::webcam::CameraLayout::ScreenOnly,
+            enabled: layer.enabled,
             fullscreen: layouts.default_layout == super::webcam::CameraLayout::FullscreenCamera,
             x: layer.x,
             y: layer.y,
@@ -651,20 +661,37 @@ mod tests {
     }
 
     #[test]
-    fn the_older_switches_still_describe_the_default_layout() {
+    fn the_file_keeps_the_layer_switch_beside_the_default_layout() {
         let layer = super::super::webcam::LayerSettings::default();
         let mut layouts = LayoutSettings {
             default_layout: CameraLayout::ScreenOnly,
             ..LayoutSettings::default()
         };
         let file = WebcamLayerFile::from_layer(layer, &layouts);
-        assert!(!file.enabled);
+        assert!(file.enabled, "the layer draws; the default is the screen");
         assert!(!file.fullscreen);
+
+        let off = super::super::webcam::LayerSettings {
+            enabled: false,
+            ..layer
+        };
+        let file = WebcamLayerFile::from_layer(off, &layouts);
+        assert!(!file.enabled, "a switched-off layer writes its own switch");
 
         layouts.default_layout = CameraLayout::FullscreenCamera;
         let file = WebcamLayerFile::from_layer(layer, &layouts);
         assert!(file.enabled);
         assert!(file.fullscreen);
+    }
+
+    #[test]
+    fn an_older_file_states_its_hidden_camera_as_a_screen_only_default() {
+        let layouts = legacy_webcam(false, false).resolved_layouts();
+        assert_eq!(layouts.default_layout, CameraLayout::ScreenOnly);
+        assert!(
+            !legacy_webcam(false, false).enabled,
+            "the older switch is what those files set"
+        );
     }
 
     #[test]

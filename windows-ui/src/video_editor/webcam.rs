@@ -416,6 +416,12 @@ impl LayoutSettings {
             split_flip: self.split_flip,
             cutout_position_x: self.cutout_position_x,
         };
+        // A layer switched off paints the screen alone at every instant. The
+        // recorded geometry and the layout timeline stay as they are, so
+        // switching it back on restores the picture that was there.
+        if !geometry.overlay.enabled {
+            return canonical(CameraLayout::ScreenOnly, geometry);
+        }
         let default = canonical(self.default_layout, geometry);
         if !seconds.is_finite() {
             return default;
@@ -1137,7 +1143,9 @@ impl WebcamModel {
         let track = track.as_ref()?;
         let settings = self.settings()?;
         let layouts = self.layouts();
-        if !layouts.uses_camera() {
+        // A switched-off layer exports nothing, so the file comes out with the
+        // screen alone and no camera track beside it.
+        if !layouts.uses_camera() || !settings.enabled {
             return None;
         }
         Some(WebcamExport {
@@ -2080,6 +2088,34 @@ mod tests {
         assert!(!settings.split_flip);
         assert!(!settings.uses_cutout());
         assert!(settings.uses_camera());
+    }
+
+    #[test]
+    fn a_switched_off_layer_paints_the_screen_alone() {
+        let settings = settings(
+            vec![
+                cue(1.0, CameraLayout::FullscreenCamera),
+                cue(2.0, CameraLayout::CameraCutout),
+            ],
+            0.45,
+        );
+        assert!(resting(&settings, 1.5).camera_alpha > 0.9, "on paints it");
+
+        let off = LayerSettings {
+            enabled: false,
+            ..LayerSettings::default()
+        };
+        for seconds in [0.0, 1.0, 1.5, 2.5] {
+            let frame = settings
+                .clone()
+                .clamped()
+                .frame_at(seconds, off, 16.0 / 9.0, 16.0 / 9.0);
+            assert_eq!(
+                frame.camera_alpha, 0.0,
+                "no camera pixels at {seconds} while switched off"
+            );
+            assert_eq!(frame.cutout, 0.0, "and no matte at {seconds}");
+        }
     }
 
     #[test]

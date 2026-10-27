@@ -3786,3 +3786,21 @@ msgstr "Время"
 
 msgid "{time} · {layout}"
 msgstr "{time} · {layout}"
+
+msgid "Camera layer"
+msgstr "Слой камеры"
+
+msgid "Delete change"
+msgstr "Удалить изменение"
+
+msgid "Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."
+msgstr "Рисует камеру поверх экрана. Когда выключено, показывается только экран, а изменения макета сохраняются."
+
+msgid "Turn camera off"
+msgstr "Выключить камеру"
+
+msgid "Turn camera on"
+msgstr "Включить камеру"
+
+msgid "Add change at playhead"
+msgstr "Добавить изменение в позицию воспроизведения"

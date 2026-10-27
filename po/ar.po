@@ -3746,3 +3746,21 @@ msgstr "الوقت"
 
 msgid "{time} · {layout}"
 msgstr "{time} · {layout}"
+
+msgid "Camera layer"
+msgstr "طبقة الكاميرا"
+
+msgid "Delete change"
+msgstr "حذف التغيير"
+
+msgid "Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."
+msgstr "ارسم الكاميرا فوق الشاشة. عند الإيقاف تُعرض الشاشة وحدها وتُحفظ تغييرات التخطيط."
+
+msgid "Turn camera off"
+msgstr "إيقاف الكاميرا"
+
+msgid "Turn camera on"
+msgstr "تشغيل الكاميرا"
+
+msgid "Add change at playhead"
+msgstr "إضافة تغيير عند موضع التشغيل"

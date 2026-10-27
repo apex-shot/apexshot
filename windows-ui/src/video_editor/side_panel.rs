@@ -1832,7 +1832,6 @@ struct WebcamControlRows {
     root: GtkBox,
     default_scope: ToggleButton,
     change_scope: ToggleButton,
-    change_label: Label,
     add_change: Button,
     delete_change: Button,
     time_row: GtkBox,
@@ -1849,10 +1848,13 @@ fn build_webcam_control_rows(scale: f64) -> WebcamControlRows {
     top.set_valign(Align::Center);
     let scope = GtkBox::new(Orientation::Horizontal, 0);
     scope.add_css_class("recording-editor-webcam-scope");
-    scope.set_halign(Align::Start);
-    scope.set_hexpand(false);
+    scope.set_halign(Align::Fill);
+    scope.set_hexpand(true);
+    scope.set_homogeneous(true);
     let (default_scope, _default_label) = webcam_scope_button(&t("Default"));
-    let (change_scope, change_label) = webcam_scope_button(&t("Change"));
+    let (change_scope, _change_label) = webcam_scope_button(&t("Change"));
+    default_scope.set_hexpand(true);
+    change_scope.set_hexpand(true);
     change_scope.set_group(Some(&default_scope));
     default_scope.set_active(true);
     change_scope.set_sensitive(false);
@@ -1881,23 +1883,21 @@ fn build_webcam_control_rows(scale: f64) -> WebcamControlRows {
     top.append(&delete_change);
     root.append(&top);
 
-    let time_row = GtkBox::new(Orientation::Horizontal, (6.0 * scale).round() as i32);
-    time_row.set_halign(Align::Start);
-    time_row.set_hexpand(false);
+    let time_row = GtkBox::new(Orientation::Horizontal, 0);
+    time_row.set_halign(Align::Fill);
+    time_row.set_hexpand(true);
     time_row.set_visible(false);
-    let time_label = Label::new(Some(&t("Time")));
-    time_label.add_css_class("recording-editor-zoom-classic-label");
-    time_label.set_xalign(0.0);
     let time_spin = SpinButton::with_range(0.0, 0.1, 0.1);
+    time_spin.add_css_class("recording-editor-webcam-time");
     time_spin.set_digits(1);
     time_spin.set_numeric(true);
     time_spin.set_width_chars(6);
+    time_spin.set_hexpand(true);
     time_spin.set_size_request(-1, (28.0 * scale).round() as i32);
     time_spin.set_valign(Align::Center);
     time_spin.set_tooltip_text(Some(&t(
         "Move this change to another time. A time that collides with another change is rejected.",
     )));
-    time_row.append(&time_label);
     time_row.append(&time_spin);
     root.append(&time_row);
 
@@ -1915,7 +1915,6 @@ fn build_webcam_control_rows(scale: f64) -> WebcamControlRows {
         root,
         default_scope,
         change_scope,
-        change_label,
         add_change,
         delete_change,
         time_row,
@@ -2754,6 +2753,25 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
     editor.set_vexpand(true);
     body.append(&editor);
 
+    // The layer's own switch sits above the layouts: off paints the screen
+    // alone and leaves every layout change where it is.
+    let (camera_row, camera_switch) = setting_switch_row(
+        &t("Camera layer"),
+        &t("Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."),
+    );
+    camera_switch.set_active(initial_layer.enabled);
+    camera_switch.connect_state_set({
+        let timeline = timeline.clone();
+        let syncing = syncing.clone();
+        move |_, active| {
+            if !syncing.get() {
+                timeline.set_webcam_enabled(active);
+            }
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    editor.append(&camera_row);
+
     let rows = build_webcam_control_rows(scale);
     editor.append(&rows.root);
 
@@ -3003,10 +3021,10 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
         let empty = empty.clone();
         let error_hint = error_hint.clone();
         let editor = editor.clone();
+        let camera_switch = camera_switch.clone();
         let reset = reset.clone();
         let default_scope = rows.default_scope.clone();
         let change_scope = rows.change_scope.clone();
-        let change_label = rows.change_label.clone();
         let add_change = rows.add_change.clone();
         let delete_change = rows.delete_change.clone();
         let time_row = rows.time_row.clone();
@@ -3044,6 +3062,7 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
 
             empty.set_visible(false);
             editor.set_visible(true);
+            camera_switch.set_active(layer.enabled);
             reset.set_visible(true);
             reset.set_sensitive(true);
 
@@ -3053,10 +3072,7 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                 change_scope.set_sensitive(true);
                 change_scope.set_active(true);
                 change_scope.set_tooltip_text(Some(&t("Edit the selected layout change.")));
-                change_label.set_text(&tfmt(
-                    "Change {time}",
-                    &[("time", &format_cue_clock(cue.at))],
-                ));
+                // The tab keeps its own name; the field below holds the time.
                 time_row.set_visible(true);
                 delete_change.set_visible(true);
                 time_spin.adjustment().set_upper(state.duration.max(0.1));
@@ -3068,7 +3084,7 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                 change_scope.set_tooltip_text(Some(&t(
                     "Select a layout change in the timeline to edit it.",
                 )));
-                change_label.set_text(&t("Change"));
+                // Nothing to rename: the tab is scope, not a value.
                 time_row.set_visible(false);
                 delete_change.set_visible(false);
             }
@@ -3085,13 +3101,20 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
 
             let layout_name =
                 t(webcam_layout_card(state.effective, Some(&layer), state.frame_aspect).label());
-            status.set_text(&tfmt(
-                "{time} · {layout}",
-                &[
-                    ("time", &format_cue_clock(state.playhead)),
-                    ("layout", &layout_name),
-                ],
-            ));
+            // While a change is selected its field already shows the time, so
+            // the line underneath only names the layout. Editing the default
+            // keeps the clock, because then the field is not there.
+            if selected.is_some() {
+                status.set_text(&layout_name);
+            } else {
+                status.set_text(&tfmt(
+                    "{time} · {layout}",
+                    &[
+                        ("time", &format_cue_clock(state.playhead)),
+                        ("layout", &layout_name),
+                    ],
+                ));
+            }
 
             let controls = webcam_editing_controls(&state);
             if webcam_panel_needs_rebuild(previous.as_ref(), &state) {
@@ -4051,6 +4074,32 @@ pub(super) fn install_css() {
         button.recording-editor-webcam-scope-btn:disabled {{
             opacity: 0.35;
         }}
+        .recording-editor-webcam-time {{
+            min-height: {webcam_scope_h}px;
+            padding: 0 2px;
+            border-radius: {webcam_scope_btn_radius}px;
+            background: alpha(white, 0.06);
+            color: alpha(white, 0.92);
+            font-size: {value_text}px;
+            font-variant-numeric: tabular-nums;
+        }}
+        .recording-editor-webcam-time entry {{
+            min-height: {webcam_scope_h}px;
+            background: transparent;
+            color: inherit;
+            font-size: {value_text}px;
+            box-shadow: none;
+        }}
+        .recording-editor-webcam-time button {{
+            min-width: {webcam_scope_h}px;
+            background: transparent;
+            color: alpha(white, 0.55);
+            box-shadow: none;
+        }}
+        .recording-editor-webcam-time button:hover {{
+            background: alpha(white, 0.10);
+            color: alpha(white, 0.94);
+        }}
         button.recording-editor-webcam-icon {{
             min-width: {webcam_icon}px;
             min-height: {webcam_icon}px;
@@ -4108,6 +4157,16 @@ pub(super) fn install_css() {
         .editor-theme-light button.recording-editor-webcam-scope-btn:checked:hover {{
             background: alpha(#111827, 0.10);
             color: alpha(#1d2129, 0.96);
+        }}
+        .editor-theme-light .recording-editor-webcam-time {{
+            background: alpha(#111827, 0.06);
+            color: alpha(#1d2129, 0.92);
+        }}
+        .editor-theme-light .recording-editor-webcam-time entry {{
+            color: inherit;
+        }}
+        .editor-theme-light .recording-editor-webcam-time button {{
+            color: alpha(#1d2129, 0.55);
         }}
         .editor-theme-light button.recording-editor-webcam-icon {{
             color: alpha(#1d2129, 0.58);
@@ -4644,9 +4703,10 @@ mod tests {
                 natural <= content_width,
                 "scope row natural {natural} exceeds {content_width}"
             );
+            // The widest state the row reaches: a selected change, its time
+            // field, and a status line naming the layout.
             rows.status.set_text("0:00.0 · Circle");
             rows.change_scope.set_sensitive(true);
-            rows.change_label.set_text("Change 12:34.5");
             rows.time_row.set_visible(true);
             rows.delete_change.set_visible(true);
             let (minimum, natural) = measure_width(&rows.root);

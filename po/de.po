@@ -3802,3 +3802,21 @@ msgstr "Zeit"
 
 msgid "{time} · {layout}"
 msgstr "{time} · {layout}"
+
+msgid "Camera layer"
+msgstr "Kamera-Ebene"
+
+msgid "Delete change"
+msgstr "Änderung löschen"
+
+msgid "Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."
+msgstr "Zeichnet die Kamera über den Bildschirm. Aus zeigt nur den Bildschirm und behält Ihre Layout-Änderungen."
+
+msgid "Turn camera off"
+msgstr "Kamera ausschalten"
+
+msgid "Turn camera on"
+msgstr "Kamera einschalten"
+
+msgid "Add change at playhead"
+msgstr "Änderung an der Abspielposition hinzufügen"
