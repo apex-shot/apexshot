@@ -434,6 +434,7 @@ fn error_message(error: &LoginError) -> String {
         LoginError::NotConfigured | LoginError::HttpRequest(_) | LoginError::Server(_) => {
             t("Couldn't reach ApexShot Cloud. Check your connection and try again.")
         }
+        LoginError::Local(_) => t("Signed in, but this device could not save the account."),
     }
 }
 

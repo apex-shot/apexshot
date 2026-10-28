@@ -11,7 +11,7 @@ use std::time::Duration;
 
 #[path = "../../../src/settings/about.rs"]
 mod about;
-mod actions;
+pub(crate) mod actions;
 #[path = "../../../src/settings/advanced.rs"]
 mod advanced;
 #[path = "../../../src/settings/after_capture.rs"]
@@ -147,14 +147,7 @@ pub fn show_settings_window() -> anyhow::Result<()> {
 }
 
 fn build_settings_window(app: &Application) {
-    use std::sync::Once;
-    static INIT_ICONS: Once = Once::new();
-    INIT_ICONS.call_once(|| {
-        relm4_icons::initialize_icons(
-            crate::capture::editor::window::icon_names::GRESOURCE_BYTES,
-            crate::capture::editor::window::icon_names::RESOURCE_PREFIX,
-        );
-    });
+    crate::icons::install();
 
     install_settings_css();
     install_window_css();

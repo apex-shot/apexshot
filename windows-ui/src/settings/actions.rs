@@ -315,7 +315,7 @@ pub fn shell_settings_path() -> Option<PathBuf> {
 ///
 /// The Linux config stays YAML because the rest of the Rust app reads it. The
 /// Windows shell is C++, so it gets a small JSON view instead of a YAML parser.
-fn write_shell_settings(config: &AppConfig) -> anyhow::Result<()> {
+pub(crate) fn write_shell_settings(config: &AppConfig) -> anyhow::Result<()> {
     let Some(path) = shell_settings_path() else {
         return Ok(());
     };

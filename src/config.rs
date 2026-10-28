@@ -725,6 +725,9 @@ fn write_config_atomically(path: &Path, serialized: &str) -> anyhow::Result<()> 
 
         preserve_invalid_config(path, parent)?;
         fs::rename(&temporary, path)?;
+        // Directory fsync is a Unix durability step. Windows cannot open a
+        // directory as a file, and NTFS does not need the extra flush.
+        #[cfg(unix)]
         File::open(parent)?.sync_all()?;
         Ok(())
     })();
@@ -827,6 +830,25 @@ fn set_private_file_mode(options: &mut OpenOptions) {
 
 #[cfg(not(unix))]
 fn set_private_file_mode(_options: &mut OpenOptions) {}
+
+#[cfg(all(test, not(unix)))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn config_writes_land_in_a_temp_directory_on_windows() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-config-save-{}-{}",
+            std::process::id(),
+            CONFIG_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let path = dir.join("config.yml");
+        let serialized = serde_yml::to_string(&AppConfig::default().sanitized()).unwrap();
+        write_config_atomically(&path, &serialized).expect("config write");
+        assert!(path.exists());
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
 
 #[cfg(all(test, unix))]
 mod tests {

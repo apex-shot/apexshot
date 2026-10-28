@@ -18,6 +18,12 @@ pub mod notify {
     pub fn desktop_notification(summary: &str, body: &str) {
         eprintln!("[notify] {summary}: {body}");
     }
+
+    /// The shared cloud client calls the important variant after a successful
+    /// device login. It is still only a log line on Windows.
+    pub fn desktop_notification_important(summary: &str, body: &str) {
+        eprintln!("[notify] {summary}: {body}");
+    }
 }
 
 pub mod open {

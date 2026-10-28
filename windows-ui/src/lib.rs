@@ -16,6 +16,8 @@ pub mod config;
 pub mod daemon;
 pub mod history;
 pub mod i18n;
+pub mod icons;
+pub mod onboarding;
 pub mod platform;
 pub mod recording;
 pub mod settings;

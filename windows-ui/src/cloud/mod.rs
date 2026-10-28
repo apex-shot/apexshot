@@ -1,28 +1,20 @@
 //! Cloud page facade for the Windows build.
 //!
-//! The Cloud page is shown so the configuration is visible and saved, but the
-//! upload/login transports are not wired on Windows yet. The page reports the
+//! Sign-in is real: the first-run onboarding links this PC through the browser
+//! and stores the same account cache the Linux build uses. The upload and
+//! gallery transports are not wired on Windows yet, so those pages report the
 //! reason instead of pretending a connection succeeded.
 
-pub mod auth {
-    #[derive(Debug)]
-    pub struct LogoutError;
+#[path = "../../../src/cloud/account.rs"]
+pub mod account;
 
-    impl std::fmt::Display for LogoutError {
-        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("Cloud sign-out is not available in the Windows build yet")
-        }
-    }
-
-    impl std::error::Error for LogoutError {}
-
-    pub fn logout() -> Result<(), LogoutError> {
-        Err(LogoutError)
-    }
-}
+#[path = "../../../src/cloud/auth.rs"]
+pub mod auth;
 
 pub mod listing {
     use std::path::PathBuf;
+
+    pub use super::account::{is_subscribed_tier, CloudAccount};
 
     pub fn cached_thumbnail(_url: &str) -> Result<PathBuf, String> {
         Err("Cloud thumbnails are not available in the Windows build yet".to_string())

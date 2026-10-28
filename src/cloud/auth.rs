@@ -5,7 +5,7 @@ use crate::config::{
     is_cloud_logged_in, load_config, resolve_cloud_backend_url, save_config, AppConfig,
 };
 
-use super::listing::CloudAccount;
+use super::account::CloudAccount;
 
 const POLL_INTERVAL: u64 = 5;
 const MAX_POLL_SECONDS: u64 = 900;
@@ -60,6 +60,9 @@ pub enum LoginError {
     Expired,
     Denied,
     Server(String),
+    /// The sign-in reached the server, but this device could not persist the
+    /// result (a config write failure, not a server refusal).
+    Local(String),
 }
 
 impl std::fmt::Display for LoginError {
@@ -73,6 +76,7 @@ impl std::fmt::Display for LoginError {
             LoginError::Expired => write!(f, "Device code expired. Run `apexshot login` again."),
             LoginError::Denied => write!(f, "Authorization was denied."),
             LoginError::Server(msg) => write!(f, "Server error: {msg}"),
+            LoginError::Local(msg) => write!(f, "Could not finish sign-in: {msg}"),
         }
     }
 }
@@ -231,7 +235,7 @@ fn finish_login(token: TokenResponse) -> Result<Option<CloudAccount>, LoginError
     // entitlement is readable later without another request.
     account.apply_to_config(&mut config);
     config.cloud_auto_upload_after_capture = true;
-    save_config(&config).map_err(|e| LoginError::Server(format!("Failed to save config: {e}")))?;
+    save_config(&config).map_err(|e| LoginError::Local(format!("{e:#}")))?;
 
     Ok(Some(account))
 }
@@ -251,7 +255,7 @@ pub fn login() -> Result<(), LoginError> {
     let mut _input = String::new();
     let _ = std::io::stdin().read_line(&mut _input);
 
-    let _ = open_browser(&start.verification_uri);
+    open_browser(&start.verification_uri);
 
     let interval = start.interval_secs.max(1);
     let elapsed = std::time::Instant::now();
@@ -334,10 +338,21 @@ fn format_user_code(code: &str) -> String {
     )
 }
 
-fn open_browser(url: &str) -> Result<(), String> {
-    crate::utils::open::open_url(url)
+/// Hand a URL to the platform's default handler. Failure is not fatal: the
+/// caller shows the link so the user can open it by hand.
+fn open_browser(url: &str) {
+    let _ = crate::utils::open::open_url(url);
 }
 
+#[cfg(target_os = "windows")]
+fn hostname() -> Option<String> {
+    std::env::var("COMPUTERNAME")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+#[cfg(not(target_os = "windows"))]
 fn hostname() -> Option<String> {
     std::fs::read_to_string("/proc/sys/kernel/hostname")
         .ok()
@@ -353,23 +368,64 @@ fn hostname() -> Option<String> {
         })
 }
 
+fn platform_suffix() -> &'static str {
+    if cfg!(target_os = "windows") {
+        " (Windows)"
+    } else {
+        " (Linux)"
+    }
+}
+
 fn device_name() -> String {
     const MAX_LEN: usize = 100;
-    const SUFFIX: &str = " (Linux)";
+    let suffix = platform_suffix();
     match hostname() {
         Some(host) => {
-            let max_host = MAX_LEN - SUFFIX.len();
+            let max_host = MAX_LEN.saturating_sub(suffix.len());
             let host = if host.chars().count() > max_host {
                 host.chars().take(max_host).collect::<String>()
             } else {
                 host
             };
-            format!("{host}{SUFFIX}")
+            format!("{host}{suffix}")
         }
-        None => "ApexShot CLI (Linux)".to_string(),
+        None => format!("ApexShot{suffix}"),
     }
 }
 
+#[cfg(target_os = "windows")]
+fn generate_install_id() -> String {
+    use sha2::{Digest, Sha256};
+
+    // Windows has no /dev/urandom to read. Hash the machine's boot-scoped
+    // identifiers and the current time into a UUID-shaped install id; the
+    // config persists the first one so later calls never need to match it.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let seed = format!(
+        "{}:{}:{}:{}",
+        hostname().unwrap_or_default(),
+        std::process::id(),
+        stamp,
+        std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default()
+    );
+    let digest = Sha256::digest(seed.as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+    )
+}
+
+#[cfg(not(target_os = "windows"))]
 fn generate_install_id() -> String {
     use std::io::Read;
     let mut buf = [0u8; 16];
