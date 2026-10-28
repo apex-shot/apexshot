@@ -76,7 +76,18 @@ public:
                          bool recordingAvailable = true,
                          bool allowAreaRecording = false,
                          bool enableScrollCapture = false,
-                         const DeviceDefaults& defaults = {},
+                         bool persistForWindowSetup = false);
+
+    /// Same, carrying the device state a previous recording left behind.
+    /// Kept as an overload rather than a `{}` default argument: GCC will not
+    /// convert a brace initialiser to a type nested in the class that is
+    /// still being defined.
+    static Result choose(QLocalServer* controlServer,
+                         QScreen* targetScreen,
+                         bool recordingAvailable,
+                         bool allowAreaRecording,
+                         bool enableScrollCapture,
+                         const DeviceDefaults& defaults,
                          bool persistForWindowSetup = false);
 
     /// Current device state, read when a persisted toolbar's window setup
@@ -96,11 +107,11 @@ protected:
     void keyPressEvent(QKeyEvent* event) override;
 
 private:
-    explicit CaptureModeToolbar(QScreen* screen, bool screenIsLocked = false,
-                                bool recordingAvailable = true,
-                                bool allowAreaRecording = false,
-                                bool enableScrollCapture = false,
-                                const DeviceDefaults& defaults = {});
+    explicit CaptureModeToolbar(QScreen* screen, bool screenIsLocked,
+                                bool recordingAvailable,
+                                bool allowAreaRecording,
+                                bool enableScrollCapture,
+                                const DeviceDefaults& defaults);
 
     int itemCount() const;
     int itemWidth(int index) const;

@@ -218,6 +218,18 @@ CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServe
                                                        bool recordingAvailable,
                                                        bool allowAreaRecording,
                                                        bool enableScrollCapture,
+                                                       bool persistForWindowSetup)
+{
+    const DeviceDefaults defaults;
+    return choose(controlServer, targetScreen, recordingAvailable, allowAreaRecording,
+                  enableScrollCapture, defaults, persistForWindowSetup);
+}
+
+CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServer,
+                                                       QScreen* targetScreen,
+                                                       bool recordingAvailable,
+                                                       bool allowAreaRecording,
+                                                       bool enableScrollCapture,
                                                        const DeviceDefaults& defaults,
                                                        bool persistForWindowSetup)
 {
