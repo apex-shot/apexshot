@@ -1,6 +1,7 @@
 #include "platform/recording.h"
 
 #include "platform/recording_settings.h"
+#include "platform/windows/audio_devices.h"
 #include "platform/windows/pointer_tracker.h"
 #include "platform/windows/settings_store.h"
 
@@ -12,12 +13,17 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
+#include <QMutex>
+#include <QMutexLocker>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QThread>
 #include <QTimer>
 
 #include <algorithm>
+#include <functional>
+#include <memory>
 
 namespace {
 
@@ -31,6 +37,19 @@ constexpr int kStopTimeoutMs = 30000;
 // A discard deletes the file anyway, so a stuck encoder is not worth waiting
 // for beyond a few seconds.
 constexpr int kDiscardTimeoutMs = 3000;
+
+/// Diagnostics for the recording pipeline, which has no console of its own.
+void recordingLog(const QString& text)
+{
+    static QMutex mutex;
+    QMutexLocker lock(&mutex);
+    QFile file(QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-recording.log")));
+    if (file.open(QIODevice::Append | QIODevice::WriteOnly)) {
+        QTextStream out(&file);
+        out.setCodec("UTF-8");
+        out << QDateTime::currentDateTime().toString(Qt::ISODate) << " " << text << Qt::endl;
+    }
+}
 
 QString ffmpegExecutable()
 {
@@ -103,72 +122,82 @@ bool runProbe(const QStringList& arguments, QString* out, QString* error)
     return true;
 }
 
+/// A hardware H.264 encoder this machine can open, or an empty string for
+/// libx264. Encoding the desktop and the camera in software keeps two cores
+/// busy for the whole recording, which is enough to make everything else on a
+/// laptop stutter; the integrated GPU encodes the same picture for a fraction
+/// of that.
+QString hardwareVideoEncoder()
+{
+    static const QString encoder = [] {
+        for (const QString& candidate :
+             {QStringLiteral("h264_qsv"), QStringLiteral("h264_nvenc")}) {
+            QString output;
+            QString error;
+            if (runProbe({QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
+                          QStringLiteral("error"), QStringLiteral("-f"),
+                          QStringLiteral("lavfi"), QStringLiteral("-i"),
+                          QStringLiteral("color=size=1280x720:rate=30"),
+                          QStringLiteral("-frames:v"), QStringLiteral("3"),
+                          QStringLiteral("-c:v"), candidate, QStringLiteral("-f"),
+                          QStringLiteral("null"), QStringLiteral("-")},
+                         &output,
+                         &error)) {
+                recordingLog(QStringLiteral("encoder: %1").arg(candidate));
+                return candidate;
+            }
+        }
+        recordingLog(QStringLiteral("encoder: libx264 (no hardware encoder answered)"));
+        return QString();
+    }();
+    return encoder;
+}
+
+/// Append a video encoder chosen for this machine. `quality` is the CRF for
+/// libx264 and the equivalent constant-quality value for a hardware encoder.
+void appendVideoEncoder(QStringList& args, int quality)
+{
+    const QString hardware = hardwareVideoEncoder();
+    if (hardware == QLatin1String("h264_qsv")) {
+        args << QStringLiteral("-c:v") << hardware << QStringLiteral("-global_quality")
+             << QString::number(quality) << QStringLiteral("-preset")
+             << QStringLiteral("veryfast") << QStringLiteral("-pix_fmt")
+             << QStringLiteral("nv12");
+        return;
+    }
+    if (hardware == QLatin1String("h264_nvenc")) {
+        args << QStringLiteral("-c:v") << hardware << QStringLiteral("-rc")
+             << QStringLiteral("vbr") << QStringLiteral("-cq") << QString::number(quality)
+             << QStringLiteral("-preset") << QStringLiteral("p5")
+             << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p");
+        return;
+    }
+    args << QStringLiteral("-c:v") << QStringLiteral("libx264") << QStringLiteral("-preset")
+         << QStringLiteral("veryfast") << QStringLiteral("-profile:v")
+         << QStringLiteral("high") << QStringLiteral("-crf") << QString::number(quality)
+         << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p");
+}
+
 QStringList audioInputs()
 {
-    static bool probed = false;
-    static QStringList names;
-    if (probed)
-        return names;
-    probed = true;
-
-    QString output;
-    QString error;
-    if (!runProbe({QStringLiteral("-hide_banner"),
-                   QStringLiteral("-list_devices"),
-                   QStringLiteral("true"),
-                   QStringLiteral("-f"),
-                   QStringLiteral("dshow"),
-                   QStringLiteral("-i"),
-                   QStringLiteral("dummy")},
-                  &output,
-                  &error)) {
-        // `-list_devices` exits non-zero on every release; the device list is
-        // still in the output, so only a launch failure is fatal.
-        if (output.isEmpty())
-            return names;
-    }
-
-    // Match one line at a time: a whole-output search would let a quoted
-    // alternative device name on one line pair with the device name on the
-    // next and capture the log prefix between them.
-    static const QRegularExpression deviceLine(
-        QStringLiteral("\"([^\"]+)\"\\s*\\(audio\\)"));
-    const QStringList lines =
-        output.split(QRegularExpression(QStringLiteral("[\\r\\n]+")));
-    for (const QString& line : lines) {
-        const QRegularExpressionMatch match = deviceLine.match(line);
-        if (match.hasMatch())
-            names.append(match.captured(1));
-    }
-    return names;
+    return Platform::directShowDevices(false);
 }
 
 QString microphoneDevice()
 {
+    const QString preferred = Platform::defaultMicrophoneName();
     const QStringList devices = audioInputs();
+    if (!preferred.isEmpty()) {
+        for (const QString& name : devices) {
+            if (name.compare(preferred, Qt::CaseInsensitive) == 0)
+                return name;
+        }
+    }
     for (const QString& name : devices) {
         if (name.contains(QStringLiteral("microphone"), Qt::CaseInsensitive))
             return name;
     }
     return devices.isEmpty() ? QString() : devices.first();
-}
-
-QString loopbackDevice()
-{
-    static const QStringList loopbackHints = {
-        QStringLiteral("stereo mix"),
-        QStringLiteral("virtual-audio-capturer"),
-        QStringLiteral("cable output"),
-        QStringLiteral("loopback"),
-    };
-    const QStringList devices = audioInputs();
-    for (const QString& hint : loopbackHints) {
-        for (const QString& name : devices) {
-            if (name.contains(hint, Qt::CaseInsensitive))
-                return name;
-        }
-    }
-    return QString();
 }
 
 QString defaultOutputPath()
@@ -210,34 +239,12 @@ QSize parseProbeSize(const QString& output)
     return QSize();
 }
 
-/// Every camera dshow reports. The device list is one probe for the whole run:
-/// listing capture devices opens each one, which is slow enough to notice.
+/// Every camera DirectShow registers. Enumeration reads the device category
+/// rather than opening each camera, so it is safe to call while the setup
+/// surface is up.
 QStringList cameraDevices()
 {
-    static bool probed = false;
-    static QStringList names;
-    if (probed)
-        return names;
-    probed = true;
-
-    QString output;
-    if (!runProbe({QStringLiteral("-hide_banner"), QStringLiteral("-list_devices"),
-                   QStringLiteral("true"), QStringLiteral("-f"), QStringLiteral("dshow"),
-                   QStringLiteral("-i"), QStringLiteral("dummy")},
-                  &output,
-                  nullptr)) {
-        if (output.isEmpty())
-            return names;
-    }
-
-    static const QRegularExpression deviceLine(
-        QStringLiteral("\"([^\"]+)\"\\s*\\(video\\)"));
-    for (const QString& line : output.split(QRegularExpression(QStringLiteral("[\\r\\n]+")))) {
-        const QRegularExpressionMatch match = deviceLine.match(line);
-        if (match.hasMatch())
-            names.append(match.captured(1));
-    }
-    return names;
+    return Platform::directShowDevices(true);
 }
 
 bool runFfprobe(const QStringList& arguments, QString* out)
@@ -289,6 +296,59 @@ QSize cameraFrameSize(const QString& device, int fps)
     return size;
 }
 
+/// The camera format to open at: the largest one it offers at 720p or below
+/// that can still deliver 24 fps. Left alone, an integrated camera opens at
+/// 1080p in uncompressed YUY2, which USB bandwidth caps at five frames a
+/// second - the frozen picture a recording then carries.
+QSize cameraCaptureSize(const QString& device)
+{
+    static QHash<QString, QSize> sizes;
+    const auto cached = sizes.constFind(device);
+    if (cached != sizes.constEnd())
+        return cached.value();
+
+    static const QRegularExpression option(
+        QStringLiteral("min s=(\\d+)x(\\d+) fps=(\\d+) max s=(\\d+)x(\\d+) fps=(\\d+)"));
+
+    QSize best;
+    // Opening the camera twice in quick succession can make the second open
+    // fail while the driver is still releasing the first, and `-list_options`
+    // exits non-zero after printing, so retry once and parse the output.
+    for (int attempt = 0; attempt < 2 && best.isEmpty(); ++attempt) {
+        if (attempt > 0)
+            QThread::msleep(250);
+        QString output;
+        runProbe({QStringLiteral("-hide_banner"), QStringLiteral("-f"),
+                  QStringLiteral("dshow"), QStringLiteral("-list_options"),
+                  QStringLiteral("true"), QStringLiteral("-i"),
+                  QStringLiteral("video=%1").arg(device)},
+                 &output,
+                 nullptr);
+
+        qint64 bestArea = 0;
+        auto matches = option.globalMatch(output);
+        while (matches.hasNext()) {
+            const QRegularExpressionMatch match = matches.next();
+            const int width = match.captured(1).toInt();
+            const int height = match.captured(2).toInt();
+            const int rate = match.captured(3).toInt();
+            if (rate < 24 || width <= 0 || height <= 0)
+                continue;
+            const qint64 area = qint64(width) * height;
+            if (area > qint64(1280) * 720)
+                continue;
+            if (area > bestArea) {
+                bestArea = area;
+                best = QSize(width, height);
+            }
+        }
+    }
+    if (!best.isValid())
+        return QSize();
+    sizes.insert(device, best);
+    return best;
+}
+
 double videoDuration(const QString& path)
 {
     QString output;
@@ -304,6 +364,16 @@ double videoDuration(const QString& path)
             .value(0)
             .toDouble(&ok);
     return ok && seconds > 0.0 ? seconds : 0.0;
+}
+
+bool hasAudioStream(const QString& path)
+{
+    QString output;
+    const QStringList arguments{QStringLiteral("-v"), QStringLiteral("error"),
+                                QStringLiteral("-select_streams"), QStringLiteral("a"),
+                                QStringLiteral("-show_entries"), QStringLiteral("stream=index"),
+                                QStringLiteral("-of"), QStringLiteral("csv=p=0"), path};
+    return runFfprobe(arguments, &output) && !output.trimmed().isEmpty();
 }
 
 QSize videoFrameSize(const QString& path)
@@ -326,11 +396,11 @@ QSize webcamPreviewFrameSize(int shape)
     switch (shape) {
     case 0:  // circle
     case 1:  // square
-        return QSize(480, 480);
+        return QSize(320, 320);
     case 2:  // rectangle, 4:3
-        return QSize(480, 360);
+        return QSize(320, 240);
     default: // vertical, 1:1.3
-        return QSize(480, 624);
+        return QSize(320, 416);
     }
 }
 
@@ -349,6 +419,11 @@ QString quoteConcatPath(const QString& path)
 } // namespace
 
 namespace Platform {
+
+QString ffmpegPath()
+{
+    return ffmpegExecutable();
+}
 
 class RecordingSession::Private
 {
@@ -377,7 +452,11 @@ public:
     void onProcessError(QProcess::ProcessError error);
     void requestQuit(int timeoutMs);
     void finalize();
+    void completeSystemAudio(const QString& videoPath);
     void completeWebcamTrack(const QString& videoPath);
+    void compositeWebcam(const QString& videoPath,
+                         const QString& trackPath,
+                         std::function<void(bool, const QString&)> done);
     void finishJoin(bool ok, const QString& finalPath, const QString& failure, bool keepWorkDir);
     void cleanupAndEmit(bool kept,
                         const QString& path,
@@ -419,10 +498,20 @@ public:
     bool webcamActive = false;
     /// The camera's native frame size, used until the joined track is probed.
     QSize webcamCameraSize;
+    /// The size the dshow input is asked to deliver; empty uses the camera's
+    /// default, which can be a five-fps 1080p mode.
+    QSize webcamCaptureSize;
     /// The bubble-sized frame the preview pipe carries.
     QSize webcamPreviewSize;
     QByteArray webcamPreviewBuffer;
+    bool webcamPreviewLogged = false;
     Platform::WebcamTrack webcamTrack;
+
+    /// The native system-audio track, written while the video records. It is
+    /// muxed into the final file after the video segments are joined.
+    std::unique_ptr<SystemAudioCapture> systemAudio;
+    QString systemAudioPath;
+    qint64 systemAudioOffsetMs = 0;
 };
 
 qint64 RecordingSession::Private::elapsedMs() const
@@ -444,22 +533,37 @@ QStringList RecordingSession::Private::buildAudioArguments(QStringList& warnings
     QStringList sources;
 
     if (request.includeMicrophone) {
-        const QString microphone = microphoneDevice();
+        QString microphone = request.microphoneDevice.trimmed();
+        const QStringList devices = audioInputs();
+        if (!microphone.isEmpty() && !devices.isEmpty()
+            && !devices.contains(microphone, Qt::CaseInsensitive)) {
+            QString matched;
+            for (const QString& device : devices) {
+                if (device.contains(microphone, Qt::CaseInsensitive)
+                    || microphone.contains(device, Qt::CaseInsensitive)) {
+                    matched = device;
+                    break;
+                }
+            }
+            if (!matched.isEmpty()) {
+                microphone = matched;
+            } else {
+                warnings.append(
+                    QStringLiteral("The microphone \"%1\" is not connected; using the default.")
+                        .arg(request.microphoneDevice));
+                microphone.clear();
+            }
+        }
+        if (microphone.isEmpty())
+            microphone = microphoneDevice();
         if (microphone.isEmpty())
             warnings.append(QStringLiteral("No microphone was found; recording without audio."));
         else
             sources.append(microphone);
     }
-    if (request.includeSpeaker) {
-        const QString loopback = loopbackDevice();
-        if (loopback.isEmpty()) {
-            warnings.append(QStringLiteral(
-                "No system-audio loopback device was found; the speaker track is omitted."));
-        } else if (!sources.contains(loopback, Qt::CaseInsensitive)) {
-            sources.append(loopback);
-        }
-    }
 
+    // System audio is captured natively and muxed once the recording is
+    // finalised; dshow cannot reach loopback audio.
     for (const QString& source : sources) {
         arguments << QStringLiteral("-f") << QStringLiteral("dshow") << QStringLiteral("-i")
                   << QStringLiteral("audio=%1").arg(source);
@@ -475,7 +579,11 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
          << QStringLiteral("error") << QStringLiteral("-nostats");
 
     const int fps = request.fps > 0 ? request.fps : 30;
-    args << QStringLiteral("-f") << QStringLiteral("gdigrab") << QStringLiteral("-framerate")
+    // A large demux queue keeps the screen and the camera from waiting on each
+    // other: without one, a slow camera frame stalls the screen capture, and
+    // the recording turns choppy even though gdigrab alone keeps up.
+    args << QStringLiteral("-thread_queue_size") << QStringLiteral("1024")
+         << QStringLiteral("-f") << QStringLiteral("gdigrab") << QStringLiteral("-framerate")
          << QString::number(fps) << QStringLiteral("-draw_mouse")
          << (request.includeCursor ? QStringLiteral("1") : QStringLiteral("0"))
          << QStringLiteral("-offset_x") << QString::number(request.region.x())
@@ -489,6 +597,13 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
         // The camera runs on its own clock, and the same process is encoding
         // three streams; a deep buffer keeps a busy desktop from making dshow
         // drop frames out of the track.
+        args << QStringLiteral("-thread_queue_size") << QStringLiteral("1024");
+        if (!webcamCaptureSize.isEmpty()) {
+            args << QStringLiteral("-video_size")
+                 << QStringLiteral("%1x%2")
+                        .arg(webcamCaptureSize.width())
+                        .arg(webcamCaptureSize.height());
+        }
         args << QStringLiteral("-f") << QStringLiteral("dshow") << QStringLiteral("-rtbufsize")
              << QStringLiteral("256M") << QStringLiteral("-framerate") << QString::number(fps)
              << QStringLiteral("-i")
@@ -521,12 +636,9 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
             ? recordingCrfResolutionReduction(outputSize.width(), outputSize.height())
             : 0;
     const int crf = std::max(1, crfBase - reduction);
-    args << QStringLiteral("-c:v") << QStringLiteral("libx264") << QStringLiteral("-preset")
-         << QStringLiteral("veryfast") << QStringLiteral("-profile:v") << QStringLiteral("high")
-         << QStringLiteral("-crf") << QString::number(crf) << QStringLiteral("-pix_fmt")
-         << QStringLiteral("yuv420p") << QStringLiteral("-g") << QString::number(fps * 2)
-         << QStringLiteral("-bf") << QStringLiteral("2") << QStringLiteral("-r")
-         << QString::number(fps);
+    appendVideoEncoder(args, crf);
+    args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-bf")
+         << QStringLiteral("2") << QStringLiteral("-r") << QString::number(fps);
 
     const int audioInputCount = audioArguments.count(QStringLiteral("-i"));
     if (audioInputCount > 0) {
@@ -556,24 +668,26 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
                            ":force_original_aspect_ratio=decrease,"
                            "scale=trunc(iw/2)*2:trunc(ih/2)*2");
         args << QStringLiteral("-map") << QStringLiteral("1:v") << QStringLiteral("-an")
-             << QStringLiteral("-vf") << trackScale << QStringLiteral("-c:v")
-             << QStringLiteral("libx264") << QStringLiteral("-preset")
-             << QStringLiteral("veryfast") << QStringLiteral("-crf") << QStringLiteral("23")
-             << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p") << QStringLiteral("-g")
-             << QString::number(fps * 2) << QStringLiteral("-r") << QString::number(fps)
-             << webcamSegmentPath;
+             << QStringLiteral("-vf") << trackScale;
+        appendVideoEncoder(args, 23);
+        args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-r")
+             << QString::number(fps) << webcamSegmentPath;
 
-        // The preview pipe is fixed at the bubble's shape, so the window can
-        // parse the stream without knowing what the camera negotiated.
-        const QSize preview = webcamPreviewSize.isEmpty() ? QSize(480, 270)
+        // The preview is a small MJPEG stream rather than raw frames: at the
+        // bubble's size a raw pipe carries tens of megabytes a second, so any
+        // hitch in the window blocks ffmpeg's stdout and stalls the whole
+        // recording with it.
+        const QSize preview = webcamPreviewSize.isEmpty() ? QSize(320, 320)
                                                           : webcamPreviewSize;
         args << QStringLiteral("-map") << QStringLiteral("1:v") << QStringLiteral("-an")
              << QStringLiteral("-vf")
              << QStringLiteral(
-                    "scale=%1:%2:force_original_aspect_ratio=increase,crop=%1:%2,format=bgra")
+                    "scale=%1:%2:force_original_aspect_ratio=increase,crop=%1:%2,fps=%3")
                     .arg(preview.width())
                     .arg(preview.height())
-             << QStringLiteral("-f") << QStringLiteral("rawvideo")
+                    .arg(fps)
+             << QStringLiteral("-c:v") << QStringLiteral("mjpeg") << QStringLiteral("-q:v")
+             << QStringLiteral("6") << QStringLiteral("-f") << QStringLiteral("mjpeg")
              << QStringLiteral("pipe:1");
     }
 
@@ -634,28 +748,46 @@ void RecordingSession::Private::consumeWebcamPreview(const QByteArray& chunk)
     if (chunk.isEmpty() || webcamPreviewSize.isEmpty())
         return;
 
+    static const QByteArray kSoi("\xff\xd8", 2);
+    static const QByteArray kEoi("\xff\xd9", 2);
+
     webcamPreviewBuffer.append(chunk);
-    const qsizetype frameBytes =
-        qsizetype(webcamPreviewSize.width()) * webcamPreviewSize.height() * 4;
-    if (frameBytes <= 0) {
-        webcamPreviewBuffer.clear();
-        return;
+    // A bubble that fell behind only needs the newest picture; a runaway
+    // buffer means the window is not reading at all, so resynchronise on the
+    // last start marker rather than decoding a stale backlog.
+    if (webcamPreviewBuffer.size() > 4 * 1024 * 1024) {
+        const int lastStart = webcamPreviewBuffer.lastIndexOf(kSoi);
+        webcamPreviewBuffer =
+            lastStart > 0 ? webcamPreviewBuffer.mid(lastStart) : QByteArray();
     }
-    // A live bubble only ever needs the newest frame; a backlog would make it
-    // lag the recording instead of showing it.
-    if (webcamPreviewBuffer.size() > frameBytes * 2) {
-        const qsizetype keep = webcamPreviewBuffer.size() - (webcamPreviewBuffer.size() % frameBytes);
-        webcamPreviewBuffer = webcamPreviewBuffer.right(qsizetype(keep));
+
+    QImage newest;
+    int start = webcamPreviewBuffer.indexOf(kSoi);
+    while (start >= 0) {
+        if (start > 0)
+            webcamPreviewBuffer.remove(0, start);
+        const int end = webcamPreviewBuffer.indexOf(kEoi, 2);
+        if (end < 0)
+            break;
+        const QByteArray jpeg = webcamPreviewBuffer.left(end + 2);
+        webcamPreviewBuffer.remove(0, end + 2);
+        QImage frame;
+        if (frame.loadFromData(jpeg)) {
+            newest = frame;
+            if (!webcamPreviewLogged) {
+                webcamPreviewLogged = true;
+                recordingLog(QStringLiteral("webcam preview %1x%2")
+                                 .arg(frame.width())
+                                 .arg(frame.height()));
+            }
+        }
+        start = webcamPreviewBuffer.indexOf(kSoi);
     }
-    while (webcamPreviewBuffer.size() >= frameBytes) {
-        const QImage frame(reinterpret_cast<const uchar*>(webcamPreviewBuffer.constData()),
-                           webcamPreviewSize.width(),
-                           webcamPreviewSize.height(),
-                           webcamPreviewSize.width() * 4,
-                           QImage::Format_ARGB32);
-        emit q->webcamFrame(frame.copy());
-        webcamPreviewBuffer.remove(0, frameBytes);
-    }
+
+    // One paint per read: emitting every buffered frame would replay stale
+    // pictures instead of catching up to the newest one.
+    if (!newest.isNull())
+        emit q->webcamFrame(newest);
 }
 
 void RecordingSession::Private::onProcessError(QProcess::ProcessError error)
@@ -736,6 +868,8 @@ void RecordingSession::Private::requestQuit(int timeoutMs)
 void RecordingSession::Private::fail(const QString& reason)
 {
     tick->stop();
+    if (systemAudio)
+        systemAudio->stop();
     pointerTracker.discard();
     state = State::Failed;
     qWarning().noquote() << "[recording]" << reason;
@@ -753,10 +887,134 @@ void RecordingSession::Private::fail(const QString& reason)
     cleanupAndEmit(false, QString(), message, true);
 }
 
+void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
+{
+    const auto next = [this](const QString& path) { completeWebcamTrack(path); };
+
+    if (!systemAudio && systemAudioPath.isEmpty()) {
+        next(videoPath);
+        return;
+    }
+    if (systemAudio)
+        systemAudio->stop();
+    if (systemAudioPath.isEmpty() || !QFileInfo::exists(systemAudioPath)
+        || QFileInfo(systemAudioPath).size() <= 68) {
+        QFile::remove(systemAudioPath);
+        systemAudioPath.clear();
+        next(videoPath);
+        return;
+    }
+
+    const QString mixedPath = QDir(workDir).filePath(QStringLiteral("mixed-audio.mp4"));
+    QFile::remove(mixedPath);
+    recordingLog(QStringLiteral("system audio: mux %1 (%2 bytes) onto %3")
+                     .arg(systemAudioPath)
+                     .arg(QFileInfo(systemAudioPath).size())
+                     .arg(videoPath));
+
+    const bool videoHasAudio = hasAudioStream(videoPath);
+    const double offsetSeconds = std::max<qint64>(0, systemAudioOffsetMs) / 1000.0;
+    const QString trim = QStringLiteral("atrim=start=%1").arg(offsetSeconds, 0, 'f', 3);
+    QString filter;
+    if (videoHasAudio) {
+        filter = QStringLiteral("[1:a]%1,apad[system];"
+                                "[0:a][system]amix=inputs=2:duration=longest:"
+                                "dropout_transition=0:normalize=0[aout]")
+                     .arg(trim);
+    } else {
+        filter = QStringLiteral("[1:a]%1,apad[aout]").arg(trim);
+    }
+
+    const QStringList arguments{
+        QStringLiteral("-y"),
+        QStringLiteral("-hide_banner"),
+        QStringLiteral("-loglevel"),
+        QStringLiteral("error"),
+        QStringLiteral("-i"),
+        videoPath,
+        QStringLiteral("-i"),
+        systemAudioPath,
+        QStringLiteral("-filter_complex"),
+        filter,
+        QStringLiteral("-map"),
+        QStringLiteral("0:v"),
+        QStringLiteral("-map"),
+        QStringLiteral("[aout]"),
+        QStringLiteral("-c:v"),
+        QStringLiteral("copy"),
+        QStringLiteral("-c:a"),
+        QStringLiteral("aac"),
+        QStringLiteral("-b:a"),
+        QStringLiteral("160k"),
+        QStringLiteral("-ac"),
+        request.monoAudio ? QStringLiteral("1") : QStringLiteral("2"),
+        QStringLiteral("-movflags"),
+        QStringLiteral("+faststart"),
+        QStringLiteral("-shortest"),
+        mixedPath,
+    };
+
+    auto* mixer = new QProcess(q);
+    mixer->setProgram(ffmpegExecutable());
+    mixer->setProcessChannelMode(QProcess::MergedChannels);
+    mixer->setArguments(arguments);
+    QObject::connect(
+        mixer,
+        QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+        q,
+        [this, mixer, mixedPath, videoPath, next](int code, QProcess::ExitStatus status) {
+            const QString detail = tailLines(QString::fromUtf8(mixer->readAll()), 6);
+            mixer->deleteLater();
+            systemAudio.reset();
+            QFile::remove(systemAudioPath);
+            systemAudioPath.clear();
+
+            recordingLog(QStringLiteral("system audio: mux exit=%1 size=%2 detail=%3")
+                             .arg(code)
+                             .arg(QFileInfo(mixedPath).size())
+                             .arg(detail));
+            if (status == QProcess::NormalExit && code == 0
+                && QFileInfo(mixedPath).size() > 0) {
+                // Keep the silent video until the mixed file is in its place;
+                // a failed rename must never leave the recording with neither.
+                const QString originalPath = videoPath + QStringLiteral(".video");
+                QFile::remove(originalPath);
+                const bool parked = QFile::rename(videoPath, originalPath);
+                if (parked && QFile::rename(mixedPath, videoPath)) {
+                    QFile::remove(originalPath);
+                } else {
+                    if (parked)
+                        QFile::rename(originalPath, videoPath);
+                    QFile::remove(mixedPath);
+                    emit q->warning(
+                        QStringLiteral("The system audio could not be joined to the recording."));
+                }
+            } else {
+                QFile::remove(mixedPath);
+                qWarning().noquote() << "[recording] system audio mux failed:" << detail;
+                emit q->warning(
+                    QStringLiteral("The system audio could not be added to the recording: %1")
+                        .arg(detail.isEmpty() ? QStringLiteral("the audio join failed") : detail));
+            }
+            next(videoPath);
+        });
+    mixer->start();
+    if (!mixer->waitForStarted(kProbeTimeoutMs)) {
+        const QString detail = mixer->errorString();
+        mixer->deleteLater();
+        systemAudio.reset();
+        QFile::remove(systemAudioPath);
+        systemAudioPath.clear();
+        emit q->warning(QStringLiteral("The system audio could not be added: %1").arg(detail));
+        next(videoPath);
+    }
+}
+
 void RecordingSession::Private::completeWebcamTrack(const QString& videoPath)
 {
     const auto finish = [this, videoPath](bool joined, const QString& detail) {
         if (!joined && !detail.isEmpty()) {
+            recordingLog(QStringLiteral("webcam track failed: %1").arg(detail));
             qWarning().noquote() << "[recording] webcam track was not written:" << detail;
             emit q->warning(
                 QStringLiteral("The webcam track could not be written: %1").arg(detail));
@@ -785,7 +1043,7 @@ void RecordingSession::Private::completeWebcamTrack(const QString& videoPath)
     QDir().mkpath(QFileInfo(trackPath).absolutePath());
     QFile::remove(trackPath);
 
-    const auto settle = [this, trackPath, finish](bool written, const QString& detail) {
+    const auto settle = [this, videoPath, trackPath, finish](bool written, const QString& detail) {
         if (!written) {
             QFile::remove(trackPath);
             finish(false, detail);
@@ -802,7 +1060,25 @@ void RecordingSession::Private::completeWebcamTrack(const QString& videoPath)
             finish(false, QStringLiteral("the camera track had no readable frames"));
             return;
         }
-        finish(true, QString());
+        compositeWebcam(
+            videoPath,
+            trackPath,
+            [this, trackPath, finish](bool baked, const QString& detail) {
+                if (baked) {
+                    // The saved recording carries the camera. Leaving the
+                    // track in the sidecar would make the editor add a second
+                    // copy on top of it.
+                    webcamTrack = Platform::WebcamTrack{};
+                    QFile::remove(trackPath);
+                } else if (!detail.isEmpty()) {
+                    recordingLog(QStringLiteral("webcam composite failed: %1").arg(detail));
+                    qWarning().noquote() << "[recording] webcam composite failed:" << detail;
+                    emit q->warning(
+                        QStringLiteral("The webcam could not be added to the recording: %1")
+                            .arg(detail));
+                }
+                finish(true, QString());
+            });
     };
 
     if (webcamSegments.size() == 1) {
@@ -859,6 +1135,121 @@ void RecordingSession::Private::completeWebcamTrack(const QString& videoPath)
                                         : detail);
                      });
     joiner->start();
+}
+
+
+void RecordingSession::Private::compositeWebcam(
+    const QString& videoPath,
+    const QString& trackPath,
+    std::function<void(bool, const QString&)> done)
+{
+    const QSize videoSize = videoFrameSize(videoPath);
+    const double videoSeconds = videoDuration(videoPath);
+    const double cameraSeconds = videoDuration(trackPath);
+    if (videoSize.isEmpty() || videoSeconds <= 0.0 || cameraSeconds <= 0.0) {
+        done(false, QStringLiteral("the recording or camera track had no readable frames"));
+        return;
+    }
+
+    const Platform::WebcamLayout& layout = request.webcamLayout;
+    const int width = std::max(2, int(std::lround(layout.w * videoSize.width())));
+    const int height = std::max(2, int(std::lround(layout.h * videoSize.height())));
+    const int x = std::clamp(int(std::lround(layout.x * videoSize.width())),
+                             0,
+                             std::max(0, videoSize.width() - 2));
+    const int y = std::clamp(int(std::lround(layout.y * videoSize.height())),
+                             0,
+                             std::max(0, videoSize.height() - 2));
+    // The camera process starts after the desktop encoder, so its track is
+    // usually a fraction of a second shorter. Hold its first frame for that
+    // gap rather than showing the desktop without a bubble at the start.
+    const double startDelay = std::max(0.0, videoSeconds - cameraSeconds);
+
+    QString filter = QStringLiteral(
+                         "[1:v]scale=%1:%2:force_original_aspect_ratio=increase,"
+                         "crop=%1:%2,setsar=1,format=rgba")
+                         .arg(width)
+                         .arg(height);
+    if (layout.shape == 0) {
+        // Feather the last couple of pixels so the baked circle has the same
+        // clean edge as the live bubble instead of a stair-stepped one.
+        filter += QStringLiteral(
+            ",geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
+            "a='255*clip((W/2-sqrt((X-W/2)*(X-W/2)+(Y-H/2)*(Y-H/2)))/2.0+0.5,0,1)'");
+    }
+    if (startDelay > 0.02) {
+        filter += QStringLiteral(",tpad=start_duration=%1:start_mode=clone")
+                      .arg(startDelay, 0, 'f', 3);
+    }
+    filter += QStringLiteral(
+        "[cam];[0:v][cam]overlay=%1:%2:shortest=0:eof_action=repeat[v]")
+                  .arg(x)
+                  .arg(y);
+
+    const QString compositePath = videoPath + QStringLiteral(".webcam-composite.mp4");
+    QFile::remove(compositePath);
+    auto* composer = new QProcess(q);
+    composer->setProgram(ffmpegExecutable());
+    composer->setProcessChannelMode(QProcess::SeparateChannels);
+    QStringList compositeArgs{
+        QStringLiteral("-y"),
+        QStringLiteral("-hide_banner"),
+        QStringLiteral("-loglevel"),
+        QStringLiteral("error"),
+        QStringLiteral("-i"),
+        videoPath,
+        QStringLiteral("-i"),
+        trackPath,
+        QStringLiteral("-filter_complex"),
+        filter,
+        QStringLiteral("-map"),
+        QStringLiteral("[v]"),
+        QStringLiteral("-map"),
+        QStringLiteral("0:a?"),
+    };
+    appendVideoEncoder(compositeArgs, 18);
+    compositeArgs << QStringLiteral("-c:a") << QStringLiteral("copy")
+                  << QStringLiteral("-movflags") << QStringLiteral("+faststart")
+                  << compositePath;
+    composer->setArguments(compositeArgs);
+    QObject::connect(
+        composer,
+        QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+        q,
+        [composer, videoPath, compositePath, done](int code, QProcess::ExitStatus status) {
+            const QString detail =
+                tailLines(QString::fromUtf8(composer->readAllStandardError()), 6);
+            composer->deleteLater();
+            if (status != QProcess::NormalExit || code != 0
+                || QFileInfo(compositePath).size() <= 0) {
+                QFile::remove(compositePath);
+                done(false,
+                     detail.isEmpty() ? QStringLiteral("the webcam join failed") : detail);
+                return;
+            }
+
+            // Keep the original until the composited file is in its place; a
+            // failed rename must not leave the recording without either.
+            const QString parked = videoPath + QStringLiteral(".video");
+            QFile::remove(parked);
+            const bool held = QFile::rename(videoPath, parked);
+            if (held && QFile::rename(compositePath, videoPath)) {
+                QFile::remove(parked);
+                done(true, QString());
+            } else {
+                if (held)
+                    QFile::rename(parked, videoPath);
+                QFile::remove(compositePath);
+                done(false, QStringLiteral("the recording could not be replaced"));
+            }
+        });
+    composer->start();
+    if (!composer->waitForStarted(kProbeTimeoutMs)) {
+        const QString detail = composer->errorString();
+        composer->deleteLater();
+        QFile::remove(compositePath);
+        done(false, detail);
+    }
 }
 
 void RecordingSession::Private::cleanupWorkDir()
@@ -932,7 +1323,7 @@ void RecordingSession::Private::finalize()
             }
             QFile::remove(segment);
         }
-        completeWebcamTrack(finalPath);
+        completeSystemAudio(finalPath);
         return;
     }
 
@@ -980,7 +1371,7 @@ void RecordingSession::Private::finalize()
                          concat = nullptr;
                          if (status == QProcess::NormalExit && code == 0
                              && QFileInfo(finalPath).size() > 0) {
-                             completeWebcamTrack(finalPath);
+                             completeSystemAudio(finalPath);
                          } else {
                              cleanupAndEmit(
                                  false,
@@ -1026,6 +1417,8 @@ RecordingSession::~RecordingSession()
         d->concat->kill();
         d->concat->waitForFinished(1000);
     }
+    if (d->systemAudio)
+        d->systemAudio->stop();
     d->cleanupWorkDir();
     delete d;
 }
@@ -1110,11 +1503,16 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
     // probe it first and record the desktop alone when it does not answer.
     d->webcamActive = false;
     d->webcamCameraSize = QSize();
+    d->webcamCaptureSize = QSize();
     d->webcamPreviewSize = QSize();
     d->webcamPreviewBuffer.clear();
+    d->webcamPreviewLogged = false;
     d->webcamSegments.clear();
     d->webcamTrack = Platform::WebcamTrack{};
     QString camera;
+    recordingLog(QStringLiteral("webcam request enabled=%1 device=%2")
+                     .arg(d->request.webcamEnabled ? 1 : 0)
+                     .arg(d->request.webcamDevice));
     if (d->request.webcamEnabled) {
         // A camera that was unplugged or renamed since the setting was written
         // falls back to the machine's only camera rather than losing the track.
@@ -1131,7 +1529,14 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         }
     }
     if (!camera.isEmpty()) {
+        const QSize captureSize = cameraCaptureSize(camera);
         const QSize cameraSize = cameraFrameSize(camera, d->request.fps);
+        recordingLog(QStringLiteral("webcam probe %1 -> %2x%3 capture=%4x%5")
+                         .arg(camera)
+                         .arg(cameraSize.width())
+                         .arg(cameraSize.height())
+                         .arg(captureSize.width())
+                         .arg(captureSize.height()));
         if (cameraSize.isEmpty()) {
             warnings.append(QStringLiteral("The camera \"%1\" could not be opened; recording "
                                            "without a webcam track.")
@@ -1140,6 +1545,7 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         } else {
             d->webcamActive = true;
             d->webcamCameraSize = cameraSize;
+            d->webcamCaptureSize = captureSize;
             d->webcamPreviewSize = webcamPreviewFrameSize(d->request.webcamLayout.shape);
             d->webcamTrack.x = std::clamp(d->request.webcamLayout.x, 0.0, 1.0);
             d->webcamTrack.y = std::clamp(d->request.webcamLayout.y, 0.0, 1.0);
@@ -1150,8 +1556,10 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         }
     }
 
-    for (const QString& warning : warnings)
+    for (const QString& warning : warnings) {
+        recordingLog(QStringLiteral("warning: %1").arg(warning));
         qWarning().noquote() << "[recording]" << warning;
+    }
     if (!warnings.isEmpty())
         emit warning(warnings.join(QLatin1Char('\n')));
 
@@ -1162,11 +1570,46 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
     d->discardRequested = false;
     d->resumeAfterPause = false;
     d->finishedEmitted = false;
+    d->systemAudio.reset();
+    d->systemAudioPath.clear();
+    d->systemAudioOffsetMs = 0;
+
+    QElapsedTimer audioClock;
+    audioClock.start();
+    if (d->request.systemAudio != RecordingRequest::SystemAudio::Off) {
+        const QString audioPath = QDir(d->workDir).filePath(QStringLiteral("system-audio.wav"));
+        auto capture = std::make_unique<SystemAudioCapture>();
+        QString audioError;
+        const SystemAudioCapture::Mode mode =
+            d->request.systemAudio == RecordingRequest::SystemAudio::Application
+                ? SystemAudioCapture::Mode::Application
+                : SystemAudioCapture::Mode::AllApps;
+        if (capture->start(mode, d->request.systemAudioProcessId, audioPath, &audioError)) {
+            d->systemAudio = std::move(capture);
+            d->systemAudioPath = audioPath;
+            recordingLog(QStringLiteral("system audio: started %1 mode=%2 pid=%3")
+                             .arg(audioPath)
+                             .arg(static_cast<int>(mode))
+                             .arg(d->request.systemAudioProcessId));
+        } else {
+            recordingLog(QStringLiteral("system audio: start failed: %1").arg(audioError));
+            const QString source = d->request.systemAudioApplication.isEmpty()
+                ? QStringLiteral("system audio")
+                : d->request.systemAudioApplication;
+            qWarning().noquote() << "[recording] system audio unavailable:" << audioError;
+            warnings.append(QStringLiteral("The %1 could not be recorded: %2")
+                                .arg(source, audioError));
+            QFile::remove(audioPath);
+        }
+    }
 
     if (!d->startSegment(error)) {
+        if (d->systemAudio)
+            d->systemAudio->stop();
         d->cleanupWorkDir();
         return false;
     }
+    d->systemAudioOffsetMs = audioClock.elapsed();
 
     d->state = Private::State::Recording;
     d->active.start();
@@ -1186,6 +1629,8 @@ void RecordingSession::pause()
 
     d->elapsedBeforeMs += d->active.elapsed();
     d->pointerTracker.pause(d->elapsedBeforeMs);
+    if (d->systemAudio)
+        d->systemAudio->setPaused(true);
     d->tick->stop();
     d->state = Private::State::Pausing;
     emit stateChanged();
@@ -1218,6 +1663,8 @@ void RecordingSession::resume()
     d->state = Private::State::Recording;
     d->active.start();
     d->pointerTracker.resume();
+    if (d->systemAudio)
+        d->systemAudio->setPaused(false);
     d->tick->start();
     emit stateChanged();
     emit elapsedChanged(d->elapsedBeforeMs);
@@ -1233,6 +1680,8 @@ void RecordingSession::stop()
     if (d->state == Private::State::Recording)
         d->elapsedBeforeMs += d->active.elapsed();
     d->pointerTracker.stop(d->elapsedBeforeMs);
+    if (d->systemAudio)
+        d->systemAudio->stop();
     d->tick->stop();
     d->discardRequested = false;
     d->resumeAfterPause = false;
@@ -1258,6 +1707,8 @@ void RecordingSession::discard()
     if (d->state == Private::State::Recording)
         d->elapsedBeforeMs += d->active.elapsed();
     d->pointerTracker.discard();
+    if (d->systemAudio)
+        d->systemAudio->stop();
     d->tick->stop();
     d->discardRequested = true;
     d->resumeAfterPause = false;
@@ -1284,6 +1735,19 @@ bool RecordingSession::isPaused() const
 QString RecordingSession::outputPath() const
 {
     return d->request.outputPath;
+}
+
+void RecordingSession::setWebcamLayout(const WebcamLayout& layout)
+{
+    if (!d || !d->webcamActive)
+        return;
+    d->request.webcamLayout = layout;
+    // The sidecar keeps its own copy for the editor; if the bake fails, that
+    // copy is what places the camera over the recording.
+    d->webcamTrack.x = std::clamp(layout.x, 0.0, 1.0);
+    d->webcamTrack.y = std::clamp(layout.y, 0.0, 1.0);
+    d->webcamTrack.w = std::clamp(layout.w, 0.0, 1.0);
+    d->webcamTrack.h = std::clamp(layout.h, 0.0, 1.0);
 }
 
 } // namespace Platform

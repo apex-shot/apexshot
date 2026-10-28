@@ -39,6 +39,16 @@ struct RecordingRequest {
         Window,
     };
 
+    /// Where system audio comes from. Windows records it natively, because
+    /// ffmpeg's dshow input cannot reach loopback audio.
+    enum class SystemAudio {
+        Off,
+        /// Every app on the default output.
+        AllApps,
+        /// One app's process tree, e.g. every tab of one browser.
+        Application,
+    };
+
     Target target = Target::Screen;
     /// Desktop rectangle in device pixels. Required for Screen and Area.
     QRect region;
@@ -48,7 +58,13 @@ struct RecordingRequest {
     QString outputPath;
     bool includeCursor = true;
     bool includeMicrophone = false;
-    bool includeSpeaker = false;
+    /// The microphone's DirectShow friendly name. Empty uses the default.
+    QString microphoneDevice;
+    SystemAudio systemAudio = SystemAudio::Off;
+    /// The process tree to capture when `systemAudio` is Application.
+    quint32 systemAudioProcessId = 0;
+    /// The app's display name, for logs and warnings.
+    QString systemAudioApplication;
     /// Mix the recorded audio down to a single channel.
     bool monoAudio = false;
     /// Frames per second. 0 falls back to 30.
@@ -67,6 +83,10 @@ struct RecordingRequest {
     /// Where the bubble sat in `region`, for the editor's layer.
     WebcamLayout webcamLayout;
 };
+
+/// The ffmpeg this build records with, resolved from APEXSHOT_FFMPEG, the
+/// application folder, or PATH. Empty when none is available.
+QString ffmpegPath();
 
 class RecordingSession : public QObject
 {
@@ -95,6 +115,11 @@ public:
     bool isActive() const;
     bool isPaused() const;
     QString outputPath() const;
+
+    /// Move the camera layer while the recording runs. The camera is baked
+    /// into the file when the recording ends, so the final position is the
+    /// one the person left the bubble at.
+    void setWebcamLayout(const WebcamLayout& layout);
 
 signals:
     void elapsedChanged(qint64 elapsedMs);

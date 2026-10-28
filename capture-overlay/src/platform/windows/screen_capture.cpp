@@ -323,6 +323,62 @@ bool captureWindowPixels(HWND hwnd,
 
 } // namespace
 
+QRect windowFrame(quintptr id)
+{
+    const HWND hwnd = reinterpret_cast<HWND>(id);
+    if (!hwnd || !IsWindow(hwnd) || !IsWindowVisible(hwnd))
+        return {};
+    return Win::visibleFrame(hwnd);
+}
+
+void activateWindow(quintptr id)
+{
+    const HWND hwnd = reinterpret_cast<HWND>(id);
+    if (!hwnd || !IsWindow(hwnd))
+        return;
+    if (IsIconic(hwnd))
+        ShowWindow(hwnd, SW_RESTORE);
+    SetForegroundWindow(hwnd);
+    BringWindowToTop(hwnd);
+}
+
+void raiseWindow(quintptr id)
+{
+    const HWND hwnd = reinterpret_cast<HWND>(id);
+    if (!hwnd || !IsWindow(hwnd))
+        return;
+    SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+}
+
+void resizeWindow(quintptr id, const QRect& frame)
+{
+    const HWND hwnd = reinterpret_cast<HWND>(id);
+    if (!hwnd || !IsWindow(hwnd) || frame.isEmpty())
+        return;
+
+    // SetWindowPos takes the window rectangle, which on Windows 11 includes
+    // an invisible resize border. Convert the visible frame the caller wants
+    // into that rectangle using the window's current insets.
+    RECT windowRect{};
+    if (!GetWindowRect(hwnd, &windowRect))
+        return;
+    const QRect visible = Win::visibleFrame(hwnd);
+    if (visible.isEmpty())
+        return;
+    const int leftInset = visible.left() - windowRect.left;
+    const int topInset = visible.top() - windowRect.top;
+    const int rightInset = windowRect.right - (visible.left() + visible.width());
+    const int bottomInset = windowRect.bottom - (visible.top() + visible.height());
+
+    SetWindowPos(hwnd,
+                 nullptr,
+                 frame.left() - leftInset,
+                 frame.top() - topInset,
+                 frame.width() + leftInset + rightInset,
+                 frame.height() + topInset + bottomInset,
+                 SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
 QRect clientRect(quintptr id)
 {
     const HWND hwnd = reinterpret_cast<HWND>(id);

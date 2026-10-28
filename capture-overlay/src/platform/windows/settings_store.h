@@ -78,8 +78,41 @@ struct ShellSettings {
     } ocr;
 };
 
+/// The device choices the window-recording surface remembers between runs.
+///
+/// They live beside the settings mirror rather than inside it: the Rust
+/// settings window rewrites settings.json wholesale, and these are shell-owned
+/// selections the Rust side neither edits nor reads.
+struct RecordingDeviceChoices {
+    bool present = false;
+    bool microphoneEnabled = false;
+    QString microphoneDevice;
+    /// "off", "all", or "app".
+    QString systemAudioMode = QStringLiteral("off");
+    QString systemAudioApplication;
+    bool cameraEnabled = false;
+    QString cameraDevice;
+};
+
 /// `%APPDATA%/apexshot/settings.json`.
 QString shellSettingsPath();
+
+/// Where the person left the camera bubble, across the capture.
+struct WebcamPlacement {
+    bool present = false;
+    double relX = 1.0;
+    double relY = 0.0;
+};
+
+/// `%APPDATA%/apexshot/webcam-placement.json`.
+QString webcamPlacementPath();
+WebcamPlacement loadWebcamPlacement();
+void saveWebcamPlacement(double relX, double relY);
+
+/// `%APPDATA%/apexshot/recording-devices.json`.
+QString recordingDeviceChoicesPath();
+RecordingDeviceChoices loadRecordingDeviceChoices();
+void saveRecordingDeviceChoices(const RecordingDeviceChoices& choices);
 
 /// Read the JSON mirror, applying defaults for missing or invalid values.
 ShellSettings loadShellSettings();

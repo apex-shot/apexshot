@@ -104,6 +104,100 @@ QString shellSettingsPath()
         .filePath(QStringLiteral("settings.json"));
 }
 
+QString webcamPlacementPath()
+{
+    return QFileInfo(shellSettingsPath()).absoluteDir().filePath(
+        QStringLiteral("webcam-placement.json"));
+}
+
+WebcamPlacement loadWebcamPlacement()
+{
+    WebcamPlacement placement;
+    QFile file(webcamPlacementPath());
+    if (!file.open(QIODevice::ReadOnly))
+        return placement;
+
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject())
+        return placement;
+
+    const QJsonObject root = document.object();
+    if (!root.contains(QStringLiteral("rel_x")) || !root.contains(QStringLiteral("rel_y")))
+        return placement;
+    placement.present = true;
+    placement.relX = std::clamp(root.value(QStringLiteral("rel_x")).toDouble(placement.relX), 0.0, 1.0);
+    placement.relY = std::clamp(root.value(QStringLiteral("rel_y")).toDouble(placement.relY), 0.0, 1.0);
+    return placement;
+}
+
+void saveWebcamPlacement(double relX, double relY)
+{
+    QJsonObject root;
+    root.insert(QStringLiteral("rel_x"), std::clamp(relX, 0.0, 1.0));
+    root.insert(QStringLiteral("rel_y"), std::clamp(relY, 0.0, 1.0));
+
+    const QString path = webcamPlacementPath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+}
+
+QString recordingDeviceChoicesPath()
+{
+    return QFileInfo(shellSettingsPath()).absoluteDir().filePath(
+        QStringLiteral("recording-devices.json"));
+}
+
+RecordingDeviceChoices loadRecordingDeviceChoices()
+{
+    RecordingDeviceChoices choices;
+    QFile file(recordingDeviceChoicesPath());
+    if (!file.open(QIODevice::ReadOnly))
+        return choices;
+
+    QJsonParseError error{};
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject())
+        return choices;
+
+    const QJsonObject root = document.object();
+    choices.present = true;
+    choices.microphoneEnabled =
+        root.value(QStringLiteral("microphone_enabled")).toBool(choices.microphoneEnabled);
+    choices.microphoneDevice =
+        root.value(QStringLiteral("microphone_device")).toString().trimmed();
+    const QString mode = root.value(QStringLiteral("system_audio_mode")).toString();
+    if (mode == QLatin1String("all") || mode == QLatin1String("app"))
+        choices.systemAudioMode = mode;
+    choices.systemAudioApplication =
+        root.value(QStringLiteral("system_audio_app")).toString().trimmed();
+    choices.cameraEnabled =
+        root.value(QStringLiteral("camera_enabled")).toBool(choices.cameraEnabled);
+    choices.cameraDevice = root.value(QStringLiteral("camera_device")).toString().trimmed();
+    return choices;
+}
+
+void saveRecordingDeviceChoices(const RecordingDeviceChoices& choices)
+{
+    QJsonObject root;
+    root.insert(QStringLiteral("microphone_enabled"), choices.microphoneEnabled);
+    root.insert(QStringLiteral("microphone_device"), choices.microphoneDevice);
+    root.insert(QStringLiteral("system_audio_mode"), choices.systemAudioMode);
+    root.insert(QStringLiteral("system_audio_app"), choices.systemAudioApplication);
+    root.insert(QStringLiteral("camera_enabled"), choices.cameraEnabled);
+    root.insert(QStringLiteral("camera_device"), choices.cameraDevice);
+
+    const QString path = recordingDeviceChoicesPath();
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate))
+        return;
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+}
+
 ShellSettings loadShellSettings()
 {
     ShellSettings out;

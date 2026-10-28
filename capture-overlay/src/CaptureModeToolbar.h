@@ -4,7 +4,10 @@
 
 #include <QColor>
 #include <QRectF>
+#include <QString>
 #include <QWidget>
+
+#include <functional>
 
 class QPainter;
 class QLocalServer;
@@ -20,6 +23,18 @@ public:
         Area,
     };
 
+    /// Device state carried into the toolbar, so its Mic, Speaker, and Webcam
+    /// items start where the last recording left them.
+    struct DeviceDefaults {
+        bool microphone = false;
+        QString microphoneDevice;
+        bool speaker = false;
+        QString systemAudioApplication;
+        quint32 systemAudioProcessId = 0;
+        bool camera = false;
+        QString cameraDevice;
+    };
+
     struct Result {
         Action action = Action::Cancel;
         QScreen* screen = nullptr;
@@ -27,8 +42,17 @@ public:
         int timerSeconds = 0;
         bool recording = false;
         bool microphone = false;
+        QString microphoneDevice;
         bool speaker = false;
+        QString systemAudioApplication;
+        quint32 systemAudioProcessId = 0;
+        bool camera = false;
+        QString cameraDevice;
         bool scroll = false;
+        /// Set only when a window recording is being set up: the toolbar
+        /// stays open over the picker and the selected window so devices can
+        /// still be changed until Start. The caller owns it.
+        CaptureModeToolbar* toolbar = nullptr;
     };
 
     // When a display was chosen before opening the toolbar, keep the toolbar
@@ -43,12 +67,26 @@ public:
     // panel selects the region, so the toolbar's Area slot stays a screenshot
     // action there.
     // `enableScrollCapture` adds a Scroll mode that combines with Window or
-    // Area. It is opt-in so the Linux overlay keeps its existing toolbar.
+    // Area. It is opt-in so the Linux overlay keeps its existing toolbar. A
+    // host that enables it also gets a Webcam item while recording, which
+    // takes the Scroll slot, so window recordings can turn the camera on
+    // before they start.
     static Result choose(QLocalServer* controlServer = nullptr,
                          QScreen* targetScreen = nullptr,
                          bool recordingAvailable = true,
                          bool allowAreaRecording = false,
-                         bool enableScrollCapture = false);
+                         bool enableScrollCapture = false,
+                         const DeviceDefaults& defaults = {},
+                         bool persistForWindowSetup = false);
+
+    /// Current device state, read when a persisted toolbar's window setup
+    /// starts recording.
+    DeviceDefaults deviceState() const;
+
+    /// Called when the Close item is clicked while the toolbar is persisting
+    /// over a window setup. The handler dismisses the picker or the selected
+    /// window; the toolbar closes itself after it returns.
+    void setCloseHandler(std::function<void()> handler);
 
 protected:
     void paintEvent(QPaintEvent* event) override;
@@ -61,16 +99,27 @@ private:
     explicit CaptureModeToolbar(QScreen* screen, bool screenIsLocked = false,
                                 bool recordingAvailable = true,
                                 bool allowAreaRecording = false,
-                                bool enableScrollCapture = false);
+                                bool enableScrollCapture = false,
+                                const DeviceDefaults& defaults = {});
 
     int itemCount() const;
     int itemWidth(int index) const;
+    int preferredWidth() const;
     QString labelFor(int index) const;
     QRectF itemRect(int index) const;
+    bool separatorAfter(int index) const;
     int hitTest(const QPoint& point) const;
+    bool cameraSlot(int index) const;
     void focusAndRaise();
     void finish(Action action);
     void drawIcon(QPainter& painter, int index, const QPointF& center, const QColor& color) const;
+    void drawFallbackIcon(QPainter& painter, int index, const QPointF& center,
+                          const QColor& color) const;
+    void openDeviceMenu(int index, const QPoint& globalPos);
+    void toggleCamera();
+    void loadCameraDefaults();
+    void enterSetupMode();
+    void closeSetup();
 
     QScreen* m_screen;
     bool m_screenIsLocked = false;
@@ -84,6 +133,13 @@ private:
     int m_timerSeconds = 0;
     bool m_recording = false;
     bool m_microphone = false;
+    QString m_microphoneDevice;
     bool m_speaker = false;
+    QString m_systemAudioApplication;
+    quint32 m_systemAudioProcessId = 0;
+    bool m_camera = false;
+    QString m_cameraDevice;
     bool m_scroll = false;
+    bool m_setupMode = false;
+    std::function<void()> m_onClose;
 };
