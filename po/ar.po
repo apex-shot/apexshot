@@ -3662,3 +3662,22 @@ msgstr "جارٍ الإنهاء…"
 
 msgid "Video editing is not available in the Windows build yet."
 msgstr "تحرير الفيديو غير متاح في إصدار Windows بعد."
+
+# First-run onboarding in the Windows build.
+msgid "Your screenshot companion for Windows. Set it up in a few quick steps."
+msgstr "رفيقك للقطات الشاشة على ويندوز. أعِدّه في خطوات سريعة."
+
+msgid "ApexShot runs in the background with a tray icon.\nAfter setup, you do not need to open Settings every time."
+msgstr "يعمل ApexShot في الخلفية بأيقونة في شريط النظام.\nبعد الإعداد لا تحتاج فتح الإعدادات في كل مرة."
+
+msgid "ApexShot stays in the tray; right-click it for the capture menu."
+msgstr "يبقى ApexShot في شريط النظام؛ انقر باليمين لفتح قائمة الالتقاط."
+
+msgid "Bindings are saved; global hotkeys arrive in a later build."
+msgstr "تُحفظ الاختصارات؛ وستصل الاختصارات العامة في إصدار لاحق."
+
+msgid "ApexShot is ready. It runs from the tray from now on."
+msgstr "ApexShot جاهز. سيعمل من شريط النظام من الآن."
+
+msgid "Signed in, but this device could not save the account."
+msgstr "تم تسجيل الدخول، لكن هذا الجهاز تعذّر عليه حفظ الحساب."

@@ -1,41 +1,48 @@
 //! First-run onboarding for the Windows build.
 //!
-//! The Windows package requires an account, so the flow starts with a real
-//! browser device-authorization handoff and stores the same account cache the
-//! rest of the app reads. After the account is linked, four short setup pages
-//! (appearance, screenshot format, recording defaults, and plan) lead to a
-//! final checklist. Every choice writes the shared [`AppConfig`]; nothing here
-//! invents a setting the Windows shell cannot honour.
+//! The same surface the Linux build shows (`src/onboarding`): one undecorated
+//! window with the step caption in its title bar, a progress rail, a mascot,
+//! and a page per step. The cloud page is shared with the Linux flow verbatim,
+//! because signing in is the same browser device-authorization handoff on both
+//! platforms and it stays optional. Finishing writes
+//! `%APPDATA%\apexshot\.windows-onboarding-complete`, which the entry point
+//! checks before it opens Settings.
 
-mod account;
-mod hero;
-mod setup;
-mod widgets;
+mod cloud;
+mod complete;
+mod howto;
+mod mascot;
+mod motion;
+mod ui;
+mod welcome;
 
 use std::cell::{Cell, RefCell};
 use std::fs;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
 
 use gtk4::prelude::*;
 use gtk4::{
-    glib, Align, Application, ApplicationWindow, Box as GtkBox, CssProvider, Orientation, Overlay,
-    Stack, StackTransitionType,
+    glib, Align, Application, ApplicationWindow, Box as GtkBox, CssProvider, Orientation, Stack,
+    StackTransitionType,
 };
 
-use crate::config::{config_path, load_config, save_config, AppConfig};
-use crate::i18n::t;
+use crate::config::config_path;
+use crate::i18n::{t, tfmt};
+use crate::settings::ui_support::{window_control_button, WindowControl, TITLE_BAR_HEIGHT};
 
-use self::widgets::px;
-
-/// Written only after the account is linked and the final page is completed.
+/// Written only after the final page finishes.
 const FLAG_FILE: &str = ".windows-onboarding-complete";
 
-/// The window's design size at 100% display scaling.
-const BASE_WIDTH: f64 = 1080.0;
-const BASE_HEIGHT: f64 = 700.0;
+/// The window box at 100% display scaling, the size the Linux flow uses.
+const BASE_WIDTH: f64 = 960.0;
+const BASE_HEIGHT: f64 = 640.0;
+
+/// Inset of the page column and the footer from the window edges.
+const PAGE_INSET: f64 = 140.0;
+
+/// Width the page column keeps inside that inset.
+const PAGE_WIDTH: f64 = 680.0;
 
 /// What the caller should do after the onboarding window closes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -44,247 +51,119 @@ pub struct Outcome {
     pub open_settings: bool,
 }
 
-/// One page of the flow. The account pages have no progress dots; the four
-/// setup pages map to the four dots, and the final checklist closes the flow.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Step {
-    Account,
-    Authorize,
-    Appearance,
-    Formats,
-    Recording,
-    Plan,
-    Finish,
+/// One page of the flow.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum OnboardingStep {
+    Welcome,
+    HowToUse,
+    Cloud,
+    Complete,
 }
 
-impl Step {
-    fn name(self) -> &'static str {
+impl OnboardingStep {
+    fn all() -> [Self; 4] {
+        [Self::Welcome, Self::HowToUse, Self::Cloud, Self::Complete]
+    }
+
+    fn label(self) -> &'static str {
         match self {
-            Self::Account => "account",
-            Self::Authorize => "authorize",
-            Self::Appearance => "appearance",
-            Self::Formats => "formats",
-            Self::Recording => "recording",
-            Self::Plan => "plan",
-            Self::Finish => "finish",
+            Self::Welcome => "Welcome",
+            Self::HowToUse => "Capturing",
+            Self::Cloud => "Cloud sharing",
+            Self::Complete => "Finish",
         }
     }
 
-    fn order(self) -> usize {
-        match self {
-            Self::Account => 0,
-            Self::Authorize => 1,
-            Self::Appearance => 2,
-            Self::Formats => 3,
-            Self::Recording => 4,
-            Self::Plan => 5,
-            Self::Finish => 6,
-        }
-    }
-
-    /// Zero-based dot index, or `None` for the account pages and the final
-    /// page, which draw no progress indicator.
-    fn dot_index(self) -> Option<usize> {
-        match self {
-            Self::Appearance => Some(0),
-            Self::Formats => Some(1),
-            Self::Recording => Some(2),
-            Self::Plan => Some(3),
-            _ => None,
-        }
+    fn position(self) -> usize {
+        Self::all()
+            .iter()
+            .position(|step| *step == self)
+            .unwrap_or(0)
     }
 
     fn next(self) -> Option<Self> {
         match self {
-            Self::Account => Some(Self::Authorize),
-            Self::Authorize => Some(Self::Appearance),
-            Self::Appearance => Some(Self::Formats),
-            Self::Formats => Some(Self::Recording),
-            Self::Recording => Some(Self::Plan),
-            Self::Plan => Some(Self::Finish),
-            Self::Finish => None,
+            Self::Welcome => Some(Self::HowToUse),
+            Self::HowToUse => Some(Self::Cloud),
+            Self::Cloud => Some(Self::Complete),
+            Self::Complete => None,
         }
     }
 
     fn prev(self) -> Option<Self> {
         match self {
-            Self::Account => None,
-            Self::Authorize => Some(Self::Account),
-            Self::Appearance => None,
-            Self::Formats => Some(Self::Appearance),
-            Self::Recording => Some(Self::Formats),
-            Self::Plan => Some(Self::Recording),
-            Self::Finish => Some(Self::Plan),
+            Self::Welcome => None,
+            Self::HowToUse => Some(Self::Welcome),
+            Self::Cloud => Some(Self::HowToUse),
+            Self::Complete => Some(Self::Cloud),
         }
     }
 }
 
-/// Shared state behind one onboarding window. Cloneable; every clone points at
-/// the same window.
+/// A design value at 100% scaling, in this display's logical pixels.
+pub(super) fn px(scale: f64, value: f64) -> i32 {
+    (value * scale).round() as i32
+}
+
+/// Identifies one rendered step. A step's background work checks `is_current`
+/// so it stops as soon as the user navigates away or the window rebuilds.
 #[derive(Clone)]
-pub(crate) struct Shell {
-    inner: Rc<ShellInner>,
+struct StepScope {
+    generation: Rc<Cell<u64>>,
+    id: u64,
 }
 
-struct ShellInner {
-    window: ApplicationWindow,
-    stack: Stack,
-    root: GtkBox,
+impl StepScope {
+    fn is_current(&self) -> bool {
+        self.generation.get() == self.id
+    }
+}
+
+/// What a step builder can do besides drawing itself. `scale` is the display
+/// scale every page lays itself out against.
+#[derive(Clone)]
+pub(crate) struct Nav {
+    scope: StepScope,
     scale: f64,
-    config: RefCell<AppConfig>,
-    step: Cell<Step>,
-    outcome: Rc<RefCell<Outcome>>,
-    /// Bumped on every page change; background work compares it and stops.
-    generation: Arc<AtomicU64>,
-    /// The action Enter should run on the current page.
-    primary: RefCell<Option<Rc<dyn Fn()>>>,
+    go: Rc<dyn Fn(OnboardingStep)>,
+    advance: Rc<dyn Fn()>,
+    finish: Rc<dyn Fn()>,
+    /// Re-apply the footer button layout after a view re-renders its own
+    /// actions in place without going through `show_step`.
+    layout_footer: Rc<dyn Fn()>,
 }
 
-impl Shell {
-    pub(crate) fn window(&self) -> &ApplicationWindow {
-        &self.inner.window
+impl Nav {
+    fn layout_footer(&self) {
+        (self.layout_footer)();
     }
+}
 
-    pub(crate) fn scale(&self) -> f64 {
-        self.inner.scale
+#[derive(Clone)]
+struct OnboardingWidgets {
+    window: ApplicationWindow,
+    pages: Stack,
+    progress: GtkBox,
+    step_caption: gtk4::Label,
+    back_slot: GtkBox,
+    left_actions: GtkBox,
+    actions: GtkBox,
+    status: gtk4::Label,
+    scale: f64,
+    generation: Rc<Cell<u64>>,
+    animations: Rc<RefCell<Vec<gtk4::TickCallbackId>>>,
+    outcome: Rc<RefCell<Outcome>>,
+}
+
+impl OnboardingWidgets {
+    fn cancel_animations(&self) {
+        cancel_animations(&self.animations);
     }
+}
 
-    pub(crate) fn config(&self) -> AppConfig {
-        self.inner.config.borrow().clone()
-    }
-
-    pub(crate) fn update_config(&self, update: impl FnOnce(&mut AppConfig)) {
-        update(&mut self.inner.config.borrow_mut());
-        self.persist();
-    }
-
-    pub(crate) fn step(&self) -> Step {
-        self.inner.step.get()
-    }
-
-    /// The generation a page's background work belongs to.
-    pub(crate) fn generation(&self) -> u64 {
-        self.inner.generation.load(Ordering::SeqCst)
-    }
-
-    /// A thread-safe handle to the page generation, for workers that must stop
-    /// when the person navigates away.
-    pub(crate) fn generation_handle(&self) -> Arc<AtomicU64> {
-        Arc::clone(&self.inner.generation)
-    }
-
-    pub(crate) fn set_primary(&self, action: Rc<dyn Fn()>) {
-        *self.inner.primary.borrow_mut() = Some(action);
-    }
-
-    pub(crate) fn primary(&self) -> Option<Rc<dyn Fn()>> {
-        self.inner.primary.borrow().clone()
-    }
-
-    /// Persist the shared config and its shell mirror. A write failure is
-    /// reported but never blocks the flow: the next page still works.
-    pub(crate) fn persist(&self) {
-        let config = self.config();
-        if let Err(error) = save_config(&config) {
-            eprintln!("[onboarding] could not save config: {error}");
-        }
-        if let Err(error) = crate::settings::actions::write_shell_settings(&config) {
-            eprintln!("[onboarding] could not write shell settings: {error}");
-        }
-    }
-
-    /// Reload the config after a worker changed it (a completed device login
-    /// stores the tokens and account cache).
-    pub(crate) fn reload_config(&self) {
-        *self.inner.config.borrow_mut() = load_config().sanitized();
-    }
-
-    /// Re-apply the selected theme to the live window.
-    pub(crate) fn apply_theme(&self) {
-        let theme = self.config().ui_theme;
-        let dark = match theme.as_str() {
-            "dark" => true,
-            "light" => false,
-            _ => crate::settings::windowing::prefers_dark_glass_theme(),
-        };
-        if dark {
-            self.inner.root.remove_css_class("editor-theme-light");
-        } else {
-            self.inner.root.add_css_class("editor-theme-light");
-        }
-    }
-
-    pub(crate) fn go(&self, step: Step) {
-        let forward = step.order() > self.step().order();
-        self.inner.step.set(step);
-        self.inner.generation.fetch_add(1, Ordering::SeqCst);
-        self.inner.primary.replace(None);
-
-        let page = match step {
-            Step::Account => account::build_account(self),
-            Step::Authorize => account::build_authorize(self),
-            Step::Appearance => setup::build_appearance(self),
-            Step::Formats => setup::build_formats(self),
-            Step::Recording => setup::build_recording(self),
-            Step::Plan => setup::build_plan(self),
-            Step::Finish => setup::build_finish(self),
-        };
-        page.set_hexpand(true);
-        page.set_vexpand(true);
-
-        let name = step.name();
-        if let Some(previous) = self.inner.stack.child_by_name(name) {
-            self.inner.stack.remove(&previous);
-        }
-        self.inner.stack.set_transition_type(if forward {
-            StackTransitionType::SlideLeft
-        } else {
-            StackTransitionType::SlideRight
-        });
-        self.inner.stack.add_named(&page, Some(name));
-        self.inner.stack.set_visible_child_name(name);
-
-        // Drop pages the transition has finished with, unless they became the
-        // current page again in the meantime.
-        let stack = self.inner.stack.clone();
-        glib::timeout_add_local_once(std::time::Duration::from_millis(360), move || {
-            let visible = stack
-                .visible_child_name()
-                .map(|name| name.to_string())
-                .unwrap_or_default();
-            let mut child = stack.first_child();
-            while let Some(widget) = child {
-                child = widget.next_sibling();
-                let own_name = stack
-                    .page(&widget)
-                    .name()
-                    .map(|name| name.to_string())
-                    .unwrap_or_default();
-                if own_name != visible {
-                    stack.remove(&widget);
-                }
-            }
-        });
-    }
-
-    /// Advance to the next page, if there is one.
-    pub(crate) fn advance(&self) {
-        if let Some(next) = self.step().next() {
-            self.go(next);
-        }
-    }
-
-    /// Complete the flow. The flag is best-effort: a failed write must not
-    /// trap the user in an onboarding that cannot end.
-    pub(crate) fn finish(&self, open_settings: bool) {
-        if let Err(error) = mark_complete() {
-            eprintln!("[onboarding] could not write the completion flag: {error}");
-        }
-        let mut outcome = self.inner.outcome.borrow_mut();
-        outcome.finished = true;
-        outcome.open_settings = open_settings;
-        drop(outcome);
-        self.inner.window.close();
+fn cancel_animations(animations: &Rc<RefCell<Vec<gtk4::TickCallbackId>>>) {
+    for callback in animations.borrow_mut().drain(..) {
+        callback.remove();
     }
 }
 
@@ -339,134 +218,374 @@ fn build_window(app: &Application, outcome: Rc<RefCell<Outcome>>) {
     crate::icons::install();
     crate::settings::ui_support::install_settings_css();
     crate::settings::install_window_css();
-    install_css();
 
-    let config = load_config().sanitized();
     let scale = crate::platform::ui_scale();
-    let dark = match config.ui_theme.as_str() {
-        "dark" => true,
-        "light" => false,
-        _ => crate::settings::windowing::prefers_dark_glass_theme(),
-    };
+    install_css(scale);
 
     let window = ApplicationWindow::builder()
         .application(app)
-        .title(t("Set up ApexShot"))
+        .title(t("ApexShot Setup"))
         .icon_name(crate::app_identity::icon_name())
-        .default_width((BASE_WIDTH * scale).round() as i32)
-        .default_height((BASE_HEIGHT * scale).round() as i32)
+        .default_width(px(scale, BASE_WIDTH))
+        .default_height(px(scale, BASE_HEIGHT))
         .build();
     window.set_decorated(false);
     window.add_css_class("editor-window");
 
+    let animations = Rc::new(RefCell::new(Vec::new()));
+    let close_animations = Rc::clone(&animations);
+    window.connect_close_request(move |_| {
+        cancel_animations(&close_animations);
+        glib::Propagation::Proceed
+    });
+
+    install(&window, scale, animations, outcome);
+    window.present();
+}
+
+/// Build the whole onboarding surface into `window` and show the first step.
+fn install(
+    window: &ApplicationWindow,
+    scale: f64,
+    animations: Rc<RefCell<Vec<gtk4::TickCallbackId>>>,
+    outcome: Rc<RefCell<Outcome>>,
+) {
+    cancel_animations(&animations);
+    let dark = crate::settings::windowing::prefers_dark_glass_theme();
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("editor-root");
-    root.add_css_class("onboarding-root");
     if !dark {
         root.add_css_class("editor-theme-light");
     }
 
-    let stack = Stack::new();
-    stack.add_css_class("onboarding-stack");
-    stack.set_transition_type(StackTransitionType::SlideLeft);
-    stack.set_transition_duration(280);
-    stack.set_vexpand(true);
-    stack.set_hexpand(true);
-    root.append(&stack);
+    let step_caption = gtk4::Label::new(None);
+    step_caption.add_css_class("onboarding-progress-caption");
+    step_caption.set_valign(Align::Center);
+    // Back lives in the title bar's top-left corner rather than the footer.
+    let back_slot = GtkBox::new(Orientation::Horizontal, 0);
+    back_slot.set_halign(Align::Start);
+    root.append(&build_toolbar(window, &step_caption, &back_slot, scale));
 
-    let shell = Shell {
-        inner: Rc::new(ShellInner {
-            window: window.clone(),
-            stack,
-            root: root.clone(),
-            scale,
-            config: RefCell::new(config),
-            step: Cell::new(Step::Account),
-            outcome,
-            generation: Arc::new(AtomicU64::new(0)),
-            primary: RefCell::new(None),
-        }),
+    let content = GtkBox::new(Orientation::Vertical, 0);
+    content.set_hexpand(true);
+    content.set_vexpand(true);
+
+    let progress = GtkBox::new(Orientation::Horizontal, px(scale, 6.0));
+    progress.add_css_class("onboarding-progress");
+    progress.set_halign(Align::Center);
+    progress.set_margin_top(px(scale, 24.0));
+    content.append(&progress);
+
+    let pages = Stack::new();
+    pages.set_hexpand(true);
+    pages.set_vexpand(true);
+    pages.set_hhomogeneous(false);
+    pages.set_vhomogeneous(false);
+    pages.set_transition_duration(320);
+    pages.set_transition_type(if motion::enabled() {
+        StackTransitionType::Crossfade
+    } else {
+        StackTransitionType::None
+    });
+    pages.connect_notify_local(Some("transition-running"), |pages, _| prune_pages(pages));
+    pages.set_margin_top(px(scale, 22.0));
+    content.append(&pages);
+
+    let status = gtk4::Label::new(None);
+    status.add_css_class("onboarding-status-error");
+    status.set_wrap(true);
+    status.set_max_width_chars(44);
+    status.set_xalign(1.0);
+    status.set_visible(false);
+    // A step with one action centers it; with two, the secondary one moves to
+    // this far-left slot and the primary stays at the end. show_step fills it.
+    let left_actions = GtkBox::new(Orientation::Horizontal, px(scale, 10.0));
+    left_actions.set_halign(Align::Start);
+    let actions = GtkBox::new(Orientation::Horizontal, px(scale, 10.0));
+    actions.set_hexpand(true);
+
+    let footer = GtkBox::new(Orientation::Horizontal, px(scale, 12.0));
+    footer.add_css_class("onboarding-footer");
+    footer.set_margin_start(px(scale, PAGE_INSET));
+    footer.set_margin_end(px(scale, PAGE_INSET));
+    footer.set_margin_top(px(scale, 14.0));
+    footer.set_margin_bottom(px(scale, 24.0));
+    footer.append(&left_actions);
+    footer.append(&status);
+    footer.append(&actions);
+    content.append(&footer);
+    root.append(&content);
+    window.set_child(Some(&root));
+
+    let widgets = OnboardingWidgets {
+        window: window.clone(),
+        pages,
+        progress,
+        step_caption,
+        back_slot,
+        left_actions,
+        actions,
+        status,
+        scale,
+        generation: Rc::new(Cell::new(0)),
+        animations,
+        outcome,
+    };
+    show_step(&widgets, OnboardingStep::Welcome);
+}
+
+/// The title bar: the step caption centered over the progress rail, Back at the
+/// far left, and the caption targets in the corner Settings puts them in.
+fn build_toolbar(
+    window: &ApplicationWindow,
+    step_caption: &gtk4::Label,
+    back_slot: &GtkBox,
+    scale: f64,
+) -> gtk4::CenterBox {
+    let toolbar = gtk4::CenterBox::new();
+    toolbar.add_css_class("settings-window-controls");
+    toolbar.add_css_class("onboarding-toolbar");
+    toolbar.set_size_request(-1, px(scale, TITLE_BAR_HEIGHT));
+
+    let start_box = GtkBox::new(Orientation::Horizontal, px(scale, 6.0));
+    start_box.set_halign(Align::Fill);
+    start_box.append(back_slot);
+    toolbar.set_start_widget(Some(&start_box));
+
+    let minimize = window_control_button(WindowControl::Minimize, &t("Minimize"), scale);
+    let window_c = window.clone();
+    minimize.connect_clicked(move |_| window_c.minimize());
+
+    let close = window_control_button(WindowControl::Close, &t("Close"), scale);
+    let window_c = window.clone();
+    close.connect_clicked(move |_| window_c.close());
+
+    let right_box = GtkBox::new(Orientation::Horizontal, 0);
+    right_box.set_halign(Align::End);
+    right_box.append(&minimize);
+    right_box.append(&close);
+    toolbar.set_end_widget(Some(&right_box));
+    toolbar.set_center_widget(Some(step_caption));
+
+    // The whole bar moves the window, not just its left corner: the buttons
+    // and Back claim their own presses, everything else drags.
+    crate::settings::windowing::install_window_drag(&toolbar, window);
+    toolbar
+}
+
+fn show_step(widgets: &OnboardingWidgets, step: OnboardingStep) {
+    widgets.cancel_animations();
+    let id = widgets.generation.get() + 1;
+    widgets.generation.set(id);
+    widgets.window.set_title(Some(&t("ApexShot Setup")));
+    widgets.status.set_visible(false);
+    clear(&widgets.actions);
+    clear(&widgets.back_slot);
+    clear(&widgets.left_actions);
+    // With no Back button the slot is hidden so the bar starts at the window
+    // edge instead of leaving a gap.
+    widgets.back_slot.set_visible(step.prev().is_some());
+    widgets.step_caption.set_text(&step_caption(step));
+    build_progress(&widgets.progress, step, widgets.scale);
+
+    let body = GtkBox::new(Orientation::Vertical, 0);
+    body.add_css_class("onboarding-page");
+    body.set_width_request(px(widgets.scale, PAGE_WIDTH));
+    body.set_hexpand(true);
+    body.set_halign(Align::Fill);
+    body.set_margin_start(px(widgets.scale, PAGE_INSET));
+    body.set_margin_end(px(widgets.scale, PAGE_INSET));
+    body.set_vexpand(true);
+    let mut animations = Vec::new();
+    let nav = Nav {
+        scope: StepScope {
+            generation: Rc::clone(&widgets.generation),
+            id,
+        },
+        scale: widgets.scale,
+        go: {
+            let widgets = widgets.clone();
+            Rc::new(move |target| show_step(&widgets, target))
+        },
+        advance: {
+            let widgets = widgets.clone();
+            Rc::new(move || {
+                if let Some(next) = step.next() {
+                    show_step(&widgets, next);
+                }
+            })
+        },
+        finish: {
+            let widgets = widgets.clone();
+            Rc::new(move || finish(&widgets))
+        },
+        layout_footer: {
+            let actions = widgets.actions.clone();
+            let left_actions = widgets.left_actions.clone();
+            Rc::new(move || layout_footer_actions(&actions, &left_actions))
+        },
     };
 
-    let overlay = Overlay::new();
-    overlay.set_child(Some(&root));
-    if !dark {
-        overlay.add_css_class("editor-theme-light");
+    let mascot = mascot::Mascot::new(step, widgets.scale);
+    match step {
+        OnboardingStep::Welcome => welcome::build(&body, &widgets.actions, &nav, mascot.widget()),
+        OnboardingStep::HowToUse => howto::build(&body, &widgets.actions, &nav),
+        OnboardingStep::Cloud => cloud::build(&body, &widgets.actions, &nav),
+        OnboardingStep::Complete => complete::build(&body, &widgets.actions, &nav),
     }
-    overlay.add_overlay(&build_title_bar(&shell));
-    window.set_child(Some(&overlay));
+    layout_footer_actions(&widgets.actions, &widgets.left_actions);
 
-    let keys = gtk4::EventControllerKey::new();
+    if step != OnboardingStep::Welcome {
+        body.prepend(mascot.widget());
+    }
+    if let Some(callback) = mascot.animate() {
+        animations.push(callback);
+    }
+
+    if let Some(previous) = step.prev() {
+        let back_btn = gtk4::Button::with_label(&t("← Back"));
+        back_btn.add_css_class("onboarding-text-button");
+        back_btn.set_valign(Align::Center);
+        back_btn.set_margin_start(px(widgets.scale, 12.0));
+        back_btn.set_margin_top(px(widgets.scale, 6.0));
+        let back_slot = widgets.back_slot.clone();
+        let widgets_c = widgets.clone();
+        back_btn.connect_clicked(move |_| show_step(&widgets_c, previous));
+        back_slot.append(&back_btn);
+    }
+
+    show_page(&widgets.pages, &body, &format!("step-{id}"));
+
+    let mut entrance = if step == OnboardingStep::Welcome {
+        body.first_child()
+            .and_then(|content| content.downcast::<GtkBox>().ok())
+            .map(|content| children(&content))
+            .unwrap_or_default()
+    } else {
+        children(&body)
+    };
+    entrance.retain(|widget| !widget.has_css_class("onboarding-mascot"));
+    entrance.push(widgets.actions.clone().upcast());
+    if let Some(callback) = motion::reveal(&entrance, 70.0, 420.0) {
+        animations.push(callback);
+    }
+    widgets.animations.replace(animations);
+}
+
+fn show_page(pages: &Stack, page: &GtkBox, name: &str) {
+    pages.add_named(page, Some(name));
+    pages.set_visible_child_name(name);
+    prune_pages(pages);
+}
+
+/// Drop superseded pages once the crossfade has finished. Removing a page
+/// unmaps it, which also ends its entrance animation.
+fn prune_pages(pages: &Stack) {
+    if pages.is_transition_running() {
+        return;
+    }
+    let visible = pages.visible_child();
+    let mut child = pages.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        if visible.as_ref() != Some(&widget) {
+            pages.remove(&widget);
+        }
+    }
+}
+
+fn step_caption(step: OnboardingStep) -> String {
+    let steps = OnboardingStep::all();
+    tfmt(
+        "Step {current} of {total}",
+        &[
+            ("current", &(step.position() + 1).to_string()),
+            ("total", &steps.len().to_string()),
+        ],
+    )
+}
+
+fn build_progress(progress: &GtkBox, step: OnboardingStep, scale: f64) {
+    clear(progress);
+    let steps = OnboardingStep::all();
+    let current = step.position();
+    for (index, item) in steps.iter().enumerate() {
+        let dot = GtkBox::new(Orientation::Horizontal, 0);
+        dot.add_css_class("onboarding-progress-dot");
+        if index == current {
+            dot.add_css_class("onboarding-progress-dot-active");
+            dot.set_size_request(px(scale, 22.0), px(scale, 6.0));
+        } else {
+            dot.set_size_request(px(scale, 6.0), px(scale, 6.0));
+        }
+        if index < current {
+            dot.add_css_class("onboarding-progress-dot-done");
+        }
+        dot.set_tooltip_text(Some(&t(item.label())));
+        progress.append(&dot);
+    }
+}
+
+fn finish(widgets: &OnboardingWidgets) {
+    if let Err(error) = mark_complete() {
+        eprintln!("[onboarding] failed to save setup state: {error}");
+        widgets.status.set_text(&t(
+            "Couldn't save your setup. Check that your config folder is writable, then try again.",
+        ));
+        widgets.status.set_visible(true);
+        return;
+    }
     {
-        let shell = shell.clone();
-        keys.connect_key_pressed(move |_, key, _, _| match key {
-            gtk4::gdk::Key::Escape => {
-                shell.window().close();
-                glib::Propagation::Stop
-            }
-            gtk4::gdk::Key::Return | gtk4::gdk::Key::KP_Enter => {
-                if let Some(action) = shell.primary() {
-                    action();
-                    glib::Propagation::Stop
-                } else {
-                    glib::Propagation::Proceed
-                }
-            }
-            _ => glib::Propagation::Proceed,
-        });
+        let mut outcome = widgets.outcome.borrow_mut();
+        outcome.finished = true;
+        outcome.open_settings = true;
     }
-    window.add_controller(keys);
-
-    shell.go(Step::Account);
-    window.present();
+    widgets.window.close();
 }
 
-/// The flat caption row the Windows windows use, overlaid on the content so the
-/// close and minimise targets sit at the same top-right corner as Settings.
-fn build_title_bar(shell: &Shell) -> GtkBox {
-    let bar = GtkBox::new(Orientation::Horizontal, 0);
-    bar.add_css_class("onboarding-titlebar");
-    bar.set_size_request(-1, px(shell.scale(), 36.0));
-    bar.set_halign(Align::Fill);
-    bar.set_valign(Align::Start);
-
-    let drag = GtkBox::new(Orientation::Horizontal, 0);
-    drag.set_hexpand(true);
-    drag.set_halign(Align::Fill);
-    bar.append(&drag);
-
-    let minimize = crate::settings::ui_support::window_control_button(
-        crate::settings::ui_support::WindowControl::Minimize,
-        &t("Minimize"),
-        shell.scale(),
-    );
-    let window = shell.window().clone();
-    minimize.connect_clicked(move |_| window.minimize());
-    minimize.set_valign(Align::Center);
-    bar.append(&minimize);
-
-    let close = crate::settings::ui_support::window_control_button(
-        crate::settings::ui_support::WindowControl::Close,
-        &t("Close"),
-        shell.scale(),
-    );
-    let window = shell.window().clone();
-    close.connect_clicked(move |_| window.close());
-    close.set_valign(Align::Center);
-    bar.append(&close);
-
-    crate::settings::windowing::install_window_drag(&drag, shell.window());
-    bar
+pub(crate) fn clear(container: &GtkBox) {
+    while let Some(child) = container.first_child() {
+        container.remove(&child);
+    }
 }
 
-/// Load the onboarding stylesheet: fixed colours and layout, plus the sizes
-/// that scale with the display.
-fn install_css() {
+fn children(container: &GtkBox) -> Vec<gtk4::Widget> {
+    let mut out = Vec::new();
+    let mut child = container.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        out.push(widget);
+    }
+    out
+}
+
+/// Lay out a step's footer actions: a single action is centered (in line with
+/// the caption and rail), while two or more spread out, with the secondary one
+/// in the far-left slot and the primary at the end.
+fn layout_footer_actions(actions: &GtkBox, left_slot: &GtkBox) {
+    // Drop whatever a previous render split off, so re-rendering in place
+    // cannot leave a stale button in the left slot.
+    clear(left_slot);
+    if children(actions).len() < 2 {
+        actions.set_halign(Align::Center);
+        return;
+    }
+    if let Some(first) = actions.first_child() {
+        actions.remove(&first);
+        left_slot.append(&first);
+    }
+    actions.set_halign(Align::End);
+}
+
+/// Load the onboarding metrics that follow the display scale. The colours,
+/// radii, and paddings come from the shared settings stylesheet; only the
+/// sizes GTK CSS cannot express relative to the manual Windows scale are here.
+fn install_css(scale: f64) {
     let Some(display) = gtk4::gdk::Display::default() else {
         return;
     };
     let provider = CssProvider::new();
-    provider.load_from_data(&format!("{ONBOARDING_CSS}\n{}", scaled_css()));
+    provider.load_from_data(&scaled_css(scale));
     gtk4::style_context_add_provider_for_display(
         &display,
         &provider,
@@ -474,266 +593,54 @@ fn install_css() {
     );
 }
 
-const ONBOARDING_CSS: &str = include_str!("style.css");
-
-/// Font sizes are the one thing GTK CSS cannot express relative to the manual
-/// Windows DPI scale, so every text class gets its size injected here.
-fn scaled_css() -> String {
-    let scale = crate::platform::ui_scale();
-    let px = |value: f64| (value * scale).round() as i32;
-    let type_scale: &[(&str, f64)] = &[
-        ("ob-brand-name", 14.5),
-        ("ob-headline", 39.0),
-        ("ob-lead", 14.5),
-        ("ob-title", 31.0),
-        ("ob-subtitle", 14.5),
-        ("ob-card-title", 14.5),
-        ("ob-card-caption", 12.5),
-        ("ob-choice-title", 14.0),
-        ("ob-choice-caption", 12.0),
-        ("ob-feature", 12.5),
-        ("ob-button", 13.5),
-        ("ob-button-small", 12.5),
-        ("ob-fineprint", 11.5),
-        ("ob-code", 21.0),
-        ("ob-step-caption", 11.0),
-        ("ob-plan-name", 15.0),
-        ("ob-plan-price", 34.0),
-        ("ob-plan-unit", 12.0),
-        ("ob-plan-feature", 12.5),
-        ("ob-status", 12.5),
-        ("ob-email", 12.0),
-        ("ob-badge", 10.5),
-        ("ob-check", 12.0),
-        ("ob-back-glyph", 22.0),
-        ("ob-return-glyph", 12.0),
-    ];
-    let mut css = String::new();
-    for (class, size) in type_scale {
-        css.push_str(&format!(".{class} {{ font-size:{}px; }}\n", px(*size)));
-    }
-    let rule = |selector: &str, body: String| format!(".{selector} {{ {body} }}\n");
-    css.push_str(&rule(
-        "ob-primary",
-        format!(
-            "min-height:{}px; padding:0 {}px; border-radius:{}px;",
-            px(46.0),
-            px(22.0),
-            px(10.0)
-        ),
-    ));
-    css.push_str(&rule(
-        "ob-secondary",
-        format!(
-            "min-height:{}px; padding:0 {}px; border-radius:{}px;",
-            px(42.0),
-            px(20.0),
-            px(10.0)
-        ),
-    ));
-    css.push_str(&rule(
-        "ob-ghost",
-        format!(
-            "min-height:{}px; padding:0 {}px; border-radius:{}px;",
-            px(36.0),
-            px(16.0),
-            px(9.0)
-        ),
-    ));
-    css.push_str(&rule(
-        "ob-next",
-        format!(
-            "min-height:{}px; min-width:{}px; padding:0 {}px; border-radius:{}px;",
-            px(42.0),
-            px(96.0),
-            px(20.0),
-            px(10.0)
-        ),
-    ));
-    css.push_str(&rule(
-        "ob-back",
-        format!(
-            "min-height:{}px; padding:0 {}px; border-radius:{}px;",
-            px(38.0),
-            px(14.0),
-            px(9.0)
-        ),
-    ));
-    css.push_str(&rule(
-        "ob-code-box",
-        format!(
-            "min-width:{}px; min-height:{}px; border-radius:{}px;",
-            px(44.0),
-            px(44.0),
-            px(12.0)
-        ),
-    ));
-    css.push_str(&rule(
-        "ob-choice-card",
-        format!("padding:{}px; border-radius:{}px;", px(16.0), px(14.0)),
-    ));
-    css.push_str(&rule(
-        "ob-feature-panel",
-        format!(
-            "padding:{}px {}px; border-radius:{}px;",
-            px(16.0),
-            px(18.0),
-            px(14.0)
-        ),
-    ));
-    css.push_str(&rule(
-        "ob-settings-card",
-        format!(
-            "padding:{}px {}px; border-radius:{}px;",
-            px(16.0),
-            px(18.0),
-            px(14.0)
-        ),
-    ));
-    css.push_str(&rule(
-        "ob-plan-card",
-        format!(
-            "padding:{}px {}px; border-radius:{}px; min-width:{}px;",
-            px(26.0),
-            px(22.0),
-            px(18.0),
-            px(340.0)
-        ),
-    ));
-    css.push_str(&rule(
-        "ob-split-left",
-        format!(
-            "padding:{}px {}px {}px {}px;",
-            px(42.0),
-            px(44.0),
-            px(40.0),
-            px(54.0)
-        ),
-    ));
-    css.push_str(&rule("ob-centered", format!("padding-top:{}px;", px(58.0))));
-    css.push_str(&rule(
-        "ob-footer",
-        format!(
-            "padding:{}px {}px {}px {}px; min-height:{}px;",
-            px(18.0),
-            px(28.0),
-            px(24.0),
-            px(28.0),
-            px(76.0)
-        ),
-    ));
-    css.push_str(&rule("ob-code-row", format!("margin-top:{}px;", px(26.0))));
-    css.push_str(&rule("ob-copy-row", format!("margin-top:{}px;", px(19.0))));
-    css.push_str(&rule(
-        "ob-plan-price-row",
-        format!("margin-top:{}px;", px(22.0)),
-    ));
-    css
-}
-
-/// A state line used by the account pages and the final checklist.
-pub(crate) fn status_line() -> gtk4::Label {
-    let label = gtk4::Label::new(None);
-    label.add_css_class("ob-status");
-    label.set_halign(Align::Start);
-    label.set_xalign(0.0);
-    label.set_wrap(true);
-    label
-}
-
-pub(crate) fn report_error(label: &gtk4::Label, message: &str) {
-    label.remove_css_class("ob-status-success");
-    label.add_css_class("ob-status-error");
-    label.set_text(message);
+fn scaled_css(scale: f64) -> String {
+    format!(
+        ".onboarding-progress-caption {{ font-size:{}px; }} \
+         .onboarding-headline {{ font-size:{}px; }} \
+         .onboarding-copy {{ font-size:{}px; }} \
+         .onboarding-text-button {{ font-size:{}px; padding:{}px {}px; }} \
+         .onboarding-text-button:focus, .onboarding-text-button:focus-visible {{ \
+             outline: none; box-shadow: none; background: transparent; }} \
+         .onboarding-hotkey-table .shortcut-capture-keycap {{ \
+             font-size:{}px; padding:{}px {}px; }} \
+         .onboarding-connect-code {{ font-size:{}px; }} \
+         .onboarding-status-error {{ font-size:{}px; }}",
+        px(scale, 12.0),
+        px(scale, 26.0),
+        px(scale, 14.0),
+        px(scale, 13.0),
+        px(scale, 6.0),
+        px(scale, 12.0),
+        px(scale, 12.0),
+        px(scale, 4.0),
+        px(scale, 10.0),
+        px(scale, 26.0),
+        px(scale, 12.0),
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::onboarding::hero::HeroScene;
+    use super::OnboardingStep;
 
     #[test]
-    fn the_setup_pages_map_to_the_four_progress_dots() {
-        assert_eq!(Step::Appearance.dot_index(), Some(0));
-        assert_eq!(Step::Formats.dot_index(), Some(1));
-        assert_eq!(Step::Recording.dot_index(), Some(2));
-        assert_eq!(Step::Plan.dot_index(), Some(3));
-        assert_eq!(Step::Account.dot_index(), None);
-        assert_eq!(Step::Authorize.dot_index(), None);
-        assert_eq!(Step::Finish.dot_index(), None);
-    }
+    fn step_chain_matches_the_rail_order() {
+        let steps = OnboardingStep::all();
+        assert_eq!(steps.len(), 4);
 
-    #[test]
-    fn the_flow_advances_in_order_and_never_goes_back_into_sign_in() {
-        let mut step = Step::Account;
-        while let Some(next) = step.next() {
-            if step == Step::Authorize {
-                // Appearance is the first page after the account is linked;
-                // Back must not reopen the browser handoff.
-                assert_eq!(next.prev(), None);
-            } else {
-                assert_eq!(next.prev(), Some(step));
-            }
-            step = next;
+        // next() walks the same order as the rail, prev() walks it back.
+        for pair in steps.windows(2) {
+            assert_eq!(pair[0].next(), Some(pair[1]));
+            assert_eq!(pair[1].prev(), Some(pair[0]));
         }
-        assert_eq!(step, Step::Finish);
+        assert_eq!(steps[0].prev(), None);
+        assert_eq!(steps[steps.len() - 1].next(), None);
     }
 
     #[test]
-    fn onboarding_css_parses_without_gtk_errors() {
-        let Some((errors, bogus_errors)) = crate::test_support::with_gtk(|| {
-            let provider = CssProvider::new();
-            let errors = std::rc::Rc::new(RefCell::new(Vec::new()));
-            {
-                let errors = std::rc::Rc::clone(&errors);
-                provider.connect_parsing_error(move |_, section, error| {
-                    errors
-                        .borrow_mut()
-                        .push(format!("{}: {}", section.to_str(), error.message()));
-                });
-            }
-            provider.load_from_data(&format!("{ONBOARDING_CSS}\n{}", scaled_css()));
-
-            let bogus = CssProvider::new();
-            let bogus_errors = std::rc::Rc::new(RefCell::new(Vec::new()));
-            {
-                let bogus_errors = std::rc::Rc::clone(&bogus_errors);
-                bogus.connect_parsing_error(move |_, _, error| {
-                    bogus_errors.borrow_mut().push(error.message().to_string());
-                });
-            }
-            bogus.load_from_data(".bogus { definitely-not-a-property: 1; }");
-
-            let parsed: Vec<String> = errors.borrow().clone();
-            let reported: Vec<String> = bogus_errors.borrow().clone();
-            (parsed, reported)
-        }) else {
-            eprintln!("skipping: no display available");
-            return;
-        };
-
-        assert!(
-            errors.is_empty(),
-            "onboarding CSS failed to parse: {errors:#?}"
-        );
-        assert!(
-            !bogus_errors.is_empty(),
-            "parsing-error signal is not firing; the CSS check is vacuous"
-        );
-    }
-
-    #[test]
-    fn hero_scenes_start_from_the_stored_recording_defaults() {
-        let mut config = AppConfig {
-            rec_webcam_enabled: false,
-            rec_mic: true,
-            ..AppConfig::default()
-        };
-        assert_eq!(HeroScene::for_config(&config), HeroScene::ScreenAndVoice);
-        config.rec_webcam_enabled = true;
-        assert_eq!(HeroScene::for_config(&config), HeroScene::CameraAndVoice);
-        config.rec_webcam_enabled = false;
-        config.rec_mic = false;
-        assert_eq!(HeroScene::for_config(&config), HeroScene::ScreenOnly);
+    fn every_step_has_a_label() {
+        for step in OnboardingStep::all() {
+            assert!(!step.label().is_empty());
+        }
     }
 }

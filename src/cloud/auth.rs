@@ -311,17 +311,23 @@ pub fn logout() -> Result<(), LogoutError> {
         Err(e) => return Err(LogoutError::HttpRequest(e.to_string())),
     }
 
+    clear_session(&mut config);
+
+    save_config(&config).map_err(|e| LogoutError::Server(format!("Failed to save config: {e}")))?;
+    println!("✓ Logged out.");
+    Ok(())
+}
+
+/// Forget the cached session in `config`: the tokens, the account, and the plan.
+/// Revoking the token is the caller's job, so a sign-out can still clear this
+/// device when the server cannot be reached.
+pub fn clear_session(config: &mut AppConfig) {
     config.cloud_api_token.clear();
     config.cloud_refresh_token.clear();
     config.cloud_user_name.clear();
     config.cloud_user_email.clear();
     config.cloud_pro_plan = false;
     config.cloud_plan_tier.clear();
-
-    save_config(&config).map_err(|e| LogoutError::Server(format!("Failed to save config: {e}")))?;
-
-    println!("✓ Logged out.");
-    Ok(())
 }
 
 fn format_user_code(code: &str) -> String {

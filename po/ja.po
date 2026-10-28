@@ -3638,3 +3638,22 @@ msgstr "完了処理中…"
 
 msgid "Video editing is not available in the Windows build yet."
 msgstr "動画編集は Windows 版ではまだ利用できません。"
+
+# First-run onboarding in the Windows build.
+msgid "Your screenshot companion for Windows. Set it up in a few quick steps."
+msgstr "Windows のためのスクリーンショットの相棒。数ステップですぐに設定できます。"
+
+msgid "ApexShot runs in the background with a tray icon.\nAfter setup, you do not need to open Settings every time."
+msgstr "ApexShot はトレイアイコンでバックグラウンド動作します。\nセットアップ後は毎回設定を開く必要はありません。"
+
+msgid "ApexShot stays in the tray; right-click it for the capture menu."
+msgstr "ApexShot はトレイに常駐します。右クリックでキャプチャメニューが開きます。"
+
+msgid "Bindings are saved; global hotkeys arrive in a later build."
+msgstr "キー割り当ては保存されます。グローバルホットキーは今後のビルドで対応します。"
+
+msgid "ApexShot is ready. It runs from the tray from now on."
+msgstr "ApexShot の準備ができました。以降はトレイから動作します。"
+
+msgid "Signed in, but this device could not save the account."
+msgstr "サインインしましたが、このデバイスはアカウントを保存できませんでした。"

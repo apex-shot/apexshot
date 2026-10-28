@@ -10,6 +10,11 @@ pub mod clipboard {
         display.clipboard().set_text(text);
         Ok(())
     }
+
+    /// The name the shared onboarding helpers call.
+    pub fn copy_text_to_gtk_clipboard(text: &str) -> Result<(), String> {
+        copy_text_to_clipboard(text)
+    }
 }
 
 pub mod notify {

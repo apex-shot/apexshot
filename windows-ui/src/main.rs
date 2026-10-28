@@ -26,9 +26,9 @@ fn main() {
     }
 }
 
-/// The account gate: a Windows install that has not finished onboarding opens
-/// the first-run flow instead of Settings. `--onboarding` and the environment
-/// override re-open it for a walk-through without touching the stored flag.
+/// A Windows install that has not finished onboarding opens the first-run flow
+/// instead of Settings. `--onboarding` and the environment override re-open it
+/// for a walk-through without touching the stored flag.
 fn needs_onboarding() -> bool {
     let forced = std::env::args().any(|arg| arg == "--onboarding")
         || std::env::var("APEXSHOT_FORCE_ONBOARDING")
