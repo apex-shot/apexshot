@@ -33,4 +33,13 @@ WebcamLayout webcamLayoutFor(const QRect& region,
                              double relY,
                              bool flip);
 
+/// Recover the stored position for a bubble the person dragged to `rect`.
+/// Returns false when the region is empty or the position cannot be expressed.
+bool webcamRelativePosition(const QRect& region,
+                            int sizeIndex,
+                            int shapeIndex,
+                            const QRect& rect,
+                            double* relX,
+                            double* relY);
+
 } // namespace Platform

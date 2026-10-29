@@ -5,6 +5,8 @@
 #include <QCloseEvent>
 #include <QCursor>
 #include <QFont>
+#include <QFontDatabase>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QMouseEvent>
 #include <QPainter>
@@ -18,21 +20,35 @@
 
 namespace {
 
-constexpr int kWidth = 260;
-constexpr int kHeight = 62;
-constexpr int kMargin = 24;
+// A compact single-row pill: drag dots, record dot, timer, then the action
+// buttons. The bar is sized from its contents so the saving state shrinks
+// instead of leaving a gap on the right.
+constexpr int kHeight = 46;
+// The window carries a few extra pixels below the body so the drop shadow's
+// rounded bottom edge fits instead of being clipped into a square band.
+constexpr int kShadowDrop = 3;
+constexpr int kWindowHeight = kHeight + kShadowDrop;
+constexpr int kPad = 10;
+constexpr int kButtonSize = 30;
+constexpr int kButtonGap = 2;
+constexpr int kButtonCount = 4;
+constexpr int kHandleWidth = 8;
+constexpr int kDotSize = 9;
+constexpr int kIconSize = 18;
+constexpr int kTextX = kPad + kHandleWidth + 10 + kDotSize + 8;
 
-// Same chrome and control tokens as the Linux recording bar.
-const QColor kChrome(20, 20, 20);
+const QColor kChrome(20, 20, 20, 250);
 const QColor kChromeRim(255, 255, 255, 26);
-const QColor kSegment(30, 31, 34);
-const QColor kSegmentHover(40, 41, 44);
 const QColor kText(245, 245, 246);
-const QColor kMuted(160, 160, 165);
-const QColor kHover(255, 255, 255, 22);
-const QColor kPressed(255, 255, 255, 34);
-const QColor kSeparator(255, 255, 255, 20);
+const QColor kMuted(158, 158, 164);
+const QColor kHover(255, 255, 255, 20);
 const QColor kRecord(244, 99, 87);
+
+// Lucide glyphs, so the bar uses the same icon set as the Quick Access bar.
+constexpr ushort kGlyphPause = 0xE12E;
+constexpr ushort kGlyphPlay = 0xE13C;
+constexpr ushort kGlyphRestart = 0xE148;
+constexpr ushort kGlyphTrash = 0xE18D;
 
 QFont uiFont(int pixelSize, bool bold)
 {
@@ -40,6 +56,54 @@ QFont uiFont(int pixelSize, bool bold)
     font.setPixelSize(pixelSize);
     font.setWeight(bold ? QFont::DemiBold : QFont::Normal);
     return font;
+}
+
+QString iconFamily()
+{
+    static const QString family = [] {
+        const int id =
+            QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/Lucide.ttf"));
+        if (id < 0)
+            return QString();
+        const QStringList families = QFontDatabase::applicationFontFamilies(id);
+        return families.isEmpty() ? QString() : families.first();
+    }();
+    return family;
+}
+
+void drawIcon(QPainter& painter, ushort glyph, const QRectF& rect, const QColor& color)
+{
+    const QString family = iconFamily();
+    if (family.isEmpty())
+        return;
+    QFont font(family);
+    font.setPixelSize(kIconSize);
+    QPainterPath path;
+    path.addText(0, 0, font, QString(QChar(glyph)));
+    const QRectF bounds = path.boundingRect();
+    painter.save();
+    painter.translate(rect.center() - bounds.center());
+    painter.fillPath(path, color);
+    painter.restore();
+}
+
+QPoint clampedToScreen(const QPoint& topLeft, const QSize& size, const QPoint& cursor)
+{
+    QScreen* screen = QGuiApplication::screenAt(cursor);
+    if (!screen)
+        screen = QGuiApplication::screenAt(
+            QPoint(topLeft.x() + size.width() / 2, topLeft.y() + size.height() / 2));
+    if (!screen)
+        return topLeft;
+    const QRect available = screen->availableGeometry();
+    QPoint point = topLeft;
+    point.setX(std::clamp(point.x(),
+                          available.left(),
+                          std::max(available.left(), available.right() - size.width() + 1)));
+    point.setY(std::clamp(point.y(),
+                          available.top(),
+                          std::max(available.top(), available.bottom() - size.height() + 1)));
+    return point;
 }
 
 QScreen* screenForRegion(const QRect& deviceRect)
@@ -53,39 +117,6 @@ QScreen* screenForRegion(const QRect& deviceRect)
             return screen;
     }
     return QGuiApplication::primaryScreen();
-}
-
-void drawPauseIcon(QPainter& painter, const QRectF& rect, bool paused)
-{
-    painter.setPen(QPen(kText, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-    const QPointF c = rect.center();
-    const qreal r = 10.0;
-    painter.drawEllipse(QRectF(c.x() - r, c.y() - r, r * 2.0, r * 2.0));
-
-    if (paused) {
-        QPainterPath triangle;
-        triangle.moveTo(c.x() - 3.0, c.y() - 5.5);
-        triangle.lineTo(c.x() + 5.0, c.y());
-        triangle.lineTo(c.x() - 3.0, c.y() + 5.5);
-        triangle.closeSubpath();
-        painter.fillPath(triangle, kText);
-    } else {
-        painter.drawLine(QPointF(c.x() - 3.5, c.y() - 5.5), QPointF(c.x() - 3.5, c.y() + 5.5));
-        painter.drawLine(QPointF(c.x() + 3.5, c.y() - 5.5), QPointF(c.x() + 3.5, c.y() + 5.5));
-    }
-}
-
-void drawTrashIcon(QPainter& painter, const QRectF& rect)
-{
-    painter.setPen(QPen(kText, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-    const QPointF c = rect.center();
-    painter.drawRoundedRect(QRectF(c.x() - 5.5, c.y() - 3.0, 11.0, 12.5), 1.5, 1.5);
-    painter.drawLine(QPointF(c.x() - 8.0, c.y() - 5.0), QPointF(c.x() + 8.0, c.y() - 5.0));
-    painter.drawRoundedRect(QRectF(c.x() - 2.5, c.y() - 7.5, 5.0, 2.5), 0.8, 0.8);
-    painter.drawLine(QPointF(c.x() - 2.0, c.y() - 1.0), QPointF(c.x() - 2.0, c.y() + 6.0));
-    painter.drawLine(QPointF(c.x() + 2.0, c.y() - 1.0), QPointF(c.x() + 2.0, c.y() + 6.0));
 }
 
 } // namespace
@@ -103,11 +134,18 @@ RecordingControls::RecordingControls(Platform::RecordingSession* session,
     setAttribute(Qt::WA_DeleteOnClose);
     setMouseTracking(true);
     setCursor(Qt::ArrowCursor);
-    setFixedSize(kWidth, kHeight);
+    setFixedSize(preferredWidth(), kWindowHeight);
 
     m_elapsedMs = 0;
+    m_textWidth = QFontMetrics(uiFont(15, true)).horizontalAdvance(QStringLiteral("00:00"));
     connect(m_session, &Platform::RecordingSession::elapsedChanged, this, [this](qint64 ms) {
         m_elapsedMs = ms;
+        const int needed =
+            QFontMetrics(uiFont(15, true)).horizontalAdvance(elapsedText());
+        if (needed > m_textWidth) {
+            m_textWidth = needed;
+            updateWidth();
+        }
         update();
     });
     connect(m_session, &Platform::RecordingSession::stateChanged, this, [this] { update(); });
@@ -137,29 +175,53 @@ QString RecordingControls::elapsedText() const
         .arg(seconds, 2, 10, QLatin1Char('0'));
 }
 
-QRectF RecordingControls::stopRect() const
+int RecordingControls::preferredWidth() const
 {
-    return QRectF(6, 5, 130, 52);
+    const QFontMetrics metrics(uiFont(15, true));
+    const QString text = m_closing ? QStringLiteral("Saving") : QString();
+    const int textWidth = m_closing ? metrics.horizontalAdvance(text)
+                                    : (m_textWidth > 0
+                                           ? m_textWidth
+                                           : metrics.horizontalAdvance(QStringLiteral("00:00")));
+    int width = kTextX + textWidth;
+    if (!m_closing)
+        width += 8 + kButtonCount * kButtonSize + (kButtonCount - 1) * kButtonGap;
+    return width + kPad;
 }
 
-QRectF RecordingControls::pauseRect() const
+void RecordingControls::updateWidth()
 {
-    return QRectF(141, 5, 56, 52);
+    const int target = preferredWidth();
+    if (target == width())
+        return;
+    // Keep the bar where the person left it instead of snapping back to the
+    // default spot when the saving state shortens it.
+    const QPoint center = frameGeometry().center();
+    setFixedSize(target, kWindowHeight);
+    move(clampedToScreen(QPoint(center.x() - target / 2, center.y() - kHeight / 2),
+                         size(),
+                         QCursor::pos()));
+    update();
 }
 
-QRectF RecordingControls::discardRect() const
+QRectF RecordingControls::buttonRect(int index) const
 {
-    return QRectF(202, 5, 56, 52);
+    const int right = width() - kPad;
+    const int x = right - (kButtonCount - index) * kButtonSize
+                  - (kButtonCount - 1 - index) * kButtonGap;
+    return QRectF(x, (kHeight - kButtonSize) / 2.0, kButtonSize, kButtonSize);
 }
 
 RecordingControls::Button RecordingControls::hitTest(const QPoint& point) const
 {
-    if (stopRect().contains(point))
-        return Button::Stop;
-    if (pauseRect().contains(point))
-        return Button::Pause;
-    if (discardRect().contains(point))
-        return Button::Discard;
+    if (!m_closing) {
+        static const Button order[] = {Button::Pause, Button::Restart, Button::Stop,
+                                       Button::Discard};
+        for (int i = 0; i < kButtonCount; ++i) {
+            if (buttonRect(i).contains(point))
+                return order[i];
+        }
+    }
     return Button::Body;
 }
 
@@ -168,63 +230,90 @@ void RecordingControls::paintEvent(QPaintEvent*)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
-    // Chrome: the same 20,20,20 bar with a hairline rim the Linux controls use.
-    const QRectF chrome = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+    const QRectF chrome(0.5, 0.5, width() - 1.0, kHeight - 1.0);
+    constexpr qreal radius = 10.0;
+
     QPainterPath shadow;
-    shadow.addRoundedRect(chrome.translated(0, 3), 12, 12);
-    painter.fillPath(shadow, QColor(0, 0, 0, 105));
+    shadow.addRoundedRect(chrome.translated(0, 3), radius, radius);
+    painter.fillPath(shadow, QColor(0, 0, 0, 100));
 
     QPainterPath chromePath;
-    chromePath.addRoundedRect(chrome, 12, 12);
+    chromePath.addRoundedRect(chrome, radius, radius);
     painter.fillPath(chromePath, kChrome);
     painter.setPen(QPen(kChromeRim, 1.0));
     painter.setBrush(Qt::NoBrush);
     painter.drawPath(chromePath);
 
-    // Stop + timer segment.
-    const QRectF stop = stopRect();
+    // Drag dots.
     painter.setPen(Qt::NoPen);
-    painter.setBrush(m_hovered == Button::Stop && !m_closing ? kSegmentHover : kSegment);
-    painter.drawRoundedRect(stop, 8, 8);
-
-    const QPointF stopCenter(stop.left() + 26.0, stop.center().y());
-    const QColor recordColor = m_closing ? kMuted : kRecord;
-    painter.setPen(QPen(recordColor, 1.8));
-    painter.setBrush(Qt::NoBrush);
-    painter.drawEllipse(stopCenter, 10.0, 10.0);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(recordColor);
-    painter.drawRoundedRect(
-        QRectF(stopCenter - QPointF(4.0, 4.0), QSizeF(8.0, 8.0)), 1.5, 1.5);
-
-    painter.setFont(uiFont(19, true));
-    painter.setPen(m_closing ? kMuted : kRecord);
-    painter.drawText(QRectF(stop.left() + 48.0, stop.top(), stop.width() - 56.0, stop.height()),
-                     Qt::AlignVCenter | Qt::AlignLeft,
-                     m_closing ? QStringLiteral("Saving") : elapsedText());
-
-    if (!m_closing) {
-        // Hairline rules matching the Linux bar.
-        painter.setPen(QPen(kSeparator, 1.0));
-        painter.drawLine(QPointF(138.5, 18.0), QPointF(138.5, kHeight - 18.0));
-        painter.drawLine(QPointF(200.5, 18.0), QPointF(200.5, kHeight - 18.0));
-
-        // Pause / resume.
-        if (m_hovered == Button::Pause) {
-            painter.setPen(Qt::NoPen);
-            painter.setBrush(kHover);
-            painter.drawRoundedRect(pauseRect().adjusted(2, 2, -2, -2), 10, 10);
+    painter.setBrush(QColor(kMuted.red(), kMuted.green(), kMuted.blue(), 150));
+    const qreal handleX = kPad + kHandleWidth / 2.0;
+    const qreal handleY = kHeight / 2.0;
+    for (int column = 0; column < 2; ++column) {
+        for (int row = 0; row < 3; ++row) {
+            painter.drawEllipse(QPointF(handleX + (column == 0 ? -2.5 : 2.5),
+                                        handleY + (row - 1) * 4.0),
+                                1.3,
+                                1.3);
         }
-        drawPauseIcon(painter, pauseRect(), m_session->isPaused());
-
-        // Discard.
-        if (m_hovered == Button::Discard) {
-            painter.setPen(Qt::NoPen);
-            painter.setBrush(kHover);
-            painter.drawRoundedRect(discardRect().adjusted(2, 2, -2, -2), 10, 10);
-        }
-        drawTrashIcon(painter, discardRect());
     }
+
+    // Record dot and timer.
+    const QPointF dot(kPad + kHandleWidth + 10 + kDotSize / 2.0, kHeight / 2.0);
+    painter.setBrush(m_closing ? kMuted : kRecord);
+    painter.drawEllipse(dot, kDotSize / 2.0, kDotSize / 2.0);
+
+    painter.setFont(uiFont(15, true));
+    painter.setPen(m_closing ? kMuted : kText);
+    const int buttonsStart =
+        m_closing ? width() - kPad : int(buttonRect(0).left()) - 8;
+    painter.drawText(
+        QRectF(kTextX, 0, std::max(0, buttonsStart - kTextX), kHeight),
+        Qt::AlignVCenter | Qt::AlignLeft,
+        m_closing ? QStringLiteral("Saving") : elapsedText());
+
+    if (m_closing)
+        return;
+
+    // Pause / resume.
+    if (m_hovered == Button::Pause) {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(kHover);
+        painter.drawEllipse(buttonRect(0).center(), kButtonSize / 2.0, kButtonSize / 2.0);
+    }
+    drawIcon(painter,
+             m_session->isPaused() ? kGlyphPlay : kGlyphPause,
+             buttonRect(0),
+             kText);
+
+    // Restart.
+    if (m_hovered == Button::Restart) {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(kHover);
+        painter.drawEllipse(buttonRect(1).center(), kButtonSize / 2.0, kButtonSize / 2.0);
+    }
+    drawIcon(painter, kGlyphRestart, buttonRect(1), kText);
+
+    // Stop: a filled red rounded square, as in the reference.
+    if (m_hovered == Button::Stop) {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(kHover);
+        painter.drawEllipse(buttonRect(2).center(), kButtonSize / 2.0, kButtonSize / 2.0);
+    }
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(kRecord);
+    painter.drawRoundedRect(QRectF(buttonRect(2).center() - QPointF(5.5, 5.5),
+                                   QSizeF(11.0, 11.0)),
+                            3.0,
+                            3.0);
+
+    // Discard.
+    if (m_hovered == Button::Discard) {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(kHover);
+        painter.drawEllipse(buttonRect(3).center(), kButtonSize / 2.0, kButtonSize / 2.0);
+    }
+    drawIcon(painter, kGlyphTrash, buttonRect(3), kText);
 }
 
 void RecordingControls::mousePressEvent(QMouseEvent* event)
@@ -239,6 +328,7 @@ void RecordingControls::mousePressEvent(QMouseEvent* event)
         if (m_closing)
             return;
         m_closing = true;
+        updateWidth();
         m_session->stop();
         update();
         return;
@@ -251,10 +341,16 @@ void RecordingControls::mousePressEvent(QMouseEvent* event)
             m_session->pause();
         update();
         return;
+    case Button::Restart:
+        if (m_closing)
+            return;
+        emit restartRequested();
+        return;
     case Button::Discard:
         if (m_closing)
             return;
         m_closing = true;
+        updateWidth();
         m_session->discard();
         update();
         return;
@@ -270,7 +366,7 @@ void RecordingControls::mousePressEvent(QMouseEvent* event)
 void RecordingControls::mouseMoveEvent(QMouseEvent* event)
 {
     if (m_dragging) {
-        move(event->globalPos() - m_dragOffset);
+        move(clampedToScreen(event->globalPos() - m_dragOffset, size(), event->globalPos()));
         return;
     }
 
@@ -330,11 +426,11 @@ void RecordingControls::positionOnScreen()
     int y = 0;
     if (fullscreen || region.isEmpty()) {
         x = available.center().x() - width() / 2;
-        y = available.top() + kMargin;
+        y = available.top() + 16;
     } else {
         constexpr int gap = 12;
-        const int minY = available.top() + kMargin;
-        const int maxY = available.bottom() - height() - kMargin;
+        const int minY = available.top() + 16;
+        const int maxY = available.bottom() - height() - 16;
 
         x = region.center().x() - width() / 2;
 
@@ -344,11 +440,11 @@ void RecordingControls::positionOnScreen()
         y = region.bottom() + 1 + gap;
         if (y > maxY) {
             const int above = region.top() - gap - height();
-            y = above >= minY ? above : region.top() + kMargin;
+            y = above >= minY ? above : region.top() + 16;
         }
 
-        x = std::max(available.left() + kMargin,
-                     std::min(x, available.right() - width() - kMargin));
+        x = std::max(available.left() + 16,
+                     std::min(x, available.right() - width() - 16));
         y = std::max(minY, std::min(y, maxY));
     }
     move(x, y);

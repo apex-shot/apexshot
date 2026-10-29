@@ -71,6 +71,23 @@ bool captureWindow(quintptr id, bool includeCursor, CaptureResult& out, QString&
 /// and title bar. Empty when the window or its client rect is unavailable.
 QRect clientRect(quintptr id);
 
+/// Visible frame of one window in device pixels, empty when the window is
+/// gone. The picker calls this while it follows a selected window.
+QRect windowFrame(quintptr id);
+
+/// Bring a window to the front before recording it, since a window recording
+/// captures the screen region it occupies.
+void activateWindow(quintptr id);
+
+/// Raise a window above its neighbours without taking focus, so a covered
+/// window can be previewed while a selection overlay keeps the keyboard.
+void raiseWindow(quintptr id);
+
+/// Resize a window's visible frame, keeping its top-left corner in place. The
+/// caller passes the frame it wants to see, not the extended window bounds,
+/// so a handle that follows visible pixels does not drift on every drag.
+void resizeWindow(quintptr id, const QRect& frame);
+
 /// Grab the bounding box of every display, for selections that span monitors.
 bool captureVirtualDesktop(bool includeCursor, CaptureResult& out, QString& outError);
 

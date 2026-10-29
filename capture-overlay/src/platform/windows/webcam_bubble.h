@@ -6,7 +6,10 @@
 #include <QRect>
 #include <QWidget>
 
+#include <functional>
+
 class QPainterPath;
+class QScreen;
 
 namespace Platform {
 
@@ -34,16 +37,33 @@ public:
     /// pixels like the capture region.
     void placeAt(const QRect& deviceRect);
 
+    /// Let the person drag the bubble around inside the recorded region.
+    /// `deviceRegion` is in device pixels, like `placeAt`.
+    void setMoveBounds(const QRect& deviceRegion);
+
+    /// Called with the bubble's final device-pixel rectangle after a drag.
+    void setMovedHandler(std::function<void(const QRect&)> handler);
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void showEvent(QShowEvent* event) override;
+    void mousePressEvent(QMouseEvent* event) override;
+    void mouseMoveEvent(QMouseEvent* event) override;
+    void mouseReleaseEvent(QMouseEvent* event) override;
 
 private:
     [[nodiscard]] QPainterPath shapePath(const QRectF& rect) const;
+    [[nodiscard]] QScreen* screenForDevicePoint(const QPoint& point) const;
+    [[nodiscard]] QRect logicalRectFor(const QRect& deviceRect) const;
+    [[nodiscard]] QRect deviceRectFor(const QRect& logicalRect) const;
 
     QImage m_frame;
     int m_shape = 0;
     bool m_flip = false;
+    QRect m_bounds;
+    QPoint m_dragOffset;
+    bool m_dragging = false;
+    std::function<void(const QRect&)> m_moved;
 };
 
 } // namespace Platform

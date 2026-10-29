@@ -6,6 +6,8 @@
 #include <QCloseEvent>
 #include <QCursor>
 #include <QFont>
+#include <QFontDatabase>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QMouseEvent>
 #include <QPainter>
@@ -20,19 +22,37 @@
 
 namespace {
 
-constexpr int kWidth = 272;
-constexpr int kHeight = 62;
+// A compact single-row pill, the same shape and tokens as the recording bar:
+// drag dots, an accent dot with the frame count, then Finish and discard. The
+// bar is sized from its contents so the stitching state shrinks instead of
+// leaving a gap on the right.
+constexpr int kHeight = 46;
+// The window carries a few extra pixels below the body so the drop shadow's
+// rounded bottom edge fits instead of being clipped into a square band.
+constexpr int kShadowDrop = 3;
+constexpr int kWindowHeight = kHeight + kShadowDrop;
+constexpr int kPad = 10;
+constexpr int kButtonSize = 30;
+constexpr int kFinishGap = 8;
+constexpr int kTextGap = 12;
+constexpr int kHandleWidth = 8;
+constexpr int kDotSize = 9;
+constexpr int kIconSize = 18;
+constexpr int kTextX = kPad + kHandleWidth + 10 + kDotSize + 8;
+constexpr int kFinishHeight = 30;
+constexpr int kFinishPadX = 14;
 constexpr int kMargin = 24;
 
-const QColor kChrome(20, 20, 20);
+const QColor kChrome(20, 20, 20, 250);
 const QColor kChromeRim(255, 255, 255, 26);
-const QColor kSegment(30, 31, 34);
 const QColor kText(245, 245, 246);
-const QColor kMuted(160, 160, 165);
-const QColor kHover(255, 255, 255, 22);
-const QColor kSeparator(255, 255, 255, 20);
+const QColor kMuted(158, 158, 164);
+const QColor kHover(255, 255, 255, 20);
 const QColor kAccent(255, 102, 0);
 const QColor kAccentHover(255, 124, 32);
+
+// Lucide glyphs, so the bar uses the same icon set as the rest of the shell.
+constexpr ushort kGlyphTrash = 0xE18D;
 
 QFont uiFont(int pixelSize, bool bold)
 {
@@ -40,6 +60,61 @@ QFont uiFont(int pixelSize, bool bold)
     font.setPixelSize(pixelSize);
     font.setWeight(bold ? QFont::DemiBold : QFont::Normal);
     return font;
+}
+
+QString iconFamily()
+{
+    static const QString family = [] {
+        const int id = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/Lucide.ttf"));
+        if (id < 0)
+            return QString();
+        const QStringList families = QFontDatabase::applicationFontFamilies(id);
+        return families.isEmpty() ? QString() : families.first();
+    }();
+    return family;
+}
+
+void drawIcon(QPainter& painter, ushort glyph, const QRectF& rect, const QColor& color)
+{
+    const QString family = iconFamily();
+    if (family.isEmpty())
+        return;
+    QFont font(family);
+    font.setPixelSize(kIconSize);
+    QPainterPath path;
+    path.addText(0, 0, font, QString(QChar(glyph)));
+    const QRectF bounds = path.boundingRect();
+    painter.save();
+    painter.translate(rect.center() - bounds.center());
+    painter.fillPath(path, color);
+    painter.restore();
+}
+
+int finishWidth()
+{
+    static const int width =
+        QFontMetrics(uiFont(12, true)).horizontalAdvance(QStringLiteral("Finish"))
+        + kFinishPadX * 2;
+    return width;
+}
+
+QPoint clampedToScreen(const QPoint& topLeft, const QSize& size, const QPoint& cursor)
+{
+    QScreen* screen = QGuiApplication::screenAt(cursor);
+    if (!screen)
+        screen = QGuiApplication::screenAt(
+            QPoint(topLeft.x() + size.width() / 2, topLeft.y() + size.height() / 2));
+    if (!screen)
+        return topLeft;
+    const QRect available = screen->availableGeometry();
+    QPoint point = topLeft;
+    point.setX(std::clamp(point.x(),
+                          available.left(),
+                          std::max(available.left(), available.right() - size.width() + 1)));
+    point.setY(std::clamp(point.y(),
+                          available.top(),
+                          std::max(available.top(), available.bottom() - size.height() + 1)));
+    return point;
 }
 
 QScreen* screenForRegion(const QRect& deviceRect)
@@ -53,18 +128,6 @@ QScreen* screenForRegion(const QRect& deviceRect)
             return screen;
     }
     return QGuiApplication::primaryScreen();
-}
-
-void drawTrashIcon(QPainter& painter, const QRectF& rect)
-{
-    painter.setPen(QPen(kText, 1.6, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-    painter.setBrush(Qt::NoBrush);
-    const QPointF c = rect.center();
-    painter.drawRoundedRect(QRectF(c.x() - 5.5, c.y() - 3.0, 11.0, 12.5), 1.5, 1.5);
-    painter.drawLine(QPointF(c.x() - 8.0, c.y() - 5.0), QPointF(c.x() + 8.0, c.y() - 5.0));
-    painter.drawRoundedRect(QRectF(c.x() - 2.5, c.y() - 7.5, 5.0, 2.5), 0.8, 0.8);
-    painter.drawLine(QPointF(c.x() - 2.0, c.y() - 1.0), QPointF(c.x() - 2.0, c.y() + 6.0));
-    painter.drawLine(QPointF(c.x() + 2.0, c.y() - 1.0), QPointF(c.x() + 2.0, c.y() + 6.0));
 }
 
 } // namespace
@@ -82,16 +145,14 @@ ScrollControls::ScrollControls(Platform::ScrollCaptureSession* session,
     setAttribute(Qt::WA_DeleteOnClose);
     setMouseTracking(true);
     setCursor(Qt::ArrowCursor);
-    setFixedSize(kWidth, kHeight);
 
-    connect(m_session, &Platform::ScrollCaptureSession::statusChanged, this,
-            [this](const QString& status) {
-                m_status = status;
-                update();
-            });
+    m_textWidth = QFontMetrics(uiFont(15, true)).horizontalAdvance(statusText());
+    setFixedSize(preferredWidth(), kWindowHeight);
+
     connect(m_session, &Platform::ScrollCaptureSession::frameCaptured, this,
             [this](int frames, int) {
                 m_frames = frames;
+                updateWidth();
                 update();
             });
     connect(m_session,
@@ -103,23 +164,64 @@ ScrollControls::ScrollControls(Platform::ScrollCaptureSession* session,
             });
 }
 
-QRectF ScrollControls::segmentRect() const
+QString ScrollControls::statusText() const
 {
-    return QRectF(6, 5, 136, 52);
+    if (m_closing)
+        return QStringLiteral("Stitching...");
+    if (m_frames <= 0)
+        return QStringLiteral("Starting...");
+    return QStringLiteral("%1 frames").arg(m_frames);
+}
+
+int ScrollControls::preferredWidth() const
+{
+    int width = kTextX + m_textWidth;
+    if (m_closing)
+        return width + kPad;
+    return width + kTextGap + finishWidth() + kFinishGap + kButtonSize + kPad;
+}
+
+void ScrollControls::updateWidth()
+{
+    const QString text = statusText();
+    const int needed = QFontMetrics(uiFont(15, true)).horizontalAdvance(text);
+    bool changed = false;
+    if (needed > m_textWidth) {
+        m_textWidth = needed;
+        changed = true;
+    }
+
+    const int target = preferredWidth();
+    if (target == width() && !changed)
+        return;
+
+    // Keep the bar where the person left it instead of snapping back to the
+    // default spot when the stitching state shortens it.
+    const QPoint center = frameGeometry().center();
+    setFixedSize(target, kWindowHeight);
+    move(clampedToScreen(QPoint(center.x() - target / 2, center.y() - kHeight / 2),
+                         size(),
+                         QCursor::pos()));
+    update();
 }
 
 QRectF ScrollControls::finishRect() const
 {
-    return QRectF(148, 14, 72, 34);
+    const int right = width() - kPad - kButtonSize - kFinishGap;
+    return QRectF(right - finishWidth(), (kHeight - kFinishHeight) / 2.0,
+                  finishWidth(), kFinishHeight);
 }
 
 QRectF ScrollControls::discardRect() const
 {
-    return QRectF(226, 5, 40, 52);
+    return QRectF(width() - kPad - kButtonSize, (kHeight - kButtonSize) / 2.0,
+                  kButtonSize, kButtonSize);
 }
 
 ScrollControls::Button ScrollControls::hitTest(const QPoint& point) const
 {
+    if (m_closing)
+        return Button::Body;
     if (finishRect().contains(point))
         return Button::Finish;
     if (discardRect().contains(point))
@@ -132,59 +234,69 @@ void ScrollControls::paintEvent(QPaintEvent*)
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing, true);
 
-    const QRectF chrome = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+    const QRectF chrome(0.5, 0.5, width() - 1.0, kHeight - 1.0);
+    constexpr qreal radius = 10.0;
+
     QPainterPath shadow;
-    shadow.addRoundedRect(chrome.translated(0, 3), 12, 12);
-    painter.fillPath(shadow, QColor(0, 0, 0, 105));
+    shadow.addRoundedRect(chrome.translated(0, 3), radius, radius);
+    painter.fillPath(shadow, QColor(0, 0, 0, 100));
 
     QPainterPath chromePath;
-    chromePath.addRoundedRect(chrome, 12, 12);
+    chromePath.addRoundedRect(chrome, radius, radius);
     painter.fillPath(chromePath, kChrome);
     painter.setPen(QPen(kChromeRim, 1.0));
     painter.setBrush(Qt::NoBrush);
     painter.drawPath(chromePath);
 
-    const QRectF segment = segmentRect();
+    // Drag dots.
     painter.setPen(Qt::NoPen);
-    painter.setBrush(kSegment);
-    painter.drawRoundedRect(segment, 8, 8);
+    painter.setBrush(QColor(kMuted.red(), kMuted.green(), kMuted.blue(), 150));
+    const qreal handleX = kPad + kHandleWidth / 2.0;
+    const qreal handleY = kHeight / 2.0;
+    for (int column = 0; column < 2; ++column) {
+        for (int row = 0; row < 3; ++row) {
+            painter.drawEllipse(QPointF(handleX + (column == 0 ? -2.5 : 2.5),
+                                        handleY + (row - 1) * 4.0),
+                                1.3,
+                                1.3);
+        }
+    }
 
-    painter.setFont(uiFont(9, true));
-    painter.setPen(kMuted);
-    painter.drawText(QRectF(18.0, 10.0, 118.0, 12.0),
-                     Qt::AlignLeft | Qt::AlignVCenter,
-                     QStringLiteral("SCROLL"));
+    // Accent dot and the frame count.
+    const QPointF dot(kPad + kHandleWidth + 10 + kDotSize / 2.0, kHeight / 2.0);
+    painter.setBrush(m_closing ? kMuted : kAccent);
+    painter.drawEllipse(dot, kDotSize / 2.0, kDotSize / 2.0);
 
+    const int buttonsStart = m_closing ? width() - kPad : int(finishRect().left()) - kTextGap;
     painter.setFont(uiFont(15, true));
     painter.setPen(m_closing ? kMuted : kText);
-    const QString label = m_closing
-        ? QStringLiteral("Stitching...")
-        : (m_frames <= 0 ? QStringLiteral("Starting...")
-                         : QStringLiteral("%1 frames").arg(m_frames));
-    painter.drawText(QRectF(18.0, 24.0, 118.0, 22.0),
-                     Qt::AlignLeft | Qt::AlignVCenter,
-                     label);
+    painter.drawText(QRectF(kTextX, 0, std::max(0, buttonsStart - kTextX), kHeight),
+                     Qt::AlignVCenter | Qt::AlignLeft,
+                     statusText());
 
-    painter.setPen(QPen(kSeparator, 1.0));
-    painter.drawLine(QPointF(145.5, 18.0), QPointF(145.5, kHeight - 18.0));
-    painter.drawLine(QPointF(223.5, 18.0), QPointF(223.5, kHeight - 18.0));
+    if (m_closing)
+        return;
 
     const QRectF finish = finishRect();
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(m_closing
-                         ? QColor(70, 70, 76)
-                         : (m_hovered == Button::Finish ? kAccentHover : kAccent));
-    painter.drawRoundedRect(finish, 10, 10);
+    if (m_hovered == Button::Finish) {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(kAccentHover);
+    } else {
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(kAccent);
+    }
+    painter.drawRoundedRect(finish, 8, 8);
     painter.setFont(uiFont(12, true));
-    painter.setPen(m_closing ? kMuted : Qt::white);
+    painter.setPen(Qt::white);
     painter.drawText(finish, Qt::AlignCenter, QStringLiteral("Finish"));
 
-    if (m_hovered == Button::Discard && !m_closing) {
+    const QRectF discard = discardRect();
+    if (m_hovered == Button::Discard) {
         painter.setPen(Qt::NoPen);
         painter.setBrush(kHover);
-        painter.drawRoundedRect(discardRect().adjusted(2, 2, -2, -2), 10, 10);
+        painter.drawEllipse(discard.center(), discard.width() / 2.0, discard.height() / 2.0);
     }
-    drawTrashIcon(painter, discardRect());
+    drawIcon(painter, kGlyphTrash, discard, kText);
 }
 
 void ScrollControls::mousePressEvent(QMouseEvent* event)
@@ -199,6 +311,7 @@ void ScrollControls::mousePressEvent(QMouseEvent* event)
         if (m_closing)
             return;
         m_closing = true;
+        updateWidth();
         m_session->stop();
         update();
         return;
@@ -206,6 +319,7 @@ void ScrollControls::mousePressEvent(QMouseEvent* event)
         if (m_closing)
             return;
         m_closing = true;
+        updateWidth();
         m_session->discard();
         update();
         return;

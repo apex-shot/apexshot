@@ -14,10 +14,10 @@ class ScrollCaptureSession;
 
 /// Floating control bar for a scrolling capture.
 ///
-/// Matches the recording bar: an inset status/frame-count segment, then a
-/// Finish action and a discard button. The capture saves automatically when
-/// the scroll reaches the end; Finish stops early and stitches the portion
-/// captured so far.
+/// Matches the recording pill: drag dots, an accent dot with the frame count,
+/// then a Finish action and a discard button. The capture saves automatically
+/// when the scroll reaches the end; Finish stops early and stitches the
+/// portion captured so far.
 class ScrollControls : public QWidget
 {
     Q_OBJECT
@@ -40,15 +40,19 @@ private:
     enum class Button { None, Body, Finish, Discard };
 
     Button hitTest(const QPoint& point) const;
-    QRectF segmentRect() const;
     QRectF finishRect() const;
     QRectF discardRect() const;
+    QString statusText() const;
+    int preferredWidth() const;
+    void updateWidth();
     void positionOnScreen();
 
     Platform::ScrollCaptureSession* m_session = nullptr;
     QRect m_captureRegion;
-    QString m_status;
     int m_frames = 0;
+    /// The widest status string shown so far; the bar only grows, never
+    /// jitters as the frame count changes.
+    int m_textWidth = 0;
     Button m_hovered = Button::None;
     bool m_dragging = false;
     QPoint m_dragOffset;

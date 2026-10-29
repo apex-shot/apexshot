@@ -210,6 +210,32 @@ void checkPaths(const QTemporaryDir& dir)
           == QStringLiteral("C:/videos/Clip 2026-10-22 23-45-06.mp4"));
 }
 
+void checkRecordingDeviceChoices(const QTemporaryDir& dir)
+{
+    const QString path = Platform::recordingDeviceChoicesPath();
+    CHECK(path == QDir(dir.path()).filePath(QStringLiteral("apexshot/recording-devices.json")));
+    QFile::remove(path);
+    CHECK(!Platform::loadRecordingDeviceChoices().present);
+
+    Platform::RecordingDeviceChoices saved;
+    saved.microphoneEnabled = true;
+    saved.microphoneDevice = QStringLiteral("Microphone Array");
+    saved.systemAudioMode = QStringLiteral("app");
+    saved.systemAudioApplication = QStringLiteral("Google Chrome");
+    saved.cameraEnabled = true;
+    saved.cameraDevice = QStringLiteral("Integrated Camera");
+    Platform::saveRecordingDeviceChoices(saved);
+
+    const Platform::RecordingDeviceChoices loaded = Platform::loadRecordingDeviceChoices();
+    CHECK(loaded.present);
+    CHECK(loaded.microphoneEnabled);
+    CHECK(loaded.microphoneDevice == QStringLiteral("Microphone Array"));
+    CHECK(loaded.systemAudioMode == QStringLiteral("app"));
+    CHECK(loaded.systemAudioApplication == QStringLiteral("Google Chrome"));
+    CHECK(loaded.cameraEnabled);
+    CHECK(loaded.cameraDevice == QStringLiteral("Integrated Camera"));
+}
+
 void checkSaving(const QTemporaryDir& dir)
 {
     Platform::ShellSettings settings;
@@ -247,6 +273,7 @@ int main(int argc, char** argv)
     checkParsing(dir);
     checkSanitizing(dir);
     checkPaths(dir);
+    checkRecordingDeviceChoices(dir);
     checkSaving(dir);
 
     if (failures != 0) {
