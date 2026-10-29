@@ -3629,6 +3629,25 @@ msgstr "正在完成…"
 msgid "Video editing is not available in the Windows build yet."
 msgstr "Windows 版本尚不支持视频编辑。"
 
+# First-run onboarding in the Windows build.
+msgid "Your screenshot companion for Windows. Set it up in a few quick steps."
+msgstr "你在 Windows 上的截图伙伴。几步即可完成设置。"
+
+msgid "ApexShot runs in the background with a tray icon.\nAfter setup, you do not need to open Settings every time."
+msgstr "ApexShot 在后台运行，带托盘图标。\n设置完成后不必每次都打开设置。"
+
+msgid "ApexShot stays in the tray; right-click it for the capture menu."
+msgstr "ApexShot 常驻托盘；右键点击打开截图菜单。"
+
+msgid "Bindings are saved; global hotkeys arrive in a later build."
+msgstr "按键组合已保存；全局热键将在后续版本中提供。"
+
+msgid "ApexShot is ready. It runs from the tray from now on."
+msgstr "ApexShot 已就绪。从现在起它从托盘运行。"
+
+msgid "Signed in, but this device could not save the account."
+msgstr "已登录，但此设备无法保存账户。"
+
 msgid "Add a layout change at the playhead."
 msgstr "在播放头位置添加布局更改。"
 

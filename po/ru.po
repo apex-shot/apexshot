@@ -3703,6 +3703,25 @@ msgstr "завершение…"
 msgid "Video editing is not available in the Windows build yet."
 msgstr "Редактирование видео пока недоступно в версии для Windows."
 
+# First-run onboarding in the Windows build.
+msgid "Your screenshot companion for Windows. Set it up in a few quick steps."
+msgstr "Ваш помощник для скриншотов в Windows. Настройте его за несколько шагов."
+
+msgid "ApexShot runs in the background with a tray icon.\nAfter setup, you do not need to open Settings every time."
+msgstr "ApexShot работает в фоне со значком в лотке.\nПосле настройки не нужно каждый раз открывать параметры."
+
+msgid "ApexShot stays in the tray; right-click it for the capture menu."
+msgstr "ApexShot остаётся в лотке; правый клик открывает меню съёмки."
+
+msgid "Bindings are saved; global hotkeys arrive in a later build."
+msgstr "Сочетания клавиш сохраняются; глобальные горячие клавиши появятся в следующей сборке."
+
+msgid "ApexShot is ready. It runs from the tray from now on."
+msgstr "ApexShot готов. Теперь он работает из лотка."
+
+msgid "Signed in, but this device could not save the account."
+msgstr "Вход выполнен, но это устройство не смогло сохранить аккаунт."
+
 msgid "Add a layout change at the playhead."
 msgstr "Добавьте изменение раскладки в позиции курсора воспроизведения."
 

@@ -3709,6 +3709,25 @@ msgstr "finalizando…"
 msgid "Video editing is not available in the Windows build yet."
 msgstr "A edição de vídeo ainda não está disponível na versão para Windows."
 
+# First-run onboarding in the Windows build.
+msgid "Your screenshot companion for Windows. Set it up in a few quick steps."
+msgstr "Seu companheiro de capturas para Windows. Configure em alguns passos rápidos."
+
+msgid "ApexShot runs in the background with a tray icon.\nAfter setup, you do not need to open Settings every time."
+msgstr "O ApexShot roda em segundo plano com ícone na bandeja.\nDepois da configuração, não precisa abrir Configurações toda vez."
+
+msgid "ApexShot stays in the tray; right-click it for the capture menu."
+msgstr "O ApexShot fica na bandeja; clique com o botão direito para o menu de captura."
+
+msgid "Bindings are saved; global hotkeys arrive in a later build."
+msgstr "Os atalhos são salvos; os atalhos globais chegam em uma versão futura."
+
+msgid "ApexShot is ready. It runs from the tray from now on."
+msgstr "O ApexShot está pronto. A partir de agora ele roda pela bandeja."
+
+msgid "Signed in, but this device could not save the account."
+msgstr "Sessão iniciada, mas este dispositivo não conseguiu salvar a conta."
+
 msgid "Add a layout change at the playhead."
 msgstr "Adicione uma mudança de layout no cabeçote de reprodução."
 

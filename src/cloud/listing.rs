@@ -24,8 +24,6 @@ const MAX_PAGE_SIZE: u32 = 100;
 const MAX_THUMBNAIL_BYTES: u64 = 16 * 1024 * 1024;
 /// Server error bodies are shown to users verbatim; keep them toast-sized.
 const MAX_SERVER_MESSAGE_CHARS: usize = 200;
-/// The only tier that is not a paid plan.
-const FREE_TIER: &str = "free";
 
 // --- errors ---
 
@@ -285,45 +283,7 @@ impl Default for UploadsPager {
 
 // --- account and entitlement ---
 
-/// The signed-in account as the server describes it.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
-pub struct CloudAccount {
-    #[serde(default)]
-    pub email: String,
-    /// `free`, `pro`, `team`, … Empty when the server did not say.
-    #[serde(default)]
-    pub tier: String,
-}
-
-impl CloudAccount {
-    /// True when this account is on a paid plan.
-    pub fn is_subscribed(&self) -> bool {
-        is_subscribed_tier(&self.tier)
-    }
-
-    /// Cache the account on `config` so UI can render without a network call.
-    /// Keeps the legacy `cloud_pro_plan` flag in sync with the tier, and leaves
-    /// existing values alone for fields the server did not send.
-    pub fn apply_to_config(&self, config: &mut AppConfig) {
-        let email = self.email.trim();
-        if !email.is_empty() {
-            config.cloud_user_email = email.to_string();
-        }
-        let tier = self.tier.trim().to_ascii_lowercase();
-        if !tier.is_empty() {
-            config.cloud_pro_plan = is_subscribed_tier(&tier);
-            config.cloud_plan_tier = tier;
-        }
-    }
-}
-
-/// Is this tier a paid plan? Anything other than `free` counts — so a tier the
-/// desktop app has not heard of yet still unlocks paid features. An absent tier
-/// is not a claim of payment, so it does not.
-pub fn is_subscribed_tier(tier: &str) -> bool {
-    let tier = tier.trim().to_ascii_lowercase();
-    !tier.is_empty() && tier != FREE_TIER
-}
+pub use super::account::{is_subscribed_tier, CloudAccount};
 
 /// The cached entitlement answer — no network, safe on the UI thread.
 ///
@@ -800,28 +760,6 @@ mod tests {
     }
 
     // --- account and entitlement ---
-
-    #[test]
-    fn tier_decides_subscription() {
-        assert!(!is_subscribed_tier("free"));
-        assert!(is_subscribed_tier("pro"));
-        assert!(is_subscribed_tier("team"));
-    }
-
-    #[test]
-    fn tier_decision_ignores_case_and_padding() {
-        assert!(!is_subscribed_tier("  FREE "));
-        assert!(is_subscribed_tier(" Pro "));
-        assert!(is_subscribed_tier("TEAM"));
-    }
-
-    #[test]
-    fn unknown_tier_counts_as_subscribed_but_absent_tier_does_not() {
-        // A tier shipped after this build still unlocks paid features.
-        assert!(is_subscribed_tier("enterprise"));
-        assert!(!is_subscribed_tier(""));
-        assert!(!is_subscribed_tier("   "));
-    }
 
     #[test]
     fn parses_account_response() {

@@ -29,6 +29,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yml = "0.0.12"
 serde_json = "1.0"
 sha2 = "0.10"
+ureq = { version = "2.10", features = ["json"] }
+async-channel = "2.5.0"
 anyhow = "1.0"
 dirs = "6.0"
 image = { version = "0.24.9", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
