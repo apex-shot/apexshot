@@ -6,6 +6,7 @@
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <audiopolicy.h>
+#include <endpointvolume.h>
 #include <audioclientactivationparams.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <shellapi.h>
@@ -460,7 +461,7 @@ IMMDevice* captureEndpointByName(IMMDeviceEnumerator* enumerator, const QString&
     IMMDeviceCollection* collection = nullptr;
     if (FAILED(enumerator->EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE, &collection))
         || !collection)
-        return defaultEndpoint(enumerator, eCapture);
+        return nullptr;
 
     IMMDevice* fallback = nullptr;
     IMMDevice* match = nullptr;
@@ -474,7 +475,10 @@ IMMDevice* captureEndpointByName(IMMDeviceEnumerator* enumerator, const QString&
             match = device;
             break;
         }
-        if (!fallback)
+        const QString endpointName = wasapiFriendlyName(device);
+        if (!fallback && (endpointName.contains(name, Qt::CaseInsensitive)
+                          || name.contains(endpointName, Qt::CaseInsensitive))
+            && !endpointName.isEmpty())
             fallback = device;
         else
             device->Release();
@@ -488,7 +492,7 @@ IMMDevice* captureEndpointByName(IMMDeviceEnumerator* enumerator, const QString&
     }
     if (fallback)
         return fallback;
-    return defaultEndpoint(enumerator, eCapture);
+    return nullptr;
 }
 
 /// The format the loopback client renders into. Process loopback does not
@@ -659,6 +663,48 @@ QString defaultMicrophoneName()
     release(device);
     enumerator->Release();
     return name;
+}
+
+QString defaultSpeakerName()
+{
+    ComScope com(COINIT_APARTMENTTHREADED);
+    IMMDeviceEnumerator* enumerator = nullptr;
+    if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                __uuidof(IMMDeviceEnumerator),
+                                reinterpret_cast<void**>(&enumerator)))
+        || !enumerator)
+        return {};
+    IMMDevice* device = defaultEndpoint(enumerator, eRender);
+    const QString name = wasapiFriendlyName(device);
+    release(device);
+    enumerator->Release();
+    return name;
+}
+
+QString resolveMicrophoneDevice(const QStringList& devices, const QString& preferred,
+                                const QString& defaultName)
+{
+    const QString selected = preferred.trimmed();
+    if (!selected.isEmpty()) {
+        for (const QString& device : devices) {
+            if (device.compare(selected, Qt::CaseInsensitive) == 0)
+                return device;
+        }
+        for (const QString& device : devices) {
+            if (device.contains(selected, Qt::CaseInsensitive)
+                || selected.contains(device, Qt::CaseInsensitive))
+                return device;
+        }
+    }
+    for (const QString& device : devices) {
+        if (device.compare(defaultName, Qt::CaseInsensitive) == 0)
+            return device;
+    }
+    for (const QString& device : devices) {
+        if (device.contains(QStringLiteral("microphone"), Qt::CaseInsensitive))
+            return device;
+    }
+    return devices.isEmpty() ? QString() : devices.first();
 }
 
 QVector<AudioApplication> audioApplications()
@@ -840,8 +886,11 @@ struct AudioLevelMonitor::Impl
         HANDLE events[2] = {stopEvent, audioEvent};
         while (running.load()) {
             const DWORD waited = WaitForMultipleObjects(2, events, FALSE, 100);
-            if (waited != WAIT_OBJECT_0 + 1)
+            if (waited != WAIT_OBJECT_0 + 1) {
+                if (waited == WAIT_TIMEOUT)
+                    peak.store(0.0f);
                 continue;
+            }
 
             float packetPeak = 0.0f;
             UINT32 packet = 0;
@@ -867,6 +916,92 @@ struct AudioLevelMonitor::Impl
             CloseHandle(audioEvent);
         enumerator->Release();
     }
+
+    void runSystem(quint32 processId)
+    {
+        ComScope com(COINIT_MULTITHREADED);
+        if (!com.owns())
+            return;
+        IMMDeviceEnumerator* enumerator = nullptr;
+        if (FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                                    __uuidof(IMMDeviceEnumerator),
+                                    reinterpret_cast<void**>(&enumerator)))
+            || !enumerator)
+            return;
+        IMMDevice* device = defaultEndpoint(enumerator, eRender);
+        IAudioMeterInformation* endpointMeter = nullptr;
+        IAudioSessionManager2* manager = nullptr;
+        if (device) {
+            if (processId == 0)
+                device->Activate(__uuidof(IAudioMeterInformation), CLSCTX_ALL, nullptr,
+                                 reinterpret_cast<void**>(&endpointMeter));
+            else
+                device->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, nullptr,
+                                 reinterpret_cast<void**>(&manager));
+        }
+        opened.store(endpointMeter || manager);
+        while (running.load() && (endpointMeter || manager)) {
+            float level = 0.0f;
+            if (endpointMeter) {
+                endpointMeter->GetPeakValue(&level);
+            } else {
+                QHash<quint32, quint32> parents;
+                HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+                if (snapshot != INVALID_HANDLE_VALUE) {
+                    PROCESSENTRY32W entry{};
+                    entry.dwSize = sizeof(entry);
+                    if (Process32FirstW(snapshot, &entry)) {
+                        do {
+                            parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+                        } while (Process32NextW(snapshot, &entry));
+                    }
+                    CloseHandle(snapshot);
+                }
+                IAudioSessionEnumerator* sessions = nullptr;
+                if (SUCCEEDED(manager->GetSessionEnumerator(&sessions)) && sessions) {
+                    int count = 0;
+                    sessions->GetCount(&count);
+                    for (int i = 0; i < count; ++i) {
+                        IAudioSessionControl* control = nullptr;
+                        IAudioSessionControl2* control2 = nullptr;
+                        IAudioMeterInformation* meter = nullptr;
+                        if (SUCCEEDED(sessions->GetSession(i, &control)) && control
+                            && SUCCEEDED(control->QueryInterface(__uuidof(IAudioSessionControl2),
+                                                               reinterpret_cast<void**>(&control2)))
+                            && control2) {
+                            DWORD sessionProcess = 0;
+                            control2->GetProcessId(&sessionProcess);
+                            quint32 current = sessionProcess;
+                            for (int depth = 0; current && current != processId && depth < 64;
+                                 ++depth) {
+                                const quint32 parent = parents.value(current, 0);
+                                current = parent == current ? 0 : parent;
+                            }
+                            if (current == processId
+                                && SUCCEEDED(control->QueryInterface(
+                                    __uuidof(IAudioMeterInformation),
+                                    reinterpret_cast<void**>(&meter))) && meter) {
+                                float sessionLevel = 0.0f;
+                                if (SUCCEEDED(meter->GetPeakValue(&sessionLevel)))
+                                    level = std::max(level, sessionLevel);
+                            }
+                        }
+                        release(meter);
+                        release(control2);
+                        release(control);
+                    }
+                    sessions->Release();
+                }
+            }
+            peak.store(std::clamp(level, 0.0f, 1.0f));
+            if (WaitForSingleObject(stopEvent, 100) == WAIT_OBJECT_0)
+                break;
+        }
+        release(manager);
+        release(endpointMeter);
+        release(device);
+        enumerator->Release();
+    }
 };
 
 AudioLevelMonitor::AudioLevelMonitor()
@@ -878,24 +1013,37 @@ AudioLevelMonitor::~AudioLevelMonitor() = default;
 
 bool AudioLevelMonitor::listen(const QString& deviceName)
 {
-    d->stop();
-    d->stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-    if (!d->stopEvent)
+    startMicrophone(deviceName);
+    if (!d->thread.joinable())
         return false;
-
-    d->running.store(true);
-    d->thread = std::thread([this, deviceName] { d->run(deviceName); });
-
-    for (int i = 0; i < 160 && !d->opened.load(); ++i) {
-        if (!d->thread.joinable())
-            break;
+    for (int i = 0; i < 160 && !d->opened.load(); ++i)
         Sleep(10);
-    }
     if (!d->opened.load()) {
         d->stop();
         return false;
     }
     return true;
+}
+
+void AudioLevelMonitor::startMicrophone(const QString& deviceName)
+{
+    d->stop();
+    d->stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!d->stopEvent)
+        return;
+
+    d->running.store(true);
+    d->thread = std::thread([this, deviceName] { d->run(deviceName); });
+}
+
+void AudioLevelMonitor::startSystemAudio(quint32 processId)
+{
+    d->stop();
+    d->stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    if (!d->stopEvent)
+        return;
+    d->running.store(true);
+    d->thread = std::thread([this, processId] { d->runSystem(processId); });
 }
 
 void AudioLevelMonitor::stop()

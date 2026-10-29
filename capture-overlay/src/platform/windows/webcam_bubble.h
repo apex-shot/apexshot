@@ -44,18 +44,28 @@ public:
     /// Called with the bubble's final device-pixel rectangle after a drag.
     void setMovedHandler(std::function<void(const QRect&)> handler);
 
+    /// Enable the pre-recording resize handles and camera controls.
+    void setSetupMode(bool enabled);
+    int shape() const { return m_shape; }
+    bool flipped() const { return m_flip; }
+    QRect deviceGeometry() const { return deviceRectFor(geometry()); }
+    void setPreviewError(const QString& error);
+
 protected:
     void paintEvent(QPaintEvent* event) override;
     void showEvent(QShowEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
+    void leaveEvent(QEvent* event) override;
 
 private:
     [[nodiscard]] QPainterPath shapePath(const QRectF& rect) const;
     [[nodiscard]] QScreen* screenForDevicePoint(const QPoint& point) const;
     [[nodiscard]] QRect logicalRectFor(const QRect& deviceRect) const;
     [[nodiscard]] QRect deviceRectFor(const QRect& logicalRect) const;
+    [[nodiscard]] QRectF controlBarRect() const;
+    [[nodiscard]] int resizeHandleAt(const QPoint& point) const;
 
     QImage m_frame;
     int m_shape = 0;
@@ -63,6 +73,12 @@ private:
     QRect m_bounds;
     QPoint m_dragOffset;
     bool m_dragging = false;
+    bool m_setupMode = false;
+    int m_hoveredControl = -1;
+    int m_resizeHandle = -1;
+    QRect m_resizeStart;
+    QPoint m_resizeOrigin;
+    QString m_previewError;
     std::function<void(const QRect&)> m_moved;
 };
 

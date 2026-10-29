@@ -32,15 +32,20 @@ QStringList directShowDevices(bool video);
 /// Friendly name of the default capture endpoint, empty when none is set.
 QString defaultMicrophoneName();
 
+/// Friendly name of the default output endpoint, empty when none is set.
+QString defaultSpeakerName();
+
+/// Resolve the microphone name using the same fallback as the recorder.
+QString resolveMicrophoneDevice(const QStringList& devices, const QString& preferred,
+                                const QString& defaultName);
+
 /// Every app that owns a non-expired audio session on the default output,
 /// playing apps first and then alphabetically.
 QVector<AudioApplication> audioApplications();
 
-/// Peak level of a microphone for the setup surface's meter.
+/// Peak level of a selected microphone or system-audio source.
 ///
-/// The monitor opens the device in shared mode, so it never blocks the
-/// recorder that opens it afterwards through ffmpeg; the setup surface stops
-/// the monitor before the recording starts.
+/// Microphones open in shared mode, so the monitor does not block ffmpeg.
 class AudioLevelMonitor
 {
 public:
@@ -53,6 +58,10 @@ public:
     /// Watch one capture device by friendly name. An empty name watches the
     /// default microphone. Returns false when the device cannot be opened.
     bool listen(const QString& deviceName);
+    /// Start monitoring without waiting for the audio endpoint to open.
+    void startMicrophone(const QString& deviceName);
+    /// Monitor the default output, or one process tree when processId is nonzero.
+    void startSystemAudio(quint32 processId = 0);
     void stop();
 
     /// Linear peak, 0..1. Zero while stopped or silent.

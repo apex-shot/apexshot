@@ -12,6 +12,7 @@
 #include "platform/windows/recording_countdown.h"
 #include "platform/windows/recording_mask.h"
 #include "platform/windows/webcam_bubble.h"
+#include "platform/windows/webcam_preview.h"
 #include "platform/windows/window_recording.h"
 #include "platform/windows/scroll_capture.h"
 #include "platform/windows/scroll_controls.h"
@@ -1292,7 +1293,10 @@ public:
         defaults.camera = defaultsOptions.cameraEnabled;
         defaults.cameraDevice = defaultsOptions.cameraDevice;
         const CaptureModeToolbar::Result result = CaptureModeToolbar::choose(
-            nullptr, nullptr, recordingAvailable, true, true, defaults, true);
+            nullptr, nullptr, recordingAvailable, true, true, defaults, true,
+            [this](bool enabled, const QString& device) {
+                updateWebcamPreview(enabled, device);
+            });
 
         m_menuOpen = false;
 
@@ -1302,7 +1306,7 @@ public:
         options.recording = result.recording;
         options.microphone = result.microphone;
         options.microphoneDevice = result.microphoneDevice;
-        if (!result.systemAudioApplication.isEmpty()) {
+        if (result.speaker && !result.systemAudioApplication.isEmpty()) {
             options.systemAudio = Platform::RecordingRequest::SystemAudio::Application;
             options.systemAudioProcessId = result.systemAudioProcessId;
             options.systemAudioApplication = result.systemAudioApplication;
@@ -1314,12 +1318,15 @@ public:
         options.cameraEnabled = result.camera;
         options.cameraDevice = result.cameraDevice;
         options.scroll = result.scroll;
+        if (!options.recording || result.action == CaptureModeToolbar::Action::Cancel)
+            stopWebcamPreview(true);
         debugLog(QStringLiteral("toolbar: action=%1 recording=%2 toolbar=%3 scroll=%4")
                      .arg(static_cast<int>(result.action))
                      .arg(options.recording ? 1 : 0)
                      .arg(result.toolbar ? 1 : 0)
                      .arg(options.scroll ? 1 : 0));
         if (options.recording && !recordingAvailable) {
+            stopWebcamPreview(true);
             if (result.toolbar)
                 result.toolbar->close();
             debugLog(QStringLiteral("recording unavailable: %1").arg(recordingError));
@@ -1653,6 +1660,113 @@ public:
     }
 
 private:
+    /// Keep the bubble's look and place, so the next preview opens the way this
+    /// one was left instead of at the settings window's defaults.
+    void rememberBubble(const QRect& region,
+                        Platform::WebcamBubble* bubble,
+                        bool rememberSize = true)
+    {
+        if (!bubble || region.isEmpty())
+            return;
+        const QRect rect = bubble->deviceGeometry();
+        if (rect.isEmpty())
+            return;
+        double relX = 0.0;
+        double relY = 0.0;
+        if (!Platform::webcamRelativePositionForWidth(region,
+                                                     rect.width(),
+                                                     bubble->shape(),
+                                                     rect,
+                                                     &relX,
+                                                     &relY))
+            return;
+        Platform::WebcamPlacement state = Platform::loadWebcamPlacement();
+        state.present = true;
+        state.relX = relX;
+        state.relY = relY;
+        // Only the setup bubble sits on the whole display, so only it can say
+        // what fraction of the screen the person chose. A drag during a
+        // recording keeps the size they set before it started.
+        if (rememberSize && region.height() > 0)
+            state.sizeFraction = double(rect.width()) / region.height();
+        state.shape = bubble->shape();
+        state.flip = bubble->flipped();
+        Platform::saveWebcamPlacement(state);
+    }
+
+    void stopWebcamPreview(bool closeBubble)
+    {
+        if (m_webcamPreview) {
+            delete m_webcamPreview;
+            m_webcamPreview = nullptr;
+        }
+        m_previewDevice.clear();
+        if (closeBubble && m_setupWebcamBubble) {
+            m_setupWebcamBubble->close();
+            m_setupWebcamBubble = nullptr;
+        }
+    }
+
+    void updateWebcamPreview(bool enabled, const QString& device)
+    {
+        if (!enabled || device.isEmpty()) {
+            stopWebcamPreview(true);
+            return;
+        }
+        if (m_activeSession && m_activeSession->isActive())
+            return;
+        if (m_webcamPreview && m_previewDevice == device)
+            return;
+
+        stopWebcamPreview(false);
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
+        if (!m_setupWebcamBubble) {
+            Platform::ShellSettings::Webcam webcam = settings.recording.webcam;
+            const Platform::WebcamPlacement placement = Platform::loadWebcamPlacement();
+            if (placement.present) {
+                webcam.relX = placement.relX;
+                webcam.relY = placement.relY;
+                webcam.shapeIndex = placement.shape;
+                webcam.flip = placement.flip;
+            }
+            const QRect region = Platform::monitorAt(QCursor::pos()).geometry;
+            if (region.isEmpty())
+                return;
+            const double width = placement.sizeFraction > 0.0
+                ? placement.sizeFraction * region.height()
+                : region.height()
+                    * Platform::kWebcamSizeFractions[std::clamp(webcam.sizeIndex, 0, 3)];
+            m_setupWebcamBubble = new Platform::WebcamBubble(webcam.shapeIndex, webcam.flip);
+            m_setupWebcamBubble->placeAt(Platform::webcamBubbleRectForWidth(
+                region, width, webcam.shapeIndex, webcam.relX, webcam.relY));
+            m_setupWebcamBubble->setMoveBounds(region);
+            m_setupWebcamBubble->setSetupMode(true);
+            QPointer<Platform::WebcamBubble> setup = m_setupWebcamBubble;
+            m_setupWebcamBubble->setMovedHandler(
+                [this, setup, region](const QRect&) { rememberBubble(region, setup); });
+            m_setupWebcamBubble->show();
+            m_setupWebcamBubble->raise();
+        } else {
+            m_setupWebcamBubble->setFrame(QImage());
+        }
+
+        m_previewDevice = device;
+        const int fps = Platform::recordingFpsForIndex(settings.recording.values.fpsIndex);
+        m_webcamPreview = new Platform::WebcamPreview(device, fps, this);
+        QPointer<Platform::WebcamBubble> bubble = m_setupWebcamBubble;
+        connect(m_webcamPreview, &Platform::WebcamPreview::frameReady, bubble,
+                [bubble](const QImage& frame) {
+                    if (bubble)
+                        bubble->setFrame(frame);
+                });
+        connect(m_webcamPreview, &Platform::WebcamPreview::failed, bubble,
+                [bubble](const QString& error) {
+                    if (bubble)
+                        bubble->setPreviewError(error);
+                });
+        m_webcamPreview->start();
+    }
+
     CaptureOptions recordingDefaults()
     {
         const Platform::ShellSettings settings = Platform::loadShellSettings();
@@ -1733,6 +1847,10 @@ private:
         toolbar->show();
         toolbar->raise();
         Platform::keepTopmost(static_cast<quintptr>(toolbar->winId()));
+        if (m_setupWebcamBubble) {
+            m_setupWebcamBubble->raise();
+            Platform::keepTopmost(static_cast<quintptr>(m_setupWebcamBubble->winId()));
+        }
     }
 
     void chooseWindowRecording(const CaptureOptions& options,
@@ -1740,17 +1858,20 @@ private:
     {
         QPointer<CaptureModeToolbar> bar(toolbar);
         if (m_activeSession && m_activeSession->isActive()) {
+            stopWebcamPreview(true);
             if (bar)
                 bar->close();
             debugLog(QStringLiteral("window picker ignored: a recording is running"));
             return;
         }
         if (m_countdownPill) {
+            stopWebcamPreview(true);
             if (bar)
                 bar->close();
             return;
         }
         if (!m_windowPicker.isNull() || !m_setupOverlay.isNull()) {
+            stopWebcamPreview(true);
             if (bar)
                 bar->close();
             return;
@@ -1770,9 +1891,10 @@ private:
                 Platform::activateWindow(window.id);
                 openWindowSetup(window, options, bar);
             },
-            [bar] {
+            [this, bar] {
                 if (bar)
                     bar->close();
+                stopWebcamPreview(true);
             });
         m_windowPicker = picker;
         picker->show();
@@ -1796,7 +1918,7 @@ private:
                     const CaptureModeToolbar::DeviceDefaults devices = bar->deviceState();
                     chosen.microphone = devices.microphone;
                     chosen.microphoneDevice = devices.microphoneDevice;
-                    if (!devices.systemAudioApplication.isEmpty()) {
+                    if (devices.speaker && !devices.systemAudioApplication.isEmpty()) {
                         chosen.systemAudio =
                             Platform::RecordingRequest::SystemAudio::Application;
                         chosen.systemAudioProcessId = devices.systemAudioProcessId;
@@ -1818,9 +1940,10 @@ private:
                     beginWindowRecording(window, chosen);
                 });
             },
-            [bar] {
+            [this, bar] {
                 if (bar)
                     bar->close();
+                stopWebcamPreview(true);
             });
         m_setupOverlay = overlay;
         overlay->show();
@@ -1861,6 +1984,7 @@ private:
                 capture.geometry = region;
             }
         } else if (!Platform::captureRegion(region, false, capture, error)) {
+            stopWebcamPreview(true);
             QMessageBox::warning(nullptr,
                                  QStringLiteral("Recording"),
                                  QStringLiteral("The window could not be captured: %1")
@@ -1920,8 +2044,10 @@ private:
     {
         Platform::CaptureResult frozen;
         QString error;
-        if (!Platform::captureVirtualDesktop(false, frozen, error))
+        if (!Platform::captureVirtualDesktop(false, frozen, error)) {
+            stopWebcamPreview(true);
             return;
+        }
         if (!options.recording && !options.scroll)
             Platform::playShutterSound();
         startArea(frozen, AreaSelector::Mode::Area, options);
@@ -1931,8 +2057,10 @@ private:
     {
         Platform::CaptureResult frozen;
         QString error;
-        if (!Platform::captureVirtualDesktop(false, frozen, error))
+        if (!Platform::captureVirtualDesktop(false, frozen, error)) {
+            stopWebcamPreview(true);
             return;
+        }
         if (!options.recording && !options.scroll)
             Platform::playShutterSound();
         startArea(frozen, AreaSelector::Mode::Crosshair, options);
@@ -1944,8 +2072,10 @@ private:
         auto* selector =
             new AreaSelector(frozen.image, mode, [this, options, frozen](const QImage& cropped,
                                                                         const QRect& selection) {
-                if (selection.isEmpty() || cropped.isNull())
+                if (selection.isEmpty() || cropped.isNull()) {
+                    stopWebcamPreview(true);
                     return;
+                }
                 const QRect desktop(selection.topLeft() + frozen.geometry.topLeft(),
                                     selection.size());
                 if (options.scroll) {
@@ -2036,13 +2166,17 @@ private:
         Platform::RecordingRequest::Target target = Platform::RecordingRequest::Target::Area,
         quintptr windowId = 0)
     {
-        if (region.isEmpty())
+        if (region.isEmpty()) {
+            stopWebcamPreview(true);
             return;
+        }
         if (m_activeSession && m_activeSession->isActive()) {
+            stopWebcamPreview(true);
             debugLog(QStringLiteral("recording ignored: a session is already active"));
             return;
         }
         if (m_countdownPill) {
+            stopWebcamPreview(true);
             debugLog(QStringLiteral("recording ignored: a countdown is already running"));
             return;
         }
@@ -2128,22 +2262,57 @@ private:
         if (placement.present) {
             webcam.relX = placement.relX;
             webcam.relY = placement.relY;
+            webcam.shapeIndex = placement.shape;
+            webcam.flip = placement.flip;
         }
         QRect webcamRect;
+        QRect previewRect;
+        QRect previewRegion;
         if (options.cameraEnabled) {
             request.webcamEnabled = true;
             request.webcamDevice = options.cameraDevice.trimmed();
-            webcamRect = Platform::webcamBubbleRect(region,
-                                                    webcam.sizeIndex,
-                                                    webcam.shapeIndex,
-                                                    webcam.relX,
-                                                    webcam.relY);
-            request.webcamLayout = Platform::webcamLayoutFor(region,
-                                                             webcam.sizeIndex,
-                                                             webcam.shapeIndex,
-                                                             webcam.relX,
-                                                             webcam.relY,
-                                                             webcam.flip);
+            if (m_setupWebcamBubble && m_previewDevice == request.webcamDevice) {
+                webcam.shapeIndex = m_setupWebcamBubble->shape();
+                webcam.flip = m_setupWebcamBubble->flipped();
+                previewRect = m_setupWebcamBubble->deviceGeometry();
+                previewRegion = Platform::monitorAt(previewRect.center()).geometry;
+                webcamRect = target == Platform::RecordingRequest::Target::Window
+                    ? Platform::webcamProjectRect(previewRegion, region, previewRect)
+                    : Platform::webcamFitRect(region, previewRect);
+                if (m_webcamPreview)
+                    request.webcamStreamUrl = m_webcamPreview->streamUrl();
+                m_webcamBubble = m_setupWebcamBubble;
+                m_setupWebcamBubble = nullptr;
+                if (request.webcamStreamUrl.isEmpty()) {
+                    stopWebcamPreview(false);
+                } else {
+                    m_activeWebcamPreview = m_webcamPreview;
+                    m_webcamPreview = nullptr;
+                    m_previewDevice.clear();
+                }
+            } else {
+                stopWebcamPreview(true);
+                previewRegion = target == Platform::RecordingRequest::Target::Window
+                    ? Platform::monitorAt(region.center()).geometry : region;
+                if (previewRegion.isEmpty())
+                    previewRegion = region;
+                const double width = placement.sizeFraction > 0.0
+                    ? placement.sizeFraction * previewRegion.height()
+                    : previewRegion.height()
+                        * Platform::kWebcamSizeFractions[std::clamp(webcam.sizeIndex, 0, 3)];
+                previewRect = Platform::webcamBubbleRectForWidth(previewRegion,
+                                                                 width,
+                                                                 webcam.shapeIndex,
+                                                                 webcam.relX,
+                                                                 webcam.relY);
+                webcamRect = target == Platform::RecordingRequest::Target::Window
+                    ? Platform::webcamProjectRect(previewRegion, region, previewRect)
+                    : previewRect;
+            }
+            request.webcamLayout = Platform::webcamLayoutForRect(
+                region, webcamRect, webcam.shapeIndex, webcam.flip);
+        } else {
+            stopWebcamPreview(true);
         }
 
         connect(session,
@@ -2153,15 +2322,41 @@ private:
                     QMessageBox::information(nullptr, QStringLiteral("Recording"), message);
                 });
 
+        connect(session, &Platform::RecordingSession::captureStopped, this, [this] {
+            if (m_activeWebcamPreview) {
+                delete m_activeWebcamPreview;
+                m_activeWebcamPreview = nullptr;
+            }
+            if (m_webcamBubble)
+                m_webcamBubble->hide();
+        });
+
         if (!request.webcamDevice.isEmpty()) {
-            m_webcamBubble = new Platform::WebcamBubble(request.webcamLayout.shape,
-                                                        request.webcamLayout.flip);
-            m_webcamBubble->placeAt(webcamRect);
-            m_webcamBubble->setMoveBounds(region);
+            if (!m_webcamBubble)
+                m_webcamBubble = new Platform::WebcamBubble(request.webcamLayout.shape,
+                                                            request.webcamLayout.flip);
+            m_webcamBubble->setSetupMode(false);
+            m_webcamBubble->placeAt(target == Platform::RecordingRequest::Target::Window
+                                        ? previewRect : webcamRect);
+            m_webcamBubble->setMoveBounds(target == Platform::RecordingRequest::Target::Window
+                                             ? previewRegion : region);
             m_webcamBubble->setMovedHandler(
-                [this, region, webcam](const QRect& rect) {
+                [this, region, previewRegion, webcam, target](const QRect& rect) {
                     if (region.isEmpty() || rect.isEmpty())
                         return;
+                    if (target == Platform::RecordingRequest::Target::Window) {
+                        // A window recording keeps the camera where the person
+                        // put it on screen and projects that position into the
+                        // window's own frame, so the camera can sit outside it.
+                        if (m_activeSession) {
+                            m_activeSession->setWebcamLayout(Platform::webcamLayoutForRect(
+                                region,
+                                Platform::webcamProjectRect(previewRegion, region, rect),
+                                std::clamp(webcam.shapeIndex, 0, 3),
+                                webcam.flip));
+                        }
+                        return;
+                    }
                     Platform::WebcamLayout layout;
                     layout.x = double(rect.x() - region.x()) / region.width();
                     layout.y = double(rect.y() - region.y()) / region.height();
@@ -2172,20 +2367,12 @@ private:
                     if (m_activeSession)
                         m_activeSession->setWebcamLayout(layout);
 
-                    double relX = 0.0;
-                    double relY = 0.0;
-                    if (Platform::webcamRelativePosition(region,
-                                                         webcam.sizeIndex,
-                                                         webcam.shapeIndex,
-                                                         rect,
-                                                         &relX,
-                                                         &relY)) {
-                        Platform::saveWebcamPlacement(relX, relY);
-                        debugLog(QStringLiteral("webcam placed relX=%1 relY=%2")
-                                     .arg(relX, 0, 'f', 3)
-                                     .arg(relY, 0, 'f', 3));
-                    }
+                    rememberBubble(region, m_webcamBubble, false);
                 });
+            if (m_webcamBubble->isVisible()) {
+                m_webcamBubble->raise();
+                Platform::keepTopmost(static_cast<quintptr>(m_webcamBubble->winId()));
+            }
             QPointer<Platform::WebcamBubble> bubble = m_webcamBubble;
             connect(session,
                     &Platform::RecordingSession::webcamFrame,
@@ -2198,15 +2385,14 @@ private:
                         if (!bubble->isVisible())
                             bubble->show();
                     });
-            // A paused recording is not part of the footage, and the camera
-            // stops with it, so the bubble goes away with the pause too.
+            const bool streamingPreview = !request.webcamStreamUrl.isEmpty();
             connect(session,
                     &Platform::RecordingSession::stateChanged,
                     m_webcamBubble,
-                    [session, bubble] {
+                    [session, bubble, streamingPreview] {
                         if (!bubble)
                             return;
-                        if (session->isActive() && !session->isPaused()
+                        if (session->isActive() && (streamingPreview || !session->isPaused())
                             && bubble->hasFrame())
                             bubble->show();
                         else
@@ -2225,6 +2411,11 @@ private:
                     if (m_recordingMask) {
                         m_recordingMask->close();
                         m_recordingMask = nullptr;
+                    }
+                    stopWebcamPreview(true);
+                    if (m_activeWebcamPreview) {
+                        delete m_activeWebcamPreview;
+                        m_activeWebcamPreview = nullptr;
                     }
                     if (m_webcamBubble) {
                         // A frame already queued behind the finished signal
@@ -2254,6 +2445,11 @@ private:
                 m_recordingMask->close();
                 m_recordingMask = nullptr;
             }
+            stopWebcamPreview(true);
+            if (m_activeWebcamPreview) {
+                delete m_activeWebcamPreview;
+                m_activeWebcamPreview = nullptr;
+            }
             if (m_webcamBubble) {
                 disconnect(session, nullptr, m_webcamBubble, nullptr);
                 m_webcamBubble->close();
@@ -2262,6 +2458,10 @@ private:
             session->deleteLater();
             QMessageBox::warning(nullptr, QStringLiteral("Recording"), error);
             return;
+        }
+        if (!session->webcamActive() && m_webcamBubble) {
+            m_webcamBubble->close();
+            m_webcamBubble = nullptr;
         }
 
         debugLog(QStringLiteral(
@@ -2497,6 +2697,10 @@ private:
     QPointer<RecordingCountdown> m_countdownPill;
     QPointer<RecordingMask> m_recordingMask;
     QPointer<Platform::WebcamBubble> m_webcamBubble;
+    QPointer<Platform::WebcamBubble> m_setupWebcamBubble;
+    QPointer<Platform::WebcamPreview> m_webcamPreview;
+    QPointer<Platform::WebcamPreview> m_activeWebcamPreview;
+    QString m_previewDevice;
     QPointer<Platform::WindowPicker> m_windowPicker;
     QPointer<Platform::RecordingSetupOverlay> m_setupOverlay;
     QPointer<Platform::ScrollCaptureSession> m_scrollSession;
@@ -2537,6 +2741,7 @@ int run(QApplication& app)
     }
 
     auto* shell = new Shell;
+    shell->setParent(&app);
 
     const QStringList arguments = QCoreApplication::arguments();
     if (arguments.contains(QStringLiteral("--demo-area"))) {

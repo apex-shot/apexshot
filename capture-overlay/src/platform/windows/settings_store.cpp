@@ -128,14 +128,23 @@ WebcamPlacement loadWebcamPlacement()
     placement.present = true;
     placement.relX = std::clamp(root.value(QStringLiteral("rel_x")).toDouble(placement.relX), 0.0, 1.0);
     placement.relY = std::clamp(root.value(QStringLiteral("rel_y")).toDouble(placement.relY), 0.0, 1.0);
+    // Files written before the look was remembered carry only the position.
+    placement.sizeFraction =
+        std::clamp(root.value(QStringLiteral("size_fraction")).toDouble(0.0), 0.0, 1.0);
+    placement.shape = std::clamp(root.value(QStringLiteral("shape")).toInt(0), 0, 3);
+    placement.flip = root.value(QStringLiteral("flip")).toBool(false);
     return placement;
 }
 
-void saveWebcamPlacement(double relX, double relY)
+void saveWebcamPlacement(const WebcamPlacement& placement)
 {
     QJsonObject root;
-    root.insert(QStringLiteral("rel_x"), std::clamp(relX, 0.0, 1.0));
-    root.insert(QStringLiteral("rel_y"), std::clamp(relY, 0.0, 1.0));
+    root.insert(QStringLiteral("rel_x"), std::clamp(placement.relX, 0.0, 1.0));
+    root.insert(QStringLiteral("rel_y"), std::clamp(placement.relY, 0.0, 1.0));
+    if (placement.sizeFraction > 0.0)
+        root.insert(QStringLiteral("size_fraction"), std::clamp(placement.sizeFraction, 0.0, 1.0));
+    root.insert(QStringLiteral("shape"), std::clamp(placement.shape, 0, 3));
+    root.insert(QStringLiteral("flip"), placement.flip);
 
     const QString path = webcamPlacementPath();
     QDir().mkpath(QFileInfo(path).absolutePath());

@@ -254,6 +254,9 @@ pub struct PointerSidecar {
     /// The camera layer, absent for a recording made without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webcam: Option<WebcamTrack>,
+    /// Clean screen footage retained beside a composited recording.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub screen_file: Option<String>,
 }
 
 impl PointerSidecar {
@@ -268,6 +271,7 @@ impl PointerSidecar {
             presses: Vec::new(),
             source: PointerDataSource::Recorded,
             webcam: None,
+            screen_file: None,
         }
     }
 
@@ -327,6 +331,20 @@ impl PointerSidecar {
         path.is_file().then_some(path)
     }
 
+    /// The clean footage to use when editing a video that already includes its camera.
+    pub fn editable_video_path(&self, video_path: &Path) -> Option<PathBuf> {
+        let file = self.screen_file.as_deref()?;
+        let name = Path::new(file);
+        if !matches!(name.components().next(), Some(std::path::Component::Normal(_)))
+            || name.components().count() != 1
+            || self.webcam_path(video_path).is_none()
+        {
+            return None;
+        }
+        let path = video_path.parent()?.join(name);
+        path.is_file().then_some(path)
+    }
+
     pub fn load_next_to_video(video_path: &Path) -> Option<Self> {
         let path = Self::sidecar_path(video_path);
         if !path.is_file() {
@@ -353,6 +371,22 @@ impl PointerSidecar {
     pub fn delete_next_to_video(video_path: &Path) {
         let current_path = Self::sidecar_path(video_path);
         if current_path.is_file() {
+            if let Ok(sidecar) = Self::load(&current_path) {
+                if let Some(file) = sidecar.screen_file.as_deref() {
+                    let name = Path::new(file);
+                    if file.starts_with(".apexshot-screen-")
+                        && matches!(name.components().next(), Some(std::path::Component::Normal(_)))
+                        && name.components().count() == 1
+                    {
+                        if let Some(parent) = video_path.parent() {
+                            let _ = std::fs::remove_file(parent.join(name));
+                        }
+                    }
+                }
+                let mut webcam_path = current_path.as_os_str().to_os_string();
+                webcam_path.push(".webcam.mp4");
+                let _ = std::fs::remove_file(webcam_path);
+            }
             remove_sidecar(&current_path);
         }
 
@@ -757,10 +791,10 @@ fn remove_sidecar(path: &Path) {
 }
 
 pub fn delete_recording_outputs(video_path: &Path) {
+    PointerSidecar::delete_next_to_video(video_path);
     if video_path.exists() {
         let _ = std::fs::remove_file(video_path);
     }
-    PointerSidecar::delete_next_to_video(video_path);
 }
 
 #[cfg(test)]
@@ -1745,6 +1779,50 @@ mod tests {
 #[cfg(test)]
 mod webcam_tests {
     use super::*;
+
+    #[test]
+    fn composited_recording_keeps_editable_screen_and_camera() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-editable-window-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("recording.mp4");
+        let screen = dir.join(".apexshot-screen-test.mp4");
+        std::fs::write(&video, b"composited").unwrap();
+        std::fs::write(&screen, b"screen").unwrap();
+        let sidecar_path = PointerSidecar::sidecar_path(&video);
+        std::fs::create_dir_all(sidecar_path.parent().unwrap()).unwrap();
+        let mut track_name = sidecar_path.as_os_str().to_os_string();
+        track_name.push(".webcam.mp4");
+        let camera = PathBuf::from(track_name);
+        std::fs::write(&camera, b"camera").unwrap();
+        let mut sidecar = PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.webcam = Some(WebcamTrack {
+            file: camera.file_name().unwrap().to_string_lossy().into_owned(),
+            width: 640,
+            height: 480,
+            w: 0.2,
+            h: 0.2,
+            ..WebcamTrack::default()
+        });
+        sidecar.screen_file = Some(screen.file_name().unwrap().to_string_lossy().into_owned());
+        sidecar.write_next_to_video(&video).unwrap();
+        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        assert_eq!(loaded.editable_video_path(&video), Some(screen.clone()));
+        std::fs::remove_file(&camera).unwrap();
+        assert!(loaded.editable_video_path(&video).is_none());
+        std::fs::write(&camera, b"camera").unwrap();
+        let mut invalid = loaded.clone();
+        invalid.screen_file = Some("../outside.mp4".to_string());
+        assert!(invalid.editable_video_path(&video).is_none());
+        delete_recording_outputs(&video);
+        assert!(!video.exists());
+        assert!(!screen.exists());
+        assert!(!camera.exists());
+        assert!(!sidecar_path.exists());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     const TRACK_JSON: &str = r#"{
         "file": "4f2a.webcam.mp4",

@@ -5,6 +5,7 @@
 
 #include <QApplication>
 #include <QCoreApplication>
+#include <QCloseEvent>
 #include <QCursor>
 #include <QDir>
 #include <QEventLoop>
@@ -231,6 +232,14 @@ CaptureModeToolbar::CaptureModeToolbar(QScreen* screen, bool screenIsLocked,
 
     if (m_enableScrollCapture && m_camera)
         loadCameraDefaults();
+#ifdef Q_OS_WIN
+    m_meterTimer = new QTimer(this);
+    m_meterTimer->setInterval(80);
+    QObject::connect(m_meterTimer, &QTimer::timeout, this, [this]() {
+        if (m_recording && isVisible())
+            update();
+    });
+#endif
 }
 
 CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServer,
@@ -251,7 +260,8 @@ CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServe
                                                        bool allowAreaRecording,
                                                        bool enableScrollCapture,
                                                        const DeviceDefaults& defaults,
-                                                       bool persistForWindowSetup)
+                                                       bool persistForWindowSetup,
+                                                       std::function<void(bool, const QString&)> cameraChanged)
 {
     QScreen* screen = targetScreen;
     if (!screen) {
@@ -265,6 +275,8 @@ CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServe
         new CaptureModeToolbar(screen, targetScreen != nullptr, recordingAvailable,
                                allowAreaRecording, enableScrollCapture, defaults));
     CaptureModeToolbar& toolbar = *toolbarHolder;
+    toolbar.m_cameraChanged = std::move(cameraChanged);
+    toolbar.notifyCameraChanged();
     QEventLoop loop;
     QObject::connect(&toolbar, &QObject::destroyed, &loop, &QEventLoop::quit);
     if (controlServer) {
@@ -364,6 +376,10 @@ int CaptureModeToolbar::itemWidth(int index) const
 {
     if (index == itemCount() - 1)
         return 44;
+#ifdef Q_OS_WIN
+    if (m_enableScrollCapture && m_recording && index >= 5 && index <= 7)
+        return m_deviceItemWidth;
+#endif
 
     QFont font(QStringLiteral("Inter"));
     font.setPixelSize(13);
@@ -414,11 +430,52 @@ QString CaptureModeToolbar::labelFor(int index) const
 {
     if (index == itemCount() - 1)
         return QString();
+#ifdef Q_OS_WIN
+    if (m_enableScrollCapture && m_recording) {
+        if (index == 5)
+            return m_microphone && !m_microphoneDevice.isEmpty()
+                ? m_microphoneDevice : QStringLiteral("No microphone");
+        if (index == 6)
+            return m_speaker && !m_outputDevice.isEmpty()
+                ? (m_systemAudioApplication.isEmpty() ? m_outputDevice : m_systemAudioApplication)
+                : QStringLiteral("No system audio");
+        if (index == 7)
+            return m_camera && !m_cameraDevice.isEmpty()
+                ? m_cameraDevice : QStringLiteral("No camera");
+    }
+#endif
     if (cameraSlot(index))
         return QStringLiteral("Webcam");
     if (m_enableScrollCapture && index == 7)
         return QStringLiteral("Scroll");
     return QString::fromLatin1(kLabels[index]);
+}
+
+QString CaptureModeToolbar::displayedLabel(int index, const QFont& font) const
+{
+    const int width = std::max(0, int(itemRect(index).width()) - 2 * kIconPad
+                                      - kIconSize - kIconGap);
+    return QFontMetrics(font).elidedText(labelFor(index), Qt::ElideRight, width);
+}
+
+void CaptureModeToolbar::resizeForMode()
+{
+#ifdef Q_OS_WIN
+    if (!m_enableScrollCapture)
+        return;
+    if (m_recording && m_screen) {
+        const int fixedWidth = preferredWidth() - 3 * m_deviceItemWidth;
+        m_deviceItemWidth = std::clamp((m_screen->availableGeometry().width() - 24 - fixedWidth) / 3,
+                                       74, 160);
+    }
+    const int center = x() + width() / 2;
+    setFixedSize(preferredWidth(), kPanelHeight);
+    const QRect available = m_screen ? m_screen->availableGeometry() : QRect();
+    int left = center - width() / 2;
+    if (!available.isNull() && width() <= available.width())
+        left = std::clamp(left, available.left(), available.right() - width() + 1);
+    move(left, y());
+#endif
 }
 
 /// While recording, the Scroll slot carries the Webcam toggle instead. Scroll
@@ -553,7 +610,13 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
         groupFont.setPixelSize(13);
         groupFont.setWeight(active || deviceOn ? QFont::DemiBold : QFont::Medium);
         QString label = isClose ? QString() : labelFor(i);
-        if (!isClose && m_recording && i == 5) {
+        bool deviceCell = false;
+#ifdef Q_OS_WIN
+        deviceCell = m_enableScrollCapture && m_recording && i >= 5 && i <= 7;
+#endif
+        if (deviceCell) {
+            label = displayedLabel(i, groupFont);
+        } else if (!isClose && m_recording && i == 5) {
             label = QStringLiteral("Mic");
         } else if (!isClose && m_recording && i == 6) {
             label = QStringLiteral("Speaker");
@@ -563,25 +626,45 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
         const double labelWidth =
             isClose ? 0.0 : QFontMetricsF(groupFont).horizontalAdvance(label);
         const double groupWidth = isClose ? 0.0 : kIconSize + kIconGap + labelWidth;
-        const QPointF iconCenter(isClose ? cell.center().x()
-                                        : cell.center().x() - groupWidth / 2.0
-                                              + kIconSize / 2.0,
-                                 cell.center().y());
+        const double groupLeft = deviceCell ? cell.left() + kIconPad
+                                            : cell.center().x() - groupWidth / 2.0;
+        const QPointF iconCenter(isClose ? cell.center().x() : groupLeft + kIconSize / 2.0,
+                                 cell.center().y() - (deviceCell && i != 7 ? 2.0 : 0.0));
         drawIcon(painter, i, iconCenter,
                  isClose && !hovered ? QColor(190, 190, 196) : iconColor);
+        if (deviceCell && !deviceOn) {
+            painter.setPen(QPen(QColor(150, 150, 158), 1.5, Qt::SolidLine, Qt::RoundCap));
+            painter.drawLine(iconCenter + QPointF(-8.0, -8.0),
+                             iconCenter + QPointF(8.0, 8.0));
+        }
 
         if (!isClose) {
             painter.setFont(groupFont);
             painter.setPen(active || deviceOn ? Qt::white
                                               : (disabled ? QColor(115, 115, 122)
-                                                          : QColor(228, 228, 232)));
-            const double textLeft = cell.center().x() - groupWidth / 2.0 + kIconSize + kIconGap;
+                                                          : (deviceCell ? QColor(150, 150, 158)
+                                                                        : QColor(228, 228, 232))));
+            const double textLeft = groupLeft + kIconSize + kIconGap;
             const QFontMetricsF labelMetrics(groupFont);
             // Align the middle of the cap height, not the whole line box: the
             // icon is centred on its painted outline below.
             painter.drawText(QPointF(textLeft,
-                                     cell.center().y() + labelMetrics.capHeight() / 2.0),
+                                     iconCenter.y() + labelMetrics.capHeight() / 2.0),
                              label);
+#ifdef Q_OS_WIN
+            if (deviceCell && (i == 5 || i == 6) && deviceOn) {
+                const qreal meterWidth = std::max(0.0, cell.right() - kIconPad - textLeft);
+                const QRectF meter(textLeft, cell.bottom() - 8.0, meterWidth, 3.0);
+                painter.setPen(Qt::NoPen);
+                painter.setBrush(QColor(255, 255, 255, 30));
+                painter.drawRoundedRect(meter, 1.5, 1.5);
+                const float level = i == 5 ? m_microphoneMonitor.peak()
+                                           : m_systemAudioMonitor.peak();
+                painter.setBrush(QColor(255, 138, 64));
+                painter.drawRoundedRect(QRectF(meter.x(), meter.y(), meter.width() * level,
+                                               meter.height()), 1.5, 1.5);
+            }
+#endif
         }
 
         if (separatorAfter(i)) {
@@ -789,6 +872,10 @@ void CaptureModeToolbar::mouseMoveEvent(QMouseEvent* event)
             QToolTip::showText(event->globalPos(),
                                QStringLiteral("Video recording is not supported on this system"),
                                this);
+#ifdef Q_OS_WIN
+        } else if (m_enableScrollCapture && m_recording && hovered >= 5 && hovered <= 7) {
+            QToolTip::showText(event->globalPos(), labelFor(hovered), this);
+#endif
         } else {
             QToolTip::hideText();
         }
@@ -839,11 +926,16 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
 
     if (m_enableScrollCapture && index == 7) {
         m_recording = false;
+        notifyCameraChanged();
         m_scroll = !m_scroll;
         if (m_scroll) {
             m_ocr = false;
             m_timerSeconds = 0;
         }
+        resizeForMode();
+#ifdef Q_OS_WIN
+        updateAudioMonitoring();
+#endif
         update();
         return;
     }
@@ -851,7 +943,12 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
     switch (index) {
     case 0:
         m_recording = false;
+        notifyCameraChanged();
         m_scroll = false;
+        resizeForMode();
+#ifdef Q_OS_WIN
+        updateAudioMonitoring();
+#endif
         update();
         break;
     case 1:
@@ -859,8 +956,16 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
             break;
         m_scroll = false;
         m_recording = true;
+        notifyCameraChanged();
         m_ocr = false;
         m_timerSeconds = 0;
+#ifdef Q_OS_WIN
+        if (m_enableScrollCapture) {
+            refreshDevices();
+            updateAudioMonitoring();
+        }
+#endif
+        resizeForMode();
         update();
         break;
     case 2:
@@ -888,6 +993,12 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
     case 5:
         if (m_recording) {
             m_microphone = !m_microphone;
+#ifdef Q_OS_WIN
+            if (m_enableScrollCapture) {
+                refreshDevices();
+                updateAudioMonitoring();
+            }
+#endif
             update();
         } else if (!m_scroll && m_timerSeconds == 0) {
             m_ocr = !m_ocr;
@@ -897,6 +1008,12 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
     case 6:
         if (m_recording) {
             m_speaker = !m_speaker;
+#ifdef Q_OS_WIN
+            if (m_enableScrollCapture) {
+                refreshDevices();
+                updateAudioMonitoring();
+            }
+#endif
             update();
         } else if (!m_scroll && !m_ocr) {
             m_timerSeconds = m_timerSeconds == 0 ? 3 : (m_timerSeconds == 3 ? 5 : (m_timerSeconds == 5 ? 10 : 0));
@@ -907,6 +1024,70 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         break;
     }
 }
+
+void CaptureModeToolbar::closeEvent(QCloseEvent* event)
+{
+#ifdef Q_OS_WIN
+    m_meterTimer->stop();
+    m_microphoneMonitor.stop();
+    m_systemAudioMonitor.stop();
+    m_monitoringMicrophone = false;
+    m_monitoringSystemAudio = false;
+#endif
+    QWidget::closeEvent(event);
+}
+
+#ifdef Q_OS_WIN
+void CaptureModeToolbar::refreshDevices()
+{
+    if (m_microphone) {
+        m_microphoneDevice = Platform::resolveMicrophoneDevice(
+            Platform::directShowDevices(false), m_microphoneDevice,
+            Platform::defaultMicrophoneName());
+        if (m_microphoneDevice.isEmpty())
+            m_microphone = false;
+    }
+    if (m_camera)
+        loadCameraDefaults();
+    m_outputDevice = Platform::defaultSpeakerName();
+    if (m_outputDevice.isEmpty())
+        m_speaker = false;
+}
+
+void CaptureModeToolbar::updateAudioMonitoring()
+{
+    const bool microphone = m_enableScrollCapture && m_recording && m_microphone
+        && !m_microphoneDevice.isEmpty();
+    if (microphone != m_monitoringMicrophone
+        || (microphone && m_monitoredMicrophone != m_microphoneDevice)) {
+        if (microphone)
+            m_microphoneMonitor.startMicrophone(m_microphoneDevice);
+        else
+            m_microphoneMonitor.stop();
+        m_monitoringMicrophone = microphone;
+        m_monitoredMicrophone = microphone ? m_microphoneDevice : QString();
+    }
+    const bool systemAudio = m_enableScrollCapture && m_recording && m_speaker
+        && !m_outputDevice.isEmpty()
+        && (m_systemAudioApplication.isEmpty() || m_systemAudioProcessId != 0);
+    const quint32 processId = m_systemAudioApplication.isEmpty() ? 0 : m_systemAudioProcessId;
+    if (systemAudio != m_monitoringSystemAudio
+        || (systemAudio && (m_monitoredProcessId != processId
+                            || m_monitoredOutput != m_outputDevice))) {
+        if (systemAudio)
+            m_systemAudioMonitor.startSystemAudio(processId);
+        else
+            m_systemAudioMonitor.stop();
+        m_monitoringSystemAudio = systemAudio;
+        m_monitoredProcessId = processId;
+        m_monitoredOutput = systemAudio ? m_outputDevice : QString();
+    }
+    if (microphone || systemAudio)
+        m_meterTimer->start();
+    else
+        m_meterTimer->stop();
+}
+#endif
 
 void CaptureModeToolbar::leaveEvent(QEvent*)
 {
@@ -948,6 +1129,7 @@ void CaptureModeToolbar::toggleCamera()
 {
     if (m_camera) {
         m_camera = false;
+        notifyCameraChanged();
         update();
         return;
     }
@@ -962,7 +1144,14 @@ void CaptureModeToolbar::toggleCamera()
         m_cameraDevice = cameras.first();
 #endif
     m_camera = true;
+    notifyCameraChanged();
     update();
+}
+
+void CaptureModeToolbar::notifyCameraChanged()
+{
+    if (m_cameraChanged)
+        m_cameraChanged(m_recording && m_camera, m_cameraDevice);
 }
 
 QPoint CaptureModeToolbar::menuAnchor(int index) const
@@ -999,6 +1188,8 @@ void CaptureModeToolbar::openDeviceMenu(int index)
             m_microphone = true;
             m_microphoneDevice = chosen->data().toString();
         }
+        refreshDevices();
+        updateAudioMonitoring();
         update();
         return;
     }
@@ -1062,6 +1253,8 @@ void CaptureModeToolbar::openDeviceMenu(int index)
             m_systemAudioProcessId = chosen->data().toUInt();
             m_systemAudioApplication = chosen->property("appName").toString();
         }
+        refreshDevices();
+        updateAudioMonitoring();
         update();
         return;
     }
@@ -1095,6 +1288,7 @@ void CaptureModeToolbar::openDeviceMenu(int index)
             m_camera = true;
             m_cameraDevice = chosen->data().toString();
         }
+        notifyCameraChanged();
         update();
         return;
     }

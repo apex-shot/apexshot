@@ -979,6 +979,9 @@ impl WebcamModel {
         let Some(sidecar) = PointerSidecar::load_next_to_video(video) else {
             return;
         };
+        if sidecar.screen_file.is_some() && sidecar.editable_video_path(video).is_none() {
+            return;
+        }
         let configured = sidecar.webcam.clone();
         let Some(track) = configured.clone().filter(WebcamTrack::is_valid) else {
             if configured.is_some() {

@@ -97,17 +97,25 @@ struct RecordingDeviceChoices {
 /// `%APPDATA%/apexshot/settings.json`.
 QString shellSettingsPath();
 
-/// Where the person left the camera bubble, across the capture.
+/// Where the person left the camera bubble, and the look they gave it, so the
+/// next preview opens the way they left it instead of at the defaults.
 struct WebcamPlacement {
     bool present = false;
     double relX = 1.0;
     double relY = 0.0;
+    /// The bubble's width as a fraction of the display's height, which is what
+    /// keeps a resized bubble the same size on any screen.
+    double sizeFraction = 0.0;
+    /// 0 circle, 1 square, 2 rectangle, 3 vertical.
+    int shape = 0;
+    bool flip = false;
 };
 
 /// `%APPDATA%/apexshot/webcam-placement.json`.
 QString webcamPlacementPath();
 WebcamPlacement loadWebcamPlacement();
-void saveWebcamPlacement(double relX, double relY);
+/// Write the whole state: `sizeFraction` of 0 leaves the size to the preset.
+void saveWebcamPlacement(const WebcamPlacement& placement);
 
 /// `%APPDATA%/apexshot/recording-devices.json`.
 QString recordingDeviceChoicesPath();

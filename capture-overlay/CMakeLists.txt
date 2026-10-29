@@ -41,6 +41,8 @@ if(WIN32)
         src/platform/windows/scroll_controls.h
         src/platform/windows/webcam_bubble.cpp
         src/platform/windows/webcam_bubble.h
+        src/platform/windows/webcam_preview.cpp
+        src/platform/windows/webcam_preview.h
         src/platform/windows/window_recording.cpp
         src/platform/windows/window_recording.h
         src/platform/windows/webcam_layout.cpp
@@ -93,6 +95,50 @@ if(WIN32)
     option(APEXSHOT_CAPTURE_BUILD_TESTS "Build the capture helper unit tests" OFF)
     if(APEXSHOT_CAPTURE_BUILD_TESTS)
         enable_testing()
+        add_executable(apexshot-capture-toolbar-tests
+            tests/CaptureModeToolbarTests.cpp
+            src/CaptureModeToolbar.cpp
+            src/CaptureModeToolbar.h
+            src/platform/windows/audio_devices.cpp
+            src/platform/windows/audio_devices.h
+            assets/lucide.qrc
+        )
+        target_include_directories(apexshot-capture-toolbar-tests PRIVATE src)
+        target_link_libraries(apexshot-capture-toolbar-tests PRIVATE
+            Qt5::Widgets Qt5::DBus Qt5::Network mmdevapi ole32 oleaut32 strmiids shell32 uuid)
+        if(MSVC)
+            target_compile_options(apexshot-capture-toolbar-tests PRIVATE /utf-8)
+        endif()
+        add_test(NAME apexshot-capture-toolbar-tests COMMAND apexshot-capture-toolbar-tests)
+        set_tests_properties(apexshot-capture-toolbar-tests PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+        add_executable(apexshot-fake-webcam tests/FakeWebcam.cpp)
+        target_link_libraries(apexshot-fake-webcam PRIVATE Qt5::Core Qt5::Gui)
+
+        add_executable(apexshot-webcam-preview-tests
+            tests/WebcamPreviewTests.cpp
+            src/platform/recording.h
+            src/platform/recording_settings.h
+            src/platform/windows/recording.cpp
+            src/platform/windows/audio_devices.cpp
+            src/platform/windows/pointer_tracker.cpp
+            src/platform/windows/recording_settings.cpp
+            src/platform/windows/settings_store.cpp
+            src/platform/windows/webcam_bubble.cpp
+            src/platform/windows/webcam_bubble.h
+            src/platform/windows/webcam_layout.cpp
+            src/platform/windows/webcam_preview.cpp
+            src/platform/windows/webcam_preview.h
+        )
+        target_include_directories(apexshot-webcam-preview-tests PRIVATE src)
+        target_link_libraries(apexshot-webcam-preview-tests PRIVATE
+            Qt5::Widgets Qt5::Network mmdevapi ole32 oleaut32 strmiids shell32 uuid)
+        add_dependencies(apexshot-webcam-preview-tests apexshot-fake-webcam)
+        add_test(NAME apexshot-webcam-preview-tests COMMAND apexshot-webcam-preview-tests)
+        set_tests_properties(apexshot-webcam-preview-tests PROPERTIES
+            ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
         add_executable(apexshot-recording-tests
             tests/WindowsRecordingTests.cpp
             src/platform/recording.h

@@ -80,6 +80,8 @@ struct RecordingRequest {
     bool webcamEnabled = false;
     /// The dshow camera to record. Empty means the machine's first camera.
     QString webcamDevice;
+    /// A running local webcam preview stream, when setup already owns the camera.
+    QString webcamStreamUrl;
     /// Where the bubble sat in `region`, for the editor's layer.
     WebcamLayout webcamLayout;
 };
@@ -121,9 +123,14 @@ public:
     /// one the person left the bubble at.
     void setWebcamLayout(const WebcamLayout& layout);
 
+    /// Whether the current recording successfully opened a webcam.
+    bool webcamActive() const;
+
 signals:
     void elapsedChanged(qint64 elapsedMs);
     void stateChanged();
+    /// The capture process has stopped for finalization or discard.
+    void captureStopped();
     /// One live frame from the webcam track, for the bubble window. The frames
     /// are small (the preview is scaled down) and arrive at the recording's
     /// frame rate; they are not the frames that reach the track file.

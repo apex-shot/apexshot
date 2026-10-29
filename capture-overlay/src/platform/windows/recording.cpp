@@ -4,6 +4,7 @@
 #include "platform/windows/audio_devices.h"
 #include "platform/windows/pointer_tracker.h"
 #include "platform/windows/settings_store.h"
+#include "platform/windows/win_util.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -20,6 +21,7 @@
 #include <QStandardPaths>
 #include <QThread>
 #include <QTimer>
+#include <QUuid>
 
 #include <algorithm>
 #include <functional>
@@ -185,19 +187,7 @@ QStringList audioInputs()
 
 QString microphoneDevice()
 {
-    const QString preferred = Platform::defaultMicrophoneName();
-    const QStringList devices = audioInputs();
-    if (!preferred.isEmpty()) {
-        for (const QString& name : devices) {
-            if (name.compare(preferred, Qt::CaseInsensitive) == 0)
-                return name;
-        }
-    }
-    for (const QString& name : devices) {
-        if (name.contains(QStringLiteral("microphone"), Qt::CaseInsensitive))
-            return name;
-    }
-    return devices.isEmpty() ? QString() : devices.first();
+    return Platform::resolveMicrophoneDevice(audioInputs(), {}, Platform::defaultMicrophoneName());
 }
 
 QString defaultOutputPath()
@@ -524,7 +514,10 @@ qint64 RecordingSession::Private::elapsedMs() const
 
 QString RecordingSession::Private::captureOutput() const
 {
-    return tailLines(QString::fromUtf8(processOutput), 8);
+    QString output = tailLines(QString::fromUtf8(processOutput), 8);
+    if (!request.webcamStreamUrl.isEmpty())
+        output.replace(request.webcamStreamUrl, QStringLiteral("[local webcam stream]"));
+    return output;
 }
 
 QStringList RecordingSession::Private::buildAudioArguments(QStringList& warnings) const
@@ -598,16 +591,24 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
         // three streams; a deep buffer keeps a busy desktop from making dshow
         // drop frames out of the track.
         args << QStringLiteral("-thread_queue_size") << QStringLiteral("1024");
-        if (!webcamCaptureSize.isEmpty()) {
-            args << QStringLiteral("-video_size")
-                 << QStringLiteral("%1x%2")
-                        .arg(webcamCaptureSize.width())
-                        .arg(webcamCaptureSize.height());
+        if (!request.webcamStreamUrl.isEmpty()) {
+            args << QStringLiteral("-f") << QStringLiteral("mjpeg")
+                 << QStringLiteral("-probesize") << QStringLiteral("32768")
+                 << QStringLiteral("-analyzeduration") << QStringLiteral("100000")
+                 << QStringLiteral("-use_wallclock_as_timestamps") << QStringLiteral("1")
+                 << QStringLiteral("-i") << request.webcamStreamUrl;
+        } else {
+            if (!webcamCaptureSize.isEmpty()) {
+                args << QStringLiteral("-video_size")
+                     << QStringLiteral("%1x%2")
+                            .arg(webcamCaptureSize.width())
+                            .arg(webcamCaptureSize.height());
+            }
+            args << QStringLiteral("-f") << QStringLiteral("dshow") << QStringLiteral("-rtbufsize")
+                 << QStringLiteral("256M") << QStringLiteral("-framerate") << QString::number(fps)
+                 << QStringLiteral("-i")
+                 << QStringLiteral("video=%1").arg(request.webcamDevice);
         }
-        args << QStringLiteral("-f") << QStringLiteral("dshow") << QStringLiteral("-rtbufsize")
-             << QStringLiteral("256M") << QStringLiteral("-framerate") << QString::number(fps)
-             << QStringLiteral("-i")
-             << QStringLiteral("video=%1").arg(request.webcamDevice);
     }
 
     args << audioArguments;
@@ -664,12 +665,12 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
         // more than any bubble size can show, and the cap keeps the extra
         // encoder cheap.
         const QString trackScale =
-            QStringLiteral("scale=w='min(iw,1280)':h='min(ih,960)'"
+            QStringLiteral("scale=w='min(iw,1920)':h='min(ih,1080)'"
                            ":force_original_aspect_ratio=decrease,"
                            "scale=trunc(iw/2)*2:trunc(ih/2)*2");
         args << QStringLiteral("-map") << QStringLiteral("1:v") << QStringLiteral("-an")
              << QStringLiteral("-vf") << trackScale;
-        appendVideoEncoder(args, 23);
+        appendVideoEncoder(args, 18);
         args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-r")
              << QString::number(fps) << webcamSegmentPath;
 
@@ -677,18 +678,20 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
         // bubble's size a raw pipe carries tens of megabytes a second, so any
         // hitch in the window blocks ffmpeg's stdout and stalls the whole
         // recording with it.
-        const QSize preview = webcamPreviewSize.isEmpty() ? QSize(320, 320)
-                                                          : webcamPreviewSize;
-        args << QStringLiteral("-map") << QStringLiteral("1:v") << QStringLiteral("-an")
-             << QStringLiteral("-vf")
-             << QStringLiteral(
-                    "scale=%1:%2:force_original_aspect_ratio=increase,crop=%1:%2,fps=%3")
-                    .arg(preview.width())
-                    .arg(preview.height())
-                    .arg(fps)
-             << QStringLiteral("-c:v") << QStringLiteral("mjpeg") << QStringLiteral("-q:v")
-             << QStringLiteral("6") << QStringLiteral("-f") << QStringLiteral("mjpeg")
-             << QStringLiteral("pipe:1");
+        if (request.webcamStreamUrl.isEmpty()) {
+            const QSize preview = webcamPreviewSize.isEmpty() ? QSize(320, 320)
+                                                              : webcamPreviewSize;
+            args << QStringLiteral("-map") << QStringLiteral("1:v") << QStringLiteral("-an")
+                 << QStringLiteral("-vf")
+                 << QStringLiteral(
+                        "scale=%1:%2:force_original_aspect_ratio=increase,crop=%1:%2,fps=%3")
+                        .arg(preview.width())
+                        .arg(preview.height())
+                        .arg(fps)
+                 << QStringLiteral("-c:v") << QStringLiteral("mjpeg") << QStringLiteral("-q:v")
+                 << QStringLiteral("6") << QStringLiteral("-f") << QStringLiteral("mjpeg")
+                 << QStringLiteral("pipe:1");
+        }
     }
 
     return args;
@@ -827,6 +830,7 @@ void RecordingSession::Private::onProcessFinished(int exitCode, QProcess::ExitSt
     }
 
     if (state == State::Stopping) {
+        emit q->captureStopped();
         if (discardRequested) {
             cleanupAndEmit(false, QString(), QString());
             return;
@@ -1064,7 +1068,7 @@ void RecordingSession::Private::completeWebcamTrack(const QString& videoPath)
             videoPath,
             trackPath,
             [this, trackPath, finish](bool baked, const QString& detail) {
-                if (baked) {
+                if (baked && request.target != RecordingRequest::Target::Window) {
                     // The saved recording carries the camera. Leaving the
                     // track in the sidecar would make the editor add a second
                     // copy on top of it.
@@ -1165,17 +1169,34 @@ void RecordingSession::Private::compositeWebcam(
     // gap rather than showing the desktop without a bubble at the start.
     const double startDelay = std::max(0.0, videoSeconds - cameraSeconds);
 
-    QString filter = QStringLiteral(
-                         "[1:v]scale=%1:%2:force_original_aspect_ratio=increase,"
+    QString filter = layout.flip ? QStringLiteral("[1:v]hflip,") : QStringLiteral("[1:v]");
+    filter += QStringLiteral(
+                         "scale=%1:%2:force_original_aspect_ratio=increase,"
                          "crop=%1:%2,setsar=1,format=rgba")
                          .arg(width)
                          .arg(height);
+    // The bubble's outline is an alpha shape, so the bake has to carry the same
+    // mask: a plain crop would put a square camera into a round bubble. The
+    // mask is the shape's signed distance, feathered over one pixel so the edge
+    // is as clean as the live preview's.
+    const auto mask = [](const QString& distance) {
+        return QStringLiteral(",geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':a='255*clip(0.5-(%1),0,1)'")
+            .arg(distance);
+    };
     if (layout.shape == 0) {
-        // Feather the last couple of pixels so the baked circle has the same
-        // clean edge as the live bubble instead of a stair-stepped one.
-        filter += QStringLiteral(
-            ",geq=r='r(X,Y)':g='g(X,Y)':b='b(X,Y)':"
-            "a='255*clip((W/2-sqrt((X-W/2)*(X-W/2)+(Y-H/2)*(Y-H/2)))/2.0+0.5,0,1)'");
+        filter += mask(QStringLiteral("sqrt((X-%1)*(X-%1)+(Y-%2)*(Y-%2))-%3")
+                           .arg(width / 2.0, 0, 'f', 3)
+                           .arg(height / 2.0, 0, 'f', 3)
+                           .arg(width / 2.0, 0, 'f', 3));
+    } else {
+        const double radius = double(width) * (layout.shape == 1 ? 0.04 : 0.06);
+        filter += mask(QStringLiteral("sqrt(max(abs(X-%1)-%2,0)*max(abs(X-%1)-%2,0)"
+                                      "+max(abs(Y-%3)-%4,0)*max(abs(Y-%3)-%4,0))-%5")
+                           .arg(width / 2.0, 0, 'f', 3)
+                           .arg(width / 2.0 - radius, 0, 'f', 3)
+                           .arg(height / 2.0, 0, 'f', 3)
+                           .arg(height / 2.0 - radius, 0, 'f', 3)
+                           .arg(radius, 0, 'f', 3));
     }
     if (startDelay > 0.02) {
         filter += QStringLiteral(",tpad=start_duration=%1:start_mode=clone")
@@ -1207,7 +1228,10 @@ void RecordingSession::Private::compositeWebcam(
         QStringLiteral("-map"),
         QStringLiteral("0:a?"),
     };
-    appendVideoEncoder(compositeArgs, 18);
+    // The composite is what the saved video shows, and it is the second
+    // generation of the screen capture, so it gets more bits than the segment
+    // that came before it.
+    appendVideoEncoder(compositeArgs, 16);
     compositeArgs << QStringLiteral("-c:a") << QStringLiteral("copy")
                   << QStringLiteral("-movflags") << QStringLiteral("+faststart")
                   << compositePath;
@@ -1216,7 +1240,7 @@ void RecordingSession::Private::compositeWebcam(
         composer,
         QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
         q,
-        [composer, videoPath, compositePath, done](int code, QProcess::ExitStatus status) {
+        [this, composer, videoPath, compositePath, done](int code, QProcess::ExitStatus status) {
             const QString detail =
                 tailLines(QString::fromUtf8(composer->readAllStandardError()), 6);
             composer->deleteLater();
@@ -1230,11 +1254,26 @@ void RecordingSession::Private::compositeWebcam(
 
             // Keep the original until the composited file is in its place; a
             // failed rename must not leave the recording without either.
-            const QString parked = videoPath + QStringLiteral(".video");
-            QFile::remove(parked);
+            const bool keepScreen = request.target == RecordingRequest::Target::Window;
+            const QString parked = keepScreen
+                ? QFileInfo(videoPath).dir().filePath(
+                      QStringLiteral(".apexshot-screen-%1.mp4")
+                          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)))
+                : videoPath + QStringLiteral(".video");
+            if (!keepScreen)
+                QFile::remove(parked);
             const bool held = QFile::rename(videoPath, parked);
             if (held && QFile::rename(compositePath, videoPath)) {
-                QFile::remove(parked);
+                if (keepScreen) {
+                    const DWORD attributes = GetFileAttributesW(
+                        reinterpret_cast<LPCWSTR>(parked.utf16()));
+                    if (attributes != INVALID_FILE_ATTRIBUTES)
+                        SetFileAttributesW(reinterpret_cast<LPCWSTR>(parked.utf16()),
+                                           attributes | FILE_ATTRIBUTE_HIDDEN);
+                    webcamTrack.screenFile = QFileInfo(parked).fileName();
+                } else {
+                    QFile::remove(parked);
+                }
                 done(true, QString());
             } else {
                 if (held)
@@ -1269,6 +1308,10 @@ void RecordingSession::Private::removeDiscardedSidecar()
         return;
     QFile::remove(path);
     QFile::remove(path + QStringLiteral(".webcam.mp4"));
+    if (!webcamTrack.screenFile.isEmpty()) {
+        QFileInfo info(request.outputPath);
+        QFile::remove(info.dir().filePath(webcamTrack.screenFile));
+    }
 }
 
 void RecordingSession::Private::cleanupAndEmit(bool kept,
@@ -1513,7 +1556,7 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
     recordingLog(QStringLiteral("webcam request enabled=%1 device=%2")
                      .arg(d->request.webcamEnabled ? 1 : 0)
                      .arg(d->request.webcamDevice));
-    if (d->request.webcamEnabled) {
+    if (d->request.webcamEnabled && d->request.webcamStreamUrl.isEmpty()) {
         // A camera that was unplugged or renamed since the setting was written
         // falls back to the machine's only camera rather than losing the track.
         const QStringList cameras = cameraDevices();
@@ -1528,7 +1571,13 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
             d->request.webcamDevice = camera;
         }
     }
-    if (!camera.isEmpty()) {
+    if (!d->request.webcamStreamUrl.isEmpty() && d->request.webcamEnabled) {
+        // The setup preview already owns the camera and carries its negotiated
+        // format, so the track reuses that stream instead of reopening the
+        // device for a second, colder view of the same picture.
+        recordingLog(QStringLiteral("webcam stream reuse requested"));
+        d->webcamActive = true;
+    } else if (!camera.isEmpty()) {
         const QSize captureSize = cameraCaptureSize(camera);
         const QSize cameraSize = cameraFrameSize(camera, d->request.fps);
         recordingLog(QStringLiteral("webcam probe %1 -> %2x%3 capture=%4x%5")
@@ -1547,13 +1596,15 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
             d->webcamCameraSize = cameraSize;
             d->webcamCaptureSize = captureSize;
             d->webcamPreviewSize = webcamPreviewFrameSize(d->request.webcamLayout.shape);
-            d->webcamTrack.x = std::clamp(d->request.webcamLayout.x, 0.0, 1.0);
-            d->webcamTrack.y = std::clamp(d->request.webcamLayout.y, 0.0, 1.0);
-            d->webcamTrack.w = std::clamp(d->request.webcamLayout.w, 0.0, 1.0);
-            d->webcamTrack.h = std::clamp(d->request.webcamLayout.h, 0.0, 1.0);
-            d->webcamTrack.shape = std::clamp(d->request.webcamLayout.shape, 0, 3);
-            d->webcamTrack.flip = d->request.webcamLayout.flip;
         }
+    }
+    if (d->webcamActive) {
+        d->webcamTrack.x = std::clamp(d->request.webcamLayout.x, 0.0, 1.0);
+        d->webcamTrack.y = std::clamp(d->request.webcamLayout.y, 0.0, 1.0);
+        d->webcamTrack.w = std::clamp(d->request.webcamLayout.w, 0.0, 1.0);
+        d->webcamTrack.h = std::clamp(d->request.webcamLayout.h, 0.0, 1.0);
+        d->webcamTrack.shape = std::clamp(d->request.webcamLayout.shape, 0, 3);
+        d->webcamTrack.flip = d->request.webcamLayout.flip;
     }
 
     for (const QString& warning : warnings) {
@@ -1691,8 +1742,10 @@ void RecordingSession::stop()
 
     if (d->process)
         d->requestQuit(kStopTimeoutMs);
-    else
+    else {
+        emit captureStopped();
         d->finalize();
+    }
 }
 
 void RecordingSession::discard()
@@ -1717,8 +1770,10 @@ void RecordingSession::discard()
 
     if (d->process)
         d->requestQuit(kDiscardTimeoutMs);
-    else
+    else {
+        emit captureStopped();
         d->cleanupAndEmit(false, QString(), QString());
+    }
 }
 
 bool RecordingSession::isActive() const
@@ -1748,6 +1803,11 @@ void RecordingSession::setWebcamLayout(const WebcamLayout& layout)
     d->webcamTrack.y = std::clamp(layout.y, 0.0, 1.0);
     d->webcamTrack.w = std::clamp(layout.w, 0.0, 1.0);
     d->webcamTrack.h = std::clamp(layout.h, 0.0, 1.0);
+}
+
+bool RecordingSession::webcamActive() const
+{
+    return d && d->webcamActive;
 }
 
 } // namespace Platform

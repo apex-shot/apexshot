@@ -9,9 +9,16 @@
 
 #include <functional>
 
+#ifdef Q_OS_WIN
+#include "platform/windows/audio_devices.h"
+#endif
+
+class QCloseEvent;
+class QFont;
 class QPainter;
 class QLocalServer;
 class QScreen;
+class QTimer;
 
 class CaptureModeToolbar : public QWidget
 {
@@ -88,7 +95,8 @@ public:
                          bool allowAreaRecording,
                          bool enableScrollCapture,
                          const DeviceDefaults& defaults,
-                         bool persistForWindowSetup = false);
+                         bool persistForWindowSetup = false,
+                         std::function<void(bool, const QString&)> cameraChanged = {});
 
     /// Current device state, read when a persisted toolbar's window setup
     /// starts recording.
@@ -105,8 +113,10 @@ protected:
     void mousePressEvent(QMouseEvent* event) override;
     void leaveEvent(QEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
+    void closeEvent(QCloseEvent* event) override;
 
 private:
+    friend class CaptureModeToolbarTests;
     explicit CaptureModeToolbar(QScreen* screen, bool screenIsLocked,
                                 bool recordingAvailable,
                                 bool allowAreaRecording,
@@ -117,6 +127,7 @@ private:
     int itemWidth(int index) const;
     int preferredWidth() const;
     QString labelFor(int index) const;
+    QString displayedLabel(int index, const QFont& font) const;
     QRectF itemRect(int index) const;
     bool separatorAfter(int index) const;
     int hitTest(const QPoint& point) const;
@@ -130,8 +141,14 @@ private:
     void openDeviceMenu(int index);
     void toggleCamera();
     void loadCameraDefaults();
+    void notifyCameraChanged();
     void enterSetupMode();
     void closeSetup();
+    void resizeForMode();
+#ifdef Q_OS_WIN
+    void refreshDevices();
+    void updateAudioMonitoring();
+#endif
 
     QScreen* m_screen;
     bool m_screenIsLocked = false;
@@ -154,4 +171,17 @@ private:
     bool m_scroll = false;
     bool m_setupMode = false;
     std::function<void()> m_onClose;
+    std::function<void(bool, const QString&)> m_cameraChanged;
+#ifdef Q_OS_WIN
+    QString m_outputDevice;
+    int m_deviceItemWidth = 160;
+    Platform::AudioLevelMonitor m_microphoneMonitor;
+    Platform::AudioLevelMonitor m_systemAudioMonitor;
+    QString m_monitoredMicrophone;
+    QString m_monitoredOutput;
+    quint32 m_monitoredProcessId = 0;
+    bool m_monitoringMicrophone = false;
+    bool m_monitoringSystemAudio = false;
+    QTimer* m_meterTimer = nullptr;
+#endif
 };

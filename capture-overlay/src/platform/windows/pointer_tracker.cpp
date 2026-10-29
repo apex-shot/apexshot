@@ -339,8 +339,7 @@ bool PointerTracker::writeSidecar(const QString& videoPath,
     };
     QJsonObject document = sidecar;
     if (webcam.is_valid()) {
-        document.insert(QStringLiteral("webcam"),
-                        QJsonObject{
+        QJsonObject camera{
                             {QStringLiteral("file"), QFileInfo(webcam.file).fileName()},
                             {QStringLiteral("width"), webcam.width},
                             {QStringLiteral("height"), webcam.height},
@@ -351,7 +350,10 @@ bool PointerTracker::writeSidecar(const QString& videoPath,
                             {QStringLiteral("h"), webcam.h},
                             {QStringLiteral("shape"), webcam.shape},
                             {QStringLiteral("flip"), webcam.flip},
-                        });
+                        };
+        document.insert(QStringLiteral("webcam"), camera);
+        if (!webcam.screenFile.isEmpty())
+            document.insert(QStringLiteral("screen_file"), QFileInfo(webcam.screenFile).fileName());
     }
 
     const QFileInfo info(path);

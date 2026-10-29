@@ -40,6 +40,8 @@ enum class CursorKind {
 struct WebcamTrack {
     /// File name inside the pointer sidecar's directory.
     QString file;
+    /// Name of the clean screen recording beside the final video, if baked.
+    QString screenFile;
     int width = 0;
     int height = 0;
     /// The track's own length. The camera's clock is not the desktop's, so the

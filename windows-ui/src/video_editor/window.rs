@@ -921,7 +921,9 @@ impl Stage {
         self.cursor.load(path);
         self.source_seconds.set(0.0);
         self.cursor_layer.queue_draw();
-        let Some((texture, width, height)) = path.and_then(poster_texture) else {
+        let clean_source = path.and_then(|video| self.cursor.sidecar()?.editable_video_path(video));
+        let preview_source = clean_source.as_deref().or(path);
+        let Some((texture, width, height)) = preview_source.and_then(poster_texture) else {
             self.export_button.set_sensitive(false);
             self.picture.set_visible(false);
             self.hint.set_visible(true);
@@ -942,7 +944,7 @@ impl Stage {
         self.set_camera((1.0, (f64::from(width) / 2.0, f64::from(height) / 2.0)));
         self.cursor_layer.queue_draw();
         if let Some(path) = path {
-            self.preview.set_document(Some(path), width, height);
+            self.preview.set_document(preview_source, width, height);
             self.estimate.set_pixels(width, height);
             self.estimate
                 .set_source(Some(path), source_seconds, composition_seconds);
@@ -1513,8 +1515,13 @@ fn export_model(
 ) -> Option<super::export::ExportModel> {
     let footage = timeline.export_footage()?;
     let source_size = stage.source_size.get()?;
+    let sidecar = stage.cursor.sidecar();
+    let source = sidecar
+        .as_ref()
+        .and_then(|sidecar| sidecar.editable_video_path(&footage.source))
+        .unwrap_or(footage.source);
     Some(super::export::ExportModel {
-        source: footage.source,
+        source,
         source_size,
         trim_start: footage.trim_start,
         trim_end: footage.trim_end,
@@ -1522,7 +1529,7 @@ fn export_model(
         zooms: footage.zooms,
         zoom_camera: footage.zoom_camera,
         cursor: stage.cursor.settings(),
-        sidecar: stage.cursor.sidecar(),
+        sidecar,
         webcam: stage.webcam.export(),
         crf: stage.quality.get().crf(),
     })
