@@ -3829,3 +3829,21 @@ msgstr "Ativar câmera"
 
 msgid "Add change at playhead"
 msgstr "Adicionar alteração na posição de reprodução"
+
+msgid "ApexShot"
+msgstr "ApexShot"
+
+msgid "No settings found"
+msgstr "Nenhuma configuração encontrada"
+
+msgid "Saved"
+msgstr "Salvo"
+
+msgid "Search settings"
+msgstr "Pesquisar configurações"
+
+msgid "This device"
+msgstr "Este dispositivo"
+
+msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
+msgstr "A captura temporizada ainda não está disponível na versão para Windows. O intervalo é salvo para uma versão futura."

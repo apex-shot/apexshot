@@ -3783,3 +3783,21 @@ msgstr "تشغيل الكاميرا"
 
 msgid "Add change at playhead"
 msgstr "إضافة تغيير عند موضع التشغيل"
+
+msgid "ApexShot"
+msgstr "ApexShot"
+
+msgid "No settings found"
+msgstr "لم يتم العثور على إعدادات"
+
+msgid "Saved"
+msgstr "تم الحفظ"
+
+msgid "Search settings"
+msgstr "ابحث في الإعدادات"
+
+msgid "This device"
+msgstr "هذا الجهاز"
+
+msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
+msgstr "لم يتم ربط الالتقاط الموقوت بنسخة Windows بعد. يتم حفظ الفاصل الزمني لإصدار مستقبلي."

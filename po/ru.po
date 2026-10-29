@@ -3823,3 +3823,21 @@ msgstr "Включить камеру"
 
 msgid "Add change at playhead"
 msgstr "Добавить изменение в позицию воспроизведения"
+
+msgid "ApexShot"
+msgstr "ApexShot"
+
+msgid "No settings found"
+msgstr "Настройки не найдены"
+
+msgid "Saved"
+msgstr "Сохранено"
+
+msgid "Search settings"
+msgstr "Поиск настроек"
+
+msgid "This device"
+msgstr "Это устройство"
+
+msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
+msgstr "Отложенная съёмка пока не подключена в сборке для Windows. Интервал сохраняется для будущего выпуска."

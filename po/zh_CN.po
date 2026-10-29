@@ -3749,3 +3749,21 @@ msgstr "开启摄像头"
 
 msgid "Add change at playhead"
 msgstr "在播放头处添加更改"
+
+msgid "ApexShot"
+msgstr "ApexShot"
+
+msgid "No settings found"
+msgstr "未找到设置"
+
+msgid "Saved"
+msgstr "已保存"
+
+msgid "Search settings"
+msgstr "搜索设置"
+
+msgid "This device"
+msgstr "此设备"
+
+msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
+msgstr "定时捕获尚未在 Windows 版本中接入。该间隔会被保存以供将来的版本使用。"

@@ -3759,3 +3759,21 @@ msgstr "カメラをオンにする"
 
 msgid "Add change at playhead"
 msgstr "再生位置に変更を追加"
+
+msgid "ApexShot"
+msgstr "ApexShot"
+
+msgid "No settings found"
+msgstr "設定が見つかりません"
+
+msgid "Saved"
+msgstr "保存しました"
+
+msgid "Search settings"
+msgstr "設定を検索"
+
+msgid "This device"
+msgstr "このデバイス"
+
+msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
+msgstr "タイマー撮影は Windows 版ではまだ利用できません。間隔は今後のリリース用に保存されます。"

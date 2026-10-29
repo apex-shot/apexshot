@@ -3846,3 +3846,21 @@ msgstr "Activer la caméra"
 
 msgid "Add change at playhead"
 msgstr "Ajouter un changement à la tête de lecture"
+
+msgid "ApexShot"
+msgstr "ApexShot"
+
+msgid "No settings found"
+msgstr "Aucun réglage trouvé"
+
+msgid "Saved"
+msgstr "Enregistré"
+
+msgid "Search settings"
+msgstr "Rechercher un réglage"
+
+msgid "This device"
+msgstr "Cet appareil"
+
+msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
+msgstr "La capture différée n'est pas encore intégrée à la version Windows. L'intervalle est enregistré pour une version future."
