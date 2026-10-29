@@ -30,13 +30,23 @@ use sha2::{Digest, Sha256};
 
 /// Format version of the file. Bumped when a field changes meaning; readers
 /// keep working through the `#[serde(default)]` on every optional key.
-pub(super) const PROJECT_VERSION: u32 = 1;
+///
+/// Version 2 gives the camera layer's `enabled` switch its own meaning — the
+/// layer draws at all — where version 1 files used it to say the default
+/// layout was the screen alone.
+pub(super) const PROJECT_VERSION: u32 = 2;
 
 /// The camera layer as the project file stores it: fractions of the frame, a
 /// corner radius as a fraction of the shorter side, and the two switches.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(super) struct WebcamLayerFile {
+    /// Whether the layer draws at all. A file from before the layouts block
+    /// used this to say the camera was not in the picture, which the
+    /// screen-only default already covers; those files read as an enabled
+    /// layer.
     pub enabled: bool,
+    /// Whether the layer fills the frame instead of sitting in a bubble. Read
+    /// only by a file that has no layouts block.
     pub fullscreen: bool,
     pub x: f64,
     pub y: f64,
@@ -44,6 +54,59 @@ pub(super) struct WebcamLayerFile {
     pub h: f64,
     pub radius: f64,
     pub mirror: bool,
+    /// The layout timeline: the recording's default layout and the changes
+    /// that switch it while the composition plays. Absent in files written
+    /// before layouts existed, where the two switches above still say what the
+    /// default was.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layouts: Option<super::webcam::LayoutSettings>,
+}
+
+impl WebcamLayerFile {
+    /// The layout timeline this file describes.
+    ///
+    /// A file written before layouts existed carries only `enabled` and
+    /// `fullscreen`, so those two say what the default layout was: a hidden
+    /// camera is Screen only, a fullscreen camera is Fullscreen camera, and
+    /// anything else is the overlay bubble. An explicit `layouts` block always
+    /// wins, even when the older switches disagree with it, because the two
+    /// switches are the coarse view of that same default and cannot describe
+    /// the changes that follow it.
+    pub(super) fn resolved_layouts(&self) -> super::webcam::LayoutSettings {
+        if let Some(layouts) = &self.layouts {
+            return layouts.clone().clamped();
+        }
+        super::webcam::LayoutSettings {
+            default_layout: if !self.enabled {
+                super::webcam::CameraLayout::ScreenOnly
+            } else if self.fullscreen {
+                super::webcam::CameraLayout::FullscreenCamera
+            } else {
+                super::webcam::CameraLayout::CameraOverlay
+            },
+            ..super::webcam::LayoutSettings::default()
+        }
+    }
+
+    /// A layer and its layout timeline as the file stores them. `fullscreen`
+    /// still describes the default layout, so a build that only knows that
+    /// switch opens on the same starting picture.
+    pub(super) fn from_layer(
+        layer: super::webcam::LayerSettings,
+        layouts: &super::webcam::LayoutSettings,
+    ) -> Self {
+        Self {
+            enabled: layer.enabled,
+            fullscreen: layouts.default_layout == super::webcam::CameraLayout::FullscreenCamera,
+            x: layer.x,
+            y: layer.y,
+            w: layer.w,
+            h: layer.h,
+            radius: layer.radius,
+            mirror: layer.mirror,
+            layouts: Some(layouts.clone()),
+        }
+    }
 }
 
 /// One recording's saved edits.
@@ -348,6 +411,7 @@ impl ProjectSync {
 
 #[cfg(test)]
 mod tests {
+    use super::super::webcam::{CameraLayout, LayoutCue, LayoutSettings};
     use super::*;
     use std::fs;
     use std::time::Duration;
@@ -412,6 +476,27 @@ mod tests {
                 h: 0.24,
                 radius: 0.5,
                 mirror: true,
+                layouts: Some(LayoutSettings {
+                    default_layout: CameraLayout::SplitScreen,
+                    cues: vec![
+                        LayoutCue {
+                            at: 1.5,
+                            layout: CameraLayout::FullscreenCamera,
+                        },
+                        LayoutCue {
+                            at: 4.25,
+                            layout: CameraLayout::CameraOverlay,
+                        },
+                        LayoutCue {
+                            at: 9.0,
+                            layout: CameraLayout::ScreenOnly,
+                        },
+                    ],
+                    transition_seconds: 0.6,
+                    split_ratio: 0.58,
+                    split_flip: true,
+                    ..LayoutSettings::default()
+                }),
             }),
             playhead_seconds: 3.5,
             timeline_scale: 42.0,
@@ -429,7 +514,184 @@ mod tests {
         write_at(&path, &file).unwrap();
         let loaded = read_at(&path, &video).expect("project loads");
 
+        let layouts = loaded
+            .webcam
+            .as_ref()
+            .and_then(|webcam| webcam.layouts.as_ref())
+            .expect("the file carries its layout timeline");
+        assert_eq!(layouts.cues.len(), 3);
+        assert_eq!(layouts.cues[1].at, 4.25);
+        assert_eq!(layouts.cues[2].layout, CameraLayout::ScreenOnly);
+        assert_eq!(layouts.default_layout, CameraLayout::SplitScreen);
         assert_eq!(loaded, file);
+    }
+
+    #[test]
+    fn a_cutout_placement_round_trips_and_stays_inside_the_frame() {
+        let directory = scratch("cutout-position");
+        let video = recording(&directory);
+        let path = directory.join("cutout-position.json");
+        let mut file = project(&video);
+        file.webcam
+            .as_mut()
+            .and_then(|webcam| webcam.layouts.as_mut())
+            .expect("the saved camera carries its layout timeline")
+            .cutout_position_x = 0.2;
+
+        write_at(&path, &file).unwrap();
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert_eq!(loaded, file);
+        assert!(
+            (loaded
+                .webcam
+                .as_ref()
+                .expect("the camera block survives")
+                .resolved_layouts()
+                .cutout_position_x
+                - 0.2)
+                .abs()
+                < 1e-9
+        );
+
+        let mut wild = project(&video);
+        wild.webcam
+            .as_mut()
+            .and_then(|webcam| webcam.layouts.as_mut())
+            .expect("the saved camera carries its layout timeline")
+            .cutout_position_x = 4.0;
+        write_at(&path, &wild).unwrap();
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert_eq!(
+            loaded
+                .webcam
+                .as_ref()
+                .expect("the camera block survives")
+                .resolved_layouts()
+                .cutout_position_x,
+            1.0
+        );
+    }
+
+    #[test]
+    fn an_older_project_without_a_cutout_position_opens_centred() {
+        let directory = scratch("cutout-legacy");
+        let video = recording(&directory);
+        let path = directory.join("cutout-legacy.json");
+        let file = project(&video);
+        let mut json: serde_json::Value =
+            serde_json::from_str(&serde_json::to_string(&file).unwrap()).unwrap();
+        let removed = json
+            .get_mut("webcam")
+            .and_then(|webcam| webcam.get_mut("layouts"))
+            .and_then(|layouts| layouts.as_object_mut())
+            .expect("the layout block is an object")
+            .remove("cutout_position_x");
+        assert!(removed.is_some(), "the fixture writes the cutout position");
+        fs::write(&path, serde_json::to_string(&json).unwrap()).unwrap();
+
+        let loaded = read_at(&path, &video).expect("project loads");
+        assert_eq!(loaded, file);
+        let layouts = loaded
+            .webcam
+            .as_ref()
+            .expect("the camera block survives")
+            .resolved_layouts();
+        assert_eq!(layouts.cutout_position_x, 0.5);
+        assert_eq!(layouts.default_layout, CameraLayout::SplitScreen);
+    }
+
+    /// A camera block as a build before layouts wrote it: the two switches and
+    /// the placement, with no layouts key at all.
+    fn legacy_webcam(enabled: bool, fullscreen: bool) -> WebcamLayerFile {
+        serde_json::from_value(serde_json::json!({
+            "enabled": enabled,
+            "fullscreen": fullscreen,
+            "x": 0.62,
+            "y": 0.31,
+            "w": 0.18,
+            "h": 0.24,
+            "radius": 0.5,
+            "mirror": true,
+        }))
+        .expect("a legacy camera block reads")
+    }
+
+    #[test]
+    fn an_older_file_derives_its_default_layout_from_the_two_switches() {
+        assert_eq!(
+            legacy_webcam(false, false)
+                .resolved_layouts()
+                .default_layout,
+            CameraLayout::ScreenOnly
+        );
+        assert_eq!(
+            legacy_webcam(true, true).resolved_layouts().default_layout,
+            CameraLayout::FullscreenCamera
+        );
+        assert_eq!(
+            legacy_webcam(true, false).resolved_layouts().default_layout,
+            CameraLayout::CameraOverlay
+        );
+        assert!(legacy_webcam(true, false)
+            .resolved_layouts()
+            .cues
+            .is_empty());
+    }
+
+    #[test]
+    fn an_explicit_layout_wins_over_the_older_switches() {
+        let mut file = legacy_webcam(false, true);
+        file.layouts = Some(LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            cues: vec![LayoutCue {
+                at: 2.0,
+                layout: CameraLayout::CameraCutout,
+            }],
+            transition_seconds: 0.3,
+            split_ratio: 0.4,
+            split_flip: true,
+            ..LayoutSettings::default()
+        });
+
+        let layouts = file.resolved_layouts();
+        assert_eq!(layouts.default_layout, CameraLayout::SplitScreen);
+        assert_eq!(layouts.cues.len(), 1);
+        assert_eq!(layouts.cues[0].at, 2.0);
+        assert_eq!(layouts.cues[0].layout, CameraLayout::CameraCutout);
+    }
+
+    #[test]
+    fn the_file_keeps_the_layer_switch_beside_the_default_layout() {
+        let layer = super::super::webcam::LayerSettings::default();
+        let mut layouts = LayoutSettings {
+            default_layout: CameraLayout::ScreenOnly,
+            ..LayoutSettings::default()
+        };
+        let file = WebcamLayerFile::from_layer(layer, &layouts);
+        assert!(file.enabled, "the layer draws; the default is the screen");
+        assert!(!file.fullscreen);
+
+        let off = super::super::webcam::LayerSettings {
+            enabled: false,
+            ..layer
+        };
+        let file = WebcamLayerFile::from_layer(off, &layouts);
+        assert!(!file.enabled, "a switched-off layer writes its own switch");
+
+        layouts.default_layout = CameraLayout::FullscreenCamera;
+        let file = WebcamLayerFile::from_layer(layer, &layouts);
+        assert!(file.enabled);
+        assert!(file.fullscreen);
+    }
+
+    #[test]
+    fn an_older_file_states_its_hidden_camera_as_a_screen_only_default() {
+        let layouts = legacy_webcam(false, false).resolved_layouts();
+        assert_eq!(layouts.default_layout, CameraLayout::ScreenOnly);
+        assert!(
+            !legacy_webcam(false, false).enabled,
+            "the older switch is what those files set"
+        );
     }
 
     #[test]
@@ -484,6 +746,18 @@ mod tests {
             ..saved.clone()
         };
         assert!(!saved.same_content(&moved_camera));
+
+        let relaid = EditorProjectFile {
+            webcam: saved.webcam.as_ref().map(|webcam| WebcamLayerFile {
+                layouts: Some(LayoutSettings {
+                    default_layout: CameraLayout::ScreenOnly,
+                    ..LayoutSettings::default()
+                }),
+                ..webcam.clone()
+            }),
+            ..saved.clone()
+        };
+        assert!(!saved.same_content(&relaid));
     }
 
     #[test]

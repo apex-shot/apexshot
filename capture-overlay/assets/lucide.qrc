@@ -1,0 +1,9 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/fonts">
+        <file alias="Lucide.ttf">fonts/Lucide.ttf</file>
+    </qresource>
+    <qresource prefix="/icons">
+        <file alias="chevron-right.png">icons/chevron-right.png</file>
+    </qresource>
+</RCC>

@@ -75,4 +75,26 @@ WebcamLayout webcamLayoutFor(const QRect& region,
     return layout;
 }
 
+bool webcamRelativePosition(const QRect& region,
+                            int sizeIndex,
+                            int shapeIndex,
+                            const QRect& rect,
+                            double* relX,
+                            double* relY)
+{
+    if (region.isEmpty() || rect.isEmpty() || !relX || !relY)
+        return false;
+
+    // The two extreme placements give the range the stored position spans;
+    // recovering it from those keeps the drag and the config's convention in
+    // one place instead of duplicating the margin and size maths here.
+    const QRect low = webcamBubbleRect(region, sizeIndex, shapeIndex, 0.0, 0.0);
+    const QRect high = webcamBubbleRect(region, sizeIndex, shapeIndex, 1.0, 1.0);
+    const int spanX = high.x() - low.x();
+    const int spanY = high.y() - low.y();
+    *relX = spanX > 0 ? clamped(double(rect.x() - low.x()) / spanX, 0.0, 1.0) : 0.0;
+    *relY = spanY != 0 ? clamped(double(rect.y() - low.y()) / spanY, 0.0, 1.0) : 0.0;
+    return true;
+}
+
 } // namespace Platform

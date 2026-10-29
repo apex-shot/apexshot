@@ -3737,3 +3737,105 @@ msgstr "ApexShot ist bereit. Ab jetzt läuft es aus dem Infobereich."
 
 msgid "Signed in, but this device could not save the account."
 msgstr "Angemeldet, aber dieses Gerät konnte das Konto nicht speichern."
+
+msgid "Add a layout change at the playhead."
+msgstr "Füge am Abspielkopf eine Layoutänderung hinzu."
+
+msgid "CAMERA"
+msgstr "KAMERA"
+
+msgid "Camera layout changes"
+msgstr "Kamera-Layoutänderungen"
+
+msgid "Change"
+msgstr "Änderung"
+
+msgid "Change {time}"
+msgstr "{time} ändern"
+
+msgid "Default"
+msgstr "Standard"
+
+msgid "Default layout"
+msgstr "Standard-Layout"
+
+msgid "Delete this layout change."
+msgstr "Diese Layoutänderung löschen."
+
+msgid "Drag to set the camera's position in the frame; double-click to centre it"
+msgstr "Ziehe, um die Kameraposition im Rahmen festzulegen; Doppelklick zentriert sie"
+
+msgid "Edit the default layout for the whole recording."
+msgstr "Bearbeite das Standard-Layout für die gesamte Aufnahme."
+
+msgid "Edit the selected layout change."
+msgstr "Bearbeite die ausgewählte Layoutänderung."
+
+msgid "Layout change"
+msgstr "Layoutänderung"
+
+msgid "Move this change to another time. A time that collides with another change is rejected."
+msgstr "Verschiebe diese Änderung auf eine andere Zeit. Eine Zeit, die mit einer anderen Änderung kollidiert, wird abgelehnt."
+
+msgid "Percentage of the frame width."
+msgstr "Prozentsatz der Rahmenbreite."
+
+msgid "Percentage of the free space around the bubble."
+msgstr "Prozentsatz des freien Raums um die Blase."
+
+msgid "SCREEN SHARE"
+msgstr "BILDSCHIRMFREIGABE"
+
+msgid "Select a layout change in the timeline to edit it."
+msgstr "Wähle eine Layoutänderung in der Zeitleiste, um sie zu bearbeiten."
+
+msgid "Select the layout change at the playhead."
+msgstr "Wähle die Layoutänderung am Abspielkopf aus."
+
+msgid "Shared by every camera layout."
+msgstr "Gilt für jedes Kamera-Layout."
+
+msgid "Shared by every cutout layout."
+msgstr "Gilt für jedes Freistell-Layout."
+
+msgid "Shared by every layout change."
+msgstr "Gilt für jede Layoutänderung."
+
+msgid "Shared by every overlay."
+msgstr "Gilt für alle Overlays."
+
+msgid "Shared by every split layout."
+msgstr "Gilt für jedes Split-Layout."
+
+msgid "The bubble's width, as a percentage of the frame."
+msgstr "Die Breite der Blase, als Prozentsatz des Rahmens."
+
+msgid "The camera layer reported: {error}"
+msgstr "Die Kameraspur meldet: {error}"
+
+msgid "The screen's share of the split, as a percentage."
+msgstr "Der Anteil des Bildschirms am Split, als Prozentsatz."
+
+msgid "Time"
+msgstr "Zeit"
+
+msgid "{time} · {layout}"
+msgstr "{time} · {layout}"
+
+msgid "Camera layer"
+msgstr "Kamera-Ebene"
+
+msgid "Delete change"
+msgstr "Änderung löschen"
+
+msgid "Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."
+msgstr "Zeichnet die Kamera über den Bildschirm. Aus zeigt nur den Bildschirm und behält Ihre Layout-Änderungen."
+
+msgid "Turn camera off"
+msgstr "Kamera ausschalten"
+
+msgid "Turn camera on"
+msgstr "Kamera einschalten"
+
+msgid "Add change at playhead"
+msgstr "Änderung an der Abspielposition hinzufügen"

@@ -24,8 +24,6 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
-
-#include <cmath>
 #include <cstdio>
 
 namespace {
@@ -564,11 +562,54 @@ int recordWithWebcam()
     return result;
 }
 
+namespace {
+
+bool checkWebcamPlacement()
+{
+    const QRect region(100, 50, 1920, 1080);
+    const double xs[] = {0.0, 0.37, 1.0};
+    const double ys[] = {0.0, 0.62, 1.0};
+    for (int size = 0; size < 4; ++size) {
+        for (int shape = 0; shape < 4; ++shape) {
+            for (double x : xs) {
+                for (double y : ys) {
+                    const QRect rect =
+                        Platform::webcamBubbleRect(region, size, shape, x, y);
+                    double relX = 0.0;
+                    double relY = 0.0;
+                    if (!Platform::webcamRelativePosition(region,
+                                                          size,
+                                                          shape,
+                                                          rect,
+                                                          &relX,
+                                                          &relY)
+                        || std::abs(relX - x) > 0.02 || std::abs(relY - y) > 0.02) {
+                        std::printf("FAIL webcam placement size=%d shape=%d got=%.3f,%.3f "
+                                    "want=%.3f,%.3f\n",
+                                    size,
+                                    shape,
+                                    relX,
+                                    relY,
+                                    x,
+                                    y);
+                        return false;
+                    }
+                }
+            }
+        }
+    }
+    return true;
+}
+
+} // namespace
+
 int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
 
     if (!checkCursorKinds())
+        return 1;
+    if (!checkWebcamPlacement())
         return 1;
 
     QString error;

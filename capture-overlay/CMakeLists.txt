@@ -4,6 +4,7 @@ project(apexshot-capture LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
 
 if(WIN32)
     # Windows builds the Quick Access shell, not the Linux overlay. The shell
@@ -24,6 +25,8 @@ if(WIN32)
         src/platform/windows/recording_settings.cpp
         src/platform/windows/settings_store.cpp
         src/platform/windows/settings_store.h
+        src/platform/windows/audio_devices.cpp
+        src/platform/windows/audio_devices.h
         src/platform/windows/capture_sound.cpp
         src/platform/windows/capture_sound.h
         src/platform/windows/recording_controls.cpp
@@ -38,6 +41,8 @@ if(WIN32)
         src/platform/windows/scroll_controls.h
         src/platform/windows/webcam_bubble.cpp
         src/platform/windows/webcam_bubble.h
+        src/platform/windows/window_recording.cpp
+        src/platform/windows/window_recording.h
         src/platform/windows/webcam_layout.cpp
         src/platform/windows/webcam_layout.h
         src/platform/windows/screen_capture.cpp
@@ -53,6 +58,7 @@ if(WIN32)
         src/platform/windows/third_party/quirc/version_db.c
         src/CaptureModeToolbar.cpp
         src/CaptureModeToolbar.h
+        assets/lucide.qrc
         src/CaptureOverlay_DrawingPrimitives.cpp
         src/CaptureOverlay_DrawingPrimitives_p.h
     )
@@ -77,6 +83,7 @@ if(WIN32)
     target_link_libraries(apexshot-capture
         PRIVATE Qt5::Widgets Qt5::DBus Qt5::Network
             windowsapp runtimeobject dwmapi uiautomationcore winmm
+            mmdevapi ole32 oleaut32 strmiids shell32 uuid
     )
 
     if(MSVC)
@@ -91,6 +98,8 @@ if(WIN32)
             src/platform/recording.h
             src/platform/recording_settings.h
             src/platform/windows/recording.cpp
+            src/platform/windows/audio_devices.cpp
+            src/platform/windows/audio_devices.h
             src/platform/windows/pointer_tracker.cpp
             src/platform/windows/pointer_tracker.h
             src/platform/windows/recording_settings.cpp
@@ -100,7 +109,8 @@ if(WIN32)
             src/platform/windows/webcam_layout.h
         )
         target_include_directories(apexshot-recording-tests PRIVATE src)
-        target_link_libraries(apexshot-recording-tests PRIVATE Qt5::Core Qt5::Gui)
+        target_link_libraries(apexshot-recording-tests PRIVATE Qt5::Core Qt5::Gui
+            mmdevapi ole32 oleaut32 strmiids shell32 uuid)
         add_test(NAME apexshot-recording-tests COMMAND apexshot-recording-tests)
         # The smoke test reports 77 when ffmpeg is absent instead of failing.
         set_tests_properties(apexshot-recording-tests PROPERTIES SKIP_RETURN_CODE 77)
@@ -146,6 +156,7 @@ else()
         src/MonitorPicker.h
         src/CaptureModeToolbar.cpp
         src/CaptureModeToolbar.h
+        assets/lucide.qrc
         src/CaptureCountdownPill.cpp
         src/CaptureCountdownPill.h
         src/CaptureOverlay.cpp

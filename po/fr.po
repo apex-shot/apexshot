@@ -3744,3 +3744,105 @@ msgstr "ApexShot est prêt. Il fonctionne désormais depuis la zone de notificat
 
 msgid "Signed in, but this device could not save the account."
 msgstr "Connexion réussie, mais cet appareil n’a pas pu enregistrer le compte."
+
+msgid "Add a layout change at the playhead."
+msgstr "Ajoutez un changement de disposition à la tête de lecture."
+
+msgid "CAMERA"
+msgstr "CAMÉRA"
+
+msgid "Camera layout changes"
+msgstr "Changements de disposition de la caméra"
+
+msgid "Change"
+msgstr "Changement"
+
+msgid "Change {time}"
+msgstr "Modifier {time}"
+
+msgid "Default"
+msgstr "Par défaut"
+
+msgid "Default layout"
+msgstr "Disposition par défaut"
+
+msgid "Delete this layout change."
+msgstr "Supprimer ce changement de disposition."
+
+msgid "Drag to set the camera's position in the frame; double-click to centre it"
+msgstr "Faites glisser pour placer la caméra dans le cadre ; double-cliquez pour la centrer"
+
+msgid "Edit the default layout for the whole recording."
+msgstr "Modifiez la disposition par défaut de tout l'enregistrement."
+
+msgid "Edit the selected layout change."
+msgstr "Modifiez le changement de disposition sélectionné."
+
+msgid "Layout change"
+msgstr "Changement de disposition"
+
+msgid "Move this change to another time. A time that collides with another change is rejected."
+msgstr "Déplacez ce changement à un autre moment. Un moment qui entre en conflit avec un autre changement est refusé."
+
+msgid "Percentage of the frame width."
+msgstr "Pourcentage de la largeur du cadre."
+
+msgid "Percentage of the free space around the bubble."
+msgstr "Pourcentage de l'espace libre autour de la bulle."
+
+msgid "SCREEN SHARE"
+msgstr "PARTAGE D'ÉCRAN"
+
+msgid "Select a layout change in the timeline to edit it."
+msgstr "Sélectionnez un changement de disposition dans la ligne de temps pour le modifier."
+
+msgid "Select the layout change at the playhead."
+msgstr "Sélectionnez le changement de disposition à la tête de lecture."
+
+msgid "Shared by every camera layout."
+msgstr "Partagé par toutes les dispositions de caméra."
+
+msgid "Shared by every cutout layout."
+msgstr "Partagé par toutes les dispositions de détourage."
+
+msgid "Shared by every layout change."
+msgstr "Partagé par tous les changements de disposition."
+
+msgid "Shared by every overlay."
+msgstr "Partagé par toutes les superpositions."
+
+msgid "Shared by every split layout."
+msgstr "Partagé par toutes les dispositions Split."
+
+msgid "The bubble's width, as a percentage of the frame."
+msgstr "La largeur de la bulle, en pourcentage du cadre."
+
+msgid "The camera layer reported: {error}"
+msgstr "La piste caméra signale : {error}"
+
+msgid "The screen's share of the split, as a percentage."
+msgstr "La part de l'écran dans le split, en pourcentage."
+
+msgid "Time"
+msgstr "Moment"
+
+msgid "{time} · {layout}"
+msgstr "{time} · {layout}"
+
+msgid "Camera layer"
+msgstr "Calque de la caméra"
+
+msgid "Delete change"
+msgstr "Supprimer le changement"
+
+msgid "Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."
+msgstr "Dessine la caméra par-dessus l'écran. Désactivé, seul l'écran s'affiche et vos changements de disposition sont conservés."
+
+msgid "Turn camera off"
+msgstr "Désactiver la caméra"
+
+msgid "Turn camera on"
+msgstr "Activer la caméra"
+
+msgid "Add change at playhead"
+msgstr "Ajouter un changement à la tête de lecture"

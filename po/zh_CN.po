@@ -3647,3 +3647,105 @@ msgstr "ApexShot 已就绪。从现在起它从托盘运行。"
 
 msgid "Signed in, but this device could not save the account."
 msgstr "已登录，但此设备无法保存账户。"
+
+msgid "Add a layout change at the playhead."
+msgstr "在播放头位置添加布局更改。"
+
+msgid "CAMERA"
+msgstr "相机"
+
+msgid "Camera layout changes"
+msgstr "相机布局更改"
+
+msgid "Change"
+msgstr "更改"
+
+msgid "Change {time}"
+msgstr "更改 {time}"
+
+msgid "Default"
+msgstr "默认"
+
+msgid "Default layout"
+msgstr "默认布局"
+
+msgid "Delete this layout change."
+msgstr "删除此布局更改。"
+
+msgid "Drag to set the camera's position in the frame; double-click to centre it"
+msgstr "拖动以设置相机在画面中的位置；双击可居中"
+
+msgid "Edit the default layout for the whole recording."
+msgstr "编辑整个录制的默认布局。"
+
+msgid "Edit the selected layout change."
+msgstr "编辑选中的布局更改。"
+
+msgid "Layout change"
+msgstr "布局更改"
+
+msgid "Move this change to another time. A time that collides with another change is rejected."
+msgstr "将此更改移到其他时间。与其他更改冲突的时间会被拒绝。"
+
+msgid "Percentage of the frame width."
+msgstr "占画面宽度的百分比。"
+
+msgid "Percentage of the free space around the bubble."
+msgstr "占气泡周围可用空间的百分比。"
+
+msgid "SCREEN SHARE"
+msgstr "屏幕共享"
+
+msgid "Select a layout change in the timeline to edit it."
+msgstr "在时间线上选择布局更改即可编辑。"
+
+msgid "Select the layout change at the playhead."
+msgstr "选择播放头处的布局更改。"
+
+msgid "Shared by every camera layout."
+msgstr "由所有相机布局共用。"
+
+msgid "Shared by every cutout layout."
+msgstr "由所有抠像布局共用。"
+
+msgid "Shared by every layout change."
+msgstr "由所有布局更改共用。"
+
+msgid "Shared by every overlay."
+msgstr "由所有浮层共用。"
+
+msgid "Shared by every split layout."
+msgstr "由所有 Split 布局共用。"
+
+msgid "The bubble's width, as a percentage of the frame."
+msgstr "气泡宽度占画面的百分比。"
+
+msgid "The camera layer reported: {error}"
+msgstr "相机图层报告：{error}"
+
+msgid "The screen's share of the split, as a percentage."
+msgstr "屏幕在分屏中所占的百分比。"
+
+msgid "Time"
+msgstr "时间"
+
+msgid "{time} · {layout}"
+msgstr "{time} · {layout}"
+
+msgid "Camera layer"
+msgstr "摄像头图层"
+
+msgid "Delete change"
+msgstr "删除更改"
+
+msgid "Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."
+msgstr "将摄像头绘制在屏幕上方。关闭后只显示屏幕，并保留你的布局更改。"
+
+msgid "Turn camera off"
+msgstr "关闭摄像头"
+
+msgid "Turn camera on"
+msgstr "开启摄像头"
+
+msgid "Add change at playhead"
+msgstr "在播放头处添加更改"

@@ -1,10 +1,10 @@
 #include "platform/windows/quick_access.h"
 
 #include "CaptureModeToolbar.h"
-#include "CaptureOverlay_DrawingPrimitives_p.h"
 #include "platform/platform.h"
 #include "platform/recording.h"
 #include "platform/recording_settings.h"
+#include "platform/windows/audio_devices.h"
 #include "platform/windows/ocr.h"
 #include "platform/windows/qr.h"
 #include "platform/windows/capture_sound.h"
@@ -12,6 +12,7 @@
 #include "platform/windows/recording_countdown.h"
 #include "platform/windows/recording_mask.h"
 #include "platform/windows/webcam_bubble.h"
+#include "platform/windows/window_recording.h"
 #include "platform/windows/scroll_capture.h"
 #include "platform/windows/scroll_controls.h"
 #include "platform/windows/settings_store.h"
@@ -27,6 +28,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
+#include <QEventLoop>
 #include <QFile>
 #include <QFont>
 #include <QFontDatabase>
@@ -47,6 +49,7 @@
 #include <QScreen>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QTextStream>
 #include <QSystemTrayIcon>
 #include <QTimer>
 #include <QToolButton>
@@ -64,22 +67,21 @@ namespace {
 // ---------------------------------------------------------------- tokens ---
 // Verbatim from capture-overlay/src/CaptureModeToolbar.cpp,
 // CaptureOverlay_p.h, CaptureOverlay_Paint.cpp and CaptureOverlay_Layout.cpp.
-const QColor kPanel(25, 25, 28, 246);
+const QColor kPanel(20, 20, 20, 250);
 const QColor kAccent(255, 102, 0);
 const QColor kText(245, 245, 247);
 const QColor kCard(18, 18, 18, 235);
-const QColor kRim(255, 255, 255, 54);
+const QColor kRim(255, 255, 255, 26);
 const QColor kDim(0, 0, 0, 140);
-const QColor kDropdownAccent(176, 92, 56);
 
 constexpr double kHandleLength = 20.0;
 constexpr double kHandleThickness = 2.5;
 constexpr double kTopBarY = 16.0;
-constexpr double kTopBarH = 44.0;
+constexpr double kTopBarH = 46.0;
 constexpr double kTopBarAspectH = 28.0;
 constexpr double kTopBarBtnSize = 32.0;
 constexpr double kFeaturePanelMargin = 16.0;
-constexpr double kTopBarRadius = 14.0;
+constexpr double kTopBarRadius = 10.0;
 
 const char* kPillLabels[4] = {"Free", "16:9", "4:3", "1:1"};
 const double kAspectRatios[4] = {0.0, 16.0 / 9.0, 4.0 / 3.0, 1.0};
@@ -139,6 +141,34 @@ QString uiFamily()
         return QStringLiteral("Segoe UI");
     }();
     return family;
+}
+
+QString areaIconFamily()
+{
+    static const QString family = [] {
+        const int id = QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/Lucide.ttf"));
+        if (id < 0)
+            return QString();
+        const QStringList families = QFontDatabase::applicationFontFamilies(id);
+        return families.isEmpty() ? QString() : families.first();
+    }();
+    return family;
+}
+
+void drawAreaIcon(QPainter& painter, ushort glyph, const QRectF& rect, const QColor& color)
+{
+    const QString family = areaIconFamily();
+    if (family.isEmpty())
+        return;
+    QFont font(family);
+    font.setPixelSize(18);
+    QPainterPath path;
+    path.addText(0, 0, font, QString(QChar(glyph)));
+    const QRectF bounds = path.boundingRect();
+    painter.save();
+    painter.translate(rect.center() - bounds.center());
+    painter.fillPath(path, color);
+    painter.restore();
 }
 
 void registerBundledFonts()
@@ -435,105 +465,6 @@ TopBarLayout topBarLayout(double screenW)
 // --------------------------------------------------------- list popup -------
 /// Dropdown copied from CaptureOverlay::drawDropdownPopup: 34px rows,
 /// (20,20,20,250) body, radius 8, hover (255,255,255,20), accent (176,92,56).
-class ListPopup : public QWidget
-{
-public:
-    ListPopup(QStringList items,
-              const QRect& anchorGlobal,
-              int width,
-              std::function<void(int)> onPick)
-        : m_items(std::move(items))
-        , m_onPick(std::move(onPick))
-    {
-        setWindowFlags(Qt::Popup | Qt::FramelessWindowHint | Qt::NoDropShadowWindowHint);
-        setAttribute(Qt::WA_TranslucentBackground, true);
-        setMouseTracking(true);
-
-        const int itemH = 34;
-        const int menuH = m_items.size() * itemH + 10;
-        int menuX = anchorGlobal.right() - width;
-        int menuY = anchorGlobal.bottom() + 4;
-
-        if (QScreen* screen = QGuiApplication::screenAt(anchorGlobal.center())) {
-            const QRect available = screen->availableGeometry();
-            if (menuX + width > available.right() - 10)
-                menuX = available.right() - width - 10;
-            if (menuY + menuH > available.bottom() - 10)
-                menuY = anchorGlobal.top() - menuH - 4;
-        }
-
-        setGeometry(menuX, menuY, width, menuH);
-        setFixedSize(width, menuH);
-    }
-
-protected:
-    void paintEvent(QPaintEvent*) override
-    {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::Antialiasing);
-
-        painter.setPen(QPen(QColor(255, 255, 255, 31), 1));
-        painter.setBrush(QColor(20, 20, 20, 250));
-        painter.drawRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 8, 8);
-
-        painter.setFont(QFont(uiFamily(), 10));
-        for (int i = 0; i < m_items.size(); ++i) {
-            const QRectF item(5, 5 + i * 34.0, width() - 10, 34);
-            if (i == m_hovered) {
-                painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(255, 255, 255, 20));
-                painter.drawRoundedRect(item, 7, 7);
-                painter.setPen(Qt::NoPen);
-                painter.setBrush(QColor(kDropdownAccent.red(), kDropdownAccent.green(),
-                                        kDropdownAccent.blue(), 28));
-                painter.drawRoundedRect(item, 7, 7);
-            }
-
-            painter.setPen(i == m_hovered ? QColor(255, 236, 220) : Qt::white);
-            QFont font(uiFamily(), 10);
-            font.setBold(i == m_hovered);
-            painter.setFont(font);
-            painter.drawText(item.adjusted(10, 0, -10, 0),
-                             Qt::AlignLeft | Qt::AlignVCenter,
-                             m_items.at(i));
-        }
-    }
-
-    void mouseMoveEvent(QMouseEvent* event) override
-    {
-        const int hovered = (event->pos().y() - 5) / 34;
-        const int bounded = (hovered >= 0 && hovered < m_items.size()) ? hovered : -1;
-        if (bounded != m_hovered) {
-            m_hovered = bounded;
-            setCursor(bounded >= 0 ? Qt::PointingHandCursor : Qt::ArrowCursor);
-            update();
-        }
-    }
-
-    void mouseReleaseEvent(QMouseEvent* event) override
-    {
-        const int index = (event->pos().y() - 5) / 34;
-        if (index >= 0 && index < m_items.size() && m_onPick) {
-            auto callback = m_onPick;
-            close();
-            callback(index);
-            return;
-        }
-        close();
-    }
-
-    void keyPressEvent(QKeyEvent* event) override
-    {
-        if (event->key() == Qt::Key_Escape)
-            close();
-    }
-
-private:
-    QStringList m_items;
-    std::function<void(int)> m_onPick;
-    int m_hovered = -1;
-};
-
 // ------------------------------------------------------- area selector ------
 /// Frozen-frame area selection, painted with the overlay's own rules.
 class AreaSelector : public QWidget
@@ -772,12 +703,12 @@ private:
                      textSize.width() + 14, textSize.height() + 8);
 
         QPainterPath path;
-        path.addRoundedRect(bubble, 6, 6);
-        painter.fillPath(path, QColor(0, 0, 0, 180));
-        painter.setPen(QPen(QColor(255, 255, 255, 40), 1.0));
+        path.addRoundedRect(bubble, 8, 8);
+        painter.fillPath(path, kPanel);
+        painter.setPen(QPen(kRim, 1.0));
         painter.setBrush(Qt::NoBrush);
         painter.drawPath(path);
-        painter.setPen(QColor(255, 255, 255));
+        painter.setPen(kText);
         painter.drawText(bubble, Qt::AlignCenter, label);
     }
 
@@ -808,12 +739,12 @@ private:
                            bh);
 
         QPainterPath path;
-        path.addRoundedRect(bubble, 6, 6);
-        painter.fillPath(path, QColor(0, 0, 0, 180));
-        painter.setPen(QPen(QColor(255, 255, 255, 40), 1.0));
+        path.addRoundedRect(bubble, 8, 8);
+        painter.fillPath(path, kPanel);
+        painter.setPen(QPen(kRim, 1.0));
         painter.setBrush(Qt::NoBrush);
         painter.drawPath(path);
-        painter.setPen(QColor(255, 255, 255));
+        painter.setPen(kText);
         painter.drawText(bubble, Qt::AlignCenter, label);
     }
 
@@ -833,7 +764,7 @@ private:
         QPainterPath body;
         body.addRoundedRect(layout.bar, kTopBarRadius, kTopBarRadius);
         painter.fillPath(body, kPanel);
-        painter.setPen(QPen(QColor(255, 255, 255, 54), 1.2));
+        painter.setPen(QPen(kRim, 1.0));
         painter.setBrush(Qt::NoBrush);
         painter.drawPath(body);
 
@@ -841,7 +772,7 @@ private:
         labelFont.setPointSizeF(10.5);
         labelFont.setBold(true);
         painter.setFont(labelFont);
-        painter.setPen(QColor(244, 244, 246, 245));
+        painter.setPen(kText);
         painter.drawText(layout.label, Qt::AlignVCenter | Qt::AlignLeft,
                          QStringLiteral("Draw an area"));
 
@@ -863,7 +794,7 @@ private:
             if (active)
                 painter.fillPath(path, QColor(255, 102, 0, 205));
             else if (hovered)
-                painter.fillPath(path, QColor(255, 255, 255, 26));
+                painter.fillPath(path, QColor(255, 255, 255, 20));
             else
                 painter.fillPath(path, QColor(255, 255, 255, 12));
 
@@ -875,31 +806,17 @@ private:
             painter.drawText(pill, Qt::AlignCenter, QString::fromLatin1(kPillLabels[i]));
         }
 
-        // Crop glyph and cancel X.
+        // Crop and cancel, the shared 18px Lucide set.
         for (int i = 0; i < 2; ++i) {
             const QRectF button = layout.buttons[i];
             const bool hovered = button.contains(m_pointer);
-            const bool cropActive = (i == 0 && (m_cropMenuOpen || m_ratio > 0.0));
+            const bool cropMenu = (i == 0 && m_cropMenuOpen);
             QPainterPath path;
             path.addRoundedRect(button, 8, 8);
-            if (cropActive)
-                painter.fillPath(path, QColor(255, 102, 0, 205));
-            else if (hovered)
-                painter.fillPath(path, QColor(255, 255, 255, 26));
+            if (cropMenu || hovered)
+                painter.fillPath(path, QColor(255, 255, 255, 20));
 
-            const double cx = button.center().x();
-            const double cy = button.center().y();
-            const QColor iconColor = cropActive ? QColor(255, 255, 255) : QColor(240, 240, 244);
-            if (i == 0) {
-                // The overlay's own crop glyph, rather than a hand-drawn one.
-                drawToolbarIcon(painter, 10, cx, cy, iconColor);
-            } else {
-                painter.setPen(QPen(iconColor, 1.7, Qt::SolidLine, Qt::RoundCap,
-                                    Qt::RoundJoin));
-                painter.setBrush(Qt::NoBrush);
-                painter.drawLine(QPointF(cx - 4.5, cy - 4.5), QPointF(cx + 4.5, cy + 4.5));
-                painter.drawLine(QPointF(cx - 4.5, cy + 4.5), QPointF(cx + 4.5, cy - 4.5));
-            }
+            drawAreaIcon(painter, i == 0 ? 0xE0AB : 0xE1B2, button, QColor(236, 236, 240));
         }
 
         drawCropMenu(painter);
@@ -924,13 +841,14 @@ private:
         const double menuH = menu.height();
 
         QPainterPath shadow;
-        shadow.addRoundedRect(QRectF(menuX, menuY + 3.0, menuW, menuH), 12, 12);
+        shadow.addRoundedRect(QRectF(menuX, menuY + 3.0, menuW, menuH),
+                              kTopBarRadius, kTopBarRadius);
         painter.fillPath(shadow, QColor(0, 0, 0, 105));
 
         QPainterPath body;
-        body.addRoundedRect(QRectF(menuX, menuY, menuW, menuH), 12, 12);
+        body.addRoundedRect(QRectF(menuX, menuY, menuW, menuH), kTopBarRadius, kTopBarRadius);
         painter.fillPath(body, kPanel);
-        painter.setPen(QPen(QColor(255, 255, 255, 54), 1.2));
+        painter.setPen(QPen(kRim, 1.0));
         painter.setBrush(Qt::NoBrush);
         painter.drawPath(body);
 
@@ -942,11 +860,8 @@ private:
 
             if (i == m_hoveredCropItem) {
                 QPainterPath hover;
-                hover.addRoundedRect(itemRect, 7, 7);
-                painter.fillPath(hover, QColor(255, 255, 255, 24));
-                painter.setPen(QPen(QColor(255, 102, 0, 170), 1.0));
-                painter.setBrush(Qt::NoBrush);
-                painter.drawPath(hover);
+                hover.addRoundedRect(itemRect, 8, 8);
+                painter.fillPath(hover, QColor(255, 255, 255, 20));
             }
 
             bool checked = false;
@@ -1341,7 +1256,13 @@ struct CaptureOptions {
     bool ocr = false;
     bool recording = false;
     bool microphone = false;
-    bool speaker = false;
+    QString microphoneDevice;
+    Platform::RecordingRequest::SystemAudio systemAudio =
+        Platform::RecordingRequest::SystemAudio::Off;
+    quint32 systemAudioProcessId = 0;
+    QString systemAudioApplication;
+    bool cameraEnabled = false;
+    QString cameraDevice;
     bool scroll = false;
 };
 
@@ -1357,9 +1278,21 @@ public:
         QString recordingError;
         const bool recordingAvailable = Platform::RecordingSession::available(&recordingError);
         // Quick Access has no recording panel or tray-first scroll entry, so
-        // the toolbar exposes both Area recording and the Scroll mode.
-        const CaptureModeToolbar::Result result =
-            CaptureModeToolbar::choose(nullptr, nullptr, recordingAvailable, true, true);
+        // the toolbar exposes both Area recording and the Scroll mode. Its
+        // Mic, Speaker, and Webcam items are configured by right-clicking
+        // them, and start from the devices the last recording used.
+        const CaptureOptions defaultsOptions = recordingDefaults();
+        CaptureModeToolbar::DeviceDefaults defaults;
+        defaults.microphone = defaultsOptions.microphone;
+        defaults.microphoneDevice = defaultsOptions.microphoneDevice;
+        defaults.speaker =
+            defaultsOptions.systemAudio != Platform::RecordingRequest::SystemAudio::Off;
+        defaults.systemAudioApplication = defaultsOptions.systemAudioApplication;
+        defaults.systemAudioProcessId = defaultsOptions.systemAudioProcessId;
+        defaults.camera = defaultsOptions.cameraEnabled;
+        defaults.cameraDevice = defaultsOptions.cameraDevice;
+        const CaptureModeToolbar::Result result = CaptureModeToolbar::choose(
+            nullptr, nullptr, recordingAvailable, true, true, defaults, true);
 
         m_menuOpen = false;
 
@@ -1368,12 +1301,32 @@ public:
         options.ocr = result.ocr;
         options.recording = result.recording;
         options.microphone = result.microphone;
-        options.speaker = result.speaker;
+        options.microphoneDevice = result.microphoneDevice;
+        if (!result.systemAudioApplication.isEmpty()) {
+            options.systemAudio = Platform::RecordingRequest::SystemAudio::Application;
+            options.systemAudioProcessId = result.systemAudioProcessId;
+            options.systemAudioApplication = result.systemAudioApplication;
+        } else if (result.speaker) {
+            options.systemAudio = Platform::RecordingRequest::SystemAudio::AllApps;
+        } else {
+            options.systemAudio = Platform::RecordingRequest::SystemAudio::Off;
+        }
+        options.cameraEnabled = result.camera;
+        options.cameraDevice = result.cameraDevice;
         options.scroll = result.scroll;
+        debugLog(QStringLiteral("toolbar: action=%1 recording=%2 toolbar=%3 scroll=%4")
+                     .arg(static_cast<int>(result.action))
+                     .arg(options.recording ? 1 : 0)
+                     .arg(result.toolbar ? 1 : 0)
+                     .arg(options.scroll ? 1 : 0));
         if (options.recording && !recordingAvailable) {
+            if (result.toolbar)
+                result.toolbar->close();
             debugLog(QStringLiteral("recording unavailable: %1").arg(recordingError));
             return;
         }
+        if (result.toolbar && result.action != CaptureModeToolbar::Action::Window)
+            result.toolbar->close();
 
         switch (result.action) {
         case CaptureModeToolbar::Action::Display:
@@ -1384,7 +1337,13 @@ public:
             withCountdown(options, [this, options] { captureDisplay(options); });
             break;
         case CaptureModeToolbar::Action::Window:
-            withCountdown(options, [this, options] { chooseWindow(options); });
+            if (options.recording) {
+                chooseWindowRecording(options, result.toolbar);
+            } else {
+                if (result.toolbar)
+                    result.toolbar->close();
+                withCountdown(options, [this, options] { chooseWindowCapture(options); });
+            }
             break;
         case CaptureModeToolbar::Action::Area:
             if (QGuiApplication::keyboardModifiers() & Qt::ShiftModifier) {
@@ -1437,44 +1396,31 @@ public:
 
     void demoWindows()
     {
-        chooseWindow(CaptureOptions{});
+        chooseWindowCapture(CaptureOptions{});
     }
 
     void recordScreen()
     {
-        const Platform::ShellSettings settings = Platform::loadShellSettings();
-        CaptureOptions options;
-        options.recording = true;
-        options.microphone = settings.recording.includeMicrophone;
-        options.speaker = settings.recording.includeSpeaker;
+        CaptureOptions options = recordingDefaults();
         captureDisplay(options);
     }
 
     void recordArea()
     {
-        const Platform::ShellSettings settings = Platform::loadShellSettings();
-        CaptureOptions options;
-        options.recording = true;
-        options.microphone = settings.recording.includeMicrophone;
-        options.speaker = settings.recording.includeSpeaker;
+        CaptureOptions options = recordingDefaults();
         captureArea(options);
     }
 
     void recordWindow()
     {
-        const Platform::ShellSettings settings = Platform::loadShellSettings();
-        CaptureOptions options;
-        options.recording = true;
-        options.microphone = settings.recording.includeMicrophone;
-        options.speaker = settings.recording.includeSpeaker;
-        chooseWindow(options);
+        chooseWindowRecording(recordingDefaults());
     }
 
     void scrollWindow()
     {
         CaptureOptions options;
         options.scroll = true;
-        chooseWindow(options);
+        chooseWindowCapture(options);
     }
 
     void scrollArea()
@@ -1531,6 +1477,169 @@ public:
         });
     }
 
+    /// Write the audio inventory and a two-second capture to a log, so the
+    /// native paths can be checked without opening the interface.
+    void probeAudio()
+    {
+        QFile log(QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-audio-probe.log")));
+        if (!log.open(QIODevice::WriteOnly | QIODevice::Truncate))
+            return;
+        QTextStream out(&log);
+        out.setCodec("UTF-8");
+
+        const QString defaultMicrophone = Platform::defaultMicrophoneName();
+        const QStringList microphones = Platform::directShowDevices(false);
+        const QStringList cameras = Platform::directShowDevices(true);
+        out << "default microphone: " << defaultMicrophone << Qt::endl;
+        out << "microphones (" << microphones.size() << "):" << Qt::endl;
+        for (const QString& name : microphones)
+            out << "  " << name << Qt::endl;
+        out << "cameras (" << cameras.size() << "):" << Qt::endl;
+        for (const QString& name : cameras)
+            out << "  " << name << Qt::endl;
+
+        const QVector<Platform::AudioApplication> apps = Platform::audioApplications();
+        out << "audio apps (" << apps.size() << "):" << Qt::endl;
+        for (const Platform::AudioApplication& app : apps) {
+            out << "  " << app.name << " pid=" << app.processId
+                << (app.active ? " active" : " idle") << Qt::endl;
+        }
+        out.flush();
+
+        const QString wav =
+            QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-probe-audio.wav"));
+        QFile::remove(wav);
+        Platform::SystemAudioCapture capture;
+        QString error;
+        if (capture.start(Platform::SystemAudioCapture::Mode::AllApps, 0, wav, &error)) {
+            out << "all-apps capture: started" << Qt::endl;
+            QEventLoop loop;
+            QTimer::singleShot(2000, &loop, &QEventLoop::quit);
+            loop.exec();
+            capture.stop();
+            out << "all-apps wav bytes: " << QFileInfo(wav).size() << Qt::endl;
+        } else {
+            out << "all-apps capture failed: " << error << Qt::endl;
+        }
+
+        const quint32 processId = apps.isEmpty() ? 0 : apps.first().processId;
+        if (processId != 0) {
+            const QString appWav =
+                QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-probe-app-audio.wav"));
+            QFile::remove(appWav);
+            Platform::SystemAudioCapture appCapture;
+            if (appCapture.start(Platform::SystemAudioCapture::Mode::Application,
+                                 processId,
+                                 appWav,
+                                 &error)) {
+                out << "app capture: started for " << apps.first().name << Qt::endl;
+                QEventLoop loop;
+                QTimer::singleShot(1500, &loop, &QEventLoop::quit);
+                loop.exec();
+                appCapture.stop();
+                out << "app wav bytes: " << QFileInfo(appWav).size() << Qt::endl;
+            } else {
+                out << "app capture failed: " << error << Qt::endl;
+            }
+        }
+
+        Platform::AudioLevelMonitor meter;
+        if (meter.listen(defaultMicrophone)) {
+            float observed = 0.0f;
+            QEventLoop loop;
+            for (int i = 0; i < 20; ++i) {
+                QTimer::singleShot(100, &loop, &QEventLoop::quit);
+                loop.exec();
+                observed = std::max(observed, meter.peak());
+            }
+            meter.stop();
+            out << "meter peak: " << observed << Qt::endl;
+        } else {
+            out << "meter: could not open the default microphone" << Qt::endl;
+        }
+
+        out.flush();
+        QCoreApplication::quit();
+    }
+
+    void demoWindowSetupStart()
+    {
+        demoWindowSetup();
+        QTimer::singleShot(2500, this, [this] {
+            if (m_setupOverlay)
+                m_setupOverlay->startNow();
+        });
+        QTimer::singleShot(2500 + 1000 + (recordingCountdownSeconds() + 12) * 1000,
+                           this,
+                           [this] {
+                               if (m_activeSession)
+                                   m_activeSession->stop();
+                           });
+    }
+
+    void demoWindowRecord()
+    {
+        for (const Platform::WindowInfo& window : Platform::windows()) {
+            if (window.minimized || window.geometry.width() < 480
+                || window.geometry.height() < 360)
+                continue;
+            CaptureOptions options = recordingDefaults();
+            options.microphone = false;
+            options.systemAudio = Platform::RecordingRequest::SystemAudio::AllApps;
+            beginWindowRecording(window, options);
+            QTimer::singleShot((recordingCountdownSeconds() + 4) * 1000, this, [this] {
+                if (m_activeSession)
+                    m_activeSession->stop();
+            });
+            return;
+        }
+        debugLog(QStringLiteral("demoWindowRecord: no suitable window"));
+    }
+
+    void demoWindowSetup()
+    {
+        for (const Platform::WindowInfo& window : Platform::windows()) {
+            if (window.minimized || window.geometry.width() < 480
+                || window.geometry.height() < 360)
+                continue;
+            Platform::activateWindow(window.id);
+            CaptureOptions options = recordingDefaults();
+            if (!options.cameraEnabled) {
+                const QStringList cameras = Platform::directShowDevices(true);
+                if (!cameras.isEmpty()) {
+                    options.cameraEnabled = true;
+                    options.cameraDevice = cameras.first();
+                }
+            }
+            openWindowSetup(window, options);
+            return;
+        }
+        debugLog(QStringLiteral("demoWindowSetup: no suitable window"));
+    }
+
+    void demoSystemAudio()
+    {
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
+        const Platform::MonitorInfo monitor = Platform::monitorAt(QCursor::pos());
+        Platform::CaptureResult still;
+        QString error;
+        if (!Platform::captureMonitor(0, false, still, error))
+            return;
+
+        CaptureOptions options;
+        options.recording = true;
+        options.microphone = settings.recording.includeMicrophone;
+        options.systemAudio = Platform::RecordingRequest::SystemAudio::AllApps;
+        startRecording(monitor.geometry,
+                       still.image,
+                       options,
+                       Platform::RecordingRequest::Target::Screen);
+        QTimer::singleShot((recordingCountdownSeconds() + 4) * 1000, this, [this] {
+            if (m_activeSession)
+                m_activeSession->stop();
+        });
+    }
+
     bool hasActiveRecording() const
     {
         return m_activeSession && m_activeSession->isActive();
@@ -1544,6 +1653,227 @@ public:
     }
 
 private:
+    CaptureOptions recordingDefaults()
+    {
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
+        CaptureOptions options;
+        options.recording = true;
+        options.microphone = settings.recording.includeMicrophone;
+        options.systemAudio = settings.recording.includeSpeaker
+            ? Platform::RecordingRequest::SystemAudio::AllApps
+            : Platform::RecordingRequest::SystemAudio::Off;
+        options.cameraEnabled = settings.recording.webcam.enabled;
+        options.cameraDevice = settings.recording.webcam.device;
+
+        // The shell remembers the last devices chosen on the pre-record
+        // surface; the Rust settings mirror stays the default for a first run.
+        const Platform::RecordingDeviceChoices saved = Platform::loadRecordingDeviceChoices();
+        if (saved.present) {
+            options.microphone = saved.microphoneEnabled;
+            options.microphoneDevice = saved.microphoneDevice;
+            if (saved.systemAudioMode == QLatin1String("all")) {
+                options.systemAudio = Platform::RecordingRequest::SystemAudio::AllApps;
+            } else if (saved.systemAudioMode == QLatin1String("app")) {
+                options.systemAudio = Platform::RecordingRequest::SystemAudio::Application;
+                options.systemAudioApplication = saved.systemAudioApplication;
+                // A per-app choice only means something while that app has an
+                // audio session; a screen recording started outside the setup
+                // surface resolves the saved name here too.
+                for (const Platform::AudioApplication& application :
+                     Platform::audioApplications()) {
+                    if (application.name.compare(saved.systemAudioApplication,
+                                                 Qt::CaseInsensitive)
+                        == 0) {
+                        options.systemAudioProcessId = application.processId;
+                        options.systemAudioApplication = application.name;
+                        break;
+                    }
+                }
+                if (options.systemAudioProcessId == 0) {
+                    options.systemAudio = Platform::RecordingRequest::SystemAudio::AllApps;
+                    options.systemAudioApplication.clear();
+                }
+            } else {
+                options.systemAudio = Platform::RecordingRequest::SystemAudio::Off;
+            }
+            options.cameraEnabled = saved.cameraEnabled;
+            if (!saved.cameraDevice.isEmpty())
+                options.cameraDevice = saved.cameraDevice;
+        }
+        return options;
+    }
+
+    /// Keep the devices a recording used as the defaults for the next one.
+    void rememberRecordingChoices(const CaptureOptions& options)
+    {
+        Platform::RecordingDeviceChoices saved;
+        saved.microphoneEnabled = options.microphone;
+        saved.microphoneDevice = options.microphoneDevice;
+        saved.systemAudioMode =
+            options.systemAudio == Platform::RecordingRequest::SystemAudio::AllApps
+                ? QStringLiteral("all")
+                : (options.systemAudio == Platform::RecordingRequest::SystemAudio::Application
+                       ? QStringLiteral("app")
+                       : QStringLiteral("off"));
+        saved.systemAudioApplication = options.systemAudioApplication;
+        saved.cameraEnabled = options.cameraEnabled;
+        saved.cameraDevice = options.cameraDevice;
+        Platform::saveRecordingDeviceChoices(saved);
+    }
+
+    /// A window recording starts with the picker: hovering paints the window
+    /// and clicking it only selects it. The selected window then carries just
+    /// the Start action, so nothing is recorded before it.
+    void raiseToolbar(const QPointer<CaptureModeToolbar>& toolbar)
+    {
+        if (!toolbar)
+            return;
+        // The picker and the selected window are full-screen topmost windows,
+        // so the toolbar has to be raised after each of them is shown.
+        toolbar->show();
+        toolbar->raise();
+        Platform::keepTopmost(static_cast<quintptr>(toolbar->winId()));
+    }
+
+    void chooseWindowRecording(const CaptureOptions& options,
+                               CaptureModeToolbar* toolbar = nullptr)
+    {
+        QPointer<CaptureModeToolbar> bar(toolbar);
+        if (m_activeSession && m_activeSession->isActive()) {
+            if (bar)
+                bar->close();
+            debugLog(QStringLiteral("window picker ignored: a recording is running"));
+            return;
+        }
+        if (m_countdownPill) {
+            if (bar)
+                bar->close();
+            return;
+        }
+        if (!m_windowPicker.isNull() || !m_setupOverlay.isNull()) {
+            if (bar)
+                bar->close();
+            return;
+        }
+
+        if (bar) {
+            bar->setCloseHandler([this] {
+                if (m_setupOverlay)
+                    m_setupOverlay->cancelNow();
+                else if (m_windowPicker)
+                    m_windowPicker->dismiss();
+            });
+        }
+
+        auto* picker = new Platform::WindowPicker(
+            [this, options, bar](const Platform::WindowInfo& window) {
+                Platform::activateWindow(window.id);
+                openWindowSetup(window, options, bar);
+            },
+            [bar] {
+                if (bar)
+                    bar->close();
+            });
+        m_windowPicker = picker;
+        picker->show();
+        picker->raise();
+        picker->activateWindow();
+        raiseToolbar(bar);
+    }
+
+    void openWindowSetup(const Platform::WindowInfo& window,
+                         const CaptureOptions& options,
+                         CaptureModeToolbar* toolbar = nullptr)
+    {
+        QPointer<CaptureModeToolbar> bar(toolbar);
+        auto* overlay = new Platform::RecordingSetupOverlay(
+            window,
+            [this, options, window, bar] {
+                CaptureOptions chosen = options;
+                if (bar) {
+                    // The toolbar stayed open through selection so the last
+                    // device changes apply to this recording.
+                    const CaptureModeToolbar::DeviceDefaults devices = bar->deviceState();
+                    chosen.microphone = devices.microphone;
+                    chosen.microphoneDevice = devices.microphoneDevice;
+                    if (!devices.systemAudioApplication.isEmpty()) {
+                        chosen.systemAudio =
+                            Platform::RecordingRequest::SystemAudio::Application;
+                        chosen.systemAudioProcessId = devices.systemAudioProcessId;
+                        chosen.systemAudioApplication = devices.systemAudioApplication;
+                    } else if (devices.speaker) {
+                        chosen.systemAudio =
+                            Platform::RecordingRequest::SystemAudio::AllApps;
+                    } else {
+                        chosen.systemAudio = Platform::RecordingRequest::SystemAudio::Off;
+                    }
+                    chosen.cameraEnabled = devices.camera;
+                    chosen.cameraDevice = devices.cameraDevice;
+                    bar->close();
+                }
+                // Let the overlay leave the screen before the frozen frame is
+                // taken, so neither the dim nor the Start button reaches the
+                // video or its thumbnail.
+                QTimer::singleShot(350, this, [this, window, chosen] {
+                    beginWindowRecording(window, chosen);
+                });
+            },
+            [bar] {
+                if (bar)
+                    bar->close();
+            });
+        m_setupOverlay = overlay;
+        overlay->show();
+        overlay->raise();
+        overlay->activateWindow();
+        raiseToolbar(bar);
+    }
+
+    void beginWindowRecording(const Platform::WindowInfo& window,
+                              const CaptureOptions& options)
+    {
+        // The overlay held the foreground so Escape and the Start pill
+        // worked; give the window its active title bar back before its first
+        // frame is captured.
+        Platform::activateWindow(window.id);
+
+        CaptureOptions chosen = options;
+
+        QRect outer = Platform::windowFrame(window.id);
+        if (outer.isEmpty())
+            outer = window.geometry;
+        // DWM's visible frame carries a thin border and the rounded-corner
+        // blend, which show up as the desktop along the edges of the video.
+        // Record the pixels inside that border instead.
+        constexpr int kFrameInset = 2;
+        QRect region = outer;
+        if (region.width() > kFrameInset * 2 + 32
+            && region.height() > kFrameInset * 2 + 32) {
+            region.adjust(kFrameInset, kFrameInset, -kFrameInset, -kFrameInset);
+        }
+
+        Platform::CaptureResult capture;
+        QString error;
+        if (Platform::captureWindow(window.id, false, capture, error)) {
+            if (capture.image.size() == outer.size()) {
+                capture.image = capture.image.copy(
+                    QRect(QPoint(kFrameInset, kFrameInset), region.size()));
+                capture.geometry = region;
+            }
+        } else if (!Platform::captureRegion(region, false, capture, error)) {
+            QMessageBox::warning(nullptr,
+                                 QStringLiteral("Recording"),
+                                 QStringLiteral("The window could not be captured: %1")
+                                     .arg(error));
+            return;
+        }
+        startRecording(region,
+                       capture.image,
+                       chosen,
+                       Platform::RecordingRequest::Target::Window,
+                       window.id);
+    }
+
     void withCountdown(const CaptureOptions& options, std::function<void()> action)
     {
         if (options.timerSeconds <= 0) {
@@ -1651,64 +1981,52 @@ private:
                      .arg(selector->y()));
     }
 
-    void chooseWindow(const CaptureOptions& options)
+    /// Window capture and scroll selection: the same full-screen picker the
+    /// recording flow uses, stopping at the pick instead of opening a setup
+    /// surface. Pointing at a window, or walking the stack with Tab, is the
+    /// one way to choose one.
+    void chooseWindowCapture(const CaptureOptions& options)
     {
-        const Platform::ShellSettings settings = Platform::loadShellSettings();
-        const QVector<Platform::WindowInfo> windows = Platform::windows();
-        debugLog(QStringLiteral("chooseWindow: enumerated=%1").arg(windows.size()));
-        if (windows.isEmpty())
+        if (!m_windowPicker.isNull() || !m_setupOverlay.isNull()) {
+            debugLog(QStringLiteral("window picker ignored: another picker is up"));
             return;
-
-        QStringList items;
-        QVector<Platform::WindowInfo> eligible;
-        for (const Platform::WindowInfo& window : windows) {
-            eligible.append(window);
-
-            QString title = window.title;
-            if (title.size() > 64)
-                title = title.left(61) + QStringLiteral("...");
-            if (window.minimized)
-                title += QStringLiteral("  (minimized)");
-            items.append(QStringLiteral("%1    %2 \u00D7 %3")
-                             .arg(title)
-                             .arg(window.geometry.width())
-                             .arg(window.geometry.height()));
         }
-        if (items.isEmpty())
-            return;
 
-        for (int i = 0; i < items.size() && i < 6; ++i)
-            debugLog(QStringLiteral("  window[%1] %2").arg(i).arg(items.at(i)));
+        const QString action =
+            options.scroll ? QStringLiteral("scroll") : QStringLiteral("capture");
+        auto* picker = new Platform::WindowPicker(
+            [this, options](const Platform::WindowInfo& window) {
+                // A window picked from under another comes to the front first,
+                // so the capture shows the window the person actually chose.
+                Platform::activateWindow(window.id);
+                QTimer::singleShot(180, this, [this, options, window] {
+                    if (options.scroll) {
+                        const QRect client = Platform::clientRect(window.id);
+                        startScrollCapture(client.isEmpty() ? window.geometry : client,
+                                           window.id);
+                        return;
+                    }
 
-        const QRect anchor(QCursor::pos(), QSize(1, 1));
-        auto* popup = new ListPopup(items, anchor, 460, [this, eligible, options, settings](int index) {
-            if (index < 0 || index >= eligible.size())
-                return;
-            const Platform::WindowInfo& window = eligible.at(index);
-            Platform::CaptureResult capture;
-            QString error;
-            if (!Platform::captureWindow(window.id,
-                                         settings.screenshots.showCursor,
-                                         capture,
-                                         error))
-                return;
-            if (!options.recording && !options.scroll)
-                Platform::playShutterSound();
-            if (options.scroll) {
-                const QRect client = Platform::clientRect(window.id);
-                startScrollCapture(client.isEmpty() ? window.geometry : client, window.id);
-            } else if (options.recording) {
-                startRecording(window.geometry,
-                               capture.image,
-                               options,
-                               Platform::RecordingRequest::Target::Window,
-                               window.id);
-            } else {
-                present(capture.image, options);
-            }
-        });
-        popup->show();
-        popup->raise();
+                    Platform::CaptureResult capture;
+                    QString error;
+                    const Platform::ShellSettings settings = Platform::loadShellSettings();
+                    if (!Platform::captureWindow(window.id,
+                                                 settings.screenshots.showCursor,
+                                                 capture,
+                                                 error)) {
+                        debugLog(QStringLiteral("window capture failed: %1").arg(error));
+                        return;
+                    }
+                    Platform::playShutterSound();
+                    present(capture.image, options);
+                });
+            },
+            [] {},
+            action);
+        m_windowPicker = picker;
+        picker->show();
+        picker->raise();
+        picker->activateWindow();
     }
 
     void startRecording(
@@ -1728,6 +2046,8 @@ private:
             debugLog(QStringLiteral("recording ignored: a countdown is already running"));
             return;
         }
+
+        rememberRecordingChoices(options);
 
         // The countdown runs after the source is chosen, so the user has time
         // to arrange the screen before the first frame.
@@ -1782,7 +2102,10 @@ private:
         // pointer that would double up with the one the editor paints.
         request.includeCursor = false;
         request.includeMicrophone = options.microphone;
-        request.includeSpeaker = options.speaker;
+        request.microphoneDevice = options.microphoneDevice;
+        request.systemAudio = options.systemAudio;
+        request.systemAudioProcessId = options.systemAudioProcessId;
+        request.systemAudioApplication = options.systemAudioApplication;
 
         // Video settings come from the shared settings store the Rust settings
         // window writes.
@@ -1798,11 +2121,18 @@ private:
         // The camera records to its own track and the editor composites it, so
         // what this window shows is a preview of that layer: it is excluded
         // from capture and leaves no pixels in the recording.
-        const Platform::ShellSettings::Webcam& webcam = settings.recording.webcam;
+        Platform::ShellSettings::Webcam webcam = settings.recording.webcam;
+        // A position the person dragged to last time wins over the default
+        // corner, so the camera stays where they left it.
+        const Platform::WebcamPlacement placement = Platform::loadWebcamPlacement();
+        if (placement.present) {
+            webcam.relX = placement.relX;
+            webcam.relY = placement.relY;
+        }
         QRect webcamRect;
-        if (webcam.enabled) {
+        if (options.cameraEnabled) {
             request.webcamEnabled = true;
-            request.webcamDevice = webcam.device.trimmed();
+            request.webcamDevice = options.cameraDevice.trimmed();
             webcamRect = Platform::webcamBubbleRect(region,
                                                     webcam.sizeIndex,
                                                     webcam.shapeIndex,
@@ -1827,6 +2157,35 @@ private:
             m_webcamBubble = new Platform::WebcamBubble(request.webcamLayout.shape,
                                                         request.webcamLayout.flip);
             m_webcamBubble->placeAt(webcamRect);
+            m_webcamBubble->setMoveBounds(region);
+            m_webcamBubble->setMovedHandler(
+                [this, region, webcam](const QRect& rect) {
+                    if (region.isEmpty() || rect.isEmpty())
+                        return;
+                    Platform::WebcamLayout layout;
+                    layout.x = double(rect.x() - region.x()) / region.width();
+                    layout.y = double(rect.y() - region.y()) / region.height();
+                    layout.w = double(rect.width()) / region.width();
+                    layout.h = double(rect.height()) / region.height();
+                    layout.shape = std::clamp(webcam.shapeIndex, 0, 3);
+                    layout.flip = webcam.flip;
+                    if (m_activeSession)
+                        m_activeSession->setWebcamLayout(layout);
+
+                    double relX = 0.0;
+                    double relY = 0.0;
+                    if (Platform::webcamRelativePosition(region,
+                                                         webcam.sizeIndex,
+                                                         webcam.shapeIndex,
+                                                         rect,
+                                                         &relX,
+                                                         &relY)) {
+                        Platform::saveWebcamPlacement(relX, relY);
+                        debugLog(QStringLiteral("webcam placed relX=%1 relY=%2")
+                                     .arg(relX, 0, 'f', 3)
+                                     .arg(relY, 0, 'f', 3));
+                    }
+                });
             QPointer<Platform::WebcamBubble> bubble = m_webcamBubble;
             connect(session,
                     &Platform::RecordingSession::webcamFrame,
@@ -1868,6 +2227,9 @@ private:
                         m_recordingMask = nullptr;
                     }
                     if (m_webcamBubble) {
+                        // A frame already queued behind the finished signal
+                        // would show the bubble again after this close.
+                        disconnect(session, nullptr, m_webcamBubble, nullptr);
                         m_webcamBubble->close();
                         m_webcamBubble = nullptr;
                     }
@@ -1876,6 +2238,12 @@ private:
                         presentRecording(thumbnail, path);
                     else if (!error.isEmpty())
                         QMessageBox::warning(nullptr, QStringLiteral("Recording"), error);
+
+                    if (m_restartAfterFinish) {
+                        auto restart = std::move(m_restartAfterFinish);
+                        m_restartAfterFinish = nullptr;
+                        QTimer::singleShot(0, this, restart);
+                    }
                 });
 
         QString error;
@@ -1887,6 +2255,7 @@ private:
                 m_recordingMask = nullptr;
             }
             if (m_webcamBubble) {
+                disconnect(session, nullptr, m_webcamBubble, nullptr);
                 m_webcamBubble->close();
                 m_webcamBubble = nullptr;
             }
@@ -1903,7 +2272,7 @@ private:
                      .arg(region.width())
                      .arg(region.height())
                      .arg(options.microphone ? 1 : 0)
-                     .arg(options.speaker ? 1 : 0)
+                     .arg(static_cast<int>(options.systemAudio))
                      .arg(request.fps)
                      .arg(request.crf)
                      .arg(request.maxWidth)
@@ -1912,6 +2281,19 @@ private:
                      .arg(request.outputPath));
 
         auto* controls = new RecordingControls(session, region);
+        connect(controls,
+                &RecordingControls::restartRequested,
+                this,
+                [this, region, thumbnail, options, target, windowId] {
+                    if (!m_activeSession || !m_activeSession->isActive())
+                        return;
+                    // Discard the take, then start a new one once the session
+                    // has emitted finished and released the camera.
+                    m_restartAfterFinish = [this, region, thumbnail, options, target, windowId] {
+                        startRecording(region, thumbnail, options, target, windowId);
+                    };
+                    m_activeSession->discard();
+                });
         controls->show();
         controls->raise();
     }
@@ -2109,9 +2491,14 @@ private:
 
     bool m_menuOpen = false;
     Platform::RecordingSession* m_activeSession = nullptr;
+    /// Set when the restart button asks for a fresh take after the current
+    /// one has finished discarding.
+    std::function<void()> m_restartAfterFinish;
     QPointer<RecordingCountdown> m_countdownPill;
     QPointer<RecordingMask> m_recordingMask;
     QPointer<Platform::WebcamBubble> m_webcamBubble;
+    QPointer<Platform::WindowPicker> m_windowPicker;
+    QPointer<Platform::RecordingSetupOverlay> m_setupOverlay;
     QPointer<Platform::ScrollCaptureSession> m_scrollSession;
     QPointer<RecordingMask> m_scrollMask;
 };
@@ -2174,6 +2561,30 @@ int run(QApplication& app)
     }
     if (arguments.contains(QStringLiteral("--demo-record"))) {
         QTimer::singleShot(0, shell, [shell] { shell->demoRecord(); });
+        return app.exec();
+    }
+    if (arguments.contains(QStringLiteral("--probe-audio"))) {
+        QTimer::singleShot(0, shell, [shell] { shell->probeAudio(); });
+        return app.exec();
+    }
+    if (arguments.contains(QStringLiteral("--demo-window-setup-start"))) {
+        QTimer::singleShot(0, shell, [shell] { shell->demoWindowSetupStart(); });
+        return app.exec();
+    }
+    if (arguments.contains(QStringLiteral("--demo-window-record"))) {
+        QTimer::singleShot(0, shell, [shell] { shell->demoWindowRecord(); });
+        return app.exec();
+    }
+    if (arguments.contains(QStringLiteral("--demo-window-setup"))) {
+        QTimer::singleShot(0, shell, [shell] { shell->demoWindowSetup(); });
+        return app.exec();
+    }
+    if (arguments.contains(QStringLiteral("--demo-system-audio"))) {
+        QTimer::singleShot(0, shell, [shell] { shell->demoSystemAudio(); });
+        return app.exec();
+    }
+    if (arguments.contains(QStringLiteral("--demo-record-window"))) {
+        QTimer::singleShot(0, shell, [shell] { shell->recordWindow(); });
         return app.exec();
     }
     if (arguments.contains(QStringLiteral("--demo-record-area"))) {

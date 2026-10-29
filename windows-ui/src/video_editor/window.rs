@@ -20,6 +20,13 @@ use std::sync::Once;
 
 type UpdateDocument = Rc<dyn Fn(Option<&Path>)>;
 type CameraTransform = (f64, f64, f64, f64);
+/// Where the layout's screen layer draws inside the video rect: the whole
+/// source scaled uniformly to cover the pane, and the pane that clips it.
+#[derive(Clone, Copy)]
+struct ScreenView {
+    draw: super::cursor::VideoRect,
+    clip: super::cursor::VideoRect,
+}
 
 const IDENTITY_CAMERA_TRANSFORM: CameraTransform = (0.0, 0.0, 1.0, 1.0);
 const IDENTITY_CAMERA_CSS: &str = ".recording-editor-video { transform: none; }";
@@ -108,6 +115,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let stage = stage.clone();
         Rc::new(move |frame| {
             stage.source_seconds.set(frame.source_seconds);
+            stage.webcam.set_composition_time(frame.composition_time);
             stage.webcam.request(frame.source_seconds);
             stage.preview.show_time(frame.source_seconds, frame.playing);
             stage
@@ -115,6 +123,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 .set_composition_seconds(frame.composition_seconds);
             stage.set_placement(frame.placement);
             stage.set_camera(frame.camera);
+            stage.apply_webcam_layout();
             let ripple = stage
                 .cursor
                 .ripple_at(frame.source_seconds, stage.source_size.get());
@@ -692,6 +701,20 @@ impl Stage {
         self.clip.set_radius(radius, measured_width);
     }
 
+    /// Put the preview's video card where the layout says the screen goes.
+    /// The split clips it to its share and cover-crops the source; every other
+    /// layout fills the video rect, so the card keeps its old geometry.
+    fn apply_webcam_layout(&self) {
+        let screen = self
+            .webcam
+            .layout_frame(self.source_size.get())
+            .map(|frame| frame.screen)
+            .filter(|screen| !screen.is_full());
+        self.clip.set_layout_rect(
+            screen.map(|screen| (screen.x, screen.y, screen.width, screen.height)),
+        );
+    }
+
     /// Set the stage aspect only when it really moves: `AspectFrame` re-runs
     /// layout on a ratio change, and the resize that follows calls back here.
     fn set_stage_ratio(&self, ratio: f32) {
@@ -905,6 +928,7 @@ impl Stage {
             self.source_size.set(None);
             self.preview.set_document(None, 0, 0);
             self.apply_geometry();
+            self.apply_webcam_layout();
             self.estimate.set_source(None, 0.0, 0.0);
             return;
         };
@@ -914,6 +938,7 @@ impl Stage {
         self.source_size.set(Some((width, height)));
         self.export_button.set_sensitive(true);
         self.apply_geometry();
+        self.apply_webcam_layout();
         self.set_camera((1.0, (f64::from(width) / 2.0, f64::from(height) / 2.0)));
         self.cursor_layer.queue_draw();
         if let Some(path) = path {
@@ -923,6 +948,87 @@ impl Stage {
                 .set_source(Some(path), source_seconds, composition_seconds);
         }
     }
+}
+
+/// The video card's rect inside the stage: where the picture, its zoom, the
+/// cursor and every layout share their origin. The clip carries the margins
+/// the stage gives the footage, so reading its allocation keeps all of them on
+/// the same rectangle even when a background fill insets the video.
+fn clip_video_rect(
+    clip: &super::rounded_clip::RoundedClip,
+    allocation_width: i32,
+    allocation_height: i32,
+    source_size: (u32, u32),
+) -> Option<super::cursor::VideoRect> {
+    let width = clip.allocated_width();
+    let height = clip.allocated_height();
+    if width > 1 && height > 1 {
+        return Some(super::cursor::VideoRect {
+            x: f64::from(clip.margin_start()),
+            y: f64::from(clip.margin_top()),
+            width: f64::from(width),
+            height: f64::from(height),
+        });
+    }
+    super::cursor::video_rect_for(
+        f64::from(allocation_width),
+        f64::from(allocation_height),
+        f64::from(source_size.0),
+        f64::from(source_size.1),
+    )
+}
+
+/// The screen's share of the video rect, in stage pixels: the cover rect the
+/// whole source draws into and the pane it is clipped to.
+fn screen_transform(video: super::cursor::VideoRect, screen: super::webcam::Rect) -> ScreenView {
+    let placement = super::rounded_clip::pane_placement(
+        video.width,
+        video.height,
+        (screen.x, screen.y, screen.width, screen.height),
+    );
+    let place = |(x, y, width, height): (f64, f64, f64, f64)| super::cursor::VideoRect {
+        x: video.x + x,
+        y: video.y + y,
+        width,
+        height,
+    };
+    ScreenView {
+        draw: place(placement.draw),
+        clip: place(placement.clip),
+    }
+}
+
+/// Draw `draw` in the video rect, or over the layout's screen pane with the
+/// cover rect's allocation and the pane as its clip.
+fn draw_in_video(
+    context: &gtk4::cairo::Context,
+    video: Option<super::cursor::VideoRect>,
+    screen: Option<ScreenView>,
+    allocation: (i32, i32),
+    draw: impl FnOnce(&gtk4::cairo::Context, i32, i32),
+) {
+    let Some(video) = video else {
+        draw(context, allocation.0, allocation.1);
+        return;
+    };
+    let _ = context.save();
+    match screen {
+        Some(view) => {
+            context.rectangle(view.clip.x, view.clip.y, view.clip.width, view.clip.height);
+            context.clip();
+            context.translate(view.draw.x, view.draw.y);
+            draw(
+                context,
+                view.draw.width.round().max(1.0) as i32,
+                view.draw.height.round().max(1.0) as i32,
+            );
+        }
+        None => {
+            context.translate(video.x, video.y);
+            draw(context, video.width as i32, video.height as i32);
+        }
+    }
+    let _ = context.restore();
 }
 
 /// The orange outline a Manual zoom shows over an unzoomed preview: the region
@@ -1080,28 +1186,66 @@ fn build_stage(
     cursor_layer.set_draw_func({
         let cursor = cursor.clone();
         let webcam = webcam.clone();
+        let clip = clip.clone();
         let source_size = source_size.clone();
         let source_seconds = source_seconds.clone();
         let camera_view = camera_view.clone();
         let placement = placement.clone();
         move |_, context, width, height| {
-            cursor.draw(
+            let source = source_size.get();
+            let video = source.and_then(|source| clip_video_rect(&clip, width, height, source));
+            let screen = webcam
+                .layout_frame(source)
+                .map(|frame| frame.screen)
+                .filter(|screen| !screen.is_full());
+            let view = match (video, screen) {
+                (Some(video), Some(screen)) => Some(screen_transform(video, screen)),
+                _ => None,
+            };
+            draw_in_video(
                 context,
-                width,
-                height,
-                source_seconds.get(),
-                source_size.get(),
-                camera_view.get(),
+                video,
+                view,
+                (width, height),
+                |context, width, height| {
+                    cursor.draw(
+                        context,
+                        width,
+                        height,
+                        source_seconds.get(),
+                        source,
+                        camera_view.get(),
+                    );
+                },
             );
-            webcam.draw(context, width, height, source_size.get());
-            draw_placement_outline(
+            webcam.draw(
                 context,
                 width,
                 height,
-                source_size.get(),
-                camera_view.get(),
-                placement.get(),
-                scale,
+                source,
+                video.map(|video| super::webcam::Rect {
+                    x: video.x,
+                    y: video.y,
+                    width: video.width,
+                    height: video.height,
+                }),
+            );
+            draw_in_video(
+                context,
+                video,
+                view,
+                (width, height),
+                |context, width, height| {
+                    draw_placement_outline(
+                        context,
+                        width,
+                        height,
+                        source,
+                        camera_view.get(),
+                        placement.get(),
+                        scale,
+                    );
+                },
             );
         }
     });
@@ -1588,7 +1732,6 @@ fn install_css() {
         }}
         .recording-editor-tools-column {{
             min-width: {tools_w}px;
-            max-width: {tools_w}px;
         }}
         .video-editor-tool-panel {{
             padding: {panel_pad}px {panel_side}px;
@@ -1653,8 +1796,102 @@ fn install_css() {
 mod tests {
     use super::{
         canvas_dimensions, card_radius, estimated_size_bytes, format_size, history_key,
-        output_dimensions, padding_px, video_rect_dimensions, FrameAspect, HistoryKey, QualityTier,
+        output_dimensions, padding_px, screen_transform, video_rect_dimensions, FrameAspect,
+        HistoryKey, QualityTier,
     };
+
+    #[test]
+    fn a_split_screen_transform_covers_the_video_pane() {
+        let video = super::super::cursor::VideoRect {
+            x: 10.0,
+            y: 20.0,
+            width: 200.0,
+            height: 100.0,
+        };
+        let screen = super::super::webcam::Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 0.5,
+            height: 1.0,
+        };
+        let view = screen_transform(video, screen);
+        assert!((view.clip.x - 10.0).abs() < 1e-9);
+        assert!((view.clip.y - 20.0).abs() < 1e-9);
+        assert!((view.clip.width - 100.0).abs() < 1e-9);
+        assert!((view.clip.height - 100.0).abs() < 1e-9);
+        assert!((view.draw.x - -40.0).abs() < 1e-9);
+        assert!((view.draw.y - 20.0).abs() < 1e-9);
+        assert!((view.draw.width - 200.0).abs() < 1e-9);
+        assert!((view.draw.height - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_preview_paints_inside_the_split_screens_pane() {
+        use gtk4::cairo::{Context, Format, ImageSurface};
+
+        let mut surface = ImageSurface::create(Format::ARgb32, 320, 200).unwrap();
+        let video = super::super::cursor::VideoRect {
+            x: 10.0,
+            y: 20.0,
+            width: 200.0,
+            height: 100.0,
+        };
+        {
+            let context = Context::new(&surface).unwrap();
+            context.set_source_rgb(0.0, 0.0, 0.0);
+            context.paint().unwrap();
+            for (x, colour) in [(0.0, (1.0, 0.0, 0.0)), (0.5, (0.0, 0.0, 1.0))] {
+                let screen = super::super::webcam::Rect {
+                    x,
+                    y: 0.0,
+                    width: 0.5,
+                    height: 1.0,
+                };
+                let view = screen_transform(video, screen);
+                super::draw_in_video(
+                    &context,
+                    Some(video),
+                    Some(view),
+                    (320, 200),
+                    |cr, width, height| {
+                        assert_eq!((width, height), (200, 100));
+                        cr.set_source_rgb(colour.0, colour.1, colour.2);
+                        cr.rectangle(0.0, 0.0, f64::from(width), f64::from(height));
+                        cr.fill().unwrap();
+                    },
+                );
+            }
+        }
+        let left = read_pixel(&mut surface, 13, 23);
+        let right = read_pixel(&mut surface, 207, 70);
+        let left_edge = read_pixel(&mut surface, 5, 70);
+        let right_edge = read_pixel(&mut surface, 215, 70);
+        assert!(
+            left[2] > 200 && left[0] < 40,
+            "the cover rect paints inside the left pane: {left:?}"
+        );
+        assert!(
+            right[0] > 200 && right[2] < 40,
+            "the cover rect paints inside the flipped pane: {right:?}"
+        );
+        assert!(
+            left_edge[2] < 40 && right_edge[0] < 40,
+            "each pane clips the cover rect: {left_edge:?} {right_edge:?}"
+        );
+    }
+
+    fn read_pixel(surface: &mut gtk4::cairo::ImageSurface, x: u32, y: u32) -> [u8; 4] {
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        let offset = y as usize * stride + x as usize * 4;
+        [
+            data[offset],
+            data[offset + 1],
+            data[offset + 2],
+            data[offset + 3],
+        ]
+    }
 
     #[test]
     fn ctrl_z_undoes_and_ctrl_shift_z_or_ctrl_y_redoes() {

@@ -1,0 +1,14 @@
+Camera cutout person segmentation models
+========================================
+
+This distribution includes two MediaPipe Selfie Segmentation models published
+by Google LLC under the Apache License, Version 2.0: the general 256x256 model
+and the landscape 256x144 model. The general ONNX conversion and packaging are
+from SelfieSegmentationBarracuda by IKEP, via PINTO_model_zoo's
+109_Selfie_Segmentation. The landscape ONNX conversion and packaging are from
+SelfieBarracuda by Keijiro Takahashi. Both conversions are Apache-2.0. The
+bundled landscape graph rewrites three legacy Upsample nodes as Resize-10; the
+weights are unchanged.
+
+See LICENSE for the full licence text and README.md for the pinned source
+revisions, checksums, selection rules, and conversion details.
