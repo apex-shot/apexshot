@@ -41,10 +41,14 @@ namespace {
 constexpr QColor kAccent(255, 102, 0);
 constexpr QColor kText(245, 245, 247);
 constexpr QColor kMuted(164, 164, 172);
-constexpr int kPanelHeight = 72;
-constexpr int kOuterPad = 7;
-constexpr int kItemHeight = 58;
-constexpr int kSeparator = 14;
+constexpr int kPanelHeight = 58;
+constexpr int kOuterPad = 6;
+constexpr int kItemHeight = 44;
+constexpr int kSeparator = 12;
+constexpr int kIconSize = 17;
+constexpr int kPanelRadius = 13;
+constexpr int kIconPad = 12;
+constexpr int kIconGap = 8;
 const char* kLabels[] = {"Shot", "Video", "Display", "Window", "Area", "OCR", "Timer",
                          "Scroll", ""};
 
@@ -86,30 +90,47 @@ QPainterPath lucidePath(const QString& family, ushort glyph, int pixelSize)
     return path;
 }
 
-QIcon checkMark(bool checked)
+/// A menu styled like a Settings dropdown that paints the tick and the
+/// submenu chevron in one trailing column. QMenu puts action icons on the
+/// left and its own arrow wherever the style says, so both marks are drawn
+/// over the finished item geometry instead.
+class DeviceMenu : public QMenu
 {
-    QPixmap pixmap(16, 16);
-    pixmap.fill(Qt::transparent);
-    if (checked) {
-        QPainter painter(&pixmap);
-        painter.setRenderHint(QPainter::Antialiasing);
+public:
+    using QMenu::QMenu;
+
+protected:
+    void paintEvent(QPaintEvent* event) override
+    {
+        QMenu::paintEvent(event);
         const QString family = lucideFamily();
-        if (!family.isEmpty()) {
-            QFont font(family);
-            font.setPixelSize(16);
-            painter.setFont(font);
-            painter.setPen(Qt::white);
-            painter.drawText(QRectF(0, 0, 16, 16), Qt::AlignCenter,
-                             QString(QChar(static_cast<ushort>(0xE06C))));
-        } else {
-            painter.setPen(QPen(Qt::white, 2.0, Qt::SolidLine, Qt::RoundCap,
-                                Qt::RoundJoin));
-            painter.drawLine(QPointF(2.5, 8.0), QPointF(6.5, 12.0));
-            painter.drawLine(QPointF(6.5, 12.0), QPointF(13.5, 3.5));
+        if (family.isEmpty())
+            return;
+
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::Antialiasing);
+        QFont font(family);
+        font.setPixelSize(15);
+        painter.setFont(font);
+        for (QAction* action : actions()) {
+            if (!action->isVisible() || action->isSeparator())
+                continue;
+            const QRect item = actionGeometry(action);
+            if (item.isNull())
+                continue;
+            const QRectF mark(item.right() - 24.0, item.top(), 16.0, item.height());
+            if (action->menu()) {
+                painter.setPen(QColor(255, 255, 255, 168));
+                painter.drawText(mark, Qt::AlignCenter,
+                                 QString(QChar(static_cast<ushort>(0xE06F))));
+            } else if (action->property("ticked").toBool()) {
+                painter.setPen(QColor(255, 255, 255, 219));
+                painter.drawText(mark, Qt::AlignCenter,
+                                 QString(QChar(static_cast<ushort>(0xE06C))));
+            }
         }
     }
-    return QIcon(pixmap);
-}
+};
 
 void roundMenu(QMenu& menu)
 {
@@ -118,7 +139,7 @@ void roundMenu(QMenu& menu)
     menu.ensurePolished();
     menu.adjustSize();
     QPainterPath path;
-    path.addRoundedRect(QRectF(menu.rect()), 12, 12);
+    path.addRoundedRect(QRectF(menu.rect()), 10, 10);
     menu.setMask(QRegion(path.toFillPolygon().toPolygon()));
 }
 
@@ -138,20 +159,19 @@ void applyMenuStyle(QMenu& menu)
     menu.setAutoFillBackground(false);
     menu.setFixedWidth(304);
     QFont font(QStringLiteral("Inter"));
-    font.setPixelSize(13);
+    font.setPixelSize(14);
+    font.setWeight(QFont::Medium);
     menu.setFont(font);
     menu.setStyleSheet(QStringLiteral(
-        "QMenu { background: rgba(22,22,25,240); color:#EDEDF0;"
-        " border:1px solid rgba(255,255,255,34); border-radius:12px; padding:7px; }"
-        "QMenu::item { padding:9px 14px 9px 8px; margin:2px 4px; border-radius:8px; }"
-        "QMenu::item:selected { background: rgba(255,102,0,218); color:#ffffff; }"
-        "QMenu::item:disabled { color: rgba(237,237,240,120); }"
-        "QMenu::separator { height:1px; background: rgba(255,255,255,22);"
-        " margin:6px 12px; }"
-        "QMenu::indicator { width:0px; height:0px; }"
-        "QMenu::icon { width:16px; height:16px; }"
-        "QMenu::right-arrow { image: url(:/icons/chevron-right.png);"
-        " width:12px; height:12px; }"));
+        "QMenu { background:#252526; color: rgba(255,255,255,230);"
+        " border:1px solid rgba(255,255,255,26); border-radius:10px;"
+        " padding:4px; }"
+        "QMenu::item { padding:7px 26px 7px 8px; border-radius:6px; }"
+        "QMenu::item:selected { background: rgba(255,255,255,18); color:#ffffff; }"
+        "QMenu::item:disabled { color: rgba(255,255,255,60); }"
+        "QMenu::separator { height:1px; background: rgba(255,255,255,16);"
+        " margin:4px 8px; }"
+        "QMenu::right-arrow { image: none; width:0px; height:0px; }"));
 }
 
 QString resolveCameraDevice(const QString& preferred)
@@ -343,7 +363,7 @@ int CaptureModeToolbar::itemCount() const
 int CaptureModeToolbar::itemWidth(int index) const
 {
     if (index == itemCount() - 1)
-        return 56;
+        return 44;
 
     QFont font(QStringLiteral("Inter"));
     font.setPixelSize(13);
@@ -372,10 +392,11 @@ int CaptureModeToolbar::itemWidth(int index) const
         break;
     }
 
-    // 16px before the icon, a 23px glyph, a 12px gap, and 14px after the
-    // label. Measuring the widest label a slot can show keeps "Video" and
-    // "Display" inside their cells when the label turns bold.
-    return 16 + 23 + 12 + textWidth + 14;
+    // The same rhythm a Settings row uses: 12px before the icon, a 17px
+    // glyph, an 8px gap, and 12px after the label. Measuring the widest
+    // label a slot can show keeps "Video" and "Display" inside their cells
+    // when the label turns bold.
+    return kIconPad + kIconSize + kIconGap + textWidth + kIconPad;
 }
 
 int CaptureModeToolbar::preferredWidth() const
@@ -446,19 +467,49 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::TextAntialiasing);
 
-    const QRectF panel = QRectF(rect()).adjusted(1.5, 1.5, -1.5, -4.0);
+    const QRectF panel(1.5, 1.5, width() - 3.0, kItemHeight + 2.0 * kOuterPad - 3.0);
     QPainterPath shadow;
-    shadow.addRoundedRect(panel.translated(0, 4), 20, 20);
+    shadow.addRoundedRect(panel.translated(0, 3), kPanelRadius, kPanelRadius);
     painter.fillPath(shadow, QColor(0, 0, 0, 110));
 
     QPainterPath body;
-    body.addRoundedRect(panel, 18, 18);
+    body.addRoundedRect(panel, kPanelRadius, kPanelRadius);
     // The settings window's body colour, so Quick Access reads as the same
     // surface rather than a lighter panel of its own.
     painter.fillPath(body, QColor(20, 20, 20, 250));
     painter.setPen(QPen(QColor(255, 255, 255, 42), 1.0));
     painter.setBrush(Qt::NoBrush);
     painter.drawPath(body);
+
+    // Shot and Video are one switch, not two buttons: an inset track holds
+    // both halves and the selected half carries the accent, the same shape
+    // every other selector in Settings draws.
+    const QRectF shotCell = itemRect(0);
+    const QRectF videoCell = itemRect(1);
+    const QRectF modeTrack(shotCell.left() + 3.0, shotCell.top() + 4.0,
+                           videoCell.right() - shotCell.left() - 6.0,
+                           shotCell.height() - 8.0);
+    const double trackRadius = kPanelRadius * modeTrack.height() / panel.height();
+    QPainterPath modeTrackPath;
+    modeTrackPath.addRoundedRect(modeTrack, trackRadius, trackRadius);
+    painter.fillPath(modeTrackPath, QColor(255, 255, 255, 18));
+
+    const int selectedMode = m_recording ? 1 : 0;
+    for (int i = 0; i < 2; ++i) {
+        const QRectF cell = itemRect(i);
+        const bool isSelected = i == selectedMode;
+        const bool hoveredHalf = i == m_hovered && !isSelected
+            && !(!m_recordingAvailable && i == 1);
+        if (!isSelected && !hoveredHalf)
+            continue;
+        const QRectF thumb = cell.adjusted(4.5, 6.0, -4.5, -6.0);
+        QPainterPath thumbPath;
+        const double thumbRadius = trackRadius * thumb.height() / modeTrack.height();
+        thumbPath.addRoundedRect(thumb, thumbRadius, thumbRadius);
+        painter.fillPath(thumbPath,
+                         isSelected ? QColor(kAccent.red(), kAccent.green(), kAccent.blue(), 235)
+                                    : QColor(255, 255, 255, 22));
+    }
 
     for (int i = 0; i < itemCount(); ++i) {
         const QRectF cell = itemRect(i);
@@ -475,46 +526,57 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
             || (m_enableScrollCapture && i == 7 && m_scroll)
             || (!m_recording && !m_scroll && i == 5 && m_ocr)
             || (!m_recording && !m_scroll && i == 6 && m_timerSeconds > 0);
-        const bool deviceOn = (i == 5 && m_microphone) || (i == 6 && m_speaker)
+        // Mic and Speaker are the recording phase's slots: on the shot side
+        // 5 and 6 are OCR and Timer and must not inherit the last recording's
+        // device state. Their selected look is the bar's orange, as before.
+        const bool deviceOn = (m_recording && ((i == 5 && m_microphone) || (i == 6 && m_speaker)))
             || (cameraSlot(i) && m_camera);
         const bool hovered = i == m_hovered && !disabled;
 
-        if (active || hovered) {
-            const QRectF highlight = cell.adjusted(3, 5, -3, -5);
+        if ((active || hovered) && i > 1) {
+            const QRectF highlight = cell.adjusted(3, 3, -3, -3);
             QPainterPath highlightPath;
-            highlightPath.addRoundedRect(highlight, 11, 11);
+            highlightPath.addRoundedRect(highlight, kPanelRadius - 3.0, kPanelRadius - 3.0);
             painter.fillPath(highlightPath,
                              active ? QColor(kAccent.red(), kAccent.green(), kAccent.blue(), 224)
                                     : QColor(255, 255, 255, 16));
         }
 
+        // Settings' nav icons are a step dimmer than their labels; the
+        // toolbar keeps that split so the two surfaces read the same.
         const QColor iconColor = active ? Qt::white
             : (deviceOn ? QColor(255, 138, 64)
-                        : (disabled ? QColor(115, 115, 122) : kText));
+                        : (disabled ? QColor(115, 115, 122)
+                                    : QColor(185, 186, 193)));
         const bool isClose = i == itemCount() - 1;
-        const QPointF iconCenter(isClose ? cell.center().x() : cell.left() + 16.0 + 11.0,
+        QFont groupFont(QStringLiteral("Inter"));
+        groupFont.setPixelSize(13);
+        groupFont.setWeight(active || deviceOn ? QFont::DemiBold : QFont::Medium);
+        QString label = isClose ? QString() : labelFor(i);
+        if (!isClose && m_recording && i == 5) {
+            label = QStringLiteral("Mic");
+        } else if (!isClose && m_recording && i == 6) {
+            label = QStringLiteral("Speaker");
+        } else if (!isClose && !m_recording && !m_scroll && i == 6 && m_timerSeconds > 0) {
+            label = QStringLiteral("%1s").arg(m_timerSeconds);
+        }
+        const double labelWidth =
+            isClose ? 0.0 : QFontMetricsF(groupFont).horizontalAdvance(label);
+        const double groupWidth = isClose ? 0.0 : kIconSize + kIconGap + labelWidth;
+        const QPointF iconCenter(isClose ? cell.center().x()
+                                        : cell.center().x() - groupWidth / 2.0
+                                              + kIconSize / 2.0,
                                  cell.center().y());
         drawIcon(painter, i, iconCenter,
                  isClose && !hovered ? QColor(190, 190, 196) : iconColor);
 
         if (!isClose) {
-            QFont font(QStringLiteral("Inter"));
-            font.setPixelSize(13);
-            font.setWeight(active || deviceOn ? QFont::DemiBold : QFont::Medium);
-            painter.setFont(font);
+            painter.setFont(groupFont);
             painter.setPen(active || deviceOn ? Qt::white
                                               : (disabled ? QColor(115, 115, 122)
                                                           : QColor(228, 228, 232)));
-            QString label = labelFor(i);
-            if (m_recording && i == 5) {
-                label = QStringLiteral("Mic");
-            } else if (m_recording && i == 6) {
-                label = QStringLiteral("Speaker");
-            } else if (!m_recording && !m_scroll && i == 6 && m_timerSeconds > 0) {
-                label = QStringLiteral("%1s").arg(m_timerSeconds);
-            }
-            const double textLeft = cell.left() + 16.0 + 23.0 + 12.0;
-            const QFontMetricsF labelMetrics(font);
+            const double textLeft = cell.center().x() - groupWidth / 2.0 + kIconSize + kIconGap;
+            const QFontMetricsF labelMetrics(groupFont);
             // Align the middle of the cap height, not the whole line box: the
             // icon is centred on its painted outline below.
             painter.drawText(QPointF(textLeft,
@@ -525,7 +587,7 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
         if (separatorAfter(i)) {
             const qreal x = cell.right() + 7.0;
             painter.setPen(QPen(QColor(255, 255, 255, 28), 1));
-            painter.drawLine(QPointF(x, 16), QPointF(x, height() - 18));
+            painter.drawLine(QPointF(x, 11), QPointF(x, height() - 12));
         }
     }
 }
@@ -576,7 +638,7 @@ void CaptureModeToolbar::drawIcon(QPainter& painter,
         break;
     }
 
-    const QPainterPath path = lucidePath(family, glyph, 23);
+    const QPainterPath path = lucidePath(family, glyph, kIconSize);
     const QRectF ink = path.boundingRect();
     painter.save();
     painter.translate(center.x() - ink.center().x(), center.y() - ink.center().y());
@@ -590,6 +652,10 @@ void CaptureModeToolbar::drawFallbackIcon(QPainter& painter,
                                   const QColor& color) const
 {
     painter.save();
+    const qreal fallbackScale = kIconSize / 23.0;
+    painter.translate(center);
+    painter.scale(fallbackScale, fallbackScale);
+    painter.translate(-center);
     painter.setPen(QPen(color, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
     painter.setBrush(Qt::NoBrush);
     const qreal x = center.x();
@@ -738,7 +804,7 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         // open; changing capture mode would abandon the pending recording.
         if (event->button() == Qt::RightButton) {
             if (index >= 0)
-                openDeviceMenu(index, event->globalPos());
+                openDeviceMenu(index);
             return;
         }
         if (event->button() != Qt::LeftButton)
@@ -752,7 +818,7 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
     }
     if (event->button() == Qt::RightButton) {
         if (index >= 0)
-            openDeviceMenu(index, event->globalPos());
+            openDeviceMenu(index);
         return;
     }
     if (event->button() != Qt::LeftButton)
@@ -899,32 +965,32 @@ void CaptureModeToolbar::toggleCamera()
     update();
 }
 
-void CaptureModeToolbar::openDeviceMenu(int index, const QPoint& globalPos)
+QPoint CaptureModeToolbar::menuAnchor(int index) const
+{
+    const QRectF cell = itemRect(index);
+    return mapToGlobal(QPoint(qRound(cell.left()), height() + 6));
+}
+
+void CaptureModeToolbar::openDeviceMenu(int index)
 {
 #ifdef Q_OS_WIN
     if (m_recording && index == 5) {
-        QMenu menu(this);
+        DeviceMenu menu(this);
         applyMenuStyle(menu);
 
         const QStringList devices = Platform::directShowDevices(false);
         for (const QString& device : devices) {
             QAction* action = menu.addAction(menuLabel(device, menu.font()));
-            action->setCheckable(true);
-            action->setChecked(m_microphone && device == m_microphoneDevice);
+            action->setProperty("ticked", m_microphone && device == m_microphoneDevice);
             action->setData(device);
-            action->setIcon(checkMark(action->isChecked()));
-            action->setIconVisibleInMenu(true);
         }
         if (!devices.isEmpty())
             menu.addSeparator();
         QAction* off = menu.addAction(QStringLiteral("Don't record microphone"));
-        off->setCheckable(true);
-        off->setChecked(!m_microphone);
-        off->setIcon(checkMark(off->isChecked()));
-        off->setIconVisibleInMenu(true);
+        off->setProperty("ticked", !m_microphone);
 
         roundMenu(menu);
-        QAction* chosen = menu.exec(globalPos);
+        QAction* chosen = menu.exec(menuAnchor(index));
         if (!chosen)
             return;
         if (chosen == off) {
@@ -938,21 +1004,21 @@ void CaptureModeToolbar::openDeviceMenu(int index, const QPoint& globalPos)
     }
 
     if (m_recording && index == 6) {
-        QMenu menu(this);
+        DeviceMenu menu(this);
         applyMenuStyle(menu);
 
         QAction* all = menu.addAction(QStringLiteral("Record system audio from all apps"));
-        all->setCheckable(true);
-        all->setChecked(m_speaker && m_systemAudioApplication.isEmpty());
-        all->setIcon(checkMark(all->isChecked()));
-        all->setIconVisibleInMenu(true);
+        all->setProperty("ticked", m_speaker && m_systemAudioApplication.isEmpty());
 
-        QMenu* one = menu.addMenu(QStringLiteral("Record audio from one app"));
+        DeviceMenu* one = new DeviceMenu(QStringLiteral("Record audio from one app"), &menu);
+        menu.addAction(one->menuAction());
         one->setFont(menu.font());
         one->setStyleSheet(menu.styleSheet());
-        one->setFixedWidth(menu.width());
-        one->menuAction()->setIcon(checkMark(false));
-        one->menuAction()->setIconVisibleInMenu(true);
+        // Qt butts a submenu against its parent. Nudge it clear once it is
+        // placed, so the two panels read as separate surfaces.
+        QObject::connect(one, &QMenu::aboutToShow, one, [one]() {
+            QTimer::singleShot(0, one, [one]() { one->move(one->x() + 6, one->y()); });
+        });
 
         QVector<QAction*> appActions;
         const QVector<Platform::AudioApplication> applications =
@@ -960,35 +1026,27 @@ void CaptureModeToolbar::openDeviceMenu(int index, const QPoint& globalPos)
         if (applications.isEmpty()) {
             QAction* empty = one->addAction(QStringLiteral("No apps are playing audio"));
             empty->setEnabled(false);
-            empty->setIcon(checkMark(false));
-            empty->setIconVisibleInMenu(true);
         } else {
             for (const Platform::AudioApplication& application : applications) {
                 QAction* action =
                     one->addAction(menuLabel(application.name, one->font()));
-                action->setCheckable(true);
-                action->setChecked(m_speaker
+                action->setProperty("ticked", m_speaker
                                    && m_systemAudioApplication.compare(
                                           application.name, Qt::CaseInsensitive)
                                        == 0);
                 action->setData(application.processId);
                 action->setProperty("appName", application.name);
-                action->setIcon(checkMark(action->isChecked()));
-                action->setIconVisibleInMenu(true);
                 appActions.append(action);
             }
         }
 
         menu.addSeparator();
         QAction* off = menu.addAction(QStringLiteral("Don't record system audio"));
-        off->setCheckable(true);
-        off->setChecked(!m_speaker);
-        off->setIcon(checkMark(off->isChecked()));
-        off->setIconVisibleInMenu(true);
+        off->setProperty("ticked", !m_speaker);
 
         roundMenu(*one);
         roundMenu(menu);
-        QAction* chosen = menu.exec(globalPos);
+        QAction* chosen = menu.exec(menuAnchor(index));
         if (!chosen)
             return;
         if (chosen == all) {
@@ -1009,34 +1067,26 @@ void CaptureModeToolbar::openDeviceMenu(int index, const QPoint& globalPos)
     }
 
     if (cameraSlot(index)) {
-        QMenu menu(this);
+        DeviceMenu menu(this);
         applyMenuStyle(menu);
 
         const QStringList cameras = Platform::directShowDevices(true);
         if (cameras.isEmpty()) {
             QAction* empty = menu.addAction(QStringLiteral("No camera detected"));
             empty->setEnabled(false);
-            empty->setIcon(checkMark(false));
-            empty->setIconVisibleInMenu(true);
         } else {
             for (const QString& camera : cameras) {
                 QAction* action = menu.addAction(menuLabel(camera, menu.font()));
-                action->setCheckable(true);
-                action->setChecked(m_camera && camera == m_cameraDevice);
+                action->setProperty("ticked", m_camera && camera == m_cameraDevice);
                 action->setData(camera);
-                action->setIcon(checkMark(action->isChecked()));
-                action->setIconVisibleInMenu(true);
             }
             menu.addSeparator();
         }
         QAction* off = menu.addAction(QStringLiteral("Don't record camera"));
-        off->setCheckable(true);
-        off->setChecked(!m_camera);
-        off->setIcon(checkMark(off->isChecked()));
-        off->setIconVisibleInMenu(true);
+        off->setProperty("ticked", !m_camera);
 
         roundMenu(menu);
-        QAction* chosen = menu.exec(globalPos);
+        QAction* chosen = menu.exec(menuAnchor(index));
         if (!chosen)
             return;
         if (chosen == off) {
@@ -1050,7 +1100,6 @@ void CaptureModeToolbar::openDeviceMenu(int index, const QPoint& globalPos)
     }
 #else
     Q_UNUSED(index);
-    Q_UNUSED(globalPos);
 #endif
 }
 

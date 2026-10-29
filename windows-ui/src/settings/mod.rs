@@ -1,9 +1,8 @@
 use crate::config::load_config;
-use crate::i18n::{self, t, tfmt};
+use crate::i18n::{self, t};
 use gtk4::{
     prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, FileChooserAction,
-    FileChooserNative, Image, Label, Orientation, Overlay as GtkOverlay, ResponseType,
-    ScrolledWindow,
+    FileChooserNative, Label, Orientation, Overlay as GtkOverlay, ResponseType, ScrolledWindow,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -18,6 +17,7 @@ mod advanced;
 mod after_capture;
 #[path = "../../../src/settings/annotate.rs"]
 mod annotate;
+mod autosave;
 #[path = "../../../src/settings/cloud.rs"]
 mod cloud;
 #[path = "../../../src/settings/general.rs"]
@@ -30,10 +30,12 @@ mod recording;
 mod screenshots;
 #[path = "../../../src/settings/select.rs"]
 mod select;
+mod shell;
 #[path = "../../../src/settings/shortcuts.rs"]
 mod shortcuts;
 #[path = "../../../src/settings/studio.rs"]
 mod studio;
+mod switches;
 #[path = "../../../src/settings/theme_picker.rs"]
 mod theme_picker;
 #[path = "../../../src/settings/ui_support.rs"]
@@ -46,7 +48,7 @@ pub(crate) mod windowing;
 pub(crate) const PAGE_TOP_MARGIN: i32 = if cfg!(target_os = "windows") { 4 } else { 20 };
 
 use self::{
-    actions::{install_checkbox_behaviors, save_settings, SaveInputs},
+    actions::{install_checkbox_behaviors, SaveInputs},
     after_capture::build_after_capture_section,
     general::build_general_section,
     quick_access::build_quick_access_section,
@@ -57,6 +59,15 @@ use self::{
     },
     windowing::{prefers_dark_glass_theme, prefers_reduced_transparency},
 };
+
+/// The bundled outline glyph for the current theme.
+fn themed_icon(dark: bool, dark_icon: &'static str, light_icon: &'static str) -> &'static str {
+    if dark {
+        dark_icon
+    } else {
+        light_icon
+    }
+}
 
 /// A short page-level note for a feature the Windows shell does not run yet.
 fn platform_note(text: &str) -> Label {
@@ -70,7 +81,7 @@ fn platform_note(text: &str) -> Label {
 }
 
 /// Short, user-facing summary of a save failure (full chain goes to stderr).
-fn format_save_error(err: &anyhow::Error) -> String {
+pub(crate) fn format_save_error(err: &anyhow::Error) -> String {
     const MAX_LEN: usize = 160;
     let root = err
         .chain()
@@ -87,13 +98,12 @@ fn format_save_error(err: &anyhow::Error) -> String {
 }
 
 #[derive(Clone, Copy)]
-enum SettingsToastKind {
-    Neutral,
+pub(crate) enum SettingsToastKind {
     Success,
     Error,
 }
 
-fn show_settings_toast(
+pub(crate) fn show_settings_toast(
     toast: &Label,
     generation: &Rc<Cell<u32>>,
     text: &str,
@@ -103,7 +113,6 @@ fn show_settings_toast(
     toast.remove_css_class("settings-toast-success");
     toast.remove_css_class("settings-toast-error");
     match kind {
-        SettingsToastKind::Neutral => {}
         SettingsToastKind::Success => toast.add_css_class("settings-toast-success"),
         SettingsToastKind::Error => toast.add_css_class("settings-toast-error"),
     }
@@ -151,19 +160,23 @@ fn build_settings_window(app: &Application) {
 
     install_settings_css();
     install_window_css();
+    shell::install_css();
 
     let config = load_config().sanitized();
     i18n::apply_gtk_direction(&config.ui_language);
     let prefers_dark = prefers_dark_glass_theme();
     let reduced_transparency = prefers_reduced_transparency();
     let ui_scale = crate::platform::ui_scale();
+    // The shell draws its type and spacing at logical size: the window keeps
+    // the roomy frame a scaled display earns without zooming the interface.
+    let text_scale = ui_scale.min(1.0);
 
     let window = ApplicationWindow::builder()
         .application(app)
         .title(t("ApexShot Settings"))
         .icon_name(crate::app_identity::icon_name())
-        .default_width((940.0 * ui_scale).round() as i32)
-        .default_height((680.0 * ui_scale).round() as i32)
+        .default_width(1240)
+        .default_height(820)
         .build();
 
     // The app draws its own title bar, like the Linux window.
@@ -180,15 +193,11 @@ fn build_settings_window(app: &Application) {
         root_box.add_css_class("editor-reduced-transparency");
     }
 
-    let save_btn = Button::with_label(&t("Save"));
-    save_btn.add_css_class("settings-save-btn");
-    save_btn.set_sensitive(false);
-
     let toast = Label::new(Some(&t("")));
     toast.add_css_class("settings-toast");
     toast.set_halign(Align::Center);
     toast.set_valign(Align::Start);
-    toast.set_margin_top(18);
+    toast.set_margin_top((52.0 * ui_scale).round() as i32);
     toast.set_opacity(0.0);
     toast.set_visible(true);
     toast.set_can_target(false);
@@ -209,128 +218,84 @@ fn build_settings_window(app: &Application) {
     content_split.set_vexpand(true);
     content_split.set_hexpand(true);
 
-    // --- NAVIGATION (SIDEBAR) ---
-    let sidebar_scroller = ScrolledWindow::new();
-    sidebar_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
-
-    let nav_strip = GtkBox::new(Orientation::Vertical, 4);
-    nav_strip.add_css_class("settings-sidebar");
-    nav_strip.set_halign(Align::Fill);
-    nav_strip.set_valign(Align::Fill);
-    nav_strip.set_hexpand(false);
-    nav_strip.set_vexpand(true);
-    sidebar_scroller.set_child(Some(&nav_strip));
-
-    let sidebar_wrapper = GtkBox::new(Orientation::Vertical, 0);
-    sidebar_wrapper.add_css_class("settings-sidebar-wrapper");
-    sidebar_wrapper.set_vexpand(true);
-    sidebar_wrapper.set_hexpand(false);
-
-    let sidebar_head = GtkBox::new(Orientation::Horizontal, 0);
-    sidebar_head.set_size_request(-1, (TITLE_BAR_HEIGHT * ui_scale).round() as i32);
-
-    let sidebar_title = Label::new(Some(&t("Settings")));
-    sidebar_title.add_css_class("settings-sidebar-title");
-    sidebar_title.set_halign(Align::Start);
-    sidebar_title.set_valign(Align::Center);
-    sidebar_title.set_hexpand(true);
-    sidebar_head.append(&sidebar_title);
-
-    sidebar_wrapper.append(&sidebar_head);
-    sidebar_wrapper.append(&sidebar_scroller);
-
-    let save_box = GtkBox::new(Orientation::Vertical, 0);
-    save_box.add_css_class("settings-save-box");
-    save_box.set_halign(Align::Fill);
-    save_box.set_margin_start(8);
-    save_box.set_margin_end(8);
-    save_box.set_margin_bottom(10);
-    save_box.set_margin_top(6);
-    save_btn.set_hexpand(true);
-    save_box.append(&save_btn);
-    sidebar_wrapper.append(&save_box);
-
-    use crate::capture::editor::window::icon_names::custom;
-    let labels = [
-        ("General", custom::SETTINGS_SYMBOLIC),
-        ("Shortcuts", custom::KEYBOARD_SHORTCUTS_SYMBOLIC),
-        ("Quick Access", custom::OVERLAPPING_WINDOWS_SYMBOLIC),
-        ("Recording", custom::RECORD_SCREEN_SYMBOLIC),
-        ("Screenshots", custom::SCREENSHOOTER_SYMBOLIC),
-        ("Annotate", custom::APP_ICON_DESIGN_SYMBOLIC),
-        ("Cloud", custom::CLOUD_OUTLINE_THIN_SYMBOLIC),
-        ("Advanced", custom::SETTINGS_SYMBOLIC),
-        ("Studio", custom::CLAPPERBOARD_SYMBOLIC),
-        ("About", custom::INFO_SYMBOLIC),
-    ];
-
+    // The page stack is built before the sidebar: the sidebar's rows are
+    // wired to it as they are created.
     let stack = gtk4::Stack::new();
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
     stack.set_vexpand(true);
     stack.add_css_class("settings-stack");
 
-    let mut nav_items = Vec::new();
+    use crate::capture::editor::window::icon_names::custom;
+    let pages = [
+        (
+            t("General"),
+            themed_icon(prefers_dark, custom::SETTINGS_2, custom::SETTINGS_2_LIGHT),
+        ),
+        (
+            t("Shortcuts"),
+            themed_icon(prefers_dark, custom::KEYBOARD, custom::KEYBOARD_LIGHT),
+        ),
+        (
+            t("Quick Access"),
+            themed_icon(
+                prefers_dark,
+                custom::PANELS_TOP_LEFT,
+                custom::PANELS_TOP_LEFT_LIGHT,
+            ),
+        ),
+        (
+            t("Recording"),
+            themed_icon(prefers_dark, custom::VIDEO, custom::VIDEO_LIGHT),
+        ),
+        (
+            t("Screenshots"),
+            themed_icon(prefers_dark, custom::CAMERA, custom::CAMERA_LIGHT),
+        ),
+        (
+            t("Annotate"),
+            themed_icon(prefers_dark, custom::PEN_TOOL, custom::PEN_TOOL_LIGHT),
+        ),
+        (
+            t("Cloud"),
+            themed_icon(prefers_dark, custom::CLOUD, custom::CLOUD_LIGHT),
+        ),
+        (
+            t("Advanced"),
+            themed_icon(
+                prefers_dark,
+                custom::SLIDERS_HORIZONTAL,
+                custom::SLIDERS_HORIZONTAL_LIGHT,
+            ),
+        ),
+        (
+            t("Studio"),
+            themed_icon(prefers_dark, custom::STUDIO, custom::STUDIO_LIGHT),
+        ),
+        (
+            t("About"),
+            themed_icon(prefers_dark, custom::ABOUT, custom::ABOUT_LIGHT),
+        ),
+    ];
+    let search_icon = themed_icon(prefers_dark, custom::SEARCH, custom::SEARCH_LIGHT);
 
-    for (i, (label_text, icon_name)) in labels.iter().enumerate() {
-        let item = GtkBox::new(Orientation::Horizontal, 8);
-        item.add_css_class("settings-nav-item");
-        item.set_halign(Align::Fill);
-        item.set_valign(Align::Center);
+    // --- NAVIGATION (SIDEBAR) ---
+    let sidebar = shell::build_sidebar(
+        text_scale,
+        TITLE_BAR_HEIGHT * ui_scale,
+        &pages,
+        &stack,
+        search_icon,
+    );
+    let sidebar_head = sidebar.head.clone();
 
-        let icon = Image::from_icon_name(icon_name);
-        icon.add_css_class("settings-nav-icon");
-        icon.set_pixel_size(16);
-        icon.set_halign(Align::Start);
+    let chip = shell::UserChip::from_config(&config);
+    let user_bar = shell::build_user_chip(&chip, text_scale, {
+        let stack = stack.clone();
+        move || stack.set_visible_child_name("8")
+    });
+    sidebar.wrapper.append(&user_bar);
 
-        let label = Label::new(Some(&t(label_text)));
-        label.add_css_class("settings-nav-label");
-        label.set_halign(Align::Start);
-
-        item.append(&icon);
-        item.append(&label);
-
-        if i == 0 {
-            item.add_css_class("settings-nav-item-selected");
-            icon.add_css_class("settings-nav-icon-selected");
-            label.add_css_class("settings-nav-label-selected");
-        }
-
-        let motion = gtk4::EventControllerMotion::new();
-        {
-            let item = item.clone();
-            let icon = icon.clone();
-            let label = label.clone();
-            motion.connect_enter(move |_, _, _| {
-                item.add_css_class("settings-nav-item-hover");
-                icon.add_css_class("settings-nav-icon-hover");
-                label.add_css_class("settings-nav-label-hover");
-            });
-        }
-        {
-            let item = item.clone();
-            let icon = icon.clone();
-            let label = label.clone();
-            motion.connect_leave(move |_| {
-                item.remove_css_class("settings-nav-item-hover");
-                icon.remove_css_class("settings-nav-icon-hover");
-                label.remove_css_class("settings-nav-label-hover");
-            });
-        }
-        item.add_controller(motion);
-
-        let s_clone = stack.clone();
-        let idx_str = i.to_string();
-        let click = gtk4::GestureClick::new();
-        click.connect_released(move |_, _, _, _| {
-            s_clone.set_visible_child_name(&idx_str);
-        });
-        item.add_controller(click);
-
-        nav_strip.append(&item);
-        nav_items.push((item, icon, label));
-    }
-
-    content_split.append(&sidebar_wrapper);
+    content_split.append(&sidebar.wrapper);
 
     // --- BODY (STACK) ---
     let right_col = GtkBox::new(Orientation::Vertical, 0);
@@ -413,6 +378,12 @@ fn build_settings_window(app: &Application) {
         .ui_language_input
         .widget()
         .set_tooltip_text(Some(&t("Windows UI translations are not available yet.")));
+    // Nothing in the Windows build reads the self-timer yet: timed captures
+    // come from the capture menu's own per-shot choice.
+    screenshots.timer_interval_input.set_sensitive(false);
+    screenshots.timer_interval_input.widget().set_tooltip_text(Some(&t(
+        "Timed capture is not wired into the Windows build yet. The interval is saved for a future release.",
+    )));
     recordings.rec_controls.set_sensitive(false);
     recordings
         .rec_controls
@@ -506,14 +477,21 @@ fn build_settings_window(app: &Application) {
     general_tab_section.append(&general.section);
     general_tab_section.append(&after_capture.wrapper);
 
-    fn add_section(stack: &gtk4::Stack, widget: &impl IsA<gtk4::Widget>, name: &str, title: &str) {
+    fn add_section(
+        stack: &gtk4::Stack,
+        widget: &impl IsA<gtk4::Widget>,
+        name: &str,
+        title: &str,
+        scale: f64,
+    ) {
         let scroller = ScrolledWindow::new();
         scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
+        let pad = (20.0 * scale).round() as i32;
         let vbox = GtkBox::new(Orientation::Vertical, 0);
-        vbox.set_margin_top(2);
-        vbox.set_margin_bottom(24);
-        vbox.set_margin_start(28);
-        vbox.set_margin_end(28);
+        vbox.set_margin_top((4.0 * scale).round() as i32);
+        vbox.set_margin_bottom((24.0 * scale).round() as i32);
+        vbox.set_margin_start(pad);
+        vbox.set_margin_end(pad);
         vbox.append(widget);
         scroller.set_child(Some(&vbox));
         let adjustment = scroller.vadjustment();
@@ -521,41 +499,35 @@ fn build_settings_window(app: &Application) {
         stack.add_titled(&scroller, Some(name), title);
     }
 
-    add_section(&stack, &general_tab_section, "0", &t("General"));
-    add_section(&stack, &shortcuts.section, "1", &t("Shortcuts"));
-    add_section(&stack, &quick_access.section, "2", &t("Quick Access"));
-    add_section(&stack, &recordings.section, "3", &t("Recording"));
-    add_section(&stack, &screenshots.section, "4", &t("Screenshots"));
-    add_section(&stack, &annotate.section, "5", &t("Annotate"));
-    add_section(&stack, &cloud.section, "6", &t("Cloud"));
-    add_section(&stack, &advanced.section, "7", &t("Advanced"));
-    add_section(&stack, &studio, "8", &t("Studio"));
-    add_section(&stack, &about.section, "9", &t("About"));
+    add_section(&stack, &general_tab_section, "0", &t("General"), text_scale);
+    add_section(&stack, &shortcuts.section, "1", &t("Shortcuts"), text_scale);
+    add_section(
+        &stack,
+        &quick_access.section,
+        "2",
+        &t("Quick Access"),
+        ui_scale,
+    );
+    add_section(
+        &stack,
+        &recordings.section,
+        "3",
+        &t("Recording"),
+        text_scale,
+    );
+    add_section(
+        &stack,
+        &screenshots.section,
+        "4",
+        &t("Screenshots"),
+        ui_scale,
+    );
+    add_section(&stack, &annotate.section, "5", &t("Annotate"), text_scale);
+    add_section(&stack, &cloud.section, "6", &t("Cloud"), text_scale);
+    add_section(&stack, &advanced.section, "7", &t("Advanced"), text_scale);
+    add_section(&stack, &studio, "8", &t("Studio"), text_scale);
+    add_section(&stack, &about.section, "9", &t("About"), text_scale);
 
-    let nav_items_clone = nav_items.clone();
-    stack.connect_visible_child_name_notify(move |s| {
-        if let Some(name) = s.visible_child_name() {
-            if let Ok(idx) = name.parse::<usize>() {
-                if let Some(child) = s.visible_child() {
-                    if let Some(scroller) = child.downcast_ref::<ScrolledWindow>() {
-                        let adjustment = scroller.vadjustment();
-                        adjustment.set_value(adjustment.lower());
-                    }
-                }
-                for (i, (item, icon, label)) in nav_items_clone.iter().enumerate() {
-                    if i == idx {
-                        item.add_css_class("settings-nav-item-selected");
-                        icon.add_css_class("settings-nav-icon-selected");
-                        label.add_css_class("settings-nav-label-selected");
-                    } else {
-                        item.remove_css_class("settings-nav-item-selected");
-                        icon.remove_css_class("settings-nav-icon-selected");
-                        label.remove_css_class("settings-nav-label-selected");
-                    }
-                }
-            }
-        }
-    });
     stack.set_visible_child_name("0");
 
     // Development aid: open a specific page without driving the sidebar.
@@ -576,8 +548,35 @@ fn build_settings_window(app: &Application) {
         stack.set_visible_child_name(&index.to_string());
     }
 
+    let page_heading = Label::new(Some(&t("General")));
+    page_heading.add_css_class("settings-page-title");
+    page_heading.set_xalign(0.0);
+    page_heading.set_halign(Align::Start);
+    page_heading.set_margin_start(22);
+    page_heading.set_margin_top(22);
+    page_heading.set_margin_bottom(2);
+
+    let page_titles: Vec<String> = pages.iter().map(|(title, _)| title.clone()).collect();
+    {
+        let page_heading = page_heading.clone();
+        stack.connect_visible_child_name_notify(move |stack| {
+            let Some(name) = stack.visible_child_name() else {
+                return;
+            };
+            if let Ok(index) = name.parse::<usize>() {
+                if let Some(title) = page_titles.get(index) {
+                    page_heading.set_text(title);
+                }
+            }
+        });
+    }
+
     right_col.append(&toolbar);
-    right_col.append(&stack);
+    right_col.append(&shell::build_content_card(
+        &stack,
+        text_scale,
+        &page_heading,
+    ));
     content_split.append(&right_col);
     root_box.append(&content_split);
     window.set_child(Some(&window_overlay));
@@ -654,118 +653,22 @@ fn build_settings_window(app: &Application) {
         ui_language: general.ui_language_input.clone(),
     });
 
-    let save_dirty = Rc::new(Cell::new(false));
-    let save_busy = Rc::new(Cell::new(false));
-    let apply_save_button_state: Rc<dyn Fn()> = {
-        let save_btn = save_btn.clone();
-        let save_dirty = Rc::clone(&save_dirty);
-        let save_busy = Rc::clone(&save_busy);
-        Rc::new(move || {
-            if save_busy.get() {
-                save_btn.set_label(&t("Saving…"));
-                save_btn.remove_css_class("settings-save-btn-ready");
-                save_btn.set_sensitive(false);
-                return;
-            }
-            save_btn.set_label(&t("Save"));
-            if save_dirty.get() {
-                save_btn.add_css_class("settings-save-btn-ready");
-                save_btn.set_sensitive(true);
-            } else {
-                save_btn.remove_css_class("settings-save-btn-ready");
-                save_btn.set_sensitive(false);
-            }
-        })
-    };
-    apply_save_button_state();
+    // --- AUTO-SAVE ---
+    // No Save button: every edit is written a moment after the person stops
+    // making it, including the last one when the window closes.
+    let saver = autosave::AutoSaver::new(
+        window.clone(),
+        Rc::clone(&save_inputs),
+        toast.clone(),
+        Rc::clone(&toast_generation),
+    );
+    install_save_dirty_tracking(&save_inputs, saver.mark_dirty());
+    switches::install(&root_box);
 
-    let mark_save_dirty: Rc<dyn Fn()> = {
-        let save_dirty = Rc::clone(&save_dirty);
-        let save_busy = Rc::clone(&save_busy);
-        let apply_save_button_state = Rc::clone(&apply_save_button_state);
-        Rc::new(move || {
-            if save_busy.get() {
-                return;
-            }
-            if !save_dirty.get() {
-                save_dirty.set(true);
-                apply_save_button_state();
-            }
-        })
-    };
-    install_save_dirty_tracking(&save_inputs, Rc::clone(&mark_save_dirty));
-
-    let trigger_save: Rc<dyn Fn()> = {
-        let save_inputs = Rc::clone(&save_inputs);
-        let toast = toast.clone();
-        let toast_generation = Rc::clone(&toast_generation);
-        let save_dirty = Rc::clone(&save_dirty);
-        let save_busy = Rc::clone(&save_busy);
-        let apply_save_button_state = Rc::clone(&apply_save_button_state);
-        let window = window.clone();
-        Rc::new(move || {
-            if save_busy.get() || !save_dirty.get() {
-                return;
-            }
-            save_busy.set(true);
-            apply_save_button_state();
-            show_settings_toast(
-                &toast,
-                &toast_generation,
-                &t("Saving…"),
-                SettingsToastKind::Neutral,
-                None,
-            );
-
-            let save_inputs = Rc::clone(&save_inputs);
-            let toast = toast.clone();
-            let toast_generation = Rc::clone(&toast_generation);
-            let save_dirty = Rc::clone(&save_dirty);
-            let save_busy = Rc::clone(&save_busy);
-            let apply_save_button_state = Rc::clone(&apply_save_button_state);
-            let window = window.clone();
-            gtk4::glib::idle_add_local_once(move || {
-                match save_settings(&save_inputs) {
-                    Ok(outcome) => {
-                        save_dirty.set(false);
-                        if outcome.language_changed {
-                            i18n::apply_gtk_direction(&crate::config::load_config().ui_language);
-                        }
-                        if outcome.language_changed || outcome.theme_changed {
-                            if let Some(app) = window.application() {
-                                window.close();
-                                build_settings_window(&app);
-                                return;
-                            }
-                        }
-                        show_settings_toast(
-                            &toast,
-                            &toast_generation,
-                            &t("Settings saved"),
-                            SettingsToastKind::Success,
-                            Some(Duration::from_secs(2)),
-                        );
-                    }
-                    Err(e) => {
-                        let message = format_save_error(&e);
-                        eprintln!("[settings] Save failed: {e:#}");
-                        show_settings_toast(
-                            &toast,
-                            &toast_generation,
-                            &tfmt("Save failed: {message}", &[("message", &message)]),
-                            SettingsToastKind::Error,
-                            Some(Duration::from_secs(4)),
-                        );
-                    }
-                }
-                save_busy.set(false);
-                apply_save_button_state();
-            });
-        })
-    };
-    let trigger_save_click = Rc::clone(&trigger_save);
-    save_btn.connect_clicked(move |_| {
-        trigger_save_click();
+    let saver_for_close = Rc::clone(&saver);
+    window.connect_close_request(move |_| {
+        saver_for_close.flush();
+        gtk4::glib::Propagation::Proceed
     });
 
     install_checkbox_behaviors(
@@ -781,6 +684,15 @@ fn build_settings_window(app: &Application) {
     );
 
     window.present();
+}
+
+/// Rebuild the window in place after a change the widget tree cannot re-apply:
+/// the light/dark theme and the reading direction both need fresh widgets.
+pub(crate) fn rebuild_settings_window(window: &ApplicationWindow) {
+    if let Some(app) = window.application() {
+        window.close();
+        build_settings_window(&app);
+    }
 }
 
 pub(crate) fn install_window_css() {
@@ -903,7 +815,7 @@ pub(crate) fn install_window_css() {
     );
 }
 
-/// Wire every settings control so any edit flips Save from grey → orange (ready).
+/// Wire every settings control so any edit reaches the auto-saver.
 fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>) {
     let wire_check = |check: &gtk4::CheckButton| {
         let mark_dirty = Rc::clone(&mark_dirty);

@@ -10,6 +10,7 @@ fn main() {
         Some("../data/icons"),
         [
             "chevron-down-regular",
+            "search-regular",
             "chevron-right-regular",
             "pointer-primary-click",
             // The clip menu's rows use the same fluent glyphs as the Linux

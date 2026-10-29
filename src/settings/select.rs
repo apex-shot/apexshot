@@ -11,6 +11,17 @@ use std::rc::Rc;
 
 use crate::capture::editor::window::icon_names;
 
+/// Height of one option row, matching the trigger's own height scale.
+const OPTION_HEIGHT: i32 = 32;
+
+/// Space between a trigger and the menu it drops.
+const MENU_GAP: i32 = 6;
+
+/// Room a popover surface reserves on each side of its contents for the
+/// shadow. Sizing the surface to the trigger's width alone leaves the visible
+/// panel this much narrower on both sides, so the request adds it back.
+const POPOVER_SHADOW_INSET: i32 = 10;
+
 #[derive(Clone)]
 pub struct SettingsSelect {
     button: Button,
@@ -69,10 +80,15 @@ impl SettingsSelect {
         popover.set_has_arrow(false);
         popover.set_autohide(true);
         popover.set_position(gtk4::PositionType::Bottom);
+        // A small gap under the trigger keeps the menu reading as a separate
+        // surface instead of a continuation of the field.
+        popover.set_offset(0, MENU_GAP);
         popover.set_parent(&button);
 
         let menu = GtkBox::new(Orientation::Vertical, 2);
+        menu.add_css_class("settings-select-menu");
         let mut option_buttons = Vec::with_capacity(labels.len());
+        let mut option_checks: Vec<Label> = Vec::with_capacity(labels.len());
         for (index, option_label) in labels.iter().enumerate() {
             let option = Button::new();
             option.add_css_class("history-action-btn");
@@ -80,20 +96,34 @@ impl SettingsSelect {
             if index == selected_index {
                 option.add_css_class("settings-select-option-active");
             }
+            option.set_size_request(-1, OPTION_HEIGHT);
+            let row = GtkBox::new(Orientation::Horizontal, 8);
             let option_text = Label::new(Some(option_label));
             option_text.set_halign(Align::Start);
             option_text.set_xalign(0.0);
-            option.set_child(Some(&option_text));
+            option_text.set_hexpand(true);
+            // The chosen option is marked, not filled: the row keeps the same
+            // surface as its neighbours and only the tick sets it apart.
+            let check = Label::new(Some("✓"));
+            check.add_css_class("settings-select-check");
+            check.set_valign(Align::Center);
+            check.set_visible(index == selected_index);
+            row.append(&option_text);
+            row.append(&check);
+            option.set_child(Some(&row));
             menu.append(&option);
             option_buttons.push(option);
+            option_checks.push(check);
         }
         popover.set_child(Some(&menu));
         let option_buttons = Rc::new(option_buttons);
+        let option_checks = Rc::new(option_checks);
 
         let apply = {
             let label = label.clone();
             let labels = Rc::clone(&labels);
             let option_buttons = Rc::clone(&option_buttons);
+            let option_checks = Rc::clone(&option_checks);
             let selected = Rc::clone(&selected);
             let on_changed = Rc::clone(&on_changed);
             Rc::new(move |index: usize, notify: bool| {
@@ -107,6 +137,9 @@ impl SettingsSelect {
                     } else {
                         option.remove_css_class("settings-select-option-active");
                     }
+                }
+                for (i, check) in option_checks.iter().enumerate() {
+                    check.set_visible(i == index);
                 }
                 if notify {
                     for callback in on_changed.borrow().iter() {
@@ -129,11 +162,11 @@ impl SettingsSelect {
             let popover = popover.clone();
             let button_for_width = button.clone();
             button.connect_clicked(move |_| {
-                // The menu is an extension of its trigger, so keep their
-                // outside widths aligned instead of letting the shared
-                // History popover surface choose a wider minimum.
+                // The menu is an extension of its trigger: the visible panel
+                // takes the trigger's outer width, so the request carries the
+                // popover surface's own shadow reserve on top of it.
                 let width = button_for_width.width();
-                popover.set_size_request(width, -1);
+                popover.set_size_request(width + POPOVER_SHADOW_INSET * 2, -1);
                 popover.popup();
             });
         }

@@ -78,3 +78,51 @@ fn register_bundled_fonts() {
 
 #[cfg(not(target_os = "windows"))]
 pub fn prepare_process() {}
+
+/// The display name of the account this process runs as ("Godwin Mayodi"),
+/// falling back to the environment's login name.
+///
+/// The settings shell shows it in the account chip. A Microsoft account has a
+/// display name even when the profile directory is a truncated login, which is
+/// why the extended-name lookup comes first.
+pub fn account_name() -> Option<String> {
+    display_name().or_else(|| {
+        std::env::var("USERNAME")
+            .ok()
+            .or_else(|| std::env::var("USER").ok())
+            .map(|name| name.trim().to_string())
+            .filter(|name| !name.is_empty())
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn display_name() -> Option<String> {
+    use windows_sys::Win32::Security::Authentication::Identity::{GetUserNameExW, NameDisplay};
+
+    let mut size = 0u32;
+    unsafe {
+        GetUserNameExW(NameDisplay, std::ptr::null_mut(), &mut size);
+    }
+    if size == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0u16; size as usize];
+    let written = unsafe { GetUserNameExW(NameDisplay, buffer.as_mut_ptr(), &mut size) };
+    if !written {
+        return None;
+    }
+    let end = buffer
+        .iter()
+        .position(|unit| *unit == 0)
+        .unwrap_or(buffer.len());
+    String::from_utf16(&buffer[..end])
+        .ok()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn display_name() -> Option<String> {
+    None
+}

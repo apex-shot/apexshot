@@ -404,7 +404,17 @@ fn build_xbackbone_panel(config: &AppConfig) -> XBackbonePanel {
     let status_hbox = GtkBox::new(Orientation::Horizontal, 0);
     status_hbox.set_hexpand(true);
     status_hbox.append(&status_label);
-    frame.append(&build_table_row(&status_hbox));
+    // The row only exists once there is something to say: an empty status
+    // line used to leave a blank band above Documentation.
+    let status_row = build_table_row(&status_hbox);
+    status_row.set_visible(false);
+    {
+        let status_row = status_row.clone();
+        status_label.connect_notify_local(Some("label"), move |label, _| {
+            status_row.set_visible(!label.text().trim().is_empty());
+        });
+    }
+    frame.append(&status_row);
 
     // Open API docs link.
     let docs_btn = Button::with_label(&t("Open XBackBone API docs"));

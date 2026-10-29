@@ -126,7 +126,8 @@ private:
     void drawIcon(QPainter& painter, int index, const QPointF& center, const QColor& color) const;
     void drawFallbackIcon(QPainter& painter, int index, const QPointF& center,
                           const QColor& color) const;
-    void openDeviceMenu(int index, const QPoint& globalPos);
+    QPoint menuAnchor(int index) const;
+    void openDeviceMenu(int index);
     void toggleCamera();
     void loadCameraDefaults();
     void enterSetupMode();
