@@ -3708,3 +3708,105 @@ msgstr "finalizando…"
 
 msgid "Video editing is not available in the Windows build yet."
 msgstr "A edição de vídeo ainda não está disponível na versão para Windows."
+
+msgid "Add a layout change at the playhead."
+msgstr "Adicione uma mudança de layout no cabeçote de reprodução."
+
+msgid "CAMERA"
+msgstr "CÂMERA"
+
+msgid "Camera layout changes"
+msgstr "Mudanças de layout da câmera"
+
+msgid "Change"
+msgstr "Mudança"
+
+msgid "Change {time}"
+msgstr "Alterar {time}"
+
+msgid "Default"
+msgstr "Padrão"
+
+msgid "Default layout"
+msgstr "Layout padrão"
+
+msgid "Delete this layout change."
+msgstr "Excluir esta mudança de layout."
+
+msgid "Drag to set the camera's position in the frame; double-click to centre it"
+msgstr "Arraste para posicionar a câmera no quadro; clique duas vezes para centralizar"
+
+msgid "Edit the default layout for the whole recording."
+msgstr "Edite o layout padrão de toda a gravação."
+
+msgid "Edit the selected layout change."
+msgstr "Edite a mudança de layout selecionada."
+
+msgid "Layout change"
+msgstr "Mudança de layout"
+
+msgid "Move this change to another time. A time that collides with another change is rejected."
+msgstr "Mova esta mudança para outro momento. Um momento que colida com outra mudança é recusado."
+
+msgid "Percentage of the frame width."
+msgstr "Porcentagem da largura do quadro."
+
+msgid "Percentage of the free space around the bubble."
+msgstr "Porcentagem do espaço livre ao redor da bolha."
+
+msgid "SCREEN SHARE"
+msgstr "COMPARTILHAMENTO DE TELA"
+
+msgid "Select a layout change in the timeline to edit it."
+msgstr "Selecione uma mudança de layout na linha do tempo para editá-la."
+
+msgid "Select the layout change at the playhead."
+msgstr "Selecione a mudança de layout no cabeçote de reprodução."
+
+msgid "Shared by every camera layout."
+msgstr "Compartilhado por todos os layouts de câmera."
+
+msgid "Shared by every cutout layout."
+msgstr "Compartilhado por todos os layouts de recorte."
+
+msgid "Shared by every layout change."
+msgstr "Compartilhado por todas as mudanças de layout."
+
+msgid "Shared by every overlay."
+msgstr "Compartilhado por todas as sobreposições."
+
+msgid "Shared by every split layout."
+msgstr "Compartilhado por todos os layouts Split."
+
+msgid "The bubble's width, as a percentage of the frame."
+msgstr "A largura da bolha, como porcentagem do quadro."
+
+msgid "The camera layer reported: {error}"
+msgstr "A camada da câmera informou: {error}"
+
+msgid "The screen's share of the split, as a percentage."
+msgstr "A parte da tela no layout dividido, como porcentagem."
+
+msgid "Time"
+msgstr "Momento"
+
+msgid "{time} · {layout}"
+msgstr "{time} · {layout}"
+
+msgid "Camera layer"
+msgstr "Camada da câmera"
+
+msgid "Delete change"
+msgstr "Excluir alteração"
+
+msgid "Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."
+msgstr "Desenha a câmera sobre a tela. Desativado mostra apenas a tela e mantém suas alterações de layout."
+
+msgid "Turn camera off"
+msgstr "Desativar câmera"
+
+msgid "Turn camera on"
+msgstr "Ativar câmera"
+
+msgid "Add change at playhead"
+msgstr "Adicionar alteração na posição de reprodução"

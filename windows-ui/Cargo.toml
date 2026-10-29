@@ -34,6 +34,7 @@ dirs = "6.0"
 image = { version = "0.24.9", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 chrono = "0.4"
 rayon = "1.10"
+tract-onnx = { version = "0.23.9", default-features = false }
 
 [target.'cfg(windows)'.dependencies]
 pango = { version = "0.21", features = ["v1_56"] }
@@ -59,3 +60,21 @@ flatpak = []
 # hour. Optimize this package in dev without rebuilding every dependency.
 [profile.dev.package.apexshot-windows-settings]
 opt-level = 2
+
+[profile.dev.package.tract-core]
+opt-level = 3
+
+[profile.dev.package.tract-data]
+opt-level = 3
+
+[profile.dev.package.tract-hir]
+opt-level = 3
+
+[profile.dev.package.tract-linalg]
+opt-level = 3
+
+[profile.dev.package.tract-onnx]
+opt-level = 3
+
+[profile.dev.package.tract-onnx-opl]
+opt-level = 3

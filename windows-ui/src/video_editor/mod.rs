@@ -9,6 +9,7 @@ use gtk4::Application;
 mod background;
 mod cursor;
 mod custom_fill;
+mod cutout;
 mod export;
 mod export_card;
 mod history;

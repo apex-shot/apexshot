@@ -3638,3 +3638,105 @@ msgstr "完了処理中…"
 
 msgid "Video editing is not available in the Windows build yet."
 msgstr "動画編集は Windows 版ではまだ利用できません。"
+
+msgid "Add a layout change at the playhead."
+msgstr "再生ヘッドの位置にレイアウト変更を追加します。"
+
+msgid "CAMERA"
+msgstr "カメラ"
+
+msgid "Camera layout changes"
+msgstr "カメラレイアウトの変更"
+
+msgid "Change"
+msgstr "変更"
+
+msgid "Change {time}"
+msgstr "{time} を変更"
+
+msgid "Default"
+msgstr "既定"
+
+msgid "Default layout"
+msgstr "既定のレイアウト"
+
+msgid "Delete this layout change."
+msgstr "このレイアウト変更を削除します。"
+
+msgid "Drag to set the camera's position in the frame; double-click to centre it"
+msgstr "ドラッグしてフレーム内のカメラ位置を決めます。ダブルクリックで中央に戻ります"
+
+msgid "Edit the default layout for the whole recording."
+msgstr "録画全体の既定のレイアウトを編集します。"
+
+msgid "Edit the selected layout change."
+msgstr "選択したレイアウト変更を編集します。"
+
+msgid "Layout change"
+msgstr "レイアウト変更"
+
+msgid "Move this change to another time. A time that collides with another change is rejected."
+msgstr "この変更を別の時間に移動します。他の変更と重なる時間は受け付けられません。"
+
+msgid "Percentage of the frame width."
+msgstr "フレーム幅に対する割合です。"
+
+msgid "Percentage of the free space around the bubble."
+msgstr "バブル周囲の余白に対する割合です。"
+
+msgid "SCREEN SHARE"
+msgstr "画面共有"
+
+msgid "Select a layout change in the timeline to edit it."
+msgstr "タイムラインでレイアウト変更を選択すると編集できます。"
+
+msgid "Select the layout change at the playhead."
+msgstr "再生ヘッドの位置にあるレイアウト変更を選択してください。"
+
+msgid "Shared by every camera layout."
+msgstr "すべてのカメラレイアウトで共有されます。"
+
+msgid "Shared by every cutout layout."
+msgstr "すべての切り抜きレイアウトで共有されます。"
+
+msgid "Shared by every layout change."
+msgstr "すべてのレイアウト変更で共有されます。"
+
+msgid "Shared by every overlay."
+msgstr "すべてのオーバーレイで共有されます。"
+
+msgid "Shared by every split layout."
+msgstr "すべてのスプリットレイアウトで共有されます。"
+
+msgid "The bubble's width, as a percentage of the frame."
+msgstr "バブルの幅をフレームに対する割合で指定します。"
+
+msgid "The camera layer reported: {error}"
+msgstr "カメラレイヤーの報告: {error}"
+
+msgid "The screen's share of the split, as a percentage."
+msgstr "画面の分割の割合をパーセントで指定します。"
+
+msgid "Time"
+msgstr "時間"
+
+msgid "{time} · {layout}"
+msgstr "{time} · {layout}"
+
+msgid "Camera layer"
+msgstr "カメラレイヤー"
+
+msgid "Delete change"
+msgstr "変更を削除"
+
+msgid "Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."
+msgstr "カメラを画面の上に描画します。オフにすると画面だけを表示し、レイアウト変更は保持されます。"
+
+msgid "Turn camera off"
+msgstr "カメラをオフにする"
+
+msgid "Turn camera on"
+msgstr "カメラをオンにする"
+
+msgid "Add change at playhead"
+msgstr "再生位置に変更を追加"
