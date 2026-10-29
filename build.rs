@@ -132,6 +132,10 @@ fn build_capture_overlay() {
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/webcam_bubble.h");
     #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/webcam_preview.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/webcam_preview.h");
+    #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/webcam_layout.cpp");
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/webcam_layout.h");

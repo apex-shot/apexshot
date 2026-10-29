@@ -335,8 +335,10 @@ impl PointerSidecar {
     pub fn editable_video_path(&self, video_path: &Path) -> Option<PathBuf> {
         let file = self.screen_file.as_deref()?;
         let name = Path::new(file);
-        if !matches!(name.components().next(), Some(std::path::Component::Normal(_)))
-            || name.components().count() != 1
+        if !matches!(
+            name.components().next(),
+            Some(std::path::Component::Normal(_))
+        ) || name.components().count() != 1
             || self.webcam_path(video_path).is_none()
         {
             return None;
@@ -375,7 +377,10 @@ impl PointerSidecar {
                 if let Some(file) = sidecar.screen_file.as_deref() {
                     let name = Path::new(file);
                     if file.starts_with(".apexshot-screen-")
-                        && matches!(name.components().next(), Some(std::path::Component::Normal(_)))
+                        && matches!(
+                            name.components().next(),
+                            Some(std::path::Component::Normal(_))
+                        )
                         && name.components().count() == 1
                     {
                         if let Some(parent) = video_path.parent() {
@@ -1782,10 +1787,8 @@ mod webcam_tests {
 
     #[test]
     fn composited_recording_keeps_editable_screen_and_camera() {
-        let dir = std::env::temp_dir().join(format!(
-            "apexshot-editable-window-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("apexshot-editable-window-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let video = dir.join("recording.mp4");
         let screen = dir.join(".apexshot-screen-test.mp4");
@@ -1797,7 +1800,8 @@ mod webcam_tests {
         track_name.push(".webcam.mp4");
         let camera = PathBuf::from(track_name);
         std::fs::write(&camera, b"camera").unwrap();
-        let mut sidecar = PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
         sidecar.webcam = Some(WebcamTrack {
             file: camera.file_name().unwrap().to_string_lossy().into_owned(),
             width: 640,
