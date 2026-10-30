@@ -3777,3 +3777,90 @@ msgstr "このデバイス"
 
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "タイマー撮影は Windows 版ではまだ利用できません。間隔は今後のリリース用に保存されます。"
+
+msgid "APEXSHOT CLOUD"
+msgstr "APEXSHOT CLOUD"
+
+msgid "Allowance unavailable"
+msgstr "利用上限を取得できません"
+
+msgid "Authorize this device"
+msgstr "このデバイスを認証"
+
+msgid "Back to Cloud"
+msgstr "Cloud に戻る"
+
+msgid "Click Connect to link this device with a one-time code."
+msgstr "「接続」をクリックし、ワンタイムコードでこのデバイスを連携します。"
+
+msgid "Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgstr "Windows 版ではクラウドの閲覧はまだ利用できません。設定 → Cloud でアカウントを接続してください。"
+
+msgid "Connect to see your usage"
+msgstr "接続して使用状況を確認"
+
+msgid "Could not refresh. Showing previous values."
+msgstr "更新できませんでした。前回の値を表示しています。"
+
+msgid "Couldn't open your browser. Copy the link and open it yourself."
+msgstr "ブラウザーを開けませんでした。リンクをコピーして開いてください。"
+
+msgid "Go to Cloud settings"
+msgstr "Cloud 設定を開く"
+
+msgid "Less than 0.1% used"
+msgstr "使用率 0.1% 未満"
+
+msgid "Loading usage..."
+msgstr "使用状況を読み込み中..."
+
+msgid "Manage billing"
+msgstr "請求を管理"
+
+msgid "Monthly usage resets in UTC."
+msgstr "月間使用量は UTC に基づいてリセットされます。"
+
+msgid "No monthly limit"
+msgstr "月間上限なし"
+
+msgid "Plan unavailable"
+msgstr "プランを取得できません"
+
+msgid "Refreshing..."
+msgstr "更新中..."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "サインインすると、アップロード、ストレージ、プランを確認できます。"
+
+msgid "Storage"
+msgstr "ストレージ"
+
+msgid "This month"
+msgstr "今月"
+
+msgid "Uploads"
+msgstr "アップロード"
+
+msgid "Usage"
+msgstr "使用状況"
+
+msgid "Usage is unavailable"
+msgstr "使用状況を取得できません"
+
+msgid "Used space"
+msgstr "使用容量"
+
+msgid "We couldn't load your usage. Check your connection and try again."
+msgstr "使用状況を読み込めませんでした。接続を確認して再試行してください。"
+
+msgid "Your session has expired. Connect your account again in Cloud settings."
+msgstr "セッションの有効期限が切れました。Cloud 設定でアカウントを再接続してください。"
+
+msgid "of {limit}"
+msgstr "上限 {limit}"
+
+msgid "of {limit} monthly uploads"
+msgstr "月間上限 {limit} 件"
+
+msgid "{percent}% used"
+msgstr "使用率 {percent}%"

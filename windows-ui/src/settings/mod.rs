@@ -20,6 +20,7 @@ mod annotate;
 mod autosave;
 #[path = "../../../src/settings/cloud.rs"]
 mod cloud;
+mod cloud_login;
 #[path = "../../../src/settings/general.rs"]
 mod general;
 #[path = "../../../src/settings/quick_access.rs"]
@@ -40,6 +41,7 @@ mod switches;
 mod theme_picker;
 #[path = "../../../src/settings/ui_support.rs"]
 pub(crate) mod ui_support;
+mod usage;
 mod webcam;
 pub(crate) mod windowing;
 
@@ -67,6 +69,13 @@ fn themed_icon(dark: bool, dark_icon: &'static str, light_icon: &'static str) ->
     } else {
         light_icon
     }
+}
+
+fn page_title<'a>(titles: &'a [String], name: &str) -> Option<&'a str> {
+    name.parse::<usize>()
+        .ok()
+        .and_then(|index| titles.get(index))
+        .map(String::as_str)
 }
 
 /// A short page-level note for a feature the Windows shell does not run yet.
@@ -260,6 +269,10 @@ fn build_settings_window(app: &Application) {
             themed_icon(prefers_dark, custom::CLOUD, custom::CLOUD_LIGHT),
         ),
         (
+            t("Usage"),
+            themed_icon(prefers_dark, custom::USAGE, custom::USAGE_LIGHT),
+        ),
+        (
             t("Advanced"),
             themed_icon(
                 prefers_dark,
@@ -280,10 +293,9 @@ fn build_settings_window(app: &Application) {
     let sidebar = shell::build_sidebar(text_scale, TITLE_BAR_HEIGHT * ui_scale, &pages, &stack);
     let sidebar_head = sidebar.head.clone();
 
-    let chip = shell::UserChip::from_config(&config);
-    let user_bar = shell::build_user_chip(&chip, text_scale, {
+    let user_bar = shell::build_user_chip(&config, text_scale, {
         let stack = stack.clone();
-        move || stack.set_visible_child_name("8")
+        move || stack.set_visible_child_name("6")
     });
     sidebar.wrapper.append(&user_bar);
 
@@ -354,6 +366,14 @@ fn build_settings_window(app: &Application) {
     cloud.section.prepend(&platform_note(&t(
         "Cloud uploads are not wired in the Windows build yet. Destination and XBackBone settings are saved for a future release.",
     )));
+    let (cloud_page, cloud_login) = cloud_login::wrap_cloud_page(&cloud.section);
+    cloud
+        .connect_btn
+        .connect_clicked(move |_| cloud_login.begin());
+    let usage = usage::build({
+        let stack = stack.clone();
+        move || stack.set_visible_child_name("6")
+    });
 
     // Controls that have no Windows implementation yet stay visible but
     // disabled, so the page still documents the setting.
@@ -515,10 +535,11 @@ fn build_settings_window(app: &Application) {
         ui_scale,
     );
     add_section(&stack, &annotate.section, "5", &t("Annotate"), text_scale);
-    add_section(&stack, &cloud.section, "6", &t("Cloud"), text_scale);
-    add_section(&stack, &advanced.section, "7", &t("Advanced"), text_scale);
-    add_section(&stack, &studio, "8", &t("Studio"), text_scale);
-    add_section(&stack, &about.section, "9", &t("About"), text_scale);
+    add_section(&stack, &cloud_page, "6", &t("Cloud"), text_scale);
+    add_section(&stack, &usage, "7", &t("Usage"), text_scale);
+    add_section(&stack, &advanced.section, "8", &t("Advanced"), text_scale);
+    add_section(&stack, &studio, "9", &t("Studio"), text_scale);
+    add_section(&stack, &about.section, "10", &t("About"), text_scale);
 
     stack.set_visible_child_name("0");
 
@@ -532,15 +553,21 @@ fn build_settings_window(app: &Application) {
             "screenshots" => 4,
             "annotate" => 5,
             "cloud" => 6,
-            "advanced" => 7,
-            "studio" => 8,
-            "about" => 9,
+            "usage" => 7,
+            "advanced" => 8,
+            "studio" => 9,
+            "about" => 10,
             other => other.parse().unwrap_or(0),
         };
         stack.set_visible_child_name(&index.to_string());
     }
 
-    let page_heading = Label::new(Some(&t("General")));
+    let page_titles: Vec<String> = pages.iter().map(|(title, _)| title.clone()).collect();
+    let initial_title = stack
+        .visible_child_name()
+        .and_then(|name| page_title(&page_titles, &name).map(str::to_owned))
+        .unwrap_or_else(|| t("General"));
+    let page_heading = Label::new(Some(&initial_title));
     page_heading.add_css_class("settings-page-title");
     page_heading.set_xalign(0.0);
     page_heading.set_halign(Align::Start);
@@ -548,17 +575,14 @@ fn build_settings_window(app: &Application) {
     page_heading.set_margin_top(22);
     page_heading.set_margin_bottom(2);
 
-    let page_titles: Vec<String> = pages.iter().map(|(title, _)| title.clone()).collect();
     {
         let page_heading = page_heading.clone();
         stack.connect_visible_child_name_notify(move |stack| {
             let Some(name) = stack.visible_child_name() else {
                 return;
             };
-            if let Ok(index) = name.parse::<usize>() {
-                if let Some(title) = page_titles.get(index) {
-                    page_heading.set_text(title);
-                }
+            if let Some(title) = page_title(&page_titles, &name) {
+                page_heading.set_text(title);
             }
         });
     }
@@ -901,4 +925,18 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_entry(&inputs.xbackbone_url);
     wire_entry(&inputs.xbackbone_api_token);
     wire_theme(&inputs.ui_theme);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::page_title;
+
+    #[test]
+    fn selected_page_title_matches_the_stack_name() {
+        let titles = vec!["General".to_string(), "Cloud".to_string()];
+        assert_eq!(page_title(&titles, "0"), Some("General"));
+        assert_eq!(page_title(&titles, "1"), Some("Cloud"));
+        assert_eq!(page_title(&titles, "2"), None);
+        assert_eq!(page_title(&titles, "invalid"), None);
+    }
 }

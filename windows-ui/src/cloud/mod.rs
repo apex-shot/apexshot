@@ -11,6 +11,8 @@ pub mod account;
 #[path = "../../../src/cloud/auth.rs"]
 pub mod auth;
 
+pub mod usage;
+
 pub mod listing {
     use std::path::PathBuf;
 

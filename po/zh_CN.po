@@ -3767,3 +3767,90 @@ msgstr "此设备"
 
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "定时捕获尚未在 Windows 版本中接入。该间隔会被保存以供将来的版本使用。"
+
+msgid "APEXSHOT CLOUD"
+msgstr "APEXSHOT CLOUD"
+
+msgid "Allowance unavailable"
+msgstr "无法获取配额"
+
+msgid "Authorize this device"
+msgstr "授权此设备"
+
+msgid "Back to Cloud"
+msgstr "返回 Cloud"
+
+msgid "Click Connect to link this device with a one-time code."
+msgstr "点击“连接”，使用一次性代码关联此设备。"
+
+msgid "Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgstr "Windows 版本暂不支持浏览云端内容。请在设置 → Cloud 中连接账户。"
+
+msgid "Connect to see your usage"
+msgstr "连接账户以查看用量"
+
+msgid "Could not refresh. Showing previous values."
+msgstr "无法刷新，正在显示先前的数据。"
+
+msgid "Couldn't open your browser. Copy the link and open it yourself."
+msgstr "无法打开浏览器。请复制链接并手动打开。"
+
+msgid "Go to Cloud settings"
+msgstr "前往 Cloud 设置"
+
+msgid "Less than 0.1% used"
+msgstr "已使用不到 0.1%"
+
+msgid "Loading usage..."
+msgstr "正在加载用量..."
+
+msgid "Manage billing"
+msgstr "管理账单"
+
+msgid "Monthly usage resets in UTC."
+msgstr "每月用量按 UTC 时间重置。"
+
+msgid "No monthly limit"
+msgstr "无每月上限"
+
+msgid "Plan unavailable"
+msgstr "无法获取套餐"
+
+msgid "Refreshing..."
+msgstr "正在刷新..."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "登录后可查看上传量、存储空间和套餐。"
+
+msgid "Storage"
+msgstr "存储空间"
+
+msgid "This month"
+msgstr "本月"
+
+msgid "Uploads"
+msgstr "上传"
+
+msgid "Usage"
+msgstr "用量"
+
+msgid "Usage is unavailable"
+msgstr "无法获取用量"
+
+msgid "Used space"
+msgstr "已用空间"
+
+msgid "We couldn't load your usage. Check your connection and try again."
+msgstr "无法加载用量。请检查网络连接并重试。"
+
+msgid "Your session has expired. Connect your account again in Cloud settings."
+msgstr "会话已过期。请在 Cloud 设置中重新连接账户。"
+
+msgid "of {limit}"
+msgstr "共 {limit}"
+
+msgid "of {limit} monthly uploads"
+msgstr "每月限额 {limit} 次上传"
+
+msgid "{percent}% used"
+msgstr "已使用 {percent}%"

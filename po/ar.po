@@ -3801,3 +3801,90 @@ msgstr "هذا الجهاز"
 
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "لم يتم ربط الالتقاط الموقوت بنسخة Windows بعد. يتم حفظ الفاصل الزمني لإصدار مستقبلي."
+
+msgid "APEXSHOT CLOUD"
+msgstr "APEXSHOT CLOUD"
+
+msgid "Allowance unavailable"
+msgstr "الحد غير متاح"
+
+msgid "Authorize this device"
+msgstr "تفويض هذا الجهاز"
+
+msgid "Back to Cloud"
+msgstr "العودة إلى Cloud"
+
+msgid "Click Connect to link this device with a one-time code."
+msgstr "انقر على «اتصال» لربط هذا الجهاز باستخدام رمز لمرة واحدة."
+
+msgid "Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgstr "تصفح السحابة غير متاح بعد في إصدار Windows. اربط حسابك من الإعدادات ← Cloud."
+
+msgid "Connect to see your usage"
+msgstr "اربط حسابك لعرض استخدامك"
+
+msgid "Could not refresh. Showing previous values."
+msgstr "تعذر التحديث. يتم عرض القيم السابقة."
+
+msgid "Couldn't open your browser. Copy the link and open it yourself."
+msgstr "تعذر فتح المتصفح. انسخ الرابط وافتحه بنفسك."
+
+msgid "Go to Cloud settings"
+msgstr "الانتقال إلى إعدادات Cloud"
+
+msgid "Less than 0.1% used"
+msgstr "المستخدم أقل من 0.1%"
+
+msgid "Loading usage..."
+msgstr "جارٍ تحميل بيانات الاستخدام..."
+
+msgid "Manage billing"
+msgstr "إدارة الفوترة"
+
+msgid "Monthly usage resets in UTC."
+msgstr "يُعاد تعيين الاستخدام الشهري حسب توقيت UTC."
+
+msgid "No monthly limit"
+msgstr "بلا حد شهري"
+
+msgid "Plan unavailable"
+msgstr "الخطة غير متاحة"
+
+msgid "Refreshing..."
+msgstr "جارٍ التحديث..."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "سجّل الدخول لعرض الملفات المرفوعة والتخزين والخطة."
+
+msgid "Storage"
+msgstr "التخزين"
+
+msgid "This month"
+msgstr "هذا الشهر"
+
+msgid "Uploads"
+msgstr "الملفات المرفوعة"
+
+msgid "Usage"
+msgstr "الاستخدام"
+
+msgid "Usage is unavailable"
+msgstr "بيانات الاستخدام غير متاحة"
+
+msgid "Used space"
+msgstr "المساحة المستخدمة"
+
+msgid "We couldn't load your usage. Check your connection and try again."
+msgstr "تعذر تحميل بيانات الاستخدام. تحقق من اتصالك وحاول مجددًا."
+
+msgid "Your session has expired. Connect your account again in Cloud settings."
+msgstr "انتهت جلستك. أعد ربط حسابك من إعدادات Cloud."
+
+msgid "of {limit}"
+msgstr "من {limit}"
+
+msgid "of {limit} monthly uploads"
+msgstr "من {limit} عملية رفع شهريًا"
+
+msgid "{percent}% used"
+msgstr "المستخدم {percent}%"
