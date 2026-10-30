@@ -11,6 +11,7 @@ pub struct AdvancedSettingsWidgets {
     pub ocr_lang_input: SettingsSelect,
     pub ocr_line_breaks_check: CheckButton,
     pub telemetry_enabled_check: CheckButton,
+    pub telemetry_hint: Label,
 }
 
 pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
@@ -170,5 +171,6 @@ pub fn build_advanced_section(config: &AppConfig) -> AdvancedSettingsWidgets {
         ocr_lang_input,
         ocr_line_breaks_check,
         telemetry_enabled_check,
+        telemetry_hint,
     }
 }

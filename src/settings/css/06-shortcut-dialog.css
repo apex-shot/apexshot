@@ -42,6 +42,10 @@
                 margin-top: 14px;
             }
 
+            .shortcut-capture-windows .shortcut-capture-keycaps-row {
+                margin-top: 0;
+            }
+
             .shortcut-capture-keycap {
                 background: alpha(white, 0.08);
                 color: white;

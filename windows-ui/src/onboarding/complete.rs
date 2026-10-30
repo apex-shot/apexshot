@@ -18,7 +18,7 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
     let tray_title = t("Tray icon");
     let tray_body = t("ApexShot stays in the tray; right-click it for the capture menu.");
     let hotkeys_title = t("Hotkeys");
-    let hotkeys_body = t("Bindings are saved; global hotkeys arrive in a later build.");
+    let hotkeys_body = t("Use your configured shortcuts while ApexShot runs in the background.");
     let menu_title = t("Settings");
     let menu_body = t("Open ApexShot anytime for Settings and preferences");
     let checklist = feature_card_list(

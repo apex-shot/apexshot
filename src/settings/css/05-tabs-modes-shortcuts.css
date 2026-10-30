@@ -122,6 +122,11 @@
                 opacity: 0.9;
             }
 
+            .shortcut-heading-windows .settings-group-title {
+                margin-top: 0;
+                margin-bottom: 0;
+            }
+
             .shortcuts-record-btn {
                 background-color: alpha(white, 0.06);
                 border: 1px solid alpha(white, 0.1);

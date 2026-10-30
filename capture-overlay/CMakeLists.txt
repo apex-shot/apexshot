@@ -11,7 +11,7 @@ if(WIN32)
     # reuses the portable toolbar and icon painter, plus the platform seam.
     enable_language(C)
 
-    find_package(Qt5 REQUIRED COMPONENTS Widgets DBus Network)
+    find_package(Qt5 REQUIRED COMPONENTS Widgets DBus Network Concurrent)
 
     add_executable(apexshot-capture WIN32
         src/platform/windows/main.cpp
@@ -25,6 +25,9 @@ if(WIN32)
         src/platform/windows/recording_settings.cpp
         src/platform/windows/settings_store.cpp
         src/platform/windows/settings_store.h
+        src/platform/windows/hotkeys.cpp
+        src/platform/windows/hotkeys.h
+        src/platform/windows/hotkey_parser.cpp
         src/platform/windows/audio_devices.cpp
         src/platform/windows/audio_devices.h
         src/platform/windows/capture_sound.cpp
@@ -51,6 +54,8 @@ if(WIN32)
         src/platform/windows/window_list.cpp
         src/platform/windows/ocr.cpp
         src/platform/windows/ocr.h
+        src/platform/windows/usage_telemetry.cpp
+        src/platform/windows/usage_telemetry.h
         src/platform/windows/qr.cpp
         src/platform/windows/qr.h
         src/platform/windows/win_util.h
@@ -83,9 +88,9 @@ if(WIN32)
     )
 
     target_link_libraries(apexshot-capture
-        PRIVATE Qt5::Widgets Qt5::DBus Qt5::Network
+        PRIVATE Qt5::Widgets Qt5::DBus Qt5::Network Qt5::Concurrent
             windowsapp runtimeobject dwmapi uiautomationcore winmm
-            mmdevapi ole32 oleaut32 strmiids shell32 uuid
+            mmdevapi ole32 oleaut32 strmiids shell32 uuid winhttp
     )
 
     if(MSVC)
@@ -182,6 +187,58 @@ if(WIN32)
         target_link_libraries(apexshot-settings-store-tests PRIVATE Qt5::Core Qt5::Gui)
         add_test(NAME apexshot-settings-store-tests
             COMMAND apexshot-settings-store-tests)
+
+        add_executable(apexshot-windows-screenshot-tests
+            tests/WindowsScreenshotTests.cpp
+            src/platform/windows/screen_capture.cpp
+        )
+        target_include_directories(apexshot-windows-screenshot-tests PRIVATE src)
+        target_link_libraries(apexshot-windows-screenshot-tests PRIVATE Qt5::Core Qt5::Gui dwmapi)
+        add_test(NAME apexshot-windows-screenshot-tests COMMAND apexshot-windows-screenshot-tests)
+
+        add_executable(apexshot-windows-usage-telemetry-tests
+            tests/WindowsUsageTelemetryTests.cpp
+            src/platform/windows/usage_telemetry.cpp
+            src/platform/windows/settings_store.cpp
+            src/platform/windows/recording_settings.cpp
+        )
+        target_include_directories(apexshot-windows-usage-telemetry-tests PRIVATE src)
+        target_compile_definitions(apexshot-windows-usage-telemetry-tests PRIVATE
+            APEXSHOT_VERSION="${APEXSHOT_VERSION}")
+        target_link_libraries(apexshot-windows-usage-telemetry-tests PRIVATE
+            Qt5::Core Qt5::Gui Qt5::Concurrent winhttp)
+        add_test(NAME apexshot-windows-usage-telemetry-tests
+            COMMAND apexshot-windows-usage-telemetry-tests)
+
+        add_executable(apexshot-windows-ocr-tests
+            tests/WindowsOcrTests.cpp
+            src/platform/windows/ocr.cpp
+        )
+        target_include_directories(apexshot-windows-ocr-tests PRIVATE src)
+        target_link_libraries(apexshot-windows-ocr-tests PRIVATE
+            Qt5::Core Qt5::Gui windowsapp runtimeobject)
+        add_test(NAME apexshot-windows-ocr-tests COMMAND apexshot-windows-ocr-tests)
+        set_tests_properties(apexshot-windows-ocr-tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+        add_executable(apexshot-hotkey-tests
+            tests/WindowsHotkeyTests.cpp
+            src/platform/windows/hotkeys.h
+            src/platform/windows/hotkey_parser.cpp
+        )
+        target_include_directories(apexshot-hotkey-tests PRIVATE src)
+        target_link_libraries(apexshot-hotkey-tests PRIVATE Qt5::Core Qt5::Gui)
+        add_test(NAME apexshot-hotkey-tests COMMAND apexshot-hotkey-tests)
+
+        add_executable(apexshot-hotkey-runtime-tests
+            tests/WindowsHotkeyRuntimeTests.cpp
+            src/platform/windows/hotkeys.cpp
+            src/platform/windows/hotkey_parser.cpp
+            src/platform/windows/settings_store.cpp
+            src/platform/windows/recording_settings.cpp
+        )
+        target_include_directories(apexshot-hotkey-runtime-tests PRIVATE src)
+        target_link_libraries(apexshot-hotkey-runtime-tests PRIVATE Qt5::Core Qt5::Gui)
+        add_test(NAME apexshot-hotkey-runtime-tests COMMAND apexshot-hotkey-runtime-tests)
     endif()
 
     install(TARGETS apexshot-capture

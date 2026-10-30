@@ -33,6 +33,8 @@ public:
     /// Device state carried into the toolbar, so its Mic, Speaker, and Webcam
     /// items start where the last recording left them.
     struct DeviceDefaults {
+        int screenshotTimerSeconds = 0;
+        bool timedSelection = false;
         bool microphone = false;
         QString microphoneDevice;
         bool speaker = false;
@@ -160,6 +162,7 @@ private:
     bool m_finished = false;
     bool m_ocr = false;
     int m_timerSeconds = 0;
+    bool m_timedSelection = false;
     bool m_recording = false;
     bool m_microphone = false;
     QString m_microphoneDevice;

@@ -6,7 +6,11 @@
 #include "platform/recording_settings.h"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QProcess>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 
 #include <cstdio>
@@ -62,11 +66,12 @@ void checkResolutionTable()
     const QStringList labels = Platform::recordingResolutionLabels();
     CHECK(labels.size() == 7);
     CHECK(labels.at(0) == QStringLiteral("Original"));
-    CHECK(labels.at(6) == QStringLiteral("2160p"));
+    CHECK(labels.at(6) == QStringLiteral("2160p (4K)"));
 
     // The display order maps back to the same labels the indices describe.
     CHECK(Platform::kRecordingResolutionDisplayOrder.size() == labels.size());
-    CHECK(labels.at(Platform::kRecordingResolutionDisplayOrder.at(1)) == QStringLiteral("2160p"));
+    CHECK(labels.at(Platform::kRecordingResolutionDisplayOrder.at(1)) ==
+          QStringLiteral("2160p (4K)"));
 }
 
 void checkQualityTable()
@@ -111,6 +116,64 @@ void checkFitTable()
     CHECK(odd.height() % 2 == 0);
     CHECK(odd.width() <= fullHd.width());
     CHECK(odd.height() <= fullHd.height());
+}
+
+void checkRecordingOutputSizes()
+{
+    const QSize fourK(3840, 2160);
+    CHECK(Platform::recordingOutputSize(fourK, QSize()) == fourK);
+    CHECK(Platform::recordingOutputSize(fourK, fourK) == fourK);
+    CHECK(Platform::recordingOutputSize(QSize(7680, 4320), fourK) == fourK);
+    CHECK(Platform::recordingOutputSize(QSize(2160, 3840), fourK) == QSize(2160, 3840));
+    CHECK(Platform::recordingOutputSize(QSize(4320, 7680), fourK) == QSize(2160, 3840));
+    CHECK(Platform::recordingOutputSize(fourK, QSize(1920, 1080)) == QSize(1920, 1080));
+    CHECK(Platform::recordingOutputSize(fourK, fourK, 0.5) == QSize(1920, 1080));
+    CHECK(Platform::recordingOutputSize(QSize(1920, 1200), QSize(1920, 1080)) ==
+          QSize(1728, 1080));
+    CHECK(Platform::recordingOutputSize(QSize(1921, 1081), QSize()) == QSize(1920, 1080));
+    CHECK(Platform::recordingOutputSize(QSize(640, 480), fourK) == QSize(640, 480));
+    CHECK(Platform::recordingOutputSize(QSize(1, 100), fourK).isEmpty());
+    CHECK(Platform::recordingScaleFilter(fourK) == QStringLiteral("scale=3840:2160"));
+}
+
+void checkSynthetic4k(const QString& directory)
+{
+    if (qEnvironmentVariableIsEmpty("APEXSHOT_TEST_4K"))
+        return;
+    const QString ffmpeg = QStandardPaths::findExecutable(QStringLiteral("ffmpeg"));
+    const QString ffprobe = QStandardPaths::findExecutable(QStringLiteral("ffprobe"));
+    if (ffmpeg.isEmpty() || ffprobe.isEmpty()) {
+        CHECK(false && "ffmpeg and ffprobe are required for the synthetic 4K test");
+        return;
+    }
+    for (const QSize& ceiling : {QSize(), QSize(1920, 1080)}) {
+        const QSize outputSize = Platform::recordingOutputSize(QSize(3840, 2160), ceiling);
+        const QString path = QDir(directory).filePath(
+            QStringLiteral("synthetic-%1.mp4").arg(outputSize.width()));
+        QProcess encode;
+        encode.start(ffmpeg, {QStringLiteral("-v"), QStringLiteral("error"),
+                              QStringLiteral("-f"), QStringLiteral("lavfi"),
+                              QStringLiteral("-i"), QStringLiteral("testsrc2=size=3840x2160:rate=30"),
+                              QStringLiteral("-frames:v"), QStringLiteral("2"),
+                              QStringLiteral("-vf"), Platform::recordingScaleFilter(outputSize),
+                              QStringLiteral("-c:v"), QStringLiteral("libx264"),
+                              QStringLiteral("-preset"), QStringLiteral("ultrafast"),
+                              QStringLiteral("-threads"), QStringLiteral("2"), path});
+        CHECK(encode.waitForFinished(60000));
+        CHECK(encode.exitStatus() == QProcess::NormalExit && encode.exitCode() == 0);
+        if (!QFileInfo::exists(path))
+            continue;
+        QProcess probe;
+        probe.start(ffprobe, {QStringLiteral("-v"), QStringLiteral("error"),
+                              QStringLiteral("-select_streams"), QStringLiteral("v:0"),
+                              QStringLiteral("-show_entries"), QStringLiteral("stream=width,height,r_frame_rate"),
+                              QStringLiteral("-of"), QStringLiteral("csv=p=0"), path});
+        CHECK(probe.waitForFinished(10000));
+        CHECK(probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0);
+        const QByteArray expected = QStringLiteral("%1,%2,30/1")
+                                        .arg(outputSize.width()).arg(outputSize.height()).toUtf8();
+        CHECK(probe.readAllStandardOutput().trimmed() == expected);
+    }
 }
 
 void checkPersistence(const QString& path)
@@ -164,6 +227,7 @@ int main(int argc, char** argv)
     checkQualityTable();
     checkResolutionCompensation();
     checkFitTable();
+    checkRecordingOutputSizes();
 
     QTemporaryDir directory;
     if (!directory.isValid()) {
@@ -172,6 +236,7 @@ int main(int argc, char** argv)
     }
     checkPersistence(directory.filePath(QStringLiteral("settings.ini")));
     checkLoadSanitizes(directory.filePath(QStringLiteral("stale.ini")));
+    checkSynthetic4k(directory.path());
 
     if (failures == 0) {
         std::printf("OK: recording settings\n");

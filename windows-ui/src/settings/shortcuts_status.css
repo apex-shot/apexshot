@@ -1,0 +1,54 @@
+.editor-root .shortcut-notice {
+    padding: 12px 14px;
+    border: 1px solid alpha(#ffad73, 0.18);
+    border-radius: 9px;
+    background-color: alpha(#ffad73, 0.055);
+}
+
+.editor-root .shortcut-notice-icon { color: #eab088; }
+.editor-root .shortcut-notice-title { font-size: 13px; font-weight: 600; }
+.editor-root .shortcut-notice-detail { font-size: 12px; color: alpha(white, 0.60); }
+
+.editor-root button.shortcut-notice-action {
+    background-image: none;
+    background-color: alpha(white, 0.06);
+    border: 1px solid alpha(white, 0.12);
+    border-radius: 6px;
+    color: alpha(white, 0.88);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 12px;
+    box-shadow: none;
+}
+.editor-root button.shortcut-notice-action:hover {
+    background-color: alpha(white, 0.11);
+}
+.editor-root .settings-table-row label.shortcut-row-status {
+    font-size: 12px;
+    font-weight: 500;
+    color: #e8ad7e;
+}
+.editor-root button.shortcuts-record-btn.shortcut-conflict {
+    border-color: alpha(#e8ad7e, 0.65);
+    background-color: alpha(#e8ad7e, 0.07);
+}
+
+.editor-root.editor-theme-light .shortcut-notice {
+    background-color: alpha(#c5652c, 0.055);
+    border-color: alpha(#a95a2a, 0.20);
+}
+.editor-root.editor-theme-light .shortcut-notice-icon { color: #a65a2c; }
+.editor-root.editor-theme-light .shortcut-notice-detail { color: alpha(#1d2129, 0.65); }
+.editor-root.editor-theme-light button.shortcut-notice-action {
+    background-color: alpha(#111827, 0.05);
+    border-color: alpha(#111827, 0.14);
+    color: #1d2129;
+}
+.editor-root.editor-theme-light button.shortcut-notice-action:hover {
+    background-color: alpha(#111827, 0.09);
+}
+.editor-root.editor-theme-light .settings-table-row label.shortcut-row-status { color: #9a4b1d; }
+.editor-root.editor-theme-light button.shortcuts-record-btn.shortcut-conflict {
+    border-color: alpha(#ad5826, 0.65);
+    background-color: alpha(#c5652c, 0.055);
+}

@@ -9,7 +9,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
-use gtk4::{glib, ApplicationWindow, Label};
+use gtk4::{glib, prelude::CheckButtonExt, ApplicationWindow, Label};
 
 use super::actions::{save_settings, SaveInputs};
 use super::{format_save_error, rebuild_settings_window, show_settings_toast, SettingsToastKind};
@@ -100,6 +100,11 @@ impl AutoSaver {
                     );
                 }
                 Err(error) => {
+                    let saved_startup = super::windowing::autostart_entry_exists()
+                        .unwrap_or_else(|_| crate::config::load_config().start_at_login);
+                    if saver.inputs.start_at_login.is_active() != saved_startup {
+                        saver.inputs.start_at_login.set_active(saved_startup);
+                    }
                     let message = format_save_error(&error);
                     eprintln!("[settings] Save failed: {error:#}");
                     show_settings_toast(

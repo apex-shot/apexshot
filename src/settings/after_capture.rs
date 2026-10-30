@@ -16,16 +16,10 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     after_capture_wrapper.set_halign(Align::Fill);
     after_capture_wrapper.set_hexpand(true);
 
-    let after_capture_section = Grid::new();
-    after_capture_section.set_halign(Align::Fill);
-    after_capture_section.set_hexpand(true);
-    after_capture_section.set_row_spacing(8);
-    after_capture_section.set_column_spacing(10);
-
     let after_capture_title = Label::new(Some(&t("After capture:")));
     after_capture_title.add_css_class("settings-group-title");
-    after_capture_title.set_size_request(165, -1);
-    after_capture_title.set_xalign(1.0);
+    after_capture_title.set_xalign(0.0);
+    after_capture_title.set_halign(Align::Start);
 
     let after_capture_description = Label::new(Some(&t(
         "Here you can decide what should happen after taking a screenshot or recording your screen.",
@@ -147,15 +141,13 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     after_capture_table_frame.set_margin_start(4);
     after_capture_table_frame.append(&after_capture_table);
 
-    after_capture_section.attach(&after_capture_title, 0, 0, 1, 1);
-    after_capture_section.attach(&after_capture_description, 1, 0, 1, 1);
-
     let after_capture_table_row = GtkBox::new(Orientation::Horizontal, 0);
     after_capture_table_row.set_halign(Align::Fill);
     after_capture_table_row.set_hexpand(true);
     after_capture_table_row.append(&after_capture_table_frame);
 
-    after_capture_wrapper.append(&after_capture_section);
+    after_capture_wrapper.append(&after_capture_title);
+    after_capture_wrapper.append(&after_capture_description);
     after_capture_wrapper.append(&after_capture_table_row);
 
     AfterCaptureWidgets {

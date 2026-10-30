@@ -20,6 +20,7 @@ mod annotate;
 mod autosave;
 #[path = "../../../src/settings/cloud.rs"]
 mod cloud;
+mod cloud_login;
 #[path = "../../../src/settings/general.rs"]
 mod general;
 #[path = "../../../src/settings/quick_access.rs"]
@@ -33,6 +34,7 @@ mod select;
 mod shell;
 #[path = "../../../src/settings/shortcuts.rs"]
 mod shortcuts;
+mod shortcuts_status;
 #[path = "../../../src/settings/studio.rs"]
 mod studio;
 mod switches;
@@ -40,6 +42,7 @@ mod switches;
 mod theme_picker;
 #[path = "../../../src/settings/ui_support.rs"]
 pub(crate) mod ui_support;
+mod usage;
 mod webcam;
 pub(crate) mod windowing;
 
@@ -67,6 +70,13 @@ fn themed_icon(dark: bool, dark_icon: &'static str, light_icon: &'static str) ->
     } else {
         light_icon
     }
+}
+
+fn page_title<'a>(titles: &'a [String], name: &str) -> Option<&'a str> {
+    name.parse::<usize>()
+        .ok()
+        .and_then(|index| titles.get(index))
+        .map(String::as_str)
 }
 
 /// A short page-level note for a feature the Windows shell does not run yet.
@@ -163,6 +173,9 @@ fn build_settings_window(app: &Application) {
     shell::install_css();
 
     let config = load_config().sanitized();
+    if let Err(error) = actions::sync_shell_settings_on_start() {
+        eprintln!("[settings] Could not synchronize the capture shell: {error:#}");
+    }
     i18n::apply_gtk_direction(&config.ui_language);
     let prefers_dark = prefers_dark_glass_theme();
     let reduced_transparency = prefers_reduced_transparency();
@@ -260,6 +273,10 @@ fn build_settings_window(app: &Application) {
             themed_icon(prefers_dark, custom::CLOUD, custom::CLOUD_LIGHT),
         ),
         (
+            t("Usage"),
+            themed_icon(prefers_dark, custom::USAGE, custom::USAGE_LIGHT),
+        ),
+        (
             t("Advanced"),
             themed_icon(
                 prefers_dark,
@@ -280,10 +297,9 @@ fn build_settings_window(app: &Application) {
     let sidebar = shell::build_sidebar(text_scale, TITLE_BAR_HEIGHT * ui_scale, &pages, &stack);
     let sidebar_head = sidebar.head.clone();
 
-    let chip = shell::UserChip::from_config(&config);
-    let user_bar = shell::build_user_chip(&chip, text_scale, {
+    let user_bar = shell::build_user_chip(&config, text_scale, {
         let stack = stack.clone();
-        move || stack.set_visible_child_name("8")
+        move || stack.set_visible_child_name("6")
     });
     sidebar.wrapper.append(&user_bar);
 
@@ -325,6 +341,15 @@ fn build_settings_window(app: &Application) {
     windowing::install_window_drag(&sidebar_head, &window);
 
     let general = build_general_section(&config);
+    match windowing::autostart_entry_exists() {
+        Ok(enabled) => general.start_at_login_check.set_active(enabled),
+        Err(error) => {
+            general.start_at_login_check.set_sensitive(false);
+            general
+                .start_at_login_check
+                .set_tooltip_text(Some(&format!("Could not read Windows startup: {error}")));
+        }
+    }
     let after_capture = build_after_capture_section(&config);
     let recordings = recording::build_recording_section(&config);
     let webcam = webcam::build_webcam_group(&config);
@@ -345,15 +370,32 @@ fn build_settings_window(app: &Application) {
     let cloud = cloud::build_cloud_section(&config);
     let studio = studio::build_studio_section();
 
-    shortcuts.section.prepend(&platform_note(&t(
-        "Global shortcuts are not available in the Windows build yet. Bindings are saved for a future release.",
-    )));
+    shortcuts_status::install(&shortcuts);
+    for button in [
+        &shortcuts.open_file_btn,
+        &shortcuts.open_clipboard_btn,
+        &shortcuts.restore_file_btn,
+        &shortcuts.toggle_overlays_btn,
+    ] {
+        button.set_sensitive(false);
+        button.set_tooltip_text(Some(&t(
+            "This action requires the Windows image editor or overlay backend.",
+        )));
+    }
     annotate.section.prepend(&platform_note(&t(
         "The annotate editor is not available in the Windows build yet. These preferences are saved for a future release.",
     )));
     cloud.section.prepend(&platform_note(&t(
         "Cloud uploads are not wired in the Windows build yet. Destination and XBackBone settings are saved for a future release.",
     )));
+    let (cloud_page, cloud_login) = cloud_login::wrap_cloud_page(&cloud.section);
+    cloud
+        .connect_btn
+        .connect_clicked(move |_| cloud_login.begin());
+    let usage = usage::build({
+        let stack = stack.clone();
+        move || stack.set_visible_child_name("6")
+    });
 
     // Controls that have no Windows implementation yet stay visible but
     // disabled, so the page still documents the setting.
@@ -361,39 +403,38 @@ fn build_settings_window(app: &Application) {
     after_capture.screenshot_after_capture_checks[3].set_tooltip_text(Some(&t(
         "The annotate editor is not available on Windows yet.",
     )));
+    after_capture.rec_save.set_tooltip_text(Some(&t(
+        "When off, recordings remain in the temporary folder for the result card and editor.",
+    )));
+    general.theme_input.widget().set_tooltip_text(Some(&t(
+        "The capture shell currently uses its own dark appearance.",
+    )));
     general.show_icon_check.set_sensitive(false);
     general.show_icon_check.set_tooltip_text(Some(&t(
-        "The Windows shell needs its tray icon until global shortcuts are available.",
+        "The Windows shell uses its tray icon to open capture, Settings, and Quit.",
     )));
     general.ui_language_input.widget().set_sensitive(false);
     general
         .ui_language_input
         .widget()
         .set_tooltip_text(Some(&t("Windows UI translations are not available yet.")));
-    // Nothing in the Windows build reads the self-timer yet: timed captures
-    // come from the capture menu's own per-shot choice.
-    screenshots.timer_interval_input.set_sensitive(false);
-    screenshots.timer_interval_input.widget().set_tooltip_text(Some(&t(
-        "Timed capture is not wired into the Windows build yet. The interval is saved for a future release.",
+    screenshots
+        .timer_interval_input
+        .widget()
+        .set_tooltip_text(Some(&t(
+            "The capture toolbar can change the timer for an individual screenshot.",
+        )));
+    recordings.rec_controls.set_tooltip_text(Some(&t(
+        "When hidden, stop the recording from the tray or with its shortcut.",
     )));
-    recordings.rec_controls.set_sensitive(false);
-    recordings
-        .rec_controls
-        .set_tooltip_text(Some(&t("The Windows recorder always shows its controls.")));
-    recordings.rec_hidpi.set_sensitive(false);
     recordings.rec_hidpi.set_tooltip_text(Some(&t(
-        "The Windows recorder always captures at native display resolution.",
+        "When off, output uses the capture's display scale before applying the maximum resolution.",
     )));
+    recordings.rec_notifications.set_active(false);
     recordings.rec_notifications.set_sensitive(false);
     recordings.rec_notifications.set_tooltip_text(Some(&t(
         "Do Not Disturb integration is not available on Windows yet.",
     )));
-    recordings.rec_remember_export_folder.set_sensitive(false);
-    recordings
-        .rec_remember_export_folder
-        .set_tooltip_text(Some(&t(
-            "Video export from the Windows editor is not available yet.",
-        )));
     quick_access.close_after_dragging_check.set_sensitive(false);
     quick_access
         .close_after_dragging_check
@@ -408,9 +449,17 @@ fn build_settings_window(app: &Application) {
         .set_tooltip_text(Some(&t(
             "Uploading from the result card is not available on Windows yet.",
         )));
-    advanced.telemetry_enabled_check.set_sensitive(false);
+    advanced
+        .telemetry_enabled_check
+        .set_active(config.windows_telemetry_enabled);
+    advanced.telemetry_hint.set_text(&t(
+        "Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0.",
+    ));
     advanced.telemetry_enabled_check.set_tooltip_text(Some(&t(
-        "Usage telemetry is not sent from the Windows build.",
+        "Off by default. Turning this on sends anonymous usage statistics.",
+    )));
+    advanced.ocr_lang_input.widget().set_tooltip_text(Some(&t(
+        "Requires the corresponding Windows OCR language pack.",
     )));
 
     let screenshot_export_location_entry_pick = screenshots.export_location_entry.clone();
@@ -515,10 +564,11 @@ fn build_settings_window(app: &Application) {
         ui_scale,
     );
     add_section(&stack, &annotate.section, "5", &t("Annotate"), text_scale);
-    add_section(&stack, &cloud.section, "6", &t("Cloud"), text_scale);
-    add_section(&stack, &advanced.section, "7", &t("Advanced"), text_scale);
-    add_section(&stack, &studio, "8", &t("Studio"), text_scale);
-    add_section(&stack, &about.section, "9", &t("About"), text_scale);
+    add_section(&stack, &cloud_page, "6", &t("Cloud"), text_scale);
+    add_section(&stack, &usage, "7", &t("Usage"), text_scale);
+    add_section(&stack, &advanced.section, "8", &t("Advanced"), text_scale);
+    add_section(&stack, &studio, "9", &t("Studio"), text_scale);
+    add_section(&stack, &about.section, "10", &t("About"), text_scale);
 
     stack.set_visible_child_name("0");
 
@@ -532,15 +582,21 @@ fn build_settings_window(app: &Application) {
             "screenshots" => 4,
             "annotate" => 5,
             "cloud" => 6,
-            "advanced" => 7,
-            "studio" => 8,
-            "about" => 9,
+            "usage" => 7,
+            "advanced" => 8,
+            "studio" => 9,
+            "about" => 10,
             other => other.parse().unwrap_or(0),
         };
         stack.set_visible_child_name(&index.to_string());
     }
 
-    let page_heading = Label::new(Some(&t("General")));
+    let page_titles: Vec<String> = pages.iter().map(|(title, _)| title.clone()).collect();
+    let initial_title = stack
+        .visible_child_name()
+        .and_then(|name| page_title(&page_titles, &name).map(str::to_owned))
+        .unwrap_or_else(|| t("General"));
+    let page_heading = Label::new(Some(&initial_title));
     page_heading.add_css_class("settings-page-title");
     page_heading.set_xalign(0.0);
     page_heading.set_halign(Align::Start);
@@ -548,17 +604,14 @@ fn build_settings_window(app: &Application) {
     page_heading.set_margin_top(22);
     page_heading.set_margin_bottom(2);
 
-    let page_titles: Vec<String> = pages.iter().map(|(title, _)| title.clone()).collect();
     {
         let page_heading = page_heading.clone();
         stack.connect_visible_child_name_notify(move |stack| {
             let Some(name) = stack.visible_child_name() else {
                 return;
             };
-            if let Ok(index) = name.parse::<usize>() {
-                if let Some(title) = page_titles.get(index) {
-                    page_heading.set_text(title);
-                }
+            if let Some(title) = page_title(&page_titles, &name) {
+                page_heading.set_text(title);
             }
         });
     }
@@ -852,6 +905,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_combo(&inputs.rec_video_fps);
     wire_combo(&inputs.rec_video_quality);
     wire_check(&inputs.rec_video_mono);
+    inputs.webcam.install_dirty_tracking(Rc::clone(&mark_dirty));
     wire_check(&inputs.screenshot_quick_access);
     wire_check(&inputs.screenshot_copy_to_clipboard);
     wire_check(&inputs.screenshot_save);
@@ -901,4 +955,18 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_entry(&inputs.xbackbone_url);
     wire_entry(&inputs.xbackbone_api_token);
     wire_theme(&inputs.ui_theme);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::page_title;
+
+    #[test]
+    fn selected_page_title_matches_the_stack_name() {
+        let titles = vec!["General".to_string(), "Cloud".to_string()];
+        assert_eq!(page_title(&titles, "0"), Some("General"));
+        assert_eq!(page_title(&titles, "1"), Some("Cloud"));
+        assert_eq!(page_title(&titles, "2"), None);
+        assert_eq!(page_title(&titles, "invalid"), None);
+    }
 }

@@ -7,6 +7,8 @@ use std::process::Command;
 
 pub struct CloudSettingsWidgets {
     pub section: GtkBox,
+    #[cfg(target_os = "windows")]
+    pub connect_btn: Button,
     pub apexshot_check: CheckButton,
     pub xbackbone_check: CheckButton,
     pub auto_upload_check: CheckButton,
@@ -128,6 +130,8 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
 
     CloudSettingsWidgets {
         section,
+        #[cfg(target_os = "windows")]
+        connect_btn: apexshot_panel.connect_btn,
         apexshot_check,
         xbackbone_check,
         auto_upload_check,
@@ -138,6 +142,8 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
 
 struct ApexShotPanel {
     container: GtkBox,
+    #[cfg(target_os = "windows")]
+    connect_btn: Button,
 }
 
 fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
@@ -186,7 +192,7 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
     status_label.set_halign(Align::Start);
 
     let signed_in = t("Signed in");
-    let connect_hint = t("Run `apexshot login` in a terminal, or click Connect below.");
+    let connect_hint = connect_hint();
     let email_label = Label::new(Some(if is_connected {
         if config.cloud_user_email.is_empty() {
             signed_in.as_str()
@@ -208,8 +214,10 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
 
     let connect_btn = Button::with_label(&t("Connect account"));
     connect_btn.add_css_class("settings-primary-btn");
+    connect_btn.set_valign(Align::Center);
     connect_btn.set_visible(!is_connected);
     let logout_btn = Button::with_label(&t("Logout"));
+    logout_btn.set_valign(Align::Center);
     logout_btn.set_visible(is_connected);
     status_row.append(&connect_btn);
     status_row.append(&logout_btn);
@@ -217,7 +225,7 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
     frame.append(&status_row);
     container.append(&frame);
 
-    // Connect account → spawn a terminal running `apexshot login`.
+    #[cfg(not(target_os = "windows"))]
     {
         connect_btn.connect_clicked(move |_| {
             spawn_apexshot_login();
@@ -249,7 +257,12 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
                 Ok(result) => {
                     if result.is_ok() {
                         set_apexshot_status(
-                            &avatar_i, &status_i, &email_i, &connect_i, &logout_i, "",
+                            &avatar_i,
+                            &status_i,
+                            &email_i,
+                            &connect_i,
+                            &logout_i,
+                            &crate::config::load_config(),
                         );
                     }
                     logout_i.set_sensitive(true);
@@ -268,15 +281,19 @@ fn build_apexshot_panel(config: &AppConfig) -> ApexShotPanel {
         let connect_c = connect_btn.clone();
         let logout_c = logout_btn.clone();
         glib::timeout_add_seconds_local(2, move || {
-            let email = crate::config::load_config().cloud_user_email;
+            let config = crate::config::load_config();
             set_apexshot_status(
-                &avatar_c, &status_c, &email_c, &connect_c, &logout_c, &email,
+                &avatar_c, &status_c, &email_c, &connect_c, &logout_c, &config,
             );
             glib::ControlFlow::Continue
         });
     }
 
-    ApexShotPanel { container }
+    ApexShotPanel {
+        container,
+        #[cfg(target_os = "windows")]
+        connect_btn,
+    }
 }
 
 fn set_apexshot_status(
@@ -285,21 +302,25 @@ fn set_apexshot_status(
     email_label: &Label,
     connect_btn: &Button,
     logout_btn: &Button,
-    email: &str,
+    config: &AppConfig,
 ) {
-    let is_connected = !email.is_empty();
+    let is_connected = crate::config::is_cloud_logged_in(config);
+    let email = config.cloud_user_email.trim();
     avatar.set_text(&initial(email));
     avatar.set_visible(is_connected);
-    status_label.set_text(if is_connected {
+    status_label.set_text(&t(if is_connected {
         "Connected"
     } else {
         "Not connected"
-    });
-    email_label.set_text(if is_connected {
-        email
+    }));
+    let detail = if !is_connected {
+        connect_hint()
+    } else if email.is_empty() {
+        t("Signed in")
     } else {
-        "Run `apexshot login` in a terminal, or click Connect below."
-    });
+        email.to_string()
+    };
+    email_label.set_text(&detail);
     connect_btn.set_visible(!is_connected);
     logout_btn.set_visible(is_connected);
 }
@@ -495,6 +516,18 @@ fn build_table_row(content: &impl IsA<gtk4::Widget>) -> gtk4::Box {
     row
 }
 
+/// How a signed-out user connects. Linux can fall back to the terminal; on
+/// Windows the Connect button's dialog is the only path, so say so.
+#[cfg(target_os = "windows")]
+fn connect_hint() -> String {
+    t("Click Connect to link this device with a one-time code.")
+}
+
+#[cfg(not(target_os = "windows"))]
+fn connect_hint() -> String {
+    t("Run `apexshot login` in a terminal, or click Connect below.")
+}
+
 fn initial(email: &str) -> String {
     let ch = email
         .trim()
@@ -508,17 +541,8 @@ fn initial(email: &str) -> String {
 /// Start the device-code login in a terminal so the user never has to sign in
 /// again through a browser session of their own. Shared with the History
 /// window's Cloud page, which watches the config for the session to land.
-#[cfg(target_os = "windows")]
-pub(crate) fn spawn_apexshot_login() {
-    crate::utils::notify::desktop_notification(
-        "ApexShot Cloud",
-        "Cloud sign-in is not available in the Windows build yet.",
-    );
-}
-
-/// Start the device-code login in a terminal so the user never has to sign in
-/// again through a browser session of their own. Shared with the History
-/// window's Cloud page, which watches the config for the session to land.
+/// Windows has no terminal: that build signs in through the inline connect
+/// view in `crate::settings::cloud_login` instead.
 #[cfg(not(target_os = "windows"))]
 pub(crate) fn spawn_apexshot_login() {
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("apexshot"));
@@ -542,4 +566,36 @@ pub(crate) fn spawn_apexshot_login() {
         "Could not open a terminal",
         "Run `apexshot login` manually in a terminal to connect your ApexShot Cloud account.",
     );
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_status_uses_the_token_not_cached_email() {
+        let Some((stale_email, token_without_email)) = crate::test_support::with_gtk(|| {
+            let avatar = Label::new(None);
+            let status = Label::new(None);
+            let email = Label::new(None);
+            let connect = Button::new();
+            let logout = Button::new();
+            let mut config = AppConfig {
+                cloud_user_email: "old@example.com".to_string(),
+                ..AppConfig::default()
+            };
+            set_apexshot_status(&avatar, &status, &email, &connect, &logout, &config);
+            let stale_email = (connect.is_visible(), logout.is_visible());
+            config.cloud_api_token = "token".to_string();
+            config.cloud_user_email.clear();
+            set_apexshot_status(&avatar, &status, &email, &connect, &logout, &config);
+            let token_without_email = (connect.is_visible(), logout.is_visible());
+            (stale_email, token_without_email)
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+        assert_eq!(stale_email, (true, false));
+        assert_eq!(token_without_email, (false, true));
+    }
 }

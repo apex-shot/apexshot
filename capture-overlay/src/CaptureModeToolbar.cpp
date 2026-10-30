@@ -212,6 +212,8 @@ CaptureModeToolbar::CaptureModeToolbar(QScreen* screen, bool screenIsLocked,
     , m_recordingAvailable(recordingAvailable)
     , m_allowAreaRecording(allowAreaRecording)
     , m_enableScrollCapture(enableScrollCapture)
+    , m_timerSeconds(defaults.screenshotTimerSeconds)
+    , m_timedSelection(defaults.timedSelection)
     , m_microphone(defaults.microphone)
     , m_microphoneDevice(defaults.microphoneDevice)
     , m_speaker(defaults.speaker)
@@ -326,7 +328,7 @@ CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServe
     Result result{toolbar.m_action,
                   toolbar.m_screen,
                   toolbar.m_ocr,
-                  toolbar.m_timerSeconds,
+                  (toolbar.m_recording || toolbar.m_scroll) ? 0 : toolbar.m_timerSeconds,
                   toolbar.m_recording,
                   toolbar.m_microphone,
                   toolbar.m_microphoneDevice,
@@ -574,8 +576,9 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
             || (m_recording && i == 4 && !m_allowAreaRecording)
             || (m_scroll && (i == 2 || i == 5 || i == 6))
             || (!m_recording && !m_scroll && i == 2 && m_ocr)
-            || (!m_recording && !m_scroll && i == 3 && (m_timerSeconds > 0 || m_ocr))
-            || (!m_recording && !m_scroll && i == 4 && m_timerSeconds > 0)
+            || (!m_recording && !m_scroll && i == 3
+                && (m_ocr || (m_timerSeconds > 0 && !m_timedSelection)))
+            || (!m_recording && !m_scroll && i == 4 && m_timerSeconds > 0 && !m_timedSelection)
             || (!m_recording && !m_scroll && i == 5 && m_timerSeconds > 0)
             || (!m_recording && !m_scroll && i == 6 && m_ocr);
         const bool active = (i == 0 && !m_recording && !m_scroll)
@@ -862,8 +865,10 @@ void CaptureModeToolbar::mouseMoveEvent(QMouseEvent* event)
             || (m_recording && hovered == 4 && !m_allowAreaRecording)
             || (m_scroll && (hovered == 2 || hovered == 5 || hovered == 6))
             || (!m_recording && !m_scroll && hovered == 2 && m_ocr)
-            || (!m_recording && !m_scroll && hovered == 3 && (m_timerSeconds > 0 || m_ocr))
-            || (!m_recording && !m_scroll && hovered == 4 && m_timerSeconds > 0)
+            || (!m_recording && !m_scroll && hovered == 3
+                && (m_ocr || (m_timerSeconds > 0 && !m_timedSelection)))
+            || (!m_recording && !m_scroll && hovered == 4
+                && m_timerSeconds > 0 && !m_timedSelection)
             || (!m_recording && !m_scroll && hovered == 5 && m_timerSeconds > 0)
             || (!m_recording && !m_scroll && hovered == 6 && m_ocr);
         setCursor(disabled || hovered < 0 ? Qt::ArrowCursor : Qt::PointingHandCursor);
@@ -930,7 +935,8 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         m_scroll = !m_scroll;
         if (m_scroll) {
             m_ocr = false;
-            m_timerSeconds = 0;
+            if (!m_timedSelection)
+                m_timerSeconds = 0;
         }
         resizeForMode();
 #ifdef Q_OS_WIN
@@ -958,7 +964,8 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         m_recording = true;
         notifyCameraChanged();
         m_ocr = false;
-        m_timerSeconds = 0;
+        if (!m_timedSelection)
+            m_timerSeconds = 0;
 #ifdef Q_OS_WIN
         if (m_enableScrollCapture) {
             refreshDevices();
@@ -982,11 +989,11 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
         }
         break;
     case 3:
-        if (m_scroll || m_recording || (m_timerSeconds == 0 && !m_ocr))
+        if (m_scroll || m_recording || (!m_ocr && (m_timerSeconds == 0 || m_timedSelection)))
             finish(Action::Window);
         break;
     case 4:
-        if ((!m_recording && !m_scroll && m_timerSeconds == 0)
+        if ((!m_recording && !m_scroll && (m_timerSeconds == 0 || m_timedSelection))
             || ((m_recording || m_scroll) && m_allowAreaRecording))
             finish(Action::Area);
         break;
@@ -1016,7 +1023,8 @@ void CaptureModeToolbar::mousePressEvent(QMouseEvent* event)
 #endif
             update();
         } else if (!m_scroll && !m_ocr) {
-            m_timerSeconds = m_timerSeconds == 0 ? 3 : (m_timerSeconds == 3 ? 5 : (m_timerSeconds == 5 ? 10 : 0));
+            m_timerSeconds = m_timerSeconds <= 1 ? 3
+                : (m_timerSeconds == 3 ? 5 : (m_timerSeconds == 5 ? 10 : 0));
             update();
         }
         break;

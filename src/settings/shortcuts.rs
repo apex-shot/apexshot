@@ -5,15 +5,25 @@ use gtk4::{
     gdk, prelude::*, Align, ApplicationWindow, Box as GtkBox, Button, Dialog, EventControllerKey,
     Image, Label, Orientation, ResponseType,
 };
+use std::{cell::RefCell, collections::HashMap};
+
+#[cfg(target_os = "windows")]
+fn may_focus_dialog(foreground_pid: u32, own_pid: u32) -> bool {
+    foreground_pid == 0 || foreground_pid == own_pid
+}
 
 #[cfg(target_os = "windows")]
 fn raise_shortcut_dialog(dialog: &Dialog) {
     use windows_sys::core::BOOL;
     use windows_sys::Win32::Foundation::{HWND, LPARAM};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowTextW, GetWindowThreadProcessId, SetForegroundWindow, SetWindowPos,
-        HWND_TOPMOST, SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW,
+        EnumWindows, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
+        SetForegroundWindow,
     };
+
+    if !dialog.is_visible() {
+        return;
+    }
 
     struct Search {
         pid: u32,
@@ -52,19 +62,18 @@ fn raise_shortcut_dialog(dialog: &Dialog) {
     };
 
     unsafe {
+        let mut foreground_pid = 0;
+        let foreground = GetForegroundWindow();
+        if !foreground.is_null() {
+            GetWindowThreadProcessId(foreground, &mut foreground_pid);
+        }
+        if !may_focus_dialog(foreground_pid, search.pid) {
+            return;
+        }
         EnumWindows(Some(enum_proc), &mut search as *mut Search as LPARAM);
         if search.found.is_null() {
             return;
         }
-        SetWindowPos(
-            search.found,
-            HWND_TOPMOST,
-            0,
-            0,
-            0,
-            0,
-            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
-        );
         SetForegroundWindow(search.found);
     }
 }
@@ -148,6 +157,22 @@ fn compose_shortcut_label(
     Some(compose_shortcut_parts(key_name, ctrl, alt, shift, super_key)?.join("+"))
 }
 
+#[cfg(target_os = "windows")]
+fn unmodified_shortcut_key(
+    display: &gdk::Display,
+    keycode: u32,
+    layout: i32,
+    fallback: gdk::Key,
+) -> gdk::Key {
+    // Ctrl+Alt can act as AltGr, so the translated character may not be the
+    // key Windows needs for RegisterHotKey.
+    display
+        .translate_key(keycode, gdk::ModifierType::empty(), layout)
+        .map(|(key, _, _, _)| key)
+        .filter(|key| key.name().is_some())
+        .unwrap_or(fallback)
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum ShortcutKeyOutcome {
     Ignore,
@@ -178,16 +203,43 @@ fn handle_shortcut_key(
     }
 }
 
-fn request_hotkey_suppressed(suppressed: bool) {
+#[cfg(target_os = "windows")]
+fn request_hotkey_suppressed(suppressed: bool) -> bool {
+    set_daemon_hotkey_suppressed(suppressed).is_ok()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn request_hotkey_suppressed(suppressed: bool) -> bool {
     std::thread::spawn(move || {
         let _ = set_daemon_hotkey_suppressed(suppressed);
     });
+    true
 }
 
-fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
+fn captured_keycaps_row() -> GtkBox {
+    let row = GtkBox::new(Orientation::Horizontal, 10);
+    row.add_css_class("shortcut-capture-keycaps-row");
+    #[cfg(target_os = "windows")]
+    {
+        row.set_halign(Align::Center);
+        row.set_valign(Align::Center);
+        row.set_vexpand(true);
+    }
+    row
+}
+
+fn install_shortcut_editor(
+    button: &Button,
+    parent: &ApplicationWindow,
+    editing: &std::rc::Rc<std::cell::Cell<bool>>,
+) {
     let button = button.clone();
     let parent = parent.clone();
+    let editing = editing.clone();
     button.clone().connect_clicked(move |_| {
+        if editing.replace(true) {
+            return;
+        }
         let action_name = button.label().unwrap_or_else(|| "shortcut".into());
 
         let dialog = Dialog::builder()
@@ -205,6 +257,8 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
         #[cfg(target_os = "windows")]
         dialog.set_destroy_with_parent(true);
         dialog.add_css_class("shortcut-capture-dialog");
+        #[cfg(target_os = "windows")]
+        dialog.add_css_class("shortcut-capture-windows");
         if !prefers_dark_glass_theme() {
             dialog.add_css_class("editor-theme-light");
         }
@@ -237,6 +291,8 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
         content.set_spacing(0);
 
         let body = GtkBox::new(Orientation::Vertical, 16);
+        #[cfg(target_os = "windows")]
+        body.set_vexpand(true);
         body.set_margin_top(12);
         body.set_margin_bottom(20);
         body.set_margin_start(28);
@@ -253,6 +309,8 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
 
         let stack = gtk4::Stack::new();
         stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
+        #[cfg(target_os = "windows")]
+        stack.set_vexpand(true);
 
         let arming_box = GtkBox::new(Orientation::Vertical, 14);
         arming_box.set_vexpand(true);
@@ -278,8 +336,7 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
 
         let captured_box = GtkBox::new(Orientation::Vertical, 18);
         captured_box.set_vexpand(true);
-        let keycaps_row = GtkBox::new(Orientation::Horizontal, 10);
-        keycaps_row.add_css_class("shortcut-capture-keycaps-row");
+        let keycaps_row = captured_keycaps_row();
         captured_box.append(&keycaps_row);
         stack.add_named(&captured_box, Some("captured"));
         stack.set_visible_child_name("arming");
@@ -296,12 +353,37 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
         let key_controller = EventControllerKey::new();
         key_controller.set_propagation_phase(gtk4::PropagationPhase::Capture);
         let suppression_ready_for_keys = suppression_ready.clone();
-        key_controller.connect_key_pressed(move |_, key, _, state| {
+        let dialog_for_keys = dialog.downgrade();
+        key_controller.connect_key_pressed(move |controller, key, keycode, state| {
+            if key == gdk::Key::Escape {
+                if let Some(dialog) = dialog_for_keys.upgrade() {
+                    dialog.response(ResponseType::Cancel);
+                }
+                return gtk4::glib::Propagation::Stop;
+            }
             let ctrl = state.contains(gdk::ModifierType::CONTROL_MASK);
             let alt = state.contains(gdk::ModifierType::ALT_MASK);
             let shift = state.contains(gdk::ModifierType::SHIFT_MASK);
             let super_key = state.contains(gdk::ModifierType::SUPER_MASK)
                 || state.contains(gdk::ModifierType::META_MASK);
+
+            #[cfg(target_os = "windows")]
+            let key = controller
+                .current_event()
+                .and_then(|event| event.downcast::<gdk::KeyEvent>().ok())
+                .and_then(|event| {
+                    controller.widget().map(|widget| {
+                        unmodified_shortcut_key(
+                            &widget.display(),
+                            keycode,
+                            event.layout() as i32,
+                            key,
+                        )
+                    })
+                })
+                .unwrap_or(key);
+            #[cfg(not(target_os = "windows"))]
+            let _ = (controller, keycode);
 
             if let Some(name) = key.name() {
                 match handle_shortcut_key(
@@ -370,12 +452,14 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
                     }
                 }
             }
-            request_hotkey_suppressed(false);
+            let _ = request_hotkey_suppressed(false);
             dialog.close();
         });
 
-        dialog.connect_close_request(|_| {
-            request_hotkey_suppressed(false);
+        let editing_for_close = editing.clone();
+        dialog.connect_close_request(move |_| {
+            editing_for_close.set(false);
+            let _ = request_hotkey_suppressed(false);
             gtk4::glib::Propagation::Proceed
         });
 
@@ -392,13 +476,19 @@ fn install_shortcut_editor(button: &Button, parent: &ApplicationWindow) {
                 raise_shortcut_dialog(&dialog_for_raise);
             });
         }
-        stack_for_present.set_visible_child_name("listening");
-        suppression_ready_for_present.set(true);
-        request_hotkey_suppressed(true);
+        if request_hotkey_suppressed(true) {
+            stack_for_present.set_visible_child_name("listening");
+            suppression_ready_for_present.set(true);
+        } else {
+            arming_label.set_text(&t(
+                "Could not pause the shortcut listener. Close this dialog and try again.",
+            ));
+        }
     });
 }
 
 pub fn install_shortcut_editors(widgets: &ShortcutSettingsWidgets, parent: &ApplicationWindow) {
+    let editing = std::rc::Rc::new(std::cell::Cell::new(false));
     for button in [
         &widgets.open_file_btn,
         &widgets.open_clipboard_btn,
@@ -415,12 +505,13 @@ pub fn install_shortcut_editors(widgets: &ShortcutSettingsWidgets, parent: &Appl
         &widgets.record_screen_btn,
         &widgets.recording_stop_save_btn,
     ] {
-        install_shortcut_editor(button, parent);
+        install_shortcut_editor(button, parent, &editing);
     }
 }
 
 pub struct ShortcutSettingsWidgets {
     pub section: GtkBox,
+    pub status_labels: HashMap<&'static str, Label>,
     pub open_file_btn: Button,
     pub open_clipboard_btn: Button,
     pub restore_file_btn: Button,
@@ -441,9 +532,12 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
     let section = GtkBox::new(Orientation::Vertical, 0);
     section.set_hexpand(true);
 
-    let tip = Label::new(Some(&t(
-        "Shortcuts set here are the same hotkeys ApexShot uses. If one does not work, your desktop environment may already be using it. Open your system keyboard settings and disable conflicting shortcuts if you want to reuse them in ApexShot.",
-    )));
+    let tip_text = if cfg!(target_os = "windows") {
+        "Use shortcuts while ApexShot is running in the background."
+    } else {
+        "Shortcuts set here are the same hotkeys ApexShot uses. If one does not work, your desktop environment may already be using it. Open your system keyboard settings and disable conflicting shortcuts if you want to reuse them in ApexShot."
+    };
+    let tip = Label::new(Some(&t(tip_text)));
     tip.set_wrap(true);
     tip.set_xalign(0.0);
     tip.add_css_class("settings-sub-option-hint");
@@ -475,25 +569,33 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
 
     let create_header = |section: &GtkBox, label_text: &str, icon: &str| {
         let hbox = GtkBox::new(Orientation::Horizontal, 10);
+        #[cfg(target_os = "windows")]
+        hbox.add_css_class("shortcut-heading-windows");
         hbox.set_margin_bottom(8);
         hbox.set_margin_top(8);
 
         let img = Image::from_icon_name(icon);
         img.set_pixel_size(20);
+        #[cfg(target_os = "windows")]
+        img.set_valign(Align::Center);
 
         let lbl = Label::new(Some(&t(label_text)));
         lbl.add_css_class("settings-group-title");
+        #[cfg(target_os = "windows")]
+        lbl.set_valign(Align::Center);
 
         hbox.append(&img);
         hbox.append(&lbl);
         section.append(&hbox);
     };
 
+    let status_labels = RefCell::new(HashMap::new());
     let create_row = |frame: &GtkBox,
                       label_text: &str,
                       hint_text: Option<&str>,
                       current_val: &str,
-                      is_muted: bool|
+                      is_muted: bool,
+                      action: Option<&'static str>|
      -> Button {
         let hbox = GtkBox::new(Orientation::Horizontal, 12);
         hbox.set_hexpand(true);
@@ -506,12 +608,22 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         lbl.set_hexpand(true);
         text_box.append(&lbl);
 
-        if let Some(hint) = hint_text {
+        if let Some(hint) = hint_text.filter(|_| !cfg!(target_os = "windows")) {
             let hint_lbl = Label::new(Some(&t(hint)));
             hint_lbl.set_xalign(0.0);
             hint_lbl.set_hexpand(true);
             hint_lbl.add_css_class("settings-sub-option-hint");
             text_box.append(&hint_lbl);
+        }
+
+        if let Some(action) = action {
+            let status = Label::new(None);
+            status.add_css_class("shortcut-row-status");
+            status.set_xalign(0.0);
+            status.set_wrap(true);
+            status.set_visible(false);
+            text_box.append(&status);
+            status_labels.borrow_mut().insert(action, status);
         }
 
         let btn = Button::new();
@@ -540,6 +652,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         None,
         &config.shortcut_open_file,
         false,
+        None,
     );
     let open_clipboard_btn = create_row(
         &general_frame,
@@ -547,6 +660,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         None,
         &config.shortcut_open_from_clipboard,
         true,
+        None,
     );
     let restore_file_btn = create_row(
         &general_frame,
@@ -554,6 +668,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         None,
         &config.shortcut_restore_recently_closed,
         false,
+        None,
     );
     let toggle_overlays_btn = create_row(
         &general_frame,
@@ -561,6 +676,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         None,
         &config.shortcut_toggle_overlays,
         true,
+        None,
     );
     section.append(&general_frame);
 
@@ -573,6 +689,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         Some("Open the screenshot and recording menu"),
         &config.shortcut_capture_menu,
         false,
+        Some("quick_capture"),
     );
     let capture_area_btn = create_row(
         &screenshots_frame,
@@ -580,6 +697,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         Some("Drag to select an area of the screen"),
         &config.shortcut_capture_area,
         true,
+        Some("capture_area"),
     );
     let capture_crosshair_btn = create_row(
         &screenshots_frame,
@@ -587,6 +705,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         None,
         &config.shortcut_capture_crosshair,
         true,
+        Some("capture_crosshair"),
     );
     let capture_prev_btn = create_row(
         &screenshots_frame,
@@ -594,6 +713,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         None,
         &config.shortcut_capture_previous_area,
         false,
+        Some("capture_previous_area"),
     );
     let capture_fullscreen_btn = create_row(
         &screenshots_frame,
@@ -601,6 +721,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         None,
         &config.shortcut_capture_fullscreen,
         true,
+        Some("capture_fullscreen"),
     );
     // Hide the disabled legacy direct-window shortcut. Quick Capture still
     // offers Window through its Shot menu.
@@ -612,6 +733,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         None,
         &config.shortcut_show_last_preview,
         true,
+        Some("show_last_preview"),
     );
     let save_last_capture_btn = create_row(
         &screenshots_frame,
@@ -619,6 +741,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         None,
         &config.shortcut_save_last_capture,
         false,
+        Some("save_last_capture"),
     );
     section.append(&screenshots_frame);
 
@@ -630,6 +753,7 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         None,
         &config.shortcut_record_screen,
         false,
+        Some("record_screen"),
     );
     let recording_stop_save_btn = create_row(
         &recording_frame,
@@ -637,11 +761,13 @@ pub fn build_shortcuts_section(config: &AppConfig) -> ShortcutSettingsWidgets {
         Some("Only during recording"),
         &config.shortcut_recording_stop_save,
         true,
+        Some("recording_stop_save"),
     );
     section.append(&recording_frame);
 
     ShortcutSettingsWidgets {
         section,
+        status_labels: status_labels.into_inner(),
         open_file_btn,
         open_clipboard_btn,
         restore_file_btn,
@@ -666,6 +792,8 @@ mod tests {
         handle_shortcut_key, ShortcutKeyOutcome,
     };
     use crate::config::AppConfig;
+    #[cfg(target_os = "windows")]
+    use gtk4::prelude::BoxExt;
     use gtk4::{
         glib::object::Cast,
         prelude::{ButtonExt, WidgetExt},
@@ -760,6 +888,14 @@ mod tests {
         assert!(labels.iter().any(|label| label == "Quick Capture:"));
         assert!(labels.iter().any(|label| label == "Capture Area:"));
         assert!(!labels.iter().any(|label| label == "Open Recording UI:"));
+        #[cfg(target_os = "windows")]
+        for hint in [
+            "Open the screenshot and recording menu",
+            "Drag to select an area of the screen",
+            "Only during recording",
+        ] {
+            assert!(!labels.iter().any(|label| label == hint));
+        }
     }
 
     #[test]
@@ -775,5 +911,120 @@ mod tests {
                 label: "Ctrl+Alt+R".into(),
             }
         );
+    }
+
+    #[test]
+    fn backspace_disables_only_without_modifiers() {
+        assert_eq!(
+            handle_shortcut_key(true, "BackSpace", false, false, false, false),
+            ShortcutKeyOutcome::Disable
+        );
+        assert_eq!(
+            handle_shortcut_key(true, "BackSpace", true, false, false, false),
+            ShortcutKeyOutcome::Capture {
+                parts: vec!["Ctrl".into(), "BackSpace".into()],
+                label: "Ctrl+BackSpace".into(),
+            }
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn altgr_character_uses_the_underlying_key_for_windows_shortcuts() {
+        use gtk4::gdk;
+        use gtk4::prelude::DisplayExtManual;
+
+        let Some(result) = crate::test_support::with_gtk(|| {
+            let display = gdk::Display::default()?;
+            let mapping = display
+                .map_keyval(gdk::Key::a)?
+                .into_iter()
+                .find(|key| key.level() == 0)?;
+            let key = super::unmodified_shortcut_key(
+                &display,
+                mapping.keycode(),
+                mapping.group(),
+                gdk::Key::aacute,
+            );
+            let name = key.name()?;
+            Some((
+                compose_shortcut_label(&name, true, true, false, false),
+                compose_shortcut_label(&name, true, true, true, false),
+            ))
+        }) else {
+            return;
+        };
+        let Some((plain, shifted)) = result else {
+            eprintln!("Skipping: no unmodified A key in the active keymap");
+            return;
+        };
+        assert_eq!(plain.as_deref(), Some("Ctrl+Alt+A"));
+        assert_eq!(shifted.as_deref(), Some("Ctrl+Alt+Shift+A"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn dialog_focus_does_not_interrupt_another_process() {
+        assert!(super::may_focus_dialog(0, 42));
+        assert!(super::may_focus_dialog(42, 42));
+        assert!(!super::may_focus_dialog(99, 42));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn captured_keycaps_are_centered_in_the_available_space() {
+        use gtk4::{Align, Orientation};
+
+        let Some(result) = crate::test_support::with_gtk(|| {
+            let captured = GtkBox::new(Orientation::Vertical, 18);
+            let row = super::captured_keycaps_row();
+            row.append(&Label::new(Some("Ctrl")));
+            row.append(&Label::new(Some("+")));
+            row.append(&Label::new(Some("D")));
+            captured.append(&row);
+            captured.measure(Orientation::Horizontal, -1);
+            captured.measure(Orientation::Vertical, 320);
+            captured.allocate(320, 160, -1, None);
+            let bounds = row.compute_bounds(&captured).unwrap();
+            (
+                row.halign(),
+                row.valign(),
+                row.vexpands(),
+                bounds.x() + bounds.width() / 2.0,
+                bounds.y() + bounds.height() / 2.0,
+            )
+        }) else {
+            return;
+        };
+        assert_eq!(
+            (result.0, result.1, result.2),
+            (Align::Center, Align::Center, true)
+        );
+        assert!((result.3 - 160.0).abs() < 1.0);
+        assert!((result.4 - 80.0).abs() < 1.0);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn shortcut_heading_icons_and_titles_share_center_alignment() {
+        use gtk4::{Align, Image};
+
+        let Some(result) = crate::test_support::with_gtk(|| {
+            let widgets = build_shortcuts_section(&AppConfig::default());
+            let mut child = widgets.section.first_child();
+            let mut headings = Vec::new();
+            while let Some(widget) = child {
+                if widget.has_css_class("shortcut-heading-windows") {
+                    let icon = widget.first_child().unwrap().downcast::<Image>().unwrap();
+                    let label = icon.next_sibling().unwrap().downcast::<Label>().unwrap();
+                    headings.push((icon.valign(), label.valign()));
+                }
+                child = widget.next_sibling();
+            }
+            headings
+        }) else {
+            return;
+        };
+        assert_eq!(result, vec![(Align::Center, Align::Center); 3]);
     }
 }

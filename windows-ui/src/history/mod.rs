@@ -62,7 +62,7 @@ pub fn windows_history_pages(
         video_edits_page::build_video_edits_page(toast, search),
         placeholder_page::build_placeholder_page(
             custom::CLOUD_OUTLINE_THIN_SYMBOLIC,
-            &t("Cloud browsing and sign-in are not available in the Windows build yet."),
+            &t("Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."),
         ),
     ]
 }

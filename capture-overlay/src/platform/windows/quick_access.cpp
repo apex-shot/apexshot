@@ -6,8 +6,10 @@
 #include "platform/recording_settings.h"
 #include "platform/windows/audio_devices.h"
 #include "platform/windows/ocr.h"
+#include "platform/windows/usage_telemetry.h"
 #include "platform/windows/qr.h"
 #include "platform/windows/capture_sound.h"
+#include "platform/windows/hotkeys.h"
 #include "platform/windows/recording_controls.h"
 #include "platform/windows/recording_countdown.h"
 #include "platform/windows/recording_mask.h"
@@ -16,6 +18,7 @@
 #include "platform/windows/window_recording.h"
 #include "platform/windows/scroll_capture.h"
 #include "platform/windows/scroll_controls.h"
+#include "platform/windows/screenshot_scale.h"
 #include "platform/windows/settings_store.h"
 
 #include <QAction>
@@ -29,6 +32,7 @@
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
+#include <QFileDialog>
 #include <QEventLoop>
 #include <QFile>
 #include <QFont>
@@ -40,6 +44,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
+#include <QMimeData>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
@@ -212,31 +217,22 @@ void debugLog(const QString& text)
     }
 }
 
-qreal screenDprForPoint(const QPoint& point)
-{
-    if (QScreen* screen = QGuiApplication::screenAt(point))
-        return screen->devicePixelRatio();
-    if (QScreen* screen = QGuiApplication::primaryScreen())
-        return screen->devicePixelRatio();
-    return 1.0;
-}
-
 /// Write a capture using the folder, format, and HiDPI suffix from Settings.
 /// A capture the user asked not to keep still gets a temporary file so the
 /// result card can open it and the file-URL clipboard mode still works.
-QString saveCapture(const QImage& image, bool persist)
+QString saveCapture(const QImage& image, const QRect& region,
+                    const Platform::ShellSettings& settings, QString& error)
 {
-    const Platform::ShellSettings settings = Platform::loadShellSettings();
     const QString directory =
-        persist ? Platform::shellScreenshotOutputDir(settings)
-                : QDir(QDir::tempPath()).filePath(QStringLiteral("ApexShot"));
+        settings.screenshots.afterSave
+            ? Platform::shellScreenshotOutputDir(settings)
+            : QDir(QDir::tempPath()).filePath(QStringLiteral("ApexShot"));
 
     QString path;
-    QString error;
     if (!Platform::saveScreenshotImage(image,
                                       settings,
                                       directory,
-                                      screenDprForPoint(QCursor::pos()),
+                                      Platform::screenshotScale(region, Platform::monitors()),
                                       path,
                                       error)) {
         debugLog(QStringLiteral("save failed: %1").arg(error));
@@ -245,11 +241,13 @@ QString saveCapture(const QImage& image, bool persist)
     return path;
 }
 
-QString videoOutputPath()
+QString videoOutputPath(const Platform::ShellSettings& settings)
 {
-    const Platform::ShellSettings settings = Platform::loadShellSettings();
-    const QString path = Platform::shellRecordingOutputPath(settings, QDateTime::currentDateTime());
-    QDir().mkpath(QFileInfo(path).absolutePath());
+    const QString path = settings.recording.afterSave
+        ? Platform::shellRecordingOutputPath(settings, QDateTime::currentDateTime())
+        : Platform::shellTemporaryRecordingOutputPath();
+    if (!path.isEmpty())
+        QDir().mkpath(QFileInfo(path).absolutePath());
     return path;
 }
 
@@ -326,7 +324,7 @@ void openHistoryWindow()
     }
 }
 
-void openVideoEditorWindow()
+void openVideoEditorWindow(const QString& path = QString())
 {
     QString executable = qEnvironmentVariable("APEXSHOT_VIDEO_EDITOR");
     if (executable.isEmpty()) {
@@ -339,7 +337,8 @@ void openVideoEditorWindow()
     if (executable.isEmpty())
         executable = QStringLiteral("apexshot-video-editor.exe");
 
-    if (!QProcess::startDetached(executable, {})) {
+    const QStringList arguments = path.isEmpty() ? QStringList() : QStringList{path};
+    if (!QProcess::startDetached(executable, arguments)) {
         QMessageBox::warning(
             nullptr,
             QStringLiteral("ApexShot Video Editor"),
@@ -1050,7 +1049,7 @@ public:
             m_onFinished = nullptr;
             close();
             if (finished)
-                finished();
+                QTimer::singleShot(80, qApp, std::move(finished));
         });
         m_timer.start();
     }
@@ -1186,6 +1185,7 @@ public:
         auto* open = new QToolButton;
         open->setObjectName(QStringLiteral("primary"));
         open->setText(QStringLiteral("Open"));
+        open->setEnabled(!path.isEmpty());
         open->setCursor(Qt::PointingHandCursor);
         open->setFont(uiFont(13, true));
         connect(open, &QToolButton::clicked, this, [path] {
@@ -1195,6 +1195,7 @@ public:
 
         auto* folder = new QToolButton;
         folder->setText(QStringLiteral("Show in folder"));
+        folder->setEnabled(!path.isEmpty());
         folder->setCursor(Qt::PointingHandCursor);
         folder->setFont(uiFont(13, true));
         connect(folder, &QToolButton::clicked, this, [path] {
@@ -1254,6 +1255,7 @@ protected:
 // --------------------------------------------------------------- shell ------
 struct CaptureOptions {
     int timerSeconds = 0;
+    quintptr monitorId = 0;
     bool ocr = false;
     bool recording = false;
     bool microphone = false;
@@ -1270,6 +1272,17 @@ struct CaptureOptions {
 class Shell : public QObject
 {
 public:
+    Shell()
+    {
+        m_telemetry = new Platform::UsageTelemetry(this);
+        m_telemetry->start();
+        m_lastScreenshotPath = QSettings().value(QStringLiteral("shortcuts/last_screenshot")).toString();
+        if (!m_lastScreenshotPath.isEmpty())
+            m_lastScreenshot.load(m_lastScreenshotPath);
+    }
+
+    void setTray(QSystemTrayIcon* tray) { m_tray = tray; }
+
     void openMenu()
     {
         if (m_menuOpen)
@@ -1284,6 +1297,8 @@ public:
         // them, and start from the devices the last recording used.
         const CaptureOptions defaultsOptions = recordingDefaults();
         CaptureModeToolbar::DeviceDefaults defaults;
+        defaults.screenshotTimerSeconds = Platform::loadShellSettings().screenshots.timerInterval;
+        defaults.timedSelection = true;
         defaults.microphone = defaultsOptions.microphone;
         defaults.microphoneDevice = defaultsOptions.microphoneDevice;
         defaults.speaker =
@@ -1341,6 +1356,7 @@ public:
             // here when the mode toggle is off.
             if (options.scroll)
                 break;
+            options.monitorId = Platform::monitorAt(QCursor::pos()).id;
             withCountdown(options, [this, options] { captureDisplay(options); });
             break;
         case CaptureModeToolbar::Action::Window:
@@ -1349,14 +1365,14 @@ public:
             } else {
                 if (result.toolbar)
                     result.toolbar->close();
-                withCountdown(options, [this, options] { chooseWindowCapture(options); });
+                chooseWindowCapture(options);
             }
             break;
         case CaptureModeToolbar::Action::Area:
             if (QGuiApplication::keyboardModifiers() & Qt::ShiftModifier) {
-                withCountdown(options, [this, options] { captureCrosshair(options); });
+                captureCrosshair(options);
             } else {
-                withCountdown(options, [this, options] { captureArea(options); });
+                captureArea(options);
             }
             break;
         case CaptureModeToolbar::Action::Cancel:
@@ -1385,6 +1401,106 @@ public:
         QString error;
         if (Platform::captureVirtualDesktop(false, frozen, error))
             startArea(frozen, AreaSelector::Mode::Crosshair, CaptureOptions{});
+    }
+
+    void shortcutCaptureArea() { captureArea(screenshotDefaults()); }
+    void shortcutCaptureCrosshair() { captureCrosshair(screenshotDefaults()); }
+    void shortcutCaptureFullscreen()
+    {
+        CaptureOptions options = screenshotDefaults();
+        options.monitorId = Platform::monitorAt(QCursor::pos()).id;
+        withCountdown(options, [this, options] { captureDisplay(options); });
+    }
+
+    void shortcutCapturePreviousArea()
+    {
+        const QRect region = QSettings().value(QStringLiteral("shortcuts/previous_area")).toRect();
+        QRegion displays;
+        for (const auto& monitor : Platform::monitors())
+            displays += monitor.geometry;
+        if (region.isEmpty() || !displays.contains(region)) {
+            debugLog(QStringLiteral("previous area is not available on the current displays"));
+            if (m_tray)
+                m_tray->showMessage(QStringLiteral("ApexShot"),
+                                    QStringLiteral("No previous capture area is available."));
+            return;
+        }
+        const CaptureOptions options = screenshotDefaults();
+        withCountdown(options, [this, region, options] {
+            Platform::CaptureResult capture;
+            QString error;
+            if (Platform::captureRegion(region,
+                                        Platform::loadShellSettings().screenshots.showCursor,
+                                        capture,
+                                        error)) {
+                Platform::playShutterSound();
+                present(capture.image, options, capture.geometry);
+            } else {
+                debugLog(QStringLiteral("previous area capture failed: %1").arg(error));
+            }
+        });
+    }
+
+    void shortcutShowLastPreview()
+    {
+        if (m_lastScreenshot.isNull()) {
+            if (m_tray)
+                m_tray->showMessage(QStringLiteral("ApexShot"),
+                                    QStringLiteral("No screenshot is available to preview."));
+            return;
+        }
+        auto* card = new ResultCard(m_lastScreenshot, m_lastScreenshotPath, m_lastScreenshotText,
+                                    QStringLiteral("Last screenshot"));
+        card->show();
+        card->raise();
+        card->activateWindow();
+    }
+
+    void shortcutSaveLastScreenshot()
+    {
+        if (m_lastScreenshot.isNull()) {
+            if (m_tray)
+                m_tray->showMessage(QStringLiteral("ApexShot"),
+                                    QStringLiteral("No screenshot is available to save."));
+            return;
+        }
+        if (m_saveDialogOpen)
+            return;
+        const QImage screenshot = m_lastScreenshot;
+        const Platform::ShellSettings settings = Platform::loadShellSettings();
+        m_saveDialogOpen = true;
+        QString filter = settings.screenshots.format == QLatin1String("JPEG")
+            ? QStringLiteral("JPEG image (*.jpg *.jpeg)")
+            : settings.screenshots.format == QLatin1String("WebP")
+                ? QStringLiteral("WebP image (*.webp)")
+                : QStringLiteral("PNG image (*.png)");
+        QString path = QFileDialog::getSaveFileName(
+            nullptr,
+            QStringLiteral("Save screenshot"),
+            QDir(Platform::shellScreenshotOutputDir(settings)).filePath(QStringLiteral("ApexShot")),
+            QStringLiteral("PNG image (*.png);;JPEG image (*.jpg *.jpeg);;WebP image (*.webp)"),
+            &filter);
+        m_saveDialogOpen = false;
+        if (!path.isEmpty() && QFileInfo(path).suffix().isEmpty()) {
+            path += filter.startsWith(QLatin1String("JPEG")) ? QStringLiteral(".jpg")
+                : filter.startsWith(QLatin1String("WebP")) ? QStringLiteral(".webp")
+                                                           : QStringLiteral(".png");
+            if (QFileInfo::exists(path)
+                && QMessageBox::question(nullptr, QStringLiteral("Save screenshot"),
+                                         QStringLiteral("Replace the existing file?\n%1").arg(path))
+                    != QMessageBox::Yes)
+                return;
+        }
+        if (!path.isEmpty() && !screenshot.save(path))
+            QMessageBox::warning(nullptr, QStringLiteral("Save screenshot"),
+                                 QStringLiteral("Could not save the screenshot."));
+    }
+
+    bool shortcutInteractionOpen() const
+    {
+        return m_menuOpen || m_saveDialogOpen || !m_screenshotCountdown.isNull()
+            || !m_areaSelector.isNull()
+            || !m_windowPicker.isNull() || !m_setupOverlay.isNull();
     }
 
     void demoOcr()
@@ -1998,21 +2114,41 @@ private:
                        window.id);
     }
 
+    CaptureOptions screenshotDefaults() const
+    {
+        CaptureOptions options;
+        options.timerSeconds = Platform::loadShellSettings().screenshots.timerInterval;
+        return options;
+    }
+
     void withCountdown(const CaptureOptions& options, std::function<void()> action)
     {
         if (options.timerSeconds <= 0) {
             action();
             return;
         }
+        if (m_screenshotCountdown)
+            return;
         auto* pill = new CountdownPill(options.timerSeconds, std::move(action));
+        m_screenshotCountdown = pill;
         pill->show();
     }
 
     void captureDisplay(const CaptureOptions& options)
     {
         const Platform::ShellSettings settings = Platform::loadShellSettings();
-        const Platform::MonitorInfo target = Platform::monitorAt(QCursor::pos());
+        Platform::MonitorInfo target = Platform::monitorAt(QCursor::pos());
         const QVector<Platform::MonitorInfo> all = Platform::monitors();
+        if (options.monitorId != 0) {
+            const auto it = std::find_if(all.cbegin(), all.cend(), [&options](const auto& monitor) {
+                return monitor.id == options.monitorId;
+            });
+            if (it == all.cend()) {
+                debugLog(QStringLiteral("selected display is no longer available"));
+                return;
+            }
+            target = *it;
+        }
         int index = 0;
         for (int i = 0; i < all.size(); ++i) {
             if (all.at(i).id == target.id) {
@@ -2037,18 +2173,20 @@ private:
         if (!Platform::captureMonitor(index, settings.screenshots.showCursor, capture, error))
             return;
         Platform::playShutterSound();
-        present(capture.image, options);
+        present(capture.image, options, capture.geometry);
     }
 
     void captureArea(const CaptureOptions& options)
     {
         Platform::CaptureResult frozen;
         QString error;
-        if (!Platform::captureVirtualDesktop(false, frozen, error)) {
+        const bool includeCursor = !options.recording && !options.scroll
+            && options.timerSeconds == 0 && Platform::loadShellSettings().screenshots.showCursor;
+        if (!Platform::captureVirtualDesktop(includeCursor, frozen, error)) {
             stopWebcamPreview(true);
             return;
         }
-        if (!options.recording && !options.scroll)
+        if (!options.recording && !options.scroll && options.timerSeconds <= 0)
             Platform::playShutterSound();
         startArea(frozen, AreaSelector::Mode::Area, options);
     }
@@ -2057,11 +2195,13 @@ private:
     {
         Platform::CaptureResult frozen;
         QString error;
-        if (!Platform::captureVirtualDesktop(false, frozen, error)) {
+        const bool includeCursor = !options.recording && !options.scroll
+            && options.timerSeconds == 0 && Platform::loadShellSettings().screenshots.showCursor;
+        if (!Platform::captureVirtualDesktop(includeCursor, frozen, error)) {
             stopWebcamPreview(true);
             return;
         }
-        if (!options.recording && !options.scroll)
+        if (!options.recording && !options.scroll && options.timerSeconds <= 0)
             Platform::playShutterSound();
         startArea(frozen, AreaSelector::Mode::Crosshair, options);
     }
@@ -2069,6 +2209,8 @@ private:
     void startArea(const Platform::CaptureResult& frozen, AreaSelector::Mode mode,
                    const CaptureOptions& options)
     {
+        if (m_areaSelector)
+            return;
         auto* selector =
             new AreaSelector(frozen.image, mode, [this, options, frozen](const QImage& cropped,
                                                                         const QRect& selection) {
@@ -2083,9 +2225,28 @@ private:
                 } else if (options.recording) {
                     startRecording(desktop, cropped, options);
                 } else {
-                    present(cropped, options);
+                    QSettings().setValue(QStringLiteral("shortcuts/previous_area"), desktop);
+                    if (options.timerSeconds <= 0) {
+                        present(cropped, options, desktop);
+                    } else {
+                        withCountdown(options, [this, desktop, options] {
+                            Platform::CaptureResult capture;
+                            QString error;
+                            if (!Platform::captureRegion(
+                                    desktop,
+                                    Platform::loadShellSettings().screenshots.showCursor,
+                                    capture,
+                                    error)) {
+                                debugLog(QStringLiteral("timed area capture failed: %1").arg(error));
+                                return;
+                            }
+                            Platform::playShutterSound();
+                            present(capture.image, options, capture.geometry);
+                        });
+                    }
                 }
             });
+        m_areaSelector = selector;
 
         QRect virtualGeometry;
         for (const QScreen* screen : QGuiApplication::screens())
@@ -2137,18 +2298,20 @@ private:
                         return;
                     }
 
-                    Platform::CaptureResult capture;
-                    QString error;
-                    const Platform::ShellSettings settings = Platform::loadShellSettings();
-                    if (!Platform::captureWindow(window.id,
-                                                 settings.screenshots.showCursor,
-                                                 capture,
-                                                 error)) {
-                        debugLog(QStringLiteral("window capture failed: %1").arg(error));
-                        return;
-                    }
-                    Platform::playShutterSound();
-                    present(capture.image, options);
+                    withCountdown(options, [this, options, window] {
+                        Platform::CaptureResult capture;
+                        QString error;
+                        const Platform::ShellSettings settings = Platform::loadShellSettings();
+                        if (!Platform::captureWindow(window.id,
+                                                     settings.screenshots.showCursor,
+                                                     capture,
+                                                     error)) {
+                            debugLog(QStringLiteral("window capture failed: %1").arg(error));
+                            return;
+                        }
+                        Platform::playShutterSound();
+                        present(capture.image, options, capture.geometry);
+                    });
                 });
             },
             [] {},
@@ -2230,7 +2393,20 @@ private:
         request.target = target;
         request.region = region;
         request.windowId = windowId;
-        request.outputPath = videoOutputPath();
+        request.outputPath = videoOutputPath(settings);
+        if (request.outputPath.isEmpty()) {
+            m_activeSession = nullptr;
+            session->deleteLater();
+            if (m_recordingMask) {
+                m_recordingMask->close();
+                m_recordingMask = nullptr;
+            }
+            stopWebcamPreview(true);
+            QMessageBox::warning(nullptr,
+                                 QStringLiteral("Recording"),
+                                 QStringLiteral("Could not find an available recording filename."));
+            return;
+        }
         // The recorder writes the pointer track beside the video and the editor
         // draws the cursor from it, so the frames never carry a baked-in
         // pointer that would double up with the one the editor paints.
@@ -2251,6 +2427,9 @@ private:
         request.maxWidth = maxResolution.width();
         request.maxHeight = maxResolution.height();
         request.monoAudio = videoSettings.monoAudio;
+        const qreal displayDpr = Platform::monitorAt(region.center()).dpr;
+        request.displayScale = !settings.recording.highDpi && displayDpr > 1.0
+            ? 1.0 / displayDpr : 1.0;
 
         // The camera records to its own track and the editor composites it, so
         // what this window shows is a preview of that layer: it is excluded
@@ -2403,7 +2582,7 @@ private:
         connect(session,
                 &Platform::RecordingSession::finished,
                 this,
-                [this, session, thumbnail](bool kept,
+                [this, session, thumbnail, settings](bool kept,
                                            const QString& path,
                                            const QString& error) {
                     if (m_activeSession == session)
@@ -2426,7 +2605,7 @@ private:
                     }
                     session->deleteLater();
                     if (kept)
-                        presentRecording(thumbnail, path);
+                        presentRecording(thumbnail, path, settings);
                     else if (!error.isEmpty())
                         QMessageBox::warning(nullptr, QStringLiteral("Recording"), error);
 
@@ -2480,22 +2659,23 @@ private:
                      .arg(request.monoAudio ? 1 : 0)
                      .arg(request.outputPath));
 
-        auto* controls = new RecordingControls(session, region);
-        connect(controls,
-                &RecordingControls::restartRequested,
-                this,
-                [this, region, thumbnail, options, target, windowId] {
-                    if (!m_activeSession || !m_activeSession->isActive())
-                        return;
-                    // Discard the take, then start a new one once the session
-                    // has emitted finished and released the camera.
-                    m_restartAfterFinish = [this, region, thumbnail, options, target, windowId] {
-                        startRecording(region, thumbnail, options, target, windowId);
-                    };
-                    m_activeSession->discard();
-                });
-        controls->show();
-        controls->raise();
+        if (settings.recording.showControls) {
+            auto* controls = new RecordingControls(session, region);
+            connect(controls,
+                    &RecordingControls::restartRequested,
+                    this,
+                    [this, region, thumbnail, options, target, windowId] {
+                        if (!m_activeSession || !m_activeSession->isActive())
+                            return;
+                        // Wait for the camera to be released before restarting.
+                        m_restartAfterFinish = [this, region, thumbnail, options, target, windowId] {
+                            startRecording(region, thumbnail, options, target, windowId);
+                        };
+                        m_activeSession->discard();
+                    });
+            controls->show();
+            controls->raise();
+        }
     }
 
     void startScrollCapture(const QRect& region, quintptr windowId = 0)
@@ -2548,7 +2728,7 @@ private:
         connect(session,
                 &Platform::ScrollCaptureSession::finished,
                 this,
-                [this, session](bool ok, const QImage& image, const QString& error) {
+                [this, session, region](bool ok, const QImage& image, const QString& error) {
                     if (m_scrollSession == session)
                         m_scrollSession = nullptr;
                     if (m_scrollMask) {
@@ -2557,7 +2737,7 @@ private:
                     }
                     session->deleteLater();
                     if (ok)
-                        presentScroll(image);
+                        presentScroll(image, region);
                     else if (!error.isEmpty())
                         QMessageBox::warning(nullptr, QStringLiteral("Scroll capture"), error);
                 });
@@ -2589,13 +2769,23 @@ private:
         controls->raise();
     }
 
-    void presentScroll(const QImage& image)
+    void presentScroll(const QImage& image, const QRect& region)
     {
         if (image.isNull())
             return;
 
+        m_telemetry->recordScreenshot();
         const Platform::ShellSettings settings = Platform::loadShellSettings();
-        const QString path = saveCapture(image, settings.screenshots.afterSave);
+        QString saveError;
+        const QString path = saveCapture(image, region, settings, saveError);
+        if (path.isEmpty())
+            QMessageBox::warning(nullptr, QStringLiteral("Screenshot"),
+                                 QStringLiteral("Could not save the screenshot: %1").arg(saveError));
+        m_lastScreenshot = image;
+        m_lastScreenshotPath = path;
+        m_lastScreenshotText.clear();
+        if (!path.isEmpty())
+            QSettings().setValue(QStringLiteral("shortcuts/last_screenshot"), path);
 
         if (settings.screenshots.afterCopyToClipboard)
             Platform::copyCaptureToClipboard(image, path, settings.screenshots.clipboardMode);
@@ -2603,7 +2793,8 @@ private:
         if (!settings.screenshots.afterShowResult)
             return;
 
-        const QString hint = settings.screenshots.afterCopyToClipboard
+        const QString hint = path.isEmpty() ? QStringLiteral("Save failed")
+            : settings.screenshots.afterCopyToClipboard
             ? QStringLiteral("Scroll capture copied")
             : QStringLiteral("Scroll capture saved");
 
@@ -2613,28 +2804,48 @@ private:
         card->activateWindow();
     }
 
-    void presentRecording(const QImage& thumbnail, const QString& path)
+    void presentRecording(const QImage& thumbnail,
+                          const QString& path,
+                          const Platform::ShellSettings& settings)
     {
+        m_telemetry->recordRecording();
+        if (settings.recording.afterCopyToClipboard) {
+            auto* mime = new QMimeData;
+            mime->setUrls({QUrl::fromLocalFile(path)});
+            QGuiApplication::clipboard()->setMimeData(mime);
+        }
+        if (settings.recording.afterOpenEditor)
+            openVideoEditorWindow(path);
+        if (!settings.recording.afterShowResult)
+            return;
+
         const QImage thumb = thumbnail.isNull()
             ? QImage(2, 2, QImage::Format_ARGB32)
             : thumbnail;
         auto* card = new ResultCard(thumb,
                                     path,
                                     QString(),
-                                    QStringLiteral("Recording saved"));
+                                    settings.recording.afterSave
+                                        ? QStringLiteral("Recording saved")
+                                        : QStringLiteral("Temporary recording"));
         card->show();
         card->raise();
         card->activateWindow();
     }
 
-    void present(const QImage& image, const CaptureOptions& options)
+    void present(const QImage& image, const CaptureOptions& options, const QRect& region)
     {
         if (image.isNull())
             return;
 
+        m_telemetry->recordScreenshot();
         const Platform::ShellSettings settings = Platform::loadShellSettings();
         const bool persist = settings.screenshots.afterSave;
-        const QString path = saveCapture(image, persist);
+        QString saveError;
+        const QString path = saveCapture(image, region, settings, saveError);
+        if (path.isEmpty())
+            QMessageBox::warning(nullptr, QStringLiteral("Screenshot"),
+                                 QStringLiteral("Could not save the screenshot: %1").arg(saveError));
 
         QString text;
         bool ocrFailed = false;
@@ -2650,9 +2861,12 @@ private:
                 debugLog(QStringLiteral("qr detected: %1 bytes").arg(payload.size()));
             } else {
                 debugLog(QStringLiteral("qr: %1").arg(qrError));
-                if (!Platform::recognizeText(image, text, ocrError)) {
+                if (!Platform::recognizeText(image, settings.ocr.language,
+                                             settings.ocr.keepLineBreaks, text, ocrError)) {
                     ocrFailed = true;
                     debugLog(QStringLiteral("ocr failed: %1").arg(ocrError));
+                    if (m_tray)
+                        m_tray->showMessage(QStringLiteral("OCR unavailable"), ocrError);
                 }
                 text = text.trimmed();
                 debugLog(QStringLiteral("ocr chars=%1").arg(text.size()));
@@ -2662,24 +2876,33 @@ private:
         QString hint = QStringLiteral("Ready");
         if (options.ocr) {
             if (isQr) {
+                m_telemetry->recordOcr();
                 QGuiApplication::clipboard()->setText(text);
                 hint = QStringLiteral("QR code detected - copied");
             } else if (!text.isEmpty()) {
+                m_telemetry->recordOcr();
                 QGuiApplication::clipboard()->setText(text);
                 hint = QStringLiteral("Text copied to clipboard");
             } else {
                 Platform::copyCaptureToClipboard(
                     image, path, settings.screenshots.clipboardMode);
-                hint = ocrFailed ? QStringLiteral("OCR unavailable - image copied")
-                                 : QStringLiteral("No text found - image copied");
+                hint = ocrFailed ? QStringLiteral("OCR unavailable - capture copied")
+                                 : QStringLiteral("No text found - capture copied");
             }
         } else if (settings.screenshots.afterCopyToClipboard) {
             Platform::copyCaptureToClipboard(image, path, settings.screenshots.clipboardMode);
             hint = QStringLiteral("Copied to clipboard");
+        } else if (path.isEmpty()) {
+            hint = QStringLiteral("Save failed");
         } else {
             hint = persist ? QStringLiteral("Saved") : QStringLiteral("Ready");
         }
 
+        m_lastScreenshot = image;
+        m_lastScreenshotPath = path;
+        m_lastScreenshotText = text;
+        if (!path.isEmpty())
+            QSettings().setValue(QStringLiteral("shortcuts/last_screenshot"), path);
         if (!settings.screenshots.afterShowResult)
             return;
 
@@ -2690,10 +2913,17 @@ private:
     }
 
     bool m_menuOpen = false;
+    Platform::UsageTelemetry* m_telemetry = nullptr;
+    QPointer<QSystemTrayIcon> m_tray;
+    bool m_saveDialogOpen = false;
+    QImage m_lastScreenshot;
+    QString m_lastScreenshotPath;
+    QString m_lastScreenshotText;
     Platform::RecordingSession* m_activeSession = nullptr;
     /// Set when the restart button asks for a fresh take after the current
     /// one has finished discarding.
     std::function<void()> m_restartAfterFinish;
+    QPointer<CountdownPill> m_screenshotCountdown;
     QPointer<RecordingCountdown> m_countdownPill;
     QPointer<RecordingMask> m_recordingMask;
     QPointer<Platform::WebcamBubble> m_webcamBubble;
@@ -2702,6 +2932,7 @@ private:
     QPointer<Platform::WebcamPreview> m_activeWebcamPreview;
     QString m_previewDevice;
     QPointer<Platform::WindowPicker> m_windowPicker;
+    QPointer<AreaSelector> m_areaSelector;
     QPointer<Platform::RecordingSetupOverlay> m_setupOverlay;
     QPointer<Platform::ScrollCaptureSession> m_scrollSession;
     QPointer<RecordingMask> m_scrollMask;
@@ -2801,7 +3032,31 @@ int run(QApplication& app)
         return app.exec();
     }
 
+    Platform::GlobalHotkeys hotkeys(shell, [shell](const QString& action) {
+        if (action != QLatin1String("recording_stop_save") && shell->shortcutInteractionOpen())
+            return;
+        if (action == QLatin1String("quick_capture"))
+            shell->openMenu();
+        else if (action == QLatin1String("capture_area"))
+            shell->shortcutCaptureArea();
+        else if (action == QLatin1String("capture_crosshair"))
+            shell->shortcutCaptureCrosshair();
+        else if (action == QLatin1String("capture_previous_area"))
+            shell->shortcutCapturePreviousArea();
+        else if (action == QLatin1String("capture_fullscreen"))
+            shell->shortcutCaptureFullscreen();
+        else if (action == QLatin1String("show_last_preview"))
+            shell->shortcutShowLastPreview();
+        else if (action == QLatin1String("save_last_capture"))
+            shell->shortcutSaveLastScreenshot();
+        else if (action == QLatin1String("record_screen"))
+            shell->recordScreen();
+        else if (action == QLatin1String("recording_stop_save"))
+            shell->stopActiveRecording();
+    });
+
     auto* tray = new QSystemTrayIcon(appIcon(), &app);
+    shell->setTray(tray);
     tray->setToolTip(QStringLiteral("ApexShot"));
 
     auto* menu = new QMenu;
@@ -2824,6 +3079,8 @@ int run(QApplication& app)
     QAction* recordScreen = recordMenu->addAction(QStringLiteral("Screen"));
     QAction* recordArea = recordMenu->addAction(QStringLiteral("Area"));
     QAction* recordWindow = recordMenu->addAction(QStringLiteral("Window"));
+    QAction* stopRecording = recordMenu->addAction(QStringLiteral("Stop and save recording"));
+    stopRecording->setVisible(false);
     recordMenu->setEnabled(recordingAvailable);
     recordMenu->setToolTipsVisible(true);
     if (!recordingAvailable)
@@ -2854,8 +3111,10 @@ int run(QApplication& app)
 
     // The Rust settings window can turn the countdown off entirely; keep the
     // submenu honest without restarting the shell.
-    QObject::connect(menu, &QMenu::aboutToShow, menu, [countdownMenu, countdownGroup] {
+    QObject::connect(menu, &QMenu::aboutToShow, menu,
+                     [countdownMenu, countdownGroup, stopRecording, shell] {
         const Platform::ShellSettings settings = Platform::loadShellSettings();
+        stopRecording->setVisible(shell->hasActiveRecording());
         countdownMenu->setEnabled(settings.recording.showCountdown);
         const int current = recordingCountdownSeconds();
         for (QAction* action : countdownGroup->actions()) {
@@ -2885,13 +3144,15 @@ int run(QApplication& app)
 
     QObject::connect(capture, &QAction::triggered, shell, [shell] { shell->openMenu(); });
     QObject::connect(crosshair, &QAction::triggered, shell,
-                     [shell] { shell->demoCrosshair(); });
+                     [shell] { shell->shortcutCaptureCrosshair(); });
     QObject::connect(recordScreen, &QAction::triggered, shell,
                      [shell] { shell->recordScreen(); });
     QObject::connect(recordArea, &QAction::triggered, shell,
                      [shell] { shell->recordArea(); });
     QObject::connect(recordWindow, &QAction::triggered, shell,
                      [shell] { shell->recordWindow(); });
+    QObject::connect(stopRecording, &QAction::triggered, shell,
+                     [shell] { shell->stopActiveRecording(); });
     QObject::connect(scrollWindowAction, &QAction::triggered, shell,
                      [shell] { shell->scrollWindow(); });
     QObject::connect(scrollAreaAction, &QAction::triggered, shell,
@@ -2911,7 +3172,8 @@ int run(QApplication& app)
                              shell->openMenu();
                      });
 
-    QTimer::singleShot(0, shell, [shell] { shell->openMenu(); });
+    if (!arguments.contains(QStringLiteral("--background")))
+        QTimer::singleShot(0, shell, [shell] { shell->openMenu(); });
 
     return app.exec();
 }

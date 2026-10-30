@@ -153,14 +153,9 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
 
     let shutter_hbox = GtkBox::new(Orientation::Horizontal, 12);
     shutter_hbox.set_hexpand(true);
+    shutter_hbox.set_valign(Align::Center);
     let shutter_title = Label::new(Some(&t("Shutter sound")));
-    shutter_title.add_css_class("settings-sub-option");
     shutter_title.set_xalign(0.0);
-    shutter_title.set_hexpand(true);
-    shutter_hbox.append(&shutter_title);
-    shutter_hbox.append(shutter_sound_input.widget());
-    sounds_frame.append(&build_row!(&shutter_hbox, true));
-
     let sound_help_text = if custom_shutter_sound {
         t("Played once, when the capture freezes. Saving or cropping stays silent.")
     } else {
@@ -171,10 +166,14 @@ pub fn build_general_section(config: &AppConfig) -> GeneralSettingsWidgets {
     sound_help.set_wrap(true);
     sound_help.set_xalign(0.0);
     sound_help.set_hexpand(true);
-    let sound_help_hbox = GtkBox::new(Orientation::Horizontal, 12);
-    sound_help_hbox.set_hexpand(true);
-    sound_help_hbox.append(&sound_help);
-    sounds_frame.append(&build_row!(&sound_help_hbox, true));
+    let shutter_text = GtkBox::new(Orientation::Vertical, 4);
+    shutter_text.set_hexpand(true);
+    shutter_text.set_valign(Align::Center);
+    shutter_text.append(&shutter_title);
+    shutter_text.append(&sound_help);
+    shutter_hbox.append(&shutter_text);
+    shutter_hbox.append(shutter_sound_input.widget());
+    sounds_frame.append(&build_row!(&shutter_hbox, true));
     section.append(&sounds_frame);
 
     // --- System Tray Group ---
