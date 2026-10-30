@@ -17,6 +17,9 @@
 /// public seam.
 namespace Platform::Win {
 
+/// Paint a cursor in desktop coordinates onto a captured frame.
+void drawCaptureCursor(HDC target, const QRect& frame, HCURSOR cursor, const QPoint& position);
+
 /// Window frame as the user sees it. GetWindowRect includes the invisible
 /// resize border, which makes window screenshots a few pixels too large.
 inline QRect visibleFrame(HWND hwnd)

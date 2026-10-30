@@ -5,6 +5,7 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QGuiApplication>
+#include <QMouseEvent>
 #include <QScreen>
 
 #include <cstdio>
@@ -14,6 +15,50 @@ class CaptureModeToolbarTests
 public:
     static bool run()
     {
+        CaptureModeToolbar::DeviceDefaults timerDefaults;
+        timerDefaults.screenshotTimerSeconds = 1;
+        timerDefaults.timedSelection = true;
+        const auto click = [](CaptureModeToolbar& bar, int index) {
+            QMouseEvent event(QEvent::MouseButtonPress, bar.itemRect(index).center(),
+                              Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+            bar.mousePressEvent(&event);
+        };
+        CaptureModeToolbar area(QGuiApplication::primaryScreen(), false, true, true, true,
+                                timerDefaults);
+        if (area.m_timerSeconds != 1)
+            return false;
+        click(area, 4);
+        if (!area.m_finished || area.m_action != CaptureModeToolbar::Action::Area)
+            return false;
+
+        CaptureModeToolbar window(QGuiApplication::primaryScreen(), false, true, true, true,
+                                  timerDefaults);
+        click(window, 3);
+        if (!window.m_finished || window.m_action != CaptureModeToolbar::Action::Window)
+            return false;
+
+        CaptureModeToolbar modes(QGuiApplication::primaryScreen(), false, true, true, true,
+                                 timerDefaults);
+        click(modes, 1);
+        click(modes, 0);
+        if (modes.m_recording || modes.m_timerSeconds != 1)
+            return false;
+        click(modes, 6);
+        if (modes.m_timerSeconds != 3)
+            return false;
+        click(modes, 6);
+        click(modes, 6);
+        click(modes, 6);
+        if (modes.m_timerSeconds != 0)
+            return false;
+
+        timerDefaults.timedSelection = false;
+        CaptureModeToolbar legacy(QGuiApplication::primaryScreen(), false, true, false, false,
+                                  timerDefaults);
+        click(legacy, 4);
+        if (legacy.m_finished)
+            return false;
+
         CaptureModeToolbar::DeviceDefaults defaults;
         CaptureModeToolbar toolbar(QGuiApplication::primaryScreen(), false, true, true, true,
                                    defaults);

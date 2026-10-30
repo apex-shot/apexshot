@@ -125,54 +125,68 @@ bool runProbe(const QStringList& arguments, QString* out, QString* error)
     return true;
 }
 
-/// A hardware H.264 encoder this machine can open, or an empty string for
-/// libx264. Encoding the desktop and the camera in software keeps two cores
-/// busy for the whole recording, which is enough to make everything else on a
-/// laptop stutter; the integrated GPU encodes the same picture for a fraction
-/// of that.
-QString hardwareVideoEncoder()
+void appendHardwareEncoder(QStringList& args, const QString& hardware, int quality)
 {
-    static const QString encoder = [] {
-        for (const QString& candidate :
-             {QStringLiteral("h264_qsv"), QStringLiteral("h264_nvenc")}) {
-            QString output;
-            QString error;
-            if (runProbe({QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
-                          QStringLiteral("error"), QStringLiteral("-f"),
-                          QStringLiteral("lavfi"), QStringLiteral("-i"),
-                          QStringLiteral("color=size=1280x720:rate=30"),
-                          QStringLiteral("-frames:v"), QStringLiteral("3"),
-                          QStringLiteral("-c:v"), candidate, QStringLiteral("-f"),
-                          QStringLiteral("null"), QStringLiteral("-")},
-                         &output,
-                         &error)) {
-                recordingLog(QStringLiteral("encoder: %1").arg(candidate));
-                return candidate;
-            }
-        }
-        recordingLog(QStringLiteral("encoder: libx264 (no hardware encoder answered)"));
-        return QString();
-    }();
-    return encoder;
-}
-
-/// Append a video encoder chosen for this machine. `quality` is the CRF for
-/// libx264 and the equivalent constant-quality value for a hardware encoder.
-void appendVideoEncoder(QStringList& args, int quality)
-{
-    const QString hardware = hardwareVideoEncoder();
     if (hardware == QLatin1String("h264_qsv")) {
         args << QStringLiteral("-c:v") << hardware << QStringLiteral("-global_quality")
              << QString::number(quality) << QStringLiteral("-preset")
              << QStringLiteral("veryfast") << QStringLiteral("-pix_fmt")
              << QStringLiteral("nv12");
-        return;
-    }
-    if (hardware == QLatin1String("h264_nvenc")) {
+    } else {
         args << QStringLiteral("-c:v") << hardware << QStringLiteral("-rc")
              << QStringLiteral("vbr") << QStringLiteral("-cq") << QString::number(quality)
+             << QStringLiteral("-b:v") << QStringLiteral("0")
              << QStringLiteral("-preset") << QStringLiteral("p5")
              << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p");
+    }
+}
+
+/// A hardware H.264 encoder this machine can open, or an empty string for
+/// libx264. Encoding the desktop and the camera in software keeps two cores
+/// busy for the whole recording, which is enough to make everything else on a
+/// laptop stutter; the integrated GPU encodes the same picture for a fraction
+/// of that.
+QString hardwareVideoEncoder(const QSize& size, int fps)
+{
+    static QHash<QString, QString> encoders;
+    const QString key = QStringLiteral("%1x%2@%3").arg(size.width()).arg(size.height()).arg(fps);
+    if (encoders.contains(key))
+        return encoders.value(key);
+
+    const QString encoder = [&] {
+        for (const QString& candidate :
+             {QStringLiteral("h264_qsv"), QStringLiteral("h264_nvenc")}) {
+            QString output;
+            QString error;
+            QStringList args{QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
+                             QStringLiteral("error"), QStringLiteral("-f"),
+                             QStringLiteral("lavfi"), QStringLiteral("-i"),
+                             QStringLiteral("color=size=%1x%2:rate=%3")
+                                 .arg(size.width()).arg(size.height()).arg(fps),
+                             QStringLiteral("-frames:v"), QStringLiteral("3")};
+            appendHardwareEncoder(args, candidate, 20);
+            args << QStringLiteral("-bf") << QStringLiteral("2")
+                 << QStringLiteral("-f") << QStringLiteral("null") << QStringLiteral("-");
+            if (runProbe(args, &output, &error)) {
+                recordingLog(QStringLiteral("encoder: %1 for %2").arg(candidate, key));
+                return candidate;
+            }
+        }
+        recordingLog(QStringLiteral("encoder: libx264 for %1 (no hardware encoder answered)")
+                         .arg(key));
+        return QString();
+    }();
+    encoders.insert(key, encoder);
+    return encoder;
+}
+
+/// Append a video encoder chosen for this machine. `quality` is the CRF for
+/// libx264 and the equivalent constant-quality value for a hardware encoder.
+void appendVideoEncoder(QStringList& args, int quality, const QSize& size, int fps)
+{
+    const QString hardware = hardwareVideoEncoder(size, fps);
+    if (!hardware.isEmpty()) {
+        appendHardwareEncoder(args, hardware, quality);
         return;
     }
     args << QStringLiteral("-c:v") << QStringLiteral("libx264") << QStringLiteral("-preset")
@@ -584,9 +598,8 @@ QStringList RecordingSession::Private::buildScreenArguments(const QString& segme
          << QStringLiteral("error") << QStringLiteral("-nostats");
 
     const int fps = request.fps > 0 ? request.fps : 30;
-    // A large demux queue keeps the desktop from waiting on a slow audio
-    // input; the camera lives in its own process so it cannot stall this one.
-    args << QStringLiteral("-thread_queue_size") << QStringLiteral("1024")
+    // Raw 4K frames are roughly 32 MiB each, so bounding this queue matters.
+    args << QStringLiteral("-thread_queue_size") << QStringLiteral("8")
          << QStringLiteral("-f") << QStringLiteral("gdigrab") << QStringLiteral("-framerate")
          << QString::number(fps) << QStringLiteral("-draw_mouse")
          << (request.includeCursor ? QStringLiteral("1") : QStringLiteral("0"))
@@ -596,29 +609,23 @@ QStringList RecordingSession::Private::buildScreenArguments(const QString& segme
          << QStringLiteral("%1x%2").arg(request.region.width()).arg(request.region.height())
          << QStringLiteral("-i") << QStringLiteral("desktop");
 
-    QString scale = QStringLiteral("scale=trunc(iw/2)*2:trunc(ih/2)*2");
-    if (request.maxWidth > 0 && request.maxHeight > 0) {
-        scale = QStringLiteral(
-                    "scale=w='min(iw,%1)':h='min(ih,%2)':force_original_aspect_ratio=decrease,"
-                    "scale=trunc(iw/2)*2:trunc(ih/2)*2")
-                    .arg(request.maxWidth)
-                    .arg(request.maxHeight);
-    }
+    const QSize outputSize =
+        recordingOutputSize(request.region.size(),
+                            QSize(request.maxWidth, request.maxHeight),
+                            request.displayScale);
+    const QString scale = recordingScaleFilter(outputSize);
     args << QStringLiteral("-map") << QStringLiteral("0:v") << QStringLiteral("-vf") << scale;
 
     const int crfBase = request.crf > 0 ? request.crf : 20;
     // Same resolution compensation as the Linux encoder: smaller outputs get a
     // lower CRF so they do not turn to mush. The source size is the capture
     // region; the maximum is already enforced by the scale filter above.
-    const QSize outputSize =
-        fitWithinMaxResolution(QSize(request.region.width(), request.region.height()),
-                               QSize(request.maxWidth, request.maxHeight));
     const int reduction =
         !outputSize.isEmpty()
             ? recordingCrfResolutionReduction(outputSize.width(), outputSize.height())
             : 0;
     const int crf = std::max(1, crfBase - reduction);
-    appendVideoEncoder(args, crf);
+    appendVideoEncoder(args, crf, outputSize, fps);
     args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-bf")
          << QStringLiteral("2") << QStringLiteral("-r") << QString::number(fps);
 
@@ -668,7 +675,10 @@ QStringList RecordingSession::Private::buildWebcamArguments(
                        "scale=trunc(iw/2)*2:trunc(ih/2)*2");
     args << QStringLiteral("-map") << QStringLiteral("0:v") << QStringLiteral("-an")
          << QStringLiteral("-vf") << trackScale;
-    appendVideoEncoder(args, 18);
+    const QSize trackSize = webcamCaptureSize.isEmpty()
+        ? QSize(1920, 1080)
+        : recordingOutputSize(webcamCaptureSize, QSize(1920, 1080));
+    appendVideoEncoder(args, 18, trackSize, fps);
     args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-r")
          << QString::number(fps) << webcamSegmentPath;
 
@@ -1346,7 +1356,7 @@ void RecordingSession::Private::compositeWebcam(
     // The composite is what the saved video shows, and it is the second
     // generation of the screen capture, so it gets more bits than the segment
     // that came before it.
-    appendVideoEncoder(compositeArgs, 16);
+    appendVideoEncoder(compositeArgs, 16, videoSize, request.fps > 0 ? request.fps : 30);
     compositeArgs << QStringLiteral("-c:a") << QStringLiteral("copy")
                   << QStringLiteral("-movflags") << QStringLiteral("+faststart")
                   << compositePath;
@@ -1632,8 +1642,8 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         return false;
     }
 
-    if (request.target != RecordingRequest::Target::Window && request.region.isEmpty()) {
-        error = QStringLiteral("The recording area is empty.");
+    if (request.region.width() < 2 || request.region.height() < 2) {
+        error = QStringLiteral("The recording area must be at least 2 by 2 pixels.");
         return false;
     }
 

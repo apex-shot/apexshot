@@ -3928,3 +3928,59 @@ msgstr "из {limit} загрузок в месяц"
 
 msgid "{percent}% used"
 msgstr "Использовано {percent}%"
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr ""
+"Не удалось приостановить прослушивание сочетаний клавиш. Закройте это окно и повторите попытку."
+
+msgid "Disabled"
+msgstr "Отключено"
+
+msgid "Off by default. Turning this on sends anonymous usage statistics."
+msgstr ""
+"По умолчанию выключено. При включении отправляется анонимная статистика использования."
+
+msgid ""
+"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
+msgstr ""
+"Необязательный ежедневный сигнал: версия приложения, Windows и счётчики функций. Без снимков, путей и текста OCR. Переопределяется через APEXSHOT_TELEMETRY=0."
+
+msgid "Requires the corresponding Windows OCR language pack."
+msgstr "Требуется соответствующий языковой пакет OCR для Windows."
+
+msgid "Shortcuts work while the ApexShot background shell is running."
+msgstr "Сочетания клавиш работают, пока работает фоновая оболочка ApexShot."
+
+msgid ""
+"The Windows shell uses its tray icon to open capture, Settings, and Quit."
+msgstr ""
+"Оболочка Windows открывает съёмку, настройки и выход через значок в лотке."
+
+msgid "The capture shell currently uses its own dark appearance."
+msgstr "Оболочка съёмки сейчас использует собственное тёмное оформление."
+
+msgid "The capture toolbar can change the timer for an individual screenshot."
+msgstr "Панель захвата может менять таймер для отдельного снимка."
+
+msgid "This action requires the Windows image editor or overlay backend."
+msgstr ""
+"Для этого действия нужен редактор изображений или оверлей-бэкенд Windows."
+
+msgid "Use your configured shortcuts while ApexShot runs in the background."
+msgstr "Используйте настроенные сочетания клавиш, пока ApexShot работает в фоне."
+
+msgid "When hidden, stop the recording from the tray or with its shortcut."
+msgstr "В скрытом виде остановите запись из лотка или сочетанием клавиш."
+
+msgid ""
+"When off, output uses the capture's display scale before applying the maximum resolution."
+msgstr ""
+"Когда выключено, вывод использует масштаб экрана съёмки перед применением максимального разрешения."
+
+msgid ""
+"When off, recordings remain in the temporary folder for the result card and editor."
+msgstr ""
+"Когда выключено, записи остаются во временной папке для карточки результата и редактора."

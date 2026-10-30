@@ -12,6 +12,7 @@
 #include <QMimeData>
 #include <QStandardPaths>
 #include <QUrl>
+#include <QUuid>
 
 #include <algorithm>
 #include <cmath>
@@ -236,6 +237,13 @@ ShellSettings loadShellSettings()
     out.general.shutterSound =
         general.value(QStringLiteral("shutter_sound")).toString(out.general.shutterSound);
 
+    const QJsonObject shortcuts = root.value(QStringLiteral("shortcuts")).toObject();
+    for (auto it = out.shortcuts.begin(); it != out.shortcuts.end(); ++it) {
+        const QJsonValue value = shortcuts.value(it.key());
+        if (value.isString())
+            it.value() = value.toString();
+    }
+
     const QJsonObject shots = root.value(QStringLiteral("screenshots")).toObject();
     out.screenshots.exportLocation =
         shots.value(QStringLiteral("export_location")).toString().trimmed();
@@ -260,6 +268,10 @@ ShellSettings loadShellSettings()
     const QJsonObject recording = root.value(QStringLiteral("recording")).toObject();
     out.recording.showCountdown =
         recording.value(QStringLiteral("show_countdown")).toBool(out.recording.showCountdown);
+    out.recording.showControls =
+        recording.value(QStringLiteral("show_controls")).toBool(out.recording.showControls);
+    out.recording.highDpi =
+        recording.value(QStringLiteral("high_dpi")).toBool(out.recording.highDpi);
     out.recording.exportLocation =
         recording.value(QStringLiteral("export_location")).toString().trimmed();
     out.recording.filenamePattern =
@@ -282,6 +294,13 @@ ShellSettings loadShellSettings()
         recording.value(QStringLiteral("show_cursor")).toBool(out.recording.showCursor);
     out.recording.afterShowResult =
         recording.value(QStringLiteral("after_show_result")).toBool(out.recording.afterShowResult);
+    out.recording.afterCopyToClipboard =
+        recording.value(QStringLiteral("after_copy_to_clipboard"))
+            .toBool(out.recording.afterCopyToClipboard);
+    out.recording.afterSave =
+        recording.value(QStringLiteral("after_save")).toBool(out.recording.afterSave);
+    out.recording.afterOpenEditor =
+        recording.value(QStringLiteral("after_open_editor")).toBool(out.recording.afterOpenEditor);
 
     const QJsonObject webcam = recording.value(QStringLiteral("webcam")).toObject();
     out.recording.webcam.enabled =
@@ -315,6 +334,8 @@ ShellSettings loadShellSettings()
     out.ocr.language = ocr.value(QStringLiteral("language")).toString(out.ocr.language).trimmed();
     out.ocr.keepLineBreaks =
         ocr.value(QStringLiteral("keep_line_breaks")).toBool(out.ocr.keepLineBreaks);
+    out.telemetryEnabled = root.value(QStringLiteral("telemetry")).toObject()
+                               .value(QStringLiteral("enabled")).toBool(false);
 
     // --- sanitize ---
     out.screenshots.format = normalizedFormat(out.screenshots.format);
@@ -373,15 +394,18 @@ QString shellRecordingOutputPath(const ShellSettings& settings, const QDateTime&
     name.replace(QLatin1Char('/'), QLatin1Char('-'));
     name.replace(QLatin1Char('\\'), QLatin1Char('-'));
 
-    return QDir(shellRecordingOutputDir(settings)).filePath(name + QStringLiteral(".mp4"));
+    return uniquePath(shellRecordingOutputDir(settings), name + QStringLiteral(".mp4"));
 }
 
-void copyCaptureToClipboard(const QImage& image, const QString& filePath, const QString& mode)
+QString shellTemporaryRecordingOutputPath()
+{
+    const QString name = QUuid::createUuid().toString(QUuid::WithoutBraces) + QStringLiteral(".mp4");
+    return QDir(QDir::tempPath()).filePath(QStringLiteral("ApexShot/") + name);
+}
+
+QMimeData* captureClipboardData(const QImage& image, const QString& filePath, const QString& mode)
 {
     const QString normalized = normalizedClipboardMode(mode);
-    if (image.isNull() && filePath.isEmpty())
-        return;
-
     auto* mime = new QMimeData;
 
     if (normalized != QLatin1String("File Path Only") && !image.isNull())
@@ -390,10 +414,17 @@ void copyCaptureToClipboard(const QImage& image, const QString& filePath, const 
     if (normalized != QLatin1String("Image Only") && !filePath.isEmpty())
         mime->setUrls({QUrl::fromLocalFile(filePath)});
 
-    if (!mime->hasImage() && !mime->hasUrls())
-        mime->setImageData(image);
+    if (!mime->hasImage() && !mime->hasUrls()) {
+        delete mime;
+        return nullptr;
+    }
+    return mime;
+}
 
-    QGuiApplication::clipboard()->setMimeData(mime);
+void copyCaptureToClipboard(const QImage& image, const QString& filePath, const QString& mode)
+{
+    if (QMimeData* mime = captureClipboardData(image, filePath, mode))
+        QGuiApplication::clipboard()->setMimeData(mime);
 }
 
 bool saveScreenshotImage(const QImage& image,
@@ -432,13 +463,11 @@ bool saveScreenshotImage(const QImage& image,
         return false;
     }
 
-    QString format = normalizedFormat(settings.screenshots.format);
+    const QString format = normalizedFormat(settings.screenshots.format);
     const QList<QByteArray> supported = QImageWriter::supportedImageFormats();
     if (!supported.contains(format.toLower().toLatin1())) {
-        format = QStringLiteral("PNG");
-        path = uniquePath(
-            targetDir,
-            QFileInfo(path).completeBaseName() + QStringLiteral(".png"));
+        outError = QStringLiteral("%1 encoding is not available on this installation").arg(format);
+        return false;
     }
 
     QImageWriter writer(path, format.toLatin1());

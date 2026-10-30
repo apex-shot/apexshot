@@ -4,7 +4,10 @@
 
 #include <QDateTime>
 #include <QImage>
+#include <QMap>
 #include <QString>
+
+class QMimeData;
 
 /// Settings shared between the Rust settings window and the C++ shell.
 ///
@@ -23,6 +26,18 @@ struct ShellSettings {
         bool playSounds = true;
         QString shutterSound = QStringLiteral("Camera");
     } general;
+
+    QMap<QString, QString> shortcuts = {
+        {QStringLiteral("quick_capture"), QStringLiteral("Ctrl+Alt+Shift+M")},
+        {QStringLiteral("capture_area"), QStringLiteral("Ctrl+Alt+Shift+A")},
+        {QStringLiteral("capture_crosshair"), QStringLiteral("Ctrl+Alt+X")},
+        {QStringLiteral("capture_previous_area"), QString()},
+        {QStringLiteral("capture_fullscreen"), QStringLiteral("Ctrl+Alt+Shift+F")},
+        {QStringLiteral("show_last_preview"), QStringLiteral("Ctrl+Alt+P")},
+        {QStringLiteral("save_last_capture"), QString()},
+        {QStringLiteral("record_screen"), QString()},
+        {QStringLiteral("recording_stop_save"), QStringLiteral("Ctrl+Alt+Shift+S")},
+    };
 
     struct Screenshots {
         /// Empty means the user's Pictures folder.
@@ -54,6 +69,8 @@ struct ShellSettings {
 
     struct Recording {
         bool showCountdown = true;
+        bool showControls = true;
+        bool highDpi = true;
         QString exportLocation;
         QString filenamePattern;
         RecordingSettings values;
@@ -61,6 +78,9 @@ struct ShellSettings {
         bool includeSpeaker = false;
         bool showCursor = true;
         bool afterShowResult = true;
+        bool afterCopyToClipboard = false;
+        bool afterSave = true;
+        bool afterOpenEditor = false;
         Webcam webcam;
     } recording;
 
@@ -76,6 +96,8 @@ struct ShellSettings {
         QString language = QStringLiteral("eng");
         bool keepLineBreaks = true;
     } ocr;
+
+    bool telemetryEnabled = false;
 };
 
 /// The device choices the window-recording surface remembers between runs.
@@ -133,6 +155,12 @@ QString shellRecordingOutputDir(const ShellSettings& settings);
 
 /// Expand `{Date}` and `{Time}` in the filename pattern and join the folder.
 QString shellRecordingOutputPath(const ShellSettings& settings, const QDateTime& now);
+
+/// A temporary recording is still available to the result card and editor.
+QString shellTemporaryRecordingOutputPath();
+
+/// Build the requested clipboard formats; the caller owns the returned data.
+QMimeData* captureClipboardData(const QImage& image, const QString& filePath, const QString& mode);
 
 /// Clipboard behaviour matching the Linux setting values.
 void copyCaptureToClipboard(const QImage& image, const QString& filePath, const QString& mode);

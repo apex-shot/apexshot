@@ -203,7 +203,7 @@ pub fn build_recording_section(config: &AppConfig) -> RecordingSettingsWidgets {
     let rec_video_max_res = SettingsSelect::new(
         [
             ("0", t("Original")),
-            ("6", t("2160p")),
+            ("6", t("2160p (4K)")),
             ("3", t("1440p")),
             ("1", t("1080p")),
             ("4", t("900p")),

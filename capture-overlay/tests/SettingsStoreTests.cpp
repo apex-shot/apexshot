@@ -9,10 +9,13 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
+#include <QMimeData>
 #include <QTemporaryDir>
 #include <QTime>
+#include <QUrl>
 
 #include <cstdio>
+#include <memory>
 
 namespace {
 
@@ -53,17 +56,28 @@ void checkDefaults(const QTemporaryDir& dir)
     CHECK(settings.screenshots.format == QStringLiteral("PNG"));
     CHECK(settings.general.playSounds);
     CHECK(settings.general.shutterSound == QStringLiteral("Camera"));
+    CHECK(!settings.general.startAtLogin);
+    CHECK(settings.general.showTrayIcon);
+    CHECK(settings.general.theme == QStringLiteral("system"));
+    CHECK(settings.general.language == QStringLiteral("system"));
+    CHECK(settings.shortcuts.value(QStringLiteral("quick_capture")) == QStringLiteral("Ctrl+Alt+Shift+M"));
+    CHECK(settings.shortcuts.value(QStringLiteral("record_screen")).isEmpty());
     CHECK(settings.screenshots.showCursor);
     CHECK(settings.screenshots.afterShowResult);
     CHECK(!settings.screenshots.afterCopyToClipboard);
     CHECK(settings.screenshots.afterSave);
     CHECK(settings.recording.showCountdown);
+    CHECK(settings.recording.showControls);
+    CHECK(settings.recording.highDpi);
     CHECK(settings.recording.values.fpsIndex == 1);
     CHECK(settings.recording.values.maxResolutionIndex == 0);
     CHECK(settings.recording.values.qualityIndex == 1);
     CHECK(!settings.recording.values.monoAudio);
     CHECK(!settings.recording.includeMicrophone);
     CHECK(settings.recording.showCursor);
+    CHECK(!settings.recording.afterCopyToClipboard);
+    CHECK(settings.recording.afterSave);
+    CHECK(!settings.recording.afterOpenEditor);
     CHECK(!settings.recording.webcam.enabled);
     CHECK(settings.recording.webcam.device.isEmpty());
     CHECK(settings.recording.webcam.sizeIndex == 1);
@@ -83,7 +97,11 @@ void checkParsing(const QTemporaryDir& dir)
 {
     writeSettings(dir,
                   R"({
-  "general": { "play_sounds": false, "shutter_sound": "Classic" },
+  "general": { "start_at_login": true, "show_tray_icon": false,
+               "theme": "dark", "language": "fr",
+               "play_sounds": false, "shutter_sound": "Classic" },
+  "shortcuts": { "quick_capture": "Ctrl+Alt+M", "capture_area": "",
+                 "record_screen": "Ctrl+Alt+R" },
   "screenshots": {
     "export_location": " C:/Users/me/Pictures/Shots ",
     "format": "WebP",
@@ -97,6 +115,8 @@ void checkParsing(const QTemporaryDir& dir)
   },
   "recording": {
     "show_countdown": false,
+    "show_controls": false,
+    "high_dpi": false,
     "export_location": "C:/Videos/Clips",
     "filename_pattern": "Take {Date} {Time}",
     "fps_index": 3,
@@ -107,6 +127,9 @@ void checkParsing(const QTemporaryDir& dir)
     "include_speaker": true,
     "show_cursor": false,
     "after_show_result": false,
+    "after_copy_to_clipboard": true,
+    "after_save": false,
+    "after_open_editor": true,
     "webcam": {
       "enabled": true,
       "device": " Integrated Camera ",
@@ -134,6 +157,14 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(settings.screenshots.format == QStringLiteral("WebP"));
     CHECK(!settings.general.playSounds);
     CHECK(settings.general.shutterSound == QStringLiteral("Classic"));
+    CHECK(settings.general.startAtLogin);
+    CHECK(!settings.general.showTrayIcon);
+    CHECK(settings.general.theme == QStringLiteral("dark"));
+    CHECK(settings.general.language == QStringLiteral("fr"));
+    CHECK(settings.shortcuts.value(QStringLiteral("quick_capture")) == QStringLiteral("Ctrl+Alt+M"));
+    CHECK(settings.shortcuts.value(QStringLiteral("capture_area")).isEmpty());
+    CHECK(settings.shortcuts.value(QStringLiteral("record_screen")) == QStringLiteral("Ctrl+Alt+R"));
+    CHECK(settings.shortcuts.value(QStringLiteral("capture_fullscreen")) == QStringLiteral("Ctrl+Alt+Shift+F"));
     CHECK(settings.screenshots.clipboardMode == QStringLiteral("Image Only"));
     CHECK(settings.screenshots.timerInterval == 5);
     CHECK(!settings.screenshots.showCursor);
@@ -142,6 +173,8 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(!settings.screenshots.afterSave);
     CHECK(settings.screenshots.highDpiSuffix);
     CHECK(!settings.recording.showCountdown);
+    CHECK(!settings.recording.showControls);
+    CHECK(!settings.recording.highDpi);
     CHECK(settings.recording.values.fpsIndex == 3);
     CHECK(settings.recording.values.maxResolutionIndex == 2);
     CHECK(settings.recording.values.qualityIndex == 0);
@@ -150,6 +183,9 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(settings.recording.includeSpeaker);
     CHECK(!settings.recording.showCursor);
     CHECK(!settings.recording.afterShowResult);
+    CHECK(settings.recording.afterCopyToClipboard);
+    CHECK(!settings.recording.afterSave);
+    CHECK(settings.recording.afterOpenEditor);
     CHECK(settings.recording.webcam.enabled);
     CHECK(settings.recording.webcam.device == QStringLiteral("Integrated Camera"));
     CHECK(settings.recording.webcam.sizeIndex == 3);
@@ -208,6 +244,19 @@ void checkPaths(const QTemporaryDir& dir)
     const QDateTime when(QDate(2026, 10, 22), QTime(23, 45, 6));
     CHECK(Platform::shellRecordingOutputPath(settings, when)
           == QStringLiteral("C:/videos/Clip 2026-10-22 23-45-06.mp4"));
+    settings.recording.exportLocation = dir.path();
+    const QString first = Platform::shellRecordingOutputPath(settings, when);
+    QFile existing(first);
+    CHECK(existing.open(QIODevice::WriteOnly));
+    existing.close();
+    const QString next = Platform::shellRecordingOutputPath(settings, when);
+    CHECK(next != first);
+    CHECK(next.endsWith(QStringLiteral(" (2).mp4")));
+    const QString temporary = Platform::shellTemporaryRecordingOutputPath();
+    CHECK(QFileInfo(temporary).absolutePath()
+          == QDir(QDir::tempPath()).filePath(QStringLiteral("ApexShot")));
+    CHECK(temporary.endsWith(QStringLiteral(".mp4")));
+    CHECK(temporary != Platform::shellTemporaryRecordingOutputPath());
 }
 
 void checkRecordingDeviceChoices(const QTemporaryDir& dir)
@@ -253,6 +302,62 @@ void checkSaving(const QTemporaryDir& dir)
     CHECK(QFileInfo::exists(path));
     CHECK(QFileInfo(path).suffix() == QStringLiteral("png"));
     CHECK(QFileInfo(path).fileName().contains(QStringLiteral("@2x")));
+    const QString originalPath = path;
+
+    settings.screenshots.highDpiSuffix = false;
+    CHECK(Platform::saveScreenshotImage(image, settings, folder, 2.0, path, error));
+    CHECK(!QFileInfo(path).fileName().contains(QStringLiteral("@2x")));
+    settings.screenshots.highDpiSuffix = true;
+    CHECK(Platform::saveScreenshotImage(image, settings, folder, 1.0, path, error));
+    CHECK(!QFileInfo(path).fileName().contains(QStringLiteral("@2x")));
+
+    CHECK(Platform::saveScreenshotImage(image, settings, folder, 2.0, path, error));
+    CHECK(path != originalPath);
+    CHECK(QFileInfo::exists(originalPath));
+
+    for (const auto& entry : {qMakePair(QStringLiteral("JPEG"), QStringLiteral("jpg")),
+                              qMakePair(QStringLiteral("WebP"), QStringLiteral("webp"))}) {
+        settings.screenshots.format = entry.first;
+        CHECK(Platform::saveScreenshotImage(image, settings, folder, 1.0, path, error));
+        CHECK(QFileInfo(path).suffix() == entry.second);
+        const QImage restored(path);
+        CHECK(!restored.isNull());
+        CHECK(restored.size() == image.size());
+    }
+
+    QFile nonDirectory(QDir(dir.path()).filePath(QStringLiteral("not-a-folder")));
+    CHECK(nonDirectory.open(QIODevice::WriteOnly));
+    nonDirectory.close();
+    CHECK(!Platform::saveScreenshotImage(image, settings,
+                                          nonDirectory.fileName() + QStringLiteral("/child"),
+                                          1.0, path, error));
+    CHECK(path.isEmpty());
+    CHECK(!error.isEmpty());
+}
+
+void checkClipboardData()
+{
+    QImage image(4, 4, QImage::Format_RGB32);
+    image.fill(Qt::red);
+    const QString path = QStringLiteral("C:/shots/capture.png");
+    const auto create = [&](const QString& mode, const QString& file = QString()) {
+        return std::unique_ptr<QMimeData>(Platform::captureClipboardData(
+            image, file.isNull() ? path : file, mode));
+    };
+
+    auto both = create(QStringLiteral("File & Image (default)"));
+    CHECK(both && both->hasImage() && both->hasUrls());
+    CHECK(both && !both->urls().isEmpty() && both->urls().first() == QUrl::fromLocalFile(path));
+    auto imageOnly = create(QStringLiteral("Image Only"));
+    CHECK(imageOnly && imageOnly->hasImage() && !imageOnly->hasUrls());
+    auto fileOnly = create(QStringLiteral("File Path Only"));
+    CHECK(fileOnly && !fileOnly->hasImage() && fileOnly->hasUrls());
+    auto fallback = create(QStringLiteral("unknown"));
+    CHECK(fallback && fallback->hasImage() && fallback->hasUrls());
+    auto missingFile = create(QStringLiteral("File Path Only"), QStringLiteral(""));
+    CHECK(!missingFile);
+    auto missingBoth = create(QStringLiteral("File & Image (default)"), QStringLiteral(""));
+    CHECK(missingBoth && missingBoth->hasImage() && !missingBoth->hasUrls());
 }
 
 }  // namespace
@@ -275,6 +380,7 @@ int main(int argc, char** argv)
     checkPaths(dir);
     checkRecordingDeviceChoices(dir);
     checkSaving(dir);
+    checkClipboardData();
 
     if (failures != 0) {
         std::printf("%d settings-store check(s) failed\n", failures);

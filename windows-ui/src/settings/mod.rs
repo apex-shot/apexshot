@@ -34,6 +34,7 @@ mod select;
 pub(crate) mod shell;
 #[path = "../../../src/settings/shortcuts.rs"]
 mod shortcuts;
+mod shortcuts_status;
 #[path = "../../../src/settings/studio.rs"]
 mod studio;
 mod switches;
@@ -172,6 +173,9 @@ fn build_settings_window(app: &Application) {
     shell::install_css();
 
     let config = load_config().sanitized();
+    if let Err(error) = actions::sync_shell_settings_on_start() {
+        eprintln!("[settings] Could not synchronize the capture shell: {error:#}");
+    }
     i18n::apply_gtk_direction(&config.ui_language);
     let prefers_dark = prefers_dark_glass_theme();
     let reduced_transparency = prefers_reduced_transparency();
@@ -337,6 +341,15 @@ fn build_settings_window(app: &Application) {
     windowing::install_window_drag(&sidebar_head, &window);
 
     let general = build_general_section(&config);
+    match windowing::autostart_entry_exists() {
+        Ok(enabled) => general.start_at_login_check.set_active(enabled),
+        Err(error) => {
+            general.start_at_login_check.set_sensitive(false);
+            general
+                .start_at_login_check
+                .set_tooltip_text(Some(&format!("Could not read Windows startup: {error}")));
+        }
+    }
     let after_capture = build_after_capture_section(&config);
     let recordings = recording::build_recording_section(&config);
     let webcam = webcam::build_webcam_group(&config);
@@ -357,9 +370,18 @@ fn build_settings_window(app: &Application) {
     let cloud = cloud::build_cloud_section(&config);
     let studio = studio::build_studio_section();
 
-    shortcuts.section.prepend(&platform_note(&t(
-        "Global shortcuts are not available in the Windows build yet. Bindings are saved for a future release.",
-    )));
+    shortcuts_status::install(&shortcuts);
+    for button in [
+        &shortcuts.open_file_btn,
+        &shortcuts.open_clipboard_btn,
+        &shortcuts.restore_file_btn,
+        &shortcuts.toggle_overlays_btn,
+    ] {
+        button.set_sensitive(false);
+        button.set_tooltip_text(Some(&t(
+            "This action requires the Windows image editor or overlay backend.",
+        )));
+    }
     annotate.section.prepend(&platform_note(&t(
         "The annotate editor is not available in the Windows build yet. These preferences are saved for a future release.",
     )));
@@ -381,39 +403,38 @@ fn build_settings_window(app: &Application) {
     after_capture.screenshot_after_capture_checks[3].set_tooltip_text(Some(&t(
         "The annotate editor is not available on Windows yet.",
     )));
+    after_capture.rec_save.set_tooltip_text(Some(&t(
+        "When off, recordings remain in the temporary folder for the result card and editor.",
+    )));
+    general.theme_input.widget().set_tooltip_text(Some(&t(
+        "The capture shell currently uses its own dark appearance.",
+    )));
     general.show_icon_check.set_sensitive(false);
     general.show_icon_check.set_tooltip_text(Some(&t(
-        "The Windows shell needs its tray icon until global shortcuts are available.",
+        "The Windows shell uses its tray icon to open capture, Settings, and Quit.",
     )));
     general.ui_language_input.widget().set_sensitive(false);
     general
         .ui_language_input
         .widget()
         .set_tooltip_text(Some(&t("Windows UI translations are not available yet.")));
-    // Nothing in the Windows build reads the self-timer yet: timed captures
-    // come from the capture menu's own per-shot choice.
-    screenshots.timer_interval_input.set_sensitive(false);
-    screenshots.timer_interval_input.widget().set_tooltip_text(Some(&t(
-        "Timed capture is not wired into the Windows build yet. The interval is saved for a future release.",
+    screenshots
+        .timer_interval_input
+        .widget()
+        .set_tooltip_text(Some(&t(
+            "The capture toolbar can change the timer for an individual screenshot.",
+        )));
+    recordings.rec_controls.set_tooltip_text(Some(&t(
+        "When hidden, stop the recording from the tray or with its shortcut.",
     )));
-    recordings.rec_controls.set_sensitive(false);
-    recordings
-        .rec_controls
-        .set_tooltip_text(Some(&t("The Windows recorder always shows its controls.")));
-    recordings.rec_hidpi.set_sensitive(false);
     recordings.rec_hidpi.set_tooltip_text(Some(&t(
-        "The Windows recorder always captures at native display resolution.",
+        "When off, output uses the capture's display scale before applying the maximum resolution.",
     )));
+    recordings.rec_notifications.set_active(false);
     recordings.rec_notifications.set_sensitive(false);
     recordings.rec_notifications.set_tooltip_text(Some(&t(
         "Do Not Disturb integration is not available on Windows yet.",
     )));
-    recordings.rec_remember_export_folder.set_sensitive(false);
-    recordings
-        .rec_remember_export_folder
-        .set_tooltip_text(Some(&t(
-            "Video export from the Windows editor is not available yet.",
-        )));
     quick_access.close_after_dragging_check.set_sensitive(false);
     quick_access
         .close_after_dragging_check
@@ -428,9 +449,17 @@ fn build_settings_window(app: &Application) {
         .set_tooltip_text(Some(&t(
             "Uploading from the result card is not available on Windows yet.",
         )));
-    advanced.telemetry_enabled_check.set_sensitive(false);
+    advanced
+        .telemetry_enabled_check
+        .set_active(config.windows_telemetry_enabled);
+    advanced.telemetry_hint.set_text(&t(
+        "Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0.",
+    ));
     advanced.telemetry_enabled_check.set_tooltip_text(Some(&t(
-        "Usage telemetry is not sent from the Windows build.",
+        "Off by default. Turning this on sends anonymous usage statistics.",
+    )));
+    advanced.ocr_lang_input.widget().set_tooltip_text(Some(&t(
+        "Requires the corresponding Windows OCR language pack.",
     )));
 
     let screenshot_export_location_entry_pick = screenshots.export_location_entry.clone();
@@ -880,6 +909,7 @@ fn install_save_dirty_tracking(inputs: &Rc<SaveInputs>, mark_dirty: Rc<dyn Fn()>
     wire_combo(&inputs.rec_video_fps);
     wire_combo(&inputs.rec_video_quality);
     wire_check(&inputs.rec_video_mono);
+    inputs.webcam.install_dirty_tracking(Rc::clone(&mark_dirty));
     wire_check(&inputs.screenshot_quick_access);
     wire_check(&inputs.screenshot_copy_to_clipboard);
     wire_check(&inputs.screenshot_save);

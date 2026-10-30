@@ -72,6 +72,8 @@ struct RecordingRequest {
     /// Maximum output size. Zero means native resolution.
     int maxWidth = 0;
     int maxHeight = 0;
+    /// Output scale relative to device pixels; 1 keeps native resolution.
+    double displayScale = 1.0;
     /// x264 CRF. 0 falls back to 20.
     int crf = 20;
     /// Record a camera track beside the video. A camera that cannot be opened

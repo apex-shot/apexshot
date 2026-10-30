@@ -12,6 +12,11 @@
 # For 14GB systems with other processes: 4 is a good balance
 jobs = 4
 
+[env]
+# Cap test-runner threads too: `cargo test` otherwise spawns one thread per
+# logical CPU, which can stall a busy machine even when `jobs` is low
+RUST_TEST_THREADS = "4"
+
 [target.x86_64-unknown-linux-gnu]
 # Reduce debug info size for faster builds and less memory
 # "line-tables-only" keeps debug info for backtraces but is much smaller
@@ -20,10 +25,12 @@ rustflags = ["-C", "debuginfo=line-tables-only"]
 [profile.dev]
 # Reduce memory usage during dev builds
 debug = "line-tables-only"
-# Disable incremental compilation to save ~50% target/ space.
+# Incremental is on: it cuts both rebuild time and total CPU spent recompiling,
+# at the cost of a larger target/ dir (roughly 1.5-2x). Reclaim space with
+# `cargo clean` if the disk gets tight.
 # Release is left alone on purpose: forcing incremental on for a release build
 # can produce a link with unresolved drop_in_place symbols out of tokio/zbus.
-incremental = false
+incremental = true
 
 [profile.test]
 # Same memory-friendly settings for test builds

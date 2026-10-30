@@ -91,6 +91,30 @@ QSize fitWithinMaxResolution(const QSize& source, const QSize& max)
     return QSize(std::max(2, outWidth), std::max(2, outHeight));
 }
 
+QSize recordingOutputSize(const QSize& source, const QSize& max, double displayScale)
+{
+    if (source.width() < 2 || source.height() < 2)
+        return QSize();
+
+    double scale = std::isfinite(displayScale) && displayScale > 0.0
+        ? std::min(1.0, displayScale) : 1.0;
+    QSize ceiling = max;
+    if (source.height() > source.width() && ceiling.width() > ceiling.height())
+        ceiling.transpose();
+    if (ceiling.width() > 0 && ceiling.height() > 0) {
+        scale = std::min(scale, static_cast<double>(ceiling.width()) / source.width());
+        scale = std::min(scale, static_cast<double>(ceiling.height()) / source.height());
+    }
+    const int width = std::max(2, static_cast<int>(std::floor(source.width() * scale)) & ~1);
+    const int height = std::max(2, static_cast<int>(std::floor(source.height() * scale)) & ~1);
+    return QSize(width, height);
+}
+
+QString recordingScaleFilter(const QSize& outputSize)
+{
+    return QStringLiteral("scale=%1:%2").arg(outputSize.width()).arg(outputSize.height());
+}
+
 QStringList recordingFpsLabels()
 {
     QStringList labels;

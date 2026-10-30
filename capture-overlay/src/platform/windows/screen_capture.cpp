@@ -4,6 +4,25 @@
 
 #include <QVector>
 
+void Platform::Win::drawCaptureCursor(HDC target,
+                                      const QRect& frame,
+                                      HCURSOR cursor,
+                                      const QPoint& position)
+{
+    if (!target || !cursor)
+        return;
+    ICONINFO icon{};
+    if (!GetIconInfo(cursor, &icon))
+        return;
+    const int x = position.x() - frame.x() - static_cast<int>(icon.xHotspot);
+    const int y = position.y() - frame.y() - static_cast<int>(icon.yHotspot);
+    DrawIconEx(target, x, y, cursor, 0, 0, 0, nullptr, DI_NORMAL);
+    if (icon.hbmMask)
+        DeleteObject(icon.hbmMask);
+    if (icon.hbmColor)
+        DeleteObject(icon.hbmColor);
+}
+
 namespace {
 
 #ifndef PW_RENDERFULLCONTENT
@@ -94,18 +113,8 @@ void drawCursor(HDC target, const QRect& rect)
     if (!GetCursorInfo(&cursor) || !(cursor.flags & CURSOR_SHOWING) || !cursor.hCursor)
         return;
 
-    ICONINFO icon{};
-    if (!GetIconInfo(cursor.hCursor, &icon))
-        return;
-
-    const int x = cursor.ptScreenPos.x - rect.x() - static_cast<int>(icon.xHotspot);
-    const int y = cursor.ptScreenPos.y - rect.y() - static_cast<int>(icon.yHotspot);
-    DrawIconEx(target, x, y, cursor.hCursor, 0, 0, 0, nullptr, DI_NORMAL);
-
-    if (icon.hbmMask)
-        DeleteObject(icon.hbmMask);
-    if (icon.hbmColor)
-        DeleteObject(icon.hbmColor);
+    Platform::Win::drawCaptureCursor(target, rect, cursor.hCursor,
+                                     QPoint(cursor.ptScreenPos.x, cursor.ptScreenPos.y));
 }
 
 bool imageFromBitmap(HDC device, HBITMAP bitmap, const QSize& size, QImage& out, QString& outError)
@@ -299,6 +308,10 @@ bool captureWindowPixels(HWND hwnd,
                 QString ignored;
                 if (imageFromBitmap(memoryDc, bitmap, frame.size(), image, ignored)
                     && !isMostlyBlack(image)) {
+                    if (includeCursor) {
+                        drawCursor(memoryDc, frame);
+                        imageFromBitmap(memoryDc, bitmap, frame.size(), image, ignored);
+                    }
                     out.image = image;
                     out.geometry = frame;
                     SelectObject(memoryDc, previous);

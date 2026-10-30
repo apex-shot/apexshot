@@ -3864,3 +3864,53 @@ msgstr "月間上限 {limit} 件"
 
 msgid "{percent}% used"
 msgstr "使用率 {percent}%"
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr "ショートカットの待ち受けを一時停止できませんでした。このダイアログを閉じて、もう一度お試しください。"
+
+msgid "Disabled"
+msgstr "無効"
+
+msgid "Off by default. Turning this on sends anonymous usage statistics."
+msgstr "既定ではオフです。オンにすると匿名の使用状況統計が送信されます。"
+
+msgid ""
+"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
+msgstr ""
+"任意の毎日のハートビート: アプリのバージョン、Windows、機能の数。スクリーンショット、パス、OCR テキストは含みません。APEXSHOT_TELEMETRY=0 で上書きできます。"
+
+msgid "Requires the corresponding Windows OCR language pack."
+msgstr "対応する Windows OCR 言語パックが必要です。"
+
+msgid "Shortcuts work while the ApexShot background shell is running."
+msgstr "ApexShot のバックグラウンドシェルが動作している間、ショートカットが使えます。"
+
+msgid ""
+"The Windows shell uses its tray icon to open capture, Settings, and Quit."
+msgstr "Windows シェルはトレイアイコンからキャプチャ、設定、終了を開きます。"
+
+msgid "The capture shell currently uses its own dark appearance."
+msgstr "キャプチャシェルは現在、独自のダーク表示を使用しています。"
+
+msgid "The capture toolbar can change the timer for an individual screenshot."
+msgstr "キャプチャツールバーでは、個々のスクリーンショットのタイマーを変更できます。"
+
+msgid "This action requires the Windows image editor or overlay backend."
+msgstr "この操作には Windows の画像エディタまたはオーバーレイバックエンドが必要です。"
+
+msgid "Use your configured shortcuts while ApexShot runs in the background."
+msgstr "ApexShot がバックグラウンドで動作している間、設定したショートカットを使えます。"
+
+msgid "When hidden, stop the recording from the tray or with its shortcut."
+msgstr "非表示のときは、トレイまたはショートカットから録画を停止します。"
+
+msgid ""
+"When off, output uses the capture's display scale before applying the maximum resolution."
+msgstr "オフの場合、最大解像度を適用する前にキャプチャの表示スケールを使用します。"
+
+msgid ""
+"When off, recordings remain in the temporary folder for the result card and editor."
+msgstr "オフの場合、録画は結果カードとエディタ用に一時フォルダーに残ります。"

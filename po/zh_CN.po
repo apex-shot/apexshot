@@ -3854,3 +3854,52 @@ msgstr "每月限额 {limit} 次上传"
 
 msgid "{percent}% used"
 msgstr "已使用 {percent}%"
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr "无法暂停快捷键监听。请关闭此对话框后重试。"
+
+msgid "Disabled"
+msgstr "已禁用"
+
+msgid "Off by default. Turning this on sends anonymous usage statistics."
+msgstr "默认关闭。开启后会发送匿名使用统计。"
+
+msgid ""
+"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
+msgstr "可选的每日心跳：应用版本、Windows 和功能数量。不包含截图、路径或 OCR 文本。可通过 APEXSHOT_TELEMETRY=0 覆盖。"
+
+msgid "Requires the corresponding Windows OCR language pack."
+msgstr "需要相应的 Windows OCR 语言包。"
+
+msgid "Shortcuts work while the ApexShot background shell is running."
+msgstr "快捷键在 ApexShot 后台外壳运行时有效。"
+
+msgid ""
+"The Windows shell uses its tray icon to open capture, Settings, and Quit."
+msgstr "Windows 外壳通过托盘图标打开捕获、设置和退出。"
+
+msgid "The capture shell currently uses its own dark appearance."
+msgstr "捕获外壳目前使用自己的深色外观。"
+
+msgid "The capture toolbar can change the timer for an individual screenshot."
+msgstr "捕获工具栏可以为单张截图更改计时器。"
+
+msgid "This action requires the Windows image editor or overlay backend."
+msgstr "此操作需要 Windows 图像编辑器或浮层后端。"
+
+msgid "Use your configured shortcuts while ApexShot runs in the background."
+msgstr "在 ApexShot 于后台运行时使用已配置的快捷键。"
+
+msgid "When hidden, stop the recording from the tray or with its shortcut."
+msgstr "隐藏时，请从托盘或使用快捷键停止录制。"
+
+msgid ""
+"When off, output uses the capture's display scale before applying the maximum resolution."
+msgstr "关闭时，输出先使用捕获的显示缩放，再应用最大分辨率。"
+
+msgid ""
+"When off, recordings remain in the temporary folder for the result card and editor."
+msgstr "关闭时，录制会保留在临时文件夹中，供结果卡片和编辑器使用。"

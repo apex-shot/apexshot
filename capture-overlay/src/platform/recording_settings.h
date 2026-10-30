@@ -40,7 +40,7 @@ inline constexpr std::array<RecordingResolutionOption, 7> kRecordingResolutionOp
     {"1440p", 2560, 1440},
     {"900p", 1600, 900},
     {"480p", 854, 480},
-    {"2160p", 3840, 2160},
+    {"2160p (4K)", 3840, 2160},
 }};
 
 /// Resolution indices in the order the settings surface shows them: Original,
@@ -91,6 +91,13 @@ int recordingCrfResolutionReduction(int width, int height);
 /// Aspect-preserving fit of `source` inside `max`, rounded to even dimensions
 /// and never upscaled. An empty or non-positive `max` leaves the source alone.
 QSize fitWithinMaxResolution(const QSize& source, const QSize& max);
+
+/// Output dimensions after display scaling and the selected ceiling. Portrait
+/// sources use the ceiling in portrait orientation; dimensions are even.
+QSize recordingOutputSize(const QSize& source, const QSize& max, double displayScale = 1.0);
+
+/// The ffmpeg filter for those encoder-safe output dimensions.
+QString recordingScaleFilter(const QSize& outputSize);
 
 /// Labels in index order, for a future settings surface. Resolution labels are
 /// paired with kRecordingResolutionDisplayOrder.

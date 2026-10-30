@@ -17,15 +17,15 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
     ));
 
     let config = load_config().sanitized();
-    let area = display_shortcut(&config.shortcut_capture_area, "Shift+Super+4");
-    let screen = display_shortcut(&config.shortcut_capture_fullscreen, "Shift+Super+3");
+    let area = display_shortcut(&config.shortcut_capture_area);
+    let screen = display_shortcut(&config.shortcut_capture_fullscreen);
 
     let hotkeys_block = GtkBox::new(Orientation::Vertical, px(scale, 8.0));
     hotkeys_block.set_margin_top(px(scale, 28.0));
     hotkeys_block.set_halign(Align::Fill);
 
     let hotkeys_hint = Label::new(Some(&t(
-        "Global shortcuts are not available in the Windows build yet. Bindings are saved for a future release.",
+        "Shortcuts work while the ApexShot background shell is running.",
     )));
     hotkeys_hint.set_halign(Align::Start);
     hotkeys_hint.set_xalign(0.0);
@@ -64,10 +64,10 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
     actions.append(&continue_btn);
 }
 
-fn display_shortcut(value: &str, fallback: &str) -> String {
+fn display_shortcut(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        fallback.to_string()
+        t("Disabled")
     } else {
         trimmed.to_string()
     }

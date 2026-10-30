@@ -3943,3 +3943,62 @@ msgstr "de {limit} subidas mensuales"
 
 msgid "{percent}% used"
 msgstr "{percent} % utilizado"
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr ""
+"No se pudo pausar el detector de atajos. Cierra este diálogo e inténtalo de nuevo."
+
+msgid "Disabled"
+msgstr "Desactivado"
+
+msgid "Off by default. Turning this on sends anonymous usage statistics."
+msgstr ""
+"Desactivado de forma predeterminada. Al activarlo, se envían estadísticas de uso anónimas."
+
+msgid ""
+"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
+msgstr ""
+"Latido diario opcional: versión de la app, Windows y recuento de funciones. Sin capturas, rutas ni texto OCR. Se puede anular con APEXSHOT_TELEMETRY=0."
+
+msgid "Requires the corresponding Windows OCR language pack."
+msgstr "Requiere el paquete de idioma OCR de Windows correspondiente."
+
+msgid "Shortcuts work while the ApexShot background shell is running."
+msgstr ""
+"Los atajos funcionan mientras se ejecuta el shell en segundo plano de ApexShot."
+
+msgid ""
+"The Windows shell uses its tray icon to open capture, Settings, and Quit."
+msgstr ""
+"El shell de Windows usa su icono de bandeja para abrir Captura, Ajustes y Salir."
+
+msgid "The capture shell currently uses its own dark appearance."
+msgstr "El shell de captura usa actualmente su propio aspecto oscuro."
+
+msgid "The capture toolbar can change the timer for an individual screenshot."
+msgstr ""
+"La barra de herramientas de captura puede cambiar el temporizador de una captura individual."
+
+msgid "This action requires the Windows image editor or overlay backend."
+msgstr ""
+"Esta acción requiere el editor de imágenes o el backend de superposición de Windows."
+
+msgid "Use your configured shortcuts while ApexShot runs in the background."
+msgstr ""
+"Usa tus atajos configurados mientras ApexShot se ejecuta en segundo plano."
+
+msgid "When hidden, stop the recording from the tray or with its shortcut."
+msgstr "Cuando está oculto, detén la grabación desde la bandeja o con su atajo."
+
+msgid ""
+"When off, output uses the capture's display scale before applying the maximum resolution."
+msgstr ""
+"Cuando está desactivado, la salida usa la escala de pantalla de la captura antes de aplicar la resolución máxima."
+
+msgid ""
+"When off, recordings remain in the temporary folder for the result card and editor."
+msgstr ""
+"Cuando está desactivado, las grabaciones permanecen en la carpeta temporal para la tarjeta de resultado y el editor."

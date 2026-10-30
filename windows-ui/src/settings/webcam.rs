@@ -11,12 +11,21 @@ use crate::i18n::t;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, CheckButton, Label, Orientation};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::Duration;
 
 use super::select::SettingsSelect;
+
+type ChangeCallbacks = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
+
+pub(super) const EDIT_ENABLED: u8 = 1 << 0;
+pub(super) const EDIT_DEVICE: u8 = 1 << 1;
+pub(super) const EDIT_SIZE: u8 = 1 << 2;
+pub(super) const EDIT_SHAPE: u8 = 1 << 3;
+pub(super) const EDIT_POSITION: u8 = 1 << 4;
+pub(super) const EDIT_FLIP: u8 = 1 << 5;
 
 /// The corner presets, in the shared config's coordinates: `rel_x` runs left to
 /// right and `rel_y` bottom to top, so bottom-right is x 1, y 0.
@@ -29,10 +38,12 @@ const POSITIONS: [(&str, f64, f64); 5] = [
 ];
 
 #[allow(dead_code)]
-pub(super) struct WebcamInputs {
+pub(crate) struct WebcamInputs {
     pub enabled: CheckButton,
     /// The chosen camera's DirectShow name, empty for the first camera.
     pub device: Rc<RefCell<String>>,
+    device_changed: ChangeCallbacks,
+    pending_edits: Rc<Cell<u8>>,
     pub size: SettingsSelect,
     pub shape: SettingsSelect,
     pub position: SettingsSelect,
@@ -40,6 +51,36 @@ pub(super) struct WebcamInputs {
 }
 
 impl WebcamInputs {
+    pub fn install_dirty_tracking(&self, mark_dirty: Rc<dyn Fn()>) {
+        let callback = |edit| {
+            let pending = self.pending_edits.clone();
+            let mark_dirty = mark_dirty.clone();
+            Rc::new(move || {
+                pending.set(pending.get() | edit);
+                mark_dirty();
+            }) as Rc<dyn Fn()>
+        };
+        let enabled = callback(EDIT_ENABLED);
+        self.enabled.connect_toggled(move |_| enabled());
+        self.device_changed.borrow_mut().push(callback(EDIT_DEVICE));
+        let size = callback(EDIT_SIZE);
+        self.size.connect_changed(move || size());
+        let shape = callback(EDIT_SHAPE);
+        self.shape.connect_changed(move || shape());
+        let position = callback(EDIT_POSITION);
+        self.position.connect_changed(move || position());
+        let flip = callback(EDIT_FLIP);
+        self.flip.connect_toggled(move |_| flip());
+    }
+
+    pub fn pending_edits(&self) -> u8 {
+        self.pending_edits.get()
+    }
+
+    pub fn clear_pending_edits(&self) {
+        self.pending_edits.set(0);
+    }
+
     /// The stored position for the chosen preset.
     pub fn position(&self) -> (f64, f64) {
         let chosen = self.position.active_id().unwrap_or_default();
@@ -150,16 +191,21 @@ pub(super) fn build_webcam_group(config: &AppConfig) -> (GtkBox, WebcamInputs) {
     frame.append(&enabled_row);
 
     let device = Rc::new(RefCell::new(config.rec_webcam_device.clone()));
+    let device_changed: ChangeCallbacks = Rc::new(RefCell::new(Vec::new()));
     let picker_slot = GtkBox::new(Orientation::Horizontal, 0);
     picker_slot.set_halign(Align::End);
     let picker = SettingsSelect::new([("", t("First available camera"))], "");
     picker_slot.append(picker.widget());
     {
         let device = device.clone();
+        let device_changed = device_changed.clone();
         let picker_cb = picker.clone();
         picker.connect_changed(move || {
             if let Some(id) = picker_cb.active_id() {
                 *device.borrow_mut() = id;
+                for callback in device_changed.borrow().iter() {
+                    callback();
+                }
             }
         });
     }
@@ -179,20 +225,28 @@ pub(super) fn build_webcam_group(config: &AppConfig) -> (GtkBox, WebcamInputs) {
     {
         let picker_slot = picker_slot.clone();
         let device = device.clone();
-        let configured = config.rec_webcam_device.clone();
+        let device_changed = device_changed.clone();
         glib::timeout_add_local(Duration::from_millis(150), move || {
             match receiver.try_recv() {
                 Ok(devices) => {
-                    let items: Vec<(String, String)> =
+                    let configured = device.borrow().clone();
+                    let mut items: Vec<(String, String)> =
                         std::iter::once((String::new(), t("First available camera")))
                             .chain(devices.iter().map(|name| (name.clone(), name.clone())))
                             .collect();
+                    if !configured.is_empty() && !devices.contains(&configured) {
+                        items.push((configured.clone(), configured.clone()));
+                    }
                     let picker = SettingsSelect::new(items, &configured);
                     let device = device.clone();
+                    let device_changed = device_changed.clone();
                     let picker_cb = picker.clone();
                     picker.connect_changed(move || {
                         if let Some(id) = picker_cb.active_id() {
                             *device.borrow_mut() = id;
+                            for callback in device_changed.borrow().iter() {
+                                callback();
+                            }
                         }
                     });
                     while let Some(child) = picker_slot.first_child() {
@@ -256,6 +310,8 @@ pub(super) fn build_webcam_group(config: &AppConfig) -> (GtkBox, WebcamInputs) {
         WebcamInputs {
             enabled,
             device,
+            device_changed,
+            pending_edits: Rc::new(Cell::new(0)),
             size,
             shape,
             position,

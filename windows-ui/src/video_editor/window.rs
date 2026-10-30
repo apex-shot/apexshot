@@ -1618,8 +1618,7 @@ fn wire_export(
     });
 }
 
-/// Ask where the MP4 goes, defaulting to the recording's folder and a name
-/// derived from the recording.
+/// Ask where the MP4 goes, using the remembered folder when enabled.
 fn choose_export_path(window: &ApplicationWindow, source: &Path, then: Rc<dyn Fn(PathBuf)>) {
     let chooser = FileChooserNative::new(
         Some(&t("Export video")),
@@ -1628,9 +1627,9 @@ fn choose_export_path(window: &ApplicationWindow, source: &Path, then: Rc<dyn Fn
         Some(&t("Export")),
         Some(&t("Cancel")),
     );
-    if let Some(folder) = source.parent() {
-        let _ = chooser.set_current_folder(Some(&gio::File::for_path(folder)));
-    }
+    let fallback = source.parent().unwrap_or_else(|| Path::new("."));
+    let folder = crate::config::load_config().video_editor_export_dir(fallback);
+    let _ = chooser.set_current_folder(Some(&gio::File::for_path(folder)));
     let stem = source
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -1651,6 +1650,12 @@ fn choose_export_path(window: &ApplicationWindow, source: &Path, then: Rc<dyn Fn
                     .is_some_and(|extension| extension.eq_ignore_ascii_case("mp4"));
                 if !has_mp4 {
                     path.set_extension("mp4");
+                }
+                let mut config = crate::config::load_config();
+                if config.remember_video_export_dir(&path) {
+                    if let Err(error) = crate::config::save_config(&config) {
+                        eprintln!("[video editor] Could not remember export folder: {error:#}");
+                    }
                 }
                 then(path);
             }
