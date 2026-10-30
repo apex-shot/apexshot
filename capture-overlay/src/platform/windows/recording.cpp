@@ -1018,8 +1018,6 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
                        std::max<qint64>(0, systemAudioOffsetMs) / 1000.0,
                        QString()});
     }
-    for (const QString& path : {micPath, systemAudioPath})
-        QFile::remove(path);
     micPath.clear();
     systemAudioPath.clear();
 
@@ -1083,9 +1081,12 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
         mixer,
         QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
         q,
-        [this, mixer, mixedPath, videoPath, next](int code, QProcess::ExitStatus status) {
+        [this, mixer, mixedPath, videoPath, next, inputs](int code,
+                                                        QProcess::ExitStatus status) {
             const QString detail = tailLines(QString::fromUtf8(mixer->readAll()), 6);
             mixer->deleteLater();
+            for (const AudioInput& input : inputs)
+                QFile::remove(input.path);
 
             recordingLog(QStringLiteral("system audio: mux exit=%1 size=%2 detail=%3")
                              .arg(code)
