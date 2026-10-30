@@ -3802,9 +3802,6 @@ msgstr "هذا الجهاز"
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "لم يتم ربط الالتقاط الموقوت بنسخة Windows بعد. يتم حفظ الفاصل الزمني لإصدار مستقبلي."
 
-msgid "2160p (4K)"
-msgstr "2160p (4K)"
-
 msgid "APEXSHOT CLOUD"
 msgstr "APEXSHOT CLOUD"
 
@@ -3820,17 +3817,11 @@ msgstr "العودة إلى Cloud"
 msgid "Click Connect to link this device with a one-time code."
 msgstr "انقر على «اتصال» لربط هذا الجهاز باستخدام رمز لمرة واحدة."
 
-msgid ""
-"Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
-msgstr ""
-"تصفح السحابة غير متاح بعد في إصدار Windows. اربط حسابك من الإعدادات ← Cloud."
+msgid "Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgstr "تصفح السحابة غير متاح بعد في إصدار Windows. اربط حسابك من الإعدادات ← Cloud."
 
 msgid "Connect to see your usage"
 msgstr "اربط حسابك لعرض استخدامك"
-
-msgid "Could not pause the shortcut listener. Close this dialog and try again."
-msgstr ""
-"تعذّر إيقاف مراقبة الاختصارات مؤقتًا. أغلق مربع الحوار هذا وحاول مرة أخرى."
 
 msgid "Could not refresh. Showing previous values."
 msgstr "تعذر التحديث. يتم عرض القيم السابقة."
@@ -3838,14 +3829,14 @@ msgstr "تعذر التحديث. يتم عرض القيم السابقة."
 msgid "Couldn't open your browser. Copy the link and open it yourself."
 msgstr "تعذر فتح المتصفح. انسخ الرابط وافتحه بنفسك."
 
-msgid "Disabled"
-msgstr "معطّل"
-
 msgid "Go to Cloud settings"
 msgstr "الانتقال إلى إعدادات Cloud"
 
 msgid "Less than 0.1% used"
 msgstr "المستخدم أقل من 0.1%"
+
+msgid "Loading usage..."
+msgstr "جارٍ تحميل بيانات الاستخدام..."
 
 msgid "Manage billing"
 msgstr "إدارة الفوترة"
@@ -3856,6 +3847,58 @@ msgstr "يُعاد تعيين الاستخدام الشهري حسب توقيت 
 msgid "No monthly limit"
 msgstr "بلا حد شهري"
 
+msgid "Plan unavailable"
+msgstr "الخطة غير متاحة"
+
+msgid "Refreshing..."
+msgstr "جارٍ التحديث..."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "سجّل الدخول لعرض الملفات المرفوعة والتخزين والخطة."
+
+msgid "Storage"
+msgstr "التخزين"
+
+msgid "This month"
+msgstr "هذا الشهر"
+
+msgid "Uploads"
+msgstr "الملفات المرفوعة"
+
+msgid "Usage"
+msgstr "الاستخدام"
+
+msgid "Usage is unavailable"
+msgstr "بيانات الاستخدام غير متاحة"
+
+msgid "Used space"
+msgstr "المساحة المستخدمة"
+
+msgid "We couldn't load your usage. Check your connection and try again."
+msgstr "تعذر تحميل بيانات الاستخدام. تحقق من اتصالك وحاول مجددًا."
+
+msgid "Your session has expired. Connect your account again in Cloud settings."
+msgstr "انتهت جلستك. أعد ربط حسابك من إعدادات Cloud."
+
+msgid "of {limit}"
+msgstr "من {limit}"
+
+msgid "of {limit} monthly uploads"
+msgstr "من {limit} عملية رفع شهريًا"
+
+msgid "{percent}% used"
+msgstr "المستخدم {percent}%"
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr ""
+"تعذّر إيقاف مراقبة الاختصارات مؤقتًا. أغلق مربع الحوار هذا وحاول مرة أخرى."
+
+msgid "Disabled"
+msgstr "معطّل"
+
 msgid "Off by default. Turning this on sends anonymous usage statistics."
 msgstr "متوقف افتراضيًا. عند تشغيله تُرسل إحصاءات استخدام مجهولة."
 
@@ -3864,20 +3907,11 @@ msgid ""
 msgstr ""
 "نبضة يومية اختيارية: إصدار التطبيق وWindows وعدد الميزات. لا لقطات ولا مسارات ولا نص OCR. يمكن تجاوزها باستخدام APEXSHOT_TELEMETRY=0."
 
-msgid "Plan unavailable"
-msgstr "الخطة غير متاحة"
-
 msgid "Requires the corresponding Windows OCR language pack."
 msgstr "يتطلب حزمة لغة OCR المقابلة في Windows."
 
 msgid "Shortcuts work while the ApexShot background shell is running."
 msgstr "تعمل الاختصارات ما دام غلاف ApexShot في الخلفية قيد التشغيل."
-
-msgid "Sign in to view your uploads, storage and plan."
-msgstr "سجّل الدخول لعرض الملفات المرفوعة والتخزين والخطة."
-
-msgid "Storage"
-msgstr "التخزين"
 
 msgid ""
 "The Windows shell uses its tray icon to open capture, Settings, and Quit."
@@ -3892,23 +3926,8 @@ msgstr "يمكن لشريط أدوات الالتقاط تغيير المؤقت 
 msgid "This action requires the Windows image editor or overlay backend."
 msgstr "يتطلب هذا الإجراء محرر الصور أو خلفية الطبقة في Windows."
 
-msgid "This month"
-msgstr "هذا الشهر"
-
-msgid "Uploads"
-msgstr "الملفات المرفوعة"
-
-msgid "Usage"
-msgstr "الاستخدام"
-
-msgid "Usage is unavailable"
-msgstr "بيانات الاستخدام غير متاحة"
-
 msgid "Use your configured shortcuts while ApexShot runs in the background."
 msgstr "استخدم اختصاراتك المضبوطة أثناء تشغيل ApexShot في الخلفية."
-
-msgid "Used space"
-msgstr "المساحة المستخدمة"
 
 msgid "When hidden, stop the recording from the tray or with its shortcut."
 msgstr "عند الإخفاء، أوقف التسجيل من الشريط أو باختصاره."

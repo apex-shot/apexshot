@@ -3768,9 +3768,6 @@ msgstr "此设备"
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "定时捕获尚未在 Windows 版本中接入。该间隔会被保存以供将来的版本使用。"
 
-msgid "2160p (4K)"
-msgstr "2160p (4K)"
-
 msgid "APEXSHOT CLOUD"
 msgstr "APEXSHOT CLOUD"
 
@@ -3786,15 +3783,11 @@ msgstr "返回 Cloud"
 msgid "Click Connect to link this device with a one-time code."
 msgstr "点击“连接”，使用一次性代码关联此设备。"
 
-msgid ""
-"Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgid "Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
 msgstr "Windows 版本暂不支持浏览云端内容。请在设置 → Cloud 中连接账户。"
 
 msgid "Connect to see your usage"
 msgstr "连接账户以查看用量"
-
-msgid "Could not pause the shortcut listener. Close this dialog and try again."
-msgstr "无法暂停快捷键监听。请关闭此对话框后重试。"
 
 msgid "Could not refresh. Showing previous values."
 msgstr "无法刷新，正在显示先前的数据。"
@@ -3802,14 +3795,14 @@ msgstr "无法刷新，正在显示先前的数据。"
 msgid "Couldn't open your browser. Copy the link and open it yourself."
 msgstr "无法打开浏览器。请复制链接并手动打开。"
 
-msgid "Disabled"
-msgstr "已禁用"
-
 msgid "Go to Cloud settings"
 msgstr "前往 Cloud 设置"
 
 msgid "Less than 0.1% used"
 msgstr "已使用不到 0.1%"
+
+msgid "Loading usage..."
+msgstr "正在加载用量..."
 
 msgid "Manage billing"
 msgstr "管理账单"
@@ -3820,6 +3813,57 @@ msgstr "每月用量按 UTC 时间重置。"
 msgid "No monthly limit"
 msgstr "无每月上限"
 
+msgid "Plan unavailable"
+msgstr "无法获取套餐"
+
+msgid "Refreshing..."
+msgstr "正在刷新..."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "登录后可查看上传量、存储空间和套餐。"
+
+msgid "Storage"
+msgstr "存储空间"
+
+msgid "This month"
+msgstr "本月"
+
+msgid "Uploads"
+msgstr "上传"
+
+msgid "Usage"
+msgstr "用量"
+
+msgid "Usage is unavailable"
+msgstr "无法获取用量"
+
+msgid "Used space"
+msgstr "已用空间"
+
+msgid "We couldn't load your usage. Check your connection and try again."
+msgstr "无法加载用量。请检查网络连接并重试。"
+
+msgid "Your session has expired. Connect your account again in Cloud settings."
+msgstr "会话已过期。请在 Cloud 设置中重新连接账户。"
+
+msgid "of {limit}"
+msgstr "共 {limit}"
+
+msgid "of {limit} monthly uploads"
+msgstr "每月限额 {limit} 次上传"
+
+msgid "{percent}% used"
+msgstr "已使用 {percent}%"
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr "无法暂停快捷键监听。请关闭此对话框后重试。"
+
+msgid "Disabled"
+msgstr "已禁用"
+
 msgid "Off by default. Turning this on sends anonymous usage statistics."
 msgstr "默认关闭。开启后会发送匿名使用统计。"
 
@@ -3827,20 +3871,11 @@ msgid ""
 "Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
 msgstr "可选的每日心跳：应用版本、Windows 和功能数量。不包含截图、路径或 OCR 文本。可通过 APEXSHOT_TELEMETRY=0 覆盖。"
 
-msgid "Plan unavailable"
-msgstr "无法获取套餐"
-
 msgid "Requires the corresponding Windows OCR language pack."
 msgstr "需要相应的 Windows OCR 语言包。"
 
 msgid "Shortcuts work while the ApexShot background shell is running."
 msgstr "快捷键在 ApexShot 后台外壳运行时有效。"
-
-msgid "Sign in to view your uploads, storage and plan."
-msgstr "登录后可查看上传量、存储空间和套餐。"
-
-msgid "Storage"
-msgstr "存储空间"
 
 msgid ""
 "The Windows shell uses its tray icon to open capture, Settings, and Quit."
@@ -3855,23 +3890,8 @@ msgstr "捕获工具栏可以为单张截图更改计时器。"
 msgid "This action requires the Windows image editor or overlay backend."
 msgstr "此操作需要 Windows 图像编辑器或浮层后端。"
 
-msgid "This month"
-msgstr "本月"
-
-msgid "Uploads"
-msgstr "上传"
-
-msgid "Usage"
-msgstr "用量"
-
-msgid "Usage is unavailable"
-msgstr "无法获取用量"
-
 msgid "Use your configured shortcuts while ApexShot runs in the background."
 msgstr "在 ApexShot 于后台运行时使用已配置的快捷键。"
-
-msgid "Used space"
-msgstr "已用空间"
 
 msgid "When hidden, stop the recording from the tray or with its shortcut."
 msgstr "隐藏时，请从托盘或使用快捷键停止录制。"

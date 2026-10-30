@@ -3842,9 +3842,6 @@ msgstr "Это устройство"
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "Отложенная съёмка пока не подключена в сборке для Windows. Интервал сохраняется для будущего выпуска."
 
-msgid "2160p (4K)"
-msgstr "2160p (4K)"
-
 msgid "APEXSHOT CLOUD"
 msgstr "APEXSHOT CLOUD"
 
@@ -3858,36 +3855,28 @@ msgid "Back to Cloud"
 msgstr "Назад к Cloud"
 
 msgid "Click Connect to link this device with a one-time code."
-msgstr ""
-"Нажмите «Подключить», чтобы привязать устройство с помощью одноразового кода."
+msgstr "Нажмите «Подключить», чтобы привязать устройство с помощью одноразового кода."
 
-msgid ""
-"Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
-msgstr ""
-"Просмотр облака пока недоступен в версии для Windows. Подключите аккаунт в разделе «Настройки → Cloud»."
+msgid "Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgstr "Просмотр облака пока недоступен в версии для Windows. Подключите аккаунт в разделе «Настройки → Cloud»."
 
 msgid "Connect to see your usage"
 msgstr "Подключите аккаунт, чтобы увидеть использование"
-
-msgid "Could not pause the shortcut listener. Close this dialog and try again."
-msgstr ""
-"Не удалось приостановить прослушивание сочетаний клавиш. Закройте это окно и повторите попытку."
 
 msgid "Could not refresh. Showing previous values."
 msgstr "Не удалось обновить данные. Показаны предыдущие значения."
 
 msgid "Couldn't open your browser. Copy the link and open it yourself."
-msgstr ""
-"Не удалось открыть браузер. Скопируйте ссылку и откройте её самостоятельно."
-
-msgid "Disabled"
-msgstr "Отключено"
+msgstr "Не удалось открыть браузер. Скопируйте ссылку и откройте её самостоятельно."
 
 msgid "Go to Cloud settings"
 msgstr "Перейти к настройкам Cloud"
 
 msgid "Less than 0.1% used"
 msgstr "Использовано менее 0,1%"
+
+msgid "Loading usage..."
+msgstr "Загрузка данных об использовании..."
 
 msgid "Manage billing"
 msgstr "Управление оплатой"
@@ -3898,6 +3887,58 @@ msgstr "Месячное использование сбрасывается п�
 msgid "No monthly limit"
 msgstr "Без месячного лимита"
 
+msgid "Plan unavailable"
+msgstr "Тариф недоступен"
+
+msgid "Refreshing..."
+msgstr "Обновление..."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "Войдите, чтобы увидеть загрузки, хранилище и тариф."
+
+msgid "Storage"
+msgstr "Хранилище"
+
+msgid "This month"
+msgstr "В этом месяце"
+
+msgid "Uploads"
+msgstr "Загрузки"
+
+msgid "Usage"
+msgstr "Использование"
+
+msgid "Usage is unavailable"
+msgstr "Данные об использовании недоступны"
+
+msgid "Used space"
+msgstr "Занято"
+
+msgid "We couldn't load your usage. Check your connection and try again."
+msgstr "Не удалось загрузить данные об использовании. Проверьте подключение и повторите попытку."
+
+msgid "Your session has expired. Connect your account again in Cloud settings."
+msgstr "Срок действия сеанса истёк. Снова подключите аккаунт в настройках Cloud."
+
+msgid "of {limit}"
+msgstr "из {limit}"
+
+msgid "of {limit} monthly uploads"
+msgstr "из {limit} загрузок в месяц"
+
+msgid "{percent}% used"
+msgstr "Использовано {percent}%"
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr ""
+"Не удалось приостановить прослушивание сочетаний клавиш. Закройте это окно и повторите попытку."
+
+msgid "Disabled"
+msgstr "Отключено"
+
 msgid "Off by default. Turning this on sends anonymous usage statistics."
 msgstr ""
 "По умолчанию выключено. При включении отправляется анонимная статистика использования."
@@ -3907,20 +3948,11 @@ msgid ""
 msgstr ""
 "Необязательный ежедневный сигнал: версия приложения, Windows и счётчики функций. Без снимков, путей и текста OCR. Переопределяется через APEXSHOT_TELEMETRY=0."
 
-msgid "Plan unavailable"
-msgstr "Тариф недоступен"
-
 msgid "Requires the corresponding Windows OCR language pack."
 msgstr "Требуется соответствующий языковой пакет OCR для Windows."
 
 msgid "Shortcuts work while the ApexShot background shell is running."
 msgstr "Сочетания клавиш работают, пока работает фоновая оболочка ApexShot."
-
-msgid "Sign in to view your uploads, storage and plan."
-msgstr "Войдите, чтобы увидеть загрузки, хранилище и тариф."
-
-msgid "Storage"
-msgstr "Хранилище"
 
 msgid ""
 "The Windows shell uses its tray icon to open capture, Settings, and Quit."
@@ -3937,23 +3969,8 @@ msgid "This action requires the Windows image editor or overlay backend."
 msgstr ""
 "Для этого действия нужен редактор изображений или оверлей-бэкенд Windows."
 
-msgid "This month"
-msgstr "В этом месяце"
-
-msgid "Uploads"
-msgstr "Загрузки"
-
-msgid "Usage"
-msgstr "Использование"
-
-msgid "Usage is unavailable"
-msgstr "Данные об использовании недоступны"
-
 msgid "Use your configured shortcuts while ApexShot runs in the background."
 msgstr "Используйте настроенные сочетания клавиш, пока ApexShot работает в фоне."
-
-msgid "Used space"
-msgstr "Занято"
 
 msgid "When hidden, stop the recording from the tray or with its shortcut."
 msgstr "В скрытом виде остановите запись из лотка или сочетанием клавиш."

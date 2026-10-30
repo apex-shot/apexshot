@@ -97,12 +97,14 @@ pub fn build_video_edits_page(toast: HistoryToast, search: &Entry) -> HistoryPag
     scroller.set_hexpand(true);
 
     let column = GtkBox::new(Orientation::Vertical, 0);
-    let scale = super::window_scale();
-    column.set_margin_top((2.0 * scale).round() as i32);
-    column.set_margin_bottom((24.0 * scale).round() as i32);
-    let side = (28.0 * scale).round() as i32;
-    column.set_margin_start(side);
-    column.set_margin_end(side);
+    // The same metrics the local galleries use: the Settings page padding
+    // plus the card inset on the edges the card leaves (the end margin also
+    // covers the scrollbar gutter).
+    let scale = super::window_scale().min(1.0);
+    column.set_margin_top((12.0 * scale).round() as i32);
+    column.set_margin_bottom((32.0 * scale).round() as i32);
+    column.set_margin_start((20.0 * scale).round() as i32);
+    column.set_margin_end((28.0 * scale).round() as i32);
 
     let grid = FlowBox::new();
     grid.add_css_class("recent-captures-grid");
@@ -168,7 +170,7 @@ fn build_empty_state() -> GtkBox {
     empty.set_valign(Align::Center);
     empty.set_vexpand(true);
 
-    let icon = Image::from_icon_name(icon_names::custom::RECORD_SCREEN_SYMBOLIC);
+    let icon = Image::from_icon_name(icon_names::custom::CLAPPERBOARD_SYMBOLIC);
     icon.set_pixel_size(48);
     icon.add_css_class("history-empty-icon");
     icon.set_halign(Align::Center);
@@ -261,7 +263,7 @@ fn build_card(state: &Rc<PageState>, card: &CardData) -> Button {
     placeholder.add_css_class("recent-captures-picture-missing");
     placeholder.set_size_request(CARD_THUMB_WIDTH, CARD_THUMB_HEIGHT);
 
-    let placeholder_icon = Image::from_icon_name(icon_names::custom::RECORD_SCREEN_SYMBOLIC);
+    let placeholder_icon = Image::from_icon_name(icon_names::custom::CLAPPERBOARD_SYMBOLIC);
     placeholder_icon.set_pixel_size(32);
     placeholder_icon.add_css_class("history-card-placeholder");
     placeholder_icon.set_vexpand(true);

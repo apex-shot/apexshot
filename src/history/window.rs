@@ -11,9 +11,11 @@ use std::sync::Once;
 use std::time::Duration;
 
 use gtk4::{
-    glib, prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, Entry, Image,
-    Label, Orientation, Overlay as GtkOverlay, ScrolledWindow,
+    glib, prelude::*, Align, Application, ApplicationWindow, Box as GtkBox, Button, Entry, Label,
+    Orientation, Overlay as GtkOverlay,
 };
+#[cfg(not(target_os = "windows"))]
+use gtk4::{Image, ScrolledWindow};
 
 use crate::i18n::t;
 use crate::settings::ui_support::{
@@ -106,6 +108,11 @@ pub fn build_history_window(app: &Application) {
     let prefers_dark = prefers_dark_glass_theme();
     let reduced_transparency = prefers_reduced_transparency();
     let ui_scale = super::window_scale();
+    // Same convention as Settings: the shell draws type and spacing at
+    // logical size, so a scaled display earns a roomier frame without
+    // zooming the interface.
+    #[cfg(target_os = "windows")]
+    let text_scale = ui_scale.min(1.0);
 
     let window = ApplicationWindow::builder()
         .application(app)
@@ -200,7 +207,13 @@ pub fn build_history_window(app: &Application) {
     toast_label.add_css_class("settings-toast");
     toast_label.set_halign(Align::Center);
     toast_label.set_valign(Align::Start);
-    toast_label.set_margin_top(18);
+    // On Windows the toast clears the caption bar exactly like the Settings
+    // toast does; the other platforms keep their tighter offset.
+    toast_label.set_margin_top(if cfg!(target_os = "windows") {
+        (52.0 * ui_scale).round() as i32
+    } else {
+        18
+    });
     toast_label.set_opacity(0.0);
     toast_label.set_visible(true);
     toast_label.set_can_target(false);
@@ -230,7 +243,191 @@ pub fn build_history_window(app: &Application) {
     content_split.set_vexpand(true);
     content_split.set_hexpand(true);
 
+    use crate::capture::editor::window::icon_names::custom;
+    // The nav uses the same icon set as the Settings sidebar: the regular
+    // bundled glyphs with a light-theme variant, not the thin symbolics.
+    let themed = |dark: &'static str, light: &'static str| {
+        if prefers_dark {
+            dark
+        } else {
+            light
+        }
+    };
+    let labels = [
+        (
+            t("Screenshots"),
+            themed(custom::CAMERA, custom::CAMERA_LIGHT),
+        ),
+        (t("Recordings"), themed(custom::VIDEO, custom::VIDEO_LIGHT)),
+        (
+            t("Motion Edits"),
+            themed(custom::SPLINE, custom::SPLINE_LIGHT),
+        ),
+        (
+            t("Video Edits"),
+            themed(custom::CLAPPERBOARD, custom::CLAPPERBOARD_LIGHT),
+        ),
+        (t("Cloud"), themed(custom::CLOUD, custom::CLOUD_LIGHT)),
+    ];
+
+    let stack = gtk4::Stack::new();
+    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
+    stack.set_vexpand(true);
+
     // --- SIDEBAR ---
+    // The Windows sidebar is the Settings one verbatim: an empty drag strip
+    // for a head, the same row metrics, and selection that follows the stack.
+    // The other platforms keep their titled sidebar and paint the selection
+    // themselves through `nav_items`.
+    #[cfg(target_os = "windows")]
+    let (sidebar_wrapper, sidebar_head, nav_items) = {
+        let sidebar = crate::settings::shell::build_sidebar(
+            text_scale,
+            TITLE_BAR_HEIGHT * ui_scale,
+            &labels,
+            &stack,
+        );
+        // Selection painting is owned by the Settings sidebar, so the window
+        // keeps an empty row list — the type stays for the shared notify hook.
+        (
+            sidebar.wrapper,
+            sidebar.head,
+            Vec::<(GtkBox, gtk4::Image, Label)>::new(),
+        )
+    };
+    #[cfg(not(target_os = "windows"))]
+    let (sidebar_wrapper, sidebar_head, nav_items) = build_native_sidebar(&labels, &stack);
+
+    install_window_drag(&sidebar_head, &window);
+    content_split.append(&sidebar_wrapper);
+
+    // --- BODY (STACK) ---
+    // Windows draws the Settings content card *behind* the stack: the pages'
+    // scrollers run to the window edge so their scrollbars land in the gutter
+    // beside the card instead of inside it. The selected sidebar row already
+    // names the page, so the card carries no heading. The other platforms
+    // keep the stack directly under the header bar.
+    #[cfg(target_os = "windows")]
+    let body_frame: gtk4::Widget = {
+        let card = GtkBox::new(Orientation::Vertical, 0);
+        card.add_css_class("settings-content-card");
+        let inset = (crate::settings::shell::CARD_INSET * text_scale).round() as i32;
+        card.set_margin_end(inset);
+        card.set_margin_top(inset);
+        card.set_margin_bottom(inset);
+
+        let overlay = GtkOverlay::new();
+        overlay.set_vexpand(true);
+        overlay.set_hexpand(true);
+        overlay.set_child(Some(&card));
+        overlay.add_overlay(&stack);
+        overlay.set_measure_overlay(&stack, false);
+        overlay.upcast()
+    };
+    #[cfg(not(target_os = "windows"))]
+    let body_frame: gtk4::Widget = {
+        let frame = GtkBox::new(Orientation::Vertical, 0);
+        frame.set_vexpand(true);
+        frame.set_hexpand(true);
+        frame.append(&stack);
+        frame.upcast()
+    };
+
+    #[allow(unused_mut, clippy::useless_vec)]
+    let mut pages = vec![
+        build_local_page(MediaKind::Image, toast.clone(), &search),
+        build_local_page(MediaKind::Video, toast.clone(), &search),
+    ];
+    #[cfg(target_os = "windows")]
+    pages.extend(super::windows_history_pages(toast.clone(), &search));
+    #[cfg(not(target_os = "windows"))]
+    pages.extend([
+        build_edits_page(EditsKind::Motion, toast.clone(), &search),
+        build_edits_page(EditsKind::Video, toast.clone(), &search),
+        build_cloud_page(toast.clone()),
+    ]);
+
+    // Hooks the header bar drives: refresh reloads the visible page, and the
+    // shared search entry takes each page's placeholder and sensitivity.
+    let refresh_hooks: Rc<Vec<Rc<dyn Fn()>>> =
+        Rc::new(pages.iter().map(|page| Rc::clone(&page.refresh)).collect());
+    let search_meta: Vec<(bool, String)> = pages
+        .iter()
+        .map(|page| (page.searchable, page.search_placeholder.clone()))
+        .collect();
+
+    for (index, page) in pages.iter().enumerate() {
+        let name = index.to_string();
+        stack.add_titled(&page.widget, Some(&name), &labels[index].0);
+    }
+
+    {
+        let stack = stack.clone();
+        let refresh_hooks = Rc::clone(&refresh_hooks);
+        refresh_btn.connect_clicked(move |_| {
+            if let Some(name) = stack.visible_child_name() {
+                if let Ok(idx) = name.parse::<usize>() {
+                    if let Some(reload) = refresh_hooks.get(idx) {
+                        reload();
+                    }
+                }
+            }
+        });
+    }
+
+    // Keep the sidebar's page indicator and the header-bar search in sync
+    // when the visible page changes.
+    let nav_items_clone = nav_items.clone();
+    let search_for_switch = search.clone();
+    stack.connect_visible_child_name_notify(move |s| {
+        if let Some(name) = s.visible_child_name() {
+            if let Ok(idx) = name.parse::<usize>() {
+                if let Some((searchable, placeholder)) = search_meta.get(idx) {
+                    search_for_switch.set_sensitive(*searchable);
+                    search_for_switch.set_placeholder_text(Some(placeholder));
+                }
+                for (i, (item, icon, label)) in nav_items_clone.iter().enumerate() {
+                    if i == idx {
+                        item.add_css_class("settings-nav-item-selected");
+                        icon.add_css_class("settings-nav-icon-selected");
+                        label.add_css_class("settings-nav-label-selected");
+                    } else {
+                        item.remove_css_class("settings-nav-item-selected");
+                        icon.remove_css_class("settings-nav-icon-selected");
+                        label.remove_css_class("settings-nav-label-selected");
+                    }
+                }
+            }
+        }
+    });
+    stack.set_visible_child_name("0");
+
+    // Right column: the header bar sits above the page stack so the sidebar
+    // beside it can run the full window height.
+    let right_col = GtkBox::new(Orientation::Vertical, 0);
+    right_col.set_vexpand(true);
+    right_col.set_hexpand(true);
+    right_col.append(&toolbar);
+    right_col.append(&body_frame);
+    content_split.append(&right_col);
+
+    root_box.append(&content_split);
+    window.set_child(Some(&window_overlay));
+
+    window.present();
+    #[cfg(not(target_os = "windows"))]
+    crate::update_ui::present_if_needed(&window_overlay);
+}
+
+/// The non-Windows sidebar: a titled head level with the taller native chrome
+/// and the shared nav rows. The Windows build uses the Settings sidebar
+/// itself instead; this returns the pieces the window needs to place (the
+/// wrapper and its drag head) plus the rows it paints the selection on.
+#[cfg(not(target_os = "windows"))]
+fn build_native_sidebar(
+    labels: &[(String, &'static str)],
+    stack: &gtk4::Stack,
+) -> (GtkBox, GtkBox, Vec<(GtkBox, Image, Label)>) {
     let sidebar_scroller = ScrolledWindow::new();
     sidebar_scroller.set_policy(gtk4::PolicyType::Never, gtk4::PolicyType::Automatic);
     // The sidebar's width comes from the wrapper's CSS `min-width`. A
@@ -255,7 +452,10 @@ pub fn build_history_window(app: &Application) {
     sidebar_wrapper.set_hexpand(false);
 
     let sidebar_head = GtkBox::new(Orientation::Horizontal, 0);
-    sidebar_head.set_size_request(-1, (52.0 * ui_scale).round() as i32);
+    sidebar_head.set_size_request(
+        -1,
+        (TITLE_BAR_HEIGHT * super::window_scale()).round() as i32,
+    );
 
     let sidebar_title = Label::new(Some(&t("History")));
     sidebar_title.add_css_class("settings-sidebar-title");
@@ -266,20 +466,6 @@ pub fn build_history_window(app: &Application) {
 
     sidebar_wrapper.append(&sidebar_head);
     sidebar_wrapper.append(&sidebar_scroller);
-    install_window_drag(&sidebar_head, &window);
-
-    use crate::capture::editor::window::icon_names::custom;
-    let labels = [
-        (t("Screenshots"), custom::SCREENSHOOTER_SYMBOLIC),
-        (t("Recordings"), custom::RECORD_SCREEN_SYMBOLIC),
-        (t("Motion Edits"), custom::SCREENSHOOTER_SYMBOLIC),
-        (t("Video Edits"), custom::RECORD_SCREEN_SYMBOLIC),
-        (t("Cloud"), custom::CLOUD_OUTLINE_THIN_SYMBOLIC),
-    ];
-
-    let stack = gtk4::Stack::new();
-    stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
-    stack.set_vexpand(true);
 
     let mut nav_items = Vec::new();
 
@@ -344,97 +530,5 @@ pub fn build_history_window(app: &Application) {
         nav_items.push((item, icon, label));
     }
 
-    content_split.append(&sidebar_wrapper);
-
-    // --- BODY (STACK) ---
-    let body_frame = GtkBox::new(Orientation::Vertical, 0);
-    body_frame.set_vexpand(true);
-    body_frame.set_hexpand(true);
-
-    #[allow(unused_mut, clippy::useless_vec)]
-    let mut pages = vec![
-        build_local_page(MediaKind::Image, toast.clone(), &search),
-        build_local_page(MediaKind::Video, toast.clone(), &search),
-    ];
-    #[cfg(target_os = "windows")]
-    pages.extend(super::windows_history_pages(toast.clone(), &search));
-    #[cfg(not(target_os = "windows"))]
-    pages.extend([
-        build_edits_page(EditsKind::Motion, toast.clone(), &search),
-        build_edits_page(EditsKind::Video, toast.clone(), &search),
-        build_cloud_page(toast.clone()),
-    ]);
-
-    // Hooks the header bar drives: refresh reloads the visible page, and the
-    // shared search entry takes each page's placeholder and sensitivity.
-    let refresh_hooks: Rc<Vec<Rc<dyn Fn()>>> =
-        Rc::new(pages.iter().map(|page| Rc::clone(&page.refresh)).collect());
-    let search_meta: Vec<(bool, String)> = pages
-        .iter()
-        .map(|page| (page.searchable, page.search_placeholder.clone()))
-        .collect();
-
-    for (index, page) in pages.iter().enumerate() {
-        let name = index.to_string();
-        stack.add_titled(&page.widget, Some(&name), &labels[index].0);
-    }
-
-    {
-        let stack = stack.clone();
-        let refresh_hooks = Rc::clone(&refresh_hooks);
-        refresh_btn.connect_clicked(move |_| {
-            if let Some(name) = stack.visible_child_name() {
-                if let Ok(idx) = name.parse::<usize>() {
-                    if let Some(reload) = refresh_hooks.get(idx) {
-                        reload();
-                    }
-                }
-            }
-        });
-    }
-
-    body_frame.append(&stack);
-
-    // Keep the sidebar's page indicator and the header-bar search in sync
-    // when the visible page changes.
-    let nav_items_clone = nav_items.clone();
-    let search_for_switch = search.clone();
-    stack.connect_visible_child_name_notify(move |s| {
-        if let Some(name) = s.visible_child_name() {
-            if let Ok(idx) = name.parse::<usize>() {
-                if let Some((searchable, placeholder)) = search_meta.get(idx) {
-                    search_for_switch.set_sensitive(*searchable);
-                    search_for_switch.set_placeholder_text(Some(placeholder));
-                }
-                for (i, (item, icon, label)) in nav_items_clone.iter().enumerate() {
-                    if i == idx {
-                        item.add_css_class("settings-nav-item-selected");
-                        icon.add_css_class("settings-nav-icon-selected");
-                        label.add_css_class("settings-nav-label-selected");
-                    } else {
-                        item.remove_css_class("settings-nav-item-selected");
-                        icon.remove_css_class("settings-nav-icon-selected");
-                        label.remove_css_class("settings-nav-label-selected");
-                    }
-                }
-            }
-        }
-    });
-    stack.set_visible_child_name("0");
-
-    // Right column: the header bar sits above the page stack so the sidebar
-    // beside it can run the full window height.
-    let right_col = GtkBox::new(Orientation::Vertical, 0);
-    right_col.set_vexpand(true);
-    right_col.set_hexpand(true);
-    right_col.append(&toolbar);
-    right_col.append(&body_frame);
-    content_split.append(&right_col);
-
-    root_box.append(&content_split);
-    window.set_child(Some(&window_overlay));
-
-    window.present();
-    #[cfg(not(target_os = "windows"))]
-    crate::update_ui::present_if_needed(&window_overlay);
+    (sidebar_wrapper, sidebar_head, nav_items)
 }

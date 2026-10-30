@@ -308,11 +308,11 @@ fn set_apexshot_status(
     let email = config.cloud_user_email.trim();
     avatar.set_text(&initial(email));
     avatar.set_visible(is_connected);
-    status_label.set_text(&t(if is_connected {
-        "Connected"
+    status_label.set_text(&if is_connected {
+        t("Connected")
     } else {
-        "Not connected"
-    }));
+        t("Not connected")
+    });
     let detail = if !is_connected {
         connect_hint()
     } else if email.is_empty() {

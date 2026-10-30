@@ -4,6 +4,7 @@
 #include "platform/windows/audio_devices.h"
 #include "platform/windows/pointer_tracker.h"
 #include "platform/windows/settings_store.h"
+#include "platform/windows/webcam_format.h"
 #include "platform/windows/win_util.h"
 
 #include <QCoreApplication>
@@ -275,18 +276,23 @@ bool runFfprobe(const QStringList& arguments, QString* out)
 }
 
 /// The size a camera delivers at `fps`, or an empty size when it cannot be
-/// opened. The answer is cached per camera and rate: opening a capture device
-/// takes about a second, and the recorder asks once per recording.
-QSize cameraFrameSize(const QString& device, int fps)
+/// opened. `pixelFormat` pins the dshow mode the way the recording will ask
+/// for it. The answer is cached per camera, rate, and format: opening a
+/// capture device takes about a second, and the recorder asks once per
+/// recording.
+QSize cameraFrameSize(const QString& device, int fps, const QString& pixelFormat)
 {
     static QHash<QString, QSize> sizes;
-    const QString key = QStringLiteral("%1|%2").arg(device).arg(fps);
+    const QString key =
+        QStringLiteral("%1|%2|%3").arg(device).arg(fps).arg(pixelFormat);
     const auto cached = sizes.constFind(key);
     if (cached != sizes.constEnd())
         return cached.value();
 
     QStringList arguments{QStringLiteral("-v"), QStringLiteral("error"),
                           QStringLiteral("-f"), QStringLiteral("dshow")};
+    if (!pixelFormat.isEmpty())
+        arguments << QStringLiteral("-pixel_format") << pixelFormat;
     if (fps > 0)
         arguments << QStringLiteral("-framerate") << QString::number(fps);
     arguments << QStringLiteral("-i") << QStringLiteral("video=%1").arg(device)
@@ -300,25 +306,22 @@ QSize cameraFrameSize(const QString& device, int fps)
     return size;
 }
 
-/// The camera format to open at: the largest one it offers at 720p or below
-/// that can still deliver 24 fps. Left alone, an integrated camera opens at
-/// 1080p in uncompressed YUY2, which USB bandwidth caps at five frames a
-/// second - the frozen picture a recording then carries.
-QSize cameraCaptureSize(const QString& device)
+/// The camera mode to open at: the shared picker's best at 24fps within its
+/// raw-size ceiling. Left alone, an integrated camera opens at 1080p in
+/// uncompressed YUY2, which USB bandwidth caps at five frames a second - the
+/// frozen picture a recording then carries.
+Platform::WebcamCameraFormat cameraCaptureFormat(const QString& device)
 {
-    static QHash<QString, QSize> sizes;
-    const auto cached = sizes.constFind(device);
-    if (cached != sizes.constEnd())
+    static QHash<QString, Platform::WebcamCameraFormat> formats;
+    const auto cached = formats.constFind(device);
+    if (cached != formats.constEnd())
         return cached.value();
 
-    static const QRegularExpression option(
-        QStringLiteral("min s=(\\d+)x(\\d+) fps=(\\d+) max s=(\\d+)x(\\d+) fps=(\\d+)"));
-
-    QSize best;
     // Opening the camera twice in quick succession can make the second open
     // fail while the driver is still releasing the first, and `-list_options`
     // exits non-zero after printing, so retry once and parse the output.
-    for (int attempt = 0; attempt < 2 && best.isEmpty(); ++attempt) {
+    Platform::WebcamCameraFormat best;
+    for (int attempt = 0; attempt < 2 && best.size.isEmpty(); ++attempt) {
         if (attempt > 0)
             QThread::msleep(250);
         QString output;
@@ -328,28 +331,9 @@ QSize cameraCaptureSize(const QString& device)
                   QStringLiteral("video=%1").arg(device)},
                  &output,
                  nullptr);
-
-        qint64 bestArea = 0;
-        auto matches = option.globalMatch(output);
-        while (matches.hasNext()) {
-            const QRegularExpressionMatch match = matches.next();
-            const int width = match.captured(1).toInt();
-            const int height = match.captured(2).toInt();
-            const int rate = match.captured(3).toInt();
-            if (rate < 24 || width <= 0 || height <= 0)
-                continue;
-            const qint64 area = qint64(width) * height;
-            if (area > qint64(1280) * 720)
-                continue;
-            if (area > bestArea) {
-                bestArea = area;
-                best = QSize(width, height);
-            }
-        }
+        best = Platform::webcamPreferredFormat(output, 24, qint64(1280) * 720);
     }
-    if (!best.isValid())
-        return QSize();
-    sizes.insert(device, best);
+    formats.insert(device, best);
     return best;
 }
 
@@ -452,8 +436,11 @@ public:
     ~Private() = default;
 
     bool startSegment(QString& error);
-    void onProcessFinished(int exitCode, QProcess::ExitStatus status);
+    void onCaptureFinished(int exitCode, QProcess::ExitStatus status);
+    void onWebcamFinished(int exitCode, QProcess::ExitStatus status);
+    void onMicFinished();
     void onProcessError(QProcess::ProcessError error);
+    void checkCaptureStopped();
     void requestQuit(int timeoutMs);
     void finalize();
     void completeSystemAudio(const QString& videoPath);
@@ -471,8 +458,8 @@ public:
     void removeDiscardedSidecar();
     void consumeWebcamPreview(const QByteArray& chunk);
     [[nodiscard]] qint64 elapsedMs() const;
-    [[nodiscard]] QStringList buildArguments(const QString& segmentPath,
-                                             const QString& webcamSegmentPath) const;
+    [[nodiscard]] QStringList buildScreenArguments(const QString& segmentPath) const;
+    [[nodiscard]] QStringList buildWebcamArguments(const QString& webcamSegmentPath) const;
     [[nodiscard]] QStringList buildAudioArguments(QStringList& warnings) const;
     [[nodiscard]] QString captureOutput() const;
 
@@ -480,6 +467,14 @@ public:
     State state = State::Idle;
     RecordingRequest request;
     QProcess* process = nullptr;
+    /// The camera runs in its own process: a single ffmpeg doing the desktop,
+    /// a camera, and two encodes at once starves every real-time input, and
+    /// the forced frame rate turns the gaps into staggering on both tracks.
+    QProcess* webcamProcess = nullptr;
+    /// The screen process's last exit, the number the state machine reports
+    /// on; a camera that dies only loses its track.
+    int captureExitCode = 0;
+    QProcess::ExitStatus captureExitStatus = QProcess::NormalExit;
     QProcess* concat = nullptr;
     QTimer* tick = nullptr;
     PointerTracker pointerTracker;
@@ -505,6 +500,9 @@ public:
     /// The size the dshow input is asked to deliver; empty uses the camera's
     /// default, which can be a five-fps 1080p mode.
     QSize webcamCaptureSize;
+    /// The dshow pixel_format the input asks for; empty uses the driver's
+    /// default, which can be the heaviest raw layout the camera lists.
+    QString webcamPixelFormat;
     /// The bubble-sized frame the preview pipe carries.
     QSize webcamPreviewSize;
     QByteArray webcamPreviewBuffer;
@@ -516,6 +514,21 @@ public:
     std::unique_ptr<SystemAudioCapture> systemAudio;
     QString systemAudioPath;
     qint64 systemAudioOffsetMs = 0;
+
+    /// The microphone runs in its own process writing raw PCM: a dshow audio
+    /// input inside the capture process starves the real-time video, and the
+    /// WAV is muxed into the recording once finalised. It records through
+    /// pauses; the spans below are what gets cut back out.
+    QProcess* micProcess = nullptr;
+    QString micPath;
+    /// How far ahead of the video the audio capture started, for the trim.
+    qint64 micOffsetMs = 0;
+    /// The elapsed time the current pause began at, or -1.
+    qint64 micPauseStartMs = -1;
+    /// Wall time that pause began at, to measure how long it lasted.
+    qint64 pauseWallMs = 0;
+    /// Paused spans in elapsed time: [start, start + paused wall duration).
+    QVector<QPair<qint64, qint64>> micPauseSpans;
 };
 
 qint64 RecordingSession::Private::elapsedMs() const
@@ -578,8 +591,7 @@ QStringList RecordingSession::Private::buildAudioArguments(QStringList& warnings
     return arguments;
 }
 
-QStringList RecordingSession::Private::buildArguments(const QString& segmentPath,
-                                                     const QString& webcamSegmentPath) const
+QStringList RecordingSession::Private::buildScreenArguments(const QString& segmentPath) const
 {
     QStringList args;
     args << QStringLiteral("-y") << QStringLiteral("-hide_banner") << QStringLiteral("-loglevel")
@@ -596,36 +608,6 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
          << QStringLiteral("-video_size")
          << QStringLiteral("%1x%2").arg(request.region.width()).arg(request.region.height())
          << QStringLiteral("-i") << QStringLiteral("desktop");
-
-    const bool hasWebcam = !webcamSegmentPath.isEmpty();
-    if (hasWebcam) {
-        // The camera runs on its own clock, and the same process is encoding
-        // three streams; a deep buffer keeps a busy desktop from making dshow
-        // drop frames out of the track.
-        args << QStringLiteral("-thread_queue_size") << QStringLiteral("1024");
-        if (!request.webcamStreamUrl.isEmpty()) {
-            args << QStringLiteral("-f") << QStringLiteral("mjpeg")
-                 << QStringLiteral("-probesize") << QStringLiteral("32768")
-                 << QStringLiteral("-analyzeduration") << QStringLiteral("100000")
-                 << QStringLiteral("-use_wallclock_as_timestamps") << QStringLiteral("1")
-                 << QStringLiteral("-i") << request.webcamStreamUrl;
-        } else {
-            if (!webcamCaptureSize.isEmpty()) {
-                args << QStringLiteral("-video_size")
-                     << QStringLiteral("%1x%2")
-                            .arg(webcamCaptureSize.width())
-                            .arg(webcamCaptureSize.height());
-            }
-            args << QStringLiteral("-f") << QStringLiteral("dshow") << QStringLiteral("-rtbufsize")
-                 << QStringLiteral("256M") << QStringLiteral("-framerate") << QString::number(fps)
-                 << QStringLiteral("-i")
-                 << QStringLiteral("video=%1").arg(request.webcamDevice);
-        }
-    }
-
-    args << audioArguments;
-    // The camera takes input 1, so every audio input moves up by one.
-    const int audioStart = hasWebcam ? 2 : 1;
 
     const QSize outputSize =
         recordingOutputSize(request.region.size(),
@@ -647,60 +629,76 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
     args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-bf")
          << QStringLiteral("2") << QStringLiteral("-r") << QString::number(fps);
 
-    const int audioInputCount = audioArguments.count(QStringLiteral("-i"));
-    if (audioInputCount > 0) {
-        if (audioInputCount > 1) {
-            args << QStringLiteral("-filter_complex")
-                 << QStringLiteral("[%1:a][%2:a]amix=inputs=2:duration=longest[aout]")
-                        .arg(audioStart)
-                        .arg(audioStart + 1)
-                 << QStringLiteral("-map") << QStringLiteral("[aout]");
-        } else {
-            args << QStringLiteral("-map") << QStringLiteral("%1:a").arg(audioStart);
+    args << QStringLiteral("-movflags") << QStringLiteral("+faststart") << segmentPath;
+    return args;
+}
+
+QStringList RecordingSession::Private::buildWebcamArguments(
+    const QString& webcamSegmentPath) const
+{
+    QStringList args;
+    args << QStringLiteral("-y") << QStringLiteral("-hide_banner") << QStringLiteral("-loglevel")
+         << QStringLiteral("error") << QStringLiteral("-nostats");
+
+    const int fps = request.fps > 0 ? request.fps : 30;
+    // The camera runs on its own clock; a deep buffer keeps the encoder from
+    // making dshow drop frames out of the track.
+    args << QStringLiteral("-thread_queue_size") << QStringLiteral("1024");
+    if (!request.webcamStreamUrl.isEmpty()) {
+        args << QStringLiteral("-f") << QStringLiteral("mjpeg")
+             << QStringLiteral("-probesize") << QStringLiteral("32768")
+             << QStringLiteral("-analyzeduration") << QStringLiteral("100000")
+             << QStringLiteral("-use_wallclock_as_timestamps") << QStringLiteral("1")
+             << QStringLiteral("-i") << request.webcamStreamUrl;
+    } else {
+        if (!webcamCaptureSize.isEmpty()) {
+            args << QStringLiteral("-video_size")
+                 << QStringLiteral("%1x%2")
+                        .arg(webcamCaptureSize.width())
+                        .arg(webcamCaptureSize.height());
         }
-        args << QStringLiteral("-c:a") << QStringLiteral("aac") << QStringLiteral("-b:a")
-             << QStringLiteral("160k") << QStringLiteral("-ac")
-             << (request.monoAudio ? QStringLiteral("1") : QStringLiteral("2"));
+        args << QStringLiteral("-f") << QStringLiteral("dshow") << QStringLiteral("-rtbufsize")
+             << QStringLiteral("256M") << QStringLiteral("-framerate") << QString::number(fps);
+        if (!webcamPixelFormat.isEmpty())
+            args << QStringLiteral("-pixel_format") << webcamPixelFormat;
+        args << QStringLiteral("-i")
+             << QStringLiteral("video=%1").arg(request.webcamDevice);
     }
 
-    args << QStringLiteral("-movflags") << QStringLiteral("+faststart") << segmentPath;
+    // The track file is the camera alone: the editor places it over the
+    // recording, so nothing about the desktop may appear in it. 1080p is
+    // more than any bubble size can show, and the cap keeps the extra
+    // encoder cheap.
+    const QString trackScale =
+        QStringLiteral("scale=w='min(iw,1920)':h='min(ih,1080)'"
+                       ":force_original_aspect_ratio=decrease,"
+                       "scale=trunc(iw/2)*2:trunc(ih/2)*2");
+    args << QStringLiteral("-map") << QStringLiteral("0:v") << QStringLiteral("-an")
+         << QStringLiteral("-vf") << trackScale;
+    const QSize trackSize = webcamCaptureSize.isEmpty()
+        ? QSize(1920, 1080)
+        : recordingOutputSize(webcamCaptureSize, QSize(1920, 1080));
+    appendVideoEncoder(args, 18, trackSize, fps);
+    args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-r")
+         << QString::number(fps) << webcamSegmentPath;
 
-    if (hasWebcam) {
-        // The track file is the camera alone: the editor places it over the
-        // recording, so nothing about the desktop may appear in it. 1080p is
-        // more than any bubble size can show, and the cap keeps the extra
-        // encoder cheap.
-        const QString trackScale =
-            QStringLiteral("scale=w='min(iw,1920)':h='min(ih,1080)'"
-                           ":force_original_aspect_ratio=decrease,"
-                           "scale=trunc(iw/2)*2:trunc(ih/2)*2");
-        args << QStringLiteral("-map") << QStringLiteral("1:v") << QStringLiteral("-an")
-             << QStringLiteral("-vf") << trackScale;
-        const QSize trackSize = webcamCaptureSize.isEmpty()
-            ? QSize(1920, 1080)
-            : recordingOutputSize(webcamCaptureSize, QSize(1920, 1080));
-        appendVideoEncoder(args, 18, trackSize, fps);
-        args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-r")
-             << QString::number(fps) << webcamSegmentPath;
-
-        // The preview is a small MJPEG stream rather than raw frames: at the
-        // bubble's size a raw pipe carries tens of megabytes a second, so any
-        // hitch in the window blocks ffmpeg's stdout and stalls the whole
-        // recording with it.
-        if (request.webcamStreamUrl.isEmpty()) {
-            const QSize preview = webcamPreviewSize.isEmpty() ? QSize(320, 320)
-                                                              : webcamPreviewSize;
-            args << QStringLiteral("-map") << QStringLiteral("1:v") << QStringLiteral("-an")
-                 << QStringLiteral("-vf")
-                 << QStringLiteral(
-                        "scale=%1:%2:force_original_aspect_ratio=increase,crop=%1:%2,fps=%3")
-                        .arg(preview.width())
-                        .arg(preview.height())
-                        .arg(fps)
-                 << QStringLiteral("-c:v") << QStringLiteral("mjpeg") << QStringLiteral("-q:v")
-                 << QStringLiteral("6") << QStringLiteral("-f") << QStringLiteral("mjpeg")
-                 << QStringLiteral("pipe:1");
-        }
+    // The preview is a small MJPEG stream rather than raw frames: at the
+    // bubble's size a raw pipe carries tens of megabytes a second, so any
+    // hitch in the window blocks ffmpeg's stdout and stalls the whole
+    // recording with it.
+    if (request.webcamStreamUrl.isEmpty()) {
+        const QSize preview =
+            webcamPreviewSize.isEmpty() ? QSize(320, 320) : webcamPreviewSize;
+        args << QStringLiteral("-map") << QStringLiteral("0:v") << QStringLiteral("-an")
+             << QStringLiteral("-vf")
+             << QStringLiteral(
+                    "scale=%1:%2:force_original_aspect_ratio=increase,crop=%1:%2,fps=%3")
+                    .arg(preview.width())
+                    .arg(preview.height())
+                    .arg(fps)
+             << QStringLiteral("-c:v") << QStringLiteral("mjpeg") << QStringLiteral("-q:v")
+             << QStringLiteral("6") << QStringLiteral("-f") << QStringLiteral("mjpeg")
+             << QStringLiteral("pipe:1");
     }
 
     return args;
@@ -718,22 +716,17 @@ bool RecordingSession::Private::startSegment(QString& error)
     webcamPreviewBuffer.clear();
     process = new QProcess(q);
     process->setProgram(ffmpegExecutable());
-    process->setArguments(buildArguments(path, webcamPath));
-    // The preview frames own stdout, so stderr has to stay on its own channel
-    // for the failure messages the recorder reports.
+    process->setArguments(buildScreenArguments(path));
     process->setProcessChannelMode(QProcess::SeparateChannels);
 
     QObject::connect(process, &QProcess::readyReadStandardError, q, [this] {
         processOutput.append(process ? process->readAllStandardError() : QByteArray());
     });
-    QObject::connect(process, &QProcess::readyReadStandardOutput, q, [this] {
-        consumeWebcamPreview(process ? process->readAllStandardOutput() : QByteArray());
-    });
     QObject::connect(process,
                      QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
                      q,
                      [this](int code, QProcess::ExitStatus status) {
-                         onProcessFinished(code, status);
+                         onCaptureFinished(code, status);
                      });
     QObject::connect(process, &QProcess::errorOccurred, q, [this](QProcess::ProcessError error) {
         onProcessError(error);
@@ -747,10 +740,47 @@ bool RecordingSession::Private::startSegment(QString& error)
         process = nullptr;
         return false;
     }
-
     segments.append(path);
-    if (!webcamPath.isEmpty())
-        webcamSegments.append(webcamPath);
+
+    if (!webcamPath.isEmpty()) {
+        webcamProcess = new QProcess(q);
+        webcamProcess->setProgram(ffmpegExecutable());
+        webcamProcess->setArguments(buildWebcamArguments(webcamPath));
+        // The preview frames own stdout, so stderr has to stay on its own
+        // channel for the failure messages the recorder reports.
+        webcamProcess->setProcessChannelMode(QProcess::SeparateChannels);
+        QObject::connect(webcamProcess, &QProcess::readyReadStandardError, q, [this] {
+            processOutput.append(webcamProcess ? webcamProcess->readAllStandardError()
+                                               : QByteArray());
+        });
+        QObject::connect(webcamProcess, &QProcess::readyReadStandardOutput, q, [this] {
+            consumeWebcamPreview(webcamProcess ? webcamProcess->readAllStandardOutput()
+                                               : QByteArray());
+        });
+        QObject::connect(webcamProcess,
+                         QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                         q,
+                         [this](int code, QProcess::ExitStatus status) {
+                             onWebcamFinished(code, status);
+                         });
+        webcamProcess->start();
+        if (!webcamProcess->waitForStarted(kProbeTimeoutMs)) {
+            // A camera process that will not start loses the track, not the
+            // recording: warn and carry on with the desktop alone.
+            recordingLog(QStringLiteral("webcam process could not start: %1")
+                             .arg(webcamProcess->errorString()));
+            emit q->warning(
+                QStringLiteral("The webcam could not be recorded: %1")
+                    .arg(webcamProcess->errorString()));
+            delete webcamProcess;
+            webcamProcess = nullptr;
+            webcamActive = false;
+            webcamTrack = Platform::WebcamTrack{};
+        } else {
+            webcamSegments.append(webcamPath);
+        }
+    }
+
     ++segmentIndex;
     return true;
 }
@@ -810,21 +840,74 @@ void RecordingSession::Private::onProcessError(QProcess::ProcessError error)
     fail(QStringLiteral("ffmpeg could not start: %1").arg(process->errorString()));
 }
 
-void RecordingSession::Private::onProcessFinished(int exitCode, QProcess::ExitStatus status)
+void RecordingSession::Private::onCaptureFinished(int exitCode, QProcess::ExitStatus status)
 {
     if (process) {
         processOutput.append(process->readAllStandardError());
-        consumeWebcamPreview(process->readAllStandardOutput());
         process->deleteLater();
         process = nullptr;
     }
+    captureExitCode = exitCode;
+    captureExitStatus = status;
+    if (state == State::Recording && webcamProcess) {
+        // The screen is gone; the track follows it down rather than keep
+        // writing a camera file nothing will join.
+        webcamProcess->kill();
+    }
+    checkCaptureStopped();
+}
+
+void RecordingSession::Private::onWebcamFinished(int exitCode, QProcess::ExitStatus status)
+{
+    if (webcamProcess) {
+        processOutput.append(webcamProcess->readAllStandardError());
+        consumeWebcamPreview(webcamProcess->readAllStandardOutput());
+        webcamProcess->deleteLater();
+        webcamProcess = nullptr;
+    }
+    if (state == State::Recording && process) {
+        // A camera that dies mid-recording loses its track, not the video:
+        // the desktop keeps recording and the file simply has no bubble.
+        webcamActive = false;
+        webcamTrack = Platform::WebcamTrack{};
+        Q_UNUSED(exitCode);
+        Q_UNUSED(status);
+        recordingLog(QStringLiteral("webcam process died mid-recording"));
+        emit q->warning(
+            QStringLiteral("The webcam stopped recording; the video continues without it."));
+    }
+    checkCaptureStopped();
+}
+
+void RecordingSession::Private::onMicFinished()
+{
+    if (micProcess) {
+        processOutput.append(micProcess->readAllStandardError());
+        micProcess->deleteLater();
+        micProcess = nullptr;
+    }
+    if (state == State::Recording && process) {
+        // A mic that dies mid-recording loses its track, not the video.
+        micPath.clear();
+        recordingLog(QStringLiteral("microphone process died mid-recording"));
+        emit q->warning(QStringLiteral(
+            "The microphone stopped recording; the video continues without it."));
+    }
+    checkCaptureStopped();
+}
+
+void RecordingSession::Private::checkCaptureStopped()
+{
+    if (process || webcamProcess)
+        return;
 
     const QString detail = captureOutput();
 
     if (state == State::Pausing) {
-        if (status != QProcess::NormalExit || exitCode != 0) {
+        if (captureExitStatus != QProcess::NormalExit || captureExitCode != 0) {
             fail(detail.isEmpty()
-                     ? QStringLiteral("ffmpeg stopped while pausing (code %1)").arg(exitCode)
+                     ? QStringLiteral("ffmpeg stopped while pausing (code %1)")
+                           .arg(captureExitCode)
                      : QStringLiteral("ffmpeg stopped while pausing: %1").arg(detail));
             return;
         }
@@ -839,15 +922,17 @@ void RecordingSession::Private::onProcessFinished(int exitCode, QProcess::ExitSt
     }
 
     if (state == State::Stopping) {
+        if (micProcess)
+            return;
         emit q->captureStopped();
         if (discardRequested) {
             cleanupAndEmit(false, QString(), QString());
             return;
         }
-        if (status != QProcess::NormalExit || exitCode != 0) {
+        if (captureExitStatus != QProcess::NormalExit || captureExitCode != 0) {
             fail(detail.isEmpty()
                      ? QStringLiteral("ffmpeg stopped before the recording was saved (code %1)")
-                           .arg(exitCode)
+                           .arg(captureExitCode)
                      : QStringLiteral("ffmpeg stopped before the recording was saved: %1")
                            .arg(detail));
             return;
@@ -864,18 +949,18 @@ void RecordingSession::Private::onProcessFinished(int exitCode, QProcess::ExitSt
 
 void RecordingSession::Private::requestQuit(int timeoutMs)
 {
-    QProcess* target = process;
-    if (!target)
-        return;
-    target->write("q\n");
-    target->closeWriteChannel();
-    // A pause can be followed by a resume before the timeout, so only the
-    // process that received `q` may be killed here.
-    QTimer::singleShot(timeoutMs, q, [this, target] {
-        if (process && process == target) {
-            process->kill();
-        }
-    });
+    for (QProcess* target : {process, webcamProcess}) {
+        if (!target)
+            continue;
+        target->write("q\n");
+        target->closeWriteChannel();
+        // A pause can be followed by a resume before the timeout, so only
+        // the process that received `q` may be killed here.
+        QTimer::singleShot(timeoutMs, q, [this, target] {
+            if ((process && process == target) || (webcamProcess && webcamProcess == target))
+                target->kill();
+        });
+    }
 }
 
 void RecordingSession::Private::fail(const QString& reason)
@@ -886,11 +971,15 @@ void RecordingSession::Private::fail(const QString& reason)
     pointerTracker.discard();
     state = State::Failed;
     qWarning().noquote() << "[recording]" << reason;
-    if (process) {
-        process->kill();
-        process->deleteLater();
-        process = nullptr;
+    for (QProcess* target : {process, webcamProcess, micProcess}) {
+        if (!target)
+            continue;
+        target->kill();
+        target->deleteLater();
     }
+    process = nullptr;
+    webcamProcess = nullptr;
+    micProcess = nullptr;
     // Keep the segments so a failed save can still be recovered from the work
     // directory the message names.
     const QString message = workDir.isEmpty()
@@ -904,68 +993,95 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
 {
     const auto next = [this](const QString& path) { completeWebcamTrack(path); };
 
-    if (!systemAudio && systemAudioPath.isEmpty()) {
-        next(videoPath);
-        return;
-    }
     if (systemAudio)
         systemAudio->stop();
-    if (systemAudioPath.isEmpty() || !QFileInfo::exists(systemAudioPath)
-        || QFileInfo(systemAudioPath).size() <= 68) {
-        QFile::remove(systemAudioPath);
-        systemAudioPath.clear();
+    systemAudio.reset();
+
+    struct AudioInput {
+        QString path;
+        double offsetSeconds;
+        QString select;
+    };
+    QVector<AudioInput> inputs;
+    const auto usable = [](const QString& path) {
+        return !path.isEmpty() && QFileInfo::exists(path) && QFileInfo(path).size() > 68;
+    };
+    if (usable(micPath)) {
+        // The mic recorded through pauses; drop those spans so the audio
+        // tracks the kept video segments.
+        QString select;
+        if (!micPauseSpans.isEmpty()) {
+            QStringList spans;
+            for (const auto& span : micPauseSpans) {
+                spans << QStringLiteral("between(t,%1,%2)")
+                             .arg(span.first / 1000.0, 0, 'f', 3)
+                             .arg(span.second / 1000.0, 0, 'f', 3);
+            }
+            select = QStringLiteral(",aselect='not(%1)',asetpts=N/SR/TB")
+                         .arg(spans.join(QStringLiteral("+")));
+        }
+        inputs.append(
+            {micPath, std::max<qint64>(0, micOffsetMs) / 1000.0, select});
+    }
+    if (usable(systemAudioPath)) {
+        inputs.append({systemAudioPath,
+                       std::max<qint64>(0, systemAudioOffsetMs) / 1000.0,
+                       QString()});
+    }
+    micPath.clear();
+    systemAudioPath.clear();
+
+    if (inputs.isEmpty()) {
         next(videoPath);
         return;
     }
 
     const QString mixedPath = QDir(workDir).filePath(QStringLiteral("mixed-audio.mp4"));
     QFile::remove(mixedPath);
-    recordingLog(QStringLiteral("system audio: mux %1 (%2 bytes) onto %3")
-                     .arg(systemAudioPath)
-                     .arg(QFileInfo(systemAudioPath).size())
+    recordingLog(QStringLiteral("audio: mux %1 tracks onto %2")
+                     .arg(inputs.size())
                      .arg(videoPath));
 
     const bool videoHasAudio = hasAudioStream(videoPath);
-    const double offsetSeconds = std::max<qint64>(0, systemAudioOffsetMs) / 1000.0;
-    const QString trim = QStringLiteral("atrim=start=%1").arg(offsetSeconds, 0, 'f', 3);
-    QString filter;
-    if (videoHasAudio) {
-        filter = QStringLiteral("[1:a]%1,apad[system];"
-                                "[0:a][system]amix=inputs=2:duration=longest:"
-                                "dropout_transition=0:normalize=0[aout]")
-                     .arg(trim);
+    QStringList labels;
+    QStringList parts;
+    for (int i = 0; i < inputs.size(); ++i) {
+        labels << QStringLiteral("[a%1]").arg(i);
+        parts << QStringLiteral("[%1:a]atrim=start=%2,asetpts=PTS-STARTPTS%3,apad%4")
+                     .arg(i + 1)
+                     .arg(inputs[i].offsetSeconds, 0, 'f', 3)
+                     .arg(inputs[i].select)
+                     .arg(labels.last());
+    }
+    QStringList mix = labels;
+    if (videoHasAudio)
+        mix.prepend(QStringLiteral("[0:a]"));
+    QString filter = parts.join(QLatin1Char(';'));
+    if (mix.size() > 1) {
+        filter += QStringLiteral(";%1amix=inputs=%2:duration=longest:"
+                                 "dropout_transition=0:normalize=0[aout]")
+                      .arg(mix.join(QString()))
+                      .arg(mix.size());
     } else {
-        filter = QStringLiteral("[1:a]%1,apad[aout]").arg(trim);
+        filter += QStringLiteral(";%1anull[aout]").arg(labels.first());
     }
 
-    const QStringList arguments{
-        QStringLiteral("-y"),
-        QStringLiteral("-hide_banner"),
-        QStringLiteral("-loglevel"),
-        QStringLiteral("error"),
-        QStringLiteral("-i"),
-        videoPath,
-        QStringLiteral("-i"),
-        systemAudioPath,
-        QStringLiteral("-filter_complex"),
-        filter,
-        QStringLiteral("-map"),
-        QStringLiteral("0:v"),
-        QStringLiteral("-map"),
-        QStringLiteral("[aout]"),
-        QStringLiteral("-c:v"),
-        QStringLiteral("copy"),
-        QStringLiteral("-c:a"),
-        QStringLiteral("aac"),
-        QStringLiteral("-b:a"),
-        QStringLiteral("160k"),
-        QStringLiteral("-ac"),
-        request.monoAudio ? QStringLiteral("1") : QStringLiteral("2"),
-        QStringLiteral("-movflags"),
-        QStringLiteral("+faststart"),
-        QStringLiteral("-shortest"),
-        mixedPath,
-    };
+    QStringList arguments{QStringLiteral("-y"), QStringLiteral("-hide_banner"),
+                          QStringLiteral("-loglevel"), QStringLiteral("error"),
+                          QStringLiteral("-i"), videoPath};
+    for (const AudioInput& input : inputs)
+        arguments << QStringLiteral("-i") << input.path;
+    arguments << QStringLiteral("-filter_complex")
+              << filter
+              << QStringLiteral("-map") << QStringLiteral("0:v")
+              << QStringLiteral("-map") << QStringLiteral("[aout]")
+              << QStringLiteral("-c:v") << QStringLiteral("copy")
+              << QStringLiteral("-c:a") << QStringLiteral("aac")
+              << QStringLiteral("-b:a") << QStringLiteral("160k")
+              << QStringLiteral("-ac")
+              << (request.monoAudio ? QStringLiteral("1") : QStringLiteral("2"))
+              << QStringLiteral("-movflags") << QStringLiteral("+faststart")
+              << QStringLiteral("-shortest") << mixedPath;
 
     auto* mixer = new QProcess(q);
     mixer->setProgram(ffmpegExecutable());
@@ -975,12 +1091,12 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
         mixer,
         QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
         q,
-        [this, mixer, mixedPath, videoPath, next](int code, QProcess::ExitStatus status) {
+        [this, mixer, mixedPath, videoPath, next, inputs](int code,
+                                                        QProcess::ExitStatus status) {
             const QString detail = tailLines(QString::fromUtf8(mixer->readAll()), 6);
             mixer->deleteLater();
-            systemAudio.reset();
-            QFile::remove(systemAudioPath);
-            systemAudioPath.clear();
+            for (const AudioInput& input : inputs)
+                QFile::remove(input.path);
 
             recordingLog(QStringLiteral("system audio: mux exit=%1 size=%2 detail=%3")
                              .arg(code)
@@ -1465,6 +1581,14 @@ RecordingSession::~RecordingSession()
         d->process->kill();
         d->process->waitForFinished(1000);
     }
+    if (d->webcamProcess) {
+        d->webcamProcess->kill();
+        d->webcamProcess->waitForFinished(1000);
+    }
+    if (d->micProcess) {
+        d->micProcess->kill();
+        d->micProcess->waitForFinished(1000);
+    }
     if (d->concat) {
         d->concat->kill();
         d->concat->waitForFinished(1000);
@@ -1556,6 +1680,7 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
     d->webcamActive = false;
     d->webcamCameraSize = QSize();
     d->webcamCaptureSize = QSize();
+    d->webcamPixelFormat.clear();
     d->webcamPreviewSize = QSize();
     d->webcamPreviewBuffer.clear();
     d->webcamPreviewLogged = false;
@@ -1587,14 +1712,22 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         recordingLog(QStringLiteral("webcam stream reuse requested"));
         d->webcamActive = true;
     } else if (!camera.isEmpty()) {
-        const QSize captureSize = cameraCaptureSize(camera);
-        const QSize cameraSize = cameraFrameSize(camera, d->request.fps);
-        recordingLog(QStringLiteral("webcam probe %1 -> %2x%3 capture=%4x%5")
+        const Platform::WebcamCameraFormat captureFormat = cameraCaptureFormat(camera);
+        QString pixelFormat = captureFormat.pixelFormat;
+        QSize cameraSize = cameraFrameSize(camera, d->request.fps, pixelFormat);
+        if (cameraSize.isEmpty() && !pixelFormat.isEmpty()) {
+            // A driver can list a format it then refuses to open; ask for its
+            // default rather than lose the track over the pin.
+            cameraSize = cameraFrameSize(camera, d->request.fps, {});
+            pixelFormat.clear();
+        }
+        recordingLog(QStringLiteral("webcam probe %1 -> %2x%3 capture=%4x%5 %6")
                          .arg(camera)
                          .arg(cameraSize.width())
                          .arg(cameraSize.height())
-                         .arg(captureSize.width())
-                         .arg(captureSize.height()));
+                         .arg(captureFormat.size.width())
+                         .arg(captureFormat.size.height())
+                         .arg(captureFormat.mjpeg ? QStringLiteral("mjpeg") : pixelFormat));
         if (cameraSize.isEmpty()) {
             warnings.append(QStringLiteral("The camera \"%1\" could not be opened; recording "
                                            "without a webcam track.")
@@ -1603,7 +1736,8 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         } else {
             d->webcamActive = true;
             d->webcamCameraSize = cameraSize;
-            d->webcamCaptureSize = captureSize;
+            d->webcamCaptureSize = captureFormat.size;
+            d->webcamPixelFormat = pixelFormat;
             d->webcamPreviewSize = webcamPreviewFrameSize(d->request.webcamLayout.shape);
         }
     }
@@ -1633,6 +1767,10 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
     d->systemAudio.reset();
     d->systemAudioPath.clear();
     d->systemAudioOffsetMs = 0;
+    d->micPath.clear();
+    d->micOffsetMs = 0;
+    d->micPauseStartMs = -1;
+    d->micPauseSpans.clear();
 
     QElapsedTimer audioClock;
     audioClock.start();
@@ -1663,13 +1801,54 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         }
     }
 
+    // The microphone records in its own process writing raw PCM, muxed in
+    // once the recording is finalised: a dshow audio input inside the
+    // capture process starves the real-time video of frames.
+    if (!d->audioArguments.isEmpty()) {
+        const QString path = QDir(d->workDir).filePath(QStringLiteral("mic.wav"));
+        QStringList micArgs{QStringLiteral("-y"), QStringLiteral("-hide_banner"),
+                            QStringLiteral("-loglevel"), QStringLiteral("error"),
+                            QStringLiteral("-nostats")};
+        micArgs << d->audioArguments << QStringLiteral("-vn") << QStringLiteral("-c:a")
+                << QStringLiteral("pcm_s16le") << path;
+        auto* mic = new QProcess(this);
+        mic->setProgram(ffmpegExecutable());
+        mic->setProcessChannelMode(QProcess::SeparateChannels);
+        mic->setArguments(micArgs);
+        QObject::connect(mic, &QProcess::readyReadStandardError, this, [d = d, mic] {
+            d->processOutput.append(mic->readAllStandardError());
+        });
+        QObject::connect(mic,
+                         QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                         this,
+                         [d = d](int, QProcess::ExitStatus) { d->onMicFinished(); });
+        mic->start();
+        if (!mic->waitForStarted(kProbeTimeoutMs)) {
+            recordingLog(QStringLiteral("microphone process could not start: %1")
+                             .arg(mic->errorString()));
+            emit warning(QStringLiteral("The microphone could not be recorded: %1")
+                             .arg(mic->errorString()));
+            delete mic;
+        } else {
+            d->micProcess = mic;
+            d->micPath = path;
+            recordingLog(QStringLiteral("microphone: started %1").arg(path));
+        }
+    }
+
     if (!d->startSegment(error)) {
         if (d->systemAudio)
             d->systemAudio->stop();
+        if (d->micProcess) {
+            d->micProcess->kill();
+            d->micProcess->deleteLater();
+            d->micProcess = nullptr;
+        }
         d->cleanupWorkDir();
         return false;
     }
     d->systemAudioOffsetMs = audioClock.elapsed();
+    d->micOffsetMs = audioClock.elapsed();
 
     d->state = Private::State::Recording;
     d->active.start();
@@ -1689,6 +1868,9 @@ void RecordingSession::pause()
 
     d->elapsedBeforeMs += d->active.elapsed();
     d->pointerTracker.pause(d->elapsedBeforeMs);
+    // The mic keeps recording through the pause; the span is cut at mux time.
+    d->micPauseStartMs = d->elapsedBeforeMs;
+    d->pauseWallMs = QDateTime::currentMSecsSinceEpoch();
     if (d->systemAudio)
         d->systemAudio->setPaused(true);
     d->tick->stop();
@@ -1723,6 +1905,11 @@ void RecordingSession::resume()
     d->state = Private::State::Recording;
     d->active.start();
     d->pointerTracker.resume();
+    if (d->micPauseStartMs >= 0) {
+        const qint64 paused = QDateTime::currentMSecsSinceEpoch() - d->pauseWallMs;
+        d->micPauseSpans.append({d->micPauseStartMs, d->micPauseStartMs + paused});
+        d->micPauseStartMs = -1;
+    }
     if (d->systemAudio)
         d->systemAudio->setPaused(false);
     d->tick->start();
@@ -1742,6 +1929,15 @@ void RecordingSession::stop()
     d->pointerTracker.stop(d->elapsedBeforeMs);
     if (d->systemAudio)
         d->systemAudio->stop();
+    if (d->micProcess) {
+        d->micProcess->write("q\n");
+        d->micProcess->closeWriteChannel();
+        QProcess* target = d->micProcess;
+        QTimer::singleShot(kStopTimeoutMs, this, [d = d, target] {
+            if (d->micProcess == target)
+                d->micProcess->kill();
+        });
+    }
     d->tick->stop();
     d->discardRequested = false;
     d->resumeAfterPause = false;
@@ -1771,6 +1967,8 @@ void RecordingSession::discard()
     d->pointerTracker.discard();
     if (d->systemAudio)
         d->systemAudio->stop();
+    if (d->micProcess)
+        d->micProcess->kill();
     d->tick->stop();
     d->discardRequested = true;
     d->resumeAfterPause = false;

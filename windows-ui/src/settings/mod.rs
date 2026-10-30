@@ -31,7 +31,7 @@ mod recording;
 mod screenshots;
 #[path = "../../../src/settings/select.rs"]
 mod select;
-mod shell;
+pub(crate) mod shell;
 #[path = "../../../src/settings/shortcuts.rs"]
 mod shortcuts;
 mod shortcuts_status;
@@ -793,13 +793,17 @@ pub(crate) fn install_window_css() {
          window.editor-window.history-window.editor-theme-light {{ border:1px solid rgba(17,24,39,0.12); }} \
          .history-root {{ border:none; border-radius:12px; font-family:'Inter','Noto Sans',system-ui,sans-serif; }} \
          .history-root .history-header-search {{ font-size:{}px; min-height:{}px; }} \
+         .history-root .history-header-refresh {{ min-width:{}px; min-height:{}px; margin-right:{}px; }} \
          .history-root .recent-captures-title {{ font-size:{}px; font-weight:600; letter-spacing:-0.1px; opacity:0.85; }} \
          .history-root .history-page-subtitle {{ font-size:{}px; }} \
          .history-root .recent-captures-card-title {{ font-size:{}px; font-weight:500; }} \
          .history-root .recent-captures-empty-title {{ font-size:{}px; }} \
          .history-root .recent-captures-empty-detail {{ font-size:{}px; }}",
         px(13.0),
-        px(30.0),
+        px(26.0),
+        px(26.0),
+        px(26.0),
+        px(4.0),
         px(14.0),
         px(13.0),
         px(13.0),

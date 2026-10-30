@@ -3778,9 +3778,6 @@ msgstr "このデバイス"
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "タイマー撮影は Windows 版ではまだ利用できません。間隔は今後のリリース用に保存されます。"
 
-msgid "2160p (4K)"
-msgstr "2160p (4K)"
-
 msgid "APEXSHOT CLOUD"
 msgstr "APEXSHOT CLOUD"
 
@@ -3796,15 +3793,11 @@ msgstr "Cloud に戻る"
 msgid "Click Connect to link this device with a one-time code."
 msgstr "「接続」をクリックし、ワンタイムコードでこのデバイスを連携します。"
 
-msgid ""
-"Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgid "Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
 msgstr "Windows 版ではクラウドの閲覧はまだ利用できません。設定 → Cloud でアカウントを接続してください。"
 
 msgid "Connect to see your usage"
 msgstr "接続して使用状況を確認"
-
-msgid "Could not pause the shortcut listener. Close this dialog and try again."
-msgstr "ショートカットの待ち受けを一時停止できませんでした。このダイアログを閉じて、もう一度お試しください。"
 
 msgid "Could not refresh. Showing previous values."
 msgstr "更新できませんでした。前回の値を表示しています。"
@@ -3812,14 +3805,14 @@ msgstr "更新できませんでした。前回の値を表示しています。
 msgid "Couldn't open your browser. Copy the link and open it yourself."
 msgstr "ブラウザーを開けませんでした。リンクをコピーして開いてください。"
 
-msgid "Disabled"
-msgstr "無効"
-
 msgid "Go to Cloud settings"
 msgstr "Cloud 設定を開く"
 
 msgid "Less than 0.1% used"
 msgstr "使用率 0.1% 未満"
+
+msgid "Loading usage..."
+msgstr "使用状況を読み込み中..."
 
 msgid "Manage billing"
 msgstr "請求を管理"
@@ -3830,6 +3823,57 @@ msgstr "月間使用量は UTC に基づいてリセットされます。"
 msgid "No monthly limit"
 msgstr "月間上限なし"
 
+msgid "Plan unavailable"
+msgstr "プランを取得できません"
+
+msgid "Refreshing..."
+msgstr "更新中..."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "サインインすると、アップロード、ストレージ、プランを確認できます。"
+
+msgid "Storage"
+msgstr "ストレージ"
+
+msgid "This month"
+msgstr "今月"
+
+msgid "Uploads"
+msgstr "アップロード"
+
+msgid "Usage"
+msgstr "使用状況"
+
+msgid "Usage is unavailable"
+msgstr "使用状況を取得できません"
+
+msgid "Used space"
+msgstr "使用容量"
+
+msgid "We couldn't load your usage. Check your connection and try again."
+msgstr "使用状況を読み込めませんでした。接続を確認して再試行してください。"
+
+msgid "Your session has expired. Connect your account again in Cloud settings."
+msgstr "セッションの有効期限が切れました。Cloud 設定でアカウントを再接続してください。"
+
+msgid "of {limit}"
+msgstr "上限 {limit}"
+
+msgid "of {limit} monthly uploads"
+msgstr "月間上限 {limit} 件"
+
+msgid "{percent}% used"
+msgstr "使用率 {percent}%"
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr "ショートカットの待ち受けを一時停止できませんでした。このダイアログを閉じて、もう一度お試しください。"
+
+msgid "Disabled"
+msgstr "無効"
+
 msgid "Off by default. Turning this on sends anonymous usage statistics."
 msgstr "既定ではオフです。オンにすると匿名の使用状況統計が送信されます。"
 
@@ -3838,20 +3882,11 @@ msgid ""
 msgstr ""
 "任意の毎日のハートビート: アプリのバージョン、Windows、機能の数。スクリーンショット、パス、OCR テキストは含みません。APEXSHOT_TELEMETRY=0 で上書きできます。"
 
-msgid "Plan unavailable"
-msgstr "プランを取得できません"
-
 msgid "Requires the corresponding Windows OCR language pack."
 msgstr "対応する Windows OCR 言語パックが必要です。"
 
 msgid "Shortcuts work while the ApexShot background shell is running."
 msgstr "ApexShot のバックグラウンドシェルが動作している間、ショートカットが使えます。"
-
-msgid "Sign in to view your uploads, storage and plan."
-msgstr "サインインすると、アップロード、ストレージ、プランを確認できます。"
-
-msgid "Storage"
-msgstr "ストレージ"
 
 msgid ""
 "The Windows shell uses its tray icon to open capture, Settings, and Quit."
@@ -3866,23 +3901,8 @@ msgstr "キャプチャツールバーでは、個々のスクリーンショッ
 msgid "This action requires the Windows image editor or overlay backend."
 msgstr "この操作には Windows の画像エディタまたはオーバーレイバックエンドが必要です。"
 
-msgid "This month"
-msgstr "今月"
-
-msgid "Uploads"
-msgstr "アップロード"
-
-msgid "Usage"
-msgstr "使用状況"
-
-msgid "Usage is unavailable"
-msgstr "使用状況を取得できません"
-
 msgid "Use your configured shortcuts while ApexShot runs in the background."
 msgstr "ApexShot がバックグラウンドで動作している間、設定したショートカットを使えます。"
-
-msgid "Used space"
-msgstr "使用容量"
 
 msgid "When hidden, stop the recording from the tray or with its shortcut."
 msgstr "非表示のときは、トレイまたはショートカットから録画を停止します。"

@@ -10,7 +10,7 @@ use gtk4::{
 
 use crate::cloud::usage::{self, UsageError, UsageSnapshot};
 use crate::config::{is_cloud_logged_in, load_config};
-use crate::i18n::t;
+use crate::i18n::{t, tfmt};
 
 const BILLING_URL: &str = "https://apexshot.org/dashboard/settings/billing";
 
@@ -280,11 +280,11 @@ impl View {
             self.show_skeleton();
         }
         self.loading_status.remove_css_class("usage-status-error");
-        self.loading_status.set_text(&t(if self.has_snapshot.get() {
-            "Refreshing..."
+        self.loading_status.set_text(&if self.has_snapshot.get() {
+            t("Refreshing...")
         } else {
-            "Loading usage..."
-        }));
+            t("Loading usage...")
+        });
         self.loading_status.set_visible(true);
         self.spinner.set_visible(true);
         self.spinner.start();
@@ -334,10 +334,10 @@ impl View {
                         return;
                     }
                     view.has_snapshot.set(false);
-                    view.error.set_text(&t(match error {
-                        UsageError::SignedOut | UsageError::Expired => "Your session has expired. Connect your account again in Cloud settings.",
-                        UsageError::Unavailable => "We couldn't load your usage. Check your connection and try again.",
-                    }));
+                    view.error.set_text(&match error {
+                        UsageError::SignedOut | UsageError::Expired => t("Your session has expired. Connect your account again in Cloud settings."),
+                        UsageError::Unavailable => t("We couldn't load your usage. Check your connection and try again."),
+                    });
                     view.states.set_visible_child_name("error");
                 }
             }
@@ -385,7 +385,7 @@ impl View {
         let tier = if snapshot.tier.trim().is_empty() {
             t("Plan unavailable")
         } else {
-            format!("{} plan", capitalize(&snapshot.tier))
+            tfmt("{plan} plan", &[("plan", &capitalize(&snapshot.tier))])
         };
         self.plan.set_text(&tier);
         let connected = t("Connected");
@@ -396,9 +396,9 @@ impl View {
         });
         self.storage
             .set_text(&format_bytes(snapshot.usage.storage_bytes));
-        self.storage_caption.set_text(&format!(
-            "of {}",
-            format_bytes(snapshot.limits.max_storage_bytes)
+        self.storage_caption.set_text(&tfmt(
+            "of {limit}",
+            &[("limit", &format_bytes(snapshot.limits.max_storage_bytes))],
         ));
         let fraction = ratio(
             snapshot.usage.storage_bytes,
@@ -416,9 +416,9 @@ impl View {
             self.uploads_bar.set_opacity(0.0);
         } else {
             self.uploads.set_text(&snapshot.usage.uploads.to_string());
-            self.uploads_caption.set_text(&format!(
-                "of {} monthly uploads",
-                snapshot.limits.max_uploads
+            self.uploads_caption.set_text(&tfmt(
+                "of {limit} monthly uploads",
+                &[("limit", &snapshot.limits.max_uploads.to_string())],
             ));
             self.uploads_detail.set_text(&percent_used(
                 snapshot.usage.uploads,
@@ -439,9 +439,9 @@ fn percent_used(value: i64, limit: i64) -> String {
     if percent > 0.0 && percent < 0.1 {
         t("Less than 0.1% used")
     } else if percent < 1.0 && percent > 0.0 {
-        format!("{percent:.1}% used")
+        tfmt("{percent}% used", &[("percent", &format!("{percent:.1}"))])
     } else {
-        format!("{percent:.0}% used")
+        tfmt("{percent}% used", &[("percent", &format!("{percent:.0}"))])
     }
 }
 
