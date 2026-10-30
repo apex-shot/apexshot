@@ -6,7 +6,7 @@
 //! Settings pages describe surfaces the Windows build does not run yet.
 
 use gtk4::prelude::*;
-use gtk4::{Align, Box as GtkBox, Button, Label, Orientation};
+use gtk4::{Align, Box as GtkBox, Button, Label, Orientation, PolicyType, ScrolledWindow};
 
 use super::toolbar::Tool;
 use super::ui_support::{px, INSPECTOR_WIDTH};
@@ -21,6 +21,8 @@ pub(super) struct Inspector {
 pub(super) fn build(scale: f64) -> Inspector {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("image-editor-inspector");
+    root.set_hexpand(false);
+    root.set_halign(Align::End);
     root.set_size_request(px(INSPECTOR_WIDTH, scale), -1);
 
     let head = GtkBox::new(Orientation::Vertical, px(4.0, scale));
@@ -61,8 +63,21 @@ pub(super) fn build(scale: f64) -> Inspector {
     note.add_css_class("image-editor-note");
     note.set_xalign(0.0);
     note.set_wrap(true);
+    // A wrapping label still reports the width of its whole string as its
+    // natural width. Pin the column so the note wraps inside the inspector
+    // instead of widening the window.
+    note.set_width_chars(36);
     note.set_max_width_chars(36);
     body.append(&note);
+
+    // The scroller keeps every child's natural width from reaching the
+    // sidebar: the column stays at INSPECTOR_WIDTH and the text wraps.
+    let scroll = ScrolledWindow::new();
+    scroll.set_policy(PolicyType::Never, PolicyType::Automatic);
+    scroll.set_propagate_natural_width(false);
+    scroll.set_hexpand(true);
+    scroll.set_vexpand(true);
+    scroll.set_child(Some(&body));
 
     let actions = GtkBox::new(Orientation::Vertical, px(8.0, scale));
     actions.add_css_class("image-editor-actions");
@@ -98,7 +113,7 @@ pub(super) fn build(scale: f64) -> Inspector {
 
     root.append(&head);
     root.append(&rule);
-    root.append(&body);
+    root.append(&scroll);
     root.append(&actions);
 
     let inspector = Inspector { root, title, hint };

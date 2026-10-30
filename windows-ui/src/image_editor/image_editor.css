@@ -11,12 +11,14 @@ window.image-editor-window {
 }
 
 .image-editor-root {
+    background-color: #141414;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 12px;
     font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
 }
 
 .image-editor-root.editor-theme-light {
+    background-color: #f6f7fb;
     border: 1px solid rgba(17, 24, 39, 0.12);
 }
 

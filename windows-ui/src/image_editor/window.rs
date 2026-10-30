@@ -59,6 +59,8 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     if windowing::prefers_reduced_transparency() {
         root.add_css_class("editor-reduced-transparency");
     }
+    // Keep the canvas inside the shell's rounded corners.
+    root.set_overflow(gtk4::Overflow::Hidden);
 
     let document_title = super::document_title(initial);
     let title_label = gtk4::Label::new(Some(&document_title));
