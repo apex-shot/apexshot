@@ -166,10 +166,10 @@ parallel `cl.exe` runs collide on `vc140.pdb` (C1041).
 ## Settings surface
 
 `windows-ui/` is a small Rust crate that builds the Windows Settings, History,
-and video-editor executables with GTK4. It includes shared pages and styling
-through `#[path]` rather than duplicating them, and supplies the Windows-only
-pieces (DPI handling, font registration, login autostart, facades, and the
-window shells).
+video-editor, and image-editor executables with GTK4. It includes shared pages
+and styling through `#[path]` rather than duplicating them, and supplies the
+Windows-only pieces (DPI handling, font registration, login autostart,
+facades, and the window shells).
 
 - The window is borderless with the app's own title bar, rounded corners, and a
   single outline.
@@ -198,11 +198,23 @@ The Qt capture shell launches the resulting executable from the tray's
 **Settings...** action, preferring `APEXSHOT_SETTINGS`, then a sibling
 `apexshot-settings.exe`.
 
+## Image editor surface
+
+`apexshot-image-editor` opens the Windows image editor. This first slice is
+the window: the frameless caption bar, a canvas that opens, drops, pans, and
+zooms PNG/JPEG/WebP screenshots, the floating annotation tool bar, and the
+right inspector frame. The tools take selection state and the inspector names
+each one; annotation storage, rendering, and export are the next slices, which
+is why the bar's history actions and the inspector's output actions are
+disabled and say so.
+
 ## Deliberately out of scope
 
-- The GTK image editor, preview overlay, and onboarding. Settings and History
-  are implemented, and the video editor has its window shell and tool-specific
-  side panels; playback and the editing pipeline still need their own port.
+- The preview overlay and onboarding. Settings and History are implemented,
+  and the video editor has its window shell and tool-specific side panels;
+  playback and the editing pipeline still need their own port.
+- The image editor's annotation model, rendering, and export path. The window
+  slice above names the boundary.
 - GNOME extension, Flatpak, and Nix packaging.
 - Recording internals, which follow their own plan.
 

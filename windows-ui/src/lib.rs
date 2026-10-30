@@ -13,10 +13,12 @@ pub mod capture_overlay;
 pub mod cloud;
 #[path = "../../src/config.rs"]
 pub mod config;
+pub mod css_scale;
 pub mod daemon;
 pub mod history;
 pub mod i18n;
 pub mod icons;
+pub mod image_editor;
 pub mod onboarding;
 pub mod platform;
 pub mod recording;

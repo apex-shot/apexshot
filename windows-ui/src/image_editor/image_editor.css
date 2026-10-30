@@ -1,0 +1,416 @@
+/*
+ * Windows image editor.
+ *
+ * Authored at 100% scale; `ui_support::install_css` scales every px length to
+ * the system DPI before the sheet reaches GTK. Colours follow the Settings and
+ * video-editor shells: #141414 ink, #ff670d accent, 12px outer radius.
+ */
+
+window.image-editor-window {
+    background: transparent;
+}
+
+.image-editor-root {
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+}
+
+.image-editor-root.editor-theme-light {
+    border: 1px solid rgba(17, 24, 39, 0.12);
+}
+
+.image-editor-titlebar {
+    border-radius: 12px 12px 0 0;
+}
+
+.image-editor-document-title {
+    color: rgba(255, 255, 255, 0.86);
+    font-size: 12px;
+    font-weight: 500;
+}
+
+.editor-theme-light .image-editor-document-title {
+    color: rgba(17, 24, 39, 0.82);
+}
+
+.image-editor-workspace {
+    background: transparent;
+}
+
+.image-editor-canvas {
+    background: #0b0b0c;
+}
+
+.editor-theme-light .image-editor-canvas {
+    background: #eceef3;
+}
+
+/* ── Floating tool bar ─────────────────────────────────────────────── */
+
+.image-editor-toolbar {
+    padding: 6px 10px;
+    background: #0f0f10;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 11px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
+}
+
+.editor-theme-light .image-editor-toolbar {
+    background: #ffffff;
+    border-color: rgba(17, 24, 39, 0.10);
+    box-shadow: 0 10px 24px rgba(17, 24, 39, 0.12);
+}
+
+button.image-editor-tool-button {
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.72);
+}
+
+button.image-editor-tool-button:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+button.image-editor-tool-button:active {
+    background: rgba(255, 255, 255, 0.12);
+    color: #ffffff;
+}
+
+button.image-editor-tool-button.image-editor-tool-active {
+    background: rgba(255, 103, 13, 0.20);
+    color: #ff670d;
+}
+
+button.image-editor-tool-button.image-editor-tool-active:hover {
+    background: rgba(255, 103, 13, 0.28);
+    color: #ff670d;
+}
+
+.editor-theme-light button.image-editor-tool-button {
+    color: rgba(17, 24, 39, 0.66);
+}
+
+.editor-theme-light button.image-editor-tool-button:hover {
+    background: rgba(17, 24, 39, 0.07);
+    color: rgba(17, 24, 39, 0.92);
+}
+
+.editor-theme-light button.image-editor-tool-button.image-editor-tool-active {
+    background: rgba(255, 103, 13, 0.16);
+    color: #d9560b;
+}
+
+button.image-editor-tool-button:disabled {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.22);
+}
+
+.editor-theme-light button.image-editor-tool-button:disabled {
+    background: transparent;
+    color: rgba(17, 24, 39, 0.24);
+}
+
+.image-editor-toolbar-rule {
+    background: rgba(255, 255, 255, 0.10);
+    border-radius: 999px;
+}
+
+.editor-theme-light .image-editor-toolbar-rule {
+    background: rgba(17, 24, 39, 0.12);
+}
+
+/* ── Zoom pill ─────────────────────────────────────────────────────── */
+
+.image-editor-zoom-pill {
+    padding: 3px;
+    background: #0f0f10;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 9px;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.24);
+}
+
+.editor-theme-light .image-editor-zoom-pill {
+    background: #ffffff;
+    border-color: rgba(17, 24, 39, 0.10);
+    box-shadow: 0 8px 18px rgba(17, 24, 39, 0.10);
+}
+
+button.image-editor-zoom-step {
+    min-width: 26px;
+    min-height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 14px;
+}
+
+button.image-editor-zoom-step:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.editor-theme-light button.image-editor-zoom-step {
+    color: rgba(17, 24, 39, 0.66);
+}
+
+.editor-theme-light button.image-editor-zoom-step:hover {
+    background: rgba(17, 24, 39, 0.07);
+    color: rgba(17, 24, 39, 0.92);
+}
+
+button.image-editor-zoom-label {
+    min-width: 52px;
+    min-height: 26px;
+    padding: 0 6px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+button.image-editor-zoom-label:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.editor-theme-light button.image-editor-zoom-label {
+    color: rgba(17, 24, 39, 0.76);
+}
+
+.editor-theme-light button.image-editor-zoom-label:hover {
+    background: rgba(17, 24, 39, 0.07);
+    color: rgba(17, 24, 39, 0.92);
+}
+
+/* ── Canvas toast ──────────────────────────────────────────────────── */
+
+.image-editor-toast {
+    padding: 8px 14px;
+    border-radius: 8px;
+    background: rgba(24, 24, 27, 0.96);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.90);
+    font-size: 12px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.30);
+}
+
+.editor-theme-light .image-editor-toast {
+    background: #ffffff;
+    border-color: rgba(17, 24, 39, 0.10);
+    color: rgba(17, 24, 39, 0.88);
+}
+
+/* ── Empty state ───────────────────────────────────────────────────── */
+
+.image-editor-empty-title {
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.editor-theme-light .image-editor-empty-title {
+    color: rgba(17, 24, 39, 0.90);
+}
+
+.image-editor-empty-detail {
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 12.5px;
+}
+
+.editor-theme-light .image-editor-empty-detail {
+    color: rgba(17, 24, 39, 0.56);
+}
+
+.image-editor-empty-error {
+    color: #ff7a72;
+    font-size: 12px;
+}
+
+.image-editor-empty-icon {
+    color: rgba(255, 255, 255, 0.38);
+}
+
+.editor-theme-light .image-editor-empty-icon {
+    color: rgba(17, 24, 39, 0.34);
+}
+
+.image-editor-empty-loading {
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 12px;
+}
+
+.editor-theme-light .image-editor-empty-loading {
+    color: rgba(17, 24, 39, 0.56);
+}
+
+button.image-editor-primary-button {
+    min-height: 32px;
+    padding: 7px 18px;
+    border: none;
+    border-radius: 8px;
+    background: #ff670d;
+    background-image: none;
+    color: #ffffff;
+    font-size: 12.5px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+button.image-editor-primary-button:hover {
+    background: #ff7a24;
+    color: #ffffff;
+}
+
+button.image-editor-primary-button:active {
+    background: #e85b06;
+    color: #ffffff;
+}
+
+/* ── Inspector ─────────────────────────────────────────────────────── */
+
+.image-editor-inspector {
+    background: rgba(255, 255, 255, 0.02);
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.editor-theme-light .image-editor-inspector {
+    background: rgba(255, 255, 255, 0.58);
+    border-left-color: rgba(17, 24, 39, 0.08);
+}
+
+.image-editor-inspector-head {
+    padding: 16px 16px 12px;
+}
+
+.image-editor-kicker {
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+}
+
+.editor-theme-light .image-editor-kicker {
+    color: rgba(17, 24, 39, 0.46);
+}
+
+.image-editor-inspector-title {
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.editor-theme-light .image-editor-inspector-title {
+    color: rgba(17, 24, 39, 0.92);
+}
+
+.image-editor-inspector-hint {
+    color: rgba(255, 255, 255, 0.50);
+    font-size: 12px;
+}
+
+.editor-theme-light .image-editor-inspector-hint {
+    color: rgba(17, 24, 39, 0.58);
+}
+
+.image-editor-rule {
+    min-height: 1px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.editor-theme-light .image-editor-rule {
+    background: rgba(17, 24, 39, 0.08);
+}
+
+.image-editor-note {
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 11.5px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 10px 11px;
+}
+
+.editor-theme-light .image-editor-note {
+    color: rgba(17, 24, 39, 0.52);
+    background: rgba(17, 24, 39, 0.03);
+    border-color: rgba(17, 24, 39, 0.07);
+}
+
+.image-editor-actions {
+    padding: 12px 16px 16px;
+}
+
+button.image-editor-action-button {
+    min-height: 32px;
+    padding: 6px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.80);
+    font-size: 12px;
+}
+
+button.image-editor-action-button:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.editor-theme-light button.image-editor-action-button {
+    border-color: rgba(17, 24, 39, 0.08);
+    background: rgba(17, 24, 39, 0.04);
+    color: rgba(17, 24, 39, 0.78);
+}
+
+.editor-theme-light button.image-editor-action-button:hover {
+    background: rgba(17, 24, 39, 0.08);
+    color: rgba(17, 24, 39, 0.92);
+}
+
+button.image-editor-action-button:disabled {
+    color: rgba(255, 255, 255, 0.28);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.editor-theme-light button.image-editor-action-button:disabled {
+    color: rgba(17, 24, 39, 0.30);
+    background: rgba(17, 24, 39, 0.02);
+}
+
+button.image-editor-action-primary {
+    border: none;
+    background: rgba(255, 103, 13, 0.18);
+    color: #ff670d;
+}
+
+button.image-editor-action-primary:hover {
+    background: rgba(255, 103, 13, 0.26);
+    color: #ff8542;
+}
+
+.editor-theme-light button.image-editor-action-primary {
+    background: rgba(255, 103, 13, 0.14);
+    color: #d9560b;
+}
+
+button.image-editor-action-primary:disabled {
+    background: rgba(255, 103, 13, 0.08);
+    color: rgba(255, 103, 13, 0.45);
+}

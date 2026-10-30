@@ -22,6 +22,10 @@ path = "src/bin/apexshot-history.rs"
 name = "apexshot-video-editor"
 path = "src/bin/apexshot-video-editor.rs"
 
+[[bin]]
+name = "apexshot-image-editor"
+path = "src/bin/apexshot-image-editor.rs"
+
 [dependencies]
 gtk4 = { version = "0.10", features = ["v4_10"] }
 relm4-icons = "0.10.1"
