@@ -321,7 +321,9 @@ QSize cameraCaptureSize(const QString& device)
             const QRegularExpressionMatch match = matches.next();
             const int width = match.captured(1).toInt();
             const int height = match.captured(2).toInt();
-            const int rate = match.captured(3).toInt();
+            // The second fps column is the mode's fastest rate; the slow end
+            // would rule out every ranged mode a 24fps recording could use.
+            const int rate = match.captured(6).toInt();
             if (rate < 24 || width <= 0 || height <= 0)
                 continue;
             const qint64 area = qint64(width) * height;

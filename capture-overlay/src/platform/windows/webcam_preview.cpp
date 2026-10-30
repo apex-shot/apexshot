@@ -11,17 +11,24 @@
 #include <QTcpSocket>
 #include <QTimer>
 #include <QUuid>
+#include <QVector>
 
 #include <algorithm>
 
 namespace Platform {
 
-WebcamCameraFormat webcamPreferredFormat(const QString& options, int fps)
+WebcamCameraFormat webcamPreferredFormat(const QString& options, int fps, qint64 maxArea)
 {
     const QRegularExpression option(QStringLiteral(
         "min s=(\\d+)x(\\d+) fps=([\\d.]+) max s=(\\d+)x(\\d+) fps=([\\d.]+)"));
-    WebcamCameraFormat best;
-    qint64 bestArea = 0;
+    const qint64 mjpegCeiling = qMin(maxArea, qint64(1920) * 1080);
+    // Uncompressed frames past 720p need more USB bandwidth than an integrated
+    // camera has: asking for one trades the frame rate for pixels, and the
+    // staggered delivery is what a recording then carries. MJPEG modes are
+    // compressed on the camera and hold their rate at larger sizes.
+    const qint64 rawCeiling = qMin(maxArea, qint64(1280) * 720);
+    QVector<WebcamCameraFormat> sustained;
+    QVector<WebcamCameraFormat> candidates;
     for (const QString& line : options.split(QLatin1Char('\n'))) {
         const auto match = option.match(line);
         if (!match.hasMatch())
@@ -31,12 +38,20 @@ WebcamCameraFormat webcamPreferredFormat(const QString& options, int fps)
         const int height = match.captured(5).toInt();
         const double maxFps = match.captured(6).toDouble();
         const qint64 area = qint64(width) * height;
-        if (width <= 0 || height <= 0 || area > qint64(1920) * 1080 || maxFps < 15)
+        if (width <= 0 || height <= 0 || maxFps < 15 || area > (mjpeg ? mjpegCeiling : rawCeiling))
             continue;
-        if (fps > 0 && maxFps < fps && area > qint64(1280) * 720)
-            continue;
-        if (area > bestArea || (area == bestArea && mjpeg && !best.mjpeg)) {
-            best = {QSize(width, height), mjpeg};
+        const WebcamCameraFormat candidate{QSize(width, height), mjpeg};
+        candidates.append(candidate);
+        if (fps <= 0 || maxFps >= fps)
+            sustained.append(candidate);
+    }
+    const QVector<WebcamCameraFormat>& pool = sustained.isEmpty() ? candidates : sustained;
+    WebcamCameraFormat best;
+    qint64 bestArea = 0;
+    for (const WebcamCameraFormat& candidate : pool) {
+        const qint64 area = qint64(candidate.size.width()) * candidate.size.height();
+        if (area > bestArea || (area == bestArea && candidate.mjpeg && !best.mjpeg)) {
+            best = candidate;
             bestArea = area;
         }
     }
@@ -79,8 +94,8 @@ void WebcamPreview::start()
                            QStringLiteral("video=%1").arg(m_device)});
     connect(m_probe, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int, QProcess::ExitStatus) {
-                const QString output = QString::fromUtf8(m_probe->readAll());
-                startCamera(webcamPreferredFormat(output, m_fps));
+                m_options = QString::fromUtf8(m_probe->readAll());
+                startCamera(webcamPreferredFormat(m_options, m_fps));
             });
     connect(m_probe, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart)
@@ -115,18 +130,29 @@ void WebcamPreview::startCamera(const WebcamCameraFormat& format)
         args << QStringLiteral("-q:v") << QStringLiteral("2");
     args << QStringLiteral("-f") << QStringLiteral("mjpeg") << QStringLiteral("pipe:1");
     m_camera->setArguments(args);
-    if (m_openAttempts == 1 && format.size.width() > 1280) {
-        // A camera that cannot sustain more than a handful of frames at this
-        // size is bandwidth-limited; 720p at full rate is the better picture.
-        QTimer::singleShot(2500, this, [this] {
-            if (m_framesSinceOpen < 8 && m_camera
-                && m_camera->state() == QProcess::Running) {
-                disconnect(m_camera, nullptr, this, nullptr);
-                m_camera->kill();
-                m_camera->deleteLater();
-                m_camera = nullptr;
-                startCamera({QSize(1280, 720), false});
+    if (m_openAttempts == 1) {
+        // A camera that cannot keep up at the chosen format is bandwidth- or
+        // driver-limited: it sends a fraction of the frames the recording
+        // assumes, and the forced frame rate turns the gaps into staggering.
+        // Reopen once at a mode that fits in 720p - MJPEG where the camera
+        // offers it - and accept whatever rate the fallback delivers.
+        QTimer::singleShot(2500, this, [this, format] {
+            const double expected = qMax(15.0, m_fps * 0.7);
+            if (!m_camera || m_camera->state() != QProcess::Running
+                || m_framesSinceOpen >= int(expected * 2.5)) {
+                return;
             }
+            WebcamCameraFormat fallback =
+                webcamPreferredFormat(m_options, m_fps, qint64(1280) * 720);
+            if (fallback.size == format.size && fallback.mjpeg == format.mjpeg)
+                return;
+            if (fallback.size.isEmpty())
+                fallback = {QSize(1280, 720), false};
+            disconnect(m_camera, nullptr, this, nullptr);
+            m_camera->kill();
+            m_camera->deleteLater();
+            m_camera = nullptr;
+            startCamera(fallback);
         });
     }
     connect(m_camera, &QProcess::readyReadStandardOutput, this, &WebcamPreview::consumeFrames);
@@ -207,6 +233,10 @@ void WebcamPreview::consumeFrames()
 void WebcamPreview::acceptClients()
 {
     while (QTcpSocket* socket = m_server->nextPendingConnection()) {
+        // Each frame is written whole, and a sub-MSS tail left to Nagle waits
+        // on a delayed ACK: the reader then stamps a late arrival wallclock on
+        // it and the forced frame rate turns the jitter into dup/drop judder.
+        socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
         connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
         QTimer::singleShot(5000, socket, [this, socket] {
             if (m_client != socket)

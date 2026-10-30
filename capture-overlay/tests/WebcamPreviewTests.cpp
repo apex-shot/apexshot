@@ -107,9 +107,19 @@ bool checkFormats()
     const auto preferred = Platform::webcamPreferredFormat(modes, 30);
     const auto fallback = Platform::webcamPreferredFormat(
         QStringLiteral("pixel_format=yuyv422 min s=1280x720 fps=5 max s=1280x720 fps=30\n"), 30);
+    // Nothing listed sustains 60, so the best deliverable mode wins: MJPEG can
+    // use its whole size where a raw mode that large would starve the USB bus.
+    const auto fast = Platform::webcamPreferredFormat(modes, 60);
+    // A raw 1080p mode is never trusted on its own, and the recording-time
+    // fallback may bound the pick to 720p.
+    const QString rawOnly =
+        QStringLiteral("pixel_format=yuyv422 min s=1920x1080 fps=5 max s=1920x1080 fps=30\n");
+    const auto bounded = Platform::webcamPreferredFormat(modes, 60, qint64(1280) * 720);
     return preferred.mjpeg && preferred.size == QSize(1920, 1080)
         && !fallback.mjpeg && fallback.size == QSize(1280, 720)
-        && Platform::webcamPreferredFormat(modes, 60).size == QSize(1280, 720);
+        && fast.mjpeg && fast.size == QSize(1920, 1080)
+        && Platform::webcamPreferredFormat(rawOnly, 30).size.isEmpty()
+        && !bounded.mjpeg && bounded.size == QSize(1280, 720);
 }
 
 bool checkPlacementPersistence()
