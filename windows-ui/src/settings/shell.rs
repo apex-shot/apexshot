@@ -8,8 +8,8 @@ use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, Align, Box as GtkBox, CssProvider, Entry, EntryIconPosition, Image, Label, Orientation,
-    PolicyType, ScrolledWindow, Stack, Widget,
+    gdk, Align, Box as GtkBox, CssProvider, Image, Label, Orientation, PolicyType, ScrolledWindow,
+    Stack, Widget,
 };
 
 use crate::capture::editor::window::icon_names;
@@ -28,7 +28,6 @@ struct NavItem {
     row: GtkBox,
     icon: Image,
     label: Label,
-    title: String,
 }
 
 /// The pieces of the sidebar the window needs: the column to place in the
@@ -45,28 +44,23 @@ pub fn build_sidebar(
     title_bar_height: f64,
     entries: &[(String, &str)],
     stack: &Stack,
-    search_icon: &str,
 ) -> Sidebar {
+    let inset = (CARD_INSET * scale).round() as i32;
+
     let wrapper = GtkBox::new(Orientation::Vertical, 0);
     wrapper.add_css_class("settings-sidebar-wrapper");
     wrapper.set_vexpand(true);
     wrapper.set_hexpand(false);
-    wrapper.set_size_request((SIDEBAR_WIDTH * scale).round() as i32, -1);
+    // The column carries the gutter the content card is inset by, so the user
+    // bar's divider runs all the way to the card's border; everything inside
+    // it keeps the gutter out with its own end inset.
+    wrapper.set_size_request((SIDEBAR_WIDTH * scale).round() as i32 + inset, -1);
 
     // The strip the window is dragged by. The sidebar carries no title: the
     // window chrome and the rows already say where you are.
     let head = GtkBox::new(Orientation::Horizontal, 0);
     head.add_css_class("settings-sidebar-head");
     head.set_size_request(-1, (title_bar_height * scale).round() as i32);
-
-    let search_row = GtkBox::new(Orientation::Horizontal, 0);
-    search_row.add_css_class("settings-search-row");
-    let search = Entry::new();
-    search.add_css_class("settings-search");
-    search.set_placeholder_text(Some(&t("Search settings")));
-    search.set_icon_from_icon_name(EntryIconPosition::Primary, Some(search_icon));
-    search.set_hexpand(true);
-    search_row.append(&search);
 
     let scroller = ScrolledWindow::new();
     scroller.set_policy(PolicyType::Never, PolicyType::Automatic);
@@ -78,6 +72,7 @@ pub fn build_sidebar(
     nav_strip.set_valign(Align::Fill);
     nav_strip.set_hexpand(false);
     nav_strip.set_vexpand(true);
+    nav_strip.set_margin_end(inset);
     scroller.set_child(Some(&nav_strip));
 
     let mut items = Vec::with_capacity(entries.len());
@@ -119,20 +114,8 @@ pub fn build_sidebar(
         row.add_controller(click);
 
         nav_strip.append(&row);
-        items.push(NavItem {
-            row,
-            icon,
-            label,
-            title: label_text.clone(),
-        });
+        items.push(NavItem { row, icon, label });
     }
-
-    let empty = Label::new(Some(&t("No settings found")));
-    empty.add_css_class("settings-search-empty");
-    empty.set_xalign(0.0);
-    empty.set_halign(Align::Start);
-    empty.set_visible(false);
-    nav_strip.append(&empty);
 
     let items = Rc::new(items);
 
@@ -159,25 +142,7 @@ pub fn build_sidebar(
         });
     }
 
-    {
-        let items = Rc::clone(&items);
-        let empty = empty.clone();
-        search.connect_changed(move |entry| {
-            let query = entry.text().to_lowercase();
-            let mut matches = 0;
-            for item in items.iter() {
-                let visible = query.is_empty() || item.title.to_lowercase().contains(&query);
-                item.row.set_visible(visible);
-                if visible {
-                    matches += 1;
-                }
-            }
-            empty.set_visible(matches == 0);
-        });
-    }
-
     wrapper.append(&head);
-    wrapper.append(&search_row);
     wrapper.append(&scroller);
 
     Sidebar { wrapper, head }
@@ -255,6 +220,7 @@ pub fn build_user_chip(chip: &UserChip, scale: f64, on_click: impl Fn() + 'stati
     let row = GtkBox::new(Orientation::Horizontal, 9);
     row.add_css_class("settings-user-chip");
     row.set_valign(Align::Center);
+    row.set_margin_end((CARD_INSET * scale).round() as i32);
 
     let avatar = GtkBox::new(Orientation::Horizontal, 0);
     avatar.add_css_class("settings-user-avatar");
@@ -318,7 +284,6 @@ pub fn build_content_card(stack: &Stack, scale: f64, heading: &impl IsA<Widget>)
     card.set_vexpand(true);
     card.set_hexpand(true);
     let inset = (CARD_INSET * scale).round() as i32;
-    card.set_margin_start(inset);
     card.set_margin_end(inset);
     card.set_margin_top(inset);
     card.set_margin_bottom(inset);
@@ -394,7 +359,6 @@ pub fn install_css() {
          .editor-root.editor-theme-light .settings-nav-item-hover {{ background-color:rgba(17,24,39,0.05); }} \
          .editor-root.editor-theme-light .settings-nav-item-selected {{ background-color:rgba(17,24,39,0.07); }} \
          .editor-root.editor-theme-light .settings-nav-item-hover.settings-nav-item-selected {{ background-color:rgba(17,24,39,0.09); }} \
-         .editor-root.editor-theme-light .settings-sidebar-wrapper {{ background-color:#eef0f4; border-right:none; }}
          .editor-root.editor-theme-light .settings-nav-label {{ color:#1d2129; }} \
          .editor-root.editor-theme-light .settings-nav-label-selected {{ color:#1d2129; opacity:1; }} \
          .editor-root.editor-theme-light .settings-nav-icon-selected {{ color:#1d2129; }} \
@@ -441,7 +405,7 @@ pub fn install_css() {
         px(8.0),
         px(10.0),
         px(13.0),
-        px(4.0),
+        px(CARD_INSET),
         px(14.0),
         px(8.0),
         px(14.0),

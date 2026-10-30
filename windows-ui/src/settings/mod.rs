@@ -276,16 +276,8 @@ fn build_settings_window(app: &Application) {
             themed_icon(prefers_dark, custom::ABOUT, custom::ABOUT_LIGHT),
         ),
     ];
-    let search_icon = themed_icon(prefers_dark, custom::SEARCH, custom::SEARCH_LIGHT);
-
     // --- NAVIGATION (SIDEBAR) ---
-    let sidebar = shell::build_sidebar(
-        text_scale,
-        TITLE_BAR_HEIGHT * ui_scale,
-        &pages,
-        &stack,
-        search_icon,
-    );
+    let sidebar = shell::build_sidebar(text_scale, TITLE_BAR_HEIGHT * ui_scale, &pages, &stack);
     let sidebar_head = sidebar.head.clone();
 
     let chip = shell::UserChip::from_config(&config);
