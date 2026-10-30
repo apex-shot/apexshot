@@ -21,7 +21,7 @@ use crate::studio_entitlement::{current_status, StudioStatus};
 pub const SIDEBAR_WIDTH: f64 = 300.0;
 
 /// Distance the content card keeps from the window edge at 100% scale.
-const CARD_INSET: f64 = 8.0;
+pub(crate) const CARD_INSET: f64 = 8.0;
 
 #[derive(Clone)]
 struct NavItem {

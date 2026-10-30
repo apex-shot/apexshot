@@ -27,9 +27,12 @@ pub(super) fn window_scale() -> f64 {
     crate::platform::ui_scale()
 }
 
-/// Layer the DPI-scaled Settings metrics after the shared base stylesheet.
+/// Layer the DPI-scaled Settings metrics after the shared base stylesheet:
+/// the window chrome first, then the shell (sidebar, card) metrics so the
+/// cascade resolves the same way it does in the Settings window.
 pub(super) fn install_platform_window_css() {
     crate::settings::install_window_css();
+    crate::settings::shell::install_css();
 }
 
 /// One page in the shared History window.
@@ -56,7 +59,7 @@ pub fn windows_history_pages(
 
     [
         placeholder_page::build_placeholder_page(
-            custom::SCREENSHOOTER_SYMBOLIC,
+            custom::SPLINE_SYMBOLIC,
             &t("Motion editing is not available in the Windows build yet."),
         ),
         video_edits_page::build_video_edits_page(toast, search),
