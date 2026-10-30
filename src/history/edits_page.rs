@@ -285,9 +285,7 @@ fn build_empty_state(kind: EditsKind) -> GtkBox {
     empty.set_margin_top(24);
 
     let icon = Image::from_icon_name(match kind {
-        EditsKind::Motion => {
-            crate::capture::editor::window::icon_names::custom::SPLINE_SYMBOLIC
-        }
+        EditsKind::Motion => crate::capture::editor::window::icon_names::custom::SPLINE_SYMBOLIC,
         EditsKind::Video => {
             crate::capture::editor::window::icon_names::custom::CLAPPERBOARD_SYMBOLIC
         }
