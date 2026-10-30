@@ -1,5 +1,7 @@
 #pragma once
 
+#include "platform/windows/webcam_format.h"
+
 #include <QByteArray>
 #include <QElapsedTimer>
 #include <QImage>
@@ -12,13 +14,6 @@ class QTcpServer;
 class QTcpSocket;
 
 namespace Platform {
-
-struct WebcamCameraFormat {
-    QSize size;
-    bool mjpeg = false;
-};
-
-WebcamCameraFormat webcamPreferredFormat(const QString& options, int fps);
 
 class WebcamPreview : public QObject
 {
@@ -42,6 +37,7 @@ private:
 
     QString m_device;
     int m_fps;
+    QString m_options;
     QString m_token;
     QProcess* m_probe = nullptr;
     QProcess* m_camera = nullptr;

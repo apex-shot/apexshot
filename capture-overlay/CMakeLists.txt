@@ -41,6 +41,8 @@ if(WIN32)
         src/platform/windows/scroll_controls.h
         src/platform/windows/webcam_bubble.cpp
         src/platform/windows/webcam_bubble.h
+        src/platform/windows/webcam_format.cpp
+        src/platform/windows/webcam_format.h
         src/platform/windows/webcam_preview.cpp
         src/platform/windows/webcam_preview.h
         src/platform/windows/window_recording.cpp
@@ -127,6 +129,8 @@ if(WIN32)
             src/platform/windows/settings_store.cpp
             src/platform/windows/webcam_bubble.cpp
             src/platform/windows/webcam_bubble.h
+            src/platform/windows/webcam_format.cpp
+            src/platform/windows/webcam_format.h
             src/platform/windows/webcam_layout.cpp
             src/platform/windows/webcam_preview.cpp
             src/platform/windows/webcam_preview.h
@@ -151,6 +155,8 @@ if(WIN32)
             src/platform/windows/recording_settings.cpp
             src/platform/windows/settings_store.cpp
             src/platform/windows/settings_store.h
+            src/platform/windows/webcam_format.cpp
+            src/platform/windows/webcam_format.h
             src/platform/windows/webcam_layout.cpp
             src/platform/windows/webcam_layout.h
         )

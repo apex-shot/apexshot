@@ -11,37 +11,11 @@
 #include <QTcpSocket>
 #include <QTimer>
 #include <QUuid>
+#include <QVector>
 
 #include <algorithm>
 
 namespace Platform {
-
-WebcamCameraFormat webcamPreferredFormat(const QString& options, int fps)
-{
-    const QRegularExpression option(QStringLiteral(
-        "min s=(\\d+)x(\\d+) fps=([\\d.]+) max s=(\\d+)x(\\d+) fps=([\\d.]+)"));
-    WebcamCameraFormat best;
-    qint64 bestArea = 0;
-    for (const QString& line : options.split(QLatin1Char('\n'))) {
-        const auto match = option.match(line);
-        if (!match.hasMatch())
-            continue;
-        const bool mjpeg = line.contains(QStringLiteral("vcodec=mjpeg"), Qt::CaseInsensitive);
-        const int width = match.captured(4).toInt();
-        const int height = match.captured(5).toInt();
-        const double maxFps = match.captured(6).toDouble();
-        const qint64 area = qint64(width) * height;
-        if (width <= 0 || height <= 0 || area > qint64(1920) * 1080 || maxFps < 15)
-            continue;
-        if (fps > 0 && maxFps < fps && area > qint64(1280) * 720)
-            continue;
-        if (area > bestArea || (area == bestArea && mjpeg && !best.mjpeg)) {
-            best = {QSize(width, height), mjpeg};
-            bestArea = area;
-        }
-    }
-    return best;
-}
 
 WebcamPreview::WebcamPreview(const QString& device, int fps, QObject* parent)
     : QObject(parent)
@@ -79,8 +53,8 @@ void WebcamPreview::start()
                            QStringLiteral("video=%1").arg(m_device)});
     connect(m_probe, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int, QProcess::ExitStatus) {
-                const QString output = QString::fromUtf8(m_probe->readAll());
-                startCamera(webcamPreferredFormat(output, m_fps));
+                m_options = QString::fromUtf8(m_probe->readAll());
+                startCamera(webcamPreferredFormat(m_options, m_fps));
             });
     connect(m_probe, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart)
@@ -101,8 +75,11 @@ void WebcamPreview::startCamera(const WebcamCameraFormat& format)
     m_camera->setProgram(ffmpegPath());
     QStringList args{QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
                      QStringLiteral("error"), QStringLiteral("-f"), QStringLiteral("dshow")};
-    if (format.mjpeg)
+    if (format.mjpeg) {
         args << QStringLiteral("-vcodec") << QStringLiteral("mjpeg");
+    } else if (!format.pixelFormat.isEmpty()) {
+        args << QStringLiteral("-pixel_format") << format.pixelFormat;
+    }
     if (!format.size.isEmpty())
         args << QStringLiteral("-video_size")
              << QStringLiteral("%1x%2").arg(format.size.width()).arg(format.size.height());
@@ -115,18 +92,37 @@ void WebcamPreview::startCamera(const WebcamCameraFormat& format)
         args << QStringLiteral("-q:v") << QStringLiteral("2");
     args << QStringLiteral("-f") << QStringLiteral("mjpeg") << QStringLiteral("pipe:1");
     m_camera->setArguments(args);
-    if (m_openAttempts == 1 && format.size.width() > 1280) {
-        // A camera that cannot sustain more than a handful of frames at this
-        // size is bandwidth-limited; 720p at full rate is the better picture.
-        QTimer::singleShot(2500, this, [this] {
-            if (m_framesSinceOpen < 8 && m_camera
-                && m_camera->state() == QProcess::Running) {
-                disconnect(m_camera, nullptr, this, nullptr);
-                m_camera->kill();
-                m_camera->deleteLater();
-                m_camera = nullptr;
-                startCamera({QSize(1280, 720), false});
+    if (m_openAttempts <= 3) {
+        // A camera that cannot keep up at the chosen format is bandwidth- or
+        // driver-limited: it sends a fraction of the frames the recording
+        // assumes, and the forced frame rate turns the gaps into staggering.
+        // Reopen at a strictly smaller mode and accept whatever rate the
+        // smallest pick delivers. The ceiling keeps the check from chasing a
+        // rate no camera on the machine can reach.
+        QTimer::singleShot(2500, this, [this, format] {
+            const double expected = qBound(15.0, m_fps * 0.7, 36.0);
+            if (!m_camera || m_camera->state() != QProcess::Running
+                || m_framesSinceOpen >= int(expected * 2.5)) {
+                return;
             }
+            const qint64 currentArea = format.size.isEmpty()
+                ? qint64(1920) * 1080
+                : qint64(format.size.width()) * format.size.height();
+            WebcamCameraFormat fallback =
+                webcamPreferredFormat(m_options, m_fps, currentArea - 1);
+            const bool same = fallback.size == format.size
+                && fallback.mjpeg == format.mjpeg
+                && fallback.pixelFormat == format.pixelFormat;
+            if (fallback.size.isEmpty() || same) {
+                fallback = {QSize(640, 480), false, format.pixelFormat};
+                if (format.size == QSize(640, 480))
+                    return;
+            }
+            disconnect(m_camera, nullptr, this, nullptr);
+            m_camera->kill();
+            m_camera->deleteLater();
+            m_camera = nullptr;
+            startCamera(fallback);
         });
     }
     connect(m_camera, &QProcess::readyReadStandardOutput, this, &WebcamPreview::consumeFrames);
@@ -207,6 +203,10 @@ void WebcamPreview::consumeFrames()
 void WebcamPreview::acceptClients()
 {
     while (QTcpSocket* socket = m_server->nextPendingConnection()) {
+        // Each frame is written whole, and a sub-MSS tail left to Nagle waits
+        // on a delayed ACK: the reader then stamps a late arrival wallclock on
+        // it and the forced frame rate turns the jitter into dup/drop judder.
+        socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);
         connect(socket, &QTcpSocket::disconnected, socket, &QObject::deleteLater);
         QTimer::singleShot(5000, socket, [this, socket] {
             if (m_client != socket)
