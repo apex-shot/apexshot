@@ -286,10 +286,10 @@ fn build_empty_state(kind: EditsKind) -> GtkBox {
 
     let icon = Image::from_icon_name(match kind {
         EditsKind::Motion => {
-            crate::capture::editor::window::icon_names::custom::SCREENSHOOTER_SYMBOLIC
+            crate::capture::editor::window::icon_names::custom::SPLINE_SYMBOLIC
         }
         EditsKind::Video => {
-            crate::capture::editor::window::icon_names::custom::RECORD_SCREEN_SYMBOLIC
+            crate::capture::editor::window::icon_names::custom::CLAPPERBOARD_SYMBOLIC
         }
     });
     icon.set_pixel_size(48);

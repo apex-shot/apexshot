@@ -72,23 +72,26 @@ pub fn build_local_page(
     scroller.set_hexpand(true);
 
     let column = GtkBox::new(Orientation::Vertical, 0);
-    let scale = super::window_scale();
+    // The Windows pages draw the Settings content card behind their scroller,
+    // so each margin is the Settings page padding plus the card inset on the
+    // edges the card leaves (the scrollbar gutter keeps the extra 8px too).
+    let scale = super::window_scale().min(1.0);
     let top = if cfg!(target_os = "windows") {
-        (2.0 * scale).round() as i32
+        (12.0 * scale).round() as i32
     } else {
         20
     };
-    let bottom = (if cfg!(target_os = "windows") {
-        24.0
+    let bottom = (32.0 * scale).round() as i32;
+    let (start, end) = if cfg!(target_os = "windows") {
+        ((20.0 * scale).round() as i32, (28.0 * scale).round() as i32)
     } else {
-        32.0
-    } * scale)
-        .round() as i32;
-    let side = (28.0 * scale).round() as i32;
+        let side = (28.0 * scale).round() as i32;
+        (side, side)
+    };
     column.set_margin_top(top);
     column.set_margin_bottom(bottom);
-    column.set_margin_start(side);
-    column.set_margin_end(side);
+    column.set_margin_start(start);
+    column.set_margin_end(end);
 
     // Header: gallery title + live count subtitle. Search and refresh live in
     // the window's header bar, GNOME-Settings-style, not on the page itself.
@@ -187,8 +190,15 @@ fn build_empty_state(kind: MediaKind) -> GtkBox {
     let empty = GtkBox::new(Orientation::Vertical, 0);
     empty.add_css_class("recent-captures-empty-state");
     empty.set_halign(Align::Center);
-    empty.set_valign(Align::Start);
-    empty.set_margin_top(24);
+    // On Windows the card pages centre their empty state like the other
+    // History pages; elsewhere it keeps its spot under the page header.
+    if cfg!(target_os = "windows") {
+        empty.set_valign(Align::Center);
+        empty.set_vexpand(true);
+    } else {
+        empty.set_valign(Align::Start);
+        empty.set_margin_top(24);
+    }
 
     let icon = Image::from_icon_name(match kind {
         MediaKind::Image => {
@@ -549,6 +559,10 @@ fn show_action_popover(
 ) {
     let popover = Popover::new();
     popover.add_css_class("history-action-popover");
+    // The same menu chrome the Settings dropdowns use — the select classes
+    // only override where the Windows shell styles them, so the native menu
+    // keeps its own look.
+    popover.add_css_class("settings-select-popover");
     popover.set_has_arrow(false);
     popover.set_autohide(true);
     // File-manager geometry: below the pointer, body extending to the right.
@@ -556,10 +570,13 @@ fn show_action_popover(
     popover.set_parent(anchor);
 
     let menu = GtkBox::new(Orientation::Vertical, 2);
+    menu.add_css_class("settings-select-menu");
 
     let add_action = |label_text: &str, destructive: bool| {
         let btn = Button::new();
         btn.add_css_class("history-action-btn");
+        // Same row height as a Settings menu option.
+        btn.set_size_request(-1, 32);
         // Opening a pointer-driven popover may focus its first action. Keep
         // that mouse focus visually neutral; keyboard focus is styled with
         // `:focus-visible`.
