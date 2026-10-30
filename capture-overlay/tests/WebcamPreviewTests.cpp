@@ -115,11 +115,19 @@ bool checkFormats()
     const QString rawOnly =
         QStringLiteral("pixel_format=yuyv422 min s=1920x1080 fps=5 max s=1920x1080 fps=30\n");
     const auto bounded = Platform::webcamPreferredFormat(modes, 60, qint64(1280) * 720);
+    // Between two raw modes at the same size, the 12-bit layout wins: it
+    // moves a quarter less data over the same bus.
+    const auto lighter = Platform::webcamPreferredFormat(
+        QStringLiteral("pixel_format=yuyv422 min s=1280x720 fps=30 max s=1280x720 fps=30\n"
+                       "pixel_format=nv12 min s=1280x720 fps=30 max s=1280x720 fps=30\n"),
+        30);
     return preferred.mjpeg && preferred.size == QSize(1920, 1080)
         && !fallback.mjpeg && fallback.size == QSize(1280, 720)
         && fast.mjpeg && fast.size == QSize(1920, 1080)
         && Platform::webcamPreferredFormat(rawOnly, 30).size.isEmpty()
-        && !bounded.mjpeg && bounded.size == QSize(1280, 720);
+        && !bounded.mjpeg && bounded.size == QSize(1280, 720)
+        && !lighter.mjpeg && lighter.size == QSize(1280, 720)
+        && lighter.pixelFormat == QLatin1String("nv12");
 }
 
 bool checkPlacementPersistence()

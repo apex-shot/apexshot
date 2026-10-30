@@ -17,47 +17,6 @@
 
 namespace Platform {
 
-WebcamCameraFormat webcamPreferredFormat(const QString& options, int fps, qint64 maxArea)
-{
-    const QRegularExpression option(QStringLiteral(
-        "min s=(\\d+)x(\\d+) fps=([\\d.]+) max s=(\\d+)x(\\d+) fps=([\\d.]+)"));
-    const qint64 mjpegCeiling = qMin(maxArea, qint64(1920) * 1080);
-    // Uncompressed frames past 720p need more USB bandwidth than an integrated
-    // camera has: asking for one trades the frame rate for pixels, and the
-    // staggered delivery is what a recording then carries. MJPEG modes are
-    // compressed on the camera and hold their rate at larger sizes.
-    const qint64 rawCeiling = qMin(maxArea, qint64(1280) * 720);
-    QVector<WebcamCameraFormat> sustained;
-    QVector<WebcamCameraFormat> candidates;
-    for (const QString& line : options.split(QLatin1Char('\n'))) {
-        const auto match = option.match(line);
-        if (!match.hasMatch())
-            continue;
-        const bool mjpeg = line.contains(QStringLiteral("vcodec=mjpeg"), Qt::CaseInsensitive);
-        const int width = match.captured(4).toInt();
-        const int height = match.captured(5).toInt();
-        const double maxFps = match.captured(6).toDouble();
-        const qint64 area = qint64(width) * height;
-        if (width <= 0 || height <= 0 || maxFps < 15 || area > (mjpeg ? mjpegCeiling : rawCeiling))
-            continue;
-        const WebcamCameraFormat candidate{QSize(width, height), mjpeg};
-        candidates.append(candidate);
-        if (fps <= 0 || maxFps >= fps)
-            sustained.append(candidate);
-    }
-    const QVector<WebcamCameraFormat>& pool = sustained.isEmpty() ? candidates : sustained;
-    WebcamCameraFormat best;
-    qint64 bestArea = 0;
-    for (const WebcamCameraFormat& candidate : pool) {
-        const qint64 area = qint64(candidate.size.width()) * candidate.size.height();
-        if (area > bestArea || (area == bestArea && candidate.mjpeg && !best.mjpeg)) {
-            best = candidate;
-            bestArea = area;
-        }
-    }
-    return best;
-}
-
 WebcamPreview::WebcamPreview(const QString& device, int fps, QObject* parent)
     : QObject(parent)
     , m_device(device)
@@ -116,8 +75,11 @@ void WebcamPreview::startCamera(const WebcamCameraFormat& format)
     m_camera->setProgram(ffmpegPath());
     QStringList args{QStringLiteral("-hide_banner"), QStringLiteral("-loglevel"),
                      QStringLiteral("error"), QStringLiteral("-f"), QStringLiteral("dshow")};
-    if (format.mjpeg)
+    if (format.mjpeg) {
         args << QStringLiteral("-vcodec") << QStringLiteral("mjpeg");
+    } else if (!format.pixelFormat.isEmpty()) {
+        args << QStringLiteral("-pixel_format") << format.pixelFormat;
+    }
     if (!format.size.isEmpty())
         args << QStringLiteral("-video_size")
              << QStringLiteral("%1x%2").arg(format.size.width()).arg(format.size.height());
@@ -130,24 +92,32 @@ void WebcamPreview::startCamera(const WebcamCameraFormat& format)
         args << QStringLiteral("-q:v") << QStringLiteral("2");
     args << QStringLiteral("-f") << QStringLiteral("mjpeg") << QStringLiteral("pipe:1");
     m_camera->setArguments(args);
-    if (m_openAttempts == 1) {
+    if (m_openAttempts <= 3) {
         // A camera that cannot keep up at the chosen format is bandwidth- or
         // driver-limited: it sends a fraction of the frames the recording
         // assumes, and the forced frame rate turns the gaps into staggering.
-        // Reopen once at a mode that fits in 720p - MJPEG where the camera
-        // offers it - and accept whatever rate the fallback delivers.
+        // Reopen at a strictly smaller mode and accept whatever rate the
+        // smallest pick delivers. The ceiling keeps the check from chasing a
+        // rate no camera on the machine can reach.
         QTimer::singleShot(2500, this, [this, format] {
-            const double expected = qMax(15.0, m_fps * 0.7);
+            const double expected = qBound(15.0, m_fps * 0.7, 36.0);
             if (!m_camera || m_camera->state() != QProcess::Running
                 || m_framesSinceOpen >= int(expected * 2.5)) {
                 return;
             }
+            const qint64 currentArea = format.size.isEmpty()
+                ? qint64(1920) * 1080
+                : qint64(format.size.width()) * format.size.height();
             WebcamCameraFormat fallback =
-                webcamPreferredFormat(m_options, m_fps, qint64(1280) * 720);
-            if (fallback.size == format.size && fallback.mjpeg == format.mjpeg)
-                return;
-            if (fallback.size.isEmpty())
-                fallback = {QSize(1280, 720), false};
+                webcamPreferredFormat(m_options, m_fps, currentArea - 1);
+            const bool same = fallback.size == format.size
+                && fallback.mjpeg == format.mjpeg
+                && fallback.pixelFormat == format.pixelFormat;
+            if (fallback.size.isEmpty() || same) {
+                fallback = {QSize(640, 480), false, format.pixelFormat};
+                if (format.size == QSize(640, 480))
+                    return;
+            }
             disconnect(m_camera, nullptr, this, nullptr);
             m_camera->kill();
             m_camera->deleteLater();

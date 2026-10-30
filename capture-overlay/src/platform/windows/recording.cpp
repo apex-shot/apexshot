@@ -4,6 +4,7 @@
 #include "platform/windows/audio_devices.h"
 #include "platform/windows/pointer_tracker.h"
 #include "platform/windows/settings_store.h"
+#include "platform/windows/webcam_format.h"
 #include "platform/windows/win_util.h"
 
 #include <QCoreApplication>
@@ -261,18 +262,23 @@ bool runFfprobe(const QStringList& arguments, QString* out)
 }
 
 /// The size a camera delivers at `fps`, or an empty size when it cannot be
-/// opened. The answer is cached per camera and rate: opening a capture device
-/// takes about a second, and the recorder asks once per recording.
-QSize cameraFrameSize(const QString& device, int fps)
+/// opened. `pixelFormat` pins the dshow mode the way the recording will ask
+/// for it. The answer is cached per camera, rate, and format: opening a
+/// capture device takes about a second, and the recorder asks once per
+/// recording.
+QSize cameraFrameSize(const QString& device, int fps, const QString& pixelFormat)
 {
     static QHash<QString, QSize> sizes;
-    const QString key = QStringLiteral("%1|%2").arg(device).arg(fps);
+    const QString key =
+        QStringLiteral("%1|%2|%3").arg(device).arg(fps).arg(pixelFormat);
     const auto cached = sizes.constFind(key);
     if (cached != sizes.constEnd())
         return cached.value();
 
     QStringList arguments{QStringLiteral("-v"), QStringLiteral("error"),
                           QStringLiteral("-f"), QStringLiteral("dshow")};
+    if (!pixelFormat.isEmpty())
+        arguments << QStringLiteral("-pixel_format") << pixelFormat;
     if (fps > 0)
         arguments << QStringLiteral("-framerate") << QString::number(fps);
     arguments << QStringLiteral("-i") << QStringLiteral("video=%1").arg(device)
@@ -286,25 +292,22 @@ QSize cameraFrameSize(const QString& device, int fps)
     return size;
 }
 
-/// The camera format to open at: the largest one it offers at 720p or below
-/// that can still deliver 24 fps. Left alone, an integrated camera opens at
-/// 1080p in uncompressed YUY2, which USB bandwidth caps at five frames a
-/// second - the frozen picture a recording then carries.
-QSize cameraCaptureSize(const QString& device)
+/// The camera mode to open at: the shared picker's best at 24fps within its
+/// raw-size ceiling. Left alone, an integrated camera opens at 1080p in
+/// uncompressed YUY2, which USB bandwidth caps at five frames a second - the
+/// frozen picture a recording then carries.
+Platform::WebcamCameraFormat cameraCaptureFormat(const QString& device)
 {
-    static QHash<QString, QSize> sizes;
-    const auto cached = sizes.constFind(device);
-    if (cached != sizes.constEnd())
+    static QHash<QString, Platform::WebcamCameraFormat> formats;
+    const auto cached = formats.constFind(device);
+    if (cached != formats.constEnd())
         return cached.value();
 
-    static const QRegularExpression option(
-        QStringLiteral("min s=(\\d+)x(\\d+) fps=(\\d+) max s=(\\d+)x(\\d+) fps=(\\d+)"));
-
-    QSize best;
     // Opening the camera twice in quick succession can make the second open
     // fail while the driver is still releasing the first, and `-list_options`
     // exits non-zero after printing, so retry once and parse the output.
-    for (int attempt = 0; attempt < 2 && best.isEmpty(); ++attempt) {
+    Platform::WebcamCameraFormat best;
+    for (int attempt = 0; attempt < 2 && best.size.isEmpty(); ++attempt) {
         if (attempt > 0)
             QThread::msleep(250);
         QString output;
@@ -314,30 +317,9 @@ QSize cameraCaptureSize(const QString& device)
                   QStringLiteral("video=%1").arg(device)},
                  &output,
                  nullptr);
-
-        qint64 bestArea = 0;
-        auto matches = option.globalMatch(output);
-        while (matches.hasNext()) {
-            const QRegularExpressionMatch match = matches.next();
-            const int width = match.captured(1).toInt();
-            const int height = match.captured(2).toInt();
-            // The second fps column is the mode's fastest rate; the slow end
-            // would rule out every ranged mode a 24fps recording could use.
-            const int rate = match.captured(6).toInt();
-            if (rate < 24 || width <= 0 || height <= 0)
-                continue;
-            const qint64 area = qint64(width) * height;
-            if (area > qint64(1280) * 720)
-                continue;
-            if (area > bestArea) {
-                bestArea = area;
-                best = QSize(width, height);
-            }
-        }
+        best = Platform::webcamPreferredFormat(output, 24, qint64(1280) * 720);
     }
-    if (!best.isValid())
-        return QSize();
-    sizes.insert(device, best);
+    formats.insert(device, best);
     return best;
 }
 
@@ -493,6 +475,9 @@ public:
     /// The size the dshow input is asked to deliver; empty uses the camera's
     /// default, which can be a five-fps 1080p mode.
     QSize webcamCaptureSize;
+    /// The dshow pixel_format the input asks for; empty uses the driver's
+    /// default, which can be the heaviest raw layout the camera lists.
+    QString webcamPixelFormat;
     /// The bubble-sized frame the preview pipe carries.
     QSize webcamPreviewSize;
     QByteArray webcamPreviewBuffer;
@@ -607,8 +592,10 @@ QStringList RecordingSession::Private::buildArguments(const QString& segmentPath
                             .arg(webcamCaptureSize.height());
             }
             args << QStringLiteral("-f") << QStringLiteral("dshow") << QStringLiteral("-rtbufsize")
-                 << QStringLiteral("256M") << QStringLiteral("-framerate") << QString::number(fps)
-                 << QStringLiteral("-i")
+                 << QStringLiteral("256M") << QStringLiteral("-framerate") << QString::number(fps);
+            if (!webcamPixelFormat.isEmpty())
+                args << QStringLiteral("-pixel_format") << webcamPixelFormat;
+            args << QStringLiteral("-i")
                  << QStringLiteral("video=%1").arg(request.webcamDevice);
         }
     }
@@ -1549,6 +1536,7 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
     d->webcamActive = false;
     d->webcamCameraSize = QSize();
     d->webcamCaptureSize = QSize();
+    d->webcamPixelFormat.clear();
     d->webcamPreviewSize = QSize();
     d->webcamPreviewBuffer.clear();
     d->webcamPreviewLogged = false;
@@ -1580,14 +1568,22 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         recordingLog(QStringLiteral("webcam stream reuse requested"));
         d->webcamActive = true;
     } else if (!camera.isEmpty()) {
-        const QSize captureSize = cameraCaptureSize(camera);
-        const QSize cameraSize = cameraFrameSize(camera, d->request.fps);
-        recordingLog(QStringLiteral("webcam probe %1 -> %2x%3 capture=%4x%5")
+        const Platform::WebcamCameraFormat captureFormat = cameraCaptureFormat(camera);
+        QString pixelFormat = captureFormat.pixelFormat;
+        QSize cameraSize = cameraFrameSize(camera, d->request.fps, pixelFormat);
+        if (cameraSize.isEmpty() && !pixelFormat.isEmpty()) {
+            // A driver can list a format it then refuses to open; ask for its
+            // default rather than lose the track over the pin.
+            cameraSize = cameraFrameSize(camera, d->request.fps, {});
+            pixelFormat.clear();
+        }
+        recordingLog(QStringLiteral("webcam probe %1 -> %2x%3 capture=%4x%5 %6")
                          .arg(camera)
                          .arg(cameraSize.width())
                          .arg(cameraSize.height())
-                         .arg(captureSize.width())
-                         .arg(captureSize.height()));
+                         .arg(captureFormat.size.width())
+                         .arg(captureFormat.size.height())
+                         .arg(captureFormat.mjpeg ? QStringLiteral("mjpeg") : pixelFormat));
         if (cameraSize.isEmpty()) {
             warnings.append(QStringLiteral("The camera \"%1\" could not be opened; recording "
                                            "without a webcam track.")
@@ -1596,7 +1592,8 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         } else {
             d->webcamActive = true;
             d->webcamCameraSize = cameraSize;
-            d->webcamCaptureSize = captureSize;
+            d->webcamCaptureSize = captureFormat.size;
+            d->webcamPixelFormat = pixelFormat;
             d->webcamPreviewSize = webcamPreviewFrameSize(d->request.webcamLayout.shape);
         }
     }
