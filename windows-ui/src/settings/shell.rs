@@ -13,7 +13,7 @@ use gtk4::{
 };
 
 use crate::capture::editor::window::icon_names;
-use crate::config::AppConfig;
+use crate::config::{is_cloud_logged_in, load_config, AppConfig};
 use crate::i18n::t;
 use crate::studio_entitlement::{current_status, StudioStatus};
 
@@ -160,8 +160,7 @@ fn set_selected(row: &GtkBox, icon: &Image, label: &Label, selected: bool) {
     }
 }
 
-/// The account chip that sits where a Save button would: the local account,
-/// the licence badge, and the account the build is signed in as.
+/// The cloud account shown at the bottom of the sidebar.
 pub struct UserChip {
     pub name: String,
     pub subtitle: String,
@@ -170,8 +169,20 @@ pub struct UserChip {
 }
 
 impl UserChip {
-    pub fn from_config(config: &AppConfig) -> Self {
-        let name = crate::platform::account_name().unwrap_or_else(|| t("ApexShot"));
+    pub fn from_config(config: &AppConfig) -> Option<Self> {
+        if !is_cloud_logged_in(config) {
+            return None;
+        }
+
+        let email = config.cloud_user_email.trim();
+        let account_name = config.cloud_user_name.trim();
+        let name = if !account_name.is_empty() {
+            account_name.to_string()
+        } else if !email.is_empty() {
+            email.to_string()
+        } else {
+            t("ApexShot Cloud")
+        };
         // Only a verified licence earns the badge; a build that cannot verify
         // one shows none rather than claiming the free tier.
         let badge = match current_status() {
@@ -181,24 +192,24 @@ impl UserChip {
             | StudioStatus::InvalidEntitlement
             | StudioStatus::DeviceMismatch => String::new(),
         };
-        let email = config.cloud_user_email.trim();
-        let subtitle = if email.is_empty() {
-            t("This device")
-        } else {
+        let subtitle = if !email.is_empty() && name != email {
             email.to_string()
+        } else {
+            t("Connected")
         };
-        Self {
+        Some(Self {
             initials: initials_of(&name),
             name,
             subtitle,
             badge,
-        }
+        })
     }
 }
 
 fn initials_of(name: &str) -> String {
     let mut initials = String::new();
-    for word in name.split_whitespace() {
+    let name = name.split('@').next().unwrap_or(name);
+    for word in name.split(|ch: char| ch.is_whitespace() || matches!(ch, '.' | '_' | '-')) {
         if let Some(first) = word.chars().next() {
             initials.extend(first.to_uppercase());
             if initials.chars().count() == 2 {
@@ -212,8 +223,32 @@ fn initials_of(name: &str) -> String {
     initials
 }
 
-/// Build the chip as a clickable row; `on_click` opens the licence page.
-pub fn build_user_chip(chip: &UserChip, scale: f64, on_click: impl Fn() + 'static) -> GtkBox {
+#[derive(Clone)]
+struct UserChipLabels {
+    initials: Label,
+    name: Label,
+    subtitle: Label,
+    badge: Label,
+}
+
+impl UserChipLabels {
+    fn update(&self, bar: &GtkBox, config: &AppConfig) {
+        let Some(chip) = UserChip::from_config(config) else {
+            bar.set_visible(false);
+            return;
+        };
+        self.initials.set_text(&chip.initials);
+        self.name.set_text(&chip.name);
+        self.subtitle.set_text(&chip.subtitle);
+        self.badge.set_text(&chip.badge);
+        self.badge.set_visible(!chip.badge.is_empty());
+        bar.set_visible(true);
+    }
+}
+
+/// Show the account chip only for a real cloud session, updating after login
+/// or logout without requiring the Settings window to be reopened.
+pub fn build_user_chip(config: &AppConfig, scale: f64, on_click: impl Fn() + 'static) -> GtkBox {
     let bar = GtkBox::new(Orientation::Vertical, 0);
     bar.add_css_class("settings-user-bar");
 
@@ -227,9 +262,11 @@ pub fn build_user_chip(chip: &UserChip, scale: f64, on_click: impl Fn() + 'stati
     avatar.set_valign(Align::Center);
     avatar.set_halign(Align::Center);
     avatar.set_size_request((30.0 * scale).round() as i32, (30.0 * scale).round() as i32);
-    let initials = Label::new(Some(&chip.initials));
+    let initials = Label::new(None);
     initials.add_css_class("settings-user-initials");
-    initials.set_halign(Align::Center);
+    initials.set_hexpand(true);
+    initials.set_halign(Align::Fill);
+    initials.set_xalign(0.5);
     initials.set_valign(Align::Center);
     avatar.append(&initials);
 
@@ -239,19 +276,17 @@ pub fn build_user_chip(chip: &UserChip, scale: f64, on_click: impl Fn() + 'stati
 
     let top = GtkBox::new(Orientation::Horizontal, 6);
     top.set_valign(Align::Center);
-    let name = Label::new(Some(&chip.name));
+    let name = Label::new(None);
     name.add_css_class("settings-user-name");
     name.set_xalign(0.0);
     name.set_ellipsize(gtk4::pango::EllipsizeMode::End);
     top.append(&name);
-    if !chip.badge.is_empty() {
-        let badge = Label::new(Some(&chip.badge));
-        badge.add_css_class("settings-user-badge");
-        badge.set_valign(Align::Center);
-        top.append(&badge);
-    }
+    let badge = Label::new(None);
+    badge.add_css_class("settings-user-badge");
+    badge.set_valign(Align::Center);
+    top.append(&badge);
 
-    let subtitle = Label::new(Some(&chip.subtitle));
+    let subtitle = Label::new(None);
     subtitle.add_css_class("settings-user-sub");
     subtitle.set_xalign(0.0);
     subtitle.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -273,6 +308,21 @@ pub fn build_user_chip(chip: &UserChip, scale: f64, on_click: impl Fn() + 'stati
     row.add_controller(click);
 
     bar.append(&row);
+    let labels = UserChipLabels {
+        initials,
+        name,
+        subtitle,
+        badge,
+    };
+    labels.update(&bar, config);
+    let weak_bar = bar.downgrade();
+    gtk4::glib::timeout_add_seconds_local(2, move || {
+        let Some(bar) = weak_bar.upgrade() else {
+            return gtk4::glib::ControlFlow::Break;
+        };
+        labels.update(&bar, &load_config());
+        gtk4::glib::ControlFlow::Continue
+    });
     bar
 }
 
@@ -321,8 +371,8 @@ pub fn install_css() {
          .settings-user-bar {{ border-top:1px solid rgba(255,255,255,0.07); padding:{}px; }} \
          .settings-user-chip {{ padding:{}px {}px; border-radius:{}px; }} \
          .settings-user-chip:hover {{ background-color:rgba(255,255,255,0.06); }} \
-         .settings-user-avatar {{ border-radius:999px; background-image:none; background-color:#ff670d; }} \
-         .settings-user-initials {{ font-size:{}px; font-weight:700; color:#ffffff; }} \
+         .settings-user-avatar {{ border-radius:999px; background-image:linear-gradient(145deg, #965032, #532d28); border:1px solid rgba(255,166,112,0.26); }} \
+         .settings-user-initials {{ font-size:{}px; font-weight:700; color:#fff3eb; }} \
          .settings-user-name {{ font-size:{}px; font-weight:600; }} \
          .settings-user-badge {{ font-size:{}px; font-weight:700; padding:1px {}px; border-radius:999px; \
              background-color:rgba(255,255,255,0.10); color:rgba(255,255,255,0.72); }} \
@@ -449,4 +499,61 @@ pub fn install_css() {
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn account_chip_requires_a_cloud_session() {
+        let mut config = AppConfig {
+            cloud_user_email: "old@example.com".to_string(),
+            cloud_user_name: "Old account".to_string(),
+            ..AppConfig::default()
+        };
+        assert!(UserChip::from_config(&config).is_none());
+
+        config.cloud_api_token = "token".to_string();
+        let chip = UserChip::from_config(&config).expect("active session");
+        assert_eq!(chip.name, "Old account");
+        assert_eq!(chip.subtitle, "old@example.com");
+        assert_eq!(chip.initials, "OA");
+
+        config.cloud_user_name.clear();
+        let chip = UserChip::from_config(&config).expect("email-only account");
+        assert_eq!(chip.name, "old@example.com");
+        assert_eq!(initials_of("jane.doe@example.com"), "JD");
+        assert_eq!(initials_of("codegoddy@example.com"), "C");
+
+        config.cloud_api_token.clear();
+        assert!(UserChip::from_config(&config).is_none());
+    }
+
+    #[test]
+    fn account_chip_updates_visibility_after_session_changes() {
+        let Some((initial, signed_in, signed_out)) = crate::test_support::with_gtk(|| {
+            let bar = GtkBox::new(Orientation::Vertical, 0);
+            let labels = UserChipLabels {
+                initials: Label::new(None),
+                name: Label::new(None),
+                subtitle: Label::new(None),
+                badge: Label::new(None),
+            };
+            let mut config = AppConfig::default();
+            labels.update(&bar, &config);
+            let initial = bar.is_visible();
+            config.cloud_api_token = "token".to_string();
+            config.cloud_user_email = "user@example.com".to_string();
+            labels.update(&bar, &config);
+            let signed_in = bar.is_visible();
+            config.cloud_api_token.clear();
+            labels.update(&bar, &config);
+            (initial, signed_in, bar.is_visible())
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+        assert_eq!((initial, signed_in, signed_out), (false, true, false));
+    }
 }

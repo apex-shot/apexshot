@@ -10,7 +10,9 @@ use std::rc::Rc;
 
 use gtk4::{glib, prelude::*, Align, Box as GtkBox, Button, Label, Orientation, Spinner};
 
-use super::ui::{copy_with_feedback, heading_centered, open_link, option_card, status_pill};
+use super::ui::{
+    copy_with_feedback, heading_centered, login_error_message, open_link, option_card, status_pill,
+};
 use super::{px, Nav, OnboardingStep};
 use crate::capture::editor::window::icon_names::custom;
 use crate::cloud::auth::{begin_device_login, poll_device_login, DeviceLogin, LoginError};
@@ -452,19 +454,8 @@ impl ConnectUi {
         self.copy_link_btn.set_sensitive(false);
         self.link_row.set_visible(false);
         self.browser_status.set_visible(false);
-        self.status.set_text(&error_message(error));
+        self.status.set_text(&login_error_message(error));
         self.retry_btn.set_visible(true);
-    }
-}
-
-fn error_message(error: &LoginError) -> String {
-    match error {
-        LoginError::Expired => t("This code expired. Try again to get a new one."),
-        LoginError::Denied => t("Authorization was denied in the browser."),
-        LoginError::NotConfigured | LoginError::HttpRequest(_) | LoginError::Server(_) => {
-            t("Couldn't reach ApexShot Cloud. Check your connection and try again.")
-        }
-        LoginError::Local(_) => t("Signed in, but this device could not save the account."),
     }
 }
 

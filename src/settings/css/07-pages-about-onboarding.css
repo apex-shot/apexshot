@@ -281,12 +281,141 @@
                 color: #17202a;
             }
 
-            .cloud-avatar {
-                background-color: #bb6d7a;
+            /* ── Inline cloud connect view ── */
+
+            .cloud-connect-eyebrow {
+                color: #ff7c2f;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.14em;
+            }
+
+            .cloud-connect-title {
+                font-size: 30px;
+                font-weight: 700;
+                letter-spacing: -0.02em;
+            }
+
+            .cloud-connect-cell {
+                background: alpha(black, 0.28);
+                border: 1px solid alpha(white, 0.10);
+                border-radius: 10px;
+                min-width: 44px;
+                min-height: 52px;
+                font-size: 20px;
+                font-weight: 600;
+            }
+
+            .cloud-connect-dash {
+                color: rgba(255,255,255,0.45);
+                font-size: 20px;
+                font-weight: 600;
+            }
+
+            .editor-root button.cloud-connect-action {
+                background-image: none;
+                background-color: #ff670d;
                 color: white;
+                border: none;
+                border-radius: 6px;
+                min-height: 36px;
+                font-weight: 600;
+                box-shadow: none;
+            }
+
+            .editor-root button.cloud-connect-action:hover {
+                background-color: #ff7c2f;
+            }
+
+            .editor-root button.cloud-connect-action:disabled {
+                background-color: alpha(#ff670d, 0.35);
+                color: alpha(white, 0.55);
+            }
+
+            .editor-root button.cloud-connect-secondary {
+                background-image: none;
+                background-color: alpha(white, 0.07);
+                color: alpha(white, 0.88);
+                border: 1px solid alpha(white, 0.08);
+                border-radius: 6px;
+                min-height: 36px;
+                font-weight: 600;
+                box-shadow: none;
+            }
+
+            .editor-root button.cloud-connect-secondary:hover {
+                background-color: alpha(white, 0.11);
+            }
+
+            .editor-root button.cloud-connect-secondary:disabled {
+                background-color: alpha(white, 0.03);
+                color: alpha(white, 0.35);
+            }
+
+            .editor-root button.cloud-connect-action:focus-visible,
+            .editor-root button.cloud-connect-secondary:focus-visible,
+            .editor-root button.cloud-connect-back:focus-visible {
+                outline: 2px solid #ff7c2f;
+                outline-offset: 2px;
+            }
+
+            .editor-root button.cloud-connect-back {
+                background: transparent;
+                border: none;
+                box-shadow: none;
+                color: alpha(white, 0.65);
+                padding: 6px 10px;
+            }
+
+            .editor-root button.cloud-connect-back:hover {
+                background: alpha(white, 0.06);
+                color: white;
+            }
+
+            .editor-root.editor-theme-light .cloud-connect-eyebrow {
+                color: #cf530b;
+            }
+
+            .editor-root.editor-theme-light .cloud-connect-cell {
+                background: alpha(#111827, 0.05);
+                border-color: alpha(#111827, 0.12);
+            }
+
+            .editor-root.editor-theme-light .cloud-connect-dash {
+                color: rgba(29, 33, 41, 0.45);
+            }
+
+            .editor-root.editor-theme-light button.cloud-connect-secondary {
+                background-color: alpha(#111827, 0.05);
+                border-color: alpha(#111827, 0.12);
+                color: #1d2129;
+            }
+
+            .editor-root.editor-theme-light button.cloud-connect-secondary:hover {
+                background-color: alpha(#111827, 0.09);
+            }
+
+            .editor-root.editor-theme-light button.cloud-connect-secondary:disabled {
+                background-color: alpha(#111827, 0.03);
+                color: alpha(#1d2129, 0.35);
+            }
+
+            .editor-root.editor-theme-light button.cloud-connect-back {
+                color: alpha(#1d2129, 0.7);
+            }
+
+            .editor-root.editor-theme-light button.cloud-connect-back:hover {
+                background: alpha(#111827, 0.06);
+                color: #1d2129;
+            }
+
+            .cloud-avatar {
+                background: linear-gradient(145deg, #965032, #532d28);
+                border: 1px solid rgba(255,166,112,0.26);
+                color: #fff3eb;
                 border-radius: 50%;
-                font-size: 24px;
-                font-weight: bold;
+                font-size: 16px;
+                font-weight: 700;
             }
 
             .cloud-user-name {

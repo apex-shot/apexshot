@@ -40,6 +40,73 @@ struct TokenResponse {
     device_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct RefreshResponse {
+    access_token: String,
+    refresh_token: String,
+}
+
+#[derive(Debug)]
+pub(crate) enum RefreshError {
+    NoRefreshToken,
+    Rejected(String),
+    Network(String),
+    Server(String),
+}
+
+impl std::fmt::Display for RefreshError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoRefreshToken => write!(f, "no refresh token stored"),
+            Self::Rejected(msg) => write!(f, "refresh token rejected: {msg}"),
+            Self::Network(msg) => write!(f, "refresh request failed: {msg}"),
+            Self::Server(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+/// Refresh a device session without overwriting a newer login or logout.
+pub(crate) fn refresh_access_token(config: &mut AppConfig) -> Result<String, RefreshError> {
+    if config.cloud_refresh_token.trim().is_empty() {
+        return Err(RefreshError::NoRefreshToken);
+    }
+    let backend_url = resolve_cloud_backend_url(config);
+    let body = serde_json::json!({ "refresh_token": config.cloud_refresh_token }).to_string();
+    let response = agent()
+        .post(&format!("{backend_url}/v1/auth/refresh"))
+        .set("Content-Type", "application/json")
+        .send_string(&body)
+        .map_err(|error| match error {
+            ureq::Error::Status(code, _) if (400..500).contains(&code) => {
+                RefreshError::Rejected(format!("HTTP {code}"))
+            }
+            ureq::Error::Status(code, _) => RefreshError::Server(format!("HTTP {code}")),
+            ureq::Error::Transport(error) => RefreshError::Network(error.to_string()),
+        })?;
+    let tokens: RefreshResponse = response
+        .into_json()
+        .map_err(|e| RefreshError::Server(format!("Invalid refresh response: {e}")))?;
+    if tokens.access_token.trim().is_empty() || tokens.refresh_token.trim().is_empty() {
+        return Err(RefreshError::Server(
+            "Invalid refresh response: missing tokens".to_string(),
+        ));
+    }
+    let mut latest = load_config();
+    if latest.cloud_refresh_token != config.cloud_refresh_token
+        || latest.cloud_api_token != config.cloud_api_token
+        || resolve_cloud_backend_url(&latest) != backend_url
+    {
+        return Err(RefreshError::Rejected("session changed".to_string()));
+    }
+    latest.cloud_api_token = tokens.access_token;
+    latest.cloud_refresh_token = tokens.refresh_token;
+    save_config(&latest)
+        .map_err(|e| RefreshError::Server(format!("Failed to save config: {e}")))?;
+    config.cloud_api_token = latest.cloud_api_token;
+    config.cloud_refresh_token = latest.cloud_refresh_token;
+    Ok(config.cloud_api_token.clone())
+}
+
 /// A started device-authorization login. Show [`DeviceLogin::user_code`] to the
 /// user, send them to [`DeviceLogin::verification_uri`], then poll with
 /// [`poll_device_login`] until it returns an account.

@@ -13,7 +13,7 @@ mod complete;
 mod howto;
 mod mascot;
 mod motion;
-mod ui;
+pub(crate) mod ui;
 mod welcome;
 
 use std::cell::{Cell, RefCell};

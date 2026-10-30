@@ -1,0 +1,109 @@
+.usage-overview {
+    padding: 8px 2px 20px;
+    border-bottom: 1px solid alpha(white, 0.08);
+}
+.usage-eyebrow {
+    color: #ff8b49;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+}
+.usage-account { font-size: 16px; font-weight: 600; }
+.usage-plan {
+    background: alpha(white, 0.06);
+    color: alpha(white, 0.78);
+    border: 1px solid alpha(white, 0.08);
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+}
+.usage-grid > flowboxchild { padding: 0; }
+.usage-metric {
+    padding: 20px;
+    border: 1px solid alpha(white, 0.08);
+    border-radius: 10px;
+    background-color: alpha(white, 0.025);
+}
+.usage-metric-title { font-size: 14px; font-weight: 600; }
+.usage-metric-detail { font-size: 12px; color: alpha(white, 0.55); }
+.usage-muted { font-size: 12px; color: alpha(white, 0.55); }
+.usage-value { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; }
+.usage-caption { font-size: 13px; color: alpha(white, 0.62); }
+.usage-status { font-size: 12px; color: alpha(white, 0.55); }
+.usage-status-error { color: #e8ad7e; }
+.usage-overview spinner { min-width: 14px; min-height: 14px; color: #ff8b49; }
+.usage-skeleton {
+    background: alpha(white, 0.09);
+    border-color: transparent;
+    border-radius: 5px;
+    color: transparent;
+}
+.usage-progress trough {
+    min-height: 7px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background-color: alpha(white, 0.08);
+}
+.usage-progress progress {
+    min-height: 7px;
+    min-width: 2px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background-image: none;
+    background-color: #ff670d;
+}
+.usage-progress-loading progress { opacity: 0; }
+.usage-footer { padding: 0 2px; }
+.usage-empty { padding: 32px 24px; }
+.usage-empty-title { font-size: 18px; font-weight: 600; }
+.editor-root button.usage-secondary {
+    background-image: none;
+    background-color: alpha(white, 0.07);
+    color: alpha(white, 0.88);
+    border: 1px solid alpha(white, 0.10);
+    border-radius: 6px;
+    box-shadow: none;
+    padding: 6px 14px;
+}
+.editor-root button.usage-secondary:hover { background-color: alpha(white, 0.11); }
+.editor-root button.usage-link {
+    background: transparent;
+    color: #ff8b49;
+    border: none;
+    box-shadow: none;
+    padding: 4px 0;
+}
+.editor-root.editor-theme-light .usage-overview {
+    border-color: alpha(#111827, 0.10);
+}
+.editor-root.editor-theme-light .usage-eyebrow { color: #b94c0a; }
+.editor-root.editor-theme-light .usage-plan {
+    background: alpha(#111827, 0.05);
+    color: alpha(#1d2129, 0.8);
+    border-color: alpha(#111827, 0.10);
+}
+.editor-root.editor-theme-light .usage-metric {
+    background-color: alpha(#111827, 0.025);
+    border-color: alpha(#111827, 0.10);
+}
+.editor-root.editor-theme-light .usage-muted,
+.editor-root.editor-theme-light .usage-metric-detail,
+.editor-root.editor-theme-light .usage-caption,
+.editor-root.editor-theme-light .usage-status { color: alpha(#1d2129, 0.60); }
+.editor-root.editor-theme-light .usage-status-error { color: #a64a16; }
+.editor-root.editor-theme-light .usage-skeleton {
+    background: alpha(#111827, 0.09);
+    border-color: transparent;
+    color: transparent;
+}
+.editor-root.editor-theme-light .usage-progress trough { background-color: alpha(#111827, 0.09); }
+.editor-root.editor-theme-light button.usage-secondary {
+    background-color: alpha(#111827, 0.05);
+    color: #1d2129;
+    border-color: alpha(#111827, 0.12);
+}
+.editor-root.editor-theme-light button.usage-secondary:hover { background-color: alpha(#111827, 0.09); }
+.editor-root.editor-theme-light button.usage-link { color: #b94c0a; }

@@ -3847,3 +3847,90 @@ msgstr "Este dispositivo"
 
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "A captura temporizada ainda não está disponível na versão para Windows. O intervalo é salvo para uma versão futura."
+
+msgid "APEXSHOT CLOUD"
+msgstr "APEXSHOT CLOUD"
+
+msgid "Allowance unavailable"
+msgstr "Limite indisponível"
+
+msgid "Authorize this device"
+msgstr "Autorizar este dispositivo"
+
+msgid "Back to Cloud"
+msgstr "Voltar para Cloud"
+
+msgid "Click Connect to link this device with a one-time code."
+msgstr "Clique em Conectar para vincular este dispositivo com um código de uso único."
+
+msgid "Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgstr "A navegação na nuvem ainda não está disponível no Windows. Conecte sua conta em Configurações → Cloud."
+
+msgid "Connect to see your usage"
+msgstr "Conecte sua conta para ver seu uso"
+
+msgid "Could not refresh. Showing previous values."
+msgstr "Não foi possível atualizar. Exibindo os valores anteriores."
+
+msgid "Couldn't open your browser. Copy the link and open it yourself."
+msgstr "Não foi possível abrir o navegador. Copie o link e abra-o manualmente."
+
+msgid "Go to Cloud settings"
+msgstr "Ir para as configurações de Cloud"
+
+msgid "Less than 0.1% used"
+msgstr "Menos de 0,1% usado"
+
+msgid "Loading usage..."
+msgstr "Carregando uso..."
+
+msgid "Manage billing"
+msgstr "Gerenciar cobrança"
+
+msgid "Monthly usage resets in UTC."
+msgstr "O uso mensal é reiniciado no horário UTC."
+
+msgid "No monthly limit"
+msgstr "Sem limite mensal"
+
+msgid "Plan unavailable"
+msgstr "Plano indisponível"
+
+msgid "Refreshing..."
+msgstr "Atualizando..."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "Entre para ver seus envios, armazenamento e plano."
+
+msgid "Storage"
+msgstr "Armazenamento"
+
+msgid "This month"
+msgstr "Este mês"
+
+msgid "Uploads"
+msgstr "Envios"
+
+msgid "Usage"
+msgstr "Uso"
+
+msgid "Usage is unavailable"
+msgstr "Uso indisponível"
+
+msgid "Used space"
+msgstr "Espaço usado"
+
+msgid "We couldn't load your usage. Check your connection and try again."
+msgstr "Não foi possível carregar seu uso. Verifique sua conexão e tente novamente."
+
+msgid "Your session has expired. Connect your account again in Cloud settings."
+msgstr "Sua sessão expirou. Conecte sua conta novamente nas configurações de Cloud."
+
+msgid "of {limit}"
+msgstr "de {limit}"
+
+msgid "of {limit} monthly uploads"
+msgstr "de {limit} envios mensais"
+
+msgid "{percent}% used"
+msgstr "{percent}% usado"

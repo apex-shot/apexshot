@@ -229,3 +229,18 @@ pub fn escape_markup(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
+
+/// The one-line reason a device-authorization sign-in failed, for the status
+/// line. Shared by the onboarding connect view and the Settings sign-in
+/// dialog.
+pub fn login_error_message(error: &crate::cloud::auth::LoginError) -> String {
+    use crate::cloud::auth::LoginError;
+    match error {
+        LoginError::Expired => t("This code expired. Try again to get a new one."),
+        LoginError::Denied => t("Authorization was denied in the browser."),
+        LoginError::NotConfigured | LoginError::HttpRequest(_) | LoginError::Server(_) => {
+            t("Couldn't reach ApexShot Cloud. Check your connection and try again.")
+        }
+        LoginError::Local(_) => t("Signed in, but this device could not save the account."),
+    }
+}

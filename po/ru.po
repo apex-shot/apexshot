@@ -3841,3 +3841,90 @@ msgstr "Это устройство"
 
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "Отложенная съёмка пока не подключена в сборке для Windows. Интервал сохраняется для будущего выпуска."
+
+msgid "APEXSHOT CLOUD"
+msgstr "APEXSHOT CLOUD"
+
+msgid "Allowance unavailable"
+msgstr "Лимит недоступен"
+
+msgid "Authorize this device"
+msgstr "Авторизовать это устройство"
+
+msgid "Back to Cloud"
+msgstr "Назад к Cloud"
+
+msgid "Click Connect to link this device with a one-time code."
+msgstr "Нажмите «Подключить», чтобы привязать устройство с помощью одноразового кода."
+
+msgid "Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgstr "Просмотр облака пока недоступен в версии для Windows. Подключите аккаунт в разделе «Настройки → Cloud»."
+
+msgid "Connect to see your usage"
+msgstr "Подключите аккаунт, чтобы увидеть использование"
+
+msgid "Could not refresh. Showing previous values."
+msgstr "Не удалось обновить данные. Показаны предыдущие значения."
+
+msgid "Couldn't open your browser. Copy the link and open it yourself."
+msgstr "Не удалось открыть браузер. Скопируйте ссылку и откройте её самостоятельно."
+
+msgid "Go to Cloud settings"
+msgstr "Перейти к настройкам Cloud"
+
+msgid "Less than 0.1% used"
+msgstr "Использовано менее 0,1%"
+
+msgid "Loading usage..."
+msgstr "Загрузка данных об использовании..."
+
+msgid "Manage billing"
+msgstr "Управление оплатой"
+
+msgid "Monthly usage resets in UTC."
+msgstr "Месячное использование сбрасывается по времени UTC."
+
+msgid "No monthly limit"
+msgstr "Без месячного лимита"
+
+msgid "Plan unavailable"
+msgstr "Тариф недоступен"
+
+msgid "Refreshing..."
+msgstr "Обновление..."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "Войдите, чтобы увидеть загрузки, хранилище и тариф."
+
+msgid "Storage"
+msgstr "Хранилище"
+
+msgid "This month"
+msgstr "В этом месяце"
+
+msgid "Uploads"
+msgstr "Загрузки"
+
+msgid "Usage"
+msgstr "Использование"
+
+msgid "Usage is unavailable"
+msgstr "Данные об использовании недоступны"
+
+msgid "Used space"
+msgstr "Занято"
+
+msgid "We couldn't load your usage. Check your connection and try again."
+msgstr "Не удалось загрузить данные об использовании. Проверьте подключение и повторите попытку."
+
+msgid "Your session has expired. Connect your account again in Cloud settings."
+msgstr "Срок действия сеанса истёк. Снова подключите аккаунт в настройках Cloud."
+
+msgid "of {limit}"
+msgstr "из {limit}"
+
+msgid "of {limit} monthly uploads"
+msgstr "из {limit} загрузок в месяц"
+
+msgid "{percent}% used"
+msgstr "Использовано {percent}%"
