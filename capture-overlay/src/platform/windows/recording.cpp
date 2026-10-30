@@ -424,6 +424,7 @@ public:
     bool startSegment(QString& error);
     void onCaptureFinished(int exitCode, QProcess::ExitStatus status);
     void onWebcamFinished(int exitCode, QProcess::ExitStatus status);
+    void onMicFinished();
     void onProcessError(QProcess::ProcessError error);
     void checkCaptureStopped();
     void requestQuit(int timeoutMs);
@@ -499,6 +500,21 @@ public:
     std::unique_ptr<SystemAudioCapture> systemAudio;
     QString systemAudioPath;
     qint64 systemAudioOffsetMs = 0;
+
+    /// The microphone runs in its own process writing raw PCM: a dshow audio
+    /// input inside the capture process starves the real-time video, and the
+    /// WAV is muxed into the recording once finalised. It records through
+    /// pauses; the spans below are what gets cut back out.
+    QProcess* micProcess = nullptr;
+    QString micPath;
+    /// How far ahead of the video the audio capture started, for the trim.
+    qint64 micOffsetMs = 0;
+    /// The elapsed time the current pause began at, or -1.
+    qint64 micPauseStartMs = -1;
+    /// Wall time that pause began at, to measure how long it lasted.
+    qint64 pauseWallMs = 0;
+    /// Paused spans in elapsed time: [start, start + paused wall duration).
+    QVector<QPair<qint64, qint64>> micPauseSpans;
 };
 
 qint64 RecordingSession::Private::elapsedMs() const
@@ -580,8 +596,6 @@ QStringList RecordingSession::Private::buildScreenArguments(const QString& segme
          << QStringLiteral("%1x%2").arg(request.region.width()).arg(request.region.height())
          << QStringLiteral("-i") << QStringLiteral("desktop");
 
-    args << audioArguments;
-
     QString scale = QStringLiteral("scale=trunc(iw/2)*2:trunc(ih/2)*2");
     if (request.maxWidth > 0 && request.maxHeight > 0) {
         scale = QStringLiteral(
@@ -607,20 +621,6 @@ QStringList RecordingSession::Private::buildScreenArguments(const QString& segme
     appendVideoEncoder(args, crf);
     args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-bf")
          << QStringLiteral("2") << QStringLiteral("-r") << QString::number(fps);
-
-    const int audioInputCount = audioArguments.count(QStringLiteral("-i"));
-    if (audioInputCount > 0) {
-        if (audioInputCount > 1) {
-            args << QStringLiteral("-filter_complex")
-                 << QStringLiteral("[1:a][2:a]amix=inputs=2:duration=longest[aout]")
-                 << QStringLiteral("-map") << QStringLiteral("[aout]");
-        } else {
-            args << QStringLiteral("-map") << QStringLiteral("1:a");
-        }
-        args << QStringLiteral("-c:a") << QStringLiteral("aac") << QStringLiteral("-b:a")
-             << QStringLiteral("160k") << QStringLiteral("-ac")
-             << (request.monoAudio ? QStringLiteral("1") : QStringLiteral("2"));
-    }
 
     args << QStringLiteral("-movflags") << QStringLiteral("+faststart") << segmentPath;
     return args;
@@ -869,6 +869,23 @@ void RecordingSession::Private::onWebcamFinished(int exitCode, QProcess::ExitSta
     checkCaptureStopped();
 }
 
+void RecordingSession::Private::onMicFinished()
+{
+    if (micProcess) {
+        processOutput.append(micProcess->readAllStandardError());
+        micProcess->deleteLater();
+        micProcess = nullptr;
+    }
+    if (state == State::Recording && process) {
+        // A mic that dies mid-recording loses its track, not the video.
+        micPath.clear();
+        recordingLog(QStringLiteral("microphone process died mid-recording"));
+        emit q->warning(QStringLiteral(
+            "The microphone stopped recording; the video continues without it."));
+    }
+    checkCaptureStopped();
+}
+
 void RecordingSession::Private::checkCaptureStopped()
 {
     if (process || webcamProcess)
@@ -895,6 +912,8 @@ void RecordingSession::Private::checkCaptureStopped()
     }
 
     if (state == State::Stopping) {
+        if (micProcess)
+            return;
         emit q->captureStopped();
         if (discardRequested) {
             cleanupAndEmit(false, QString(), QString());
@@ -942,7 +961,7 @@ void RecordingSession::Private::fail(const QString& reason)
     pointerTracker.discard();
     state = State::Failed;
     qWarning().noquote() << "[recording]" << reason;
-    for (QProcess* target : {process, webcamProcess}) {
+    for (QProcess* target : {process, webcamProcess, micProcess}) {
         if (!target)
             continue;
         target->kill();
@@ -950,6 +969,7 @@ void RecordingSession::Private::fail(const QString& reason)
     }
     process = nullptr;
     webcamProcess = nullptr;
+    micProcess = nullptr;
     // Keep the segments so a failed save can still be recovered from the work
     // directory the message names.
     const QString message = workDir.isEmpty()
@@ -963,68 +983,97 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
 {
     const auto next = [this](const QString& path) { completeWebcamTrack(path); };
 
-    if (!systemAudio && systemAudioPath.isEmpty()) {
-        next(videoPath);
-        return;
-    }
     if (systemAudio)
         systemAudio->stop();
-    if (systemAudioPath.isEmpty() || !QFileInfo::exists(systemAudioPath)
-        || QFileInfo(systemAudioPath).size() <= 68) {
-        QFile::remove(systemAudioPath);
-        systemAudioPath.clear();
+    systemAudio.reset();
+
+    struct AudioInput {
+        QString path;
+        double offsetSeconds;
+        QString select;
+    };
+    QVector<AudioInput> inputs;
+    const auto usable = [](const QString& path) {
+        return !path.isEmpty() && QFileInfo::exists(path) && QFileInfo(path).size() > 68;
+    };
+    if (usable(micPath)) {
+        // The mic recorded through pauses; drop those spans so the audio
+        // tracks the kept video segments.
+        QString select;
+        if (!micPauseSpans.isEmpty()) {
+            QStringList spans;
+            for (const auto& span : micPauseSpans) {
+                spans << QStringLiteral("between(t,%1,%2)")
+                             .arg(span.first / 1000.0, 0, 'f', 3)
+                             .arg(span.second / 1000.0, 0, 'f', 3);
+            }
+            select = QStringLiteral(",aselect='not(%1)',asetpts=N/SR/TB")
+                         .arg(spans.join(QStringLiteral("+")));
+        }
+        inputs.append(
+            {micPath, std::max<qint64>(0, micOffsetMs) / 1000.0, select});
+    }
+    if (usable(systemAudioPath)) {
+        inputs.append({systemAudioPath,
+                       std::max<qint64>(0, systemAudioOffsetMs) / 1000.0,
+                       QString()});
+    }
+    for (const QString& path : {micPath, systemAudioPath})
+        QFile::remove(path);
+    micPath.clear();
+    systemAudioPath.clear();
+
+    if (inputs.isEmpty()) {
         next(videoPath);
         return;
     }
 
     const QString mixedPath = QDir(workDir).filePath(QStringLiteral("mixed-audio.mp4"));
     QFile::remove(mixedPath);
-    recordingLog(QStringLiteral("system audio: mux %1 (%2 bytes) onto %3")
-                     .arg(systemAudioPath)
-                     .arg(QFileInfo(systemAudioPath).size())
+    recordingLog(QStringLiteral("audio: mux %1 tracks onto %2")
+                     .arg(inputs.size())
                      .arg(videoPath));
 
     const bool videoHasAudio = hasAudioStream(videoPath);
-    const double offsetSeconds = std::max<qint64>(0, systemAudioOffsetMs) / 1000.0;
-    const QString trim = QStringLiteral("atrim=start=%1").arg(offsetSeconds, 0, 'f', 3);
-    QString filter;
-    if (videoHasAudio) {
-        filter = QStringLiteral("[1:a]%1,apad[system];"
-                                "[0:a][system]amix=inputs=2:duration=longest:"
-                                "dropout_transition=0:normalize=0[aout]")
-                     .arg(trim);
+    QStringList labels;
+    QStringList parts;
+    for (int i = 0; i < inputs.size(); ++i) {
+        labels << QStringLiteral("[a%1]").arg(i);
+        parts << QStringLiteral("[%1:a]atrim=start=%2,asetpts=PTS-STARTPTS%3,apad%4")
+                     .arg(i + 1)
+                     .arg(inputs[i].offsetSeconds, 0, 'f', 3)
+                     .arg(inputs[i].select)
+                     .arg(labels.last());
+    }
+    QStringList mix = labels;
+    if (videoHasAudio)
+        mix.prepend(QStringLiteral("[0:a]"));
+    QString filter = parts.join(QLatin1Char(';'));
+    if (mix.size() > 1) {
+        filter += QStringLiteral(";%1amix=inputs=%2:duration=longest:"
+                                 "dropout_transition=0:normalize=0[aout]")
+                      .arg(mix.join(QString()))
+                      .arg(mix.size());
     } else {
-        filter = QStringLiteral("[1:a]%1,apad[aout]").arg(trim);
+        filter += QStringLiteral(";%1anull[aout]").arg(labels.first());
     }
 
-    const QStringList arguments{
-        QStringLiteral("-y"),
-        QStringLiteral("-hide_banner"),
-        QStringLiteral("-loglevel"),
-        QStringLiteral("error"),
-        QStringLiteral("-i"),
-        videoPath,
-        QStringLiteral("-i"),
-        systemAudioPath,
-        QStringLiteral("-filter_complex"),
-        filter,
-        QStringLiteral("-map"),
-        QStringLiteral("0:v"),
-        QStringLiteral("-map"),
-        QStringLiteral("[aout]"),
-        QStringLiteral("-c:v"),
-        QStringLiteral("copy"),
-        QStringLiteral("-c:a"),
-        QStringLiteral("aac"),
-        QStringLiteral("-b:a"),
-        QStringLiteral("160k"),
-        QStringLiteral("-ac"),
-        request.monoAudio ? QStringLiteral("1") : QStringLiteral("2"),
-        QStringLiteral("-movflags"),
-        QStringLiteral("+faststart"),
-        QStringLiteral("-shortest"),
-        mixedPath,
-    };
+    QStringList arguments{QStringLiteral("-y"), QStringLiteral("-hide_banner"),
+                          QStringLiteral("-loglevel"), QStringLiteral("error"),
+                          QStringLiteral("-i"), videoPath};
+    for (const AudioInput& input : inputs)
+        arguments << QStringLiteral("-i") << input.path;
+    arguments << QStringLiteral("-filter_complex")
+              << filter
+              << QStringLiteral("-map") << QStringLiteral("0:v")
+              << QStringLiteral("-map") << QStringLiteral("[aout]")
+              << QStringLiteral("-c:v") << QStringLiteral("copy")
+              << QStringLiteral("-c:a") << QStringLiteral("aac")
+              << QStringLiteral("-b:a") << QStringLiteral("160k")
+              << QStringLiteral("-ac")
+              << (request.monoAudio ? QStringLiteral("1") : QStringLiteral("2"))
+              << QStringLiteral("-movflags") << QStringLiteral("+faststart")
+              << QStringLiteral("-shortest") << mixedPath;
 
     auto* mixer = new QProcess(q);
     mixer->setProgram(ffmpegExecutable());
@@ -1037,9 +1086,6 @@ void RecordingSession::Private::completeSystemAudio(const QString& videoPath)
         [this, mixer, mixedPath, videoPath, next](int code, QProcess::ExitStatus status) {
             const QString detail = tailLines(QString::fromUtf8(mixer->readAll()), 6);
             mixer->deleteLater();
-            systemAudio.reset();
-            QFile::remove(systemAudioPath);
-            systemAudioPath.clear();
 
             recordingLog(QStringLiteral("system audio: mux exit=%1 size=%2 detail=%3")
                              .arg(code)
@@ -1528,6 +1574,10 @@ RecordingSession::~RecordingSession()
         d->webcamProcess->kill();
         d->webcamProcess->waitForFinished(1000);
     }
+    if (d->micProcess) {
+        d->micProcess->kill();
+        d->micProcess->waitForFinished(1000);
+    }
     if (d->concat) {
         d->concat->kill();
         d->concat->waitForFinished(1000);
@@ -1706,6 +1756,10 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
     d->systemAudio.reset();
     d->systemAudioPath.clear();
     d->systemAudioOffsetMs = 0;
+    d->micPath.clear();
+    d->micOffsetMs = 0;
+    d->micPauseStartMs = -1;
+    d->micPauseSpans.clear();
 
     QElapsedTimer audioClock;
     audioClock.start();
@@ -1736,13 +1790,54 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         }
     }
 
+    // The microphone records in its own process writing raw PCM, muxed in
+    // once the recording is finalised: a dshow audio input inside the
+    // capture process starves the real-time video of frames.
+    if (!d->audioArguments.isEmpty()) {
+        const QString path = QDir(d->workDir).filePath(QStringLiteral("mic.wav"));
+        QStringList micArgs{QStringLiteral("-y"), QStringLiteral("-hide_banner"),
+                            QStringLiteral("-loglevel"), QStringLiteral("error"),
+                            QStringLiteral("-nostats")};
+        micArgs << d->audioArguments << QStringLiteral("-vn") << QStringLiteral("-c:a")
+                << QStringLiteral("pcm_s16le") << path;
+        auto* mic = new QProcess(this);
+        mic->setProgram(ffmpegExecutable());
+        mic->setProcessChannelMode(QProcess::SeparateChannels);
+        mic->setArguments(micArgs);
+        QObject::connect(mic, &QProcess::readyReadStandardError, this, [d = d, mic] {
+            d->processOutput.append(mic->readAllStandardError());
+        });
+        QObject::connect(mic,
+                         QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                         this,
+                         [d = d](int, QProcess::ExitStatus) { d->onMicFinished(); });
+        mic->start();
+        if (!mic->waitForStarted(kProbeTimeoutMs)) {
+            recordingLog(QStringLiteral("microphone process could not start: %1")
+                             .arg(mic->errorString()));
+            emit warning(QStringLiteral("The microphone could not be recorded: %1")
+                             .arg(mic->errorString()));
+            delete mic;
+        } else {
+            d->micProcess = mic;
+            d->micPath = path;
+            recordingLog(QStringLiteral("microphone: started %1").arg(path));
+        }
+    }
+
     if (!d->startSegment(error)) {
         if (d->systemAudio)
             d->systemAudio->stop();
+        if (d->micProcess) {
+            d->micProcess->kill();
+            d->micProcess->deleteLater();
+            d->micProcess = nullptr;
+        }
         d->cleanupWorkDir();
         return false;
     }
     d->systemAudioOffsetMs = audioClock.elapsed();
+    d->micOffsetMs = audioClock.elapsed();
 
     d->state = Private::State::Recording;
     d->active.start();
@@ -1762,6 +1857,9 @@ void RecordingSession::pause()
 
     d->elapsedBeforeMs += d->active.elapsed();
     d->pointerTracker.pause(d->elapsedBeforeMs);
+    // The mic keeps recording through the pause; the span is cut at mux time.
+    d->micPauseStartMs = d->elapsedBeforeMs;
+    d->pauseWallMs = QDateTime::currentMSecsSinceEpoch();
     if (d->systemAudio)
         d->systemAudio->setPaused(true);
     d->tick->stop();
@@ -1796,6 +1894,11 @@ void RecordingSession::resume()
     d->state = Private::State::Recording;
     d->active.start();
     d->pointerTracker.resume();
+    if (d->micPauseStartMs >= 0) {
+        const qint64 paused = QDateTime::currentMSecsSinceEpoch() - d->pauseWallMs;
+        d->micPauseSpans.append({d->micPauseStartMs, d->micPauseStartMs + paused});
+        d->micPauseStartMs = -1;
+    }
     if (d->systemAudio)
         d->systemAudio->setPaused(false);
     d->tick->start();
@@ -1815,6 +1918,15 @@ void RecordingSession::stop()
     d->pointerTracker.stop(d->elapsedBeforeMs);
     if (d->systemAudio)
         d->systemAudio->stop();
+    if (d->micProcess) {
+        d->micProcess->write("q\n");
+        d->micProcess->closeWriteChannel();
+        QProcess* target = d->micProcess;
+        QTimer::singleShot(kStopTimeoutMs, this, [d = d, target] {
+            if (d->micProcess == target)
+                d->micProcess->kill();
+        });
+    }
     d->tick->stop();
     d->discardRequested = false;
     d->resumeAfterPause = false;
@@ -1844,6 +1956,8 @@ void RecordingSession::discard()
     d->pointerTracker.discard();
     if (d->systemAudio)
         d->systemAudio->stop();
+    if (d->micProcess)
+        d->micProcess->kill();
     d->tick->stop();
     d->discardRequested = true;
     d->resumeAfterPause = false;
