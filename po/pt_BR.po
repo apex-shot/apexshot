@@ -3847,3 +3847,130 @@ msgstr "Este dispositivo"
 
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "A captura temporizada ainda não está disponível na versão para Windows. O intervalo é salvo para uma versão futura."
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "APEXSHOT CLOUD"
+msgstr "APEXSHOT CLOUD"
+
+msgid "Allowance unavailable"
+msgstr "Limite indisponível"
+
+msgid "Authorize this device"
+msgstr "Autorizar este dispositivo"
+
+msgid "Back to Cloud"
+msgstr "Voltar para Cloud"
+
+msgid "Click Connect to link this device with a one-time code."
+msgstr ""
+"Clique em Conectar para vincular este dispositivo com um código de uso único."
+
+msgid ""
+"Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgstr ""
+"A navegação na nuvem ainda não está disponível no Windows. Conecte sua conta em Configurações → Cloud."
+
+msgid "Connect to see your usage"
+msgstr "Conecte sua conta para ver seu uso"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr ""
+"Não foi possível pausar o monitor de atalhos. Feche esta caixa de diálogo e tente novamente."
+
+msgid "Could not refresh. Showing previous values."
+msgstr "Não foi possível atualizar. Exibindo os valores anteriores."
+
+msgid "Couldn't open your browser. Copy the link and open it yourself."
+msgstr "Não foi possível abrir o navegador. Copie o link e abra-o manualmente."
+
+msgid "Disabled"
+msgstr "Desativado"
+
+msgid "Go to Cloud settings"
+msgstr "Ir para as configurações de Cloud"
+
+msgid "Less than 0.1% used"
+msgstr "Menos de 0,1% usado"
+
+msgid "Manage billing"
+msgstr "Gerenciar cobrança"
+
+msgid "Monthly usage resets in UTC."
+msgstr "O uso mensal é reiniciado no horário UTC."
+
+msgid "No monthly limit"
+msgstr "Sem limite mensal"
+
+msgid "Off by default. Turning this on sends anonymous usage statistics."
+msgstr ""
+"Desligado por padrão. Ao ativar, estatísticas de uso anônimas são enviadas."
+
+msgid ""
+"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
+msgstr ""
+"Batimento diário opcional: versão do app, Windows e contagem de recursos. Sem capturas, caminhos ou texto de OCR. Substitua com APEXSHOT_TELEMETRY=0."
+
+msgid "Plan unavailable"
+msgstr "Plano indisponível"
+
+msgid "Requires the corresponding Windows OCR language pack."
+msgstr "Requer o pacote de idioma de OCR do Windows correspondente."
+
+msgid "Shortcuts work while the ApexShot background shell is running."
+msgstr ""
+"Os atalhos funcionam enquanto o shell em segundo plano do ApexShot estiver em execução."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "Entre para ver seus envios, armazenamento e plano."
+
+msgid "Storage"
+msgstr "Armazenamento"
+
+msgid ""
+"The Windows shell uses its tray icon to open capture, Settings, and Quit."
+msgstr ""
+"O shell do Windows usa o ícone da bandeja para abrir Captura, Configurações e Sair."
+
+msgid "The capture shell currently uses its own dark appearance."
+msgstr "O shell de captura usa atualmente sua própria aparência escura."
+
+msgid "The capture toolbar can change the timer for an individual screenshot."
+msgstr ""
+"A barra de ferramentas de captura pode alterar o temporizador de uma captura individual."
+
+msgid "This action requires the Windows image editor or overlay backend."
+msgstr ""
+"Esta ação requer o editor de imagens ou o back-end de sobreposição do Windows."
+
+msgid "This month"
+msgstr "Este mês"
+
+msgid "Uploads"
+msgstr "Envios"
+
+msgid "Usage"
+msgstr "Uso"
+
+msgid "Usage is unavailable"
+msgstr "Uso indisponível"
+
+msgid "Use your configured shortcuts while ApexShot runs in the background."
+msgstr "Use seus atalhos configurados enquanto o ApexShot roda em segundo plano."
+
+msgid "Used space"
+msgstr "Espaço usado"
+
+msgid "When hidden, stop the recording from the tray or with its shortcut."
+msgstr "Quando oculto, pare a gravação pela bandeja ou com o atalho."
+
+msgid ""
+"When off, output uses the capture's display scale before applying the maximum resolution."
+msgstr ""
+"Quando desligado, a saída usa a escala de exibição da captura antes de aplicar a resolução máxima."
+
+msgid ""
+"When off, recordings remain in the temporary folder for the result card and editor."
+msgstr ""
+"Quando desligado, as gravações permanecem na pasta temporária para o cartão de resultado e o editor."

@@ -3857,3 +3857,133 @@ msgstr "Dieses Gerät"
 
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "Zeitversetzte Aufnahme ist im Windows-Build noch nicht angebunden. Das Intervall wird für eine künftige Version gespeichert."
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "APEXSHOT CLOUD"
+msgstr "APEXSHOT CLOUD"
+
+msgid "Allowance unavailable"
+msgstr "Kontingent nicht verfügbar"
+
+msgid "Authorize this device"
+msgstr "Dieses Gerät autorisieren"
+
+msgid "Back to Cloud"
+msgstr "Zurück zu Cloud"
+
+msgid "Click Connect to link this device with a one-time code."
+msgstr ""
+"Klicke auf Verbinden, um dieses Gerät mit einem einmaligen Code zu verknüpfen."
+
+msgid ""
+"Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgstr ""
+"Das Durchsuchen der Cloud ist in der Windows-Version noch nicht verfügbar. Verbinde dein Konto unter Einstellungen → Cloud."
+
+msgid "Connect to see your usage"
+msgstr "Verbinde dein Konto, um deine Nutzung zu sehen"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr ""
+"Der Tastenkürzel-Listener konnte nicht pausiert werden. Schließe diesen Dialog und versuche es erneut."
+
+msgid "Could not refresh. Showing previous values."
+msgstr "Aktualisierung fehlgeschlagen. Die vorherigen Werte werden angezeigt."
+
+msgid "Couldn't open your browser. Copy the link and open it yourself."
+msgstr ""
+"Der Browser konnte nicht geöffnet werden. Kopiere den Link und öffne ihn selbst."
+
+msgid "Disabled"
+msgstr "Deaktiviert"
+
+msgid "Go to Cloud settings"
+msgstr "Zu den Cloud-Einstellungen"
+
+msgid "Less than 0.1% used"
+msgstr "Weniger als 0,1 % belegt"
+
+msgid "Manage billing"
+msgstr "Abrechnung verwalten"
+
+msgid "Monthly usage resets in UTC."
+msgstr "Die monatliche Nutzung wird nach UTC zurückgesetzt."
+
+msgid "No monthly limit"
+msgstr "Kein monatliches Limit"
+
+msgid "Off by default. Turning this on sends anonymous usage statistics."
+msgstr ""
+"Standardmäßig aus. Wenn du das einschaltest, werden anonyme Nutzungsstatistiken gesendet."
+
+msgid ""
+"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
+msgstr ""
+"Optionaler täglicher Heartbeat: App-Version, Windows und Funktionszähler. Keine Screenshots, Pfade oder OCR-Texte. Überschreibbar mit APEXSHOT_TELEMETRY=0."
+
+msgid "Plan unavailable"
+msgstr "Tarif nicht verfügbar"
+
+msgid "Requires the corresponding Windows OCR language pack."
+msgstr "Erfordert das passende Windows-OCR-Sprachpaket."
+
+msgid "Shortcuts work while the ApexShot background shell is running."
+msgstr "Tastenkürzel funktionieren, solange die ApexShot-Hintergrundshell läuft."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr ""
+"Melde dich an, um deine Uploads, deinen Speicher und deinen Tarif zu sehen."
+
+msgid "Storage"
+msgstr "Speicher"
+
+msgid ""
+"The Windows shell uses its tray icon to open capture, Settings, and Quit."
+msgstr ""
+"Die Windows-Shell nutzt ihr Leistensymbol, um Aufnahme, Einstellungen und Beenden zu öffnen."
+
+msgid "The capture shell currently uses its own dark appearance."
+msgstr ""
+"Die Aufnahme-Shell verwendet derzeit ihr eigenes dunkles Erscheinungsbild."
+
+msgid "The capture toolbar can change the timer for an individual screenshot."
+msgstr ""
+"Die Aufnahme-Werkzeugleiste kann den Timer für einen einzelnen Screenshot ändern."
+
+msgid "This action requires the Windows image editor or overlay backend."
+msgstr "Diese Aktion erfordert den Windows-Bildeditor oder das Overlay-Backend."
+
+msgid "This month"
+msgstr "Diesen Monat"
+
+msgid "Uploads"
+msgstr "Uploads"
+
+msgid "Usage"
+msgstr "Nutzung"
+
+msgid "Usage is unavailable"
+msgstr "Nutzung nicht verfügbar"
+
+msgid "Use your configured shortcuts while ApexShot runs in the background."
+msgstr ""
+"Nutze deine konfigurierten Tastenkürzel, während ApexShot im Hintergrund läuft."
+
+msgid "Used space"
+msgstr "Belegter Speicher"
+
+msgid "When hidden, stop the recording from the tray or with its shortcut."
+msgstr ""
+"Wenn sie ausgeblendet ist, beende die Aufnahme über die Leiste oder ihr Kürzel."
+
+msgid ""
+"When off, output uses the capture's display scale before applying the maximum resolution."
+msgstr ""
+"Wenn ausgeschaltet, nutzt die Ausgabe die Anzeigeskalierung der Aufnahme, bevor die maximale Auflösung angewendet wird."
+
+msgid ""
+"When off, recordings remain in the temporary folder for the result card and editor."
+msgstr ""
+"Wenn ausgeschaltet, bleiben Aufnahmen im temporären Ordner für die Ergebniskarte und den Editor."

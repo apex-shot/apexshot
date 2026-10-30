@@ -3841,3 +3841,129 @@ msgstr "Это устройство"
 
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "Отложенная съёмка пока не подключена в сборке для Windows. Интервал сохраняется для будущего выпуска."
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "APEXSHOT CLOUD"
+msgstr "APEXSHOT CLOUD"
+
+msgid "Allowance unavailable"
+msgstr "Лимит недоступен"
+
+msgid "Authorize this device"
+msgstr "Авторизовать это устройство"
+
+msgid "Back to Cloud"
+msgstr "Назад к Cloud"
+
+msgid "Click Connect to link this device with a one-time code."
+msgstr ""
+"Нажмите «Подключить», чтобы привязать устройство с помощью одноразового кода."
+
+msgid ""
+"Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgstr ""
+"Просмотр облака пока недоступен в версии для Windows. Подключите аккаунт в разделе «Настройки → Cloud»."
+
+msgid "Connect to see your usage"
+msgstr "Подключите аккаунт, чтобы увидеть использование"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr ""
+"Не удалось приостановить прослушивание сочетаний клавиш. Закройте это окно и повторите попытку."
+
+msgid "Could not refresh. Showing previous values."
+msgstr "Не удалось обновить данные. Показаны предыдущие значения."
+
+msgid "Couldn't open your browser. Copy the link and open it yourself."
+msgstr ""
+"Не удалось открыть браузер. Скопируйте ссылку и откройте её самостоятельно."
+
+msgid "Disabled"
+msgstr "Отключено"
+
+msgid "Go to Cloud settings"
+msgstr "Перейти к настройкам Cloud"
+
+msgid "Less than 0.1% used"
+msgstr "Использовано менее 0,1%"
+
+msgid "Manage billing"
+msgstr "Управление оплатой"
+
+msgid "Monthly usage resets in UTC."
+msgstr "Месячное использование сбрасывается по времени UTC."
+
+msgid "No monthly limit"
+msgstr "Без месячного лимита"
+
+msgid "Off by default. Turning this on sends anonymous usage statistics."
+msgstr ""
+"По умолчанию выключено. При включении отправляется анонимная статистика использования."
+
+msgid ""
+"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
+msgstr ""
+"Необязательный ежедневный сигнал: версия приложения, Windows и счётчики функций. Без снимков, путей и текста OCR. Переопределяется через APEXSHOT_TELEMETRY=0."
+
+msgid "Plan unavailable"
+msgstr "Тариф недоступен"
+
+msgid "Requires the corresponding Windows OCR language pack."
+msgstr "Требуется соответствующий языковой пакет OCR для Windows."
+
+msgid "Shortcuts work while the ApexShot background shell is running."
+msgstr "Сочетания клавиш работают, пока работает фоновая оболочка ApexShot."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "Войдите, чтобы увидеть загрузки, хранилище и тариф."
+
+msgid "Storage"
+msgstr "Хранилище"
+
+msgid ""
+"The Windows shell uses its tray icon to open capture, Settings, and Quit."
+msgstr ""
+"Оболочка Windows открывает съёмку, настройки и выход через значок в лотке."
+
+msgid "The capture shell currently uses its own dark appearance."
+msgstr "Оболочка съёмки сейчас использует собственное тёмное оформление."
+
+msgid "The capture toolbar can change the timer for an individual screenshot."
+msgstr "Панель захвата может менять таймер для отдельного снимка."
+
+msgid "This action requires the Windows image editor or overlay backend."
+msgstr ""
+"Для этого действия нужен редактор изображений или оверлей-бэкенд Windows."
+
+msgid "This month"
+msgstr "В этом месяце"
+
+msgid "Uploads"
+msgstr "Загрузки"
+
+msgid "Usage"
+msgstr "Использование"
+
+msgid "Usage is unavailable"
+msgstr "Данные об использовании недоступны"
+
+msgid "Use your configured shortcuts while ApexShot runs in the background."
+msgstr "Используйте настроенные сочетания клавиш, пока ApexShot работает в фоне."
+
+msgid "Used space"
+msgstr "Занято"
+
+msgid "When hidden, stop the recording from the tray or with its shortcut."
+msgstr "В скрытом виде остановите запись из лотка или сочетанием клавиш."
+
+msgid ""
+"When off, output uses the capture's display scale before applying the maximum resolution."
+msgstr ""
+"Когда выключено, вывод использует масштаб экрана съёмки перед применением максимального разрешения."
+
+msgid ""
+"When off, recordings remain in the temporary folder for the result card and editor."
+msgstr ""
+"Когда выключено, записи остаются во временной папке для карточки результата и редактора."

@@ -3801,3 +3801,122 @@ msgstr "هذا الجهاز"
 
 msgid "Timed capture is not wired into the Windows build yet. The interval is saved for a future release."
 msgstr "لم يتم ربط الالتقاط الموقوت بنسخة Windows بعد. يتم حفظ الفاصل الزمني لإصدار مستقبلي."
+
+msgid "2160p (4K)"
+msgstr "2160p (4K)"
+
+msgid "APEXSHOT CLOUD"
+msgstr "APEXSHOT CLOUD"
+
+msgid "Allowance unavailable"
+msgstr "الحد غير متاح"
+
+msgid "Authorize this device"
+msgstr "تفويض هذا الجهاز"
+
+msgid "Back to Cloud"
+msgstr "العودة إلى Cloud"
+
+msgid "Click Connect to link this device with a one-time code."
+msgstr "انقر على «اتصال» لربط هذا الجهاز باستخدام رمز لمرة واحدة."
+
+msgid ""
+"Cloud browsing is not available in the Windows build yet. Connect your account in Settings → Cloud."
+msgstr ""
+"تصفح السحابة غير متاح بعد في إصدار Windows. اربط حسابك من الإعدادات ← Cloud."
+
+msgid "Connect to see your usage"
+msgstr "اربط حسابك لعرض استخدامك"
+
+msgid "Could not pause the shortcut listener. Close this dialog and try again."
+msgstr ""
+"تعذّر إيقاف مراقبة الاختصارات مؤقتًا. أغلق مربع الحوار هذا وحاول مرة أخرى."
+
+msgid "Could not refresh. Showing previous values."
+msgstr "تعذر التحديث. يتم عرض القيم السابقة."
+
+msgid "Couldn't open your browser. Copy the link and open it yourself."
+msgstr "تعذر فتح المتصفح. انسخ الرابط وافتحه بنفسك."
+
+msgid "Disabled"
+msgstr "معطّل"
+
+msgid "Go to Cloud settings"
+msgstr "الانتقال إلى إعدادات Cloud"
+
+msgid "Less than 0.1% used"
+msgstr "المستخدم أقل من 0.1%"
+
+msgid "Manage billing"
+msgstr "إدارة الفوترة"
+
+msgid "Monthly usage resets in UTC."
+msgstr "يُعاد تعيين الاستخدام الشهري حسب توقيت UTC."
+
+msgid "No monthly limit"
+msgstr "بلا حد شهري"
+
+msgid "Off by default. Turning this on sends anonymous usage statistics."
+msgstr "متوقف افتراضيًا. عند تشغيله تُرسل إحصاءات استخدام مجهولة."
+
+msgid ""
+"Optional daily heartbeat: app version, Windows, and feature counts. No screenshots, paths, or OCR text. Override with APEXSHOT_TELEMETRY=0."
+msgstr ""
+"نبضة يومية اختيارية: إصدار التطبيق وWindows وعدد الميزات. لا لقطات ولا مسارات ولا نص OCR. يمكن تجاوزها باستخدام APEXSHOT_TELEMETRY=0."
+
+msgid "Plan unavailable"
+msgstr "الخطة غير متاحة"
+
+msgid "Requires the corresponding Windows OCR language pack."
+msgstr "يتطلب حزمة لغة OCR المقابلة في Windows."
+
+msgid "Shortcuts work while the ApexShot background shell is running."
+msgstr "تعمل الاختصارات ما دام غلاف ApexShot في الخلفية قيد التشغيل."
+
+msgid "Sign in to view your uploads, storage and plan."
+msgstr "سجّل الدخول لعرض الملفات المرفوعة والتخزين والخطة."
+
+msgid "Storage"
+msgstr "التخزين"
+
+msgid ""
+"The Windows shell uses its tray icon to open capture, Settings, and Quit."
+msgstr "يستخدم غلاف Windows أيقونته في الشريط لفتح الالتقاط والإعدادات والخروج."
+
+msgid "The capture shell currently uses its own dark appearance."
+msgstr "يستخدم غلاف الالتقاط حاليًا مظهره الداكن الخاص."
+
+msgid "The capture toolbar can change the timer for an individual screenshot."
+msgstr "يمكن لشريط أدوات الالتقاط تغيير المؤقت للقطة شاشة فردية."
+
+msgid "This action requires the Windows image editor or overlay backend."
+msgstr "يتطلب هذا الإجراء محرر الصور أو خلفية الطبقة في Windows."
+
+msgid "This month"
+msgstr "هذا الشهر"
+
+msgid "Uploads"
+msgstr "الملفات المرفوعة"
+
+msgid "Usage"
+msgstr "الاستخدام"
+
+msgid "Usage is unavailable"
+msgstr "بيانات الاستخدام غير متاحة"
+
+msgid "Use your configured shortcuts while ApexShot runs in the background."
+msgstr "استخدم اختصاراتك المضبوطة أثناء تشغيل ApexShot في الخلفية."
+
+msgid "Used space"
+msgstr "المساحة المستخدمة"
+
+msgid "When hidden, stop the recording from the tray or with its shortcut."
+msgstr "عند الإخفاء، أوقف التسجيل من الشريط أو باختصاره."
+
+msgid ""
+"When off, output uses the capture's display scale before applying the maximum resolution."
+msgstr "عند الإيقاف، يستخدم الإخراج مقياس عرض الالتقاط قبل تطبيق الدقة القصوى."
+
+msgid ""
+"When off, recordings remain in the temporary folder for the result card and editor."
+msgstr "عند الإيقاف، تبقى التسجيلات في المجلد المؤقت لبطاقة النتيجة والمحرر."
