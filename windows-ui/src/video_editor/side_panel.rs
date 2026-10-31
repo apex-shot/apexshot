@@ -3389,8 +3389,11 @@ fn format_value(value: f64, decimals: usize) -> String {
     }
 }
 
+/// The docked panels' fill slider: a 32px filled track with the label inside
+/// it and the value trailing. Shared with the image editor's Appearance panel
+/// so both sidebars draw the same control.
 #[derive(Clone)]
-struct FilledSlider {
+pub(crate) struct FilledSlider {
     area: DrawingArea,
     value: Rc<Cell<f64>>,
     min: f64,
@@ -3405,7 +3408,7 @@ struct FilledSlider {
 }
 
 impl FilledSlider {
-    fn new(
+    pub(crate) fn new(
         label: &str,
         min: f64,
         max: f64,
@@ -3487,7 +3490,7 @@ impl FilledSlider {
         slider
     }
 
-    fn widget(&self) -> DrawingArea {
+    pub(crate) fn widget(&self) -> DrawingArea {
         self.area.clone()
     }
 

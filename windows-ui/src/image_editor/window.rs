@@ -1,15 +1,14 @@
 //! The Windows image-editor window.
 //!
-//! The frame follows the Windows Settings and video-editor shells: a custom
-//! 32px caption bar, one rounded outline, the Inter face, and DPI-scaled
-//! metrics. Inside it, the floating tool bar and the inspector frame sit around
-//! the canvas that owns the screenshot.
+//! The frame follows the Linux editor: no caption bar, the checkerboard canvas
+//! fills the window, and the floating tool bar rides in a transparent top
+//! chrome strip that doubles as the drag handle. The caption controls sit at
+//! the top of the inspector, the same place the Linux editor puts its window
+//! controls.
 
 use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
-use crate::settings::ui_support::{
-    caption_button, CaptionGlyph, CAPTION_BUTTON_WIDTH, TITLE_BAR_HEIGHT,
-};
+use crate::settings::ui_support::{caption_button, CaptionGlyph};
 use crate::settings::windowing;
 use gtk4::gdk;
 use gtk4::glib::Propagation;
@@ -23,7 +22,7 @@ use std::sync::Once;
 use super::canvas;
 use super::inspector;
 use super::toolbar::{self, Tool};
-use super::ui_support::{self, px, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH};
+use super::ui_support::{self, px, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, TOP_CHROME_HEIGHT};
 
 pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     static INIT_ICONS: Once = Once::new();
@@ -62,28 +61,44 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     // Keep the canvas inside the shell's rounded corners.
     root.set_overflow(gtk4::Overflow::Hidden);
 
-    let document_title = super::document_title(initial);
-    let title_label = gtk4::Label::new(Some(&document_title));
-    title_label.set_tooltip_text(Some(&document_title));
-    let title_bar = build_title_bar(&window, &title_label, scale);
-    root.append(&title_bar);
-
-    let on_loaded: Rc<dyn Fn(&Path)> = {
-        let title_label = title_label.clone();
-        Rc::new(move |path| {
-            let title = super::document_title(Some(path));
-            title_label.set_text(&title);
-            title_label.set_tooltip_text(Some(&title));
-        })
-    };
-    let canvas = canvas::build(scale, dark, on_loaded);
+    let canvas = canvas::build(scale, dark);
 
     let inspector = Rc::new(inspector::build(scale));
+    let sub_bars = Rc::new(super::sub_bar::build(scale, {
+        let canvas = canvas.clone();
+        Rc::new(move |docked| canvas.set_docked(docked))
+    }));
     let toolbar = toolbar::build(scale, Tool::Select, {
         let inspector = inspector.clone();
-        Rc::new(move |tool| inspector.show_tool(tool))
+        let sub_bars = sub_bars.clone();
+        Rc::new(move |tool| {
+            inspector.show_tool(tool);
+            sub_bars.show_tool(tool);
+        })
     });
-    canvas.root.add_overlay(&toolbar.root);
+    canvas.root.add_overlay(&sub_bars.root);
+
+    // Transparent strip over the canvas' top edge: it centres the tool bar and
+    // is the strip the window drags from, like the Linux top chrome.
+    let top_chrome = GtkBox::new(gtk4::Orientation::Horizontal, 0);
+    top_chrome.add_css_class("image-editor-top-chrome");
+    top_chrome.set_halign(Align::Fill);
+    top_chrome.set_valign(Align::Start);
+    top_chrome.set_hexpand(true);
+    top_chrome.set_size_request(-1, px(TOP_CHROME_HEIGHT, scale));
+    let top_left = GtkBox::new(gtk4::Orientation::Horizontal, 0);
+    top_left.set_hexpand(true);
+    let top_right = GtkBox::new(gtk4::Orientation::Horizontal, 0);
+    top_right.set_hexpand(true);
+    top_chrome.append(&top_left);
+    top_chrome.append(&toolbar.root);
+    top_chrome.append(&top_right);
+    canvas.root.add_overlay(&top_chrome);
+    canvas.root.add_overlay(&toolbar.history);
+    windowing::install_window_drag(&top_chrome, &window);
+
+    let utility = build_utility_strip(&window, scale);
+    inspector.root.prepend(&utility);
 
     let workspace = GtkBox::new(gtk4::Orientation::Horizontal, 0);
     workspace.add_css_class("image-editor-workspace");
@@ -110,26 +125,18 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     }
 }
 
-fn build_title_bar(window: &ApplicationWindow, title: &gtk4::Label, scale: f64) -> GtkBox {
-    let bar = GtkBox::new(gtk4::Orientation::Horizontal, 0);
-    bar.add_css_class("settings-window-controls");
-    bar.add_css_class("image-editor-titlebar");
-    bar.set_size_request(-1, (TITLE_BAR_HEIGHT * scale).round() as i32);
+/// The caption controls at the top of the inspector: an empty drag area on the
+/// left, then minimize, maximize and close hugging the window's top-right
+/// corner, where the Linux utility strip keeps its window buttons.
+fn build_utility_strip(window: &ApplicationWindow, scale: f64) -> GtkBox {
+    let strip = GtkBox::new(gtk4::Orientation::Horizontal, 0);
+    strip.add_css_class("image-editor-utility-controls");
+    strip.set_halign(Align::Fill);
 
-    // Balance the title over the window the way the video editor does: reserve
-    // the caption controls on both sides so a document name stays centred.
-    let controls_width = (CAPTION_BUTTON_WIDTH * scale).round() as i32 * 3;
-    let left_handle = GtkBox::new(gtk4::Orientation::Horizontal, 0);
-    left_handle.set_size_request(controls_width, -1);
-    bar.append(&left_handle);
-
-    title.add_css_class("image-editor-document-title");
-    title.set_hexpand(true);
-    title.set_halign(Align::Center);
-    title.set_valign(Align::Center);
-    title.set_ellipsize(gtk4::pango::EllipsizeMode::Middle);
-    title.set_max_width_chars(72);
-    bar.append(title);
+    let drag_area = GtkBox::new(gtk4::Orientation::Horizontal, 0);
+    drag_area.set_hexpand(true);
+    strip.append(&drag_area);
+    windowing::install_window_drag(&drag_area, window);
 
     let (minimize, _) = caption_button(
         Rc::new(Cell::new(CaptionGlyph::Minimize)),
@@ -165,22 +172,10 @@ fn build_title_bar(window: &ApplicationWindow, title: &gtk4::Label, scale: f64) 
     let close_window = window.clone();
     close.connect_clicked(move |_| close_window.close());
 
-    let actions = GtkBox::new(gtk4::Orientation::Horizontal, 0);
-    actions.set_halign(Align::End);
-    actions.set_valign(Align::Fill);
-    actions.append(&minimize);
-    actions.append(&maximize);
-    actions.append(&close);
-
-    let right_balance = GtkBox::new(gtk4::Orientation::Horizontal, 0);
-    right_balance.set_size_request(controls_width, -1);
-    right_balance.append(&actions);
-    bar.append(&right_balance);
-
-    windowing::install_window_drag(&left_handle, window);
-    windowing::install_window_drag(title, window);
-
-    bar
+    strip.append(&minimize);
+    strip.append(&maximize);
+    strip.append(&close);
+    strip
 }
 
 fn install_keys(window: &ApplicationWindow, canvas: &Rc<canvas::Canvas>) {
@@ -220,23 +215,4 @@ fn install_keys(window: &ApplicationWindow, canvas: &Rc<canvas::Canvas>) {
         }
     });
     window.add_controller(keys);
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::document_title;
-    use std::path::Path;
-
-    #[test]
-    fn the_title_bar_names_the_open_file() {
-        assert_eq!(
-            document_title(Some(Path::new(r"C:\shots\Capture 2026-10-31.png"))),
-            "Capture 2026-10-31.png"
-        );
-    }
-
-    #[test]
-    fn an_empty_session_keeps_the_untitled_title() {
-        assert_eq!(document_title(None), "Untitled screenshot");
-    }
 }

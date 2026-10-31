@@ -18,7 +18,7 @@ mod press;
 mod preview;
 mod project;
 mod rounded_clip;
-mod side_panel;
+pub(crate) mod side_panel;
 mod timeline;
 mod ui_support;
 mod webcam;

@@ -8,10 +8,11 @@
 use gtk4::prelude::*;
 use gtk4::Application;
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 mod canvas;
 mod inspector;
+mod sub_bar;
 mod toolbar;
 mod ui_support;
 mod window;
@@ -44,18 +45,9 @@ pub fn initial_image_from_args(args: impl IntoIterator<Item = OsString>) -> Opti
         .map(PathBuf::from)
 }
 
-/// The name shown in the caption bar while a session is open.
-fn document_title(path: Option<&Path>) -> String {
-    path.and_then(Path::file_name)
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.trim().is_empty())
-        .map(str::to_owned)
-        .unwrap_or_else(|| crate::i18n::t("Untitled screenshot"))
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{document_title, initial_image_from_args};
+    use super::initial_image_from_args;
     use std::ffi::OsString;
     use std::path::PathBuf;
 
@@ -74,10 +66,5 @@ mod tests {
     fn launching_without_a_path_opens_the_empty_shell() {
         assert_eq!(initial_image_from_args(Vec::<OsString>::new()), None);
         assert_eq!(initial_image_from_args([OsString::from("--verbose")]), None);
-    }
-
-    #[test]
-    fn an_unnamed_image_keeps_the_generic_title() {
-        assert_eq!(document_title(None), "Untitled screenshot");
     }
 }

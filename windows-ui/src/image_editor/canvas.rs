@@ -67,20 +67,22 @@ pub(super) struct Canvas {
     spinner: Spinner,
     status: Label,
     toast: Label,
-    zoom_pill: GtkBox,
     zoom_button: Button,
     zoom_in: Button,
     zoom_out: Button,
     state: Rc<RefCell<ImageState>>,
     scale: f64,
-    on_loaded: Rc<dyn Fn(&Path)>,
+    /// Extra logical pixels the canvas gives up below the top chrome while a
+    /// tool's option bar is docked, like the Linux docked-bar inset.
+    docked_inset: Rc<Cell<f64>>,
     /// Bumped for each open so a late decode cannot replace a newer image.
     generation: Rc<Cell<u64>>,
     toast_generation: Rc<Cell<u64>>,
 }
 
-pub(super) fn build(scale: f64, dark: bool, on_loaded: Rc<dyn Fn(&Path)>) -> Rc<Canvas> {
+pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
     let state = Rc::new(RefCell::new(ImageState::default()));
+    let docked_inset = Rc::new(Cell::new(0.0));
     let last_zoom_text = Rc::new(RefCell::new(String::new()));
 
     let (empty, open_button, loading_row, spinner, status) = build_empty_state(scale);
@@ -92,10 +94,18 @@ pub(super) fn build(scale: f64, dark: bool, on_loaded: Rc<dyn Fn(&Path)>) -> Rc<
     area.set_vexpand(true);
     area.set_draw_func({
         let state = state.clone();
+        let docked_inset = docked_inset.clone();
         let last_zoom_text = last_zoom_text.clone();
         let zoom_button = zoom_button.downgrade();
         move |area, context, _width, _height| {
-            let Some(zoom) = paint(area, context, &state.borrow(), scale, dark) else {
+            let Some(zoom) = paint(
+                area,
+                context,
+                &state.borrow(),
+                scale,
+                dark,
+                docked_inset.get(),
+            ) else {
                 return;
             };
             let text = zoom_text(zoom);
@@ -122,12 +132,28 @@ pub(super) fn build(scale: f64, dark: bool, on_loaded: Rc<dyn Fn(&Path)>) -> Rc<
     toast.set_max_width_chars(60);
     toast.set_visible(false);
 
+    // Bottom-centre mode switch, mirroring the Linux floating motion control.
+    let motion = GtkBox::new(Orientation::Horizontal, 0);
+    motion.add_css_class("image-editor-motion-pill");
+    motion.set_halign(Align::Center);
+    motion.set_valign(Align::End);
+    motion.set_margin_bottom(px(16.0, scale));
+    let motion_button = Button::with_label(&t("Motion"));
+    motion_button.add_css_class("image-editor-motion-button");
+    motion_button.set_focusable(false);
+    motion_button.set_sensitive(false);
+    motion_button.set_tooltip_text(Some(&t(
+        "Switch to Motion: not available in the Windows image editor yet",
+    )));
+    motion.append(&motion_button);
+
     let root = Overlay::new();
     root.set_hexpand(true);
     root.set_vexpand(true);
     root.set_child(Some(&area));
     root.add_overlay(&empty);
     root.add_overlay(&zoom_pill);
+    root.add_overlay(&motion);
     root.add_overlay(&toast);
 
     let canvas = Rc::new(Canvas {
@@ -139,13 +165,12 @@ pub(super) fn build(scale: f64, dark: bool, on_loaded: Rc<dyn Fn(&Path)>) -> Rc<
         spinner,
         status,
         toast,
-        zoom_pill,
         zoom_button,
         zoom_in,
         zoom_out,
         state,
         scale,
-        on_loaded,
+        docked_inset,
         generation: Rc::new(Cell::new(0)),
         toast_generation: Rc::new(Cell::new(0)),
     });
@@ -226,7 +251,6 @@ impl Canvas {
         });
 
         let canvas = Rc::downgrade(self);
-        let path = path.to_path_buf();
         glib::timeout_add_local(Duration::from_millis(16), move || {
             let Some(canvas) = canvas.upgrade() else {
                 return glib::ControlFlow::Break;
@@ -236,7 +260,7 @@ impl Canvas {
             }
             match receiver.try_recv() {
                 Ok(Ok(decoded)) => {
-                    canvas.finish_load(decoded, &path);
+                    canvas.finish_load(decoded);
                     glib::ControlFlow::Break
                 }
                 Ok(Err(error)) => {
@@ -262,6 +286,16 @@ impl Canvas {
         self.zoom_by(1.0 / ZOOM_STEP);
     }
 
+    /// Reserve or release the docked-bar band below the top chrome; the image
+    /// refits into the space left, the way the Linux canvas reflows.
+    pub(super) fn set_docked(&self, docked: bool) {
+        let inset = if docked { 56.0 } else { 0.0 };
+        if self.docked_inset.replace(inset) == inset {
+            return;
+        }
+        self.area.queue_draw();
+    }
+
     /// Reset the view to fit the viewport, as Ctrl+0 and the zoom label do.
     pub(super) fn fit(&self) {
         if self.state.borrow().pixbuf.is_none() {
@@ -277,7 +311,8 @@ impl Canvas {
         if state.pixbuf.is_none() {
             return;
         }
-        let (_, _, avail_width, avail_height) = content_rect(&self.area, self.scale);
+        let (_, _, avail_width, avail_height) =
+            content_rect(&self.area, self.scale, self.docked_inset.get());
         let current = effective_zoom(&state, avail_width, avail_height);
         let zoom = (current * factor).clamp(MIN_ZOOM, MAX_ZOOM);
         state.manual_zoom = Some(zoom);
@@ -293,7 +328,7 @@ impl Canvas {
         self.area.queue_draw();
     }
 
-    fn finish_load(self: &Rc<Self>, decoded: DecodedImage, path: &Path) {
+    fn finish_load(self: &Rc<Self>, decoded: DecodedImage) {
         if decoded.width <= 0 || decoded.height <= 0 {
             self.finish_error(&t("The image is empty."));
             return;
@@ -324,9 +359,7 @@ impl Canvas {
         self.loading_row.set_visible(false);
         self.spinner.stop();
         self.open_button.set_sensitive(true);
-        self.zoom_pill.set_visible(true);
         self.area.set_cursor_from_name(Some("grab"));
-        (self.on_loaded)(path);
         self.area.queue_draw();
     }
 
@@ -387,7 +420,8 @@ impl Canvas {
                 if state.pixbuf.is_none() {
                     return;
                 }
-                let (_, _, avail_width, avail_height) = content_rect(&canvas.area, canvas.scale);
+                let (_, _, avail_width, avail_height) =
+                    content_rect(&canvas.area, canvas.scale, canvas.docked_inset.get());
                 let zoom = effective_zoom(&state, avail_width, avail_height);
                 let start = pan_start.get();
                 state.pan = clamp_pan(
@@ -498,13 +532,15 @@ impl Canvas {
 }
 
 fn build_empty_state(scale: f64) -> (GtkBox, Button, GtkBox, Spinner, Label) {
-    let root = GtkBox::new(Orientation::Vertical, px(10.0, scale));
+    // Centred on the whole canvas pane, like the Linux drop zone.
+    let root = GtkBox::new(Orientation::Vertical, px(14.0, scale));
     root.set_halign(Align::Center);
     root.set_valign(Align::Center);
-    root.set_margin_top(px(TOP_CHROME_HEIGHT, scale));
 
-    let icon = Image::from_icon_name("image-regular");
-    icon.set_pixel_size(px(44.0, scale));
+    let icon = Image::from_icon_name(
+        crate::capture::editor::window::icon_names::custom::IMAGE_ALT_SYMBOLIC,
+    );
+    icon.set_pixel_size(px(42.0, scale));
     icon.add_css_class("image-editor-empty-icon");
     icon.set_halign(Align::Center);
 
@@ -552,7 +588,6 @@ fn build_zoom_pill(scale: f64) -> (GtkBox, Button, Button, Button) {
     pill.set_valign(Align::End);
     pill.set_margin_start(px(16.0, scale));
     pill.set_margin_bottom(px(16.0, scale));
-    pill.set_visible(false);
 
     let zoom_out = Button::with_label("−");
     zoom_out.add_css_class("image-editor-zoom-step");
@@ -576,11 +611,12 @@ fn build_zoom_pill(scale: f64) -> (GtkBox, Button, Button, Button) {
     (pill, label, zoom_out, zoom_in)
 }
 
-/// The viewport left for the image: below the floating toolbar, above the pill.
-fn content_rect(area: &DrawingArea, scale: f64) -> (f64, f64, f64, f64) {
+/// The viewport left for the image: below the floating toolbar (plus whatever
+/// a docked option bar claims), above the pill.
+fn content_rect(area: &DrawingArea, scale: f64, docked_inset: f64) -> (f64, f64, f64, f64) {
     let width = f64::from(area.width()).max(1.0);
     let height = f64::from(area.height()).max(1.0);
-    let top = TOP_CHROME_HEIGHT * scale;
+    let top = (TOP_CHROME_HEIGHT + docked_inset) * scale;
     let bottom = CONTENT_MARGIN * scale;
     (0.0, top, width, (height - top - bottom).max(1.0))
 }
@@ -624,15 +660,19 @@ fn paint(
     state: &ImageState,
     scale: f64,
     dark: bool,
+    docked_inset: f64,
 ) -> Option<f64> {
-    let (_, top, avail_width, avail_height) = content_rect(area, scale);
+    let (_, top, avail_width, avail_height) = content_rect(area, scale, docked_inset);
 
-    if dark {
-        context.set_source_rgb(0.043, 0.043, 0.047);
-    } else {
-        context.set_source_rgb(0.925, 0.933, 0.953);
-    }
-    let _ = context.paint();
+    // The whole canvas gets the transparency checkerboard, image or not, like
+    // the Linux canvas.
+    draw_canvas_checkerboard(
+        context,
+        f64::from(area.width()).max(1.0),
+        f64::from(area.height()).max(1.0),
+        scale,
+        dark,
+    );
 
     let pixbuf = state.pixbuf.as_ref()?;
     let zoom = effective_zoom(state, avail_width, avail_height);
@@ -640,16 +680,6 @@ fn paint(
     let draw_height = f64::from(state.height) * zoom;
     let x = (avail_width - draw_width) / 2.0 + state.pan.0;
     let y = top + (avail_height - draw_height) / 2.0 + state.pan.1;
-
-    draw_checkerboard(
-        context,
-        x,
-        y,
-        draw_width,
-        draw_height,
-        (8.0 * scale).max(1.0),
-        dark,
-    );
 
     let _ = context.save();
     context.translate(x, y);
@@ -676,47 +706,39 @@ fn paint(
     Some(zoom)
 }
 
-fn draw_checkerboard(
-    context: &Context,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    cell: f64,
-    dark: bool,
-) {
+/// The checkerboard the Linux canvas fills its drawing area with: 14px tiles
+/// in a repeating surface pattern, light or dark.
+fn draw_canvas_checkerboard(context: &Context, width: f64, height: f64, scale: f64, dark: bool) {
     if width <= 0.0 || height <= 0.0 {
         return;
     }
-    let _ = context.save();
-    context.rectangle(x, y, width, height);
-    context.clip();
-
+    let tile = (14.0 * scale).max(1.0);
     let (base, alternate) = if dark {
-        ((1.0, 1.0, 1.0, 0.018), (1.0, 1.0, 1.0, 0.045))
+        ((0.078, 0.078, 0.078), (0.114, 0.114, 0.114))
     } else {
-        ((0.067, 0.094, 0.153, 0.018), (0.067, 0.094, 0.153, 0.05))
+        ((0.965, 0.969, 0.984), (0.941, 0.945, 0.961))
     };
-    context.set_source_rgba(base.0, base.1, base.2, base.3);
-    let _ = context.paint();
 
-    let columns = (width / cell).ceil() as i32;
-    let rows = (height / cell).ceil() as i32;
-    context.set_source_rgba(alternate.0, alternate.1, alternate.2, alternate.3);
-    for row in 0..rows {
-        for column in 0..columns {
-            if (row + column) % 2 == 0 {
-                context.rectangle(
-                    x + f64::from(column) * cell,
-                    y + f64::from(row) * cell,
-                    cell,
-                    cell,
-                );
-            }
-        }
-    }
+    let side = (tile * 2.0).ceil().max(2.0) as i32;
+    let Ok(surface) = gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::Rgb24, side, side)
+    else {
+        return;
+    };
+    let Ok(pattern_ctx) = Context::new(&surface) else {
+        return;
+    };
+    pattern_ctx.set_source_rgb(base.0, base.1, base.2);
+    let _ = pattern_ctx.paint();
+    pattern_ctx.set_source_rgb(alternate.0, alternate.1, alternate.2);
+    pattern_ctx.rectangle(0.0, 0.0, tile, tile);
+    pattern_ctx.rectangle(tile, tile, tile, tile);
+    let _ = pattern_ctx.fill();
+
+    let pattern = gtk4::cairo::SurfacePattern::create(&surface);
+    pattern.set_extend(gtk4::cairo::Extend::Repeat);
+    let _ = context.set_source(&pattern);
+    context.rectangle(0.0, 0.0, width, height);
     let _ = context.fill();
-    let _ = context.restore();
 }
 
 fn decode_image(path: &Path) -> Result<DecodedImage, String> {

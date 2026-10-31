@@ -11,8 +11,9 @@ pub(super) const MIN_WINDOW_WIDTH: f64 = 980.0;
 pub(super) const MIN_WINDOW_HEIGHT: f64 = 560.0;
 /// Strip above the canvas reserved for the floating tool bar and title drag.
 pub(super) const TOP_CHROME_HEIGHT: f64 = 56.0;
-/// Width of the right inspector column at 100% scale.
-pub(super) const INSPECTOR_WIDTH: f64 = 280.0;
+/// Width of the right inspector column at 100% scale, the same 288px dock the
+/// Linux Motion inspector and the Windows video editor's tools column use.
+pub(super) const INSPECTOR_WIDTH: f64 = 288.0;
 const DEFAULT_WINDOW_WIDTH: f64 = 1560.0;
 const DEFAULT_WINDOW_HEIGHT: f64 = 900.0;
 
@@ -55,12 +56,12 @@ pub(super) fn tool_button(icon: &str, tooltip: &str, icon_size: i32) -> Button {
     button
 }
 
-/// A hairline between tool groups in the floating bar.
-pub(super) fn toolbar_rule(scale: f64) -> gtk4::Box {
+/// A hairline between tool groups in the floating bar. The CSS margins keep
+/// it a thin rule inside the bar's padding, like the Linux tool divider.
+pub(super) fn toolbar_rule(_scale: f64) -> gtk4::Box {
     let rule = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
     rule.add_css_class("image-editor-toolbar-rule");
-    rule.set_size_request(px(1.0, scale), px(20.0, scale));
-    rule.set_valign(gtk4::Align::Center);
+    rule.set_vexpand(true);
     rule
 }
 

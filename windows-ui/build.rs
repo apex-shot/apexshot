@@ -22,24 +22,12 @@ fn main() {
             "clipboard-paste-regular",
             "eye-regular",
             "eye-off-regular",
-            // Image editor: tools, history and the empty-state artwork.
-            "select",
-            "crop",
-            "pen-regular",
-            "highlight-regular",
-            "arrow-up-right-regular",
-            "draw-line",
-            "rectangle-landscape-regular",
-            "circle-regular",
-            "text-t-regular",
+            // Image editor: the one fluent glyph the tool rail keeps; every
+            // other tool icon comes from the bundled symbolic set.
             "number-circle-1-regular",
-            "blur",
-            "small-rectangle-in-focus",
-            "arrow-undo-regular",
-            "arrow-redo-regular",
-            "delete-regular",
-            "image-regular",
-            "cloud-arrow-up-regular",
+            // The Appearance panel's Image tab trails the Linux chooser's
+            // folder affordance.
+            "folder-open-regular",
         ],
     );
 }
