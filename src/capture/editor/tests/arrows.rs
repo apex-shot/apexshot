@@ -149,6 +149,7 @@ fn curved_arrow_control_handle_movement() {
             Point { x: 90.0, y: 90.0 },
         ]),
         shadow: false,
+        reversed: false,
     });
     state.selected_action_index = Some(0);
 
@@ -198,6 +199,7 @@ fn curved_arrow_endpoint_move_keeps_middle_control_point_inside_image() {
             Point { x: 80.0, y: 60.0 },
         ]),
         shadow: false,
+        reversed: false,
     });
     state.selected_action_index = Some(0);
 
@@ -309,6 +311,7 @@ fn arrow_hit_testing_on_head_and_body_regions() {
         style: ArrowStyle::Fancy,
         control_points: None,
         shadow: false,
+        reversed: false,
     });
 
     // Click near the arrow head tip (should be selectable)
@@ -337,6 +340,7 @@ fn curved_arrow_hit_testing_on_head_and_body() {
             Point { x: 180.0, y: 50.0 },
         ]),
         shadow: false,
+        reversed: false,
     });
 
     // Click near the arrow head
@@ -361,6 +365,7 @@ fn double_arrow_hit_testing_on_both_heads_and_body() {
         style: ArrowStyle::Double,
         control_points: None,
         shadow: false,
+        reversed: false,
     });
 
     // Click near the end head
@@ -393,6 +398,7 @@ fn arrow_tool_switch_clears_editing_controls() {
             Point { x: 90.0, y: 90.0 },
         ]),
         shadow: false,
+        reversed: false,
     });
     state.selected_action_index = Some(0);
     state.arrow_editing_controls = true;
@@ -418,6 +424,7 @@ fn arrow_interaction_cleanup_preserves_controls_for_selected_arrow() {
             Point { x: 90.0, y: 90.0 },
         ]),
         shadow: false,
+        reversed: false,
     });
     state.selected_action_index = Some(0);
     state.arrow_editing_controls = true;

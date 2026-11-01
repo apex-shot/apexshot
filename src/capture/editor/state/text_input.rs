@@ -231,8 +231,10 @@ impl EditorState {
             if let Some(b) = bounds {
                 let position = Point {
                     x: b.rect.x as f64,
-                    y: (b.rect.y as f64 + self.text_size + 8.0)
-                        .clamp(self.text_size + 8.0, self.base_image.height() as f64 - 8.0),
+                    y: (b.rect.y as f64 + self.text_size + 8.0).clamp(
+                        self.text_size + 8.0,
+                        (self.base_image.height() as f64 - 8.0).max(self.text_size + 8.0),
+                    ),
                 };
                 let font = FontSettings {
                     family: self.text_font_family.clone(),

@@ -699,6 +699,7 @@ mod tests {
                     Point { x: 16.0, y: 17.0 },
                 ]),
                 shadow: false,
+                reversed: false,
             },
             AnnotationAction::Box {
                 rect: Rect {

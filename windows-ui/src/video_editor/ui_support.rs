@@ -17,7 +17,7 @@ const RECORDING_EDITOR_CSS: &str = concat!(
     include_str!("../../../src/recording/editor/ui_support_css/09.css"),
 );
 
-pub(super) fn install_recording_editor_css() {
+pub(crate) fn install_recording_editor_css() {
     let Some(display) = gdk::Display::default() else {
         return;
     };

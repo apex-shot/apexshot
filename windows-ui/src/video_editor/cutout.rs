@@ -5,23 +5,20 @@
 //! Windows binary and runs them on the CPU through a pure-Rust ONNX engine, so
 //! the editor has no runtime download, Python, or external inference DLL.
 //!
-//! Wide frames use the landscape 256x144 network; square and portrait frames
-//! use the general 256x256 one. Each frame is letterboxed into its network with
-//! zero bars, so the subject keeps its proportions; stretching a square track
-//! into the landscape canvas squashes the subject and degrades the mask, and
-//! stretching a wide track into the square canvas distorts it. The sigmoid mask
-//! is resized back from the letterboxed content area. Both resizes and the
-//! inference are CPU-bound; callers must keep `matte` off the GTK main thread.
+//! Wide camera frames use a 192x192 portrait segmentation network. Square and
+//! portrait frames use the general 256x256 selfie model. The mask is resized
+//! back using the camera image to guide its edges. Inference and resizing are
+//! CPU-bound, so callers must keep `matte` off the GTK main thread.
 
 use tract_onnx::prelude::*;
 
-const LANDSCAPE_MODEL_BYTES: &[u8] =
-    include_bytes!("../../assets/camera-cutout/selfie_segmentation_landscape.onnx");
+const PORTRAIT_MODEL_BYTES: &[u8] =
+    include_bytes!("../../assets/camera-cutout/portrait_segmentation.onnx");
 const GENERAL_MODEL_BYTES: &[u8] =
     include_bytes!("../../assets/camera-cutout/selfie_segmentation.onnx");
 #[cfg(test)]
-const LANDSCAPE_MODEL_SHA256: &str =
-    "93a779c5e5d835ad465eda76f48073b5abfb3da048a497efa29ffcb58498533e";
+const PORTRAIT_MODEL_SHA256: &str =
+    "6913acd125be55fd08e76072ed464146925223392954c437f3aa700e4da84b17";
 #[cfg(test)]
 const GENERAL_MODEL_SHA256: &str =
     "1511ab5564cb0ae179cba9bcad6ad931003ccc71656f11fd270967023678c6a5";
@@ -32,14 +29,14 @@ const MAX_PIXELS: u64 = 16_777_216;
 /// The embedded network a frame selects by its orientation.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Variant {
-    Landscape,
+    Portrait,
     General,
 }
 
 impl Variant {
     fn for_frame(width: u32, height: u32) -> Self {
         if width > height {
-            Self::Landscape
+            Self::Portrait
         } else {
             Self::General
         }
@@ -47,15 +44,29 @@ impl Variant {
 
     fn canvas(self) -> (usize, usize) {
         match self {
-            Self::Landscape => (256, 144),
+            Self::Portrait => (192, 192),
             Self::General => (256, 256),
         }
     }
 
     fn bytes(self) -> &'static [u8] {
         match self {
-            Self::Landscape => LANDSCAPE_MODEL_BYTES,
+            Self::Portrait => PORTRAIT_MODEL_BYTES,
             Self::General => GENERAL_MODEL_BYTES,
+        }
+    }
+
+    fn input_shape(self) -> [usize; 4] {
+        match self {
+            Self::Portrait => [1, 3, 192, 192],
+            Self::General => [1, 256, 256, 3],
+        }
+    }
+
+    fn output_shape(self) -> [usize; 4] {
+        match self {
+            Self::Portrait => [1, 192, 192, 2],
+            Self::General => [1, 256, 256, 1],
         }
     }
 }
@@ -114,9 +125,19 @@ impl CutoutProcessor {
         }
         let variant = Variant::for_frame(width, height);
         let (canvas_width, canvas_height) = variant.canvas();
-        let layout = letterbox(width as usize, height as usize, canvas_width, canvas_height);
+        let layout = if variant == Variant::Portrait {
+            Letterbox {
+                left: 0,
+                top: 0,
+                width: canvas_width,
+                height: canvas_height,
+            }
+        } else {
+            letterbox(width as usize, height as usize, canvas_width, canvas_height)
+        };
         let input = prepare_input(bgra, width as usize, height as usize, variant, layout);
-        let tensor = Tensor::from_shape(&[1, canvas_height, canvas_width, MODEL_CHANNELS], &input)
+        let model_input = network_input(&input, variant);
+        let tensor = Tensor::from_shape(&variant.input_shape(), &model_input)
             .map_err(|error| format!("Could not assemble the camera cutout input: {error}"))?;
         let loaded = self.loaded_for(variant)?;
         let outputs = loaded
@@ -129,7 +150,7 @@ impl CutoutProcessor {
         let view = output
             .to_plain_array_view::<f32>()
             .map_err(|error| format!("The camera cutout mask has an unexpected type: {error}"))?;
-        if view.shape() != [1, canvas_height, canvas_width, 1] {
+        if view.shape() != variant.output_shape() {
             return Err(format!(
                 "The camera cutout model returned a {:?} mask, not a {canvas_width}x{canvas_height} one.",
                 view.shape()
@@ -142,20 +163,120 @@ impl CutoutProcessor {
                     "The camera cutout model returned a non-finite value at pixel {index}."
                 ));
             }
-            mask.push(value.clamp(0.0, 1.0));
+            if variant == Variant::General || index % 2 == 1 {
+                mask.push(value.clamp(0.0, 1.0));
+            }
+        }
+        if variant == Variant::Portrait {
+            clean_portrait_mask(&mut mask, canvas_width, canvas_height);
         }
         let mut alpha = Vec::with_capacity(layout.width * layout.height);
+        let mut guide = Vec::with_capacity(layout.width * layout.height);
         for y in layout.top..layout.top + layout.height {
             let start = y * canvas_width + layout.left;
             alpha.extend_from_slice(&mask[start..start + layout.width]);
+            for rgb in input[start * MODEL_CHANNELS..(start + layout.width) * MODEL_CHANNELS]
+                .as_chunks::<MODEL_CHANNELS>()
+                .0
+            {
+                guide.push([
+                    (rgb[0] * 255.0).round() as u8,
+                    (rgb[1] * 255.0).round() as u8,
+                    (rgb[2] * 255.0).round() as u8,
+                ]);
+            }
         }
-        Ok(resize_alpha(
+        Ok(upsample_alpha(
             &alpha,
+            &guide,
             layout.width,
             layout.height,
+            bgra,
             width as usize,
             height as usize,
         ))
+    }
+}
+
+/// Suppress distant weak islands without discarding strong or nearby details.
+fn clean_portrait_mask(mask: &mut [f32], width: usize, height: usize) {
+    struct Component {
+        area: usize,
+        peak: f32,
+        min_x: usize,
+        min_y: usize,
+        max_x: usize,
+        max_y: usize,
+    }
+
+    let mut labels = vec![usize::MAX; mask.len()];
+    let mut components = Vec::<Component>::new();
+    let mut stack = Vec::new();
+    for index in 0..mask.len() {
+        if mask[index] < 0.1 || labels[index] != usize::MAX {
+            continue;
+        }
+        let label = components.len();
+        let mut component = Component {
+            area: 0,
+            peak: 0.0,
+            min_x: width,
+            min_y: height,
+            max_x: 0,
+            max_y: 0,
+        };
+        labels[index] = label;
+        stack.push(index);
+        while let Some(pixel) = stack.pop() {
+            let x = pixel % width;
+            let y = pixel / width;
+            component.area += 1;
+            component.peak = component.peak.max(mask[pixel]);
+            component.min_x = component.min_x.min(x);
+            component.max_x = component.max_x.max(x);
+            component.min_y = component.min_y.min(y);
+            component.max_y = component.max_y.max(y);
+            for ny in y.saturating_sub(1)..=(y + 1).min(height - 1) {
+                for nx in x.saturating_sub(1)..=(x + 1).min(width - 1) {
+                    let neighbor = ny * width + nx;
+                    if labels[neighbor] == usize::MAX && mask[neighbor] >= 0.1 {
+                        labels[neighbor] = label;
+                        stack.push(neighbor);
+                    }
+                }
+            }
+        }
+        components.push(component);
+    }
+    let Some(largest) = components.iter().max_by_key(|component| component.area) else {
+        mask.fill(0.0);
+        return;
+    };
+    let factors: Vec<f32> = components
+        .iter()
+        .map(|component| {
+            let gap_x = component
+                .min_x
+                .saturating_sub(largest.max_x)
+                .max(largest.min_x.saturating_sub(component.max_x));
+            let gap_y = component
+                .min_y
+                .saturating_sub(largest.max_y)
+                .max(largest.min_y.saturating_sub(component.max_y));
+            if component.area * 5 >= largest.area || (gap_x <= width / 10 && gap_y <= height / 10) {
+                1.0
+            } else {
+                let t = ((component.peak - 0.85) / 0.1).clamp(0.0, 1.0);
+                t * t * (3.0 - 2.0 * t)
+            }
+        })
+        .collect();
+    for (value, label) in mask.iter_mut().zip(labels) {
+        if label != usize::MAX {
+            *value *= factors[label];
+        }
+        let t = ((*value - 0.05) / 0.9).clamp(0.0, 1.0);
+        *value = t * t * (3.0 - 2.0 * t);
     }
 }
 
@@ -171,7 +292,6 @@ impl LoadedModel {
     }
 
     fn from_model_bytes(variant: Variant, bytes: &[u8]) -> Result<Self, String> {
-        let (canvas_width, canvas_height) = variant.canvas();
         let mut reader = std::io::Cursor::new(bytes);
         let model = tract_onnx::onnx()
             .model_for_read(&mut reader)
@@ -189,7 +309,7 @@ impl LoadedModel {
         let input = model
             .input_fact(0)
             .map_err(|error| format!("Could not inspect the camera cutout model input: {error}"))?;
-        let expected = [1, canvas_height, canvas_width, MODEL_CHANNELS];
+        let expected = variant.input_shape();
         if input.datum_type != f32::datum_type()
             || input.shape.as_concrete() != Some(expected.as_slice())
         {
@@ -201,7 +321,7 @@ impl LoadedModel {
         let output = model.output_fact(0).map_err(|error| {
             format!("Could not inspect the camera cutout model output: {error}")
         })?;
-        let expected_output = [1, canvas_height, canvas_width, 1];
+        let expected_output = variant.output_shape();
         if output.datum_type != f32::datum_type() {
             return Err(format!(
                 "The camera cutout model returns {:?}, not a float mask.",
@@ -261,6 +381,20 @@ fn letterbox(width: usize, height: usize, canvas_width: usize, canvas_height: us
     }
 }
 
+fn network_input(rgb: &[f32], variant: Variant) -> Vec<f32> {
+    if variant == Variant::General {
+        return rgb.to_vec();
+    }
+    let pixels = rgb.len() / MODEL_CHANNELS;
+    let mut planar = vec![0.0; rgb.len()];
+    for (i, pixel) in rgb.as_chunks::<MODEL_CHANNELS>().0.iter().enumerate() {
+        for channel in 0..MODEL_CHANNELS {
+            planar[channel * pixels + i] = pixel[channel] * (255.0 / 128.0) - 1.0;
+        }
+    }
+    planar
+}
+
 /// Convert a BGRA frame to the RGB, row-major `[0, 1]` tensor the network
 /// expects, bilinearly resizing into the letterboxed content area.
 fn prepare_input(
@@ -310,17 +444,26 @@ fn prepare_input(
     input
 }
 
-/// Resize a single-channel mask with bilinear sampling and edge clamping.
-fn resize_alpha(
+/// Jointly upsample the mask with the original camera image as a colour guide.
+fn upsample_alpha(
     alpha: &[f32],
+    guide: &[[u8; 3]],
     source_width: usize,
     source_height: usize,
+    bgra: &[u8],
     width: usize,
     height: usize,
 ) -> Vec<f32> {
     debug_assert_eq!(alpha.len(), source_width * source_height);
-    if width == source_width && height == source_height {
-        return alpha.to_vec();
+    debug_assert_eq!(guide.len(), alpha.len());
+    debug_assert_eq!(bgra.len(), width * height * 4);
+
+    // A lookup keeps the colour-distance Gaussian cheap at video resolutions.
+    const COLOUR_SIGMA: f32 = 55.0;
+    let mut range = [0.0f32; 766];
+    for (distance, weight) in range.iter_mut().enumerate() {
+        let normalized = distance as f32 / COLOUR_SIGMA;
+        *weight = (-0.5 * normalized * normalized).exp();
     }
     let x_positions: Vec<_> = (0..width)
         .map(|x| sample_positions(x, source_width as f32 / width as f32, source_width))
@@ -329,14 +472,47 @@ fn resize_alpha(
     for y in 0..height {
         let (top, bottom, vertical) =
             sample_positions(y, source_height as f32 / height as f32, source_height);
-        for &(left, right, horizontal) in &x_positions {
-            let top_left = alpha[top * source_width + left];
-            let top_right = alpha[top * source_width + right];
-            let bottom_left = alpha[bottom * source_width + left];
-            let bottom_right = alpha[bottom * source_width + right];
-            let top_value = top_left + (top_right - top_left) * horizontal;
-            let bottom_value = bottom_left + (bottom_right - bottom_left) * horizontal;
-            resized.push((top_value + (bottom_value - top_value) * vertical).clamp(0.0, 1.0));
+        for (x, &(left, right, horizontal)) in x_positions.iter().enumerate() {
+            let indices = [
+                top * source_width + left,
+                top * source_width + right,
+                bottom * source_width + left,
+                bottom * source_width + right,
+            ];
+            let spatial = [
+                (1.0 - horizontal) * (1.0 - vertical),
+                horizontal * (1.0 - vertical),
+                (1.0 - horizontal) * vertical,
+                horizontal * vertical,
+            ];
+            let samples = indices.map(|index| alpha[index]);
+            let bilinear: f32 = samples.iter().zip(&spatial).map(|(a, w)| a * w).sum();
+            let min = samples.iter().copied().fold(f32::INFINITY, f32::min);
+            let max = samples.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+            if max - min < 1.0 / 255.0 {
+                resized.push(bilinear.clamp(0.0, 1.0));
+                continue;
+            }
+            let pixel = &bgra[(y * width + x) * 4..][..3];
+            let mut weighted = 0.0;
+            let mut total = 0.0;
+            for (&index, &spatial_weight) in indices.iter().zip(&spatial) {
+                let colour = guide[index];
+                let distance = usize::from(pixel[2].abs_diff(colour[0]))
+                    + usize::from(pixel[1].abs_diff(colour[1]))
+                    + usize::from(pixel[0].abs_diff(colour[2]));
+                let weight = spatial_weight * range[distance];
+                weighted += alpha[index] * weight;
+                total += weight;
+            }
+            // A high-frequency colour absent from the small guide has no
+            // reliable match, so retain the ordinary interpolation there.
+            let value = if total > 1e-5 {
+                weighted / total
+            } else {
+                bilinear
+            };
+            resized.push(value.clamp(0.0, 1.0));
         }
     }
     resized
@@ -357,10 +533,10 @@ mod tests {
 
     #[test]
     fn bundled_models_match_their_documented_checksums() {
-        assert_eq!(LANDSCAPE_MODEL_BYTES.len(), 446_289);
+        assert_eq!(PORTRAIT_MODEL_BYTES.len(), 6_196_913);
         assert_eq!(
-            format!("{:x}", Sha256::digest(LANDSCAPE_MODEL_BYTES)),
-            LANDSCAPE_MODEL_SHA256
+            format!("{:x}", Sha256::digest(PORTRAIT_MODEL_BYTES)),
+            PORTRAIT_MODEL_SHA256
         );
         assert_eq!(GENERAL_MODEL_BYTES.len(), 447_596);
         assert_eq!(
@@ -371,7 +547,7 @@ mod tests {
 
     #[test]
     fn incompatible_model_bytes_are_rejected() {
-        for variant in [Variant::Landscape, Variant::General] {
+        for variant in [Variant::Portrait, Variant::General] {
             let error = LoadedModel::from_model_bytes(variant, b"this is not an ONNX graph")
                 .err()
                 .expect("junk must not load");
@@ -393,11 +569,11 @@ mod tests {
 
     #[test]
     fn frames_select_the_network_by_orientation() {
-        assert!(matches!(Variant::for_frame(1920, 1080), Variant::Landscape));
-        assert!(matches!(Variant::for_frame(4, 3), Variant::Landscape));
+        assert!(matches!(Variant::for_frame(1920, 1080), Variant::Portrait));
+        assert!(matches!(Variant::for_frame(4, 3), Variant::Portrait));
         assert!(matches!(Variant::for_frame(512, 512), Variant::General));
         assert!(matches!(Variant::for_frame(1080, 1920), Variant::General));
-        assert_eq!(Variant::Landscape.canvas(), (256, 144));
+        assert_eq!(Variant::Portrait.canvas(), (192, 192));
         assert_eq!(Variant::General.canvas(), (256, 256));
     }
 
@@ -411,6 +587,58 @@ mod tests {
         let blue = [255, 0, 0, 255];
         let input = prepare_input(&blue, 1, 1, Variant::General, letterbox(1, 1, 256, 256));
         assert_eq!(&input[0..3], &[0.0, 0.0, 1.0]);
+    }
+
+    #[test]
+    fn portrait_input_uses_planar_rgb_and_the_models_normalization() {
+        let rgb = [1.0, 0.0, 0.5, 0.0, 1.0, 0.25];
+        let input = network_input(&rgb, Variant::Portrait);
+        assert_eq!(input.len(), 6);
+        assert!((input[0] - (255.0 / 128.0 - 1.0)).abs() < 1e-6);
+        assert_eq!(input[1], -1.0);
+        assert_eq!(input[2], -1.0);
+        assert!((input[3] - (255.0 / 128.0 - 1.0)).abs() < 1e-6);
+        assert!((input[4] - (127.5 / 128.0 - 1.0)).abs() < 1e-6);
+        assert_eq!(network_input(&rgb, Variant::General), rgb);
+    }
+
+    #[test]
+    fn portrait_cleanup_removes_distant_weak_islands_but_keeps_people_and_details() {
+        let (width, height) = (100, 80);
+        let mut mask = vec![0.0; width * height];
+        for y in 20..70 {
+            for x in 30..60 {
+                mask[y * width + x] = 0.99;
+            }
+        }
+        // A soft detail near the subject and a confident separate subject.
+        mask[30 * width + 25] = 0.7;
+        mask[10 * width + 90] = 0.99;
+        // A distant remnant and a low-confidence haze.
+        mask[10 * width + 2] = 0.8;
+        mask[11 * width + 2] = 0.6;
+        mask[12 * width + 2] = 0.08;
+        clean_portrait_mask(&mut mask, width, height);
+        assert_eq!(mask[40 * width + 40], 1.0);
+        assert!(mask[30 * width + 25] > 0.7);
+        assert_eq!(mask[10 * width + 90], 1.0);
+        assert_eq!(mask[10 * width + 2], 0.0);
+        assert_eq!(mask[11 * width + 2], 0.0);
+        assert!(mask[12 * width + 2] < 0.01);
+    }
+
+    #[test]
+    fn portrait_cleanup_preserves_a_low_confidence_primary_subject() {
+        let mut mask = vec![0.08; 16 * 16];
+        clean_portrait_mask(&mut mask, 16, 16);
+        assert!(mask.iter().all(|&alpha| alpha == 0.0));
+        for y in 4..12 {
+            for x in 4..12 {
+                mask[y * 16 + x] = 0.5;
+            }
+        }
+        clean_portrait_mask(&mut mask, 16, 16);
+        assert!((mask[8 * 16 + 8] - 0.5).abs() < 1e-6);
     }
 
     #[test]
@@ -436,24 +664,24 @@ mod tests {
             0, 0, 255, 255, 0, 255, 0, 255, 255, 0, 0, 255, 255, 255, 255, 255, 0, 255, 255, 255,
             255, 0, 255, 255, 255, 255, 0, 255, 128, 128, 128, 255,
         ];
-        let layout = letterbox(4, 2, 256, 144);
+        let layout = letterbox(4, 2, 256, 256);
         assert_eq!(
             layout,
             Letterbox {
                 left: 0,
-                top: 8,
+                top: 64,
                 width: 256,
                 height: 128,
             }
         );
-        let input = prepare_input(&frame, 4, 2, Variant::Landscape, layout);
+        let input = prepare_input(&frame, 4, 2, Variant::General, layout);
         let row = |y: usize| &input[y * 256 * MODEL_CHANNELS..(y + 1) * 256 * MODEL_CHANNELS];
         assert!(row(0).iter().all(|&value| value == 0.0));
-        assert!(row(7).iter().all(|&value| value == 0.0));
-        assert_eq!(&row(8)[0..3], &[1.0, 0.0, 0.0]);
-        assert_eq!(&row(8)[255 * 3..256 * 3], &[1.0, 1.0, 1.0]);
-        assert_eq!(&row(135)[0..3], &[1.0, 1.0, 0.0]);
-        assert_eq!(&row(135)[255 * 3..256 * 3], &[128.0 / 255.0; 3]);
+        assert!(row(63).iter().all(|&value| value == 0.0));
+        assert_eq!(&row(64)[0..3], &[1.0, 0.0, 0.0]);
+        assert_eq!(&row(64)[255 * 3..256 * 3], &[1.0, 1.0, 1.0]);
+        assert_eq!(&row(191)[0..3], &[1.0, 1.0, 0.0]);
+        assert_eq!(&row(191)[255 * 3..256 * 3], &[128.0 / 255.0; 3]);
 
         let portrait = [
             0, 0, 255, 255, 255, 0, 0, 255, 0, 255, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 128,
@@ -479,16 +707,91 @@ mod tests {
     }
 
     #[test]
-    fn alpha_resize_is_bilinear_and_bounded() {
+    fn alpha_upsampling_stays_soft_on_a_flat_guide() {
         let source = [0.0, 0.25, 0.75, 1.0];
-        let resized = resize_alpha(&source, 2, 2, 4, 4);
+        let guide = [[80, 80, 80]; 4];
+        let pixels = [80, 80, 80, 255].repeat(16);
+        let resized = upsample_alpha(&source, &guide, 2, 2, &pixels, 4, 4);
         assert_eq!(resized.len(), 16);
         assert!((resized[0] - 0.0).abs() < 1e-6);
         assert!((resized[5] - 0.25).abs() < 1e-6);
         assert!((resized[10] - 0.75).abs() < 1e-6);
         assert!((resized[15] - 1.0).abs() < 1e-6);
         assert!(resized.iter().all(|value| (0.0..=1.0).contains(value)));
-        assert_eq!(resize_alpha(&source, 2, 2, 2, 2), source);
+        assert_eq!(
+            upsample_alpha(&source, &guide, 2, 2, &pixels[..16], 2, 2),
+            source
+        );
+    }
+
+    #[test]
+    fn alpha_upsampling_follows_the_camera_edge() {
+        let alpha = [1.0, 0.0];
+        let guide = [[0, 0, 0], [255, 255, 255]];
+        let mut pixels = [0, 0, 0, 255].repeat(4);
+        pixels.extend([255, 255, 255, 255].repeat(4));
+        let result = upsample_alpha(&alpha, &guide, 2, 1, &pixels, 8, 1);
+        assert!(result[3] > 0.99, "the dark side stays foreground");
+        assert!(result[4] < 0.01, "the bright side stays background");
+        assert!(result.iter().all(|value| (0.0..=1.0).contains(value)));
+    }
+
+    #[test]
+    fn alpha_upsampling_falls_back_when_the_guide_has_no_colour_match() {
+        let alpha = [0.2, 0.8];
+        let guide = [[0, 255, 0], [0, 0, 255]];
+        let pixels = [0, 0, 255, 255].repeat(4);
+        let result = upsample_alpha(&alpha, &guide, 2, 1, &pixels, 4, 1);
+        assert!((result[1] - 0.35).abs() < 1e-5);
+        assert!((result[2] - 0.65).abs() < 1e-5);
+    }
+
+    #[test]
+    #[ignore = "manual performance check"]
+    fn benchmark_cutout_pipeline() {
+        for (width, height) in [(720u32, 405u32), (1920, 1080)] {
+            let mut frame = Vec::with_capacity((width * height * 4) as usize);
+            for y in 0..height {
+                for x in 0..width {
+                    frame.extend_from_slice(&[
+                        ((x * 7 + y * 13) & 0xff) as u8,
+                        ((x * 3 + y * 5) & 0xff) as u8,
+                        ((x ^ y) & 0xff) as u8,
+                        255,
+                    ]);
+                }
+            }
+            let mut processor = CutoutProcessor::new().unwrap();
+            processor.matte(&frame, (width, height)).unwrap();
+            let start = std::time::Instant::now();
+            for _ in 0..3 {
+                std::hint::black_box(processor.matte(&frame, (width, height)).unwrap());
+            }
+            eprintln!("{width}x{height} cutout: {:?}/frame", start.elapsed() / 3);
+        }
+    }
+
+    #[test]
+    #[ignore = "manual local image check"]
+    fn render_local_cutout_sample() {
+        let input = std::env::var("APEXSHOT_CUTOUT_INPUT").unwrap();
+        let output = std::env::var("APEXSHOT_CUTOUT_OUTPUT").unwrap();
+        let image = image::open(input).unwrap().to_rgba8();
+        let (width, height) = image.dimensions();
+        let mut bgra = image.clone().into_raw();
+        for pixel in bgra.as_chunks_mut::<4>().0 {
+            pixel.swap(0, 2);
+        }
+        let mut processor = CutoutProcessor::new().unwrap();
+        let alpha = processor.matte(&bgra, (width, height)).unwrap();
+        let mut result = image;
+        for (pixel, alpha) in result.pixels_mut().zip(alpha) {
+            for channel in 0..3 {
+                pixel[channel] =
+                    (f32::from(pixel[channel]) * alpha + 100.0 * (1.0 - alpha)).round() as u8;
+            }
+        }
+        result.save(output).unwrap();
     }
 
     #[test]

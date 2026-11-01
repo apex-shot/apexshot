@@ -171,6 +171,7 @@ impl EditorState {
                         style: self.arrow_style,
                         control_points: None,
                         shadow: self.draw_object_shadow,
+                        reversed: self.inverse_arrow_direction,
                     })
                 }
             }
@@ -296,6 +297,7 @@ impl EditorState {
                         style: self.arrow_style,
                         control_points: None,
                         shadow: self.draw_object_shadow,
+                        reversed: self.inverse_arrow_direction,
                     })
                 }
             }

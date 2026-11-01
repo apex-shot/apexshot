@@ -1,9 +1,8 @@
 //! The editor's display canvas.
 //!
 //! The canvas owns the checkerboard, the decoded image, the empty drop state,
-//! the zoom pill and the pan/zoom gestures. Annotation rendering and editing
-//! arrive in their own slices; this one puts a screenshot on screen at the
-//! right scale and keeps it there.
+//! the zoom pill and the view transform. The annotation controller handles
+//! drawing and editing in image coordinates through that same transform.
 
 use gtk4::cairo::Context;
 use gtk4::gdk;
@@ -18,7 +17,7 @@ use gtk4::{
 use std::cell::{Cell, RefCell};
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
 use super::ui_support::{is_supported_image, px, TOP_CHROME_HEIGHT};
@@ -29,7 +28,24 @@ const MIN_ZOOM: f64 = 0.05;
 const MAX_ZOOM: f64 = 16.0;
 /// Breathing room below the top chrome and above the zoom pill.
 const CONTENT_MARGIN: f64 = 16.0;
+const DOCKED_BAR_INSET: f64 = 48.0;
+const CROP_HANDLE_MARGIN: f64 = 20.0;
+const CROP_BOTTOM_CHROME: f64 = 64.0;
 const TOAST_LIFETIME: Duration = Duration::from_millis(4200);
+
+struct SavedCropView {
+    width: i32,
+    height: i32,
+    manual_zoom: Option<f64>,
+    pan: (f64, f64),
+}
+
+struct PaintOptions {
+    scale: f64,
+    dark: bool,
+    docked_inset: f64,
+    crop_mode: bool,
+}
 
 struct ImageState {
     pixbuf: Option<Pixbuf>,
@@ -38,6 +54,7 @@ struct ImageState {
     /// `None` keeps the image fitted while the window resizes.
     manual_zoom: Option<f64>,
     pan: (f64, f64),
+    saved_crop_view: Option<SavedCropView>,
 }
 
 impl Default for ImageState {
@@ -48,6 +65,7 @@ impl Default for ImageState {
             height: 0,
             manual_zoom: None,
             pan: (0.0, 0.0),
+            saved_crop_view: None,
         }
     }
 }
@@ -62,6 +80,7 @@ pub(super) struct Canvas {
     pub root: Overlay,
     pub area: DrawingArea,
     pub open_button: Button,
+    pub motion_button: Button,
     empty: GtkBox,
     loading_row: GtkBox,
     spinner: Spinner,
@@ -75,26 +94,81 @@ pub(super) struct Canvas {
     /// Extra logical pixels the canvas gives up below the top chrome while a
     /// tool's option bar is docked, like the Linux docked-bar inset.
     docked_inset: Rc<Cell<f64>>,
+    crop_mode: Rc<Cell<bool>>,
     /// Bumped for each open so a late decode cannot replace a newer image.
     generation: Rc<Cell<u64>>,
     toast_generation: Rc<Cell<u64>>,
+    /// The annotation document and interaction controller.
+    pub host: Rc<super::annotate::EditorHost>,
+    /// Subscribed change listeners (sub-bars, history pill) fired by the host.
+    listeners: Rc<RefCell<Vec<Rc<dyn Fn()>>>>,
 }
 
 pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
     let state = Rc::new(RefCell::new(ImageState::default()));
     let docked_inset = Rc::new(Cell::new(0.0));
+    let crop_mode = Rc::new(Cell::new(false));
     let last_zoom_text = Rc::new(RefCell::new(String::new()));
 
     let (empty, open_button, loading_row, spinner, status) = build_empty_state(scale);
     let (zoom_pill, zoom_button, zoom_out, zoom_in) = build_zoom_pill(scale);
 
+    let toast = Label::new(None);
+    toast.add_css_class("image-editor-toast");
+    toast.set_halign(Align::Center);
+    toast.set_valign(Align::End);
+    toast.set_margin_bottom(px(20.0, scale));
+    toast.set_wrap(true);
+    toast.set_max_width_chars(60);
+    toast.set_visible(false);
+
     let area = DrawingArea::new();
+    area.set_focusable(true);
+    let listeners: Rc<RefCell<Vec<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(Vec::new()));
+    let host = super::annotate::EditorHost::new(
+        {
+            let listeners = listeners.clone();
+            let weak_area = area.downgrade();
+            Rc::new(move || {
+                if let Some(area) = weak_area.upgrade() {
+                    area.queue_draw();
+                }
+                for listener in listeners.borrow().iter() {
+                    listener();
+                }
+            })
+        },
+        {
+            let toast = toast.clone();
+            let toast_generation = Rc::new(Cell::new(0u64));
+            Rc::new(move |message| {
+                toast.set_text(&message);
+                toast.set_visible(true);
+                let token = toast_generation.get() + 1;
+                toast_generation.set(token);
+                let toast = toast.clone();
+                let gen = toast_generation.clone();
+                glib::timeout_add_local_once(TOAST_LIFETIME, move || {
+                    if gen.get() == token {
+                        toast.set_visible(false);
+                    }
+                });
+            })
+        },
+        {
+            let state = state.clone();
+            Rc::new(move || state.borrow().pan)
+        },
+    );
+
     area.add_css_class("image-editor-canvas");
     area.set_hexpand(true);
     area.set_vexpand(true);
     area.set_draw_func({
         let state = state.clone();
+        let host = host.clone();
         let docked_inset = docked_inset.clone();
+        let crop_mode = crop_mode.clone();
         let last_zoom_text = last_zoom_text.clone();
         let zoom_button = zoom_button.downgrade();
         move |area, context, _width, _height| {
@@ -102,9 +176,13 @@ pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
                 area,
                 context,
                 &state.borrow(),
-                scale,
-                dark,
-                docked_inset.get(),
+                PaintOptions {
+                    scale,
+                    dark,
+                    docked_inset: docked_inset.get(),
+                    crop_mode: crop_mode.get(),
+                },
+                &host,
             ) else {
                 return;
             };
@@ -122,15 +200,6 @@ pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
             });
         }
     });
-
-    let toast = Label::new(None);
-    toast.add_css_class("image-editor-toast");
-    toast.set_halign(Align::Center);
-    toast.set_valign(Align::End);
-    toast.set_margin_bottom(px(20.0, scale));
-    toast.set_wrap(true);
-    toast.set_max_width_chars(60);
-    toast.set_visible(false);
 
     // Bottom-centre mode switch, mirroring the Linux floating motion control.
     let motion = GtkBox::new(Orientation::Horizontal, 0);
@@ -160,6 +229,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
         root,
         area,
         open_button,
+        motion_button,
         empty,
         loading_row,
         spinner,
@@ -171,12 +241,24 @@ pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
         state,
         scale,
         docked_inset,
+        crop_mode,
         generation: Rc::new(Cell::new(0)),
         toast_generation: Rc::new(Cell::new(0)),
+        host,
+        listeners,
     });
 
     canvas.install_gestures();
     canvas.install_zoom_controls();
+    canvas.install_model_timers();
+    canvas.area.connect_resize({
+        let canvas = Rc::downgrade(&canvas);
+        move |_, _, _| {
+            if let Some(canvas) = canvas.upgrade() {
+                canvas.host.changed();
+            }
+        }
+    });
     canvas
 }
 
@@ -289,10 +371,38 @@ impl Canvas {
     /// Reserve or release the docked-bar band below the top chrome; the image
     /// refits into the space left, the way the Linux canvas reflows.
     pub(super) fn set_docked(&self, docked: bool) {
-        let inset = if docked { 56.0 } else { 0.0 };
+        let inset = if docked { DOCKED_BAR_INSET } else { 0.0 };
         if self.docked_inset.replace(inset) == inset {
             return;
         }
+        self.area.queue_draw();
+    }
+
+    /// Fit crop handles inside the viewport without losing the previous view.
+    pub(super) fn set_crop_mode(&self, enabled: bool) {
+        if self.crop_mode.replace(enabled) == enabled {
+            return;
+        }
+        let mut state = self.state.borrow_mut();
+        if enabled {
+            state.saved_crop_view = Some(SavedCropView {
+                width: state.width,
+                height: state.height,
+                manual_zoom: state.manual_zoom,
+                pan: state.pan,
+            });
+            state.manual_zoom = None;
+            state.pan = (0.0, 0.0);
+        } else if let Some(saved) = state.saved_crop_view.take() {
+            if (saved.width, saved.height) == (state.width, state.height) {
+                state.manual_zoom = saved.manual_zoom;
+                let (_, _, width, height) =
+                    content_rect(&self.area, self.scale, self.docked_inset.get(), false);
+                let zoom = effective_zoom(&state, width, height, false);
+                state.pan = clamp_pan(saved.pan, state.width, state.height, zoom, width, height);
+            }
+        }
+        drop(state);
         self.area.queue_draw();
     }
 
@@ -303,7 +413,7 @@ impl Canvas {
         }
         self.state.borrow_mut().manual_zoom = None;
         self.state.borrow_mut().pan = (0.0, 0.0);
-        self.area.queue_draw();
+        self.host.changed();
     }
 
     fn zoom_by(&self, factor: f64) {
@@ -311,10 +421,25 @@ impl Canvas {
         if state.pixbuf.is_none() {
             return;
         }
-        let (_, _, avail_width, avail_height) =
-            content_rect(&self.area, self.scale, self.docked_inset.get());
-        let current = effective_zoom(&state, avail_width, avail_height);
-        let zoom = (current * factor).clamp(MIN_ZOOM, MAX_ZOOM);
+        let (_, _, avail_width, avail_height) = content_rect(
+            &self.area,
+            self.scale,
+            self.docked_inset.get(),
+            self.crop_mode.get(),
+        );
+        let crop_mode = self.crop_mode.get();
+        let current = effective_zoom(&state, avail_width, avail_height, crop_mode);
+        let min_zoom = if crop_mode {
+            MIN_ZOOM.min(crop_fit_zoom(
+                state.width,
+                state.height,
+                avail_width,
+                avail_height,
+            ))
+        } else {
+            MIN_ZOOM
+        };
+        let zoom = (current * factor).clamp(min_zoom, MAX_ZOOM);
         state.manual_zoom = Some(zoom);
         state.pan = clamp_pan(
             state.pan,
@@ -325,7 +450,7 @@ impl Canvas {
             avail_height,
         );
         drop(state);
-        self.area.queue_draw();
+        self.host.changed();
     }
 
     fn finish_load(self: &Rc<Self>, decoded: DecodedImage) {
@@ -353,12 +478,27 @@ impl Canvas {
             state.height = decoded.height;
             state.manual_zoom = None;
             state.pan = (0.0, 0.0);
+            state.saved_crop_view = None;
+        }
+
+        // Hand the decoded pixels to the annotation document. The pixbuf
+        // stays as the "image present" marker for zoom/fit bookkeeping.
+        let image = image::RgbaImage::from_raw(
+            decoded.width as u32,
+            decoded.height as u32,
+            bytes.as_ref().to_vec(),
+        );
+        if let Some(image) = image {
+            self.host.load_document(image, &self.area);
         }
 
         self.empty.set_visible(false);
         self.loading_row.set_visible(false);
         self.spinner.stop();
         self.open_button.set_sensitive(true);
+        // The Motion mode opens for any loaded image, like the Linux editor.
+        self.motion_button.set_sensitive(true);
+        self.motion_button.set_tooltip_text(None);
         self.area.set_cursor_from_name(Some("grab"));
         self.area.queue_draw();
     }
@@ -390,42 +530,154 @@ impl Canvas {
         });
     }
 
-    fn install_gestures(self: &Rc<Self>) {
-        let drag = gtk4::GestureDrag::new();
-        let pan_start = Rc::new(Cell::new((0.0, 0.0)));
-        drag.connect_drag_begin({
-            let canvas = Rc::downgrade(self);
-            let pan_start = pan_start.clone();
-            move |_, _, _| {
-                let Some(canvas) = canvas.upgrade() else {
-                    return;
-                };
-                let state = canvas.state.borrow();
-                if state.pixbuf.is_none() {
-                    return;
+    /// Text-caret blink and the OCR completion poll: both tick on the UI
+    /// clock, read the shared document, and redraw only when something moved.
+    fn install_model_timers(self: &Rc<Self>) {
+        // Caret blink while a text session is live.
+        let canvas = Rc::downgrade(self);
+        gtk4::glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+            let Some(canvas) = canvas.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            let flipped = canvas.host.editor.borrow_mut().as_mut().map(|st| {
+                if let Some(input) = st.active_text_input.as_mut() {
+                    input.cursor_visible = !input.cursor_visible;
+                    return true;
                 }
-                pan_start.set(state.pan);
-                drop(state);
-                canvas.area.set_cursor_from_name(Some("grabbing"));
+                false
+            });
+            // No document yet: stay alive so the next load's caret blinks;
+            // only repaint when a visible toggle actually happened.
+            match flipped {
+                Some(true) => {
+                    canvas.area.queue_draw();
+                    glib::ControlFlow::Continue
+                }
+                _ => glib::ControlFlow::Continue,
             }
         });
-        drag.connect_drag_update({
+
+        // OCR readiness: when detection lands, refresh so the text-aware
+        // highlighter can use it; surface a one-time failure.
+        let canvas = Rc::downgrade(self);
+        let generation = self.host.session_generation.clone();
+        let consumed_for = Rc::new(Cell::new((usize::MAX, u64::MAX)));
+        gtk4::glib::timeout_add_local(std::time::Duration::from_millis(400), move || {
+            let Some(canvas) = canvas.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            let gen = generation.get();
+            let outcome = canvas.host.read(|st| {
+                let detector_id = Arc::as_ptr(&st.text_detector) as usize;
+                use std::sync::atomic::Ordering;
+                let ready = st.text_detection_ready.load(Ordering::Acquire);
+                let failed = st
+                    .text_detector
+                    .lock()
+                    .ok()
+                    .and_then(|det| match det.status() {
+                        crate::capture::editor::text_detect::DetectionStatus::Failed(e) => {
+                            Some(e.clone())
+                        }
+                        _ => None,
+                    });
+                (ready, failed, detector_id)
+            });
+            // Failed is checked before ready: the worker marks ready even
+            // when detection itself failed, so ready-first would never
+            // surface the error. Identity keys on (detector, generation) so
+            // a post-crop restart in the same session is still observed.
+            match outcome {
+                Some((_, Some(error), id)) if consumed_for.get() != (id, gen) => {
+                    consumed_for.set((id, gen));
+                    canvas.host.report_error(format!(
+                        "Text detection is unavailable: {error}. The highlighter falls back to freehand."
+                    ));
+                }
+                Some((true, _, id)) if consumed_for.get() != (id, gen) => {
+                    consumed_for.set((id, gen));
+                    canvas.area.queue_draw();
+                }
+                _ => {}
+            }
+            glib::ControlFlow::Continue
+        });
+    }
+
+    /// Re-derive the view's image extents from the live document so crop
+    /// and undo can't leave painting/hit-testing pointed at stale
+    /// dimensions; a real size change drops manual zoom back to fit.
+    pub(super) fn sync_view_to_document(&self) {
+        let Some((w, h)) = self
+            .host
+            .read(|st| (st.working_image.width(), st.working_image.height()))
+        else {
+            return;
+        };
+        let mut state = self.state.borrow_mut();
+        if state.width == w as i32 && state.height == h as i32 {
+            return;
+        }
+        state.width = w as i32;
+        state.height = h as i32;
+        state.manual_zoom = None;
+        state.pan = (0.0, 0.0);
+        drop(state);
+        self.area.queue_draw();
+    }
+
+    /// Subscribe to document/selection changes (bars, history pill).
+    pub(super) fn add_change_listener(&self, listener: Rc<dyn Fn()>) {
+        self.listeners.borrow_mut().push(listener);
+    }
+
+    /// The view transform the paint pass uses, rebuilt from live layout so
+    /// painting and hit testing agree exactly.
+    pub(super) fn view_transform(&self) -> crate::capture::editor::types::ViewTransform {
+        use crate::capture::editor::types::ViewTransform;
+        let state = self.state.borrow();
+        let (left, top, avail_width, avail_height) = content_rect(
+            &self.area,
+            self.scale,
+            self.docked_inset.get(),
+            self.crop_mode.get(),
+        );
+        let zoom = effective_zoom(&state, avail_width, avail_height, self.crop_mode.get());
+        let draw_width = f64::from(state.width) * zoom;
+        let draw_height = f64::from(state.height) * zoom;
+        ViewTransform {
+            scale: zoom,
+            offset_x: left + (avail_width - draw_width) / 2.0 + state.pan.0,
+            offset_y: image_y(
+                top,
+                avail_height,
+                f64::from(self.area.height()),
+                self.scale,
+                self.crop_mode.get(),
+                draw_height,
+            ) + state.pan.1,
+            ..ViewTransform::for_image(f64::from(state.width), f64::from(state.height))
+        }
+    }
+
+    fn install_gestures(self: &Rc<Self>) {
+        let pan_to: Rc<dyn Fn(f64, f64)> = {
             let canvas = Rc::downgrade(self);
-            let pan_start = pan_start.clone();
-            move |_, offset_x, offset_y| {
+            Rc::new(move |px, py| {
                 let Some(canvas) = canvas.upgrade() else {
                     return;
                 };
                 let mut state = canvas.state.borrow_mut();
-                if state.pixbuf.is_none() {
-                    return;
-                }
-                let (_, _, avail_width, avail_height) =
-                    content_rect(&canvas.area, canvas.scale, canvas.docked_inset.get());
-                let zoom = effective_zoom(&state, avail_width, avail_height);
-                let start = pan_start.get();
+                let (_, _, avail_width, avail_height) = content_rect(
+                    &canvas.area,
+                    canvas.scale,
+                    canvas.docked_inset.get(),
+                    canvas.crop_mode.get(),
+                );
+                let zoom =
+                    effective_zoom(&state, avail_width, avail_height, canvas.crop_mode.get());
                 state.pan = clamp_pan(
-                    (start.0 + offset_x, start.1 + offset_y),
+                    (px, py),
                     state.width,
                     state.height,
                     zoom,
@@ -433,23 +685,32 @@ impl Canvas {
                     avail_height,
                 );
                 drop(state);
-                canvas.area.queue_draw();
-            }
-        });
-        drag.connect_drag_end({
-            let canvas = Rc::downgrade(self);
-            move |_, _, _| {
-                if let Some(canvas) = canvas.upgrade() {
-                    let cursor = if canvas.state.borrow().pixbuf.is_some() {
-                        "grab"
-                    } else {
-                        "default"
-                    };
-                    canvas.area.set_cursor_from_name(Some(cursor));
-                }
-            }
-        });
-        self.area.add_controller(drag);
+                canvas.host.changed();
+            })
+        };
+        self.host.install(
+            &self.area,
+            {
+                let canvas = Rc::downgrade(self);
+                Rc::new(move || {
+                    canvas
+                        .upgrade()
+                        .map(|c| c.view_transform())
+                        .unwrap_or_else(|| {
+                            crate::capture::editor::types::ViewTransform::for_image(1.0, 1.0)
+                        })
+                })
+            },
+            {
+                let area = self.area.downgrade();
+                Rc::new(move |name| {
+                    if let Some(area) = area.upgrade() {
+                        area.set_cursor_from_name(name);
+                    }
+                })
+            },
+            pan_to,
+        );
 
         let scroll = EventControllerScroll::new(EventControllerScrollFlags::BOTH_AXES);
         scroll.connect_scroll({
@@ -613,12 +874,68 @@ fn build_zoom_pill(scale: f64) -> (GtkBox, Button, Button, Button) {
 
 /// The viewport left for the image: below the floating toolbar (plus whatever
 /// a docked option bar claims), above the pill.
-fn content_rect(area: &DrawingArea, scale: f64, docked_inset: f64) -> (f64, f64, f64, f64) {
-    let width = f64::from(area.width()).max(1.0);
-    let height = f64::from(area.height()).max(1.0);
-    let top = (TOP_CHROME_HEIGHT + docked_inset) * scale;
-    let bottom = CONTENT_MARGIN * scale;
-    (0.0, top, width, (height - top - bottom).max(1.0))
+fn content_rect(
+    area: &DrawingArea,
+    scale: f64,
+    docked_inset: f64,
+    crop_mode: bool,
+) -> (f64, f64, f64, f64) {
+    viewport_rect(
+        f64::from(area.width()),
+        f64::from(area.height()),
+        scale,
+        docked_inset,
+        crop_mode,
+    )
+}
+
+fn viewport_rect(
+    width: f64,
+    height: f64,
+    scale: f64,
+    docked_inset: f64,
+    crop_mode: bool,
+) -> (f64, f64, f64, f64) {
+    let width = width.max(1.0);
+    let height = height.max(1.0);
+    let margin = if crop_mode {
+        CROP_HANDLE_MARGIN * scale
+    } else {
+        0.0
+    };
+    let top = (TOP_CHROME_HEIGHT + docked_inset) * scale + margin;
+    let bottom = (if crop_mode {
+        CROP_BOTTOM_CHROME
+    } else {
+        CONTENT_MARGIN
+    }) * scale
+        + margin;
+    (
+        margin,
+        top,
+        (width - 2.0 * margin).max(1.0),
+        (height - top - bottom).max(1.0),
+    )
+}
+
+fn image_y(
+    top: f64,
+    avail_height: f64,
+    canvas_height: f64,
+    scale: f64,
+    crop_mode: bool,
+    draw_height: f64,
+) -> f64 {
+    if draw_height > avail_height {
+        return top + (avail_height - draw_height) / 2.0;
+    }
+    let bottom = (if crop_mode {
+        CROP_BOTTOM_CHROME + CROP_HANDLE_MARGIN
+    } else {
+        CONTENT_MARGIN
+    }) * scale;
+    // Keep a stable canvas-centred position unless the tool bar needs the space.
+    ((canvas_height - bottom - draw_height) / 2.0).clamp(top, top + avail_height - draw_height)
 }
 
 fn fit_zoom(image_width: i32, image_height: i32, avail_width: f64, avail_height: f64) -> f64 {
@@ -629,9 +946,27 @@ fn fit_zoom(image_width: i32, image_height: i32, avail_width: f64, avail_height:
     zoom.clamp(MIN_ZOOM, MAX_ZOOM)
 }
 
-fn effective_zoom(state: &ImageState, avail_width: f64, avail_height: f64) -> f64 {
+fn crop_fit_zoom(image_width: i32, image_height: i32, avail_width: f64, avail_height: f64) -> f64 {
+    if image_width <= 0 || image_height <= 0 {
+        return 1.0;
+    }
+    (avail_width / f64::from(image_width))
+        .min(avail_height / f64::from(image_height))
+        .clamp(0.0001, MAX_ZOOM)
+}
+
+fn effective_zoom(state: &ImageState, avail_width: f64, avail_height: f64, crop_mode: bool) -> f64 {
+    let crop_fit = crop_fit_zoom(state.width, state.height, avail_width, avail_height);
     match state.manual_zoom {
-        Some(zoom) => zoom.clamp(MIN_ZOOM, MAX_ZOOM),
+        Some(zoom) => zoom.clamp(
+            if crop_mode {
+                MIN_ZOOM.min(crop_fit)
+            } else {
+                MIN_ZOOM
+            },
+            MAX_ZOOM,
+        ),
+        None if crop_mode => crop_fit,
         None => fit_zoom(state.width, state.height, avail_width, avail_height),
     }
 }
@@ -658,11 +993,16 @@ fn paint(
     area: &DrawingArea,
     context: &Context,
     state: &ImageState,
-    scale: f64,
-    dark: bool,
-    docked_inset: f64,
+    options: PaintOptions,
+    host: &super::annotate::EditorHost,
 ) -> Option<f64> {
-    let (_, top, avail_width, avail_height) = content_rect(area, scale, docked_inset);
+    let PaintOptions {
+        scale,
+        dark,
+        docked_inset,
+        crop_mode,
+    } = options;
+    let (left, top, avail_width, avail_height) = content_rect(area, scale, docked_inset, crop_mode);
 
     // The whole canvas gets the transparency checkerboard, image or not, like
     // the Linux canvas.
@@ -675,19 +1015,39 @@ fn paint(
     );
 
     let pixbuf = state.pixbuf.as_ref()?;
-    let zoom = effective_zoom(state, avail_width, avail_height);
+    let zoom = effective_zoom(state, avail_width, avail_height, crop_mode);
     let draw_width = f64::from(state.width) * zoom;
     let draw_height = f64::from(state.height) * zoom;
-    let x = (avail_width - draw_width) / 2.0 + state.pan.0;
-    let y = top + (avail_height - draw_height) / 2.0 + state.pan.1;
+    let x = left + (avail_width - draw_width) / 2.0 + state.pan.0;
+    let y = image_y(
+        top,
+        avail_height,
+        f64::from(area.height()),
+        scale,
+        crop_mode,
+        draw_height,
+    ) + state.pan.1;
 
-    let _ = context.save();
-    context.translate(x, y);
-    context.scale(zoom, zoom);
-    context.set_source_pixbuf(pixbuf, 0.0, 0.0);
-    context.source().set_filter(gtk4::cairo::Filter::Good);
-    let _ = context.paint();
-    let _ = context.restore();
+    if host.has_document() {
+        let transform = crate::capture::editor::types::ViewTransform {
+            scale: zoom,
+            offset_x: x,
+            offset_y: y,
+            ..crate::capture::editor::types::ViewTransform::for_image(
+                f64::from(state.width),
+                f64::from(state.height),
+            )
+        };
+        host.paint_document(context, transform);
+    } else {
+        let _ = context.save();
+        context.translate(x, y);
+        context.scale(zoom, zoom);
+        context.set_source_pixbuf(pixbuf, 0.0, 0.0);
+        context.source().set_filter(gtk4::cairo::Filter::Good);
+        let _ = context.paint();
+        let _ = context.restore();
+    }
 
     context.set_line_width(1.0);
     if dark {
@@ -708,7 +1068,13 @@ fn paint(
 
 /// The checkerboard the Linux canvas fills its drawing area with: 14px tiles
 /// in a repeating surface pattern, light or dark.
-fn draw_canvas_checkerboard(context: &Context, width: f64, height: f64, scale: f64, dark: bool) {
+pub(super) fn draw_canvas_checkerboard(
+    context: &Context,
+    width: f64,
+    height: f64,
+    scale: f64,
+    dark: bool,
+) {
     if width <= 0.0 || height <= 0.0 {
         return;
     }
@@ -755,7 +1121,10 @@ fn decode_image(path: &Path) -> Result<DecodedImage, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{clamp_pan, fit_zoom, zoom_text, MAX_ZOOM, MIN_ZOOM};
+    use super::{
+        clamp_pan, crop_fit_zoom, fit_zoom, image_y, viewport_rect, zoom_text, CROP_BOTTOM_CHROME,
+        CROP_HANDLE_MARGIN, DOCKED_BAR_INSET, MAX_ZOOM, MIN_ZOOM,
+    };
 
     #[test]
     fn fit_zoom_uses_the_tighter_axis() {
@@ -790,5 +1159,85 @@ mod tests {
         assert_eq!(zoom_text(1.0), "100%");
         assert_eq!(zoom_text(0.333), "33%");
         assert_eq!(zoom_text(0.0), "1%");
+    }
+
+    #[test]
+    fn opening_a_bar_does_not_push_a_centered_landscape_image_down() {
+        let (_, top, _, height) = viewport_rect(1168.0, 940.0, 1.25, 0.0, false);
+        let (_, docked_top, _, docked_height) =
+            viewport_rect(1168.0, 940.0, 1.25, DOCKED_BAR_INSET, false);
+        let initial = image_y(top, height, 940.0, 1.25, false, 610.0);
+        let docked = image_y(docked_top, docked_height, 940.0, 1.25, false, 610.0);
+        assert_eq!(docked, initial);
+        assert!(docked - docked_top < 50.0);
+
+        let tall_image = docked_height;
+        assert_eq!(
+            image_y(docked_top, docked_height, 940.0, 1.25, false, tall_image),
+            docked_top
+        );
+    }
+
+    #[test]
+    fn crop_fit_leaves_handle_and_bottom_chrome_clearance() {
+        for scale in [1.0, 1.25, 2.0] {
+            let (left, top, width, height) =
+                viewport_rect(1000.0, 800.0, scale, DOCKED_BAR_INSET, true);
+            for (image_width, image_height) in [(2000, 600), (600, 2000), (2000, 2000)] {
+                let zoom = crop_fit_zoom(image_width, image_height, width, height);
+                let draw_w = f64::from(image_width) * zoom;
+                let draw_h = f64::from(image_height) * zoom;
+                let x = left + (width - draw_w) / 2.0;
+                let y = image_y(top, height, 800.0, scale, true, draw_h);
+                assert!(x >= CROP_HANDLE_MARGIN * scale - 1e-9);
+                assert!(x + draw_w <= 1000.0 - CROP_HANDLE_MARGIN * scale + 1e-9);
+                assert!(y >= top - 1e-9);
+                assert!(
+                    y + draw_h <= 800.0 - (CROP_BOTTOM_CHROME + CROP_HANDLE_MARGIN) * scale + 1e-9
+                );
+            }
+        }
+        assert!(crop_fit_zoom(100_000, 100_000, 800.0, 600.0) < MIN_ZOOM);
+    }
+
+    #[test]
+    fn entering_crop_temporarily_fits_and_restores_the_previous_view() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            use gtk4::prelude::*;
+            let canvas = super::build(1.0, true);
+            canvas.area.measure(gtk4::Orientation::Horizontal, -1);
+            canvas.area.measure(gtk4::Orientation::Vertical, 800);
+            canvas.area.allocate(800, 600, -1, None);
+            {
+                let mut st = canvas.state.borrow_mut();
+                st.width = 1000;
+                st.height = 800;
+                st.manual_zoom = Some(1.0);
+                st.pan = (10.0, 20.0);
+            }
+            canvas.set_docked(true);
+            canvas.set_crop_mode(true);
+            {
+                let st = canvas.state.borrow();
+                assert_eq!(st.manual_zoom, None);
+                assert_eq!(st.pan, (0.0, 0.0));
+            }
+            canvas.set_docked(false);
+            canvas.set_crop_mode(false);
+            {
+                let st = canvas.state.borrow();
+                assert_eq!(st.manual_zoom, Some(1.0));
+                assert_eq!(st.pan, (10.0, 20.0));
+            }
+            canvas.set_crop_mode(true);
+            canvas.state.borrow_mut().width = 800;
+            canvas.set_crop_mode(false);
+            let st = canvas.state.borrow();
+            assert_eq!(st.manual_zoom, None);
+            assert_eq!(st.pan, (0.0, 0.0));
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
     }
 }

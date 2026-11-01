@@ -423,6 +423,7 @@ fn action_to_serializable(action: &AnnotationAction) -> Option<SerializableAnnot
             style,
             control_points,
             shadow,
+            reversed,
         } => Some(SerializableAnnotation::Arrow {
             start: Point::from_editor(*start),
             end: Point::from_editor(*end),
@@ -433,6 +434,7 @@ fn action_to_serializable(action: &AnnotationAction) -> Option<SerializableAnnot
                 .as_ref()
                 .map(|pts| pts.iter().map(|p| Point::from_editor(*p)).collect()),
             shadow: *shadow,
+            reversed: *reversed,
         }),
 
         AnnotationAction::Box {
@@ -555,6 +557,7 @@ pub fn serializable_to_action(ann: &SerializableAnnotation) -> AnnotationAction 
             style,
             control_points,
             shadow,
+            reversed,
         } => AnnotationAction::Arrow {
             start: start.to_editor(),
             end: end.to_editor(),
@@ -565,6 +568,7 @@ pub fn serializable_to_action(ann: &SerializableAnnotation) -> AnnotationAction 
                 .as_ref()
                 .map(|pts| pts.iter().map(|p| p.to_editor()).collect()),
             shadow: *shadow,
+            reversed: *reversed,
         },
 
         SerializableAnnotation::Box {
@@ -853,6 +857,36 @@ fn serializable_to_number_size(
 mod tests {
     use super::*;
     use std::path::PathBuf;
+
+    #[test]
+    fn arrow_reverse_state_round_trips_and_legacy_files_default_to_normal() {
+        let action = AnnotationAction::Arrow {
+            start: crate::capture::editor::types::Point { x: 10.0, y: 15.0 },
+            end: crate::capture::editor::types::Point { x: 1.0, y: 2.0 },
+            color: crate::capture::editor::types::DrawColor::new(1.0, 0.0, 0.0, 1.0),
+            stroke_size: 4.0,
+            style: EditorArrowStyle::Standard,
+            control_points: None,
+            shadow: false,
+            reversed: true,
+        };
+        let saved = action_to_serializable(&action).unwrap();
+        let mut json = serde_json::to_value(saved).unwrap();
+        let restored: SerializableAnnotation = serde_json::from_value(json.clone()).unwrap();
+        assert!(matches!(
+            serializable_to_action(&restored),
+            AnnotationAction::Arrow { reversed: true, .. }
+        ));
+        json.as_object_mut().unwrap().remove("reversed");
+        let legacy: SerializableAnnotation = serde_json::from_value(json).unwrap();
+        assert!(matches!(
+            serializable_to_action(&legacy),
+            AnnotationAction::Arrow {
+                reversed: false,
+                ..
+            }
+        ));
+    }
 
     #[test]
     fn annotation_path_is_deterministic() {

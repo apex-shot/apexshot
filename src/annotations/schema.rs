@@ -383,6 +383,8 @@ pub enum SerializableAnnotation {
         style: ArrowStyle,
         control_points: Option<Vec<Point>>,
         shadow: bool,
+        #[serde(default)]
+        reversed: bool,
     },
     Box {
         rect: Rect,

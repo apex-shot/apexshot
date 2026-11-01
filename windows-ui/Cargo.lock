@@ -49,6 +49,7 @@ dependencies = [
  "serde_json",
  "serde_yml",
  "sha2",
+ "thiserror",
  "tract-onnx",
  "ureq",
  "windows-sys 0.61.2",

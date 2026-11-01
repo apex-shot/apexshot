@@ -349,12 +349,12 @@ fn tab_button(label: &str) -> ToggleButton {
 }
 
 #[derive(Clone)]
-struct ColorPicker {
-    widget: GtkBox,
-    repaint: Rc<dyn Fn()>,
+pub(crate) struct ColorPicker {
+    pub(crate) widget: GtkBox,
+    pub(crate) repaint: Rc<dyn Fn()>,
 }
 
-fn build_color_picker(
+pub(crate) fn build_color_picker(
     get: Rc<dyn Fn() -> Color>,
     set: Rc<dyn Fn(Color)>,
     notify: Rc<dyn Fn()>,

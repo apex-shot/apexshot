@@ -41,6 +41,44 @@ const TOOL_GROUPS: [&[Tool]; 5] = [
 ];
 
 impl Tool {
+    /// The rail button for a model tool, for model-authoritative sync.
+    pub(super) fn from_model(tool: crate::capture::editor::types::Tool) -> Self {
+        use crate::capture::editor::types::Tool as Model;
+        match tool {
+            Model::Select | Model::Background => Self::Select,
+            Model::Crop => Self::Crop,
+            Model::Pen => Self::Pen,
+            Model::Highlighter => Self::Highlighter,
+            Model::Arrow => Self::Arrow,
+            Model::Line => Self::Line,
+            Model::Box => Self::Box,
+            Model::Circle => Self::Circle,
+            Model::Text => Self::Text,
+            Model::Number => Self::Number,
+            Model::Obfuscate => Self::Obfuscate,
+            Model::Focus => Self::Focus,
+        }
+    }
+
+    /// The shared editor's tool this rail button arms.
+    pub(super) fn to_model(self) -> crate::capture::editor::types::Tool {
+        use crate::capture::editor::types::Tool as Model;
+        match self {
+            Self::Select => Model::Select,
+            Self::Crop => Model::Crop,
+            Self::Pen => Model::Pen,
+            Self::Highlighter => Model::Highlighter,
+            Self::Arrow => Model::Arrow,
+            Self::Line => Model::Line,
+            Self::Box => Model::Box,
+            Self::Circle => Model::Circle,
+            Self::Text => Model::Text,
+            Self::Number => Model::Number,
+            Self::Obfuscate => Model::Obfuscate,
+            Self::Focus => Model::Focus,
+        }
+    }
+
     pub(super) fn label(self) -> String {
         match self {
             Self::Select => t("Select"),
@@ -82,6 +120,10 @@ pub(super) struct Toolbar {
     pub root: GtkBox,
     /// The floating undo/redo/delete pill docked at the canvas' bottom-right.
     pub history: GtkBox,
+    /// History pill buttons the window wires to the document.
+    pub undo: Button,
+    pub redo: Button,
+    pub delete: Button,
     buttons: Rc<RefCell<Vec<(Tool, Button)>>>,
 }
 
@@ -123,6 +165,7 @@ pub(super) fn build(scale: f64, initial: Tool, on_select: Rc<dyn Fn(Tool)>) -> T
     history.set_margin_end(px(16.0, scale));
     history.set_margin_bottom(px(16.0, scale));
 
+    let mut history_buttons = Vec::new();
     for (icon, label) in [
         (custom::EDIT_UNDO_SYMBOLIC, t("Undo")),
         (custom::EDIT_UNDO_RTL_SYMBOLIC, t("Redo")),
@@ -130,16 +173,21 @@ pub(super) fn build(scale: f64, initial: Tool, on_select: Rc<dyn Fn(Tool)>) -> T
     ] {
         let button = tool_button(icon, &label, icon_size);
         button.set_sensitive(false);
-        button.set_tooltip_text(Some(&format!(
-            "{label}: {}",
-            t("not available in the Windows image editor yet")
-        )));
+        button.set_tooltip_text(Some(&label));
         history.append(&button);
+        history_buttons.push(button);
     }
+    let mut history_iter = history_buttons.into_iter();
+    let undo = history_iter.next().unwrap();
+    let redo = history_iter.next().unwrap();
+    let delete = history_iter.next().unwrap();
 
     let toolbar = Toolbar {
         root,
         history,
+        undo,
+        redo,
+        delete,
         buttons,
     };
     toolbar.set_active(initial);
@@ -147,6 +195,12 @@ pub(super) fn build(scale: f64, initial: Tool, on_select: Rc<dyn Fn(Tool)>) -> T
 }
 
 impl Toolbar {
+    /// Move the active highlight; used when the model's tool changes from
+    /// elsewhere (crop apply/cancel, shortcuts, loads).
+    pub(super) fn set_active_tool(&self, tool: Tool) {
+        set_active(&self.buttons, tool);
+    }
+
     pub(super) fn set_active(&self, tool: Tool) {
         set_active(&self.buttons, tool);
     }

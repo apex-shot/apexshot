@@ -14,6 +14,13 @@ impl EditorState {
         Some(*style)
     }
 
+    pub fn selected_arrow_reversed(&self) -> Option<bool> {
+        match self.selected_action()? {
+            AnnotationAction::Arrow { reversed, .. } => Some(*reversed),
+            _ => None,
+        }
+    }
+
     pub fn set_selected_arrow_style(&mut self, style: ArrowStyle) -> bool {
         let Some(index) = self.selected_action_index else {
             return false;
@@ -58,6 +65,7 @@ impl EditorState {
             start,
             end,
             control_points,
+            reversed,
             ..
         } = action
         else {
@@ -68,6 +76,7 @@ impl EditorState {
         if let Some(points) = control_points.as_mut() {
             points.reverse();
         }
+        *reversed = !*reversed;
         self.clear_redo_history();
         self.commit_history_change(before, super::history::HistoryKind::Edit);
         true
@@ -220,6 +229,7 @@ mod tests {
                 Point { x: 24.0, y: 26.0 },
             ]),
             shadow: false,
+            reversed: false,
         });
         state.selected_action_index = Some(0);
 
@@ -243,6 +253,7 @@ mod tests {
                 Point { x: 20.0, y: 22.0 },
             ]),
             shadow: false,
+            reversed: false,
         });
         state.selected_action_index = Some(0);
 

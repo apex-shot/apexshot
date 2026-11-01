@@ -161,6 +161,176 @@ button.image-editor-tool-button image {
     box-shadow: none;
 }
 
+button.image-editor-color-trigger {
+    min-height: 28px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.10);
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.65);
+}
+
+button.image-editor-color-trigger:hover {
+    background: rgba(255, 255, 255, 0.17);
+    color: #ffffff;
+}
+
+.image-editor-color-palette {
+    margin-top: 4px;
+    padding: 8px;
+    background: #0f0f0f;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 10px;
+}
+
+button.image-editor-color-swatch {
+    min-width: 26px;
+    min-height: 26px;
+    padding: 2px;
+    border: 2px solid transparent;
+    border-radius: 50%;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+}
+
+button.image-editor-color-swatch:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+button.image-editor-color-swatch.selected {
+    border-color: #ff670d;
+}
+
+.editor-theme-light button.image-editor-color-trigger {
+    background: rgba(17, 24, 39, 0.09);
+    color: rgba(17, 24, 39, 0.65);
+}
+
+.editor-theme-light button.image-editor-color-trigger:hover {
+    background: rgba(17, 24, 39, 0.15);
+    color: #1d2129;
+}
+
+.editor-theme-light .image-editor-color-palette {
+    background: #eef0f5;
+    border-color: rgba(17, 24, 39, 0.14);
+}
+
+.editor-theme-light button.image-editor-color-swatch:hover {
+    background: rgba(17, 24, 39, 0.12);
+}
+
+.image-editor-custom-color {
+    margin-top: 4px;
+    padding: 8px 4px 4px;
+    background: #171717;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 10px;
+}
+
+.image-editor-custom-color-header {
+    margin: 0 8px 8px;
+}
+
+.image-editor-custom-color-title {
+    color: rgba(255, 255, 255, 0.80);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.image-editor-custom-color .recording-editor-custom-value-row {
+    background: rgba(255, 255, 255, 0.07);
+}
+
+.image-editor-custom-color .recording-editor-custom-hex {
+    color: rgba(255, 255, 255, 0.90);
+}
+
+.image-editor-custom-opacity {
+    margin: 0 8px 10px;
+}
+
+.image-editor-custom-opacity-label,
+.image-editor-custom-opacity-value {
+    color: rgba(255, 255, 255, 0.65);
+    font-size: 11px;
+}
+
+.image-editor-custom-opacity-value {
+    min-width: 34px;
+}
+
+button.image-editor-custom-color-close {
+    min-width: 24px;
+    min-height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.60);
+}
+
+button.image-editor-custom-color-close:hover {
+    background: rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+}
+
+scale.image-editor-opacity-slider,
+scale.image-editor-opacity-slider trough,
+scale.image-editor-opacity-slider highlight {
+    border: none;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+}
+
+scale.image-editor-opacity-slider trough {
+    min-height: 10px;
+}
+
+scale.image-editor-opacity-slider slider {
+    min-width: 14px;
+    min-height: 14px;
+    border: 2px solid #ffffff;
+    border-radius: 999px;
+    background: #323232;
+    background-image: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+}
+
+.editor-theme-light .image-editor-custom-color {
+    background: #f8f9fc;
+    border-color: rgba(17, 24, 39, 0.14);
+}
+
+.editor-theme-light .image-editor-custom-color-title,
+.editor-theme-light .image-editor-custom-color .recording-editor-custom-hex {
+    color: rgba(17, 24, 39, 0.88);
+}
+
+.editor-theme-light .image-editor-custom-color .recording-editor-custom-value-row {
+    background: rgba(17, 24, 39, 0.06);
+}
+
+.editor-theme-light .image-editor-custom-opacity-label,
+.editor-theme-light .image-editor-custom-opacity-value {
+    color: rgba(17, 24, 39, 0.65);
+}
+
+.editor-theme-light button.image-editor-custom-color-close {
+    color: rgba(17, 24, 39, 0.60);
+}
+
+.editor-theme-light button.image-editor-custom-color-close:hover {
+    background: rgba(17, 24, 39, 0.10);
+    color: #1d2129;
+}
+
 /* Menus match the Settings select dropdowns: a rounded #252526 menu and
  * check-marked option rows; the trigger pills stay flat floating-bar buttons. */
 button.image-editor-subbar-pill {
@@ -197,6 +367,90 @@ button.image-editor-subbar-pill:disabled {
     color: #1d2129;
 }
 
+button.image-editor-stroke-trigger {
+    min-height: 28px;
+    padding: 0 7px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+button.image-editor-stroke-trigger:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.image-editor-stroke-menu {
+    padding: 6px;
+}
+
+.image-editor-number-style-sample {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+button.image-editor-stroke-option.image-editor-number-style-option {
+    min-width: 54px;
+}
+
+button.image-editor-stroke-option {
+    min-width: 42px;
+    min-height: 26px;
+    padding: 0;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.72);
+}
+
+button.image-editor-stroke-option:hover {
+    background: rgba(255, 255, 255, 0.09);
+    color: #ffffff;
+}
+
+button.image-editor-stroke-option:focus {
+    outline: none;
+    box-shadow: none;
+}
+
+button.image-editor-stroke-option.selected {
+    background: transparent;
+    box-shadow: none;
+    color: #ff8b4a;
+}
+
+.editor-theme-light button.image-editor-stroke-trigger,
+.editor-theme-light button.image-editor-stroke-option {
+    color: rgba(17, 24, 39, 0.78);
+}
+
+.editor-theme-light button.image-editor-stroke-trigger:hover,
+.editor-theme-light button.image-editor-stroke-option:hover {
+    background: rgba(17, 24, 39, 0.07);
+    color: #1d2129;
+}
+
+.editor-theme-light button.image-editor-stroke-option.selected {
+    background: transparent;
+    box-shadow: none;
+    color: #b84500;
+}
+
+button.image-editor-arrow-reverse.selected,
+button.image-editor-arrow-reverse.selected:hover {
+    color: #ff8b4a;
+}
+
+.editor-theme-light button.image-editor-arrow-reverse.selected,
+.editor-theme-light button.image-editor-arrow-reverse.selected:hover {
+    color: #b84500;
+}
+
 popover.image-editor-subbar-popover > contents {
     margin-top: 6px;
     background: #0f0f0f;
@@ -211,6 +465,15 @@ popover.image-editor-subbar-popover > contents {
     background: #eef0f5;
     border-color: rgba(17, 24, 39, 0.14);
     color: rgba(29, 33, 41, 0.90);
+}
+
+popover.image-editor-stroke-popover > contents {
+    border: none;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.10);
+}
+
+.editor-theme-light popover.image-editor-stroke-popover > contents {
+    box-shadow: inset 0 0 0 1px rgba(17, 24, 39, 0.14);
 }
 
 .image-editor-subbar-menu {
@@ -376,28 +639,60 @@ entry.image-editor-subbar-entry {
     color: rgba(17, 24, 39, 0.88);
 }
 
-scale.image-editor-subbar-slider trough {
+.image-editor-effect-control {
+    padding: 6px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 9px;
+    background: #0f0f0f;
+}
+
+.editor-theme-light .image-editor-effect-control {
+    background: #eef0f5;
+    border-color: rgba(17, 24, 39, 0.14);
+}
+
+.image-editor-effect-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.editor-theme-light .image-editor-effect-value {
+    color: rgba(17, 24, 39, 0.82);
+}
+
+scale.image-editor-effect-slider trough {
     min-height: 4px;
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.16);
+    border: none;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.18);
 }
 
-scale.image-editor-subbar-slider highlight {
-    background: #ff670d;
-    border-radius: 2px;
+scale.image-editor-effect-slider highlight {
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.82);
 }
 
-scale.image-editor-subbar-slider slider {
+scale.image-editor-effect-slider slider {
     min-width: 14px;
     min-height: 14px;
+    border: 2px solid #0f0f0f;
     border-radius: 999px;
-    background: #ffffff;
-    border: none;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.40);
+    background: #ff8b4a;
+    box-shadow: none;
 }
 
-.editor-theme-light scale.image-editor-subbar-slider trough {
+.editor-theme-light scale.image-editor-effect-slider trough {
     background: rgba(17, 24, 39, 0.16);
+}
+
+.editor-theme-light scale.image-editor-effect-slider highlight {
+    background: rgba(17, 24, 39, 0.70);
+}
+
+.editor-theme-light scale.image-editor-effect-slider slider {
+    border-color: #eef0f5;
+    background: #dd5200;
 }
 
 /* ── History pill ──────────────────────────────────────────────────── */
@@ -1054,4 +1349,447 @@ button.image-editor-export:active {
 button.image-editor-export:disabled {
     background: rgba(255, 103, 13, 0.45);
     color: rgba(255, 255, 255, 0.70);
+}
+
+/* ── Tool groups below the Background card ─────────────────────────── */
+/*
+ * Export quality plus the Transform, Shadow, Style and Frame disclosures,
+ * metric for metric with the Linux Motion inspector
+ * (src/capture/editor/css/10-canvas-inspector.css and
+ * src/capture/editor/css/12-background-choices.css).
+ */
+
+.image-editor-hint {
+    color: rgba(255, 255, 255, 0.52);
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.editor-theme-light .image-editor-hint {
+    color: rgba(17, 24, 39, 0.58);
+}
+
+/* The disclosure header is a clickable box over the revealer, so its hover
+ * paints only the title, the way the Linux header does. */
+.image-editor-disclosure-header {
+    min-height: 24px;
+}
+
+.image-editor-disclosure-header:hover .image-editor-section-title {
+    color: rgba(255, 255, 255, 0.72);
+}
+
+.editor-theme-light .image-editor-disclosure-header:hover .image-editor-section-title {
+    color: rgba(17, 24, 39, 0.72);
+}
+
+.image-editor-disclosure-chevron {
+    min-width: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.editor-theme-light .image-editor-disclosure-chevron {
+    color: rgba(17, 24, 39, 0.5);
+}
+
+button.image-editor-inline-button {
+    min-height: 30px;
+    padding: 0 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.045);
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.85);
+    font-size: 11px;
+}
+
+button.image-editor-inline-button label {
+    color: inherit;
+    font-size: 11px;
+}
+
+button.image-editor-inline-button:hover {
+    background: rgba(255, 255, 255, 0.09);
+}
+
+button.image-editor-inline-button:disabled {
+    opacity: 0.35;
+}
+
+.editor-theme-light button.image-editor-inline-button {
+    border-color: rgba(17, 24, 39, 0.08);
+    background: rgba(17, 24, 39, 0.045);
+    color: rgba(17, 24, 39, 0.85);
+}
+
+.editor-theme-light button.image-editor-inline-button:hover {
+    background: rgba(17, 24, 39, 0.09);
+}
+
+/* Shadow falloff pills: one homogeneous row in the zoom-easing shape. */
+.image-editor-preset-row {
+    margin-top: 8px;
+}
+
+button.image-editor-preset-pill {
+    min-height: 28px;
+    padding: 0 6px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.62);
+}
+
+button.image-editor-preset-pill label {
+    color: inherit;
+    font-size: 12px;
+    font-weight: 500;
+}
+
+button.image-editor-preset-pill:hover {
+    background: rgba(255, 255, 255, 0.10);
+    color: rgba(255, 255, 255, 0.92);
+}
+
+button.image-editor-preset-pill:checked,
+button.image-editor-preset-pill:checked:hover {
+    background: rgba(255, 103, 13, 0.18);
+    color: #f0a07a;
+}
+
+button.image-editor-preset-pill:checked label,
+button.image-editor-preset-pill:checked:hover label {
+    color: #f0a07a;
+}
+
+.editor-theme-light button.image-editor-preset-pill {
+    background: rgba(17, 24, 39, 0.05);
+    color: rgba(17, 24, 39, 0.62);
+}
+
+.editor-theme-light button.image-editor-preset-pill:hover {
+    background: rgba(17, 24, 39, 0.08);
+    color: rgba(17, 24, 39, 0.88);
+}
+
+.editor-theme-light button.image-editor-preset-pill:checked,
+.editor-theme-light button.image-editor-preset-pill:checked:hover {
+    background: rgba(255, 103, 13, 0.18);
+    color: #ff670d;
+}
+
+.editor-theme-light button.image-editor-preset-pill:checked label,
+.editor-theme-light button.image-editor-preset-pill:checked:hover label {
+    color: #ff670d;
+}
+
+/* The pads paint every pixel of their squares, so only touch behaviour
+ * ships from CSS. */
+.image-editor-position-pad,
+.image-editor-light-pad {
+    background: transparent;
+}
+
+/* Frame picker: filled dimension pills and borderless tiles whose selection
+ * lives on the shape draw, never on the button chrome. */
+.image-editor-dim-row {
+    min-width: 0;
+}
+
+.image-editor-dim-pill {
+    min-width: 0;
+    min-height: 32px;
+    padding: 0 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border: none;
+    box-shadow: none;
+}
+
+.image-editor-dim-unit {
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.52);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+entry.image-editor-dim-entry,
+entry.image-editor-dim-entry:focus,
+entry.image-editor-dim-entry:hover,
+entry.image-editor-dim-entry:active,
+entry.image-editor-dim-entry:focus-visible {
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    background: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    outline: none;
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 12px;
+}
+
+entry.image-editor-dim-entry:disabled {
+    color: rgba(255, 255, 255, 0.38);
+}
+
+button.image-editor-frame-expand {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.8);
+    font-size: 14px;
+}
+
+button.image-editor-frame-expand:hover {
+    background: rgba(255, 255, 255, 0.11);
+    color: #ffffff;
+}
+
+.image-editor-frame-expanded {
+    min-width: 0;
+}
+
+.image-editor-frame-grid {
+    min-width: 0;
+}
+
+button.image-editor-frame-tile,
+button.image-editor-frame-tile:hover,
+button.image-editor-frame-tile:active,
+button.image-editor-frame-tile:focus,
+button.image-editor-frame-tile:focus-visible {
+    min-width: 0;
+    min-height: 0;
+    padding: 4px 2px;
+    background: transparent;
+    background-image: none;
+    border: none;
+    border-radius: 10px;
+    box-shadow: none;
+    outline: none;
+    outline-offset: 0;
+}
+
+button.image-editor-frame-tile:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.image-editor-frame-shape {
+    min-width: 0;
+    outline: none;
+}
+
+.image-editor-frame-tile-label {
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.image-editor-frame-sublabel {
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 10px;
+}
+
+.image-editor-frame-subheader {
+    min-width: 0;
+    color: rgba(255, 255, 255, 0.86);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.image-editor-frame-separator {
+    min-width: 0;
+    background: rgba(255, 255, 255, 0.10);
+    min-height: 1px;
+}
+
+.editor-theme-light .image-editor-dim-pill {
+    background: rgba(17, 24, 39, 0.08);
+}
+
+.editor-theme-light .image-editor-dim-unit {
+    color: rgba(17, 24, 39, 0.52);
+}
+
+.editor-theme-light entry.image-editor-dim-entry {
+    color: rgba(17, 24, 39, 0.9);
+}
+
+.editor-theme-light entry.image-editor-dim-entry:disabled {
+    color: rgba(17, 24, 39, 0.38);
+}
+
+.editor-theme-light button.image-editor-frame-expand {
+    background: rgba(17, 24, 39, 0.08);
+    color: rgba(17, 24, 39, 0.8);
+}
+
+.editor-theme-light button.image-editor-frame-expand:hover {
+    background: rgba(17, 24, 39, 0.11);
+    color: rgba(17, 24, 39, 0.96);
+}
+
+.editor-theme-light button.image-editor-frame-tile:hover {
+    background: rgba(17, 24, 39, 0.05);
+}
+
+.editor-theme-light .image-editor-frame-tile-label {
+    color: rgba(17, 24, 39, 0.78);
+}
+
+.editor-theme-light .image-editor-frame-sublabel {
+    color: rgba(17, 24, 39, 0.48);
+}
+
+.editor-theme-light .image-editor-frame-subheader {
+    color: rgba(17, 24, 39, 0.86);
+}
+
+.editor-theme-light .image-editor-frame-separator {
+    background: rgba(17, 24, 39, 0.10);
+}
+
+/* ── Motion mode ───────────────────────────────────────────────────── */
+
+/* The tool notch hugs the preview's right edge, midway to the timeline:
+ * one 40px icon button per Motion tool, active-tool carrying the same
+ * highlight the toolbar's active tool reads. */
+.editor-motion-tool-notch {
+    padding: 9px 7px;
+    background: #0f0f0f;
+    border-radius: 10px 0 0 10px;
+}
+
+button.image-editor-notch-button {
+    min-width: 40px;
+    min-height: 40px;
+    padding: 0;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.78);
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+button.image-editor-notch-button:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #ffffff;
+}
+
+button.image-editor-notch-button image {
+    filter: brightness(0) invert(0.96);
+}
+
+button.image-editor-notch-button.active-tool,
+button.image-editor-notch-button.active-tool:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #ffffff;
+}
+
+.editor-theme-light .editor-motion-tool-notch {
+    background: #eef0f5;
+}
+
+.editor-theme-light button.image-editor-notch-button {
+    color: rgba(17, 24, 39, 0.78);
+}
+
+.editor-theme-light button.image-editor-notch-button image {
+    filter: brightness(0);
+}
+
+.editor-theme-light button.image-editor-notch-button.active-tool,
+.editor-theme-light button.image-editor-notch-button.active-tool:hover {
+    background: rgba(17, 24, 39, 0.12);
+    color: #1d2129;
+}
+
+/* The labelled mode button in the top toolbar stack. */
+button.image-editor-mode-button {
+    min-height: 34px;
+    padding: 0 14px;
+    color: rgba(255, 255, 255, 0.86);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+button.image-editor-mode-button label {
+    color: inherit;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+button.image-editor-mode-button:hover {
+    color: #ffffff;
+}
+
+.editor-theme-light button.image-editor-mode-button {
+    color: rgba(17, 24, 39, 0.85);
+}
+
+.editor-theme-light button.image-editor-mode-button:hover {
+    color: #1d2129;
+}
+
+/* The dock reuses the shared recording-editor sheet; only its surface
+ * differs from the video editor's, matching the Linux Motion page. */
+.editor-root .image-editor-root .editor-motion-timeline-dock {
+    background: rgba(0, 0, 0, 0.25);
+}
+
+.editor-theme-light .image-editor-root .editor-motion-timeline-dock {
+    background: rgba(17, 24, 39, 0.04);
+}
+
+/* The transport buttons carry theme glyphs; the dock reuses the toolbar's
+ * image recolour so the symbolic artwork reads on both themes. */
+button.recording-editor-timeline-icon,
+button.recording-editor-timeline-play {
+    min-width: 22px;
+    min-height: 22px;
+    padding: 0;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.62);
+}
+
+button.recording-editor-timeline-icon:hover,
+button.recording-editor-timeline-play:hover {
+    color: rgba(255, 255, 255, 0.94);
+}
+
+button.recording-editor-timeline-icon:disabled,
+button.recording-editor-timeline-play:disabled {
+    color: rgba(255, 255, 255, 0.32);
+}
+
+button.recording-editor-timeline-icon image,
+button.recording-editor-timeline-play image,
+button.recording-editor-timeline-tool image {
+    filter: brightness(0) invert(0.9);
+}
+
+.editor-theme-light button.recording-editor-timeline-icon image,
+.editor-theme-light button.recording-editor-timeline-play image,
+.editor-theme-light button.recording-editor-timeline-tool image {
+    filter: brightness(0);
 }

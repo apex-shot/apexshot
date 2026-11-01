@@ -2,17 +2,29 @@
 //!
 //! This module owns the editor's window chrome, the display canvas, the
 //! floating tool bar and the inspector frame. The annotation model, its
-//! rendering and export follow their own slices; until then the tools take
-//! selection state and the inspector names what each one will do.
+//! rendering and export live in the annotation controller and shared editor
+//! core; the Appearance and Motion shells remain separate from that document.
 
 use gtk4::prelude::*;
 use gtk4::Application;
 use std::ffi::OsString;
 use std::path::PathBuf;
 
+mod annotate;
+mod arrow_control;
 mod canvas;
+mod color_control;
+mod custom_color;
+mod effect_control;
+mod effect_mode;
 mod inspector;
+mod motion;
+mod number_control;
+mod picker_placement;
+mod sections;
+mod stroke_control;
 mod sub_bar;
+mod timeline;
 mod toolbar;
 mod ui_support;
 mod window;

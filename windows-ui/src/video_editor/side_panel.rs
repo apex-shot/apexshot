@@ -3494,17 +3494,17 @@ impl FilledSlider {
         self.area.clone()
     }
 
-    fn set_value(&self, value: f64) {
+    pub(crate) fn set_value(&self, value: f64) {
         self.value.set(value.clamp(self.min, self.max));
         self.area.queue_draw();
     }
 
-    fn with_suffix(mut self, suffix: &'static str) -> Self {
+    pub(crate) fn with_suffix(mut self, suffix: &'static str) -> Self {
         self.suffix = suffix;
         self
     }
 
-    fn on_change(&self, callback: Rc<dyn Fn(f64)>) {
+    pub(crate) fn on_change(&self, callback: Rc<dyn Fn(f64)>) {
         *self.on_change.borrow_mut() = Some(callback);
     }
 

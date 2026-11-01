@@ -21,6 +21,9 @@ const IMAGE_EDITOR_CSS: &str = include_str!("image_editor.css");
 
 pub(super) fn install_css() {
     crate::settings::install_window_css();
+    // The Motion timeline reuses the shared recording editor stylesheet for
+    // its dock, card and lane chrome.
+    crate::video_editor::ui_support::install_recording_editor_css();
 
     let Some(display) = gdk::Display::default() else {
         return;
@@ -35,6 +38,11 @@ pub(super) fn install_css() {
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
     );
+}
+
+/// An empty overlay that hosts the editor's mode pages and overlays.
+pub(super) fn editor_overlay() -> gtk4::Overlay {
+    gtk4::Overlay::new()
 }
 
 /// Scale a logical size to device pixels.

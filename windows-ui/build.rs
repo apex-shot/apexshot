@@ -28,6 +28,8 @@ fn main() {
             // The Appearance panel's Image tab trails the Linux chooser's
             // folder affordance.
             "folder-open-regular",
+            // The Motion notch borrows the watermark tab's photo glyph.
+            "image-regular",
         ],
     );
 }
