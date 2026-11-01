@@ -2,14 +2,14 @@
 //!
 //! The session is a Windows port of the Linux editor's annotation document:
 //! same fields, same mutation semantics, same history model. The pieces the
-//! Linux editor hangs off the Appearance/Motion backends (background
-//! composition, transforms, motion history) are out of scope here — canvas
-//! bounds are the plain image bounds — while every annotation behaviour is
-//! shared verbatim or ported faithfully.
+//! Linux editor hangs off the Appearance/Motion backends (transforms and motion
+//! history) remain out of scope here, while background composition and
+//! annotation behaviour are shared or ported from the Linux editor.
 
 #[path = "../../../../../src/capture/editor/state/arrow.rs"]
 #[rustfmt::skip]
 mod arrow;
+pub(crate) mod background;
 mod crop;
 pub(crate) use crop::{crop_handle_at, point_in_rect};
 #[path = "../../../../../src/capture/editor/state/drag_draw.rs"]
@@ -44,6 +44,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 pub struct EditorState {
+    pub(crate) background: background::Appearance,
     pub source_upscale: super::upscale::SourceUpscale,
     pub(crate) export_scale: f64,
     pub base_image: Arc<RgbaImage>,
@@ -269,6 +270,7 @@ impl EditorState {
     pub fn new(base_image: RgbaImage) -> Self {
         let base_image = Arc::new(base_image);
         Self {
+            background: background::Appearance::default(),
             source_upscale: Default::default(),
             export_scale: 1.0,
             working_image: Arc::clone(&base_image),

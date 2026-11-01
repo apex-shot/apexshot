@@ -108,12 +108,12 @@ pub(super) fn effective_padding(padding: f64) -> f64 {
 /// A fill the panel paints itself, drawn over the whole canvas. The Custom tab
 /// owns the color and gradient model, so it hands the stage a painter instead of
 /// its state: the stage needs pixels, not a fill type.
-pub(super) type FillPainter = Rc<dyn Fn(&Context, i32, i32)>;
+pub(crate) type FillPainter = Rc<dyn Fn(&Context, i32, i32)>;
 
 /// The fill chosen in the Background panel. Shared by the panel, which sets
 /// it, and the stage, which paints it behind the video.
 #[derive(Clone)]
-pub(super) struct Background {
+pub(crate) struct Background {
     selection: Rc<RefCell<Option<String>>>,
     custom_fill: Rc<RefCell<Option<FillPainter>>>,
     padding: Rc<Cell<f64>>,
@@ -213,7 +213,7 @@ impl Background {
 /// Read-only view of the fill, its padding, and the video card's corner
 /// radius, shared with the stage.
 #[derive(Clone)]
-pub(super) struct BackgroundState {
+pub(crate) struct BackgroundState {
     selection: Rc<RefCell<Option<String>>>,
     custom_fill: Rc<RefCell<Option<FillPainter>>>,
     padding: Rc<Cell<f64>>,
@@ -248,7 +248,7 @@ impl BackgroundState {
 
 /// Where the shared background images live: the repository during
 /// development, then the installed copies next to the executable.
-fn asset_directory() -> Option<PathBuf> {
+pub(crate) fn asset_directory() -> Option<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Some(assets) = std::env::var_os("APEXSHOT_ASSETS") {
         roots.push(PathBuf::from(assets).join("background-images"));

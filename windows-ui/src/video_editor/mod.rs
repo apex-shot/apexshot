@@ -6,7 +6,7 @@
 
 use gtk4::prelude::*;
 use gtk4::Application;
-mod background;
+pub(crate) mod background;
 mod cursor;
 pub(crate) mod custom_fill;
 mod cutout;

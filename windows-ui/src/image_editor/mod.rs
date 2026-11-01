@@ -3,7 +3,8 @@
 //! This module owns the editor's window chrome, the display canvas, the
 //! floating tool bar and the inspector frame. The annotation model, its
 //! rendering and export live in the annotation controller and shared editor
-//! core; the Appearance and Motion shells remain separate from that document.
+//! core; the remaining Appearance tools and Motion shell are separate from
+//! that document.
 
 use gtk4::prelude::*;
 use gtk4::Application;

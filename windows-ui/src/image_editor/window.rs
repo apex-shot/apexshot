@@ -67,7 +67,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         &canvas.host,
     ));
     canvas.root.add_overlay(&effect_control.root);
-    let inspector = Rc::new(inspector::build(scale));
+    let inspector = Rc::new(inspector::build(scale, &canvas.host, &window));
     let motion = Rc::new(motion::build(scale, dark, inspector.clone()));
     let sub_bars = Rc::new(super::sub_bar::build(
         scale,
@@ -103,6 +103,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             let toolbar = toolbar.clone();
             let canvas = canvas.clone();
             let effect_control = effect_control.clone();
+            let inspector = inspector.clone();
             Rc::new(move || {
                 // View math follows the document so crop/undo re-fit and
                 // hit-testing tracks the real pixels.
@@ -119,8 +120,9 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                     delete.set_sensitive(st.selected_action_index.is_some());
                 });
                 let has_doc = host.has_document();
-                copy.set_sensitive(has_doc);
-                export.set_sensitive(has_doc);
+                inspector.sync_background();
+                copy.set_sensitive(has_doc && !host.background_loading());
+                export.set_sensitive(has_doc && !host.background_loading());
             })
         };
         canvas.add_change_listener(sync_all.clone());
@@ -316,7 +318,7 @@ fn build_utility_strip(window: &ApplicationWindow, scale: f64) -> GtkBox {
 /// Save As through the platform dialog; the filter set is the formats the
 /// encoder writes (PNG, JPEG, WebP). The dialog handles overwrite prompts.
 fn save_as_dialog(window: &ApplicationWindow, host: &Rc<super::annotate::EditorHost>) {
-    if !host.has_document() {
+    if !host.has_document() || host.background_loading() {
         return;
     }
     let dialog = gtk4::FileDialog::new();

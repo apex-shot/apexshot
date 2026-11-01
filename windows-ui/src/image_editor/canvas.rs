@@ -51,6 +51,12 @@ struct ImageState {
     pixbuf: Option<Pixbuf>,
     width: i32,
     height: i32,
+    canvas_width: i32,
+    canvas_height: i32,
+    image_x: f64,
+    image_y: f64,
+    has_background: bool,
+    frame_aspect: Option<crate::capture::editor::state::background::FrameRatio>,
     /// `None` keeps the image fitted while the window resizes.
     manual_zoom: Option<f64>,
     pan: (f64, f64),
@@ -63,6 +69,12 @@ impl Default for ImageState {
             pixbuf: None,
             width: 0,
             height: 0,
+            canvas_width: 0,
+            canvas_height: 0,
+            image_x: 0.0,
+            image_y: 0.0,
+            has_background: false,
+            frame_aspect: None,
             manual_zoom: None,
             pan: (0.0, 0.0),
             saved_crop_view: None,
@@ -399,7 +411,14 @@ impl Canvas {
                 let (_, _, width, height) =
                     content_rect(&self.area, self.scale, self.docked_inset.get(), false);
                 let zoom = effective_zoom(&state, width, height, false);
-                state.pan = clamp_pan(saved.pan, state.width, state.height, zoom, width, height);
+                state.pan = clamp_pan(
+                    saved.pan,
+                    state.canvas_width,
+                    state.canvas_height,
+                    zoom,
+                    width,
+                    height,
+                );
             }
         }
         drop(state);
@@ -431,8 +450,8 @@ impl Canvas {
         let current = effective_zoom(&state, avail_width, avail_height, crop_mode);
         let min_zoom = if crop_mode {
             MIN_ZOOM.min(crop_fit_zoom(
-                state.width,
-                state.height,
+                state.canvas_width,
+                state.canvas_height,
                 avail_width,
                 avail_height,
             ))
@@ -443,8 +462,8 @@ impl Canvas {
         state.manual_zoom = Some(zoom);
         state.pan = clamp_pan(
             state.pan,
-            state.width,
-            state.height,
+            state.canvas_width,
+            state.canvas_height,
             zoom,
             avail_width,
             avail_height,
@@ -476,6 +495,12 @@ impl Canvas {
             state.pixbuf = Some(pixbuf);
             state.width = decoded.width;
             state.height = decoded.height;
+            state.canvas_width = decoded.width;
+            state.canvas_height = decoded.height;
+            state.image_x = 0.0;
+            state.image_y = 0.0;
+            state.has_background = false;
+            state.frame_aspect = None;
             state.manual_zoom = None;
             state.pan = (0.0, 0.0);
             state.saved_crop_view = None;
@@ -608,20 +633,37 @@ impl Canvas {
     /// and undo can't leave painting/hit-testing pointed at stale
     /// dimensions; a real size change drops manual zoom back to fit.
     pub(super) fn sync_view_to_document(&self) {
-        let Some((w, h)) = self
-            .host
-            .read(|st| (st.working_image.width(), st.working_image.height()))
-        else {
+        let Some((w, h, layout, has_background, frame_aspect)) = self.host.read(|st| {
+            let (w, h) = st.working_image.dimensions();
+            (
+                w,
+                h,
+                st.background.layout(w, h),
+                st.background.has_fill() || st.background.frame_aspect.is_some(),
+                st.background.frame_aspect,
+            )
+        }) else {
             return;
         };
         let mut state = self.state.borrow_mut();
-        if state.width == w as i32 && state.height == h as i32 {
-            return;
+        if state.width != w as i32 || state.height != h as i32 {
+            state.width = w as i32;
+            state.height = h as i32;
+            state.manual_zoom = None;
+            state.pan = (0.0, 0.0);
         }
-        state.width = w as i32;
-        state.height = h as i32;
-        state.manual_zoom = None;
-        state.pan = (0.0, 0.0);
+        if state.frame_aspect != frame_aspect
+            || (state.has_background != has_background && frame_aspect.is_some())
+        {
+            state.manual_zoom = None;
+            state.pan = (0.0, 0.0);
+            state.frame_aspect = frame_aspect;
+        }
+        state.canvas_width = layout.width.ceil() as i32;
+        state.canvas_height = layout.height.ceil() as i32;
+        state.image_x = layout.image_x;
+        state.image_y = layout.image_y;
+        state.has_background = has_background;
         drop(state);
         self.area.queue_draw();
     }
@@ -643,19 +685,29 @@ impl Canvas {
             self.crop_mode.get(),
         );
         let zoom = effective_zoom(&state, avail_width, avail_height, self.crop_mode.get());
-        let draw_width = f64::from(state.width) * zoom;
-        let draw_height = f64::from(state.height) * zoom;
+        let draw_width = f64::from(state.canvas_width) * zoom;
+        let draw_height = f64::from(state.canvas_height) * zoom;
+        let canvas_x = left + (avail_width - draw_width) / 2.0 + state.pan.0;
+        let canvas_y = image_y(
+            top,
+            avail_height,
+            f64::from(self.area.height()),
+            self.scale,
+            self.crop_mode.get(),
+            draw_height,
+        ) + state.pan.1;
         ViewTransform {
             scale: zoom,
-            offset_x: left + (avail_width - draw_width) / 2.0 + state.pan.0,
-            offset_y: image_y(
-                top,
-                avail_height,
-                f64::from(self.area.height()),
-                self.scale,
-                self.crop_mode.get(),
-                draw_height,
-            ) + state.pan.1,
+            offset_x: canvas_x + state.image_x * zoom,
+            offset_y: canvas_y + state.image_y * zoom,
+            has_background: state.has_background,
+            canvas_offset_x: canvas_x,
+            canvas_offset_y: canvas_y,
+            canvas_scale: zoom,
+            canvas_width: f64::from(state.canvas_width),
+            canvas_height: f64::from(state.canvas_height),
+            image_rect_x: state.image_x,
+            image_rect_y: state.image_y,
             ..ViewTransform::for_image(f64::from(state.width), f64::from(state.height))
         }
     }
@@ -678,8 +730,8 @@ impl Canvas {
                     effective_zoom(&state, avail_width, avail_height, canvas.crop_mode.get());
                 state.pan = clamp_pan(
                     (px, py),
-                    state.width,
-                    state.height,
+                    state.canvas_width,
+                    state.canvas_height,
                     zoom,
                     avail_width,
                     avail_height,
@@ -956,7 +1008,12 @@ fn crop_fit_zoom(image_width: i32, image_height: i32, avail_width: f64, avail_he
 }
 
 fn effective_zoom(state: &ImageState, avail_width: f64, avail_height: f64, crop_mode: bool) -> f64 {
-    let crop_fit = crop_fit_zoom(state.width, state.height, avail_width, avail_height);
+    let crop_fit = crop_fit_zoom(
+        state.canvas_width,
+        state.canvas_height,
+        avail_width,
+        avail_height,
+    );
     match state.manual_zoom {
         Some(zoom) => zoom.clamp(
             if crop_mode {
@@ -967,7 +1024,12 @@ fn effective_zoom(state: &ImageState, avail_width: f64, avail_height: f64, crop_
             MAX_ZOOM,
         ),
         None if crop_mode => crop_fit,
-        None => fit_zoom(state.width, state.height, avail_width, avail_height),
+        None => fit_zoom(
+            state.canvas_width,
+            state.canvas_height,
+            avail_width,
+            avail_height,
+        ),
     }
 }
 
@@ -1016,8 +1078,8 @@ fn paint(
 
     let pixbuf = state.pixbuf.as_ref()?;
     let zoom = effective_zoom(state, avail_width, avail_height, crop_mode);
-    let draw_width = f64::from(state.width) * zoom;
-    let draw_height = f64::from(state.height) * zoom;
+    let draw_width = f64::from(state.canvas_width) * zoom;
+    let draw_height = f64::from(state.canvas_height) * zoom;
     let x = left + (avail_width - draw_width) / 2.0 + state.pan.0;
     let y = image_y(
         top,
@@ -1031,8 +1093,16 @@ fn paint(
     if host.has_document() {
         let transform = crate::capture::editor::types::ViewTransform {
             scale: zoom,
-            offset_x: x,
-            offset_y: y,
+            offset_x: x + state.image_x * zoom,
+            offset_y: y + state.image_y * zoom,
+            has_background: state.has_background,
+            canvas_offset_x: x,
+            canvas_offset_y: y,
+            canvas_scale: zoom,
+            canvas_width: f64::from(state.canvas_width),
+            canvas_height: f64::from(state.canvas_height),
+            image_rect_x: state.image_x,
+            image_rect_y: state.image_y,
             ..crate::capture::editor::types::ViewTransform::for_image(
                 f64::from(state.width),
                 f64::from(state.height),
@@ -1212,6 +1282,8 @@ mod tests {
                 let mut st = canvas.state.borrow_mut();
                 st.width = 1000;
                 st.height = 800;
+                st.canvas_width = 1000;
+                st.canvas_height = 800;
                 st.manual_zoom = Some(1.0);
                 st.pan = (10.0, 20.0);
             }
@@ -1237,6 +1309,40 @@ mod tests {
             assert_eq!(st.pan, (0.0, 0.0));
         }) else {
             eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn changing_frame_ratio_refits_without_resetting_on_padding_changes() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            use crate::capture::editor::state::background::Fill;
+            use crate::capture::editor::state::EditorState;
+            use image::{Rgba, RgbaImage};
+            use std::sync::Arc;
+            let canvas = super::build(1.0, true);
+            let mut document = EditorState::new(RgbaImage::new(1000, 500));
+            document.background.fill =
+                Fill::Image(Arc::new(RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 255]))));
+            *canvas.host.editor.borrow_mut() = Some(document);
+            canvas.sync_view_to_document();
+            canvas.state.borrow_mut().manual_zoom = Some(0.68);
+            canvas.host.mutate(|st| st.background.padding = 10.0);
+            canvas.sync_view_to_document();
+            assert_eq!(canvas.state.borrow().manual_zoom, Some(0.68));
+            canvas.host.mutate(|st| {
+                st.background.frame_aspect = Some(
+                    crate::capture::editor::state::background::FrameRatio::new(10, 21),
+                )
+            });
+            canvas.sync_view_to_document();
+            let state = canvas.state.borrow();
+            assert_eq!(state.manual_zoom, None);
+            assert_eq!(state.pan, (0.0, 0.0));
+            assert!(state.canvas_height > state.canvas_width);
+            let zoom = super::effective_zoom(&state, 1000.0, 600.0, false);
+            assert!(f64::from(state.canvas_height) * zoom <= 600.0 + 1e-6);
+        }) else {
             return;
         };
     }

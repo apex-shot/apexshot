@@ -31,7 +31,7 @@ enum FillValue {
     Gradient(CustomGradient),
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum GradientKind {
     Linear,
     Radial,
@@ -84,12 +84,12 @@ impl CustomGradient {
     }
 }
 
-pub(super) struct CustomFillPage {
+pub(crate) struct CustomFillPage {
     pub widget: GtkBox,
     pub clear: Rc<dyn Fn()>,
 }
 
-pub(super) fn build_custom_page(
+pub(crate) fn build_custom_page(
     scale: f64,
     column: &GtkBox,
     background: &Background,
@@ -551,6 +551,7 @@ fn build_gradient_page(
 
     let type_popover = Popover::new();
     type_popover.add_css_class("recording-editor-dropdown-popover");
+    type_popover.add_css_class("gradient-type-menu");
     type_popover.set_has_arrow(false);
     type_popover.set_position(PositionType::Bottom);
     type_popover.set_size_request((104.0 * scale).round() as i32, -1);
@@ -563,11 +564,16 @@ fn build_gradient_page(
         (GradientKind::Angular, t("Angular")),
         (GradientKind::Diamond, t("Diamond")),
     ];
+    let kind_items = Rc::new(RefCell::new(Vec::new()));
     for (kind, label) in kinds {
-        let item = Button::with_label(&label);
+        let item = Button::new();
         item.add_css_class("recording-editor-dropdown-item");
         item.set_has_frame(false);
         item.set_halign(Align::Fill);
+        let text = Label::new(Some(&label));
+        text.set_xalign(0.0);
+        text.set_hexpand(true);
+        item.set_child(Some(&text));
         let state = state.clone();
         let notify = notify.clone();
         let type_label = type_label.clone();
@@ -582,6 +588,7 @@ fn build_gradient_page(
             type_popover.popdown();
             notify();
         });
+        kind_items.borrow_mut().push((kind, item.clone()));
         type_list.append(&item);
     }
     type_popover.set_child(Some(&type_list));
@@ -619,6 +626,8 @@ fn build_gradient_page(
     let stops = GtkBox::new(Orientation::Vertical, 4);
     stops.add_css_class("recording-editor-gradient-steps");
     stops.set_hexpand(true);
+    let stop_rows: Rc<RefCell<Vec<(DrawingArea, Entry)>>> = Rc::new(RefCell::new(Vec::new()));
+    let stop_pickers: Rc<RefCell<Vec<Popover>>> = Rc::new(RefCell::new(Vec::new()));
 
     let refresh_ramp = {
         let state = state.clone();
@@ -652,8 +661,15 @@ fn build_gradient_page(
         let selected = selected.clone();
         let card_body = card_body.clone();
         let rebuild_slot = rebuild_slot.clone();
+        let stop_rows = stop_rows.clone();
+        let stop_pickers = stop_pickers.clone();
         let scale = scale;
         Rc::new(move || {
+            for picker in stop_pickers.borrow_mut().drain(..) {
+                picker.popdown();
+                picker.unparent();
+            }
+            stop_rows.borrow_mut().clear();
             while let Some(child) = stops.first_child() {
                 stops.remove(&child);
             }
@@ -718,6 +734,7 @@ fn build_gradient_page(
                     let state = state.clone();
                     let notify = notify.clone();
                     let rebuild_slot = rebuild_slot.clone();
+                    let selected = selected.clone();
                     move |_| {
                         {
                             let mut guard = state.borrow_mut();
@@ -726,6 +743,12 @@ fn build_gradient_page(
                                 return;
                             }
                             gradient.stops.remove(index);
+                            let current = selected.get();
+                            if index < current {
+                                selected.set(current - 1);
+                            } else if index == current {
+                                selected.set(current.min(gradient.stops.len() - 1));
+                            }
                             *guard = FillValue::Gradient(gradient.normalized());
                         }
                         if let Some(rebuild) = rebuild_slot.borrow().clone() {
@@ -739,6 +762,8 @@ fn build_gradient_page(
 
                 let stop_picker =
                     build_stop_picker(&card_body, state.clone(), index, notify.clone(), scale);
+                stop_pickers.borrow_mut().push(stop_picker.clone());
+                stop_rows.borrow_mut().push((chip, hex.clone()));
                 swatch.connect_clicked({
                     let stop_picker = stop_picker.clone();
                     let selected = selected.clone();
@@ -817,14 +842,26 @@ fn build_gradient_page(
     flip.connect_clicked({
         let state = state.clone();
         let notify = notify.clone();
+        let selected = selected.clone();
+        let rebuild_slot = rebuild_slot.clone();
         move |_| {
             let mut guard = state.borrow_mut();
             let mut gradient = ensure_gradient(&mut guard);
             for stop in &mut gradient.stops {
                 stop.position = 1.0 - stop.position;
             }
+            selected.set(
+                gradient
+                    .stops
+                    .len()
+                    .saturating_sub(1)
+                    .saturating_sub(selected.get()),
+            );
             *guard = FillValue::Gradient(gradient.normalized());
             drop(guard);
+            if let Some(rebuild) = rebuild_slot.borrow().clone() {
+                rebuild();
+            }
             notify();
         }
     });
@@ -848,7 +885,33 @@ fn build_gradient_page(
 
     let repaint = {
         let refresh_ramp = refresh_ramp.clone();
-        Rc::new(move || refresh_ramp()) as Rc<dyn Fn()>
+        let state = state.clone();
+        let rebuild = rebuild.clone();
+        Rc::new(move || {
+            let gradient = current_gradient(&state);
+            if stop_rows.borrow().len() != gradient.stops.len() {
+                rebuild();
+            }
+            type_label.set_text(&gradient_kind_label(gradient.kind));
+            rotate.set_sensitive(matches!(
+                gradient.kind,
+                GradientKind::Linear | GradientKind::Angular
+            ));
+            for (kind, item) in kind_items.borrow().iter() {
+                if *kind == gradient.kind {
+                    item.add_css_class("selected");
+                } else {
+                    item.remove_css_class("selected");
+                }
+            }
+            for ((chip, hex), stop) in stop_rows.borrow().iter().zip(&gradient.stops) {
+                chip.queue_draw();
+                if !hex.has_focus() {
+                    hex.set_text(&hex_string(stop.color));
+                }
+            }
+            refresh_ramp();
+        }) as Rc<dyn Fn()>
     };
     GradientView { widget, repaint }
 }
@@ -1123,6 +1186,15 @@ fn connect_hex_entry(
     index: usize,
     notify: Rc<dyn Fn()>,
 ) {
+    let current = {
+        let state = state.clone();
+        Rc::new(move || {
+            current_gradient(&state)
+                .stops
+                .get(index)
+                .map_or((255, 255, 255), |stop| stop.color)
+        })
+    };
     let apply = Rc::new(move |text: &str| {
         let Some(color) = parse_hex(text) else {
             return;
@@ -1138,11 +1210,16 @@ fn connect_hex_entry(
     });
     entry.connect_activate({
         let apply = apply.clone();
-        move |entry| apply(&entry.text())
+        let current = current.clone();
+        move |entry| {
+            apply(&entry.text());
+            entry.set_text(&hex_string(current()));
+        }
     });
     let focus = EventControllerFocus::new();
     focus.connect_leave({
         let apply = apply.clone();
+        let current = current.clone();
         move |controller| {
             let Some(entry) = controller
                 .widget()
@@ -1151,6 +1228,7 @@ fn connect_hex_entry(
                 return;
             };
             apply(&entry.text());
+            entry.set_text(&hex_string(current()));
         }
     });
     entry.add_controller(focus);
@@ -1158,13 +1236,17 @@ fn connect_hex_entry(
 
 fn sample_gradient_color(gradient: &CustomGradient, position: f64) -> Color {
     let gradient = gradient.normalized();
-    let Some(first) = gradient.stops.first() else {
+    sample_gradient_stops(&gradient.stops, position)
+}
+
+fn sample_gradient_stops(stops: &[GradientStop], position: f64) -> Color {
+    let Some(first) = stops.first() else {
         return (255, 255, 255);
     };
     if position <= first.position {
         return first.color;
     }
-    for pair in gradient.stops.windows(2) {
+    for pair in stops.windows(2) {
         if position <= pair[1].position {
             let span = (pair[1].position - pair[0].position).max(1e-9);
             let amount = ((position - pair[0].position) / span).clamp(0.0, 1.0);
@@ -1181,10 +1263,7 @@ fn sample_gradient_color(gradient: &CustomGradient, position: f64) -> Color {
             );
         }
     }
-    gradient
-        .stops
-        .last()
-        .map_or((255, 255, 255), |stop| stop.color)
+    stops.last().map_or((255, 255, 255), |stop| stop.color)
 }
 
 fn draw_stop_bar(
@@ -1200,12 +1279,23 @@ fn draw_stop_bar(
     }
     let track_height = (14.0 * scale).min(height);
     let track_top = (height - track_height) * 0.5;
-    let mut flat = gradient.clone();
-    flat.kind = GradientKind::Linear;
-    flat.angle = 0.0;
     context.save().ok();
     context.translate(0.0, track_top);
-    draw_gradient(context, width, track_height, &flat, track_height * 0.5);
+    rounded_rect(context, 0.0, 0.0, width, track_height, track_height * 0.5);
+    context.clip();
+    let pattern = LinearGradient::new(
+        gradient_pin_x(0.0, width, scale),
+        0.0,
+        gradient_pin_x(1.0, width, scale),
+        0.0,
+    );
+    pattern.set_extend(gtk4::cairo::Extend::Pad);
+    for stop in &gradient.normalized().stops {
+        let (r, g, b) = stop_color(stop.color);
+        pattern.add_color_stop_rgb(stop.position, r, g, b);
+    }
+    context.set_source(&pattern).ok();
+    context.paint().ok();
     context.restore().ok();
 
     for (index, stop) in gradient.normalized().stops.iter().enumerate() {
@@ -1426,7 +1516,7 @@ fn draw_gradient(
     gradient: &CustomGradient,
     radius: f64,
 ) {
-    if width < 2.0 || height < 2.0 {
+    if width <= 0.0 || height <= 0.0 {
         return;
     }
     let gradient = gradient.normalized();
@@ -1435,33 +1525,78 @@ fn draw_gradient(
     context.clip();
     let start_end = gradient_endpoints(width, height, gradient.angle);
     match gradient.kind {
-        GradientKind::Radial | GradientKind::Diamond => {
+        GradientKind::Radial => {
             let pattern = RadialGradient::new(
                 width * 0.5,
                 height * 0.5,
                 0.0,
                 width * 0.5,
                 height * 0.5,
-                width.max(height) * 0.65,
+                (width * 0.5).hypot(height * 0.5),
             );
+            pattern.set_extend(gtk4::cairo::Extend::Pad);
             for stop in &gradient.stops {
                 let color = stop_color(stop.color);
                 pattern.add_color_stop_rgb(stop.position, color.0, color.1, color.2);
             }
             context.set_source(&pattern).ok();
         }
-        GradientKind::Linear | GradientKind::Angular => {
+        GradientKind::Linear => {
             let pattern = LinearGradient::new(start_end.0, start_end.1, start_end.2, start_end.3);
+            pattern.set_extend(gtk4::cairo::Extend::Pad);
             for stop in &gradient.stops {
                 let color = stop_color(stop.color);
                 pattern.add_color_stop_rgb(stop.position, color.0, color.1, color.2);
             }
             context.set_source(&pattern).ok();
+        }
+        GradientKind::Angular | GradientKind::Diamond => {
+            let Some(surface) = raster_gradient(width as i32, height as i32, &gradient) else {
+                context.restore().ok();
+                return;
+            };
+            context.set_source_surface(&surface, 0.0, 0.0).ok();
         }
     }
     context.rectangle(0.0, 0.0, width, height);
     context.fill().ok();
     context.restore().ok();
+}
+
+fn raster_gradient(
+    width: i32,
+    height: i32,
+    gradient: &CustomGradient,
+) -> Option<gtk4::cairo::ImageSurface> {
+    let mut surface =
+        gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, width.max(1), height.max(1))
+            .ok()?;
+    let stride = surface.stride() as usize;
+    let (cx, cy) = (f64::from(width) * 0.5, f64::from(height) * 0.5);
+    {
+        let mut data = surface.data().ok()?;
+        for y in 0..height as usize {
+            for x in 0..width as usize {
+                let dx = x as f64 + 0.5 - cx;
+                let dy = y as f64 + 0.5 - cy;
+                let position = match gradient.kind {
+                    GradientKind::Angular => {
+                        (dy.atan2(dx) - gradient.angle.to_radians()).rem_euclid(TAU) / TAU
+                    }
+                    GradientKind::Diamond => (dx.abs() / cx).max(dy.abs() / cy).min(1.0),
+                    _ => return None,
+                };
+                let (r, g, b) = sample_gradient_stops(&gradient.stops, position);
+                let pixel =
+                    (0xff00_0000 | (u32::from(r) << 16) | (u32::from(g) << 8) | u32::from(b))
+                        .to_ne_bytes();
+                let offset = y * stride + x * 4;
+                data[offset..offset + 4].copy_from_slice(&pixel);
+            }
+        }
+    }
+    surface.mark_dirty();
+    Some(surface)
 }
 
 fn gradient_endpoints(width: f64, height: f64, angle: f64) -> (f64, f64, f64, f64) {
@@ -1766,7 +1901,7 @@ fn parse_hex(text: &str) -> Option<Color> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hex_string, parse_hex, CustomGradient, FillValue};
+    use super::{hex_string, parse_hex, CustomGradient, FillValue, GradientKind, GradientStop};
 
     #[test]
     fn hex_colors_round_trip() {
@@ -1791,5 +1926,272 @@ mod tests {
         let normalized = gradient.normalized();
         assert_eq!(normalized.stops[0].position, 0.0);
         assert_eq!(normalized.stops[1].position, 1.0);
+    }
+
+    fn rendered_gradient(kind: GradientKind, angle: f64) -> image::RgbaImage {
+        let gradient = CustomGradient {
+            kind,
+            angle,
+            stops: vec![
+                GradientStop {
+                    position: 0.0,
+                    color: (0, 0, 0),
+                },
+                GradientStop {
+                    position: 1.0,
+                    color: (255, 255, 255),
+                },
+            ],
+        };
+        let mut surface =
+            gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 65, 65).unwrap();
+        {
+            let context = gtk4::cairo::Context::new(&surface).unwrap();
+            super::draw_gradient(&context, 65.0, 65.0, &gradient, 0.0);
+        }
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        crate::capture::editor::render::cairo_argb_to_rgba_image(65, 65, stride, &data)
+    }
+
+    #[test]
+    fn gradient_kinds_render_distinct_geometry_and_rotate() {
+        let linear = rendered_gradient(GradientKind::Linear, 0.0);
+        let vertical = rendered_gradient(GradientKind::Linear, 90.0);
+        assert!(linear.get_pixel(60, 32)[0] > linear.get_pixel(4, 32)[0] + 150);
+        assert!(vertical.get_pixel(32, 60)[0] > vertical.get_pixel(32, 4)[0] + 150);
+
+        let radial = rendered_gradient(GradientKind::Radial, 0.0);
+        let diamond = rendered_gradient(GradientKind::Diamond, 0.0);
+        assert!(radial.get_pixel(32, 32)[0] < 10);
+        assert!(radial.get_pixel(0, 0)[0] > 240);
+        assert!(diamond.get_pixel(0, 32)[0] > radial.get_pixel(0, 32)[0] + 40);
+        assert!(
+            (i16::from(diamond.get_pixel(16, 16)[0]) - i16::from(diamond.get_pixel(16, 32)[0]))
+                .abs()
+                <= 2
+        );
+        assert!(radial.get_pixel(16, 16)[0] > radial.get_pixel(16, 32)[0] + 30);
+
+        let angular = rendered_gradient(GradientKind::Angular, 0.0);
+        assert!(angular.get_pixel(60, 32)[0] < 10);
+        assert!((60..=68).contains(&angular.get_pixel(32, 60)[0]));
+        assert!((124..=132).contains(&angular.get_pixel(4, 32)[0]));
+        let rotated = rendered_gradient(GradientKind::Angular, 90.0);
+        assert!(rotated.get_pixel(32, 60)[0] < 10);
+        assert!((187..=195).contains(&rotated.get_pixel(60, 32)[0]));
+    }
+
+    #[test]
+    fn gradient_preview_and_export_use_the_same_fill() {
+        use crate::capture::editor::state::{background::Fill, EditorState};
+        use image::{Rgba, RgbaImage};
+        use std::rc::Rc;
+
+        for kind in [
+            GradientKind::Linear,
+            GradientKind::Radial,
+            GradientKind::Angular,
+            GradientKind::Diamond,
+        ] {
+            let gradient = CustomGradient {
+                kind,
+                angle: 90.0,
+                ..CustomGradient::default()
+            };
+            let mut state =
+                EditorState::new(RgbaImage::from_pixel(100, 80, Rgba([255, 0, 0, 255])));
+            state.background.set_padding(40.0);
+            state
+                .background
+                .set_fill(Fill::Custom(Rc::new(move |context, width, height| {
+                    super::draw_gradient(
+                        context,
+                        f64::from(width),
+                        f64::from(height),
+                        &gradient,
+                        0.0,
+                    );
+                })));
+            let layout = state.background.layout(100, 80);
+            let mut surface = state.background.surface(layout, 4096.0).unwrap();
+            surface.flush();
+            let stride = surface.stride() as usize;
+            let data = surface.data().unwrap();
+            let preview = crate::capture::editor::render::cairo_argb_to_rgba_image(
+                layout.width as u32,
+                layout.height as u32,
+                stride,
+                &data,
+            );
+            let exported = state.to_export_image().unwrap();
+            for (x, y) in [(0, 0), (60, 2), (2, 50), (119, 99)] {
+                assert_eq!(
+                    preview.get_pixel(x, y),
+                    exported.get_pixel(x, y),
+                    "{kind:?} at {x},{y}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gradient_stop_picker_refreshes_rows_and_operations() {
+        use gtk4::prelude::*;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        fn collect(widget: &gtk4::Widget, class: &str, result: &mut Vec<gtk4::Widget>) {
+            if widget.has_css_class(class) {
+                result.push(widget.clone());
+            }
+            let mut child = widget.first_child();
+            while let Some(widget) = child {
+                child = widget.next_sibling();
+                collect(&widget, class, result);
+            }
+        }
+
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let parent = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+            let state = Rc::new(RefCell::new(FillValue::Gradient(CustomGradient::default())));
+            let repaint: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+            let notify: Rc<dyn Fn()> = {
+                let repaint = repaint.clone();
+                Rc::new(move || {
+                    if let Some(repaint) = repaint.borrow().clone() {
+                        repaint()
+                    }
+                })
+            };
+            let view = super::build_gradient_page(parent.clone(), state.clone(), notify, 1.0);
+            *repaint.borrow_mut() = Some(view.repaint.clone());
+            let mut entries = Vec::new();
+            collect(
+                view.widget.upcast_ref(),
+                "recording-editor-gradient-step-hex",
+                &mut entries,
+            );
+            assert_eq!(entries.len(), 2);
+            let mut picker_entries = Vec::new();
+            collect(
+                parent.upcast_ref(),
+                "recording-editor-custom-hex",
+                &mut picker_entries,
+            );
+            assert_eq!(picker_entries.len(), 2);
+            let picker = picker_entries[1].clone().downcast::<gtk4::Entry>().unwrap();
+            picker.set_text("#FFFFFF");
+            picker.emit_activate();
+            assert_eq!(
+                super::current_gradient(&state).stops[1].color,
+                (255, 255, 255)
+            );
+            assert_eq!(
+                entries[1]
+                    .clone()
+                    .downcast::<gtk4::Entry>()
+                    .unwrap()
+                    .text()
+                    .as_str(),
+                "#FFFFFF"
+            );
+
+            let entry = entries[0].clone().downcast::<gtk4::Entry>().unwrap();
+            entry.set_text("#123");
+            entry.emit_activate();
+            assert_eq!(super::current_gradient(&state).stops[0].color, (17, 34, 51));
+            assert_eq!(entry.text().as_str(), "#112233");
+            entry.set_text("invalid");
+            entry.emit_activate();
+            assert_eq!(entry.text().as_str(), "#112233");
+
+            let mut adds = Vec::new();
+            collect(
+                view.widget.upcast_ref(),
+                "recording-editor-gradient-add",
+                &mut adds,
+            );
+            adds[0]
+                .clone()
+                .downcast::<gtk4::Button>()
+                .unwrap()
+                .emit_clicked();
+            assert_eq!(super::current_gradient(&state).stops.len(), 3);
+            let mut removes = Vec::new();
+            collect(
+                view.widget.upcast_ref(),
+                "recording-editor-gradient-remove",
+                &mut removes,
+            );
+            removes[1]
+                .clone()
+                .downcast::<gtk4::Button>()
+                .unwrap()
+                .emit_clicked();
+            assert_eq!(super::current_gradient(&state).stops.len(), 2);
+
+            let mut icons = Vec::new();
+            collect(
+                view.widget.upcast_ref(),
+                "recording-editor-gradient-icon",
+                &mut icons,
+            );
+            let flip = icons[0].clone().downcast::<gtk4::Button>().unwrap();
+            let rotate = icons[1].clone().downcast::<gtk4::Button>().unwrap();
+            flip.emit_clicked();
+            let reversed = super::current_gradient(&state);
+            assert_eq!(reversed.stops[0].color, (255, 255, 255));
+            assert_eq!(reversed.stops[1].color, (17, 34, 51));
+            let mut entries = Vec::new();
+            collect(
+                view.widget.upcast_ref(),
+                "recording-editor-gradient-step-hex",
+                &mut entries,
+            );
+            assert_eq!(
+                entries[0]
+                    .clone()
+                    .downcast::<gtk4::Entry>()
+                    .unwrap()
+                    .text()
+                    .as_str(),
+                "#FFFFFF"
+            );
+
+            let mut items = Vec::new();
+            collect(
+                view.widget.upcast_ref(),
+                "recording-editor-dropdown-item",
+                &mut items,
+            );
+            assert_eq!(items.len(), 4);
+            for (item, kind) in items.iter().zip([
+                GradientKind::Linear,
+                GradientKind::Radial,
+                GradientKind::Angular,
+                GradientKind::Diamond,
+            ]) {
+                let item = item.clone().downcast::<gtk4::Button>().unwrap();
+                assert!(item.child().unwrap().is::<gtk4::Label>());
+                item.emit_clicked();
+                assert_eq!(super::current_gradient(&state).kind, kind);
+                assert!(item.has_css_class("selected"));
+                assert_eq!(
+                    rotate.is_sensitive(),
+                    matches!(kind, GradientKind::Linear | GradientKind::Angular)
+                );
+            }
+            items[2]
+                .clone()
+                .downcast::<gtk4::Button>()
+                .unwrap()
+                .emit_clicked();
+            rotate.emit_clicked();
+            assert_eq!(super::current_gradient(&state).angle, 90.0);
+        }) else {
+            return;
+        };
     }
 }

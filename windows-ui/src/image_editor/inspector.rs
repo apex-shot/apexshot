@@ -2,8 +2,8 @@
 //!
 //! Static mode shows the shared Appearance builder; Motion swaps the dock's
 //! page to the Motion inspector's tab set (Composition, Text, Appearance,
-//! Watermark). The interaction is a shell: nothing a drawing backend could
-//! read exists on this platform yet.
+//! Watermark). The static Background card is connected to the document; the
+//! remaining Appearance and Motion controls are still shells.
 
 use std::rc::Rc;
 
@@ -24,12 +24,16 @@ pub(super) struct Inspector {
     motion_scroller: ScrolledWindow,
     motion_stack: Stack,
     motion_duration: FilledSlider,
+    background_sync: Rc<dyn Fn()>,
     /// Clipboard copy and the flattened export the window wires to the document.
     pub copy_button: gtk4::Button,
     pub export_button: gtk4::Button,
 }
 
 impl Inspector {
+    pub(super) fn sync_background(&self) {
+        (self.background_sync)();
+    }
     /// Swap the dock's content for Motion or back: the Motion pages hide the
     /// Appearance scroll and its bottom actions, keeping the strip the
     /// caption buttons live in. Entry always lands on the Composition page,
@@ -60,7 +64,11 @@ impl Inspector {
     }
 }
 
-pub(super) fn build(scale: f64) -> Inspector {
+pub(super) fn build(
+    scale: f64,
+    host: &Rc<super::annotate::EditorHost>,
+    window: &gtk4::ApplicationWindow,
+) -> Inspector {
     let root = GtkBox::new(Orientation::Vertical, 0);
     root.add_css_class("image-editor-inspector");
     root.set_hexpand(false);
@@ -81,7 +89,8 @@ pub(super) fn build(scale: f64) -> Inspector {
 
     // The static Appearance dock: the Linux builder attaches its Transform
     // extension only here, so the port does the same.
-    let static_page = sections::appearance_panel(scale, true);
+    let (static_page, background_sync) =
+        sections::appearance_panel(scale, true, Some(host), &root, window);
     scroller.set_child(Some(&static_page));
     root.append(&scroller);
 
@@ -124,7 +133,7 @@ pub(super) fn build(scale: f64) -> Inspector {
     motion_stack.add_named(&text_page, Some("motion-text"));
 
     motion_stack.add_named(
-        &sections::appearance_panel(scale, false),
+        &sections::appearance_panel(scale, false, None, &root, window).0,
         Some("motion-appearance"),
     );
 
@@ -190,6 +199,7 @@ pub(super) fn build(scale: f64) -> Inspector {
         motion_scroller,
         motion_stack,
         motion_duration: duration,
+        background_sync,
         copy_button,
         export_button: export,
     }

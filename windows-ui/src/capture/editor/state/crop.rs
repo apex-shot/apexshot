@@ -20,10 +20,13 @@ impl EditorState {
         width: u32,
         height: u32,
     ) -> (f64, f64, f64, f64) {
-        // The Appearance backend is not wired on Windows: the editable canvas
-        // is exactly the screenshot.
-        let _ = self;
-        (0.0, 0.0, width as f64, height as f64)
+        let layout = self.background.layout(width, height);
+        (
+            -layout.image_x,
+            -layout.image_y,
+            layout.width - layout.image_x,
+            layout.height - layout.image_y,
+        )
     }
 
     /// Begin creating, moving, or resizing the pending crop at an image point.

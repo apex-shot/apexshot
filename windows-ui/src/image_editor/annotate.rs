@@ -14,7 +14,10 @@ use gtk4::DrawingArea;
 use image::RgbaImage;
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::{mpsc, Arc};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc, Mutex,
+};
 use std::time::Duration;
 
 use crate::capture::editor::color::{
@@ -66,6 +69,45 @@ pub type Shared = Rc<RefCell<Option<EditorState>>>;
 const MOVE_HANDLE_DRAG_RADIUS: f64 = 7.0;
 const RESIZE_HANDLE_DRAG_SIZE: f64 = 10.0;
 const ARROW_CLICK_NOOP_DISTANCE: f64 = 3.0;
+static BACKGROUND_DECODE_LOCK: Mutex<()> = Mutex::new(());
+
+type DecodedBackground = (RgbaImage, Vec<u8>);
+
+fn spawn_background_decode(
+    path: std::path::PathBuf,
+    preview_path: Option<std::path::PathBuf>,
+    cancel: Arc<AtomicBool>,
+) -> mpsc::Receiver<(bool, image::ImageResult<DecodedBackground>)> {
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let prepare = |image: image::DynamicImage| {
+            let image = image.to_rgba8();
+            let bytes = render::rgba_to_cairo_argb_bytes(&image);
+            (image, bytes)
+        };
+        if let Some(path) = preview_path {
+            if let Ok(image) = image::open(path) {
+                if cancel.load(Ordering::Relaxed)
+                    || sender.send((true, Ok(prepare(image)))).is_err()
+                {
+                    return;
+                }
+            }
+        }
+        let Ok(_guard) = BACKGROUND_DECODE_LOCK.lock() else {
+            return;
+        };
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        let image = image::open(path);
+        if cancel.load(Ordering::Relaxed) {
+            return;
+        }
+        let _ = sender.send((false, image.map(prepare)));
+    });
+    receiver
+}
 
 pub struct EditorHost {
     pub editor: Shared,
@@ -75,8 +117,14 @@ pub struct EditorHost {
     on_error: Rc<dyn Fn(String)>,
     /// Prepared Cairo surface for the working image, keyed by its revision.
     surface_cache: RefCell<Option<(u64, ImageSurface)>>,
+    background_cache: RefCell<Option<(u64, u32, u32, ImageSurface)>>,
+    background_source: RefCell<Option<(Arc<RgbaImage>, ImageSurface)>>,
     /// Bumped on every document load so stale async results are rejected.
     pub session_generation: Rc<Cell<u64>>,
+    background_generation: Cell<u64>,
+    background_loading: Cell<bool>,
+    background_previous: RefCell<Option<crate::capture::editor::state::background::Fill>>,
+    background_cancel: RefCell<Option<Arc<AtomicBool>>>,
     space_pan: Rc<Cell<bool>>,
     space_pan_dragging: Rc<Cell<bool>>,
     pan_start: Rc<Cell<(f64, f64)>>,
@@ -97,7 +145,13 @@ impl EditorHost {
             on_change,
             on_error,
             surface_cache: RefCell::new(None),
+            background_cache: RefCell::new(None),
+            background_source: RefCell::new(None),
             session_generation: Rc::new(Cell::new(0)),
+            background_generation: Cell::new(0),
+            background_loading: Cell::new(false),
+            background_previous: RefCell::new(None),
+            background_cancel: RefCell::new(None),
             space_pan: Rc::new(Cell::new(false)),
             space_pan_dragging: Rc::new(Cell::new(false)),
             pan_start: Rc::new(Cell::new((0.0, 0.0))),
@@ -124,6 +178,9 @@ impl EditorHost {
         self.start_detection(&mut state);
         *self.editor.borrow_mut() = Some(state);
         *self.surface_cache.borrow_mut() = None;
+        *self.background_cache.borrow_mut() = None;
+        *self.background_source.borrow_mut() = None;
+        self.cancel_background_load();
         self.session_generation
             .set(self.session_generation.get() + 1);
         self.changed();
@@ -165,6 +222,112 @@ impl EditorHost {
     /// Surface an error message through the window's toast.
     pub(crate) fn report_error(&self, message: String) {
         (self.on_error)(message);
+    }
+
+    pub(crate) fn cancel_background_load(&self) {
+        self.background_generation
+            .set(self.background_generation.get().wrapping_add(1));
+        self.background_loading.set(false);
+        self.background_previous.borrow_mut().take();
+        if let Some(cancel) = self.background_cancel.borrow_mut().take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+    }
+
+    pub(crate) fn background_loading(&self) -> bool {
+        self.background_loading.get()
+    }
+
+    pub(crate) fn load_background(
+        self: &Rc<Self>,
+        path: std::path::PathBuf,
+        preview_path: Option<std::path::PathBuf>,
+        on_selected: impl FnOnce(&RgbaImage) + 'static,
+        on_failure: impl FnOnce() + 'static,
+    ) {
+        if !self.background_loading.get() {
+            *self.background_previous.borrow_mut() = self.read(|st| st.background.fill.clone());
+        }
+        self.background_generation
+            .set(self.background_generation.get().wrapping_add(1));
+        if let Some(cancel) = self.background_cancel.borrow_mut().take() {
+            cancel.store(true, Ordering::Relaxed);
+        }
+        let cancel = Arc::new(AtomicBool::new(false));
+        *self.background_cancel.borrow_mut() = Some(Arc::clone(&cancel));
+        self.background_loading.set(true);
+        self.changed();
+        let generation = self.background_generation.get();
+        let receiver = spawn_background_decode(path, preview_path, cancel);
+        let host = Rc::downgrade(self);
+        let mut on_selected = Some(on_selected);
+        let mut on_failure = Some(on_failure);
+        glib::timeout_add_local(Duration::from_millis(16), move || {
+            let Some(host) = host.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            if host.background_generation.get() != generation {
+                return glib::ControlFlow::Break;
+            }
+            match receiver.try_recv() {
+                Ok((preview, Ok((image, bytes)))) => {
+                    let width = image.width();
+                    let height = image.height();
+                    let surface = gtk4::cairo::Format::ARgb32
+                        .stride_for_width(width)
+                        .ok()
+                        .and_then(|stride| {
+                            ImageSurface::create_for_data(
+                                bytes,
+                                gtk4::cairo::Format::ARgb32,
+                                width as i32,
+                                height as i32,
+                                stride,
+                            )
+                            .ok()
+                        });
+                    if !preview {
+                        if let Some(selected) = on_selected.take() {
+                            selected(&image);
+                        }
+                    }
+                    let image = Arc::new(image);
+                    *host.background_source.borrow_mut() =
+                        surface.map(|surface| (Arc::clone(&image), surface));
+                    if !preview {
+                        host.background_loading.set(false);
+                        host.background_previous.borrow_mut().take();
+                    }
+                    host.mutate(|st| {
+                        st.background.set_fill(
+                            crate::capture::editor::state::background::Fill::Image(image),
+                        );
+                        st.background.changed();
+                    });
+                    if preview {
+                        glib::ControlFlow::Continue
+                    } else {
+                        glib::ControlFlow::Break
+                    }
+                }
+                Ok((_, Err(_))) | Err(mpsc::TryRecvError::Disconnected) => {
+                    host.background_loading.set(false);
+                    if let Some(previous) = host.background_previous.borrow_mut().take() {
+                        host.mutate(|st| {
+                            st.background.fill = previous;
+                            st.background.changed();
+                        });
+                    }
+                    if let Some(failure) = on_failure.take() {
+                        failure();
+                    }
+                    host.report_error(crate::i18n::t("Could not open background image."));
+                    host.changed();
+                    glib::ControlFlow::Break
+                }
+                Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            }
+        });
     }
 
     /// Mutate the document then redraw and refresh the bars; returns the
@@ -274,9 +437,63 @@ impl EditorHost {
             return;
         };
 
+        let layout = st
+            .background
+            .layout(st.working_image.width(), st.working_image.height());
+        if let crate::capture::editor::state::background::Fill::Image(image) = &st.background.fill {
+            if st.background.blur <= 0.001 {
+                if let Some(background) = self.background_image_surface(image) {
+                    let _ = context.save();
+                    context.rectangle(
+                        t.canvas_offset_x,
+                        t.canvas_offset_y,
+                        t.canvas_width * t.canvas_scale,
+                        t.canvas_height * t.canvas_scale,
+                    );
+                    context.clip();
+                    context.translate(t.canvas_offset_x, t.canvas_offset_y);
+                    context.scale(t.canvas_scale, t.canvas_scale);
+                    let cover = (t.canvas_width / f64::from(image.width()))
+                        .max(t.canvas_height / f64::from(image.height()));
+                    let _ = context.save();
+                    context.translate(
+                        (t.canvas_width - f64::from(image.width()) * cover) / 2.0,
+                        (t.canvas_height - f64::from(image.height()) * cover) / 2.0,
+                    );
+                    context.scale(cover, cover);
+                    context.set_source_surface(&background, 0.0, 0.0).ok();
+                    context.source().set_extend(gtk4::cairo::Extend::Pad);
+                    context.source().set_filter(gtk4::cairo::Filter::Good);
+                    let _ = context.paint();
+                    let _ = context.restore();
+                    render::paint_background_noise(
+                        context,
+                        0.0,
+                        0.0,
+                        t.canvas_width,
+                        t.canvas_height,
+                        st.background.noise,
+                    );
+                    let _ = context.restore();
+                }
+            } else {
+                self.paint_composited_background(context, st, t, layout);
+            }
+        } else if st.background.has_fill() {
+            self.paint_composited_background(context, st, t, layout);
+        }
         let _ = context.save();
         context.translate(t.offset_x, t.offset_y);
         context.scale(t.scale, t.scale);
+        render::rounded_rect_path(
+            context,
+            0.0,
+            0.0,
+            f64::from(st.working_image.width()),
+            f64::from(st.working_image.height()),
+            layout.radius,
+        );
+        context.clip();
         context.set_source_surface(&surface, 0.0, 0.0).ok();
         context
             .source()
@@ -312,6 +529,61 @@ impl EditorHost {
 
         self.paint_chrome(context, st, t);
         let _ = context.restore();
+    }
+
+    fn background_image_surface(&self, image: &Arc<RgbaImage>) -> Option<ImageSurface> {
+        if let Some((cached_image, surface)) = self.background_source.borrow().as_ref() {
+            if Arc::ptr_eq(cached_image, image) {
+                return Some(surface.clone());
+            }
+        }
+        let surface = rgba_image_to_surface(image)?;
+        *self.background_source.borrow_mut() = Some((Arc::clone(image), surface.clone()));
+        Some(surface)
+    }
+
+    fn paint_composited_background(
+        &self,
+        context: &gtk4::cairo::Context,
+        st: &EditorState,
+        t: ViewTransform,
+        layout: crate::capture::editor::state::background::Layout,
+    ) {
+        let key = (
+            st.background.revision,
+            st.working_image.width(),
+            st.working_image.height(),
+        );
+        let cached = self.background_cache.borrow();
+        let background = cached
+            .as_ref()
+            .filter(|(revision, width, height, _)| (*revision, *width, *height) == key)
+            .map(|(_, _, _, surface)| surface.clone());
+        drop(cached);
+        let background = background.or_else(|| {
+            let surface = st.background.surface(layout, 1200.0)?;
+            *self.background_cache.borrow_mut() = Some((key.0, key.1, key.2, surface.clone()));
+            Some(surface)
+        });
+        if let Some(background) = background {
+            let _ = context.save();
+            context.rectangle(
+                t.canvas_offset_x,
+                t.canvas_offset_y,
+                t.canvas_width * t.canvas_scale,
+                t.canvas_height * t.canvas_scale,
+            );
+            context.clip();
+            context.translate(t.canvas_offset_x, t.canvas_offset_y);
+            context.scale(
+                t.canvas_width * t.canvas_scale / f64::from(background.width()),
+                t.canvas_height * t.canvas_scale / f64::from(background.height()),
+            );
+            context.set_source_surface(&background, 0.0, 0.0).ok();
+            context.source().set_extend(gtk4::cairo::Extend::Pad);
+            let _ = context.paint();
+            let _ = context.restore();
+        }
     }
 
     fn working_surface(&self, st: &EditorState) -> Option<ImageSurface> {
@@ -1649,6 +1921,12 @@ impl EditorHost {
     /// on a worker so a pending effect pass never leaks an unredacted frame;
     /// the texture lands back on the main loop.
     pub fn copy_to_clipboard(&self) {
+        if self.background_loading() {
+            self.report_error(crate::i18n::t(
+                "Wait for the background image to finish loading.",
+            ));
+            return;
+        }
         self.commit_text_if_active();
         let snapshot = self.with_state(|st| st.to_export_image().ok());
         let Some(snapshot) = snapshot.flatten() else {
@@ -1684,6 +1962,12 @@ impl EditorHost {
     /// Save the flattened document with the platform file dialog handling
     /// overwrite confirmation; never touches the loaded source path.
     pub fn save_as(&self, parent: &impl IsA<gtk4::Window>, path: &std::path::Path) {
+        if self.background_loading() {
+            self.report_error(crate::i18n::t(
+                "Wait for the background image to finish loading.",
+            ));
+            return;
+        }
         self.commit_text_if_active();
         let snapshot = self.with_state(|st| st.to_export_image().ok());
         let Some(snapshot) = snapshot.flatten() else {
@@ -1913,6 +2197,163 @@ mod tests {
 
     fn ctrl() -> gdk::ModifierType {
         gdk::ModifierType::CONTROL_MASK
+    }
+
+    #[test]
+    fn preview_and_export_use_the_same_background_geometry() {
+        use crate::capture::editor::state::background::Fill;
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            100,
+            80,
+            image::Rgba([240, 0, 0, 255]),
+        ));
+        state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            20,
+            20,
+            image::Rgba([0, 0, 255, 255]),
+        )));
+        state.background.padding = 40.0;
+        state.background.radius = 40.0;
+        state.background.frame_aspect = Some(
+            crate::capture::editor::state::background::FrameRatio::new(1, 1),
+        );
+        let exported = state.to_export_image().unwrap();
+        *host.editor.borrow_mut() = Some(state);
+        let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 120, 120).unwrap();
+        {
+            let context = gtk4::cairo::Context::new(&surface).unwrap();
+            let transform = ViewTransform {
+                offset_x: 10.0,
+                offset_y: 20.0,
+                has_background: true,
+                canvas_width: 120.0,
+                canvas_height: 120.0,
+                image_rect_x: 10.0,
+                image_rect_y: 20.0,
+                ..ViewTransform::for_image(100.0, 80.0)
+            };
+            host.paint_document(&context, transform);
+        }
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        let preview = render::cairo_argb_to_rgba_image(120, 120, stride, data.as_ref());
+        assert_eq!(preview, exported);
+    }
+
+    #[test]
+    fn wallpaper_is_clipped_to_its_canvas_in_the_preview() {
+        use crate::capture::editor::state::background::Fill;
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            100,
+            80,
+            image::Rgba([240, 0, 0, 255]),
+        ));
+        state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            20,
+            20,
+            image::Rgba([0, 0, 255, 255]),
+        )));
+        state.background.padding = 40.0;
+        *host.editor.borrow_mut() = Some(state);
+        let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 180, 150).unwrap();
+        {
+            let context = gtk4::cairo::Context::new(&surface).unwrap();
+            context.set_source_rgb(0.0, 1.0, 0.0);
+            context.paint().unwrap();
+            let transform = ViewTransform {
+                offset_x: 30.0,
+                offset_y: 35.0,
+                has_background: true,
+                canvas_offset_x: 20.0,
+                canvas_offset_y: 25.0,
+                canvas_width: 120.0,
+                canvas_height: 100.0,
+                image_rect_x: 10.0,
+                image_rect_y: 10.0,
+                ..ViewTransform::for_image(100.0, 80.0)
+            };
+            host.paint_document(&context, transform);
+        }
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        let preview = render::cairo_argb_to_rgba_image(180, 150, stride, data.as_ref());
+        for (x, y) in [(0, 0), (19, 50), (140, 50), (50, 24), (50, 125)] {
+            assert_eq!(*preview.get_pixel(x, y), image::Rgba([0, 255, 0, 255]));
+        }
+        assert_eq!(*preview.get_pixel(25, 30), image::Rgba([0, 0, 255, 255]));
+        assert_eq!(*preview.get_pixel(80, 70), image::Rgba([240, 0, 0, 255]));
+    }
+
+    #[test]
+    fn unblurred_wallpaper_preview_keeps_full_resolution() {
+        use crate::capture::editor::state::background::Fill;
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            1600,
+            20,
+            image::Rgba([240, 0, 0, 255]),
+        ));
+        let wallpaper = RgbaImage::from_fn(1664, 84, |x, _| {
+            if x % 2 == 0 {
+                image::Rgba([0, 0, 0, 255])
+            } else {
+                image::Rgba([255, 255, 255, 255])
+            }
+        });
+        state.background.fill = Fill::Image(Arc::new(wallpaper));
+        state.background.padding = 8.0;
+        let exported = state.to_export_image().unwrap();
+        assert_eq!(exported.dimensions(), (1664, 84));
+        *host.editor.borrow_mut() = Some(state);
+        let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 1664, 84).unwrap();
+        {
+            let context = gtk4::cairo::Context::new(&surface).unwrap();
+            host.paint_document(
+                &context,
+                ViewTransform {
+                    offset_x: 32.0,
+                    offset_y: 32.0,
+                    has_background: true,
+                    canvas_width: 1664.0,
+                    canvas_height: 84.0,
+                    image_rect_x: 32.0,
+                    image_rect_y: 32.0,
+                    ..ViewTransform::for_image(1600.0, 20.0)
+                },
+            );
+        }
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        let preview = render::cairo_argb_to_rgba_image(1664, 84, stride, data.as_ref());
+        for x in 100..110 {
+            assert_eq!(preview.get_pixel(x, 5), exported.get_pixel(x, 5));
+        }
+    }
+
+    #[test]
+    fn background_worker_delivers_preview_then_full_image_and_honors_cancellation() {
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../src/capture/editor/background-images");
+        let path = assets.join("wallpaper-001.jpg");
+        let thumb = assets.join("wallpaper-thumb-001.jpg");
+        let receiver = spawn_background_decode(
+            path.clone(),
+            Some(thumb.clone()),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let (preview, image) = receiver.recv_timeout(Duration::from_secs(15)).unwrap();
+        assert!(preview);
+        assert!(image.unwrap().0.width() < 1920);
+        let (preview, image) = receiver.recv_timeout(Duration::from_secs(15)).unwrap();
+        assert!(!preview);
+        assert_eq!(image.unwrap().0.dimensions(), (1920, 1080));
+        let receiver = spawn_background_decode(path, Some(thumb), Arc::new(AtomicBool::new(true)));
+        assert!(receiver.recv_timeout(Duration::from_secs(15)).is_err());
     }
 
     #[test]

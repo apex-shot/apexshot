@@ -15,6 +15,32 @@ const RECORDING_EDITOR_CSS: &str = concat!(
     include_str!("../../../src/recording/editor/ui_support_css/07.css"),
     include_str!("../../../src/recording/editor/ui_support_css/08.css"),
     include_str!("../../../src/recording/editor/ui_support_css/09.css"),
+    r#"
+    popover.gradient-type-menu button.recording-editor-dropdown-item {
+        min-height: 32px;
+        padding: 0 8px;
+        font-size: 14px;
+        font-weight: 500;
+    }
+    popover.gradient-type-menu button.recording-editor-dropdown-item:focus,
+    popover.gradient-type-menu button.recording-editor-dropdown-item:focus-visible,
+    popover.gradient-type-menu button.recording-editor-dropdown-item:focus-within {
+        outline: none;
+        box-shadow: none;
+    }
+    popover.gradient-type-menu button.recording-editor-dropdown-item.selected {
+        background: alpha(white, 0.08);
+    }
+    popover.gradient-type-menu button.recording-editor-dropdown-item:hover {
+        background: alpha(white, 0.12);
+    }
+    .editor-theme-light popover.gradient-type-menu button.recording-editor-dropdown-item.selected {
+        background: alpha(#111827, 0.07);
+    }
+    .editor-theme-light popover.gradient-type-menu button.recording-editor-dropdown-item:hover {
+        background: alpha(#111827, 0.10);
+    }
+    "#,
 );
 
 pub(crate) fn install_recording_editor_css() {
