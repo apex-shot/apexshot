@@ -2,9 +2,8 @@
 //!
 //! After the fill-source card, the Linux static builder stacks five more
 //! groups in a fixed order: Export quality, then Transform, Shadow, Style
-//! and Frame. This module rebuilds those as shape-only shells: every
-//! Background controls drive the static document; the other groups are
-//! currently visual shells.
+//! and Frame. These groups drive the static document, except for the
+//! unavailable neural export-quality controls.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -21,9 +20,11 @@ use gtk4::{
 
 use super::annotate::EditorHost;
 use super::ui_support::px;
-use crate::capture::editor::state::background::{Fill, FrameRatio};
+use crate::capture::editor::state::background::{Fill, FrameRatio, Layout};
+use crate::capture::editor::types::FrameStyle;
 use crate::capture::editor::window::icon_names;
 use crate::i18n::{t, tfmt};
+use crate::recording::editor::model::{MotionSceneShadow, MotionSceneShadowPreset};
 use crate::video_editor::side_panel::FilledSlider;
 
 /// Edge of one wallpaper thumbnail. The tile is pinned to it and centred in
@@ -103,8 +104,7 @@ fn disclosure_row(title: &str, body: &GtkBox, scale: f64) -> GtkBox {
     card
 }
 
-/// A flat control row styled like the Transform reset button: a subtle fill
-/// with no frame, used by Compare and Reset.
+/// A flat control row with a subtle fill and no frame.
 fn inline_button(label: &str, scale: f64) -> Button {
     let button = Button::with_label(label);
     button.add_css_class("image-editor-inline-button");
@@ -220,12 +220,16 @@ fn unit_slider(
 /// The Transform disclosure: the still image's frozen camera pose. Yaw,
 /// pitch and roll swing the card, perspective leans it once the first two
 /// move off zero, and the pad plus the X/Y sliders place it.
-pub(super) fn transform_disclosure(scale: f64) -> GtkBox {
+pub(super) fn transform_disclosure(
+    scale: f64,
+    host: Option<&Rc<EditorHost>>,
+) -> (GtkBox, Rc<dyn Fn()>) {
     let body = GtkBox::new(Orientation::Vertical, px(8.0, scale));
 
-    body.append(&hint(
+    let studio_hint = hint(
         "Studio preview. A non-default rendered pose needs activation for final images; backgrounds and normal edits stay free.",
-    ));
+    );
+    body.append(&studio_hint);
 
     let yaw = unit_slider(&t("Yaw"), -24.0, 24.0, 0.0, "°", scale);
     let pitch = unit_slider(&t("Pitch"), -24.0, 24.0, 0.0, "°", scale);
@@ -242,41 +246,160 @@ pub(super) fn transform_disclosure(scale: f64) -> GtkBox {
     body.append(&pitch.widget());
     body.append(&roll.widget());
     body.append(&perspective.widget());
-    body.append(&hint(
-        "Tilt the image with Yaw or Pitch before adjusting perspective.",
-    ));
+    let perspective_hint = hint("Tilt the image with Yaw or Pitch before adjusting perspective.");
+    body.append(&perspective_hint);
 
     let position_title = subheader("Position");
     body.append(&position_title);
-    let (pad, pad_position) = position_pad(scale);
+    let on_point: Rc<dyn Fn(f64, f64)> = {
+        let host = host.cloned();
+        Rc::new(move |x, y| {
+            if let Some(host) = &host {
+                host.mutate(|st| {
+                    let mut pose = st.static_image_transform;
+                    pose.pos_x = x;
+                    pose.pos_y = y;
+                    st.set_static_image_transform(pose);
+                });
+            }
+        })
+    };
+    let (begin, end) = transform_interaction(host.cloned());
+    let (pad, pad_position) = position_pad(scale, on_point, begin.clone(), end.clone());
     body.append(&pad);
     body.append(&position_x.widget());
     body.append(&position_y.widget());
 
-    let reset = inline_button(&t("Reset transforms"), scale);
-    reset.connect_clicked(move |_| {
-        for (slider, value) in [
-            (&yaw, 0.0),
-            (&pitch, 0.0),
-            (&roll, 0.0),
-            (&perspective, 18.0),
-            (&position_x, 0.0),
-            (&position_y, 0.0),
-        ] {
-            slider.set_value(value);
+    let edit_hint = hint("The saved camera pose is paused while drawing.");
+    body.append(&edit_hint);
+    let reset = Button::new();
+    reset.add_css_class("image-editor-transform-reset");
+    reset.set_has_frame(false);
+    reset.set_halign(Align::End);
+    let reset_content = GtkBox::new(Orientation::Horizontal, px(5.0, scale));
+    let reset_icon = Image::from_icon_name(icon_names::custom::EDIT_UNDO_SYMBOLIC);
+    reset_icon.set_pixel_size(px(13.0, scale));
+    reset_content.append(&reset_icon);
+    reset_content.append(&Label::new(Some(&t("Reset transforms"))));
+    reset.set_child(Some(&reset_content));
+    reset.connect_clicked({
+        let host = host.cloned();
+        move |_| {
+            if let Some(host) = &host {
+                host.set_tool(crate::capture::editor::types::Tool::Background);
+                host.mutate(|st| {
+                    st.set_static_image_transform(Default::default());
+                });
+            }
         }
-        pad_position.set((0.0, 0.0));
-        pad.queue_draw();
     });
     body.append(&reset);
 
-    disclosure_row("Transform", &body, scale)
+    for (index, slider) in [&yaw, &pitch, &roll, &perspective, &position_x, &position_y]
+        .into_iter()
+        .enumerate()
+    {
+        slider.on_interaction(begin.clone(), end.clone());
+        slider.enable_keyboard(if index < 3 {
+            5.0
+        } else if index == 3 {
+            10.0
+        } else {
+            100.0
+        });
+        let host = host.cloned();
+        slider.on_change(Rc::new(move |value| {
+            if let Some(host) = &host {
+                host.mutate(|st| {
+                    let mut pose = st.static_image_transform;
+                    match index {
+                        0 => pose.yaw = value,
+                        1 => pose.pitch = value,
+                        2 => pose.roll = value,
+                        3 => pose.perspective = value / 100.0,
+                        4 => pose.pos_x = value / 1000.0,
+                        _ => pose.pos_y = value / 1000.0,
+                    }
+                    st.set_static_image_transform(pose);
+                });
+            }
+        }));
+    }
+    let card = disclosure_row("Transform", &body, scale);
+    let sync = {
+        let card = card.clone();
+        let host = host.cloned();
+        let studio_status = Cell::new((
+            std::time::Instant::now(),
+            crate::studio_entitlement::studio_unlocked(),
+        ));
+        Rc::new(move || {
+            let pose = host
+                .as_ref()
+                .and_then(|host| host.read(|st| st.static_image_transform));
+            card.set_sensitive(pose.is_some());
+            let pose = pose.unwrap_or_default();
+            yaw.set_value(pose.yaw);
+            pitch.set_value(pose.pitch);
+            roll.set_value(pose.roll);
+            perspective.set_value(pose.perspective * 100.0);
+            position_x.set_value(pose.pos_x * 1000.0);
+            position_y.set_value(pose.pos_y * 1000.0);
+            if pad_position.replace((pose.pos_x, pose.pos_y)) != (pose.pos_x, pose.pos_y) {
+                pad.queue_draw();
+            }
+            let tilted = pose.yaw.abs() > 1e-7 || pose.pitch.abs() > 1e-7;
+            perspective.widget().set_sensitive(tilted);
+            perspective_hint.set_visible(!tilted);
+            reset.set_sensitive(!pose.is_identity());
+            edit_hint.set_visible(!pose.is_identity());
+            let (checked, unlocked) = studio_status.get();
+            let unlocked = if checked.elapsed() >= std::time::Duration::from_secs(1) {
+                let unlocked = crate::studio_entitlement::studio_unlocked();
+                studio_status.set((std::time::Instant::now(), unlocked));
+                unlocked
+            } else {
+                unlocked
+            };
+            studio_hint.set_visible(!unlocked);
+        }) as Rc<dyn Fn()>
+    };
+    (card, sync)
+}
+
+type InteractionCallback = Rc<dyn Fn()>;
+
+fn transform_interaction(
+    host: Option<Rc<EditorHost>>,
+) -> (InteractionCallback, InteractionCallback) {
+    let begin_host = host.clone();
+    let begin: Rc<dyn Fn()> = Rc::new(move || {
+        if let Some(host) = &begin_host {
+            if host.read(|st| st.selected_tool)
+                != Some(crate::capture::editor::types::Tool::Background)
+            {
+                host.set_tool(crate::capture::editor::types::Tool::Background);
+            }
+            host.mutate(|st| st.begin_history_interaction());
+        }
+    });
+    let end: Rc<dyn Fn()> = Rc::new(move || {
+        if let Some(host) = &host {
+            host.mutate(|st| st.finish_history_interaction());
+        }
+    });
+    (begin, end)
 }
 
 /// The camera-framing pad: a soft square with a draggable dot, top-right
 /// showing top-right. It reports its normalized position through the handle
 /// so Reset can park it back at the origin.
-fn position_pad(scale: f64) -> (DrawingArea, Rc<Cell<(f64, f64)>>) {
+fn position_pad(
+    scale: f64,
+    on_point: Rc<dyn Fn(f64, f64)>,
+    begin: Rc<dyn Fn()>,
+    end: Rc<dyn Fn()>,
+) -> (DrawingArea, Rc<Cell<(f64, f64)>>) {
     let area = DrawingArea::new();
     area.set_size_request(-1, px(152.0, scale));
     area.set_hexpand(true);
@@ -298,13 +421,39 @@ fn position_pad(scale: f64) -> (DrawingArea, Rc<Cell<(f64, f64)>>) {
             let y = (point_y / height * 2.0 - 1.0).clamp(-1.0, 1.0);
             position.set((x, y));
             area.queue_draw();
+            on_point(x, y);
         }
+    };
+    let active = Rc::new(Cell::new(false));
+    let start_interaction: Rc<dyn Fn()> = {
+        let active = active.clone();
+        Rc::new(move || {
+            if !active.replace(true) {
+                begin();
+            }
+        })
+    };
+    let end_interaction: Rc<dyn Fn()> = {
+        let active = active.clone();
+        Rc::new(move || {
+            if active.replace(false) {
+                end();
+            }
+        })
     };
     let click = GestureClick::new();
     click.set_button(1);
     click.connect_pressed({
+        let start = start_interaction.clone();
         let apply_point = apply_point.clone();
-        move |_, _, x, y| apply_point(x, y)
+        move |_, _, x, y| {
+            start();
+            apply_point(x, y);
+        }
+    });
+    click.connect_released({
+        let end = end_interaction.clone();
+        move |_, _, _, _| end()
     });
     area.add_controller(click);
     let drag = GestureDrag::new();
@@ -312,6 +461,7 @@ fn position_pad(scale: f64) -> (DrawingArea, Rc<Cell<(f64, f64)>>) {
     drag.connect_drag_begin({
         let apply_point = apply_point.clone();
         move |gesture, _, _| {
+            start_interaction();
             if let Some((x, y)) = gesture.start_point() {
                 apply_point(x, y);
             }
@@ -322,6 +472,7 @@ fn position_pad(scale: f64) -> (DrawingArea, Rc<Cell<(f64, f64)>>) {
             apply_point(start_x + dx, start_y + dy);
         }
     });
+    drag.connect_drag_end(move |_, _, _| end_interaction());
     area.add_controller(drag);
     area.set_cursor(gtk4::gdk::Cursor::from_name("move", None).as_ref());
     area.set_tooltip_text(Some(&t("Drag to choose what the camera shows")));
@@ -436,21 +587,23 @@ fn widget_is_light(widget: &DrawingArea) -> bool {
 
 // ── Shadow ──────────────────────────────────────────────────────────
 
-/// The four shadow styles the Linux panel offers, in their row order.
-const SHADOW_PRESETS: [&str; 4] = ["None", "Spread", "Hug", "Adaptive"];
-
 /// The Shadow disclosure: one shadow cast by the image onto the background.
 /// The pills pick a falloff style, the opacity dials it, and the light pad
 /// places the light; the shadow falls opposite the dot.
-pub(super) fn shadow_disclosure(scale: f64) -> GtkBox {
+pub(super) fn shadow_disclosure(
+    scale: f64,
+    host: Option<&Rc<EditorHost>>,
+) -> (GtkBox, Rc<dyn Fn()>) {
     let body = GtkBox::new(Orientation::Vertical, px(8.0, scale));
-
+    let syncing = Rc::new(Cell::new(false));
+    let (begin, end) = transform_interaction(host.cloned());
     let pills = GtkBox::new(Orientation::Horizontal, px(6.0, scale));
     pills.add_css_class("image-editor-preset-row");
     pills.set_homogeneous(true);
     let mut first: Option<ToggleButton> = None;
-    for (index, label) in SHADOW_PRESETS.into_iter().enumerate() {
-        let pill = ToggleButton::with_label(&t(label));
+    let mut buttons = Vec::new();
+    for preset in MotionSceneShadowPreset::ALL {
+        let pill = ToggleButton::with_label(&t(preset.label()));
         pill.add_css_class("image-editor-preset-pill");
         pill.set_has_frame(false);
         pill.set_hexpand(true);
@@ -459,26 +612,119 @@ pub(super) fn shadow_disclosure(scale: f64) -> GtkBox {
         } else {
             first = Some(pill.clone());
         }
-        pill.set_active(index == 0);
+        pill.set_active(preset == MotionSceneShadowPreset::None);
+        pill.connect_toggled({
+            let host = host.cloned();
+            let syncing = syncing.clone();
+            move |pill| {
+                if !pill.is_active() || syncing.get() {
+                    return;
+                }
+                if let Some(host) = &host {
+                    if host.read(|st| st.selected_tool)
+                        != Some(crate::capture::editor::types::Tool::Background)
+                    {
+                        host.set_tool(crate::capture::editor::types::Tool::Background);
+                    }
+                    host.mutate(|st| {
+                        let mut shadow = st.scene_shadow.clone();
+                        shadow.select_preset(preset);
+                        st.set_scene_shadow(shadow);
+                    });
+                }
+            }
+        });
         pills.append(&pill);
+        buttons.push((preset, pill));
     }
     body.append(&pills);
 
     let opacity = unit_slider(&t("Opacity"), 0.0, 100.0, 100.0, "%", scale);
+    opacity.on_interaction(begin.clone(), end.clone());
+    opacity.enable_keyboard(10.0);
+    opacity.on_change({
+        let host = host.cloned();
+        Rc::new(move |value| {
+            if let Some(host) = &host {
+                host.mutate(|st| {
+                    let mut shadow = st.scene_shadow.clone();
+                    shadow.opacity = value / 100.0;
+                    st.set_scene_shadow(shadow);
+                });
+            }
+        })
+    });
     body.append(&opacity.widget());
 
     let light_title = Label::new(Some(&t("Adjust Light")));
     light_title.add_css_class("image-editor-section-title");
     light_title.set_xalign(0.0);
     body.append(&light_title);
-    body.append(&light_pad(px(136.0, scale)));
+    let on_light = {
+        let host = host.cloned();
+        Rc::new(move |x, y| {
+            if let Some(host) = &host {
+                host.mutate(|st| {
+                    let mut shadow = st.scene_shadow.clone();
+                    shadow.light = (x, y);
+                    st.set_scene_shadow(shadow);
+                });
+            }
+        }) as Rc<dyn Fn(f64, f64)>
+    };
+    let (pad, light) = light_pad(px(136.0, scale), on_light, begin, end);
+    body.append(&pad);
+    let no_background_hint = hint("Add a background and padding to see the shadow.");
+    body.append(&no_background_hint);
 
-    disclosure_row("Shadow", &body, scale)
+    let card = disclosure_row("Shadow", &body, scale);
+    let sync = {
+        let card = card.clone();
+        let host = host.cloned();
+        Rc::new(move || {
+            let state = host.as_ref().and_then(|host| {
+                host.read(|st| {
+                    let layout = st
+                        .background
+                        .layout(st.working_image.width(), st.working_image.height());
+                    (
+                        st.scene_shadow.clone(),
+                        st.background.has_fill(),
+                        layout.image_x > 0.0 || layout.image_y > 0.0,
+                    )
+                })
+            });
+            card.set_sensitive(state.is_some());
+            let (shadow, has_fill, has_margin) =
+                state.unwrap_or_else(|| (MotionSceneShadow::default(), false, false));
+            syncing.set(true);
+            for (preset, button) in &buttons {
+                button.set_active(*preset == shadow.preset);
+            }
+            opacity.set_value(shadow.opacity * 100.0);
+            if light.replace(shadow.light) != shadow.light {
+                pad.queue_draw();
+            }
+            no_background_hint.set_text(&t(if has_fill {
+                "Increase padding to reveal the shadow."
+            } else {
+                "Add a background and padding to see the shadow."
+            }));
+            no_background_hint.set_visible(!has_margin);
+            syncing.set(false);
+        }) as Rc<dyn Fn()>
+    };
+    (card, sync)
 }
 
 /// The "Adjust Light" pad: a dark rounded square with a draggable dot. The
 /// dot is the light, so the cast falls on the opposite side of the card.
-fn light_pad(edge: i32) -> DrawingArea {
+fn light_pad(
+    edge: i32,
+    on_point: Rc<dyn Fn(f64, f64)>,
+    begin: InteractionCallback,
+    end: InteractionCallback,
+) -> (DrawingArea, Rc<Cell<(f64, f64)>>) {
     let area = DrawingArea::new();
     area.set_size_request(edge, edge);
     area.set_hexpand(true);
@@ -487,13 +733,14 @@ fn light_pad(edge: i32) -> DrawingArea {
     let light: Rc<Cell<(f64, f64)>> = Rc::new(Cell::new((0.65, 0.65)));
     area.set_draw_func({
         let light = light.clone();
-        move |_, context, width, height| {
-            paint_light_pad(context, width, height, &light.get());
+        move |widget, context, width, height| {
+            paint_light_pad(widget, context, width, height, &light.get());
         }
     });
     let move_light = {
         let area = area.clone();
         let light = light.clone();
+        let on_point = on_point.clone();
         move |x: f64, y: f64| {
             let width = f64::from(area.allocated_width());
             let height = f64::from(area.allocated_height());
@@ -502,17 +749,39 @@ fn light_pad(edge: i32) -> DrawingArea {
             let origin_y = (height - size) * 0.5;
             let dot = size * 0.072;
             let travel = (size * 0.5 - dot * 2.0).max(1.0);
-            light.set((
+            let position = (
                 ((x - origin_x - size * 0.5) / travel).clamp(-1.0, 1.0),
                 ((y - origin_y - size * 0.5) / travel).clamp(-1.0, 1.0),
-            ));
+            );
+            light.set(position);
             area.queue_draw();
+            on_point(position.0, position.1);
         }
     };
+    let active = Rc::new(Cell::new(false));
+    let start: Rc<dyn Fn()> = {
+        let active = active.clone();
+        Rc::new(move || {
+            if !active.replace(true) {
+                begin();
+            }
+        })
+    };
+    let stop: Rc<dyn Fn()> = {
+        let active = active.clone();
+        Rc::new(move || {
+            if active.replace(false) {
+                end();
+            }
+        })
+    };
     let drag = GestureDrag::new();
+    drag.set_button(1);
     drag.connect_drag_begin({
         let move_light = move_light.clone();
+        let start = start.clone();
         move |gesture, _, _| {
+            start();
             if let Some((x, y)) = gesture.start_point() {
                 move_light(x, y);
             }
@@ -526,17 +795,71 @@ fn light_pad(edge: i32) -> DrawingArea {
             }
         }
     });
+    drag.connect_drag_end({
+        let stop = stop.clone();
+        move |_, _, _| stop()
+    });
     area.add_controller(drag);
     let click = GestureClick::new();
+    click.set_button(1);
     click.connect_pressed({
         let move_light = move_light.clone();
-        move |_, _, x, y| move_light(x, y)
+        let start = start.clone();
+        move |_, _, x, y| {
+            start();
+            move_light(x, y);
+        }
+    });
+    click.connect_released({
+        let stop = stop.clone();
+        move |_, _, _, _| stop()
     });
     area.add_controller(click);
-    area
+    area.set_cursor(gtk4::gdk::Cursor::from_name("move", None).as_ref());
+    area.set_tooltip_text(Some(&t("Move the light to direct the shadow")));
+    area.set_focusable(true);
+    let keyboard = gtk4::EventControllerKey::new();
+    keyboard.connect_key_pressed({
+        let light = light.clone();
+        let area = area.clone();
+        move |_, key, _, modifiers| {
+            let step = if modifiers.contains(gtk4::gdk::ModifierType::SHIFT_MASK) {
+                0.2
+            } else {
+                0.05
+            };
+            let (mut x, mut y) = light.get();
+            match key {
+                gtk4::gdk::Key::Left => x -= step,
+                gtk4::gdk::Key::Right => x += step,
+                gtk4::gdk::Key::Up => y -= step,
+                gtk4::gdk::Key::Down => y += step,
+                gtk4::gdk::Key::Home => {
+                    x = 0.0;
+                    y = 0.0;
+                }
+                _ => return gtk4::glib::Propagation::Proceed,
+            }
+            let position = (x.clamp(-1.0, 1.0), y.clamp(-1.0, 1.0));
+            light.set(position);
+            area.queue_draw();
+            start();
+            on_point(position.0, position.1);
+            stop();
+            gtk4::glib::Propagation::Stop
+        }
+    });
+    area.add_controller(keyboard);
+    (area, light)
 }
 
-fn paint_light_pad(context: &CairoContext, width: i32, height: i32, light: &(f64, f64)) {
+fn paint_light_pad(
+    widget: &DrawingArea,
+    context: &CairoContext,
+    width: i32,
+    height: i32,
+    light: &(f64, f64),
+) {
     let width = f64::from(width);
     let height = f64::from(height);
     let size = width.min(height);
@@ -548,6 +871,19 @@ fn paint_light_pad(context: &CairoContext, width: i32, height: i32, light: &(f64
     rounded_rect(context, pad_x, pad_y, size, size, size * 0.10);
     context.set_source_rgba(0.0, 0.0, 0.0, 0.35);
     let _ = context.fill();
+    if widget.has_focus() {
+        rounded_rect(
+            context,
+            pad_x + 0.5,
+            pad_y + 0.5,
+            size - 1.0,
+            size - 1.0,
+            size * 0.10,
+        );
+        context.set_source_rgba(0.91, 0.57, 0.36, 0.9);
+        context.set_line_width(1.0);
+        let _ = context.stroke();
+    }
 
     let (lx, ly) = *light;
     let dot = size * 0.072;
@@ -565,344 +901,57 @@ fn paint_light_pad(context: &CairoContext, width: i32, height: i32, light: &(f64
 
 // ── Style ───────────────────────────────────────────────────────────
 
-/// One drawn accent around the card in a tile: an outer stroke whose gap
-/// spaces it from the stroke before it.
-#[derive(Clone, Copy)]
-struct OuterStroke {
-    thickness: f64,
-    color: [f64; 4],
-    gap: f64,
-}
-
-/// One backing sheet behind the card, for the Stack looks: full-size flat
-/// fill, offset and rotated, `center_pivot` fanning diagonally.
-#[derive(Clone, Copy)]
-struct Backing {
-    offset_x: f64,
-    offset_y: f64,
-    rotation_deg: f64,
-    center_pivot: bool,
-    color: [f64; 4],
-}
-
-struct StyleSpec {
-    label: &'static str,
-    thickness: f64,
-    color: [f64; 4],
-    inset: bool,
-    liquid: bool,
-    outer1: Option<OuterStroke>,
-    outer2: Option<OuterStroke>,
-    backing1: Option<Backing>,
-    backing2: Option<Backing>,
-}
-
-/// The twelve frame-style presets the Linux Style grid paints, carrying the
-/// same resolved border/outer/backing numbers its swatch painter draws.
-/// A static, so the tile closures can hold `'static` references into it.
-static STYLE_SPECS: [StyleSpec; 12] = [
-    StyleSpec {
-        label: "Clean",
-        thickness: 0.0,
-        color: [1.0, 1.0, 1.0, 0.0],
-        inset: false,
-        liquid: false,
-        outer1: None,
-        outer2: None,
-        backing1: None,
-        backing2: None,
-    },
-    StyleSpec {
-        label: "Frost",
-        thickness: 2.5,
-        color: [1.0, 1.0, 1.0, 0.55],
-        inset: false,
-        liquid: true,
-        outer1: Some(OuterStroke {
-            thickness: 1.0,
-            color: [1.0, 1.0, 1.0, 0.95],
-            gap: 0.0,
-        }),
-        outer2: None,
-        backing1: None,
-        backing2: None,
-    },
-    StyleSpec {
-        label: "Smoke",
-        thickness: 2.5,
-        color: [0.05, 0.05, 0.07, 0.60],
-        inset: false,
-        liquid: true,
-        outer1: Some(OuterStroke {
-            thickness: 1.0,
-            color: [1.0, 1.0, 1.0, 0.90],
-            gap: 0.0,
-        }),
-        outer2: None,
-        backing1: None,
-        backing2: None,
-    },
-    StyleSpec {
-        label: "Prism",
-        thickness: 2.5,
-        color: [1.0, 1.0, 1.0, 0.10],
-        inset: false,
-        liquid: true,
-        outer1: Some(OuterStroke {
-            thickness: 1.0,
-            color: [1.0, 1.0, 1.0, 0.55],
-            gap: 0.0,
-        }),
-        outer2: None,
-        backing1: None,
-        backing2: None,
-    },
-    StyleSpec {
-        label: "Pearl",
-        thickness: 3.0,
-        color: [1.0, 1.0, 1.0, 0.85],
-        inset: true,
-        liquid: false,
-        outer1: None,
-        outer2: None,
-        backing1: None,
-        backing2: None,
-    },
-    StyleSpec {
-        label: "Slate",
-        thickness: 3.0,
-        color: [0.0, 0.0, 0.0, 0.85],
-        inset: true,
-        liquid: false,
-        outer1: None,
-        outer2: None,
-        backing1: None,
-        backing2: None,
-    },
-    StyleSpec {
-        label: "Halo",
-        thickness: 0.0,
-        color: [1.0, 1.0, 1.0, 0.0],
-        inset: false,
-        liquid: false,
-        outer1: Some(OuterStroke {
-            thickness: 1.0,
-            color: [0.7, 0.7, 0.7, 1.0],
-            gap: 2.0,
-        }),
-        outer2: None,
-        backing1: None,
-        backing2: None,
-    },
-    StyleSpec {
-        label: "Ink",
-        thickness: 3.0,
-        color: [0.0, 0.0, 0.0, 1.0],
-        inset: false,
-        liquid: false,
-        outer1: None,
-        outer2: None,
-        backing1: None,
-        backing2: None,
-    },
-    StyleSpec {
-        label: "Offset",
-        thickness: 3.0,
-        color: [0.0, 0.0, 0.0, 1.0],
-        inset: false,
-        liquid: false,
-        outer1: None,
-        outer2: None,
-        backing1: Some(Backing {
-            offset_x: 28.0,
-            offset_y: 28.0,
-            rotation_deg: 0.0,
-            center_pivot: false,
-            color: [0.0, 0.0, 0.0, 1.0],
-        }),
-        backing2: None,
-    },
-    StyleSpec {
-        label: "Bevel",
-        thickness: 1.5,
-        color: [0.08, 0.09, 0.12, 0.55],
-        inset: false,
-        liquid: false,
-        outer1: Some(OuterStroke {
-            thickness: 0.75,
-            color: [1.0, 1.0, 1.0, 0.65],
-            gap: 0.0,
-        }),
-        outer2: None,
-        backing1: None,
-        backing2: None,
-    },
-    StyleSpec {
-        label: "Tilt",
-        thickness: 0.0,
-        color: [1.0, 1.0, 1.0, 0.0],
-        inset: false,
-        liquid: false,
-        outer1: None,
-        outer2: None,
-        backing1: Some(Backing {
-            offset_x: 0.0,
-            offset_y: 0.0,
-            rotation_deg: -2.0,
-            center_pivot: true,
-            color: [0.75, 0.75, 0.77, 1.0],
-        }),
-        backing2: None,
-    },
-    StyleSpec {
-        label: "Cascade",
-        thickness: 0.0,
-        color: [1.0, 1.0, 1.0, 0.0],
-        inset: false,
-        liquid: false,
-        outer1: None,
-        outer2: None,
-        backing1: Some(Backing {
-            offset_x: -10.0,
-            offset_y: -28.0,
-            rotation_deg: -3.0,
-            center_pivot: false,
-            color: [0.56, 0.56, 0.58, 1.0],
-        }),
-        backing2: Some(Backing {
-            offset_x: -5.0,
-            offset_y: -14.0,
-            rotation_deg: -1.5,
-            center_pivot: false,
-            color: [0.78, 0.78, 0.80, 1.0],
-        }),
-    },
-];
-
-/// Swatch body: a gray card with the preset's backings, glass rim and
-/// border strokes, scaled down into the tile like the Linux painter.
-fn paint_style_swatch(context: &CairoContext, width: f64, height: f64, spec: &StyleSpec) {
+fn paint_style_swatch(context: &CairoContext, width: f64, height: f64, style: FrameStyle) {
     if width < 2.0 || height < 2.0 {
         return;
     }
     let k = width / 56.0;
-    let card_w = 34.0 * k;
-    let card_h = 22.0 * k;
-    let card_x = (width - card_w) / 2.0;
-    let card_y = (height - card_h) / 2.0;
-    let card_r = 5.0 * k;
-    for backing in [spec.backing1, spec.backing2].into_iter().flatten() {
-        let _ = context.save();
-        if backing.center_pivot {
-            context.translate(
-                card_x + card_w / 2.0 + backing.offset_x * 0.32 * k,
-                card_y + card_h / 2.0 + backing.offset_y * 0.32 * k,
-            );
-            context.rotate(backing.rotation_deg.to_radians());
-            context.translate(-card_w / 2.0, -card_h / 2.0);
-        } else {
-            context.translate(
-                card_x + card_w + backing.offset_x * 0.32 * k,
-                card_y + card_h + backing.offset_y * 0.32 * k,
-            );
-            context.rotate(backing.rotation_deg.to_radians());
-            context.translate(-card_w, -card_h);
-        }
-        context.set_source_rgba(
-            backing.color[0],
-            backing.color[1],
-            backing.color[2],
-            backing.color[3],
-        );
-        rounded_rect(context, 0.0, 0.0, card_w, card_h, card_r);
-        let _ = context.fill();
-        let _ = context.restore();
-    }
+    let (card_w, card_h) = (34.0 * k, 22.0 * k);
+    let layout = Layout {
+        width,
+        height,
+        image_x: (width - card_w) / 2.0,
+        image_y: (height - card_h) / 2.0,
+        radius: 5.0 * k,
+    };
+    let mut geometry = crate::capture::editor::style_render::StyleGeometry::new(
+        layout,
+        card_w,
+        card_h,
+        Default::default(),
+        style,
+    );
+    geometry.border_unit = 0.32 * k;
+    geometry.backing_unit = 0.32 * k;
+    geometry.paint_backings(context);
+    geometry.paint_underlay(context);
     context.set_source_rgba(0.82, 0.82, 0.84, 1.0);
-    rounded_rect(context, card_x, card_y, card_w, card_h, card_r);
-    let _ = context.fill();
-
-    // Glass presets: a translucent edge band plus a bright rim, the recipe
-    // the Cairo previews scale down to.
-    if spec.liquid {
-        let [r, g, b, a] = spec.color;
-        let band = (spec.thickness * 0.64 * k).max(1.0);
-        context.set_source_rgba(r, g, b, a);
-        rounded_rect(
-            context,
-            card_x - band,
-            card_y - band,
-            card_w + band * 2.0,
-            card_h + band * 2.0,
-            card_r + band,
-        );
-        let _ = context.fill();
-    }
-    if !spec.liquid && spec.inset && spec.thickness > 0.0 {
-        // Inset styles paint inside the card edge.
-        let t = (spec.thickness * 0.32 * k).max(k);
-        let [r, g, b, a] = spec.color;
-        context.set_source_rgba(r, g, b, a);
-        context.set_line_width(t);
-        rounded_rect(
-            context,
-            card_x + t / 2.0,
-            card_y + t / 2.0,
-            (card_w - t).max(1.0),
-            (card_h - t).max(1.0),
-            (card_r - t / 2.0).max(0.0),
-        );
-        let _ = context.stroke();
-    }
-    if !spec.liquid && !spec.inset && spec.thickness > 0.0 {
-        let t = (spec.thickness * 0.32 * k).max(k);
-        let [r, g, b, a] = spec.color;
-        context.set_source_rgba(r, g, b, a);
-        context.set_line_width(t);
-        let e = t / 2.0;
-        rounded_rect(
-            context,
-            card_x - e,
-            card_y - e,
-            card_w + e * 2.0,
-            card_h + e * 2.0,
-            card_r + e,
-        );
-        let _ = context.stroke();
-    }
-    for outer in [spec.outer1, spec.outer2].into_iter().flatten() {
-        let t = (outer.thickness * 0.32 * k).max(k);
-        let e = outer.gap * 0.32 * k + t / 2.0;
-        context.set_source_rgba(
-            outer.color[0],
-            outer.color[1],
-            outer.color[2],
-            outer.color[3],
-        );
-        context.set_line_width(t);
-        rounded_rect(
-            context,
-            card_x - e,
-            card_y - e,
-            card_w + e * 2.0,
-            card_h + e * 2.0,
-            card_r + e,
-        );
-        let _ = context.stroke();
-    }
+    crate::capture::editor::render::rounded_rect_path(
+        context,
+        layout.image_x,
+        layout.image_y,
+        card_w,
+        card_h,
+        layout.radius,
+    );
+    context.fill().ok();
+    geometry.paint_frame(context);
 }
 
 /// The Style disclosure: one tile per frame-style preset, three per row.
 /// The chosen tile carries the accent ring; the swatch paints the preset.
-pub(super) fn style_disclosure(scale: f64) -> GtkBox {
+pub(super) fn style_disclosure(
+    scale: f64,
+    host: Option<&Rc<EditorHost>>,
+) -> (GtkBox, Rc<dyn Fn()>) {
     let body = GtkBox::new(Orientation::Vertical, px(8.0, scale));
     let grid = Grid::new();
     grid.add_css_class("image-editor-frame-grid");
     grid.set_column_homogeneous(true);
     grid.set_column_spacing(px(6.0, scale).max(0) as u32);
     grid.set_row_spacing(px(8.0, scale).max(0) as u32);
-    for (index, spec) in STYLE_SPECS.iter().enumerate() {
-        let spec: &'static StyleSpec = spec;
+    let mut buttons = Vec::new();
+    for (index, style) in FrameStyle::ALL.into_iter().enumerate() {
         let cell = GtkBox::new(Orientation::Vertical, px(4.0, scale));
         cell.set_hexpand(false);
         cell.set_halign(Align::Center);
@@ -912,7 +961,7 @@ pub(super) fn style_disclosure(scale: f64) -> GtkBox {
             .build();
         preview.set_can_target(false);
         preview.set_draw_func(move |_, context, width, height| {
-            paint_style_swatch(context, f64::from(width), f64::from(height), spec);
+            paint_style_swatch(context, f64::from(width), f64::from(height), style);
         });
         // Linux keeps the swatch alone in the hover-tinted button, with the
         // name below it outside the tint.
@@ -920,10 +969,26 @@ pub(super) fn style_disclosure(scale: f64) -> GtkBox {
         button.set_has_frame(false);
         button.add_css_class("image-editor-frame-tile");
         button.set_child(Some(&preview));
-        button.set_tooltip_text(Some(&t(spec.label)));
+        button.set_tooltip_text(Some(&t(style.label())));
         button.set_hexpand(false);
         button.set_halign(Align::Center);
-        let label = Label::new(Some(&t(spec.label)));
+        button.connect_clicked({
+            let host = host.cloned();
+            move |_| {
+                if let Some(host) = &host {
+                    if host.read(|st| st.selected_tool)
+                        != Some(crate::capture::editor::types::Tool::Background)
+                    {
+                        host.set_tool(crate::capture::editor::types::Tool::Background);
+                    }
+                    host.mutate(|st| {
+                        st.set_frame_style(style);
+                    });
+                }
+            }
+        });
+        buttons.push((style, button.clone()));
+        let label = Label::new(Some(&t(style.label())));
         label.add_css_class("image-editor-frame-tile-label");
         label.set_xalign(0.5);
         label.set_ellipsize(gtk4::pango::EllipsizeMode::End);
@@ -933,7 +998,25 @@ pub(super) fn style_disclosure(scale: f64) -> GtkBox {
         grid.attach(&cell, (index % 3) as i32, (index / 3) as i32, 1, 1);
     }
     body.append(&grid);
-    disclosure_row("Style", &body, scale)
+    let card = disclosure_row("Style", &body, scale);
+    let sync = {
+        let card = card.clone();
+        let host = host.cloned();
+        Rc::new(move || {
+            let style = host
+                .as_ref()
+                .and_then(|host| host.read(|st| st.background.frame_style));
+            card.set_sensitive(style.is_some());
+            for (preset, button) in &buttons {
+                if Some(*preset) == style {
+                    button.add_css_class("selected-style");
+                } else {
+                    button.remove_css_class("selected-style");
+                }
+            }
+        }) as Rc<dyn Fn()>
+    };
+    (card, sync)
 }
 
 // ── Frame ───────────────────────────────────────────────────────────
@@ -1874,16 +1957,27 @@ pub(super) fn appearance_panel(
     let (background, sync) = background_card(scale, host, column, window);
     body.append(&background);
     body.append(&export_quality(scale));
-    if include_transform {
-        body.append(&transform_disclosure(scale));
-    }
-    body.append(&shadow_disclosure(scale));
-    body.append(&style_disclosure(scale));
+    let transform_sync = if include_transform {
+        let (transform, sync) = transform_disclosure(scale, host);
+        body.append(&transform);
+        Some(sync)
+    } else {
+        None
+    };
+    let (shadow, shadow_sync) = shadow_disclosure(scale, host);
+    body.append(&shadow);
+    let (style, style_sync) = style_disclosure(scale, host);
+    body.append(&style);
     let (frame, frame_sync) = frame_disclosure(scale, host);
     body.append(&frame);
     let sync = Rc::new(move || {
         sync();
+        shadow_sync();
+        style_sync();
         frame_sync();
+        if let Some(sync) = &transform_sync {
+            sync();
+        }
     });
     (body, sync)
 }
@@ -1979,8 +2073,11 @@ fn background_card(
     let radius = FilledSlider::new(&t("Border Radius"), 0.0, 40.0, 0.0, 1.0, 0, scale);
     let noise =
         FilledSlider::new(&t("Background noise"), 0.0, 100.0, 0.0, 1.0, 0, scale).with_suffix("%");
+    let (begin, end) = transform_interaction(host.cloned());
     for (index, slider) in [&padding, &blur, &radius, &noise].into_iter().enumerate() {
         options.append(&slider.widget());
+        slider.on_interaction(begin.clone(), end.clone());
+        slider.enable_keyboard(10.0);
         if let Some(host) = host {
             let host = host.clone();
             slider.on_change(Rc::new(move |value| {
@@ -2016,8 +2113,18 @@ fn background_card(
                     slider.set_value(0.0);
                 }
             }
-            if let Some(value) = host.read(|st| st.background.padding) {
-                padding.set_value(value);
+            if let Some((padding_value, blur_value, radius_value, noise_value)) = host.read(|st| {
+                (
+                    st.background.padding,
+                    st.background.blur,
+                    st.background.radius,
+                    st.background.noise,
+                )
+            }) {
+                padding.set_value(padding_value);
+                blur.set_value(blur_value);
+                radius.set_value(radius_value);
+                noise.set_value(noise_value * 100.0);
             }
         }) as Rc<dyn Fn()>
     };
@@ -2192,6 +2299,207 @@ mod tests {
             collect_class(&current, class, found);
             child = current.next_sibling();
         }
+    }
+
+    #[test]
+    fn shadow_controls_follow_document_and_undo() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            type RefreshHook = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+            let refresh: RefreshHook = Rc::new(RefCell::new(None));
+            let host = EditorHost::new(
+                {
+                    let refresh = refresh.clone();
+                    Rc::new(move || {
+                        if let Some(refresh) = refresh.borrow().as_ref() {
+                            refresh();
+                        }
+                    })
+                },
+                Rc::new(|_| {}),
+                Rc::new(|| (0.0, 0.0)),
+            );
+            *host.editor.borrow_mut() = Some(EditorState::new(RgbaImage::new(100, 80)));
+            let (section, sync) = shadow_disclosure(1.0, Some(&host));
+            *refresh.borrow_mut() = Some(sync.clone());
+            sync();
+            let mut buttons = Vec::new();
+            collect_class(
+                section.upcast_ref(),
+                "image-editor-preset-pill",
+                &mut buttons,
+            );
+            assert_eq!(buttons.len(), 4);
+            let spread = buttons[1].clone().downcast::<ToggleButton>().unwrap();
+            let adaptive = buttons[3].clone().downcast::<ToggleButton>().unwrap();
+            spread.set_active(true);
+            assert_eq!(
+                host.read(|st| st.scene_shadow.preset),
+                Some(MotionSceneShadowPreset::Spread)
+            );
+            assert!(spread.is_active());
+            adaptive.set_active(true);
+            assert_eq!(
+                host.read(|st| st.scene_shadow.preset),
+                Some(MotionSceneShadowPreset::Adaptive)
+            );
+            assert!(adaptive.is_active());
+            host.undo();
+            assert!(spread.is_active());
+            assert_eq!(
+                host.read(|st| st.scene_shadow.preset),
+                Some(MotionSceneShadowPreset::Spread)
+            );
+            host.redo();
+            assert!(adaptive.is_active());
+        }) else {
+            return;
+        };
+    }
+
+    #[test]
+    fn shadow_slider_and_light_pad_commit_grouped_edits() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let host = EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)));
+            *host.editor.borrow_mut() = Some(EditorState::new(RgbaImage::new(100, 80)));
+            let (section, sync) = shadow_disclosure(1.0, Some(&host));
+            sync();
+            let mut sliders = Vec::new();
+            let mut pads = Vec::new();
+            collect_class(
+                section.upcast_ref(),
+                "recording-editor-fill-slider",
+                &mut sliders,
+            );
+            collect_class(section.upcast_ref(), "image-editor-light-pad", &mut pads);
+            assert_eq!(sliders.len(), 1);
+            assert_eq!(pads.len(), 1);
+            let controller = |widget: &gtk4::Widget, type_name: &str| {
+                let controllers = widget.observe_controllers();
+                (0..controllers.n_items())
+                    .map(|index| controllers.item(index).unwrap())
+                    .find(|object| object.type_().name() == type_name)
+                    .unwrap()
+            };
+            let slider = controller(&sliders[0], "GtkGestureDrag")
+                .downcast::<GestureDrag>()
+                .unwrap();
+            slider.emit_by_name::<()>("drag-begin", &[&0.25_f64, &0.0_f64]);
+            slider.emit_by_name::<()>("drag-end", &[&0.0_f64, &0.0_f64]);
+            assert_eq!(host.read(|state| state.scene_shadow.opacity), Some(0.25));
+            assert!(host.read(|state| state.can_undo()).unwrap());
+            host.undo();
+            assert_eq!(host.read(|state| state.scene_shadow.opacity), Some(1.0));
+            host.redo();
+            assert_eq!(host.read(|state| state.scene_shadow.opacity), Some(0.25));
+
+            let light = controller(&pads[0], "GtkGestureClick")
+                .downcast::<GestureClick>()
+                .unwrap();
+            light.emit_by_name::<()>("pressed", &[&1_i32, &0.25_f64, &0.25_f64]);
+            light.emit_by_name::<()>("pressed", &[&1_i32, &0.75_f64, &0.75_f64]);
+            light.emit_by_name::<()>("released", &[&1_i32, &0.75_f64, &0.75_f64]);
+            let position = host.read(|state| state.scene_shadow.light).unwrap();
+            assert_ne!(position, (0.65, 0.65));
+            host.undo();
+            assert_eq!(
+                host.read(|state| state.scene_shadow.light),
+                Some((0.65, 0.65))
+            );
+            assert_eq!(host.read(|state| state.scene_shadow.opacity), Some(0.25));
+            host.redo();
+            assert_eq!(host.read(|state| state.scene_shadow.light), Some(position));
+        }) else {
+            return;
+        };
+    }
+
+    #[test]
+    fn style_tiles_follow_the_shared_presets_and_document_history() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let host = EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)));
+            *host.editor.borrow_mut() = Some(EditorState::new(RgbaImage::new(100, 80)));
+            let (section, sync) = style_disclosure(1.0, Some(&host));
+            sync();
+            let mut buttons = Vec::new();
+            collect_class(
+                section.upcast_ref(),
+                "image-editor-frame-tile",
+                &mut buttons,
+            );
+            assert_eq!(buttons.len(), FrameStyle::ALL.len());
+            assert!(buttons[0].has_css_class("selected-style"));
+            for (button, style) in buttons.iter().zip(FrameStyle::ALL) {
+                button.clone().downcast::<Button>().unwrap().emit_clicked();
+                sync();
+                assert_eq!(host.read(|st| st.background.frame_style), Some(style));
+                assert!(button.has_css_class("selected-style"));
+                assert_eq!(
+                    buttons
+                        .iter()
+                        .filter(|tile| tile.has_css_class("selected-style"))
+                        .count(),
+                    1
+                );
+            }
+            host.undo();
+            sync();
+            assert!(buttons[10].has_css_class("selected-style"));
+        }) else {
+            return;
+        };
+    }
+
+    #[test]
+    fn style_swatches_are_drawn_from_the_applied_presets() {
+        let render = |style| {
+            let mut surface =
+                gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 56, 44).unwrap();
+            {
+                let context = CairoContext::new(&surface).unwrap();
+                paint_style_swatch(&context, 56.0, 44.0, style);
+            }
+            surface.flush();
+            let bytes = surface.data().unwrap().to_vec();
+            bytes
+        };
+        let clean = render(FrameStyle::Default);
+        for style in FrameStyle::ALL.into_iter().skip(1) {
+            assert_ne!(
+                render(style),
+                clean,
+                "{style:?} needs a representative swatch"
+            );
+        }
+    }
+
+    #[test]
+    fn transform_reset_is_a_compact_secondary_action() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let host = EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)));
+            let mut state = EditorState::new(RgbaImage::new(100, 80));
+            state.static_image_transform.yaw = 12.0;
+            *host.editor.borrow_mut() = Some(state);
+            let (section, sync) = transform_disclosure(1.0, Some(&host));
+            sync();
+            let mut buttons = Vec::new();
+            collect_class(
+                section.upcast_ref(),
+                "image-editor-transform-reset",
+                &mut buttons,
+            );
+            assert_eq!(buttons.len(), 1);
+            let reset = buttons[0].clone().downcast::<Button>().unwrap();
+            assert_eq!(reset.halign(), Align::End);
+            assert!(reset.is_sensitive());
+            reset.emit_clicked();
+            sync();
+            assert!(!reset.is_sensitive());
+            assert!(host
+                .read(|st| st.static_image_transform.is_identity())
+                .unwrap());
+        }) else {
+            return;
+        };
     }
 
     #[test]

@@ -42,9 +42,19 @@ pub mod editor {
     pub mod upscale;
 
     /// Composition layout types. Only the rectangle the renderer's frame
-    /// border helper needs is ported; the full background compositor stays
-    /// behind the Appearance backend, which is not wired yet.
+    /// border helper needs is ported; Windows uses its own Appearance layout.
     pub mod composition;
+
+    /// The still image camera pose, shared with the Linux editor.
+    #[path = "../../../../src/capture/editor/image_transform.rs"]
+    #[rustfmt::skip]
+    pub mod image_transform;
+
+    pub(crate) mod glass_render;
+    pub(crate) mod shadow_render;
+    pub(crate) mod style_render;
+    /// Perspective projection for the Windows still-image editor.
+    pub(crate) mod transform_render;
 
     /// Windows Runtime OCR used by the highlighter's Detect text mode.
     pub mod ocr;

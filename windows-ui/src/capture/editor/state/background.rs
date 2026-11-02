@@ -41,6 +41,7 @@ pub(crate) struct Appearance {
     pub radius: f64,
     pub noise: f64,
     pub frame_aspect: Option<FrameRatio>,
+    pub frame_style: super::super::types::FrameStyle,
     pub revision: u64,
     padding_initialized: bool,
 }
@@ -54,13 +55,14 @@ impl Default for Appearance {
             radius: 0.0,
             noise: 0.0,
             frame_aspect: None,
+            frame_style: Default::default(),
             revision: 0,
             padding_initialized: false,
         }
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Layout {
     pub width: f64,
     pub height: f64,
@@ -96,6 +98,16 @@ impl Appearance {
         };
         let mut canvas_width = f64::from(width) + 2.0 * inset;
         let mut canvas_height = f64::from(height) + 2.0 * inset;
+        let (left, top, right, bottom) = super::super::style_render::overhangs(
+            self.frame_style,
+            f64::from(width),
+            f64::from(height),
+        );
+        let (left, top, right, bottom) = (left.ceil(), top.ceil(), right.ceil(), bottom.ceil());
+        let content_width = f64::from(width) + left + right;
+        let content_height = f64::from(height) + top + bottom;
+        canvas_width = canvas_width.max(content_width.ceil());
+        canvas_height = canvas_height.max(content_height.ceil());
         if let Some(ratio) = self.frame_aspect.filter(|r| r.width > 0 && r.height > 0) {
             let w = f64::from(ratio.width);
             let h = f64::from(ratio.height);
@@ -106,8 +118,8 @@ impl Appearance {
         Layout {
             width: canvas_width,
             height: canvas_height,
-            image_x: ((canvas_width - f64::from(width)) / 2.0).floor(),
-            image_y: ((canvas_height - f64::from(height)) / 2.0).floor(),
+            image_x: ((canvas_width - content_width) / 2.0).floor() + left,
+            image_y: ((canvas_height - content_height) / 2.0).floor() + top,
             radius: self.radius * unit,
         }
     }

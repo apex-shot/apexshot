@@ -1429,6 +1429,54 @@ button.image-editor-inline-button:disabled {
     background: rgba(17, 24, 39, 0.09);
 }
 
+button.image-editor-transform-reset {
+    min-height: 26px;
+    padding: 0 8px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.66);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+button.image-editor-transform-reset label {
+    color: inherit;
+    font-size: 11px;
+}
+
+button.image-editor-transform-reset:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.95);
+}
+
+button.image-editor-transform-reset:active {
+    background: rgba(255, 255, 255, 0.14);
+}
+
+button.image-editor-transform-reset:focus-visible {
+    box-shadow: inset 0 0 0 1px rgba(233, 145, 91, 0.8);
+}
+
+button.image-editor-transform-reset:disabled {
+    opacity: 0.4;
+}
+
+.editor-theme-light button.image-editor-transform-reset {
+    color: rgba(17, 24, 39, 0.66);
+}
+
+.editor-theme-light button.image-editor-transform-reset:hover {
+    background: rgba(17, 24, 39, 0.08);
+    color: rgba(17, 24, 39, 0.95);
+}
+
+.editor-theme-light button.image-editor-transform-reset:active {
+    background: rgba(17, 24, 39, 0.14);
+}
+
 /* Shadow falloff pills: one homogeneous row in the zoom-easing shape. */
 .image-editor-preset-row {
     margin-top: 8px;
@@ -1584,6 +1632,12 @@ button.image-editor-frame-tile:focus-visible {
 
 button.image-editor-frame-tile:hover {
     background: rgba(255, 255, 255, 0.05);
+}
+
+button.image-editor-frame-tile.selected-style,
+button.image-editor-frame-tile.selected-style:hover {
+    background: rgba(233, 145, 91, 0.14);
+    box-shadow: inset 0 0 0 1px rgba(233, 145, 91, 0.7);
 }
 
 .image-editor-frame-shape {

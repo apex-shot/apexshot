@@ -639,7 +639,12 @@ impl Canvas {
                 w,
                 h,
                 st.background.layout(w, h),
-                st.background.has_fill() || st.background.frame_aspect.is_some(),
+                st.background.has_fill()
+                    || st.background.frame_aspect.is_some()
+                    || crate::capture::editor::types::frame_needs_canvas(
+                        st.background.frame_style,
+                        st.background.frame_style.spec().border_thickness,
+                    ),
                 st.background.frame_aspect,
             )
         }) else {

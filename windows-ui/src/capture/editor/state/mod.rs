@@ -2,9 +2,8 @@
 //!
 //! The session is a Windows port of the Linux editor's annotation document:
 //! same fields, same mutation semantics, same history model. The pieces the
-//! Linux editor hangs off the Appearance/Motion backends (transforms and motion
-//! history) remain out of scope here, while background composition and
-//! annotation behaviour are shared or ported from the Linux editor.
+//! Linux editor hangs off the Motion backend remain out of scope here, while
+//! background composition and annotation behaviour are shared or ported.
 
 #[path = "../../../../../src/capture/editor/state/arrow.rs"]
 #[rustfmt::skip]
@@ -45,6 +44,8 @@ use std::sync::{Arc, Mutex};
 
 pub struct EditorState {
     pub(crate) background: background::Appearance,
+    pub(crate) static_image_transform: super::image_transform::StaticImageTransform,
+    pub(crate) scene_shadow: crate::recording::editor::model::MotionSceneShadow,
     pub source_upscale: super::upscale::SourceUpscale,
     pub(crate) export_scale: f64,
     pub base_image: Arc<RgbaImage>,
@@ -271,6 +272,8 @@ impl EditorState {
         let base_image = Arc::new(base_image);
         Self {
             background: background::Appearance::default(),
+            static_image_transform: Default::default(),
+            scene_shadow: Default::default(),
             source_upscale: Default::default(),
             export_scale: 1.0,
             working_image: Arc::clone(&base_image),
@@ -346,6 +349,59 @@ impl EditorState {
             self.rebuild_effect_layer();
         }
         rebuild
+    }
+
+    pub(crate) fn set_static_image_transform(
+        &mut self,
+        transform: super::image_transform::StaticImageTransform,
+    ) -> bool {
+        let transform = transform.sanitized();
+        if self.static_image_transform == transform {
+            return false;
+        }
+        let before = self.document_snapshot();
+        self.static_image_transform = transform;
+        if self.history_interaction_before.is_none() {
+            self.commit_history_change(before, history::HistoryKind::StaticTransform);
+        }
+        true
+    }
+
+    pub(crate) fn set_scene_shadow(
+        &mut self,
+        shadow: crate::recording::editor::model::MotionSceneShadow,
+    ) -> bool {
+        let shadow = shadow.clamped();
+        if self.scene_shadow == shadow {
+            return false;
+        }
+        let before = self.document_snapshot();
+        self.scene_shadow = shadow;
+        if self.history_interaction_before.is_none() {
+            self.commit_history_change(before, history::HistoryKind::Edit);
+        }
+        true
+    }
+
+    pub(crate) fn set_frame_style(&mut self, style: super::types::FrameStyle) -> bool {
+        if self.background.frame_style == style {
+            return false;
+        }
+        let before = self.document_snapshot();
+        let before_radius = self.background.radius;
+        self.background.frame_style = style;
+        if style.spec().liquid && self.background.radius < 12.0 {
+            self.background.radius = 20.0;
+        }
+        self.background.changed();
+        self.commit_history_change(
+            before,
+            history::HistoryKind::FrameStyle {
+                before_radius,
+                after_radius: self.background.radius,
+            },
+        );
+        true
     }
 
     pub fn set_tool_without_rebuild(&mut self, tool: Tool) -> bool {

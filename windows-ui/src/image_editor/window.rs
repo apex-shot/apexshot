@@ -144,7 +144,8 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
 
     inspector.copy_button.connect_clicked({
         let host = canvas.host.clone();
-        move |_| host.copy_to_clipboard()
+        let window = window.clone();
+        move |_| copy_image(&window, &host)
     });
     inspector.export_button.connect_clicked({
         let host = canvas.host.clone();
@@ -245,7 +246,9 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     workspace.append(&inspector.root);
     root.append(&workspace);
 
-    window.set_child(Some(&root));
+    let overlay = gtk4::Overlay::new();
+    overlay.set_child(Some(&root));
+    window.set_child(Some(&overlay));
 
     canvas.open_button.connect_clicked({
         let canvas = canvas.clone();
@@ -321,6 +324,15 @@ fn save_as_dialog(window: &ApplicationWindow, host: &Rc<super::annotate::EditorH
     if !host.has_document() || host.background_loading() {
         return;
     }
+    let retry_window = window.downgrade();
+    let retry_host = Rc::downgrade(host);
+    if !gate_image_output(window, host, move || {
+        if let (Some(window), Some(host)) = (retry_window.upgrade(), retry_host.upgrade()) {
+            save_as_dialog(&window, &host);
+        }
+    }) {
+        return;
+    }
     let dialog = gtk4::FileDialog::new();
     dialog.set_title(&t("Save annotated image"));
     dialog.set_initial_name(Some("annotated.png"));
@@ -342,6 +354,34 @@ fn save_as_dialog(window: &ApplicationWindow, host: &Rc<super::annotate::EditorH
             }
         }
     });
+}
+
+fn gate_image_output(
+    window: &ApplicationWindow,
+    host: &Rc<super::annotate::EditorHost>,
+    retry: impl Fn() + 'static,
+) -> bool {
+    let Some(capabilities) = host.read(|st| {
+        crate::studio_entitlement::capabilities_for_static_image(st.static_image_transform)
+    }) else {
+        return false;
+    };
+    crate::studio_upsell::gate(window, capabilities, retry)
+}
+
+fn copy_image(window: &ApplicationWindow, host: &Rc<super::annotate::EditorHost>) {
+    if !host.has_document() || host.background_loading() {
+        return;
+    }
+    let retry_window = window.downgrade();
+    let retry_host = Rc::downgrade(host);
+    if gate_image_output(window, host, move || {
+        if let (Some(window), Some(host)) = (retry_window.upgrade(), retry_host.upgrade()) {
+            copy_image(&window, &host);
+        }
+    }) {
+        host.copy_to_clipboard();
+    }
 }
 
 fn install_keys(
@@ -426,7 +466,7 @@ fn install_keys(
                     Propagation::Stop
                 }
                 gdk::Key::c | gdk::Key::C if ctrl => {
-                    canvas.host.copy_to_clipboard();
+                    copy_image(&window, &canvas.host);
                     Propagation::Stop
                 }
                 gdk::Key::_0 | gdk::Key::KP_0 if ctrl => {

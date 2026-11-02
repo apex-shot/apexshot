@@ -148,6 +148,12 @@ impl ExportHandle {
 pub(super) fn start_export(model: ExportModel, output: PathBuf) -> ExportHandle {
     let (sender, receiver) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
+    if let Err(error) =
+        crate::studio_entitlement::ensure_export_allowed(super::studio::capabilities(&model))
+    {
+        let _ = sender.send(ExportUpdate::Failed(error.to_string()));
+        return ExportHandle { receiver, cancel };
+    }
     let thread_cancel = cancel.clone();
     std::thread::spawn(move || {
         let encoder = Encoder::fastest();

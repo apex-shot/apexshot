@@ -1,3 +1,4 @@
+use super::super::image_transform::StaticImageTransform;
 use super::super::text_detect::TextDetector;
 use super::super::types::{AnnotationAction, Rect};
 use super::EditorState;
@@ -11,6 +12,9 @@ pub(crate) struct DocumentSnapshot {
     working_image: Arc<RgbaImage>,
     actions: Vec<AnnotationAction>,
     next_number: u32,
+    static_image_transform: StaticImageTransform,
+    scene_shadow: crate::recording::editor::model::MotionSceneShadow,
+    frame_style: super::super::types::FrameStyle,
 }
 
 impl DocumentSnapshot {
@@ -18,6 +22,9 @@ impl DocumentSnapshot {
         Arc::ptr_eq(&self.base_image, &other.base_image)
             && self.actions == other.actions
             && self.next_number == other.next_number
+            && self.static_image_transform == other.static_image_transform
+            && self.scene_shadow == other.scene_shadow
+            && self.frame_style == other.frame_style
     }
 }
 
@@ -32,6 +39,10 @@ pub(super) enum HistoryKind {
         old_height: u32,
     },
     StaticTransform,
+    FrameStyle {
+        before_radius: f64,
+        after_radius: f64,
+    },
 }
 
 #[derive(Clone)]
@@ -55,6 +66,9 @@ impl EditorState {
             working_image: Arc::clone(&self.working_image),
             actions: self.actions.clone(),
             next_number: self.next_number,
+            static_image_transform: self.static_image_transform,
+            scene_shadow: self.scene_shadow.clone(),
+            frame_style: self.background.frame_style,
         }
     }
 
@@ -128,6 +142,12 @@ impl EditorState {
         self.working_image = snapshot.working_image;
         self.actions = snapshot.actions;
         self.next_number = snapshot.next_number;
+        self.static_image_transform = snapshot.static_image_transform;
+        self.scene_shadow = snapshot.scene_shadow;
+        if self.background.frame_style != snapshot.frame_style {
+            self.background.frame_style = snapshot.frame_style;
+            self.background.changed();
+        }
         self.selected_action_index = None;
         self.select_drag_anchor = None;
         self.select_resize_handle = None;
@@ -221,6 +241,16 @@ impl EditorState {
                 self.redo_actions.push(action.clone());
             }
             self.restore_document_snapshot(transaction.before.clone());
+            if let HistoryKind::FrameStyle {
+                before_radius,
+                after_radius,
+            } = &transaction.kind
+            {
+                if before_radius != after_radius && self.background.radius == *after_radius {
+                    self.background.radius = *before_radius;
+                    self.background.changed();
+                }
+            }
             self.redo_history.push(transaction);
             return true;
         }
@@ -272,6 +302,16 @@ impl EditorState {
                 self.redo_actions.pop();
             }
             self.restore_document_snapshot(transaction.after.clone());
+            if let HistoryKind::FrameStyle {
+                before_radius,
+                after_radius,
+            } = &transaction.kind
+            {
+                if before_radius != after_radius && self.background.radius == *before_radius {
+                    self.background.radius = *after_radius;
+                    self.background.changed();
+                }
+            }
             self.undo_history.push(transaction);
             return true;
         }

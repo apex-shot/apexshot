@@ -11,6 +11,7 @@ mod background_blur;
 mod effects;
 mod liquid_glass;
 mod noise;
+pub(crate) mod scene_shadow;
 mod text;
 
 pub use arrows::{

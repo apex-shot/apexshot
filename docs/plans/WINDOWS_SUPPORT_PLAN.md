@@ -194,6 +194,13 @@ $env:PATH = "C:\gtk\bin;$env:PATH"
 cargo build --manifest-path windows-ui/Cargo.toml
 ```
 
+Studio-enabled Windows builds use the same `APEXSHOT_STUDIO_VERIFY_KEY` and
+`APEXSHOT_STUDIO_RELEASE_TIMESTAMP` build variables as Linux. Supply both in
+the environment or the repository root `.env`; the key is the public
+verification key, not a license token. Release builds require the pair unless
+`APEXSHOT_ALLOW_NO_STUDIO=1` explicitly opts out. Debug builds without it
+remain usable for free editing but cannot activate Studio.
+
 The Qt capture shell launches the resulting executable from the tray's
 **Settings...** action, preferring `APEXSHOT_SETTINGS`, then a sibling
 `apexshot-settings.exe`.

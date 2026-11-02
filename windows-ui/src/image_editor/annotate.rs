@@ -69,7 +69,16 @@ pub type Shared = Rc<RefCell<Option<EditorState>>>;
 const MOVE_HANDLE_DRAG_RADIUS: f64 = 7.0;
 const RESIZE_HANDLE_DRAG_SIZE: f64 = 10.0;
 const ARROW_CLICK_NOOP_DISTANCE: f64 = 3.0;
+const PREVIEW_CARD_MAX_EDGE: u32 = 1600;
 static BACKGROUND_DECODE_LOCK: Mutex<()> = Mutex::new(());
+
+fn preview_card_size(width: u32, height: u32) -> (u32, u32) {
+    let factor = (f64::from(PREVIEW_CARD_MAX_EDGE) / f64::from(width.max(height).max(1))).min(1.0);
+    (
+        (f64::from(width) * factor).round().max(1.0) as u32,
+        (f64::from(height) * factor).round().max(1.0) as u32,
+    )
+}
 
 type DecodedBackground = (RgbaImage, Vec<u8>);
 
@@ -109,6 +118,21 @@ fn spawn_background_decode(
     receiver
 }
 
+type CachedCard = (u64, Vec<AnnotationAction>, f64, ImageSurface);
+type CachedShadow = (
+    crate::capture::editor::render::scene_shadow::SceneShadowGeometry,
+    bool,
+    ImageSurface,
+);
+type CachedGlass = (
+    u64,
+    crate::capture::editor::state::background::Layout,
+    u32,
+    u32,
+    u32,
+    Option<crate::capture::editor::glass_render::GlassOverlay>,
+);
+
 pub struct EditorHost {
     pub editor: Shared,
     /// Called after any document or selection mutation: redraw + sync bars.
@@ -117,6 +141,9 @@ pub struct EditorHost {
     on_error: Rc<dyn Fn(String)>,
     /// Prepared Cairo surface for the working image, keyed by its revision.
     surface_cache: RefCell<Option<(u64, ImageSurface)>>,
+    card_cache: RefCell<Option<CachedCard>>,
+    shadow_cache: RefCell<Option<CachedShadow>>,
+    glass_cache: RefCell<Option<CachedGlass>>,
     background_cache: RefCell<Option<(u64, u32, u32, ImageSurface)>>,
     background_source: RefCell<Option<(Arc<RgbaImage>, ImageSurface)>>,
     /// Bumped on every document load so stale async results are rejected.
@@ -145,6 +172,9 @@ impl EditorHost {
             on_change,
             on_error,
             surface_cache: RefCell::new(None),
+            card_cache: RefCell::new(None),
+            shadow_cache: RefCell::new(None),
+            glass_cache: RefCell::new(None),
             background_cache: RefCell::new(None),
             background_source: RefCell::new(None),
             session_generation: Rc::new(Cell::new(0)),
@@ -178,6 +208,9 @@ impl EditorHost {
         self.start_detection(&mut state);
         *self.editor.borrow_mut() = Some(state);
         *self.surface_cache.borrow_mut() = None;
+        *self.card_cache.borrow_mut() = None;
+        *self.shadow_cache.borrow_mut() = None;
+        *self.glass_cache.borrow_mut() = None;
         *self.background_cache.borrow_mut() = None;
         *self.background_source.borrow_mut() = None;
         self.cancel_background_load();
@@ -482,6 +515,137 @@ impl EditorHost {
         } else if st.background.has_fill() {
             self.paint_composited_background(context, st, t, layout);
         }
+        let pose = if st.selected_tool == Tool::Background {
+            st.static_image_transform
+        } else {
+            Default::default()
+        };
+        if let Some(shadow) = crate::capture::editor::shadow_render::geometry(
+            layout,
+            f64::from(st.working_image.width()),
+            f64::from(st.working_image.height()),
+            pose,
+            &st.scene_shadow,
+        ) {
+            let interactive = st.history_interaction_before.is_some();
+            // During a light/opacity drag, move a cached unoffset silhouette
+            // instead of blurring the same card again for every pointer event.
+            let mut mask_geometry = shadow;
+            if interactive {
+                let margin = shadow.blur * 1.5
+                    + f64::from(st.working_image.width().min(st.working_image.height())) * 0.1;
+                let min_x = shadow.corners.iter().map(|p| p.0).fold(0.0, f64::min);
+                let min_y = shadow.corners.iter().map(|p| p.1).fold(0.0, f64::min);
+                let max_x = shadow
+                    .corners
+                    .iter()
+                    .map(|p| p.0)
+                    .fold(layout.width, f64::max);
+                let max_y = shadow
+                    .corners
+                    .iter()
+                    .map(|p| p.1)
+                    .fold(layout.height, f64::max);
+                mask_geometry.bounds = (
+                    min_x - margin,
+                    min_y - margin,
+                    max_x - min_x + margin * 2.0,
+                    max_y - min_y + margin * 2.0,
+                );
+                mask_geometry.offset = (0.0, 0.0);
+                mask_geometry.opacity = 1.0;
+            }
+            let cached = self.shadow_cache.borrow();
+            let mask = cached
+                .as_ref()
+                .filter(|(geometry, cached_interactive, _)| {
+                    *geometry == mask_geometry && *cached_interactive == interactive
+                })
+                .map(|(_, _, surface)| surface.clone());
+            drop(cached);
+            let mask = mask.or_else(|| {
+                let surface = render::scene_shadow::shadow_mask(
+                    mask_geometry,
+                    if interactive { 192.0 } else { 720.0 },
+                )?;
+                *self.shadow_cache.borrow_mut() =
+                    Some((mask_geometry, interactive, surface.clone()));
+                Some(surface)
+            });
+            if let Some(mask) = mask {
+                let _ = context.save();
+                context.translate(t.canvas_offset_x, t.canvas_offset_y);
+                context.scale(t.canvas_scale, t.canvas_scale);
+                context.rectangle(0.0, 0.0, layout.width, layout.height);
+                context.clip();
+                if interactive {
+                    context.translate(shadow.offset.0, shadow.offset.1);
+                }
+                render::scene_shadow::paint_shadow_mask(
+                    context,
+                    &mask,
+                    mask_geometry.bounds,
+                    if interactive { shadow.opacity } else { 1.0 },
+                );
+                let _ = context.restore();
+            }
+        }
+        let style = crate::capture::editor::style_render::StyleGeometry::new(
+            layout,
+            f64::from(st.working_image.width()),
+            f64::from(st.working_image.height()),
+            pose,
+            st.background.frame_style,
+        );
+        let _ = context.save();
+        context.translate(t.canvas_offset_x, t.canvas_offset_y);
+        context.scale(t.canvas_scale, t.canvas_scale);
+        style.paint_backings(context);
+        style.paint_underlay(context);
+        let _ = context.restore();
+        if st.selected_tool == Tool::Background && !st.static_image_transform.is_identity() {
+            let cached = self.card_cache.borrow();
+            let card = cached
+                .as_ref()
+                .filter(|(revision, actions, radius, _)| {
+                    *revision == st.working_image_revision
+                        && *actions == st.actions
+                        && *radius == layout.radius
+                })
+                .map(|(_, _, _, surface)| surface.clone());
+            drop(cached);
+            let card = card.or_else(|| {
+                let (width, height) =
+                    preview_card_size(st.working_image.width(), st.working_image.height());
+                let surface = st
+                    .card_surface_from_source(&surface, layout.radius, width, height)
+                    .ok()?;
+                *self.card_cache.borrow_mut() = Some((
+                    st.working_image_revision,
+                    st.actions.clone(),
+                    layout.radius,
+                    surface.clone(),
+                ));
+                Some(surface)
+            });
+            if let Some(card) = card {
+                let _ = context.save();
+                context.translate(t.canvas_offset_x, t.canvas_offset_y);
+                context.scale(t.canvas_scale, t.canvas_scale);
+                crate::capture::editor::transform_render::paint_card(
+                    context,
+                    &card,
+                    layout,
+                    f64::from(st.working_image.width()),
+                    f64::from(st.working_image.height()),
+                    st.static_image_transform,
+                    crate::capture::editor::transform_render::Quality::Preview,
+                );
+                style.paint_frame(context);
+                let _ = context.restore();
+            }
+            return;
+        }
         let _ = context.save();
         context.translate(t.offset_x, t.offset_y);
         context.scale(t.scale, t.scale);
@@ -499,6 +663,14 @@ impl EditorHost {
             .source()
             .set_filter(render::editor_image_filter_for_scale(t.scale));
         let _ = context.paint();
+        let _ = context.restore();
+
+        let _ = context.save();
+        context.translate(t.canvas_offset_x, t.canvas_offset_y);
+        context.scale(t.canvas_scale, t.canvas_scale);
+        if !self.paint_glass_frame(context, st, layout, t.canvas_scale) {
+            style.paint_frame(context);
+        }
         let _ = context.restore();
 
         let _ = context.save();
@@ -540,6 +712,58 @@ impl EditorHost {
         let surface = rgba_image_to_surface(image)?;
         *self.background_source.borrow_mut() = Some((Arc::clone(image), surface.clone()));
         Some(surface)
+    }
+
+    fn paint_glass_frame(
+        &self,
+        context: &gtk4::cairo::Context,
+        st: &EditorState,
+        layout: crate::capture::editor::state::background::Layout,
+        zoom: f64,
+    ) -> bool {
+        if !st.background.frame_style.spec().liquid || st.history_interaction_before.is_some() {
+            return false;
+        }
+        let (width, height) = st.working_image.dimensions();
+        let edge = (layout.width.max(layout.height) * zoom)
+            .ceil()
+            .clamp(1.0, 1200.0) as u32;
+        let cached = self.glass_cache.borrow();
+        let glass = cached
+            .as_ref()
+            .filter(|(revision, bounds, w, h, size, _)| {
+                *revision == st.background.revision
+                    && *bounds == layout
+                    && *w == width
+                    && *h == height
+                    && *size == edge
+            })
+            .map(|(_, _, _, _, _, overlay)| overlay.clone());
+        drop(cached);
+        let glass = glass.unwrap_or_else(|| {
+            let overlay = crate::capture::editor::glass_render::render(
+                &st.background,
+                layout,
+                width,
+                height,
+                f64::from(edge),
+            );
+            *self.glass_cache.borrow_mut() = Some((
+                st.background.revision,
+                layout,
+                width,
+                height,
+                edge,
+                overlay.clone(),
+            ));
+            overlay
+        });
+        if let Some(glass) = glass {
+            glass.paint(context);
+            true
+        } else {
+            false
+        }
     }
 
     fn paint_composited_background(
@@ -1928,7 +2152,7 @@ impl EditorHost {
             return;
         }
         self.commit_text_if_active();
-        let snapshot = self.with_state(|st| st.to_export_image().ok());
+        let snapshot = self.with_state(|st| st.to_final_image().ok());
         let Some(snapshot) = snapshot.flatten() else {
             (self.on_error)("Could not render the image for the clipboard.".into());
             return;
@@ -1969,7 +2193,7 @@ impl EditorHost {
             return;
         }
         self.commit_text_if_active();
-        let snapshot = self.with_state(|st| st.to_export_image().ok());
+        let snapshot = self.with_state(|st| st.to_final_image().ok());
         let Some(snapshot) = snapshot.flatten() else {
             (self.on_error)("Could not render the image.".into());
             return;
@@ -2188,6 +2412,99 @@ mod tests {
         EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)))
     }
 
+    #[test]
+    #[ignore = "manual transform preview performance measurement"]
+    fn measure_large_transform_preview() {
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            3840,
+            2160,
+            image::Rgba([120, 80, 40, 255]),
+        ));
+        state.selected_tool = Tool::Background;
+        state.static_image_transform.yaw = 18.0;
+        *host.editor.borrow_mut() = Some(state);
+        let surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 960, 540).unwrap();
+        let context = gtk4::cairo::Context::new(&surface).unwrap();
+        let transform = ViewTransform {
+            scale: 0.25,
+            canvas_scale: 0.25,
+            canvas_width: 3840.0,
+            canvas_height: 2160.0,
+            ..ViewTransform::for_image(3840.0, 2160.0)
+        };
+        let start = std::time::Instant::now();
+        host.paint_document(&context, transform);
+        let first = start.elapsed();
+        let start = std::time::Instant::now();
+        for frame in 0..20 {
+            host.mutate(|state| state.static_image_transform.yaw = 10.0 + f64::from(frame) / 2.0);
+            host.paint_document(&context, transform);
+        }
+        eprintln!(
+            "transform preview: first={first:?}, 20 frames={:?}",
+            start.elapsed()
+        );
+        host.mutate(|state| {
+            state.scene_shadow.preset =
+                crate::recording::editor::model::MotionSceneShadowPreset::Spread;
+            state.begin_history_interaction();
+        });
+        let start = std::time::Instant::now();
+        for frame in 0..20 {
+            host.mutate(|state| state.scene_shadow.light.0 = f64::from(frame) / 10.0 - 1.0);
+            host.paint_document(&context, transform);
+        }
+        eprintln!("shadow preview: 20 frames={:?}", start.elapsed());
+        host.mutate(|state| {
+            state.finish_history_interaction();
+            state.static_image_transform = Default::default();
+            state.background.fill =
+                crate::capture::editor::state::background::Fill::Image(Arc::new(
+                    RgbaImage::from_pixel(1, 1, image::Rgba([90, 130, 190, 255])),
+                ));
+            state.background.padding = 40.0;
+            state.set_frame_style(crate::capture::editor::types::FrameStyle::Liquid);
+        });
+        let layout = host
+            .read(|state| state.background.layout(3840, 2160))
+            .unwrap();
+        let zoom = 960.0 / layout.width;
+        let transform = ViewTransform {
+            scale: zoom,
+            canvas_scale: zoom,
+            offset_x: layout.image_x * zoom,
+            offset_y: layout.image_y * zoom,
+            canvas_width: layout.width,
+            canvas_height: layout.height,
+            image_rect_x: layout.image_x,
+            image_rect_y: layout.image_y,
+            has_background: true,
+            ..ViewTransform::for_image(3840.0, 2160.0)
+        };
+        let start = std::time::Instant::now();
+        host.paint_document(&context, transform);
+        let first = start.elapsed();
+        let start = std::time::Instant::now();
+        for _ in 0..20 {
+            host.paint_document(&context, transform);
+        }
+        eprintln!(
+            "glass preview: first={first:?}, 20 cached frames={:?}",
+            start.elapsed()
+        );
+        host.mutate(|state| {
+            state.background.frame_style = crate::capture::editor::types::FrameStyle::Default;
+            state.scene_shadow.preset =
+                crate::recording::editor::model::MotionSceneShadowPreset::None;
+        });
+        let start = std::time::Instant::now();
+        for _ in 0..20 {
+            host.paint_document(&context, transform);
+        }
+        eprintln!("flat preview: 20 frames={:?}", start.elapsed());
+    }
+
     fn loaded(tool: Tool) -> Rc<EditorHost> {
         let h = host();
         h.load_document_headless(test_image(64, 64));
@@ -2240,6 +2557,376 @@ mod tests {
         let data = surface.data().unwrap();
         let preview = render::cairo_argb_to_rgba_image(120, 120, stride, data.as_ref());
         assert_eq!(preview, exported);
+    }
+
+    #[test]
+    fn transformed_preview_matches_export_and_drawing_pauses_pose() {
+        use crate::capture::editor::state::background::Fill;
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            100,
+            80,
+            image::Rgba([240, 0, 0, 255]),
+        ));
+        state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            20,
+            20,
+            image::Rgba([0, 0, 255, 255]),
+        )));
+        state.background.padding = 40.0;
+        state.background.radius = 12.0;
+        state.static_image_transform.yaw = 18.0;
+        state.static_image_transform.pos_x = 0.2;
+        state.selected_tool = Tool::Background;
+        let exported = state.to_export_image().unwrap();
+        *host.editor.borrow_mut() = Some(state);
+        let transform = ViewTransform {
+            offset_x: 10.0,
+            offset_y: 10.0,
+            has_background: true,
+            canvas_width: 120.0,
+            canvas_height: 100.0,
+            image_rect_x: 10.0,
+            image_rect_y: 10.0,
+            ..ViewTransform::for_image(100.0, 80.0)
+        };
+        let paint = || {
+            let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 120, 100).unwrap();
+            {
+                let context = gtk4::cairo::Context::new(&surface).unwrap();
+                host.paint_document(&context, transform);
+            }
+            surface.flush();
+            let stride = surface.stride() as usize;
+            let data = surface.data().unwrap();
+            render::cairo_argb_to_rgba_image(120, 100, stride, data.as_ref())
+        };
+        let preview = paint();
+        let red_bounds = |image: &RgbaImage| {
+            image
+                .enumerate_pixels()
+                .filter(|(_, _, pixel)| pixel[0] > 180 && pixel[2] < 80)
+                .map(|(x, y, _)| (x, y))
+                .fold(None::<(u32, u32, u32, u32)>, |bounds, (x, y)| {
+                    Some(match bounds {
+                        Some((min_x, min_y, max_x, max_y)) => {
+                            (min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y))
+                        }
+                        None => (x, y, x, y),
+                    })
+                })
+                .unwrap()
+        };
+        let actual = red_bounds(&preview);
+        let expected = red_bounds(&exported);
+        for (a, b) in [
+            (actual.0, expected.0),
+            (actual.1, expected.1),
+            (actual.2, expected.2),
+            (actual.3, expected.3),
+        ] {
+            assert!(
+                a.abs_diff(b) <= 1,
+                "preview {actual:?} differs from export {expected:?}"
+            );
+        }
+        assert_eq!(preview.get_pixel(0, 0), exported.get_pixel(0, 0));
+        assert_eq!(
+            host.read(|state| state.to_export_image().unwrap()),
+            Some(exported.clone())
+        );
+        host.mutate(|state| state.selected_tool = Tool::Pen);
+        assert_ne!(paint(), exported);
+        assert_eq!(
+            host.read(|state| state.static_image_transform.yaw),
+            Some(18.0)
+        );
+    }
+
+    #[test]
+    fn shadow_preview_matches_export_and_reuses_interactive_mask() {
+        use crate::capture::editor::state::background::Fill;
+        use crate::recording::editor::model::MotionSceneShadowPreset;
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            100,
+            80,
+            image::Rgba([240, 0, 0, 255]),
+        ));
+        state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([240, 240, 240, 255]),
+        )));
+        state.background.padding = 80.0;
+        state.background.radius = 10.0;
+        state.scene_shadow.preset = MotionSceneShadowPreset::Spread;
+        state.selected_tool = Tool::Background;
+        let exported = state.to_export_image().unwrap();
+        let layout = state.background.layout(100, 80);
+        *host.editor.borrow_mut() = Some(state);
+        let transform = ViewTransform {
+            offset_x: layout.image_x,
+            offset_y: layout.image_y,
+            has_background: true,
+            canvas_width: layout.width,
+            canvas_height: layout.height,
+            image_rect_x: layout.image_x,
+            image_rect_y: layout.image_y,
+            ..ViewTransform::for_image(100.0, 80.0)
+        };
+        let paint = || {
+            let mut surface = ImageSurface::create(
+                gtk4::cairo::Format::ARgb32,
+                layout.width as i32,
+                layout.height as i32,
+            )
+            .unwrap();
+            {
+                let context = gtk4::cairo::Context::new(&surface).unwrap();
+                host.paint_document(&context, transform);
+            }
+            surface.flush();
+            let stride = surface.stride() as usize;
+            let data = surface.data().unwrap();
+            render::cairo_argb_to_rgba_image(
+                layout.width as u32,
+                layout.height as u32,
+                stride,
+                data.as_ref(),
+            )
+        };
+        assert_eq!(paint(), exported);
+        host.mutate(|state| state.begin_history_interaction());
+        let first_frame = paint();
+        let cached = host.shadow_cache.borrow().as_ref().unwrap().2.clone();
+        host.mutate(|state| {
+            state.scene_shadow.light = (-1.0, -0.5);
+            state.scene_shadow.opacity = 0.4;
+        });
+        assert_ne!(paint(), first_frame);
+        assert_eq!(
+            cached.to_raw_none(),
+            host.shadow_cache.borrow().as_ref().unwrap().2.to_raw_none()
+        );
+        host.mutate(|state| state.finish_history_interaction());
+        paint();
+        assert_ne!(
+            cached.to_raw_none(),
+            host.shadow_cache.borrow().as_ref().unwrap().2.to_raw_none()
+        );
+    }
+
+    #[test]
+    fn frame_style_preview_matches_flat_export() {
+        use crate::capture::editor::state::background::Fill;
+        use crate::capture::editor::types::FrameStyle;
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            100,
+            80,
+            image::Rgba([240, 0, 0, 255]),
+        ));
+        state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([80, 140, 210, 255]),
+        )));
+        state.background.padding = 120.0;
+        state.background.radius = 20.0;
+        state.selected_tool = Tool::Background;
+        *host.editor.borrow_mut() = Some(state);
+        for style in FrameStyle::ALL {
+            host.mutate(|state| {
+                state.set_frame_style(style);
+            });
+            let (layout, exported) = host
+                .read(|state| {
+                    (
+                        state.background.layout(100, 80),
+                        state.to_export_image().unwrap(),
+                    )
+                })
+                .unwrap();
+            let transform = ViewTransform {
+                offset_x: layout.image_x,
+                offset_y: layout.image_y,
+                has_background: true,
+                canvas_width: layout.width,
+                canvas_height: layout.height,
+                image_rect_x: layout.image_x,
+                image_rect_y: layout.image_y,
+                ..ViewTransform::for_image(100.0, 80.0)
+            };
+            let mut surface = ImageSurface::create(
+                gtk4::cairo::Format::ARgb32,
+                layout.width as i32,
+                layout.height as i32,
+            )
+            .unwrap();
+            {
+                let context = gtk4::cairo::Context::new(&surface).unwrap();
+                host.paint_document(&context, transform);
+            }
+            surface.flush();
+            let stride = surface.stride() as usize;
+            let data = surface.data().unwrap();
+            let preview = render::cairo_argb_to_rgba_image(
+                layout.width as u32,
+                layout.height as u32,
+                stride,
+                data.as_ref(),
+            );
+            assert_eq!(preview, exported, "preview differs for {style:?}");
+        }
+    }
+
+    #[test]
+    fn refractive_glass_preview_matches_export_and_is_cached() {
+        use crate::capture::editor::state::background::Fill;
+        use crate::capture::editor::types::FrameStyle;
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            400,
+            300,
+            image::Rgba([240, 0, 0, 255]),
+        ));
+        state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([80, 140, 210, 255]),
+        )));
+        state.background.padding = 60.0;
+        state.background.radius = 20.0;
+        state.selected_tool = Tool::Background;
+        *host.editor.borrow_mut() = Some(state);
+        for style in [
+            FrameStyle::GlassLight,
+            FrameStyle::GlassDark,
+            FrameStyle::Liquid,
+        ] {
+            host.mutate(|state| {
+                state.set_frame_style(style);
+            });
+            let (layout, exported) = host
+                .read(|state| {
+                    (
+                        state.background.layout(400, 300),
+                        state.to_export_image().unwrap(),
+                    )
+                })
+                .unwrap();
+            let transform = ViewTransform {
+                offset_x: layout.image_x,
+                offset_y: layout.image_y,
+                has_background: true,
+                canvas_width: layout.width,
+                canvas_height: layout.height,
+                image_rect_x: layout.image_x,
+                image_rect_y: layout.image_y,
+                ..ViewTransform::for_image(400.0, 300.0)
+            };
+            let paint = || {
+                let mut surface = ImageSurface::create(
+                    gtk4::cairo::Format::ARgb32,
+                    layout.width as i32,
+                    layout.height as i32,
+                )
+                .unwrap();
+                {
+                    let context = gtk4::cairo::Context::new(&surface).unwrap();
+                    host.paint_document(&context, transform);
+                }
+                surface.flush();
+                let stride = surface.stride() as usize;
+                let data = surface.data().unwrap();
+                render::cairo_argb_to_rgba_image(
+                    layout.width as u32,
+                    layout.height as u32,
+                    stride,
+                    data.as_ref(),
+                )
+            };
+            assert_eq!(paint(), exported, "glass preview differs for {style:?}");
+            let cached = host
+                .glass_cache
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .5
+                .clone()
+                .unwrap();
+            paint();
+            let reused = host
+                .glass_cache
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .5
+                .clone()
+                .unwrap();
+            assert!(cached.same_surface(&reused));
+        }
+    }
+
+    #[test]
+    fn preview_card_is_bounded_and_reused_until_document_changes() {
+        assert_eq!(preview_card_size(3840, 2160), (1600, 900));
+        assert_eq!(preview_card_size(100, 80), (100, 80));
+        assert_eq!(preview_card_size(1, 3840), (1, 1600));
+
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            2000,
+            1000,
+            image::Rgba([240, 0, 0, 255]),
+        ));
+        state.static_image_transform.yaw = 12.0;
+        state.selected_tool = Tool::Background;
+        *host.editor.borrow_mut() = Some(state);
+        let surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 200, 100).unwrap();
+        let context = gtk4::cairo::Context::new(&surface).unwrap();
+        let transform = ViewTransform {
+            scale: 0.1,
+            canvas_scale: 0.1,
+            canvas_width: 2000.0,
+            canvas_height: 1000.0,
+            ..ViewTransform::for_image(2000.0, 1000.0)
+        };
+        host.paint_document(&context, transform);
+        let cached = host.card_cache.borrow().as_ref().unwrap().3.clone();
+        assert_eq!((cached.width(), cached.height()), (1600, 800));
+        host.mutate(|state| state.static_image_transform.pitch = 8.0);
+        host.paint_document(&context, transform);
+        assert_eq!(
+            cached.to_raw_none(),
+            host.card_cache.borrow().as_ref().unwrap().3.to_raw_none()
+        );
+        host.mutate(|state| state.mark_working_image_dirty());
+        host.paint_document(&context, transform);
+        assert_ne!(
+            cached.to_raw_none(),
+            host.card_cache.borrow().as_ref().unwrap().3.to_raw_none()
+        );
+        let rebuilt = host.card_cache.borrow().as_ref().unwrap().3.clone();
+        host.mutate(|state| {
+            state.actions.push(AnnotationAction::Box {
+                rect: crate::capture::editor::types::Rect {
+                    x: 20,
+                    y: 20,
+                    width: 100,
+                    height: 100,
+                },
+                color: crate::capture::editor::types::DrawColor::new(1.0, 1.0, 1.0, 1.0),
+                stroke_size: 4.0,
+                shadow: false,
+            });
+        });
+        host.paint_document(&context, transform);
+        assert_ne!(
+            rebuilt.to_raw_none(),
+            host.card_cache.borrow().as_ref().unwrap().3.to_raw_none()
+        );
     }
 
     #[test]

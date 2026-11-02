@@ -3392,6 +3392,8 @@ fn format_value(value: f64, decimals: usize) -> String {
 /// The docked panels' fill slider: a 32px filled track with the label inside
 /// it and the value trailing. Shared with the image editor's Appearance panel
 /// so both sidebars draw the same control.
+type SliderInteraction = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+
 #[derive(Clone)]
 pub(crate) struct FilledSlider {
     area: DrawingArea,
@@ -3405,6 +3407,8 @@ pub(crate) struct FilledSlider {
     dragging: Rc<Cell<bool>>,
     suffix: &'static str,
     on_change: Rc<RefCell<Option<Rc<dyn Fn(f64)>>>>,
+    on_interaction_start: SliderInteraction,
+    on_interaction_end: SliderInteraction,
 }
 
 impl FilledSlider {
@@ -3433,6 +3437,8 @@ impl FilledSlider {
             dragging: Rc::new(Cell::new(false)),
             suffix: "",
             on_change: Rc::new(RefCell::new(None)),
+            on_interaction_start: Rc::new(RefCell::new(None)),
+            on_interaction_end: Rc::new(RefCell::new(None)),
         };
         area.set_draw_func({
             let slider = slider.clone();
@@ -3449,6 +3455,9 @@ impl FilledSlider {
             move |gesture, x, _| {
                 slider.dragging.set(true);
                 slider.area.queue_draw();
+                if let Some(callback) = slider.on_interaction_start.borrow().clone() {
+                    callback();
+                }
                 slider.apply_x(gesture, x);
             }
         });
@@ -3466,6 +3475,9 @@ impl FilledSlider {
             move |_, _, _| {
                 slider.dragging.set(false);
                 slider.area.queue_draw();
+                if let Some(callback) = slider.on_interaction_end.borrow().clone() {
+                    callback();
+                }
             }
         });
         area.add_controller(drag);
@@ -3495,7 +3507,11 @@ impl FilledSlider {
     }
 
     pub(crate) fn set_value(&self, value: f64) {
-        self.value.set(value.clamp(self.min, self.max));
+        let value = value.clamp(self.min, self.max);
+        if self.value.get() == value {
+            return;
+        }
+        self.value.set(value);
         self.area.queue_draw();
     }
 
@@ -3506,6 +3522,75 @@ impl FilledSlider {
 
     pub(crate) fn on_change(&self, callback: Rc<dyn Fn(f64)>) {
         *self.on_change.borrow_mut() = Some(callback);
+    }
+
+    pub(crate) fn on_interaction(&self, start: Rc<dyn Fn()>, end: Rc<dyn Fn()>) {
+        *self.on_interaction_start.borrow_mut() = Some(start);
+        *self.on_interaction_end.borrow_mut() = Some(end);
+    }
+
+    pub(crate) fn enable_keyboard(&self, page: f64) {
+        self.area.set_focusable(true);
+        let active = Rc::new(Cell::new(false));
+        let keys = gtk4::EventControllerKey::new();
+        keys.connect_key_pressed({
+            let slider = self.clone();
+            let active = active.clone();
+            move |_, key, _, _| {
+                let value = slider.value.get();
+                let next = match key {
+                    gdk::Key::Left | gdk::Key::Down => value - slider.step,
+                    gdk::Key::Right | gdk::Key::Up => value + slider.step,
+                    gdk::Key::Page_Down => value - page,
+                    gdk::Key::Page_Up => value + page,
+                    gdk::Key::Home => slider.min,
+                    gdk::Key::End => slider.max,
+                    _ => return gtk4::glib::Propagation::Proceed,
+                };
+                if !active.replace(true) {
+                    if let Some(callback) = slider.on_interaction_start.borrow().clone() {
+                        callback();
+                    }
+                }
+                slider.apply_value(next);
+                gtk4::glib::Propagation::Stop
+            }
+        });
+        keys.connect_key_released({
+            let slider = self.clone();
+            let active = active.clone();
+            move |_, key, _, _| {
+                if matches!(
+                    key,
+                    gdk::Key::Left
+                        | gdk::Key::Down
+                        | gdk::Key::Right
+                        | gdk::Key::Up
+                        | gdk::Key::Page_Down
+                        | gdk::Key::Page_Up
+                        | gdk::Key::Home
+                        | gdk::Key::End
+                ) && active.replace(false)
+                {
+                    if let Some(callback) = slider.on_interaction_end.borrow().clone() {
+                        callback();
+                    }
+                }
+            }
+        });
+        self.area.add_controller(keys);
+        let focus = gtk4::EventControllerFocus::new();
+        focus.connect_leave({
+            let slider = self.clone();
+            move |_| {
+                if active.replace(false) {
+                    if let Some(callback) = slider.on_interaction_end.borrow().clone() {
+                        callback();
+                    }
+                }
+            }
+        });
+        self.area.add_controller(focus);
     }
 
     fn apply_x(&self, gesture: &GestureDrag, x: f64) {
@@ -3520,6 +3605,10 @@ impl FilledSlider {
         } else {
             raw
         };
+        self.apply_value(value);
+    }
+
+    fn apply_value(&self, value: f64) {
         let value = value.clamp(self.min, self.max);
         if (self.value.get() - value).abs() < 1e-9 {
             return;

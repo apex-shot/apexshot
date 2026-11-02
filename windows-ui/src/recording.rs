@@ -31,6 +31,24 @@ pub mod editor {
     pub mod model {
         include!("../../src/recording/editor/model_parts/cursor_types.rs");
         include!("../../src/recording/editor/model_parts/background_types.rs");
+        include!("../../src/recording/editor/model_parts/motion_scene_shadow.rs");
+
+        pub const DEFAULT_MOTION_END_PERSPECTIVE: f64 = 0.18;
+        pub const MIN_MOTION_YAW: f64 = -24.0;
+        pub const MAX_MOTION_YAW: f64 = 24.0;
+        pub const MIN_MOTION_POS: f64 = -1.0;
+        pub const MAX_MOTION_POS: f64 = 1.0;
+
+        #[derive(Debug, Clone, Copy, PartialEq)]
+        pub struct MotionTransform {
+            pub scale: f64,
+            pub rotation_x: f64,
+            pub rotation_y: f64,
+            pub rotation_z: f64,
+            pub perspective: f64,
+            pub pos_x: f64,
+            pub pos_y: f64,
+        }
     }
 
     /// The cursor sprites and previews the Linux editor draws.

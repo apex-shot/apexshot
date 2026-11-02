@@ -1598,24 +1598,60 @@ fn wire_export(
     let timeline = timeline.clone();
     let shell = shell.clone();
     stage.export_button.connect_clicked(move |_| {
-        let Some(footage) = timeline.export_footage() else {
+        let Some(model) = export_model(&stage_handle, &timeline) else {
             return;
         };
-        let source = footage.source;
+        let retry = stage_handle.export_button.downgrade();
+        if !crate::studio_upsell::gate(&window, super::studio::capabilities(&model), move || {
+            if let Some(button) = retry.upgrade() {
+                button.emit_clicked();
+            }
+        }) {
+            return;
+        }
+        let source = model.source;
         let stage = stage_handle.clone();
         let timeline = timeline.clone();
         let shell = shell.clone();
+        let window_for_output = window.clone();
         choose_export_path(
             &window,
             &source,
             Rc::new(move |output| {
-                let Some(model) = export_model(&stage, &timeline) else {
-                    return;
-                };
-                super::export_card::show(&shell, model, output);
+                start_gated_video_export(&window_for_output, &stage, &timeline, &shell, output);
             }),
         );
     });
+}
+
+fn start_gated_video_export(
+    window: &ApplicationWindow,
+    stage: &Stage,
+    timeline: &super::timeline::Timeline,
+    shell: &Overlay,
+    output: PathBuf,
+) {
+    let Some(model) = export_model(stage, timeline) else {
+        return;
+    };
+    let retry_window = window.downgrade();
+    let retry_stage = stage.clone();
+    let retry_timeline = timeline.clone();
+    let retry_shell = shell.downgrade();
+    let retry_output = output.clone();
+    if crate::studio_upsell::gate(window, super::studio::capabilities(&model), move || {
+        if let (Some(window), Some(shell)) = (retry_window.upgrade(), retry_shell.upgrade()) {
+            start_gated_video_export(
+                &window,
+                &retry_stage,
+                &retry_timeline,
+                &shell,
+                retry_output.clone(),
+            );
+        }
+    }) {
+        super::export_card::show(shell, model, output);
+    }
 }
 
 /// Ask where the MP4 goes, using the remembered folder when enabled.

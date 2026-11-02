@@ -24,7 +24,10 @@ pub mod platform;
 pub mod recording;
 pub mod settings;
 pub mod studio_entitlement;
+#[path = "../../src/studio_upsell.rs"]
+pub(crate) mod studio_upsell;
 #[path = "../../src/test_support.rs"]
 pub mod test_support;
+mod usage_telemetry;
 pub mod utils;
 pub mod video_editor;
