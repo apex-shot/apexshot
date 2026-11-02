@@ -1,4 +1,4 @@
-//! Clip hit testing, context actions and edge trimming.
+//! Clip hit testing, context actions, body moves and edge trimming.
 
 use super::*;
 use crate::capture::editor::window::icon_names;
@@ -15,16 +15,20 @@ pub(super) struct Hooks {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Edge {
+enum DragKind {
     Start,
     End,
+    Body,
 }
 
+/// A grab on a clip: either one of its trim edges or its body. `origin` is
+/// the value the drag maps back from, so a body move keeps the press offset
+/// and a trim keeps the edge under the pointer.
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Trim {
+struct Drag {
     text: bool,
     index: usize,
-    edge: Edge,
+    kind: DragKind,
     origin: f64,
 }
 
@@ -98,15 +102,17 @@ fn edge_at(
     width: f64,
     height: f64,
     scale: f64,
-) -> Option<Trim> {
+) -> Option<Drag> {
     if !inside_lane(text, y, height) {
         return None;
     }
-    let mut best: Option<(bool, f64, Trim)> = None;
+    let mut best: Option<(bool, f64, Drag)> = None;
     for index in 0..count(model, text) {
         let (start, end) = bounds(model, text, index)?;
         let (left, right) = painted_bounds(model, text, index, width)?;
-        for (edge, position, origin) in [(Edge::Start, left, start), (Edge::End, right, end)] {
+        for (kind, position, origin) in
+            [(DragKind::Start, left, start), (DragKind::End, right, end)]
+        {
             let distance = (x - position).abs();
             if distance > 8.0 * scale {
                 continue;
@@ -119,38 +125,69 @@ fn edge_at(
                 best = Some((
                     inside,
                     distance,
-                    Trim {
+                    Drag {
                         text,
                         index,
-                        edge,
+                        kind,
                         origin,
                     },
                 ));
             }
         }
     }
-    best.map(|(_, _, trim)| trim)
+    best.map(|(_, _, drag)| drag)
 }
 
-fn resize(model: &mut Model, trim: Trim, offset: f64, width: f64, scale: f64) -> bool {
-    let Some((start, end)) = bounds(model, trim.text, trim.index) else {
-        return false;
-    };
-    let duration = model.duration;
-    let time = trim.origin + offset / width.max(1.0) * duration;
-    let tolerance = 10.0 * scale / width.max(1.0) * duration;
-    let time = if trim.text {
-        model.snap_text_time(time, tolerance, Some(trim.index))
+/// What a press at (`x`, `y`) grabs: an edge within the trim band, else the
+/// clip body under the pointer, else nothing.
+fn grab_at(
+    model: &Model,
+    text: bool,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    scale: f64,
+) -> Option<Drag> {
+    if let Some(edge) = edge_at(model, text, x, y, width, height, scale) {
+        return Some(edge);
+    }
+    let index = clip_at(model, text, x, y, width, height)?;
+    Some(Drag {
+        text,
+        index,
+        kind: DragKind::Body,
+        origin: bounds(model, text, index)?.0,
+    })
+}
+
+/// The clip index the model re-selected after an edit; a move or trim can
+/// reorder the lane, so the drag must follow it.
+fn selected(model: &Model, text: bool) -> Option<usize> {
+    if text {
+        model.selected_text
     } else {
-        model.snap_effect_time(time, tolerance, Some(trim.index))
+        model.selected
+    }
+}
+
+fn resize(model: &mut Model, drag: Drag, offset: f64, width: f64, scale: f64) -> Option<usize> {
+    let (start, end) = bounds(model, drag.text, drag.index)?;
+    let duration = model.duration;
+    let time = drag.origin + offset / width.max(1.0) * duration;
+    let tolerance = 10.0 * scale / width.max(1.0) * duration;
+    let time = if drag.text {
+        model.snap_text_time(time, tolerance, Some(drag.index))
+    } else {
+        model.snap_effect_time(time, tolerance, Some(drag.index))
     };
     let mut left: f64 = 0.0;
     let mut right = duration;
-    for index in 0..count(model, trim.text) {
-        if index == trim.index {
+    for index in 0..count(model, drag.text) {
+        if index == drag.index {
             continue;
         }
-        if let Some((other_start, other_end)) = bounds(model, trim.text, index) {
+        if let Some((other_start, other_end)) = bounds(model, drag.text, index) {
             if other_end <= start + 1e-9 {
                 left = left.max(other_end);
             }
@@ -159,26 +196,46 @@ fn resize(model: &mut Model, trim: Trim, offset: f64, width: f64, scale: f64) ->
             }
         }
     }
-    let (new_start, new_end) = match trim.edge {
-        Edge::Start if end - MIN_MOTION_SEGMENT_SECONDS >= left => {
+    let (new_start, new_end) = match drag.kind {
+        DragKind::Start if end - MIN_MOTION_SEGMENT_SECONDS >= left => {
             (time.clamp(left, end - MIN_MOTION_SEGMENT_SECONDS), end)
         }
-        Edge::End if start + MIN_MOTION_SEGMENT_SECONDS <= right => {
+        DragKind::End if start + MIN_MOTION_SEGMENT_SECONDS <= right => {
             (start, time.clamp(start + MIN_MOTION_SEGMENT_SECONDS, right))
         }
-        _ => return false,
+        _ => return None,
     };
     if (new_start - start).abs() < 1e-9 && (new_end - end).abs() < 1e-9 {
-        return false;
+        return None;
     }
-    if trim.text {
-        model.resize_text_range(trim.index, new_start, new_end);
+    if drag.text {
+        model.resize_text_range(drag.index, new_start, new_end);
     } else {
-        model.resize_segment_range(trim.index, new_start, new_end);
+        model.resize_segment_range(drag.index, new_start, new_end);
     }
-    bounds(model, trim.text, trim.index).is_some_and(|(actual_start, actual_end)| {
-        (actual_start - start).abs() > 1e-9 || (actual_end - end).abs() > 1e-9
-    })
+    let next = selected(model, drag.text)?;
+    (bounds(model, drag.text, next)? != (start, end)).then_some(next)
+}
+
+/// Slide a whole clip under the pointer. The model keeps the span and rejects
+/// an overlap, so a move stops at a neighbour's edge instead of stacking.
+fn move_to(model: &mut Model, drag: Drag, offset: f64, width: f64, scale: f64) -> Option<usize> {
+    let (start, end) = bounds(model, drag.text, drag.index)?;
+    let duration = model.duration;
+    let raw = drag.origin + offset / width.max(1.0) * duration;
+    let tolerance = 10.0 * scale / width.max(1.0) * duration;
+    let target = if drag.text {
+        model.snap_text_time(raw, tolerance, Some(drag.index))
+    } else {
+        model.snap_effect_time(raw, tolerance, Some(drag.index))
+    };
+    if drag.text {
+        model.move_text(drag.index, target);
+    } else {
+        model.move_segment(drag.index, target);
+    }
+    let next = selected(model, drag.text)?;
+    (bounds(model, drag.text, next)? != (start, end)).then_some(next)
 }
 
 fn apply_action(model: &mut Model, text: bool, index: usize, action: Action) -> bool {
@@ -238,7 +295,7 @@ pub(super) fn install(row: &DrawingArea, text: bool, scale: f64, hooks: Hooks) {
     });
     row.add_controller(right_click);
 
-    let active = Rc::new(Cell::new(None::<Trim>));
+    let active = Rc::new(Cell::new(None::<Drag>));
     let checkpoint = Rc::new(RefCell::new(None::<Model>));
     let drag = gtk4::GestureDrag::new();
     drag.set_button(1);
@@ -248,7 +305,7 @@ pub(super) fn install(row: &DrawingArea, text: bool, scale: f64, hooks: Hooks) {
         let hooks = hooks.clone();
         move |_, x, y| {
             let Some(row) = row.upgrade() else { return };
-            let trim = edge_at(
+            let grabbed = grab_at(
                 &hooks.shared.model.borrow(),
                 text,
                 x,
@@ -257,12 +314,12 @@ pub(super) fn install(row: &DrawingArea, text: bool, scale: f64, hooks: Hooks) {
                 f64::from(row.height()),
                 scale,
             );
-            active.set(trim);
-            if let Some(trim) = trim {
+            active.set(grabbed);
+            if let Some(grabbed) = grabbed {
                 hooks.dragged.set(true);
                 hooks.shared.dragging_clip.set(true);
                 (hooks.pause)();
-                select(&mut hooks.shared.model.borrow_mut(), text, trim.index);
+                select(&mut hooks.shared.model.borrow_mut(), text, grabbed.index);
                 (hooks.redraw)();
                 hooks.shared.notify_state();
             }
@@ -277,15 +334,24 @@ pub(super) fn install(row: &DrawingArea, text: bool, scale: f64, hooks: Hooks) {
             if !shared.dragging_clip.get() {
                 return;
             }
-            let (Some(row), Some(trim)) = (row.upgrade(), active.get()) else {
+            let (Some(row), Some(grabbed)) = (row.upgrade(), active.get()) else {
                 return;
             };
             let mut model = shared.model.borrow_mut();
             let before = model.clone();
-            if resize(&mut model, trim, dx, f64::from(row.width().max(1)), scale) {
+            let width = f64::from(row.width().max(1));
+            let next = match grabbed.kind {
+                DragKind::Body => move_to(&mut model, grabbed, dx, width, scale),
+                DragKind::Start | DragKind::End => resize(&mut model, grabbed, dx, width, scale),
+            };
+            if let Some(next) = next {
                 if checkpoint.borrow().is_none() {
                     *checkpoint.borrow_mut() = Some(before);
                 }
+                active.set(Some(Drag {
+                    index: next,
+                    ..grabbed
+                }));
                 row.queue_draw();
             }
         }
@@ -295,7 +361,7 @@ pub(super) fn install(row: &DrawingArea, text: bool, scale: f64, hooks: Hooks) {
         let checkpoint = checkpoint.clone();
         let hooks = hooks.clone();
         Rc::new(move || {
-            let Some(trim) = active.take() else { return };
+            let Some(grabbed) = active.take() else { return };
             if !hooks.shared.dragging_clip.replace(false) {
                 checkpoint.borrow_mut().take();
                 hooks.dragged.set(false);
@@ -309,7 +375,7 @@ pub(super) fn install(row: &DrawingArea, text: bool, scale: f64, hooks: Hooks) {
             (hooks.redraw)();
             hooks.shared.notify_preview();
             hooks.shared.notify_state();
-            if changed && !trim.text {
+            if changed && !grabbed.text && grabbed.kind != DragKind::Body {
                 let range = hooks
                     .shared
                     .model
@@ -341,7 +407,7 @@ pub(super) fn install(row: &DrawingArea, text: bool, scale: f64, hooks: Hooks) {
             if shared.dragging_clip.get() {
                 return;
             }
-            let edge = edge_at(
+            let grabbed = grab_at(
                 &shared.model.borrow(),
                 text,
                 x,
@@ -350,10 +416,12 @@ pub(super) fn install(row: &DrawingArea, text: bool, scale: f64, hooks: Hooks) {
                 f64::from(widget.height()),
                 scale,
             );
-            widget.set_cursor_from_name(edge.map(|trim| match trim.edge {
-                Edge::Start => "w-resize",
-                Edge::End => "e-resize",
-            }));
+            widget.set_cursor_from_name(match grabbed.map(|grabbed| grabbed.kind) {
+                Some(DragKind::Start) => Some("w-resize"),
+                Some(DragKind::End) => Some("e-resize"),
+                Some(DragKind::Body) => Some("grab"),
+                None => None,
+            });
         }
     });
     pointer.connect_leave(|controller| {
@@ -495,25 +563,25 @@ mod tests {
             add(&mut model, text, 1.0);
             add(&mut model, text, 4.0);
             let end = edge_at(&model, text, 200.0, 20.0, 600.0, 44.0, 1.0).unwrap();
-            assert_eq!(end.edge, Edge::End);
-            assert!(resize(&mut model, end, 350.0, 600.0, 1.0));
+            assert_eq!(end.kind, DragKind::End);
+            assert!(resize(&mut model, end, 350.0, 600.0, 1.0).is_some());
             assert_eq!(bounds(&model, text, 0), Some((1.0, 4.0)));
             assert_eq!(bounds(&model, text, 1), Some((4.0, 5.0)));
-            let start = Trim {
+            let start = Drag {
                 text,
                 index: 0,
-                edge: Edge::Start,
+                kind: DragKind::Start,
                 origin: 1.0,
             };
-            assert!(resize(&mut model, start, -200.0, 600.0, 1.0));
+            assert!(resize(&mut model, start, -200.0, 600.0, 1.0).is_some());
             assert_eq!(bounds(&model, text, 0), Some((0.0, 4.0)));
-            let end = Trim { origin: 4.0, ..end };
-            assert!(resize(&mut model, end, -900.0, 600.0, 1.0));
+            let end = Drag { origin: 4.0, ..end };
+            assert!(resize(&mut model, end, -900.0, 600.0, 1.0).is_some());
             assert_eq!(
                 bounds(&model, text, 0),
                 Some((0.0, MIN_MOTION_SEGMENT_SECONDS))
             );
-            assert!(!resize(&mut model, end, -900.0, 600.0, 1.0));
+            assert!(resize(&mut model, end, -900.0, 600.0, 1.0).is_none());
             assert_eq!(
                 if text {
                     model.selected_text
@@ -527,14 +595,46 @@ mod tests {
         let mut model = Model::default();
         add(&mut model, false, 1.0);
         add(&mut model, true, 3.0);
-        let trim = Trim {
+        let trim = Drag {
             text: false,
             index: 0,
-            edge: Edge::End,
+            kind: DragKind::End,
             origin: 2.0,
         };
-        assert!(resize(&mut model, trim, 96.0, 600.0, 1.0));
+        assert!(resize(&mut model, trim, 96.0, 600.0, 1.0).is_some());
         assert_eq!(model.segments[0].end, 3.0);
+    }
+
+    #[test]
+    fn clip_bodies_move_without_retiming_and_stop_at_neighbors() {
+        let near = |model: &Model, text: bool, expected: (f64, f64)| {
+            let (start, end) = bounds(model, text, 0).unwrap();
+            (start - expected.0).abs() < 1e-9 && (end - expected.1).abs() < 1e-9
+        };
+        for text in [false, true] {
+            let mut model = Model::default();
+            add(&mut model, text, 1.0);
+            add(&mut model, text, 4.0);
+            let body = grab_at(&model, text, 180.0, 20.0, 600.0, 56.0, 1.0).unwrap();
+            assert_eq!(body.kind, DragKind::Body);
+            assert_eq!(body.index, 0);
+            assert!(move_to(&mut model, body, 60.0, 600.0, 1.0).is_some());
+            assert!(near(&model, text, (1.6, 2.6)));
+            assert_eq!(bounds(&model, text, 1), Some((4.0, 5.0)));
+            let duration = if text {
+                model.text_segments[0].duration()
+            } else {
+                model.segments[0].duration()
+            };
+            assert!((duration - 1.0).abs() < 1e-9);
+
+            // A body drag that would land across the next clip is refused
+            // instead of stacking, and the span survives.
+            let body = grab_at(&model, text, 250.0, 20.0, 600.0, 56.0, 1.0).unwrap();
+            assert_eq!(body.kind, DragKind::Body);
+            assert!(move_to(&mut model, body, 190.0, 600.0, 1.0).is_none());
+            assert!(near(&model, text, (1.6, 2.6)));
+        }
     }
 
     #[test]
@@ -546,13 +646,13 @@ mod tests {
         model.text_segments[0].transition_duration = 0.4;
         model.text_segments[0].typewriter_time = 0.6;
         for text in [false, true] {
-            let trim = Trim {
+            let trim = Drag {
                 text,
                 index: 0,
-                edge: Edge::End,
+                kind: DragKind::End,
                 origin: 2.0,
             };
-            assert!(resize(&mut model, trim, 100.0, 600.0, 1.0));
+            assert!(resize(&mut model, trim, 100.0, 600.0, 1.0).is_some());
         }
         assert_eq!(model.segments[0].timing.transition_duration, 1.0);
         assert_eq!(model.text_segments[0].transition_duration, 0.8);
@@ -571,14 +671,14 @@ mod tests {
             0
         );
         let edge = edge_at(&model, false, 201.0, 20.0, 600.0, 56.0, 1.0).unwrap();
-        assert_eq!((edge.index, edge.edge), (1, Edge::Start));
+        assert_eq!((edge.index, edge.kind), (1, DragKind::Start));
         assert!(edge_at(&model, false, 200.0, 2.0, 600.0, 56.0, 1.0).is_none());
         assert_eq!(clip_at(&model, false, 250.0, 20.0, 600.0, 56.0), Some(1));
         assert_eq!(clip_at(&model, false, 250.0, 2.0, 600.0, 56.0), None);
         model.resize_segment_range(0, 1.0, 1.25);
         let edge = edge_at(&model, false, 48.0, 20.0, 200.0, 56.0, 1.0).unwrap();
-        assert_eq!(edge.edge, Edge::End);
-        assert!(resize(&mut model, edge, 10.0, 200.0, 1.0));
+        assert_eq!(edge.kind, DragKind::End);
+        assert!(resize(&mut model, edge, 10.0, 200.0, 1.0).is_some());
         assert!((model.segments[0].end - 1.55).abs() < 1e-9);
     }
 

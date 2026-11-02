@@ -7,6 +7,9 @@ use super::state::background::Layout;
 
 #[derive(Clone, Copy)]
 pub(crate) enum Quality {
+    /// A frame painted while the head or pointer moves: coarse enough that a
+    /// mesh card stays cheap, and the parked frame is painted again.
+    Live,
     Preview,
     Export,
 }
@@ -70,6 +73,7 @@ pub(crate) fn paint_card(
     quality: Quality,
 ) {
     let (div, filter) = match quality {
+        Quality::Live => (2, Filter::Bilinear),
         Quality::Preview => (8, Filter::Bilinear),
         Quality::Export => (16, Filter::Good),
     };

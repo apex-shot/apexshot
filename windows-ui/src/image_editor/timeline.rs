@@ -4,10 +4,11 @@
 //!
 //! Motion clips use the same model as the Linux editor.
 
-use std::cell::{Cell, RefCell};
+use std::cell::{Cell, OnceCell, RefCell};
 use std::rc::Rc;
 
 use gtk4::cairo::Context as CairoContext;
+use gtk4::cairo::ImageSurface;
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, DrawingArea, Image, Label, Orientation, Overlay};
@@ -40,6 +41,15 @@ const TEXT_CLIP_ORANGE_EDGE: (f64, f64, f64) = (1.0, 178.0 / 255.0, 115.0 / 255.
 const PLAYHEAD_HANDLE_W: f64 = 12.0;
 const PLAYHEAD_HANDLE_H: f64 = 26.0;
 const PLAYHEAD_HANDLE_TOP: f64 = 2.0;
+
+/// The source badge's cast: a blurred silhouette with enough pad for the
+/// blur to fall off before the surface edge.
+const BADGE_SHADOW_PAD: f64 = 10.0;
+const BADGE_SHADOW_ICON: f64 = 20.0;
+
+thread_local! {
+    static BADGE_SHADOW: OnceCell<Option<ImageSurface>> = const { OnceCell::new() };
+}
 
 /// Which lane the board pointer is over.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -89,7 +99,7 @@ fn motion_clip_tone(selected: bool, faint: bool) -> ClipTone {
             fill: (blue.0, blue.1, blue.2, 0.95),
             edge: (0.0, 0.0, 0.0, 0.0),
             handle: (0.0, 0.0, 0.0, 0.0),
-            label: 0.82,
+            label: 0.92,
         }
     }
 }
@@ -125,7 +135,7 @@ fn text_clip_tone(selected: bool, faint: bool) -> ClipTone {
             fill: (orange.0, orange.1, orange.2, 0.95),
             edge: (0.0, 0.0, 0.0, 0.0),
             handle: (0.0, 0.0, 0.0, 0.0),
-            label: 0.84,
+            label: 0.92,
         }
     }
 }
@@ -146,6 +156,7 @@ fn disabled_clip_tone(mut tone: ClipTone, disabled: bool) -> ClipTone {
 
 type Model = MotionState;
 type PreviewRange = (f64, f64);
+type ThumbnailSource = Rc<dyn Fn() -> Option<ImageSurface>>;
 
 /// What the painters and handlers share: the mutable model plus the hover
 /// read-out.
@@ -161,20 +172,32 @@ struct Shared {
     interaction: RefCell<Option<MotionState>>,
     preview_on_finish: Cell<bool>,
     dragging_clip: Cell<bool>,
+    /// A ruler drag owns the head: hover must not steer the preview then, or
+    /// every pointer event would ask for a second frame behind the scrub.
+    scrubbing: Cell<bool>,
+    /// The still the source lane repeats as a filmstrip; absent before an
+    /// image is loaded.
+    thumbnail: RefCell<Option<ThumbnailSource>>,
     source_revision: Cell<u64>,
 }
 
 impl Shared {
+    fn hover_previewing(&self) -> bool {
+        if self.playing.get() || self.hover_lane.get() != HoverLane::Motion {
+            return false;
+        }
+        self.hover_time
+            .get()
+            .is_some_and(|time| self.model.borrow().segment_index_at(time).is_some())
+    }
+
     fn preview_time(&self) -> f64 {
-        let model = self.model.borrow();
-        if !self.playing.get() && self.hover_lane.get() == HoverLane::Motion {
+        if self.hover_previewing() {
             if let Some(time) = self.hover_time.get() {
-                if model.segment_index_at(time).is_some() {
-                    return time;
-                }
+                return time;
             }
         }
-        model.playhead
+        self.model.borrow().playhead
     }
 
     fn notify_preview(&self) {
@@ -329,6 +352,19 @@ impl Timeline {
         *self.shared.preview_changed.borrow_mut() = Some(listener);
     }
 
+    /// The source lane repeats this surface across the composition. The
+    /// provider is called at paint time so it can answer with the cached
+    /// card of the current image and annotations.
+    pub(super) fn set_thumbnail_source(&self, provider: ThumbnailSource) {
+        *self.shared.thumbnail.borrow_mut() = Some(provider);
+    }
+
+    /// Whether the preview frame is being repainted while the head or the
+    /// pointer moves, so the painter can keep the cheap interactive shadow.
+    pub(super) fn is_live(&self) -> bool {
+        self.shared.scrubbing.get() || self.shared.playing.get() || self.shared.hover_previewing()
+    }
+
     pub(super) fn pause(&self) {
         (self.pause)();
     }
@@ -354,6 +390,8 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         interaction: RefCell::new(None),
         preview_on_finish: Cell::new(false),
         dragging_clip: Cell::new(false),
+        scrubbing: Cell::new(false),
+        thumbnail: RefCell::new(None),
         source_revision: Cell::new(0),
     });
 
@@ -489,6 +527,18 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
     };
     let redraw: Rc<dyn Fn()> = Rc::new(redraw);
 
+    // A moving head changes the head overlays and the ruler's near-head tick
+    // emphasis, and nothing else. Keeping this apart from `redraw` means a
+    // scrub or a playback tick never re-lays a clip lane.
+    let redraw_playhead: Rc<dyn Fn()> = {
+        let ruler = ruler.clone();
+        let playhead = playhead.clone();
+        Rc::new(move || {
+            ruler.queue_draw();
+            playhead.queue_draw();
+        })
+    };
+
     // ── The head's clock mirrors the model; the label is outside the draw
     // pass so a redraw chain never repaints widget text.
     let set_playhead_label: Rc<dyn Fn()> = {
@@ -501,21 +551,25 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
 
     // ── Transport ──
     // The head is the model's playhead; a scrub, a skip button and playback
-    // all write through `move_playhead`, which queues every row and both
-    // head overlays.
+    // all write through `move_playhead`, which repaints the head surfaces and
+    // asks the preview for one frame.
     let move_playhead: Rc<dyn Fn(f64)> = {
         let shared = shared.clone();
-        let redraw = redraw.clone();
+        let redraw_playhead = redraw_playhead.clone();
         let set_playhead_label = set_playhead_label.clone();
         let play_button = play_button.clone();
         Rc::new(move |time: f64| {
             shared.playing.set(false);
             play_button.set_icon_name("media-playback-start-symbolic");
             let mut model = shared.model.borrow_mut();
-            model.playhead = time.clamp(0.0, model.duration);
+            let next = time.clamp(0.0, model.duration);
+            if (next - model.playhead).abs() < 1e-9 {
+                return;
+            }
+            model.playhead = next;
             drop(model);
             set_playhead_label();
-            redraw();
+            redraw_playhead();
             shared.notify_preview();
         })
     };
@@ -535,7 +589,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
     let start_playback: Rc<dyn Fn(Option<PreviewRange>)> = {
         let shared = shared.clone();
         let set_playhead_label = set_playhead_label.clone();
-        let redraw = redraw.clone();
+        let redraw_playhead = redraw_playhead.clone();
         let button = play_button.downgrade();
         let generation = playback_generation.clone();
         Rc::new(move |range: Option<(f64, f64)>| {
@@ -560,11 +614,11 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
             shared.playing.set(true);
             button.set_icon_name("media-playback-pause-symbolic");
             set_playhead_label();
-            redraw();
+            redraw_playhead();
             shared.notify_preview();
             let shared = shared.clone();
             let set_playhead_label = set_playhead_label.clone();
-            let redraw = redraw.clone();
+            let redraw_playhead = redraw_playhead.clone();
             let generation = generation.clone();
             let last_frame = Cell::new(None::<i64>);
             button.add_tick_callback(move |button, frame_clock| {
@@ -583,7 +637,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
                     model.playhead >= end
                 };
                 set_playhead_label();
-                redraw();
+                redraw_playhead();
                 shared.notify_preview();
                 if parked {
                     shared.playing.set(false);
@@ -664,8 +718,9 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
 
     // ── Scrub ──
     // The ruler is the grab surface; clicking and dragging move the head.
-    // Scrub: the ruler is the grab surface; clicking and dragging on it
-    // move the head, the way the Linux ruler does.
+    // A scrub owns the head for its length: it pauses playback and drops the
+    // hover read-out, so the preview follows one time (the head's) instead of
+    // racing the pointer, and the release paints the parked frame sharply.
     let scrub: Rc<dyn Fn(f64)> = {
         let shared = shared.clone();
         let ruler = ruler.clone();
@@ -676,17 +731,56 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
             move_playhead(x / width * duration);
         })
     };
+    let begin_scrub: Rc<dyn Fn()> = {
+        let shared = shared.clone();
+        let pause = pause.clone();
+        Rc::new(move || {
+            if !shared.scrubbing.replace(true) {
+                (pause)();
+            }
+        })
+    };
+    let end_scrub: Rc<dyn Fn()> = {
+        let shared = shared.clone();
+        Rc::new(move || {
+            if shared.scrubbing.replace(false) {
+                shared.notify_preview();
+            }
+        })
+    };
     {
         let scrub_click = scrub.clone();
+        let dragging = Rc::new(Cell::new(false));
         let click = gtk4::GestureClick::new();
         click.set_button(1);
-        click.connect_pressed(move |_, _, x, _| scrub_click(x));
+        click.connect_pressed({
+            let begin_scrub = begin_scrub.clone();
+            move |_, _, x, _| {
+                begin_scrub();
+                scrub_click(x);
+            }
+        });
+        click.connect_released({
+            let dragging = dragging.clone();
+            let end_scrub = end_scrub.clone();
+            move |_, _, _, _| {
+                if !dragging.get() {
+                    end_scrub();
+                }
+            }
+        });
         ruler.add_controller(click);
         let drag = gtk4::GestureDrag::new();
         drag.set_button(1);
         drag.connect_drag_begin({
             let scrub_begin = scrub.clone();
-            move |_, x, _| scrub_begin(x)
+            let begin_scrub = begin_scrub.clone();
+            let dragging = dragging.clone();
+            move |_, x, _| {
+                dragging.set(true);
+                begin_scrub();
+                scrub_begin(x);
+            }
         });
         drag.connect_drag_update({
             let scrub_update = scrub.clone();
@@ -694,6 +788,21 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
                 if let Some((start_x, _)) = gesture.start_point() {
                     scrub_update(start_x + dx);
                 }
+            }
+        });
+        drag.connect_drag_end({
+            let dragging = dragging.clone();
+            let end_scrub = end_scrub.clone();
+            move |_, _, _| {
+                dragging.set(false);
+                end_scrub();
+            }
+        });
+        drag.connect_cancel({
+            let dragging = dragging.clone();
+            move |_, _| {
+                dragging.set(false);
+                end_scrub();
             }
         });
         ruler.add_controller(drag);
@@ -761,7 +870,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         let text_track = text_track.clone();
         let hover_playhead = hover_playhead.clone();
         Rc::new(move |x, y| {
-            if shared.dragging_clip.get() {
+            if shared.dragging_clip.get() || shared.scrubbing.get() {
                 return;
             }
             let Some(board) = board.upgrade() else { return };
@@ -803,6 +912,9 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         let text_track = text_track.clone();
         let hover_playhead = hover_playhead.clone();
         move |_| {
+            if shared.scrubbing.get() {
+                return;
+            }
             let previous = shared.preview_time();
             shared.hover_lane.set(HoverLane::None);
             shared.hover_time.set(None);
@@ -827,8 +939,13 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
     source_track.set_draw_func({
         let shared = shared.clone();
         move |_, context, width, height| {
+            let thumbnail = shared
+                .thumbnail
+                .borrow()
+                .as_ref()
+                .and_then(|provider| provider());
             let model = shared.model.borrow();
-            draw_source_track(context, width, height, &model);
+            draw_source_track(context, width, height, &model, thumbnail.as_ref());
         }
     });
     for (row, lane) in [
@@ -1151,7 +1268,13 @@ fn format_ruler_label(seconds: f64, major: f64) -> String {
     }
 }
 
-fn draw_source_track(context: &CairoContext, width: i32, height: i32, model: &Model) {
+fn draw_source_track(
+    context: &CairoContext,
+    width: i32,
+    height: i32,
+    model: &Model,
+    thumbnail: Option<&ImageSurface>,
+) {
     let w = f64::from(width.max(1));
     let h = f64::from(height.max(1));
     let inset = 6.0;
@@ -1162,12 +1285,90 @@ fn draw_source_track(context: &CairoContext, width: i32, height: i32, model: &Mo
     context.set_source_rgba(0.10, 0.11, 0.13, 0.9);
     let _ = context.fill();
 
-    draw_source_chip(context, y, clip_h, model.duration);
+    // Repeated cover thumbnails make the still readable across the whole
+    // duration without inventing motion the source does not have.
+    if let Some(card) = thumbnail {
+        let image_w = f64::from(card.width().max(1));
+        let image_h = f64::from(card.height().max(1));
+        let tile_w: f64 = 92.0;
+        let _ = context.save();
+        rounded_rect(context, 0.0, y, w, clip_h, 5.0);
+        context.clip();
+        let mut tile_x = 0.0;
+        while tile_x < w {
+            let visible_w = tile_w.min(w - tile_x);
+            let scale = (visible_w / image_w).max(clip_h / image_h);
+            let painted_w = image_w * scale;
+            let painted_h = image_h * scale;
+            let _ = context.save();
+            context.rectangle(tile_x, y, visible_w, clip_h);
+            context.clip();
+            context.translate(
+                tile_x + (visible_w - painted_w) / 2.0,
+                y + (clip_h - painted_h) / 2.0,
+            );
+            context.scale(scale, scale);
+            context.set_source_surface(card, 0.0, 0.0).ok();
+            context.source().set_filter(gtk4::cairo::Filter::Bilinear);
+            let _ = context.paint();
+            let _ = context.restore();
+            tile_x += tile_w;
+        }
+        let _ = context.restore();
+    }
+
+    draw_source_chip(context, w, y, clip_h, model.duration);
 }
 
-/// The source lane's identity badge: icon, "Image", and the clip length.
-fn draw_source_chip(context: &CairoContext, y: f64, clip_h: f64, duration: f64) {
+/// The badge's cast, built once: a rounded silhouette blurred three times so
+/// the halo is a real gradient instead of stacked rings.
+fn badge_shadow() -> Option<ImageSurface> {
+    BADGE_SHADOW.with(|cache| cache.get_or_init(build_badge_shadow).clone())
+}
+
+fn build_badge_shadow() -> Option<ImageSurface> {
+    let size = (BADGE_SHADOW_ICON + BADGE_SHADOW_PAD * 2.0) as i32;
+    let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, size, size).ok()?;
+    {
+        let context = CairoContext::new(&surface).ok()?;
+        rounded_rect(
+            &context,
+            BADGE_SHADOW_PAD,
+            BADGE_SHADOW_PAD,
+            BADGE_SHADOW_ICON,
+            BADGE_SHADOW_ICON,
+            5.0,
+        );
+        context.set_source_rgba(0.0, 0.0, 0.0, 1.0);
+        let _ = context.fill();
+    }
+    surface.flush();
+    let stride = surface.stride() as usize;
+    let data = surface.data().ok()?;
+    let mut image = crate::capture::editor::render::cairo_argb_to_rgba_image(
+        size as u32,
+        size as u32,
+        stride,
+        data.as_ref(),
+    );
+    drop(data);
+    let rect = crate::capture::editor::types::Rect {
+        x: 0,
+        y: 0,
+        width: size,
+        height: size,
+    };
+    for _ in 0..3 {
+        crate::capture::editor::render::apply_blur_rect(&mut image, rect, 3.0, true);
+    }
+    crate::capture::editor::render::rgba_image_to_surface(&image)
+}
+
+/// The source lane's identity badge: the image glyph, "Image", and the clip
+/// length, set directly on the filmstrip and centred on the clip.
+fn draw_source_chip(context: &CairoContext, width: f64, y: f64, clip_h: f64, duration: f64) {
     let title = t("Image");
+    let duration_label = format!("{}s", duration.round().max(0.0) as i64);
     context.select_font_face(
         "Inter",
         gtk4::cairo::FontSlant::Normal,
@@ -1178,7 +1379,6 @@ fn draw_source_chip(context: &CairoContext, y: f64, clip_h: f64, duration: f64) 
         .text_extents(&title)
         .map(|ext| ext.width())
         .unwrap_or(0.0);
-    let duration_label = format!("{}s", duration.round().max(0.0) as i64);
     context.select_font_face(
         "Inter",
         gtk4::cairo::FontSlant::Normal,
@@ -1190,55 +1390,118 @@ fn draw_source_chip(context: &CairoContext, y: f64, clip_h: f64, duration: f64) 
         .map(|ext| ext.width())
         .unwrap_or(0.0);
 
-    let chip_h = 34.0;
-    let chip_x = 8.0;
-    let chip_y = y + (clip_h - chip_h) / 2.0;
     let icon_size = 20.0;
-    let chip_w = 8.0 + icon_size + 7.0 + title_w.max(duration_w) + 10.0;
-    rounded_rect(context, chip_x, chip_y, chip_w, chip_h, 8.0);
-    context.set_source_rgba(0.06, 0.06, 0.08, 0.92);
-    let _ = context.fill();
+    let gap = 7.0;
+    let block_w = icon_size + gap + title_w.max(duration_w);
+    let block_h = 34.0;
+    let block_x = ((width - block_w) / 2.0).clamp(8.0, (width - block_w - 8.0).max(8.0));
+    let block_y = y + (clip_h - block_h) / 2.0;
 
-    let icon_x = chip_x + 8.0;
-    let icon_y = chip_y + (chip_h - icon_size) / 2.0;
+    let icon_x = block_x;
+    let icon_y = block_y + (block_h - icon_size) / 2.0;
+    // A real blurred silhouette, not stacked rings: the badge reads as a
+    // floating tag the same way the reference does.
+    if let Some(shadow) = badge_shadow() {
+        context
+            .set_source_surface(
+                &shadow,
+                icon_x - BADGE_SHADOW_PAD,
+                icon_y - BADGE_SHADOW_PAD + 2.0,
+            )
+            .ok();
+        let _ = context.paint();
+        let _ = context.paint();
+    }
     rounded_rect(context, icon_x, icon_y, icon_size, icon_size, 5.0);
-    context.set_source_rgba(0.95, 0.96, 0.98, 1.0);
-    let _ = context.fill();
+    context.set_source_rgba(0.93, 0.95, 0.99, 1.0);
+    let _ = context.fill_preserve();
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.16);
+    context.set_line_width(1.0);
+    let _ = context.stroke();
     let _ = context.save();
     rounded_rect(context, icon_x, icon_y, icon_size, icon_size, 5.0);
     context.clip();
-    context.set_source_rgba(0.10, 0.10, 0.12, 1.0);
-    context.arc(icon_x + 6.5, icon_y + 6.5, 2.2, 0.0, std::f64::consts::TAU);
+    context.set_source_rgba(0.07, 0.07, 0.09, 1.0);
+    // Sun and two peaks, kept apart so the mark reads as a picture rather
+    // than one solid mound.
+    context.arc(icon_x + 6.4, icon_y + 6.2, 2.0, 0.0, std::f64::consts::TAU);
     let _ = context.fill();
-    context.move_to(icon_x + 2.0, icon_y + icon_size - 3.0);
-    context.line_to(icon_x + 8.0, icon_y + 9.0);
-    context.line_to(icon_x + 12.5, icon_y + 14.5);
-    context.line_to(icon_x + icon_size - 1.0, icon_y + 7.5);
-    context.line_to(icon_x + icon_size - 1.0, icon_y + icon_size - 1.0);
-    context.line_to(icon_x + 2.0, icon_y + icon_size - 1.0);
+    context.move_to(icon_x + 2.5, icon_y + 17.0);
+    context.line_to(icon_x + 7.5, icon_y + 11.0);
+    context.line_to(icon_x + 10.6, icon_y + 14.2);
+    context.line_to(icon_x + 16.0, icon_y + 7.5);
+    context.line_to(icon_x + 17.5, icon_y + 9.0);
+    context.line_to(icon_x + 17.5, icon_y + 17.0);
     context.close_path();
     let _ = context.fill();
     let _ = context.restore();
 
-    let text_x = icon_x + icon_size + 7.0;
-    context.set_source_rgba(0.96, 0.97, 1.0, 0.96);
+    let text_x = icon_x + icon_size + gap;
+    paint_source_text(context, text_x, block_y, &title, &duration_label);
+}
+
+/// White type with a dark outline, the recipe that stays legible over a
+/// bright still as well as a dark one.
+fn paint_source_text(
+    context: &CairoContext,
+    text_x: f64,
+    block_y: f64,
+    title: &str,
+    duration: &str,
+) {
     context.select_font_face(
         "Inter",
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Bold,
     );
     context.set_font_size(11.0);
-    context.move_to(text_x, chip_y + 14.0);
-    let _ = context.show_text(&title);
-    context.set_source_rgba(0.86, 0.88, 0.92, 0.72);
+    for (dx, dy, alpha) in [
+        (0.0, 2.0, 0.10),
+        (1.0, 1.0, 0.12),
+        (-1.0, 1.0, 0.12),
+        (0.0, 1.0, 0.22),
+    ] {
+        context.new_path();
+        context.move_to(text_x + dx, block_y + 14.0 + dy);
+        context.text_path(title);
+        context.set_source_rgba(0.0, 0.0, 0.0, alpha);
+        let _ = context.fill();
+    }
+    context.new_path();
+    context.move_to(text_x, block_y + 14.0);
+    context.text_path(title);
+    context.set_line_width(2.0);
+    context.set_source_rgba(0.05, 0.05, 0.07, 0.55);
+    let _ = context.stroke_preserve();
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.98);
+    let _ = context.fill();
+
     context.select_font_face(
         "Inter",
         gtk4::cairo::FontSlant::Normal,
         gtk4::cairo::FontWeight::Normal,
     );
     context.set_font_size(10.0);
-    context.move_to(text_x, chip_y + 26.0);
-    let _ = context.show_text(&duration_label);
+    for (dx, dy, alpha) in [
+        (0.0, 2.0, 0.10),
+        (1.0, 1.0, 0.12),
+        (-1.0, 1.0, 0.12),
+        (0.0, 1.0, 0.22),
+    ] {
+        context.new_path();
+        context.move_to(text_x + dx, block_y + 26.0 + dy);
+        context.text_path(duration);
+        context.set_source_rgba(0.0, 0.0, 0.0, alpha);
+        let _ = context.fill();
+    }
+    context.new_path();
+    context.move_to(text_x, block_y + 26.0);
+    context.text_path(duration);
+    context.set_line_width(2.0);
+    context.set_source_rgba(0.05, 0.05, 0.07, 0.55);
+    let _ = context.stroke_preserve();
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.92);
+    let _ = context.fill();
 }
 
 /// One clip lane: the hover ghost, then the clips, their glyphs and labels,
@@ -1343,19 +1606,24 @@ fn draw_clip_track(
             context.clip();
             let center_y = y + clip_h / 2.0;
             draw_clip_glyph(context, x0 + 12.0, center_y, tone.label, text);
-            if clip_w > 42.0 {
+            if clip_w > 46.0 {
+                let label = t(if text { "Text" } else { "Motion" });
                 let _ = context.save();
-                context.rectangle(x0 + 27.0, y + 2.0, (clip_w - 40.0).max(0.0), clip_h - 4.0);
+                context.rectangle(x0 + 30.0, y + 2.0, (clip_w - 44.0).max(0.0), clip_h - 4.0);
                 context.clip();
                 context.set_source_rgba(1.0, 1.0, 1.0, tone.label);
                 context.select_font_face(
                     "Inter",
                     gtk4::cairo::FontSlant::Normal,
-                    gtk4::cairo::FontWeight::Normal,
+                    gtk4::cairo::FontWeight::Bold,
                 );
-                context.set_font_size(11.0);
-                context.move_to(x0 + 28.0, y + clip_h * if text { 0.64 } else { 0.62 });
-                let _ = context.show_text(&t(if text { "Text" } else { "Motion" }));
+                context.set_font_size(12.0);
+                // Centre the label's ink on the glyph's centre instead of
+                // leaning on a fraction of the lane height.
+                if let Ok(ext) = context.text_extents(&label) {
+                    context.move_to(x0 + 30.0, center_y - ext.y_bearing() - ext.height() / 2.0);
+                    let _ = context.show_text(&label);
+                }
                 let _ = context.restore();
             }
             let _ = context.restore();
@@ -1433,10 +1701,10 @@ fn draw_add_track(
 /// The clip glyph: the lane's kind, drawn like the Linux painter draws.
 fn draw_clip_glyph(context: &CairoContext, x: f64, center_y: f64, opacity: f64, text: bool) {
     let _ = context.save();
-    context.translate(x, center_y - 7.0);
-    context.scale(14.0 / 24.0, 14.0 / 24.0);
+    context.translate(x, center_y - 8.0);
+    context.scale(16.0 / 24.0, 16.0 / 24.0);
     context.set_source_rgba(1.0, 1.0, 1.0, opacity);
-    context.set_line_width(2.0);
+    context.set_line_width(2.4);
     context.set_line_cap(gtk4::cairo::LineCap::Round);
     context.set_line_join(gtk4::cairo::LineJoin::Round);
     if text {
@@ -1596,6 +1864,67 @@ fn rounded_rect(context: &CairoContext, x: f64, y: f64, w: f64, h: f64, r: f64) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn motion_and_text_clips_paint_their_lane_colour() {
+        let mut model = Model::default();
+        model.add_segment_at(1.0).unwrap();
+        model.add_text_at(1.0).unwrap();
+        model.selected = None;
+        model.selected_text = None;
+        for (lane, expect_blue) in [(HoverLane::Motion, true), (HoverLane::Text, false)] {
+            let mut surface =
+                gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 600, 56).unwrap();
+            {
+                let context = gtk4::cairo::Context::new(&surface).unwrap();
+                draw_clip_track(&context, 600, 56, &model, lane, HoverLane::None, None);
+            }
+            surface.flush();
+            let stride = surface.stride() as usize;
+            let data = surface.data().unwrap();
+            let offset = 12 * stride + 150 * 4;
+            let (blue, green, red) = (data[offset], data[offset + 1], data[offset + 2]);
+            if expect_blue {
+                assert!(
+                    blue > 180 && red < 60 && green > 80,
+                    "motion clip is azure, got r{red} g{green} b{blue}"
+                );
+            } else {
+                assert!(
+                    red > 180 && blue < 60,
+                    "text clip is orange, got r{red} g{green} b{blue}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn source_lane_repeats_the_still_as_a_filmstrip() {
+        let model = Model::default();
+        let thumb = ImageSurface::create(gtk4::cairo::Format::ARgb32, 40, 40).unwrap();
+        {
+            let context = gtk4::cairo::Context::new(&thumb).unwrap();
+            context.set_source_rgba(1.0, 0.0, 0.0, 1.0);
+            let _ = context.paint();
+        }
+        thumb.flush();
+        let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 600, 48).unwrap();
+        {
+            let context = gtk4::cairo::Context::new(&surface).unwrap();
+            draw_source_track(&context, 600, 48, &model, Some(&thumb));
+        }
+        surface.flush();
+        let stride = surface.stride() as usize;
+        let data = surface.data().unwrap();
+        for x in [10_usize, 110] {
+            let offset = 24 * stride + x * 4;
+            let (blue, green, red) = (data[offset], data[offset + 1], data[offset + 2]);
+            assert!(
+                red > 200 && green < 40 && blue < 40,
+                "tile at x={x} shows the still, got r{red} g{green} b{blue}"
+            );
+        }
+    }
 
     #[test]
     fn lane_click_adds_selects_and_snaps_real_motion_segments() {

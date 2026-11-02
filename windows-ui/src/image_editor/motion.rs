@@ -69,7 +69,7 @@ pub(super) fn build(
                     transform.canvas_width * transform.canvas_scale,
                     transform.canvas_height * transform.canvas_scale,
                 );
-                paint_frames(&host, context, transform, &frames);
+                paint_frames(&host, context, transform, &frames, timeline.is_live());
             }
         }
     });
@@ -80,6 +80,10 @@ pub(super) fn build(
                 preview.queue_draw();
             }
         })
+    });
+    timeline.set_thumbnail_source({
+        let host = canvas.host.clone();
+        Rc::new(move || host.motion_thumbnail())
     });
     canvas.add_change_listener({
         let preview = preview.downgrade();
@@ -221,12 +225,13 @@ fn paint_frames(
     context: &gtk4::cairo::Context,
     transform: ViewTransform,
     frames: &[(crate::recording::editor::model::MotionTransform, (f64, f64))],
+    live: bool,
 ) {
     if frames.len() == 1 {
         let (pose, anchor) = frames[0];
-        host.paint_motion_preview(context, transform, pose, anchor);
+        host.paint_motion_preview(context, transform, pose, anchor, live);
     } else if !frames.is_empty() {
-        host.paint_motion_background(context, transform);
+        host.paint_motion_background(context, transform, live);
         let _ = context.save();
         context.rectangle(
             transform.canvas_offset_x,
@@ -240,12 +245,19 @@ fn paint_frames(
         // short exposure's other poses use an affine approximation of its
         // projected corners instead of rebuilding the entire scene.
         context.push_group();
-        host.paint_motion_foreground(context, transform, frames[0].0, frames[0].1);
+        host.paint_motion_foreground(context, transform, frames[0].0, frames[0].1, live);
         let foreground = context.pop_group();
         let Ok(foreground) = foreground else {
             let _ = context.restore();
             return;
         };
+        // Every subframe resamples this group through its own affine matrix.
+        // Good filtering convolves the whole surface per sample, which is
+        // what makes live motion blur miss the frame budget; the parked frame
+        // is composited again with the default filter.
+        if live {
+            foreground.set_filter(gtk4::cairo::Filter::Fast);
+        }
         context.push_group();
         for frame in frames {
             let _ = context.save();
@@ -413,6 +425,7 @@ mod tests {
                     (pose, (0.5, 0.5)),
                     (MotionTransform { pos_x: 0.5, ..pose }, (0.5, 0.5)),
                 ],
+                false,
             );
         }
         assert_eq!(host.document_paints.get(), 2);
@@ -473,6 +486,7 @@ mod tests {
             &context,
             ViewTransform::for_image(160.0, 120.0),
             &frames,
+            false,
         );
         assert_eq!(host.document_paints.get(), 2);
         let reference =
@@ -529,16 +543,16 @@ mod tests {
                 )
             })
             .collect();
-        host.paint_motion_preview(&context, transform, frames[0].0, frames[0].1);
+        host.paint_motion_preview(&context, transform, frames[0].0, frames[0].1, false);
         let start = std::time::Instant::now();
         for (pose, anchor) in &frames {
             context.push_group();
-            host.paint_motion_preview(&context, transform, *pose, *anchor);
+            host.paint_motion_preview(&context, transform, *pose, *anchor, false);
             let _ = context.pop_group();
         }
         let original = start.elapsed();
         let start = std::time::Instant::now();
-        paint_frames(&host, &context, transform, &frames);
+        paint_frames(&host, &context, transform, &frames, false);
         let optimized = start.elapsed();
         eprintln!("five full scene renders: {original:?}; optimized blur: {optimized:?}");
     }

@@ -122,6 +122,7 @@ type CachedCard = (u64, Vec<AnnotationAction>, f64, ImageSurface);
 type CachedShadow = (
     crate::capture::editor::render::scene_shadow::SceneShadowGeometry,
     bool,
+    f64,
     ImageSurface,
 );
 type CachedGlass = (
@@ -471,7 +472,7 @@ impl EditorHost {
     /// Paint the document inside the already-transformed image rect. `t` is
     /// the view transform the canvas computed for this frame.
     pub fn paint_document(&self, context: &gtk4::cairo::Context, t: ViewTransform) {
-        self.paint_document_inner(context, t, None, MotionPaintPart::Complete);
+        self.paint_document_inner(context, t, None, MotionPaintPart::Complete, false);
     }
 
     pub(super) fn motion_thumbnail(&self) -> Option<ImageSurface> {
@@ -508,24 +509,34 @@ impl EditorHost {
         Some(surface)
     }
 
-    /// Motion animates the card independently of the background.
+    /// Motion animates the card independently of the background. `live`
+    /// marks a frame painted while the head is moving (scrub, hover, or
+    /// playback): the shadow keeps the cheap cached silhouette then, and the
+    /// parked frame is painted again at full quality on release.
     pub(super) fn paint_motion_preview(
         &self,
         context: &gtk4::cairo::Context,
         t: ViewTransform,
         motion: crate::recording::editor::model::MotionTransform,
         anchor: (f64, f64),
+        live: bool,
     ) {
         self.paint_document_inner(
             context,
             t,
             Some((motion, anchor)),
             MotionPaintPart::Complete,
+            live,
         );
     }
 
-    pub(super) fn paint_motion_background(&self, context: &gtk4::cairo::Context, t: ViewTransform) {
-        self.paint_document_inner(context, t, None, MotionPaintPart::Background);
+    pub(super) fn paint_motion_background(
+        &self,
+        context: &gtk4::cairo::Context,
+        t: ViewTransform,
+        live: bool,
+    ) {
+        self.paint_document_inner(context, t, None, MotionPaintPart::Background, live);
     }
 
     pub(super) fn paint_motion_foreground(
@@ -534,12 +545,14 @@ impl EditorHost {
         t: ViewTransform,
         motion: crate::recording::editor::model::MotionTransform,
         anchor: (f64, f64),
+        live: bool,
     ) {
         self.paint_document_inner(
             context,
             t,
             Some((motion, anchor)),
             MotionPaintPart::Foreground,
+            live,
         );
     }
 
@@ -549,6 +562,7 @@ impl EditorHost {
         t: ViewTransform,
         motion_pose: Option<(crate::recording::editor::model::MotionTransform, (f64, f64))>,
         part: MotionPaintPart,
+        live: bool,
     ) {
         #[cfg(test)]
         self.document_paints.set(self.document_paints.get() + 1);
@@ -592,7 +606,15 @@ impl EditorHost {
                         context.scale(cover, cover);
                         context.set_source_surface(&background, 0.0, 0.0).ok();
                         context.source().set_extend(gtk4::cairo::Extend::Pad);
-                        context.source().set_filter(gtk4::cairo::Filter::Good);
+                        // A moving preview downscales the same wallpaper on
+                        // every pointer event or playback frame; Cairo's Good
+                        // filter convolves the whole source each time. The
+                        // parked frame is painted again with Good on release.
+                        context.source().set_filter(if live {
+                            gtk4::cairo::Filter::Bilinear
+                        } else {
+                            gtk4::cairo::Filter::Good
+                        });
                         let _ = context.paint();
                         let _ = context.restore();
                         render::paint_background_noise(
@@ -665,8 +687,9 @@ impl EditorHost {
             pose,
             &st.scene_shadow,
         ) {
-            let interactive =
-                st.history_interaction_before.is_some() || part == MotionPaintPart::Foreground;
+            let interactive = st.history_interaction_before.is_some()
+                || part == MotionPaintPart::Foreground
+                || (motion && live);
             // During a light/opacity drag, move a cached unoffset silhouette
             // instead of blurring the same card again for every pointer event.
             let mut mask_geometry = shadow;
@@ -694,21 +717,30 @@ impl EditorHost {
                 mask_geometry.offset = (0.0, 0.0);
                 mask_geometry.opacity = 1.0;
             }
+            // A live frame keeps a small mask; the parked frame gets the
+            // full-resolution one. The edge is part of the key so a live mask
+            // is never reused as a sharp one.
+            let shadow_edge = if live {
+                96.0
+            } else if interactive {
+                192.0
+            } else {
+                720.0
+            };
             let cached = self.shadow_cache.borrow();
             let mask = cached
                 .as_ref()
-                .filter(|(geometry, cached_interactive, _)| {
-                    *geometry == mask_geometry && *cached_interactive == interactive
+                .filter(|(geometry, cached_interactive, edge, _)| {
+                    *geometry == mask_geometry
+                        && *cached_interactive == interactive
+                        && *edge == shadow_edge
                 })
-                .map(|(_, _, surface)| surface.clone());
+                .map(|(_, _, _, surface)| surface.clone());
             drop(cached);
             let mask = mask.or_else(|| {
-                let surface = render::scene_shadow::shadow_mask(
-                    mask_geometry,
-                    if interactive { 192.0 } else { 720.0 },
-                )?;
+                let surface = render::scene_shadow::shadow_mask(mask_geometry, shadow_edge)?;
                 *self.shadow_cache.borrow_mut() =
-                    Some((mask_geometry, interactive, surface.clone()));
+                    Some((mask_geometry, interactive, shadow_edge, surface.clone()));
                 Some(surface)
             });
             if let Some(mask) = mask {
@@ -778,7 +810,11 @@ impl EditorHost {
                     f64::from(st.working_image.width()),
                     f64::from(st.working_image.height()),
                     pose,
-                    crate::capture::editor::transform_render::Quality::Preview,
+                    if live {
+                        crate::capture::editor::transform_render::Quality::Live
+                    } else {
+                        crate::capture::editor::transform_render::Quality::Preview
+                    },
                 );
                 style.paint_frame(context);
                 let _ = context.restore();
@@ -2716,6 +2752,7 @@ mod tests {
                         ..Default::default()
                     },
                     (0.5, 0.5),
+                    false,
                 );
             }
             surface.flush();
@@ -2778,7 +2815,7 @@ mod tests {
                 ImageSurface::create(gtk4::cairo::Format::ARgb32, width, height).unwrap();
             {
                 let context = gtk4::cairo::Context::new(&surface).unwrap();
-                host.paint_motion_preview(&context, transform, pose, anchor);
+                host.paint_motion_preview(&context, transform, pose, anchor, false);
             }
             surface.flush();
             let stride = surface.stride() as usize;
@@ -3009,7 +3046,7 @@ mod tests {
         assert_eq!(paint(), exported);
         host.mutate(|state| state.begin_history_interaction());
         let first_frame = paint();
-        let cached = host.shadow_cache.borrow().as_ref().unwrap().2.clone();
+        let cached = host.shadow_cache.borrow().as_ref().unwrap().3.clone();
         host.mutate(|state| {
             state.scene_shadow.light = (-1.0, -0.5);
             state.scene_shadow.opacity = 0.4;
@@ -3017,13 +3054,13 @@ mod tests {
         assert_ne!(paint(), first_frame);
         assert_eq!(
             cached.to_raw_none(),
-            host.shadow_cache.borrow().as_ref().unwrap().2.to_raw_none()
+            host.shadow_cache.borrow().as_ref().unwrap().3.to_raw_none()
         );
         host.mutate(|state| state.finish_history_interaction());
         paint();
         assert_ne!(
             cached.to_raw_none(),
-            host.shadow_cache.borrow().as_ref().unwrap().2.to_raw_none()
+            host.shadow_cache.borrow().as_ref().unwrap().3.to_raw_none()
         );
     }
 
