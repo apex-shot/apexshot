@@ -38,6 +38,7 @@ pub(super) fn install_css() {
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
     );
+    crate::settings::shell::install_select_menu_css();
 }
 
 /// An empty overlay that hosts the editor's mode pages and overlays.

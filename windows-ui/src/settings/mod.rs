@@ -30,7 +30,7 @@ mod recording;
 #[path = "../../../src/settings/screenshots.rs"]
 mod screenshots;
 #[path = "../../../src/settings/select.rs"]
-mod select;
+pub(crate) mod select;
 pub(crate) mod shell;
 #[path = "../../../src/settings/shortcuts.rs"]
 mod shortcuts;

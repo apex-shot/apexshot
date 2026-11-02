@@ -133,8 +133,17 @@ type CachedGlass = (
     Option<crate::capture::editor::glass_render::GlassOverlay>,
 );
 
+#[derive(Clone, Copy, PartialEq)]
+enum MotionPaintPart {
+    Complete,
+    Background,
+    Foreground,
+}
+
 pub struct EditorHost {
     pub editor: Shared,
+    #[cfg(test)]
+    pub(super) document_paints: Cell<usize>,
     /// Called after any document or selection mutation: redraw + sync bars.
     on_change: Rc<dyn Fn()>,
     /// Toast/banner reporter for OCR failures and export errors.
@@ -169,6 +178,8 @@ impl EditorHost {
     ) -> Rc<Self> {
         Rc::new(Self {
             editor: Rc::new(RefCell::new(None)),
+            #[cfg(test)]
+            document_paints: Cell::new(0),
             on_change,
             on_error,
             surface_cache: RefCell::new(None),
@@ -460,6 +471,88 @@ impl EditorHost {
     /// Paint the document inside the already-transformed image rect. `t` is
     /// the view transform the canvas computed for this frame.
     pub fn paint_document(&self, context: &gtk4::cairo::Context, t: ViewTransform) {
+        self.paint_document_inner(context, t, None, MotionPaintPart::Complete);
+    }
+
+    pub(super) fn motion_thumbnail(&self) -> Option<ImageSurface> {
+        let borrow = self.editor.try_borrow().ok()?;
+        let st = borrow.as_ref()?;
+        let layout = st
+            .background
+            .layout(st.working_image.width(), st.working_image.height());
+        if let Some(surface) = self
+            .card_cache
+            .borrow()
+            .as_ref()
+            .filter(|(revision, actions, radius, _)| {
+                *revision == st.working_image_revision
+                    && *actions == st.actions
+                    && *radius == layout.radius
+            })
+            .map(|(_, _, _, surface)| surface.clone())
+        {
+            return Some(surface);
+        }
+        let source = self.working_surface(st)?;
+        let (width, height) =
+            preview_card_size(st.working_image.width(), st.working_image.height());
+        let surface = st
+            .card_surface_from_source(&source, layout.radius, width, height)
+            .ok()?;
+        *self.card_cache.borrow_mut() = Some((
+            st.working_image_revision,
+            st.actions.clone(),
+            layout.radius,
+            surface.clone(),
+        ));
+        Some(surface)
+    }
+
+    /// Motion animates the card independently of the background.
+    pub(super) fn paint_motion_preview(
+        &self,
+        context: &gtk4::cairo::Context,
+        t: ViewTransform,
+        motion: crate::recording::editor::model::MotionTransform,
+        anchor: (f64, f64),
+    ) {
+        self.paint_document_inner(
+            context,
+            t,
+            Some((motion, anchor)),
+            MotionPaintPart::Complete,
+        );
+    }
+
+    pub(super) fn paint_motion_background(&self, context: &gtk4::cairo::Context, t: ViewTransform) {
+        self.paint_document_inner(context, t, None, MotionPaintPart::Background);
+    }
+
+    pub(super) fn paint_motion_foreground(
+        &self,
+        context: &gtk4::cairo::Context,
+        t: ViewTransform,
+        motion: crate::recording::editor::model::MotionTransform,
+        anchor: (f64, f64),
+    ) {
+        self.paint_document_inner(
+            context,
+            t,
+            Some((motion, anchor)),
+            MotionPaintPart::Foreground,
+        );
+    }
+
+    fn paint_document_inner(
+        &self,
+        context: &gtk4::cairo::Context,
+        t: ViewTransform,
+        motion_pose: Option<(crate::recording::editor::model::MotionTransform, (f64, f64))>,
+        part: MotionPaintPart,
+    ) {
+        #[cfg(test)]
+        self.document_paints.set(self.document_paints.get() + 1);
+        let motion = motion_pose.is_some();
         let Some(borrow) = self.editor.try_borrow().ok() else {
             return;
         };
@@ -473,53 +566,98 @@ impl EditorHost {
         let layout = st
             .background
             .layout(st.working_image.width(), st.working_image.height());
-        if let crate::capture::editor::state::background::Fill::Image(image) = &st.background.fill {
-            if st.background.blur <= 0.001 {
-                if let Some(background) = self.background_image_surface(image) {
-                    let _ = context.save();
-                    context.rectangle(
-                        t.canvas_offset_x,
-                        t.canvas_offset_y,
-                        t.canvas_width * t.canvas_scale,
-                        t.canvas_height * t.canvas_scale,
-                    );
-                    context.clip();
-                    context.translate(t.canvas_offset_x, t.canvas_offset_y);
-                    context.scale(t.canvas_scale, t.canvas_scale);
-                    let cover = (t.canvas_width / f64::from(image.width()))
-                        .max(t.canvas_height / f64::from(image.height()));
-                    let _ = context.save();
-                    context.translate(
-                        (t.canvas_width - f64::from(image.width()) * cover) / 2.0,
-                        (t.canvas_height - f64::from(image.height()) * cover) / 2.0,
-                    );
-                    context.scale(cover, cover);
-                    context.set_source_surface(&background, 0.0, 0.0).ok();
-                    context.source().set_extend(gtk4::cairo::Extend::Pad);
-                    context.source().set_filter(gtk4::cairo::Filter::Good);
-                    let _ = context.paint();
-                    let _ = context.restore();
-                    render::paint_background_noise(
-                        context,
-                        0.0,
-                        0.0,
-                        t.canvas_width,
-                        t.canvas_height,
-                        st.background.noise,
-                    );
-                    let _ = context.restore();
+        if part != MotionPaintPart::Foreground {
+            if let crate::capture::editor::state::background::Fill::Image(image) =
+                &st.background.fill
+            {
+                if st.background.blur <= 0.001 {
+                    if let Some(background) = self.background_image_surface(image) {
+                        let _ = context.save();
+                        context.rectangle(
+                            t.canvas_offset_x,
+                            t.canvas_offset_y,
+                            t.canvas_width * t.canvas_scale,
+                            t.canvas_height * t.canvas_scale,
+                        );
+                        context.clip();
+                        context.translate(t.canvas_offset_x, t.canvas_offset_y);
+                        context.scale(t.canvas_scale, t.canvas_scale);
+                        let cover = (t.canvas_width / f64::from(image.width()))
+                            .max(t.canvas_height / f64::from(image.height()));
+                        let _ = context.save();
+                        context.translate(
+                            (t.canvas_width - f64::from(image.width()) * cover) / 2.0,
+                            (t.canvas_height - f64::from(image.height()) * cover) / 2.0,
+                        );
+                        context.scale(cover, cover);
+                        context.set_source_surface(&background, 0.0, 0.0).ok();
+                        context.source().set_extend(gtk4::cairo::Extend::Pad);
+                        context.source().set_filter(gtk4::cairo::Filter::Good);
+                        let _ = context.paint();
+                        let _ = context.restore();
+                        render::paint_background_noise(
+                            context,
+                            0.0,
+                            0.0,
+                            t.canvas_width,
+                            t.canvas_height,
+                            st.background.noise,
+                        );
+                        let _ = context.restore();
+                    }
+                } else {
+                    self.paint_composited_background(context, st, t, layout);
                 }
-            } else {
+            } else if st.background.has_fill() {
                 self.paint_composited_background(context, st, t, layout);
             }
-        } else if st.background.has_fill() {
-            self.paint_composited_background(context, st, t, layout);
         }
-        let pose = if st.selected_tool == Tool::Background {
+        if part == MotionPaintPart::Background {
+            return;
+        }
+        let pose = if let Some((transform, _)) = motion_pose {
+            crate::capture::editor::image_transform::StaticImageTransform {
+                yaw: transform.rotation_y,
+                pitch: transform.rotation_x,
+                roll: transform.rotation_z,
+                perspective: transform.perspective,
+                pos_x: transform.pos_x / transform.scale.max(0.01),
+                pos_y: transform.pos_y / transform.scale.max(0.01),
+            }
+        } else if st.selected_tool == Tool::Background {
             st.static_image_transform
         } else {
             Default::default()
         };
+        if let Some((transform, anchor)) = motion_pose {
+            let _ = context.save();
+            context.rectangle(
+                t.canvas_offset_x,
+                t.canvas_offset_y,
+                t.canvas_width * t.canvas_scale,
+                t.canvas_height * t.canvas_scale,
+            );
+            context.clip();
+            let width = f64::from(st.working_image.width());
+            let height = f64::from(st.working_image.height());
+            let anchor_pose = crate::capture::editor::image_transform::StaticImageTransform {
+                pos_x: 0.0,
+                pos_y: 0.0,
+                ..pose
+            };
+            let project = crate::capture::editor::transform_render::projector(
+                layout,
+                width,
+                height,
+                anchor_pose,
+            );
+            let (x, y) = project((anchor.0 - 0.5) * width, (anchor.1 - 0.5) * height);
+            let cx = t.canvas_offset_x + x * t.canvas_scale;
+            let cy = t.canvas_offset_y + y * t.canvas_scale;
+            context.translate(cx, cy);
+            context.scale(transform.scale, transform.scale);
+            context.translate(-cx, -cy);
+        }
         if let Some(shadow) = crate::capture::editor::shadow_render::geometry(
             layout,
             f64::from(st.working_image.width()),
@@ -527,7 +665,8 @@ impl EditorHost {
             pose,
             &st.scene_shadow,
         ) {
-            let interactive = st.history_interaction_before.is_some();
+            let interactive =
+                st.history_interaction_before.is_some() || part == MotionPaintPart::Foreground;
             // During a light/opacity drag, move a cached unoffset silhouette
             // instead of blurring the same card again for every pointer event.
             let mut mask_geometry = shadow;
@@ -603,7 +742,7 @@ impl EditorHost {
         style.paint_backings(context);
         style.paint_underlay(context);
         let _ = context.restore();
-        if st.selected_tool == Tool::Background && !st.static_image_transform.is_identity() {
+        if !pose.is_identity() {
             let cached = self.card_cache.borrow();
             let card = cached
                 .as_ref()
@@ -638,10 +777,13 @@ impl EditorHost {
                     layout,
                     f64::from(st.working_image.width()),
                     f64::from(st.working_image.height()),
-                    st.static_image_transform,
+                    pose,
                     crate::capture::editor::transform_render::Quality::Preview,
                 );
                 style.paint_frame(context);
+                let _ = context.restore();
+            }
+            if motion {
                 let _ = context.restore();
             }
             return;
@@ -679,10 +821,13 @@ impl EditorHost {
         let _ = context.save();
         clip_annotation_content_to_canvas(context, t);
 
-        let editing = st
-            .active_text_input
-            .as_ref()
-            .and_then(|input| input.editing_action_index);
+        let editing = if motion {
+            None
+        } else {
+            st.active_text_input
+                .as_ref()
+                .and_then(|input| input.editing_action_index)
+        };
         for (index, action) in st.actions.iter().enumerate() {
             if Some(index) == editing
                 || matches!(
@@ -694,13 +839,20 @@ impl EditorHost {
             }
             draw_annotation_action(context, action);
         }
-        if let Some(draft) = st.draft_action() {
-            draw_draft_action(context, &draft);
+        if !motion {
+            if let Some(draft) = st.draft_action() {
+                draw_draft_action(context, &draft);
+            }
         }
         let _ = context.restore();
 
-        self.paint_chrome(context, st, t);
+        if !motion {
+            self.paint_chrome(context, st, t);
+        }
         let _ = context.restore();
+        if motion {
+            let _ = context.restore();
+        }
     }
 
     fn background_image_surface(&self, image: &Arc<RgbaImage>) -> Option<ImageSurface> {
@@ -2514,6 +2666,164 @@ mod tests {
 
     fn ctrl() -> gdk::ModifierType {
         gdk::ModifierType::CONTROL_MASK
+    }
+
+    #[test]
+    fn motion_preview_shares_appearance_but_not_static_pose_or_selection() {
+        use crate::capture::editor::state::background::Fill;
+        use crate::capture::editor::types::DrawColor;
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            100,
+            80,
+            image::Rgba([240, 0, 0, 255]),
+        ));
+        state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([0, 0, 255, 255]),
+        )));
+        state.background.padding = 40.0;
+        state.actions.push(AnnotationAction::Line {
+            start: Point { x: 20.0, y: 40.0 },
+            end: Point { x: 80.0, y: 40.0 },
+            color: DrawColor::new(0.0, 1.0, 0.0, 1.0),
+            stroke_size: 4.0,
+            shadow: false,
+        });
+        state.selected_action_index = Some(0);
+        state.selected_tool = Tool::Background;
+        state.static_image_transform.yaw = 20.0;
+        *host.editor.borrow_mut() = Some(state);
+        let transform = ViewTransform {
+            offset_x: 10.0,
+            offset_y: 10.0,
+            canvas_width: 120.0,
+            canvas_height: 100.0,
+            image_rect_x: 10.0,
+            image_rect_y: 10.0,
+            ..ViewTransform::for_image(100.0, 80.0)
+        };
+        let paint = |zoom| {
+            let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 120, 100).unwrap();
+            {
+                let context = gtk4::cairo::Context::new(&surface).unwrap();
+                host.paint_motion_preview(
+                    &context,
+                    transform,
+                    crate::recording::editor::model::MotionTransform {
+                        scale: zoom,
+                        ..Default::default()
+                    },
+                    (0.5, 0.5),
+                );
+            }
+            surface.flush();
+            let stride = surface.stride() as usize;
+            let data = surface.data().unwrap();
+            render::cairo_argb_to_rgba_image(120, 100, stride, data.as_ref())
+        };
+        let preview = paint(1.0);
+        assert_eq!(*preview.get_pixel(0, 0), image::Rgba([0, 0, 255, 255]));
+        assert_eq!(*preview.get_pixel(15, 15), image::Rgba([240, 0, 0, 255]));
+        assert!(preview.get_pixel(60, 50)[1] > 240);
+        let zoomed = paint(1.2);
+        assert_eq!(*zoomed.get_pixel(0, 0), image::Rgba([0, 0, 255, 255]));
+        assert_eq!(*preview.get_pixel(6, 50), image::Rgba([0, 0, 255, 255]));
+        assert_eq!(*zoomed.get_pixel(6, 50), image::Rgba([240, 0, 0, 255]));
+        host.mutate(|state| {
+            state.static_image_transform = Default::default();
+            state.selected_tool = Tool::Select;
+            state.selected_action_index = None;
+        });
+        assert_eq!(paint(1.0), preview);
+        host.mutate(|state| {
+            state.background.fill = Fill::None;
+            state.background.changed();
+        });
+        assert_ne!(paint(1.0), preview);
+    }
+
+    #[test]
+    fn motion_preview_projects_position_rotation_and_zoom_anchor() {
+        use crate::capture::editor::state::background::Fill;
+        use crate::recording::editor::model::MotionTransform;
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            100,
+            80,
+            image::Rgba([240, 0, 0, 255]),
+        ));
+        state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([0, 0, 255, 255]),
+        )));
+        state.background.padding = 40.0;
+        let layout = state.background.layout(100, 80);
+        let transform = ViewTransform {
+            offset_x: layout.image_x,
+            offset_y: layout.image_y,
+            canvas_width: layout.width,
+            canvas_height: layout.height,
+            image_rect_x: layout.image_x,
+            image_rect_y: layout.image_y,
+            ..ViewTransform::for_image(100.0, 80.0)
+        };
+        *host.editor.borrow_mut() = Some(state);
+        let paint = |pose: MotionTransform, anchor| {
+            let width = layout.width.ceil() as i32;
+            let height = layout.height.ceil() as i32;
+            let mut surface =
+                ImageSurface::create(gtk4::cairo::Format::ARgb32, width, height).unwrap();
+            {
+                let context = gtk4::cairo::Context::new(&surface).unwrap();
+                host.paint_motion_preview(&context, transform, pose, anchor);
+            }
+            surface.flush();
+            let stride = surface.stride() as usize;
+            let data = surface.data().unwrap();
+            render::cairo_argb_to_rgba_image(width as u32, height as u32, stride, data.as_ref())
+        };
+        let default = MotionTransform::default();
+        let baseline = paint(default, (0.5, 0.5));
+        let moved = paint(
+            MotionTransform {
+                pos_x: 0.5,
+                ..default
+            },
+            (0.5, 0.5),
+        );
+        let x = (layout.image_x + 85.0) as u32;
+        let y = (layout.image_y + 40.0) as u32;
+        assert_eq!(*baseline.get_pixel(x, y), image::Rgba([240, 0, 0, 255]));
+        assert_eq!(*moved.get_pixel(x, y), image::Rgba([0, 0, 255, 255]));
+        let rotated = paint(
+            MotionTransform {
+                rotation_y: 20.0,
+                perspective: 0.8,
+                ..default
+            },
+            (0.5, 0.5),
+        );
+        assert_ne!(rotated, baseline);
+        let centered = paint(
+            MotionTransform {
+                scale: 1.4,
+                ..default
+            },
+            (0.5, 0.5),
+        );
+        let anchored = paint(
+            MotionTransform {
+                scale: 1.4,
+                ..default
+            },
+            (0.0, 0.5),
+        );
+        let left = (layout.image_x - 10.0) as u32;
+        assert_eq!(*centered.get_pixel(left, y), image::Rgba([240, 0, 0, 255]));
+        assert_eq!(*anchored.get_pixel(left, y), image::Rgba([0, 0, 255, 255]));
     }
 
     #[test]

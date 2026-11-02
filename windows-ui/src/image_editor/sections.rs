@@ -481,7 +481,7 @@ fn position_pad(
 
 /// The pad body: a soft raised square, the origin cross at centre, and the
 /// shared soft-white handle at the chosen camera position.
-fn paint_position_pad(
+pub(super) fn paint_position_pad(
     widget: &DrawingArea,
     context: &CairoContext,
     width: i32,
@@ -545,7 +545,7 @@ const CENTRE_TICK: f64 = 5.0;
 /// The marker: one plain white soft square over a blurred shadow. No ring,
 /// no core, one colour, so it reads as the chosen point rather than a
 /// second widget parked on the pad.
-fn paint_soft_handle(context: &CairoContext, x: f64, y: f64) {
+pub(super) fn paint_soft_handle(context: &CairoContext, x: f64, y: f64) {
     let shadow = gtk4::cairo::RadialGradient::new(
         x,
         y + 2.0,
@@ -574,7 +574,7 @@ fn paint_soft_handle(context: &CairoContext, x: f64, y: f64) {
 }
 
 /// Shadows toward the ancestor carrying the theme class, then stops.
-fn widget_is_light(widget: &DrawingArea) -> bool {
+pub(super) fn widget_is_light(widget: &DrawingArea) -> bool {
     let mut current = Some(widget.clone().upcast::<gtk4::Widget>());
     while let Some(node) = current {
         if node.has_css_class("editor-theme-light") {
@@ -1941,11 +1941,10 @@ fn build_source_pages(
 /// it.
 pub(super) fn appearance_panel(
     scale: f64,
-    include_transform: bool,
     host: Option<&Rc<EditorHost>>,
     column: &GtkBox,
     window: &gtk4::ApplicationWindow,
-) -> (GtkBox, Rc<dyn Fn()>) {
+) -> (GtkBox, GtkBox, Rc<dyn Fn()>) {
     let body = GtkBox::new(Orientation::Vertical, px(12.0, scale));
     body.add_css_class("image-editor-inspector-body");
 
@@ -1957,13 +1956,8 @@ pub(super) fn appearance_panel(
     let (background, sync) = background_card(scale, host, column, window);
     body.append(&background);
     body.append(&export_quality(scale));
-    let transform_sync = if include_transform {
-        let (transform, sync) = transform_disclosure(scale, host);
-        body.append(&transform);
-        Some(sync)
-    } else {
-        None
-    };
+    let (transform, transform_sync) = transform_disclosure(scale, host);
+    body.append(&transform);
     let (shadow, shadow_sync) = shadow_disclosure(scale, host);
     body.append(&shadow);
     let (style, style_sync) = style_disclosure(scale, host);
@@ -1975,11 +1969,9 @@ pub(super) fn appearance_panel(
         shadow_sync();
         style_sync();
         frame_sync();
-        if let Some(sync) = &transform_sync {
-            sync();
-        }
+        transform_sync();
     });
-    (body, sync)
+    (body, transform, sync)
 }
 
 /// The Background card: the fill-source tray and the shared sliders, the

@@ -2,28 +2,27 @@
 //!
 //! Static mode shows the shared Appearance builder; Motion swaps the dock's
 //! page to the Motion inspector's tab set (Composition, Text, Appearance,
-//! Watermark). The static Background card is connected to the document; the
-//! remaining Appearance and Motion controls are still shells.
+//! Watermark). Appearance uses the same controls and document in both modes.
 
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{Box as GtkBox, Label, Orientation, PolicyType, ScrolledWindow, Stack};
 
+use super::motion_controls::MotionControls;
 use super::sections;
 use super::toolbar::Tool;
 use super::ui_support::{px, INSPECTOR_WIDTH};
 use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
-use crate::video_editor::side_panel::FilledSlider;
 
 pub(super) struct Inspector {
     pub root: GtkBox,
     scroller: ScrolledWindow,
     actions: GtkBox,
-    motion_scroller: ScrolledWindow,
     motion_stack: Stack,
-    motion_duration: FilledSlider,
+    motion_controls: MotionControls,
+    transform: GtkBox,
     background_sync: Rc<dyn Fn()>,
     /// Clipboard copy and the flattened export the window wires to the document.
     pub copy_button: gtk4::Button,
@@ -39,13 +38,13 @@ impl Inspector {
     /// caption buttons live in. Entry always lands on the Composition page,
     /// like the Linux editor applies its mode.
     pub(super) fn set_mode(&self, motion: bool) {
-        self.scroller.set_visible(!motion);
         self.actions.set_visible(!motion);
-        self.motion_scroller.set_visible(motion);
-        self.motion_stack.set_visible(motion);
-        if motion {
-            self.motion_stack.set_visible_child_name("motion");
-        }
+        self.transform.set_visible(!motion);
+        self.motion_stack.set_visible_child_name(if motion {
+            "motion"
+        } else {
+            "motion-appearance"
+        });
     }
 
     /// The static editor's tool switch knows the dock; the pages arrive
@@ -55,12 +54,26 @@ impl Inspector {
     /// The notch asked for a Motion tool page; switch the dock over.
     pub(super) fn show_motion_page(&self, page: &str) {
         self.motion_stack.set_visible_child_name(page);
+        self.scroller.vadjustment().set_value(0.0);
     }
 
     /// Hand the Composition slider to the Motion timeline so a drag resizes
     /// the composition.
     pub(super) fn set_motion_duration_listener(&self, listener: Rc<dyn Fn(f64)>) {
-        self.motion_duration.on_change(listener);
+        self.motion_controls.duration.on_change(listener);
+    }
+
+    pub(super) fn bind_motion(&self, timeline: &Rc<super::timeline::Timeline>) {
+        self.motion_controls.bind(timeline);
+        self.motion_controls.sync(&timeline.motion_state());
+    }
+
+    pub(super) fn sync_motion(&self, state: &crate::recording::editor::model::MotionState) {
+        self.motion_controls.sync(state);
+    }
+
+    pub(super) fn refresh_motion_thumbnail(&self) {
+        self.motion_controls.refresh_thumbnail();
     }
 }
 
@@ -87,13 +100,9 @@ pub(super) fn build(
     scroller.set_propagate_natural_height(false);
     scroller.set_hexpand(false);
 
-    // The static Appearance dock: the Linux builder attaches its Transform
-    // extension only here, so the port does the same.
-    let (static_page, background_sync) =
-        sections::appearance_panel(scale, true, Some(host), &root, window);
-    scroller.set_child(Some(&static_page));
-    root.append(&scroller);
-
+    // Both modes use the same panel; only Static exposes its Transform.
+    let (appearance_page, transform, background_sync) =
+        sections::appearance_panel(scale, Some(host), &root, window);
     // The Motion dock: the notch's four pages, in the Linux tab order.
     let motion_stack = Stack::new();
     // Equal pages: a non-homogeneous stack would size each tool page to its
@@ -101,22 +110,10 @@ pub(super) fn build(
     // click. One allocation matches the static Appearance panel's viewport.
     motion_stack.set_hhomogeneous(true);
     motion_stack.set_vhomogeneous(false);
+    motion_stack.add_named(&appearance_page, Some("motion-appearance"));
 
-    let composition_page = GtkBox::new(Orientation::Vertical, px(12.0, scale));
-    composition_page.add_css_class("image-editor-inspector-body");
-    let composition_hint = Label::new(Some(&t(
-        "Studio preview. MP4 export needs activation; local editing and project saves remain free.",
-    )));
-    composition_hint.add_css_class("image-editor-hint");
-    composition_hint.set_wrap(true);
-    composition_hint.set_xalign(0.0);
-    composition_page.append(&composition_hint);
-    let composition_card = sections::section_card("Composition", scale);
-    let duration =
-        FilledSlider::new(&t("Duration"), 1.0, 10.0, 6.0, 0.5, 1, scale).with_suffix("s");
-    composition_card.append(&duration.widget());
-    composition_page.append(&composition_card);
-    motion_stack.add_named(&composition_page, Some("motion"));
+    let motion_controls = MotionControls::build(scale, host);
+    motion_stack.add_named(&motion_controls.page, Some("motion"));
 
     // The Linux Text page carries four sections of its own; this slice
     // leaves the panel's port to a next one and says so where it would be.
@@ -132,37 +129,16 @@ pub(super) fn build(
     text_page.append(&text_hint);
     motion_stack.add_named(&text_page, Some("motion-text"));
 
-    motion_stack.add_named(
-        &sections::appearance_panel(scale, false, None, &root, window).0,
-        Some("motion-appearance"),
-    );
-
     let watermark_page = GtkBox::new(Orientation::Vertical, px(12.0, scale));
     watermark_page.add_css_class("image-editor-inspector-body");
     watermark_page.append(&sections::watermark_panel(scale));
     motion_stack.add_named(&watermark_page, Some("motion-watermark"));
 
-    // Hidden until Motion is open; the dock shows one mode at a time.
-    motion_stack.set_visible_child_name("motion");
-    motion_stack.set_visible(false);
-
-    // The Motion pages are long (the Appearance card especially), and a
-    // stack reports its widest page's natural size — which would stretch
-    // the dock to window width and starve the preview. The same clipped
-    // scroll the static dock uses keeps the dock at its fixed width.
-    let motion_scroller = ScrolledWindow::builder()
-        .hscrollbar_policy(PolicyType::Never)
-        .vscrollbar_policy(PolicyType::Automatic)
-        .overlay_scrolling(true)
-        .vexpand(true)
-        .build();
-    motion_scroller.add_css_class("image-editor-inspector-scroll");
-    motion_scroller.set_propagate_natural_width(false);
-    motion_scroller.set_propagate_natural_height(false);
-    motion_scroller.set_hexpand(false);
-    motion_scroller.set_child(Some(&motion_stack));
-    motion_scroller.set_visible(false);
-    root.append(&motion_scroller);
+    // One homogeneous stack and viewport keep the dock's requisition
+    // independent of which tool is active.
+    motion_stack.set_visible_child_name("motion-appearance");
+    scroller.set_child(Some(&motion_stack));
+    root.append(&scroller);
 
     // Bottom actions: copy and upload are icon buttons on the left, Export
     // owns the right edge as the panel's one accent pill. They belong to the
@@ -196,9 +172,9 @@ pub(super) fn build(
         root,
         scroller,
         actions,
-        motion_scroller,
         motion_stack,
-        motion_duration: duration,
+        motion_controls,
+        transform,
         background_sync,
         copy_button,
         export_button: export,
@@ -232,4 +208,105 @@ fn action_export_button(scale: f64) -> gtk4::Button {
     export.set_tooltip_text(Some(&t("Save the annotated image")));
     let _ = scale;
     export
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capture::editor::state::EditorState;
+    use crate::capture::editor::types::FrameStyle;
+    use image::RgbaImage;
+
+    fn collect_class(widget: &gtk4::Widget, class: &str, found: &mut Vec<gtk4::Widget>) {
+        if widget.has_css_class(class) {
+            found.push(widget.clone());
+        }
+        let mut child = widget.first_child();
+        while let Some(current) = child {
+            collect_class(&current, class, found);
+            child = current.next_sibling();
+        }
+    }
+
+    #[test]
+    fn motion_and_static_share_the_appearance_panel_without_static_transform() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            super::super::ui_support::install_css();
+            let app = gtk4::Application::new(None::<&str>, Default::default());
+            app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+            let window = gtk4::ApplicationWindow::new(&app);
+            let host = super::super::annotate::EditorHost::new(
+                Rc::new(|| {}),
+                Rc::new(|_| {}),
+                Rc::new(|| (0.0, 0.0)),
+            );
+            *host.editor.borrow_mut() = Some(EditorState::new(RgbaImage::new(100, 80)));
+            let inspector = build(1.0, &host, &window);
+            inspector.sync_background();
+            let page = inspector
+                .motion_stack
+                .child_by_name("motion-appearance")
+                .unwrap();
+            let mut styles = Vec::new();
+            collect_class(&page, "image-editor-frame-tile", &mut styles);
+            assert!(styles.len() > 1);
+            let style = styles[1].clone().downcast::<gtk4::Button>().unwrap();
+            style.emit_clicked();
+            inspector.sync_background();
+            assert_eq!(
+                host.read(|state| state.background.frame_style),
+                Some(FrameStyle::ALL[1])
+            );
+            assert!(style.has_css_class("selected-style"));
+            assert!(inspector.transform.is_visible());
+
+            inspector.set_mode(true);
+            inspector.show_motion_page("motion-appearance");
+            assert_eq!(inspector.motion_stack.visible_child(), Some(page.clone()));
+            assert!(inspector.scroller.is_visible());
+            assert!(!inspector.transform.is_visible());
+            styles[0]
+                .clone()
+                .downcast::<gtk4::Button>()
+                .unwrap()
+                .emit_clicked();
+            inspector.sync_background();
+            assert_eq!(
+                host.read(|state| state.background.frame_style),
+                Some(FrameStyle::ALL[0])
+            );
+            let width = inspector.root.measure(Orientation::Horizontal, -1);
+            let appearance_width = page.measure(Orientation::Horizontal, -1).0;
+            assert_eq!(width.0, appearance_width.max(px(INSPECTOR_WIDTH, 1.0)));
+            for name in [
+                "motion",
+                "motion-text",
+                "motion-watermark",
+                "motion-appearance",
+            ] {
+                inspector.show_motion_page(name);
+                assert_eq!(inspector.root.measure(Orientation::Horizontal, -1), width);
+            }
+            let mut motion_state = crate::recording::editor::model::MotionState::default();
+            motion_state.add_segment_at(0.0);
+            inspector.sync_motion(&motion_state);
+            for name in [
+                "motion",
+                "motion-text",
+                "motion-watermark",
+                "motion-appearance",
+            ] {
+                inspector.show_motion_page(name);
+                assert_eq!(inspector.root.measure(Orientation::Horizontal, -1), width);
+            }
+            assert!(inspector.scroller.is_visible());
+            inspector.set_mode(false);
+            assert!(inspector.scroller.is_visible());
+            assert!(inspector.transform.is_visible());
+            assert!(styles[0].has_css_class("selected-style"));
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
 }

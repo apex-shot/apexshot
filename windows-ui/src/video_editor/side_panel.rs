@@ -3398,14 +3398,14 @@ type SliderInteraction = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 pub(crate) struct FilledSlider {
     area: DrawingArea,
     value: Rc<Cell<f64>>,
-    min: f64,
-    max: f64,
+    min: Rc<Cell<f64>>,
+    max: Rc<Cell<f64>>,
     step: f64,
     decimals: usize,
     scale: f64,
     hovered: Rc<Cell<bool>>,
     dragging: Rc<Cell<bool>>,
-    suffix: &'static str,
+    suffix: Rc<Cell<&'static str>>,
     on_change: Rc<RefCell<Option<Rc<dyn Fn(f64)>>>>,
     on_interaction_start: SliderInteraction,
     on_interaction_end: SliderInteraction,
@@ -3428,14 +3428,14 @@ impl FilledSlider {
         let slider = Self {
             area: area.clone(),
             value: Rc::new(Cell::new(initial.clamp(min, max))),
-            min,
-            max: max.max(min + 1e-9),
+            min: Rc::new(Cell::new(min)),
+            max: Rc::new(Cell::new(max.max(min + 1e-9))),
             step,
             decimals,
             scale,
             hovered: Rc::new(Cell::new(false)),
             dragging: Rc::new(Cell::new(false)),
-            suffix: "",
+            suffix: Rc::new(Cell::new("")),
             on_change: Rc::new(RefCell::new(None)),
             on_interaction_start: Rc::new(RefCell::new(None)),
             on_interaction_end: Rc::new(RefCell::new(None)),
@@ -3507,7 +3507,7 @@ impl FilledSlider {
     }
 
     pub(crate) fn set_value(&self, value: f64) {
-        let value = value.clamp(self.min, self.max);
+        let value = value.clamp(self.min.get(), self.max.get());
         if self.value.get() == value {
             return;
         }
@@ -3515,9 +3515,16 @@ impl FilledSlider {
         self.area.queue_draw();
     }
 
-    pub(crate) fn with_suffix(mut self, suffix: &'static str) -> Self {
-        self.suffix = suffix;
+    pub(crate) fn with_suffix(self, suffix: &'static str) -> Self {
+        self.suffix.set(suffix);
         self
+    }
+
+    pub(crate) fn set_range(&self, min: f64, max: f64) {
+        self.min.set(min);
+        self.max.set(max.max(min + 1e-9));
+        self.set_value(self.value.get());
+        self.area.queue_draw();
     }
 
     pub(crate) fn on_change(&self, callback: Rc<dyn Fn(f64)>) {
@@ -3543,8 +3550,8 @@ impl FilledSlider {
                     gdk::Key::Right | gdk::Key::Up => value + slider.step,
                     gdk::Key::Page_Down => value - page,
                     gdk::Key::Page_Up => value + page,
-                    gdk::Key::Home => slider.min,
-                    gdk::Key::End => slider.max,
+                    gdk::Key::Home => slider.min.get(),
+                    gdk::Key::End => slider.max.get(),
                     _ => return gtk4::glib::Propagation::Proceed,
                 };
                 if !active.replace(true) {
@@ -3599,9 +3606,11 @@ impl FilledSlider {
             .map(|widget| widget.allocated_width().max(1) as f64)
             .unwrap_or(1.0);
         let t = (x / width).clamp(0.0, 1.0);
-        let raw = self.min + t * (self.max - self.min);
+        let min = self.min.get();
+        let max = self.max.get();
+        let raw = min + t * (max - min);
         let value = if self.step > 1e-9 {
-            ((raw - self.min) / self.step).round() * self.step + self.min
+            ((raw - min) / self.step).round() * self.step + min
         } else {
             raw
         };
@@ -3609,7 +3618,7 @@ impl FilledSlider {
     }
 
     fn apply_value(&self, value: f64) {
-        let value = value.clamp(self.min, self.max);
+        let value = value.clamp(self.min.get(), self.max.get());
         if (self.value.get() - value).abs() < 1e-9 {
             return;
         }
@@ -3637,8 +3646,9 @@ impl FilledSlider {
         let light = widget_is_light(widget);
         let hot = self.hovered.get() || self.dragging.get();
         let active = self.dragging.get();
-        let progress =
-            ((self.value.get() - self.min) / (self.max - self.min).max(1e-9)).clamp(0.0, 1.0);
+        let progress = ((self.value.get() - self.min.get())
+            / (self.max.get() - self.min.get()).max(1e-9))
+        .clamp(0.0, 1.0);
         let radius = 5.0 * self.scale;
         let (track_alpha, fill_alpha, text_alpha, handle_alpha) = if light {
             if active {
@@ -3688,7 +3698,7 @@ impl FilledSlider {
         let value_text = format!(
             "{}{}",
             format_value(self.value.get(), self.decimals),
-            self.suffix
+            self.suffix.get()
         );
         if let Ok(extents) = context.text_extents(&value_text) {
             context.move_to(width - 14.0 * self.scale - extents.width(), height * 0.66);
@@ -4400,6 +4410,24 @@ mod tests {
         assert_eq!(format_value(24.4, 0), "24");
         assert_eq!(format_value(0.35, 1), "0.3");
         assert_eq!(format_value(0.456, 2), "0.46");
+    }
+
+    #[test]
+    fn filled_slider_clones_share_suffix_and_range_updates() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let slider = super::FilledSlider::new("Duration", 0.0, 10.0, 8.0, 1.0, 0, 1.0);
+            let drawing_copy = slider.clone();
+            let slider = slider.with_suffix("ms");
+            slider.set_range(0.0, 3.0);
+            assert_eq!(drawing_copy.suffix.get(), "ms");
+            assert_eq!(drawing_copy.max.get(), 3.0);
+            assert_eq!(drawing_copy.value.get(), 3.0);
+            drawing_copy.apply_value(9.0);
+            assert_eq!(slider.value.get(), 3.0);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
     }
 
     #[test]

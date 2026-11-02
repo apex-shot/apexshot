@@ -28,6 +28,9 @@ pub mod studio_entitlement;
 pub(crate) mod studio_upsell;
 #[path = "../../src/test_support.rs"]
 pub mod test_support;
+#[path = "../../src/typography.rs"]
+#[rustfmt::skip]
+pub mod typography;
 mod usage_telemetry;
 pub mod utils;
 pub mod video_editor;

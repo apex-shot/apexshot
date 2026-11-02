@@ -431,22 +431,7 @@ pub fn install_css() {
          .editor-root.editor-theme-light scale highlight {{ background-color:#ff670d; }} \
          .editor-root.editor-theme-light scale slider {{ background-color:#ffffff;
              border:1px solid rgba(17,24,39,0.16); }} \
-         .settings-page-title {{ font-size:{}px; font-weight:600; letter-spacing:-0.2px; opacity:0.96; }} 
-         .settings-select-popover contents {{ background-color:#252526; border:1px solid rgba(255,255,255,0.10);              border-radius:10px; padding:0; box-shadow:none; }} 
-         .settings-select-menu {{ padding:4px; }} 
-         .settings-select-popover contents .history-action-btn {{ min-height:0; padding:0 8px; border-radius:6px;              font-size:14px; font-weight:500; color:rgba(255,255,255,0.90); background-color:transparent;              border:none; box-shadow:none; }} 
-         .settings-select-popover contents .history-action-btn:hover {{ background-color:rgba(255,255,255,0.07); color:#ffffff; }} 
-         .settings-select-popover contents .history-action-btn:active {{ background-color:rgba(255,255,255,0.10); color:#ffffff; }} 
-         .settings-select-popover contents .history-action-btn:focus,          .settings-select-popover contents .history-action-btn:focus-visible,          .settings-select-popover contents .history-action-btn:focus-within {{ background-color:transparent;              color:rgba(255,255,255,0.90); outline:none; box-shadow:none; }} 
-         .settings-select-popover contents .history-action-btn:hover:focus {{ background-color:rgba(255,255,255,0.07);              color:#ffffff; }} 
-         .settings-select-popover contents .settings-select-option-active {{ background-color:transparent; color:#ffffff;              box-shadow:none; border:none; }} 
-         .settings-select-popover contents .settings-select-check {{ font-size:13px; color:rgba(255,255,255,0.85); }} 
-         .editor-root.editor-theme-light .settings-select-popover contents {{ background-color:#f2f3f4;              border:1px solid rgba(17,24,39,0.14); }} 
-         .editor-root.editor-theme-light .settings-select-popover contents .history-action-btn {{ color:rgba(29,33,41,0.90); }} 
-         .editor-root.editor-theme-light .settings-select-popover contents .history-action-btn:hover {{ background-color:rgba(17,24,39,0.05); color:#111827; }} 
-         .editor-root.editor-theme-light .settings-select-popover contents .history-action-btn:focus,          .editor-root.editor-theme-light .settings-select-popover contents .history-action-btn:focus-visible {{ background-color:transparent; color:rgba(29,33,41,0.90); outline:none; }} 
-         .editor-root.editor-theme-light .settings-select-popover contents .settings-select-option-active {{ color:#111827; }} 
-         .editor-root.editor-theme-light .settings-select-popover contents .settings-select-check {{ color:#111827; }}",
+         .settings-page-title {{ font-size:{}px; font-weight:600; letter-spacing:-0.2px; opacity:0.96; }}",
         px(14.0),
         px(14.0),
         px(8.0),
@@ -499,11 +484,43 @@ pub fn install_css() {
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
     );
+    install_select_menu_css();
+}
+
+pub(crate) fn install_select_menu_css() {
+    let Some(display) = gdk::Display::default() else {
+        return;
+    };
+    let provider = CssProvider::new();
+    provider.load_from_data(include_str!("select_menu.css"));
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 5,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn shared_select_menu_css_is_valid() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let provider = CssProvider::new();
+            let errors = Rc::new(Cell::new(0));
+            provider.connect_parsing_error({
+                let errors = errors.clone();
+                move |_, _, _| errors.set(errors.get() + 1)
+            });
+            provider.load_from_data(include_str!("select_menu.css"));
+            assert_eq!(errors.get(), 0);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
 
     #[test]
     fn account_chip_requires_a_cloud_session() {

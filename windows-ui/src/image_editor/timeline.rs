@@ -2,9 +2,7 @@
 //! `motion_timeline.rs`. Ruler, source lane, Motion lane, Text lane and a
 //! painted playhead, in the video editor card's language.
 //!
-//! This slice is a shell: the model is local to the module, so scrubbing,
-//! playback, adding a clip and selecting drive it directly, but nothing a
-//! drawing backend could read exists on this platform yet.
+//! Motion clips use the same model as the Linux editor.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -17,13 +15,15 @@ use gtk4::{Align, Box as GtkBox, Button, DrawingArea, Image, Label, Orientation,
 use super::ui_support::px;
 use crate::capture::editor::window::icon_names::custom;
 use crate::i18n::t;
+use crate::recording::editor::model::{
+    MotionBlurBudgetMode, MotionState, MotionTransform, DEFAULT_MOTION_DURATION_SECONDS,
+};
+
+mod clip;
 
 /// The shipped composition length and its bounds, the Linux model's
 /// constants.
-const DEFAULT_DURATION: f64 = 6.0;
-/// The clip length the Add buttons insert at the playhead, matching the
-/// Linux default segment.
-const DEFAULT_SEGMENT: f64 = 1.0;
+const DEFAULT_DURATION: f64 = DEFAULT_MOTION_DURATION_SECONDS;
 
 /// Clip colours. Motion clips use the editor palette's azure so the two
 /// timelines read as different cards; text clips take the primary orange.
@@ -41,9 +41,8 @@ const PLAYHEAD_HANDLE_W: f64 = 12.0;
 const PLAYHEAD_HANDLE_H: f64 = 26.0;
 const PLAYHEAD_HANDLE_TOP: f64 = 2.0;
 
-/// Which lane the pointer is over. Rows own their controllers, so the ghost
-/// can never promise a span on the neighbouring lane.
-#[derive(Clone, Copy, PartialEq)]
+/// Which lane the board pointer is over.
+#[derive(Clone, Copy, Debug, PartialEq)]
 enum HoverLane {
     None,
     Motion,
@@ -131,56 +130,87 @@ fn text_clip_tone(selected: bool, faint: bool) -> ClipTone {
     }
 }
 
-/// The exact span a click at `start` would create in `clips`, or `None`
-/// when the click is inside a clip or the free gap is too short. The lane's
-/// ghost and its Add button share this, so both promise exactly what
-/// happens.
-fn add_span(clips: &[(f64, f64)], duration: f64, start: f64) -> Option<(f64, f64)> {
-    let start = start.clamp(0.0, duration);
-    if clips
-        .iter()
-        .any(|(begin, end)| *begin <= start && start <= *end)
-    {
-        return None;
+fn disabled_clip_tone(mut tone: ClipTone, disabled: bool) -> ClipTone {
+    if disabled {
+        let gray = (tone.fill.0 + tone.fill.1 + tone.fill.2) / 3.0;
+        tone.fill.0 = (tone.fill.0 + gray) / 2.0;
+        tone.fill.1 = (tone.fill.1 + gray) / 2.0;
+        tone.fill.2 = (tone.fill.2 + gray) / 2.0;
+        tone.fill.3 *= 0.55;
+        tone.edge.3 *= 0.55;
+        tone.handle.3 *= 0.6;
+        tone.label *= 0.65;
     }
-    let gap_start = clips
-        .iter()
-        .filter(|(_, end)| *end <= start + 1e-9)
-        .fold(0.0_f64, |best, (_, end)| best.max(*end));
-    let gap_end = clips
-        .iter()
-        .filter(|(begin, _)| *begin >= start - 1e-9)
-        .fold(duration, |best, (begin, _)| best.min(*begin));
-    if gap_end - gap_start + 1e-9 < DEFAULT_SEGMENT {
-        return None;
-    }
-    let fitted = start.clamp(gap_start, gap_end - DEFAULT_SEGMENT);
-    Some((fitted, fitted + DEFAULT_SEGMENT))
+    tone
 }
 
-/// The shell's local model: composition length, playhead, the two clip
-/// lanes, and one selection per lane. Painters and handlers both reach it.
-struct Model {
-    duration: f64,
-    playhead: f64,
-    motion_clips: Vec<(f64, f64)>,
-    text_clips: Vec<(f64, f64)>,
-    selected_motion: Option<usize>,
-    selected_text: Option<usize>,
-}
+type Model = MotionState;
+type PreviewRange = (f64, f64);
 
 /// What the painters and handlers share: the mutable model plus the hover
 /// read-out.
 struct Shared {
     model: RefCell<Model>,
     hover_lane: Cell<HoverLane>,
-    hover_time: Cell<f64>,
+    hover_time: Cell<Option<f64>>,
+    playing: Cell<bool>,
+    preview_changed: RefCell<Option<Rc<dyn Fn()>>>,
+    state_changed: RefCell<Option<Rc<dyn Fn()>>>,
+    undo: RefCell<Vec<MotionState>>,
+    redo: RefCell<Vec<MotionState>>,
+    interaction: RefCell<Option<MotionState>>,
+    preview_on_finish: Cell<bool>,
+    dragging_clip: Cell<bool>,
+    source_revision: Cell<u64>,
+}
+
+impl Shared {
+    fn preview_time(&self) -> f64 {
+        let model = self.model.borrow();
+        if !self.playing.get() && self.hover_lane.get() == HoverLane::Motion {
+            if let Some(time) = self.hover_time.get() {
+                if model.segment_index_at(time).is_some() {
+                    return time;
+                }
+            }
+        }
+        model.playhead
+    }
+
+    fn notify_preview(&self) {
+        if let Some(callback) = self.preview_changed.borrow().as_ref() {
+            callback();
+        }
+    }
+
+    fn notify_state(&self) {
+        if let Some(callback) = self.state_changed.borrow().as_ref() {
+            callback();
+        }
+    }
+
+    fn record_edit(&self, before: MotionState) {
+        if self.interaction.borrow().is_none() && *self.model.borrow() != before {
+            let mut undo = self.undo.borrow_mut();
+            undo.push(before);
+            if undo.len() > 100 {
+                undo.remove(0);
+            }
+            self.redo.borrow_mut().clear();
+        }
+    }
 }
 
 /// The dock and the handles its rows need for interaction wiring.
 pub(super) struct Timeline {
     pub dock: GtkBox,
     update_duration: Rc<dyn Fn(f64)>,
+    pause: Rc<dyn Fn()>,
+    reset_source: Rc<dyn Fn()>,
+    redraw: Rc<dyn Fn()>,
+    update_clock: Rc<dyn Fn()>,
+    start_playback: Rc<dyn Fn(Option<PreviewRange>)>,
+    shared: Rc<Shared>,
 }
 
 impl Timeline {
@@ -189,6 +219,123 @@ impl Timeline {
     pub(super) fn set_duration(&self, seconds: f64) {
         (self.update_duration)(seconds);
     }
+
+    pub(super) fn preview_frames(
+        &self,
+        width: f64,
+        height: f64,
+    ) -> Vec<(MotionTransform, (f64, f64))> {
+        let time = self.shared.preview_time();
+        let model = self.shared.model.borrow();
+        let settings = model.motion_blur_settings;
+        let current = model.sample(time);
+        let previous = model.sample((time - settings.exposure_seconds(30.0)).max(0.0));
+        let travel = width.hypot(height)
+            * ((current.scale - previous.scale).abs() * 0.5
+                + (current.pos_x - previous.pos_x).abs() * 0.5
+                + (current.pos_y - previous.pos_y).abs() * 0.5
+                + (current.rotation_x - previous.rotation_x)
+                    .abs()
+                    .to_radians()
+                + (current.rotation_y - previous.rotation_y)
+                    .abs()
+                    .to_radians()
+                + (current.rotation_z - previous.rotation_z)
+                    .abs()
+                    .to_radians());
+        let offsets =
+            settings.temporal_offsets(30.0, travel, MotionBlurBudgetMode::LivePreviewPlayback);
+        if offsets.is_empty() {
+            return vec![(current, model.zoom_anchor_at(time))];
+        }
+        let count = offsets.len().min(5);
+        let last = *offsets.last().unwrap_or(&0.0);
+        (0..count)
+            .map(|index| {
+                let sample_time = (time + last * index as f64 / (count - 1) as f64).max(0.0);
+                (model.sample(sample_time), model.zoom_anchor_at(sample_time))
+            })
+            .collect()
+    }
+
+    pub(super) fn motion_state(&self) -> MotionState {
+        self.shared.model.borrow().clone()
+    }
+
+    pub(super) fn set_state_listener(&self, listener: Rc<dyn Fn()>) {
+        *self.shared.state_changed.borrow_mut() = Some(listener);
+    }
+
+    pub(super) fn edit_motion(&self, edit: impl FnOnce(&mut MotionState), show_pose: bool) {
+        self.pause();
+        let mut model = self.shared.model.borrow_mut();
+        let before = model.clone();
+        edit(&mut model);
+        let changed = *model != before;
+        let range = if show_pose && changed {
+            model.selected_segment().map(motion_preview_range)
+        } else {
+            None
+        };
+        if show_pose {
+            if let Some(segment) = model.selected_segment() {
+                model.playhead =
+                    segment.start + segment.timing.transition_duration.min(segment.duration());
+            }
+        }
+        drop(model);
+        self.shared.record_edit(before);
+        (self.update_clock)();
+        (self.redraw)();
+        self.shared.notify_preview();
+        self.shared.notify_state();
+        if let Some(range) = range {
+            if self.shared.interaction.borrow().is_some() {
+                self.shared.preview_on_finish.set(true);
+            } else {
+                (self.start_playback)(Some(range));
+            }
+        }
+    }
+
+    pub(super) fn begin_edit(&self) {
+        let mut interaction = self.shared.interaction.borrow_mut();
+        if interaction.is_none() {
+            *interaction = Some(self.shared.model.borrow().clone());
+            self.shared.preview_on_finish.set(false);
+        }
+    }
+
+    pub(super) fn finish_edit(&self) {
+        let before = self.shared.interaction.borrow_mut().take();
+        if let Some(before) = before {
+            self.shared.record_edit(before);
+            (self.redraw)();
+            if self.shared.preview_on_finish.replace(false) {
+                let range = self
+                    .shared
+                    .model
+                    .borrow()
+                    .selected_segment()
+                    .map(motion_preview_range);
+                if let Some(range) = range {
+                    (self.start_playback)(Some(range));
+                }
+            }
+        }
+    }
+
+    pub(super) fn set_preview_listener(&self, listener: Rc<dyn Fn()>) {
+        *self.shared.preview_changed.borrow_mut() = Some(listener);
+    }
+
+    pub(super) fn pause(&self) {
+        (self.pause)();
+    }
+
+    pub(super) fn reset_source(&self) {
+        (self.reset_source)();
+    }
 }
 
 /// Rebuild the dock. `dark` decides the ruler and playhead tones once, the
@@ -196,16 +343,18 @@ impl Timeline {
 pub(super) fn build(scale: f64, dark: bool) -> Timeline {
     let light = !dark;
     let shared = Rc::new(Shared {
-        model: RefCell::new(Model {
-            duration: DEFAULT_DURATION,
-            playhead: 0.0,
-            motion_clips: Vec::new(),
-            text_clips: Vec::new(),
-            selected_motion: None,
-            selected_text: None,
-        }),
+        model: RefCell::new(Model::default()),
         hover_lane: Cell::new(HoverLane::None),
-        hover_time: Cell::new(0.0),
+        hover_time: Cell::new(None),
+        playing: Cell::new(false),
+        preview_changed: RefCell::new(None),
+        state_changed: RefCell::new(None),
+        undo: RefCell::new(Vec::new()),
+        redo: RefCell::new(Vec::new()),
+        interaction: RefCell::new(None),
+        preview_on_finish: Cell::new(false),
+        dragging_clip: Cell::new(false),
+        source_revision: Cell::new(0),
     });
 
     let dock = GtkBox::new(Orientation::Vertical, 0);
@@ -320,6 +469,9 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         let text_track = text_track.clone();
         let hover_playhead = hover_playhead.clone();
         let playhead = playhead.clone();
+        let shared = shared.clone();
+        let undo_btn = undo_btn.downgrade();
+        let redo_btn = redo_btn.downgrade();
         move || {
             ruler.queue_draw();
             source_track.queue_draw();
@@ -327,18 +479,24 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
             text_track.queue_draw();
             hover_playhead.queue_draw();
             playhead.queue_draw();
+            if let Some(button) = undo_btn.upgrade() {
+                button.set_sensitive(!shared.undo.borrow().is_empty());
+            }
+            if let Some(button) = redo_btn.upgrade() {
+                button.set_sensitive(!shared.redo.borrow().is_empty());
+            }
         }
     };
     let redraw: Rc<dyn Fn()> = Rc::new(redraw);
 
     // ── The head's clock mirrors the model; the label is outside the draw
     // pass so a redraw chain never repaints widget text.
-    let set_playhead_label = {
+    let set_playhead_label: Rc<dyn Fn()> = {
         let play_label = play_label.clone();
         let shared = shared.clone();
-        move || {
+        Rc::new(move || {
             play_label.set_text(&format_clock(shared.model.borrow().playhead));
-        }
+        })
     };
 
     // ── Transport ──
@@ -349,12 +507,16 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         let shared = shared.clone();
         let redraw = redraw.clone();
         let set_playhead_label = set_playhead_label.clone();
+        let play_button = play_button.clone();
         Rc::new(move |time: f64| {
+            shared.playing.set(false);
+            play_button.set_icon_name("media-playback-start-symbolic");
             let mut model = shared.model.borrow_mut();
             model.playhead = time.clamp(0.0, model.duration);
             drop(model);
             set_playhead_label();
             redraw();
+            shared.notify_preview();
         })
     };
 
@@ -367,34 +529,46 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         });
     }
 
-    // Play runs the head through the duration on the frame clock; the icon
-    // toggles with it, and the head parks at the end. One shared playing
-    // flag guards the tick callback, so repeated clicks never stack ticks.
-    let playing: Rc<Cell<bool>> = Rc::new(Cell::new(false));
-    play_button.connect_clicked({
-        let playing = playing.clone();
+    // One generation owns the tick callback, including short automatic
+    // previews of newly created motion segments.
+    let playback_generation = Rc::new(Cell::new(0_u64));
+    let start_playback: Rc<dyn Fn(Option<PreviewRange>)> = {
         let shared = shared.clone();
         let set_playhead_label = set_playhead_label.clone();
         let redraw = redraw.clone();
-        let play_button = play_button.clone();
-        move |_| {
-            if playing.replace(!playing.get()) {
-                play_button.set_icon_name("media-playback-start-symbolic");
+        let button = play_button.downgrade();
+        let generation = playback_generation.clone();
+        Rc::new(move |range: Option<(f64, f64)>| {
+            let Some(button) = button.upgrade() else {
                 return;
+            };
+            let token = generation.get().wrapping_add(1);
+            generation.set(token);
+            let end = {
+                let mut model = shared.model.borrow_mut();
+                if let Some((start, _)) = range {
+                    model.playhead = start;
+                } else if model.playhead >= model.duration {
+                    model.playhead = 0.0;
+                }
+                range.map(|(_, end)| end).unwrap_or(model.duration)
+            };
+            if range.is_some() {
+                shared.hover_time.set(None);
+                shared.hover_lane.set(HoverLane::None);
             }
-            play_button.set_icon_name("media-playback-pause-symbolic");
-            let playing = playing.clone();
+            shared.playing.set(true);
+            button.set_icon_name("media-playback-pause-symbolic");
+            set_playhead_label();
+            redraw();
+            shared.notify_preview();
             let shared = shared.clone();
             let set_playhead_label = set_playhead_label.clone();
             let redraw = redraw.clone();
-            let button = play_button.clone();
-            let last_frame: Rc<Cell<Option<i64>>> = Rc::new(Cell::new(None));
-            let weak_button = button.downgrade();
-            button.add_tick_callback(move |_, frame_clock| {
-                let Some(button) = weak_button.upgrade() else {
-                    return glib::ControlFlow::Break;
-                };
-                if !playing.get() {
+            let generation = generation.clone();
+            let last_frame = Cell::new(None::<i64>);
+            button.add_tick_callback(move |button, frame_clock| {
+                if !shared.playing.get() || generation.get() != token {
                     return glib::ControlFlow::Break;
                 }
                 let frame_time = frame_clock.frame_time();
@@ -404,24 +578,52 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
                 let span = frame_time.saturating_sub(previous) as f64 / 1_000_000.0;
                 let parked = {
                     let mut model = shared.model.borrow_mut();
-                    model.playhead = (model.playhead + span).min(model.duration);
-                    (model.duration - model.playhead).abs() < 1e-6
+                    let end = end.min(model.duration);
+                    model.playhead = (model.playhead + span).min(end);
+                    model.playhead >= end
                 };
                 set_playhead_label();
                 redraw();
+                shared.notify_preview();
                 if parked {
-                    playing.set(false);
+                    shared.playing.set(false);
                     button.set_icon_name("media-playback-start-symbolic");
-                }
-                let _ = playhead;
-                if parked {
+                    shared.notify_preview();
                     glib::ControlFlow::Break
                 } else {
                     glib::ControlFlow::Continue
                 }
             });
+        })
+    };
+    play_button.connect_clicked({
+        let shared = shared.clone();
+        let start_playback = start_playback.clone();
+        move |button| {
+            if shared.playing.replace(false) {
+                button.set_icon_name("media-playback-start-symbolic");
+                shared.notify_preview();
+            } else {
+                start_playback(None);
+            }
         }
     });
+
+    let pause: Rc<dyn Fn()> = {
+        let shared = shared.clone();
+        let play_button = play_button.downgrade();
+        let redraw = redraw.clone();
+        Rc::new(move || {
+            shared.playing.set(false);
+            shared.hover_time.set(None);
+            shared.hover_lane.set(HoverLane::None);
+            if let Some(button) = play_button.upgrade() {
+                button.set_icon_name("media-playback-start-symbolic");
+            }
+            redraw();
+            shared.notify_preview();
+        })
+    };
 
     // ── Add buttons ──
     // A click adds the lane's default clip at the playhead when the gap
@@ -429,28 +631,26 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
     let add_clip: Rc<dyn Fn(bool)> = {
         let shared = shared.clone();
         let redraw = redraw.clone();
+        let start_playback = start_playback.clone();
         Rc::new(move |text: bool| {
             let mut model = shared.model.borrow_mut();
             let playhead = model.playhead;
-            if text {
-                let Some((start, end)) = add_span(&model.text_clips, model.duration, playhead)
-                else {
-                    return;
-                };
-                model.text_clips.push((start, end));
-                model.selected_motion = None;
-                model.selected_text = Some(model.text_clips.len() - 1);
+            let before = model.clone();
+            let preview = if text {
+                model.add_text_at(playhead);
+                None
             } else {
-                let Some((start, end)) = add_span(&model.motion_clips, model.duration, playhead)
-                else {
-                    return;
-                };
-                model.motion_clips.push((start, end));
-                model.selected_text = None;
-                model.selected_motion = Some(model.motion_clips.len() - 1);
-            }
+                model
+                    .add_segment_at(playhead)
+                    .map(|index| motion_preview_range(&model.segments[index]))
+            };
             drop(model);
+            shared.record_edit(before);
             redraw();
+            shared.notify_state();
+            if let Some(range) = preview {
+                start_playback(Some(range));
+            }
         })
     };
     add_btn.connect_clicked({
@@ -485,14 +685,8 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         let drag = gtk4::GestureDrag::new();
         drag.set_button(1);
         drag.connect_drag_begin({
-            let drag = drag.clone();
             let scrub_begin = scrub.clone();
-            move |gesture, x, _| {
-                let _ = &drag;
-                if let Some((start_x, _)) = gesture.start_point() {
-                    scrub_begin(start_x + x);
-                }
-            }
+            move |_, x, _| scrub_begin(x)
         });
         drag.connect_drag_update({
             let scrub_update = scrub.clone();
@@ -506,76 +700,121 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
     }
 
     // ── Lanes ──
-    // A lane click selects the clip it covers and clears the other lane.
+    // A click selects an existing clip or creates one in an available gap.
     for (row, text) in [(&motion_track, false), (&text_track, true)] {
         let shared = shared.clone();
         let redraw = redraw.clone();
+        let start_playback = start_playback.clone();
         let row = row.clone();
+        let dragged = Rc::new(Cell::new(false));
         let click = gtk4::GestureClick::new();
         click.set_button(1);
-        click.connect_pressed({
+        click.connect_released({
             let row = row.clone();
+            let dragged = dragged.clone();
+            let shared = shared.clone();
+            let redraw = redraw.clone();
+            let start_playback = start_playback.clone();
             move |_, _, x, _| {
+                if dragged.replace(false) {
+                    return;
+                }
                 let width = f64::from(row.allocated_width().max(1));
                 let mut model = shared.model.borrow_mut();
-                let time = x / width * model.duration;
-                if text {
-                    model.selected_text = find_clip(&model.text_clips, time);
-                    model.selected_motion = None;
-                } else {
-                    model.selected_motion = find_clip(&model.motion_clips, time);
-                    model.selected_text = None;
-                }
+                let before = model.clone();
+                let count = model.segments.len() + model.text_segments.len();
+                let preview = activate_lane(&mut model, text, x, width);
+                let added = count != model.segments.len() + model.text_segments.len();
                 drop(model);
+                if added {
+                    shared.record_edit(before);
+                }
                 redraw();
+                shared.notify_state();
+                if let Some(range) = preview {
+                    start_playback(Some(range));
+                }
             }
         });
         row.add_controller(click);
+        clip::install(
+            &row,
+            text,
+            scale,
+            clip::Hooks {
+                shared: shared.clone(),
+                redraw: redraw.clone(),
+                pause: pause.clone(),
+                start_playback: start_playback.clone(),
+                dragged,
+            },
+        );
     }
 
-    // ── Hover read-out and lane ghosts ──
-    // Each row reports its own lane, so the ghost can never jump rows; the
-    // ruler and source lane only move the red read-out line.
-    for (row, lane) in [
-        (&ruler, HoverLane::None),
-        (&source_track, HoverLane::None),
-        (&motion_track, HoverLane::Motion),
-        (&text_track, HoverLane::Text),
-    ] {
+    // Track the whole board, including gaps between rows, in board coordinates.
+    let hover = gtk4::EventControllerMotion::new();
+    hover.set_propagation_phase(gtk4::PropagationPhase::Capture);
+    let on_hover: Rc<dyn Fn(f64, f64)> = {
         let shared = shared.clone();
-        let redraw = redraw.clone();
-        let row = row.clone();
-        let hover = gtk4::EventControllerMotion::new();
-        hover.connect_enter({
-            let shared = shared.clone();
-            let redraw = redraw.clone();
-            let row = row.clone();
-            move |_, _, x| {
-                shared.hover_lane.set(lane);
-                update_hover_time(&shared, &row, x);
-                redraw();
+        let board = board.downgrade();
+        let motion_track = motion_track.clone();
+        let text_track = text_track.clone();
+        let hover_playhead = hover_playhead.clone();
+        Rc::new(move |x, y| {
+            if shared.dragging_clip.get() {
+                return;
             }
-        });
-        hover.connect_motion({
-            let shared = shared.clone();
-            let redraw = redraw.clone();
-            let row = row.clone();
-            move |_, _, x| {
-                update_hover_time(&shared, &row, x);
-                redraw();
+            let Some(board) = board.upgrade() else { return };
+            let previous = shared.preview_time();
+            let old_lane = shared.hover_lane.get();
+            let lane = if pointer_in_lane(&motion_track, &board, y) {
+                HoverLane::Motion
+            } else if pointer_in_lane(&text_track, &board, y) {
+                HoverLane::Text
+            } else {
+                HoverLane::None
+            };
+            let duration = shared.model.borrow().duration;
+            let width = f64::from(board.allocated_width().max(1));
+            shared.hover_lane.set(lane);
+            shared
+                .hover_time
+                .set(Some((x / width).clamp(0.0, 1.0) * duration));
+            hover_playhead.queue_draw();
+            if old_lane == HoverLane::Motion || lane == HoverLane::Motion {
+                motion_track.queue_draw();
             }
-        });
-        hover.connect_leave({
-            let shared = shared.clone();
-            let redraw = redraw.clone();
-            move |_| {
-                shared.hover_lane.set(HoverLane::None);
-                shared.hover_time.set(0.0);
-                redraw();
+            if old_lane == HoverLane::Text || lane == HoverLane::Text {
+                text_track.queue_draw();
             }
-        });
-        row.add_controller(hover);
-    }
+            if (previous - shared.preview_time()).abs() > f64::EPSILON {
+                shared.notify_preview();
+            }
+        })
+    };
+    hover.connect_enter({
+        let on_hover = on_hover.clone();
+        move |_, x, y| on_hover(x, y)
+    });
+    hover.connect_motion(move |_, x, y| on_hover(x, y));
+    hover.connect_leave({
+        let shared = shared.clone();
+        let motion_track = motion_track.clone();
+        let text_track = text_track.clone();
+        let hover_playhead = hover_playhead.clone();
+        move |_| {
+            let previous = shared.preview_time();
+            shared.hover_lane.set(HoverLane::None);
+            shared.hover_time.set(None);
+            hover_playhead.queue_draw();
+            motion_track.queue_draw();
+            text_track.queue_draw();
+            if (previous - shared.preview_time()).abs() > f64::EPSILON {
+                shared.notify_preview();
+            }
+        }
+    });
+    board.add_controller(hover);
 
     // ── Painters ──
     ruler.set_draw_func({
@@ -631,6 +870,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
         let shared = shared.clone();
         let redraw = redraw.clone();
         let duration_label = duration_label.clone();
+        let set_playhead_label = set_playhead_label.clone();
         Rc::new(move |seconds: f64| {
             let seconds = seconds.clamp(1.0, 10.0);
             let changed = {
@@ -638,23 +878,90 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
                 if (model.duration - seconds).abs() < 1e-6 {
                     false
                 } else {
-                    model.duration = seconds;
-                    if model.playhead > seconds {
-                        model.playhead = seconds;
-                    }
+                    let before = model.clone();
+                    model.set_duration(seconds);
+                    drop(model);
+                    shared.record_edit(before);
                     true
                 }
             };
             if changed {
                 duration_label.set_text(&format_clock(seconds));
+                set_playhead_label();
                 redraw();
+                shared.notify_preview();
+                shared.notify_state();
             }
         })
     };
 
+    let reset_source: Rc<dyn Fn()> = {
+        let shared = shared.clone();
+        let pause = pause.clone();
+        let redraw = redraw.clone();
+        let set_playhead_label = set_playhead_label.clone();
+        Rc::new(move || {
+            pause();
+            let mut model = shared.model.borrow_mut();
+            let duration = model.duration;
+            *model = MotionState {
+                duration,
+                ..MotionState::default()
+            };
+            drop(model);
+            shared.undo.borrow_mut().clear();
+            shared.redo.borrow_mut().clear();
+            shared.interaction.borrow_mut().take();
+            shared.preview_on_finish.set(false);
+            shared.dragging_clip.set(false);
+            shared
+                .source_revision
+                .set(shared.source_revision.get().wrapping_add(1));
+            set_playhead_label();
+            redraw();
+            shared.notify_preview();
+            shared.notify_state();
+        })
+    };
+
+    for (button, undo) in [(&undo_btn, true), (&redo_btn, false)] {
+        let shared = shared.clone();
+        let redraw = redraw.clone();
+        let set_playhead_label = set_playhead_label.clone();
+        let duration_label = duration_label.clone();
+        let pause = pause.clone();
+        button.connect_clicked(move |_| {
+            pause();
+            let (source, target) = if undo {
+                (&shared.undo, &shared.redo)
+            } else {
+                (&shared.redo, &shared.undo)
+            };
+            let Some(snapshot) = source.borrow_mut().pop() else {
+                return;
+            };
+            let mut model = shared.model.borrow_mut();
+            target.borrow_mut().push(model.clone());
+            *model = snapshot;
+            let duration = model.duration;
+            drop(model);
+            duration_label.set_text(&format_clock(duration));
+            set_playhead_label();
+            redraw();
+            shared.notify_preview();
+            shared.notify_state();
+        });
+    }
+
     Timeline {
         dock,
         update_duration,
+        pause,
+        reset_source,
+        redraw,
+        update_clock: set_playhead_label,
+        start_playback,
+        shared,
     }
 }
 
@@ -697,19 +1004,62 @@ fn rows_drawing_area(scale: f64, height: f64, class: &str) -> DrawingArea {
     row
 }
 
-fn update_hover_time(shared: &Rc<Shared>, row: &DrawingArea, x: f64) {
-    let width = f64::from(row.allocated_width().max(1));
-    shared
-        .hover_time
-        .set(x / width * shared.model.borrow().duration);
+fn pointer_in_lane(lane: &DrawingArea, board: &Overlay, y: f64) -> bool {
+    lane.translate_coordinates(board, 0.0, 0.0)
+        .is_some_and(|(_, top)| y >= top && y <= top + f64::from(lane.allocated_height()))
 }
 
-/// The clip owning `time`, so a lane click selects what it covers and
-/// clears its selection elsewhere.
-fn find_clip(clips: &[(f64, f64)], time: f64) -> Option<usize> {
-    clips
-        .iter()
-        .position(|(start, end)| *start <= time && time <= *end)
+fn motion_preview_range(segment: &crate::recording::editor::model::MotionSegment) -> (f64, f64) {
+    let transition = segment
+        .timing
+        .clamped()
+        .transition_duration
+        .min(segment.duration());
+    (
+        segment.start,
+        (segment.start + transition + 0.12).min(segment.end),
+    )
+}
+
+fn lane_add_span(model: &Model, text: bool, time: f64, width: f64) -> Option<(f64, f64)> {
+    let tolerance = 10.0 / width.max(1.0) * model.duration;
+    if text {
+        if model.text_index_at(time).is_some() {
+            return None;
+        }
+        model.text_add_span(model.snap_text_time(time, tolerance, None))
+    } else {
+        if model.segment_index_at(time).is_some() {
+            return None;
+        }
+        model.motion_add_span(model.snap_effect_time(time, tolerance, None))
+    }
+}
+
+/// Selection uses the raw pointer position; only insertion is snapped.
+fn activate_lane(model: &mut Model, text: bool, x: f64, width: f64) -> Option<(f64, f64)> {
+    let width = width.max(1.0);
+    let time = (x / width).clamp(0.0, 1.0) * model.duration;
+    let tolerance = 10.0 / width * model.duration;
+    if text {
+        if let Some(index) = model.text_index_at(time) {
+            model.selected_text = Some(index);
+            model.selected = None;
+        } else {
+            let time = model.snap_text_time(time, tolerance, None);
+            model.add_text_at(time);
+        }
+        None
+    } else if let Some(index) = model.segment_index_at(time) {
+        model.selected = Some(index);
+        model.selected_text = None;
+        None
+    } else {
+        let time = model.snap_effect_time(time, tolerance, None);
+        model
+            .add_segment_at(time)
+            .map(|index| motion_preview_range(&model.segments[index]))
+    }
 }
 
 // ── Painters ────────────────────────────────────────────────────────
@@ -900,25 +1250,34 @@ fn draw_clip_track(
     model: &Model,
     lane_paint: HoverLane,
     hover_lane: HoverLane,
-    hover_time: f64,
+    hover_time: Option<f64>,
 ) {
     let text = lane_paint == HoverLane::Text;
-    let clips = if text {
-        &model.text_clips
+    let clips: Vec<(f64, f64, bool)> = if text {
+        model
+            .text_segments
+            .iter()
+            .map(|clip| (clip.start, clip.end, clip.is_disabled))
+            .collect()
     } else {
-        &model.motion_clips
+        model
+            .segments
+            .iter()
+            .map(|clip| (clip.start, clip.end, clip.is_disabled))
+            .collect()
     };
     let selected = if text {
         model.selected_text
     } else {
-        model.selected_motion
+        model.selected
     };
     let w = f64::from(width.max(1));
     let h = f64::from(height.max(1));
     let duration = model.duration.max(0.001);
 
     if hover_lane == lane_paint {
-        if let Some((start, end)) = add_span(clips, duration, hover_time) {
+        let span = hover_time.and_then(|time| lane_add_span(model, text, time, w));
+        if let Some((start, end)) = span {
             let tint = if text {
                 TEXT_CLIP_ORANGE
             } else {
@@ -946,18 +1305,21 @@ fn draw_clip_track(
     }
 
     let has_selection = selected.is_some();
-    for (index, (start, end)) in clips.iter().enumerate() {
+    for (index, (start, end, disabled)) in clips.iter().enumerate() {
         let x0 = time_to_x(*start, duration, w);
         let x1 = time_to_x(*end, duration, w);
         let clip_w = (x1 - x0).max(22.0);
         let y = if text { 6.0 } else { 7.0 };
         let clip_h = if text { h - 12.0 } else { h - 14.0 };
         let is_selected = selected == Some(index);
-        let tone = if text {
-            text_clip_tone(is_selected, has_selection && !is_selected)
-        } else {
-            motion_clip_tone(is_selected, has_selection && !is_selected)
-        };
+        let tone = disabled_clip_tone(
+            if text {
+                text_clip_tone(is_selected, has_selection && !is_selected)
+            } else {
+                motion_clip_tone(is_selected, has_selection && !is_selected)
+            },
+            *disabled,
+        );
         rounded_rect(context, x0, y, clip_w, clip_h, 5.0);
         context.set_source_rgba(tone.fill.0, tone.fill.1, tone.fill.2, tone.fill.3);
         let _ = context.fill();
@@ -1143,9 +1505,12 @@ fn draw_hover_playhead(
     context: &CairoContext,
     width: i32,
     height: i32,
-    hover_time: f64,
+    hover_time: Option<f64>,
     duration: f64,
 ) {
+    let Some(hover_time) = hover_time else {
+        return;
+    };
     let w = f64::from(width.max(1));
     let h = f64::from(height.max(1));
     let x = time_to_x(hover_time, duration.max(0.001), w).floor() + 0.5;
@@ -1226,4 +1591,126 @@ fn rounded_rect(context: &CairoContext, x: f64, y: f64, w: f64, h: f64, r: f64) 
         3.0 * std::f64::consts::FRAC_PI_2,
     );
     context.close_path();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lane_click_adds_selects_and_snaps_real_motion_segments() {
+        let mut model = Model::default();
+        assert_eq!(model.motion_add_span(1.0), Some((1.0, 2.0)));
+        assert_eq!(
+            activate_lane(&mut model, false, 100.0, 600.0),
+            Some((1.0, 2.0))
+        );
+        assert_eq!(model.selected, Some(0));
+        assert_eq!(model.segments[0].to.scale, 2.0);
+        assert!(model.sample(1.5).scale > 1.0);
+        assert_eq!(lane_add_span(&model, false, 1.5, 600.0), None);
+        assert_eq!(lane_add_span(&model, false, 2.05, 600.0), Some((2.0, 3.0)));
+
+        assert_eq!(activate_lane(&mut model, false, 150.0, 600.0), None);
+        assert_eq!(model.segments.len(), 1);
+        assert_eq!(
+            activate_lane(&mut model, false, 205.0, 600.0),
+            Some((2.0, 3.0))
+        );
+        assert_eq!(model.segments.len(), 2);
+        assert_eq!(model.selected, Some(1));
+        assert_eq!(model.segments[1].from.scale, 2.0);
+        assert_eq!(model.segments[1].to.scale, 1.0);
+
+        model.set_duration(1.5);
+        assert_eq!(model.segments.len(), 1);
+        assert_eq!(model.segments[0].end, 1.5);
+        assert_eq!(model.selected, None);
+    }
+
+    #[test]
+    fn hover_tracks_horizontal_pointer_and_lane_and_click_creates_clip() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let timeline = build(1.0, true);
+            timeline.dock.measure(Orientation::Horizontal, -1);
+            let height = timeline.dock.measure(Orientation::Vertical, 600).0.max(300);
+            timeline.dock.allocate(600, height, -1, None);
+            let card = timeline.dock.first_child().unwrap();
+            let board = card.last_child().unwrap().downcast::<Overlay>().unwrap();
+            let tracks = board.child().unwrap();
+            let ruler = tracks.first_child().unwrap();
+            let source = ruler.next_sibling().unwrap();
+            let motion = source
+                .next_sibling()
+                .unwrap()
+                .downcast::<DrawingArea>()
+                .unwrap();
+            let (_, y) = motion.translate_coordinates(&board, 0.0, 0.0).unwrap();
+            let y = y + f64::from(motion.height()) / 2.0;
+            let width = f64::from(board.width());
+            assert!(width > 0.0);
+            let controllers = board.observe_controllers();
+            let hover = (0..controllers.n_items())
+                .filter_map(|index| controllers.item(index))
+                .find_map(|item| item.downcast::<gtk4::EventControllerMotion>().ok())
+                .unwrap();
+            hover.emit_by_name::<()>("enter", &[&(width * 0.25), &y]);
+            assert_eq!(timeline.shared.hover_lane.get(), HoverLane::Motion);
+            assert!((timeline.shared.hover_time.get().unwrap() - 1.5).abs() < 0.001);
+            hover.emit_by_name::<()>("motion", &[&(width * 0.75), &y]);
+            assert!((timeline.shared.hover_time.get().unwrap() - 4.5).abs() < 0.001);
+
+            let controllers = motion.observe_controllers();
+            let click = (0..controllers.n_items())
+                .filter_map(|index| controllers.item(index))
+                .filter_map(|item| item.downcast::<gtk4::GestureClick>().ok())
+                .find(|click| click.button() == 1)
+                .unwrap();
+            let motion_width = f64::from(motion.width());
+            click.emit_by_name::<()>("released", &[&1_i32, &(motion_width * 0.5), &10.0_f64]);
+            assert_eq!(timeline.shared.model.borrow().segments.len(), 1);
+            assert_eq!(timeline.shared.model.borrow().segments[0].start, 3.0);
+            assert!(timeline.shared.playing.get());
+            timeline.pause();
+            hover.emit_by_name::<()>("motion", &[&(width * (3.5 / 6.0)), &y]);
+            assert!(timeline.preview_frames(100.0, 100.0)[0].0.scale > 1.0);
+            hover.emit_by_name::<()>("leave", &[]);
+            assert_eq!(timeline.shared.hover_time.get(), None);
+            assert_eq!(timeline.shared.hover_lane.get(), HoverLane::None);
+            assert_eq!(timeline.preview_frames(100.0, 100.0)[0].0.scale, 1.0);
+            timeline.reset_source();
+            assert!(timeline.shared.model.borrow().segments.is_empty());
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn blur_samples_only_when_exposure_and_motion_are_present() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let timeline = build(1.0, true);
+            timeline.edit_motion(
+                |state| {
+                    state.add_segment_at(0.0);
+                    state.playhead = 0.3;
+                },
+                false,
+            );
+            assert_eq!(timeline.preview_frames(2000.0, 1000.0).len(), 1);
+            timeline.edit_motion(|state| state.set_motion_blur(1.0), false);
+            let frames = timeline.preview_frames(2000.0, 1000.0);
+            assert!(frames.len() > 1);
+            assert!(frames.len() <= 5);
+            assert!(frames[0].0.scale > frames.last().unwrap().0.scale);
+            timeline.edit_motion(
+                |state| state.motion_blur_settings.shutter_angle = 0.0,
+                false,
+            );
+            assert_eq!(timeline.preview_frames(2000.0, 1000.0).len(), 1);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
 }

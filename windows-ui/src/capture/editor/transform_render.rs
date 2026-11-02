@@ -162,21 +162,10 @@ fn paint_triangle(
     dst: [(f64, f64); 3],
     filter: Filter,
 ) {
-    let [(x1, y1), (x2, y2), (x3, y3)] = src;
     let [(u1, v1), (u2, v2), (u3, v3)] = dst;
-    let det = x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2);
-    if det.abs() < 1e-8 {
+    let Some(matrix) = triangle_transform(src, dst) else {
         return;
-    }
-    let coefficients = |a: f64, b: f64, c: f64| {
-        (
-            (a * (y2 - y3) + b * (y3 - y1) + c * (y1 - y2)) / det,
-            (a * (x3 - x2) + b * (x1 - x3) + c * (x2 - x1)) / det,
-            (a * (x2 * y3 - x3 * y2) + b * (x3 * y1 - x1 * y3) + c * (x1 * y2 - x2 * y1)) / det,
-        )
     };
-    let (xx, xy, x0) = coefficients(u1, u2, u3);
-    let (yx, yy, y0) = coefficients(v1, v2, v3);
     let center = ((u1 + u2 + u3) / 3.0, (v1 + v2 + v3) / 3.0);
     let expanded = dst.map(|(x, y)| {
         let (dx, dy) = (x - center.0, y - center.1);
@@ -190,9 +179,28 @@ fn paint_triangle(
     context.line_to(expanded[2].0, expanded[2].1);
     context.close_path();
     context.clip();
-    context.transform(Matrix::new(xx, yx, xy, yy, x0, y0));
+    context.transform(matrix);
     context.set_source_surface(surface, 0.0, 0.0).ok();
     context.source().set_filter(filter);
     context.paint().ok();
     context.restore().ok();
+}
+
+pub(crate) fn triangle_transform(src: [(f64, f64); 3], dst: [(f64, f64); 3]) -> Option<Matrix> {
+    let [(x1, y1), (x2, y2), (x3, y3)] = src;
+    let [(u1, v1), (u2, v2), (u3, v3)] = dst;
+    let det = x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2);
+    if det.abs() < 1e-8 {
+        return None;
+    }
+    let coefficients = |a: f64, b: f64, c: f64| {
+        (
+            (a * (y2 - y3) + b * (y3 - y1) + c * (y1 - y2)) / det,
+            (a * (x3 - x2) + b * (x1 - x3) + c * (x2 - x1)) / det,
+            (a * (x2 * y3 - x3 * y2) + b * (x3 * y1 - x1 * y3) + c * (x1 * y2 - x2 * y1)) / det,
+        )
+    };
+    let (xx, xy, x0) = coefficients(u1, u2, u3);
+    let (yx, yy, y0) = coefficients(v1, v2, v3);
+    Some(Matrix::new(xx, yx, xy, yy, x0, y0))
 }

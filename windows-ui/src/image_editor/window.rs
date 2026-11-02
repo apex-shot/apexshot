@@ -68,7 +68,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     ));
     canvas.root.add_overlay(&effect_control.root);
     let inspector = Rc::new(inspector::build(scale, &canvas.host, &window));
-    let motion = Rc::new(motion::build(scale, dark, inspector.clone()));
+    let motion = Rc::new(motion::build(scale, dark, inspector.clone(), &canvas));
     let sub_bars = Rc::new(super::sub_bar::build(
         scale,
         canvas.host.clone(),
@@ -183,14 +183,21 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     });
 
     // Motion button opens Motion mode; the Motion toolbar's Static button
-    // returns. Neither asks for confirmation here — the confirm dialog asks
-    // about annotations, and the shell carries none yet.
+    // returns. Commit any inline text before showing the motion source.
     let switch_mode = {
         let workspace_stack = workspace_stack.clone();
         let toolbar_stack = toolbar_stack.clone();
         let inspector = inspector.clone();
         let motion = motion.clone();
+        let host = canvas.host.clone();
         Rc::new(move |motion_now: bool| {
+            if motion_now {
+                host.commit_text_if_active();
+                host.set_space_pan(false);
+                host.changed();
+            } else {
+                motion.timeline.pause();
+            }
             let page = if motion_now { "motion" } else { "static" };
             for stack in [&workspace_stack, &toolbar_stack] {
                 stack.set_visible_child_name(page);
@@ -256,7 +263,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         move |_| canvas.choose_image(&window)
     });
 
-    install_keys(&window, &canvas, &sub_bars);
+    install_keys(&window, &canvas, &sub_bars, &workspace_stack);
 
     window.present();
 
@@ -388,6 +395,7 @@ fn install_keys(
     window: &ApplicationWindow,
     canvas: &Rc<canvas::Canvas>,
     sub_bars: &Rc<super::sub_bar::SubBars>,
+    workspace: &gtk4::Stack,
 ) {
     // Space held = pan mode. Capture phase so it wins over the canvas, but a
     // focused text entry still gets its literal space character.
@@ -397,7 +405,11 @@ fn install_keys(
         let canvas = canvas.clone();
         let window = window.clone();
         let sub_bars = sub_bars.clone();
+        let workspace = workspace.clone();
         move |controller, key, _, _| {
+            if workspace.visible_child_name().as_deref() == Some("motion") {
+                return Propagation::Proceed;
+            }
             if key == gdk::Key::Escape && sub_bars.close_color_panels() {
                 return Propagation::Stop;
             }
@@ -441,7 +453,11 @@ fn install_keys(
     keys.connect_key_pressed({
         let canvas = canvas.clone();
         let window = window.clone();
+        let workspace = workspace.clone();
         move |_, key, _, modifiers| {
+            if workspace.visible_child_name().as_deref() == Some("motion") {
+                return Propagation::Proceed;
+            }
             let ctrl = modifiers.contains(gdk::ModifierType::CONTROL_MASK);
             // A focused editable owns its keys: entries keep characters and
             // their own shortcuts instead of triggering editor commands.

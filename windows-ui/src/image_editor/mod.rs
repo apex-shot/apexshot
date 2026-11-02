@@ -20,6 +20,7 @@ mod effect_control;
 mod effect_mode;
 mod inspector;
 mod motion;
+mod motion_controls;
 mod number_control;
 mod picker_placement;
 mod sections;
