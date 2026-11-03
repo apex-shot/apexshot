@@ -123,6 +123,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 inspector.sync_background();
                 copy.set_sensitive(has_doc && !host.background_loading());
                 export.set_sensitive(has_doc && !host.background_loading());
+                canvas.refresh_cursor();
             })
         };
         canvas.add_change_listener(sync_all.clone());

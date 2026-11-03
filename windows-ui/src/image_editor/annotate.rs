@@ -1367,6 +1367,7 @@ impl EditorHost {
         area: &DrawingArea,
         transform_of: Rc<dyn Fn() -> ViewTransform>,
         cursor: Rc<dyn Fn(Option<&'static str>)>,
+        hover: Rc<super::canvas::Hover>,
         pan_to: Rc<dyn Fn(f64, f64)>,
     ) {
         // ---- pointer motion: text hover + handle cursors ----
@@ -1376,6 +1377,7 @@ impl EditorHost {
             let transform_of = transform_of.clone();
             let area = area.downgrade();
             let cursor = cursor.clone();
+            let hover = hover.clone();
             move |_, x, y| {
                 let Some(host) = host.upgrade() else {
                     return;
@@ -1386,7 +1388,12 @@ impl EditorHost {
                     return;
                 };
                 let mut cursor_name: Option<&'static str> = None;
-                host.with_state(|st| {
+                let brush = host.with_state(|st| {
+                    // The pen and the highlighter draw their own brush preview;
+                    // every other tool keeps a theme cursor.
+                    if let Some(brush) = super::cursor::brush_cursor(st, t, Point { x, y }) {
+                        return Some(brush);
+                    }
                     if st.selected_tool == Tool::Text && st.active_text_input.is_none() {
                         let hit =
                             st.actions
@@ -1420,9 +1427,21 @@ impl EditorHost {
                     } else {
                         cursor_name = Some("crosshair");
                     }
+                    None
                 });
-                cursor(cursor_name);
+                hover.point.set(Some(Point { x, y }));
+                match brush.flatten() {
+                    Some(super::cursor::CanvasCursor::Name(name)) => cursor(Some(name)),
+                    Some(super::cursor::CanvasCursor::Custom(brush)) => {
+                        area.set_cursor(Some(&brush));
+                    }
+                    None => cursor(cursor_name),
+                }
             }
+        });
+        motion.connect_leave({
+            let hover = hover.clone();
+            move |_| hover.point.set(None)
         });
         area.add_controller(motion);
 

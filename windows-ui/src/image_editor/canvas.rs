@@ -88,6 +88,13 @@ struct DecodedImage {
     height: i32,
 }
 
+/// Where the pointer last was over the canvas, so a tool, brush or detection
+/// change can refresh its cursor without waiting for the pointer to move.
+#[derive(Default)]
+pub(super) struct Hover {
+    pub(super) point: Cell<Option<crate::capture::editor::types::Point>>,
+}
+
 pub(super) struct Canvas {
     pub root: Overlay,
     pub area: DrawingArea,
@@ -112,6 +119,7 @@ pub(super) struct Canvas {
     toast_generation: Rc<Cell<u64>>,
     /// The annotation document and interaction controller.
     pub host: Rc<super::annotate::EditorHost>,
+    hover: Rc<Hover>,
     /// Subscribed change listeners (sub-bars, history pill) fired by the host.
     listeners: Rc<RefCell<Vec<Rc<dyn Fn()>>>>,
 }
@@ -257,6 +265,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
         generation: Rc::new(Cell::new(0)),
         toast_generation: Rc::new(Cell::new(0)),
         host,
+        hover: Rc::new(Hover::default()),
         listeners,
     });
 
@@ -621,6 +630,7 @@ impl Canvas {
                 }
                 Some((true, _, id)) if consumed_for.get() != (id, gen) => {
                     consumed_for.set((id, gen));
+                    canvas.refresh_cursor();
                     canvas.area.queue_draw();
                 }
                 _ => {}
@@ -717,6 +727,29 @@ impl Canvas {
         }
     }
 
+    /// Re-apply the cursor at the pointer's last position, so a tool switch,
+    /// a brush-size change or a finished detection shows without motion.
+    pub(super) fn refresh_cursor(&self) {
+        let Some(point) = self.hover.point.get() else {
+            return;
+        };
+        let transform = self.view_transform();
+        match self
+            .host
+            .read(|st| super::cursor::brush_cursor(st, transform, point))
+            .flatten()
+        {
+            Some(super::cursor::CanvasCursor::Name(name)) => {
+                self.area.set_cursor_from_name(Some(name));
+            }
+            Some(super::cursor::CanvasCursor::Custom(cursor)) => {
+                self.area.set_cursor(Some(&cursor));
+            }
+            // Other tools keep the cursor the motion handler last picked.
+            None => {}
+        }
+    }
+
     fn install_gestures(self: &Rc<Self>) {
         let pan_to: Rc<dyn Fn(f64, f64)> = {
             let canvas = Rc::downgrade(self);
@@ -766,6 +799,7 @@ impl Canvas {
                     }
                 })
             },
+            self.hover.clone(),
             pan_to,
         );
 

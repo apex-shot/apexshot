@@ -15,6 +15,7 @@ mod annotate;
 mod arrow_control;
 mod canvas;
 mod color_control;
+mod cursor;
 mod custom_color;
 mod effect_control;
 mod effect_mode;
