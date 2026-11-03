@@ -349,6 +349,13 @@ pub fn install_css() {
     };
     let scale = crate::platform::ui_scale().min(1.0);
     let px = |value: f64| (value * scale).round() as i32;
+    // The shortcuts page groups its rows under an icon + title row. This
+    // provider outranks the shared stylesheet, so the block spacing those
+    // headings need has to live here: the row carries it and the title keeps
+    // no margins of its own, which is what puts the title's centre on the
+    // icon's centre.
+    let heading_gap = px(28.0);
+    let heading_gap_bottom = px(10.0);
 
     let css = format!(
         "\
@@ -380,6 +387,8 @@ pub fn install_css() {
          .settings-user-chevron {{ opacity:0.32; }} \
          .settings-content-card {{ border-radius:{}px; border:1px solid rgba(255,255,255,0.06); background-color:rgba(255,255,255,0.028); }} \
          .settings-group-title {{ font-size:{}px; font-weight:600; letter-spacing:0; opacity:0.92; margin-top:28px; margin-bottom:10px; }} \
+         .shortcut-heading-windows {{ margin-top:{heading_gap}px; margin-bottom:{heading_gap_bottom}px; }} \
+         .shortcut-heading-windows .settings-group-title {{ margin-top:0; margin-bottom:0; }} \
          .settings-table-frame {{ border-radius:{}px; background-color:rgba(255,255,255,0.045); }} \
          .settings-table-frame > .settings-table-row {{ border-bottom:1px solid rgba(255,255,255,0.055); }} \
          .settings-table-frame > .settings-table-row:last-child {{ border-bottom:none; }} \

@@ -1006,25 +1006,54 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn shortcut_heading_icons_and_titles_share_center_alignment() {
-        use gtk4::{Align, Image};
+    fn shortcut_heading_titles_are_centred_on_their_icons() {
+        use gtk4::{Align, Image, Orientation};
 
+        // The heading row's spacing comes from the Windows shell stylesheet,
+        // which outranks the shared one. A margin left on the title lands in
+        // the row's own box and drops the title below the icon's centre while
+        // `valign` still reads `Center`, so this measures a laid out row
+        // instead of trusting the alignment properties.
         let Some(result) = crate::test_support::with_gtk(|| {
+            crate::settings::ui_support::install_settings_css();
+            crate::settings::shell::install_css();
+
             let widgets = build_shortcuts_section(&AppConfig::default());
-            let mut child = widgets.section.first_child();
+            let section = &widgets.section;
+            section.measure(Orientation::Vertical, 600);
+            section.allocate(600, 1600, -1, None);
+
+            let mut child: Option<Widget> = section.first_child();
             let mut headings = Vec::new();
             while let Some(widget) = child {
                 if widget.has_css_class("shortcut-heading-windows") {
                     let icon = widget.first_child().unwrap().downcast::<Image>().unwrap();
                     let label = icon.next_sibling().unwrap().downcast::<Label>().unwrap();
-                    headings.push((icon.valign(), label.valign()));
+                    let icon_bounds = icon.compute_bounds(section).unwrap();
+                    let label_bounds = label.compute_bounds(section).unwrap();
+                    headings.push((
+                        icon.valign(),
+                        label.valign(),
+                        icon_bounds.y() + icon_bounds.height() / 2.0,
+                        label_bounds.y() + label_bounds.height() / 2.0,
+                    ));
                 }
                 child = widget.next_sibling();
             }
             headings
         }) else {
+            eprintln!("Skipping: GTK not available (no display server)");
             return;
         };
-        assert_eq!(result, vec![(Align::Center, Align::Center); 3]);
+
+        assert_eq!(result.len(), 3, "expected a heading per shortcuts group");
+        for (icon_align, label_align, icon_centre, label_centre) in result {
+            assert_eq!(icon_align, Align::Center);
+            assert_eq!(label_align, Align::Center);
+            assert!(
+                (icon_centre - label_centre).abs() < 0.5,
+                "title centre {label_centre} misses the icon centre {icon_centre}"
+            );
+        }
     }
 }
