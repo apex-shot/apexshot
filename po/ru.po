@@ -3984,3 +3984,12 @@ msgid ""
 "When off, recordings remain in the temporary folder for the result card and editor."
 msgstr ""
 "Когда выключено, записи остаются во временной папке для карточки результата и редактора."
+
+msgid "Beta"
+msgstr "Бета"
+
+msgid "Hide sidebar"
+msgstr "Скрыть боковую панель"
+
+msgid "Show sidebar"
+msgstr "Показать боковую панель"

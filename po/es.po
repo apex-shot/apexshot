@@ -4002,3 +4002,12 @@ msgid ""
 "When off, recordings remain in the temporary folder for the result card and editor."
 msgstr ""
 "Cuando está desactivado, las grabaciones permanecen en la carpeta temporal para la tarjeta de resultado y el editor."
+
+msgid "Beta"
+msgstr "Beta"
+
+msgid "Hide sidebar"
+msgstr "Ocultar barra lateral"
+
+msgid "Show sidebar"
+msgstr "Mostrar barra lateral"

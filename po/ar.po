@@ -3939,3 +3939,12 @@ msgstr "عند الإيقاف، يستخدم الإخراج مقياس عرض ا
 msgid ""
 "When off, recordings remain in the temporary folder for the result card and editor."
 msgstr "عند الإيقاف، تبقى التسجيلات في المجلد المؤقت لبطاقة النتيجة والمحرر."
+
+msgid "Beta"
+msgstr "بيتا"
+
+msgid "Hide sidebar"
+msgstr "إخفاء الشريط الجانبي"
+
+msgid "Show sidebar"
+msgstr "إظهار الشريط الجانبي"

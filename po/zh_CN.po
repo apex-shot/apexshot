@@ -3903,3 +3903,12 @@ msgstr "关闭时，输出先使用捕获的显示缩放，再应用最大分辨
 msgid ""
 "When off, recordings remain in the temporary folder for the result card and editor."
 msgstr "关闭时，录制会保留在临时文件夹中，供结果卡片和编辑器使用。"
+
+msgid "Beta"
+msgstr "测试版"
+
+msgid "Hide sidebar"
+msgstr "隐藏侧边栏"
+
+msgid "Show sidebar"
+msgstr "显示侧边栏"

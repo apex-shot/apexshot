@@ -3914,3 +3914,12 @@ msgstr "オフの場合、最大解像度を適用する前にキャプチャの
 msgid ""
 "When off, recordings remain in the temporary folder for the result card and editor."
 msgstr "オフの場合、録画は結果カードとエディタ用に一時フォルダーに残ります。"
+
+msgid "Beta"
+msgstr "ベータ"
+
+msgid "Hide sidebar"
+msgstr "サイドバーを非表示"
+
+msgid "Show sidebar"
+msgstr "サイドバーを表示"

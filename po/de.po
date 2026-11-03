@@ -4003,3 +4003,12 @@ msgid ""
 "When off, recordings remain in the temporary folder for the result card and editor."
 msgstr ""
 "Wenn ausgeschaltet, bleiben Aufnahmen im temporären Ordner für die Ergebniskarte und den Editor."
+
+msgid "Beta"
+msgstr "Beta"
+
+msgid "Hide sidebar"
+msgstr "Seitenleiste ausblenden"
+
+msgid "Show sidebar"
+msgstr "Seitenleiste anzeigen"

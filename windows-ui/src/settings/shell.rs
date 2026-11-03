@@ -4,12 +4,13 @@
 //! the pages scroll inside. The pages themselves stay shared with the Linux
 //! window; this module only owns the frame around them.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, Align, Box as GtkBox, CssProvider, Image, Label, Orientation, PolicyType, ScrolledWindow,
-    Stack, Widget,
+    gdk, Align, Box as GtkBox, Button, CssProvider, Image, Label, Orientation, PolicyType,
+    ScrolledWindow, Stack, Widget,
 };
 
 use crate::capture::editor::window::icon_names;
@@ -146,6 +147,72 @@ pub fn build_sidebar(
     wrapper.append(&scroller);
 
     Sidebar { wrapper, head }
+}
+
+/// The sidebar toggle and the Beta badge that sit in the window's top-left
+/// corner.
+pub struct ShellControls {
+    pub row: GtkBox,
+    pub toggle: Button,
+}
+
+/// Build the controls above the navigation rows: the button that hides the
+/// column and the badge that marks the build.
+pub fn build_shell_controls() -> ShellControls {
+    let row = GtkBox::new(Orientation::Horizontal, 8);
+    row.add_css_class("settings-shell-controls");
+    row.set_halign(Align::Start);
+    row.set_valign(Align::Center);
+
+    let toggle = Button::from_icon_name("sidebar-show-symbolic");
+    toggle.add_css_class("settings-sidebar-toggle");
+    toggle.set_valign(Align::Center);
+    toggle.set_tooltip_text(Some(&t("Hide sidebar")));
+
+    let badge = Label::new(Some(&t("Beta")));
+    badge.add_css_class("settings-beta-badge");
+    badge.set_valign(Align::Center);
+
+    row.append(&toggle);
+    row.append(&badge);
+    ShellControls { row, toggle }
+}
+
+/// Hide or show the sidebar from its own toggle. The controls ride in the
+/// sidebar's head while the column is open and move into the title bar while
+/// it is closed, so the button never leaves with the column it hides. The
+/// open sidebar supplies the content card's left gutter; with it closed the
+/// card takes that gutter itself, so no edge of the card reaches the window
+/// border.
+pub fn wire_sidebar_toggle(
+    controls: &ShellControls,
+    sidebar: &GtkBox,
+    head: &GtkBox,
+    title_bar: &GtkBox,
+    card: &GtkBox,
+    scale: f64,
+) {
+    let row = controls.row.clone();
+    let sidebar = sidebar.clone();
+    let head = head.clone();
+    let title_bar = title_bar.clone();
+    let card = card.clone();
+    let inset = (CARD_INSET * scale).round() as i32;
+    let hidden = Cell::new(false);
+    controls.toggle.connect_clicked(move |button| {
+        let hide = !hidden.get();
+        hidden.set(hide);
+        row.unparent();
+        if hide {
+            title_bar.prepend(&row);
+            button.set_tooltip_text(Some(&t("Show sidebar")));
+        } else {
+            head.append(&row);
+            button.set_tooltip_text(Some(&t("Hide sidebar")));
+        }
+        card.set_margin_start(if hide { inset } else { 0 });
+        sidebar.set_visible(!hide);
+    });
 }
 
 fn set_selected(row: &GtkBox, icon: &Image, label: &Label, selected: bool) {
@@ -357,7 +424,7 @@ pub fn install_css() {
     let heading_gap = px(28.0);
     let heading_gap_bottom = px(10.0);
 
-    let css = format!(
+    let mut css = format!(
         "\
          .editor-root {{ background-color:#141414; }}          .editor-root.editor-theme-light {{ background-color:#f6f7fb; }}          .settings-window-controls {{ background-color:transparent; border-bottom:none; }} \n         .editor-root.editor-theme-light .settings-window-controls {{ background-color:transparent; }} \n         .settings-sidebar-wrapper {{ background-color:transparent; border-right:none; min-width:0; }} \
          .settings-sidebar-head {{ padding-left:{}px; }} \
@@ -486,6 +553,33 @@ pub fn install_css() {
         px(24.0),
     );
 
+    // The sidebar's head controls: the toggle that hides the column and the
+    // build badge beside it. In the title bar the row keeps the same left
+    // inset the sidebar head gives it, so the icon does not jump when the
+    // sidebar closes.
+    css.push_str(&format!(
+        "\
+         .settings-sidebar-toggle {{ min-width:{button}px; min-height:{button}px; padding:0; \
+             border:1px solid transparent; border-radius:{radius}px; background-color:transparent; \
+             background-image:none; box-shadow:none; color:rgba(255,255,255,0.82); }} \
+         .settings-sidebar-toggle:hover {{ background-color:rgba(255,255,255,0.07); color:#ffffff; }} \
+         .settings-sidebar-toggle:active {{ background-color:rgba(255,255,255,0.10); }} \
+         .settings-sidebar-toggle image {{ -gtk-icon-size:{icon}px; }} \
+         .settings-beta-badge {{ font-size:{badge_font}px; font-weight:700; padding:4px {badge_pad}px; \
+             border-radius:999px; background-color:rgba(255,103,13,0.18); color:#ff9250; }} \
+         .settings-window-controls > .settings-shell-controls {{ margin-left:{gap}px; }} \
+         .editor-root.editor-theme-light .settings-sidebar-toggle {{ color:rgba(29,33,41,0.78); }} \
+         .editor-root.editor-theme-light .settings-sidebar-toggle:hover {{ background-color:rgba(17,24,39,0.06); color:#1d2129; }} \
+         .editor-root.editor-theme-light .settings-sidebar-toggle:active {{ background-color:rgba(17,24,39,0.09); }} \
+         .editor-root.editor-theme-light .settings-beta-badge {{ background-color:rgba(214,84,6,0.13); color:#c2500a; }}",
+        button = px(28.0),
+        radius = px(6.0),
+        icon = px(16.0),
+        badge_font = px(12.0),
+        badge_pad = px(10.0),
+        gap = px(14.0),
+    ));
+
     let provider = CssProvider::new();
     provider.load_from_data(&css);
     gtk4::style_context_add_provider_for_display(
@@ -581,5 +675,59 @@ mod tests {
             return;
         };
         assert_eq!((initial, signed_in, signed_out), (false, true, false));
+    }
+
+    #[test]
+    fn sidebar_toggle_carries_the_controls_into_the_title_bar() {
+        let Some((badge, open, closed, restored)) = crate::test_support::with_gtk(|| {
+            let controls = build_shell_controls();
+            let sidebar = GtkBox::new(Orientation::Vertical, 0);
+            let head = GtkBox::new(Orientation::Horizontal, 0);
+            let title_bar = GtkBox::new(Orientation::Horizontal, 0);
+            let card = GtkBox::new(Orientation::Vertical, 0);
+            head.append(&controls.row);
+            wire_sidebar_toggle(&controls, &sidebar, &head, &title_bar, &card, 1.0);
+
+            let badge = controls
+                .row
+                .last_child()
+                .and_then(|widget| widget.downcast::<Label>().ok())
+                .map(|label| label.text().to_string());
+            let open = (
+                sidebar.is_visible(),
+                head.first_child().is_some(),
+                title_bar.first_child().is_none(),
+                controls.toggle.tooltip_text().map(|text| text.to_string()),
+                card.margin_start(),
+            );
+
+            controls.toggle.emit_clicked();
+            let closed = (
+                sidebar.is_visible(),
+                head.first_child().is_none(),
+                title_bar
+                    .first_child()
+                    .is_some_and(|widget| widget.has_css_class("settings-shell-controls")),
+                controls.toggle.tooltip_text().map(|text| text.to_string()),
+                card.margin_start(),
+            );
+
+            controls.toggle.emit_clicked();
+            let restored = (
+                sidebar.is_visible(),
+                head.first_child().is_some(),
+                title_bar.first_child().is_none(),
+                card.margin_start(),
+            );
+            (badge, open, closed, restored)
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+
+        assert_eq!(badge.as_deref(), Some(t("Beta").as_str()));
+        assert_eq!(open, (true, true, true, Some(t("Hide sidebar")), 0));
+        assert_eq!(closed, (false, true, true, Some(t("Show sidebar")), 8));
+        assert_eq!(restored, (true, true, true, 0));
     }
 }
