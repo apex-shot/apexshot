@@ -721,6 +721,48 @@ mod tests {
     }
 
     #[test]
+    fn shape_drags_below_the_minimum_size_commit_no_dot() {
+        for tool in [super::Tool::Box, super::Tool::Circle] {
+            for end in [
+                Point { x: 12.0, y: 12.0 },
+                // A sliver is no more a shape than a dot is.
+                Point { x: 40.0, y: 12.5 },
+            ] {
+                let mut state = sample_state();
+                state.selected_tool = tool;
+                state.begin_drag(Point { x: 10.0, y: 10.0 });
+                state.update_drag(end);
+                assert!(
+                    state.draft_action().is_none(),
+                    "{tool:?} should not draft a {end:?} shape"
+                );
+                assert!(
+                    state.finalize_drag_action().is_none(),
+                    "{tool:?} should not commit a {end:?} shape"
+                );
+                assert!(state.actions.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn shape_drags_at_the_minimum_size_still_commit() {
+        for tool in [super::Tool::Box, super::Tool::Circle] {
+            let mut state = sample_state();
+            state.selected_tool = tool;
+            state.begin_drag(Point { x: 10.0, y: 10.0 });
+            state.update_drag(Point { x: 14.0, y: 14.0 });
+            match state.finalize_drag_action() {
+                Some(AnnotationAction::Box { rect, .. })
+                | Some(AnnotationAction::Circle { rect, .. }) => {
+                    assert_eq!((rect.width, rect.height), (4, 4), "{tool:?}");
+                }
+                other => panic!("{tool:?} should commit a 4px shape, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn line_and_arrow_drags_shift_constrain_to_45_degrees() {
         for tool in [super::Tool::Line, super::Tool::Arrow] {
             let mut state = sample_state();

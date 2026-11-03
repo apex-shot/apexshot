@@ -69,6 +69,9 @@ pub type Shared = Rc<RefCell<Option<EditorState>>>;
 const MOVE_HANDLE_DRAG_RADIUS: f64 = 7.0;
 const RESIZE_HANDLE_DRAG_SIZE: f64 = 10.0;
 const ARROW_CLICK_NOOP_DISTANCE: f64 = 3.0;
+/// A new box or circle needs a deliberate drag on screen; anything shorter is
+/// a click that jittered, and committing it would leave a dot behind.
+const MIN_SHAPE_DRAG_DISTANCE: f64 = 16.0;
 const PREVIEW_CARD_MAX_EDGE: u32 = 1600;
 static BACKGROUND_DECODE_LOCK: Mutex<()> = Mutex::new(());
 
@@ -2194,6 +2197,14 @@ impl EditorHost {
                 st.finalize_arrow_interaction_cleanup();
                 return;
             }
+            // Moving an existing shape is handled above; reaching here means a
+            // new box or circle, which has to be a deliberate drag.
+            if matches!(st.selected_tool, Tool::Box | Tool::Circle)
+                && ox.abs().max(oy.abs()) < MIN_SHAPE_DRAG_DISTANCE
+            {
+                st.clear_drag();
+                return;
+            }
             // Fold the release point into the path so the committed shape
             // matches where the pointer actually ended.
             st.update_drag(t.view_to_image_clamped(current_view));
@@ -3531,6 +3542,34 @@ mod tests {
             *h.editor.borrow_mut() = Some(st);
             h.drag_begin(&transform, &gesture, Point { x: 70.0, y: 125.0 });
             assert_eq!(h.read(|st| st.drag_start_view), Some(None));
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn a_jittered_shape_drag_leaves_no_dot() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let h = loaded(Tool::Box);
+            let transform = ViewTransform::for_image(64.0, 64.0);
+            let gesture = gtk4::GestureDrag::new();
+
+            h.drag_begin(&transform, &gesture, Point { x: 20.0, y: 20.0 });
+            h.drag_end(&transform, &gesture, 5.0, 5.0);
+            assert_eq!(
+                h.read(|st| st.actions.len()),
+                Some(0),
+                "a short drag must not leave a dot"
+            );
+
+            h.drag_begin(&transform, &gesture, Point { x: 20.0, y: 20.0 });
+            h.drag_end(&transform, &gesture, 20.0, 20.0);
+            assert_eq!(
+                h.read(|st| st.actions.len()),
+                Some(1),
+                "a deliberate drag still commits"
+            );
         }) else {
             eprintln!("skipping: GTK unavailable");
             return;
