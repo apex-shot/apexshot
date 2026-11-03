@@ -1,74 +1,265 @@
+/* Cloud usage page. Authored at 100%; install_css scales the px lengths to the
+   display's UI scale before the sheet reaches GTK. */
+
 .usage-overview {
-    padding: 8px 2px 20px;
-    border-bottom: 1px solid alpha(white, 0.08);
+    padding: 4px 2px 18px;
 }
+
 .usage-eyebrow {
     color: #ff8b49;
     font-size: 11px;
     font-weight: 700;
-    letter-spacing: 0.12em;
+    letter-spacing: 1.3px;
 }
-.usage-account { font-size: 16px; font-weight: 600; }
+
+.usage-account {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.2px;
+}
+
 .usage-plan {
-    background: alpha(white, 0.06);
-    color: alpha(white, 0.78);
-    border: 1px solid alpha(white, 0.08);
+    background-color: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.78);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 999px;
     padding: 5px 12px;
     font-size: 12px;
     font-weight: 600;
 }
-.usage-grid > flowboxchild { padding: 0; }
-.usage-metric {
-    padding: 20px;
-    border: 1px solid alpha(white, 0.08);
+
+.usage-status {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.usage-status-error {
+    color: #e8ad7e;
+}
+
+.usage-overview spinner {
+    min-width: 14px;
+    min-height: 14px;
+    color: #ff8b49;
+}
+
+/* The allowance banner: one sentence about the account, coloured by state. */
+.usage-banner {
+    padding: 12px 14px;
     border-radius: 10px;
-    background-color: alpha(white, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background-color: rgba(255, 255, 255, 0.03);
 }
-.usage-metric-title { font-size: 14px; font-weight: 600; }
-.usage-metric-detail { font-size: 12px; color: alpha(white, 0.55); }
-.usage-muted { font-size: 12px; color: alpha(white, 0.55); }
-.usage-value { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; }
-.usage-caption { font-size: 13px; color: alpha(white, 0.62); }
-.usage-status { font-size: 12px; color: alpha(white, 0.55); }
-.usage-status-error { color: #e8ad7e; }
-.usage-overview spinner { min-width: 14px; min-height: 14px; color: #ff8b49; }
-.usage-skeleton {
-    background: alpha(white, 0.09);
-    border-color: transparent;
-    border-radius: 5px;
-    color: transparent;
-}
-.usage-progress trough {
+
+.usage-banner-dot {
+    min-width: 7px;
     min-height: 7px;
+    margin-top: 5px;
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.28);
+}
+
+.usage-banner-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.88);
+}
+
+.usage-banner-detail {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+}
+
+.usage-banner-ok {
+    background-color: rgba(63, 168, 106, 0.10);
+    border-color: rgba(63, 168, 106, 0.24);
+}
+
+.usage-banner-ok .usage-banner-dot {
+    background-color: #52c087;
+}
+
+.usage-banner-ok .usage-banner-title {
+    color: #8fdcab;
+}
+
+.usage-banner-ok .usage-banner-detail {
+    color: rgba(214, 236, 222, 0.58);
+}
+
+.usage-banner-warn {
+    background-color: rgba(214, 154, 66, 0.12);
+    border-color: rgba(214, 154, 66, 0.28);
+}
+
+.usage-banner-warn .usage-banner-dot {
+    background-color: #e2ab54;
+}
+
+.usage-banner-warn .usage-banner-title {
+    color: #eec181;
+}
+
+.usage-banner-warn .usage-banner-detail {
+    color: rgba(240, 226, 205, 0.6);
+}
+
+.usage-banner-full {
+    background-color: rgba(214, 96, 78, 0.13);
+    border-color: rgba(214, 96, 78, 0.30);
+}
+
+.usage-banner-full .usage-banner-dot {
+    background-color: #e0705f;
+}
+
+.usage-banner-full .usage-banner-title {
+    color: #f0a396;
+}
+
+.usage-banner-full .usage-banner-detail {
+    color: rgba(244, 219, 214, 0.6);
+}
+
+/* Cards. */
+.usage-card {
+    padding: 16px 18px;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background-color: rgba(255, 255, 255, 0.028);
+}
+
+.usage-card-hero {
+    padding: 18px 20px 16px;
+}
+
+.usage-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.40);
+}
+
+.usage-value-hero {
+    font-size: 34px;
+    font-weight: 700;
+    letter-spacing: -1.2px;
+    color: rgba(255, 255, 255, 0.96);
+}
+
+.usage-value {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.6px;
+    color: rgba(255, 255, 255, 0.94);
+}
+
+.usage-caption {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.usage-scale {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.34);
+}
+
+.usage-note {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.usage-muted {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+}
+
+/* The allowance bar. A tiny reading keeps a visible pip rather than nothing. */
+.usage-progress {
+    min-width: 0;
+}
+
+.usage-progress trough {
+    min-width: 0;
+    min-height: 8px;
     padding: 0;
     border: none;
     border-radius: 999px;
-    background-color: alpha(white, 0.08);
+    background-color: rgba(255, 255, 255, 0.07);
 }
+
 .usage-progress progress {
-    min-height: 7px;
-    min-width: 2px;
+    min-height: 8px;
+    min-width: 6px;
     padding: 0;
     border: none;
     border-radius: 999px;
     background-image: none;
     background-color: #ff670d;
 }
-.usage-progress-loading progress { opacity: 0; }
-.usage-footer { padding: 0 2px; }
-.usage-empty { padding: 32px 24px; }
-.usage-empty-title { font-size: 18px; font-weight: 600; }
+
+.usage-progress-loading progress {
+    opacity: 0;
+}
+
+/* Plan, retention and last-checked facts, divided like a table row. */
+.usage-facts {
+    padding: 13px 0;
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    background-color: rgba(255, 255, 255, 0.022);
+}
+
+.usage-fact {
+    padding: 0 18px;
+}
+
+.usage-fact-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.88);
+}
+
+.usage-fact-divider {
+    min-width: 1px;
+    background-color: rgba(255, 255, 255, 0.07);
+}
+
+.usage-skeleton {
+    background-color: rgba(255, 255, 255, 0.09);
+    border-color: transparent;
+    border-radius: 5px;
+    color: transparent;
+}
+
+.usage-empty {
+    padding: 32px 24px;
+}
+
+.usage-empty-title {
+    font-size: 18px;
+    font-weight: 600;
+}
+
 .editor-root button.usage-secondary {
     background-image: none;
-    background-color: alpha(white, 0.07);
-    color: alpha(white, 0.88);
-    border: 1px solid alpha(white, 0.10);
+    background-color: rgba(255, 255, 255, 0.07);
+    color: rgba(255, 255, 255, 0.88);
+    border: 1px solid rgba(255, 255, 255, 0.10);
     border-radius: 6px;
     box-shadow: none;
     padding: 6px 14px;
 }
-.editor-root button.usage-secondary:hover { background-color: alpha(white, 0.11); }
+
+.editor-root button.usage-secondary:hover {
+    background-color: rgba(255, 255, 255, 0.11);
+}
+
+.editor-root button.usage-secondary:disabled {
+    color: rgba(255, 255, 255, 0.4);
+    background-color: rgba(255, 255, 255, 0.04);
+}
+
 .editor-root button.usage-link {
     background: transparent;
     color: #ff8b49;
@@ -76,34 +267,146 @@
     box-shadow: none;
     padding: 4px 0;
 }
-.editor-root.editor-theme-light .usage-overview {
-    border-color: alpha(#111827, 0.10);
+
+/* Light theme. */
+
+.editor-root.editor-theme-light .usage-eyebrow {
+    color: #b94c0a;
 }
-.editor-root.editor-theme-light .usage-eyebrow { color: #b94c0a; }
+
 .editor-root.editor-theme-light .usage-plan {
-    background: alpha(#111827, 0.05);
-    color: alpha(#1d2129, 0.8);
-    border-color: alpha(#111827, 0.10);
+    background-color: rgba(17, 24, 39, 0.05);
+    color: rgba(29, 33, 41, 0.8);
+    border-color: rgba(17, 24, 39, 0.10);
 }
-.editor-root.editor-theme-light .usage-metric {
-    background-color: alpha(#111827, 0.025);
-    border-color: alpha(#111827, 0.10);
+
+.editor-root.editor-theme-light .usage-card {
+    background-color: rgba(17, 24, 39, 0.022);
+    border-color: rgba(17, 24, 39, 0.10);
 }
-.editor-root.editor-theme-light .usage-muted,
-.editor-root.editor-theme-light .usage-metric-detail,
+
+.editor-root.editor-theme-light .usage-label {
+    color: rgba(29, 33, 41, 0.45);
+}
+
+.editor-root.editor-theme-light .usage-value,
+.editor-root.editor-theme-light .usage-value-hero {
+    color: rgba(17, 20, 26, 0.94);
+}
+
 .editor-root.editor-theme-light .usage-caption,
-.editor-root.editor-theme-light .usage-status { color: alpha(#1d2129, 0.60); }
-.editor-root.editor-theme-light .usage-status-error { color: #a64a16; }
+.editor-root.editor-theme-light .usage-scale,
+.editor-root.editor-theme-light .usage-note,
+.editor-root.editor-theme-light .usage-status,
+.editor-root.editor-theme-light .usage-muted {
+    color: rgba(29, 33, 41, 0.60);
+}
+
+.editor-root.editor-theme-light .usage-status-error {
+    color: #a64a16;
+}
+
+.editor-root.editor-theme-light .usage-banner {
+    background-color: rgba(17, 24, 39, 0.03);
+    border-color: rgba(17, 24, 39, 0.10);
+}
+
+.editor-root.editor-theme-light .usage-banner-dot {
+    background-color: rgba(29, 33, 41, 0.35);
+}
+
+.editor-root.editor-theme-light .usage-banner-title {
+    color: rgba(17, 20, 26, 0.9);
+}
+
+.editor-root.editor-theme-light .usage-banner-detail {
+    color: rgba(29, 33, 41, 0.62);
+}
+
+.editor-root.editor-theme-light .usage-banner-ok {
+    background-color: rgba(30, 122, 76, 0.08);
+    border-color: rgba(30, 122, 76, 0.22);
+}
+
+.editor-root.editor-theme-light .usage-banner-ok .usage-banner-dot {
+    background-color: #1e7a4c;
+}
+
+.editor-root.editor-theme-light .usage-banner-ok .usage-banner-title {
+    color: #17643e;
+}
+
+.editor-root.editor-theme-light .usage-banner-ok .usage-banner-detail {
+    color: rgba(23, 100, 62, 0.72);
+}
+
+.editor-root.editor-theme-light .usage-banner-warn {
+    background-color: rgba(158, 106, 20, 0.09);
+    border-color: rgba(158, 106, 20, 0.24);
+}
+
+.editor-root.editor-theme-light .usage-banner-warn .usage-banner-dot {
+    background-color: #9e6a14;
+}
+
+.editor-root.editor-theme-light .usage-banner-warn .usage-banner-title {
+    color: #85590f;
+}
+
+.editor-root.editor-theme-light .usage-banner-warn .usage-banner-detail {
+    color: rgba(133, 89, 15, 0.72);
+}
+
+.editor-root.editor-theme-light .usage-banner-full {
+    background-color: rgba(163, 45, 32, 0.08);
+    border-color: rgba(163, 45, 32, 0.22);
+}
+
+.editor-root.editor-theme-light .usage-banner-full .usage-banner-dot {
+    background-color: #a32d20;
+}
+
+.editor-root.editor-theme-light .usage-banner-full .usage-banner-title {
+    color: #8f271b;
+}
+
+.editor-root.editor-theme-light .usage-banner-full .usage-banner-detail {
+    color: rgba(143, 39, 27, 0.72);
+}
+
+.editor-root.editor-theme-light .usage-facts {
+    background-color: rgba(17, 24, 39, 0.018);
+    border-color: rgba(17, 24, 39, 0.10);
+}
+
+.editor-root.editor-theme-light .usage-fact-value {
+    color: rgba(17, 20, 26, 0.9);
+}
+
+.editor-root.editor-theme-light .usage-fact-divider {
+    background-color: rgba(17, 24, 39, 0.10);
+}
+
 .editor-root.editor-theme-light .usage-skeleton {
-    background: alpha(#111827, 0.09);
+    background-color: rgba(17, 24, 39, 0.09);
     border-color: transparent;
     color: transparent;
 }
-.editor-root.editor-theme-light .usage-progress trough { background-color: alpha(#111827, 0.09); }
-.editor-root.editor-theme-light button.usage-secondary {
-    background-color: alpha(#111827, 0.05);
-    color: #1d2129;
-    border-color: alpha(#111827, 0.12);
+
+.editor-root.editor-theme-light .usage-progress trough {
+    background-color: rgba(17, 24, 39, 0.09);
 }
-.editor-root.editor-theme-light button.usage-secondary:hover { background-color: alpha(#111827, 0.09); }
-.editor-root.editor-theme-light button.usage-link { color: #b94c0a; }
+
+.editor-root.editor-theme-light button.usage-secondary {
+    background-color: rgba(17, 24, 39, 0.05);
+    color: #1d2129;
+    border-color: rgba(17, 24, 39, 0.12);
+}
+
+.editor-root.editor-theme-light button.usage-secondary:hover {
+    background-color: rgba(17, 24, 39, 0.09);
+}
+
+.editor-root.editor-theme-light button.usage-link {
+    color: #b94c0a;
+}
