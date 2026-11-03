@@ -628,10 +628,10 @@ impl EditorHost {
                         let _ = context.restore();
                     }
                 } else {
-                    self.paint_composited_background(context, st, t, layout);
+                    self.paint_composited_background(context, st, t, layout, live);
                 }
             } else if st.background.has_fill() {
-                self.paint_composited_background(context, st, t, layout);
+                self.paint_composited_background(context, st, t, layout, live);
             }
         }
         if part == MotionPaintPart::Background {
@@ -837,9 +837,14 @@ impl EditorHost {
         );
         context.clip();
         context.set_source_surface(&surface, 0.0, 0.0).ok();
-        context
-            .source()
-            .set_filter(render::editor_image_filter_for_scale(t.scale));
+        // A live frame resamples the screenshot under a moving scale; the
+        // quality convolution costs tens of milliseconds there. The parked
+        // frame is painted again with the full filter.
+        context.source().set_filter(if live {
+            render::editor_interactive_image_filter()
+        } else {
+            render::editor_image_filter_for_scale(t.scale)
+        });
         let _ = context.paint();
         let _ = context.restore();
 
@@ -960,6 +965,7 @@ impl EditorHost {
         st: &EditorState,
         t: ViewTransform,
         layout: crate::capture::editor::state::background::Layout,
+        live: bool,
     ) {
         let key = (
             st.background.revision,
@@ -993,6 +999,13 @@ impl EditorHost {
             );
             context.set_source_surface(&background, 0.0, 0.0).ok();
             context.source().set_extend(gtk4::cairo::Extend::Pad);
+            // Same rule as the wallpaper branch: a moving frame trades the
+            // quality resample for a cheap one and is repainted on release.
+            context.source().set_filter(if live {
+                render::editor_interactive_image_filter()
+            } else {
+                render::editor_image_filter_for_scale(t.canvas_scale)
+            });
             let _ = context.paint();
             let _ = context.restore();
         }

@@ -334,16 +334,21 @@ impl Timeline {
         if let Some(before) = before {
             self.shared.record_edit(before);
             (self.redraw)();
-            if self.shared.preview_on_finish.replace(false) {
-                let range = self
-                    .shared
+            // The drag painted interactive frames only. A closing playback
+            // repaints its parked frame itself; otherwise the release owes the
+            // preview that one sharp frame.
+            let range = if self.shared.preview_on_finish.replace(false) {
+                self.shared
                     .model
                     .borrow()
                     .selected_segment()
-                    .map(motion_preview_range);
-                if let Some(range) = range {
-                    (self.start_playback)(Some(range));
-                }
+                    .map(motion_preview_range)
+            } else {
+                None
+            };
+            match range {
+                Some(range) => (self.start_playback)(Some(range)),
+                None => self.shared.notify_preview(),
             }
         }
     }
@@ -361,8 +366,14 @@ impl Timeline {
 
     /// Whether the preview frame is being repainted while the head or the
     /// pointer moves, so the painter can keep the cheap interactive shadow.
+    /// A control drag counts: every inspector slider and pad paints a frame
+    /// per pointer event through `edit_motion`, and the parked treatment of
+    /// the wallpaper, card and shadow is far too slow for that.
     pub(super) fn is_live(&self) -> bool {
-        self.shared.scrubbing.get() || self.shared.playing.get() || self.shared.hover_previewing()
+        self.shared.scrubbing.get()
+            || self.shared.playing.get()
+            || self.shared.hover_previewing()
+            || self.shared.interaction.borrow().is_some()
     }
 
     pub(super) fn pause(&self) {
