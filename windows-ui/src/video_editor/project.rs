@@ -342,7 +342,7 @@ pub(super) fn list_projects() -> Vec<EditorProjectFile> {
         }
         saved.push((saved_at, file));
     }
-    saved.sort_by(|left, right| right.0.cmp(&left.0));
+    saved.sort_by_key(|left| std::cmp::Reverse(left.0));
     saved.into_iter().map(|(_, file)| file).collect()
 }
 

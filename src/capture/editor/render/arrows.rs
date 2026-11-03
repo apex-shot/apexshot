@@ -650,6 +650,7 @@ fn build_double_arrow_path(
     context.close_path();
     true
 }
+#[allow(clippy::too_many_arguments)]
 pub fn draw_arrow(
     context: &gtk4::cairo::Context,
     start: Point,

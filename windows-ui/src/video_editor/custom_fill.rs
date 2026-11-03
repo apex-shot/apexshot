@@ -17,6 +17,7 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::rc::Rc;
 
 type Color = (u8, u8, u8);
+type RebuildSlot = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
 const COLOR_RADIUS: f64 = 8.0;
 const HANDLE_RADIUS: f64 = 8.0;
@@ -651,7 +652,7 @@ fn build_gradient_page(
     };
     refresh_ramp();
 
-    let rebuild_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let rebuild_slot: RebuildSlot = Rc::new(RefCell::new(None));
     let rebuild: Rc<dyn Fn()> = {
         let stops = stops.clone();
         let state = state.clone();
@@ -663,7 +664,6 @@ fn build_gradient_page(
         let rebuild_slot = rebuild_slot.clone();
         let stop_rows = stop_rows.clone();
         let stop_pickers = stop_pickers.clone();
-        let scale = scale;
         Rc::new(move || {
             for picker in stop_pickers.borrow_mut().drain(..) {
                 picker.popdown();
@@ -975,7 +975,7 @@ fn build_stop_picker(
     // this one. Without a slot holding its own repaint, a drag inside the card
     // updated the gradient while the handle and the hex field stayed where they
     // were until the card was closed and reopened.
-    let repaint_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let repaint_slot: RebuildSlot = Rc::new(RefCell::new(None));
     let notify_repainting: Rc<dyn Fn()> = {
         let slot = repaint_slot.clone();
         let notify = notify.clone();
@@ -1364,7 +1364,7 @@ fn attach_stop_drag(
     state: Rc<RefCell<FillValue>>,
     notify: Rc<dyn Fn()>,
     selected: Rc<Cell<usize>>,
-    rebuild_slot: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
+    rebuild_slot: RebuildSlot,
     scale: f64,
 ) {
     let dragging = Rc::new(Cell::new(usize::MAX));
@@ -1890,7 +1890,7 @@ fn parse_hex(text: &str) -> Option<Color> {
         6 => {
             let bytes = digits.as_bytes();
             let mut out = [0u8; 3];
-            for (index, pair) in bytes.chunks_exact(2).enumerate() {
+            for (index, pair) in bytes.as_chunks::<2>().0.iter().enumerate() {
                 out[index] = nibble(pair[0] as char)? * 16 + nibble(pair[1] as char)?;
             }
             Some((out[0], out[1], out[2]))
@@ -1901,7 +1901,9 @@ fn parse_hex(text: &str) -> Option<Color> {
 
 #[cfg(test)]
 mod tests {
-    use super::{hex_string, parse_hex, CustomGradient, FillValue, GradientKind, GradientStop};
+    use super::{
+        hex_string, parse_hex, CustomGradient, FillValue, GradientKind, GradientStop, RebuildSlot,
+    };
 
     #[test]
     fn hex_colors_round_trip() {
@@ -2056,7 +2058,7 @@ mod tests {
         let Some(()) = crate::test_support::with_gtk(|| {
             let parent = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
             let state = Rc::new(RefCell::new(FillValue::Gradient(CustomGradient::default())));
-            let repaint: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+            let repaint: RebuildSlot = Rc::new(RefCell::new(None));
             let notify: Rc<dyn Fn()> = {
                 let repaint = repaint.clone();
                 Rc::new(move || {

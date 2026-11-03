@@ -26,6 +26,7 @@ pub mod settings;
 pub mod studio_entitlement;
 #[path = "../../src/studio_upsell.rs"]
 pub(crate) mod studio_upsell;
+#[cfg(test)]
 #[path = "../../src/test_support.rs"]
 pub mod test_support;
 #[path = "../../src/typography.rs"]

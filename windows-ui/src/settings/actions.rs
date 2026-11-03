@@ -86,6 +86,7 @@ pub struct SaveInputs {
     pub ui_language: SettingsSelect,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn install_checkbox_behaviors(
     play_sounds_check: &CheckButton,
     shutter_sound_input: &SettingsSelect,

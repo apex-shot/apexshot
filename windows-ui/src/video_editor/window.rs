@@ -436,7 +436,7 @@ fn canvas_dimensions(aspect: FrameAspect, source: (u32, u32)) -> (u32, u32) {
 /// Even dimensions keep the encoder's yuv420p happy.
 fn even_dimension(value: u32) -> u32 {
     let clamped = value.max(2);
-    if clamped % 2 == 0 {
+    if clamped.is_multiple_of(2) {
         clamped
     } else {
         clamped - 1
@@ -639,6 +639,8 @@ impl Estimate {
     }
 }
 
+type Placement = Rc<Cell<Option<(f64, (f64, f64))>>>;
+
 /// The preview stage, mirrored from the recording editor: a padded 16:9 play
 /// surface with the centred stage tools below it. The transport lives in the
 /// timeline, exactly as it does in the Linux editor.
@@ -668,7 +670,7 @@ struct Stage {
     clip_margins: Rc<RefCell<(i32, i32, i32, i32)>>,
     camera_view: Rc<Cell<Option<super::zoom::ViewRect>>>,
     /// The Manual zoom outline the preview shows, as `(scale, focus point)`.
-    placement: Rc<Cell<Option<(f64, (f64, f64))>>>,
+    placement: Placement,
     zoom_provider: CssProvider,
     last_zoom_transform: Rc<Cell<CameraTransform>>,
     last_zoom_css: Rc<RefCell<String>>,
@@ -719,7 +721,7 @@ impl Stage {
     /// layout on a ratio change, and the resize that follows calls back here.
     fn set_stage_ratio(&self, ratio: f32) {
         if (self.canvas.ratio() - ratio).abs() > 0.001 {
-            self.canvas.set_ratio(ratio.into());
+            self.canvas.set_ratio(ratio);
         }
     }
 
@@ -1184,7 +1186,7 @@ fn build_stage(
         let layer = cursor_layer.clone();
         move || layer.queue_draw()
     }));
-    let placement: Rc<Cell<Option<(f64, (f64, f64))>>> = Rc::new(Cell::new(None));
+    let placement: Placement = Rc::new(Cell::new(None));
     cursor_layer.set_draw_func({
         let cursor = cursor.clone();
         let webcam = webcam.clone();

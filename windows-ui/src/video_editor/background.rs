@@ -118,8 +118,10 @@ pub(crate) struct Background {
     custom_fill: Rc<RefCell<Option<FillPainter>>>,
     padding: Rc<Cell<f64>>,
     radius: Rc<Cell<f64>>,
-    listeners: Rc<RefCell<Vec<Rc<dyn Fn()>>>>,
+    listeners: ChangeListeners,
 }
+
+type ChangeListeners = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
 
 impl Default for Background {
     fn default() -> Self {

@@ -1,6 +1,6 @@
 use super::super::image_transform::StaticImageTransform;
 use super::super::text_detect::TextDetector;
-use super::super::types::{AnnotationAction, Rect};
+use super::super::types::AnnotationAction;
 use super::EditorState;
 use image::RgbaImage;
 use std::sync::atomic::AtomicBool;
@@ -33,11 +33,7 @@ pub(super) enum HistoryKind {
     Annotation(AnnotationAction),
     Edit,
     PropertyEdit(Option<usize>),
-    Crop {
-        rect: Rect,
-        old_width: u32,
-        old_height: u32,
-    },
+    Crop,
     StaticTransform,
     FrameStyle {
         before_radius: f64,

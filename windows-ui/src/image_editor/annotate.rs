@@ -319,44 +319,7 @@ impl EditorHost {
             }
             match receiver.try_recv() {
                 Ok((preview, Ok((image, bytes)))) => {
-                    let width = image.width();
-                    let height = image.height();
-                    let surface = gtk4::cairo::Format::ARgb32
-                        .stride_for_width(width)
-                        .ok()
-                        .and_then(|stride| {
-                            ImageSurface::create_for_data(
-                                bytes,
-                                gtk4::cairo::Format::ARgb32,
-                                width as i32,
-                                height as i32,
-                                stride,
-                            )
-                            .ok()
-                        });
-                    if !preview {
-                        if let Some(selected) = on_selected.take() {
-                            selected(&image);
-                        }
-                    }
-                    let image = Arc::new(image);
-                    *host.background_source.borrow_mut() =
-                        surface.map(|surface| (Arc::clone(&image), surface));
-                    if !preview {
-                        host.background_loading.set(false);
-                        host.background_previous.borrow_mut().take();
-                    }
-                    host.mutate(|st| {
-                        st.background.set_fill(
-                            crate::capture::editor::state::background::Fill::Image(image),
-                        );
-                        st.background.changed();
-                    });
-                    if preview {
-                        glib::ControlFlow::Continue
-                    } else {
-                        glib::ControlFlow::Break
-                    }
+                    host.apply_decoded_background(preview, image, bytes, &mut on_selected)
                 }
                 Ok((_, Err(_))) | Err(mpsc::TryRecvError::Disconnected) => {
                     host.background_loading.set(false);
@@ -376,6 +339,53 @@ impl EditorHost {
                 Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
             }
         });
+    }
+
+    fn apply_decoded_background(
+        &self,
+        preview: bool,
+        image: RgbaImage,
+        bytes: Vec<u8>,
+        on_selected: &mut Option<impl FnOnce(&RgbaImage)>,
+    ) -> glib::ControlFlow {
+        let width = image.width();
+        let height = image.height();
+        let surface = gtk4::cairo::Format::ARgb32
+            .stride_for_width(width)
+            .ok()
+            .and_then(|stride| {
+                ImageSurface::create_for_data(
+                    bytes,
+                    gtk4::cairo::Format::ARgb32,
+                    width as i32,
+                    height as i32,
+                    stride,
+                )
+                .ok()
+            });
+        if !preview {
+            if let Some(selected) = on_selected.take() {
+                selected(&image);
+            }
+        }
+        let image = Arc::new(image);
+        *self.background_source.borrow_mut() = surface.map(|surface| (Arc::clone(&image), surface));
+        if !preview {
+            self.background_loading.set(false);
+            self.background_previous.borrow_mut().take();
+        }
+        self.mutate(|st| {
+            st.background
+                .set_fill(crate::capture::editor::state::background::Fill::Image(
+                    image,
+                ));
+            st.background.changed();
+        });
+        if preview {
+            glib::ControlFlow::Continue
+        } else {
+            glib::ControlFlow::Break
+        }
     }
 
     /// Mutate the document then redraw and refresh the bars; returns the
@@ -1796,6 +1806,7 @@ impl EditorHost {
                         st.begin_text_input(image_point, initial_width, initial_height);
                     }
                 }
+                #[allow(clippy::collapsible_match)]
                 Tool::Number => {
                     if !st.select_number_action_at_point_with_scale(image_point, t.scale) {
                         st.add_number_marker(image_point);
@@ -1930,80 +1941,73 @@ impl EditorHost {
             if matches!(
                 st.selected_tool,
                 Tool::Box | Tool::Circle | Tool::Obfuscate | Tool::Focus
-            ) {
-                if !(st.selected_action_index.is_some() && st.select_drag_anchor.is_some()) {
-                    if let Some(index) = st.selected_action_index {
-                        let matching = st.actions.get(index).is_some_and(|action| {
-                            matches!(
+            ) && !(st.selected_action_index.is_some() && st.select_drag_anchor.is_some())
+            {
+                if let Some(index) = st.selected_action_index {
+                    let matching = st.actions.get(index).is_some_and(|action| {
+                        matches!(
+                            (action, st.selected_tool),
+                            (AnnotationAction::Box { .. }, Tool::Box)
+                                | (AnnotationAction::Circle { .. }, Tool::Circle)
+                                | (AnnotationAction::Obfuscate { .. }, Tool::Obfuscate)
+                                | (AnnotationAction::Focus { .. }, Tool::Focus)
+                        )
+                    });
+                    if matching {
+                        let radius = selection_handle_hit_radius_for_scale(t.scale);
+                        let action = &st.actions[index];
+                        if let Some(handle) =
+                            action_resize_handle_at_point_with_radius(action, image_point, radius)
+                        {
+                            st.select_resize_handle = Some(handle);
+                            st.select_drag_anchor = Some(image_point);
+                            st.drag_start_view = Some(view_point);
+                            return;
+                        }
+                        if action_contains_point_with_padding(
+                            action,
+                            image_point,
+                            selection_hit_padding_for_scale(t.scale),
+                        ) {
+                            st.select_drag_anchor = Some(image_point);
+                            st.select_resize_handle = None;
+                            st.drag_start_view = Some(view_point);
+                            return;
+                        }
+                    }
+                    st.selected_action_index = None;
+                    st.select_drag_anchor = None;
+                }
+                if st.selected_action_index.is_none() {
+                    let padding = selection_hit_padding_for_scale(t.scale);
+                    let hit = st
+                        .actions
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .find(|(_, action)| {
+                            let matching = matches!(
                                 (action, st.selected_tool),
                                 (AnnotationAction::Box { .. }, Tool::Box)
                                     | (AnnotationAction::Circle { .. }, Tool::Circle)
                                     | (AnnotationAction::Obfuscate { .. }, Tool::Obfuscate)
                                     | (AnnotationAction::Focus { .. }, Tool::Focus)
-                            )
-                        });
-                        if matching {
-                            let radius = selection_handle_hit_radius_for_scale(t.scale);
-                            let action = &st.actions[index];
-                            if let Some(handle) = action_resize_handle_at_point_with_radius(
-                                action,
-                                image_point,
-                                radius,
-                            ) {
-                                st.select_resize_handle = Some(handle);
-                                st.select_drag_anchor = Some(image_point);
-                                st.drag_start_view = Some(view_point);
-                                return;
-                            }
-                            if action_contains_point_with_padding(
-                                action,
-                                image_point,
-                                selection_hit_padding_for_scale(t.scale),
-                            ) {
-                                st.select_drag_anchor = Some(image_point);
-                                st.select_resize_handle = None;
-                                st.drag_start_view = Some(view_point);
-                                return;
-                            }
-                        }
-                        st.selected_action_index = None;
-                        st.select_drag_anchor = None;
-                    }
-                    if st.selected_action_index.is_none() {
-                        let padding = selection_hit_padding_for_scale(t.scale);
-                        let hit = st
-                            .actions
-                            .iter()
-                            .enumerate()
-                            .rev()
-                            .find(|(_, action)| {
-                                let matching = matches!(
-                                    (action, st.selected_tool),
-                                    (AnnotationAction::Box { .. }, Tool::Box)
-                                        | (AnnotationAction::Circle { .. }, Tool::Circle)
-                                        | (AnnotationAction::Obfuscate { .. }, Tool::Obfuscate)
-                                        | (AnnotationAction::Focus { .. }, Tool::Focus)
-                                );
-                                matching
-                                    && action_contains_point_with_padding(
-                                        action,
-                                        image_point,
-                                        padding,
-                                    )
-                            })
-                            .map(|(index, _)| index);
-                        if let Some(index) = hit {
-                            st.selected_action_index = Some(index);
-                            let radius = selection_handle_hit_radius_for_scale(t.scale);
-                            st.select_resize_handle = action_resize_handle_at_point_with_radius(
-                                &st.actions[index],
-                                image_point,
-                                radius,
                             );
-                            st.select_drag_anchor = Some(image_point);
-                            st.drag_start_view = Some(view_point);
-                            return;
-                        }
+                            matching
+                                && action_contains_point_with_padding(action, image_point, padding)
+                        })
+                        .map(|(index, _)| index);
+                    if let Some(index) = hit {
+                        st.selected_action_index = Some(index);
+                        let radius = selection_handle_hit_radius_for_scale(t.scale);
+                        st.select_resize_handle = action_resize_handle_at_point_with_radius(
+                            &st.actions[index],
+                            image_point,
+                            radius,
+                        );
+                        st.select_drag_anchor = Some(image_point);
+                        st.drag_start_view = Some(view_point);
+                        return;
                     }
                 }
             }
@@ -2250,9 +2254,7 @@ impl EditorHost {
 
         // Live text input owns character keys.
         let text_result = self.with_state(|st| {
-            if st.active_text_input.is_none() {
-                return None;
-            }
+            st.active_text_input.as_ref()?;
             let mut handled = true;
             let mut commit = false;
             let mut cancel = false;
@@ -3431,6 +3433,39 @@ mod tests {
         assert_eq!(image.unwrap().0.dimensions(), (1920, 1080));
         let receiver = spawn_background_decode(path, Some(thumb), Arc::new(AtomicBool::new(true)));
         assert!(receiver.recv_timeout(Duration::from_secs(15)).is_err());
+    }
+
+    #[test]
+    fn wallpaper_selection_keeps_the_full_image_after_the_thumbnail_preview() {
+        let host = host();
+        *host.editor.borrow_mut() = Some(EditorState::new(RgbaImage::new(100, 80)));
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../src/capture/editor/background-images");
+        let receiver = spawn_background_decode(
+            assets.join("wallpaper-001.jpg"),
+            Some(assets.join("wallpaper-thumb-001.jpg")),
+            Arc::new(AtomicBool::new(false)),
+        );
+        let mut on_selected = Some(|_: &RgbaImage| {});
+        let (preview, result) = receiver.recv_timeout(Duration::from_secs(15)).unwrap();
+        assert!(preview);
+        let (image, bytes) = result.unwrap();
+        let flow = host.apply_decoded_background(preview, image, bytes, &mut on_selected);
+        assert!(matches!(flow, gtk4::glib::ControlFlow::Continue));
+        let (preview, result) = receiver.recv_timeout(Duration::from_secs(15)).unwrap();
+        assert!(!preview);
+        let (image, bytes) = result.unwrap();
+        let flow = host.apply_decoded_background(preview, image, bytes, &mut on_selected);
+        assert!(matches!(flow, gtk4::glib::ControlFlow::Break));
+        let dimensions = host
+            .read(|state| match &state.background.fill {
+                crate::capture::editor::state::background::Fill::Image(image) => {
+                    Some(image.dimensions())
+                }
+                _ => None,
+            })
+            .flatten();
+        assert_eq!(dimensions, Some((1920, 1080)));
     }
 
     #[test]

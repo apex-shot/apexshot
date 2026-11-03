@@ -62,9 +62,7 @@ impl CursorModel {
         source_size: Option<(u32, u32)>,
     ) -> Option<PreviewRipple> {
         let state = self.state.borrow();
-        let Some((width, height)) = source_size else {
-            return None;
-        };
+        let (width, height) = source_size?;
         preview_ripple(
             state.sidecar.as_ref()?,
             state.settings,

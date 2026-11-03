@@ -121,6 +121,12 @@ pub mod editor {
             None
         }
 
+        pub fn apply_theme_to_gtk() {
+            if let Some(settings) = gtk4::Settings::default() {
+                settings.set_gtk_application_prefer_dark_theme(prefers_dark_glass_theme());
+            }
+        }
+
         #[cfg(test)]
         mod tests {
             use super::apps_use_light_theme;
@@ -136,12 +142,6 @@ pub mod editor {
                     Some(true)
                 );
                 assert_eq!(apps_use_light_theme(""), None);
-            }
-        }
-
-        pub fn apply_theme_to_gtk() {
-            if let Some(settings) = gtk4::Settings::default() {
-                settings.set_gtk_application_prefer_dark_theme(prefers_dark_glass_theme());
             }
         }
     }

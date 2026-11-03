@@ -33,6 +33,8 @@ const CROP_HANDLE_MARGIN: f64 = 20.0;
 const CROP_BOTTOM_CHROME: f64 = 64.0;
 const TOAST_LIFETIME: Duration = Duration::from_millis(4200);
 
+type ChangeListeners = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
+
 struct SavedCropView {
     width: i32,
     height: i32,
@@ -121,7 +123,7 @@ pub(super) struct Canvas {
     pub host: Rc<super::annotate::EditorHost>,
     hover: Rc<Hover>,
     /// Subscribed change listeners (sub-bars, history pill) fired by the host.
-    listeners: Rc<RefCell<Vec<Rc<dyn Fn()>>>>,
+    listeners: ChangeListeners,
 }
 
 pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
@@ -144,7 +146,7 @@ pub(super) fn build(scale: f64, dark: bool) -> Rc<Canvas> {
 
     let area = DrawingArea::new();
     area.set_focusable(true);
-    let listeners: Rc<RefCell<Vec<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(Vec::new()));
+    let listeners: ChangeListeners = Rc::new(RefCell::new(Vec::new()));
     let host = super::annotate::EditorHost::new(
         {
             let listeners = listeners.clone();

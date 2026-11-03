@@ -199,8 +199,6 @@ impl EditorState {
         self.history_interaction_before = None;
         let before = self.document_snapshot_with_current_effects();
         let old_image = Arc::clone(&self.base_image);
-        let old_width = old_image.width();
-        let old_height = old_image.height();
         let cropped = image::imageops::crop_imm(
             old_image.as_ref(),
             rect.x as u32,
@@ -254,14 +252,7 @@ impl EditorState {
         self.text_detection_handle = None;
         self.text_detection_restart_pending = false;
         self.rebuild_effect_layer();
-        self.commit_history_change(
-            before,
-            HistoryKind::Crop {
-                rect,
-                old_width,
-                old_height,
-            },
-        );
+        self.commit_history_change(before, HistoryKind::Crop);
         true
     }
 

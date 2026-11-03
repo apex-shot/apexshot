@@ -737,7 +737,10 @@ fn write_config_atomically(path: &Path, serialized: &str) -> anyhow::Result<()> 
         .context("Configuration path has no parent directory")?;
     create_private_directory(parent)
         .with_context(|| format!("Failed to create config directory {}", parent.display()))?;
+    #[cfg(unix)]
     let _lock = lock_config_writes(path)?;
+    #[cfg(not(unix))]
+    lock_config_writes(path)?;
 
     let sequence = CONFIG_TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
     let temporary = parent.join(format!(".config-{}-{sequence}.tmp", std::process::id()));
@@ -828,11 +831,6 @@ fn create_private_directory(path: &Path) -> anyhow::Result<()> {
 fn set_private_directory_permissions(path: &Path) -> anyhow::Result<()> {
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn set_private_directory_permissions(_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 

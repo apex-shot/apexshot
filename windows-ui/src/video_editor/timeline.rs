@@ -2228,6 +2228,9 @@ pub(super) struct ExportFootage {
     pub zoom_camera: super::zoom::ZoomCameraSettings,
 }
 
+type PreviewFrameSink = Rc<RefCell<Option<Rc<dyn Fn(PreviewFrame)>>>>;
+type ChangeListener = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+
 #[derive(Clone)]
 pub(super) struct Timeline {
     pub root: GtkBox,
@@ -2237,9 +2240,9 @@ pub(super) struct Timeline {
     generation: Rc<Cell<u64>>,
     zoom_scale: Scale,
     repaint: Rc<dyn Fn()>,
-    frame_sink: Rc<RefCell<Option<Rc<dyn Fn(PreviewFrame)>>>>,
-    zoom_listener: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
-    webcam_listener: Rc<RefCell<Option<Rc<dyn Fn()>>>>,
+    frame_sink: PreviewFrameSink,
+    zoom_listener: ChangeListener,
+    webcam_listener: ChangeListener,
     /// The saved edit list: what was last written, and whether the editor has
     /// repainted since, which is when it may need writing again.
     project: super::project::ProjectSync,
@@ -3084,8 +3087,8 @@ pub(super) fn build(
     let lane_state: Rc<Cell<Option<LaneState>>> = Rc::new(Cell::new(None));
     // The Zoom panel follows every change to the zoom track or its selection.
     // Repainting is the one place every mutation already passes through.
-    let zoom_listener: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
-    let webcam_listener: Rc<RefCell<Option<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(None));
+    let zoom_listener: ChangeListener = Rc::new(RefCell::new(None));
+    let webcam_listener: ChangeListener = Rc::new(RefCell::new(None));
     let repaint: Rc<dyn Fn()> = {
         let data = data.clone();
         let ruler = ruler.clone();
@@ -3445,7 +3448,7 @@ pub(super) fn build(
     // resize just as the source editor's 50 ms tick does. The same tick feeds
     // the preview the source frame under the playhead, and the stage the
     // composition's current length for its export estimate.
-    let frame_sink: Rc<RefCell<Option<Rc<dyn Fn(PreviewFrame)>>>> = Rc::new(RefCell::new(None));
+    let frame_sink: PreviewFrameSink = Rc::new(RefCell::new(None));
     gtk4::glib::timeout_add_local(Duration::from_millis(50), {
         let data = data.clone();
         let cursor = cursor.clone();
@@ -3574,6 +3577,7 @@ impl LaneGutterRow {
 
 /// Apply a lane snapshot to the gutter and the drawing areas. Only called when
 /// the snapshot changes, so playback never re-measures the card.
+#[allow(clippy::too_many_arguments)]
 fn apply_lane_state(
     state: LaneState,
     video: &LaneGutterRow,
@@ -5379,6 +5383,7 @@ fn draw_effect_clips(
 /// A placeable ghost reads as the real pill, so what the click will produce is
 /// obvious. One that would collide keeps the outline and drops the fill,
 /// matching the hollow treatment a disabled clip already uses.
+#[allow(clippy::too_many_arguments)]
 fn draw_effect_ghost(
     context: &Context,
     width: f64,
@@ -5494,7 +5499,6 @@ fn format_layout_clock(seconds: f64) -> String {
 /// The width a layout chip takes from its text and the distance to the next
 /// cue. The gap is a ceiling, never a target: a short label stays a short chip,
 /// and neighbouring chips keep a seam between them.
-
 /// Pixel bounds of one layout-change chip. A change owns the row from its own
 /// instant to the next one, so the chips tile the lane the way the effect
 /// pills do and a chip is as wide as the layout it holds.
@@ -6242,12 +6246,13 @@ mod tests {
     use gtk4::cairo::{Format, ImageSurface};
 
     fn loaded() -> Data {
-        let mut data = Data::default();
-        data.path = Some(PathBuf::from("clip.mp4"));
-        data.duration = 10.0;
-        data.frame_size = Some((1920, 1080));
-        data.trim_end = 10.0;
-        data
+        Data {
+            path: Some(PathBuf::from("clip.mp4")),
+            duration: 10.0,
+            frame_size: Some((1920, 1080)),
+            trim_end: 10.0,
+            ..Data::default()
+        }
     }
 
     /// A recording on disk, which is what a project file is keyed to.
@@ -6487,7 +6492,6 @@ mod tests {
         surface.flush();
 
         let stride = surface.stride() as usize;
-        let width = surface.width() as usize;
         let x = data.time_to_x(3.5, 400.0).round() as usize;
         let contents = surface.data().unwrap();
         let offset = 28 * stride + x * 4;

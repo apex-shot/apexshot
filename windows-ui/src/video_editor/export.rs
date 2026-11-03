@@ -540,7 +540,7 @@ fn render(
                 return Err(error);
             }
             done += 1;
-            if done % 100 == 0 || done == total {
+            if done.is_multiple_of(100) || done == total {
                 let elapsed = started.elapsed().as_secs_f64();
                 eprintln!(
                     "[export] frame {done}/{total} at {:.1} ms/frame",
@@ -819,6 +819,7 @@ fn overlay_half_extent(settings: CursorSettings, reference_width: f64) -> f64 {
 /// The cairo surface is reused for the whole export and only the box the
 /// sprite and its rings can touch is copied in, drawn, and copied back, so the
 /// cost does not scale with the frame size.
+#[allow(clippy::too_many_arguments)]
 fn draw_cursor(
     pixels: &mut [u8],
     size: (u32, u32),
@@ -1142,13 +1143,11 @@ mod tests {
             crf: 23,
         };
         let handle = start_export(model, output.clone());
-        let mut finished = false;
         loop {
             match handle.receiver.recv_timeout(Duration::from_secs(180)) {
                 Ok(ExportUpdate::Progress { .. }) => {}
                 Ok(ExportUpdate::Finished(path)) => {
                     assert_eq!(path, output);
-                    finished = true;
                     break;
                 }
                 Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
@@ -1156,7 +1155,6 @@ mod tests {
                 Err(error) => panic!("export did not report back: {error}"),
             }
         }
-        assert!(finished);
         let size = std::fs::metadata(&output).unwrap().len();
         assert!(size > 1024, "encoded file is only {size} bytes");
         let probed = probe_duration(&output).expect("ffprobe should read the export");
@@ -1227,7 +1225,7 @@ mod tests {
         let out = (320, 180);
         let view = (10.3, 8.7, 300.5, 168.25);
         let mut pixels = vec![0u8; size.0 as usize * size.1 as usize * 4];
-        for (index, pixel) in pixels.chunks_exact_mut(4).enumerate() {
+        for (index, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let x = (index % size.0 as usize) as u8;
             let y = (index / size.0 as usize) as u8;
             pixel.copy_from_slice(&[x, y.wrapping_mul(7), 90u8.wrapping_add(x), 255]);
@@ -1300,7 +1298,7 @@ mod tests {
         };
         let size = (320, 180);
         let mut frame = vec![0u8; size.0 as usize * size.1 as usize * 4];
-        for (index, pixel) in frame.chunks_exact_mut(4).enumerate() {
+        for (index, pixel) in frame.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let x = (index % size.0 as usize) as u8;
             let y = (index / size.0 as usize) as u8;
             pixel.copy_from_slice(&[x, y.wrapping_mul(3), 200 - x / 2, 255]);
@@ -1387,7 +1385,7 @@ mod tests {
             return;
         };
         let mut bgra = pixels.to_vec();
-        for pixel in bgra.chunks_exact_mut(4) {
+        for pixel in bgra.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
         }
         let mut surface = gtk4::cairo::ImageSurface::create_for_data(
@@ -1436,7 +1434,12 @@ mod tests {
         }
         surface.flush();
         let data = surface.data().unwrap();
-        for (target, source) in pixels.chunks_exact_mut(4).zip(data.chunks_exact(4)) {
+        for (target, source) in pixels
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(data.as_chunks::<4>().0)
+        {
             target[0] = source[2];
             target[1] = source[1];
             target[2] = source[0];

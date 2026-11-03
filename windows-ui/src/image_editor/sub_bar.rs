@@ -39,12 +39,13 @@ const HIGHLIGHTER_MODES: [(HighlighterMode, &str); 2] = [
 ];
 
 type BarContext = (Tool, Option<&'static str>, Option<usize>);
+type Refresher = Rc<dyn Fn(&EditorState)>;
 
 pub(super) struct SubBars {
     pub root: Stack,
     syncing: Rc<Cell<bool>>,
     /// name -> refresh closure reading the model into the controls.
-    refreshers: HashMap<&'static str, Rc<dyn Fn(&EditorState)>>,
+    refreshers: HashMap<&'static str, Refresher>,
     on_dock_change: Rc<dyn Fn(bool)>,
     color_panels: Vec<gtk4::Revealer>,
     active_context: Cell<Option<BarContext>>,
@@ -124,7 +125,6 @@ fn pill(scale: f64, options: &[&str], on_pick: Rc<dyn Fn(usize)>) -> Pill {
     let set_selected = {
         let text = text;
         let checks = checks;
-        let selected = selected;
         Rc::new(move |index: usize| {
             selected.set(index);
             for (i, check) in checks.borrow().iter().enumerate() {
@@ -173,7 +173,7 @@ pub(super) fn build(
     root.set_margin_top(px(56.0, scale));
     root.set_visible(false);
 
-    let mut refreshers: HashMap<&'static str, Rc<dyn Fn(&EditorState)>> = HashMap::new();
+    let mut refreshers: HashMap<&'static str, Refresher> = HashMap::new();
     let mut color_panels = Vec::new();
 
     // ----- crop: ratio pill, dimensions, Cancel/Apply -----

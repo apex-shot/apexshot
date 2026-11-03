@@ -957,7 +957,7 @@ pub fn cairo_argb_to_rgba_image(width: u32, height: u32, stride: usize, data: &[
     let mut out = Vec::with_capacity((width * height * 4) as usize);
     for y in 0..height as usize {
         let row = &data[(y * stride)..(y * stride + (width as usize * 4))];
-        for chunk in row.chunks_exact(4) {
+        for chunk in row.as_chunks::<4>().0 {
             let b = chunk[0] as u32;
             let g = chunk[1] as u32;
             let r = chunk[2] as u32;

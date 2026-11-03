@@ -461,7 +461,6 @@ fn build_image_page(
     let reset: Rc<dyn Fn()> = {
         let label = label.clone();
         let icon = icon.clone();
-        let scale = scale;
         Rc::new(move || {
             label.set_text(&t("Select image…"));
             icon.set_icon_name(Some(icon_names::custom::IMAGE_ALT_SYMBOLIC));
@@ -473,7 +472,6 @@ fn build_image_page(
         let label = label.clone();
         let icon = icon.clone();
         let background = background.clone();
-        let scale = scale;
         Rc::new(move || {
             let label = label.clone();
             let icon = icon.clone();
@@ -3327,6 +3325,7 @@ fn value_slider_row(
 
 /// A slider row whose value is reported as it is dragged, for controls the
 /// preview reacts to immediately.
+#[allow(clippy::too_many_arguments)]
 fn value_slider_row_with(
     label: &str,
     min: f64,
@@ -3340,6 +3339,7 @@ fn value_slider_row_with(
     value_slider_control(label, min, max, initial, step, decimals, scale, on_change).widget()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn value_slider_control(
     label: &str,
     min: f64,
@@ -3355,6 +3355,7 @@ fn value_slider_control(
     slider
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cursor_slider(
     label: &str,
     min: f64,
@@ -3393,6 +3394,7 @@ fn format_value(value: f64, decimals: usize) -> String {
 /// it and the value trailing. Shared with the image editor's Appearance panel
 /// so both sidebars draw the same control.
 type SliderInteraction = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+type ValueListener = Rc<RefCell<Option<Rc<dyn Fn(f64)>>>>;
 
 #[derive(Clone)]
 pub(crate) struct FilledSlider {
@@ -3406,7 +3408,7 @@ pub(crate) struct FilledSlider {
     hovered: Rc<Cell<bool>>,
     dragging: Rc<Cell<bool>>,
     suffix: Rc<Cell<&'static str>>,
-    on_change: Rc<RefCell<Option<Rc<dyn Fn(f64)>>>>,
+    on_change: ValueListener,
     on_interaction_start: SliderInteraction,
     on_interaction_end: SliderInteraction,
 }
