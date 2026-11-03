@@ -45,6 +45,7 @@ chrono = "0.4"
 rayon = "1.10"
 thiserror = "2.0"
 tract-onnx = { version = "0.23.9", default-features = false }
+unicode-segmentation = "1.13"
 
 [target.'cfg(windows)'.dependencies]
 pango = { version = "0.21", features = ["v1_56"] }

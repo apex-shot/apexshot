@@ -285,6 +285,12 @@ impl Timeline {
         self.shared.model.borrow().clone()
     }
 
+    /// The time the preview is showing: the playhead, or the hover frame
+    /// while the pointer is over the Motion lane.
+    pub(super) fn preview_time(&self) -> f64 {
+        self.shared.preview_time()
+    }
+
     pub(super) fn set_state_listener(&self, listener: Rc<dyn Fn()>) {
         *self.shared.state_changed.borrow_mut() = Some(listener);
     }
@@ -378,6 +384,28 @@ impl Timeline {
 
     pub(super) fn pause(&self) {
         (self.pause)();
+    }
+
+    /// Drop the timed Motion edits when the editor leaves Motion. Appearance,
+    /// watermark and frame settings are shared with Static, so they stay.
+    pub(super) fn clear_clips(&self) {
+        self.pause();
+        let mut model = self.shared.model.borrow_mut();
+        model.segments.clear();
+        model.text_segments.clear();
+        model.selected = None;
+        model.selected_text = None;
+        model.playhead = 0.0;
+        drop(model);
+        self.shared.undo.borrow_mut().clear();
+        self.shared.redo.borrow_mut().clear();
+        self.shared.interaction.borrow_mut().take();
+        self.shared.preview_on_finish.set(false);
+        self.shared.dragging_clip.set(false);
+        (self.update_clock)();
+        (self.redraw)();
+        self.shared.notify_preview();
+        self.shared.notify_state();
     }
 
     pub(super) fn reset_source(&self) {
@@ -1173,20 +1201,33 @@ fn activate_lane(model: &mut Model, text: bool, x: f64, width: f64) -> Option<(f
         if let Some(index) = model.text_index_at(time) {
             model.selected_text = Some(index);
             model.selected = None;
+            if let Some(segment) = model.text_segments.get(index) {
+                model.playhead = segment.start;
+            }
+            None
         } else {
             let time = model.snap_text_time(time, tolerance, None);
-            model.add_text_at(time);
+            model.add_text_at(time).and_then(|index| {
+                let segment = model.text_segments.get(index)?;
+                let range = (segment.start, segment.end);
+                model.playhead = range.0;
+                Some(range)
+            })
         }
-        None
     } else if let Some(index) = model.segment_index_at(time) {
         model.selected = Some(index);
         model.selected_text = None;
+        if let Some(segment) = model.segments.get(index) {
+            model.playhead = segment.start;
+        }
         None
     } else {
         let time = model.snap_effect_time(time, tolerance, None);
-        model
-            .add_segment_at(time)
-            .map(|index| motion_preview_range(&model.segments[index]))
+        model.add_segment_at(time).map(|index| {
+            let range = motion_preview_range(&model.segments[index]);
+            model.playhead = model.segments[index].start;
+            range
+        })
     }
 }
 
@@ -1966,6 +2007,35 @@ mod tests {
         assert_eq!(model.segments.len(), 1);
         assert_eq!(model.segments[0].end, 1.5);
         assert_eq!(model.selected, None);
+    }
+
+    #[test]
+    fn clearing_clips_keeps_the_shared_appearance() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let timeline = build(1.0, true);
+            timeline.edit_motion(
+                |state| {
+                    state.add_segment_at(0.0).unwrap();
+                    state.add_text_at(0.5).unwrap();
+                    state.playhead = 0.75;
+                    state.perspective_intensity = 12.0;
+                    state.motion_blur = 0.8;
+                    state.set_duration(6.0);
+                },
+                false,
+            );
+            timeline.clear_clips();
+            let model = timeline.motion_state();
+            assert!(model.segments.is_empty());
+            assert!(model.text_segments.is_empty());
+            assert_eq!(model.playhead, 0.0);
+            assert_eq!(model.perspective_intensity, 12.0);
+            assert_eq!(model.motion_blur, 0.8);
+            assert_eq!(model.duration, 6.0);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
     }
 
     #[test]

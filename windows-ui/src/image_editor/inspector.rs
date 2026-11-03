@@ -7,10 +7,11 @@
 use std::rc::Rc;
 
 use gtk4::prelude::*;
-use gtk4::{Box as GtkBox, Label, Orientation, PolicyType, ScrolledWindow, Stack};
+use gtk4::{Box as GtkBox, Orientation, PolicyType, ScrolledWindow, Stack};
 
 use super::motion_controls::MotionControls;
 use super::sections;
+use super::text_controls::TextControls;
 use super::toolbar::Tool;
 use super::ui_support::{px, INSPECTOR_WIDTH};
 use crate::capture::editor::window::icon_names;
@@ -22,6 +23,7 @@ pub(super) struct Inspector {
     actions: GtkBox,
     motion_stack: Stack,
     motion_controls: MotionControls,
+    text_controls: TextControls,
     transform: GtkBox,
     background_sync: Rc<dyn Fn()>,
     /// Clipboard copy and the flattened export the window wires to the document.
@@ -65,11 +67,14 @@ impl Inspector {
 
     pub(super) fn bind_motion(&self, timeline: &Rc<super::timeline::Timeline>) {
         self.motion_controls.bind(timeline);
+        self.text_controls.bind(timeline);
         self.motion_controls.sync(&timeline.motion_state());
+        self.text_controls.sync(&timeline.motion_state());
     }
 
     pub(super) fn sync_motion(&self, state: &crate::recording::editor::model::MotionState) {
         self.motion_controls.sync(state);
+        self.text_controls.sync(state);
     }
 
     pub(super) fn refresh_motion_thumbnail(&self) {
@@ -115,19 +120,10 @@ pub(super) fn build(
     let motion_controls = MotionControls::build(scale, host);
     motion_stack.add_named(&motion_controls.page, Some("motion"));
 
-    // The Linux Text page carries four sections of its own; this slice
-    // leaves the panel's port to a next one and says so where it would be.
-    let text_page = GtkBox::new(Orientation::Vertical, px(12.0, scale));
-    text_page.add_css_class("image-editor-inspector-body");
-    text_page.append(&sections::section_card("Text", scale));
-    let text_hint = Label::new(Some(&t(
-        "The Text panel is not available in the Windows image editor yet",
-    )));
-    text_hint.add_css_class("image-editor-hint");
-    text_hint.set_wrap(true);
-    text_hint.set_xalign(0.0);
-    text_page.append(&text_hint);
-    motion_stack.add_named(&text_page, Some("motion-text"));
+    // The Linux Text page: Content, Typography, Placement and Animation,
+    // editing the selected title through the timeline.
+    let text_controls = TextControls::build(scale, &root);
+    motion_stack.add_named(&text_controls.page, Some("motion-text"));
 
     let watermark_page = GtkBox::new(Orientation::Vertical, px(12.0, scale));
     watermark_page.add_css_class("image-editor-inspector-body");
@@ -174,6 +170,7 @@ pub(super) fn build(
         actions,
         motion_stack,
         motion_controls,
+        text_controls,
         transform,
         background_sync,
         copy_button,

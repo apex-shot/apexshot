@@ -3,13 +3,16 @@
 //! way the Linux editor swaps its stacks; the notch tabs switch the dock's
 //! pages.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
+use gtk4::cairo::{Context as CairoContext, Format, ImageSurface};
 use gtk4::prelude::*;
-use gtk4::{Align, Box as GtkBox, Button, DrawingArea, Image, Orientation, Overlay};
+use gtk4::{Align, Box as GtkBox, Button, DrawingArea, GestureDrag, Image, Orientation, Overlay};
 
 use super::canvas::{draw_canvas_checkerboard, Canvas};
 use super::inspector::Inspector;
+use super::motion_text;
 use super::timeline;
 use super::ui_support::px;
 use crate::capture::editor::types::ViewTransform;
@@ -52,7 +55,7 @@ pub(super) fn build(
     let preview = DrawingArea::new();
     preview.set_hexpand(true);
     preview.set_vexpand(true);
-    preview.set_can_target(false);
+    preview.set_can_target(true);
     preview.set_draw_func({
         let host = canvas.host.clone();
         let timeline = timeline.clone();
@@ -70,6 +73,31 @@ pub(super) fn build(
                     transform.canvas_height * transform.canvas_scale,
                 );
                 paint_frames(&host, context, transform, &frames, timeline.is_live());
+                // Titles sit above the card and its annotations, in
+                // composition coordinates so they follow the camera.
+                if let Some((pose, anchor)) = frames.first() {
+                    let state = timeline.motion_state();
+                    let time = timeline.preview_time();
+                    let Some((layout, image_width, image_height)) = host.read(|st| {
+                        let (image_width, image_height) = st.working_image.dimensions();
+                        (
+                            st.background.layout(image_width, image_height),
+                            f64::from(image_width),
+                            f64::from(image_height),
+                        )
+                    }) else {
+                        return;
+                    };
+                    let card =
+                        motion_text::card_layout(layout, image_width, image_height, *pose, *anchor);
+                    let _ = context.save();
+                    context.translate(transform.canvas_offset_x, transform.canvas_offset_y);
+                    context.scale(transform.canvas_scale, transform.canvas_scale);
+                    context.rectangle(0.0, 0.0, layout.width, layout.height);
+                    context.clip();
+                    motion_text::paint_motion_text(context, card, &state, time);
+                    let _ = context.restore();
+                }
             }
         }
     });
@@ -85,6 +113,83 @@ pub(super) fn build(
         let host = canvas.host.clone();
         Rc::new(move || host.motion_thumbnail())
     });
+    // A title can be dragged on the preview itself, the same gesture the
+    // panel's pad offers; the renderer's own hit test decides what was grabbed.
+    {
+        let host = canvas.host.clone();
+        let timeline = timeline.clone();
+        let preview = preview.clone();
+        let grab: Rc<Cell<Option<(f64, f64)>>> = Rc::new(Cell::new(None));
+        let drag = GestureDrag::new();
+        drag.set_button(1);
+        drag.connect_drag_begin({
+            let host = host.clone();
+            let timeline = timeline.clone();
+            let preview = preview.clone();
+            let grab = grab.clone();
+            move |_, x, y| {
+                grab.set(None);
+                let Some(transform) = current_preview_transform(&host, &preview, scale) else {
+                    return;
+                };
+                let Some(context) = TextDragContext::new(&host, &timeline, transform) else {
+                    return;
+                };
+                let state = timeline.motion_state();
+                let Some(segment) = state.selected_text_segment() else {
+                    return;
+                };
+                let Some(placement) = context.placement(segment) else {
+                    return;
+                };
+                let (stage_x, stage_y) = context.view_to_stage(x, y);
+                if !placement.contains_stage_point(stage_x, stage_y, placement.local_slop(6.0)) {
+                    return;
+                }
+                grab.set(Some(context.stage_to_view(placement.anchor_view_point())));
+                timeline.begin_edit();
+            }
+        });
+        drag.connect_drag_update({
+            let host = host.clone();
+            let timeline = timeline.clone();
+            let preview = preview.clone();
+            let grab = grab.clone();
+            move |_, dx, dy| {
+                let Some((anchor_x, anchor_y)) = grab.get() else {
+                    return;
+                };
+                let Some(transform) = current_preview_transform(&host, &preview, scale) else {
+                    return;
+                };
+                let Some(context) = TextDragContext::new(&host, &timeline, transform) else {
+                    return;
+                };
+                let state = timeline.motion_state();
+                let Some(segment) = state.selected_text_segment() else {
+                    return;
+                };
+                let Some(placement) = context.placement(segment) else {
+                    return;
+                };
+                let (stage_x, stage_y) = context.view_to_stage(anchor_x + dx, anchor_y + dy);
+                let Some((pos_x, pos_y)) = placement.position_at(stage_x, stage_y) else {
+                    return;
+                };
+                timeline.edit_motion(|state| state.set_selected_text_pos(pos_x, pos_y), false);
+            }
+        });
+        drag.connect_drag_end({
+            let timeline = timeline.clone();
+            let grab = grab.clone();
+            move |_, _, _| {
+                if grab.take().is_some() {
+                    timeline.finish_edit();
+                }
+            }
+        });
+        preview.add_controller(drag);
+    }
     canvas.add_change_listener({
         let preview = preview.downgrade();
         let timeline = timeline.clone();
@@ -328,6 +433,91 @@ fn projected_points(
             )
         })
     })
+}
+
+/// The preview's current view transform, rebuilt from the allocated size and
+/// the document so a gesture and the frame it is steering agree.
+fn current_preview_transform(
+    host: &Rc<super::annotate::EditorHost>,
+    preview: &DrawingArea,
+    scale: f64,
+) -> Option<ViewTransform> {
+    let width = f64::from(preview.width().max(1));
+    let height = f64::from(preview.height().max(1));
+    host.read(|st| {
+        let (image_width, image_height) = st.working_image.dimensions();
+        let layout = st.background.layout(image_width, image_height);
+        preview_transform(width, height, scale, image_width, image_height, layout)
+    })
+}
+
+/// What a preview title drag needs: the card projection and the view mapping.
+struct TextDragContext {
+    layout: crate::capture::editor::state::background::Layout,
+    image_width: f64,
+    image_height: f64,
+    pose: crate::recording::editor::model::MotionTransform,
+    anchor: (f64, f64),
+    time: f64,
+    transform: ViewTransform,
+}
+
+impl TextDragContext {
+    fn new(
+        host: &Rc<super::annotate::EditorHost>,
+        timeline: &Rc<timeline::Timeline>,
+        transform: ViewTransform,
+    ) -> Option<Self> {
+        let state = timeline.motion_state();
+        let time = timeline.preview_time();
+        let (layout, image_width, image_height) = host.read(|st| {
+            let (image_width, image_height) = st.working_image.dimensions();
+            (
+                st.background.layout(image_width, image_height),
+                f64::from(image_width),
+                f64::from(image_height),
+            )
+        })?;
+        Some(Self {
+            layout,
+            image_width,
+            image_height,
+            pose: state.sample(time),
+            anchor: state.zoom_anchor_at(time),
+            time,
+            transform,
+        })
+    }
+
+    fn placement(
+        &self,
+        segment: &crate::recording::editor::model::MotionTextSegment,
+    ) -> Option<motion_text::MotionTextPlacement> {
+        let surface = ImageSurface::create(Format::ARgb32, 1, 1).ok()?;
+        let context = CairoContext::new(&surface).ok()?;
+        let card = motion_text::card_layout(
+            self.layout,
+            self.image_width,
+            self.image_height,
+            self.pose,
+            self.anchor,
+        );
+        motion_text::motion_text_placement(&context, card, segment, self.time)
+    }
+
+    fn view_to_stage(&self, x: f64, y: f64) -> (f64, f64) {
+        (
+            (x - self.transform.canvas_offset_x) / self.transform.canvas_scale,
+            (y - self.transform.canvas_offset_y) / self.transform.canvas_scale,
+        )
+    }
+
+    fn stage_to_view(&self, (x, y): (f64, f64)) -> (f64, f64) {
+        (
+            self.transform.canvas_offset_x + x * self.transform.canvas_scale,
+            self.transform.canvas_offset_y + y * self.transform.canvas_scale,
+        )
+    }
 }
 
 fn preview_transform(

@@ -22,7 +22,7 @@ use std::sync::Once;
 use super::inspector;
 use super::toolbar::{self, Tool};
 use super::ui_support::{self, px, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, TOP_CHROME_HEIGHT};
-use super::{canvas, motion};
+use super::{canvas, mode_confirm, motion};
 
 pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     static INIT_ICONS: Once = Once::new();
@@ -69,6 +69,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     canvas.root.add_overlay(&effect_control.root);
     let inspector = Rc::new(inspector::build(scale, &canvas.host, &window));
     let motion = Rc::new(motion::build(scale, dark, inspector.clone(), &canvas));
+    let mode_confirm = Rc::new(mode_confirm::build(scale, dark));
     let sub_bars = Rc::new(super::sub_bar::build(
         scale,
         canvas.host.clone(),
@@ -197,7 +198,10 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 host.set_space_pan(false);
                 host.changed();
             } else {
-                motion.timeline.pause();
+                // Leaving Motion drops its clips, the way the Linux session
+                // clears the snapshot; the warning below is what tells the
+                // user that. Shared appearance settings survive.
+                motion.timeline.clear_clips();
             }
             let page = if motion_now { "motion" } else { "static" };
             for stack in [&workspace_stack, &toolbar_stack] {
@@ -209,13 +213,52 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             }
         })
     };
-    canvas.motion_button.connect_clicked({
+    // Both mode buttons ask first when the switch would drop work the other
+    // mode cannot show.
+    let request_mode = {
         let switch_mode = switch_mode.clone();
-        move |_| switch_mode(true)
+        let confirm = mode_confirm.clone();
+        let host = canvas.host.clone();
+        let timeline = motion.timeline.clone();
+        Rc::new(move |motion_now: bool| {
+            let switch = if motion_now {
+                mode_confirm::ModeSwitch::ToMotion
+            } else {
+                mode_confirm::ModeSwitch::ToStatic
+            };
+            let config = crate::config::load_config();
+            // Pending text counts as an annotation: entering Motion commits
+            // it before the snapshot is taken.
+            let has_static_annotations = host
+                .read(|st| {
+                    !st.actions.is_empty()
+                        || st
+                            .active_text_input
+                            .as_ref()
+                            .is_some_and(|input| !input.text.trim().is_empty())
+                })
+                .unwrap_or(false);
+            let has_motion_segments = timeline.motion_state().has_segments();
+            if mode_confirm::needs_confirmation(
+                switch,
+                has_static_annotations,
+                has_motion_segments,
+                &config,
+            ) {
+                let switch_mode = switch_mode.clone();
+                confirm.ask(switch, Rc::new(move || switch_mode(motion_now)));
+                return;
+            }
+            switch_mode(motion_now);
+        })
+    };
+    canvas.motion_button.connect_clicked({
+        let request_mode = request_mode.clone();
+        move |_| request_mode(true)
     });
     motion.static_button.connect_clicked({
-        let switch_mode = switch_mode.clone();
-        move |_| switch_mode(false)
+        let request_mode = request_mode.clone();
+        move |_| request_mode(false)
     });
 
     // Transparent strip over the top edge of both mode pages: it centres the
@@ -256,6 +299,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
 
     let overlay = gtk4::Overlay::new();
     overlay.set_child(Some(&root));
+    overlay.add_overlay(mode_confirm.overlay());
     window.set_child(Some(&overlay));
 
     canvas.open_button.connect_clicked({
@@ -264,7 +308,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         move |_| canvas.choose_image(&window)
     });
 
-    install_keys(&window, &canvas, &sub_bars, &workspace_stack);
+    install_keys(&window, &canvas, &sub_bars, &workspace_stack, &mode_confirm);
 
     window.present();
 
@@ -397,6 +441,7 @@ fn install_keys(
     canvas: &Rc<canvas::Canvas>,
     sub_bars: &Rc<super::sub_bar::SubBars>,
     workspace: &gtk4::Stack,
+    mode_confirm: &Rc<mode_confirm::ModeConfirm>,
 ) {
     // Space held = pan mode. Capture phase so it wins over the canvas, but a
     // focused text entry still gets its literal space character.
@@ -407,7 +452,11 @@ fn install_keys(
         let window = window.clone();
         let sub_bars = sub_bars.clone();
         let workspace = workspace.clone();
+        let mode_confirm = mode_confirm.clone();
         move |controller, key, _, _| {
+            if mode_confirm.visible() {
+                return Propagation::Stop;
+            }
             if workspace.visible_child_name().as_deref() == Some("motion") {
                 return Propagation::Proceed;
             }
@@ -455,7 +504,14 @@ fn install_keys(
         let canvas = canvas.clone();
         let window = window.clone();
         let workspace = workspace.clone();
+        let mode_confirm = mode_confirm.clone();
         move |_, key, _, modifiers| {
+            if mode_confirm.visible() {
+                if key == gdk::Key::Escape {
+                    mode_confirm.cancel();
+                }
+                return Propagation::Stop;
+            }
             if workspace.visible_child_name().as_deref() == Some("motion") {
                 return Propagation::Proceed;
             }

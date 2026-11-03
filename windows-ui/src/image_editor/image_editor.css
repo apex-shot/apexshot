@@ -1160,7 +1160,7 @@ button.image-editor-wallpaper-tile.active-background-option:hover {
     min-width: 28px;
     min-height: 28px;
     border-radius: 7px;
-    background: #ff670d;
+    background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.16);
 }
 
@@ -1202,6 +1202,7 @@ button.image-editor-bg-custom-edit:disabled {
 }
 
 .editor-theme-light .image-editor-bg-custom-swatch {
+    background: rgba(17, 24, 39, 0.06);
     border-color: rgba(17, 24, 39, 0.16);
 }
 
@@ -1367,6 +1368,54 @@ button.image-editor-export:disabled {
 
 .editor-theme-light .image-editor-hint {
     color: rgba(17, 24, 39, 0.58);
+}
+
+/* ── Motion Text page ──────────────────────────────────────────────── */
+
+.image-editor-text-scroll {
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.image-editor-text-content,
+.image-editor-text-content text {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 12.5px;
+}
+
+.image-editor-text-content {
+    caret-color: #ff670d;
+}
+
+.editor-theme-light .image-editor-text-scroll {
+    background: rgba(17, 24, 39, 0.05);
+}
+
+.editor-theme-light .image-editor-text-content,
+.editor-theme-light .image-editor-text-content text {
+    color: rgba(17, 24, 39, 0.92);
+}
+
+.image-editor-font-dropdown {
+    min-height: 30px;
+    padding: 0 8px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    color: rgba(255, 255, 255, 0.90);
+    font-size: 12px;
+}
+
+.image-editor-font-dropdown > button {
+    border: none;
+    background: transparent;
+    box-shadow: none;
+    color: inherit;
+}
+
+.editor-theme-light .image-editor-font-dropdown {
+    background: rgba(17, 24, 39, 0.06);
+    color: rgba(17, 24, 39, 0.90);
 }
 
 /* The disclosure header is a clickable box over the revealer, so its hover
@@ -1846,4 +1895,104 @@ button.recording-editor-timeline-tool image {
 .editor-theme-light button.recording-editor-timeline-play image,
 .editor-theme-light button.recording-editor-timeline-tool image {
     filter: brightness(0);
+}
+
+/* ── Mode-switch warning ───────────────────────────────────────────── */
+
+/* The scrim matches the shell's radius so a full-window dim never paints
+ * square corners over the rounded editor. */
+.image-editor-confirm-scrim {
+    background: rgba(5, 7, 12, 0.55);
+    border-radius: 12px;
+}
+
+.image-editor-confirm-card {
+    padding: 18px;
+    background: #1c1c1e;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 12px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.image-editor-confirm-card.editor-theme-light {
+    background: #ffffff;
+    border-color: rgba(17, 24, 39, 0.10);
+    box-shadow: 0 24px 64px rgba(17, 24, 39, 0.18);
+}
+
+.image-editor-confirm-title {
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.image-editor-confirm-card.editor-theme-light .image-editor-confirm-title {
+    color: #1d2129;
+}
+
+.image-editor-confirm-body {
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 12.5px;
+}
+
+.image-editor-confirm-card.editor-theme-light .image-editor-confirm-body {
+    color: rgba(17, 24, 39, 0.62);
+}
+
+.image-editor-confirm-skip {
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 12px;
+}
+
+.image-editor-confirm-card.editor-theme-light .image-editor-confirm-skip {
+    color: rgba(17, 24, 39, 0.72);
+}
+
+button.image-editor-confirm-cancel {
+    padding: 5px 12px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+button.image-editor-confirm-cancel:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffffff;
+}
+
+.image-editor-confirm-card.editor-theme-light button.image-editor-confirm-cancel {
+    color: rgba(17, 24, 39, 0.78);
+}
+
+.image-editor-confirm-card.editor-theme-light button.image-editor-confirm-cancel:hover {
+    background: rgba(17, 24, 39, 0.06);
+    color: #1d2129;
+}
+
+button.image-editor-confirm-continue {
+    min-width: 92px;
+    padding: 5px 14px;
+    border: none;
+    border-radius: 6px;
+    background: #ff670d;
+    background-image: none;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+button.image-editor-confirm-continue:hover {
+    background: #ff7c2f;
+    color: #ffffff;
+}
+
+button.image-editor-confirm-continue:active {
+    background: #e85b06;
+    color: #ffffff;
 }

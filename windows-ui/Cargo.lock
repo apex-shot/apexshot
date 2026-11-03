@@ -54,6 +54,7 @@ dependencies = [
  "sha2",
  "thiserror",
  "tract-onnx",
+ "unicode-segmentation",
  "ureq",
  "windows-sys 0.61.2",
 ]
@@ -2427,6 +2428,12 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-segmentation"
+version = "1.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9629274872b2bfaf8d66f5f15725007f635594914870f65218920345aa11aa8c"
 
 [[package]]
 name = "untrusted"
