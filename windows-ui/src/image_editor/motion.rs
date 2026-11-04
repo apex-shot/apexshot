@@ -15,6 +15,7 @@ use super::inspector::Inspector;
 use super::motion_text;
 use super::timeline;
 use super::ui_support::px;
+use super::watermark;
 use crate::capture::editor::types::ViewTransform;
 use crate::capture::editor::window::icon_names::{custom, shipped};
 use crate::i18n::t;
@@ -52,6 +53,7 @@ pub(super) fn build(
     canvas: &Rc<Canvas>,
 ) -> MotionMode {
     let timeline = Rc::new(timeline::build(scale, dark));
+    let watermark_surface = inspector.watermark.surface();
     let preview = DrawingArea::new();
     preview.set_hexpand(true);
     preview.set_vexpand(true);
@@ -59,6 +61,7 @@ pub(super) fn build(
     preview.set_draw_func({
         let host = canvas.host.clone();
         let timeline = timeline.clone();
+        let watermark_surface = watermark_surface.clone();
         move |_, context, width, height| {
             let (width, height) = (f64::from(width), f64::from(height));
             draw_canvas_checkerboard(context, width, height, scale, dark);
@@ -96,6 +99,11 @@ pub(super) fn build(
                     context.rectangle(0.0, 0.0, layout.width, layout.height);
                     context.clip();
                     motion_text::paint_motion_text(context, card, &state, time);
+                    // The mark sits above the card and its titles, in the
+                    // same card space, so it tracks the camera too.
+                    if let Some(surface) = watermark_surface.borrow().clone() {
+                        watermark::paint(context, card, &state, &surface);
+                    }
                     let _ = context.restore();
                 }
             }

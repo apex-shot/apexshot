@@ -14,6 +14,7 @@ use super::sections;
 use super::text_controls::TextControls;
 use super::toolbar::Tool;
 use super::ui_support::{px, INSPECTOR_WIDTH};
+use super::watermark::Controls as WatermarkControls;
 use crate::capture::editor::window::icon_names;
 use crate::i18n::t;
 
@@ -24,6 +25,7 @@ pub(super) struct Inspector {
     motion_stack: Stack,
     motion_controls: MotionControls,
     text_controls: TextControls,
+    pub watermark: WatermarkControls,
     transform: GtkBox,
     background_sync: Rc<dyn Fn()>,
     /// Clipboard copy and the flattened export the window wires to the document.
@@ -68,13 +70,16 @@ impl Inspector {
     pub(super) fn bind_motion(&self, timeline: &Rc<super::timeline::Timeline>) {
         self.motion_controls.bind(timeline);
         self.text_controls.bind(timeline);
+        self.watermark.bind(timeline);
         self.motion_controls.sync(&timeline.motion_state());
         self.text_controls.sync(&timeline.motion_state());
+        self.watermark.sync(&timeline.motion_state());
     }
 
     pub(super) fn sync_motion(&self, state: &crate::recording::editor::model::MotionState) {
         self.motion_controls.sync(state);
         self.text_controls.sync(state);
+        self.watermark.sync(state);
     }
 
     pub(super) fn refresh_motion_thumbnail(&self) {
@@ -125,9 +130,10 @@ pub(super) fn build(
     let text_controls = TextControls::build(scale, &root);
     motion_stack.add_named(&text_controls.page, Some("motion-text"));
 
+    let watermark = WatermarkControls::build(scale, window, host);
     let watermark_page = GtkBox::new(Orientation::Vertical, px(12.0, scale));
     watermark_page.add_css_class("image-editor-inspector-body");
-    watermark_page.append(&sections::watermark_panel(scale));
+    watermark_page.append(&watermark.page);
     motion_stack.add_named(&watermark_page, Some("motion-watermark"));
 
     // One homogeneous stack and viewport keep the dock's requisition
@@ -171,6 +177,7 @@ pub(super) fn build(
         motion_stack,
         motion_controls,
         text_controls,
+        watermark,
         transform,
         background_sync,
         copy_button,

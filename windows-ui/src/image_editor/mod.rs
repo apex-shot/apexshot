@@ -34,6 +34,7 @@ mod text_controls;
 mod timeline;
 mod toolbar;
 mod ui_support;
+mod watermark;
 mod window;
 
 pub(crate) use preview::{build as onboarding_preview, install_css as install_preview_css};

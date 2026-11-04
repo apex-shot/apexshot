@@ -48,11 +48,11 @@ pub(super) struct CardLayout {
 }
 
 impl CardLayout {
-    fn img_w(&self) -> f64 {
+    pub(super) fn img_w(&self) -> f64 {
         self.image_width
     }
 
-    fn img_h(&self) -> f64 {
+    pub(super) fn img_h(&self) -> f64 {
         self.image_height
     }
 
@@ -66,7 +66,7 @@ impl CardLayout {
         (ax + (x - ax) * self.scale, ay + (y - ay) * self.scale)
     }
 
-    fn local_matrix(&self, image_x: f64, image_y: f64) -> Option<Matrix> {
+    pub(super) fn local_matrix(&self, image_x: f64, image_y: f64) -> Option<Matrix> {
         let origin = self.project(image_x, image_y);
         let x = self.project(image_x + 1.0, image_y);
         let y = self.project(image_x, image_y + 1.0);

@@ -1246,9 +1246,11 @@ button.image-editor-bg-image-row:disabled {
     color: rgba(255, 255, 255, 0.42);
 }
 
+/* The chosen picture's own edge is the shape; a stroke around the chip would
+ * read as a second frame. */
 .image-editor-bg-image-thumb {
     background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.10);
+    border: none;
 }
 
 .image-editor-bg-image-icon {
@@ -1267,7 +1269,7 @@ button.image-editor-bg-image-row:disabled {
 
 .editor-theme-light .image-editor-bg-image-thumb {
     background: rgba(17, 24, 39, 0.06);
-    border-color: rgba(17, 24, 39, 0.10);
+    border: none;
 }
 
 .editor-theme-light .image-editor-bg-image-icon {
@@ -1476,6 +1478,51 @@ button.image-editor-inline-button:disabled {
 
 .editor-theme-light button.image-editor-inline-button:hover {
     background: rgba(17, 24, 39, 0.09);
+}
+
+/* Watermark's Remove is the flat sidebar action: no fill, no border, a quiet
+ * label that only washes on hover, so it reads below the picker instead of
+ * competing with it. */
+button.image-editor-watermark-remove {
+    min-height: 28px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    background-image: none;
+    box-shadow: none;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 11px;
+    font-weight: 500;
+}
+
+button.image-editor-watermark-remove label {
+    color: inherit;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+button.image-editor-watermark-remove:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.92);
+}
+
+button.image-editor-watermark-remove:disabled {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.30);
+}
+
+.editor-theme-light button.image-editor-watermark-remove {
+    color: rgba(29, 33, 41, 0.62);
+}
+
+.editor-theme-light button.image-editor-watermark-remove:hover {
+    background: rgba(17, 24, 39, 0.08);
+    color: rgba(29, 33, 41, 0.92);
+}
+
+.editor-theme-light button.image-editor-watermark-remove:disabled {
+    color: rgba(29, 33, 41, 0.30);
 }
 
 button.image-editor-transform-reset {

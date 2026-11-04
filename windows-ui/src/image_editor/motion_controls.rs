@@ -163,7 +163,11 @@ impl MotionControls {
         clip_box.append(&title);
 
         let transform = sections::section_card("Transform", scale);
-        let anchor = MotionPad::new(scale, Some(host.clone()));
+        let anchor = MotionPad::new(
+            scale,
+            Some(host.clone()),
+            &t("Click or drag to place the zoom anchor; double-click to recenter"),
+        );
         transform.append(&anchor.area);
         add_slider(
             &transform,
@@ -213,7 +217,11 @@ impl MotionControls {
         clip_box.append(&rotation);
 
         let position_section = sections::section_card("Position", scale);
-        let position = MotionPad::new(scale, None);
+        let position = MotionPad::new(
+            scale,
+            None,
+            &t("Click or drag to position the camera; double-click to recenter"),
+        );
         position_section.append(&position.area);
         for (field, label) in [(Field::X, "X"), (Field::Y, "Y")] {
             add_slider(
@@ -515,31 +523,33 @@ fn update_custom_rows(custom: bool, kind: MotionTimingKind, ease: &GtkBox, sprin
 
 type PadListener = Rc<dyn Fn(f64, f64)>;
 type InteractionListener = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
+/// An extra layer over the pad's card: the rect it was laid out in, in pad
+/// pixels, and the point the marker sits at. The Watermark tool draws its
+/// mark there so the pad previews the placement it edits.
+pub(super) type PadLayer = Rc<dyn Fn(&gtk4::cairo::Context, (f64, f64, f64, f64), (f64, f64))>;
 
-struct MotionPad {
-    area: DrawingArea,
+pub(super) struct MotionPad {
+    pub area: DrawingArea,
     point: Rc<Cell<(f64, f64)>>,
     listener: Rc<RefCell<Option<PadListener>>>,
     on_start: InteractionListener,
     on_end: InteractionListener,
+    layer: Rc<RefCell<Option<PadLayer>>>,
 }
 
 impl MotionPad {
-    fn new(scale: f64, host: Option<Rc<EditorHost>>) -> Self {
+    pub(super) fn new(scale: f64, host: Option<Rc<EditorHost>>, tooltip: &str) -> Self {
         let area = DrawingArea::new();
         area.set_size_request(-1, px(152.0, scale));
         area.set_hexpand(true);
         area.add_css_class("image-editor-position-pad");
         area.set_cursor_from_name(Some("crosshair"));
-        area.set_tooltip_text(Some(&t(if host.is_some() {
-            "Click or drag to place the zoom anchor; double-click to recenter"
-        } else {
-            "Click or drag to position the camera; double-click to recenter"
-        })));
+        area.set_tooltip_text(Some(tooltip));
         let point = Rc::new(Cell::new((0.5, 0.5)));
         let listener = Rc::new(RefCell::new(None::<PadListener>));
         let on_start = Rc::new(RefCell::new(None::<Rc<dyn Fn()>>));
         let on_end = Rc::new(RefCell::new(None::<Rc<dyn Fn()>>));
+        let layer: Rc<RefCell<Option<PadLayer>>> = Rc::new(RefCell::new(None));
         let active = Rc::new(Cell::new(false));
         let start: Rc<dyn Fn()> = {
             let active = active.clone();
@@ -566,15 +576,16 @@ impl MotionPad {
         area.set_draw_func({
             let point = point.clone();
             let host = host.clone();
+            let layer = layer.clone();
             move |area, context, width, height| {
                 draw_pad(
                     area,
                     context,
-                    f64::from(width),
-                    f64::from(height),
+                    (f64::from(width), f64::from(height)),
                     scale,
                     point.get(),
                     host.as_deref(),
+                    layer.borrow().as_ref(),
                 );
             }
         });
@@ -637,20 +648,32 @@ impl MotionPad {
             listener,
             on_start,
             on_end,
+            layer,
         }
     }
 
-    fn set_point(&self, x: f64, y: f64) {
+    /// Draw an extra layer over the card, under the marker.
+    pub(super) fn set_layer(&self, layer: PadLayer) {
+        *self.layer.borrow_mut() = Some(layer);
+        self.area.queue_draw();
+    }
+
+    pub(super) fn set_point(&self, x: f64, y: f64) {
         if self.point.replace((x, y)) != (x, y) {
             self.area.queue_draw();
         }
     }
 
-    fn on_change(&self, listener: PadListener) {
+    #[cfg(test)]
+    pub(super) fn point(&self) -> (f64, f64) {
+        self.point.get()
+    }
+
+    pub(super) fn on_change(&self, listener: PadListener) {
         *self.listener.borrow_mut() = Some(listener);
     }
 
-    fn on_interaction(&self, start: Rc<dyn Fn()>, end: Rc<dyn Fn()>) {
+    pub(super) fn on_interaction(&self, start: Rc<dyn Fn()>, end: Rc<dyn Fn()>) {
         *self.on_start.borrow_mut() = Some(start);
         *self.on_end.borrow_mut() = Some(end);
     }
@@ -688,11 +711,11 @@ fn pad_rect(
 fn draw_pad(
     area: &DrawingArea,
     context: &gtk4::cairo::Context,
-    width: f64,
-    height: f64,
+    (width, height): (f64, f64),
     scale: f64,
     point: (f64, f64),
     host: Option<&EditorHost>,
+    layer: Option<&PadLayer>,
 ) {
     if host.is_none() {
         sections::paint_position_pad(
@@ -746,6 +769,9 @@ fn draw_pad(
         context.stroke().ok();
     }
     let _ = context.restore();
+    if let Some(layer) = layer {
+        layer(context, (x, y, w, h), point);
+    }
     let (cx, cy) = (x + point.0 * w, y + point.1 * h);
     sections::paint_soft_handle(context, cx, cy);
 }

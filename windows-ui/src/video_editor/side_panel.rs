@@ -3533,6 +3533,13 @@ impl FilledSlider {
         *self.on_change.borrow_mut() = Some(callback);
     }
 
+    /// Drive the control the way a drag would, for panels whose callbacks are
+    /// private to their own module.
+    #[cfg(test)]
+    pub(crate) fn set_value_from_test(&self, value: f64) {
+        self.apply_value(value);
+    }
+
     pub(crate) fn on_interaction(&self, start: Rc<dyn Fn()>, end: Rc<dyn Fn()>) {
         *self.on_interaction_start.borrow_mut() = Some(start);
         *self.on_interaction_end.borrow_mut() = Some(end);
