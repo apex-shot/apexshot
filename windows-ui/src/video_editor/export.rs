@@ -30,6 +30,27 @@ use std::time::Instant;
 
 const DEFAULT_FPS: f64 = 30.0;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct ExportSettings {
+    /// None preserves the recording's frame rate.
+    pub fps: Option<u32>,
+    /// The short edge, preserving the recording's aspect ratio. None keeps its size.
+    pub resolution: Option<u32>,
+}
+
+impl ExportSettings {
+    pub fn dimensions(self, source: (u32, u32)) -> (u32, u32) {
+        let Some(edge) = self.resolution else {
+            return output_size(source);
+        };
+        let ratio = f64::from(edge) / f64::from(source.0.min(source.1).max(1));
+        output_size((
+            (f64::from(source.0) * ratio).round() as u32,
+            (f64::from(source.1) * ratio).round() as u32,
+        ))
+    }
+}
+
 /// Everything the exporter needs that only the window knows.
 pub(super) struct ExportModel {
     pub source: PathBuf,
@@ -145,7 +166,16 @@ impl ExportHandle {
     }
 }
 
+#[cfg(test)]
 pub(super) fn start_export(model: ExportModel, output: PathBuf) -> ExportHandle {
+    start_export_with_settings(model, output, ExportSettings::default())
+}
+
+pub(super) fn start_export_with_settings(
+    model: ExportModel,
+    output: PathBuf,
+    settings: ExportSettings,
+) -> ExportHandle {
     let (sender, receiver) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     if let Err(error) =
@@ -157,14 +187,21 @@ pub(super) fn start_export(model: ExportModel, output: PathBuf) -> ExportHandle 
     let thread_cancel = cancel.clone();
     std::thread::spawn(move || {
         let encoder = Encoder::fastest();
-        let mut result = render(&model, &output, &sender, &thread_cancel, encoder);
+        let mut result = render(&model, &output, &sender, &thread_cancel, encoder, settings);
         if encoder != Encoder::X264 {
             if let Err(End::Failed(message)) = &result {
                 eprintln!(
                     "[export] {} failed ({message}); retrying with libx264",
                     encoder.codec()
                 );
-                result = render(&model, &output, &sender, &thread_cancel, Encoder::X264);
+                result = render(
+                    &model,
+                    &output,
+                    &sender,
+                    &thread_cancel,
+                    Encoder::X264,
+                    settings,
+                );
             }
         }
         match result {
@@ -278,8 +315,12 @@ fn render(
     sender: &Sender<ExportUpdate>,
     cancel: &Arc<AtomicBool>,
     encoder: Encoder,
+    settings: ExportSettings,
 ) -> Result<(), End> {
-    let fps = ffmpeg::probe_frame_rate(&model.source)
+    let fps = settings
+        .fps
+        .map(f64::from)
+        .or_else(|| ffmpeg::probe_frame_rate(&model.source))
         .filter(|fps| fps.is_finite() && *fps > 0.0)
         .unwrap_or(DEFAULT_FPS);
     let spans = frame_plan(model.trim_start, model.trim_end, &model.cuts, fps);
@@ -294,7 +335,7 @@ fn render(
         f64::from(model.source_size.0),
         f64::from(model.source_size.1),
     );
-    let size = output_size(model.source_size);
+    let size = settings.dimensions(model.source_size);
     let mapping = TimeMapping::new(
         spans
             .iter()
@@ -599,7 +640,9 @@ fn spawn_decoder(
         .arg(source)
         .args(["-t", &format!("{duration:.6}")])
         .arg("-an")
-        .args(["-vf", &format!("scale={}:{},fps={fps}", size.0, size.1)])
+        // A seek between source frames leaves a positive first timestamp.
+        // Fill that leading gap on the output grid instead of losing a frame.
+        .args(["-vf", &format!("scale={}:{},fps={fps}:start_time=0", size.0, size.1)])
         .args(["-frames:v", &span.frames.to_string()])
         .args(["-f", "rawvideo", "-pix_fmt", "nv12", "pipe:1"])
         .stdout(Stdio::piped())
@@ -974,11 +1017,14 @@ fn draw_cursor(
 #[cfg(test)]
 mod tests {
     use super::{
-        frame_plan, frame_source_time, output_size, start_export, total_frames, ExportModel,
-        ExportUpdate,
+        frame_plan, frame_source_time, output_size, render, start_export, total_frames, zoom,
+        Encoder, End, ExportModel, ExportSettings, ExportUpdate,
     };
+    use crate::recording::editor::ffmpeg;
     use crate::recording::editor::model::CursorSettings;
     use std::path::PathBuf;
+    use std::process::Command;
+    use std::sync::{atomic::AtomicBool, mpsc, Arc};
     use std::time::Duration;
 
     #[test]
@@ -1080,6 +1126,110 @@ mod tests {
         assert_eq!(output_size((1920, 1080)), (1920, 1080));
         assert_eq!(output_size((1919, 1079)), (1918, 1078));
         assert_eq!(output_size((0, 0)), (2, 2));
+    }
+
+    #[test]
+    fn resolution_presets_keep_aspect_ratio_and_even_edges() {
+        let settings = ExportSettings {
+            resolution: Some(720),
+            ..ExportSettings::default()
+        };
+        assert_eq!(settings.dimensions((1920, 1080)), (1280, 720));
+        assert_eq!(settings.dimensions((1080, 1920)), (720, 1280));
+        assert_eq!(settings.dimensions((1440, 1080)), (960, 720));
+        assert_eq!(
+            ExportSettings::default().dimensions((1919, 1079)),
+            (1918, 1078)
+        );
+    }
+
+    #[test]
+    fn selected_settings_reach_the_mp4_encoder() {
+        if std::env::var("APEXSHOT_EXPORT_TEST").ok().as_deref() != Some("1") {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-export-options-test-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        let generated = Command::new(ffmpeg::ffmpeg_executable())
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=s=320x180:r=30:d=0.5",
+                "-threads",
+                "2",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&source)
+            .status()
+            .expect("ffmpeg should be available");
+        assert!(generated.success());
+        let model = ExportModel {
+            source,
+            source_size: (320, 180),
+            trim_start: 0.0,
+            trim_end: 0.5,
+            cuts: vec![0.25],
+            zooms: Vec::new(),
+            zoom_camera: zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: None,
+            webcam: None,
+            crf: 20,
+        };
+        for fps in [24, 60] {
+            let settings = ExportSettings {
+                fps: Some(fps),
+                resolution: Some(90),
+            };
+            let output = dir.join(format!("output-{fps}.mp4"));
+            let (sender, _receiver) = mpsc::channel();
+            let cancel = Arc::new(AtomicBool::new(false));
+            if let Err(end) = render(&model, &output, &sender, &cancel, Encoder::X264, settings) {
+                match end {
+                    End::Failed(message) => panic!("MP4 export failed: {message}"),
+                    End::Cancelled => panic!("export cancelled itself"),
+                }
+            }
+            let probe = Command::new(ffmpeg::ffprobe_executable())
+                .args([
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "v:0",
+                    "-count_frames",
+                    "-show_entries",
+                    "stream=width,height,nb_read_frames",
+                    "-of",
+                    "json",
+                ])
+                .arg(&output)
+                .output()
+                .unwrap();
+            assert!(probe.status.success());
+            let data: serde_json::Value = serde_json::from_slice(&probe.stdout).unwrap();
+            let stream = &data["streams"][0];
+            assert_eq!(stream["width"], 160);
+            assert_eq!(stream["height"], 90);
+            assert_eq!(
+                stream["nb_read_frames"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<u32>()
+                    .unwrap(),
+                fps / 2
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

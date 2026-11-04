@@ -74,7 +74,6 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
 
     let document_title = Rc::new(RefCell::new(document_title(initial)));
     let (title_bar, export_button) = build_title_bar(&window, document_title.clone(), scale);
-    root.append(&title_bar);
 
     let workspace = GtkBox::new(Orientation::Horizontal, 0);
     workspace.add_css_class("recording-editor-workspace");
@@ -109,8 +108,10 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         &timeline,
     );
     workspace.append(&tools_column);
-    root.append(&workspace);
-    root.append(&timeline.root);
+    let editor_body = GtkBox::new(Orientation::Vertical, 0);
+    editor_body.set_vexpand(true);
+    editor_body.append(&workspace);
+    editor_body.append(&timeline.root);
     timeline.set_frame_sink({
         let stage = stage.clone();
         Rc::new(move |frame| {
@@ -136,17 +137,12 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         Rc::new(move |center| timeline.set_selected_zoom_center(center))
     });
 
-    // The whole editor sits inside one overlay so the export card can float
-    // over it; wrapping the assembled layout keeps every child parented to the
-    // boxes that already own it.
-    let shell = Overlay::new();
-    shell.add_css_class("video-editor-shell");
-    shell.set_child(Some(&root));
+    let shell = build_editor_shell(&root, &title_bar, &editor_body);
 
     wire_export(&window, &stage, &timeline, &shell);
-    wire_history_keys(&window, &timeline);
+    wire_history_keys(&window, &timeline, &shell);
 
-    window.set_child(Some(&shell));
+    window.set_child(Some(&root));
 
     let update_document: UpdateDocument = {
         let document_title = document_title.clone();
@@ -206,6 +202,24 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     });
 
     window.present();
+}
+
+fn build_editor_shell(root: &GtkBox, title_bar: &GtkBox, editor_body: &GtkBox) -> Overlay {
+    let editor = GtkBox::new(Orientation::Vertical, 0);
+    editor.append(title_bar);
+    editor.append(editor_body);
+
+    // Export replaces the title bar as well as the workspace, inside the
+    // existing window outline. Clip descendants to that outline's corners.
+    root.set_overflow(gtk4::Overflow::Hidden);
+    let shell = Overlay::new();
+    shell.add_css_class("video-editor-shell");
+    shell.set_hexpand(true);
+    shell.set_vexpand(true);
+    shell.set_overflow(gtk4::Overflow::Hidden);
+    shell.set_child(Some(&editor));
+    root.append(&shell);
+    shell
 }
 
 fn build_title_bar(
@@ -296,7 +310,7 @@ fn build_title_bar(
     }
     export_button.add_css_class("video-editor-title-export");
     export_button.set_valign(Align::Center);
-    export_button.set_tooltip_text(Some(&t("Export the edited MP4")));
+    export_button.set_tooltip_text(Some(&t("Choose video export options")));
     let export_label = Label::new(Some(&t("Export")));
     export_label.set_halign(Align::Center);
     export_label.set_valign(Align::Center);
@@ -1567,10 +1581,18 @@ fn history_key(key: gdk::Key, modifiers: gdk::ModifierType) -> Option<HistoryKey
 /// The controller sits on the window and runs in the bubble phase: a focused
 /// text entry keeps its own Ctrl+Z, because GTK offers the key to the focused
 /// widget's controllers first.
-fn wire_history_keys(window: &ApplicationWindow, timeline: &super::timeline::Timeline) {
+fn wire_history_keys(
+    window: &ApplicationWindow,
+    timeline: &super::timeline::Timeline,
+    shell: &Overlay,
+) {
     let keys = gtk4::EventControllerKey::new();
     let timeline = timeline.clone();
+    let shell = shell.clone();
     keys.connect_key_pressed(move |_, key, _, modifiers| {
+        if shell.child().is_some_and(|editor| !editor.is_sensitive()) {
+            return gtk4::glib::Propagation::Proceed;
+        }
         let Some(action) = history_key(key, modifiers) else {
             return gtk4::glib::Propagation::Proceed;
         };
@@ -1599,7 +1621,19 @@ fn wire_export(
     let stage_handle = stage.clone();
     let timeline = timeline.clone();
     let shell = shell.clone();
+    if let Some(editor) = shell.child() {
+        let button = stage.export_button.downgrade();
+        editor.connect_sensitive_notify(move |editor| {
+            if let Some(button) = button.upgrade() {
+                button.set_sensitive(editor.is_sensitive());
+            }
+        });
+    }
     stage.export_button.connect_clicked(move |_| {
+        if shell.child().is_some_and(|editor| !editor.is_sensitive()) {
+            return;
+        }
+        timeline.pause();
         let Some(model) = export_model(&stage_handle, &timeline) else {
             return;
         };
@@ -1611,19 +1645,65 @@ fn wire_export(
         }) {
             return;
         }
-        let source = model.source;
+        let source = model.source.clone();
         let stage = stage_handle.clone();
         let timeline = timeline.clone();
-        let shell = shell.clone();
-        let window_for_output = window.clone();
-        choose_export_path(
-            &window,
-            &source,
-            Rc::new(move |output| {
-                start_gated_video_export(&window_for_output, &stage, &timeline, &shell, output);
+        let shell_for_options = shell.clone();
+        let window = window.clone();
+        super::export_options::show(
+            &shell,
+            &model,
+            Rc::new(move |settings, crf, clipboard| {
+                let stage = stage.clone();
+                let timeline = timeline.clone();
+                let shell = shell_for_options.clone();
+                let export_window = window.clone();
+                let begin = Rc::new(move |output| {
+                    start_gated_video_export(
+                        &export_window,
+                        &stage,
+                        &timeline,
+                        &shell,
+                        VideoExportRequest {
+                            output,
+                            settings,
+                            crf,
+                            clipboard,
+                        },
+                    );
+                });
+                if clipboard {
+                    let folder = dirs::cache_dir()
+                        .unwrap_or_else(std::env::temp_dir)
+                        .join("apexshot")
+                        .join("clipboard-exports");
+                    if let Err(error) = std::fs::create_dir_all(&folder) {
+                        eprintln!(
+                            "[video editor] Could not create clipboard export folder: {error}"
+                        );
+                        // A normal save dialog still lets the user complete the export.
+                        choose_export_path(&window, &source, begin);
+                        return;
+                    }
+                    let id = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    begin(folder.join(format!("recording-{id}.mp4")));
+                } else {
+                    choose_export_path(&window, &source, begin);
+                }
             }),
         );
     });
+}
+
+#[derive(Clone)]
+struct VideoExportRequest {
+    output: PathBuf,
+    settings: super::export::ExportSettings,
+    crf: u32,
+    clipboard: bool,
 }
 
 fn start_gated_video_export(
@@ -1631,16 +1711,17 @@ fn start_gated_video_export(
     stage: &Stage,
     timeline: &super::timeline::Timeline,
     shell: &Overlay,
-    output: PathBuf,
+    request: VideoExportRequest,
 ) {
-    let Some(model) = export_model(stage, timeline) else {
+    let Some(mut model) = export_model(stage, timeline) else {
         return;
     };
+    model.crf = request.crf;
     let retry_window = window.downgrade();
     let retry_stage = stage.clone();
     let retry_timeline = timeline.clone();
     let retry_shell = shell.downgrade();
-    let retry_output = output.clone();
+    let retry_request = request.clone();
     if crate::studio_upsell::gate(window, super::studio::capabilities(&model), move || {
         if let (Some(window), Some(shell)) = (retry_window.upgrade(), retry_shell.upgrade()) {
             start_gated_video_export(
@@ -1648,15 +1729,21 @@ fn start_gated_video_export(
                 &retry_stage,
                 &retry_timeline,
                 &shell,
-                retry_output.clone(),
+                retry_request.clone(),
             );
         }
     }) {
-        super::export_card::show(shell, model, output);
+        super::export_card::show(
+            shell,
+            model,
+            request.output,
+            request.settings,
+            request.clipboard,
+        );
     }
 }
 
-/// Ask where the MP4 goes, using the remembered folder when enabled.
+/// Ask where the export goes, using the remembered folder when enabled.
 fn choose_export_path(window: &ApplicationWindow, source: &Path, then: Rc<dyn Fn(PathBuf)>) {
     let chooser = FileChooserNative::new(
         Some(&t("Export video")),
@@ -1682,11 +1769,11 @@ fn choose_export_path(window: &ApplicationWindow, source: &Path, then: Rc<dyn Fn
     chooser.connect_response(move |chooser, response| {
         if response == ResponseType::Accept {
             if let Some(mut path) = chooser.file().and_then(|file| file.path()) {
-                let has_mp4 = path
+                let has_extension = path
                     .extension()
                     .and_then(|extension| extension.to_str())
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("mp4"));
-                if !has_mp4 {
+                    .is_some_and(|value| value.eq_ignore_ascii_case("mp4"));
+                if !has_extension {
                     path.set_extension("mp4");
                 }
                 let mut config = crate::config::load_config();
@@ -1771,6 +1858,9 @@ fn install_css() {
         .video-editor-root.editor-theme-light {{
             border: 1px solid rgba(17,24,39,0.12);
         }}
+        .video-editor-shell {{
+            border-radius: 11px;
+        }}
         .video-editor-titlebar {{
             min-height: {titlebar}px;
             padding: 0;
@@ -1849,6 +1939,31 @@ mod tests {
         output_dimensions, padding_px, screen_transform, video_rect_dimensions, FrameAspect,
         HistoryKey, QualityTier,
     };
+
+    #[test]
+    fn the_export_shell_contains_the_entire_editor_and_clips_its_corners() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            use gtk4::prelude::*;
+            use gtk4::{Box as GtkBox, Orientation, Overflow};
+
+            let root = GtkBox::new(Orientation::Vertical, 0);
+            let title = GtkBox::new(Orientation::Horizontal, 0);
+            let body = GtkBox::new(Orientation::Vertical, 0);
+            let shell = super::build_editor_shell(&root, &title, &body);
+            assert_eq!(root.first_child(), Some(shell.clone().upcast()));
+            assert_eq!(root.last_child(), Some(shell.clone().upcast()));
+            let editor = shell.child().unwrap();
+            assert_eq!(editor.first_child(), Some(title.clone().upcast()));
+            assert_eq!(editor.last_child(), Some(body.upcast()));
+            assert_eq!(root.overflow(), Overflow::Hidden);
+            assert_eq!(shell.overflow(), Overflow::Hidden);
+            editor.set_sensitive(false);
+            assert!(!title.is_sensitive());
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
 
     #[test]
     fn a_split_screen_transform_covers_the_video_pane() {
@@ -1964,7 +2079,7 @@ mod tests {
         let source = include_str!("window.rs");
         let production = &source[..source.find("\n#[cfg(test)]").expect("tests module")];
         assert!(
-            production.contains("wire_history_keys(&window, &timeline)"),
+            production.contains("wire_history_keys(&window, &timeline, &shell)"),
             "the editor window must install the undo shortcut"
         );
     }

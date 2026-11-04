@@ -2666,6 +2666,13 @@ impl Timeline {
         ))
     }
 
+    /// Pause playback before opening export options or running the encoder.
+    pub fn pause(&self) {
+        self.data.borrow_mut().playing = false;
+        (self.repaint)();
+        self.publish_frame();
+    }
+
     /// Write this recording's edits now. Called when another recording replaces
     /// this one and when the window closes, both of which land before the
     /// repaint-driven autosave's next tick.

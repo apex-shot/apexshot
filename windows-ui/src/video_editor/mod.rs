@@ -12,6 +12,7 @@ pub(crate) mod custom_fill;
 mod cutout;
 mod export;
 mod export_card;
+mod export_options;
 mod history;
 mod pixels;
 mod press;
