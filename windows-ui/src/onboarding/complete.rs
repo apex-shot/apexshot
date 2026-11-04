@@ -3,7 +3,7 @@
 use gtk4::{prelude::*, Box as GtkBox, Button};
 
 use super::ui::{feature_card_list, heading};
-use super::{px, Nav};
+use super::{px, Nav, SECTION_GAP};
 use crate::capture::editor::window::icon_names::custom;
 use crate::i18n::t;
 
@@ -11,16 +11,16 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
     let scale = nav.scale;
     body.append(&heading(
         scale,
-        &t("You're all set!"),
-        &t("ApexShot is ready. It runs from the tray from now on."),
+        &t("You’re all set."),
+        &t("Here’s where to find everything."),
     ));
 
     let tray_title = t("Tray icon");
-    let tray_body = t("ApexShot stays in the tray; right-click it for the capture menu.");
+    let tray_body = t("Right-click for your capture menu.");
     let hotkeys_title = t("Hotkeys");
-    let hotkeys_body = t("Use your configured shortcuts while ApexShot runs in the background.");
+    let hotkeys_body = t("Your shortcuts work while ApexShot runs.");
     let menu_title = t("Settings");
-    let menu_body = t("Open ApexShot anytime for Settings and preferences");
+    let menu_body = t("Change any of this later.");
     let checklist = feature_card_list(
         scale,
         &[
@@ -41,10 +41,10 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
             ),
         ],
     );
-    checklist.set_margin_top(px(scale, 28.0));
+    checklist.set_margin_top(px(scale, SECTION_GAP));
     body.append(&checklist);
 
-    let finish_btn = Button::with_label(&t("Start Using ApexShot"));
+    let finish_btn = Button::with_label(&t("Open ApexShot"));
     finish_btn.add_css_class("settings-primary-btn");
     let finish = nav.finish.clone();
     finish_btn.connect_clicked(move |_| finish());

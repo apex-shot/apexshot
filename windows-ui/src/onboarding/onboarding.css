@@ -1,0 +1,210 @@
+/* Authored at 100% scale, then scaled with the Windows editor stylesheet. */
+
+.editor-root.onboarding-root {
+    background: #191919;
+    color: #f3f0ec;
+    border: none;
+    box-shadow: none;
+}
+
+.onboarding-pane {
+    background: transparent;
+}
+
+.onboarding-showcase {
+    background: #242424;
+    border: none;
+    border-radius: 20px;
+    box-shadow: none;
+}
+
+.onboarding-showcase-title {
+    font-size: 27px;
+    font-weight: 600;
+    letter-spacing: -0.7px;
+    color: #f3f0ec;
+}
+
+.onboarding-showcase-copy {
+    font-size: 12px;
+    color: #a3a09c;
+}
+
+.onboarding-root .onboarding-headline {
+    font-size: 23px;
+    font-weight: 600;
+    letter-spacing: -0.6px;
+}
+
+.onboarding-root .onboarding-copy {
+    font-size: 12px;
+    color: #a3a09c;
+    opacity: 1;
+}
+
+.editor-root .onboarding-actions button.settings-primary-btn {
+    min-width: 0;
+    min-height: 38px;
+    padding: 0 18px;
+    border: none;
+    border-radius: 7px;
+    background: #ff670d;
+    color: #ffffff;
+    font-size: 12px;
+    font-weight: 600;
+    box-shadow: none;
+}
+
+.editor-root .onboarding-actions button.settings-primary-btn:hover {
+    background: #ff792b;
+}
+
+.editor-root .onboarding-actions button.settings-primary-btn:active {
+    background: #e65c0a;
+}
+
+.editor-root .onboarding-actions button.settings-primary-btn:disabled {
+    background: #67391f;
+    color: #b9a493;
+}
+
+.onboarding-root .onboarding-progress-caption {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 1px;
+    opacity: 0.45;
+}
+
+.onboarding-root .onboarding-progress-dot {
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.onboarding-root .onboarding-progress-dot-done {
+    background: #8b512e;
+}
+
+.onboarding-root .onboarding-progress-dot-active {
+    background: #ff670d;
+}
+
+.onboarding-root .onboarding-text-button,
+.onboarding-root .onboarding-text-button:hover,
+.onboarding-root .onboarding-text-button:active {
+    background: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    font-size: 11px;
+    padding: 5px 10px;
+}
+
+.onboarding-root .onboarding-text-button:focus-visible {
+    outline: 1px solid #ff670d;
+    outline-offset: 3px;
+}
+
+.onboarding-action-note {
+    color: #83807b;
+    font-size: 10px;
+}
+
+/* Setup is a form, not another Settings page: no nested tables or cards. */
+.onboarding-root .onboarding-card-list,
+.onboarding-root .onboarding-hotkey-table {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+.onboarding-root .onboarding-feature-row,
+.onboarding-root .onboarding-hotkey-table .settings-table-row {
+    background: transparent;
+    border: none;
+    padding: 10px 0;
+}
+
+.onboarding-root .onboarding-icon-badge {
+    color: #b9b4ad;
+    background: transparent;
+}
+
+.onboarding-root .settings-sub-option {
+    font-size: 11px;
+    color: #a3a09c;
+}
+
+.onboarding-hotkey-table .shortcut-capture-keycap {
+    font-size: 10px;
+    padding: 4px 7px;
+    border: none;
+    box-shadow: none;
+    background: #2b2b2b;
+}
+
+.onboarding-root .onboarding-connect-code-frame {
+    background: #222222;
+    border: none;
+    box-shadow: none;
+    border-radius: 8px;
+    padding: 8px 8px 8px 16px;
+}
+
+.onboarding-root .onboarding-connect-code {
+    font-family: 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: 2px;
+}
+
+.onboarding-status-error {
+    font-size: 11px;
+}
+
+/* The preview is the editor's own window, cropped by the card. Only its
+   top-left corner is visible, so only that corner rounds. */
+.onboarding-editor-preview {
+    background: #141414;
+    border: none;
+    border-radius: 12px 0 0 0;
+}
+
+.editor-root.editor-theme-light.onboarding-root {
+    background: #f4f2ee;
+    color: #25231f;
+}
+
+.editor-theme-light .onboarding-showcase {
+    background: #e8e5df;
+}
+
+.editor-theme-light .onboarding-showcase-title {
+    color: #25231f;
+}
+
+.editor-theme-light .onboarding-showcase-copy,
+.editor-theme-light.onboarding-root .onboarding-copy,
+.editor-theme-light.onboarding-root .settings-sub-option {
+    color: #6c6861;
+}
+
+.editor-theme-light.onboarding-root .onboarding-progress-dot {
+    background: rgba(37, 35, 31, 0.15);
+}
+
+.editor-theme-light.onboarding-root .onboarding-progress-dot-done {
+    background: #b57a55;
+}
+
+.editor-theme-light.onboarding-root .onboarding-progress-dot-active {
+    background: #ff670d;
+}
+
+.editor-theme-light .onboarding-editor-preview {
+    background: #f6f7fb;
+}
+
+.editor-theme-light.onboarding-root .onboarding-hotkey-table .shortcut-capture-keycap,
+.editor-theme-light.onboarding-root .onboarding-connect-code-frame {
+    background: #e8e5df;
+}
