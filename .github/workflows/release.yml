@@ -514,6 +514,19 @@ jobs:
           cargo --version
           rpmbuild --version
 
+      # Fedora 43's rustc links the system LLVM 21, whose vpdpbusd intrinsic
+      # signature no longer matches the stdarch in Rust 1.99, so the OCR
+      # dependency tree fails to compile there. The upstream toolchain ships a
+      # matching LLVM.
+      - name: Install the upstream Rust toolchain
+        if: matrix.fedora == 43
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs -o /tmp/rustup-init.sh
+          sh /tmp/rustup-init.sh -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/cargo" --version
+          "$HOME/.cargo/bin/rustc" -vV | grep -E '^(rustc|LLVM)'
+
       - name: Get version from tag
         id: get_version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
