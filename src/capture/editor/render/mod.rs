@@ -11,6 +11,7 @@ mod background_blur;
 mod effects;
 mod liquid_glass;
 mod noise;
+pub(crate) mod scene_shadow;
 mod text;
 
 pub use arrows::{
@@ -151,6 +152,7 @@ pub fn draw_annotation_action(context: &gtk4::cairo::Context, action: &Annotatio
             style,
             control_points,
             shadow,
+            ..
         } => draw_arrow(
             context,
             *start,
@@ -257,6 +259,7 @@ pub fn draw_draft_action(context: &gtk4::cairo::Context, action: &AnnotationActi
             style,
             control_points,
             shadow,
+            ..
         } => {
             draw_arrow(
                 context,
@@ -369,6 +372,7 @@ pub fn draw_crop_overlay(
     }
 
     let _ = context.save();
+    let _ = context.save();
     context.rectangle(0.0, 0.0, image_width, image_height);
     context.clip();
     context.set_source_rgba(0.0, 0.0, 0.0, 0.48);
@@ -383,16 +387,19 @@ pub fn draw_crop_overlay(
         }
     }
     let _ = context.fill();
+    let _ = context.restore();
 
     context.rectangle(x, y, width, height);
-    context.set_line_width(1.0 / view_scale.max(0.1));
+    let scale = view_scale.max(0.0001);
+    context.set_line_width(3.0 / scale);
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.80);
+    let _ = context.stroke_preserve();
+    context.set_line_width(1.0 / scale);
     context.set_source_rgba(1.0, 1.0, 1.0, 0.92);
     let _ = context.stroke();
 
     let mid_x = x + width / 2.0;
     let mid_y = y + height / 2.0;
-    context.set_source_rgba(1.0, 1.0, 1.0, 0.42);
-    context.set_line_width(1.0 / view_scale.max(0.1));
     for idx in 1..=2 {
         let dx = width * (idx as f64) / 3.0;
         let dy = height * (idx as f64) / 3.0;
@@ -402,9 +409,14 @@ pub fn draw_crop_overlay(
         context.move_to(x, y + dy);
         context.line_to(x + width, y + dy);
     }
+    context.set_source_rgba(0.0, 0.0, 0.0, 0.38);
+    context.set_line_width(2.0 / scale);
+    let _ = context.stroke_preserve();
+    context.set_source_rgba(1.0, 1.0, 1.0, 0.72);
+    context.set_line_width(1.0 / scale);
     let _ = context.stroke();
 
-    let handle = (9.0 / view_scale.max(0.1)).clamp(6.0, 14.0);
+    let handle = 12.0 / scale;
     for (hx, hy) in [
         (x, y),
         (mid_x, y),
@@ -418,8 +430,11 @@ pub fn draw_crop_overlay(
         context.rectangle(hx - handle / 2.0, hy - handle / 2.0, handle, handle);
         context.set_source_rgba(0.08, 0.08, 0.09, 0.9);
         let _ = context.fill_preserve();
+        context.set_source_rgba(0.0, 0.0, 0.0, 0.85);
+        context.set_line_width(3.0 / scale);
+        let _ = context.stroke_preserve();
         context.set_source_rgba(1.0, 1.0, 1.0, if active { 1.0 } else { 0.85 });
-        context.set_line_width(1.2 / view_scale.max(0.1));
+        context.set_line_width(1.2 / scale);
         let _ = context.stroke();
     }
     let _ = context.restore();
@@ -942,7 +957,7 @@ pub fn cairo_argb_to_rgba_image(width: u32, height: u32, stride: usize, data: &[
     let mut out = Vec::with_capacity((width * height * 4) as usize);
     for y in 0..height as usize {
         let row = &data[(y * stride)..(y * stride + (width as usize * 4))];
-        for chunk in row.chunks_exact(4) {
+        for chunk in row.as_chunks::<4>().0 {
             let b = chunk[0] as u32;
             let g = chunk[1] as u32;
             let r = chunk[2] as u32;
@@ -1382,6 +1397,52 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn crop_handles_contrast_with_light_and_dark_and_extend_beyond_image() {
+        for scale in [0.1, 0.5, 1.0, 2.0] {
+            for background in [0.0, 1.0] {
+                let mut surface =
+                    gtk4::cairo::ImageSurface::create(gtk4::cairo::Format::ARgb32, 300, 300)
+                        .expect("surface");
+                let context = gtk4::cairo::Context::new(&surface).expect("context");
+                context.set_source_rgb(background, background, background);
+                context.paint().unwrap();
+                context.translate(40.0, 40.0);
+                context.scale(scale, scale);
+                draw_crop_overlay(
+                    &context,
+                    100.0,
+                    100.0,
+                    Rect {
+                        x: 0,
+                        y: 0,
+                        width: 100,
+                        height: 100,
+                    },
+                    true,
+                    scale,
+                );
+                drop(context);
+                surface.flush();
+                let stride = surface.stride() as usize;
+                let data = surface.data().expect("surface data");
+                let image = cairo_argb_to_rgba_image(300, 300, stride, &data);
+                let pixels = (33..40)
+                    .flat_map(|x| (33..47).map(move |y| (x, y)))
+                    .map(|(x, y)| image.get_pixel(x, y).0[0]);
+                let contrast = if background == 1.0 {
+                    pixels.min().unwrap() < 100
+                } else {
+                    pixels.max().unwrap() > 150
+                };
+                assert!(
+                    contrast,
+                    "handle must contrast outside the image at scale {scale} on {background}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn partial_annotation_is_clipped_to_composition_canvas_bounds() {

@@ -29,6 +29,8 @@ use crate::i18n::{t, tfmt};
 pub(super) const CARD_THUMB_WIDTH: i32 = 160;
 pub(super) const CARD_THUMB_HEIGHT: i32 = 92;
 
+type SimpleAction = Rc<dyn Fn(&CaptureEntry) -> Result<String, String>>;
+
 /// One card widget plus the metadata needed to filter and act on it.
 struct Card {
     /// Thumbnail-request id, echoed back on delivery to find this card.
@@ -612,16 +614,15 @@ fn show_action_popover(
     popover.set_size_request(anchor.width(), -1);
 
     // Simple, synchronous actions report their outcome and close the popover.
-    let wire_simple =
-        |btn: &Button, action: Rc<dyn Fn(&CaptureEntry) -> Result<String, String>>| {
-            let state = Rc::clone(state);
-            let entry = entry.clone();
-            let popover = popover.clone();
-            btn.connect_clicked(move |_| {
-                report(&state, action(&entry));
-                popover.popdown();
-            });
-        };
+    let wire_simple = |btn: &Button, action: SimpleAction| {
+        let state = Rc::clone(state);
+        let entry = entry.clone();
+        let popover = popover.clone();
+        btn.connect_clicked(move |_| {
+            report(&state, action(&entry));
+            popover.popdown();
+        });
+    };
 
     wire_simple(&open_btn, Rc::new(super::actions::open_in_default_app));
     wire_simple(

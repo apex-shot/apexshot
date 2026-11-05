@@ -905,6 +905,8 @@ pub enum AnnotationAction {
         style: ArrowStyle,
         control_points: Option<Vec<Point>>,
         shadow: bool,
+        /// Whether its direction is reversed relative to the original draw gesture.
+        reversed: bool,
     },
     Box {
         rect: Rect,

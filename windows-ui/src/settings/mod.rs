@@ -30,7 +30,7 @@ mod recording;
 #[path = "../../../src/settings/screenshots.rs"]
 mod screenshots;
 #[path = "../../../src/settings/select.rs"]
-mod select;
+pub(crate) mod select;
 pub(crate) mod shell;
 #[path = "../../../src/settings/shortcuts.rs"]
 mod shortcuts;
@@ -296,6 +296,8 @@ fn build_settings_window(app: &Application) {
     // --- NAVIGATION (SIDEBAR) ---
     let sidebar = shell::build_sidebar(text_scale, TITLE_BAR_HEIGHT * ui_scale, &pages, &stack);
     let sidebar_head = sidebar.head.clone();
+    let shell_controls = shell::build_shell_controls();
+    sidebar_head.append(&shell_controls.row);
 
     let user_bar = shell::build_user_chip(&config, text_scale, {
         let stack = stack.clone();
@@ -616,12 +618,17 @@ fn build_settings_window(app: &Application) {
         });
     }
 
-    right_col.append(&toolbar);
-    right_col.append(&shell::build_content_card(
-        &stack,
+    let content_card = shell::build_content_card(&stack, text_scale, &page_heading);
+    shell::wire_sidebar_toggle(
+        &shell_controls,
+        &sidebar.wrapper,
+        &sidebar_head,
+        &toolbar,
+        &content_card,
         text_scale,
-        &page_heading,
-    ));
+    );
+    right_col.append(&toolbar);
+    right_col.append(&content_card);
     content_split.append(&right_col);
     root_box.append(&content_split);
     window.set_child(Some(&window_overlay));

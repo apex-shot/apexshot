@@ -412,6 +412,7 @@ pub fn draw_wrapped_text(
         );
     }
 }
+#[allow(clippy::too_many_arguments)]
 pub(super) fn draw_text_with_shadow(
     context: &gtk4::cairo::Context,
     position: Point,

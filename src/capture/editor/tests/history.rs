@@ -34,6 +34,7 @@ fn undo_redo_stack_behaves_correctly() {
         style: ArrowStyle::Standard,
         control_points: None,
         shadow: false,
+        reversed: false,
     });
     state.push_action(AnnotationAction::Box {
         rect: Rect {

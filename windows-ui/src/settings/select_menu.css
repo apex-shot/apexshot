@@ -1,0 +1,88 @@
+popover.settings-select-popover {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+popover.settings-select-popover > contents {
+    min-width: 0;
+    background-color: #252526;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 10px;
+    padding: 0;
+    box-shadow: none;
+}
+
+.settings-select-menu {
+    padding: 4px;
+}
+
+popover.settings-select-popover > contents button.history-action-btn {
+    min-height: 0;
+    padding: 0 8px;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.90);
+    background-color: transparent;
+    background-image: none;
+    border: none;
+    box-shadow: none;
+    outline: none;
+}
+
+popover.settings-select-popover > contents button.history-action-btn:hover {
+    background-color: rgba(255, 255, 255, 0.07);
+    color: #ffffff;
+}
+
+popover.settings-select-popover > contents button.history-action-btn:active {
+    background-color: rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+}
+
+popover.settings-select-popover > contents button.history-action-btn:focus,
+popover.settings-select-popover > contents button.history-action-btn:focus-visible,
+popover.settings-select-popover > contents button.history-action-btn:focus-within {
+    outline: none;
+    box-shadow: none;
+}
+
+popover.settings-select-popover > contents button.history-action-btn:disabled {
+    color: rgba(255, 255, 255, 0.35);
+}
+
+popover.settings-select-popover > contents .settings-select-option-active {
+    background-color: transparent;
+    color: #ffffff;
+    box-shadow: none;
+    border: none;
+}
+
+popover.settings-select-popover > contents .settings-select-check {
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.85);
+}
+
+.editor-root.editor-theme-light popover.settings-select-popover > contents {
+    background-color: #f2f3f4;
+    border: 1px solid rgba(17, 24, 39, 0.14);
+}
+
+.editor-root.editor-theme-light popover.settings-select-popover > contents button.history-action-btn {
+    color: rgba(29, 33, 41, 0.90);
+}
+
+.editor-root.editor-theme-light popover.settings-select-popover > contents button.history-action-btn:hover {
+    background-color: rgba(17, 24, 39, 0.05);
+    color: #111827;
+}
+
+.editor-root.editor-theme-light popover.settings-select-popover > contents button.history-action-btn:disabled {
+    color: rgba(29, 33, 41, 0.35);
+}
+
+.editor-root.editor-theme-light popover.settings-select-popover > contents .settings-select-option-active,
+.editor-root.editor-theme-light popover.settings-select-popover > contents .settings-select-check {
+    color: #111827;
+}

@@ -26,10 +26,17 @@ pub mod editor {
     #[rustfmt::skip]
     pub mod click_effect;
 
-    /// The cursor model the editor's cursor panel speaks.
-    #[path = "../../../../src/recording/editor/model_parts/cursor_types.rs"]
-    #[rustfmt::skip]
-    pub mod model;
+    /// The cursor and background model types the editors share: cursor
+    /// settings plus the `VideoGradient` spec the annotation types reference.
+    pub mod model {
+        include!("../../src/recording/editor/model_parts/cursor_types.rs");
+        include!("../../src/recording/editor/model_parts/background_types.rs");
+        include!("../../src/recording/editor/model_parts/motion_transform.rs");
+        include!("../../src/recording/editor/model_parts/motion_text.rs");
+        include!("../../src/recording/editor/model_parts/motion_blur.rs");
+        include!("../../src/recording/editor/model_parts/motion_scene.rs");
+        include!("../../src/recording/editor/model_parts/motion_state_impl.rs");
+    }
 
     /// The cursor sprites and previews the Linux editor draws.
     #[path = "../../../../src/recording/editor/cursor_sprite.rs"]

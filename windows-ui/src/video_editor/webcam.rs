@@ -770,7 +770,7 @@ pub(super) fn draw_bubble(
     if radius > 0.01 {
         context.clip_preserve();
     } else {
-        let _ = context.clip();
+        context.clip();
     }
     {
         let _ = context.save();

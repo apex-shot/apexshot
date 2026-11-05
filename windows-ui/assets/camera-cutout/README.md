@@ -1,21 +1,61 @@
 # Camera cutout person segmentation
 
-`selfie_segmentation.onnx` and `selfie_segmentation_landscape.onnx` are the
-person masks behind the Windows editor's camera cutout. The app embeds both
-with `include_bytes!` and runs the one a frame needs on the CPU through Tract's
-pure-Rust ONNX engine, so segmentation needs no network access, Python, or a
-separately installed inference runtime.
+The Windows editor embeds a portrait segmentation network and the general
+selfie segmentation network with `include_bytes!` and runs them on the CPU
+through Tract's pure-Rust ONNX engine. Segmentation needs no network access,
+Python, or a separately installed inference runtime.
 
 ## Selection and preprocessing
 
-A frame wider than it is tall uses the landscape network; a square or portrait
-frame uses the general network. Each frame is letterboxed into the selected
-network with zero bars, so its subject keeps the aspect ratio it has in the
-camera, and the mask is resized back from the letterboxed content area.
+A frame wider than it is tall uses the portrait segmentation network. Its
+192x192 input is resized to that shape, then its mask is resized back to the
+camera's aspect ratio. Square and portrait frames use the general network,
+letterboxed with zero bars. The mask is then upsampled with the original camera
+image as a colour guide. This joint bilateral upsampling keeps
+the soft mask while reducing leakage across contrasting image edges; when the
+small guide has no matching colour, it falls back to bilinear interpolation.
+It cannot correct a background region that the network confidently classifies
+as a person.
 
-The landscape network is the cheaper of the two. A square or portrait track
-pays the general network's higher inference cost; a wide track keeps the
-landscape network's cost.
+For wide tracks, isolated, relatively small regions far from the main subject
+are attenuated when their peak person confidence is low. Large regions, strong
+separate subjects, and details close to the main subject are preserved.
+Weak, detached hands or objects far from the subject can still be suppressed;
+the cleanup is intentionally not applied to square or portrait tracks.
+
+The model's documentation recommends a joint bilateral filter to improve
+segmentation boundaries. Joint bilateral upsampling applies the same idea
+while enlarging a low-resolution result:
+
+- <https://github.com/google/mediapipe/blob/master/docs/solutions/selfie_segmentation.md>
+- <https://johanneskopf.de/publications/jbu/paper/FinalPaper_0185.pdf>
+
+Frames are processed independently, including during seeking. Temporal
+smoothing without motion compensation can leave ghost trails and make a
+seeked preview differ from export; a recurrent video matting model is a
+possible future improvement but requires separate performance and quality
+evaluation:
+
+- <https://openaccess.thecvf.com/content/WACV2022/html/Lin_Robust_High-Resolution_Video_Matting_With_Temporal_Guidance_WACV_2022_paper.html>
+
+## Portrait segmentation model
+
+- **File:** `portrait_segmentation.onnx`, 6,196,913 bytes.
+- **Task:** person/background segmentation for camera footage.
+- **Input:** float32 `1x3x192x192`, NCHW RGB, normalized as `(byte / 128) - 1`.
+- **Output:** float32 `1x192x192x2`, NHWC. The graph includes softmax;
+  channel 1 is the person probability. Applying softmax again is incorrect.
+- **SHA-256:** `6913acd125be55fd08e76072ed464146925223392954c437f3aa700e4da84b17`.
+
+The model originates from the Apache-2.0 PP-HumanSeg project. The bundled ONNX
+conversion was obtained from GitHub user `royshil`, commit
+`8591913a41d07f54722e81844138b271e1184c93`, file
+`data/models/pphumanseg_fp32.onnx`. It is included unchanged. The model's
+published SPDX notice attributes PaddlePaddle Authors, Roy Shilkrot, and Kaito
+Udagawa and specifies Apache-2.0. See `NOTICE` and `LICENSE`.
+
+The older landscape model described below remains in the repository for
+provenance but is not selected by the editor.
 
 ## General model
 

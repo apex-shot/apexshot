@@ -6,21 +6,23 @@
 
 use gtk4::prelude::*;
 use gtk4::Application;
-mod background;
+pub(crate) mod background;
 mod cursor;
-mod custom_fill;
+pub(crate) mod custom_fill;
 mod cutout;
 mod export;
 mod export_card;
+mod export_options;
 mod history;
 mod pixels;
 mod press;
 mod preview;
 mod project;
 mod rounded_clip;
-mod side_panel;
+pub(crate) mod side_panel;
+mod studio;
 mod timeline;
-mod ui_support;
+pub(crate) mod ui_support;
 mod webcam;
 mod window;
 mod zoom;

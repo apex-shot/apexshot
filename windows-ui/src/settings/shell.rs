@@ -4,18 +4,19 @@
 //! the pages scroll inside. The pages themselves stay shared with the Linux
 //! window; this module only owns the frame around them.
 
+use std::cell::Cell;
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, Align, Box as GtkBox, CssProvider, Image, Label, Orientation, PolicyType, ScrolledWindow,
-    Stack, Widget,
+    gdk, Align, Box as GtkBox, Button, CssProvider, Image, Label, Orientation, PolicyType,
+    ScrolledWindow, Stack, Widget,
 };
 
+use super::usage::capitalize;
 use crate::capture::editor::window::icon_names;
 use crate::config::{is_cloud_logged_in, load_config, AppConfig};
 use crate::i18n::t;
-use crate::studio_entitlement::{current_status, StudioStatus};
 
 /// Sidebar width at 100% scale.
 pub const SIDEBAR_WIDTH: f64 = 300.0;
@@ -148,6 +149,72 @@ pub fn build_sidebar(
     Sidebar { wrapper, head }
 }
 
+/// The sidebar toggle and the Beta badge that sit in the window's top-left
+/// corner.
+pub struct ShellControls {
+    pub row: GtkBox,
+    pub toggle: Button,
+}
+
+/// Build the controls above the navigation rows: the button that hides the
+/// column and the badge that marks the build.
+pub fn build_shell_controls() -> ShellControls {
+    let row = GtkBox::new(Orientation::Horizontal, 8);
+    row.add_css_class("settings-shell-controls");
+    row.set_halign(Align::Start);
+    row.set_valign(Align::Center);
+
+    let toggle = Button::from_icon_name("sidebar-show-symbolic");
+    toggle.add_css_class("settings-sidebar-toggle");
+    toggle.set_valign(Align::Center);
+    toggle.set_tooltip_text(Some(&t("Hide sidebar")));
+
+    let badge = Label::new(Some(&t("Beta")));
+    badge.add_css_class("settings-beta-badge");
+    badge.set_valign(Align::Center);
+
+    row.append(&toggle);
+    row.append(&badge);
+    ShellControls { row, toggle }
+}
+
+/// Hide or show the sidebar from its own toggle. The controls ride in the
+/// sidebar's head while the column is open and move into the title bar while
+/// it is closed, so the button never leaves with the column it hides. The
+/// open sidebar supplies the content card's left gutter; with it closed the
+/// card takes that gutter itself, so no edge of the card reaches the window
+/// border.
+pub fn wire_sidebar_toggle(
+    controls: &ShellControls,
+    sidebar: &GtkBox,
+    head: &GtkBox,
+    title_bar: &GtkBox,
+    card: &GtkBox,
+    scale: f64,
+) {
+    let row = controls.row.clone();
+    let sidebar = sidebar.clone();
+    let head = head.clone();
+    let title_bar = title_bar.clone();
+    let card = card.clone();
+    let inset = (CARD_INSET * scale).round() as i32;
+    let hidden = Cell::new(false);
+    controls.toggle.connect_clicked(move |button| {
+        let hide = !hidden.get();
+        hidden.set(hide);
+        row.unparent();
+        if hide {
+            title_bar.prepend(&row);
+            button.set_tooltip_text(Some(&t("Show sidebar")));
+        } else {
+            head.append(&row);
+            button.set_tooltip_text(Some(&t("Hide sidebar")));
+        }
+        card.set_margin_start(if hide { inset } else { 0 });
+        sidebar.set_visible(!hide);
+    });
+}
+
 fn set_selected(row: &GtkBox, icon: &Image, label: &Label, selected: bool) {
     if selected {
         row.add_css_class("settings-nav-item-selected");
@@ -183,14 +250,16 @@ impl UserChip {
         } else {
             t("ApexShot Cloud")
         };
-        // Only a verified licence earns the badge; a build that cannot verify
-        // one shows none rather than claiming the free tier.
-        let badge = match current_status() {
-            StudioStatus::Active { .. } | StudioStatus::UpdateAccessEnded { .. } => t("Studio"),
-            StudioStatus::NotActivated => t("Free"),
-            StudioStatus::ConfigurationUnavailable
-            | StudioStatus::InvalidEntitlement
-            | StudioStatus::DeviceMismatch => String::new(),
+        // The chip represents the Cloud account, so its badge reports that
+        // account's plan tier. Studio is a separate, device-bound licence with
+        // its own Settings page; showing its status here made paid Cloud
+        // accounts read as "Free". An unknown tier earns no badge rather than
+        // claiming a plan the app has not seen.
+        let tier = config.cloud_plan_tier.trim();
+        let badge = if tier.is_empty() {
+            String::new()
+        } else {
+            capitalize(tier)
         };
         let subtitle = if !email.is_empty() && name != email {
             email.to_string()
@@ -349,8 +418,15 @@ pub fn install_css() {
     };
     let scale = crate::platform::ui_scale().min(1.0);
     let px = |value: f64| (value * scale).round() as i32;
+    // The shortcuts page groups its rows under an icon + title row. This
+    // provider outranks the shared stylesheet, so the block spacing those
+    // headings need has to live here: the row carries it and the title keeps
+    // no margins of its own, which is what puts the title's centre on the
+    // icon's centre.
+    let heading_gap = px(28.0);
+    let heading_gap_bottom = px(10.0);
 
-    let css = format!(
+    let mut css = format!(
         "\
          .editor-root {{ background-color:#141414; }}          .editor-root.editor-theme-light {{ background-color:#f6f7fb; }}          .settings-window-controls {{ background-color:transparent; border-bottom:none; }} \n         .editor-root.editor-theme-light .settings-window-controls {{ background-color:transparent; }} \n         .settings-sidebar-wrapper {{ background-color:transparent; border-right:none; min-width:0; }} \
          .settings-sidebar-head {{ padding-left:{}px; }} \
@@ -380,6 +456,8 @@ pub fn install_css() {
          .settings-user-chevron {{ opacity:0.32; }} \
          .settings-content-card {{ border-radius:{}px; border:1px solid rgba(255,255,255,0.06); background-color:rgba(255,255,255,0.028); }} \
          .settings-group-title {{ font-size:{}px; font-weight:600; letter-spacing:0; opacity:0.92; margin-top:28px; margin-bottom:10px; }} \
+         .shortcut-heading-windows {{ margin-top:{heading_gap}px; margin-bottom:{heading_gap_bottom}px; }} \
+         .shortcut-heading-windows .settings-group-title {{ margin-top:0; margin-bottom:0; }} \
          .settings-table-frame {{ border-radius:{}px; background-color:rgba(255,255,255,0.045); }} \
          .settings-table-frame > .settings-table-row {{ border-bottom:1px solid rgba(255,255,255,0.055); }} \
          .settings-table-frame > .settings-table-row:last-child {{ border-bottom:none; }} \
@@ -431,22 +509,7 @@ pub fn install_css() {
          .editor-root.editor-theme-light scale highlight {{ background-color:#ff670d; }} \
          .editor-root.editor-theme-light scale slider {{ background-color:#ffffff;
              border:1px solid rgba(17,24,39,0.16); }} \
-         .settings-page-title {{ font-size:{}px; font-weight:600; letter-spacing:-0.2px; opacity:0.96; }} 
-         .settings-select-popover contents {{ background-color:#252526; border:1px solid rgba(255,255,255,0.10);              border-radius:10px; padding:0; box-shadow:none; }} 
-         .settings-select-menu {{ padding:4px; }} 
-         .settings-select-popover contents .history-action-btn {{ min-height:0; padding:0 8px; border-radius:6px;              font-size:14px; font-weight:500; color:rgba(255,255,255,0.90); background-color:transparent;              border:none; box-shadow:none; }} 
-         .settings-select-popover contents .history-action-btn:hover {{ background-color:rgba(255,255,255,0.07); color:#ffffff; }} 
-         .settings-select-popover contents .history-action-btn:active {{ background-color:rgba(255,255,255,0.10); color:#ffffff; }} 
-         .settings-select-popover contents .history-action-btn:focus,          .settings-select-popover contents .history-action-btn:focus-visible,          .settings-select-popover contents .history-action-btn:focus-within {{ background-color:transparent;              color:rgba(255,255,255,0.90); outline:none; box-shadow:none; }} 
-         .settings-select-popover contents .history-action-btn:hover:focus {{ background-color:rgba(255,255,255,0.07);              color:#ffffff; }} 
-         .settings-select-popover contents .settings-select-option-active {{ background-color:transparent; color:#ffffff;              box-shadow:none; border:none; }} 
-         .settings-select-popover contents .settings-select-check {{ font-size:13px; color:rgba(255,255,255,0.85); }} 
-         .editor-root.editor-theme-light .settings-select-popover contents {{ background-color:#f2f3f4;              border:1px solid rgba(17,24,39,0.14); }} 
-         .editor-root.editor-theme-light .settings-select-popover contents .history-action-btn {{ color:rgba(29,33,41,0.90); }} 
-         .editor-root.editor-theme-light .settings-select-popover contents .history-action-btn:hover {{ background-color:rgba(17,24,39,0.05); color:#111827; }} 
-         .editor-root.editor-theme-light .settings-select-popover contents .history-action-btn:focus,          .editor-root.editor-theme-light .settings-select-popover contents .history-action-btn:focus-visible {{ background-color:transparent; color:rgba(29,33,41,0.90); outline:none; }} 
-         .editor-root.editor-theme-light .settings-select-popover contents .settings-select-option-active {{ color:#111827; }} 
-         .editor-root.editor-theme-light .settings-select-popover contents .settings-select-check {{ color:#111827; }}",
+         .settings-page-title {{ font-size:{}px; font-weight:600; letter-spacing:-0.2px; opacity:0.96; }}",
         px(14.0),
         px(14.0),
         px(8.0),
@@ -492,6 +555,33 @@ pub fn install_css() {
         px(24.0),
     );
 
+    // The sidebar's head controls: the toggle that hides the column and the
+    // build badge beside it. In the title bar the row keeps the same left
+    // inset the sidebar head gives it, so the icon does not jump when the
+    // sidebar closes.
+    css.push_str(&format!(
+        "\
+         .settings-sidebar-toggle {{ min-width:{button}px; min-height:{button}px; padding:0; \
+             border:1px solid transparent; border-radius:{radius}px; background-color:transparent; \
+             background-image:none; box-shadow:none; color:rgba(255,255,255,0.82); }} \
+         .settings-sidebar-toggle:hover {{ background-color:rgba(255,255,255,0.07); color:#ffffff; }} \
+         .settings-sidebar-toggle:active {{ background-color:rgba(255,255,255,0.10); }} \
+         .settings-sidebar-toggle image {{ -gtk-icon-size:{icon}px; }} \
+         .settings-beta-badge {{ font-size:{badge_font}px; font-weight:700; padding:4px {badge_pad}px; \
+             border-radius:999px; background-color:rgba(255,103,13,0.18); color:#ff9250; }} \
+         .settings-window-controls > .settings-shell-controls {{ margin-left:{gap}px; }} \
+         .editor-root.editor-theme-light .settings-sidebar-toggle {{ color:rgba(29,33,41,0.78); }} \
+         .editor-root.editor-theme-light .settings-sidebar-toggle:hover {{ background-color:rgba(17,24,39,0.06); color:#1d2129; }} \
+         .editor-root.editor-theme-light .settings-sidebar-toggle:active {{ background-color:rgba(17,24,39,0.09); }} \
+         .editor-root.editor-theme-light .settings-beta-badge {{ background-color:rgba(214,84,6,0.13); color:#c2500a; }}",
+        button = px(28.0),
+        radius = px(6.0),
+        icon = px(16.0),
+        badge_font = px(12.0),
+        badge_pad = px(10.0),
+        gap = px(14.0),
+    ));
+
     let provider = CssProvider::new();
     provider.load_from_data(&css);
     gtk4::style_context_add_provider_for_display(
@@ -499,11 +589,43 @@ pub fn install_css() {
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
     );
+    install_select_menu_css();
+}
+
+pub(crate) fn install_select_menu_css() {
+    let Some(display) = gdk::Display::default() else {
+        return;
+    };
+    let provider = CssProvider::new();
+    provider.load_from_data(include_str!("select_menu.css"));
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 5,
+    );
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::Cell;
+
+    #[test]
+    fn shared_select_menu_css_is_valid() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let provider = CssProvider::new();
+            let errors = Rc::new(Cell::new(0));
+            provider.connect_parsing_error({
+                let errors = errors.clone();
+                move |_, _, _| errors.set(errors.get() + 1)
+            });
+            provider.load_from_data(include_str!("select_menu.css"));
+            assert_eq!(errors.get(), 0);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
 
     #[test]
     fn account_chip_requires_a_cloud_session() {
@@ -531,6 +653,28 @@ mod tests {
     }
 
     #[test]
+    fn account_chip_badge_reports_the_cloud_plan() {
+        let mut config = AppConfig {
+            cloud_api_token: "token".to_string(),
+            cloud_user_email: "user@example.com".to_string(),
+            ..AppConfig::default()
+        };
+
+        config.cloud_plan_tier = "pro".to_string();
+        assert_eq!(UserChip::from_config(&config).unwrap().badge, "Pro");
+
+        config.cloud_plan_tier = "free".to_string();
+        assert_eq!(UserChip::from_config(&config).unwrap().badge, "Free");
+
+        config.cloud_plan_tier = "  Team ".to_string();
+        assert_eq!(UserChip::from_config(&config).unwrap().badge, "Team");
+
+        // No cached tier is not evidence of a free plan.
+        config.cloud_plan_tier.clear();
+        assert_eq!(UserChip::from_config(&config).unwrap().badge, "");
+    }
+
+    #[test]
     fn account_chip_updates_visibility_after_session_changes() {
         let Some((initial, signed_in, signed_out)) = crate::test_support::with_gtk(|| {
             let bar = GtkBox::new(Orientation::Vertical, 0);
@@ -555,5 +699,59 @@ mod tests {
             return;
         };
         assert_eq!((initial, signed_in, signed_out), (false, true, false));
+    }
+
+    #[test]
+    fn sidebar_toggle_carries_the_controls_into_the_title_bar() {
+        let Some((badge, open, closed, restored)) = crate::test_support::with_gtk(|| {
+            let controls = build_shell_controls();
+            let sidebar = GtkBox::new(Orientation::Vertical, 0);
+            let head = GtkBox::new(Orientation::Horizontal, 0);
+            let title_bar = GtkBox::new(Orientation::Horizontal, 0);
+            let card = GtkBox::new(Orientation::Vertical, 0);
+            head.append(&controls.row);
+            wire_sidebar_toggle(&controls, &sidebar, &head, &title_bar, &card, 1.0);
+
+            let badge = controls
+                .row
+                .last_child()
+                .and_then(|widget| widget.downcast::<Label>().ok())
+                .map(|label| label.text().to_string());
+            let open = (
+                sidebar.is_visible(),
+                head.first_child().is_some(),
+                title_bar.first_child().is_none(),
+                controls.toggle.tooltip_text().map(|text| text.to_string()),
+                card.margin_start(),
+            );
+
+            controls.toggle.emit_clicked();
+            let closed = (
+                sidebar.is_visible(),
+                head.first_child().is_none(),
+                title_bar
+                    .first_child()
+                    .is_some_and(|widget| widget.has_css_class("settings-shell-controls")),
+                controls.toggle.tooltip_text().map(|text| text.to_string()),
+                card.margin_start(),
+            );
+
+            controls.toggle.emit_clicked();
+            let restored = (
+                sidebar.is_visible(),
+                head.first_child().is_some(),
+                title_bar.first_child().is_none(),
+                card.margin_start(),
+            );
+            (badge, open, closed, restored)
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+
+        assert_eq!(badge.as_deref(), Some(t("Beta").as_str()));
+        assert_eq!(open, (true, true, true, Some(t("Hide sidebar")), 0));
+        assert_eq!(closed, (false, true, true, Some(t("Show sidebar")), 8));
+        assert_eq!(restored, (true, true, true, 0));
     }
 }

@@ -22,13 +22,15 @@ const MENU_GAP: i32 = 6;
 /// panel this much narrower on both sides, so the request adds it back.
 const POPOVER_SHADOW_INSET: i32 = 10;
 
+type ChangeListeners = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
+
 #[derive(Clone)]
 pub struct SettingsSelect {
     button: Button,
     ids: Rc<Vec<String>>,
     selected: Rc<Cell<usize>>,
     apply: Rc<dyn Fn(usize, bool)>,
-    on_changed: Rc<RefCell<Vec<Rc<dyn Fn()>>>>,
+    on_changed: ChangeListeners,
 }
 
 impl SettingsSelect {
@@ -53,7 +55,7 @@ impl SettingsSelect {
         let ids = Rc::new(ids);
         let labels = Rc::new(labels);
         let selected = Rc::new(Cell::new(selected_index));
-        let on_changed: Rc<RefCell<Vec<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(Vec::new()));
+        let on_changed: ChangeListeners = Rc::new(RefCell::new(Vec::new()));
 
         let button = Button::new();
         button.add_css_class("settings-select");

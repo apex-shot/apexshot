@@ -7,6 +7,16 @@ use super::super::types::{
 };
 use super::{EditorState, TextInputState};
 
+type SelectedTextActionData = (
+    usize,
+    String,
+    DrawColor,
+    FontSettings,
+    Option<f64>,
+    Point,
+    Option<DrawColor>,
+);
+
 impl EditorState {
     fn existing_text_bounds(&self, skip_index: Option<usize>) -> Vec<Rect> {
         self.actions
@@ -231,8 +241,10 @@ impl EditorState {
             if let Some(b) = bounds {
                 let position = Point {
                     x: b.rect.x as f64,
-                    y: (b.rect.y as f64 + self.text_size + 8.0)
-                        .clamp(self.text_size + 8.0, self.base_image.height() as f64 - 8.0),
+                    y: (b.rect.y as f64 + self.text_size + 8.0).clamp(
+                        self.text_size + 8.0,
+                        (self.base_image.height() as f64 - 8.0).max(self.text_size + 8.0),
+                    ),
                 };
                 let font = FontSettings {
                     family: self.text_font_family.clone(),
@@ -784,17 +796,7 @@ impl EditorState {
         true
     }
 
-    pub fn selected_text_action_data(
-        &self,
-    ) -> Option<(
-        usize,
-        String,
-        DrawColor,
-        FontSettings,
-        Option<f64>,
-        Point,
-        Option<DrawColor>,
-    )> {
+    pub fn selected_text_action_data(&self) -> Option<SelectedTextActionData> {
         let index = self.selected_action_index?;
         let AnnotationAction::Text {
             position,

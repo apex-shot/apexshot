@@ -17,6 +17,8 @@ use crate::i18n::t;
 /// strings stay literal for the catalog coverage checker.
 const THEME_IDS: [&str; 3] = ["system", "light", "dark"];
 
+type ChangeListeners = Rc<RefCell<Vec<Rc<dyn Fn()>>>>;
+
 fn theme_caption(theme_id: &str) -> String {
     match theme_id {
         "light" => t("Light"),
@@ -30,7 +32,7 @@ pub struct ThemePicker {
     root: GtkBox,
     ids: Rc<Vec<String>>,
     selected: Rc<Cell<usize>>,
-    on_changed: Rc<RefCell<Vec<Rc<dyn Fn()>>>>,
+    on_changed: ChangeListeners,
 }
 
 impl ThemePicker {
@@ -43,7 +45,7 @@ impl ThemePicker {
             .unwrap_or(0);
         let ids = Rc::new(ids);
         let selected = Rc::new(Cell::new(selected_index));
-        let on_changed: Rc<RefCell<Vec<Rc<dyn Fn()>>>> = Rc::new(RefCell::new(Vec::new()));
+        let on_changed: ChangeListeners = Rc::new(RefCell::new(Vec::new()));
 
         let root = GtkBox::new(Orientation::Horizontal, 16);
         root.add_css_class("settings-theme-picker");

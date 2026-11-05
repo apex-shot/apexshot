@@ -1,6 +1,73 @@
 //! The slice of `crate::capture` the settings pages need.
 
 pub mod editor {
+    //! The annotation model the Windows image editor shares with the Linux
+    //! editor. Platform-neutral pieces (types, palette, pen weights, the
+    //! Cairo renderer and hit testing) are the same source files the Linux
+    //! binary compiles, attached here through `#[path]`; the session state,
+    //! export and text detection are Windows ports of their Linux siblings.
+
+    /// Annotation document types (actions, tools, colours, transforms).
+    #[path = "../../../../src/capture/editor/types.rs"]
+    #[rustfmt::skip]
+    pub mod types;
+
+    /// The shared drawing palette and value clamps.
+    #[path = "../../../../src/capture/editor/color.rs"]
+    #[rustfmt::skip]
+    pub mod color;
+
+    /// Stroke thickness presets for the pen and highlighter.
+    #[path = "../../../../src/capture/editor/pen_weight.rs"]
+    #[rustfmt::skip]
+    pub mod pen_weight;
+
+    /// Numbering marker styles and sizes.
+    #[path = "../../../../src/capture/editor/numbering_style.rs"]
+    #[rustfmt::skip]
+    pub mod numbering_style;
+
+    /// Annotation hit testing, bounds and geometry editing.
+    #[path = "../../../../src/capture/editor/selection.rs"]
+    #[rustfmt::skip]
+    pub mod selection;
+
+    /// The Cairo annotation renderer every annotation goes through.
+    #[path = "../../../../src/capture/editor/render/mod.rs"]
+    #[rustfmt::skip]
+    pub mod render;
+
+    /// Source upscaling options. The Windows editor ships the enum so the
+    /// shared types compile; the neural path itself is not offered yet.
+    pub mod upscale;
+
+    /// Composition layout types. Only the rectangle the renderer's frame
+    /// border helper needs is ported; Windows uses its own Appearance layout.
+    pub mod composition;
+
+    /// The still image camera pose, shared with the Linux editor.
+    #[path = "../../../../src/capture/editor/image_transform.rs"]
+    #[rustfmt::skip]
+    pub mod image_transform;
+
+    pub(crate) mod glass_render;
+    pub(crate) mod shadow_render;
+    pub(crate) mod style_render;
+    /// Perspective projection for the Windows still-image editor.
+    pub(crate) mod transform_render;
+
+    /// Windows Runtime OCR used by the highlighter's Detect text mode.
+    pub mod ocr;
+
+    /// Text region detection feeding the text-aware highlighter.
+    pub mod text_detect;
+
+    /// The annotation session: document, tools, undo history and effects.
+    pub mod state;
+
+    /// Save/copy paths for the flattened document.
+    pub mod io_ops;
+
     pub mod ui_support {
         /// Resolve the configured theme. "System" follows the Windows app
         /// theme, then the GTK preference.
@@ -54,6 +121,12 @@ pub mod editor {
             None
         }
 
+        pub fn apply_theme_to_gtk() {
+            if let Some(settings) = gtk4::Settings::default() {
+                settings.set_gtk_application_prefer_dark_theme(prefers_dark_glass_theme());
+            }
+        }
+
         #[cfg(test)]
         mod tests {
             use super::apps_use_light_theme;
@@ -69,12 +142,6 @@ pub mod editor {
                     Some(true)
                 );
                 assert_eq!(apps_use_light_theme(""), None);
-            }
-        }
-
-        pub fn apply_theme_to_gtk() {
-            if let Some(settings) = gtk4::Settings::default() {
-                settings.set_gtk_application_prefer_dark_theme(prefers_dark_glass_theme());
             }
         }
     }

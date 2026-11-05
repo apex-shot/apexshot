@@ -1,18 +1,22 @@
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use ed25519_dalek::{Signature, VerifyingKey};
 use serde::Deserialize;
-use std::fs::{self, File, OpenOptions};
+#[cfg(not(target_os = "windows"))]
+use std::fs::File;
+use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use thiserror::Error;
 
 use crate::capture::editor::image_transform::StaticImageTransform;
+#[cfg(not(target_os = "windows"))]
 use crate::recording::editor::model::{VideoEditState, ZoomCameraSettings, ZoomClip};
 
 const KEY_ID: &str = "studio-v1";
 const PRODUCT: &str = "apexshot-studio";
 const MAX_TOKEN_BYTES: usize = 16 * 1024;
+#[cfg(not(target_os = "windows"))]
 const IDENTITY_EPSILON: f64 = 1e-7;
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 #[cfg(test)]
@@ -289,6 +293,7 @@ pub fn capabilities_for_image_export(
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 pub fn capabilities_for_video(state: &VideoEditState) -> StudioCapabilities {
     if state.zoom_hidden {
         return StudioCapabilities::default();
@@ -337,6 +342,7 @@ pub fn capabilities_for_motion_export() -> StudioCapabilities {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
 fn clip_intersects_visible_video(state: &VideoEditState, clip: &ZoomClip) -> bool {
     if clip.hidden || !clip.start.is_finite() || !clip.end.is_finite() || clip.end <= clip.start {
         return false;
@@ -363,6 +369,7 @@ fn clip_intersects_visible_video(state: &VideoEditState, clip: &ZoomClip) -> boo
     })
 }
 
+#[cfg(not(target_os = "windows"))]
 fn has_early_window(state: &VideoEditState, clips: &[&ZoomClip], lead_in_seconds: f64) -> bool {
     let boundaries = state.segment_boundaries();
     clips.iter().any(|clip| {
@@ -644,6 +651,7 @@ fn write_token_atomically(path: &Path, token: &str) -> Result<(), StudioEntitlem
             .map_err(|error| StudioEntitlementError::Storage(error.to_string()))?;
         fs::rename(&temporary, path)
             .map_err(|error| StudioEntitlementError::Storage(error.to_string()))?;
+        #[cfg(not(target_os = "windows"))]
         File::open(parent)
             .and_then(|directory| directory.sync_all())
             .map_err(|error| StudioEntitlementError::Storage(error.to_string()))?;
@@ -757,7 +765,77 @@ fn signed_token_for_test(signing_key: &ed25519_dalek::SigningKey, payload: &[u8]
     .to_string()
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "windows"))]
+mod windows_tests {
+    use super::*;
+
+    fn signed_token(device: Option<&str>, updates_until: i64) -> String {
+        let mut payload = serde_json::json!({
+            "schema_version": 1,
+            "license_id": "550e8400-e29b-41d4-a716-446655440000",
+            "product": PRODUCT,
+            "issued_at": 100,
+            "updates_until": updates_until,
+        });
+        if let Some(device) = device {
+            payload["schema_version"] = 2.into();
+            payload["install_id"] = device.into();
+            payload["licensee"] = "user@example.invalid".into();
+            payload["devices_max"] = 3.into();
+        }
+        signed_token_for_test(
+            &ed25519_dalek::SigningKey::from_bytes(&[7; 32]),
+            payload.to_string().as_bytes(),
+        )
+    }
+
+    #[test]
+    fn activation_checks_signature_device_and_build_coverage() {
+        let path = new_test_entitlement_path();
+        let mut scope = test_entitlement_path_scope(path.clone());
+        scope.cleanup_directory = path.parent().map(Path::to_path_buf);
+        let capabilities = StudioCapabilities {
+            static_presentation: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            ensure_export_allowed(capabilities),
+            Err(StudioEntitlementError::NotActivated)
+        );
+        assert_eq!(
+            activate_token("{}"),
+            Err(StudioEntitlementError::InvalidEntitlement)
+        );
+        let other = signed_token(Some("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), 300);
+        assert_eq!(
+            activate_token(&other),
+            Err(StudioEntitlementError::DeviceMismatch)
+        );
+        let expired = signed_token(None, 150);
+        activate_token(&expired).unwrap();
+        assert_eq!(
+            ensure_export_allowed(capabilities),
+            Err(StudioEntitlementError::UpdateAccessEnded)
+        );
+        let valid = signed_token(device_id().as_deref(), 300);
+        activate_token(&valid).unwrap();
+        assert_eq!(stored_token(), Some(valid));
+        assert!(ensure_export_allowed(capabilities).is_ok());
+        assert!(matches!(current_status(), StudioStatus::Active { .. }));
+    }
+
+    #[test]
+    fn build_configuration_requires_a_valid_public_key_and_timestamp() {
+        let signing = ed25519_dalek::SigningKey::from_bytes(&[7; 32]);
+        let encoded = URL_SAFE_NO_PAD.encode(signing.verifying_key().as_bytes());
+        assert!(parse_build_configuration(Some(&encoded), Some("200")).is_ok());
+        assert!(parse_build_configuration(None, Some("200")).is_err());
+        assert!(parse_build_configuration(Some(&encoded), Some("0")).is_err());
+        assert!(parse_build_configuration(Some("invalid"), Some("200")).is_err());
+    }
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
 mod tests {
     use super::*;
     #[test]

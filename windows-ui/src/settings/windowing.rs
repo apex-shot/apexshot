@@ -285,8 +285,10 @@ pub fn uninstall_autostart_entry() -> anyhow::Result<()> {
 /// The Windows title bar is drawn by the app; drag the window from the custom
 /// handle and toggle maximize on a double click.
 pub fn install_window_drag(handle: &impl IsA<gtk4::Widget>, window: &gtk4::ApplicationWindow) {
+    let handle = handle.upcast_ref::<gtk4::Widget>().clone();
     let drag = gtk4::GestureDrag::new();
     let window_clone = window.clone();
+    let drag_handle = handle.clone();
     drag.connect_drag_begin(move |gesture, start_x, start_y| {
         let Some(surface) = window_clone.surface() else {
             return;
@@ -304,7 +306,24 @@ pub fn install_window_drag(handle: &impl IsA<gtk4::Widget>, window: &gtk4::Appli
             .downcast_ref::<gdk::ButtonEvent>()
             .map(|event| event.button())
             .unwrap_or(1);
-        toplevel.begin_move(&device, button as i32, start_x, start_y, event.time());
+        // `begin_move` takes the press point in surface coordinates, while the
+        // gesture reports it in the handle's own. A handle away from the
+        // window's origin — the sidebar head, the inspector's caption strip —
+        // otherwise grabs the window at the wrong offset and it jumps to the
+        // top-left as soon as the drag begins.
+        let Some(point) = drag_handle.compute_point(
+            &window_clone,
+            &gtk4::graphene::Point::new(start_x as f32, start_y as f32),
+        ) else {
+            return;
+        };
+        toplevel.begin_move(
+            &device,
+            button as i32,
+            point.x() as f64,
+            point.y() as f64,
+            event.time(),
+        );
     });
     handle.add_controller(drag);
 
@@ -349,6 +368,18 @@ mod tests {
         assert!(script.contains(
             r#"shell.Run """C:\Dev Tools\apexshot-capture.exe"" --background", 0, False"#
         ));
+    }
+
+    #[test]
+    fn window_drag_hands_begin_move_surface_coordinates() {
+        let source = include_str!("windowing.rs");
+        let production_source = source.split("#[cfg(test)]").next().unwrap_or(source);
+        assert!(
+            production_source.contains("drag_handle.compute_point(")
+                && !production_source.contains("begin_move(&device, button as i32, start_x"),
+            "begin_move takes surface coordinates; the gesture's handle-relative point \
+             would grab the window at the wrong offset and make it jump"
+        );
     }
 
     #[test]

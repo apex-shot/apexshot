@@ -424,172 +424,23 @@ pub(crate) fn paint_card_shadow(
     position: (f64, f64),
     interactive: bool,
 ) {
-    let blur = blur.max(0.0);
-    let opacity = opacity.clamp(0.0, 1.0);
-    if opacity <= 0.001 {
-        return;
-    }
-
-    // No perspective lift: the corners are already projected, and any extra
-    // offset here would shift the shadow away from the Static canvas position
-    // even when the card is flat. Shadow matches Static; tilt shows through
-    // the projected quad itself.
-    let (base_x, base_y) = position;
-
-    let scene_x = stage.center_x - stage.bounds_w * 0.5;
-    let scene_y = stage.center_y - stage.bounds_h * 0.5;
-    let _ = context.save();
-    context.rectangle(scene_x, scene_y, stage.bounds_w, stage.bounds_h);
-    context.clip();
-
-    if blur < 0.5 {
-        context.set_source_rgba(0.0, 0.0, 0.0, opacity);
-        trace_rounded_quad(
-            context,
+    crate::capture::editor::render::scene_shadow::paint_shadow(
+        context,
+        crate::capture::editor::render::scene_shadow::SceneShadowGeometry {
+            bounds: (
+                stage.center_x - stage.bounds_w * 0.5,
+                stage.center_y - stage.bounds_h * 0.5,
+                stage.bounds_w,
+                stage.bounds_h,
+            ),
             corners,
             radius,
-            (base_x, base_y),
-            1.0,
-            (0.0, 0.0),
-        );
-        context.fill().ok();
-        context.restore().ok();
-        return;
-    }
-
-    // Rasterize one shadow silhouette, then blur its alpha mask. The previous
-    // implementation painted concentric polygon copies, leaving staircase
-    // edges and making blur look like a larger solid shadow.
-    let mask_edge = if interactive { 320.0 } else { 720.0 };
-    let render_scale = (mask_edge / stage.bounds_w.max(stage.bounds_h)).min(1.0);
-    let mask_w = (stage.bounds_w * render_scale).ceil().max(1.0) as i32;
-    let mask_h = (stage.bounds_h * render_scale).ceil().max(1.0) as i32;
-    let blurred_surface = (|| {
-        let mut mask = ImageSurface::create(Format::ARgb32, mask_w, mask_h).ok()?;
-        {
-            let mask_context = Context::new(&mask).ok()?;
-            mask_context.set_source_rgba(0.0, 0.0, 0.0, opacity);
-            trace_rounded_quad(
-                &mask_context,
-                corners,
-                radius,
-                (base_x, base_y),
-                render_scale,
-                (scene_x, scene_y),
-            );
-            mask_context.fill().ok()?;
-        }
-        mask.flush();
-        let stride = mask.stride() as usize;
-        let mut rgba = {
-            let data = mask.data().ok()?;
-            crate::capture::editor::render::cairo_argb_to_rgba_image(
-                mask_w as u32,
-                mask_h as u32,
-                stride,
-                data.as_ref(),
-            )
-        };
-        // CSS-style blur radii are approximately twice Gaussian sigma. A
-        // slightly tighter factor keeps the shadow soft without inflating it.
-        let sigma = (blur * render_scale * 0.4).max(0.1);
-        let mask_rect = crate::capture::editor::types::Rect {
-            x: 0,
-            y: 0,
-            width: mask_w,
-            height: mask_h,
-        };
-        // Three separable box passes closely approximate a Gaussian while
-        // keeping animated preview work linear in the mask dimensions.
-        for _ in 0..3 {
-            crate::capture::editor::render::apply_blur_rect(&mut rgba, mask_rect, sigma, true);
-        }
-        crate::capture::editor::render::rgba_image_to_surface(&rgba)
-    })();
-
-    if let Some(surface) = blurred_surface {
-        context.translate(scene_x, scene_y);
-        context.scale(
-            stage.bounds_w / f64::from(mask_w),
-            stage.bounds_h / f64::from(mask_h),
-        );
-        context.set_source_surface(&surface, 0.0, 0.0).ok();
-        context.source().set_filter(Filter::Bilinear);
-        context.paint().ok();
-    }
-    context.restore().ok();
-}
-
-/// Trace the card silhouette as a rounded quad so the shadow follows the
-/// card's border radius (`rounded_rect_path` uses a superellipse; a cubic per
-/// corner is visually identical once the shadow is blurred). Works for the
-/// flat static rect and the projected Motion quad: each corner is cut back by
-/// `radius` along its two edges and bridged with a curve through the vertex.
-/// Points are offset, scaled into mask space, and shifted by the scene origin.
-fn trace_rounded_quad(
-    context: &Context,
-    corners: [(f64, f64); 4],
-    radius: f64,
-    offset: (f64, f64),
-    scale: f64,
-    origin: (f64, f64),
-) {
-    let points: [(f64, f64); 4] = corners.map(|(x, y)| {
-        (
-            (x + offset.0 - origin.0) * scale,
-            (y + offset.1 - origin.1) * scale,
-        )
-    });
-    // Each corner consumes `radius` on both of its edges, so the shortest edge
-    // bounds it: half an edge keeps neighbouring corner arcs from overlapping.
-    let mut shortest = f64::INFINITY;
-    for index in 0..4 {
-        let a = points[index];
-        let b = points[(index + 1) % 4];
-        shortest = shortest.min((b.0 - a.0).hypot(b.1 - a.1));
-    }
-    let radius = (radius * scale).clamp(0.0, shortest / 2.0);
-    if radius <= 0.5 {
-        context.move_to(points[0].0, points[0].1);
-        for point in &points[1..] {
-            context.line_to(point.0, point.1);
-        }
-        context.close_path();
-        return;
-    }
-    let direction = |a: (f64, f64), b: (f64, f64)| {
-        let dx = b.0 - a.0;
-        let dy = b.1 - a.1;
-        let length = (dx * dx + dy * dy).sqrt().max(1e-6);
-        (dx / length, dy / length)
-    };
-    let mut first = true;
-    for index in 0..4 {
-        let previous = points[(index + 3) % 4];
-        let corner = points[index];
-        let next = points[(index + 1) % 4];
-        let incoming = direction(previous, corner);
-        let outgoing = direction(corner, next);
-        let start = (corner.0 - incoming.0 * radius, corner.1 - incoming.1 * radius);
-        let end = (corner.0 + outgoing.0 * radius, corner.1 + outgoing.1 * radius);
-        if first {
-            context.move_to(start.0, start.1);
-            first = false;
-        } else {
-            context.line_to(start.0, start.1);
-        }
-        // Cubic equivalent of a quadratic through the corner vertex.
-        let control_1 = (
-            start.0 + (corner.0 - start.0) * (2.0 / 3.0),
-            start.1 + (corner.1 - start.1) * (2.0 / 3.0),
-        );
-        let control_2 = (
-            end.0 + (corner.0 - end.0) * (2.0 / 3.0),
-            end.1 + (corner.1 - end.1) * (2.0 / 3.0),
-        );
-        context.curve_to(control_1.0, control_1.1, control_2.0, control_2.1, end.0, end.1);
-    }
-    context.close_path();
+            opacity,
+            blur,
+            offset: position,
+        },
+        interactive,
+    );
 }
 
 fn paint_perspective_card(

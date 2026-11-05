@@ -178,7 +178,7 @@ impl PreviewRipple {
             let source_y = view_y + (y as f64 + 0.5) * step_y;
             let baseline_y = (y as f64 + 0.5 - capture_y) * texture_scale_y - 0.5;
             let render_span = |start: usize, span: &mut [u8]| {
-                for (offset, pixel) in span.chunks_exact_mut(4).enumerate() {
+                for (offset, pixel) in span.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                     let x = start + offset;
                     let source_x = view_x + (x as f64 + 0.5) * step_x;
                     let (mut pull_x, mut pull_y) = (0.0, 0.0);
@@ -617,8 +617,10 @@ mod tests {
             let output =
                 effect.warp_pixels(&pixels, size, (-10.0, -10.0, 220.0, 140.0), output_size);
             assert!(output
-                .chunks_exact(4)
-                .all(|pixel| pixel == [12, 34, 56, 96]));
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == [12, 34, 56, 96]));
         }
     }
 

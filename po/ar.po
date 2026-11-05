@@ -3939,3 +3939,284 @@ msgstr "عند الإيقاف، يستخدم الإخراج مقياس عرض ا
 msgid ""
 "When off, recordings remain in the temporary folder for the result card and editor."
 msgstr "عند الإيقاف، تبقى التسجيلات في المجلد المؤقت لبطاقة النتيجة والمحرر."
+
+msgid "Beta"
+msgstr "بيتا"
+
+msgid "Hide sidebar"
+msgstr "إخفاء الشريط الجانبي"
+
+msgid "Show sidebar"
+msgstr "إظهار الشريط الجانبي"
+
+msgid ""
+"10:21 image aspect ratio; long pins may be cropped in feeds. 2:3 is recommended."
+msgstr "نسبة صورة 10:21؛ قد تُقتطع المثبتات الطويلة في الخلاصات. يُنصح بـ 2:3."
+
+msgid ""
+"16:9 image aspect ratio; banners need at least 2048 x 1152 pixels and may be cropped on some devices."
+msgstr ""
+"نسبة صورة 16:9؛ تحتاج الأغلفة إلى 2048 x 1152 بكسل على الأقل وقد تُقتطع على بعض الأجهزة."
+
+msgid "Activation"
+msgstr "التفعيل"
+
+msgid "Add a background and padding to see the shadow."
+msgstr "أضف خلفية وحشوًا لرؤية الظل."
+
+msgid ""
+"Add arrows, text, and blur, then set the background, padding, and shadow before you export."
+msgstr "أضف أسهمًا ونصًا وتمويهًا، ثم اضبط الخلفية والحشو والظل قبل التصدير."
+
+msgid "Annotate and style every capture."
+msgstr "علّق على كل لقطة ونسّقها."
+
+msgid "Annotation color"
+msgstr "لون التعليق"
+
+msgid "Automatic"
+msgstr "تلقائي"
+
+msgid "Available"
+msgstr "متاح"
+
+msgid "Back to editor"
+msgstr "العودة إلى المحرر"
+
+msgid "Capture your screen, mark it up, and export it."
+msgstr "التقط شاشتك وعلّق عليها وصدّرها."
+
+msgid "Change any of this later."
+msgstr "يمكنك تغيير أي من هذا لاحقًا."
+
+msgid "Choose video export options"
+msgstr "اختر خيارات تصدير الفيديو"
+
+msgid "Click a Motion clip, or click the track to add a move."
+msgstr "انقر على مقطع Motion، أو انقر على المسار لإضافة حركة."
+
+msgid "Click or drag to place the watermark; double-click to center it"
+msgstr "انقر أو اسحب لوضع العلامة المائية؛ انقر نقرًا مزدوجًا لتوسيطها"
+
+msgid "Click or drag to place the zoom anchor; double-click to recenter"
+msgstr "انقر أو اسحب لوضع مرساة التكبير؛ انقر نقرًا مزدوجًا لإعادة التمركز"
+
+msgid "Click or drag to position the camera; double-click to recenter"
+msgstr "انقر أو اسحب لتحديد موضع الكاميرا؛ انقر نقرًا مزدوجًا لإعادة التمركز"
+
+msgid "Clipboard is unavailable."
+msgstr "الحافظة غير متاحة."
+
+msgid "Close custom color"
+msgstr "إغلاق اللون المخصص"
+
+msgid "Close export options"
+msgstr "إغلاق خيارات التصدير"
+
+msgid "Complete"
+msgstr "اكتمل"
+
+msgid "Could not open background image."
+msgstr "تعذر فتح صورة الخلفية."
+
+msgid "Couldn't open a browser: {error}. Use Copy link and open it yourself."
+msgstr "تعذر فتح متصفح: {error}. استخدم «نسخ الرابط» وافتحه بنفسك."
+
+msgid "Custom color"
+msgstr "لون مخصص"
+
+msgid "Drag to choose what the camera shows"
+msgstr "اسحب لتحديد ما تعرضه الكاميرا"
+
+msgid "Drop a PNG, JPEG, or WebP here, or choose one from disk."
+msgstr "أفلت ملف PNG أو JPEG أو WebP هنا، أو اختر واحدًا من القرص."
+
+msgid "Estimated output size"
+msgstr "حجم الإخراج التقديري"
+
+msgid "Estimating…"
+msgstr "جارٍ التقدير…"
+
+msgid "Export a file and copy it to the clipboard for pasting into other apps."
+msgstr "صدّر ملفًا وانسخه إلى الحافظة للصقه في تطبيقات أخرى."
+
+msgid "Export time depends on your hardware and effects."
+msgstr "يعتمد وقت التصدير على عتادك والتأثيرات."
+
+msgid "Export to file"
+msgstr "التصدير إلى ملف"
+
+msgid "Exported successfully"
+msgstr "تم التصدير بنجاح"
+
+msgid "Exporting video"
+msgstr "جارٍ تصدير الفيديو"
+
+msgid "File copied to clipboard. Ready to paste into other apps."
+msgstr "تم نسخ الملف إلى الحافظة. جاهز للصق في تطبيقات أخرى."
+
+msgid "Finishing…"
+msgstr "جارٍ الإنهاء…"
+
+msgid "Fit to window"
+msgstr "ملاءمة النافذة"
+
+msgid "Free up space or raise your allowance to keep uploading."
+msgstr "حرّر مساحة أو ارفع حدّك لمتابعة الرفع."
+
+msgid "Here’s where to find everything."
+msgstr "من هنا تجد كل شيء."
+
+msgid "Image editor preview with an annotated capture and the Appearance panel"
+msgstr "معاينة محرر الصور مع لقطة معلّق عليها ولوحة المظهر"
+
+msgid "Last checked"
+msgstr "آخر تحقق"
+
+msgid "Monthly, UTC"
+msgstr "شهريًا، UTC"
+
+msgid "Move the light to direct the shadow"
+msgstr "حرّك الضوء لتوجيه الظل"
+
+msgid "Neural upscaling is not available in the Windows image editor yet"
+msgstr "التحسين العصبي للدقة غير متاح بعد في محرر صور Windows"
+
+msgid "No account needed."
+msgstr "لا حاجة إلى حساب."
+
+msgid "Not set"
+msgstr "غير محدد"
+
+msgid "Obfuscate intensity"
+msgstr "شدة الطمس"
+
+msgid "One shortcut away."
+msgstr "على بُعد اختصار واحد."
+
+msgid "Open ApexShot"
+msgstr "فتح ApexShot"
+
+msgid "Open Image"
+msgstr "فتح صورة"
+
+msgid "Open an image to annotate"
+msgstr "افتح صورة للتعليق عليها"
+
+msgid "Open image"
+msgstr "فتح صورة"
+
+msgid "Opening {name}…"
+msgstr "جارٍ فتح {name}…"
+
+msgid ""
+"Optional. Link your account now so it’s ready when uploads arrive on Windows."
+msgstr "اختياري. اربط حسابك الآن ليكون جاهزًا عند وصول الرفع إلى Windows."
+
+msgid "Preparing export…"
+msgstr "جارٍ تجهيز التصدير…"
+
+msgid "Remove the watermark"
+msgstr "إزالة العلامة المائية"
+
+msgid "Resets"
+msgstr "التجديد"
+
+msgid "Retention"
+msgstr "الاحتفاظ"
+
+msgid "Reverse"
+msgstr "عكس"
+
+msgid "Right-click for your capture menu."
+msgstr "انقر باليمين لفتح قائمة الالتقاط."
+
+msgid "Save annotated image"
+msgstr "حفظ الصورة المعلّق عليها"
+
+msgid "Save the annotated image"
+msgstr "حفظ الصورة المعلّق عليها"
+
+msgid "Select image"
+msgstr "اختيار صورة"
+
+msgid "Shortcuts work while ApexShot runs in the background."
+msgstr "تعمل الاختصارات أثناء تشغيل ApexShot في الخلفية."
+
+msgid "Start a capture from your keyboard or the tray menu."
+msgstr "ابدأ الالتقاط من لوحة المفاتيح أو قائمة الشريط."
+
+msgid "Status"
+msgstr "الحالة"
+
+msgid "Stop export"
+msgstr "إيقاف التصدير"
+
+msgid "Stopping export…"
+msgstr "جارٍ إيقاف التصدير…"
+
+msgid "Storage is full"
+msgstr "التخزين ممتلئ"
+
+msgid "Storage is nearly full"
+msgstr "التخزين على وشك الامتلاء"
+
+msgid "Storage is within your allowance"
+msgstr "التخزين ضمن حدّك المسموح"
+
+msgid "Storage used"
+msgstr "التخزين المستخدم"
+
+msgid "Stroke"
+msgstr "الخط"
+
+msgid "Switch to Motion: not available in the Windows image editor yet"
+msgstr "التبديل إلى Motion: غير متاح بعد في محرر صور Windows"
+
+msgid "That file is not a supported image. Choose a PNG, JPEG, or WebP."
+msgstr "هذا الملف ليس صورة مدعومة. اختر ملف PNG أو JPEG أو WebP."
+
+msgid "The image could not be read."
+msgstr "تعذرت قراءة الصورة."
+
+msgid "The image is empty."
+msgstr "الصورة فارغة."
+
+msgid "They reset monthly in UTC."
+msgstr "تتجدد شهريًا بتوقيت UTC."
+
+msgid "This month's uploads are used up"
+msgstr "استُنفدت رفوعات هذا الشهر"
+
+msgid "Video exported, but could not copy to clipboard:"
+msgstr "تم تصدير الفيديو، لكن تعذر النسخ إلى الحافظة:"
+
+msgid "Wait for the background image to finish loading."
+msgstr "انتظر اكتمال تحميل صورة الخلفية."
+
+msgid "Your shortcuts work while ApexShot runs."
+msgstr "تعمل اختصاراتك أثناء تشغيل ApexShot."
+
+msgid "You’re all set."
+msgstr "أصبحت جاهزًا."
+
+msgid "left"
+msgstr "متبقية"
+
+msgid "of {limit} allowance"
+msgstr "من أصل {limit}"
+
+msgid "of {limit} this month"
+msgstr "من {limit} هذا الشهر"
+
+msgid "{current} / {total}"
+msgstr "{current} / {total}"
+
+msgid "{days} days"
+msgstr "{days} يومًا"
+
+msgid "{remaining} remains before your allowance is reached."
+msgstr "يتبقى {remaining} قبل الوصول إلى حدّك."
+
+msgid "{remaining} remains of your {limit} allowance."
+msgstr "يتبقى {remaining} من حدّك البالغ {limit}."

@@ -593,11 +593,9 @@ fn supersampled_bitmap(theme: CursorTheme, kind: &str) -> RgbaImage {
         let [r, g, b, a] = pixel.0;
         let alpha = u16::from(a);
         let unpremultiply = |channel: u8| {
-            if alpha == 0 {
-                0
-            } else {
-                ((u16::from(channel) * 255) / alpha).min(255) as u8
-            }
+            (u16::from(channel) * 255)
+                .checked_div(alpha)
+                .map_or(0, |value| value.min(255) as u8)
         };
         out.put_pixel(
             x,
@@ -608,6 +606,7 @@ fn supersampled_bitmap(theme: CursorTheme, kind: &str) -> RgbaImage {
     out
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_sprite(
     cr: &Context,
     surface: &ImageSurface,

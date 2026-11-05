@@ -7,7 +7,7 @@ use gtk4::{Align, Box as GtkBox, Button, Entry, Expander, Label, Orientation};
 
 pub fn build_studio_section() -> GtkBox {
     let status_snapshot = current_status();
-    let section = GtkBox::new(Orientation::Vertical, 12);
+    let section = GtkBox::new(Orientation::Vertical, 0);
     section.set_halign(Align::Fill);
     section.set_valign(Align::Start);
     section.set_hexpand(true);
@@ -24,51 +24,51 @@ pub fn build_studio_section() -> GtkBox {
     intro.set_margin_bottom(4);
     section.append(&intro);
 
-    let frame = GtkBox::new(Orientation::Vertical, 0);
-    frame.add_css_class("settings-table-frame");
-    frame.set_margin_start(4);
-    frame.set_margin_end(4);
-
-    let status_row = GtkBox::new(Orientation::Vertical, 4);
+    // --- Status ---
+    section.append(&group_title(&t("Status")));
+    let status_frame = table_frame();
+    let status_row = GtkBox::new(Orientation::Horizontal, 12);
     status_row.add_css_class("settings-table-row");
-    let status_title = Label::new(Some(&t("Studio status")));
-    status_title.add_css_class("settings-group-title");
-    status_title.set_xalign(0.0);
-    status_title.set_hexpand(true);
-    let status_heading = GtkBox::new(Orientation::Horizontal, 8);
-    status_heading.append(&status_title);
+    status_row.set_hexpand(true);
+
+    let status_text = GtkBox::new(Orientation::Vertical, 4);
+    status_text.set_hexpand(true);
+    status_text.set_valign(Align::Center);
     if matches!(status_snapshot, StudioStatus::Active { .. }) {
         let pill = Label::new(Some(&t("Active")));
         pill.add_css_class("settings-status-pill");
-        pill.set_valign(Align::Center);
-        status_heading.append(&pill);
+        pill.set_halign(Align::Start);
+        status_text.append(&pill);
     }
     let status = Label::new(Some(&status_snapshot.message()));
-    status.add_css_class("dim-label");
+    status.add_css_class("settings-sub-option");
     status.set_wrap(true);
     status.set_xalign(0.0);
-    status_row.append(&status_heading);
-    status_row.append(&status);
-    frame.append(&status_row);
+    status_text.append(&status);
+    status_row.append(&status_text);
+
+    // The action that belongs with the status sits at the row's right edge,
+    // the same place the Cloud page keeps its Connect button.
+    let status_actions = GtkBox::new(Orientation::Horizontal, 8);
+    status_actions.set_valign(Align::Center);
+    status_row.append(&status_actions);
+    status_frame.append(&status_row);
 
     match status_snapshot {
         StudioStatus::ConfigurationUnavailable => {
-            let availability_row = GtkBox::new(Orientation::Vertical, 8);
-            availability_row.add_css_class("settings-table-row");
             let guidance = Label::new(Some(&t(
                 "This build can't verify Studio licenses. Check the official Studio page for build availability or license recovery; buying a license alone can't enable this build.",
             )));
             guidance.add_css_class("dim-label");
             guidance.set_wrap(true);
             guidance.set_xalign(0.0);
-            let action = Button::with_label(&studio_page_action_label(status_snapshot));
-            action.set_halign(Align::Start);
-            action.connect_clicked(|_| {
+            status_text.append(&guidance);
+
+            let studio_page = Button::with_label(&studio_page_action_label(status_snapshot));
+            studio_page.connect_clicked(|_| {
                 let _ = crate::utils::open::open_url("https://apexshot.org/studio");
             });
-            availability_row.append(&guidance);
-            availability_row.append(&action);
-            frame.append(&availability_row);
+            status_actions.append(&studio_page);
         }
         StudioStatus::Active { .. } | StudioStatus::UpdateAccessEnded { .. } => {
             // A saved license that already works: keep the status and the way to
@@ -76,35 +76,9 @@ pub fn build_studio_section() -> GtkBox {
             // disclosure so an activated installation doesn't read like a form
             // that still needs filling in.
             let studio_page = Button::with_label(&studio_page_action_label(status_snapshot));
-            studio_page.set_halign(Align::Start);
-
-            let replacement = Expander::new(Some(&t("Replace license")));
-            replacement.set_expanded(false);
-            let controls = build_activation_controls(&status, &studio_page, {
-                let replacement = replacement.clone();
-                move || replacement.set_expanded(false)
-            });
-
-            let replacement_body = GtkBox::new(Orientation::Vertical, 8);
-            replacement_body.add_css_class("settings-table-row");
-            replacement_body.append(&controls.hint);
-            replacement_body.append(&controls.token);
-            replacement_body.append(&controls.activate);
-            replacement_body.append(&controls.feedback);
-            replacement.set_child(Some(&replacement_body));
-
-            let replace_row = GtkBox::new(Orientation::Vertical, 8);
-            replace_row.add_css_class("settings-table-row");
-            replace_row.append(&replacement);
-            frame.append(&replace_row);
-
-            let manage_row = GtkBox::new(Orientation::Horizontal, 8);
-            manage_row.add_css_class("settings-table-row");
-            manage_row.set_hexpand(true);
-            manage_row.append(&studio_page);
+            status_actions.append(&studio_page);
             if crate::studio_entitlement::stored_token().is_some() {
                 let copy = Button::with_label(&t("Copy license"));
-                copy.set_hexpand(false);
                 copy.connect_clicked(|button| {
                     let Some(token) = crate::studio_entitlement::stored_token() else {
                         return;
@@ -118,39 +92,88 @@ pub fn build_studio_section() -> GtkBox {
                         );
                     }
                 });
-                // Keep the two actions at opposite ends of the row instead of
-                // stacking them together in the corner.
-                let gap = GtkBox::new(Orientation::Horizontal, 0);
-                gap.set_hexpand(true);
-                manage_row.append(&gap);
-                manage_row.append(&copy);
+                status_actions.append(&copy);
             }
-            frame.append(&manage_row);
-            frame.append(&build_device_id_row());
+
+            let replacement = Expander::new(Some(&t("Replace license")));
+            replacement.set_expanded(false);
+            let controls = build_activation_controls(&status, &studio_page, {
+                let replacement = replacement.clone();
+                move || replacement.set_expanded(false)
+            });
+
+            let replacement_body = GtkBox::new(Orientation::Vertical, 8);
+            replacement_body.set_margin_top(8);
+            replacement_body.append(&controls.hint);
+            replacement_body.append(&controls.token);
+            replacement_body.append(&controls.activate);
+            replacement_body.append(&controls.feedback);
+            replacement.set_child(Some(&replacement_body));
+
+            let replace_row = GtkBox::new(Orientation::Vertical, 0);
+            replace_row.add_css_class("settings-table-row");
+            replace_row.append(&replacement);
+            status_frame.append(&replace_row);
         }
+        StudioStatus::NotActivated
+        | StudioStatus::InvalidEntitlement
+        | StudioStatus::DeviceMismatch => {}
+    }
+    section.append(&status_frame);
+
+    match status_snapshot {
         StudioStatus::NotActivated
         | StudioStatus::InvalidEntitlement
         | StudioStatus::DeviceMismatch => {
             let studio_page = Button::with_label(&studio_page_action_label(status_snapshot));
             let controls = build_activation_controls(&status, &studio_page, || {});
 
+            section.append(&group_title(&t("Activation")));
+            let activation_frame = table_frame();
             let activation_row = GtkBox::new(Orientation::Vertical, 8);
             activation_row.add_css_class("settings-table-row");
             let actions = GtkBox::new(Orientation::Horizontal, 8);
-            actions.set_halign(Align::Start);
-            actions.append(&controls.activate);
             actions.append(&studio_page);
+            // The purchase link keeps the left; the form's submit rides the
+            // row's far edge instead of bunching against it.
+            let gap = GtkBox::new(Orientation::Horizontal, 0);
+            gap.set_hexpand(true);
+            actions.append(&gap);
+            actions.append(&controls.activate);
             activation_row.append(&controls.hint);
             activation_row.append(&controls.token);
             activation_row.append(&actions);
             activation_row.append(&controls.feedback);
-            frame.append(&activation_row);
-            frame.append(&build_device_id_row());
+            activation_frame.append(&activation_row);
+            section.append(&activation_frame);
         }
+        _ => {}
     }
 
-    section.append(&frame);
+    if !matches!(status_snapshot, StudioStatus::ConfigurationUnavailable) {
+        section.append(&group_title(&t("Device ID")));
+        let device_frame = table_frame();
+        device_frame.append(&build_device_id_row());
+        section.append(&device_frame);
+    }
+
     section
+}
+
+fn group_title(text: &str) -> Label {
+    let title = Label::new(Some(text));
+    title.add_css_class("settings-group-title");
+    title.set_xalign(0.0);
+    title.set_halign(Align::Start);
+    title
+}
+
+fn table_frame() -> GtkBox {
+    let frame = GtkBox::new(Orientation::Vertical, 0);
+    frame.add_css_class("settings-table-frame");
+    frame.set_margin_start(4);
+    frame.set_margin_end(4);
+    frame
 }
 
 struct ActivationControls {
@@ -182,9 +205,7 @@ fn build_activation_controls(
     feedback.set_xalign(0.0);
 
     let activate = Button::with_label(&t("Activate"));
-    // The themed primary rules are compound: both classes are required.
-    activate.add_css_class("settings-save-btn");
-    activate.add_css_class("settings-save-btn-ready");
+    activate.add_css_class("settings-primary-btn");
 
     activate.connect_clicked({
         let token = token.clone();
@@ -237,26 +258,24 @@ fn build_activation_controls(
 /// The value a buyer pastes on apexshot.org/studio when claiming a licence for
 /// this machine. Shown even before activation, because it is needed first.
 fn build_device_id_row() -> GtkBox {
-    let row = GtkBox::new(Orientation::Vertical, 4);
+    let row = GtkBox::new(Orientation::Horizontal, 12);
     row.add_css_class("settings-table-row");
+    row.set_hexpand(true);
 
-    let heading = GtkBox::new(Orientation::Horizontal, 8);
-    let title = Label::new(Some(&t("Device ID")));
-    title.add_css_class("settings-group-title");
-    title.set_xalign(0.0);
-    title.set_hexpand(true);
-    let copy = Button::with_label(&t("Copy"));
-    copy.set_hexpand(false);
-    heading.append(&title);
-    heading.append(&copy);
+    let text = GtkBox::new(Orientation::Vertical, 3);
+    text.set_hexpand(true);
+    text.set_valign(Align::Center);
 
+    let device_id = crate::studio_entitlement::device_id();
     let value = Label::new(Some(
-        &crate::studio_entitlement::device_id().unwrap_or_else(|| t("Unavailable on this system")),
+        &device_id
+            .clone()
+            .unwrap_or_else(|| t("Unavailable on this system")),
     ));
-    value.add_css_class("dim-label");
+    value.add_css_class("settings-mono-value");
     value.set_selectable(true);
     value.set_xalign(0.0);
-    value.set_wrap(true);
+    text.append(&value);
 
     let hint = Label::new(Some(&t(
         "Paste this at apexshot.org/studio to claim a Studio licence for this device.",
@@ -264,8 +283,11 @@ fn build_device_id_row() -> GtkBox {
     hint.add_css_class("dim-label");
     hint.set_xalign(0.0);
     hint.set_wrap(true);
+    text.append(&hint);
 
-    let device_id = crate::studio_entitlement::device_id();
+    let copy = Button::with_label(&t("Copy"));
+    copy.set_valign(Align::Center);
+    copy.set_sensitive(device_id.is_some());
     copy.connect_clicked(move |button| {
         let Some(device_id) = device_id.as_deref() else {
             return;
@@ -279,9 +301,8 @@ fn build_device_id_row() -> GtkBox {
         }
     });
 
-    row.append(&heading);
-    row.append(&value);
-    row.append(&hint);
+    row.append(&text);
+    row.append(&copy);
     row
 }
 

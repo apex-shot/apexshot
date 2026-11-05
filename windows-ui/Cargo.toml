@@ -22,6 +22,10 @@ path = "src/bin/apexshot-history.rs"
 name = "apexshot-video-editor"
 path = "src/bin/apexshot-video-editor.rs"
 
+[[bin]]
+name = "apexshot-image-editor"
+path = "src/bin/apexshot-image-editor.rs"
+
 [dependencies]
 gtk4 = { version = "0.10", features = ["v4_10"] }
 relm4-icons = "0.10.1"
@@ -29,6 +33,9 @@ serde = { version = "1.0", features = ["derive"] }
 serde_yml = "0.0.12"
 serde_json = "1.0"
 sha2 = "0.10"
+base64 = "0.22.1"
+ed25519-dalek = "2.2.0"
+getrandom = "0.2"
 ureq = { version = "2.10", features = ["json"] }
 async-channel = "2.5.0"
 anyhow = "1.0"
@@ -36,7 +43,9 @@ dirs = "6.0"
 image = { version = "0.24.9", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 chrono = "0.4"
 rayon = "1.10"
+thiserror = "2.0"
 tract-onnx = { version = "0.23.9", default-features = false }
+unicode-segmentation = "1.13"
 
 [target.'cfg(windows)'.dependencies]
 pango = { version = "0.21", features = ["v1_56"] }
@@ -45,6 +54,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_Security_Authentication_Identity",
+    "Win32_Storage_FileSystem",
     "Win32_System_Registry",
     "Win32_UI_HiDpi",
     "Win32_UI_Shell",

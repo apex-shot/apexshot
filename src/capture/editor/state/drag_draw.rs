@@ -4,6 +4,19 @@ use super::super::types::{AnnotationAction, ArrowStyle, Point, Rect, Tool};
 use super::{expand_rgba_image, simplify_drag_path, EditorState};
 use std::sync::Arc;
 
+/// Smallest box or circle a drag may commit, in image pixels. A click that
+/// jitters a pixel or two would otherwise leave a dot behind.
+const MIN_SHAPE_DRAG_SIZE: f64 = 4.0;
+
+/// The box/circle a drag covers, or `None` while it is still too small to be
+/// a deliberate shape. Drafts and commits share this so a dot never appears.
+fn shape_rect(start: Point, end: Point) -> Option<Rect> {
+    Rect::from_points(start, end).filter(|rect| {
+        f64::from(rect.width) >= MIN_SHAPE_DRAG_SIZE
+            && f64::from(rect.height) >= MIN_SHAPE_DRAG_SIZE
+    })
+}
+
 impl EditorState {
     /// Thickness the highlighter paints with: the size locked at drag start, else
     /// the toolbar slider. Text-aware strokes lock the detected text height instead.
@@ -144,7 +157,7 @@ impl EditorState {
                     None
                 }
             }
-            Tool::Circle => Rect::from_points(start, end).map(|rect| AnnotationAction::Circle {
+            Tool::Circle => shape_rect(start, end).map(|rect| AnnotationAction::Circle {
                 rect,
                 color,
                 stroke_size,
@@ -171,10 +184,11 @@ impl EditorState {
                         style: self.arrow_style,
                         control_points: None,
                         shadow: self.draw_object_shadow,
+                        reversed: self.inverse_arrow_direction,
                     })
                 }
             }
-            Tool::Box => Rect::from_points(start, end).map(|rect| AnnotationAction::Box {
+            Tool::Box => shape_rect(start, end).map(|rect| AnnotationAction::Box {
                 rect,
                 color,
                 stroke_size,
@@ -269,7 +283,7 @@ impl EditorState {
             Tool::Background => None,
             Tool::Pen => None,
             Tool::Highlighter => None,
-            Tool::Circle => Rect::from_points(start, end).map(|rect| AnnotationAction::Circle {
+            Tool::Circle => shape_rect(start, end).map(|rect| AnnotationAction::Circle {
                 rect,
                 color,
                 stroke_size,
@@ -296,10 +310,11 @@ impl EditorState {
                         style: self.arrow_style,
                         control_points: None,
                         shadow: self.draw_object_shadow,
+                        reversed: self.inverse_arrow_direction,
                     })
                 }
             }
-            Tool::Box => Rect::from_points(start, end).map(|rect| AnnotationAction::Box {
+            Tool::Box => shape_rect(start, end).map(|rect| AnnotationAction::Box {
                 rect,
                 color,
                 stroke_size,

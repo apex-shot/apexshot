@@ -10,11 +10,8 @@ use std::rc::Rc;
 
 use gtk4::{glib, prelude::*, Align, Box as GtkBox, Button, Label, Orientation, Spinner};
 
-use super::ui::{
-    copy_with_feedback, heading_centered, login_error_message, open_link, option_card, status_pill,
-};
-use super::{px, Nav, OnboardingStep};
-use crate::capture::editor::window::icon_names::custom;
+use super::ui::{copy_with_feedback, heading, login_error_message, open_link, status_pill};
+use super::{px, Nav, OnboardingStep, SECTION_GAP};
 use crate::cloud::auth::{begin_device_login, poll_device_login, DeviceLogin, LoginError};
 use crate::cloud::listing::CloudAccount;
 use crate::config::{is_cloud_logged_in, load_config, save_config, AppConfig};
@@ -38,13 +35,7 @@ struct View {
 
 impl View {
     fn begin(&self) -> u64 {
-        let mut child = self.body.first_child();
-        while let Some(widget) = child {
-            child = widget.next_sibling();
-            if !widget.has_css_class("onboarding-mascot") {
-                self.body.remove(&widget);
-            }
-        }
+        super::clear(&self.body);
         super::clear(&self.actions);
         let session = self.session.get() + 1;
         self.session.set(session);
@@ -74,21 +65,11 @@ pub fn build(body: &GtkBox, actions: &GtkBox, nav: &Nav) {
 fn intro(view: &View) {
     view.begin();
     let scale = view.nav.scale;
-    view.body.append(&heading_centered(
+    view.body.append(&heading(
         scale,
-        &t("Share captures as links"),
-        &t("Optional. Connect ApexShot Cloud to turn a capture into a link you can paste anywhere. ApexShot works offline without an account, so you can skip this."),
-    ));
-
-    let options = GtkBox::new(Orientation::Vertical, px(scale, 12.0));
-    options.set_margin_top(px(scale, 26.0));
-    options.append(&option_card(
-        scale,
-        custom::APEXSHOT_CLOUD,
         &t("ApexShot Cloud"),
-        &t("Hosted by us. Connect with a one-time code from your browser."),
+        &t("Optional. Link your account now so it’s ready when uploads arrive on Windows."),
     ));
-    view.body.append(&options);
 
     let skip_btn = Button::with_label(&t("Skip for now"));
     skip_btn.add_css_class("onboarding-text-button");
@@ -96,7 +77,7 @@ fn intro(view: &View) {
     skip_btn.connect_clicked(move |_| advance());
     view.actions.append(&skip_btn);
 
-    let connect_btn = Button::with_label(&t("Connect ApexShot Cloud"));
+    let connect_btn = Button::with_label(&t("Connect account"));
     connect_btn.add_css_class("settings-primary-btn");
     let view_c = view.clone();
     connect_btn.connect_clicked(move |_| connect(&view_c));
@@ -106,7 +87,7 @@ fn intro(view: &View) {
 fn connected(view: &View, config: &AppConfig) {
     view.begin();
     let scale = view.nav.scale;
-    view.body.append(&heading_centered(
+    view.body.append(&heading(
         scale,
         &t("You're connected"),
         &t("Cloud uploads are not available in the Windows build yet"),
@@ -120,7 +101,7 @@ fn connected(view: &View, config: &AppConfig) {
     };
     let pill = status_pill(&tfmt("{plan} plan", &[("plan", &plan)]));
     pill.set_halign(Align::Center);
-    pill.set_margin_top(px(scale, 26.0));
+    pill.set_margin_top(px(scale, SECTION_GAP));
     view.body.append(&pill);
 
     let email = if config.cloud_user_email.trim().is_empty() {
@@ -181,58 +162,35 @@ fn sign_out(view: &View) {
 
 /// Device-authorization sub-view: show the code, open the browser, and poll
 /// until the account lands. Expiry and failures end the session and offer a retry.
-fn connect(view: &View) {
+fn connect_ui(view: &View) -> ConnectUi {
     let scale = view.nav.scale;
     let session = view.begin();
-    view.body.append(&heading_centered(
+    view.body.append(&heading(
         scale,
         &t("Connect your account"),
         &t("Enter this code in your browser to link this device."),
     ));
 
-    let code_frame = GtkBox::new(Orientation::Horizontal, px(scale, 12.0));
+    // The code and its Copy action share one row. The link is not printed:
+    // the browser opens on its own and Copy link covers the fallback.
+    let code_frame = GtkBox::new(Orientation::Horizontal, px(scale, 8.0));
     code_frame.add_css_class("onboarding-connect-code-frame");
-    code_frame.set_halign(Align::Center);
-    code_frame.set_margin_top(px(scale, 26.0));
+    code_frame.set_hexpand(true);
+    code_frame.set_margin_top(px(scale, SECTION_GAP));
 
     let code_label = Label::new(Some("— — — —"));
     code_label.add_css_class("onboarding-connect-code");
     code_label.set_valign(Align::Center);
+    code_label.set_xalign(0.0);
+    code_label.set_hexpand(true);
     code_frame.append(&code_label);
 
-    let copy_btn = Button::with_label(&t("Copy code"));
-    copy_btn.add_css_class("secondary-settings-button");
+    let copy_btn = Button::with_label(&t("Copy"));
+    copy_btn.add_css_class("onboarding-text-button");
     copy_btn.set_valign(Align::Center);
     copy_btn.set_sensitive(false);
     code_frame.append(&copy_btn);
     view.body.append(&code_frame);
-
-    let link_row = GtkBox::new(Orientation::Horizontal, px(scale, 10.0));
-    link_row.add_css_class("onboarding-connect-link-frame");
-    link_row.set_halign(Align::Center);
-    link_row.set_margin_top(px(scale, 14.0));
-    link_row.set_visible(false);
-    let link_label = Label::new(None);
-    link_label.add_css_class("onboarding-connect-link");
-    link_label.set_selectable(true);
-    link_label.set_wrap(true);
-    link_label.set_xalign(0.0);
-    link_label.set_valign(Align::Center);
-    link_row.append(&link_label);
-    let copy_link_btn = Button::with_label(&t("Copy link"));
-    copy_link_btn.add_css_class("secondary-settings-button");
-    copy_link_btn.set_valign(Align::Center);
-    link_row.append(&copy_link_btn);
-    view.body.append(&link_row);
-
-    let browser_status = Label::new(None);
-    browser_status.add_css_class("settings-sub-option");
-    browser_status.set_halign(Align::Center);
-    browser_status.set_xalign(0.5);
-    browser_status.set_wrap(true);
-    browser_status.set_margin_top(px(scale, 10.0));
-    browser_status.set_visible(false);
-    view.body.append(&browser_status);
 
     let status_row = GtkBox::new(Orientation::Horizontal, px(scale, 8.0));
     status_row.set_halign(Align::Center);
@@ -244,6 +202,8 @@ fn connect(view: &View) {
     let status = Label::new(Some(&t("Starting…")));
     status.add_css_class("settings-sub-option");
     status.set_valign(Align::Center);
+    status.set_wrap(true);
+    status.set_max_width_chars(34);
     status_row.append(&status);
     view.body.append(&status_row);
 
@@ -255,19 +215,17 @@ fn connect(view: &View) {
     expiry.set_visible(false);
     view.body.append(&expiry);
 
-    let cancel_btn = Button::with_label(&t("Cancel"));
-    cancel_btn.add_css_class("onboarding-danger-button");
-    cancel_btn.set_halign(Align::Center);
-    cancel_btn.set_margin_top(px(scale, 12.0));
-    let view_cancel = view.clone();
-    cancel_btn.connect_clicked(move |_| intro(&view_cancel));
-    view.body.append(&cancel_btn);
-
-    let skip_btn = Button::with_label(&t("Skip for now"));
-    skip_btn.add_css_class("onboarding-text-button");
-    let advance = view.nav.advance.clone();
-    skip_btn.connect_clicked(move |_| advance());
-    view.actions.append(&skip_btn);
+    // Only shown when the browser could not be opened.
+    let browser_status = Label::new(None);
+    browser_status.add_css_class("settings-sub-option");
+    browser_status.set_halign(Align::Center);
+    browser_status.set_xalign(0.5);
+    browser_status.set_justify(gtk4::Justification::Center);
+    browser_status.set_wrap(true);
+    browser_status.set_max_width_chars(36);
+    browser_status.set_margin_top(px(scale, 8.0));
+    browser_status.set_visible(false);
+    view.body.append(&browser_status);
 
     let open_btn = Button::with_label(&t("Open browser"));
     open_btn.add_css_class("settings-primary-btn");
@@ -280,6 +238,18 @@ fn connect(view: &View) {
     let view_retry = view.clone();
     retry_btn.connect_clicked(move |_| connect(&view_retry));
     view.actions.append(&retry_btn);
+
+    let secondary = GtkBox::new(Orientation::Horizontal, px(scale, 4.0));
+    let copy_link_btn = Button::with_label(&t("Copy link"));
+    copy_link_btn.add_css_class("onboarding-text-button");
+    copy_link_btn.set_sensitive(false);
+    secondary.append(&copy_link_btn);
+    let skip_btn = Button::with_label(&t("Skip for now"));
+    skip_btn.add_css_class("onboarding-text-button");
+    let advance = view.nav.advance.clone();
+    skip_btn.connect_clicked(move |_| advance());
+    secondary.append(&skip_btn);
+    view.actions.append(&secondary);
     view.nav.layout_footer();
 
     let ui = ConnectUi {
@@ -287,8 +257,6 @@ fn connect(view: &View) {
         session,
         code_label,
         copy_btn,
-        link_row,
-        link_label,
         copy_link_btn,
         browser_status,
         open_btn,
@@ -301,7 +269,12 @@ fn connect(view: &View) {
         uri: Rc::new(RefCell::new(String::new())),
     };
     ui.wire_actions();
+    ui
+}
 
+fn connect(view: &View) {
+    let ui = connect_ui(view);
+    let session = ui.session;
     let (tx, rx) = async_channel::unbounded::<ConnectMsg>();
     let login_tx = tx.clone();
     std::thread::spawn(move || {
@@ -344,8 +317,6 @@ struct ConnectUi {
     session: u64,
     code_label: Label,
     copy_btn: Button,
-    link_row: GtkBox,
-    link_label: Label,
     copy_link_btn: Button,
     browser_status: Label,
     open_btn: Button,
@@ -366,7 +337,7 @@ impl ConnectUi {
             if value.is_empty() {
                 return;
             }
-            copy_with_feedback(button, &value, &t("Copy code"));
+            copy_with_feedback(button, &value, &t("Copy"));
         });
 
         let uri = Rc::clone(&self.uri);
@@ -396,9 +367,6 @@ impl ConnectUi {
         self.copy_btn.set_sensitive(true);
         self.copy_link_btn.set_sensitive(true);
         self.open_btn.set_sensitive(true);
-        self.link_label.set_text(&login.verification_uri);
-        self.link_row.set_visible(true);
-        self.browser_status.set_visible(true);
         self.status.set_text(&t("Waiting for you to authorize…"));
 
         let minutes = login.expires_in_secs.div_ceil(60).max(1);
@@ -448,11 +416,11 @@ impl ConnectUi {
         eprintln!("[onboarding] cloud sign-in failed: {error}");
         self.view.session.set(self.session + 1);
         self.spinner.stop();
+        self.spinner.set_visible(false);
         self.expiry.set_visible(false);
-        self.open_btn.set_sensitive(false);
+        self.open_btn.set_visible(false);
         self.copy_btn.set_sensitive(false);
         self.copy_link_btn.set_sensitive(false);
-        self.link_row.set_visible(false);
         self.browser_status.set_visible(false);
         self.status.set_text(&login_error_message(error));
         self.retry_btn.set_visible(true);
@@ -482,7 +450,34 @@ fn capitalize(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::capitalize;
+    use super::*;
+
+    #[test]
+    fn sign_in_waiting_and_failure_states_fit_without_scrolling() {
+        let _ = crate::test_support::with_gtk(|| {
+            let scale = crate::platform::ui_scale();
+            let (root, body, actions, nav) = super::super::tests::test_form(scale);
+            let view = View {
+                body,
+                actions,
+                nav,
+                session: Rc::new(Cell::new(0)),
+            };
+            // Build only the presentation; no login request or browser launch.
+            let ui = connect_ui(&view);
+            ui.code_label.set_text("KM5Y-6MNK");
+            ui.status.set_text("Waiting for you to authorize…");
+            ui.expiry.set_text("Code expires in 15 min");
+            ui.expiry.set_visible(true);
+            super::super::tests::assert_form_fits(&root, scale);
+            ui.browser_status
+                .set_text("Couldn’t open a browser. Use Copy link and open it yourself.");
+            ui.browser_status.set_visible(true);
+            super::super::tests::assert_form_fits(&root, scale);
+            ui.failed(&LoginError::Expired);
+            super::super::tests::assert_form_fits(&root, scale);
+        });
+    }
 
     #[test]
     fn capitalize_uppercases_the_first_letter_only() {
