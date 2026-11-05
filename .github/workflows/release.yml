@@ -467,7 +467,7 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     needs: [lint, ci, studio_release_config, release]
     container:
-      image: fedora:42
+      image: fedora:44
       env:
         GITHUB_API_URL: ${{ github.api_url }}
         GITHUB_SERVER_URL: ${{ github.server_url }}
