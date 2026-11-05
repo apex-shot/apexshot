@@ -729,7 +729,7 @@ fn format_bytes(bytes: i64) -> String {
     }
 }
 
-fn capitalize(value: &str) -> String {
+pub(crate) fn capitalize(value: &str) -> String {
     let mut chars = value.trim().chars();
     match chars.next() {
         Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),

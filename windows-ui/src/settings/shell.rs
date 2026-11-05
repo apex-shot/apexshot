@@ -13,10 +13,10 @@ use gtk4::{
     ScrolledWindow, Stack, Widget,
 };
 
+use super::usage::capitalize;
 use crate::capture::editor::window::icon_names;
 use crate::config::{is_cloud_logged_in, load_config, AppConfig};
 use crate::i18n::t;
-use crate::studio_entitlement::{current_status, StudioStatus};
 
 /// Sidebar width at 100% scale.
 pub const SIDEBAR_WIDTH: f64 = 300.0;
@@ -250,14 +250,16 @@ impl UserChip {
         } else {
             t("ApexShot Cloud")
         };
-        // Only a verified licence earns the badge; a build that cannot verify
-        // one shows none rather than claiming the free tier.
-        let badge = match current_status() {
-            StudioStatus::Active { .. } | StudioStatus::UpdateAccessEnded { .. } => t("Studio"),
-            StudioStatus::NotActivated => t("Free"),
-            StudioStatus::ConfigurationUnavailable
-            | StudioStatus::InvalidEntitlement
-            | StudioStatus::DeviceMismatch => String::new(),
+        // The chip represents the Cloud account, so its badge reports that
+        // account's plan tier. Studio is a separate, device-bound licence with
+        // its own Settings page; showing its status here made paid Cloud
+        // accounts read as "Free". An unknown tier earns no badge rather than
+        // claiming a plan the app has not seen.
+        let tier = config.cloud_plan_tier.trim();
+        let badge = if tier.is_empty() {
+            String::new()
+        } else {
+            capitalize(tier)
         };
         let subtitle = if !email.is_empty() && name != email {
             email.to_string()
@@ -648,6 +650,28 @@ mod tests {
 
         config.cloud_api_token.clear();
         assert!(UserChip::from_config(&config).is_none());
+    }
+
+    #[test]
+    fn account_chip_badge_reports_the_cloud_plan() {
+        let mut config = AppConfig {
+            cloud_api_token: "token".to_string(),
+            cloud_user_email: "user@example.com".to_string(),
+            ..AppConfig::default()
+        };
+
+        config.cloud_plan_tier = "pro".to_string();
+        assert_eq!(UserChip::from_config(&config).unwrap().badge, "Pro");
+
+        config.cloud_plan_tier = "free".to_string();
+        assert_eq!(UserChip::from_config(&config).unwrap().badge, "Free");
+
+        config.cloud_plan_tier = "  Team ".to_string();
+        assert_eq!(UserChip::from_config(&config).unwrap().badge, "Team");
+
+        // No cached tier is not evidence of a free plan.
+        config.cloud_plan_tier.clear();
+        assert_eq!(UserChip::from_config(&config).unwrap().badge, "");
     }
 
     #[test]
