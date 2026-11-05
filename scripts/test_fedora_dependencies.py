@@ -76,12 +76,21 @@ class RuntimeDependencyTest(unittest.TestCase):
 
 
 class ReleaseBuildTargetTest(unittest.TestCase):
-    """The Fedora RPM must be built on the Fedora release it is installed on."""
+    """The Fedora RPM must be built on each Fedora release it is installed on."""
 
-    def test_fedora_rpm_builds_on_fedora_44_or_newer(self):
-        match = re.search(r"^\s+image: fedora:(\d+)$", RELEASE_WORKFLOW.read_text(), re.M)
-        self.assertIsNotNone(match, "release.yml has no Fedora build container")
-        self.assertGreaterEqual(int(match.group(1)), 44)
+    def matrix(self):
+        match = re.search(r"^\s+fedora: \[([0-9, ]+)\]$", RELEASE_WORKFLOW.read_text(), re.M)
+        self.assertIsNotNone(match, "release.yml has no Fedora build matrix")
+        return [int(part) for part in match.group(1).split(",")]
+
+    def test_matrix_covers_the_current_and_previous_fedora_release(self):
+        matrix = self.matrix()
+        self.assertEqual(matrix, list(range(min(matrix), max(matrix) + 1)))
+        self.assertGreaterEqual(len(matrix), 2)
+        self.assertGreaterEqual(max(matrix), 44)
+
+    def test_build_container_follows_the_matrix(self):
+        self.assertIn("image: fedora:${{ matrix.fedora }}", RELEASE_WORKFLOW.read_text())
 
 
 class SpecDependencyTest(unittest.TestCase):

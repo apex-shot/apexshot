@@ -14,6 +14,7 @@ RELEASES_URL = f"https://github.com/{REPO}/releases"
 TAG = "v0.2.35"
 
 FEDORA_RPM = "apexshot-0.2.35-1.fc42.x86_64.rpm"
+FEDORA_43_RPM = "apexshot-0.2.35-1.fc43.x86_64.rpm"
 FEDORA_44_RPM = "apexshot-0.2.35-1.fc44.x86_64.rpm"
 OPENSUSE_RPM = "apexshot-0.2.35-0.x86_64.rpm"
 DEBUGINFO_RPM = "apexshot-debuginfo-0.2.35-1.fc42.x86_64.rpm"
@@ -141,6 +142,10 @@ class FedoraResolverTest(ResolverCase):
         page = release_page(FEDORA_44_RPM, FEDORA_RPM)
         self.assertSelects(page, FEDORA_44_RPM, host_fedora=44)
         self.assertSelects(page, FEDORA_RPM, host_fedora=42)
+
+    def test_selects_the_previous_release_build_for_a_previous_fedora(self):
+        page = release_page(FEDORA_44_RPM, FEDORA_43_RPM)
+        self.assertSelects(page, FEDORA_43_RPM, host_fedora=43)
 
     def test_picks_the_newest_rpm_when_the_host_version_is_not_published(self):
         page = release_page(FEDORA_RPM, FEDORA_44_RPM)

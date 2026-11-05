@@ -110,6 +110,38 @@ class StagedAssetTests(unittest.TestCase):
                 metadata["assets_by_artifact"]["fedora-rpms"],
             )
 
+    def test_one_rpm_per_supported_fedora_release_is_staged_together(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            build_root = root / "build"
+            asset_dir = root / "assets"
+            self.build_artifacts(build_root)
+            rpm_dir = build_root / "fedora-rpms/target/RPMS/x86_64"
+            extra = {
+                "apexshot-1.2.3-1.fc43.x86_64.rpm": b"fedora 43",
+                "apexshot-debuginfo-1.2.3-1.fc43.x86_64.rpm": b"fedora 43 debug",
+                "apexshot-debugsource-1.2.3-1.fc43.x86_64.rpm": b"fedora 43 debug source",
+            }
+            for name, contents in extra.items():
+                (rpm_dir / name).write_bytes(contents)
+            (build_root / "fedora-rpms/target/SRPMS/apexshot-1.2.3-1.fc43.src.rpm").write_bytes(b"fedora 43 source")
+
+            release_gate.prepare_assets(
+                build_root, asset_dir, "v1.2.3", self.public_key, "1798761600", self.source_commit
+            )
+
+            metadata = release_gate.validate_assets(asset_dir, require_stable=True)
+            fedora_assets = set(metadata["assets_by_artifact"]["fedora-rpms"])
+            expected = {
+                path.name
+                for path in (build_root / "fedora-rpms").rglob("*")
+                if path.is_file()
+            }
+            self.assertEqual(fedora_assets, expected)
+            for name in ("apexshot-1.2.3-1.fc42.x86_64.rpm", "apexshot-1.2.3-1.fc43.x86_64.rpm"):
+                self.assertIn(name, fedora_assets)
+                self.assertTrue((asset_dir / name).is_file())
+
     def test_missing_package_group_duplicate_name_or_tampered_file_blocks_stage(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
