@@ -159,9 +159,11 @@ void applyMenuStyle(QMenu& menu)
     menu.setAttribute(Qt::WA_NoSystemBackground, true);
     menu.setAutoFillBackground(false);
     menu.setFixedWidth(304);
-    QFont font(QStringLiteral("Inter"));
+    QFont font(QStringLiteral("DM Sans"));
     font.setPixelSize(14);
     font.setWeight(QFont::Medium);
+    font.setHintingPreference(QFont::PreferNoHinting);
+    font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
     menu.setFont(font);
     menu.setStyleSheet(QStringLiteral(
         "QMenu { background:#252526; color: rgba(255,255,255,230);"
@@ -383,9 +385,11 @@ int CaptureModeToolbar::itemWidth(int index) const
         return m_deviceItemWidth;
 #endif
 
-    QFont font(QStringLiteral("Inter"));
-    font.setPixelSize(13);
-    font.setWeight(QFont::DemiBold);
+    QFont font(QStringLiteral("DM Sans"));
+    font.setPixelSize(14);
+    font.setWeight(QFont::Medium);
+    font.setHintingPreference(QFont::PreferNoHinting);
+    font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
     const QFontMetrics metrics(font);
     const auto measure = [&metrics](const QString& text) {
         return metrics.horizontalAdvance(text);
@@ -609,9 +613,11 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
                         : (disabled ? QColor(115, 115, 122)
                                     : QColor(185, 186, 193)));
         const bool isClose = i == itemCount() - 1;
-        QFont groupFont(QStringLiteral("Inter"));
-        groupFont.setPixelSize(13);
-        groupFont.setWeight(active || deviceOn ? QFont::DemiBold : QFont::Medium);
+        QFont groupFont(QStringLiteral("DM Sans"));
+        groupFont.setPixelSize(14);
+        groupFont.setWeight(active || deviceOn ? QFont::Medium : QFont::Normal);
+        groupFont.setHintingPreference(QFont::PreferNoHinting);
+        groupFont.setLetterSpacing(QFont::PercentageSpacing, 98.0);
         QString label = isClose ? QString() : labelFor(i);
         bool deviceCell = false;
 #ifdef Q_OS_WIN
@@ -792,9 +798,11 @@ void CaptureModeToolbar::drawFallbackIcon(QPainter& painter,
             }
             break;
         }
-        QFont font(QStringLiteral("Inter"));
+        QFont font(QStringLiteral("DM Sans"));
         font.setPixelSize(13);
         font.setWeight(QFont::Bold);
+        font.setHintingPreference(QFont::PreferNoHinting);
+        font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
         painter.setFont(font);
         painter.setPen(color);
         painter.drawText(QRectF(x - 12, y - 10, 24, 20), Qt::AlignCenter, QStringLiteral("Aa"));

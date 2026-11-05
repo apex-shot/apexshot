@@ -1,9 +1,8 @@
 //! First-run onboarding for the Windows build.
 //!
 //! The same steps the Linux build shows (`src/onboarding`) in one undecorated
-//! window split in two: the step's page on the left under the app mark, with
-//! the progress rail at its foot, and a showcase card on the right with a line
-//! about the editor over a cropped view of it. The cloud page is shared
+//! window: the step's page in a centred column under the app mark, with the
+//! progress rail at its foot. The cloud page is shared
 //! with the Linux flow verbatim, because signing in is the same browser
 //! device-authorization handoff on both platforms and it stays optional.
 //! Finishing writes `%APPDATA%\apexshot\.windows-onboarding-complete`, which
@@ -30,27 +29,24 @@ use gtk4::{
 
 use crate::config::config_path;
 use crate::i18n::{t, tfmt};
-use crate::settings::ui_support::{window_control_button, WindowControl, TITLE_BAR_HEIGHT};
+use crate::settings::ui_support::{window_control_button, WindowControl};
 
 /// Written only after the final page finishes.
 const FLAG_FILE: &str = ".windows-onboarding-complete";
 
 /// The window box at 100% display scaling.
-const BASE_WIDTH: f64 = 1040.0;
+const BASE_WIDTH: f64 = 560.0;
 const BASE_HEIGHT: f64 = 650.0;
 
-/// Width of the left pane that holds the step's page.
+/// Width of the pane that holds the step's page.
 const PANE_WIDTH: f64 = 384.0;
 
-/// Inset of the page from the left pane's edges.
+/// Inset of the page from the pane's edges.
 const PAGE_INSET: f64 = 46.0;
 
 /// The one gap between a page's sections, so every step reads with the same
 /// rhythm. Smaller sub-gaps inside a section stay local to that section.
 pub(super) const SECTION_GAP: f64 = 20.0;
-
-/// Gap between the showcase card and the window edges.
-const CARD_INSET: f64 = 12.0;
 
 /// What the caller should do after the onboarding window closes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -226,7 +222,6 @@ fn build_window(app: &Application, outcome: Rc<RefCell<Outcome>>) {
     crate::icons::install();
     crate::settings::ui_support::install_settings_css();
     crate::settings::install_window_css();
-    crate::image_editor::install_preview_css();
 
     let scale = crate::platform::ui_scale();
     install_css(scale);
@@ -268,23 +263,18 @@ fn install(
         root.add_css_class("editor-theme-light");
     }
 
-    let split = GtkBox::new(Orientation::Horizontal, 0);
-    split.set_hexpand(true);
-    split.set_vexpand(true);
-
     let pane = GtkBox::new(Orientation::Vertical, 0);
     pane.add_css_class("onboarding-pane");
     pane.set_size_request(px(scale, PANE_WIDTH), -1);
     pane.set_hexpand(false);
+    pane.set_halign(Align::Center);
+    crate::settings::windowing::install_window_drag(&pane, window);
 
-    // Back sits in the pane's top-left corner; the rest of the strip drags.
+    // Back floats in the window's top-left corner, over the centred pane;
+    // the pane itself is the drag handle.
     let back_slot = GtkBox::new(Orientation::Horizontal, 0);
     back_slot.set_halign(Align::Start);
-    let header = GtkBox::new(Orientation::Horizontal, 0);
-    header.set_size_request(-1, px(scale, TITLE_BAR_HEIGHT + 8.0));
-    header.append(&back_slot);
-    crate::settings::windowing::install_window_drag(&header, window);
-    pane.append(&header);
+    back_slot.set_valign(Align::Start);
 
     let pages = crossfade_stack();
     pages.connect_notify_local(Some("transition-running"), |pages, _| prune_pages(pages));
@@ -324,22 +314,10 @@ fn install(
     progress_row.append(&progress);
     footer.append(&progress_row);
     pane.append(&footer);
-    split.append(&pane);
-
-    let card = GtkBox::new(Orientation::Vertical, 0);
-    card.add_css_class("onboarding-showcase");
-    card.set_overflow(gtk4::Overflow::Hidden);
-    card.set_hexpand(true);
-    card.set_vexpand(true);
-    card.set_margin_top(px(scale, CARD_INSET));
-    card.set_margin_end(px(scale, CARD_INSET));
-    card.set_margin_bottom(px(scale, CARD_INSET));
-    card.append(&showcase::panel(scale, dark, window));
-    crate::settings::windowing::install_window_drag(&card, window);
-    split.append(&card);
 
     let overlay = Overlay::new();
-    overlay.set_child(Some(&split));
+    overlay.set_child(Some(&pane));
+    overlay.add_overlay(&back_slot);
     overlay.add_overlay(&window_controls(window, scale));
     root.append(&overlay);
     window.set_child(Some(&root));
@@ -667,7 +645,10 @@ mod tests {
         let width = px(scale, PANE_WIDTH - 2.0 * PAGE_INSET);
         let height = root.measure(Orientation::Vertical, width).0;
         // Leave the header, progress row and its margins outside the form.
-        let available = px(scale, BASE_HEIGHT - TITLE_BAR_HEIGHT - 8.0 - 64.0);
+        let available = px(
+            scale,
+            BASE_HEIGHT - crate::settings::ui_support::TITLE_BAR_HEIGHT - 8.0 - 64.0,
+        );
         assert!(
             height <= available,
             "form needs {height}px, only {available}px available"

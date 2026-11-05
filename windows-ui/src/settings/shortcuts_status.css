@@ -5,7 +5,6 @@
     background-color: alpha(#ffad73, 0.055);
 }
 
-.editor-root .shortcut-notice-icon { color: #eab088; }
 .editor-root .shortcut-notice-title { font-size: 13px; font-weight: 600; }
 .editor-root .shortcut-notice-detail { font-size: 12px; color: alpha(white, 0.60); }
 

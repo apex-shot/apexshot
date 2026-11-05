@@ -5,29 +5,11 @@
     color: #f3f0ec;
     border: none;
     box-shadow: none;
+    font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
 }
 
 .onboarding-pane {
     background: transparent;
-}
-
-.onboarding-showcase {
-    background: #242424;
-    border: none;
-    border-radius: 20px;
-    box-shadow: none;
-}
-
-.onboarding-showcase-title {
-    font-size: 27px;
-    font-weight: 600;
-    letter-spacing: -0.7px;
-    color: #f3f0ec;
-}
-
-.onboarding-showcase-copy {
-    font-size: 12px;
-    color: #a3a09c;
 }
 
 .onboarding-root .onboarding-headline {
@@ -161,28 +143,11 @@
     font-size: 11px;
 }
 
-/* The preview is the editor's own window, cropped by the card. Only its
-   top-left corner is visible, so only that corner rounds. */
-.onboarding-editor-preview {
-    background: #141414;
-    border: none;
-    border-radius: 12px 0 0 0;
-}
-
 .editor-root.editor-theme-light.onboarding-root {
     background: #f4f2ee;
     color: #25231f;
 }
 
-.editor-theme-light .onboarding-showcase {
-    background: #e8e5df;
-}
-
-.editor-theme-light .onboarding-showcase-title {
-    color: #25231f;
-}
-
-.editor-theme-light .onboarding-showcase-copy,
 .editor-theme-light.onboarding-root .onboarding-copy,
 .editor-theme-light.onboarding-root .settings-sub-option {
     color: #6c6861;
@@ -198,10 +163,6 @@
 
 .editor-theme-light.onboarding-root .onboarding-progress-dot-active {
     background: #ff670d;
-}
-
-.editor-theme-light .onboarding-editor-preview {
-    background: #f6f7fb;
 }
 
 .editor-theme-light.onboarding-root .onboarding-hotkey-table .shortcut-capture-keycap,

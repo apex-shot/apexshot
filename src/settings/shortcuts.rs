@@ -1009,14 +1009,15 @@ mod tests {
     fn shortcut_heading_titles_are_centred_on_their_icons() {
         use gtk4::{Align, Image, Orientation};
 
-        // The heading row's spacing comes from the Windows shell stylesheet,
-        // which outranks the shared one. A margin left on the title lands in
+        // The heading row's spacing comes from the Windows shell and type
+        // sheets, which outrank the shared one. A margin left on the title lands in
         // the row's own box and drops the title below the icon's centre while
         // `valign` still reads `Center`, so this measures a laid out row
         // instead of trusting the alignment properties.
         let Some(result) = crate::test_support::with_gtk(|| {
             crate::settings::ui_support::install_settings_css();
             crate::settings::shell::install_css();
+            crate::settings::shell::install_type_css();
 
             let widgets = build_shortcuts_section(&AppConfig::default());
             let section = &widgets.section;

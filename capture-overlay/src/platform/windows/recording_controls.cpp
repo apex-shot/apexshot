@@ -52,9 +52,11 @@ constexpr ushort kGlyphTrash = 0xE18D;
 
 QFont uiFont(int pixelSize, bool bold)
 {
-    QFont font(QStringLiteral("Inter"));
+    QFont font(QStringLiteral("DM Sans"));
     font.setPixelSize(pixelSize);
-    font.setWeight(bold ? QFont::DemiBold : QFont::Normal);
+    font.setWeight(bold ? QFont::Medium : QFont::Normal);
+    font.setHintingPreference(QFont::PreferNoHinting);
+    font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
     return font;
 }
 

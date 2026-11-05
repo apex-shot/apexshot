@@ -37,6 +37,7 @@
 #include <QFile>
 #include <QFont>
 #include <QFontDatabase>
+#include <QFontInfo>
 #include <QFontMetrics>
 #include <QGuiApplication>
 #include <QHBoxLayout>
@@ -140,7 +141,8 @@ QString uiFamily()
 {
     static const QString family = [] {
         const QStringList families = QFontDatabase().families();
-        for (const QString& candidate : {QStringLiteral("Inter"), QStringLiteral("Segoe UI")}) {
+        for (const QString& candidate :
+             {QStringLiteral("DM Sans"), QStringLiteral("Inter"), QStringLiteral("Segoe UI")}) {
             if (families.contains(candidate))
                 return candidate;
         }
@@ -181,7 +183,11 @@ void registerBundledFonts()
 {
     const QString fontDir = QStringLiteral(APEXSHOT_FONT_DIR);
     int loaded = 0;
-    for (const QString& file : {QStringLiteral("Inter-Regular.ttf"),
+    for (const QString& file : {QStringLiteral("DMSans-Regular.ttf"),
+                                QStringLiteral("DMSans-Medium.ttf"),
+                                QStringLiteral("DMSans-SemiBold.ttf"),
+                                QStringLiteral("DMSans-Bold.ttf"),
+                                QStringLiteral("Inter-Regular.ttf"),
                                 QStringLiteral("Inter-Medium.ttf"),
                                 QStringLiteral("Inter-SemiBold.ttf"),
                                 QStringLiteral("Inter-Bold.ttf")}) {
@@ -191,10 +197,10 @@ void registerBundledFonts()
 
     QFile log(QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-quickaccess.log")));
     if (log.open(QIODevice::Append | QIODevice::WriteOnly)) {
-        log.write(QStringLiteral("fonts: %1/4 from %2; Inter present=%3; family=%4\n")
+        log.write(QStringLiteral("fonts: %1/8 from %2; DM Sans present=%3; family=%4\n")
                       .arg(loaded)
                       .arg(fontDir)
-                      .arg(QFontDatabase().families().contains(QStringLiteral("Inter")) ? 1 : 0)
+                      .arg(QFontDatabase().families().contains(QStringLiteral("DM Sans")) ? 1 : 0)
                       .arg(uiFamily())
                       .toUtf8());
     }
@@ -204,7 +210,9 @@ QFont uiFont(int pixelSize, bool bold = false)
 {
     QFont font(uiFamily());
     font.setPixelSize(pixelSize);
-    font.setWeight(bold ? QFont::DemiBold : QFont::Normal);
+    font.setWeight(bold ? QFont::Medium : QFont::Normal);
+    font.setHintingPreference(QFont::PreferNoHinting);
+    font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
     return font;
 }
 
@@ -422,7 +430,9 @@ TopBarLayout topBarLayout(double screenW)
     static const QFont labelFont = [] {
         QFont font(uiFamily());
         font.setPointSizeF(10.5);
-        font.setBold(true);
+        font.setWeight(QFont::Medium);
+        font.setHintingPreference(QFont::PreferNoHinting);
+        font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
         return font;
     }();
     static const double labelW = std::max(
@@ -693,6 +703,8 @@ private:
         QFont font(uiFamily());
         font.setPixelSize(12);
         font.setWeight(QFont::Medium);
+        font.setHintingPreference(QFont::PreferNoHinting);
+        font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
         painter.setFont(font);
 
         const QString label = QStringLiteral("%1 \u00D7 %2").arg(sel.width()).arg(sel.height());
@@ -727,6 +739,8 @@ private:
         QFont font(uiFamily());
         font.setPixelSize(12);
         font.setWeight(QFont::Medium);
+        font.setHintingPreference(QFont::PreferNoHinting);
+        font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
         painter.setFont(font);
 
         const QFontMetrics metrics(font);
@@ -770,7 +784,9 @@ private:
 
         QFont labelFont(uiFamily());
         labelFont.setPointSizeF(10.5);
-        labelFont.setBold(true);
+        labelFont.setWeight(QFont::Medium);
+        labelFont.setHintingPreference(QFont::PreferNoHinting);
+        labelFont.setLetterSpacing(QFont::PercentageSpacing, 98.0);
         painter.setFont(labelFont);
         painter.setPen(kText);
         painter.drawText(layout.label, Qt::AlignVCenter | Qt::AlignLeft,
@@ -800,7 +816,9 @@ private:
 
             QFont font(uiFamily());
             font.setPointSizeF(9.5);
-            font.setBold(active || hovered);
+            font.setWeight(active || hovered ? QFont::Medium : QFont::Normal);
+            font.setHintingPreference(QFont::PreferNoHinting);
+            font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
             painter.setFont(font);
             painter.setPen(active ? QColor(255, 255, 255) : QColor(232, 232, 236));
             painter.drawText(pill, Qt::AlignCenter, QString::fromLatin1(kPillLabels[i]));
@@ -884,7 +902,9 @@ private:
 
             QFont itemFont(uiFamily());
             itemFont.setPointSizeF(10.0);
-            itemFont.setBold(checked || i == CropRowReset);
+            itemFont.setWeight(checked || i == CropRowReset ? QFont::Medium : QFont::Normal);
+            itemFont.setHintingPreference(QFont::PreferNoHinting);
+            itemFont.setLetterSpacing(QFont::PercentageSpacing, 98.0);
             painter.setFont(itemFont);
             painter.setPen(QColor(242, 242, 244));
             painter.drawText(labelRect, Qt::AlignVCenter | Qt::AlignLeft,
@@ -1073,7 +1093,9 @@ protected:
         painter.drawLine(QPointF(cx, cy), QPointF(cx + 5.0, cy + 2.0));
 
         QFont font(uiFamily());
-        font.setBold(true);
+        font.setWeight(QFont::Medium);
+        font.setHintingPreference(QFont::PreferNoHinting);
+        font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
         // 22pt in the Linux build fills most of the 44px pill; at 1:1 on
         // Windows that reads oversized, so the number sits at 16pt.
         font.setPointSizeF(m_hovered ? 13.0 : 16.0);
@@ -2952,10 +2974,14 @@ int run(QApplication& app)
         // visible in the log instead of only on screen.
         QFont label(uiFamily());
         label.setPointSizeF(10.5);
-        label.setBold(true);
+        label.setWeight(QFont::Medium);
+        label.setHintingPreference(QFont::PreferNoHinting);
+        label.setLetterSpacing(QFont::PercentageSpacing, 98.0);
         QFont pill(uiFamily());
         pill.setPointSizeF(9.5);
-        pill.setBold(true);
+        pill.setWeight(QFont::Medium);
+        pill.setHintingPreference(QFont::PreferNoHinting);
+        pill.setLetterSpacing(QFont::PercentageSpacing, 98.0);
         const QFontMetrics labelMetrics(label);
         const QFontMetrics pillMetrics(pill);
         QFile log(QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-quickaccess.log")));
