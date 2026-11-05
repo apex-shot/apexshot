@@ -4011,3 +4011,286 @@ msgstr "Ocultar barra lateral"
 
 msgid "Show sidebar"
 msgstr "Mostrar barra lateral"
+
+msgid ""
+"10:21 image aspect ratio; long pins may be cropped in feeds. 2:3 is recommended."
+msgstr ""
+"Relación de aspecto de imagen 10:21; los pines largos pueden recortarse en los feeds. Se recomienda 2:3."
+
+msgid ""
+"16:9 image aspect ratio; banners need at least 2048 x 1152 pixels and may be cropped on some devices."
+msgstr ""
+"Relación de aspecto de imagen 16:9; los banners necesitan al menos 2048 x 1152 píxeles y pueden recortarse en algunos dispositivos."
+
+msgid "Activation"
+msgstr "Activación"
+
+msgid "Add a background and padding to see the shadow."
+msgstr "Añade un fondo y relleno para ver la sombra."
+
+msgid ""
+"Add arrows, text, and blur, then set the background, padding, and shadow before you export."
+msgstr ""
+"Añade flechas, texto y desenfoque, y luego define el fondo, el relleno y la sombra antes de exportar."
+
+msgid "Annotate and style every capture."
+msgstr "Anota y aplica estilo a cada captura."
+
+msgid "Annotation color"
+msgstr "Color de anotación"
+
+msgid "Automatic"
+msgstr "Automático"
+
+msgid "Available"
+msgstr "Disponible"
+
+msgid "Back to editor"
+msgstr "Volver al editor"
+
+msgid "Capture your screen, mark it up, and export it."
+msgstr "Captura tu pantalla, anótala y expórtala."
+
+msgid "Change any of this later."
+msgstr "Puedes cambiar todo esto más adelante."
+
+msgid "Choose video export options"
+msgstr "Elige las opciones de exportación de vídeo"
+
+msgid "Click a Motion clip, or click the track to add a move."
+msgstr "Haz clic en un clip de Motion o en la pista para añadir un movimiento."
+
+msgid "Click or drag to place the watermark; double-click to center it"
+msgstr ""
+"Haz clic o arrastra para colocar la marca de agua; doble clic para centrarla"
+
+msgid "Click or drag to place the zoom anchor; double-click to recenter"
+msgstr ""
+"Haz clic o arrastra para colocar el ancla de zoom; doble clic para recentrar"
+
+msgid "Click or drag to position the camera; double-click to recenter"
+msgstr "Haz clic o arrastra para situar la cámara; doble clic para recentrar"
+
+msgid "Clipboard is unavailable."
+msgstr "El portapapeles no está disponible."
+
+msgid "Close custom color"
+msgstr "Cerrar color personalizado"
+
+msgid "Close export options"
+msgstr "Cerrar opciones de exportación"
+
+msgid "Complete"
+msgstr "Completado"
+
+msgid "Could not open background image."
+msgstr "No se pudo abrir la imagen de fondo."
+
+msgid "Couldn't open a browser: {error}. Use Copy link and open it yourself."
+msgstr ""
+"No se pudo abrir un navegador: {error}. Usa «Copiar enlace» y ábrelo tú mismo."
+
+msgid "Custom color"
+msgstr "Color personalizado"
+
+msgid "Drag to choose what the camera shows"
+msgstr "Arrastra para elegir lo que muestra la cámara"
+
+msgid "Drop a PNG, JPEG, or WebP here, or choose one from disk."
+msgstr "Arrastra aquí un PNG, JPEG o WebP, o elige uno del disco."
+
+msgid "Estimated output size"
+msgstr "Tamaño de salida estimado"
+
+msgid "Estimating…"
+msgstr "Calculando…"
+
+msgid "Export a file and copy it to the clipboard for pasting into other apps."
+msgstr ""
+"Exporta un archivo y cópialo al portapapeles para pegarlo en otras aplicaciones."
+
+msgid "Export time depends on your hardware and effects."
+msgstr "El tiempo de exportación depende de tu hardware y de los efectos."
+
+msgid "Export to file"
+msgstr "Exportar a archivo"
+
+msgid "Exported successfully"
+msgstr "Exportado correctamente"
+
+msgid "Exporting video"
+msgstr "Exportando vídeo"
+
+msgid "File copied to clipboard. Ready to paste into other apps."
+msgstr "Archivo copiado al portapapeles. Listo para pegar en otras aplicaciones."
+
+msgid "Finishing…"
+msgstr "Terminando…"
+
+msgid "Fit to window"
+msgstr "Ajustar a la ventana"
+
+msgid "Free up space or raise your allowance to keep uploading."
+msgstr "Libera espacio o aumenta tu límite para seguir subiendo."
+
+msgid "Here’s where to find everything."
+msgstr "Aquí encontrarás todo."
+
+msgid "Image editor preview with an annotated capture and the Appearance panel"
+msgstr ""
+"Vista previa del editor de imagen con una captura anotada y el panel Apariencia"
+
+msgid "Last checked"
+msgstr "Última comprobación"
+
+msgid "Monthly, UTC"
+msgstr "Mensual, UTC"
+
+msgid "Move the light to direct the shadow"
+msgstr "Mueve la luz para orientar la sombra"
+
+msgid "Neural upscaling is not available in the Windows image editor yet"
+msgstr ""
+"El escalado neuronal aún no está disponible en el editor de imagen de Windows"
+
+msgid "No account needed."
+msgstr "No necesitas cuenta."
+
+msgid "Not set"
+msgstr "Sin definir"
+
+msgid "Obfuscate intensity"
+msgstr "Intensidad de ofuscación"
+
+msgid "One shortcut away."
+msgstr "A un atajo de distancia."
+
+msgid "Open ApexShot"
+msgstr "Abrir ApexShot"
+
+msgid "Open Image"
+msgstr "Abrir imagen"
+
+msgid "Open an image to annotate"
+msgstr "Abre una imagen para anotarla"
+
+msgid "Open image"
+msgstr "Abrir imagen"
+
+msgid "Opening {name}…"
+msgstr "Abriendo {name}…"
+
+msgid ""
+"Optional. Link your account now so it’s ready when uploads arrive on Windows."
+msgstr ""
+"Opcional. Vincula tu cuenta ahora para tenerla lista cuando las subidas lleguen a Windows."
+
+msgid "Preparing export…"
+msgstr "Preparando la exportación…"
+
+msgid "Remove the watermark"
+msgstr "Eliminar la marca de agua"
+
+msgid "Resets"
+msgstr "Se reinicia"
+
+msgid "Retention"
+msgstr "Retención"
+
+msgid "Reverse"
+msgstr "Invertir"
+
+msgid "Right-click for your capture menu."
+msgstr "Haz clic derecho para abrir el menú de captura."
+
+msgid "Save annotated image"
+msgstr "Guardar imagen anotada"
+
+msgid "Save the annotated image"
+msgstr "Guarda la imagen anotada"
+
+msgid "Select image"
+msgstr "Seleccionar imagen"
+
+msgid "Shortcuts work while ApexShot runs in the background."
+msgstr "Los atajos funcionan mientras ApexShot se ejecuta en segundo plano."
+
+msgid "Start a capture from your keyboard or the tray menu."
+msgstr "Inicia una captura desde el teclado o el menú de la bandeja."
+
+msgid "Status"
+msgstr "Estado"
+
+msgid "Stop export"
+msgstr "Detener exportación"
+
+msgid "Stopping export…"
+msgstr "Deteniendo la exportación…"
+
+msgid "Storage is full"
+msgstr "El almacenamiento está lleno"
+
+msgid "Storage is nearly full"
+msgstr "El almacenamiento está casi lleno"
+
+msgid "Storage is within your allowance"
+msgstr "El almacenamiento está dentro de tu límite"
+
+msgid "Storage used"
+msgstr "Almacenamiento utilizado"
+
+msgid "Stroke"
+msgstr "Trazo"
+
+msgid "Switch to Motion: not available in the Windows image editor yet"
+msgstr ""
+"Cambiar a Motion: aún no está disponible en el editor de imagen de Windows"
+
+msgid "That file is not a supported image. Choose a PNG, JPEG, or WebP."
+msgstr ""
+"Ese archivo no es una imagen compatible. Elige un archivo PNG, JPEG o WebP."
+
+msgid "The image could not be read."
+msgstr "No se pudo leer la imagen."
+
+msgid "The image is empty."
+msgstr "La imagen está vacía."
+
+msgid "They reset monthly in UTC."
+msgstr "Se reinician cada mes en UTC."
+
+msgid "This month's uploads are used up"
+msgstr "Las subidas de este mes se han agotado"
+
+msgid "Video exported, but could not copy to clipboard:"
+msgstr "Vídeo exportado, pero no se pudo copiar al portapapeles:"
+
+msgid "Wait for the background image to finish loading."
+msgstr "Espera a que la imagen de fondo termine de cargar."
+
+msgid "Your shortcuts work while ApexShot runs."
+msgstr "Tus atajos funcionan mientras ApexShot se ejecuta."
+
+msgid "You’re all set."
+msgstr "Todo listo."
+
+msgid "left"
+msgstr "restantes"
+
+msgid "of {limit} allowance"
+msgstr "de {limit} de límite"
+
+msgid "of {limit} this month"
+msgstr "de {limit} este mes"
+
+msgid "{current} / {total}"
+msgstr "{current} / {total}"
+
+msgid "{days} days"
+msgstr "{days} días"
+
+msgid "{remaining} remains before your allowance is reached."
+msgstr "{remaining} restantes antes de alcanzar tu límite."
+
+msgid "{remaining} remains of your {limit} allowance."
+msgstr "{remaining} restantes de tu límite de {limit}."

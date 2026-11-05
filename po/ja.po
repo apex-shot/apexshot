@@ -3923,3 +3923,274 @@ msgstr "サイドバーを非表示"
 
 msgid "Show sidebar"
 msgstr "サイドバーを表示"
+
+msgid ""
+"10:21 image aspect ratio; long pins may be cropped in feeds. 2:3 is recommended."
+msgstr "10:21 の画像アスペクト比。縦長のピンはフィードで切り取られる場合があります。2:3 をおすすめします。"
+
+msgid ""
+"16:9 image aspect ratio; banners need at least 2048 x 1152 pixels and may be cropped on some devices."
+msgstr "16:9 の画像アスペクト比。バナーには 2048 x 1152 ピクセル以上が必要で、一部のデバイスでは切り取られる場合があります。"
+
+msgid "Activation"
+msgstr "有効化"
+
+msgid "Add a background and padding to see the shadow."
+msgstr "背景と余白を追加すると影が表示されます。"
+
+msgid ""
+"Add arrows, text, and blur, then set the background, padding, and shadow before you export."
+msgstr "矢印・テキスト・ぼかしを追加し、書き出す前に背景・余白・影を設定します。"
+
+msgid "Annotate and style every capture."
+msgstr "すべてのキャプチャに注釈とスタイルを"
+
+msgid "Annotation color"
+msgstr "注釈の色"
+
+msgid "Automatic"
+msgstr "自動"
+
+msgid "Available"
+msgstr "利用可能"
+
+msgid "Back to editor"
+msgstr "エディターに戻る"
+
+msgid "Capture your screen, mark it up, and export it."
+msgstr "画面をキャプチャして注釈を付け、書き出します。"
+
+msgid "Change any of this later."
+msgstr "これらは後から変更できます。"
+
+msgid "Choose video export options"
+msgstr "動画の書き出しオプションを選択"
+
+msgid "Click a Motion clip, or click the track to add a move."
+msgstr "Motion クリップをクリックするか、トラックをクリックして動きを追加"
+
+msgid "Click or drag to place the watermark; double-click to center it"
+msgstr "クリックまたはドラッグで透かしを配置、ダブルクリックで中央に移動"
+
+msgid "Click or drag to place the zoom anchor; double-click to recenter"
+msgstr "クリックまたはドラッグでズームアンカーを配置、ダブルクリックで中央に戻す"
+
+msgid "Click or drag to position the camera; double-click to recenter"
+msgstr "クリックまたはドラッグでカメラを配置、ダブルクリックで中央に戻す"
+
+msgid "Clipboard is unavailable."
+msgstr "クリップボードを利用できません。"
+
+msgid "Close custom color"
+msgstr "カスタムカラーを閉じる"
+
+msgid "Close export options"
+msgstr "書き出しオプションを閉じる"
+
+msgid "Complete"
+msgstr "完了"
+
+msgid "Could not open background image."
+msgstr "背景画像を開けませんでした。"
+
+msgid "Couldn't open a browser: {error}. Use Copy link and open it yourself."
+msgstr "ブラウザを開けませんでした: {error}。リンクをコピーして、ご自身で開いてください。"
+
+msgid "Custom color"
+msgstr "カスタムカラー"
+
+msgid "Drag to choose what the camera shows"
+msgstr "ドラッグしてカメラに映す範囲を選択"
+
+msgid "Drop a PNG, JPEG, or WebP here, or choose one from disk."
+msgstr "ここに PNG、JPEG、WebP をドロップするか、ディスクから選択してください。"
+
+msgid "Estimated output size"
+msgstr "推定出力サイズ"
+
+msgid "Estimating…"
+msgstr "推定中…"
+
+msgid "Export a file and copy it to the clipboard for pasting into other apps."
+msgstr "ファイルに書き出し、他のアプリに貼り付けられるようクリップボードにコピーします。"
+
+msgid "Export time depends on your hardware and effects."
+msgstr "書き出し時間はハードウェアとエフェクトによって変わります。"
+
+msgid "Export to file"
+msgstr "ファイルに書き出し"
+
+msgid "Exported successfully"
+msgstr "書き出しに成功しました"
+
+msgid "Exporting video"
+msgstr "動画を書き出し中"
+
+msgid "File copied to clipboard. Ready to paste into other apps."
+msgstr "ファイルをクリップボードにコピーしました。他のアプリに貼り付けられます。"
+
+msgid "Finishing…"
+msgstr "完了処理中…"
+
+msgid "Fit to window"
+msgstr "ウィンドウに合わせる"
+
+msgid "Free up space or raise your allowance to keep uploading."
+msgstr "容量を空けるか、利用上限を上げると、アップロードを続けられます。"
+
+msgid "Here’s where to find everything."
+msgstr "各機能の場所はこちらです。"
+
+msgid "Image editor preview with an annotated capture and the Appearance panel"
+msgstr "注釈付きキャプチャと外観パネルを表示した画像エディターのプレビュー"
+
+msgid "Last checked"
+msgstr "最終確認"
+
+msgid "Monthly, UTC"
+msgstr "毎月、UTC"
+
+msgid "Move the light to direct the shadow"
+msgstr "光を動かして影の向きを調整"
+
+msgid "Neural upscaling is not available in the Windows image editor yet"
+msgstr "Windows の画像エディターではニューラルアップスケーリングをまだ利用できません"
+
+msgid "No account needed."
+msgstr "アカウントは不要です。"
+
+msgid "Not set"
+msgstr "未設定"
+
+msgid "Obfuscate intensity"
+msgstr "難読化の強さ"
+
+msgid "One shortcut away."
+msgstr "ショートカット 1 つで始められます。"
+
+msgid "Open ApexShot"
+msgstr "ApexShot を開く"
+
+msgid "Open Image"
+msgstr "画像を開く"
+
+msgid "Open an image to annotate"
+msgstr "注釈する画像を開く"
+
+msgid "Open image"
+msgstr "画像を開く"
+
+msgid "Opening {name}…"
+msgstr "{name} を開いています…"
+
+msgid ""
+"Optional. Link your account now so it’s ready when uploads arrive on Windows."
+msgstr "任意です。今のうちにアカウントを連携しておくと、Windows でアップロードが利用できるようになったときにすぐ使えます。"
+
+msgid "Preparing export…"
+msgstr "書き出しの準備中…"
+
+msgid "Remove the watermark"
+msgstr "透かしを削除"
+
+msgid "Resets"
+msgstr "リセット"
+
+msgid "Retention"
+msgstr "保持期間"
+
+msgid "Reverse"
+msgstr "反転"
+
+msgid "Right-click for your capture menu."
+msgstr "右クリックでキャプチャメニューを表示します。"
+
+msgid "Save annotated image"
+msgstr "注釈付き画像を保存"
+
+msgid "Save the annotated image"
+msgstr "注釈付き画像を保存"
+
+msgid "Select image"
+msgstr "画像を選択"
+
+msgid "Shortcuts work while ApexShot runs in the background."
+msgstr "ApexShot がバックグラウンドで動作している間もショートカットを使えます。"
+
+msgid "Start a capture from your keyboard or the tray menu."
+msgstr "キーボードまたはトレイメニューからキャプチャを開始できます。"
+
+msgid "Status"
+msgstr "ステータス"
+
+msgid "Stop export"
+msgstr "書き出しを停止"
+
+msgid "Stopping export…"
+msgstr "書き出しを停止しています…"
+
+msgid "Storage is full"
+msgstr "ストレージがいっぱいです"
+
+msgid "Storage is nearly full"
+msgstr "ストレージがほぼいっぱいです"
+
+msgid "Storage is within your allowance"
+msgstr "ストレージは利用上限内です"
+
+msgid "Storage used"
+msgstr "ストレージ使用量"
+
+msgid "Stroke"
+msgstr "ストローク"
+
+msgid "Switch to Motion: not available in the Windows image editor yet"
+msgstr "Motion に切り替え: Windows の画像エディターではまだ利用できません"
+
+msgid "That file is not a supported image. Choose a PNG, JPEG, or WebP."
+msgstr "このファイルは対応している画像形式ではありません。PNG、JPEG、WebP のいずれかを選択してください。"
+
+msgid "The image could not be read."
+msgstr "画像を読み取れませんでした。"
+
+msgid "The image is empty."
+msgstr "画像が空です。"
+
+msgid "They reset monthly in UTC."
+msgstr "毎月 UTC にリセットされます。"
+
+msgid "This month's uploads are used up"
+msgstr "今月のアップロード枠を使い切りました"
+
+msgid "Video exported, but could not copy to clipboard:"
+msgstr "動画は書き出しましたが、クリップボードにコピーできませんでした:"
+
+msgid "Wait for the background image to finish loading."
+msgstr "背景画像の読み込みが完了するまでお待ちください。"
+
+msgid "Your shortcuts work while ApexShot runs."
+msgstr "ApexShot の動作中はショートカットを使えます。"
+
+msgid "You’re all set."
+msgstr "準備完了です。"
+
+msgid "left"
+msgstr "残り"
+
+msgid "of {limit} allowance"
+msgstr "利用上限 {limit} 中"
+
+msgid "of {limit} this month"
+msgstr "今月の上限 {limit} 件"
+
+msgid "{current} / {total}"
+msgstr "{current} / {total}"
+
+msgid "{days} days"
+msgstr "{days} 日間"
+
+msgid "{remaining} remains before your allowance is reached."
+msgstr "利用上限まで残り {remaining} です。"
+
+msgid "{remaining} remains of your {limit} allowance."
+msgstr "{remaining} が残っています（利用上限 {limit} のうち）。"

@@ -3912,3 +3912,274 @@ msgstr "隐藏侧边栏"
 
 msgid "Show sidebar"
 msgstr "显示侧边栏"
+
+msgid ""
+"10:21 image aspect ratio; long pins may be cropped in feeds. 2:3 is recommended."
+msgstr "10:21 图像宽高比；长图在信息流中可能被裁剪。建议使用 2:3。"
+
+msgid ""
+"16:9 image aspect ratio; banners need at least 2048 x 1152 pixels and may be cropped on some devices."
+msgstr "16:9 图像宽高比；横幅至少需要 2048 x 1152 像素，并且在部分设备上可能被裁剪。"
+
+msgid "Activation"
+msgstr "激活"
+
+msgid "Add a background and padding to see the shadow."
+msgstr "添加背景和填充后即可看到阴影。"
+
+msgid ""
+"Add arrows, text, and blur, then set the background, padding, and shadow before you export."
+msgstr "添加箭头、文字和模糊，然后在导出前设置背景、填充和阴影。"
+
+msgid "Annotate and style every capture."
+msgstr "为每张截图添加标注与样式。"
+
+msgid "Annotation color"
+msgstr "标注颜色"
+
+msgid "Automatic"
+msgstr "自动"
+
+msgid "Available"
+msgstr "可用"
+
+msgid "Back to editor"
+msgstr "返回编辑器"
+
+msgid "Capture your screen, mark it up, and export it."
+msgstr "截取屏幕，添加标注，然后导出。"
+
+msgid "Change any of this later."
+msgstr "之后可以随时更改。"
+
+msgid "Choose video export options"
+msgstr "选择视频导出选项"
+
+msgid "Click a Motion clip, or click the track to add a move."
+msgstr "点击 Motion 片段，或点击轨道添加移动。"
+
+msgid "Click or drag to place the watermark; double-click to center it"
+msgstr "点击或拖动以放置水印；双击将其居中"
+
+msgid "Click or drag to place the zoom anchor; double-click to recenter"
+msgstr "点击或拖动以放置缩放锚点；双击重新居中"
+
+msgid "Click or drag to position the camera; double-click to recenter"
+msgstr "点击或拖动以定位相机；双击重新居中"
+
+msgid "Clipboard is unavailable."
+msgstr "剪贴板不可用。"
+
+msgid "Close custom color"
+msgstr "关闭自定义颜色"
+
+msgid "Close export options"
+msgstr "关闭导出选项"
+
+msgid "Complete"
+msgstr "完成"
+
+msgid "Could not open background image."
+msgstr "无法打开背景图片。"
+
+msgid "Couldn't open a browser: {error}. Use Copy link and open it yourself."
+msgstr "无法打开浏览器：{error}。请使用“复制链接”自行打开。"
+
+msgid "Custom color"
+msgstr "自定义颜色"
+
+msgid "Drag to choose what the camera shows"
+msgstr "拖动以选择相机显示的内容"
+
+msgid "Drop a PNG, JPEG, or WebP here, or choose one from disk."
+msgstr "将 PNG、JPEG 或 WebP 拖放到此处，或从磁盘选择。"
+
+msgid "Estimated output size"
+msgstr "预计输出大小"
+
+msgid "Estimating…"
+msgstr "正在估算…"
+
+msgid "Export a file and copy it to the clipboard for pasting into other apps."
+msgstr "导出文件并复制到剪贴板，以便粘贴到其他应用。"
+
+msgid "Export time depends on your hardware and effects."
+msgstr "导出时间取决于你的硬件和效果。"
+
+msgid "Export to file"
+msgstr "导出到文件"
+
+msgid "Exported successfully"
+msgstr "导出成功"
+
+msgid "Exporting video"
+msgstr "正在导出视频"
+
+msgid "File copied to clipboard. Ready to paste into other apps."
+msgstr "文件已复制到剪贴板，可粘贴到其他应用。"
+
+msgid "Finishing…"
+msgstr "正在完成…"
+
+msgid "Fit to window"
+msgstr "适应窗口"
+
+msgid "Free up space or raise your allowance to keep uploading."
+msgstr "请释放空间或提高配额以继续上传。"
+
+msgid "Here’s where to find everything."
+msgstr "这里可以找到所有功能。"
+
+msgid "Image editor preview with an annotated capture and the Appearance panel"
+msgstr "图像编辑器预览，显示带标注的截图和外观面板"
+
+msgid "Last checked"
+msgstr "上次检查"
+
+msgid "Monthly, UTC"
+msgstr "每月，UTC"
+
+msgid "Move the light to direct the shadow"
+msgstr "移动光源以控制阴影方向"
+
+msgid "Neural upscaling is not available in the Windows image editor yet"
+msgstr "Windows 图像编辑器尚不支持神经网络放大"
+
+msgid "No account needed."
+msgstr "无需账户。"
+
+msgid "Not set"
+msgstr "未设置"
+
+msgid "Obfuscate intensity"
+msgstr "混淆强度"
+
+msgid "One shortcut away."
+msgstr "只差一个快捷键。"
+
+msgid "Open ApexShot"
+msgstr "打开 ApexShot"
+
+msgid "Open Image"
+msgstr "打开图像"
+
+msgid "Open an image to annotate"
+msgstr "打开图像以进行标注"
+
+msgid "Open image"
+msgstr "打开图像"
+
+msgid "Opening {name}…"
+msgstr "正在打开 {name}…"
+
+msgid ""
+"Optional. Link your account now so it’s ready when uploads arrive on Windows."
+msgstr "可选。现在关联账户，等 Windows 版支持上传时即可使用。"
+
+msgid "Preparing export…"
+msgstr "正在准备导出…"
+
+msgid "Remove the watermark"
+msgstr "移除水印"
+
+msgid "Resets"
+msgstr "重置"
+
+msgid "Retention"
+msgstr "保留期"
+
+msgid "Reverse"
+msgstr "反向"
+
+msgid "Right-click for your capture menu."
+msgstr "右键单击可打开截图菜单。"
+
+msgid "Save annotated image"
+msgstr "保存标注后的图像"
+
+msgid "Save the annotated image"
+msgstr "保存标注后的图像"
+
+msgid "Select image"
+msgstr "选择图像"
+
+msgid "Shortcuts work while ApexShot runs in the background."
+msgstr "ApexShot 在后台运行时快捷键依然有效。"
+
+msgid "Start a capture from your keyboard or the tray menu."
+msgstr "通过键盘或托盘菜单开始截图。"
+
+msgid "Status"
+msgstr "状态"
+
+msgid "Stop export"
+msgstr "停止导出"
+
+msgid "Stopping export…"
+msgstr "正在停止导出…"
+
+msgid "Storage is full"
+msgstr "存储空间已满"
+
+msgid "Storage is nearly full"
+msgstr "存储空间即将用尽"
+
+msgid "Storage is within your allowance"
+msgstr "存储空间在配额范围内"
+
+msgid "Storage used"
+msgstr "已用空间"
+
+msgid "Stroke"
+msgstr "笔画"
+
+msgid "Switch to Motion: not available in the Windows image editor yet"
+msgstr "切换到 Motion：Windows 图像编辑器尚不支持"
+
+msgid "That file is not a supported image. Choose a PNG, JPEG, or WebP."
+msgstr "该文件不是支持的图像格式。请选择 PNG、JPEG 或 WebP。"
+
+msgid "The image could not be read."
+msgstr "无法读取该图像。"
+
+msgid "The image is empty."
+msgstr "该图像为空。"
+
+msgid "They reset monthly in UTC."
+msgstr "每月按 UTC 时间重置。"
+
+msgid "This month's uploads are used up"
+msgstr "本月上传次数已用完"
+
+msgid "Video exported, but could not copy to clipboard:"
+msgstr "视频已导出，但无法复制到剪贴板："
+
+msgid "Wait for the background image to finish loading."
+msgstr "请等待背景图片加载完成。"
+
+msgid "Your shortcuts work while ApexShot runs."
+msgstr "ApexShot 运行时快捷键依然有效。"
+
+msgid "You’re all set."
+msgstr "一切就绪。"
+
+msgid "left"
+msgstr "剩余"
+
+msgid "of {limit} allowance"
+msgstr "共 {limit} 配额"
+
+msgid "of {limit} this month"
+msgstr "本月共 {limit} 次"
+
+msgid "{current} / {total}"
+msgstr "{current} / {total}"
+
+msgid "{days} days"
+msgstr "{days} 天"
+
+msgid "{remaining} remains before your allowance is reached."
+msgstr "距离达到配额上限还剩 {remaining}。"
+
+msgid "{remaining} remains of your {limit} allowance."
+msgstr "{remaining} 是你 {limit} 配额中的剩余量。"

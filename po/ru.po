@@ -3993,3 +3993,286 @@ msgstr "Скрыть боковую панель"
 
 msgid "Show sidebar"
 msgstr "Показать боковую панель"
+
+msgid ""
+"10:21 image aspect ratio; long pins may be cropped in feeds. 2:3 is recommended."
+msgstr ""
+"Соотношение сторон изображения 10:21; длинные публикации могут обрезаться в лентах. Рекомендуется 2:3."
+
+msgid ""
+"16:9 image aspect ratio; banners need at least 2048 x 1152 pixels and may be cropped on some devices."
+msgstr ""
+"Соотношение сторон изображения 16:9; для баннеров нужно не менее 2048 x 1152 пикселей, они могут обрезаться на некоторых устройствах."
+
+msgid "Activation"
+msgstr "Активация"
+
+msgid "Add a background and padding to see the shadow."
+msgstr "Добавьте фон и отступ, чтобы увидеть тень."
+
+msgid ""
+"Add arrows, text, and blur, then set the background, padding, and shadow before you export."
+msgstr ""
+"Добавьте стрелки, текст и размытие, затем настройте фон, отступ и тень перед экспортом."
+
+msgid "Annotate and style every capture."
+msgstr "Размечайте и оформляйте каждый снимок."
+
+msgid "Annotation color"
+msgstr "Цвет разметки"
+
+msgid "Automatic"
+msgstr "Авто"
+
+msgid "Available"
+msgstr "Доступно"
+
+msgid "Back to editor"
+msgstr "Назад в редактор"
+
+msgid "Capture your screen, mark it up, and export it."
+msgstr "Снимайте экран, размечайте и экспортируйте."
+
+msgid "Change any of this later."
+msgstr "Всё это можно изменить позже."
+
+msgid "Choose video export options"
+msgstr "Выбрать параметры экспорта видео"
+
+msgid "Click a Motion clip, or click the track to add a move."
+msgstr "Нажмите клип Motion или нажмите дорожку, чтобы добавить движение."
+
+msgid "Click or drag to place the watermark; double-click to center it"
+msgstr ""
+"Щёлкните или перетащите, чтобы разместить водяной знак; двойной щелчок центрирует его"
+
+msgid "Click or drag to place the zoom anchor; double-click to recenter"
+msgstr ""
+"Щёлкните или перетащите, чтобы разместить якорь масштаба; двойной щелчок — сброс к центру"
+
+msgid "Click or drag to position the camera; double-click to recenter"
+msgstr ""
+"Щёлкните или перетащите, чтобы задать положение камеры; двойной щелчок — сброс к центру"
+
+msgid "Clipboard is unavailable."
+msgstr "Буфер обмена недоступен."
+
+msgid "Close custom color"
+msgstr "Закрыть выбор пользовательского цвета"
+
+msgid "Close export options"
+msgstr "Закрыть параметры экспорта"
+
+msgid "Complete"
+msgstr "Готово"
+
+msgid "Could not open background image."
+msgstr "Не удалось открыть фоновое изображение."
+
+msgid "Couldn't open a browser: {error}. Use Copy link and open it yourself."
+msgstr ""
+"Не удалось открыть браузер: {error}. Используйте «Скопировать ссылку» и откройте её самостоятельно."
+
+msgid "Custom color"
+msgstr "Пользовательский цвет"
+
+msgid "Drag to choose what the camera shows"
+msgstr "Перетащите, чтобы выбрать, что видит камера"
+
+msgid "Drop a PNG, JPEG, or WebP here, or choose one from disk."
+msgstr "Перетащите сюда PNG, JPEG или WebP или выберите файл на диске."
+
+msgid "Estimated output size"
+msgstr "Ориентировочный размер файла"
+
+msgid "Estimating…"
+msgstr "Оценка…"
+
+msgid "Export a file and copy it to the clipboard for pasting into other apps."
+msgstr ""
+"Экспортировать файл и скопировать его в буфер обмена для вставки в другие приложения."
+
+msgid "Export time depends on your hardware and effects."
+msgstr "Время экспорта зависит от вашего оборудования и эффектов."
+
+msgid "Export to file"
+msgstr "Экспорт в файл"
+
+msgid "Exported successfully"
+msgstr "Экспорт выполнен"
+
+msgid "Exporting video"
+msgstr "Экспорт видео"
+
+msgid "File copied to clipboard. Ready to paste into other apps."
+msgstr "Файл скопирован в буфер обмена. Готов к вставке в другие приложения."
+
+msgid "Finishing…"
+msgstr "Завершение…"
+
+msgid "Fit to window"
+msgstr "Вписать в окно"
+
+msgid "Free up space or raise your allowance to keep uploading."
+msgstr "Освободите место или увеличьте лимит, чтобы продолжить загрузку."
+
+msgid "Here’s where to find everything."
+msgstr "Вот где всё находится."
+
+msgid "Image editor preview with an annotated capture and the Appearance panel"
+msgstr ""
+"Предпросмотр редактора изображений с размеченным снимком и панелью «Внешний вид»"
+
+msgid "Last checked"
+msgstr "Последняя проверка"
+
+msgid "Monthly, UTC"
+msgstr "Ежемесячно, UTC"
+
+msgid "Move the light to direct the shadow"
+msgstr "Перемещайте свет, чтобы направлять тень"
+
+msgid "Neural upscaling is not available in the Windows image editor yet"
+msgstr ""
+"Нейронное масштабирование пока недоступно в редакторе изображений для Windows"
+
+msgid "No account needed."
+msgstr "Аккаунт не нужен."
+
+msgid "Not set"
+msgstr "Не задано"
+
+msgid "Obfuscate intensity"
+msgstr "Интенсивность обфускации"
+
+msgid "One shortcut away."
+msgstr "Одно сочетание — и готово."
+
+msgid "Open ApexShot"
+msgstr "Открыть ApexShot"
+
+msgid "Open Image"
+msgstr "Открыть изображение"
+
+msgid "Open an image to annotate"
+msgstr "Откройте изображение для разметки"
+
+msgid "Open image"
+msgstr "Открыть изображение"
+
+msgid "Opening {name}…"
+msgstr "Открываем {name}…"
+
+msgid ""
+"Optional. Link your account now so it’s ready when uploads arrive on Windows."
+msgstr ""
+"Необязательно. Привяжите аккаунт сейчас, чтобы он был готов, когда загрузки появятся в Windows."
+
+msgid "Preparing export…"
+msgstr "Подготовка экспорта…"
+
+msgid "Remove the watermark"
+msgstr "Удалить водяной знак"
+
+msgid "Resets"
+msgstr "Сброс"
+
+msgid "Retention"
+msgstr "Хранение"
+
+msgid "Reverse"
+msgstr "Развернуть"
+
+msgid "Right-click for your capture menu."
+msgstr "Правый клик открывает меню съёмки."
+
+msgid "Save annotated image"
+msgstr "Сохранить размеченное изображение"
+
+msgid "Save the annotated image"
+msgstr "Сохранить изображение с разметкой"
+
+msgid "Select image"
+msgstr "Выбрать изображение"
+
+msgid "Shortcuts work while ApexShot runs in the background."
+msgstr "Сочетания клавиш работают, пока ApexShot запущен в фоне."
+
+msgid "Start a capture from your keyboard or the tray menu."
+msgstr "Начинайте снимок с клавиатуры или из меню лотка."
+
+msgid "Status"
+msgstr "Состояние"
+
+msgid "Stop export"
+msgstr "Остановить экспорт"
+
+msgid "Stopping export…"
+msgstr "Остановка экспорта…"
+
+msgid "Storage is full"
+msgstr "Хранилище заполнено"
+
+msgid "Storage is nearly full"
+msgstr "Хранилище почти заполнено"
+
+msgid "Storage is within your allowance"
+msgstr "Хранилище в пределах лимита"
+
+msgid "Storage used"
+msgstr "Занято в хранилище"
+
+msgid "Stroke"
+msgstr "Штрих"
+
+msgid "Switch to Motion: not available in the Windows image editor yet"
+msgstr "Перейти к Motion: пока недоступно в редакторе изображений для Windows"
+
+msgid "That file is not a supported image. Choose a PNG, JPEG, or WebP."
+msgstr ""
+"Этот файл не является поддерживаемым изображением. Выберите файл PNG, JPEG или WebP."
+
+msgid "The image could not be read."
+msgstr "Не удалось прочитать изображение."
+
+msgid "The image is empty."
+msgstr "Изображение пустое."
+
+msgid "They reset monthly in UTC."
+msgstr "Они сбрасываются ежемесячно по времени UTC."
+
+msgid "This month's uploads are used up"
+msgstr "Загрузки за этот месяц исчерпаны"
+
+msgid "Video exported, but could not copy to clipboard:"
+msgstr "Видео экспортировано, но не удалось скопировать в буфер обмена:"
+
+msgid "Wait for the background image to finish loading."
+msgstr "Дождитесь загрузки фонового изображения."
+
+msgid "Your shortcuts work while ApexShot runs."
+msgstr "Сочетания клавиш работают, пока запущен ApexShot."
+
+msgid "You’re all set."
+msgstr "Всё готово."
+
+msgid "left"
+msgstr "осталось"
+
+msgid "of {limit} allowance"
+msgstr "из {limit} лимита"
+
+msgid "of {limit} this month"
+msgstr "из {limit} в этом месяце"
+
+msgid "{current} / {total}"
+msgstr "{current} / {total}"
+
+msgid "{days} days"
+msgstr "{days} дн."
+
+msgid "{remaining} remains before your allowance is reached."
+msgstr "До достижения лимита осталось {remaining}."
+
+msgid "{remaining} remains of your {limit} allowance."
+msgstr "Осталось {remaining} из вашего лимита {limit}."
