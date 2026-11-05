@@ -264,19 +264,67 @@ install_runtime_dependencies() {
         bash -c "${SUDO} dnf install -y ${deps[*]}"
 }
 
+fedora_rpm_tag() {
+    sed -n 's/.*\.fc\([0-9]\+\)\.x86_64\.rpm$/\1/p'
+}
+
+host_fedora_version() {
+    local version=""
+    if command -v rpm >/dev/null 2>&1; then
+        version="$(rpm -E %fedora 2>/dev/null || true)"
+        [[ "$version" =~ ^[0-9]+$ ]] || version=""
+    fi
+    if [[ -z "$version" && -r /etc/os-release ]]; then
+        version="$(. /etc/os-release && printf '%s' "${VERSION_ID:-}")"
+        version="${version%%.*}"
+        [[ "$version" =~ ^[0-9]+$ ]] || version=""
+    fi
+    printf '%s' "$version"
+}
+
 resolve_rpm_url() {
-    local rpm_path version_no_v version_re
+    local assets host_version chosen tag
+    local version_no_v version_re
     version_no_v="${VERSION#v}"
     version_re=${version_no_v//./\\.}
-    rpm_path=$(curl -fsSL "${RELEASES_URL}/expanded_assets/${VERSION}" |
-               grep -oE "\"/${REPO}/releases/download/${VERSION}/apexshot-${version_re}-[0-9]+\.fc[0-9]+\.x86_64\.rpm\"" |
-               head -n 1 | tr -d '"' || true)
+    assets=$(curl -fsSL "${RELEASES_URL}/expanded_assets/${VERSION}" |
+             grep -oE "\"/${REPO}/releases/download/${VERSION}/apexshot-${version_re}-[0-9]+\.fc[0-9]+\.x86_64\.rpm\"" |
+             tr -d '"' || true)
 
-    if [[ -z "$rpm_path" ]]; then
+    if [[ -z "$assets" ]]; then
         return 1
     fi
 
-    printf 'https://github.com%s' "$rpm_path"
+    # Prefer the package built for this machine's Fedora release, and fall back
+    # to the newest published one so a newer Fedora still gets an install.
+    host_version=$(host_fedora_version)
+    chosen=""
+    if [[ -n "$host_version" ]]; then
+        chosen=$(printf '%s\n' "$assets" |
+                 grep -E "\.fc${host_version}\.x86_64\.rpm$" |
+                 head -n 1 || true)
+    fi
+    if [[ -z "$chosen" ]]; then
+        chosen=$(printf '%s\n' "$assets" |
+                 while IFS= read -r candidate; do
+                     tag=$(printf '%s' "$candidate" | fedora_rpm_tag)
+                     [[ -n "$tag" ]] && printf '%s %s\n' "$tag" "$candidate"
+                 done |
+                 sort -n | tail -n 1 | cut -d' ' -f2-)
+    fi
+
+    if [[ -z "$chosen" ]]; then
+        return 1
+    fi
+
+    if [[ -n "$host_version" ]]; then
+        tag=$(printf '%s' "$chosen" | fedora_rpm_tag)
+        if [[ -n "$tag" && "$tag" -lt "$host_version" ]]; then
+            warn "This release has no Fedora ${host_version} package; installing the Fedora ${tag} build." >&2
+        fi
+    fi
+
+    printf 'https://github.com%s' "$chosen"
 }
 
 download_rpm() {

@@ -12,6 +12,7 @@ import unittest
 ROOT = Path(__file__).resolve().parent
 INSTALLER = ROOT / "fedora-install.sh"
 SPEC = ROOT.parent / "packaging" / "fedora" / "apexshot.spec"
+RELEASE_WORKFLOW = ROOT.parent / ".github" / "workflows" / "release.yml"
 MAIN_CALL = '\nmain "$@"\n'
 
 HARNESS = """
@@ -72,6 +73,15 @@ class RuntimeDependencyTest(unittest.TestCase):
 
     def test_leaves_an_existing_ffmpeg_alone(self):
         self.assertNotIn("ffmpeg-free", self.install_deps(ffmpeg_installed=True))
+
+
+class ReleaseBuildTargetTest(unittest.TestCase):
+    """The Fedora RPM must be built on the Fedora release it is installed on."""
+
+    def test_fedora_rpm_builds_on_fedora_44_or_newer(self):
+        match = re.search(r"^\s+image: fedora:(\d+)$", RELEASE_WORKFLOW.read_text(), re.M)
+        self.assertIsNotNone(match, "release.yml has no Fedora build container")
+        self.assertGreaterEqual(int(match.group(1)), 44)
 
 
 class SpecDependencyTest(unittest.TestCase):

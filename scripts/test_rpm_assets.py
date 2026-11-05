@@ -14,6 +14,7 @@ RELEASES_URL = f"https://github.com/{REPO}/releases"
 TAG = "v0.2.35"
 
 FEDORA_RPM = "apexshot-0.2.35-1.fc42.x86_64.rpm"
+FEDORA_44_RPM = "apexshot-0.2.35-1.fc44.x86_64.rpm"
 OPENSUSE_RPM = "apexshot-0.2.35-0.x86_64.rpm"
 DEBUGINFO_RPM = "apexshot-debuginfo-0.2.35-1.fc42.x86_64.rpm"
 DEBUGSOURCE_RPM = "apexshot-debugsource-0.2.35-1.fc42.x86_64.rpm"
@@ -31,11 +32,18 @@ def script_text(script):
     return (ROOT / script).read_text()
 
 
-def resolver_source(script):
-    match = re.search(r"^resolve_rpm_url\(\) \{\n.*?^\}\n", script_text(script), re.M | re.S)
-    if match is None:
-        raise AssertionError(f"resolve_rpm_url not found in {script}")
-    return match.group(0)
+COLOR_DEFAULTS = 'BOLD=""; DIM=""; RESET=""; RED=""; GREEN=""; YELLOW=""; BLUE=""; CYAN=""\n'
+
+
+def resolver_source(script, names):
+    text = script_text(script)
+    parts = []
+    for name in names:
+        match = re.search(rf"^{name}\(\) \{{\n.*?^\}}\n", text, re.M | re.S)
+        if match is None:
+            raise AssertionError(f"{name} not found in {script}")
+        parts.append(match.group(0))
+    return COLOR_DEFAULTS + "".join(parts)
 
 
 def installer_harness(script, logged_functions):
@@ -77,26 +85,33 @@ def run_offline(tmp_path, page, command, extra_env):
 
 class ResolverCase(unittest.TestCase):
     script = ""
+    functions = ("resolve_rpm_url",)
 
-    def resolve(self, page, tag=TAG):
-        harness = "set -euo pipefail\n" + resolver_source(self.script) + "resolve_rpm_url\n"
+    def resolve(self, page, tag=TAG, host_fedora=None):
+        harness = "set -euo pipefail\n" + resolver_source(self.script, self.functions) + "resolve_rpm_url\n"
         extra_env = {"REPO": REPO, "RELEASES_URL": RELEASES_URL, "VERSION": tag}
         with tempfile.TemporaryDirectory() as tmp:
-            return run_offline(Path(tmp), page, ["bash", "-c", harness], extra_env)
+            tmp_path = Path(tmp)
+            if host_fedora is not None:
+                rpm_stub = tmp_path / "rpm"
+                rpm_stub.write_text(f"#!/bin/sh\necho {host_fedora}\n")
+                rpm_stub.chmod(0o755)
+            return run_offline(tmp_path, page, ["bash", "-c", harness], extra_env)
 
-    def assertSelects(self, page, name):
-        result = self.resolve(page)
+    def assertSelects(self, page, name, host_fedora=None):
+        result = self.resolve(page, host_fedora=host_fedora)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, expected_url(name))
 
-    def assertRefuses(self, page):
-        result = self.resolve(page)
+    def assertRefuses(self, page, host_fedora=None):
+        result = self.resolve(page, host_fedora=host_fedora)
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "")
 
 
 class FedoraResolverTest(ResolverCase):
     script = "fedora-install.sh"
+    functions = ("warn", "fedora_rpm_tag", "host_fedora_version", "resolve_rpm_url")
 
     def test_selects_main_fedora_rpm_among_mixed_assets(self):
         page = release_page(SOURCE_RPM, DEBUGSOURCE_RPM, DEBUGINFO_RPM, OPENSUSE_RPM, FEDORA_RPM)
@@ -121,6 +136,29 @@ class FedoraResolverTest(ResolverCase):
 
     def test_version_dots_match_literally(self):
         self.assertRefuses(release_page("apexshot-0x2x35-1.fc42.x86_64.rpm"))
+
+    def test_prefers_the_rpm_built_for_the_host_fedora(self):
+        page = release_page(FEDORA_44_RPM, FEDORA_RPM)
+        self.assertSelects(page, FEDORA_44_RPM, host_fedora=44)
+        self.assertSelects(page, FEDORA_RPM, host_fedora=42)
+
+    def test_picks_the_newest_rpm_when_the_host_version_is_not_published(self):
+        page = release_page(FEDORA_RPM, FEDORA_44_RPM)
+        self.assertSelects(page, FEDORA_44_RPM, host_fedora=45)
+        self.assertSelects(page, FEDORA_44_RPM, host_fedora=43)
+
+    def test_warns_when_the_newest_rpm_targets_an_older_fedora(self):
+        result = self.resolve(release_page(FEDORA_RPM, FEDORA_44_RPM), host_fedora=45)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, expected_url(FEDORA_44_RPM))
+        self.assertIn("Fedora 45", result.stderr)
+        self.assertIn("Fedora 44", result.stderr)
+
+    def test_does_not_warn_when_the_rpm_matches_the_host(self):
+        result = self.resolve(release_page(FEDORA_44_RPM), host_fedora=44)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, expected_url(FEDORA_44_RPM))
+        self.assertEqual(result.stderr, "")
 
 
 class OpenSuseResolverTest(ResolverCase):
