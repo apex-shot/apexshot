@@ -101,6 +101,12 @@
                 padding: 8px 14px;
             }
 
+            .settings-table-row label.settings-mono-value {
+                font-family: monospace;
+                font-weight: 500;
+                letter-spacing: 0.02em;
+            }
+
             .settings-table-row-muted {
                 background-color: transparent;
             }
