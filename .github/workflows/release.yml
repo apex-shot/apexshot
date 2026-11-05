@@ -472,7 +472,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        fedora: [43, 44]
+        fedora: [42, 43, 44]
     container:
       image: fedora:${{ matrix.fedora }}
       env:
