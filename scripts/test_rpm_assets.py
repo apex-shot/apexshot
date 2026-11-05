@@ -112,7 +112,7 @@ class ResolverCase(unittest.TestCase):
 
 class FedoraResolverTest(ResolverCase):
     script = "fedora-install.sh"
-    functions = ("warn", "fedora_rpm_tag", "host_fedora_version", "resolve_rpm_url")
+    functions = ("warn", "err", "fedora_rpm_tag", "host_fedora_version", "resolve_rpm_url")
 
     def test_selects_main_fedora_rpm_among_mixed_assets(self):
         page = release_page(SOURCE_RPM, DEBUGSOURCE_RPM, DEBUGINFO_RPM, OPENSUSE_RPM, FEDORA_RPM)
@@ -147,10 +147,16 @@ class FedoraResolverTest(ResolverCase):
         page = release_page(FEDORA_44_RPM, FEDORA_43_RPM)
         self.assertSelects(page, FEDORA_43_RPM, host_fedora=43)
 
-    def test_picks_the_newest_rpm_when_the_host_version_is_not_published(self):
+    def test_picks_the_newest_installable_rpm_when_the_host_version_is_not_published(self):
         page = release_page(FEDORA_RPM, FEDORA_44_RPM)
         self.assertSelects(page, FEDORA_44_RPM, host_fedora=45)
-        self.assertSelects(page, FEDORA_44_RPM, host_fedora=43)
+        self.assertSelects(page, FEDORA_RPM, host_fedora=43)
+
+    def test_refuses_when_every_build_targets_a_newer_fedora(self):
+        result = self.resolve(release_page(FEDORA_43_RPM, FEDORA_44_RPM), host_fedora=42)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("Fedora 42", result.stderr)
 
     def test_warns_when_the_newest_rpm_targets_an_older_fedora(self):
         result = self.resolve(release_page(FEDORA_RPM, FEDORA_44_RPM), host_fedora=45)
