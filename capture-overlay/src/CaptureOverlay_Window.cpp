@@ -661,7 +661,7 @@ void CaptureOverlay::drawWindowPickerMode(QPainter& p, const QRect& widgetRect)
     QPainterPath keyPath;
     keyPath.addRoundedRect(keyRect, 8, 8);
     p.fillPath(keyPath, QColor(255, 102, 0, 220));
-    QFont keyFont(QStringLiteral("Inter"));
+    QFont keyFont(QStringLiteral("DM Sans"));
     keyFont.setPixelSize(10);
     keyFont.setWeight(QFont::DemiBold);
     p.setFont(keyFont);

@@ -171,6 +171,7 @@ fn build_settings_window(app: &Application) {
     install_settings_css();
     install_window_css();
     shell::install_css();
+    shell::install_type_css();
 
     let config = load_config().sanitized();
     if let Err(error) = actions::sync_shell_settings_on_start() {
