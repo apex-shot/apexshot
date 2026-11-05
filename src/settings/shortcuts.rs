@@ -1050,8 +1050,13 @@ mod tests {
         for (icon_align, label_align, icon_centre, label_centre) in result {
             assert_eq!(icon_align, Align::Center);
             assert_eq!(label_align, Align::Center);
+            // Centring an item whose height has the other parity than the
+            // row's leaves a half pixel that GTK rounds per widget, so the
+            // measured centres can differ by 0.5 on a font whose line height
+            // the row does not divide evenly. A whole pixel still catches the
+            // margin that used to drop the title below its icon.
             assert!(
-                (icon_centre - label_centre).abs() < 0.5,
+                (icon_centre - label_centre).abs() < 1.0,
                 "title centre {label_centre} misses the icon centre {icon_centre}"
             );
         }
