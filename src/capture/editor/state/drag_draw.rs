@@ -12,7 +12,8 @@ const MIN_SHAPE_DRAG_SIZE: f64 = 4.0;
 /// a deliberate shape. Drafts and commits share this so a dot never appears.
 fn shape_rect(start: Point, end: Point) -> Option<Rect> {
     Rect::from_points(start, end).filter(|rect| {
-        f64::from(rect.width) >= MIN_SHAPE_DRAG_SIZE && f64::from(rect.height) >= MIN_SHAPE_DRAG_SIZE
+        f64::from(rect.width) >= MIN_SHAPE_DRAG_SIZE
+            && f64::from(rect.height) >= MIN_SHAPE_DRAG_SIZE
     })
 }
 
