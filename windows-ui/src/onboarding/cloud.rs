@@ -112,6 +112,10 @@ fn connected(view: &View, config: &AppConfig) {
     let who = Label::new(Some(&email));
     who.set_halign(Align::Center);
     who.set_xalign(0.5);
+    who.set_wrap(true);
+    who.set_wrap_mode(gtk4::pango::WrapMode::WordChar);
+    who.set_max_width_chars(36);
+    who.set_justify(gtk4::Justification::Center);
     who.set_margin_top(px(scale, 10.0));
     who.add_css_class("cloud-user-name");
     view.body.append(&who);
@@ -455,27 +459,35 @@ mod tests {
     #[test]
     fn sign_in_waiting_and_failure_states_fit_without_scrolling() {
         let _ = crate::test_support::with_gtk(|| {
-            let scale = crate::platform::ui_scale();
-            let (root, body, actions, nav) = super::super::tests::test_form(scale);
-            let view = View {
-                body,
-                actions,
-                nav,
-                session: Rc::new(Cell::new(0)),
-            };
-            // Build only the presentation; no login request or browser launch.
-            let ui = connect_ui(&view);
-            ui.code_label.set_text("KM5Y-6MNK");
-            ui.status.set_text("Waiting for you to authorize…");
-            ui.expiry.set_text("Code expires in 15 min");
-            ui.expiry.set_visible(true);
-            super::super::tests::assert_form_fits(&root, scale);
-            ui.browser_status
-                .set_text("Couldn’t open a browser. Use Copy link and open it yourself.");
-            ui.browser_status.set_visible(true);
-            super::super::tests::assert_form_fits(&root, scale);
-            ui.failed(&LoginError::Expired);
-            super::super::tests::assert_form_fits(&root, scale);
+            for scale in [1.0, 1.25, 1.5, 2.0] {
+                let (root, body, actions, nav) =
+                    super::super::tests::test_form(scale, OnboardingStep::Cloud);
+                let view = View {
+                    body,
+                    actions,
+                    nav,
+                    session: Rc::new(Cell::new(0)),
+                };
+                let config = AppConfig {
+                    cloud_user_email: "a.long.account.address@example.com".into(),
+                    ..Default::default()
+                };
+                connected(&view, &config);
+                super::super::tests::assert_form_fits(&root, scale);
+                // Build only the presentation; no login request or browser launch.
+                let ui = connect_ui(&view);
+                ui.code_label.set_text("KM5Y-6MNK");
+                ui.status.set_text("Waiting for you to authorize…");
+                ui.expiry.set_text("Code expires in 15 min");
+                ui.expiry.set_visible(true);
+                super::super::tests::assert_form_fits(&root, scale);
+                ui.browser_status
+                    .set_text("Couldn’t open a browser. Use Copy link and open it yourself.");
+                ui.browser_status.set_visible(true);
+                super::super::tests::assert_form_fits(&root, scale);
+                ui.failed(&LoginError::Expired);
+                super::super::tests::assert_form_fits(&root, scale);
+            }
         });
     }
 

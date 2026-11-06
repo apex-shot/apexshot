@@ -3,6 +3,8 @@
 use gtk4::prelude::*;
 use gtk4::{glib, Widget};
 
+pub(super) use super::blur_text::reveal as reveal_text;
+
 pub fn enabled() -> bool {
     gtk4::Settings::default().is_none_or(|settings| settings.is_gtk_enable_animations())
 }
@@ -43,6 +45,33 @@ pub fn reveal(
             pending |= progress < 1.0;
         }
         if pending {
+            glib::ControlFlow::Continue
+        } else {
+            glib::ControlFlow::Break
+        }
+    }))
+}
+
+/// Fade one widget after a delay. Used when a page needs its own entrance
+/// rhythm instead of the shared stagger.
+pub fn fade_in(widget: &Widget, delay_ms: f64, duration_ms: f64) -> Option<gtk4::TickCallbackId> {
+    if !enabled() {
+        return None;
+    }
+    widget.set_opacity(0.0);
+    let started = std::cell::Cell::new(None::<i64>);
+    Some(widget.add_tick_callback(move |widget, clock| {
+        if !widget.is_mapped() {
+            widget.set_opacity(1.0);
+            return glib::ControlFlow::Break;
+        }
+        let now = clock.frame_time();
+        let start = started.get().unwrap_or(now);
+        started.set(Some(start));
+        let elapsed_ms = (now - start) as f64 / 1000.0;
+        let progress = ((elapsed_ms - delay_ms) / duration_ms).clamp(0.0, 1.0);
+        widget.set_opacity(ease_out_cubic(progress));
+        if progress < 1.0 {
             glib::ControlFlow::Continue
         } else {
             glib::ControlFlow::Break
