@@ -394,7 +394,7 @@ fn retro_backing_is_solid_down_right(
     backing.offset_x > 0.0
         && backing.offset_y > 0.0
         && backing.rotation_deg.abs() < f64::EPSILON
-        && backing.color == DrawColor::new(0.0, 0.0, 0.0, 1.0)
+        && backing.color == DrawColor::new(0.75, 0.75, 0.77, 1.0)
 }
 
 #[test]
@@ -415,7 +415,15 @@ fn retro_draws_thin_border_with_solid_window_behind_card() {
     let (w, h) = (final_image.width(), final_image.height());
     let x = w / 2;
     let is_gray = |px: &image::Rgba<u8>| px[0] == 100 && px[1] == 100 && px[2] == 100;
-    let is_black = |px: &image::Rgba<u8>| px[0] == 0 && px[1] == 0 && px[2] == 0;
+    // The sheet behind the card is a light card, not a black void, so it reads
+    // on a transparent export as well as over a background.
+    let sheet = spec.backing1.expect("retro sheet").color;
+    let is_sheet = |px: &image::Rgba<u8>| {
+        let channel = |value: f64| (value * 255.0).round() as u8;
+        px[0].abs_diff(channel(sheet.r)) <= 2
+            && px[1].abs_diff(channel(sheet.g)) <= 2
+            && px[2].abs_diff(channel(sheet.b)) <= 2
+    };
     let is_dark = |px: &image::Rgba<u8>| px[0].max(px[1]).max(px[2]) < 160;
     let is_red = |px: &image::Rgba<u8>| px[0] == 255 && px[1] == 0 && px[2] == 0;
     let is_reddish = |px: &image::Rgba<u8>| px[0] > 150 && px[1] < 150 && px[2] < 150;
@@ -438,11 +446,12 @@ fn retro_draws_thin_border_with_solid_window_behind_card() {
         "expected thin bottom border below card, got {:?}",
         final_image.get_pixel(x, last_gray + 1)
     );
-    // Offset window peeks well below the card but not above it: the hard
-    // shadow only extends down-right.
+    // Offset window peeks well below the card but not above it: the sheet
+    // only extends down-right.
     assert!(
-        is_black(final_image.get_pixel(x, last_gray + 10)),
-        "expected retro window peeking below card"
+        is_sheet(final_image.get_pixel(x, last_gray + 10)),
+        "expected retro window peeking below card, got {:?}",
+        final_image.get_pixel(x, last_gray + 10)
     );
     assert!(
         is_reddish(final_image.get_pixel(x, first_gray - 6)),
@@ -473,10 +482,16 @@ fn retro_window_renders_without_background_and_follows_radius() {
         final_image.height()
     );
     let (w, h) = (final_image.width(), final_image.height());
-    let is_black = |px: &image::Rgba<u8>| px[0] == 0 && px[1] == 0 && px[2] == 0;
+    let sheet = spec.backing1.expect("retro sheet").color;
+    let is_sheet = |px: &image::Rgba<u8>| {
+        let channel = |value: f64| (value * 255.0).round() as u8;
+        px[0].abs_diff(channel(sheet.r)) <= 2
+            && px[1].abs_diff(channel(sheet.g)) <= 2
+            && px[2].abs_diff(channel(sheet.b)) <= 2
+    };
     // The window peeks along the right/bottom edges but not top-left.
     assert!(
-        is_black(final_image.get_pixel(w - 2, h / 2)),
+        is_sheet(final_image.get_pixel(w - 2, h / 2)),
         "expected retro window along right edge, got {:?}",
         final_image.get_pixel(w - 2, h / 2)
     );
