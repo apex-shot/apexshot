@@ -19,6 +19,145 @@ const DEFAULT_WINDOW_HEIGHT: f64 = 900.0;
 
 const IMAGE_EDITOR_CSS: &str = include_str!("image_editor.css");
 
+/// The editor's type scale, authored at 100% and scaled by
+/// [`crate::platform::ui_scale`] when it is installed.
+///
+/// Settings and onboarding both author their type at 100% and let the display
+/// scale carry it: Settings in a type sheet layered over its shell, onboarding
+/// in its page sheet. This is the editor's version of that. Every role is
+/// restated here, and [`crate::css_scale::scale_font_sizes`] multiplies only the
+/// `font-size` values, so the type resolves from one place at the top of the
+/// cascade. Weights, colour and every length stay with `image_editor.css`, whose
+/// metrics [`install_css`] scales by the display.
+///
+/// The sizes are the Settings window's — a 14px base, 15px row titles, 13px
+/// hints and buttons, and 11px eyebrow labels. DM Sans runs a little lighter at
+/// the same size than the Inter the editor was tuned for, so the body roles sit
+/// a step above the sheet's authored sizes and the windows read alike.
+const IMAGE_EDITOR_TYPE_CSS: &str = r#"
+        /* Base */
+        .image-editor-root {
+            font-size: 14px;
+        }
+
+        /* Panel and section headings */
+        .image-editor-inspector-title {
+            font-size: 15px;
+        }
+        .image-editor-section-title {
+            font-size: 11px;
+        }
+        .image-editor-frame-subheader {
+            font-size: 14px;
+        }
+        .image-editor-custom-color-title {
+            font-size: 13px;
+        }
+
+        /* Rows, tabs and disclosure actions */
+        button.image-editor-bg-none-row,
+        button.image-editor-bg-none-row label,
+        button.image-editor-bg-custom-edit,
+        button.image-editor-bg-custom-edit label,
+        button.image-editor-bg-image-row,
+        button.image-editor-bg-image-row label,
+        .image-editor-bg-custom-row label {
+            font-size: 14px;
+        }
+        togglebutton.image-editor-bg-tab,
+        togglebutton.image-editor-bg-tab label,
+        button.image-editor-preset-pill label {
+            font-size: 13px;
+        }
+        button.image-editor-inline-button,
+        button.image-editor-inline-button label,
+        button.image-editor-watermark-remove,
+        button.image-editor-watermark-remove label,
+        button.image-editor-transform-reset,
+        button.image-editor-transform-reset label {
+            font-size: 13px;
+        }
+        .image-editor-frame-tile-label,
+        .image-editor-frame-sublabel {
+            font-size: 11px;
+        }
+        .image-editor-dim-unit {
+            font-size: 12px;
+        }
+        entry.image-editor-dim-entry {
+            font-size: 13px;
+        }
+        .image-editor-font-dropdown {
+            font-size: 13px;
+        }
+        .image-editor-text-content,
+        .image-editor-text-content text {
+            font-size: 13px;
+        }
+
+        /* Floating bar and popovers */
+        button.image-editor-subbar-pill,
+        button.image-editor-subbar-button,
+        entry.image-editor-subbar-entry {
+            font-size: 13px;
+        }
+        button.image-editor-subbar-option {
+            font-size: 15px;
+        }
+        .image-editor-subbar-dimensions {
+            font-size: 12px;
+        }
+        .image-editor-number-style-sample {
+            font-size: 14px;
+        }
+        .image-editor-effect-value {
+            font-size: 13px;
+        }
+        .image-editor-custom-opacity-label,
+        .image-editor-custom-opacity-value {
+            font-size: 12px;
+        }
+        button.image-editor-motion-button,
+        button.image-editor-mode-button,
+        button.image-editor-mode-button label,
+        button.image-editor-zoom-label {
+            font-size: 13px;
+        }
+        button.image-editor-zoom-step {
+            font-size: 16px;
+        }
+        button.image-editor-primary-button,
+        button.image-editor-export,
+        button.image-editor-export label {
+            font-size: 13px;
+        }
+
+        /* Hints, overlays and empty states */
+        .image-editor-hint,
+        .image-editor-empty-detail,
+        .image-editor-empty-error,
+        .image-editor-empty-loading {
+            font-size: 13px;
+        }
+        .image-editor-empty-title {
+            font-size: 18px;
+        }
+        .image-editor-toast {
+            font-size: 13px;
+        }
+
+        /* Mode-switch confirmation */
+        .image-editor-confirm-title {
+            font-size: 15px;
+        }
+        .image-editor-confirm-body,
+        .image-editor-confirm-skip,
+        button.image-editor-confirm-cancel,
+        button.image-editor-confirm-continue {
+            font-size: 13px;
+        }
+        "#;
+
 pub(super) fn install_css() {
     crate::settings::install_window_css();
     // The Motion timeline reuses the shared recording editor stylesheet for
@@ -38,7 +177,31 @@ pub(super) fn install_css() {
         &provider,
         gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 4,
     );
+    install_type_css();
     crate::settings::shell::install_select_menu_css();
+}
+
+/// Install the editor's type scale over the metrics sheet.
+///
+/// The sheet is authored at 100%, so only its `font-size` values are taken
+/// through the display scaler; running the whole sheet through the length
+/// scaler would grow its spacing a second time. Priority sits above the metrics
+/// sheet (and above the shared Settings type sheet, which never matches an
+/// `.image-editor-` selector) so these roles win the cascade.
+fn install_type_css() {
+    let Some(display) = gdk::Display::default() else {
+        return;
+    };
+    let provider = CssProvider::new();
+    provider.load_from_data(&crate::css_scale::scale_font_sizes(
+        IMAGE_EDITOR_TYPE_CSS,
+        crate::platform::ui_scale(),
+    ));
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 6,
+    );
 }
 
 /// An empty overlay that hosts the editor's mode pages and overlays.
@@ -112,8 +275,10 @@ pub(super) fn default_window_size(scale: f64) -> (i32, i32) {
 
 #[cfg(test)]
 mod tests {
-    use super::{has_supported_image_extension, is_supported_image};
+    use super::{has_supported_image_extension, is_supported_image, IMAGE_EDITOR_TYPE_CSS};
+    use std::cell::RefCell;
     use std::path::Path;
+    use std::rc::Rc;
 
     #[test]
     fn only_the_shared_image_formats_are_dropped() {
@@ -128,5 +293,40 @@ mod tests {
     #[test]
     fn missing_files_are_rejected() {
         assert!(!is_supported_image(Path::new("does-not-exist.png")));
+    }
+
+    #[test]
+    fn type_sheet_parses() {
+        let Some(errors) = crate::test_support::with_gtk(|| {
+            let provider = gtk4::CssProvider::new();
+            let errors = Rc::new(RefCell::new(Vec::new()));
+            let captured = Rc::clone(&errors);
+            provider.connect_parsing_error(move |_, _, error| {
+                captured.borrow_mut().push(error.message().to_string());
+            });
+            provider.load_from_data(IMAGE_EDITOR_TYPE_CSS);
+            let result = errors.borrow().clone();
+            result
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+        assert!(
+            errors.is_empty(),
+            "image editor type CSS errors: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn type_sheet_scales_with_the_display() {
+        let scaled = crate::css_scale::scale_font_sizes(IMAGE_EDITOR_TYPE_CSS, 1.5);
+        // The 14px base and the 15px row titles follow the display.
+        assert!(scaled.contains("font-size: 21px;"));
+        assert!(scaled.contains("font-size: 22.5px;"));
+        // Every role survives the pass; only the values change.
+        assert_eq!(
+            scaled.matches("font-size:").count(),
+            IMAGE_EDITOR_TYPE_CSS.matches("font-size:").count()
+        );
     }
 }

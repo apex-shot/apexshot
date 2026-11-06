@@ -14,7 +14,7 @@ window.image-editor-window {
     background-color: #141414;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 12px;
-    font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
+    font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
 }
 
 .image-editor-root.editor-theme-light {
@@ -504,7 +504,6 @@ button.image-editor-subbar-option:active {
 }
 
 .image-editor-subbar-check {
-    font-size: 13px;
     color: rgba(255, 255, 255, 0.85);
 }
 
@@ -922,6 +921,72 @@ button.image-editor-primary-button:active {
     background: #e85b06;
     color: #ffffff;
 }
+
+/* ── Panel scrollbars ───────────────────────────────────────────────── */
+
+/*
+ * The panels scroll on this sheet alone, so the GTK theme's scrollbar rail
+ * shows as a strip down the inspector and its inner lists. Clear every part of
+ * the track and leave only the thumb, the way the shared recording sheet styles
+ * the video editor's scrollbars.
+ */
+
+.image-editor-root scrollbar,
+.image-editor-root scrollbar.overlay-indicator {
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+}
+
+.image-editor-root scrollbar.vertical {
+    min-width: 6px;
+}
+
+.image-editor-root scrollbar.horizontal {
+    min-height: 6px;
+}
+
+.image-editor-root scrollbar contents,
+.image-editor-root scrollbar trough {
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+}
+
+.image-editor-root scrollbar slider {
+    min-width: 5px;
+    min-height: 5px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background-color: rgba(255, 255, 255, 0.18);
+}
+
+.image-editor-root scrollbar slider:hover {
+    background-color: rgba(255, 255, 255, 0.28);
+}
+
+.image-editor-root scrollbar slider:active {
+    background-color: rgba(255, 255, 255, 0.35);
+}
+
+.image-editor-root.editor-theme-light scrollbar slider {
+    background-color: rgba(17, 24, 39, 0.18);
+}
+
+.image-editor-root.editor-theme-light scrollbar slider:hover {
+    background-color: rgba(17, 24, 39, 0.30);
+}
+
+.image-editor-root.editor-theme-light scrollbar slider:active {
+    background-color: rgba(17, 24, 39, 0.40);
+}
+
 /* ── Inspector ─────────────────────────────────────────────────────── */
 
 /*
@@ -1437,8 +1502,6 @@ button.image-editor-export:disabled {
 .image-editor-disclosure-chevron {
     min-width: 12px;
     color: rgba(255, 255, 255, 0.5);
-    font-size: 14px;
-    font-weight: 600;
 }
 
 .editor-theme-light .image-editor-disclosure-chevron {
@@ -1693,7 +1756,6 @@ button.image-editor-frame-expand {
     border: none;
     box-shadow: none;
     color: rgba(255, 255, 255, 0.8);
-    font-size: 14px;
 }
 
 button.image-editor-frame-expand:hover {
