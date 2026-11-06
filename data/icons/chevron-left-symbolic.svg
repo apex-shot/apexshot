@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Lucide chevron-left (ISC), expanded to filled outlines for GTK symbolic recoloring. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <g fill="#222222">
+    <path d="M15.8485 17.1515 9.8485 11.1515 8.1515 12.8485 14.1515 18.8485Z"/>
+    <path d="M9.8485 12.8485 15.8485 6.8485 14.1515 5.1515 8.1515 11.1515Z"/>
+    <circle cx="15" cy="18" r="1.2"/>
+    <circle cx="9" cy="12" r="1.2"/>
+    <circle cx="15" cy="6" r="1.2"/>
+  </g>
+</svg>
