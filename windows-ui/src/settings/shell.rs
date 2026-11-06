@@ -481,12 +481,12 @@ pub fn install_css() {
          switch > image {{ opacity:0; }} \
          switch:disabled {{ background-color:rgba(255,255,255,0.07); }} \
          switch:disabled > slider {{ background-color:rgba(255,255,255,0.45); }} \
-         .editor-root button.settings-select {{ min-width:{}px; min-height:{}px; border-radius:{}px; font-size:{}px;              border:1px solid rgba(255,255,255,0.10); background-color:rgba(255,255,255,0.03); padding:0 {}px; }} 
-         .editor-root button.settings-select:focus, .editor-root button.settings-select:focus-visible {{ outline:none; box-shadow:none; }}          .editor-root button.settings-select:hover {{ background-color:rgba(255,255,255,0.055); border-color:rgba(255,255,255,0.16); }} 
-         .editor-root button.settings-select:active, .editor-root button.settings-select:checked {{ background-color:rgba(255,255,255,0.07); border-color:rgba(255,255,255,0.18); }} 
-         .editor-root button.settings-select:disabled {{ background-color:rgba(255,255,255,0.015); border-color:rgba(255,255,255,0.06); color:rgba(255,255,255,0.38); }} 
-         .editor-root button.settings-select .settings-select-arrow {{ opacity:0.5; }} 
-         .editor-root.editor-theme-light button.settings-select {{ border-color:rgba(17,24,39,0.14); background-color:rgba(17,24,39,0.02); color:#1d2129; }} 
+         .editor-root button.settings-select {{ min-width:{}px; min-height:{}px; border-radius:{}px; font-size:{}px;              border:1px solid rgba(255,255,255,0.10); background-color:rgba(255,255,255,0.03); padding:0 {}px; }}
+         .editor-root button.settings-select:focus, .editor-root button.settings-select:focus-visible {{ outline:none; box-shadow:none; }}          .editor-root button.settings-select:hover {{ background-color:rgba(255,255,255,0.055); border-color:rgba(255,255,255,0.16); }}
+         .editor-root button.settings-select:active, .editor-root button.settings-select:checked {{ background-color:rgba(255,255,255,0.07); border-color:rgba(255,255,255,0.18); }}
+         .editor-root button.settings-select:disabled {{ background-color:rgba(255,255,255,0.015); border-color:rgba(255,255,255,0.06); color:rgba(255,255,255,0.38); }}
+         .editor-root button.settings-select .settings-select-arrow {{ opacity:0.5; }}
+         .editor-root.editor-theme-light button.settings-select {{ border-color:rgba(17,24,39,0.14); background-color:rgba(17,24,39,0.02); color:#1d2129; }}
          .editor-root.editor-theme-light button.settings-select:hover {{ background-color:rgba(17,24,39,0.045); border-color:rgba(17,24,39,0.2); }} \
          .editor-root.editor-theme-light entry.settings-search {{ background-color:rgba(17,24,39,0.05); color:#1d2129; }} \
          .editor-root.editor-theme-light entry.settings-search:focus {{ background-color:rgba(17,24,39,0.08); outline:none; }} \
@@ -619,25 +619,30 @@ pub(crate) fn install_select_menu_css() {
 /// control text — and the pages stop carrying per-page weights of their own.
 /// It is installed by the Settings window only, after the shell and page
 /// sheets, so the History and editor windows keep their own typography.
+///
+/// The sheet is authored at 100% and its font sizes are scaled by
+/// [`crate::platform::ui_scale`], the way the onboarding sheet is. Only type is
+/// scaled here: the shell sheet already scales its own metrics, and running the
+/// whole sheet through the length scaler would grow its spacing twice.
 pub(crate) fn install_type_css() {
     let Some(display) = gdk::Display::default() else {
         return;
     };
     let provider = CssProvider::new();
-    provider.load_from_data(
+    provider.load_from_data(&crate::css_scale::scale_font_sizes(
         r#"
         /* Page chrome */
         .editor-root {
             font-size: 14px;
         }
         .settings-page-title {
-            font-size: 24px;
+            font-size: 28px;
             font-weight: 600;
             letter-spacing: -0.3px;
             opacity: 0.97;
         }
         .settings-group-title {
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 600;
             letter-spacing: 0.2px;
             opacity: 0.72;
@@ -661,7 +666,7 @@ pub(crate) fn install_type_css() {
 
         /* Rows: one title weight for the label, one body weight for the hint */
         .settings-table-row label {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 500;
         }
         .settings-table-row label.dim-label {
@@ -698,6 +703,14 @@ pub(crate) fn install_type_css() {
         }
 
         /* Controls */
+        entry.settings-search {
+            font-size: 14px;
+            font-weight: 400;
+        }
+        .settings-search-empty {
+            font-size: 13px;
+            font-weight: 400;
+        }
         button.settings-select,
         button.settings-select label {
             font-size: 14px;
@@ -725,7 +738,7 @@ pub(crate) fn install_type_css() {
             font-weight: 600;
         }
         .settings-scale-caption {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 500;
             opacity: 0.9;
         }
@@ -741,11 +754,11 @@ pub(crate) fn install_type_css() {
             font-weight: 600;
         }
         .settings-nav-label {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 500;
         }
         .settings-user-name {
-            font-size: 13px;
+            font-size: 14px;
             font-weight: 500;
         }
         .settings-user-sub {
@@ -766,7 +779,7 @@ pub(crate) fn install_type_css() {
             font-weight: 600;
         }
         .shortcuts-label {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 400;
         }
         .shortcuts-tip {
@@ -774,7 +787,7 @@ pub(crate) fn install_type_css() {
             font-weight: 400;
         }
         .shortcut-notice-title {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 600;
         }
         .shortcut-notice-detail {
@@ -794,7 +807,7 @@ pub(crate) fn install_type_css() {
             font-weight: 600;
         }
         .shortcut-capture-subtitle {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 400;
         }
         .shortcut-capture-hint {
@@ -810,7 +823,7 @@ pub(crate) fn install_type_css() {
             font-weight: 500;
         }
         .shortcut-capture-cleared-label {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 400;
         }
         .shortcut-capture-secondary-btn,
@@ -821,7 +834,7 @@ pub(crate) fn install_type_css() {
 
         /* Recording tabs */
         .recording-tab-button {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 500;
         }
         .settings-action-button {
@@ -831,7 +844,7 @@ pub(crate) fn install_type_css() {
 
         /* About */
         .about-app-name {
-            font-size: 22px;
+            font-size: 24px;
             font-weight: 600;
             letter-spacing: -0.2px;
         }
@@ -841,7 +854,7 @@ pub(crate) fn install_type_css() {
             opacity: 0.55;
         }
         .about-link-button {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 400;
         }
         .about-support-title {
@@ -867,7 +880,7 @@ pub(crate) fn install_type_css() {
             font-weight: 600;
         }
         .cloud-connect-title {
-            font-size: 24px;
+            font-size: 28px;
             font-weight: 600;
         }
         .cloud-connect-eyebrow {
@@ -884,7 +897,7 @@ pub(crate) fn install_type_css() {
             font-weight: 500;
         }
         .cloud-connect-link {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 400;
         }
         .cloud-connect-action,
@@ -939,7 +952,7 @@ pub(crate) fn install_type_css() {
             font-weight: 400;
         }
         .usage-fact-value {
-            font-size: 14px;
+            font-size: 15px;
             font-weight: 500;
         }
         .usage-empty-title {
@@ -947,7 +960,8 @@ pub(crate) fn install_type_css() {
             font-weight: 600;
         }
         "#,
-    );
+        crate::platform::ui_scale(),
+    ));
     gtk4::style_context_add_provider_for_display(
         &display,
         &provider,
