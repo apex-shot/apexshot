@@ -7,6 +7,8 @@
 /attached_assets/
 
 # Build artifacts
+# Windows packaging: the staged app tree and the .exe installer
+/dist/
 /.flatpak-builder/
 flatpak/.studio-build-config.env
 *.deb

@@ -50,10 +50,10 @@ fn register_bundled_fonts() {
     // FR_PRIVATE: available to this process without installing it system-wide.
     const FR_PRIVATE: u32 = 0x10;
 
-    let directory = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../capture-overlay/assets/fonts"
-    );
+    let Some(directory) = font_directory() else {
+        eprintln!("[settings] the bundled fonts are missing; GTK uses a system face");
+        return;
+    };
 
     let fonts = pangocairo::FontMap::default();
     for file in [
@@ -66,7 +66,7 @@ fn register_bundled_fonts() {
         "DMSans-Medium.ttf",
         "DMSans-SemiBold.ttf",
     ] {
-        let path = format!("{directory}/{file}");
+        let path = directory.join(file);
         if let Err(error) = fonts.add_font_file(&path) {
             eprintln!("[settings] GTK could not load {file}: {error}");
         }
@@ -78,6 +78,31 @@ fn register_bundled_fonts() {
             AddFontResourceExW(wide.as_ptr(), FR_PRIVATE, std::ptr::null());
         }
     }
+}
+
+/// Where the bundled faces live: `share/apexshot/fonts` beside the install's
+/// `bin` folder, or the checkout copy the Qt shell and the Linux build read.
+///
+/// The installed copy comes first because a released binary must not depend on
+/// the directory it was compiled in.
+#[cfg(target_os = "windows")]
+fn font_directory() -> Option<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(directory) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+    {
+        candidates.push(directory.join("share/apexshot/fonts"));
+        candidates.push(directory.join("../share/apexshot/fonts"));
+    }
+    if let Some(source) = option_env!("CARGO_MANIFEST_DIR") {
+        candidates.push(
+            std::path::Path::new(source)
+                .join("../capture-overlay/assets/fonts")
+                .to_path_buf(),
+        );
+    }
+    candidates.into_iter().find(|path| path.is_dir())
 }
 
 #[cfg(not(target_os = "windows"))]

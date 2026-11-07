@@ -46,6 +46,9 @@ mod usage;
 mod webcam;
 pub(crate) mod windowing;
 
+// The first-run entry point starts the tray shell when setup finishes.
+pub use self::windowing::launch_shell;
+
 /// Top inset for page content. The Windows surface removes the page-title row,
 /// so the first section needs only a hairline of breathing room.
 pub(crate) const PAGE_TOP_MARGIN: i32 = if cfg!(target_os = "windows") { 4 } else { 20 };
