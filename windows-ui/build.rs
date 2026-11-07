@@ -5,6 +5,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=APEXSHOT_STUDIO_RELEASE_TIMESTAMP");
     println!("cargo:rerun-if-env-changed=APEXSHOT_ALLOW_NO_STUDIO");
     configure_studio();
+    configure_windows_resources();
 
     // The settings window reuses the editor's icon bundle so its dropdown
     // chevrons and custom page icons match the Linux build. The image editor
@@ -86,3 +87,52 @@ fn configure_studio() {
     println!("cargo:rustc-env={KEY}={key}");
     println!("cargo:rustc-env={TIMESTAMP}={timestamp}");
 }
+
+/// Give every Windows binary the app icon and the version block, so Explorer,
+/// the taskbar, the Start-menu shortcut, and Add/Remove Programs show ApexShot
+/// instead of a blank executable.
+///
+/// The resource only exists for Windows targets, and only a Windows host has an
+/// `rc.exe` to compile it, so every other case builds unchanged.
+#[cfg(windows)]
+fn configure_windows_resources() {
+    if !std::env::var("CARGO_CFG_TARGET_OS").is_ok_and(|os| os == "windows") {
+        return;
+    }
+
+    println!("cargo:rerun-if-changed=../packaging/windows/apexshot.rc");
+    println!("cargo:rerun-if-changed=../packaging/windows/apexshot.ico");
+
+    // `FILEVERSION` wants four comma-separated numbers; `FileVersion` wants the
+    // version as it is spelled in Cargo.toml.
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    let mut parts = version
+        .split('.')
+        .map(|part| part.parse::<u16>().unwrap_or(0));
+    let numbers = format!(
+        "{},{},{},0",
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0)
+    );
+
+    let compiled = embed_resource::compile(
+        "../packaging/windows/apexshot.rc",
+        embed_resource::ParamsMacrosAndIncludeDirs(
+            [
+                format!("VERSION={numbers}"),
+                // rc substitutes the value verbatim, so the quotes belong in
+                // the macro: `VALUE "FileVersion", VERSION_STR` has to expand
+                // to a quoted string, not to an escaped one.
+                format!("VERSION_STR=\"{version}\""),
+            ],
+            ["../packaging/windows"],
+        ),
+    );
+    if compiled != embed_resource::CompilationResult::Ok {
+        println!("cargo:warning=the Windows icon and version block were not embedded: {compiled}");
+    }
+}
+
+#[cfg(not(windows))]
+fn configure_windows_resources() {}

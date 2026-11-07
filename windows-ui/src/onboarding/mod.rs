@@ -50,11 +50,12 @@ const PAGE_INSET: f64 = 48.0;
 /// rhythm. Smaller sub-gaps inside a section stay local to that section.
 pub(super) const SECTION_GAP: f64 = 20.0;
 
-/// What the caller should do after the onboarding window closes.
+/// What happened when the onboarding window closed.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Outcome {
+    /// True only when the last page finished; a window the user closed early
+    /// leaves it false so the caller starts nothing.
     pub finished: bool,
-    pub open_settings: bool,
 }
 
 /// One page of the flow.
@@ -579,7 +580,6 @@ fn finish(widgets: &OnboardingWidgets) {
     {
         let mut outcome = widgets.outcome.borrow_mut();
         outcome.finished = true;
-        outcome.open_settings = true;
     }
     widgets.window.close();
 }

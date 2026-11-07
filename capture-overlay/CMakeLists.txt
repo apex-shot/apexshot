@@ -83,6 +83,20 @@ if(WIN32)
             APEXSHOT_VERSION "${APEXSHOT_VERSION_LINE}")
     endif()
 
+    # The shell is what the Start-menu and desktop shortcuts start, so it carries
+    # the shared icon and version block the Rust binaries use. rc.exe takes a
+    # quoted macro only through a shell that strips the quoting, which CMake is
+    # not, so the version pair is written to a header the resource includes.
+    enable_language(RC)
+    string(REPLACE "." "," APEXSHOT_VERSION_COMMAS "${APEXSHOT_VERSION}")
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/apexshot-version.h"
+        "#define VERSION ${APEXSHOT_VERSION_COMMAS},0\n"
+        "#define VERSION_STR \"${APEXSHOT_VERSION}\"\n")
+    target_sources(apexshot-capture PRIVATE ../packaging/windows/apexshot.rc)
+    target_include_directories(apexshot-capture PRIVATE
+        ../packaging/windows
+        "${CMAKE_CURRENT_BINARY_DIR}")
+
     target_compile_definitions(apexshot-capture PRIVATE
         APEXSHOT_FONT_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts"
         APEXSHOT_SOUND_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../assets/sounds"
