@@ -573,7 +573,10 @@ public:
         , m_mode(mode)
         , m_done(std::move(done))
     {
-        setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+        // A tool window, not a normal one: Windows would otherwise raise a
+        // taskbar button for the seconds the selection is up, which is the
+        // flash of a second app every capture used to show.
+        setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
         setCursor(Qt::CrossCursor);
         setAttribute(Qt::WA_DeleteOnClose, true);
         setMouseTracking(true);
