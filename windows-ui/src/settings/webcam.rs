@@ -127,7 +127,7 @@ fn row(title: &str, description: Option<&str>, control: &impl IsA<gtk4::Widget>)
 /// Every camera DirectShow reports. ffmpeg's device listing goes to stderr and
 /// exits non-zero on every release, so only the parsed names matter.
 fn camera_devices() -> Vec<String> {
-    let output = std::process::Command::new(crate::recording::editor::ffmpeg::ffmpeg_executable())
+    let output = crate::utils::hidden_command(crate::recording::editor::ffmpeg::ffmpeg_executable())
         .args([
             "-hide_banner",
             "-list_devices",

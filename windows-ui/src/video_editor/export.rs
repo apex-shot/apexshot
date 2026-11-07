@@ -22,7 +22,7 @@ use gtk4::cairo::{Context, Format, ImageSurface};
 use rayon::prelude::*;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, OnceLock};
@@ -290,7 +290,7 @@ impl Encoder {
     /// encoder it was compiled with, whether or not the machine has the
     /// hardware or a new enough driver for it.
     fn opens(self) -> bool {
-        Command::new(ffmpeg::ffmpeg_executable())
+        crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
             .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
             .args(["-f", "lavfi", "-i", "color=c=black:s=320x240:r=30"])
             .args(["-frames:v", "2"])
@@ -633,7 +633,7 @@ fn spawn_decoder(
     size: (u32, u32),
 ) -> Result<Child, End> {
     let duration = span.frames as f64 / fps;
-    Command::new(ffmpeg::ffmpeg_executable())
+    crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
         .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
         .args(["-ss", &format!("{:.6}", span.source_start)])
         .arg("-i")
@@ -658,7 +658,7 @@ fn spawn_encoder(
     crf: u32,
     encoder: Encoder,
 ) -> Result<Child, End> {
-    Command::new(ffmpeg::ffmpeg_executable())
+    crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
         .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"])
         .args([
             "-f",
@@ -1154,7 +1154,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         let source = dir.join("source.mp4");
-        let generated = Command::new(ffmpeg::ffmpeg_executable())
+        let generated = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
             .args([
                 "-hide_banner",
                 "-loglevel",
@@ -1200,7 +1200,7 @@ mod tests {
                     End::Cancelled => panic!("export cancelled itself"),
                 }
             }
-            let probe = Command::new(ffmpeg::ffprobe_executable())
+            let probe = crate::utils::hidden_command(ffmpeg::ffprobe_executable())
                 .args([
                     "-v",
                     "error",
@@ -1634,7 +1634,7 @@ mod tests {
         let source = dir.join("src1080p30.mp4");
         if !source.is_file() {
             let status =
-                std::process::Command::new(crate::recording::editor::ffmpeg::ffmpeg_executable())
+                crate::utils::hidden_command(crate::recording::editor::ffmpeg::ffmpeg_executable())
                     .args([
                         "-hide_banner",
                         "-loglevel",
@@ -1716,7 +1716,7 @@ mod tests {
 
     fn probe_duration(path: &std::path::Path) -> Option<f64> {
         let output =
-            std::process::Command::new(crate::recording::editor::ffmpeg::ffprobe_executable())
+            crate::utils::hidden_command(crate::recording::editor::ffmpeg::ffprobe_executable())
                 .args([
                     "-v",
                     "error",
@@ -1743,7 +1743,7 @@ mod webcam_export_tests {
     /// Generate a solid clip with the bundled ffmpeg, or None when there is
     /// none to run.
     fn solid_clip(path: &Path, colour: &str, size: &str, seconds: f64) -> bool {
-        let status = Command::new(ffmpeg::ffmpeg_executable())
+        let status = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
             .args(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi"])
             .args(["-i", &format!("color=c={colour}:s={size}:d={seconds}:r=30")])
             .args(["-pix_fmt", "yuv420p"])
@@ -1756,7 +1756,7 @@ mod webcam_export_tests {
 
     /// One frame of the file as RGB rows, for pixel checks.
     fn frame_rgb(path: &Path, seconds: f64, size: (u32, u32)) -> Option<Vec<u8>> {
-        let output = Command::new(ffmpeg::ffmpeg_executable())
+        let output = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
             .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
             .args(["-ss", &format!("{seconds:.3}")])
             .arg("-i")
@@ -1787,7 +1787,7 @@ mod webcam_export_tests {
             .next()
             .and_then(|height| height.parse::<u32>().ok())
             .unwrap_or(320);
-        let status = Command::new(ffmpeg::ffmpeg_executable())
+        let status = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
             .args(["-y", "-hide_banner", "-loglevel", "error"])
             .args([
                 "-f",
@@ -1813,7 +1813,7 @@ mod webcam_export_tests {
     /// uniform cover crop shows the centre while a squeezed copy shows all
     /// three.
     fn striped_clip(path: &Path, seconds: f64) -> bool {
-        let status = Command::new(ffmpeg::ffmpeg_executable())
+        let status = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
             .args(["-y", "-hide_banner", "-loglevel", "error"])
             .args([
                 "-f",
@@ -1843,7 +1843,7 @@ mod webcam_export_tests {
 
     /// The width and height of the file's first video stream.
     fn video_dimensions(path: &Path) -> Option<(u32, u32)> {
-        let output = Command::new(ffmpeg::ffprobe_executable())
+        let output = crate::utils::hidden_command(ffmpeg::ffprobe_executable())
             .args(["-v", "error", "-select_streams", "v:0"])
             .args(["-show_entries", "stream=width,height"])
             .args(["-of", "csv=p=0"])
