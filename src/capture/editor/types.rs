@@ -337,7 +337,10 @@ impl FrameStyle {
                     offset_y: 28.0,
                     rotation_deg: 0.0,
                     center_pivot: false,
-                    color: DrawColor::new(0.0, 0.0, 0.0, 1.0),
+                    // The sheet reads as a second card behind this one, like the
+                    // Stack presets' sheets. Opaque black only worked over a
+                    // background; on a transparent export it was a black slab.
+                    color: DrawColor::new(0.75, 0.75, 0.77, 1.0),
                 }),
                 backing2: None,
             },

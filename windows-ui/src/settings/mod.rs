@@ -171,6 +171,7 @@ fn build_settings_window(app: &Application) {
     install_settings_css();
     install_window_css();
     shell::install_css();
+    shell::install_type_css();
 
     let config = load_config().sanitized();
     if let Err(error) = actions::sync_shell_settings_on_start() {
@@ -299,13 +300,28 @@ fn build_settings_window(app: &Application) {
     let shell_controls = shell::build_shell_controls();
     sidebar_head.append(&shell_controls.row);
 
+    // The drag lives on the empty part of the head, not the head itself: a
+    // drag gesture on the parent claims the press before the toggle can see
+    // it, which is what made the first click do nothing.
+    let sidebar_drag = GtkBox::new(Orientation::Horizontal, 0);
+    sidebar_drag.set_hexpand(true);
+    sidebar_drag.set_halign(Align::Fill);
+    sidebar_head.append(&sidebar_drag);
+
     let user_bar = shell::build_user_chip(&config, text_scale, {
         let stack = stack.clone();
         move || stack.set_visible_child_name("6")
     });
     sidebar.wrapper.append(&user_bar);
 
-    content_split.append(&sidebar.wrapper);
+    let sidebar_revealer = gtk4::Revealer::new();
+    sidebar_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideRight);
+    sidebar_revealer.set_transition_duration(180);
+    sidebar_revealer.set_vexpand(true);
+    sidebar_revealer.set_hexpand(false);
+    sidebar_revealer.set_child(Some(&sidebar.wrapper));
+    sidebar_revealer.set_reveal_child(true);
+    content_split.append(&sidebar_revealer);
 
     // --- BODY (STACK) ---
     let right_col = GtkBox::new(Orientation::Vertical, 0);
@@ -340,7 +356,7 @@ fn build_settings_window(app: &Application) {
     toolbar.append(&right_box);
 
     windowing::install_window_drag(&drag_handle, &window);
-    windowing::install_window_drag(&sidebar_head, &window);
+    windowing::install_window_drag(&sidebar_drag, &window);
 
     let general = build_general_section(&config);
     match windowing::autostart_entry_exists() {
@@ -621,7 +637,7 @@ fn build_settings_window(app: &Application) {
     let content_card = shell::build_content_card(&stack, text_scale, &page_heading);
     shell::wire_sidebar_toggle(
         &shell_controls,
-        &sidebar.wrapper,
+        &sidebar_revealer,
         &sidebar_head,
         &toolbar,
         &content_card,
@@ -796,26 +812,14 @@ pub(crate) fn install_window_css() {
         px(12.0),
     );
     css.push_str(&format!(
-        " window.editor-window.history-window {{ padding:1px; border:1px solid rgba(255,255,255,0.12); border-radius:12px; }} \
-         window.editor-window.history-window.editor-theme-light {{ border:1px solid rgba(17,24,39,0.12); }} \
-         .history-root {{ border:none; border-radius:12px; font-family:'Inter','Noto Sans',system-ui,sans-serif; }} \
-         .history-root .history-header-search {{ font-size:{}px; min-height:{}px; }} \
+        " .history-root .history-header-search {{ min-height:{}px; }} \
          .history-root .history-header-refresh {{ min-width:{}px; min-height:{}px; margin-right:{}px; }} \
-         .history-root .recent-captures-title {{ font-size:{}px; font-weight:600; letter-spacing:-0.1px; opacity:0.85; }} \
-         .history-root .history-page-subtitle {{ font-size:{}px; }} \
-         .history-root .recent-captures-card-title {{ font-size:{}px; font-weight:500; }} \
-         .history-root .recent-captures-empty-title {{ font-size:{}px; }} \
-         .history-root .recent-captures-empty-detail {{ font-size:{}px; }}",
-        px(13.0),
+         .history-root .recent-captures-title {{ font-weight:600; letter-spacing:-0.1px; opacity:0.85; }} \
+         .history-root .recent-captures-card-title {{ font-weight:500; }}",
         px(26.0),
         px(26.0),
         px(26.0),
         px(4.0),
-        px(14.0),
-        px(13.0),
-        px(13.0),
-        px(18.0),
-        px(14.0),
     ));
 
     let provider = CssProvider::new();

@@ -18,6 +18,7 @@ fn main() {
             "chevron-down-regular",
             "search-regular",
             "chevron-right-regular",
+            "chevron-up-regular",
             "pointer-primary-click",
             // The clip menu's rows use the same fluent glyphs as the Linux
             // editor, so a right-click reads the same on both platforms.

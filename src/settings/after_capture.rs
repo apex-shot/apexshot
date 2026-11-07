@@ -16,19 +16,21 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     after_capture_wrapper.set_halign(Align::Fill);
     after_capture_wrapper.set_hexpand(true);
 
-    let after_capture_title = Label::new(Some(&t("After capture:")));
-    after_capture_title.add_css_class("settings-group-title");
-    after_capture_title.set_xalign(0.0);
-    after_capture_title.set_halign(Align::Start);
-
-    let after_capture_description = Label::new(Some(&t(
-        "Here you can decide what should happen after taking a screenshot or recording your screen.",
-    )));
-    after_capture_description.add_css_class("dim-label");
-    after_capture_description.set_wrap(true);
-    after_capture_description.set_xalign(0.0);
-    after_capture_description.set_max_width_chars(44);
-    after_capture_description.set_halign(Align::Start);
+    let after_capture_heading = Label::new(None);
+    after_capture_heading.add_css_class("settings-group-title");
+    after_capture_heading.set_xalign(0.0);
+    after_capture_heading.set_halign(Align::Start);
+    after_capture_heading.set_wrap(true);
+    // The hint finishes the heading's sentence: one label, so the copy follows
+    // the colon and wraps at the page's width instead of being cut to a
+    // narrower column of its own.
+    after_capture_heading.set_markup(&format!(
+        "<b>{}</b> <span weight=\"normal\" alpha=\"62%\">{}</span>",
+        gtk4::glib::markup_escape_text(&t("After capture:")),
+        gtk4::glib::markup_escape_text(&t(
+            "Here you can decide what should happen after taking a screenshot or recording your screen.",
+        )),
+    ));
 
     let after_capture_table = GtkBox::new(Orientation::Vertical, 0);
     after_capture_table.set_halign(Align::Center);
@@ -146,8 +148,7 @@ pub fn build_after_capture_section(config: &AppConfig) -> AfterCaptureWidgets {
     after_capture_table_row.set_hexpand(true);
     after_capture_table_row.append(&after_capture_table_frame);
 
-    after_capture_wrapper.append(&after_capture_title);
-    after_capture_wrapper.append(&after_capture_description);
+    after_capture_wrapper.append(&after_capture_heading);
     after_capture_wrapper.append(&after_capture_table_row);
 
     AfterCaptureWidgets {

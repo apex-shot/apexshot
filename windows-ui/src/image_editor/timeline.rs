@@ -413,6 +413,15 @@ impl Timeline {
     }
 }
 
+/// The head a stopped transport lands on. A full composition run rewinds to
+/// the start, the way the Linux transport does, so the next Play begins at the
+/// top and the preview shows the opening pose. A range-bounded preview — the
+/// short run a freshly added Motion clip starts — parks on its own end instead,
+/// keeping the pose that clip finishes on.
+fn playhead_when_stopped(range: Option<PreviewRange>) -> Option<f64> {
+    range.is_none().then_some(0.0)
+}
+
 /// Rebuild the dock. `dark` decides the ruler and playhead tones once, the
 /// way the Linux builder decides at build time.
 pub(super) fn build(scale: f64, dark: bool) -> Timeline {
@@ -675,13 +684,17 @@ pub(super) fn build(scale: f64, dark: bool) -> Timeline {
                     model.playhead = (model.playhead + span).min(end);
                     model.playhead >= end
                 };
+                if parked {
+                    shared.playing.set(false);
+                    button.set_icon_name("media-playback-start-symbolic");
+                    if let Some(playhead) = playhead_when_stopped(range) {
+                        shared.model.borrow_mut().playhead = playhead;
+                    }
+                }
                 set_playhead_label();
                 redraw_playhead();
                 shared.notify_preview();
                 if parked {
-                    shared.playing.set(false);
-                    button.set_icon_name("media-playback-start-symbolic");
-                    shared.notify_preview();
                     glib::ControlFlow::Break
                 } else {
                     glib::ControlFlow::Continue
@@ -1916,6 +1929,15 @@ fn rounded_rect(context: &CairoContext, x: f64, y: f64, w: f64, h: f64, r: f64) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_finished_run_rewinds_to_the_start_while_a_preview_parks() {
+        // Playback to the end takes the head back to 00:00 so the next Play
+        // starts at the top; the automatic preview of a new clip stays on the
+        // pose that clip ends with.
+        assert_eq!(playhead_when_stopped(None), Some(0.0));
+        assert_eq!(playhead_when_stopped(Some((1.5, 2.25))), None);
+    }
 
     #[test]
     fn motion_and_text_clips_paint_their_lane_colour() {

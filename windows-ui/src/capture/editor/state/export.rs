@@ -255,6 +255,32 @@ mod tests {
         EditorState::new(RgbaImage::from_pixel(100, 80, Rgba([240, 0, 0, 255])))
     }
 
+    /// An inset stroke meets transparency at the card edge without carrying the
+    /// picture into that rim. The stroke used to end exactly on the clip
+    /// outline, so the two anti-aliased rims shared their coverage and the
+    /// picture tinted the stroke's outer edge, most visibly around the corners.
+    #[test]
+    fn an_inset_stroke_meets_transparency_without_the_picture() {
+        let source = RgbaImage::from_pixel(800, 600, Rgba([255, 0, 0, 255]));
+        for radius in [20.0, 40.0] {
+            let mut state = EditorState::new(source.clone());
+            state.background.fill = Fill::None;
+            state.background.radius = radius;
+            state.set_frame_style(FrameStyle::InsetDark);
+            let image = state.to_export_image().unwrap();
+            let (width, _) = image.dimensions();
+            let rim = (0..width.min(160))
+                .map(|step| image.get_pixel(step, step))
+                .find(|pixel| pixel[3] > 0)
+                .map(|pixel| pixel.0)
+                .expect("the stroke reaches the corner");
+            assert_eq!(
+                rim[0], 0,
+                "the stroke's outer rim carries the picture at radius {radius}: {rim:?}"
+            );
+        }
+    }
+
     #[test]
     fn every_frame_style_changes_the_export_and_preserves_the_card() {
         let mut state = EditorState::new(RgbaImage::from_pixel(160, 120, Rgba([240, 0, 0, 255])));
@@ -318,6 +344,39 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The Offset preset's sheet is a light card, not a black slab: on a
+    /// transparent export the old opaque black sheet read as a hole under the
+    /// card, which is exactly where nothing could lighten it.
+    #[test]
+    fn the_offset_sheet_is_a_light_card() {
+        let mut state =
+            EditorState::new(RgbaImage::from_pixel(400, 300, Rgba([255, 255, 255, 255])));
+        state.background.fill = Fill::None;
+        state.background.radius = 0.0;
+        state.set_frame_style(FrameStyle::Retro);
+        let image = state.to_export_image().unwrap();
+        let (width, height) = image.dimensions();
+        let sheet = FrameStyle::Retro
+            .spec()
+            .backing1
+            .expect("offset sheet")
+            .color;
+        let channel = |value: f64| (value * 255.0).round() as u8;
+        // The sheet peeks 28px below the card, past the 3px border.
+        let sample = image.get_pixel(width / 2, height - 10);
+        assert_eq!(sample[3], 255, "the sheet is opaque: {sample:?}");
+        assert!(
+            sample[0] > 150 && sample[1] > 150 && sample[2] > 150,
+            "the sheet is a light card, not a black slab: {sample:?}"
+        );
+        assert!(
+            sample[0].abs_diff(channel(sheet.r)) <= 2
+                && sample[1].abs_diff(channel(sheet.g)) <= 2
+                && sample[2].abs_diff(channel(sheet.b)) <= 2,
+            "the sheet is the backing colour: {sample:?}"
+        );
     }
 
     #[test]

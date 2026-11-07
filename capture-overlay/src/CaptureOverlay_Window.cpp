@@ -91,7 +91,7 @@ void drawListRow(QPainter& p,
     p.setBrush(hovered ? QColor(255, 255, 255, 40) : QColor(255, 255, 255, 28));
     p.drawEllipse(badgeRect);
     QFont badgeFont;
-    badgeFont.setPointSizeF(12.0);
+    badgeFont.setPixelSize(12);
     badgeFont.setBold(true);
     p.setFont(badgeFont);
     p.setPen(QColor(255, 255, 255, 240));
@@ -102,7 +102,7 @@ void drawListRow(QPainter& p,
     const int textW = std::max(40, textRight - textLeft);
 
     QFont appFont;
-    appFont.setPointSizeF(11.0);
+    appFont.setPixelSize(15);
     appFont.setBold(true);
     p.setFont(appFont);
     p.setPen(QColor(255, 255, 255, 240));
@@ -112,7 +112,7 @@ void drawListRow(QPainter& p,
     p.drawText(QRect(textLeft, row.y() + 8, textW, 20), Qt::AlignLeft | Qt::AlignVCenter, appLine);
 
     QFont titleFont;
-    titleFont.setPointSizeF(9.5);
+    titleFont.setPixelSize(13);
     p.setFont(titleFont);
     p.setPen(QColor(255, 255, 255, hovered ? 210 : 170));
     QString titleLine = title.isEmpty() ? appLabel : title;
@@ -126,7 +126,7 @@ void drawListRow(QPainter& p,
                              .arg(std::max(1, size.width()))
                              .arg(std::max(1, size.height()));
     QFont dimsFont;
-    dimsFont.setPointSizeF(8.5);
+    dimsFont.setPixelSize(11);
     p.setFont(dimsFont);
     p.setPen(QColor(255, 255, 255, hovered ? 200 : 150));
     p.drawText(QRect(textLeft, row.y() + 26, textW, 18),
@@ -558,7 +558,7 @@ void CaptureOverlay::drawWindowPickerMode(QPainter& p, const QRect& widgetRect)
     p.fillRect(widgetRect, QColor(0, 0, 0, 120));
 
     QFont titleFont;
-    titleFont.setPointSizeF(16.0);
+    titleFont.setPixelSize(18);
     titleFont.setBold(true);
     p.setFont(titleFont);
     p.setPen(QColor(255, 255, 255, 230));
@@ -576,7 +576,7 @@ void CaptureOverlay::drawWindowPickerMode(QPainter& p, const QRect& widgetRect)
 
     if (m_windows.isEmpty()) {
         QFont f;
-        f.setPointSizeF(12.5);
+        f.setPixelSize(14);
         p.setFont(f);
         p.setPen(QColor(255, 255, 255, 175));
         p.drawText(widgetRect.adjusted(40, 0, -40, -40),
@@ -630,7 +630,7 @@ void CaptureOverlay::drawWindowPickerMode(QPainter& p, const QRect& widgetRect)
 
         if (m_windowCardRects.size() < m_windows.size()) {
             QFont moreFont;
-            moreFont.setPointSizeF(9.5);
+            moreFont.setPixelSize(13);
             p.setFont(moreFont);
             p.setPen(QColor(255, 255, 255, 150));
             const int more = m_windows.size() - m_windowCardRects.size();
@@ -642,7 +642,7 @@ void CaptureOverlay::drawWindowPickerMode(QPainter& p, const QRect& widgetRect)
 
     // Bottom hint
     QFont hintFont;
-    hintFont.setPointSizeF(10.5);
+    hintFont.setPixelSize(14);
     p.setFont(hintFont);
     const QString hint = QStringLiteral("Back to capture menu");
     QFontMetrics hfm(hintFont);
@@ -661,8 +661,8 @@ void CaptureOverlay::drawWindowPickerMode(QPainter& p, const QRect& widgetRect)
     QPainterPath keyPath;
     keyPath.addRoundedRect(keyRect, 8, 8);
     p.fillPath(keyPath, QColor(255, 102, 0, 220));
-    QFont keyFont(QStringLiteral("Inter"));
-    keyFont.setPixelSize(10);
+    QFont keyFont(QStringLiteral("DM Sans"));
+    keyFont.setPixelSize(11);
     keyFont.setWeight(QFont::DemiBold);
     p.setFont(keyFont);
     p.setPen(Qt::white);

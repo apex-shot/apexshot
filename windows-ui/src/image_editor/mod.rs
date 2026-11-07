@@ -26,7 +26,6 @@ mod motion_controls;
 mod motion_text;
 mod number_control;
 mod picker_placement;
-mod preview;
 mod sections;
 mod stroke_control;
 mod sub_bar;
@@ -36,8 +35,6 @@ mod toolbar;
 mod ui_support;
 mod watermark;
 mod window;
-
-pub(crate) use preview::{build as onboarding_preview, install_css as install_preview_css};
 
 /// Open the Windows image editor, optionally with an image to annotate.
 pub fn show_image_editor_window(initial: Option<PathBuf>) -> anyhow::Result<()> {

@@ -49,14 +49,27 @@ pub fn copy_with_feedback(button: &Button, value: &str, idle: &str) {
     });
 }
 
-/// Heading block: title over supporting copy, centered under the app mark.
+/// Heading block: title over supporting copy, centered under the page mark.
 pub fn heading(scale: f64, title: &str, copy: &str) -> GtkBox {
+    heading_parts(scale, title, copy).block
+}
+
+pub struct HeadingParts {
+    pub block: GtkBox,
+    pub title: Label,
+    pub copy: Label,
+}
+
+/// Heading block with its labels exposed for a page-specific text reveal.
+pub fn heading_parts(scale: f64, title: &str, copy: &str) -> HeadingParts {
     let block = GtkBox::new(Orientation::Vertical, px(scale, 8.0));
     block.set_halign(Align::Center);
 
     // The character caps keep a wrapped label's natural width inside the
     // pane's design width; without one the label would ask for its full
     // unwrapped width and stretch the pane.
+    let mut title_label = None;
+    let mut copy_label = None;
     for (text, class, max_chars) in [
         (title, "onboarding-headline", 26),
         (copy, "onboarding-copy", 36),
@@ -69,9 +82,18 @@ pub fn heading(scale: f64, title: &str, copy: &str) -> GtkBox {
         label.set_wrap(true);
         label.set_max_width_chars(max_chars);
         block.append(&label);
+        if class == "onboarding-headline" {
+            title_label = Some(label);
+        } else {
+            copy_label = Some(label);
+        }
     }
 
-    block
+    HeadingParts {
+        block,
+        title: title_label.expect("heading always has a title"),
+        copy: copy_label.expect("heading always has supporting copy"),
+    }
 }
 
 /// A quiet, unframed list of icon-and-copy rows.
@@ -108,11 +130,8 @@ fn feature_card_row(scale: f64, icon: &str, title: &str, subtitle: &str) -> GtkB
     text.set_hexpand(true);
     text.set_valign(Align::Center);
 
-    let title_label = Label::new(None);
-    title_label.set_markup(&format!(
-        "<span weight='bold'>{}</span>",
-        escape_markup(title)
-    ));
+    let title_label = Label::new(Some(title));
+    title_label.add_css_class("onboarding-feature-title");
     title_label.set_halign(Align::Start);
     title_label.set_xalign(0.0);
     text.append(&title_label);
@@ -137,12 +156,6 @@ pub fn status_pill(text: &str) -> Label {
     label.add_css_class("onboarding-status-pill");
     label.set_halign(Align::Start);
     label
-}
-
-pub fn escape_markup(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
 }
 
 /// The one-line reason a device-authorization sign-in failed, for the status

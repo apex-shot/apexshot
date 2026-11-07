@@ -7,6 +7,14 @@ use super::state::background::Layout;
 use super::types::{DrawColor, FrameStyle};
 use super::{render, transform_render};
 
+/// How far an inset band overscans the card edge. The screenshot is clipped to
+/// the card outline, so a band that stops exactly on that outline shares its
+/// anti-aliased rim with the picture and the stroke's edge carries the
+/// screenshot's colours. The canvas clips the overscan on the straight sides, so
+/// the stroke still ends at the export's edge and no rim of bare stroke colour
+/// shows; the extra pixel only fills the corner notch.
+const INSET_OVERSCAN: f64 = 1.0;
+
 #[derive(Clone, Copy)]
 pub(crate) struct StyleGeometry {
     pub layout: Layout,
@@ -173,7 +181,12 @@ impl StyleGeometry {
         if !spec.liquid && spec.border_thickness > 0.0 {
             let thickness = spec.border_thickness * self.border_unit;
             if spec.inset_border {
-                self.band(context, 0.0, -thickness, spec.border_color);
+                // Start the band a pixel outside the card so the edge belongs
+                // to the style rather than to the screenshot's own rim: sharing
+                // that anti-aliased outline lets the picture show through the
+                // stroke along the rounded corners. The canvas clips the extra
+                // pixel, so the stroke still meets the export's edge.
+                self.band(context, INSET_OVERSCAN, -thickness, spec.border_color);
                 if self.style == FrameStyle::InsetLight {
                     self.band(
                         context,
@@ -241,4 +254,46 @@ pub(crate) fn overhangs(style: FrameStyle, width: f64, height: f64) -> (f64, f64
         }
     }
     (left.max(0.0), top.max(0.0), right.max(0.0), bottom.max(0.0))
+}
+
+/// Whether a style only reads over a fill.
+///
+/// The glass family (Frost, Smoke, Prism) is an edge that refracts whatever sits
+/// behind the card, and the stacked presets (Offset, Tilt, Cascade) draw backing
+/// sheets that need a surface to sit on. Exported with no fill they are a
+/// transparent, margin-less card whose look depends on the page it lands on, so
+/// the inspector offers them a backdrop when one is picked.
+pub(crate) fn needs_backdrop(style: FrameStyle) -> bool {
+    let spec = style.spec();
+    spec.liquid || spec.backing1.is_some() || spec.backing2.is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::needs_backdrop;
+    use crate::capture::editor::types::FrameStyle;
+
+    #[test]
+    fn only_the_glass_and_stacked_styles_ask_for_a_backdrop() {
+        for style in [
+            FrameStyle::GlassLight,
+            FrameStyle::GlassDark,
+            FrameStyle::Liquid,
+            FrameStyle::Retro,
+            FrameStyle::Stack,
+            FrameStyle::Stack2,
+        ] {
+            assert!(needs_backdrop(style), "{style:?} reads only over a fill");
+        }
+        for style in [
+            FrameStyle::Default,
+            FrameStyle::InsetLight,
+            FrameStyle::InsetDark,
+            FrameStyle::Outline,
+            FrameStyle::Border,
+            FrameStyle::Card,
+        ] {
+            assert!(!needs_backdrop(style), "{style:?} stands on its own");
+        }
+    }
 }

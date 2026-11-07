@@ -143,7 +143,7 @@ void drawToolbarIcon(QPainter& p, int iconIndex,
         p.setPen(color);
         QFont f = p.font();
         f.setFamily("Sans");
-        f.setPointSizeF(8.0);
+        f.setPixelSize(11);
         f.setBold(true);
         p.setFont(f);
         QFontMetricsF fm(f);
@@ -301,7 +301,7 @@ void drawToolbarIcon(QPainter& p, int iconIndex,
         roundedRectPath(box, cx - 9, cy - 6, 18, 12, 3);
         p.drawPath(box);
         p.setPen(QColor(0,0,0,180));
-        QFont f = p.font(); f.setPointSizeF(6.5); f.setBold(true); p.setFont(f);
+        QFont f = p.font(); f.setPixelSize(10); f.setBold(true); p.setFont(f);
         p.drawText(QRectF(cx - 9, cy - 6, 18, 12), Qt::AlignCenter, "GIF");
         break;
     }
