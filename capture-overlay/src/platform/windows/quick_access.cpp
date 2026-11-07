@@ -45,6 +45,8 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
+#include <QLocalServer>
+#include <QLocalSocket>
 #include <QMimeData>
 #include <QMessageBox>
 #include <QMouseEvent>
@@ -3199,6 +3201,27 @@ int run(QApplication& app)
         else if (action == QLatin1String("recording_stop_save"))
             shell->stopActiveRecording();
     });
+
+    // A second launch from the Start menu talks to this one. Exiting silently
+    // made the app look broken: the shortcut was found, clicked, and nothing
+    // ever appeared because the shell was already in the tray.
+    static QLocalServer sessionServer;
+    QLocalServer::removeServer(QStringLiteral("apexshot-shell"));
+    if (sessionServer.listen(QStringLiteral("apexshot-shell"))) {
+        QObject::connect(&sessionServer, &QLocalServer::newConnection, shell, [shell] {
+            while (QLocalSocket* socket = sessionServer.nextPendingConnection()) {
+                QObject::connect(socket, &QLocalSocket::readyRead, socket, [socket, shell] {
+                    if (socket->readAll().trimmed() == QByteArray("menu"))
+                        shell->openMenu();
+                });
+                QObject::connect(socket, &QLocalSocket::disconnected,
+                                 socket, &QLocalSocket::deleteLater);
+            }
+        });
+    } else {
+        debugLog(QStringLiteral("session channel unavailable: %1")
+                     .arg(sessionServer.errorString()));
+    }
 
     auto* tray = new QSystemTrayIcon(appIcon(), &app);
     shell->setTray(tray);
