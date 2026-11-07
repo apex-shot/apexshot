@@ -271,7 +271,7 @@ pub(super) fn install_css() {
         .video-export-scrim {{ background: alpha(#05070c, 0.64); }}
         .video-export-options, .video-export-screen {{
             color: #e8e8e8;
-            font-family: Inter, sans-serif;
+            font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
             font-size: {font}px;
         }}
         .video-export-options {{
@@ -383,9 +383,9 @@ pub(super) fn install_css() {
         .editor-theme-light .video-export-screen button.video-export-stop:active {{ background: #efd5c3; color: #8a3508; }}
         .editor-theme-light .video-export-screen button.video-export-stop:disabled {{ background: #eeeeee; color: #999999; }}
         "#,
-        font = 12.0 * scale,
-        small = 10.5 * scale,
-        title = 14.0 * scale,
+        font = 14.0 * scale,
+        small = 13.0 * scale,
+        title = 15.0 * scale,
         dialog_title = 18.0 * scale,
         radius = px(14.0),
         pad = px(26.0),

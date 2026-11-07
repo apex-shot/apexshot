@@ -36,8 +36,8 @@ pub fn prepare_process() {
     register_bundled_fonts();
 }
 
-/// Make the bundled Inter faces available to both text stacks: GDI for the
-/// text cairo draws on canvases, and Pango for every GTK label. Pango's
+/// Make the bundled faces available to both text stacks: GDI for the text
+/// cairo draws on canvases, and Pango for every GTK label. Pango's
 /// DirectWrite font map never sees fonts added privately through GDI, so
 /// without its own registration GTK falls back to a system font.
 #[cfg(target_os = "windows")]
@@ -61,6 +61,10 @@ fn register_bundled_fonts() {
         "Inter-Medium.ttf",
         "Inter-SemiBold.ttf",
         "Inter-Bold.ttf",
+        // The Settings, History, image editor and video editor typeface.
+        "DMSans-Regular.ttf",
+        "DMSans-Medium.ttf",
+        "DMSans-SemiBold.ttf",
     ] {
         let path = format!("{directory}/{file}");
         if let Err(error) = fonts.add_font_file(&path) {

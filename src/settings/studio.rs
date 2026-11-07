@@ -106,6 +106,9 @@ pub fn build_studio_section() -> GtkBox {
             replacement_body.set_margin_top(8);
             replacement_body.append(&controls.hint);
             replacement_body.append(&controls.token);
+            // The submit closes the form, so it sits a gap further down than
+            // the form's own line spacing.
+            controls.activate.set_margin_top(8);
             replacement_body.append(&controls.activate);
             replacement_body.append(&controls.feedback);
             replacement.set_child(Some(&replacement_body));
@@ -140,6 +143,9 @@ pub fn build_studio_section() -> GtkBox {
             gap.set_hexpand(true);
             actions.append(&gap);
             actions.append(&controls.activate);
+            // The submit row closes the form, so it sits a gap further down than
+            // the form's own line spacing.
+            actions.set_margin_top(8);
             activation_row.append(&controls.hint);
             activation_row.append(&controls.token);
             activation_row.append(&actions);
@@ -203,6 +209,9 @@ fn build_activation_controls(
     feedback.add_css_class("dim-label");
     feedback.set_wrap(true);
     feedback.set_xalign(0.0);
+    // The result line only appears once a submit reports something, so the form
+    // does not reserve a blank line under the buttons.
+    feedback.set_visible(false);
 
     let activate = Button::with_label(&t("Activate"));
     activate.add_css_class("settings-primary-btn");
@@ -226,6 +235,7 @@ fn build_activation_controls(
                     other => other.message(),
                 };
                 feedback.set_text(&feedback_message);
+                feedback.set_visible(true);
                 on_activated();
             }
             Err(error) => {
@@ -234,6 +244,7 @@ fn build_activation_controls(
                     StudioEntitlementError::DeviceMismatch => StudioStatus::DeviceMismatch.message(),
                     error => error.to_string(),
                 });
+                feedback.set_visible(true);
             }
         }
     });

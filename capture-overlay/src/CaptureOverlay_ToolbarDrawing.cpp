@@ -169,7 +169,7 @@ void CaptureOverlay::drawToolbar(QPainter& p,
                         QColor(0,0,0, int(shadowAlpha*255)));
         drawToolbarIcon(p, TOOLBAR_ICON_IDS[i], cx, iconY, iconColor);
 
-        QFont f; f.setFamily("Sans"); f.setPointSizeF(7.1);
+        QFont f; f.setFamily("Sans"); f.setPixelSize(11);
         f.setBold(hovered || active); p.setFont(f);
         QFontMetricsF fm(f);
         QString label(TOOLBAR_LABELS[i]);
@@ -186,7 +186,7 @@ void CaptureOverlay::drawToolbar(QPainter& p,
 
         if (i == kTimerToolIndex && timerToolActive) {
             const QString badgeText = QStringLiteral("%1s").arg(m_captureDelaySeconds);
-            QFont badgeFont; badgeFont.setFamily("Sans"); badgeFont.setPointSizeF(6.6); badgeFont.setBold(true);
+            QFont badgeFont; badgeFont.setFamily("Sans"); badgeFont.setPixelSize(10); badgeFont.setBold(true);
             p.setFont(badgeFont);
             QFontMetricsF badgeMetrics(badgeFont);
             const double badgeTextW = badgeMetrics.horizontalAdvance(badgeText);
@@ -203,7 +203,7 @@ void CaptureOverlay::drawToolbar(QPainter& p,
     Q_UNUSED(selW);
     Q_UNUSED(selH);
     auto drawActionLabel = [&](const QRectF& rect, const QString& text, bool primary) {
-        QFont f; f.setFamily("Sans"); f.setPointSizeF(9.0); f.setBold(true); p.setFont(f);
+        QFont f; f.setFamily("Sans"); f.setPixelSize(13); f.setBold(true); p.setFont(f);
         p.setPen(QColor(0, 0, 0, primary ? 132 : 118));
         p.drawText(rect.translated(0.6, 0.8), Qt::AlignCenter, text);
         p.setPen(primary ? QColor(255, 231, 214, 248) : QColor(244, 244, 244, 244));
@@ -251,7 +251,7 @@ void CaptureOverlay::drawToolbar(QPainter& p,
 
             QFont f;
             f.setFamily("Sans");
-            f.setPointSizeF(10.0);
+            f.setPixelSize(14);
             f.setBold(true);
             p.setFont(f);
             p.setPen(primary ? QColor(224, 241, 255, 252) : QColor(255, 255, 255, 248));
@@ -530,7 +530,7 @@ void CaptureOverlay::drawTopInstructionBar(QPainter& p, double screenW, double /
     // Label.
     {
         QFont f(QStringLiteral("Sans"));
-        f.setPointSizeF(10.5);
+        f.setPixelSize(14);
         f.setBold(true);
         p.setFont(f);
         p.setPen(QColor(244, 244, 246, 245));
@@ -559,7 +559,7 @@ void CaptureOverlay::drawTopInstructionBar(QPainter& p, double screenW, double /
             p.fillPath(path, QColor(255, 255, 255, 12));
         }
         QFont f(QStringLiteral("Sans"));
-        f.setPointSizeF(9.5);
+        f.setPixelSize(13);
         f.setBold(active || hovered);
         p.setFont(f);
         p.setPen(active ? QColor(255, 255, 255) : QColor(232, 232, 236));
@@ -656,7 +656,7 @@ void CaptureOverlay::drawTopBarCropMenu(QPainter& p, double screenW, double scre
             p.drawLine(QPointF(indicatorRect.x() + 6.5, cy + 3.0), QPointF(indicatorRect.x() + 12.5, cy - 4.0));
         }
         QFont itemFont(QStringLiteral("Sans"));
-        itemFont.setPointSizeF(i == CropRowReset ? 10.0 : 10.0);
+        itemFont.setPixelSize(13);
         itemFont.setBold(checked || i == CropRowReset);
         p.setFont(itemFont);
         p.setPen(QColor(242, 242, 244));

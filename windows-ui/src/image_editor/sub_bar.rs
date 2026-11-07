@@ -6,7 +6,7 @@
 //! armed, for the kind of the selected annotation so it can be restyled.
 
 use gtk4::prelude::*;
-use gtk4::{Align, Box as GtkBox, Button, Label, Orientation, Popover, Stack};
+use gtk4::{Align, Box as GtkBox, Button, Image, Label, Orientation, Popover, Stack};
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -22,6 +22,7 @@ use super::ui_support::px;
 use crate::capture::editor::pen_weight::HighlighterMode;
 use crate::capture::editor::state::EditorState;
 use crate::capture::editor::types::{AnnotationAction, CropAspectRatio};
+use crate::capture::editor::window::icon_names::custom;
 use crate::i18n::t;
 
 const TEXT_SIZE_OPTIONS: [i32; 12] = [12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 64, 72];
@@ -82,9 +83,12 @@ fn pill(scale: f64, options: &[&str], on_pick: Rc<dyn Fn(usize)>) -> Pill {
     list.add_css_class("image-editor-subbar-menu");
 
     let selected = Rc::new(Cell::new(0usize));
-    let checks = Rc::new(RefCell::new(Vec::<Label>::new()));
+    let checks = Rc::new(RefCell::new(Vec::<Image>::new()));
     for (index, option) in options.iter().enumerate() {
-        let check = Label::new(Some("✓"));
+        // A bundled check rather than U+2713: the editor's DM Sans has no
+        // check mark, so the text glyph fell back to a missing-glyph box.
+        let check = Image::from_icon_name(custom::CHECK_SYMBOLIC);
+        check.set_pixel_size(px(12.0, scale));
         check.add_css_class("image-editor-subbar-check");
         check.set_visible(index == 0);
         let option_label = Label::new(Some(option));

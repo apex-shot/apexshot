@@ -3,54 +3,39 @@
 .editor-root.onboarding-root {
     background: #191919;
     color: #f3f0ec;
-    border: none;
     box-shadow: none;
+    font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+    font-size: 14px;
 }
 
 .onboarding-pane {
     background: transparent;
 }
 
-.onboarding-showcase {
-    background: #242424;
-    border: none;
-    border-radius: 20px;
-    box-shadow: none;
-}
-
-.onboarding-showcase-title {
-    font-size: 27px;
-    font-weight: 600;
-    letter-spacing: -0.7px;
-    color: #f3f0ec;
-}
-
-.onboarding-showcase-copy {
-    font-size: 12px;
-    color: #a3a09c;
-}
-
 .onboarding-root .onboarding-headline {
-    font-size: 23px;
+    font-size: 28px;
     font-weight: 600;
     letter-spacing: -0.6px;
+    line-height: 1.15;
 }
 
 .onboarding-root .onboarding-copy {
-    font-size: 12px;
+    font-size: 15px;
+    font-weight: 400;
+    line-height: 1.35;
     color: #a3a09c;
     opacity: 1;
 }
 
 .editor-root .onboarding-actions button.settings-primary-btn {
     min-width: 0;
-    min-height: 38px;
+    min-height: 42px;
     padding: 0 18px;
     border: none;
     border-radius: 7px;
     background: #ff670d;
     color: #ffffff;
-    font-size: 12px;
+    font-size: 14px;
     font-weight: 600;
     box-shadow: none;
 }
@@ -68,24 +53,32 @@
     color: #b9a493;
 }
 
-.onboarding-root .onboarding-progress-caption {
-    font-size: 10px;
+.onboarding-root .onboarding-progress-node {
+    border: 1px solid rgba(243, 240, 236, 0.14);
+    border-radius: 999px;
+    color: rgba(243, 240, 236, 0.30);
+    font-size: 11px;
     font-weight: 500;
-    letter-spacing: 1px;
-    opacity: 0.45;
 }
 
-.onboarding-root .onboarding-progress-dot {
-    border-radius: 2px;
-    background: rgba(255, 255, 255, 0.12);
+.onboarding-root .onboarding-progress-node-done {
+    border-color: rgba(243, 240, 236, 0.24);
+    color: rgba(243, 240, 236, 0.65);
 }
 
-.onboarding-root .onboarding-progress-dot-done {
-    background: #8b512e;
+.onboarding-root .onboarding-progress-node-active {
+    border-color: rgba(243, 240, 236, 0.65);
+    background: rgba(243, 240, 236, 0.07);
+    color: #f3f0ec;
+    font-weight: 600;
 }
 
-.onboarding-root .onboarding-progress-dot-active {
-    background: #ff670d;
+.onboarding-root .onboarding-progress-connector {
+    background: rgba(243, 240, 236, 0.12);
+}
+
+.onboarding-root .onboarding-progress-connector-done {
+    background: rgba(243, 240, 236, 0.24);
 }
 
 .onboarding-root .onboarding-text-button,
@@ -95,7 +88,8 @@
     background-image: none;
     border: none;
     box-shadow: none;
-    font-size: 11px;
+    font-size: 13px;
+    font-weight: 500;
     padding: 5px 10px;
 }
 
@@ -106,7 +100,7 @@
 
 .onboarding-action-note {
     color: #83807b;
-    font-size: 10px;
+    font-size: 12px;
 }
 
 /* Setup is a form, not another Settings page: no nested tables or cards. */
@@ -129,13 +123,37 @@
     background: transparent;
 }
 
+.onboarding-root .settings-table-row > label,
+.onboarding-root .onboarding-feature-title {
+    font-size: 15px;
+    font-weight: 500;
+}
+
 .onboarding-root .settings-sub-option {
-    font-size: 11px;
+    font-size: 13px;
+    font-weight: 400;
+    line-height: 1.3;
     color: #a3a09c;
+    opacity: 1;
+}
+
+.onboarding-root .cloud-user-name {
+    font-size: 15px;
+    font-weight: 500;
+}
+
+.onboarding-root .onboarding-status-pill {
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.onboarding-hotkey-table .shortcut-capture-plus {
+    font-size: 12px;
 }
 
 .onboarding-hotkey-table .shortcut-capture-keycap {
-    font-size: 10px;
+    font-size: 12px;
+    font-weight: 500;
     padding: 4px 7px;
     border: none;
     box-shadow: none;
@@ -152,21 +170,13 @@
 
 .onboarding-root .onboarding-connect-code {
     font-family: 'Cascadia Mono', 'Consolas', 'Courier New', monospace;
-    font-size: 20px;
+    font-size: 24px;
     font-weight: 600;
     letter-spacing: 2px;
 }
 
 .onboarding-status-error {
-    font-size: 11px;
-}
-
-/* The preview is the editor's own window, cropped by the card. Only its
-   top-left corner is visible, so only that corner rounds. */
-.onboarding-editor-preview {
-    background: #141414;
-    border: none;
-    border-radius: 12px 0 0 0;
+    font-size: 13px;
 }
 
 .editor-root.editor-theme-light.onboarding-root {
@@ -174,34 +184,33 @@
     color: #25231f;
 }
 
-.editor-theme-light .onboarding-showcase {
-    background: #e8e5df;
-}
-
-.editor-theme-light .onboarding-showcase-title {
-    color: #25231f;
-}
-
-.editor-theme-light .onboarding-showcase-copy,
 .editor-theme-light.onboarding-root .onboarding-copy,
 .editor-theme-light.onboarding-root .settings-sub-option {
     color: #6c6861;
 }
 
-.editor-theme-light.onboarding-root .onboarding-progress-dot {
+.editor-theme-light.onboarding-root .onboarding-progress-node {
+    border-color: rgba(37, 35, 31, 0.15);
+    color: rgba(37, 35, 31, 0.35);
+}
+
+.editor-theme-light.onboarding-root .onboarding-progress-node-done {
+    border-color: rgba(37, 35, 31, 0.28);
+    color: rgba(37, 35, 31, 0.65);
+}
+
+.editor-theme-light.onboarding-root .onboarding-progress-node-active {
+    border-color: rgba(37, 35, 31, 0.65);
+    background: rgba(37, 35, 31, 0.05);
+    color: #25231f;
+}
+
+.editor-theme-light.onboarding-root .onboarding-progress-connector {
     background: rgba(37, 35, 31, 0.15);
 }
 
-.editor-theme-light.onboarding-root .onboarding-progress-dot-done {
-    background: #b57a55;
-}
-
-.editor-theme-light.onboarding-root .onboarding-progress-dot-active {
-    background: #ff670d;
-}
-
-.editor-theme-light .onboarding-editor-preview {
-    background: #f6f7fb;
+.editor-theme-light.onboarding-root .onboarding-progress-connector-done {
+    background: rgba(37, 35, 31, 0.28);
 }
 
 .editor-theme-light.onboarding-root .onboarding-hotkey-table .shortcut-capture-keycap,

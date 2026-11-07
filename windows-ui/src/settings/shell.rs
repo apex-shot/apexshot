@@ -10,7 +10,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{
     gdk, Align, Box as GtkBox, Button, CssProvider, Image, Label, Orientation, PolicyType,
-    ScrolledWindow, Stack, Widget,
+    Revealer, ScrolledWindow, Stack, Widget,
 };
 
 use super::usage::capitalize;
@@ -82,17 +82,23 @@ pub fn build_sidebar(
         let row = GtkBox::new(Orientation::Horizontal, 10);
         row.add_css_class("settings-nav-item");
         row.set_halign(Align::Fill);
-        row.set_valign(Align::Center);
 
         let icon = Image::from_icon_name(icon_name);
         icon.add_css_class("settings-nav-icon");
         icon.set_pixel_size((16.0 * scale).round() as i32);
         icon.set_halign(Align::Start);
+        icon.set_valign(Align::Center);
 
         let label = Label::new(Some(label_text));
         label.add_css_class("settings-nav-label");
         label.set_halign(Align::Start);
+        label.set_valign(Align::Center);
+        label.set_yalign(0.5);
         label.set_hexpand(true);
+
+        // Both children are centred in the row, so the glyph and the text share
+        // one horizontal axis instead of the glyph riding the row's top edge.
+        row.set_valign(Align::Center);
 
         row.append(&icon);
         row.append(&label);
@@ -178,15 +184,15 @@ pub fn build_shell_controls() -> ShellControls {
     ShellControls { row, toggle }
 }
 
-/// Hide or show the sidebar from its own toggle. The controls ride in the
-/// sidebar's head while the column is open and move into the title bar while
-/// it is closed, so the button never leaves with the column it hides. The
-/// open sidebar supplies the content card's left gutter; with it closed the
-/// card takes that gutter itself, so no edge of the card reaches the window
-/// border.
+/// Hide or show the sidebar from its own toggle. The revealer slides the
+/// column out and back; the controls ride in the sidebar's head while the
+/// column is open and move into the title bar while it is closed, so the
+/// button never leaves with the column it hides. The open sidebar supplies
+/// the content card's left gutter; with it closed the card takes that gutter
+/// itself, so no edge of the card reaches the window border.
 pub fn wire_sidebar_toggle(
     controls: &ShellControls,
-    sidebar: &GtkBox,
+    sidebar: &Revealer,
     head: &GtkBox,
     title_bar: &GtkBox,
     card: &GtkBox,
@@ -207,11 +213,11 @@ pub fn wire_sidebar_toggle(
             title_bar.prepend(&row);
             button.set_tooltip_text(Some(&t("Show sidebar")));
         } else {
-            head.append(&row);
+            head.prepend(&row);
             button.set_tooltip_text(Some(&t("Hide sidebar")));
         }
         card.set_margin_start(if hide { inset } else { 0 });
-        sidebar.set_visible(!hide);
+        sidebar.set_reveal_child(!hide);
     });
 }
 
@@ -428,7 +434,7 @@ pub fn install_css() {
 
     let mut css = format!(
         "\
-         .editor-root {{ background-color:#141414; }}          .editor-root.editor-theme-light {{ background-color:#f6f7fb; }}          .settings-window-controls {{ background-color:transparent; border-bottom:none; }} \n         .editor-root.editor-theme-light .settings-window-controls {{ background-color:transparent; }} \n         .settings-sidebar-wrapper {{ background-color:transparent; border-right:none; min-width:0; }} \
+         .editor-root {{ background-color:#0f0f0f; font-family:'DM Sans','Noto Sans',system-ui,sans-serif; }}          .editor-root.editor-theme-light {{ background-color:#ffffff; }}          .settings-window-controls {{ background-color:transparent; border-bottom:none; }} \n         .editor-root.editor-theme-light .settings-window-controls {{ background-color:transparent; }} \n         .settings-sidebar-wrapper {{ background-color:transparent; border-right:none; min-width:0; }} \
          .settings-sidebar-head {{ padding-left:{}px; }} \
          .settings-search-row {{ padding:0 {}px {}px {}px; }} \
          .editor-root entry.settings-search {{ min-height:{}px; border-radius:{}px; background-color:rgba(255,255,255,0.055); padding:0 {}px; font-size:{}px; }} \
@@ -475,12 +481,12 @@ pub fn install_css() {
          switch > image {{ opacity:0; }} \
          switch:disabled {{ background-color:rgba(255,255,255,0.07); }} \
          switch:disabled > slider {{ background-color:rgba(255,255,255,0.45); }} \
-         .editor-root button.settings-select {{ min-width:{}px; min-height:{}px; border-radius:{}px; font-size:{}px;              border:1px solid rgba(255,255,255,0.10); background-color:rgba(255,255,255,0.03); padding:0 {}px; }} 
-         .editor-root button.settings-select:focus, .editor-root button.settings-select:focus-visible {{ outline:none; box-shadow:none; }}          .editor-root button.settings-select:hover {{ background-color:rgba(255,255,255,0.055); border-color:rgba(255,255,255,0.16); }} 
-         .editor-root button.settings-select:active, .editor-root button.settings-select:checked {{ background-color:rgba(255,255,255,0.07); border-color:rgba(255,255,255,0.18); }} 
-         .editor-root button.settings-select:disabled {{ background-color:rgba(255,255,255,0.015); border-color:rgba(255,255,255,0.06); color:rgba(255,255,255,0.38); }} 
-         .editor-root button.settings-select .settings-select-arrow {{ opacity:0.5; }} 
-         .editor-root.editor-theme-light button.settings-select {{ border-color:rgba(17,24,39,0.14); background-color:rgba(17,24,39,0.02); color:#1d2129; }} 
+         .editor-root button.settings-select {{ min-width:{}px; min-height:{}px; border-radius:{}px; font-size:{}px;              border:1px solid rgba(255,255,255,0.10); background-color:rgba(255,255,255,0.03); padding:0 {}px; }}
+         .editor-root button.settings-select:focus, .editor-root button.settings-select:focus-visible {{ outline:none; box-shadow:none; }}          .editor-root button.settings-select:hover {{ background-color:rgba(255,255,255,0.055); border-color:rgba(255,255,255,0.16); }}
+         .editor-root button.settings-select:active, .editor-root button.settings-select:checked {{ background-color:rgba(255,255,255,0.07); border-color:rgba(255,255,255,0.18); }}
+         .editor-root button.settings-select:disabled {{ background-color:rgba(255,255,255,0.015); border-color:rgba(255,255,255,0.06); color:rgba(255,255,255,0.38); }}
+         .editor-root button.settings-select .settings-select-arrow {{ opacity:0.5; }}
+         .editor-root.editor-theme-light button.settings-select {{ border-color:rgba(17,24,39,0.14); background-color:rgba(17,24,39,0.02); color:#1d2129; }}
          .editor-root.editor-theme-light button.settings-select:hover {{ background-color:rgba(17,24,39,0.045); border-color:rgba(17,24,39,0.2); }} \
          .editor-root.editor-theme-light entry.settings-search {{ background-color:rgba(17,24,39,0.05); color:#1d2129; }} \
          .editor-root.editor-theme-light entry.settings-search:focus {{ background-color:rgba(17,24,39,0.08); outline:none; }} \
@@ -605,6 +611,364 @@ pub(crate) fn install_select_menu_css() {
     );
 }
 
+/// The Settings window's type scale.
+///
+/// The shared sheets were tuned for Inter at the sizes the Linux build uses.
+/// DM Sans runs a little lighter at the same size, so this provider restates
+/// every role once — page heading, section heading, row title, row hint and
+/// control text — and the pages stop carrying per-page weights of their own.
+/// It is installed by the Settings window only, after the shell and page
+/// sheets, so the History and editor windows keep their own typography.
+///
+/// The sheet is authored at 100% and its font sizes are scaled by
+/// [`crate::platform::ui_scale`], the way the onboarding sheet is. Only type is
+/// scaled here: the shell sheet already scales its own metrics, and running the
+/// whole sheet through the length scaler would grow its spacing twice.
+pub(crate) fn install_type_css() {
+    let Some(display) = gdk::Display::default() else {
+        return;
+    };
+    let provider = CssProvider::new();
+    provider.load_from_data(&crate::css_scale::scale_font_sizes(
+        r#"
+        /* Page chrome */
+        .editor-root {
+            font-size: 14px;
+        }
+        .settings-page-title {
+            font-size: 28px;
+            font-weight: 600;
+            letter-spacing: -0.3px;
+            opacity: 0.97;
+        }
+        .settings-group-title {
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.2px;
+            opacity: 0.72;
+            margin-top: 24px;
+            margin-bottom: 8px;
+        }
+        /* The Shortcuts page headings carry the title beside an icon and keep
+           their spacing on the row instead. GTK resolves providers before
+           specificity, so the zeroing has to be repeated in this sheet — the
+           lower-priority rule cannot reach past this provider's margins. */
+        .shortcut-heading-windows .settings-group-title {
+            margin-top: 0;
+            margin-bottom: 0;
+        }
+        .settings-table-header {
+            font-size: 12px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
+            opacity: 0.55;
+        }
+
+        /* Rows: one title weight for the label, one body weight for the hint */
+        .settings-table-row label {
+            font-size: 15px;
+            font-weight: 500;
+        }
+        .settings-table-row label.dim-label {
+            font-size: 13px;
+            font-weight: 400;
+            opacity: 0.6;
+        }
+        .settings-table-row label.settings-sub-option {
+            font-size: 13px;
+            font-weight: 400;
+            opacity: 0.7;
+        }
+        .settings-table-row label.settings-sub-option-hint {
+            font-size: 13px;
+            font-weight: 400;
+            opacity: 0.5;
+        }
+        .settings-table-row label.settings-mono-value {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .settings-table-row button label {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .settings-sub-option {
+            font-size: 13px;
+            font-weight: 400;
+            opacity: 0.66;
+        }
+        .settings-sub-option-hint {
+            font-size: 13px;
+            font-weight: 400;
+        }
+
+        /* Controls */
+        entry.settings-search {
+            font-size: 14px;
+            font-weight: 400;
+        }
+        .settings-search-empty {
+            font-size: 13px;
+            font-weight: 400;
+        }
+        button.settings-select,
+        button.settings-select label {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        popover.settings-select-popover > contents button.history-action-btn {
+            font-size: 14px;
+            font-weight: 400;
+        }
+        .settings-primary-btn,
+        .settings-save-btn {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .secondary-settings-button {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .settings-toast {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .settings-status-pill {
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .settings-scale-caption {
+            font-size: 15px;
+            font-weight: 500;
+            opacity: 0.9;
+        }
+        .settings-scale-readout {
+            font-size: 13px;
+            font-weight: 500;
+            opacity: 0.55;
+        }
+
+        /* Sidebar */
+        .settings-beta-badge {
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .settings-nav-label {
+            font-size: 15px;
+            font-weight: 500;
+        }
+        .settings-user-name {
+            font-size: 14px;
+            font-weight: 500;
+        }
+        .settings-user-sub {
+            font-size: 12px;
+        }
+        .settings-user-initials {
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .settings-user-badge {
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        /* Shortcuts page and the capture dialog */
+        .shortcuts-header-title {
+            font-size: 15px;
+            font-weight: 600;
+        }
+        .shortcuts-label {
+            font-size: 15px;
+            font-weight: 400;
+        }
+        .shortcuts-tip {
+            font-size: 13px;
+            font-weight: 400;
+        }
+        .shortcut-notice-title {
+            font-size: 15px;
+            font-weight: 600;
+        }
+        .shortcut-notice-detail {
+            font-size: 13px;
+            font-weight: 400;
+        }
+        .shortcut-notice-action {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .shortcut-row-status {
+            font-size: 13px;
+            font-weight: 500;
+        }
+        .shortcut-capture-title {
+            font-size: 17px;
+            font-weight: 600;
+        }
+        .shortcut-capture-subtitle {
+            font-size: 15px;
+            font-weight: 400;
+        }
+        .shortcut-capture-hint {
+            font-size: 12px;
+            font-weight: 400;
+        }
+        .shortcut-capture-keycap {
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .shortcut-capture-plus {
+            font-size: 17px;
+            font-weight: 500;
+        }
+        .shortcut-capture-cleared-label {
+            font-size: 15px;
+            font-weight: 400;
+        }
+        .shortcut-capture-secondary-btn,
+        .shortcut-capture-primary-btn {
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        /* Recording tabs */
+        .recording-tab-button {
+            font-size: 15px;
+            font-weight: 500;
+        }
+        .settings-action-button {
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        /* About */
+        .about-app-name {
+            font-size: 24px;
+            font-weight: 600;
+            letter-spacing: -0.2px;
+        }
+        .about-version-label {
+            font-size: 13px;
+            font-weight: 400;
+            opacity: 0.55;
+        }
+        .about-link-button {
+            font-size: 15px;
+            font-weight: 400;
+        }
+        .about-support-title {
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .about-support-copy {
+            font-size: 13px;
+            font-weight: 400;
+        }
+
+        /* Cloud */
+        .cloud-user-name {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .cloud-user-email {
+            font-size: 13px;
+            font-weight: 400;
+        }
+        .cloud-avatar {
+            font-size: 15px;
+            font-weight: 600;
+        }
+        .cloud-connect-title {
+            font-size: 28px;
+            font-weight: 600;
+        }
+        .cloud-connect-eyebrow {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.9px;
+        }
+        .cloud-connect-cell {
+            font-size: 19px;
+            font-weight: 600;
+        }
+        .cloud-connect-dash {
+            font-size: 19px;
+            font-weight: 500;
+        }
+        .cloud-connect-link {
+            font-size: 15px;
+            font-weight: 400;
+        }
+        .cloud-connect-action,
+        .cloud-connect-secondary {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        /* Usage */
+        .usage-eyebrow {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 1.1px;
+        }
+        .usage-account {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .usage-plan {
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .usage-status,
+        .usage-banner-detail,
+        .usage-banner-title {
+            font-size: 13px;
+        }
+        .usage-banner-title {
+            font-weight: 600;
+        }
+        .usage-label {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.6px;
+        }
+        .usage-value-hero {
+            font-size: 34px;
+            font-weight: 600;
+        }
+        .usage-value {
+            font-size: 22px;
+            font-weight: 600;
+        }
+        .usage-caption,
+        .usage-note,
+        .usage-muted {
+            font-size: 13px;
+            font-weight: 400;
+        }
+        .usage-scale {
+            font-size: 12px;
+            font-weight: 400;
+        }
+        .usage-fact-value {
+            font-size: 15px;
+            font-weight: 500;
+        }
+        .usage-empty-title {
+            font-size: 18px;
+            font-weight: 600;
+        }
+        "#,
+        crate::platform::ui_scale(),
+    ));
+    gtk4::style_context_add_provider_for_display(
+        &display,
+        &provider,
+        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION + 6,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -705,7 +1069,9 @@ mod tests {
     fn sidebar_toggle_carries_the_controls_into_the_title_bar() {
         let Some((badge, open, closed, restored)) = crate::test_support::with_gtk(|| {
             let controls = build_shell_controls();
-            let sidebar = GtkBox::new(Orientation::Vertical, 0);
+            let sidebar = Revealer::new();
+            sidebar.set_child(Some(&GtkBox::new(Orientation::Vertical, 0)));
+            sidebar.set_reveal_child(true);
             let head = GtkBox::new(Orientation::Horizontal, 0);
             let title_bar = GtkBox::new(Orientation::Horizontal, 0);
             let card = GtkBox::new(Orientation::Vertical, 0);
@@ -718,7 +1084,7 @@ mod tests {
                 .and_then(|widget| widget.downcast::<Label>().ok())
                 .map(|label| label.text().to_string());
             let open = (
-                sidebar.is_visible(),
+                sidebar.reveals_child(),
                 head.first_child().is_some(),
                 title_bar.first_child().is_none(),
                 controls.toggle.tooltip_text().map(|text| text.to_string()),
@@ -727,7 +1093,7 @@ mod tests {
 
             controls.toggle.emit_clicked();
             let closed = (
-                sidebar.is_visible(),
+                sidebar.reveals_child(),
                 head.first_child().is_none(),
                 title_bar
                     .first_child()
@@ -738,7 +1104,7 @@ mod tests {
 
             controls.toggle.emit_clicked();
             let restored = (
-                sidebar.is_visible(),
+                sidebar.reveals_child(),
                 head.first_child().is_some(),
                 title_bar.first_child().is_none(),
                 card.margin_start(),

@@ -21,6 +21,7 @@ use gtk4::{
 use super::annotate::EditorHost;
 use super::ui_support::px;
 use crate::capture::editor::state::background::{Fill, FrameRatio, Layout};
+use crate::capture::editor::style_render::needs_backdrop;
 use crate::capture::editor::types::FrameStyle;
 use crate::capture::editor::window::icon_names;
 use crate::i18n::{t, tfmt};
@@ -74,7 +75,9 @@ fn disclosure_row(title: &str, body: &GtkBox, scale: f64) -> GtkBox {
     heading.add_css_class("image-editor-section-title");
     heading.set_xalign(0.0);
     heading.set_hexpand(true);
-    let chevron = Label::new(Some("›"));
+    let chevron = Image::from_icon_name("chevron-right-regular");
+    chevron.set_pixel_size(px(12.0, scale));
+    chevron.set_valign(Align::Center);
     chevron.add_css_class("image-editor-disclosure-chevron");
     header.append(&heading);
     header.append(&chevron);
@@ -97,7 +100,11 @@ fn disclosure_row(title: &str, body: &GtkBox, scale: f64) -> GtkBox {
         move |_, _, _, _| {
             let revealed = revealer.reveals_child();
             revealer.set_reveal_child(!revealed);
-            chevron.set_label(if revealed { "›" } else { "⌄" });
+            chevron.set_icon_name(Some(if revealed {
+                "chevron-right-regular"
+            } else {
+                "chevron-down-regular"
+            }));
         }
     });
     header.add_controller(click);
@@ -943,6 +950,7 @@ fn paint_style_swatch(context: &CairoContext, width: f64, height: f64, style: Fr
 pub(super) fn style_disclosure(
     scale: f64,
     host: Option<&Rc<EditorHost>>,
+    backdrop: Option<BackdropAction>,
 ) -> (GtkBox, Rc<dyn Fn()>) {
     let body = GtkBox::new(Orientation::Vertical, px(8.0, scale));
     let grid = Grid::new();
@@ -974,6 +982,7 @@ pub(super) fn style_disclosure(
         button.set_halign(Align::Center);
         button.connect_clicked({
             let host = host.cloned();
+            let backdrop = backdrop.clone();
             move |_| {
                 if let Some(host) = &host {
                     if host.read(|st| st.selected_tool)
@@ -981,9 +990,21 @@ pub(super) fn style_disclosure(
                     {
                         host.set_tool(crate::capture::editor::types::Tool::Background);
                     }
+                    let empty = host
+                        .read(|st| matches!(st.background.fill, Fill::None))
+                        .unwrap_or(false);
                     host.mutate(|st| {
                         st.set_frame_style(style);
                     });
+                    // A glass or stacked style has nothing to read against on a
+                    // bare card: the export would be transparent and sit flush
+                    // against the image. Offer the catalog's first wallpaper so
+                    // the style lands on the background it was drawn for.
+                    if empty && needs_backdrop(style) {
+                        if let Some(backdrop) = &backdrop {
+                            backdrop();
+                        }
+                    }
                 }
             }
         });
@@ -1215,9 +1236,15 @@ fn frame_disclosure(scale: f64, host: Option<&Rc<EditorHost>>) -> (GtkBox, Rc<dy
         dimensions.push(entry);
         dim_row.append(&pill);
     }
-    let expand_button = Button::with_label("⌄");
+    let expand_button = Button::new();
     expand_button.set_has_frame(false);
     expand_button.add_css_class("image-editor-frame-expand");
+    // A bundled chevron replaces the arrow character the Linux panel uses: the
+    // Windows UI's DM Sans has no U+2304/U+2303, so the glyph fell back to the
+    // missing-glyph box whenever the row opened.
+    let expand_icon = Image::from_icon_name("chevron-down-regular");
+    expand_icon.set_pixel_size(px(12.0, scale));
+    expand_button.set_child(Some(&expand_icon));
     expand_button.set_tooltip_text(Some(&t("More frame sizes")));
     let revealer = Revealer::builder()
         .transition_type(RevealerTransitionType::SlideDown)
@@ -1228,11 +1255,15 @@ fn frame_disclosure(scale: f64, host: Option<&Rc<EditorHost>>) -> (GtkBox, Rc<dy
     revealer.set_reveal_child(false);
     expand_button.connect_clicked({
         let revealer = revealer.clone();
-        let button = expand_button.clone();
+        let icon = expand_icon.clone();
         move |_| {
             let revealed = revealer.reveals_child();
             revealer.set_reveal_child(!revealed);
-            button.set_label(if revealed { "⌄" } else { "⌃" });
+            icon.set_icon_name(Some(if revealed {
+                "chevron-down-regular"
+            } else {
+                "chevron-up-regular"
+            }));
         }
     });
     dim_row.append(&expand_button);
@@ -1455,6 +1486,11 @@ fn paint_thumbnail(
 
 type ResetAction = Rc<RefCell<Option<Rc<dyn Fn()>>>>;
 
+/// The action that gives a style its backdrop: picks the catalog's first
+/// wallpaper the way a tile click would, so the fill, the ring and the loaded
+/// preview all follow the normal path.
+type BackdropAction = Rc<dyn Fn()>;
+
 /// Every tile and the None row share one selection.
 #[derive(Clone)]
 struct Selection {
@@ -1527,6 +1563,20 @@ impl Selection {
     fn reset_image(&self) {
         if let Some(clear) = self.clear_image.borrow().as_ref() {
             clear();
+        }
+    }
+
+    /// Choose the catalog's first tile the way a click would, so the tile's own
+    /// handler loads the full image and moves the ring. Returns false when the
+    /// catalog is empty and there was nothing to choose.
+    fn select_first(&self) -> bool {
+        let tile = self.tiles.borrow().first().cloned();
+        match tile {
+            Some(tile) => {
+                tile.emit_clicked();
+                true
+            }
+            None => false,
         }
     }
 }
@@ -1953,14 +2003,14 @@ pub(super) fn appearance_panel(
     title.set_xalign(0.0);
     body.append(&title);
 
-    let (background, sync) = background_card(scale, host, column, window);
+    let (background, sync, apply_first_wallpaper) = background_card(scale, host, column, window);
     body.append(&background);
     body.append(&export_quality(scale));
     let (transform, transform_sync) = transform_disclosure(scale, host);
     body.append(&transform);
     let (shadow, shadow_sync) = shadow_disclosure(scale, host);
     body.append(&shadow);
-    let (style, style_sync) = style_disclosure(scale, host);
+    let (style, style_sync) = style_disclosure(scale, host, Some(apply_first_wallpaper));
     body.append(&style);
     let (frame, frame_sync) = frame_disclosure(scale, host);
     body.append(&frame);
@@ -1976,13 +2026,14 @@ pub(super) fn appearance_panel(
 
 /// The Background card: the fill-source tray and the shared sliders, the
 /// Linux panel's opening group. `selection` owns the one ring both here and
-/// the catalog carry.
+/// the catalog carry. The third value picks the catalog's first wallpaper,
+/// which is how the Style card gives a glass or stacked preset a backdrop.
 fn background_card(
     scale: f64,
     host: Option<&Rc<EditorHost>>,
     column: &GtkBox,
     window: &gtk4::ApplicationWindow,
-) -> (GtkBox, Rc<dyn Fn()>) {
+) -> (GtkBox, Rc<dyn Fn()>, BackdropAction) {
     let section = section_card("Background", scale);
 
     // "None" clears the fill outright. It is not a fourth source tab, so it
@@ -2090,6 +2141,7 @@ fn background_card(
     let host = host.cloned();
     let sync = {
         let section = section.clone();
+        let selection = selection.clone();
         Rc::new(move || {
             let Some(host) = &host else {
                 section.set_sensitive(false);
@@ -2120,7 +2172,13 @@ fn background_card(
             }
         }) as Rc<dyn Fn()>
     };
-    (section, sync)
+    let apply_first_wallpaper: BackdropAction = {
+        let selection = selection.clone();
+        Rc::new(move || {
+            selection.select_first();
+        })
+    };
+    (section, sync, apply_first_wallpaper)
 }
 
 #[cfg(test)]
@@ -2258,7 +2316,7 @@ mod tests {
         let Some(()) = crate::test_support::with_gtk(|| {
             let host = EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)));
             *host.editor.borrow_mut() = Some(EditorState::new(RgbaImage::new(100, 80)));
-            let (section, sync) = style_disclosure(1.0, Some(&host));
+            let (section, sync) = style_disclosure(1.0, Some(&host), None);
             sync();
             let mut buttons = Vec::new();
             collect_class(
@@ -2543,6 +2601,120 @@ mod tests {
                 host.read(|st| st.background.fill.clone()),
                 Some(Fill::None)
             ));
+        }) else {
+            return;
+        };
+    }
+
+    fn test_host() -> Rc<EditorHost> {
+        let host = EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)));
+        *host.editor.borrow_mut() = Some(EditorState::new(RgbaImage::new(100, 80)));
+        host
+    }
+
+    fn frame_tile_buttons(card: &GtkBox) -> Vec<Button> {
+        let mut found = Vec::new();
+        collect_class(
+            card.upcast_ref::<gtk4::Widget>(),
+            "image-editor-frame-tile",
+            &mut found,
+        );
+        found
+            .into_iter()
+            .filter_map(|widget| widget.downcast::<Button>().ok())
+            .collect()
+    }
+
+    #[test]
+    fn glass_and_stacked_styles_ask_for_a_backdrop_only_over_an_empty_fill() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let host = test_host();
+            let asks = Rc::new(Cell::new(0));
+            let backdrop = {
+                let asks = asks.clone();
+                let host = host.clone();
+                Rc::new(move || {
+                    asks.set(asks.get() + 1);
+                    host.mutate(|st| {
+                        st.background
+                            .set_fill(Fill::Image(Arc::new(RgbaImage::new(4, 4))));
+                    });
+                })
+            };
+            let (card, _sync) = style_disclosure(1.0, Some(&host), Some(backdrop));
+            let buttons = frame_tile_buttons(&card);
+            assert_eq!(buttons.len(), FrameStyle::ALL.len());
+            let press = |style: FrameStyle| {
+                let index = FrameStyle::ALL
+                    .iter()
+                    .position(|candidate| *candidate == style)
+                    .expect("style is in ALL");
+                buttons[index].emit_clicked();
+            };
+
+            press(FrameStyle::Liquid);
+            assert_eq!(asks.get(), 1, "a glass style over no fill asks once");
+
+            press(FrameStyle::Stack);
+            assert_eq!(asks.get(), 1, "the fill the first style added stands");
+
+            host.mutate(|st| st.background.fill = Fill::None);
+            press(FrameStyle::Card);
+            assert_eq!(asks.get(), 1, "a flat style stands on its own");
+
+            press(FrameStyle::Retro);
+            assert_eq!(asks.get(), 2, "a stacked style over no fill asks again");
+        }) else {
+            return;
+        };
+    }
+
+    #[test]
+    fn the_backdrop_action_picks_the_catalogs_first_tile() {
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let host = test_host();
+            let selection = Selection {
+                tiles: Rc::new(RefCell::new(Vec::new())),
+                none: Button::new(),
+                clear_image: Rc::new(RefCell::new(None)),
+                confirmed: Rc::new(RefCell::new(None)),
+                confirmed_none: Rc::new(Cell::new(true)),
+            };
+            selection.none.add_css_class("active-background-option");
+            let clear_custom: ResetAction = Rc::new(RefCell::new(None));
+            let first = wallpaper_tile(
+                1.0,
+                std::path::Path::new("missing-thumb-wallpaper-001.jpg"),
+                &selection,
+                Some(&host),
+                &clear_custom,
+            );
+            let second = wallpaper_tile(
+                1.0,
+                std::path::Path::new("missing-thumb-wallpaper-002.jpg"),
+                &selection,
+                Some(&host),
+                &clear_custom,
+            );
+            selection
+                .tiles
+                .borrow_mut()
+                .extend([first.clone(), second.clone()]);
+
+            assert!(selection.select_first());
+            assert!(first.has_css_class("active-background-option"));
+            assert!(!second.has_css_class("active-background-option"));
+            assert!(host.background_loading(), "the tile loads its image");
+            host.cancel_background_load();
+
+            let empty = Selection {
+                tiles: Rc::new(RefCell::new(Vec::new())),
+                none: Button::new(),
+                clear_image: Rc::new(RefCell::new(None)),
+                confirmed: Rc::new(RefCell::new(None)),
+                confirmed_none: Rc::new(Cell::new(true)),
+            };
+            assert!(!empty.select_first(), "an empty catalog chooses nothing");
         }) else {
             return;
         };

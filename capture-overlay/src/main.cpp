@@ -542,7 +542,7 @@ int main(int argc, char* argv[])
     // sans when the Inter family is unavailable.
     {
         QFont overlayFont = app.font();
-        overlayFont.setFamily(QStringLiteral("Inter"));
+        overlayFont.setFamily(QStringLiteral("DM Sans"));
         app.setFont(overlayFont);
     }
     app.setApplicationName("ApexShot Capture");

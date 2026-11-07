@@ -91,7 +91,7 @@ protected:
         painter.drawLine(center, QPointF(center.x(), center.y() - 5));
         painter.drawLine(center, QPointF(center.x() + 4, center.y() + 2));
 
-        QFont font(QStringLiteral("Inter"));
+        QFont font(QStringLiteral("DM Sans"));
         font.setPixelSize(22);
         font.setWeight(QFont::Bold);
         painter.setFont(font);

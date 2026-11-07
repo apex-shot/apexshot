@@ -297,7 +297,7 @@ void RecordingControlsWindow::setupUi()
     m_timerLabel = new QLabel(QStringLiteral("0:00"), stopSegment);
     QFont timerFont = font();
     timerFont.setBold(true);
-    timerFont.setPointSizeF(15.0);
+    timerFont.setPixelSize(20);
     m_timerLabel->setFont(timerFont);
     m_timerLabel->setStyleSheet("color: rgb(244, 99, 87); background: transparent;");
     m_timerLabel->setVisible(m_showTimer);

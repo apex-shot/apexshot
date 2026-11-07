@@ -1,5 +1,6 @@
 #include "platform/windows/window_recording.h"
 
+#include <QAction>
 #include <QCursor>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -7,6 +8,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFont>
+#include <QFontDatabase>
 #include <QFontMetrics>
 #include <QFormLayout>
 #include <QGuiApplication>
@@ -59,6 +61,7 @@ public:
     }
 
 protected:
+    void paintEvent(QPaintEvent* event) override;
     void showEvent(QShowEvent* event) override
     {
         QMenu::showEvent(event);
@@ -80,6 +83,52 @@ private:
     }
 };
 
+QString iconFamily()
+{
+    static const QString family = [] {
+        const int id =
+            QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/Lucide.ttf"));
+        if (id < 0)
+            return QString();
+        const QStringList families = QFontDatabase::applicationFontFamilies(id);
+        return families.isEmpty() ? QString() : families.first();
+    }();
+    return family;
+}
+
+// The trailing column marks a submenu with a chevron and the picked entry
+// with a tick, the way the toolbar's device menus do.
+void RoundedMenu::paintEvent(QPaintEvent* event)
+{
+    QMenu::paintEvent(event);
+    const QString family = iconFamily();
+    if (family.isEmpty())
+        return;
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing);
+    QFont font(family);
+    font.setPixelSize(15);
+    painter.setFont(font);
+    for (QAction* action : actions()) {
+        if (!action->isVisible() || action->isSeparator())
+            continue;
+        const QRect item = actionGeometry(action);
+        if (item.isNull())
+            continue;
+        const QRectF mark(item.right() - 24.0, item.top(), 16.0, item.height());
+        if (action->menu()) {
+            painter.setPen(QColor(255, 255, 255, 168));
+            painter.drawText(mark, Qt::AlignCenter,
+                             QString(QChar(static_cast<ushort>(0xE06F))));
+        } else if (action->property("ticked").toBool()) {
+            painter.setPen(QColor(255, 255, 255, 219));
+            painter.drawText(mark, Qt::AlignCenter,
+                             QString(QChar(static_cast<ushort>(0xE06C))));
+        }
+    }
+}
+
 const QColor kAccent(255, 102, 0);
 const QColor kAccentWash(255, 102, 0, 26);
 const QColor kStartTop(255, 122, 26);
@@ -93,9 +142,11 @@ constexpr double kControlRadius = 10.0;
 
 QFont uiFont(int pixelSize, bool bold)
 {
-    QFont font(QStringLiteral("Inter"));
+    QFont font(QStringLiteral("DM Sans"));
     font.setPixelSize(pixelSize);
-    font.setWeight(bold ? QFont::DemiBold : QFont::Normal);
+    font.setWeight(bold ? QFont::Medium : QFont::Normal);
+    font.setHintingPreference(QFont::PreferNoHinting);
+    font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
     return font;
 }
 
@@ -212,8 +263,8 @@ void paintHintPill(QPainter& painter,
                    const QString& title,
                    const QString& hint)
 {
-    const QFont titleFont = uiFont(13, true);
-    const QFont hintFont = uiFont(12, false);
+    const QFont titleFont = uiFont(15, true);
+    const QFont hintFont = uiFont(13, false);
     const QFontMetrics titleMetrics(titleFont);
     const QFontMetrics hintMetrics(hintFont);
     const double gap = 12.0;
@@ -642,11 +693,11 @@ double RecordingSetupOverlay::controlWidth() const
 {
     // The Start button and the size chip share one width, so the chip never
     // sticks out past the button it belongs to.
-    const QFontMetrics buttonMetrics(uiFont(16, true));
+    const QFontMetrics buttonMetrics(uiFont(15, true));
     const double buttonWidth =
         std::max(148.0, buttonMetrics.horizontalAdvance(QStringLiteral("Start recording")) + 52.0);
-    const QFontMetrics sizeMetrics(uiFont(13, false));
-    const QFontMetrics resizeMetrics(uiFont(13, true));
+    const QFontMetrics sizeMetrics(uiFont(14, false));
+    const QFontMetrics resizeMetrics(uiFont(14, false));
     const double chipWidth = 12.0 + sizeMetrics.horizontalAdvance(sizeText()) + 10.0 + 1.0
                              + 10.0 + resizeMetrics.horizontalAdvance(QStringLiteral("Resize"))
                              + 24.0 + 12.0;
@@ -679,15 +730,15 @@ QRectF RecordingSetupOverlay::headerRect() const
     const double chipWidth = controlWidth();
     const QRectF start = startRect();
     return QRectF(start.center().x() - chipWidth / 2.0,
-                  start.top() - 46.0,
+                  start.top() - 50.0,
                   chipWidth,
-                  32.0);
+                  36.0);
 }
 
 QRectF RecordingSetupOverlay::sizeRect() const
 {
     const QRectF header = headerRect();
-    const QFontMetrics metrics(uiFont(13, false));
+    const QFontMetrics metrics(uiFont(14, false));
     return QRectF(header.left() + 12.0,
                   header.top(),
                   metrics.horizontalAdvance(sizeText()),
@@ -697,7 +748,7 @@ QRectF RecordingSetupOverlay::sizeRect() const
 QRectF RecordingSetupOverlay::resizeRect() const
 {
     const QRectF header = headerRect();
-    const QFontMetrics metrics(uiFont(13, true));
+    const QFontMetrics metrics(uiFont(14, false));
     const double width = metrics.horizontalAdvance(QStringLiteral("Resize")) + 24.0;
     return QRectF(header.right() - 12.0 - width,
                   header.top() + 3.0,
@@ -748,7 +799,7 @@ void RecordingSetupOverlay::paintEvent(QPaintEvent*)
     startFill.setColorAt(1.0, m_hoverStart ? kStartBottomHover : kStartBottom);
     painter.fillPath(startPath, startFill);
 
-    painter.setFont(uiFont(16, true));
+    painter.setFont(uiFont(15, true));
     painter.setPen(Qt::white);
     painter.drawText(start, Qt::AlignCenter, QStringLiteral("Start recording"));
 
@@ -759,7 +810,7 @@ void RecordingSetupOverlay::paintEvent(QPaintEvent*)
     painter.setBrush(QColor(16, 16, 18, 228));
     painter.drawRoundedRect(header, 8.0, 8.0);
 
-    painter.setFont(uiFont(13, false));
+    painter.setFont(uiFont(14, false));
     painter.setPen(kText);
     painter.drawText(sizeRect(), Qt::AlignVCenter | Qt::AlignLeft, sizeText());
 
@@ -773,7 +824,7 @@ void RecordingSetupOverlay::paintEvent(QPaintEvent*)
         painter.setBrush(QColor(255, 255, 255, 30));
         painter.drawRoundedRect(resize, 6.0, 6.0);
     }
-    painter.setFont(uiFont(13, true));
+    painter.setFont(uiFont(14, false));
     painter.setPen(kText);
     painter.drawText(resize, Qt::AlignCenter, QStringLiteral("Resize"));
 
@@ -966,16 +1017,18 @@ void RecordingSetupOverlay::openResizeMenu()
 {
     RoundedMenu menu(this);
     menu.setWindowFlag(Qt::WindowStaysOnTopHint, true);
-    menu.setFixedWidth(232);
-    menu.setFont(uiFont(13, false));
+    menu.setFixedWidth(304);
+    menu.setFont(uiFont(14, true));
     const QString sheet = QStringLiteral(
-        "QMenu { background: rgba(22,22,25,240); color:#EDEDF0;"
-        " border:1px solid rgba(255,255,255,34); border-radius:10px; padding:7px; }"
-        "QMenu::item { padding:9px 14px 9px 8px; margin:2px 4px; border-radius:8px; }"
-        "QMenu::item:selected { background: rgba(255,102,0,218); color:#ffffff; }"
-        "QMenu::item:checked { background: rgba(255,102,0,90); color:#ffffff; }"
-        "QMenu::separator { height:1px; background: rgba(255,255,255,22);"
-        " margin:6px 12px; }");
+        "QMenu { background:#252526; color: rgba(255,255,255,230);"
+        " border:1px solid rgba(255,255,255,26); border-radius:10px;"
+        " padding:4px; }"
+        "QMenu::item { padding:7px 26px 7px 8px; border-radius:6px; }"
+        "QMenu::item:selected { background: rgba(255,255,255,18); color:#ffffff; }"
+        "QMenu::item:disabled { color: rgba(255,255,255,60); }"
+        "QMenu::separator { height:1px; background: rgba(255,255,255,16);"
+        " margin:4px 8px; }"
+        "QMenu::right-arrow { image: none; width:0px; height:0px; }");
     menu.setStyleSheet(sheet);
 
     const QSize current = m_window.geometry.size();
@@ -983,8 +1036,7 @@ void RecordingSetupOverlay::openResizeMenu()
         QAction* action = target->addAction(
             QStringLiteral("%1 × %2").arg(size.width()).arg(size.height()));
         action->setData(QVariant::fromValue(size));
-        action->setCheckable(true);
-        action->setChecked(size == current);
+        action->setProperty("ticked", size == current);
         if (!fitsOnScreen(size))
             action->setEnabled(false);
         return action;
@@ -1008,7 +1060,13 @@ void RecordingSetupOverlay::openResizeMenu()
         auto* submenu = new RoundedMenu(&menu);
         submenu->setTitle(ratio.label);
         submenu->setStyleSheet(sheet);
-        submenu->setFont(uiFont(13, false));
+        submenu->setFont(uiFont(14, true));
+        // Qt butts a submenu against its parent. Nudge it clear once it is
+        // placed, so the two panels read as separate surfaces.
+        QObject::connect(submenu, &QMenu::aboutToShow, submenu, [submenu]() {
+            QTimer::singleShot(0, submenu,
+                               [submenu]() { submenu->move(submenu->x() + 6, submenu->y()); });
+        });
         menu.addMenu(submenu);
         for (const QSize& size : ratio.sizes)
             addSize(submenu, size);

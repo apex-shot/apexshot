@@ -30,9 +30,11 @@ const QColor kCancelText(255, 228, 214);
 
 QFont countdownFont(int pixelSize)
 {
-    QFont font(QStringLiteral("Inter"));
+    QFont font(QStringLiteral("DM Sans"));
     font.setPixelSize(pixelSize);
-    font.setWeight(QFont::Bold);
+    font.setWeight(QFont::Medium);
+    font.setHintingPreference(QFont::PreferNoHinting);
+    font.setLetterSpacing(QFont::PercentageSpacing, 98.0);
     return font;
 }
 

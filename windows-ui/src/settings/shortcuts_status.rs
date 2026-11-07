@@ -1,8 +1,6 @@
 //! Compact, row-specific shortcut registration feedback.
 
-use gtk4::{
-    glib, prelude::*, Align, Box as GtkBox, Button, CssProvider, Image, Label, Orientation,
-};
+use gtk4::{glib, prelude::*, Align, Box as GtkBox, Button, CssProvider, Label, Orientation};
 use serde_json::Value;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -182,12 +180,6 @@ pub fn install(widgets: &ShortcutSettingsWidgets) {
     root.add_css_class("shortcut-notice");
     root.set_hexpand(true);
     root.set_visible(false);
-
-    let icon = Image::from_icon_name("dialog-warning-symbolic");
-    icon.add_css_class("shortcut-notice-icon");
-    icon.set_pixel_size(18);
-    icon.set_valign(Align::Start);
-    root.append(&icon);
 
     let text = GtkBox::new(Orientation::Vertical, 3);
     text.set_hexpand(true);

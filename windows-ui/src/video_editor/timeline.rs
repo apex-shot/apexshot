@@ -5218,8 +5218,8 @@ fn draw_ruler(
         (0.11, 0.13, 0.16)
     };
 
-    context.select_font_face("Inter", FontSlant::Normal, FontWeight::Normal);
-    context.set_font_size((10.0 * scale).round());
+    context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
+    context.set_font_size((11.0 * scale).round());
     context.set_line_width(1.0);
 
     let mut time = (view_start / minor).floor() * minor;
@@ -5344,7 +5344,7 @@ fn draw_effect_clips(
 
         if pill_w > 40.0 * scale {
             context.set_source_rgba(1.0, 1.0, 1.0, 0.92);
-            context.select_font_face("Inter", FontSlant::Normal, FontWeight::Normal);
+            context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
             context.set_font_size((11.0 * scale).round());
             let label = match track {
                 EffectTrack::Zoom if pill_w > 92.0 * scale => format!(
@@ -5443,7 +5443,7 @@ fn draw_effect_ghost(
 
     if pill_w > 40.0 * scale {
         context.set_source_rgba(1.0, 1.0, 1.0, if free { 0.92 } else { 0.55 });
-        context.select_font_face("Inter", FontSlant::Normal, FontWeight::Normal);
+        context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
         context.set_font_size((11.0 * scale).round());
         context.move_to(x0 + 14.0 * scale, y + pill_h * 0.62);
         let label = if free { t("Paste") } else { t("Occupied") };
@@ -5688,7 +5688,7 @@ fn draw_layout_lane(
     let y = LAYOUT_CHIP_INSET * scale;
     let pill_height = (height - LAYOUT_CHIP_INSET * 2.0 * scale).max(10.0);
     let radius = LAYOUT_CHIP_RADIUS * scale;
-    context.select_font_face("Inter", FontSlant::Normal, FontWeight::Normal);
+    context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
     context.set_font_size((11.0 * scale).round());
 
     // The default chip runs from zero to the first change. With no changes it
@@ -5906,7 +5906,7 @@ fn draw_extend_band(
         return;
     }
     let label = t("Drag to adjust duration");
-    context.select_font_face("Inter", FontSlant::Normal, FontWeight::Normal);
+    context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
     context.set_font_size((13.0 * scale).round());
     if let Ok(extents) = context.text_extents(&label) {
         // Only spell it out when the band is wide enough for the words to sit
