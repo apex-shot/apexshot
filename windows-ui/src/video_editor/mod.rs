@@ -22,6 +22,7 @@ mod rounded_clip;
 pub(crate) mod side_panel;
 mod studio;
 mod timeline;
+mod type_scale;
 pub(crate) mod ui_support;
 mod webcam;
 mod window;
