@@ -128,8 +128,9 @@ constexpr CropOption kCropOptions[CropRowCount] = {
     {"Snap to ratios", 0.0},
 };
 
-constexpr double kCropMenuW = 196.0;
-constexpr double kCropItemH = 32.0;
+constexpr double kCropMenuW = 200.0;
+constexpr double kCropItemH = 34.0;
+constexpr double kCropMenuPadding = 4.0;
 
 bool ratiosEqual(double a, double b)
 {
@@ -223,6 +224,79 @@ void debugLog(const QString& text)
         log.write(text.toUtf8());
         log.write("\n");
     }
+}
+
+/// How much the display is scaled, so the menu matches the Settings windows
+/// instead of shrinking on a high-DPI screen. Qt reports the display's own DPI
+/// here rather than dividing it out, and its pixel sizes are raw device pixels.
+qreal uiScale()
+{
+    const QScreen* screen = QGuiApplication::primaryScreen();
+    const qreal dpi = screen ? screen->logicalDotsPerInch() : 96.0;
+    return dpi > 0.0 ? dpi / 96.0 : 1.0;
+}
+
+/// The overlay chrome grows with the display by the same factor.
+qreal chromeScale()
+{
+    return uiScale();
+}
+
+/// The tray menu, in the Settings window's dropdown dress: the #252526 body, a
+/// 10px body radius over a 1px rim, 6px rows, and a whisper of white on hover
+/// instead of an accent fill, so a menu reads the same in either surface.
+///
+/// Every length is a 100%-display value multiplied by the screen scale, since
+/// the shell draws in device pixels: the Settings sheet's 14px base becomes the
+/// same physical size here at any scaling.
+QString trayMenuStyle()
+{
+    const qreal scale = uiScale();
+    const auto px = [scale](double value) {
+        return QString::number(qRound(value * scale));
+    };
+    return QStringLiteral(
+               "QMenu { background:#252526; color:rgba(255,255,255,0.90); "
+               "border:1px solid rgba(255,255,255,0.10); border-radius:%1px; "
+               // A submenu opens at the item's right edge, so a slimmer right
+               // margin is what lets it sit flush against the body instead of
+               // swallowing the rounded edge.
+               "padding:%2px %13px %2px %2px; } "
+               "QMenu::item { padding:%3px %4px; border-radius:%5px; "
+               "font-size:%6px; font-weight:500; } "
+               "QMenu::item:selected { background:rgba(255,255,255,0.07); color:#ffffff; } "
+               "QMenu::item:disabled { color:rgba(255,255,255,0.35); } "
+               "QMenu::separator { height:1px; margin:%7px %8px; "
+               "background:rgba(255,255,255,0.08); } "
+               "QMenu::indicator { width:%9px; height:%9px; margin-left:%10px; } "
+               "QMenu::indicator:checked { image:url(:/icons/check.png); } "
+               "QMenu::right-arrow { image:url(:/icons/chevron-right.png); "
+               "width:%11px; height:%11px; margin-right:%12px; }")
+        .arg(px(10))   // body radius
+        .arg(px(4))    // body padding
+        .arg(px(9))    // row height above and below the label
+        .arg(px(14))   // row inset
+        .arg(px(6))    // row radius
+        .arg(px(14))   // label size, the Settings sheet's base
+        .arg(px(7))    // separator margin, vertical
+        .arg(px(9))    // separator margin, horizontal
+        .arg(px(16))   // check indicator
+        .arg(px(5))    // check indicator inset
+        .arg(px(13))   // submenu arrow
+        .arg(px(7))    // submenu arrow inset
+        .arg(px(2));   // body margin on the submenu side
+}
+
+/// A rounded body needs the popup itself to be translucent and undecorated.
+/// Qt cascades the stylesheet into a submenu but not these window properties,
+/// which is why a submenu paints square corners under a rounded parent.
+void decoratePopupMenu(QMenu* menu, const QString& style, const QFont& font)
+{
+    menu->setFont(font);
+    menu->setStyleSheet(style);
+    menu->setAttribute(Qt::WA_TranslucentBackground);
+    menu->setWindowFlags(menu->windowFlags() | Qt::FramelessWindowHint
+                         | Qt::NoDropShadowWindowHint);
 }
 
 /// Write a capture using the folder, format, and HiDPI suffix from Settings.
@@ -358,6 +432,15 @@ void openVideoEditorWindow(const QString& path = QString())
 
 QIcon appIcon()
 {
+    // The tray wears the application's own mark - the same icon the installer
+    // puts on the Start-menu shortcut - instead of a redraw of it.
+    const QIcon bundled(QStringLiteral(":/icons/apexshot.ico"));
+    if (!bundled.availableSizes().isEmpty()) {
+        debugLog(QStringLiteral("tray icon: %1 sizes from the bundled ico")
+                     .arg(bundled.availableSizes().size()));
+        return bundled;
+    }
+
     QPixmap pixmap(64, 64);
     pixmap.fill(Qt::transparent);
 
@@ -513,7 +596,11 @@ protected:
                 painter.setBrush(Qt::NoBrush);
                 painter.drawRect(selection.adjusted(0, 0, -1, -1));
             }
+            const double scale = chromeScale();
+            painter.save();
+            painter.scale(scale, scale);
             drawCrosshairBubble(painter);
+            painter.restore();
             return;
         }
 
@@ -562,12 +649,20 @@ protected:
             painter.drawLine(QPointF(sel.left(), midY - half), QPointF(sel.left(), midY + half));
             painter.drawLine(QPointF(sel.right(), midY - half), QPointF(sel.right(), midY + half));
 
+            const double scale = chromeScale();
+            painter.save();
+            painter.scale(scale, scale);
             drawSizeBubble(painter, sel);
+            painter.restore();
         } else {
             painter.fillRect(rect(), QColor(0, 0, 0, 60));
         }
 
+        const double scale = chromeScale();
+        painter.save();
+        painter.scale(scale, scale);
         drawTopBar(painter);
+        painter.restore();
     }
 
     void mousePressEvent(QMouseEvent* event) override
@@ -587,7 +682,7 @@ protected:
         }
 
         if (m_cropMenuOpen) {
-            const int row = cropItemAt(event->pos());
+            const int row = cropItemAt((QPointF(event->pos()) / chromeScale()).toPoint());
             if (row >= 0) {
                 applyCropRow(row);
                 return;
@@ -598,24 +693,25 @@ protected:
             return;
         }
 
-        const TopBarLayout layout = topBarLayout(width());
+        const QPointF pointer = QPointF(event->pos()) / chromeScale();
+        const TopBarLayout layout = topBarLayout(width() / chromeScale());
         if (layout.valid) {
             for (int i = 0; i < 4; ++i) {
-                if (layout.pills[i].contains(event->pos())) {
+                if (layout.pills[i].contains(pointer)) {
                     m_ratio = kAspectRatios[i];
                     applyRatioToSelection();
                     update();
                     return;
                 }
             }
-            if (layout.buttons[0].contains(event->pos())) {
+            if (layout.buttons[0].contains(pointer)) {
                 m_cropMenuOpen = true;
                 m_hoveredCropItem = -1;
                 debugLog(QStringLiteral("crop menu opened"));
                 update();
                 return;
             }
-            if (layout.buttons[1].contains(event->pos())) {
+            if (layout.buttons[1].contains(pointer)) {
                 finish(QImage());
                 return;
             }
@@ -629,7 +725,7 @@ protected:
 
     void mouseMoveEvent(QMouseEvent* event) override
     {
-        m_pointer = event->pos();
+        m_pointer = (QPointF(event->pos()) / chromeScale()).toPoint();
 
         if (m_mode == Mode::Crosshair) {
             if (m_dragging) {
@@ -641,7 +737,7 @@ protected:
         }
 
         if (m_cropMenuOpen) {
-            const int row = cropItemAt(event->pos());
+            const int row = cropItemAt((QPointF(event->pos()) / chromeScale()).toPoint());
             if (row != m_hoveredCropItem) {
                 m_hoveredCropItem = row;
                 update();
@@ -711,8 +807,13 @@ private:
         const QFontMetrics metrics(font);
         const QSize textSize = metrics.size(Qt::TextSingleLine, label);
 
-        QRect bubble(sel.left(), qMax(4, sel.top() - textSize.height() - 12),
-                     textSize.width() + 14, textSize.height() + 8);
+        // The numbers are capture pixels; the box around them is chrome and
+        // grows with the display, so it is laid out in logical units.
+        const qreal scale = chromeScale();
+        const QRectF logical(sel.x() / scale, sel.y() / scale,
+                             sel.width() / scale, sel.height() / scale);
+        QRectF bubble(logical.left(), qMax<qreal>(4, logical.top() - textSize.height() - 12),
+                      textSize.width() + 14, textSize.height() + 8);
 
         QPainterPath path;
         path.addRoundedRect(bubble, 8, 8);
@@ -728,12 +829,15 @@ private:
     /// and styling follow crosshairBubbleRectForPoint.
     void drawCrosshairBubble(QPainter& painter)
     {
+        const qreal scale = chromeScale();
         QString label;
         if (m_dragging || m_hasSelection) {
             const QRect sel = m_selection.normalized();
             label = QStringLiteral("%1 \u00D7 %2").arg(sel.width()).arg(sel.height());
         } else {
-            label = QStringLiteral("%1, %2").arg(m_pointer.x()).arg(m_pointer.y());
+            label = QStringLiteral("%1, %2")
+                        .arg(qRound(m_pointer.x() * scale))
+                        .arg(qRound(m_pointer.y() * scale));
         }
 
         QFont font(uiFamily());
@@ -747,10 +851,12 @@ private:
         const QRect textRect = metrics.boundingRect(label);
         const int bw = textRect.width() + 20;
         const int bh = textRect.height() + 12;
-        const QRect bubble(std::clamp(m_pointer.x() + 16, 8, width() - bw - 8),
-                           std::clamp(m_pointer.y() + 16, 8, height() - bh - 8),
-                           bw,
-                           bh);
+        const qreal screenW = width() / scale;
+        const qreal screenH = height() / scale;
+        const QRectF bubble(std::clamp(m_pointer.x() + 16.0, 8.0, screenW - bw - 8.0),
+                            std::clamp(m_pointer.y() + 16.0, 8.0, screenH - bh - 8.0),
+                            bw,
+                            bh);
 
         QPainterPath path;
         path.addRoundedRect(bubble, 8, 8);
@@ -764,7 +870,7 @@ private:
 
     void drawTopBar(QPainter& painter)
     {
-        const TopBarLayout layout = topBarLayout(width());
+        const TopBarLayout layout = topBarLayout(width() / chromeScale());
         if (!layout.valid)
             return;
 
@@ -848,7 +954,7 @@ private:
         if (!m_cropMenuOpen)
             return;
 
-        const TopBarLayout layout = topBarLayout(width());
+        const TopBarLayout layout = topBarLayout(width() / chromeScale());
         if (!layout.valid)
             return;
 
@@ -865,21 +971,25 @@ private:
 
         QPainterPath body;
         body.addRoundedRect(QRectF(menuX, menuY, menuW, menuH), kTopBarRadius, kTopBarRadius);
-        painter.fillPath(body, kPanel);
+        // The tray menu's dress, so the two menus a capture shows read as one.
+        painter.fillPath(body, QColor(37, 37, 38));
         painter.setPen(QPen(kRim, 1.0));
         painter.setBrush(Qt::NoBrush);
         painter.drawPath(body);
 
         for (int i = 0; i < CropRowCount; ++i) {
-            const QRectF itemRect(menuX + 5.0, menuY + 5.0 + i * kCropItemH, menuW - 10.0, kCropItemH);
-            const QRectF indicatorRect(itemRect.x() + 8.0, itemRect.y(), 18.0, itemRect.height());
-            const QRectF labelRect(itemRect.x() + 30.0, itemRect.y(),
-                                   itemRect.width() - 40.0, itemRect.height());
+            const QRectF itemRect(menuX + kCropMenuPadding,
+                                  menuY + kCropMenuPadding + i * kCropItemH,
+                                  menuW - kCropMenuPadding * 2,
+                                  kCropItemH);
+            const QRectF indicatorRect(itemRect.x() + 10.0, itemRect.y(), 16.0, itemRect.height());
+            const QRectF labelRect(itemRect.x() + 32.0, itemRect.y(),
+                                   itemRect.width() - 42.0, itemRect.height());
 
             if (i == m_hoveredCropItem) {
                 QPainterPath hover;
-                hover.addRoundedRect(itemRect, 8, 8);
-                painter.fillPath(hover, QColor(255, 255, 255, 20));
+                hover.addRoundedRect(itemRect, 6, 6);
+                painter.fillPath(hover, QColor(255, 255, 255, 18));
             }
 
             bool checked = false;
@@ -900,30 +1010,28 @@ private:
                                  QPointF(indicatorRect.x() + 12.5, cy - 4.0));
             }
 
-            QFont itemFont(uiFamily());
-            itemFont.setPixelSize(13);
+            QFont itemFont(uiFont(14));
             itemFont.setWeight(checked || i == CropRowReset ? QFont::Medium : QFont::Normal);
-            itemFont.setHintingPreference(QFont::PreferNoHinting);
-            itemFont.setLetterSpacing(QFont::PercentageSpacing, 98.0);
             painter.setFont(itemFont);
-            painter.setPen(QColor(242, 242, 244));
+            painter.setPen(checked ? QColor(255, 255, 255) : QColor(230, 230, 232));
             painter.drawText(labelRect, Qt::AlignVCenter | Qt::AlignLeft,
                              QString::fromLatin1(kCropOptions[i].label));
         }
 
-        painter.setPen(QPen(QColor(255, 255, 255, 26), 1.0));
-        const double y1 = menuY + 5.0 + kCropItemH;
-        painter.drawLine(QPointF(menuX + 12.0, y1), QPointF(menuX + menuW - 12.0, y1));
-        const double y2 = menuY + 5.0 + CropRowSnap * kCropItemH;
+        painter.setPen(QPen(QColor(255, 255, 255, 20), 1.0));
+        const double y1 = menuY + kCropMenuPadding + kCropItemH;
+        painter.drawLine(QPointF(menuX + 9.0, y1), QPointF(menuX + menuW - 9.0, y1));
+        const double y2 = menuY + kCropMenuPadding + CropRowSnap * kCropItemH;
         painter.drawLine(QPointF(menuX + 12.0, y2), QPointF(menuX + menuW - 12.0, y2));
     }
 
     QRectF cropMenuRect(const TopBarLayout& layout) const
     {
         const QRectF anchor = layout.buttons[0];
-        const double menuH = CropRowCount * kCropItemH + 10.0;
+        const double menuH = CropRowCount * kCropItemH + kCropMenuPadding * 2;
+        const double screenW = width() / chromeScale();
         const double menuX = std::max(
-            10.0, std::min(anchor.center().x() - kCropMenuW / 2.0, width() - kCropMenuW - 10.0));
+            10.0, std::min(anchor.center().x() - kCropMenuW / 2.0, screenW - kCropMenuW - 10.0));
         const double menuY = std::max(layout.bar.bottom() + 4.0, anchor.bottom() + 8.0);
         return QRectF(menuX, menuY, kCropMenuW, menuH);
     }
@@ -936,15 +1044,20 @@ private:
         const QRectF menu = cropMenuRect(layout);
         if (!menu.contains(point))
             return -1;
-        const int index = static_cast<int>((point.y() - menu.top() - 5.0) / kCropItemH);
+        const int index = static_cast<int>(
+            (point.y() - menu.top() - kCropMenuPadding) / kCropItemH);
         return (index >= 0 && index < CropRowCount) ? index : -1;
     }
 
     void applyCropRow(int row)
     {
         if (row == CropRowReset) {
+            // The selection only exists while the pointer is down, so the row
+            // earns its place by dropping the aspect lock too: the next drag
+            // starts free.
             m_selection = QRect();
             m_hasSelection = false;
+            m_ratio = 0.0;
         } else if (row == CropRowSnap) {
             m_snapToRatios = !m_snapToRatios;
         } else if (row > CropRowSnap) {
@@ -1015,6 +1128,8 @@ private:
     void finish(const QImage& result)
     {
         const QRect selection = selectionInImage();
+        if (result.isNull())
+            Platform::releaseShutterSound();
         if (m_done)
             m_done(result, selection);
         close();
@@ -2208,8 +2323,6 @@ private:
             stopWebcamPreview(true);
             return;
         }
-        if (!options.recording && !options.scroll && options.timerSeconds <= 0)
-            Platform::playShutterSound();
         startArea(frozen, AreaSelector::Mode::Area, options);
     }
 
@@ -2223,8 +2336,6 @@ private:
             stopWebcamPreview(true);
             return;
         }
-        if (!options.recording && !options.scroll && options.timerSeconds <= 0)
-            Platform::playShutterSound();
         startArea(frozen, AreaSelector::Mode::Crosshair, options);
     }
 
@@ -2249,6 +2360,10 @@ private:
                 } else {
                     QSettings().setValue(QStringLiteral("shortcuts/previous_area"), desktop);
                     if (options.timerSeconds <= 0) {
+                        // Windows can tell the truth here: the shutter belongs
+                        // to the moment the image is taken, not to the freeze
+                        // that opens the selection.
+                        Platform::playShutterSound();
                         present(cropped, options, desktop);
                     } else {
                         withCountdown(options, [this, desktop, options] {
@@ -2281,6 +2396,7 @@ private:
                      .arg(frozen.image.height()));
 
         selector->setGeometry(virtualGeometry);
+        Platform::primeShutterSound();
         selector->show();
         selector->raise();
         selector->activateWindow();
@@ -3086,12 +3202,15 @@ int run(QApplication& app)
     tray->setToolTip(QStringLiteral("ApexShot"));
 
     auto* menu = new QMenu;
-    menu->setFont(uiFont(14));
-    menu->setStyleSheet(QStringLiteral(
-        "QMenu { background:#19191c; color:#f5f5f7; "
-        "border:1px solid rgba(255,255,255,54); border-radius:12px; padding:6px; } "
-        "QMenu::item { padding:7px 16px; border-radius:8px; } "
-        "QMenu::item:selected { background:rgba(255,102,0,205); color:#ffffff; }"));
+    const QString menuStyle = trayMenuStyle();
+    const QFont menuFont = uiFont(std::lround(14 * uiScale()));
+    decoratePopupMenu(menu, menuStyle, menuFont);
+
+    // Every submenu needs the same body and window properties, or it paints
+    // square corners under a rounded parent.
+    const auto styleSubmenu = [&](QMenu* submenu) {
+        decoratePopupMenu(submenu, menuStyle, menuFont);
+    };
 
     QAction* capture = menu->addAction(QStringLiteral("Capture..."));
     QAction* crosshair = menu->addAction(QStringLiteral("Crosshair capture"));
@@ -3102,6 +3221,7 @@ int run(QApplication& app)
         debugLog(QStringLiteral("recording disabled: %1").arg(recordingError));
 
     QMenu* recordMenu = menu->addMenu(QStringLiteral("Record"));
+    styleSubmenu(recordMenu);
     QAction* recordScreen = recordMenu->addAction(QStringLiteral("Screen"));
     QAction* recordArea = recordMenu->addAction(QStringLiteral("Area"));
     QAction* recordWindow = recordMenu->addAction(QStringLiteral("Window"));
@@ -3113,6 +3233,7 @@ int run(QApplication& app)
         recordMenu->setToolTip(recordingError);
 
     QMenu* scrollMenu = menu->addMenu(QStringLiteral("Scroll capture"));
+    styleSubmenu(scrollMenu);
     QAction* scrollWindowAction = scrollMenu->addAction(QStringLiteral("Window"));
     QAction* scrollAreaAction = scrollMenu->addAction(QStringLiteral("Area"));
     scrollMenu->setToolTipsVisible(true);
@@ -3120,6 +3241,7 @@ int run(QApplication& app)
 
     recordMenu->addSeparator();
     QMenu* countdownMenu = recordMenu->addMenu(QStringLiteral("Countdown"));
+    styleSubmenu(countdownMenu);
     auto* countdownGroup = new QActionGroup(countdownMenu);
     countdownGroup->setExclusive(true);
     const int currentCountdown = recordingCountdownSeconds();
