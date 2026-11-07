@@ -124,8 +124,6 @@ pub fn build_history_window(app: &Application) {
 
     window.set_decorated(false);
     window.add_css_class("editor-window");
-    #[cfg(target_os = "windows")]
-    window.add_css_class("history-window");
 
     let root_box = GtkBox::new(Orientation::Vertical, 0);
     root_box.add_css_class("editor-root");
@@ -298,8 +296,35 @@ pub fn build_history_window(app: &Application) {
     #[cfg(not(target_os = "windows"))]
     let (sidebar_wrapper, sidebar_head, nav_items) = build_native_sidebar(&labels, &stack);
 
+    // The same toggle and Beta badge Settings puts in its sidebar head. The
+    // toggle moves the row into the title bar while the column is hidden.
+    #[cfg(target_os = "windows")]
+    let (shell_controls, sidebar_drag) = {
+        let controls = crate::settings::shell::build_shell_controls();
+        sidebar_head.append(&controls.row);
+        // The drag lives on the empty part of the head, not the head itself:
+        // a drag gesture on the parent claims the press before the toggle can
+        // see it, which is what made the first click do nothing.
+        let strip = GtkBox::new(Orientation::Horizontal, 0);
+        strip.set_hexpand(true);
+        strip.set_halign(Align::Fill);
+        sidebar_head.append(&strip);
+        (controls, strip)
+    };
+
+    #[cfg(target_os = "windows")]
+    install_window_drag(&sidebar_drag, &window);
+    #[cfg(not(target_os = "windows"))]
     install_window_drag(&sidebar_head, &window);
-    content_split.append(&sidebar_wrapper);
+
+    let sidebar_revealer = gtk4::Revealer::new();
+    sidebar_revealer.set_transition_type(gtk4::RevealerTransitionType::SlideRight);
+    sidebar_revealer.set_transition_duration(180);
+    sidebar_revealer.set_vexpand(true);
+    sidebar_revealer.set_hexpand(false);
+    sidebar_revealer.set_child(Some(&sidebar_wrapper));
+    sidebar_revealer.set_reveal_child(true);
+    content_split.append(&sidebar_revealer);
 
     // --- BODY (STACK) ---
     // Windows draws the Settings content card *behind* the stack: the pages'
@@ -308,7 +333,7 @@ pub fn build_history_window(app: &Application) {
     // names the page, so the card carries no heading. The other platforms
     // keep the stack directly under the header bar.
     #[cfg(target_os = "windows")]
-    let body_frame: gtk4::Widget = {
+    let (body_frame, content_card): (gtk4::Widget, GtkBox) = {
         let card = GtkBox::new(Orientation::Vertical, 0);
         card.add_css_class("settings-content-card");
         let inset = (crate::settings::shell::CARD_INSET * text_scale).round() as i32;
@@ -322,7 +347,7 @@ pub fn build_history_window(app: &Application) {
         overlay.set_child(Some(&card));
         overlay.add_overlay(&stack);
         overlay.set_measure_overlay(&stack, false);
-        overlay.upcast()
+        (overlay.upcast(), card)
     };
     #[cfg(not(target_os = "windows"))]
     let body_frame: gtk4::Widget = {
@@ -409,6 +434,15 @@ pub fn build_history_window(app: &Application) {
     right_col.set_hexpand(true);
     right_col.append(&toolbar);
     right_col.append(&body_frame);
+    #[cfg(target_os = "windows")]
+    crate::settings::shell::wire_sidebar_toggle(
+        &shell_controls,
+        &sidebar_revealer,
+        &sidebar_head,
+        &toolbar,
+        &content_card,
+        text_scale,
+    );
     content_split.append(&right_col);
 
     root_box.append(&content_split);

@@ -66,7 +66,7 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
 
         static const QFont crosshairBubbleFont = []() {
             QFont font(QStringLiteral("Sans"));
-            font.setPixelSize(12);
+            font.setPixelSize(13);
             font.setWeight(QFont::Medium);
             return font;
         }();
@@ -113,7 +113,7 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
     if (!m_hasSelection) {
         // Hint text (kept below the top-center instruction bar).
         p.fillRect(widgetRect, QColor(0, 0, 0, 30));
-        QFont f; f.setPointSize(13); p.setFont(f);
+        QFont f; f.setPixelSize(14); p.setFont(f);
         QString hint = "Drag to select an area  •  ESC to cancel";
         QFontMetrics fm(f);
         QRect tr = fm.boundingRect(hint);
@@ -266,7 +266,7 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
             // Draw countdown number on the right side
             QFont countdownFont(QStringLiteral("Sans"));
             countdownFont.setBold(true);
-            countdownFont.setPointSizeF(m_hoveredCountdownCancel ? 13.0 : 22.0);
+            countdownFont.setPixelSize(m_hoveredCountdownCancel ? 14 : 22);
             p.setFont(countdownFont);
             p.setPen(Qt::white);
             p.setBrush(Qt::NoBrush);
@@ -292,7 +292,7 @@ void CaptureOverlay::paintEvent(QPaintEvent* event)
 
             QFont countdownFont(QStringLiteral("Sans"));
             countdownFont.setBold(true);
-            countdownFont.setPointSizeF(m_hoveredCountdownCancel ? 34.0 : 72.0);
+            countdownFont.setPixelSize(m_hoveredCountdownCancel ? 28 : 96);
             p.setFont(countdownFont);
             p.setPen(m_hoveredCountdownCancel ? QColor(255, 228, 214) : Qt::white);
 

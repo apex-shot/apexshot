@@ -10,7 +10,7 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::{
     gdk, Align, Box as GtkBox, Button, CssProvider, Image, Label, Orientation, PolicyType,
-    ScrolledWindow, Stack, Widget,
+    Revealer, ScrolledWindow, Stack, Widget,
 };
 
 use super::usage::capitalize;
@@ -184,15 +184,15 @@ pub fn build_shell_controls() -> ShellControls {
     ShellControls { row, toggle }
 }
 
-/// Hide or show the sidebar from its own toggle. The controls ride in the
-/// sidebar's head while the column is open and move into the title bar while
-/// it is closed, so the button never leaves with the column it hides. The
-/// open sidebar supplies the content card's left gutter; with it closed the
-/// card takes that gutter itself, so no edge of the card reaches the window
-/// border.
+/// Hide or show the sidebar from its own toggle. The revealer slides the
+/// column out and back; the controls ride in the sidebar's head while the
+/// column is open and move into the title bar while it is closed, so the
+/// button never leaves with the column it hides. The open sidebar supplies
+/// the content card's left gutter; with it closed the card takes that gutter
+/// itself, so no edge of the card reaches the window border.
 pub fn wire_sidebar_toggle(
     controls: &ShellControls,
-    sidebar: &GtkBox,
+    sidebar: &Revealer,
     head: &GtkBox,
     title_bar: &GtkBox,
     card: &GtkBox,
@@ -213,11 +213,11 @@ pub fn wire_sidebar_toggle(
             title_bar.prepend(&row);
             button.set_tooltip_text(Some(&t("Show sidebar")));
         } else {
-            head.append(&row);
+            head.prepend(&row);
             button.set_tooltip_text(Some(&t("Hide sidebar")));
         }
         card.set_margin_start(if hide { inset } else { 0 });
-        sidebar.set_visible(!hide);
+        sidebar.set_reveal_child(!hide);
     });
 }
 
@@ -1069,7 +1069,9 @@ mod tests {
     fn sidebar_toggle_carries_the_controls_into_the_title_bar() {
         let Some((badge, open, closed, restored)) = crate::test_support::with_gtk(|| {
             let controls = build_shell_controls();
-            let sidebar = GtkBox::new(Orientation::Vertical, 0);
+            let sidebar = Revealer::new();
+            sidebar.set_child(Some(&GtkBox::new(Orientation::Vertical, 0)));
+            sidebar.set_reveal_child(true);
             let head = GtkBox::new(Orientation::Horizontal, 0);
             let title_bar = GtkBox::new(Orientation::Horizontal, 0);
             let card = GtkBox::new(Orientation::Vertical, 0);
@@ -1082,7 +1084,7 @@ mod tests {
                 .and_then(|widget| widget.downcast::<Label>().ok())
                 .map(|label| label.text().to_string());
             let open = (
-                sidebar.is_visible(),
+                sidebar.reveals_child(),
                 head.first_child().is_some(),
                 title_bar.first_child().is_none(),
                 controls.toggle.tooltip_text().map(|text| text.to_string()),
@@ -1091,7 +1093,7 @@ mod tests {
 
             controls.toggle.emit_clicked();
             let closed = (
-                sidebar.is_visible(),
+                sidebar.reveals_child(),
                 head.first_child().is_none(),
                 title_bar
                     .first_child()
@@ -1102,7 +1104,7 @@ mod tests {
 
             controls.toggle.emit_clicked();
             let restored = (
-                sidebar.is_visible(),
+                sidebar.reveals_child(),
                 head.first_child().is_some(),
                 title_bar.first_child().is_none(),
                 card.margin_start(),

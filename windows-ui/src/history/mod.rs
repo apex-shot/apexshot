@@ -13,6 +13,7 @@ pub mod placeholder_page;
 pub mod scan;
 #[path = "../../../src/history/thumbnails.rs"]
 pub mod thumbnails;
+mod type_scale;
 pub mod video_edits_page;
 #[path = "../../../src/history/window.rs"]
 pub mod window;
@@ -29,10 +30,12 @@ pub(super) fn window_scale() -> f64 {
 
 /// Layer the DPI-scaled Settings metrics after the shared base stylesheet:
 /// the window chrome first, then the shell (sidebar, card) metrics so the
-/// cascade resolves the same way it does in the Settings window.
+/// cascade resolves the same way it does in the Settings window, and finally
+/// the History type sheet over both.
 pub(super) fn install_platform_window_css() {
     crate::settings::install_window_css();
     crate::settings::shell::install_css();
+    type_scale::install();
 }
 
 /// One page in the shared History window.

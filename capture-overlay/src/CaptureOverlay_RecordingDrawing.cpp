@@ -152,7 +152,7 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
                         QColor(0, 0, 0, int(shadowAlpha * 255)));
         drawToolbarIcon(p, iconIdx, iconCenter.x(), iconCenter.y(), iconColor);
         if (hasLabel) {
-            QFont f; f.setFamily("Sans"); f.setPointSizeF(8.0); f.setBold(hovered || active);
+            QFont f; f.setFamily("Sans"); f.setPixelSize(11); f.setBold(hovered || active);
             p.setFont(f);
             QFontMetricsF fm(f);
             const double tw = fm.horizontalAdvance(label);
@@ -204,7 +204,7 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
                         QColor(0, 0, 0, int(shadowAlpha * 255)));
         drawToolbarIcon(p, iconIdx, rect.x() + 28.0, iconY,
                         QColor(255, 255, 255, int(iconAlpha * 255)));
-        QFont titleFont; titleFont.setFamily("Sans"); titleFont.setPointSizeF(11.8); titleFont.setBold(true);
+        QFont titleFont; titleFont.setFamily("Sans"); titleFont.setPixelSize(15); titleFont.setBold(true);
         p.setFont(titleFont);
         const double textX = rect.x() + 50.0;
         const double textY = rect.y() + 30.0;
@@ -245,12 +245,12 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
     }
     {
         const QString sizeVal = QString("%1×%2").arg((int)selW).arg((int)selH);
-        QFont headerFont; headerFont.setFamily("Sans"); headerFont.setPointSizeF(7.2); headerFont.setBold(true);
+        QFont headerFont; headerFont.setFamily("Sans"); headerFont.setPixelSize(11); headerFont.setBold(true);
         p.setFont(headerFont);
         p.setPen(QColor(255, 224, 196, 196));
         p.drawText(QRectF(sizeRect.x(), sizeRect.y() + 8.0, sizeRect.width(), 12.0), Qt::AlignCenter, QStringLiteral("FRAME"));
 
-        QFont valueFont; valueFont.setFamily("Sans"); valueFont.setPointSizeF(11.0); valueFont.setBold(true);
+        QFont valueFont; valueFont.setFamily("Sans"); valueFont.setPixelSize(14); valueFont.setBold(true);
         p.setFont(valueFont);
         p.setPen(QColor(245, 245, 246));
         p.drawText(QRectF(sizeRect.x(), sizeRect.y() + 20.0, sizeRect.width(), 20.0), Qt::AlignCenter, sizeVal);
@@ -322,7 +322,7 @@ void CaptureOverlay::drawRecordingPanel(QPainter& p,
             }
 
             QFont itemFont(QStringLiteral("Sans"));
-            itemFont.setPointSizeF(10.0);
+            itemFont.setPixelSize(13);
             itemFont.setBold(selected);
             p.setFont(itemFont);
             p.setPen(selected ? QColor(255, 240, 226) : QColor(242, 242, 244));

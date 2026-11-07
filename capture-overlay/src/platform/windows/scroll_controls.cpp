@@ -95,7 +95,7 @@ void drawIcon(QPainter& painter, ushort glyph, const QRectF& rect, const QColor&
 int finishWidth()
 {
     static const int width =
-        QFontMetrics(uiFont(12, true)).horizontalAdvance(QStringLiteral("Finish"))
+        QFontMetrics(uiFont(13, true)).horizontalAdvance(QStringLiteral("Finish"))
         + kFinishPadX * 2;
     return width;
 }
@@ -288,7 +288,7 @@ void ScrollControls::paintEvent(QPaintEvent*)
         painter.setBrush(kAccent);
     }
     painter.drawRoundedRect(finish, 8, 8);
-    painter.setFont(uiFont(12, true));
+    painter.setFont(uiFont(13, true));
     painter.setPen(Qt::white);
     painter.drawText(finish, Qt::AlignCenter, QStringLiteral("Finish"));
 

@@ -1,8 +1,6 @@
 //! Compact, row-specific shortcut registration feedback.
 
-use gtk4::{
-    glib, prelude::*, Align, Box as GtkBox, Button, CssProvider, Label, Orientation,
-};
+use gtk4::{glib, prelude::*, Align, Box as GtkBox, Button, CssProvider, Label, Orientation};
 use serde_json::Value;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

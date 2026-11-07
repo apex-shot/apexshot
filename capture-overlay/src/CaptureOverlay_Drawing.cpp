@@ -33,7 +33,7 @@ QRect CaptureOverlay::crosshairBubbleRectForPoint(const QPoint& point) const
         labelText = QStringLiteral("%1, %2").arg(guidePoint.x()).arg(guidePoint.y());
     }
     QFont font(QStringLiteral("Sans"));
-    font.setPixelSize(12);
+    font.setPixelSize(13);
     font.setWeight(QFont::Medium);
     const QFontMetrics fm(font);
     const QRect textRect = fm.boundingRect(labelText);
