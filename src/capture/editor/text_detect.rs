@@ -35,7 +35,7 @@ const TEXT_GUIDE_MARGIN: i32 = 24;
 
 /// Default text detection model URL (ocrs - pure Rust)
 const DEFAULT_DETECTION_MODEL_URL: &str =
-    "https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.rten";
+    "https://ocrs-models.s3.amazonaws.com/text-detection.onnx";
 
 // ============================================================================
 // Helper Functions
@@ -56,7 +56,7 @@ fn load_detection_model() -> Result<rten::Model, String> {
     let cache_dir = dirs::cache_dir()
         .unwrap_or_else(|| std::path::PathBuf::from(".cache"))
         .join("apexshot");
-    let model_path = cache_dir.join("text-detection.rten");
+    let model_path = cache_dir.join("text-detection.onnx");
 
     if model_path.exists() {
         // Load from cache

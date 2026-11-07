@@ -177,17 +177,17 @@ modules:
   - name: ocrs-models
     buildsystem: simple
     build-commands:
-      - install -Dm644 text-detection.rten /app/share/apexshot/ocr-models/text-detection.rten
-      - install -Dm644 text-recognition.rten /app/share/apexshot/ocr-models/text-recognition.rten
+      - install -Dm644 text-detection.onnx /app/share/apexshot/ocr-models/text-detection.onnx
+      - install -Dm644 text-recognition.onnx /app/share/apexshot/ocr-models/text-recognition.onnx
     sources:
       - type: file
-        url: https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.rten
-        sha256: f15cfb56bd02c4bf478a20343986504a1f01e1665c2b3a0ad66340f054b1b5ca
-        dest-filename: text-detection.rten
+        url: https://ocrs-models.s3.amazonaws.com/text-detection.onnx
+        sha256: a917b23dbd9524b465df7e922641b3ff2981623df4ded5a0234004ef2fee7cfe
+        dest-filename: text-detection.onnx
       - type: file
-        url: https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.rten
-        sha256: e484866d4cce403175bd8d00b128feb08ab42e208de30e42cd9889d8f1735a6e
-        dest-filename: text-recognition.rten
+        url: https://ocrs-models.s3.amazonaws.com/text-recognition.onnx
+        sha256: 86c145c2edb96c8caed5b1ebb8f44d706408922211451c309c625157dd6061c5
+        dest-filename: text-recognition.onnx
 
   - name: apexshot
     buildsystem: simple

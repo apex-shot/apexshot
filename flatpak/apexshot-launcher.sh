@@ -27,8 +27,8 @@ seed_model() {
     fi
 }
 
-seed_model /app/share/apexshot/ocr-models/text-detection.rten "$ocr_cache/text-detection.rten"
-seed_model /app/share/apexshot/ocr-models/text-recognition.rten "$ocr_cache/text-recognition.rten"
-seed_model /app/share/apexshot/ocr-models/text-detection.rten "$app_cache/text-detection.rten"
+seed_model /app/share/apexshot/ocr-models/text-detection.onnx "$ocr_cache/text-detection.onnx"
+seed_model /app/share/apexshot/ocr-models/text-recognition.onnx "$ocr_cache/text-recognition.onnx"
+seed_model /app/share/apexshot/ocr-models/text-detection.onnx "$app_cache/text-detection.onnx"
 
 exec /app/libexec/apexshot.bin "$@"

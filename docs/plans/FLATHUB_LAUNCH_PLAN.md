@@ -285,7 +285,7 @@ Notes:
   FileChooser portal for anything else.
 - OCR models download at runtime from S3 to `~/.cache/apexshot/ocr-models` — that is
   acceptable with `--share=network`, but reviewers prefer bundled models. Consider
-  bundling `text-detection.rten` / `text-recognition.rten` if size allows.
+  bundling `text-detection.onnx` / `text-recognition.onnx` if size allows.
 - `gtk4-layer-shell` works in Flatpak but layer-shell is a wlroots protocol; on
   GNOME the layer-shell overlay paths will not apply. Confirm which overlay path
   actually runs on GNOME before assuming parity.
