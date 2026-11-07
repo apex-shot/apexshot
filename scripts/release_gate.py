@@ -20,6 +20,7 @@ ARTIFACT_DIRECTORIES = {
     "opensuse-rpms": "openSUSE RPMs",
     "fedora-rpms": "Fedora RPMs",
     "arch-package": "Arch package",
+    "windows-installer": "Windows installer",
 }
 METADATA_NAME = "STUDIO_RELEASE_METADATA.json"
 CHECKSUMS_NAME = "SHA256SUMS"
@@ -114,6 +115,11 @@ def _has_primary_arch_package(paths: list[Path], version: str) -> bool:
     )
 
 
+def _has_windows_installer(paths: list[Path], version: str) -> bool:
+    pattern = re.compile(rf"ApexShot-{re.escape(version)}-setup\.exe")
+    return any(pattern.fullmatch(path.name) for path in paths)
+
+
 def is_commit_id(value: object) -> bool:
     return isinstance(value, str) and re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", value) is not None
 
@@ -140,6 +146,8 @@ def validate_build_artifacts(build_root: Path, version: str) -> dict[str, list[P
 
     if not _has_primary_arch_package(result["arch-package"], version):
         raise ReleaseGateError("Staged Arch build is missing the matching x86_64 ApexShot package")
+    if not _has_windows_installer(result["windows-installer"], version):
+        raise ReleaseGateError("Staged Windows build is missing the matching ApexShot installer")
     return result
 
 
@@ -263,6 +271,8 @@ def validate_assets(
             raise ReleaseGateError(f"Release manifest is missing the matching x86_64 {directory} ApexShot RPM")
     if not _has_primary_arch_package(grouped["arch-package"], version):
         raise ReleaseGateError("Release manifest is missing the matching x86_64 ApexShot Arch package")
+    if not _has_windows_installer(grouped["windows-installer"], version):
+        raise ReleaseGateError("Release manifest is missing the matching ApexShot Windows installer")
 
     try:
         checksum_lines = checksums_path.read_text(encoding="utf-8").splitlines()

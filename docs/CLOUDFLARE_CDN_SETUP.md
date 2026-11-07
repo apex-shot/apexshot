@@ -150,8 +150,8 @@ curl -fsSI https://apexshot.org/ | head -n 1
 
 The existing `checksums` job in `.github/workflows/release.yml` already
 downloads **every** release asset (`.deb`, `.rpm`, Arch package, GNOME
-extension zip) and generates `SHA256SUMS`. Append this step to that job, right
-after the `gh release upload … SHA256SUMS` line:
+extension zip, Windows `.exe`) and generates `SHA256SUMS`. Append this step to
+that job, right after the `gh release upload … SHA256SUMS` line:
 
 ```yaml
       - name: Mirror release assets to Cloudflare R2

@@ -79,6 +79,7 @@ class StagedAssetTests(unittest.TestCase):
             "fedora-rpms/target/SRPMS/apexshot-1.2.3-1.fc42.src.rpm": b"fedora source",
             "arch-package/packaging/arch/apexshot-1.2.3-1-x86_64.pkg.tar.zst": b"arch",
             "arch-package/packaging/arch/apexshot-debug-1.2.3-1-x86_64.pkg.tar.zst": b"arch debug",
+            "windows-installer/dist/windows/ApexShot-1.2.3-setup.exe": b"windows",
         }
         for relative, contents in files.items():
             path = root / relative
@@ -213,6 +214,19 @@ class StagedAssetTests(unittest.TestCase):
             with self.assertRaises(release_gate.ReleaseGateError):
                 release_gate.validate_build_artifacts(build_root, "1.2.3")
 
+    def test_windows_installer_matches_the_upstream_version(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            build_root = Path(temporary) / "build"
+            self.build_artifacts(build_root)
+            installer = build_root / "windows-installer/dist/windows/ApexShot-1.2.3-setup.exe"
+            self.assertEqual(installer.name, "ApexShot-1.2.3-setup.exe")
+            release_gate.validate_build_artifacts(build_root, "1.2.3")
+
+            wrong_version = installer.with_name("ApexShot-9.9.9-setup.exe")
+            installer.rename(wrong_version)
+            with self.assertRaises(release_gate.ReleaseGateError):
+                release_gate.validate_build_artifacts(build_root, "1.2.3")
+
     def test_promotion_rejects_a_draft_built_with_changed_public_config(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -258,6 +272,7 @@ class WorkflowSourceTests(unittest.TestCase):
         self.assertIn("name: opensuse-rpms", workflow)
         self.assertIn("name: fedora-rpms", workflow)
         self.assertIn("name: arch-package", workflow)
+        self.assertIn("name: windows-installer", workflow)
         self.assertNotIn("Publish AUR package", workflow)
         stage = workflow.split("name: Stage complete draft release", 1)[1]
         self.assertIn(
