@@ -17,12 +17,10 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 /// URL for the text detection model
-const DETECTION_MODEL_URL: &str =
-    "https://ocrs-models.s3-accelerate.amazonaws.com/text-detection.rten";
+const DETECTION_MODEL_URL: &str = "https://ocrs-models.s3.amazonaws.com/text-detection.onnx";
 
 /// URL for the text recognition model
-const RECOGNITION_MODEL_URL: &str =
-    "https://ocrs-models.s3-accelerate.amazonaws.com/text-recognition.rten";
+const RECOGNITION_MODEL_URL: &str = "https://ocrs-models.s3.amazonaws.com/text-recognition.onnx";
 
 /// Cache directory for OCR models
 fn model_cache_dir() -> PathBuf {
@@ -43,7 +41,7 @@ fn ensure_cache_dir() -> std::io::Result<()> {
 
 /// Get the cached path for a model URL
 fn cached_model_path(url: &str) -> PathBuf {
-    let filename = url.split('/').next_back().unwrap_or("model.rten");
+    let filename = url.split('/').next_back().unwrap_or("model.onnx");
     model_cache_dir().join(filename)
 }
 
