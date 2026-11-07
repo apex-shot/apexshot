@@ -79,6 +79,85 @@ fn shell_executable() -> anyhow::Result<PathBuf> {
     )
 }
 
+/// Start the tray shell, which is the running app: the tray icon, the capture
+/// menu, and the hotkey listener all live there.
+///
+/// `open_menu` decides whether the shell shows its quick access bar on start. A
+/// finished setup gets it as the surface its shortcuts feed; a settings window
+/// asking for the tray to be up does not, and passing `--background` also keeps
+/// a launch that finds a shell already running from raising that bar.
+pub fn launch_shell(open_menu: bool) -> anyhow::Result<()> {
+    let shell = shell_executable()?;
+    let mut command = Command::new(&shell);
+    if let Some(runtime) = shell_runtime_directory(&shell) {
+        // A checkout build keeps Qt in its own prefix rather than next to the
+        // binary, and a child starts with a DLL search path of its own.
+        let path = match std::env::var_os("PATH") {
+            Some(existing) => {
+                let mut paths = vec![runtime];
+                paths.extend(std::env::split_paths(&existing));
+                std::env::join_paths(paths)?
+            }
+            None => runtime.into_os_string(),
+        };
+        command.env("PATH", path);
+    }
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    if !open_menu {
+        command.arg("--background");
+    }
+    let result = command.spawn().map(|child| child.id());
+    record_shell_launch(&shell, &result);
+    result.map_err(|error| anyhow::anyhow!("could not start {}: {error}", shell.display()))?;
+    Ok(())
+}
+
+/// The folder holding Qt for a shell that has none beside it.
+///
+/// The packaged layout deploys the Qt DLLs next to the binary, so this returns
+/// nothing there. A checkout build points at the Qt prefix the CMake configure
+/// recorded; without it the shell exits before it draws a window and the
+/// handover looks like nothing happened.
+fn shell_runtime_directory(shell: &std::path::Path) -> Option<PathBuf> {
+    let directory = shell.parent()?;
+    if directory.join("Qt5Core.dll").is_file() {
+        return None;
+    }
+    let cache = std::path::Path::new(option_env!("CARGO_MANIFEST_DIR")?)
+        .parent()?
+        .join("capture-overlay/build/CMakeCache.txt");
+    let contents = std::fs::read_to_string(cache).ok()?;
+    let qt5_dir = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("Qt5_DIR:PATH="))?;
+    // <prefix>/lib/cmake/Qt5 -> <prefix>/bin
+    let prefix = std::path::Path::new(qt5_dir).ancestors().nth(3)?;
+    let bin = prefix.join("bin");
+    bin.is_dir().then_some(bin)
+}
+
+/// Leave a line behind for each handover: a release build has no console, so a
+/// shell that fails to start would otherwise fail silently.
+fn record_shell_launch(shell: &std::path::Path, result: &std::io::Result<u32>) {
+    let path = std::env::temp_dir().join("apexshot-shell-launch.log");
+    let line = match result {
+        Ok(pid) => format!("started {} as pid {pid}", shell.display()),
+        Err(error) => format!("could not start {}: {error}", shell.display()),
+    };
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(file, "{line}");
+    }
+    eprintln!("[shell] {line}");
+}
+
 pub fn install_autostart_entry_smart() -> anyhow::Result<PathBuf> {
     let shell = shell_executable()?;
     let settings = std::env::current_exe()?;

@@ -63,6 +63,7 @@ windows-sys = { version = "0.61", features = [
 
 [build-dependencies]
 relm4-icons-build = "0.10.1"
+embed-resource = "3.0.12"
 
 [dev-dependencies]
 pretty_assertions = "1.4"

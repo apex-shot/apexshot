@@ -305,7 +305,9 @@ WindowPicker::WindowPicker(Picked onPicked,
     , m_onCancelled(std::move(onCancelled))
     , m_action(std::move(action))
 {
-    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    // Tool windows stay out of the taskbar and Alt+Tab, where a transient
+    // overlay has no business appearing.
+    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose);
     setMouseTracking(true);
@@ -626,7 +628,9 @@ RecordingSetupOverlay::RecordingSetupOverlay(const WindowInfo& window,
     , m_onStarted(std::move(onStarted))
     , m_onCancelled(std::move(onCancelled))
 {
-    setWindowFlags(Qt::Window | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
+    // Tool windows stay out of the taskbar and Alt+Tab, where a transient
+    // overlay has no business appearing.
+    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_DeleteOnClose);
     setFocusPolicy(Qt::StrongFocus);
