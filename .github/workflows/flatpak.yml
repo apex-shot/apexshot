@@ -1,37 +1,8 @@
 name: Flatpak package build
 
+# Paused until the Flatpak publication decision is made. The manifest and this
+# job stay in the tree, but only a manual dispatch starts a build.
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/flatpak.yml
-      - Cargo.toml
-      - Cargo.lock
-      - build.rs
-      - capture-overlay/**
-      - flatpak/**
-      - src/**
-      - data/**
-      - po/**
-      - assets/fonts/**
-      - packaging/apexshot.svg
-      - packaging/apexshot-recording.svg
-  pull_request:
-    # Every pull request, not only those aimed at main: this repo stacks
-    # feature branches, and a base-branch filter silently skipped the layer.
-    paths:
-      - .github/workflows/flatpak.yml
-      - Cargo.toml
-      - Cargo.lock
-      - build.rs
-      - capture-overlay/**
-      - flatpak/**
-      - src/**
-      - data/**
-      - po/**
-      - assets/fonts/**
-      - packaging/apexshot.svg
-      - packaging/apexshot-recording.svg
   workflow_dispatch:
 
 permissions:

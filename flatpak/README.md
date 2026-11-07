@@ -132,6 +132,6 @@ Automatic System-theme matching depends on the host publishing its color-scheme 
 
 ## Test coverage
 
-The packaging workflow builds this manifest on pull requests and relevant pushes. For a desktop smoke test, confirm the app opens, use the real screenshot and ScreenCast portals, record and stop a short session, verify clipboard copy on the active display protocol, and check that the installed GNOME extension's window-list and overlay D-Bus methods are reachable. A headless `--help` invocation alone is not a desktop integration test.
+The packaging workflow is manual-only for now, paused until the Flatpak publication decision. For a desktop smoke test, confirm the app opens, use the real screenshot and ScreenCast portals, record and stop a short session, verify clipboard copy on the active display protocol, and check that the installed GNOME extension's window-list and overlay D-Bus methods are reachable. A headless `--help` invocation alone is not a desktop integration test.
 
 This local manifest uses the working tree as its application source. Keep it local to development and testing; the maintainer must create a separate, independently authored manifest for any publication.
