@@ -32,7 +32,7 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
     drawFrostedPanel(p, menuX, menuY, menuW, menuH, 10.0, nullptr, width(), height());
 
     QFont titleFont(QStringLiteral("Sans"));
-    titleFont.setPixelSize(14);
+    titleFont.setPixelSize(15);
     titleFont.setWeight(QFont::DemiBold);
     p.setFont(titleFont);
     p.setPen(QColor(241, 241, 243, 230));
@@ -67,7 +67,7 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
             p.setPen(QColor(255, 255, 255, 155));
         }
 
-        QFont tf; tf.setFamily("Sans"); tf.setPixelSize(12); tf.setWeight(m_settingsTab == i ? QFont::DemiBold : QFont::Medium);
+        QFont tf; tf.setFamily("Sans"); tf.setPixelSize(13); tf.setWeight(m_settingsTab == i ? QFont::DemiBold : QFont::Medium);
         p.setFont(tf);
         p.drawText(tr, Qt::AlignCenter, tabs[i]);
     }
@@ -90,7 +90,7 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
         auto drawSetting = [&](const QString& label, const QString& desc, bool checked, bool* target,
                                bool disabled = false, const QString& badge = QString()) {
             QRectF labelRect(labelX, currY, 106, rowH);
-            QFont labelFont(QStringLiteral("Sans")); labelFont.setPixelSize(12); labelFont.setWeight(QFont::DemiBold);
+            QFont labelFont(QStringLiteral("Sans")); labelFont.setPixelSize(14); labelFont.setWeight(QFont::DemiBold);
             p.setFont(labelFont);
             p.setPen(QColor(255, 255, 255, disabled ? 110 : 200));
             p.drawText(labelRect, Qt::AlignLeft | Qt::AlignVCenter, label);
@@ -125,18 +125,18 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
                 p.drawRoundedRect(cb, 4, 4);
             }
 
-            QFont descFont(QStringLiteral("Sans")); descFont.setPixelSize(11);
+            QFont descFont(QStringLiteral("Sans")); descFont.setPixelSize(13);
             p.setFont(descFont);
             p.setPen(disabled ? QColor(255, 255, 255, 100) : QColor(255, 255, 255, 155));
             p.drawText(QRectF(labelX + 110.0, currY, valueX - labelX - 120.0, rowH),
                        Qt::AlignLeft | Qt::AlignVCenter, desc);
 
             if (disabled && !badge.isEmpty()) {
-                QFont badgeFont; badgeFont.setFamily("Sans"); badgeFont.setPointSizeF(7.0); badgeFont.setBold(true);
+                QFont badgeFont; badgeFont.setFamily("Sans"); badgeFont.setPixelSize(10); badgeFont.setBold(true);
                 p.setFont(badgeFont);
                 QFontMetricsF badgeFm(badgeFont);
                 const double badgeTextW = badgeFm.horizontalAdvance(badge);
-                const double descW = QFontMetricsF(QFont("Sans", 10, QFont::Normal)).horizontalAdvance(desc);
+                const double descW = QFontMetricsF(descFont).horizontalAdvance(desc);
                 const double badgeX = valueX + 28 + descW + 10.0;
                 QRectF badgeRect(badgeX, currY + (rowH - 14) / 2.0, badgeTextW + 12.0, 14.0);
                 p.setPen(Qt::NoPen);
@@ -178,7 +178,7 @@ void CaptureOverlay::drawSettingsMenu(QPainter& p, double panelX, double startY)
 
         auto drawText = [&](const QString& text, double x, double y, bool bold, int alpha) {
             QFont font(QStringLiteral("Sans"));
-            font.setPixelSize(bold ? 13 : 11);
+            font.setPixelSize(bold ? 14 : 13);
             font.setWeight(bold ? QFont::DemiBold : QFont::Normal);
             p.setFont(font);
             p.setPen(QColor(255, 255, 255, alpha));

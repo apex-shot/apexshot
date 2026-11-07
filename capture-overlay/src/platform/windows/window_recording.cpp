@@ -263,8 +263,8 @@ void paintHintPill(QPainter& painter,
                    const QString& title,
                    const QString& hint)
 {
-    const QFont titleFont = uiFont(13, true);
-    const QFont hintFont = uiFont(12, false);
+    const QFont titleFont = uiFont(15, true);
+    const QFont hintFont = uiFont(13, false);
     const QFontMetrics titleMetrics(titleFont);
     const QFontMetrics hintMetrics(hintFont);
     const double gap = 12.0;
@@ -693,7 +693,7 @@ double RecordingSetupOverlay::controlWidth() const
 {
     // The Start button and the size chip share one width, so the chip never
     // sticks out past the button it belongs to.
-    const QFontMetrics buttonMetrics(uiFont(16, true));
+    const QFontMetrics buttonMetrics(uiFont(15, true));
     const double buttonWidth =
         std::max(148.0, buttonMetrics.horizontalAdvance(QStringLiteral("Start recording")) + 52.0);
     const QFontMetrics sizeMetrics(uiFont(14, false));
@@ -799,7 +799,7 @@ void RecordingSetupOverlay::paintEvent(QPaintEvent*)
     startFill.setColorAt(1.0, m_hoverStart ? kStartBottomHover : kStartBottom);
     painter.fillPath(startPath, startFill);
 
-    painter.setFont(uiFont(16, true));
+    painter.setFont(uiFont(15, true));
     painter.setPen(Qt::white);
     painter.drawText(start, Qt::AlignCenter, QStringLiteral("Start recording"));
 

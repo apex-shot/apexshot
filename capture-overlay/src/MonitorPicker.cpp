@@ -176,7 +176,7 @@ protected:
 
         const qreal metaY = glyphRect.bottom() + 12;
         QFont titleF = font();
-        titleF.setPixelSize(13);
+        titleF.setPixelSize(14);
         titleF.setWeight(QFont::DemiBold);
         p.setFont(titleF);
         p.setPen(kTextPrimary);
@@ -185,7 +185,7 @@ protected:
                    QStringLiteral("Display %1").arg(m_index + 1));
 
         QFont subF = font();
-        subF.setPixelSize(11);
+        subF.setPixelSize(13);
         p.setFont(subF);
         p.setPen(kTextMuted);
         const QString sub = QStringLiteral("%1  ·  %2").arg(m_sizeText, m_name);
@@ -429,7 +429,7 @@ int selectMonitorIndex(const QList<QScreen*>& screens)
     hint->setAlignment(Qt::AlignCenter);
     {
         QFont f = hint->font();
-        f.setPixelSize(12);
+        f.setPixelSize(13);
         hint->setFont(f);
     }
     hint->setStyleSheet(QStringLiteral(

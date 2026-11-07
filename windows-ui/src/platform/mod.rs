@@ -61,8 +61,8 @@ fn register_bundled_fonts() {
         "Inter-Medium.ttf",
         "Inter-SemiBold.ttf",
         "Inter-Bold.ttf",
-        // The Settings and image editor typeface; History and the video editor
-        // stay on Inter.
+        // The Settings, History and image editor typeface; the video editor
+        // stays on Inter.
         "DMSans-Regular.ttf",
         "DMSans-Medium.ttf",
         "DMSans-SemiBold.ttf",
