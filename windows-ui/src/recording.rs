@@ -87,7 +87,7 @@ pub mod editor {
         /// missing metadata comes back as `None`, which the caller treats the
         /// way ffmpeg does for an untagged stream.
         pub fn probe_color_space(source: &Path) -> (Option<String>, Option<String>) {
-            let Ok(output) = Command::new(ffprobe_executable())
+            let Ok(output) = crate::utils::hidden_command(ffprobe_executable())
                 .args([
                     "-v",
                     "error",
@@ -123,7 +123,7 @@ pub mod editor {
 
         /// Read the container duration without decoding the stream.
         pub fn probe_duration(source: &Path) -> Result<f64, String> {
-            let output = Command::new(ffmpeg_executable())
+            let output = crate::utils::hidden_command(ffmpeg_executable())
                 .args(["-hide_banner", "-i"])
                 .arg(source)
                 .output()
@@ -162,7 +162,7 @@ pub mod editor {
             let rate = FILMSTRIP_FRAMES as f64 / duration.max(0.1);
             let pattern = output_dir.join("frame-%02d.png");
             let filter = format!("fps={rate:.6},scale=260:-2");
-            let output = Command::new(ffmpeg_executable())
+            let output = crate::utils::hidden_command(ffmpeg_executable())
                 .args(["-hide_banner", "-loglevel", "error", "-y"])
                 .arg("-i")
                 .arg(source)
@@ -203,7 +203,7 @@ pub mod editor {
             std::fs::create_dir_all(parent)
                 .map_err(|error| format!("could not create thumbnail cache: {error}"))?;
 
-            let output = Command::new(ffmpeg_executable())
+            let output = crate::utils::hidden_command(ffmpeg_executable())
                 .args(["-hide_banner", "-loglevel", "error", "-y"])
                 .args(["-ss", &seconds.to_string(), "-i"])
                 .arg(source)
@@ -232,7 +232,7 @@ pub mod editor {
             height: u32,
             realtime: bool,
         ) -> Command {
-            let mut command = Command::new(ffmpeg_executable());
+            let mut command = crate::utils::hidden_command(ffmpeg_executable());
             command.args(["-hide_banner", "-loglevel", "error", "-nostdin"]);
             if realtime {
                 command.arg("-re");
@@ -258,7 +258,7 @@ pub mod editor {
         /// The recording's frame rate, from the container's video stream.
         /// Falls back to the "30 fps" banner in ffmpeg's stream info.
         pub fn probe_frame_rate(source: &Path) -> Option<f64> {
-            if let Ok(output) = Command::new(ffprobe_executable())
+            if let Ok(output) = crate::utils::hidden_command(ffprobe_executable())
                 .args([
                     "-v",
                     "error",
@@ -279,7 +279,7 @@ pub mod editor {
                     }
                 }
             }
-            let output = Command::new(ffmpeg_executable())
+            let output = crate::utils::hidden_command(ffmpeg_executable())
                 .args(["-hide_banner", "-i"])
                 .arg(source)
                 .output()

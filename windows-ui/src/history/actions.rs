@@ -40,7 +40,7 @@ pub fn launch_video_editor(path: &Path) -> Result<String, String> {
         .or(sibling)
         .unwrap_or_else(|| PathBuf::from("apexshot-video-editor.exe"));
 
-    std::process::Command::new(&executable)
+    crate::utils::hidden_command(&executable)
         .arg(path)
         .spawn()
         .map_err(|error| {
@@ -116,7 +116,7 @@ pub fn open_in_browser(url: &str) -> Result<String, String> {
 
 pub fn reveal_in_file_manager(entry: &CaptureEntry) -> Result<String, String> {
     ensure_exists(&entry.path)?;
-    std::process::Command::new("explorer.exe")
+    crate::utils::hidden_command("explorer.exe")
         .arg("/select,")
         .arg(&entry.path)
         .spawn()
