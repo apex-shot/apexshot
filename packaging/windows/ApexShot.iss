@@ -71,9 +71,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\bin\apexshot-capture.exe"; WorkingDir: "{app}\bin"; IconFilename: "{app}\bin\apexshot-capture.exe"; Comment: "Screenshots, recording, and the tray menu"
+Name: "{group}\{#AppName}"; Filename: "{app}\bin\apexshot-settings.exe"; WorkingDir: "{app}\bin"; IconFilename: "{app}\bin\apexshot-capture.exe"; Comment: "ApexShot settings - the tray icon starts a capture"
 Name: "{group}\{cm:UninstallProgram,{#AppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\bin\apexshot-capture.exe"; WorkingDir: "{app}\bin"; IconFilename: "{app}\bin\apexshot-capture.exe"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\bin\apexshot-settings.exe"; WorkingDir: "{app}\bin"; IconFilename: "{app}\bin\apexshot-capture.exe"; Tasks: desktopicon
 
 [Run]
 ; The settings binary owns the first-run flow and hands over to the tray shell

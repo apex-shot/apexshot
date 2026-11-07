@@ -80,9 +80,13 @@ fn shell_executable() -> anyhow::Result<PathBuf> {
 }
 
 /// Start the tray shell, which is the running app: the tray icon, the capture
-/// menu, and the hotkey listener all live there. It opens the quick access
-/// menu on start, so a finished setup lands on the surface the shortcuts feed.
-pub fn launch_shell() -> anyhow::Result<()> {
+/// menu, and the hotkey listener all live there.
+///
+/// `open_menu` decides whether the shell shows its quick access bar on start. A
+/// finished setup gets it as the surface its shortcuts feed; a settings window
+/// asking for the tray to be up does not, and passing `--background` also keeps
+/// a launch that finds a shell already running from raising that bar.
+pub fn launch_shell(open_menu: bool) -> anyhow::Result<()> {
     let shell = shell_executable()?;
     let mut command = Command::new(&shell);
     if let Some(runtime) = shell_runtime_directory(&shell) {
@@ -102,6 +106,9 @@ pub fn launch_shell() -> anyhow::Result<()> {
     {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    if !open_menu {
+        command.arg("--background");
     }
     let result = command.spawn().map(|child| child.id());
     record_shell_launch(&shell, &result);

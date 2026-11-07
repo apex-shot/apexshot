@@ -26,6 +26,17 @@ bool requestsDemo(int argc, char** argv)
     return false;
 }
 
+/// Start the shell without its menu, for the settings window that wants the
+/// tray and the hotkeys up but not a capture bar over its own UI.
+bool requestsBackground(int argc, char** argv)
+{
+    for (int index = 1; index < argc; ++index) {
+        if (std::strcmp(argv[index], "--background") == 0)
+            return true;
+    }
+    return false;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -56,13 +67,17 @@ int main(int argc, char** argv)
     if (alreadyRunning) {
         // Silent invisibility was the bug: launching the app again found the
         // shortcut, clicked it, and nothing happened because this copy simply
-        // exited. Ask the shell in the tray to open its menu instead.
-        QLocalSocket socket;
-        socket.connectToServer(QString::fromLatin1(sessionChannel()));
-        if (socket.waitForConnected(1500)) {
-            socket.write("menu");
-            socket.flush();
-            socket.waitForBytesWritten(1000);
+        // exited. Ask the shell in the tray to open its menu instead - unless
+        // this copy was asked to stay in the background, where it exists only
+        // to make sure the shell is up.
+        if (!requestsBackground(argc, argv)) {
+            QLocalSocket socket;
+            socket.connectToServer(QString::fromLatin1(sessionChannel()));
+            if (socket.waitForConnected(1500)) {
+                socket.write("menu");
+                socket.flush();
+                socket.waitForBytesWritten(1000);
+            }
         }
         return 0;
     }
