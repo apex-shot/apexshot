@@ -1283,6 +1283,18 @@ public:
 
     void setTray(QSystemTrayIcon* tray) { m_tray = tray; }
 
+    /// A system notification, for an outcome the window is not going to show.
+    ///
+    /// The result card after a capture is the main feedback, so this is what
+    /// speaks when the card is turned off: without it a capture that copied,
+    /// saved, or read text would look like nothing happened.
+    void notify(const QString& body,
+                const QString& title = QStringLiteral("ApexShot"))
+    {
+        if (m_tray)
+            m_tray->showMessage(title, body, QSystemTrayIcon::Information, 6000);
+    }
+
     void openMenu()
     {
         if (m_menuOpen)
@@ -1420,9 +1432,7 @@ public:
             displays += monitor.geometry;
         if (region.isEmpty() || !displays.contains(region)) {
             debugLog(QStringLiteral("previous area is not available on the current displays"));
-            if (m_tray)
-                m_tray->showMessage(QStringLiteral("ApexShot"),
-                                    QStringLiteral("No previous capture area is available."));
+            notify(QStringLiteral("No previous capture area is available."));
             return;
         }
         const CaptureOptions options = screenshotDefaults();
@@ -1444,9 +1454,7 @@ public:
     void shortcutShowLastPreview()
     {
         if (m_lastScreenshot.isNull()) {
-            if (m_tray)
-                m_tray->showMessage(QStringLiteral("ApexShot"),
-                                    QStringLiteral("No screenshot is available to preview."));
+            notify(QStringLiteral("No screenshot is available to preview."));
             return;
         }
         auto* card = new ResultCard(m_lastScreenshot, m_lastScreenshotPath, m_lastScreenshotText,
@@ -1459,9 +1467,7 @@ public:
     void shortcutSaveLastScreenshot()
     {
         if (m_lastScreenshot.isNull()) {
-            if (m_tray)
-                m_tray->showMessage(QStringLiteral("ApexShot"),
-                                    QStringLiteral("No screenshot is available to save."));
+            notify(QStringLiteral("No screenshot is available to save."));
             return;
         }
         if (m_saveDialogOpen)
@@ -2790,13 +2796,17 @@ private:
         if (settings.screenshots.afterCopyToClipboard)
             Platform::copyCaptureToClipboard(image, path, settings.screenshots.clipboardMode);
 
-        if (!settings.screenshots.afterShowResult)
-            return;
-
         const QString hint = path.isEmpty() ? QStringLiteral("Save failed")
             : settings.screenshots.afterCopyToClipboard
             ? QStringLiteral("Scroll capture copied")
             : QStringLiteral("Scroll capture saved");
+
+        if (!settings.screenshots.afterShowResult) {
+            // A capture that did not save already raised its own warning.
+            if (!path.isEmpty())
+                notify(hint);
+            return;
+        }
 
         auto* card = new ResultCard(image, path, QString(), hint, image.size());
         card->show();
@@ -2816,18 +2826,20 @@ private:
         }
         if (settings.recording.afterOpenEditor)
             openVideoEditorWindow(path);
-        if (!settings.recording.afterShowResult)
+
+        const QString hint = settings.recording.afterSave
+            ? QStringLiteral("Recording saved")
+            : QStringLiteral("Temporary recording");
+
+        if (!settings.recording.afterShowResult) {
+            notify(hint);
             return;
+        }
 
         const QImage thumb = thumbnail.isNull()
             ? QImage(2, 2, QImage::Format_ARGB32)
             : thumbnail;
-        auto* card = new ResultCard(thumb,
-                                    path,
-                                    QString(),
-                                    settings.recording.afterSave
-                                        ? QStringLiteral("Recording saved")
-                                        : QStringLiteral("Temporary recording"));
+        auto* card = new ResultCard(thumb, path, QString(), hint);
         card->show();
         card->raise();
         card->activateWindow();
@@ -2865,8 +2877,7 @@ private:
                                              settings.ocr.keepLineBreaks, text, ocrError)) {
                     ocrFailed = true;
                     debugLog(QStringLiteral("ocr failed: %1").arg(ocrError));
-                    if (m_tray)
-                        m_tray->showMessage(QStringLiteral("OCR unavailable"), ocrError);
+                    notify(ocrError, QStringLiteral("OCR unavailable"));
                 }
                 text = text.trimmed();
                 debugLog(QStringLiteral("ocr chars=%1").arg(text.size()));
@@ -2903,8 +2914,14 @@ private:
         m_lastScreenshotText = text;
         if (!path.isEmpty())
             QSettings().setValue(QStringLiteral("shortcuts/last_screenshot"), path);
-        if (!settings.screenshots.afterShowResult)
+        if (!settings.screenshots.afterShowResult) {
+            // The hint is what the card would have said - text copied, image
+            // copied, saved - so with the card off the notification carries it.
+            // A capture that did not save already raised its own warning.
+            if (!path.isEmpty())
+                notify(hint);
             return;
+        }
 
         auto* card = new ResultCard(image, path, text, hint);
         card->show();
