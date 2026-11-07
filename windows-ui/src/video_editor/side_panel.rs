@@ -3694,8 +3694,8 @@ impl FilledSlider {
             let _ = context.fill();
         }
 
-        context.select_font_face("Inter", FontSlant::Normal, FontWeight::Normal);
-        context.set_font_size(12.0 * self.scale);
+        context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
+        context.set_font_size(13.0 * self.scale);
         if light {
             context.set_source_rgba(0.15, 0.16, 0.18, text_alpha);
         } else {
@@ -4313,21 +4313,21 @@ pub(super) fn install_css() {
         value_h = px(34.0),
         value_gap = px(6.0),
         number_w = px(38.0),
-        value_text = px(11.0),
+        value_text = px(13.0),
         secondary_h = px(32.0),
         secondary_x = px(14.0),
         secondary_radius = px(8.0),
-        secondary_text = px(12.0),
+        secondary_text = px(13.0),
         webcam_card_h = px(62.0),
         webcam_scope_pad = px(2.0),
         webcam_scope_radius = px(7.0),
         webcam_scope_h = px(24.0),
         webcam_scope_x = px(7.0),
         webcam_scope_btn_radius = px(5.0),
-        webcam_scope_text = px(11.0),
+        webcam_scope_text = px(13.0),
         webcam_icon = px(28.0),
         webcam_icon_radius = px(7.0),
-        webcam_kicker_text = px(10.0),
+        webcam_kicker_text = px(11.0),
         webcam_status_text = px(11.0),
     );
     let provider = CssProvider::new();

@@ -1840,6 +1840,7 @@ fn install_css() {
     super::ui_support::install_recording_editor_css();
     super::side_panel::install_css();
     super::export_card::install_css();
+    super::type_scale::install();
 
     let Some(display) = gdk::Display::default() else {
         return;
@@ -1911,16 +1912,16 @@ fn install_css() {
         }}
         "#,
         titlebar = px(TITLE_BAR_HEIGHT),
-        title = px(12.0),
+        title = px(15.0),
         tools_w = px(super::side_panel::TOOL_COLUMN_WIDTH as f64),
         panel_pad = px(10.0),
         panel_side = px(16.0),
         panel_head_y = px(14.0),
         panel_head_bottom = px(12.0),
         panel_title = px(15.0),
-        panel_detail = px(12.0),
+        panel_detail = px(13.0),
         placeholder_top = px(16.0),
-        placeholder = px(12.0),
+        placeholder = px(13.0),
     );
 
     let provider = CssProvider::new();
