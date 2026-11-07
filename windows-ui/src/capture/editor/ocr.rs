@@ -9,7 +9,6 @@
 
 use image::RgbaImage;
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// One recognised line: the words that compose it, in reading order.
@@ -124,7 +123,7 @@ pub fn detect_word_lines(image: &RgbaImage) -> Result<Vec<OcrLine>, String> {
 }
 
 fn run_helper(path: &PathBuf) -> Result<Vec<OcrLine>, String> {
-    let output = Command::new("powershell.exe")
+    let output = crate::utils::hidden_command("powershell.exe")
         .args([
             "-NoProfile",
             "-NonInteractive",

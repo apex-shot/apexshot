@@ -31,12 +31,28 @@ pub mod notify {
     }
 }
 
+/// A command for a console program started from this GUI app.
+///
+/// Windows gives every child process of a windowed program a console of its
+/// own unless it is told not to, which is why launching Settings used to flash
+/// terminal windows before the app appeared. Every console tool this app runs
+/// goes through here.
+pub fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    command
+}
+
 pub mod open {
     use std::path::Path;
 
     /// Open a URL with the default Windows handler.
     pub fn open_url(url: &str) -> anyhow::Result<()> {
-        std::process::Command::new("cmd")
+        crate::utils::hidden_command("cmd")
             .args(["/C", "start", "", url])
             .spawn()?;
         Ok(())
@@ -45,7 +61,7 @@ pub mod open {
     /// Show `path` in Explorer with the file itself selected. Explorer reports
     /// a failure exit code even when it succeeds, so only the spawn counts.
     pub fn reveal_in_file_manager(path: &Path) -> anyhow::Result<()> {
-        std::process::Command::new("explorer.exe")
+        crate::utils::hidden_command("explorer.exe")
             .arg("/select,")
             .arg(path)
             .spawn()?;

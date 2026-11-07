@@ -86,7 +86,7 @@ pub mod editor {
 
         #[cfg(target_os = "windows")]
         fn system_prefers_dark() -> Option<bool> {
-            let output = std::process::Command::new("reg")
+            let output = crate::utils::hidden_command("reg")
                 .args([
                     "query",
                     r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
