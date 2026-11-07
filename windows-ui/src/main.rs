@@ -25,11 +25,18 @@ fn main() {
         // icon and the capture hotkeys, and it opens the quick access menu, so
         // the new install lands where the shortcuts work instead of in a
         // settings window the user did not ask for.
-        if let Err(error) = app::settings::launch_shell() {
+        if let Err(error) = app::settings::launch_shell(true) {
             eprintln!("Failed to start the ApexShot shell: {error}");
             std::process::exit(1);
         }
         return;
+    }
+
+    // Settings is a window, not the app: opening it from the Start menu also
+    // makes sure the shell that owns the tray icon and the capture hotkeys is
+    // running, so the shortcuts keep working after a reboot.
+    if let Err(error) = app::settings::launch_shell(false) {
+        eprintln!("Failed to start the ApexShot shell: {error}");
     }
 
     if let Err(error) = app::settings::show_settings_window() {
