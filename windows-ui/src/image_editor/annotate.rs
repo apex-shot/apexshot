@@ -2387,7 +2387,11 @@ impl EditorHost {
         self.commit_text_if_active();
         let snapshot = self.with_state(|st| st.to_final_image().ok());
         let Some(snapshot) = snapshot.flatten() else {
-            (self.on_error)("Could not render the image for the clipboard.".into());
+            report_output_failure(
+                &*self.on_error,
+                &crate::i18n::t("Copy failed"),
+                "Could not render the image for the clipboard.",
+            );
             return;
         };
         let report = self.on_error.clone();
@@ -2400,7 +2404,11 @@ impl EditorHost {
                 Ok(bytes) => bytes,
                 Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    report("Could not copy the image to the clipboard.".into());
+                    report_output_failure(
+                        &*report,
+                        &crate::i18n::t("Copy failed"),
+                        "Could not copy the image to the clipboard.",
+                    );
                     return glib::ControlFlow::Break;
                 }
             };
@@ -2410,7 +2418,11 @@ impl EditorHost {
                         display.clipboard().set_texture(&texture);
                     }
                 }
-                None => report("Could not copy the image to the clipboard.".into()),
+                None => report_output_failure(
+                    &*report,
+                    &crate::i18n::t("Copy failed"),
+                    "Could not copy the image to the clipboard.",
+                ),
             }
             glib::ControlFlow::Break
         });
@@ -2428,11 +2440,16 @@ impl EditorHost {
         self.commit_text_if_active();
         let snapshot = self.with_state(|st| st.to_final_image().ok());
         let Some(snapshot) = snapshot.flatten() else {
-            (self.on_error)("Could not render the image.".into());
+            report_output_failure(
+                &*self.on_error,
+                &crate::i18n::t("Export failed"),
+                "Could not render the image.",
+            );
             return;
         };
         let path = path.to_path_buf();
         let report = self.on_error.clone();
+        let reported_path = path.clone();
         let (sender, receiver) =
             mpsc::channel::<Result<(), crate::capture::editor::types::EditorError>>();
         std::thread::spawn(move || {
@@ -2442,9 +2459,19 @@ impl EditorHost {
         });
         glib::timeout_add_local(Duration::from_millis(50), move || {
             match receiver.try_recv() {
-                Ok(Ok(())) => glib::ControlFlow::Break,
+                Ok(Ok(())) => {
+                    crate::utils::notify::desktop_notification(
+                        &crate::i18n::t("Export complete"),
+                        &reported_path.display().to_string(),
+                    );
+                    glib::ControlFlow::Break
+                }
                 Ok(Err(error)) => {
-                    report(format!("Could not save the image: {error}"));
+                    report_output_failure(
+                        &*report,
+                        &crate::i18n::t("Export failed"),
+                        &format!("Could not save the image: {error}"),
+                    );
                     glib::ControlFlow::Break
                 }
                 Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
@@ -2453,6 +2480,14 @@ impl EditorHost {
         });
         let _ = parent;
     }
+}
+
+/// Report a failed copy or export on both surfaces: the canvas toast for the
+/// window the user is looking at, and a system notification for the copy that
+/// window no longer covers by the time the worker finishes.
+fn report_output_failure(report: &dyn Fn(String), summary: &str, message: &str) {
+    crate::utils::notify::desktop_notification_important(summary, message);
+    report(message.to_string());
 }
 
 /// Gate for a finished effect worker frame: apply only the newest request

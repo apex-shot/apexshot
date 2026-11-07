@@ -173,6 +173,10 @@ pub(super) fn show(
                 }
                 Ok(ExportUpdate::Finished(path)) => {
                     title.set_text(&t("Exported successfully"));
+                    crate::utils::notify::desktop_notification(
+                        &t("Export complete"),
+                        &path.display().to_string(),
+                    );
                     timing.set_text(&format!(
                         "{} · {}",
                         clock(started.elapsed().as_secs_f64()),
@@ -206,6 +210,7 @@ pub(super) fn show(
             };
             if let Some(message) = failure {
                 title.set_text(&t("Export failed"));
+                crate::utils::notify::desktop_notification_important(&t("Export failed"), &message);
                 detail.set_text(&message);
                 detail.add_css_class("video-export-error");
                 detail.set_visible(true);
