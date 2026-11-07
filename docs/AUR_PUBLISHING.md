@@ -30,9 +30,9 @@ approval, so this failure does not roll back the GitHub release assets.
 ## Release flow
 
 1. A version tag runs CI, validates the official Studio build configuration,
-   builds Debian/GNOME, openSUSE, Fedora, and Arch artifacts, then verifies the
-   complete package set and checksums before creating or refreshing a **draft**
-   release.
+   builds Debian/GNOME, openSUSE, Fedora, Arch, and Windows x64 artifacts, then
+   verifies the complete package set and checksums before creating or refreshing
+   a **draft** release.
 2. Review the draft assets and notes. To publish, dispatch **Promote stable
    release** from `main`, enter the stable `vMAJOR.MINOR.PATCH` tag, and type
    `PUBLISH <tag>` exactly.
@@ -47,8 +47,8 @@ approval, so this failure does not roll back the GitHub release assets.
 
 The asset gate includes every RPM produced by both RPM builds, including debug
 variants, along with source RPMs, the Debian package, GNOME extension archive,
-Arch package, and `SHA256SUMS`. A missing or duplicate asset, a checksum
-mismatch, or a stale Studio marker prevents promotion.
+Arch package, Windows installer, and `SHA256SUMS`. A missing or duplicate asset,
+a checksum mismatch, or a stale Studio marker prevents promotion.
 
 ## Local preparation helper
 

@@ -9,10 +9,12 @@ packages; this is the Windows-only counterpart.
 
 ## What a run needs
 
-- The MSVC Rust toolchain, and GTK4 on `PATH` for `pkg-config` (the same setup a
-  developer build already uses).
-- Qt 5 with `windeployqt`, found from `capture-overlay/build/CMakeCache.txt`.
-- Visual Studio 2022 (the Qt shell builds with MSVC).
+- A Rust toolchain that can link the GTK4 build `pkg-config` finds: the GNU
+  `x86_64-pc-windows-gnu` toolchain with the MSYS2 MINGW64 GTK4 build (what CI
+  uses), or MSVC with an MSVC-built GTK4 prefix.
+- Qt 5 with `windeployqt`, found from `capture-overlay/build/CMakeCache.txt` or
+  `qmake`.
+- Visual Studio 2022 (the Qt capture shell builds with MSVC).
 - [Inno Setup](https://jrsoftware.org/isinfo.php): `winget install JRSoftware.InnoSetup`.
 - An ffmpeg payload: `ffmpeg.exe`, `ffprobe.exe`, and the shared `av*`/`sw*`
   DLLs. Put it in `dist/ffmpeg/bin` or pass `--ffmpeg-dir`.
@@ -25,6 +27,27 @@ The result lands in `dist/windows/`: the staged tree, and
 `ApexShot-<version>-setup.exe` beside it. `--skip-build` reuses the release
 binaries and the Qt shell already in place; `--skip-installer` stops after
 staging, which is the fast loop while working on the layout.
+
+## CI and supported architectures
+
+The `windows` job in `.github/workflows/release.yml` builds this installer on a
+`windows-2022` runner for every `v*` tag. It installs the GTK4 stack from
+MSYS2 MINGW64, the GNU Rust toolchain, Qt 5.15.2 (MSVC 2019 64-bit), Inno Setup,
+and a staged ffmpeg payload, then uploads `ApexShot-<version>-setup.exe` as the
+`windows-installer` artifact. `stage_release` validates that installer with the
+other package artifacts, checksums it, and adds it to the draft release.
+
+The package is **x86_64 only**:
+
+- The Rust binaries target `x86_64-pc-windows-gnu`; GTK comes from MSYS2
+  `MINGW64`; Qt is `win64_msvc2019_64`; the capture shell is built with
+  `vcvars64`; and Inno Setup is restricted to `x64compatible`.
+- 32-bit Windows is not supported: the installer refuses it and the binaries are
+  64-bit.
+- Native ARM64 is not built. Windows 11 ARM64 counts as `x64compatible` for Inno
+  Setup, so the x86_64 installer can be installed there and the binaries run
+  under x64 emulation. A native ARM64 package would need a separate ARM64
+  toolchain, GTK/Qt builds, and installer.
 
 ## What the installed tree looks like
 

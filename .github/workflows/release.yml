@@ -645,6 +645,141 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
+  windows:
+    name: Build Windows installer
+    # Pinned: the packaging script looks for the Visual Studio 2022
+    # vcvars64.bat, and the Qt 5 install is the MSVC 2019 build.
+    runs-on: windows-2022
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [lint, ci, studio_release_config]
+    timeout-minutes: 90
+    env:
+      APEXSHOT_STUDIO_VERIFY_KEY: ${{ needs.studio_release_config.outputs.verify_key }}
+      APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ needs.studio_release_config.outputs.release_timestamp }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # The packaging script is bash and the installer source is read by MSYS2;
+      # a CRLF checkout puts a \r in every command and path.
+      - name: Check out the line endings the repository stores
+        shell: bash
+        run: |
+          git config --global core.autocrlf false
+          git rm --cached -r --quiet .
+          git reset --hard --quiet
+
+      # The capture shell is Qt 5, built by MSVC. The action installs the same
+      # Qt tree a developer uses and puts qmake and windeployqt on PATH.
+      - name: Install Qt 5
+        id: qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '5.15.2'
+          arch: win64_msvc2019_64
+          cache: true
+
+      - name: Verify the Qt tools
+        shell: bash
+        run: |
+          qt_dir=$(cygpath -u "${{ steps.qt.outputs.qt-root-dir }}")
+          test -f "$qt_dir/bin/windeployqt.exe"
+
+      # GTK4, its pkg-config files, the MinGW linker for the GNU Rust build,
+      # and the ffmpeg payload the editors ship. MINGW64 is the only Windows
+      # architecture this package builds for.
+      - name: Install GTK4 and ffmpeg
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          path-type: inherit
+          install: >-
+            mingw-w64-x86_64-gtk4
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-ffmpeg
+            mingw-w64-x86_64-ninja
+
+      # The MSVC toolchain cannot link against the MinGW GTK import libraries,
+      # so the Rust binaries use the GNU target that matches them. The Qt
+      # capture shell below is built with MSVC.
+      - name: Install the GNU Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+          rustup default stable-x86_64-pc-windows-gnu
+
+      # The release binaries and the Qt shell are rebuilt only for tags, so the
+      # cache mostly avoids re-downloading the crate registry on a retry.
+      - name: Cache cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            windows-ui/target/
+          key: windows-release-cargo-${{ hashFiles('windows-ui/Cargo.lock', 'Cargo.lock') }}
+          restore-keys: |
+            windows-release-cargo-
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: |
+          choco install innosetup --no-progress -y
+          if (-not (Test-Path 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe')) {
+            throw 'Inno Setup compiler was not installed'
+          }
+
+      # The package script looks for dist/ffmpeg/bin. Stage the MSYS2 ffmpeg
+      # build and the DLL closure it loads, so the package carries exactly the
+      # ffmpeg runtime the editors need instead of the whole MinGW prefix.
+      - name: Stage the ffmpeg payload
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          mkdir -p dist/ffmpeg/bin
+          cp /mingw64/bin/ffmpeg.exe /mingw64/bin/ffprobe.exe dist/ffmpeg/bin/
+          for executable in ffmpeg.exe ffprobe.exe; do
+            libraries=$(PATH="/mingw64/bin:$PATH" ldd "/mingw64/bin/$executable" 2>/dev/null |
+              awk '{ for (field = 1; field <= NF; field++) if ($field ~ /^\/mingw64\/bin\//) print $field }')
+            while IFS= read -r library; do
+              [[ -n $library && -f $library ]] && cp "$library" dist/ffmpeg/bin/
+            done <<< "$libraries"
+          done
+          for license in /mingw64/share/licenses/ffmpeg/*; do
+            if [[ -f $license ]]; then
+              cp "$license" dist/ffmpeg/LICENSE.txt
+              break
+            fi
+          done
+
+      # The tag is the release identity; Cargo.toml is the installer version.
+      # Refuse to build an installer whose name the release gate would reject.
+      - name: Build the Windows installer
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          cargo_version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          if [[ -z $cargo_version || $version != "$cargo_version" ]]; then
+            echo "Tag version $version does not match Cargo.toml version $cargo_version" >&2
+            exit 1
+          fi
+          qt_dir=$(cygpath -u "${{ steps.qt.outputs.qt-root-dir }}")
+          bash scripts/package-windows.sh --qt-dir "$qt_dir"
+
+      - name: Upload the Windows installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: dist/windows/ApexShot-*-setup.exe
+          if-no-files-found: error
+          retention-days: 90
+
   stage_release:
     name: Stage complete draft release
     runs-on: ubuntu-latest
@@ -652,7 +787,7 @@ jobs:
     concurrency:
       group: stable-release-${{ github.repository }}-${{ github.ref_name }}
       cancel-in-progress: false
-    needs: [studio_release_config, release, fedora, opensuse, arch]
+    needs: [studio_release_config, release, fedora, opensuse, arch, windows]
     env:
       APEXSHOT_STUDIO_VERIFY_KEY: ${{ needs.studio_release_config.outputs.verify_key }}
       APEXSHOT_STUDIO_RELEASE_TIMESTAMP: ${{ needs.studio_release_config.outputs.release_timestamp }}

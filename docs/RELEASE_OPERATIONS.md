@@ -80,15 +80,16 @@ Studio status line in Settings instead.
 
 ## Tagging and promotion
 
-A tag run builds the Debian, Fedora, openSUSE, and Arch packages and stages a
-**draft** release with checksums. The tag-only jobs never run on `main`, so a
-green `main` run says nothing about the release path; only a tag run exercises
-it.
+A tag run builds the Debian, Fedora, openSUSE, Arch, and Windows x64 packages
+and stages a **draft** release with checksums. The tag-only jobs never run on
+`main`, so a green `main` run says nothing about the release path; only a tag
+run exercises it.
 
 1. Push the tag. The run validates the Studio configuration, then builds.
-2. Review the draft: every expected asset present, `SHA256SUMS` covering all of
-   them, and no unexpected extras. Paste the notes preface above the generated
-   changelog.
+2. Review the draft: every expected asset present (Debian package, GNOME
+   extension, both RPM sets, Arch package, and the Windows installer),
+   `SHA256SUMS` covering all of them, and no unexpected extras. Paste the notes
+   preface above the generated changelog.
 3. Publish by dispatching **Promote stable release** from `main`, entering the
    stable tag and typing `PUBLISH <tag>`. `scripts/release_gate.py
    authorize-promotion` requires the configured maintainer, `refs/heads/main`,
