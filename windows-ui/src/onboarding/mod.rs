@@ -643,6 +643,13 @@ mod tests {
 
     /// Reproduce the form's spacing without presenting or driving a window.
     pub(super) fn test_form(scale: f64, step: OnboardingStep) -> (GtkBox, GtkBox, GtkBox, Nav) {
+        // Measure the form with the faces the app registers before it opens
+        // onboarding. Without them the fixture falls back to whatever the
+        // machine has installed, and a wider fallback can fail the fit checks
+        // on a runner that has no DM Sans.
+        static FONTS: std::sync::Once = std::sync::Once::new();
+        FONTS.call_once(crate::platform::prepare_process);
+
         // Keep this fixture's CSS scoped to onboarding. Reinstalling the
         // shared Settings providers changes other GTK tests' cascade.
         install_css(scale);
