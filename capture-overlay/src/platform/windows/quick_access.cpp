@@ -1430,11 +1430,14 @@ public:
     /// The result card after a capture is the main feedback, so this is what
     /// speaks when the card is turned off: without it a capture that copied,
     /// saved, or read text would look like nothing happened.
-    void notify(const QString& body,
-                const QString& title = QStringLiteral("ApexShot"))
+    ///
+    /// The shell already heads the notification with the app name, and the
+    /// tray icon supplies the body's icon, so the default title is empty;
+    /// only a caller with something more specific to say supplies one.
+    void notify(const QString& body, const QString& title = QString())
     {
         if (m_tray)
-            m_tray->showMessage(title, body, QSystemTrayIcon::Information, 6000);
+            m_tray->showMessage(title, body, m_tray->icon(), 6000);
     }
 
     void openMenu()

@@ -22,13 +22,13 @@ use windows_sys::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, WPARAM};
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::Shell::{
     ExtractIconExW, Shell_NotifyIconW, NIF_ICON, NIF_INFO, NIF_MESSAGE, NIF_STATE, NIF_TIP,
-    NIIF_INFO, NIIF_WARNING, NIM_ADD, NIM_MODIFY, NIN_BALLOONHIDE, NIN_BALLOONTIMEOUT,
-    NIN_BALLOONUSERCLICK, NIS_HIDDEN, NOTIFYICONDATAW,
+    NIIF_INFO, NIIF_LARGE_ICON, NIIF_USER, NIIF_WARNING, NIM_ADD, NIM_MODIFY, NIN_BALLOONHIDE,
+    NIN_BALLOONTIMEOUT, NIN_BALLOONUSERCLICK, NIS_HIDDEN, NOTIFYICONDATAW,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DestroyIcon, DispatchMessageW, LoadIconW, PeekMessageW,
-    RegisterClassW, TranslateMessage, HICON, IDI_APPLICATION, MSG, PM_REMOVE, WM_APP, WNDCLASSW,
-    WS_EX_TOOLWINDOW,
+    PrivateExtractIconsW, RegisterClassW, TranslateMessage, HICON, IDI_APPLICATION, MSG, PM_REMOVE,
+    WM_APP, WNDCLASSW, WS_EX_TOOLWINDOW,
 };
 
 /// The window class the notification icon belongs to.
@@ -123,6 +123,7 @@ fn queue() -> &'static Sender<Notification> {
 struct Host {
     window: HWND,
     icon: HICON,
+    balloon_icon: HICON,
     added: bool,
     shown_at: Option<Instant>,
 }
@@ -157,9 +158,11 @@ impl Host {
             return None;
         }
 
+        let (icon, balloon_icon) = app_icons();
         Some(Self {
             window,
-            icon: app_icon(),
+            icon,
+            balloon_icon,
             added: false,
             shown_at: None,
         })
@@ -193,6 +196,10 @@ impl Host {
         data.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_INFO | NIF_STATE;
         data.uCallbackMessage = CALLBACK_MESSAGE;
         data.hIcon = self.icon;
+        let has_balloon_icon = !notification.important && !self.balloon_icon.is_null();
+        if has_balloon_icon {
+            data.hBalloonIcon = self.balloon_icon;
+        }
         // The previous balloon left the icon hidden; clearing the bit reveals
         // it again before the new balloon goes up.
         data.dwState = 0;
@@ -202,6 +209,8 @@ impl Host {
         write_utf16(&mut data.szInfo, body);
         data.dwInfoFlags = if notification.important {
             NIIF_WARNING
+        } else if has_balloon_icon {
+            NIIF_USER | NIIF_LARGE_ICON
         } else {
             NIIF_INFO
         };
@@ -299,23 +308,53 @@ unsafe extern "system" fn window_procedure(
     DefWindowProcW(window, message, wparam, lparam)
 }
 
-/// ApexShot's own icon, taken from the executable's embedded resource so a
-/// notification carries the same mark as the app.
-fn app_icon() -> HICON {
+/// ApexShot's own icons, taken from the executable's embedded resource so a
+/// notification carries the same mark as the app. The shell uses the small
+/// one in the notification area and the largest frame in the balloon body.
+fn app_icons() -> (HICON, HICON) {
     if let Ok(executable) = std::env::current_exe() {
         let path = wide(&executable.to_string_lossy());
         let mut large: HICON = std::ptr::null_mut();
         let mut small: HICON = std::ptr::null_mut();
         let extracted = unsafe { ExtractIconExW(path.as_ptr(), 0, &mut large, &mut small, 1) };
-        if extracted > 0 {
-            if small.is_null() {
-                return large;
-            }
+        if extracted > 0 && !small.is_null() {
+            let balloon = balloon_icon(&path);
             if !large.is_null() {
                 unsafe { DestroyIcon(large) };
             }
-            return small;
+            return (small, balloon);
         }
+        if !large.is_null() {
+            let balloon = balloon_icon(&path);
+            return (large, balloon);
+        }
+    }
+    let fallback = unsafe { LoadIconW(std::ptr::null_mut(), IDI_APPLICATION) };
+    (fallback, fallback)
+}
+
+/// The largest frame in the executable, for the balloon body.
+///
+/// `ExtractIconExW` only returns the system-large 32×32 frame. The shell draws
+/// the body icon at a size that grows with the display scale, so upscaling that
+/// frame makes the mark soft; ask for the 256×256 frame instead and let the
+/// shell downscale it.
+fn balloon_icon(path: &[u16]) -> HICON {
+    let mut icon: HICON = std::ptr::null_mut();
+    let extracted = unsafe {
+        PrivateExtractIconsW(
+            path.as_ptr(),
+            0,
+            256,
+            256,
+            &mut icon,
+            std::ptr::null_mut(),
+            1,
+            0,
+        )
+    };
+    if extracted > 0 && !icon.is_null() {
+        return icon;
     }
     unsafe { LoadIconW(std::ptr::null_mut(), IDI_APPLICATION) }
 }
