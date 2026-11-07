@@ -5,5 +5,7 @@
     </qresource>
     <qresource prefix="/icons">
         <file alias="chevron-right.png">icons/chevron-right.png</file>
+        <file alias="check.png">icons/check.png</file>
+        <file alias="apexshot.ico">../../packaging/windows/apexshot.ico</file>
     </qresource>
 </RCC>

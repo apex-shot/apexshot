@@ -4,6 +4,7 @@
 #include "Sandbox.h"
 
 #include <QApplication>
+#include <functional>
 #include <QCoreApplication>
 #include <QCloseEvent>
 #include <QCursor>
@@ -32,6 +33,8 @@
 
 #ifdef Q_OS_WIN
 #include "platform/windows/audio_devices.h"
+
+#include <windows.h>
 #endif
 
 #include <algorithm>
@@ -189,6 +192,68 @@ QString resolveCameraDevice(const QString& preferred)
 #endif
 }
 
+#ifdef Q_OS_WIN
+class OutsidePressWatcher;
+
+OutsidePressWatcher* g_outsidePressWatcher = nullptr;
+
+/// The toolbar floats above everything but is not a popup, so Windows gives it
+/// no outside-click behaviour of its own. A low-level hook supplies it: a press
+/// anywhere but the toolbar, or one of its menus, dismisses the toolbar.
+class OutsidePressWatcher
+{
+public:
+    OutsidePressWatcher(QWidget* toolbar, std::function<void()> dismiss)
+        : m_toolbar(toolbar)
+        , m_dismiss(std::move(dismiss))
+    {
+        g_outsidePressWatcher = this;
+        m_hook = SetWindowsHookExW(WH_MOUSE_LL, &OutsidePressWatcher::dispatch,
+                                   GetModuleHandleW(nullptr), 0);
+    }
+
+    ~OutsidePressWatcher()
+    {
+        if (m_hook)
+            UnhookWindowsHookEx(m_hook);
+        if (g_outsidePressWatcher == this)
+            g_outsidePressWatcher = nullptr;
+    }
+
+    OutsidePressWatcher(const OutsidePressWatcher&) = delete;
+    OutsidePressWatcher& operator=(const OutsidePressWatcher&) = delete;
+
+private:
+    static LRESULT CALLBACK dispatch(int code, WPARAM message, LPARAM event)
+    {
+        if (code == HC_ACTION && g_outsidePressWatcher)
+            g_outsidePressWatcher->inspect(message, reinterpret_cast<MSLLHOOKSTRUCT*>(event));
+        return CallNextHookEx(nullptr, code, message, event);
+    }
+
+    void inspect(WPARAM message, const MSLLHOOKSTRUCT* event)
+    {
+        if (message != WM_LBUTTONDOWN && message != WM_RBUTTONDOWN
+            && message != WM_MBUTTONDOWN && message != WM_XBUTTONDOWN)
+            return;
+        if (!m_toolbar || !m_toolbar->isVisible())
+            return;
+        QWidget* popup = QApplication::activePopupWidget();
+        if (popup && qobject_cast<QMenu*>(popup))
+            return;
+        if (m_toolbar->frameGeometry().contains(QPoint(event->pt.x, event->pt.y)))
+            return;
+        auto dismiss = m_dismiss;
+        QTimer::singleShot(0, m_toolbar, [dismiss] { dismiss(); });
+    }
+
+    QWidget* m_toolbar;
+    std::function<void()> m_dismiss;
+    HHOOK m_hook = nullptr;
+};
+
+#endif
+
 Qt::WindowFlags toolbarFlags()
 {
     Qt::WindowFlags flags = Qt::Dialog
@@ -305,6 +370,12 @@ CaptureModeToolbar::Result CaptureModeToolbar::choose(QLocalServer* controlServe
         });
     }
     toolbar.focusAndRaise();
+#ifdef Q_OS_WIN
+    OutsidePressWatcher outsidePress(&toolbar, [&toolbar] {
+        if (!toolbar.m_setupMode)
+            toolbar.finish(Action::Cancel);
+    });
+#endif
     CaptureModeToolbar* toolbarPointer = &toolbar;
     QTimer::singleShot(100, &toolbar, [toolbarPointer]() {
         if (toolbarPointer->isVisible() && !toolbarPointer->m_setupMode) {
@@ -398,15 +469,15 @@ int CaptureModeToolbar::itemWidth(int index) const
     int textWidth = 0;
     switch (index) {
     case 5:
-        textWidth = std::max(measure(QStringLiteral("OCR")), measure(QStringLiteral("Mic")));
+        textWidth = (std::max)(measure(QStringLiteral("OCR")), measure(QStringLiteral("Mic")));
         break;
     case 6:
-        textWidth = std::max({measure(QStringLiteral("Timer")),
+        textWidth = (std::max)({measure(QStringLiteral("Timer")),
                               measure(QStringLiteral("Speaker")),
                               measure(QStringLiteral("10s"))});
         break;
     case 7:
-        textWidth = std::max(measure(QStringLiteral("Scroll")),
+        textWidth = (std::max)(measure(QStringLiteral("Scroll")),
                              measure(QStringLiteral("Webcam")));
         break;
     default:
@@ -459,7 +530,7 @@ QString CaptureModeToolbar::labelFor(int index) const
 
 QString CaptureModeToolbar::displayedLabel(int index, const QFont& font) const
 {
-    const int width = std::max(0, int(itemRect(index).width()) - 2 * kIconPad
+    const int width = (std::max)(0, int(itemRect(index).width()) - 2 * kIconPad
                                       - kIconSize - kIconGap);
     return QFontMetrics(font).elidedText(labelFor(index), Qt::ElideRight, width);
 }
@@ -662,7 +733,7 @@ void CaptureModeToolbar::paintEvent(QPaintEvent*)
                              label);
 #ifdef Q_OS_WIN
             if (deviceCell && (i == 5 || i == 6) && deviceOn) {
-                const qreal meterWidth = std::max(0.0, cell.right() - kIconPad - textLeft);
+                const qreal meterWidth = (std::max)(0.0, cell.right() - kIconPad - textLeft);
                 const QRectF meter(textLeft, cell.bottom() - 8.0, meterWidth, 3.0);
                 painter.setPen(Qt::NoPen);
                 painter.setBrush(QColor(255, 255, 255, 30));
