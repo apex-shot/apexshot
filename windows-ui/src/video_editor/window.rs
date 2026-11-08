@@ -1840,6 +1840,9 @@ fn install_css() {
     super::ui_support::install_recording_editor_css();
     super::side_panel::install_css();
     super::export_card::install_css();
+    // The clip menu is the shared select menu, so it needs the Settings sheet
+    // that draws its surface and rows.
+    crate::settings::shell::install_select_menu_css();
     super::type_scale::install();
 
     let Some(display) = gdk::Display::default() else {

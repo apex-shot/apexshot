@@ -1,9 +1,9 @@
 //! The recording editor's timeline card.
 //!
 //! The chrome (tool row, transport, ruler, lanes, playhead, zoom pill) mirrors
-//! the source editor. A narrow gutter names each lane, and every lane is a
-//! flat, full-width row beside it, so time zero lands on one x for the ruler,
-//! the filmstrip, the effect pills and the camera lane. The video lane holds
+//! the source editor. Every lane is a flat, full-width row, so time zero lands
+//! on one x for the ruler, the filmstrip, the effect pills and the camera lane.
+//! The video lane holds
 //! the trimmed, filmstripped clip; the zoom and cursor-hide lanes always stay
 //! open so clips can be dropped into them, and a recording with a camera track
 //! gets a compact camera-layout lane beneath them whose chips select the
@@ -52,10 +52,6 @@ const PLAYHEAD_SNAP: f64 = 12.0;
 /// Layout change times closer than this are the same cue, so adding one twice
 /// at a resting playhead selects the first instead of stacking a second.
 const LAYOUT_CUE_EPSILON: f64 = 0.01;
-/// Width of the icon rail left of the lanes, in unscaled pixels. It is its
-/// own widget column, so the lanes' drawing starts at their left edge and the
-/// gutter never enters the timeline's coordinate mapping.
-const LANE_GUTTER_WIDTH: f64 = 34.0;
 /// Height of the ruler row, in unscaled pixels.
 const RULER_HEIGHT: f64 = 36.0;
 /// Height of the filmstrip lane, in unscaled pixels.
@@ -89,18 +85,13 @@ enum EffectTrack {
     Hide,
 }
 
-/// What the lane stack shows: which rows are present and which one carries
-/// the selection. Playback never changes it, so the layout cannot breathe in
-/// and out while the playhead moves.
+/// What the lane stack shows: which rows are present. Playback never changes
+/// it, so the layout cannot breathe in and out while the playhead moves.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 struct LaneState {
     camera: bool,
     zoom: bool,
     hide: bool,
-    video_selected: bool,
-    camera_selected: bool,
-    zoom_selected: bool,
-    hide_selected: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -1271,9 +1262,9 @@ impl Data {
             .map(|template| template.duration)
     }
 
-    /// The lane and gutter flags come from one snapshot, so the two columns
-    /// cannot disagree about which rows exist. Both effect rows are permanent
-    /// drop targets: an empty lane still shows where a clip can go.
+    /// The lane flags come from one snapshot, so the rows cannot disagree
+    /// about which ones exist. Both effect rows are permanent drop targets:
+    /// an empty lane still shows where a clip can go.
     fn lane_state(&self) -> LaneState {
         LaneState {
             camera: self
@@ -1282,10 +1273,6 @@ impl Data {
                 .is_some_and(|webcam| webcam.has_track()),
             zoom: true,
             hide: true,
-            video_selected: self.selected,
-            camera_selected: self.selected_layout.is_some(),
-            zoom_selected: self.selected_zoom.is_some(),
-            hide_selected: self.selected_hide.is_some(),
         }
     }
 
@@ -2805,7 +2792,7 @@ pub(super) fn build(
     let data = Rc::new(RefCell::new(Data::default()));
     // The shared sheet sizes the board and the filmstrip/effect lanes for this
     // card, but it has no camera-lane rule. The scoped sheet below fills that
-    // gap and adds the gutter type for this window only.
+    // gap.
     install_timeline_css(scale);
     // The document needs the camera layer even when this recording has no
     // track: opening a different one has to be able to load it.
@@ -2964,43 +2951,6 @@ pub(super) fn build(
         }
     });
 
-    // The gutter is its own column: every lane's drawing area begins where the
-    // ruler's begins, so time zero maps to one x across the whole card and the
-    // camera row appearing or disappearing cannot shift a lane's coordinate.
-    let ruler_gutter = GtkBox::new(Orientation::Vertical, 0);
-    ruler_gutter.set_size_request(-1, (RULER_HEIGHT * scale).round() as i32);
-    let video_gutter = LaneGutterRow::new(
-        icon_names::custom::CLAPPERBOARD_SYMBOLIC,
-        (VIDEO_LANE_HEIGHT * scale).round() as i32,
-        scale,
-    );
-    let zoom_gutter = LaneGutterRow::new(
-        "zoom-fit-best-symbolic",
-        (EFFECT_LANE_HEIGHT * scale).round() as i32,
-        scale,
-    );
-    let hide_gutter = LaneGutterRow::new(
-        "view-conceal-symbolic",
-        (EFFECT_LANE_HEIGHT * scale).round() as i32,
-        scale,
-    );
-    let camera_gutter = LaneGutterRow::new(
-        icon_names::custom::WEBCAM_SYMBOLIC,
-        (LAYOUT_LANE_HEIGHT * scale).round() as i32,
-        scale,
-    );
-    camera_gutter.row.set_visible(false);
-
-    let gutter = GtkBox::new(Orientation::Vertical, (LANE_GAP * scale).round() as i32);
-    gutter.add_css_class("recording-editor-timeline-gutter");
-    gutter.set_size_request((LANE_GUTTER_WIDTH * scale).round() as i32, -1);
-    gutter.set_valign(Align::Start);
-    gutter.append(&ruler_gutter);
-    gutter.append(&video_gutter.row);
-    gutter.append(&zoom_gutter.row);
-    gutter.append(&hide_gutter.row);
-    gutter.append(&camera_gutter.row);
-
     let lanes = GtkBox::new(Orientation::Vertical, (LANE_GAP * scale).round() as i32);
     lanes.add_css_class("recording-editor-card-tracks");
     lanes.set_hexpand(true);
@@ -3057,9 +3007,9 @@ pub(super) fn build(
         }
     });
 
-    // The playhead covers the content column, not the gutter, so its one line
-    // crosses the ruler and every visible row at the same coordinate the lanes
-    // use. The board keeps the padding below it.
+    // The playhead covers the lane column, so its one line crosses the ruler
+    // and every visible row at the same coordinate the lanes use. The board
+    // keeps the padding below it.
     let content_overlay = Overlay::new();
     content_overlay.set_hexpand(true);
     content_overlay.set_child(Some(&content));
@@ -3068,7 +3018,6 @@ pub(super) fn build(
     let tracks = GtkBox::new(Orientation::Horizontal, 0);
     tracks.add_css_class("recording-editor-card-tracks");
     tracks.set_hexpand(true);
-    tracks.append(&gutter);
     tracks.append(&content_overlay);
 
     let board = Overlay::new();
@@ -3110,10 +3059,6 @@ pub(super) fn build(
         let adjustment = adjustment.clone();
         let scroll_syncing = scroll_syncing.clone();
         let lane_state = lane_state.clone();
-        let video_gutter = video_gutter.clone();
-        let camera_gutter = camera_gutter.clone();
-        let zoom_gutter = zoom_gutter.clone();
-        let hide_gutter = hide_gutter.clone();
         let zoom_listener = zoom_listener.clone();
         let webcam_listener = webcam_listener.clone();
         let project = project.clone();
@@ -3141,16 +3086,7 @@ pub(super) fn build(
             // lane heights.
             if lane_state.get() != Some(state) {
                 lane_state.set(Some(state));
-                apply_lane_state(
-                    state,
-                    &video_gutter,
-                    &camera_gutter,
-                    &zoom_gutter,
-                    &hide_gutter,
-                    &layout_track,
-                    &zoom_track_lane,
-                    &hide_track,
-                );
+                apply_lane_state(state, &layout_track, &zoom_track_lane, &hide_track);
             }
             if let Some(listener) = zoom_listener.borrow().as_ref() {
                 listener();
@@ -3549,75 +3485,19 @@ pub(super) fn build(
     timeline
 }
 
-/// One row of the timeline's label gutter: a small symbolic glyph and the
-/// track's short name, sized to match the lane beside it.
-#[derive(Clone)]
-struct LaneGutterRow {
-    row: GtkBox,
-    icon: Image,
-}
-
-impl LaneGutterRow {
-    fn new(icon_name: &str, height: i32, scale: f64) -> Self {
-        let row = GtkBox::new(Orientation::Horizontal, 0);
-        row.add_css_class("recording-editor-timeline-gutter-row");
-        row.set_size_request(-1, height);
-        let icon = Image::from_icon_name(icon_name);
-        icon.set_pixel_size((14.0 * scale).round() as i32);
-        icon.set_valign(Align::Center);
-        icon.set_halign(Align::Center);
-        icon.add_css_class("recording-editor-timeline-gutter-icon");
-        row.append(&icon);
-        Self { row, icon }
-    }
-
-    fn set_selected(&self, selected: bool) {
-        if selected {
-            self.icon
-                .add_css_class("recording-editor-timeline-gutter-icon-selected");
-        } else {
-            self.icon
-                .remove_css_class("recording-editor-timeline-gutter-icon-selected");
-        }
-    }
-}
-
-/// Apply a lane snapshot to the gutter and the drawing areas. Only called when
-/// the snapshot changes, so playback never re-measures the card.
-#[allow(clippy::too_many_arguments)]
+/// Apply a lane snapshot to the drawing areas. Only called when the snapshot
+/// changes, so playback never re-measures the card.
 fn apply_lane_state(
     state: LaneState,
-    video: &LaneGutterRow,
-    camera: &LaneGutterRow,
-    zoom: &LaneGutterRow,
-    hide: &LaneGutterRow,
     layout_track: &DrawingArea,
     zoom_track: &DrawingArea,
     hide_track: &DrawingArea,
 ) {
-    camera.row.set_visible(state.camera);
     layout_track.set_visible(state.camera);
     // Both effect lanes are permanent drop targets, so their rows never
     // collapse, even while empty.
-    zoom.row.set_visible(state.zoom);
     zoom_track.set_visible(state.zoom);
-    hide.row.set_visible(state.hide);
     hide_track.set_visible(state.hide);
-    set_effect_gutter(zoom, EffectTrack::Zoom);
-    set_effect_gutter(hide, EffectTrack::Hide);
-
-    video.set_selected(state.video_selected);
-    camera.set_selected(state.camera_selected);
-    zoom.set_selected(state.zoom_selected);
-    hide.set_selected(state.hide_selected);
-}
-
-fn set_effect_gutter(row: &LaneGutterRow, track: EffectTrack) {
-    let icon = match track {
-        EffectTrack::Zoom => "zoom-fit-best-symbolic",
-        EffectTrack::Hide => "view-conceal-symbolic",
-    };
-    row.icon.set_icon_name(Some(icon));
 }
 
 /// The one stylesheet this card adds on top of the shared editor sheet.
@@ -3633,21 +3513,6 @@ fn timeline_css(scale: f64) -> String {
         "
 .recording-editor-timeline-compact .recording-editor-card-layout-track {{
     min-height: {camera};
-}}
-.recording-editor-timeline-compact .recording-editor-timeline-gutter-row {{
-    padding: 0 10px;
-}}
-.recording-editor-timeline-compact .recording-editor-timeline-gutter-icon {{
-    color: alpha(white, 0.50);
-}}
-.recording-editor-timeline-compact .recording-editor-timeline-gutter-icon-selected {{
-    color: alpha(white, 0.94);
-}}
-.editor-theme-light .recording-editor-timeline-compact .recording-editor-timeline-gutter-icon {{
-    color: alpha(#111827, 0.50);
-}}
-.editor-theme-light .recording-editor-timeline-compact .recording-editor-timeline-gutter-icon-selected {{
-    color: alpha(#111827, 0.92);
 }}
 ",
         camera = px(LAYOUT_LANE_HEIGHT),
@@ -4032,6 +3897,7 @@ fn bind_clip(
                 MenuTarget::Video,
                 x,
                 y,
+                scale,
                 data.clone(),
                 repaint.clone(),
                 None,
@@ -4176,7 +4042,7 @@ fn bind_clip(
 /// The red read-out line belongs to the content column, not to one lane:
 /// motion over the ruler, a gap, a lane or a pill all report the same time, so
 /// the line stays put as the pointer crosses between them instead of blinking
-/// out. The label gutter is outside this column, so it never reports a time.
+/// out. The column starts at the ruler's origin, so it never reports a time.
 fn bind_board_hover(
     content: &GtkBox,
     data: Rc<RefCell<Data>>,
@@ -4470,7 +4336,16 @@ fn bind_effect_lane(
                 EffectTrack::Zoom => MenuTarget::Zoom(index),
                 EffectTrack::Hide => MenuTarget::Hide(index),
             };
-            show_clip_menu(&lane, target, x, y, data.clone(), repaint.clone(), None);
+            show_clip_menu(
+                &lane,
+                target,
+                x,
+                y,
+                scale,
+                data.clone(),
+                repaint.clone(),
+                None,
+            );
         }
     });
     lane.add_controller(menu);
@@ -4780,6 +4655,7 @@ fn bind_layout_lane(
                 target,
                 x,
                 y,
+                scale,
                 data.clone(),
                 repaint.clone(),
                 Some(&timeline),
@@ -4846,31 +4722,38 @@ enum MenuTarget {
 struct MenuItem {
     icon: &'static str,
     label: String,
-    danger: bool,
     action: Rc<dyn Fn()>,
 }
 
 /// Pop up the clip menu at `(x, y)` in `anchor`'s space. It opens upward: the
 /// tracks sit at the bottom of the editor, so a downward menu would fall off
-/// the window.
+/// the window. The surface and rows are the shared select menu's, so this menu
+/// reads like the Motion timeline's.
+#[allow(clippy::too_many_arguments)]
 fn show_clip_menu(
     anchor: &impl IsA<gtk4::Widget>,
     target: MenuTarget,
     x: f64,
     y: f64,
+    scale: f64,
     data: Rc<RefCell<Data>>,
     repaint: Rc<dyn Fn()>,
     timeline: Option<&Timeline>,
 ) {
+    // The menu is drawn at its authored size like the Motion timeline's, so a
+    // high-DPI display does not inflate rows the shared sheet already sizes.
+    let scale = scale.min(1.0);
     let popover = Popover::new();
-    popover.add_css_class("recording-editor-clip-menu-popover");
+    popover.add_css_class("history-action-popover");
+    popover.add_css_class("settings-select-popover");
     popover.set_parent(anchor);
     popover.set_has_arrow(false);
     popover.set_autohide(true);
     popover.set_position(PositionType::Top);
 
-    let card = GtkBox::new(Orientation::Vertical, 0);
-    card.add_css_class("recording-editor-clip-menu");
+    let card = GtkBox::new(Orientation::Vertical, (2.0 * scale).round() as i32);
+    card.add_css_class("settings-select-menu");
+    card.set_size_request((160.0 * scale).round() as i32, -1);
 
     let mut items = Vec::new();
     let mut offer_paste = false;
@@ -4878,7 +4761,6 @@ fn show_clip_menu(
         MenuTarget::Video => items.push(MenuItem {
             icon: icon_names::custom::USER_TRASH_SYMBOLIC,
             label: t("Delete"),
-            danger: true,
             action: {
                 let data = data.clone();
                 let repaint = repaint.clone();
@@ -4907,7 +4789,6 @@ fn show_clip_menu(
             MenuItem {
                 icon: icon_names::shipped::CLIPBOARD_PASTE_REGULAR,
                 label: t("Paste"),
-                danger: false,
                 action: {
                     let data = data.clone();
                     let repaint = repaint.clone();
@@ -4920,11 +4801,8 @@ fn show_clip_menu(
         );
     }
 
-    for (position, item) in items.into_iter().enumerate() {
-        if item.danger && position > 0 {
-            card.append(&menu_separator());
-        }
-        card.append(&clip_menu_row(item, &popover));
+    for item in items {
+        card.append(&clip_menu_row(item, &popover, scale));
     }
 
     popover.set_child(Some(&card));
@@ -4952,7 +4830,6 @@ fn effect_menu_items(
     items.push(MenuItem {
         icon: icon_names::shipped::COPY_ARROW_RIGHT_REGULAR,
         label: t("Duplicate"),
-        danger: false,
         action: {
             let data = data.clone();
             let repaint = repaint.clone();
@@ -4965,7 +4842,6 @@ fn effect_menu_items(
     items.push(MenuItem {
         icon: icon_names::shipped::COPY_REGULAR,
         label: t("Copy"),
-        danger: false,
         action: {
             let data = data.clone();
             let repaint = repaint.clone();
@@ -4978,7 +4854,6 @@ fn effect_menu_items(
     items.push(MenuItem {
         icon: icon_names::shipped::CUT_REGULAR,
         label: t("Cut"),
-        danger: false,
         action: {
             let data = data.clone();
             let repaint = repaint.clone();
@@ -4995,7 +4870,6 @@ fn effect_menu_items(
             icon_names::shipped::EYE_OFF_REGULAR
         },
         label: if hidden_now { t("Show") } else { t("Hide") },
-        danger: false,
         action: {
             let data = data.clone();
             let repaint = repaint.clone();
@@ -5009,7 +4883,6 @@ fn effect_menu_items(
     items.push(MenuItem {
         icon: icon_names::custom::USER_TRASH_SYMBOLIC,
         label: t("Delete"),
-        danger: true,
         action: {
             let data = data.clone();
             let repaint = repaint.clone();
@@ -5044,7 +4917,6 @@ fn layout_menu_items(
         .map(|&layout| MenuItem {
             icon: layout_menu_icon(layout),
             label: t(layout_lane_label(layout)),
-            danger: false,
             action: {
                 let timeline = timeline.clone();
                 Rc::new(move || {
@@ -5063,7 +4935,6 @@ fn layout_menu_items(
     items.push(MenuItem {
         icon: "list-add-symbolic",
         label: t("Add change at playhead"),
-        danger: false,
         action: {
             let timeline = timeline.clone();
             Rc::new(move || timeline.add_webcam_layout_cue())
@@ -5081,7 +4952,6 @@ fn layout_menu_items(
         } else {
             t("Turn camera on")
         },
-        danger: false,
         action: {
             let timeline = timeline.clone();
             Rc::new(move || timeline.set_webcam_enabled(!shown))
@@ -5092,7 +4962,6 @@ fn layout_menu_items(
         items.push(MenuItem {
             icon: icon_names::custom::USER_TRASH_SYMBOLIC,
             label: t("Delete change"),
-            danger: true,
             action: {
                 let timeline = timeline.clone();
                 Rc::new(move || timeline.remove_webcam_layout_cue(index))
@@ -5129,25 +4998,16 @@ fn layout_menu_icon(layout: super::webcam::CameraLayout) -> &'static str {
     }
 }
 
-fn menu_separator() -> GtkBox {
-    let separator = GtkBox::new(Orientation::Vertical, 0);
-    separator.add_css_class("recording-editor-clip-menu-separator");
-    separator.set_size_request(-1, 1);
-    separator
-}
-
-fn clip_menu_row(item: MenuItem, popover: &Popover) -> Button {
+fn clip_menu_row(item: MenuItem, popover: &Popover, scale: f64) -> Button {
     let button = Button::new();
-    button.add_css_class("recording-editor-clip-menu-row");
-    if item.danger {
-        button.add_css_class("recording-editor-clip-menu-row-danger");
-    }
+    button.add_css_class("history-action-btn");
     button.set_has_frame(false);
+    button.set_focus_on_click(false);
+    button.set_size_request(-1, (32.0 * scale).round() as i32);
 
-    let row = GtkBox::new(Orientation::Horizontal, 10);
-    row.add_css_class("recording-editor-clip-menu-row-inner");
+    let row = GtkBox::new(Orientation::Horizontal, (10.0 * scale).round() as i32);
     let icon = Image::from_icon_name(item.icon);
-    icon.set_pixel_size(15);
+    icon.set_pixel_size((15.0 * scale).round() as i32);
     let label = Label::new(Some(&item.label));
     label.set_xalign(0.0);
     label.set_hexpand(true);
@@ -7812,9 +7672,9 @@ mod tests {
     }
 
     #[test]
-    fn both_effect_lanes_and_gutters_stay_open_without_clips() {
-        // The lane flags drive the drawing area and its gutter row together,
-        // so both true means both drop targets are on screen from the start.
+    fn both_effect_lanes_stay_open_without_clips() {
+        // The lane flags drive the drawing areas, so both true means both drop
+        // targets are on screen from the start.
         let data = loaded();
         let state = data.lane_state();
         assert!(state.zoom);
@@ -7840,13 +7700,13 @@ mod tests {
     }
 
     #[test]
-    fn the_gutter_leaves_lane_coordinates_on_the_rulers_origin() {
-        let (mut data, scratch) = webcam_loaded("gutter");
+    fn the_lanes_share_the_rulers_origin() {
+        let (mut data, scratch) = webcam_loaded("lanes");
         for at in [1.0, 4.0, 7.0] {
             data.add_layout_cue(at).expect("the track takes a cue");
         }
         assert!(data.add_effect(EffectTrack::Zoom, 0.0).is_some());
-        // What a lane actually gets: the content column beside the gutter.
+        // What a lane actually gets: the full width of the content column.
         let width = 900.0;
 
         for (scale, scroll) in [(0.0, 0.0), (40.0, 0.5), (80.0, 0.5)] {
@@ -8044,10 +7904,8 @@ mod tests {
         assert!(!css.contains("recording-editor-card-zoom-track"));
         assert!(!css.contains("recording-editor-card-hide-track"));
         assert!(!css.contains("min-height: 0"));
-        // The gutter is an icon rail: the lane titles and their type rules are
-        // gone, and the selected icon carries the same emphasis the title did.
-        assert!(!css.contains("recording-editor-timeline-gutter-label"));
-        assert!(css.contains("recording-editor-timeline-gutter-icon-selected"));
+        // The lane rail is gone, so the sheet carries no gutter rules at all.
+        assert!(!css.contains("recording-editor-timeline-gutter"));
         for rejected in ["max-height", "max-width", "overflow"] {
             assert!(
                 !css.contains(rejected),

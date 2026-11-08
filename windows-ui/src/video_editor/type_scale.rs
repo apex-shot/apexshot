@@ -70,7 +70,6 @@ const VIDEO_EDITOR_TYPE_CSS: &str = r#"
         .video-editor-root .recording-editor-bg-custom-edit label,
         .video-editor-root .recording-editor-gradient-steps-header label,
         .video-editor-root .recording-editor-custom-value,
-        .video-editor-root .recording-editor-clip-menu-row,
         .video-editor-root .video-editor-value-number,
         .video-editor-root .recording-editor-webcam-card-label,
         .video-editor-root .recording-editor-webcam-scope-btn,
