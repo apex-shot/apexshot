@@ -16,40 +16,80 @@ use std::rc::Rc;
 const STUDIO_URL: &str = "https://apexshot.org/studio";
 const SCRIM_CLASS: &str = "apexshot-studio-scrim";
 const LIGHT_CLASS: &str = "apexshot-studio-light";
-const CARD_WIDTH: i32 = 440;
+const CARD_WIDTH: f64 = 440.0;
 const NATURAL_WIDTH_CHARS: i32 = 20;
 
+/// Logical size to device pixels, the way the editor's own widgets do it. GDK
+/// already reports a scaled display on Linux, so only Windows needs the
+/// conversion.
+fn px(value: f64) -> i32 {
+    #[cfg(target_os = "windows")]
+    {
+        (value * crate::platform::ui_scale()).round() as i32
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        value.round() as i32
+    }
+}
+
 const CSS: &str = r#"
-    .apexshot-studio-scrim { background: alpha(#000000, 0.45); }
-    .apexshot-studio-card {
-        font-family: 'Inter', 'Noto Sans', system-ui, sans-serif;
-        background: #0f0f0f;
-        color: #f1f1f3;
-        border: 1px solid alpha(white, 0.16);
+    .apexshot-studio-scrim {
+        background: rgba(5, 7, 12, 0.55);
         border-radius: 12px;
-        padding: 20px 22px 16px;
-        box-shadow: none;
+    }
+    .apexshot-studio-card {
+        font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+        background: #1c1c1e;
+        color: #f3f0ec;
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        border-radius: 12px;
+        padding: 18px;
+        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
     }
     .apexshot-studio-title {
-        color: alpha(white, 0.92);
-        font-size: 13px;
+        color: #f3f0ec;
+        font-size: 15px;
         font-weight: 600;
-        letter-spacing: -0.1px;
+        letter-spacing: -0.2px;
     }
-    .apexshot-studio-subtitle,
-    .apexshot-studio-feature-detail,
-    .apexshot-studio-term { font-size: 11px; color: alpha(white, 0.52); line-height: 1.4; }
-    .apexshot-studio-feature { padding: 10px 0; }
-    .apexshot-studio-feature-divided { border-top: 1px solid alpha(white, 0.06); }
-    .apexshot-studio-feature-title { font-size: 12px; font-weight: 500; }
-    .apexshot-studio-feature-icon { color: alpha(white, 0.68); }
+    .apexshot-studio-subtitle {
+        font-size: 13px;
+        color: #a3a09c;
+        line-height: 1.4;
+    }
+    .apexshot-studio-feature { padding: 7px 0; }
+    .apexshot-studio-feature-title {
+        font-size: 13px;
+        font-weight: 500;
+        color: #f3f0ec;
+    }
+    .apexshot-studio-feature-detail {
+        font-size: 13px;
+        color: #a3a09c;
+        line-height: 1.35;
+    }
+    .apexshot-studio-feature-icon { color: #b9b4ad; }
     .apexshot-studio-used {
-        font-size: 10px;
-        color: alpha(white, 0.42);
+        font-size: 11px;
+        font-weight: 700;
+        color: #ff9250;
+        background: rgba(255, 103, 13, 0.18);
+        border-radius: 999px;
+        padding: 2px 8px;
     }
-    .apexshot-studio-license-actions { padding: 8px 0; }
-    .apexshot-studio-note { font-size: 10px; color: alpha(white, 0.42); }
-    .apexshot-studio-feedback { font-size: 11px; color: #ff8a80; }
+    .apexshot-studio-price {
+        font-size: 18px;
+        font-weight: 600;
+        color: #f3f0ec;
+    }
+    .apexshot-studio-term {
+        font-size: 12px;
+        color: #83807b;
+        line-height: 1.4;
+    }
+    .apexshot-studio-note { font-size: 12px; color: #83807b; }
+    .apexshot-studio-feedback { font-size: 12px; color: #ff8a80; }
     .apexshot-studio-card button {
         background-image: none;
         text-shadow: none;
@@ -58,75 +98,132 @@ const CSS: &str = r#"
     }
     button.apexshot-studio-primary,
     button.apexshot-studio-activate {
-        min-width: 72px;
-        min-height: 28px;
+        min-height: 30px;
         padding: 0 14px;
         border: none;
         border-radius: 6px;
         background: #ff670d;
-        color: white;
-        font-size: 12px;
+        color: #ffffff;
+        font-size: 13px;
         font-weight: 600;
     }
     button.apexshot-studio-primary:hover,
-    button.apexshot-studio-activate:hover { background: #c06a44; }
+    button.apexshot-studio-activate:hover { background: #ff792b; }
     button.apexshot-studio-primary:active,
-    button.apexshot-studio-activate:active { background: #8a4a2d; }
+    button.apexshot-studio-activate:active { background: #e65c0a; }
     button.apexshot-studio-ghost {
-        min-height: 28px;
-        padding: 0 10px;
+        min-height: 30px;
+        padding: 0 12px;
+        border: none;
+        border-radius: 6px;
+        background: transparent;
+        color: #a3a09c;
+        font-size: 13px;
+        font-weight: 500;
+    }
+    button.apexshot-studio-ghost:hover { background: rgba(255, 255, 255, 0.06); color: #f3f0ec; }
+    button.apexshot-studio-close {
+        min-width: 24px;
+        min-height: 24px;
+        padding: 0;
         border: none;
         border-radius: 5px;
         background: transparent;
-        color: alpha(white, 0.68);
-        font-size: 12px;
+        color: #83807b;
     }
-    button.apexshot-studio-ghost:hover { background: alpha(white, 0.1); color: white; }
-    button.apexshot-studio-license { padding: 0; min-height: 20px; font-size: 11px; }
-    button.apexshot-studio-license:hover { background: transparent; }
-    button.apexshot-studio-activate:disabled { background: alpha(white, 0.06); color: alpha(white, 0.34); }
-    entry.apexshot-studio-entry {
+    button.apexshot-studio-close:hover { background: rgba(255, 255, 255, 0.08); color: #f3f0ec; }
+    button.apexshot-studio-close:active { background: rgba(255, 255, 255, 0.12); }
+    button.apexshot-studio-close image { -gtk-icon-size: 14px; }
+    button.apexshot-studio-license {
         min-height: 28px;
-        padding: 0 8px;
-        border: 1px solid alpha(white, 0.12);
+        padding: 0 12px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
         border-radius: 6px;
-        background: alpha(white, 0.06);
-        color: #f1f1f3;
-        font-size: 12px;
+        background: rgba(255, 255, 255, 0.04);
+        color: #d8d5d1;
+        font-size: 13px;
+        font-weight: 500;
+    }
+    button.apexshot-studio-license:hover {
+        border-color: rgba(255, 255, 255, 0.24);
+        background: rgba(255, 255, 255, 0.08);
+        color: #f3f0ec;
+    }
+    button.apexshot-studio-license:active { background: rgba(255, 255, 255, 0.12); }
+    button.apexshot-studio-activate:disabled {
+        background: rgba(255, 255, 255, 0.06);
+        color: rgba(255, 255, 255, 0.34);
+    }
+    entry.apexshot-studio-entry {
+        min-height: 30px;
+        padding: 0 10px;
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.05);
+        color: #f3f0ec;
+        font-size: 13px;
         box-shadow: none;
     }
-    entry.apexshot-studio-entry:focus-within { border-color: alpha(white, 0.28); }
+    entry.apexshot-studio-entry:focus-within { border-color: rgba(255, 255, 255, 0.28); }
 
-    .apexshot-studio-light.apexshot-studio-scrim { background: alpha(#111827, 0.28); }
+    .apexshot-studio-light.apexshot-studio-scrim { background: rgba(17, 24, 39, 0.28); }
     .apexshot-studio-light .apexshot-studio-card {
         background: #ffffff;
         color: #1d2129;
-        border-color: alpha(#111827, 0.16);
+        border-color: rgba(17, 24, 39, 0.10);
+        box-shadow: 0 24px 64px rgba(17, 24, 39, 0.18);
     }
-    .apexshot-studio-light .apexshot-studio-title { color: alpha(#1d2129, 0.92); }
+    .apexshot-studio-light .apexshot-studio-title { color: #1d2129; }
     .apexshot-studio-light .apexshot-studio-subtitle,
-    .apexshot-studio-light .apexshot-studio-feature-detail,
-    .apexshot-studio-light .apexshot-studio-term { color: alpha(#1d2129, 0.58); }
-    .apexshot-studio-light .apexshot-studio-feature-divided { border-top-color: alpha(#111827, 0.09); }
-    .apexshot-studio-light .apexshot-studio-feature-icon { color: alpha(#1d2129, 0.68); }
-    .apexshot-studio-light .apexshot-studio-used { color: alpha(#1d2129, 0.5); }
-    .apexshot-studio-light .apexshot-studio-note { color: alpha(#1d2129, 0.5); }
+    .apexshot-studio-light .apexshot-studio-feature-detail { color: #5c6470; }
+    .apexshot-studio-light .apexshot-studio-feature-title { color: #1d2129; }
+    .apexshot-studio-light .apexshot-studio-feature-icon { color: #6b7280; }
+    .apexshot-studio-light .apexshot-studio-used {
+        color: #c2500a;
+        background: rgba(214, 84, 6, 0.13);
+    }
+    .apexshot-studio-light .apexshot-studio-price { color: #1d2129; }
+    .apexshot-studio-light .apexshot-studio-term,
+    .apexshot-studio-light .apexshot-studio-note { color: #6b7280; }
     .apexshot-studio-light .apexshot-studio-feedback { color: #b42318; }
-    .apexshot-studio-light button.apexshot-studio-ghost { color: alpha(#1d2129, 0.68); }
+    .apexshot-studio-light button.apexshot-studio-ghost { color: #5c6470; }
     .apexshot-studio-light button.apexshot-studio-ghost:hover {
-        background: alpha(#111827, 0.07);
+        background: rgba(17, 24, 39, 0.06);
         color: #1d2129;
+    }
+    .apexshot-studio-light button.apexshot-studio-close { color: #6b7280; }
+    .apexshot-studio-light button.apexshot-studio-close:hover {
+        background: rgba(17, 24, 39, 0.07);
+        color: #1d2129;
+    }
+    .apexshot-studio-light button.apexshot-studio-close:active {
+        background: rgba(17, 24, 39, 0.10);
+    }
+    .apexshot-studio-light button.apexshot-studio-license {
+        border-color: rgba(17, 24, 39, 0.16);
+        background: rgba(17, 24, 39, 0.03);
+        color: #1d2129;
+    }
+    .apexshot-studio-light button.apexshot-studio-license:hover {
+        border-color: rgba(17, 24, 39, 0.26);
+        background: rgba(17, 24, 39, 0.06);
+        color: #1d2129;
+    }
+    .apexshot-studio-light button.apexshot-studio-license:active {
+        background: rgba(17, 24, 39, 0.09);
     }
     .apexshot-studio-light button.apexshot-studio-activate:disabled {
-        background: alpha(#111827, 0.07);
-        color: alpha(#1d2129, 0.34);
+        background: rgba(17, 24, 39, 0.07);
+        color: rgba(29, 33, 41, 0.34);
     }
     .apexshot-studio-light entry.apexshot-studio-entry {
-        background: alpha(#111827, 0.04);
-        border-color: alpha(#111827, 0.16);
+        background: rgba(17, 24, 39, 0.04);
+        border-color: rgba(17, 24, 39, 0.16);
         color: #1d2129;
     }
-    .apexshot-studio-light entry.apexshot-studio-entry:focus-within { border-color: alpha(#111827, 0.32); }
+    .apexshot-studio-light entry.apexshot-studio-entry:focus-within {
+        border-color: rgba(17, 24, 39, 0.32);
+    }
 "#;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -162,7 +259,7 @@ enum PrimaryAction {
 impl PrimaryAction {
     fn label(self) -> String {
         match self {
-            Self::Upgrade => t("Upgrade to Studio — $39 with 12 months of updates"),
+            Self::Upgrade => t("Upgrade to Studio"),
             Self::GetStudioReadyBuild => t("Check Studio availability"),
             Self::RecoverLicense => t("Recover license"),
             Self::ManageLicense => t("Manage license"),
@@ -261,21 +358,48 @@ pub(crate) fn gate(
     let Err(error) = ensure_export_allowed(capabilities) else {
         return true;
     };
-    let Some(overlay) = window.child().and_downcast::<Overlay>() else {
+    let dark = !has_descendant_with_class(window.upcast_ref(), "editor-theme-light");
+    let Some(overlay) = overlay_for(window) else {
         crate::utils::notify::desktop_notification_important(
             &t("Studio export unavailable"),
             &error.to_string(),
         );
         return false;
     };
-    present(&overlay, &error, capabilities, Rc::new(retry));
+    present(&overlay, &error, capabilities, dark, Rc::new(retry));
     false
+}
+
+/// The overlay a card can be raised into. The image editor's window child is
+/// one, while the video editor keeps its overlay under the window's root box,
+/// so a direct-child cast would miss it there.
+fn overlay_for(window: &ApplicationWindow) -> Option<Overlay> {
+    let child = window.child()?;
+    if let Ok(overlay) = child.clone().downcast::<Overlay>() {
+        return Some(overlay);
+    }
+    first_overlay(&child)
+}
+
+fn first_overlay(root: &gtk4::Widget) -> Option<Overlay> {
+    if let Ok(overlay) = root.clone().downcast::<Overlay>() {
+        return Some(overlay);
+    }
+    let mut child = root.first_child();
+    while let Some(current) = child {
+        if let Some(overlay) = first_overlay(&current) {
+            return Some(overlay);
+        }
+        child = current.next_sibling();
+    }
+    None
 }
 
 fn present(
     overlay: &Overlay,
     error: &StudioEntitlementError,
     capabilities: StudioCapabilities,
+    dark: bool,
     retry: Rc<dyn Fn()>,
 ) {
     if has_child_with_class(overlay, SCRIM_CLASS) {
@@ -290,7 +414,7 @@ fn present(
     scrim.set_hexpand(true);
     scrim.set_vexpand(true);
     scrim.set_can_target(true);
-    if has_descendant_with_class(overlay.upcast_ref(), "editor-theme-light") {
+    if !dark {
         scrim.add_css_class(LIGHT_CLASS);
     }
 
@@ -304,7 +428,7 @@ fn present(
         }
     });
 
-    let (card, focus_target) = build_card(error, capabilities, &dismiss, &retry);
+    let (card, focus_target) = build_card(error, capabilities, dark, &dismiss, &retry);
     scrim.append(&card);
 
     let keys = EventControllerKey::new();
@@ -331,6 +455,7 @@ fn present(
 fn build_card(
     error: &StudioEntitlementError,
     capabilities: StudioCapabilities,
+    dark: bool,
     dismiss: &Rc<dyn Fn()>,
     retry: &Rc<dyn Fn()>,
 ) -> (GtkBox, gtk4::Widget) {
@@ -338,7 +463,7 @@ fn build_card(
 
     let card = GtkBox::new(Orientation::Vertical, 0);
     card.add_css_class("apexshot-studio-card");
-    card.set_size_request(CARD_WIDTH, -1);
+    card.set_size_request(px(CARD_WIDTH), -1);
     card.set_halign(Align::Center);
     card.set_valign(Align::Center);
     card.set_hexpand(true);
@@ -346,21 +471,25 @@ fn build_card(
 
     let (title, subtitle) = card_copy(error);
 
-    let heading = GtkBox::new(Orientation::Vertical, 6);
+    let heading = GtkBox::new(Orientation::Vertical, px(6.0));
+    let title_row = GtkBox::new(Orientation::Horizontal, px(10.0));
     let title_label = text_label(&title, "apexshot-studio-title");
+    title_label.set_hexpand(true);
+    let close = close_button();
+    close.connect_clicked({
+        let dismiss = dismiss.clone();
+        move |_| dismiss()
+    });
+    title_row.append(&title_label);
+    title_row.append(&close);
     let subtitle_label = text_label(&subtitle, "apexshot-studio-subtitle");
-    heading.append(&title_label);
+    heading.append(&title_row);
     heading.append(&subtitle_label);
     card.append(&heading);
 
     if kind == Kind::Purchase {
-        card.append(&feature_panel(capabilities));
-        let terms = text_label(
-            &t("Includes 12 months of updates. Versions you get keep working forever."),
-            "apexshot-studio-term",
-        );
-        terms.set_margin_top(14);
-        card.append(&terms);
+        card.append(&feature_panel(capabilities, dark));
+        card.append(&offer_block());
     }
 
     let license_row = license_entry(capabilities, dismiss, retry);
@@ -379,8 +508,8 @@ fn build_card(
         move |_| dismiss()
     });
 
-    let actions = GtkBox::new(Orientation::Horizontal, 8);
-    actions.set_margin_top(12);
+    let actions = GtkBox::new(Orientation::Horizontal, px(8.0));
+    actions.set_margin_top(px(16.0));
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
     let action = primary_action(error);
@@ -412,8 +541,8 @@ fn build_card(
                     }
                 }
             });
-            let license_actions = GtkBox::new(Orientation::Horizontal, 12);
-            license_actions.add_css_class("apexshot-studio-license-actions");
+            let license_actions = GtkBox::new(Orientation::Horizontal, px(12.0));
+            license_actions.set_margin_top(px(14.0));
             let refund = text_label(
                 &t("14-day refund on your first purchase."),
                 "apexshot-studio-term",
@@ -464,54 +593,61 @@ fn build_card(
         &t("Capture, annotation, recording and clean exports stay free."),
         "apexshot-studio-note",
     );
-    note.set_margin_top(14);
+    note.set_margin_top(px(12.0));
     card.append(&note);
 
     (card, focus_target)
 }
 
-fn feature_panel(capabilities: StudioCapabilities) -> GtkBox {
-    let panel = GtkBox::new(Orientation::Vertical, 0);
-    panel.set_margin_top(10);
+/// Settings pairs every icon with a light-theme drawing; the card reads the
+/// same package so its rows look like the pages they describe.
+fn themed_icon(dark: bool, dark_icon: &'static str, light_icon: &'static str) -> &'static str {
+    if dark {
+        dark_icon
+    } else {
+        light_icon
+    }
+}
 
-    for (index, (feature, used)) in features_for(capabilities).into_iter().enumerate() {
+fn feature_panel(capabilities: StudioCapabilities, dark: bool) -> GtkBox {
+    let panel = GtkBox::new(Orientation::Vertical, 0);
+    panel.set_margin_top(px(12.0));
+
+    for (feature, used) in features_for(capabilities) {
         let (title, detail, icon_name) = match feature {
             Feature::Motion => (
                 t("Motion timeline"),
                 t("Animate your captures with titles and easing, then export as MP4."),
-                custom::SPLINE_SYMBOLIC,
+                themed_icon(dark, custom::SPLINE, custom::SPLINE_LIGHT),
             ),
             Feature::Placement => (
                 t("Perspective and placement"),
                 t("Tilt, rotate and position a still inside its background."),
-                custom::OVERLAPPING_WINDOWS_SYMBOLIC,
+                themed_icon(dark, custom::PANELS_TOP_LEFT, custom::PANELS_TOP_LEFT_LIGHT),
             ),
             Feature::Camera => (
                 t("Camera controls"),
                 t("Instant zooms, speed, smoothness and motion blur for recordings."),
-                custom::SETTINGS_SYMBOLIC,
+                themed_icon(dark, custom::CAMERA, custom::CAMERA_LIGHT),
             ),
             Feature::Upscale => (
                 t("Neural upscaling"),
                 t("Enhance small screenshots locally before image and Motion exports."),
-                custom::SETTINGS_SYMBOLIC,
+                custom::WAND_SPARKLES_SYMBOLIC,
             ),
         };
 
-        let row = GtkBox::new(Orientation::Horizontal, 12);
+        let row = GtkBox::new(Orientation::Horizontal, px(12.0));
         row.add_css_class("apexshot-studio-feature");
-        if index > 0 {
-            row.add_css_class("apexshot-studio-feature-divided");
-        }
         let icon = Image::from_icon_name(icon_name);
         icon.add_css_class("apexshot-studio-feature-icon");
-        icon.set_pixel_size(16);
+        icon.set_pixel_size(px(16.0));
         icon.set_valign(Align::Start);
-        icon.set_margin_top(1);
+        icon.set_margin_top(px(1.0));
 
-        let text = GtkBox::new(Orientation::Vertical, 4);
+        let text = GtkBox::new(Orientation::Vertical, px(4.0));
         text.set_hexpand(true);
-        let heading = GtkBox::new(Orientation::Horizontal, 12);
+        let heading = GtkBox::new(Orientation::Horizontal, px(12.0));
         let title = text_label(&title, "apexshot-studio-feature-title");
         title.set_hexpand(true);
         heading.append(&title);
@@ -529,6 +665,23 @@ fn feature_panel(capabilities: StudioCapabilities) -> GtkBox {
     panel
 }
 
+/// The price and what it includes, kept out of the button so the primary
+/// action stays a short call to action.
+fn offer_block() -> GtkBox {
+    let block = GtkBox::new(Orientation::Vertical, px(3.0));
+    block.set_margin_top(px(18.0));
+
+    let price = Label::new(Some("$39"));
+    price.add_css_class("apexshot-studio-price");
+    price.set_xalign(0.0);
+    block.append(&price);
+    block.append(&text_label(
+        &t("Includes 12 months of updates. Versions you get keep working forever."),
+        "apexshot-studio-term",
+    ));
+    block
+}
+
 struct LicenseEntry {
     container: GtkBox,
     entry: Entry,
@@ -539,11 +692,11 @@ fn license_entry(
     dismiss: &Rc<dyn Fn()>,
     retry: &Rc<dyn Fn()>,
 ) -> LicenseEntry {
-    let container = GtkBox::new(Orientation::Vertical, 6);
-    container.set_margin_top(4);
-    container.set_margin_bottom(4);
+    let container = GtkBox::new(Orientation::Vertical, px(6.0));
+    container.set_margin_top(px(4.0));
+    container.set_margin_bottom(px(4.0));
 
-    let row = GtkBox::new(Orientation::Horizontal, 8);
+    let row = GtkBox::new(Orientation::Horizontal, px(8.0));
     let entry = Entry::new();
     entry.add_css_class("apexshot-studio-entry");
     entry.set_hexpand(true);
@@ -638,6 +791,32 @@ fn ghost_button(text: &str) -> Button {
     button
 }
 
+/// The top-right dismiss. It closes the card the same way Escape does.
+fn close_button() -> Button {
+    let tooltip = t("Close");
+    let button = Button::builder()
+        .has_frame(false)
+        .tooltip_text(&tooltip)
+        .build();
+    button.add_css_class("apexshot-studio-close");
+    button.set_valign(Align::Start);
+    button.set_child(Some(&Image::from_icon_name("window-close-symbolic")));
+    button
+}
+
+/// The sheet is authored at 100%, like the editor's own, so the Windows build
+/// runs it through the same display scaler. GDK already scales on Linux.
+fn scaled_css() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        crate::css_scale::scale_px_lengths(CSS, crate::platform::ui_scale())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        CSS.to_owned()
+    }
+}
+
 fn install_css() {
     thread_local! {
         static INSTALLED: Cell<bool> = const { Cell::new(false) };
@@ -649,7 +828,7 @@ fn install_css() {
         return;
     };
     let provider = CssProvider::new();
-    provider.load_from_data(CSS);
+    provider.load_from_data(&scaled_css());
     gtk4::style_context_add_provider_for_display(
         &display,
         &provider,
@@ -718,7 +897,7 @@ mod tests {
             (
                 StudioEntitlementError::NotActivated,
                 PrimaryAction::Upgrade,
-                t("Upgrade to Studio — $39 with 12 months of updates"),
+                t("Upgrade to Studio"),
                 Some(STUDIO_URL),
             ),
             (

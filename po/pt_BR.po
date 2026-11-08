@@ -4412,3 +4412,6 @@ msgstr "Envia cada captura e gravação salva e copia o link de compartilhamento
 
 msgid "ffmpeg failed to encode the Motion video."
 msgstr "O ffmpeg não conseguiu codificar o vídeo do Motion."
+
+msgid "Upgrade to Studio"
+msgstr "Atualizar para o Studio"

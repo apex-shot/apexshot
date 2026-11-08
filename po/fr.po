@@ -4432,3 +4432,6 @@ msgstr "Envoie chaque capture et enregistrement sauvegardés et copie le lien de
 
 msgid "ffmpeg failed to encode the Motion video."
 msgstr "ffmpeg n'a pas pu encoder la vidéo Motion."
+
+msgid "Upgrade to Studio"
+msgstr "Passer à Studio"

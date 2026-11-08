@@ -4402,3 +4402,6 @@ msgstr "Загружает каждый сохранённый снимок и �
 
 msgid "ffmpeg failed to encode the Motion video."
 msgstr "ffmpeg не смог закодировать видео Motion."
+
+msgid "Upgrade to Studio"
+msgstr "Перейти на Studio"

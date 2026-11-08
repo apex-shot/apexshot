@@ -4422,3 +4422,6 @@ msgstr "Lädt jeden gespeicherten Screenshot und jede Aufzeichnung hoch und kopi
 
 msgid "ffmpeg failed to encode the Motion video."
 msgstr "ffmpeg konnte das Motion-Video nicht kodieren."
+
+msgid "Upgrade to Studio"
+msgstr "Auf Studio upgraden"

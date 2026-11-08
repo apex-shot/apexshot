@@ -4320,3 +4320,6 @@ msgstr "保存されたスクリーンショットと録画をアップロード
 
 msgid "ffmpeg failed to encode the Motion video."
 msgstr "ffmpeg が Motion 動画をエンコードできませんでした。"
+
+msgid "Upgrade to Studio"
+msgstr "Studio にアップグレード"

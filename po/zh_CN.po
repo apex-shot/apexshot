@@ -4309,3 +4309,6 @@ msgstr "上传每张已保存的截图和录制内容，并复制分享链接。
 
 msgid "ffmpeg failed to encode the Motion video."
 msgstr "ffmpeg 无法编码 Motion 视频。"
+
+msgid "Upgrade to Studio"
+msgstr "升级到 Studio"
