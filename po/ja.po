@@ -4272,3 +4272,51 @@ msgstr "失敗"
 
 msgid "Could not start the installer: {error}"
 msgstr "インストーラーを起動できませんでした: {error}"
+
+msgid "Captures and recordings can now upload from this PC."
+msgstr "撮影した画面と録画をこの PC からアップロードできるようになりました。"
+
+msgid "Close the result card when its Upload action starts an upload."
+msgstr "Upload アクションでアップロードが始まると、結果カードを閉じます。"
+
+msgid "Could not open the Motion encoder input."
+msgstr "Motion エンコーダーの入力を開けませんでした。"
+
+msgid "Could not render the Motion frame."
+msgstr "Motion のフレームをレンダリングできませんでした。"
+
+msgid "Could not start the image editor: {message}"
+msgstr "画像エディターを起動できませんでした: {message}"
+
+msgid "Motion has no still to export."
+msgstr "Motion に書き出す静止画がありません。"
+
+msgid "Opened {name} in the image editor"
+msgstr "{name} を画像エディターで開きました"
+
+msgid "Optional. Link your account to upload screenshots and recordings to ApexShot Cloud."
+msgstr "任意。アカウントをリンクすると、スクリーンショットと録画を ApexShot Cloud にアップロードできます。"
+
+msgid "Share link copied to clipboard: {url}"
+msgstr "共有リンクをクリップボードにコピーしました: {url}"
+
+msgid "The Motion encoder is not running."
+msgstr "Motion エンコーダーが実行されていません。"
+
+msgid "These annotate preferences are not applied by the Windows image editor yet."
+msgstr "これらの注釈設定は、Windows の画像エディターではまだ適用されません。"
+
+msgid "Upload"
+msgstr "アップロード"
+
+msgid "Uploaded"
+msgstr "アップロード済み"
+
+msgid "Uploaded {name} and copied its share link"
+msgstr "{name} をアップロードし、共有リンクをコピーしました"
+
+msgid "Uploads each saved screenshot and recording and copies the share link. Does nothing until you Connect."
+msgstr "保存されたスクリーンショットと録画をアップロードし、共有リンクをコピーします。接続するまで何もしません。"
+
+msgid "ffmpeg failed to encode the Motion video."
+msgstr "ffmpeg が Motion 動画をエンコードできませんでした。"

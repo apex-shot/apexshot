@@ -4374,3 +4374,51 @@ msgstr "Fehlgeschlagen"
 
 msgid "Could not start the installer: {error}"
 msgstr "Installationsprogramm konnte nicht gestartet werden: {error}"
+
+msgid "Captures and recordings can now upload from this PC."
+msgstr "Aufnahmen und Bildschirmaufzeichnungen können jetzt von diesem PC hochgeladen werden."
+
+msgid "Close the result card when its Upload action starts an upload."
+msgstr "Schließt die Ergebniskarte, wenn ihre Upload-Aktion einen Upload startet."
+
+msgid "Could not open the Motion encoder input."
+msgstr "Der Motion-Encoder-Eingang konnte nicht geöffnet werden."
+
+msgid "Could not render the Motion frame."
+msgstr "Das Motion-Bild konnte nicht gerendert werden."
+
+msgid "Could not start the image editor: {message}"
+msgstr "Der Bildeditor konnte nicht gestartet werden: {message}"
+
+msgid "Motion has no still to export."
+msgstr "Motion hat kein Standbild zum Exportieren."
+
+msgid "Opened {name} in the image editor"
+msgstr "{name} im Bildeditor geöffnet"
+
+msgid "Optional. Link your account to upload screenshots and recordings to ApexShot Cloud."
+msgstr "Optional. Verknüpfe dein Konto, um Screenshots und Aufzeichnungen in ApexShot Cloud hochzuladen."
+
+msgid "Share link copied to clipboard: {url}"
+msgstr "Freigabelink in die Zwischenablage kopiert: {url}"
+
+msgid "The Motion encoder is not running."
+msgstr "Der Motion-Encoder läuft nicht."
+
+msgid "These annotate preferences are not applied by the Windows image editor yet."
+msgstr "Diese Anmerkungs-Einstellungen werden vom Windows-Bildeditor noch nicht angewendet."
+
+msgid "Upload"
+msgstr "Hochladen"
+
+msgid "Uploaded"
+msgstr "Hochgeladen"
+
+msgid "Uploaded {name} and copied its share link"
+msgstr "{name} hochgeladen und Freigabelink kopiert"
+
+msgid "Uploads each saved screenshot and recording and copies the share link. Does nothing until you Connect."
+msgstr "Lädt jeden gespeicherten Screenshot und jede Aufzeichnung hoch und kopiert den Freigabelink. Tut nichts, bis du dich verbindest."
+
+msgid "ffmpeg failed to encode the Motion video."
+msgstr "ffmpeg konnte das Motion-Video nicht kodieren."

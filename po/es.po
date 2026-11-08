@@ -4372,3 +4372,51 @@ msgstr "Error"
 
 msgid "Could not start the installer: {error}"
 msgstr "No se pudo iniciar el instalador: {error}"
+
+msgid "Captures and recordings can now upload from this PC."
+msgstr "Las capturas y grabaciones ya pueden subirse desde este equipo."
+
+msgid "Close the result card when its Upload action starts an upload."
+msgstr "Cierra la tarjeta de resultado cuando su acción Subir inicia una subida."
+
+msgid "Could not open the Motion encoder input."
+msgstr "No se pudo abrir la entrada del codificador de Motion."
+
+msgid "Could not render the Motion frame."
+msgstr "No se pudo renderizar el fotograma de Motion."
+
+msgid "Could not start the image editor: {message}"
+msgstr "No se pudo iniciar el editor de imágenes: {message}"
+
+msgid "Motion has no still to export."
+msgstr "Motion no tiene ninguna imagen fija para exportar."
+
+msgid "Opened {name} in the image editor"
+msgstr "Se abrió {name} en el editor de imágenes"
+
+msgid "Optional. Link your account to upload screenshots and recordings to ApexShot Cloud."
+msgstr "Opcional. Vincula tu cuenta para subir capturas y grabaciones a ApexShot Cloud."
+
+msgid "Share link copied to clipboard: {url}"
+msgstr "Enlace para compartir copiado al portapapeles: {url}"
+
+msgid "The Motion encoder is not running."
+msgstr "El codificador de Motion no está en ejecución."
+
+msgid "These annotate preferences are not applied by the Windows image editor yet."
+msgstr "El editor de imágenes de Windows aún no aplica estas preferencias de anotación."
+
+msgid "Upload"
+msgstr "Subir"
+
+msgid "Uploaded"
+msgstr "Subido"
+
+msgid "Uploaded {name} and copied its share link"
+msgstr "Se subió {name} y se copió su enlace para compartir"
+
+msgid "Uploads each saved screenshot and recording and copies the share link. Does nothing until you Connect."
+msgstr "Sube cada captura y grabación guardada y copia el enlace para compartir. No hace nada hasta que te conectes."
+
+msgid "ffmpeg failed to encode the Motion video."
+msgstr "ffmpeg no pudo codificar el vídeo de Motion."

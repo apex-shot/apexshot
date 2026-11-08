@@ -4261,3 +4261,51 @@ msgstr "失败"
 
 msgid "Could not start the installer: {error}"
 msgstr "无法启动安装程序：{error}"
+
+msgid "Captures and recordings can now upload from this PC."
+msgstr "截图和录制内容现在可以从此电脑上传。"
+
+msgid "Close the result card when its Upload action starts an upload."
+msgstr "当结果卡片的“上传”操作开始上传时，关闭该卡片。"
+
+msgid "Could not open the Motion encoder input."
+msgstr "无法打开 Motion 编码器输入。"
+
+msgid "Could not render the Motion frame."
+msgstr "无法渲染 Motion 帧。"
+
+msgid "Could not start the image editor: {message}"
+msgstr "无法启动图像编辑器：{message}"
+
+msgid "Motion has no still to export."
+msgstr "Motion 没有可导出的静态画面。"
+
+msgid "Opened {name} in the image editor"
+msgstr "已在图像编辑器中打开 {name}"
+
+msgid "Optional. Link your account to upload screenshots and recordings to ApexShot Cloud."
+msgstr "可选。关联账户即可将截图和录制内容上传到 ApexShot Cloud。"
+
+msgid "Share link copied to clipboard: {url}"
+msgstr "分享链接已复制到剪贴板：{url}"
+
+msgid "The Motion encoder is not running."
+msgstr "Motion 编码器未在运行。"
+
+msgid "These annotate preferences are not applied by the Windows image editor yet."
+msgstr "Windows 图像编辑器尚未应用这些注释偏好。"
+
+msgid "Upload"
+msgstr "上传"
+
+msgid "Uploaded"
+msgstr "已上传"
+
+msgid "Uploaded {name} and copied its share link"
+msgstr "已上传 {name} 并复制了分享链接"
+
+msgid "Uploads each saved screenshot and recording and copies the share link. Does nothing until you Connect."
+msgstr "上传每张已保存的截图和录制内容，并复制分享链接。连接前不会执行任何操作。"
+
+msgid "ffmpeg failed to encode the Motion video."
+msgstr "ffmpeg 无法编码 Motion 视频。"

@@ -4384,3 +4384,51 @@ msgstr "Échec"
 
 msgid "Could not start the installer: {error}"
 msgstr "Impossible de lancer l'installateur : {error}"
+
+msgid "Captures and recordings can now upload from this PC."
+msgstr "Les captures et enregistrements peuvent désormais être envoyés depuis ce PC."
+
+msgid "Close the result card when its Upload action starts an upload."
+msgstr "Ferme la carte de résultat lorsque son action Envoyer démarre un envoi."
+
+msgid "Could not open the Motion encoder input."
+msgstr "Impossible d'ouvrir l'entrée de l'encodeur Motion."
+
+msgid "Could not render the Motion frame."
+msgstr "Impossible de rendre l'image Motion."
+
+msgid "Could not start the image editor: {message}"
+msgstr "Impossible de lancer l'éditeur d'images : {message}"
+
+msgid "Motion has no still to export."
+msgstr "Motion n'a aucune image fixe à exporter."
+
+msgid "Opened {name} in the image editor"
+msgstr "{name} ouvert dans l'éditeur d'images"
+
+msgid "Optional. Link your account to upload screenshots and recordings to ApexShot Cloud."
+msgstr "Facultatif. Associez votre compte pour envoyer captures et enregistrements vers ApexShot Cloud."
+
+msgid "Share link copied to clipboard: {url}"
+msgstr "Lien de partage copié dans le presse-papiers : {url}"
+
+msgid "The Motion encoder is not running."
+msgstr "L'encodeur Motion n'est pas en cours d'exécution."
+
+msgid "These annotate preferences are not applied by the Windows image editor yet."
+msgstr "L'éditeur d'images Windows n'applique pas encore ces préférences d'annotation."
+
+msgid "Upload"
+msgstr "Envoyer"
+
+msgid "Uploaded"
+msgstr "Envoyé"
+
+msgid "Uploaded {name} and copied its share link"
+msgstr "{name} envoyé et son lien de partage copié"
+
+msgid "Uploads each saved screenshot and recording and copies the share link. Does nothing until you Connect."
+msgstr "Envoie chaque capture et enregistrement sauvegardés et copie le lien de partage. Ne fait rien tant que vous n'êtes pas connecté."
+
+msgid "ffmpeg failed to encode the Motion video."
+msgstr "ffmpeg n'a pas pu encoder la vidéo Motion."

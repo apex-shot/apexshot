@@ -4354,3 +4354,51 @@ msgstr "Ошибка"
 
 msgid "Could not start the installer: {error}"
 msgstr "Не удалось запустить установщик: {error}"
+
+msgid "Captures and recordings can now upload from this PC."
+msgstr "Снимки и записи теперь можно загружать с этого компьютера."
+
+msgid "Close the result card when its Upload action starts an upload."
+msgstr "Закрывает карточку результата, когда её действие «Отправить» начинает загрузку."
+
+msgid "Could not open the Motion encoder input."
+msgstr "Не удалось открыть вход кодировщика Motion."
+
+msgid "Could not render the Motion frame."
+msgstr "Не удалось отрисовать кадр Motion."
+
+msgid "Could not start the image editor: {message}"
+msgstr "Не удалось запустить редактор изображений: {message}"
+
+msgid "Motion has no still to export."
+msgstr "В Motion нет статичного кадра для экспорта."
+
+msgid "Opened {name} in the image editor"
+msgstr "{name} открыт в редакторе изображений"
+
+msgid "Optional. Link your account to upload screenshots and recordings to ApexShot Cloud."
+msgstr "Необязательно. Привяжите аккаунт, чтобы загружать снимки и записи в ApexShot Cloud."
+
+msgid "Share link copied to clipboard: {url}"
+msgstr "Ссылка для общего доступа скопирована в буфер обмена: {url}"
+
+msgid "The Motion encoder is not running."
+msgstr "Кодировщик Motion не запущен."
+
+msgid "These annotate preferences are not applied by the Windows image editor yet."
+msgstr "Редактор изображений Windows пока не применяет эти настройки аннотаций."
+
+msgid "Upload"
+msgstr "Загрузить"
+
+msgid "Uploaded"
+msgstr "Загружено"
+
+msgid "Uploaded {name} and copied its share link"
+msgstr "{name} загружен, ссылка скопирована"
+
+msgid "Uploads each saved screenshot and recording and copies the share link. Does nothing until you Connect."
+msgstr "Загружает каждый сохранённый снимок и запись и копирует ссылку. Ничего не делает, пока вы не подключитесь."
+
+msgid "ffmpeg failed to encode the Motion video."
+msgstr "ffmpeg не смог закодировать видео Motion."

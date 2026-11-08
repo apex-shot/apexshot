@@ -4298,3 +4298,51 @@ msgstr "فشل"
 
 msgid "Could not start the installer: {error}"
 msgstr "تعذّر تشغيل برنامج التثبيت: {error}"
+
+msgid "Captures and recordings can now upload from this PC."
+msgstr "يمكن الآن رفع لقطات الشاشة والتسجيلات من هذا الكمبيوتر."
+
+msgid "Close the result card when its Upload action starts an upload."
+msgstr "يغلق بطاقة النتيجة عندما يبدأ إجراء الرفع عملية رفع."
+
+msgid "Could not open the Motion encoder input."
+msgstr "تعذّر فتح إدخال مشفّر Motion."
+
+msgid "Could not render the Motion frame."
+msgstr "تعذّر عرض إطار Motion."
+
+msgid "Could not start the image editor: {message}"
+msgstr "تعذّر تشغيل محرر الصور: {message}"
+
+msgid "Motion has no still to export."
+msgstr "لا يحتوي Motion على صورة ثابتة للتصدير."
+
+msgid "Opened {name} in the image editor"
+msgstr "تم فتح {name} في محرر الصور"
+
+msgid "Optional. Link your account to upload screenshots and recordings to ApexShot Cloud."
+msgstr "اختياري. اربط حسابك لرفع لقطات الشاشة والتسجيلات إلى ApexShot Cloud."
+
+msgid "Share link copied to clipboard: {url}"
+msgstr "تم نسخ رابط المشاركة إلى الحافظة: {url}"
+
+msgid "The Motion encoder is not running."
+msgstr "مشفّر Motion لا يعمل."
+
+msgid "These annotate preferences are not applied by the Windows image editor yet."
+msgstr "محرر الصور في Windows لا يطبّق تفضيلات التعليقات هذه بعد."
+
+msgid "Upload"
+msgstr "رفع"
+
+msgid "Uploaded"
+msgstr "تم الرفع"
+
+msgid "Uploaded {name} and copied its share link"
+msgstr "تم رفع {name} ونسخ رابط المشاركة"
+
+msgid "Uploads each saved screenshot and recording and copies the share link. Does nothing until you Connect."
+msgstr "يرفع كل لقطة شاشة وتسجيل محفوظ وينسخ رابط المشاركة. لا يفعل شيئًا حتى تتصل."
+
+msgid "ffmpeg failed to encode the Motion video."
+msgstr "تعذّر على ffmpeg ترميز فيديو Motion."

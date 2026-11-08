@@ -4364,3 +4364,51 @@ msgstr "Falhou"
 
 msgid "Could not start the installer: {error}"
 msgstr "Não foi possível iniciar o instalador: {error}"
+
+msgid "Captures and recordings can now upload from this PC."
+msgstr "Capturas e gravações agora podem ser enviadas deste PC."
+
+msgid "Close the result card when its Upload action starts an upload."
+msgstr "Fecha o cartão de resultado quando a ação Enviar inicia um envio."
+
+msgid "Could not open the Motion encoder input."
+msgstr "Não foi possível abrir a entrada do codificador do Motion."
+
+msgid "Could not render the Motion frame."
+msgstr "Não foi possível renderizar o quadro do Motion."
+
+msgid "Could not start the image editor: {message}"
+msgstr "Não foi possível iniciar o editor de imagens: {message}"
+
+msgid "Motion has no still to export."
+msgstr "O Motion não tem imagem estática para exportar."
+
+msgid "Opened {name} in the image editor"
+msgstr "{name} aberto no editor de imagens"
+
+msgid "Optional. Link your account to upload screenshots and recordings to ApexShot Cloud."
+msgstr "Opcional. Vincule sua conta para enviar capturas e gravações ao ApexShot Cloud."
+
+msgid "Share link copied to clipboard: {url}"
+msgstr "Link de compartilhamento copiado para a área de transferência: {url}"
+
+msgid "The Motion encoder is not running."
+msgstr "O codificador do Motion não está em execução."
+
+msgid "These annotate preferences are not applied by the Windows image editor yet."
+msgstr "O editor de imagens do Windows ainda não aplica estas preferências de anotação."
+
+msgid "Upload"
+msgstr "Enviar"
+
+msgid "Uploaded"
+msgstr "Enviado"
+
+msgid "Uploaded {name} and copied its share link"
+msgstr "{name} enviado e link de compartilhamento copiado"
+
+msgid "Uploads each saved screenshot and recording and copies the share link. Does nothing until you Connect."
+msgstr "Envia cada captura e gravação salva e copia o link de compartilhamento. Não faz nada até você conectar."
+
+msgid "ffmpeg failed to encode the Motion video."
+msgstr "O ffmpeg não conseguiu codificar o vídeo do Motion."
