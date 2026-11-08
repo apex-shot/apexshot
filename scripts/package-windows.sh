@@ -154,17 +154,35 @@ done
 
 # --- builds -------------------------------------------------------------
 
-shell_build() {
+# Run one command inside the MSVC environment. cmd has no way to quote the
+# vcvars path inside a `cmd /c "..."` string - the nested quotes have to be
+# escaped, and Git Bash rewrites them to backslashes that cmd then reads
+# literally. Writing both lines to a batch file leaves the quoting to cmd.
+run_in_msvc_env() {
     [[ -n $vcvars ]] || die "no Visual Studio 2022 vcvars64.bat; the Qt shell needs MSVC"
+    local dir bat status
+    dir=$(mktemp -d)
+    bat=$dir/build.bat
+    {
+        printf '@call "%s" >nul\r\n' "$vcvars"
+        printf '@%s\r\n' "$1"
+    } > "$bat"
+    MSYS_NO_PATHCONV=1 cmd /c "$(cygpath -w "$bat")"
+    status=$?
+    rm -rf "$dir"
+    return $status
+}
+
+shell_build() {
     local build_dir=$repo_root/capture-overlay/build
 
     if [[ ! -f $build_dir/CMakeCache.txt ]]; then
         echo "Configuring the capture shell"
-        MSYS_NO_PATHCONV=1 cmd /c "call \"$vcvars\" >nul && cmake -S \"$(cygpath -w "$repo_root/capture-overlay")\" -B \"$(cygpath -w "$build_dir")\" -G Ninja -DCMAKE_BUILD_TYPE=Release -DQt5_DIR=\"$(cygpath -w "$qt_dir")\\lib\\cmake\\Qt5\"" ||
+        run_in_msvc_env "cmake -S \"$(cygpath -w "$repo_root/capture-overlay")\" -B \"$(cygpath -w "$build_dir")\" -G Ninja -DCMAKE_BUILD_TYPE=Release -DQt5_DIR=\"$(cygpath -w "$qt_dir")\\lib\\cmake\\Qt5\"" ||
             die "cmake could not configure the capture shell"
     fi
     echo "Building the capture shell"
-    MSYS_NO_PATHCONV=1 cmd /c "call \"$vcvars\" >nul && cmake --build \"$(cygpath -w "$build_dir")\" --target apexshot-capture" ||
+    run_in_msvc_env "cmake --build \"$(cygpath -w "$build_dir")\" --target apexshot-capture" ||
         die "the capture shell did not build"
 }
 
