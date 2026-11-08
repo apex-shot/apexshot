@@ -4296,3 +4296,81 @@ msgstr "{remaining} verbleiben, bevor dein Kontingent erreicht ist."
 
 msgid "{remaining} remains of your {limit} allowance."
 msgstr "{remaining} verbleiben von deinem {limit}-Kontingent."
+
+msgid "ApexShot Update"
+msgstr "ApexShot-Update"
+
+msgid "ApexShot v{version} is ready to install."
+msgstr "ApexShot v{version} kann jetzt installiert werden."
+
+msgid "ApexShot v{version} is on its way. Keep this window open."
+msgstr "ApexShot v{version} ist unterwegs. Lass dieses Fenster geöffnet."
+
+msgid "ApexShot v{version} has finished downloading."
+msgstr "ApexShot v{version} wurde heruntergeladen."
+
+msgid "ApexShot v{version} could not be updated."
+msgstr "ApexShot v{version} konnte nicht aktualisiert werden."
+
+msgid "Update available"
+msgstr "Update verfügbar"
+
+msgid "Downloading update"
+msgstr "Update wird heruntergeladen"
+
+msgid "Update ready"
+msgstr "Update bereit"
+
+msgid "Update failed"
+msgstr "Update fehlgeschlagen"
+
+msgid "Update now"
+msgstr "Jetzt aktualisieren"
+
+msgid "Later"
+msgstr "Später"
+
+msgid "Cancel download"
+msgstr "Download abbrechen"
+
+msgid "Install now"
+msgstr "Jetzt installieren"
+
+msgid "Installed version"
+msgstr "Installierte Version"
+
+msgid "Latest version"
+msgstr "Neueste Version"
+
+msgid "Download size"
+msgstr "Downloadgröße"
+
+msgid "Download speed"
+msgstr "Downloadgeschwindigkeit"
+
+msgid "Downloaded"
+msgstr "Heruntergeladen"
+
+msgid "Downloading..."
+msgstr "Wird heruntergeladen..."
+
+msgid "Starting..."
+msgstr "Wird gestartet..."
+
+msgid "Filename"
+msgstr "Dateiname"
+
+msgid "File size"
+msgstr "Dateigröße"
+
+msgid "Progress"
+msgstr "Fortschritt"
+
+msgid "Release notes"
+msgstr "Versionshinweise"
+
+msgid "Failed"
+msgstr "Fehlgeschlagen"
+
+msgid "Could not start the installer: {error}"
+msgstr "Installationsprogramm konnte nicht gestartet werden: {error}"

@@ -4194,3 +4194,81 @@ msgstr "利用上限まで残り {remaining} です。"
 
 msgid "{remaining} remains of your {limit} allowance."
 msgstr "{remaining} が残っています（利用上限 {limit} のうち）。"
+
+msgid "ApexShot Update"
+msgstr "ApexShot のアップデート"
+
+msgid "ApexShot v{version} is ready to install."
+msgstr "ApexShot v{version} をインストールできます。"
+
+msgid "ApexShot v{version} is on its way. Keep this window open."
+msgstr "ApexShot v{version} をダウンロードしています。このウィンドウを開いたままにしてください。"
+
+msgid "ApexShot v{version} has finished downloading."
+msgstr "ApexShot v{version} のダウンロードが完了しました。"
+
+msgid "ApexShot v{version} could not be updated."
+msgstr "ApexShot v{version} をアップデートできませんでした。"
+
+msgid "Update available"
+msgstr "アップデートがあります"
+
+msgid "Downloading update"
+msgstr "アップデートをダウンロード中"
+
+msgid "Update ready"
+msgstr "アップデートの準備完了"
+
+msgid "Update failed"
+msgstr "アップデートに失敗しました"
+
+msgid "Update now"
+msgstr "今すぐアップデート"
+
+msgid "Later"
+msgstr "後で"
+
+msgid "Cancel download"
+msgstr "ダウンロードをキャンセル"
+
+msgid "Install now"
+msgstr "今すぐインストール"
+
+msgid "Installed version"
+msgstr "インストール済みバージョン"
+
+msgid "Latest version"
+msgstr "最新バージョン"
+
+msgid "Download size"
+msgstr "ダウンロードサイズ"
+
+msgid "Download speed"
+msgstr "ダウンロード速度"
+
+msgid "Downloaded"
+msgstr "ダウンロード済み"
+
+msgid "Downloading..."
+msgstr "ダウンロード中..."
+
+msgid "Starting..."
+msgstr "開始しています..."
+
+msgid "Filename"
+msgstr "ファイル名"
+
+msgid "File size"
+msgstr "ファイルサイズ"
+
+msgid "Progress"
+msgstr "進行状況"
+
+msgid "Release notes"
+msgstr "リリースノート"
+
+msgid "Failed"
+msgstr "失敗"
+
+msgid "Could not start the installer: {error}"
+msgstr "インストーラーを起動できませんでした: {error}"

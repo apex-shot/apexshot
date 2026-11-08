@@ -4276,3 +4276,81 @@ msgstr "До достижения лимита осталось {remaining}."
 
 msgid "{remaining} remains of your {limit} allowance."
 msgstr "Осталось {remaining} из вашего лимита {limit}."
+
+msgid "ApexShot Update"
+msgstr "Обновление ApexShot"
+
+msgid "ApexShot v{version} is ready to install."
+msgstr "ApexShot v{version} готов к установке."
+
+msgid "ApexShot v{version} is on its way. Keep this window open."
+msgstr "ApexShot v{version} уже в пути. Не закрывайте это окно."
+
+msgid "ApexShot v{version} has finished downloading."
+msgstr "ApexShot v{version} загружен."
+
+msgid "ApexShot v{version} could not be updated."
+msgstr "Не удалось обновить ApexShot v{version}."
+
+msgid "Update available"
+msgstr "Доступно обновление"
+
+msgid "Downloading update"
+msgstr "Загрузка обновления"
+
+msgid "Update ready"
+msgstr "Обновление готово"
+
+msgid "Update failed"
+msgstr "Не удалось обновить"
+
+msgid "Update now"
+msgstr "Обновить сейчас"
+
+msgid "Later"
+msgstr "Позже"
+
+msgid "Cancel download"
+msgstr "Отменить загрузку"
+
+msgid "Install now"
+msgstr "Установить сейчас"
+
+msgid "Installed version"
+msgstr "Установленная версия"
+
+msgid "Latest version"
+msgstr "Последняя версия"
+
+msgid "Download size"
+msgstr "Размер загрузки"
+
+msgid "Download speed"
+msgstr "Скорость загрузки"
+
+msgid "Downloaded"
+msgstr "Загружено"
+
+msgid "Downloading..."
+msgstr "Загрузка..."
+
+msgid "Starting..."
+msgstr "Запуск..."
+
+msgid "Filename"
+msgstr "Имя файла"
+
+msgid "File size"
+msgstr "Размер файла"
+
+msgid "Progress"
+msgstr "Прогресс"
+
+msgid "Release notes"
+msgstr "Примечания к выпуску"
+
+msgid "Failed"
+msgstr "Ошибка"
+
+msgid "Could not start the installer: {error}"
+msgstr "Не удалось запустить установщик: {error}"

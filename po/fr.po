@@ -4306,3 +4306,81 @@ msgstr "Il reste {remaining} avant d’atteindre votre quota."
 
 msgid "{remaining} remains of your {limit} allowance."
 msgstr "Il reste {remaining} sur votre quota de {limit}."
+
+msgid "ApexShot Update"
+msgstr "Mise à jour d'ApexShot"
+
+msgid "ApexShot v{version} is ready to install."
+msgstr "ApexShot v{version} est prêt à être installé."
+
+msgid "ApexShot v{version} is on its way. Keep this window open."
+msgstr "ApexShot v{version} est en cours de téléchargement. Gardez cette fenêtre ouverte."
+
+msgid "ApexShot v{version} has finished downloading."
+msgstr "ApexShot v{version} a terminé de se télécharger."
+
+msgid "ApexShot v{version} could not be updated."
+msgstr "ApexShot v{version} n'a pas pu être mis à jour."
+
+msgid "Update available"
+msgstr "Mise à jour disponible"
+
+msgid "Downloading update"
+msgstr "Téléchargement de la mise à jour"
+
+msgid "Update ready"
+msgstr "Mise à jour prête"
+
+msgid "Update failed"
+msgstr "Échec de la mise à jour"
+
+msgid "Update now"
+msgstr "Mettre à jour maintenant"
+
+msgid "Later"
+msgstr "Plus tard"
+
+msgid "Cancel download"
+msgstr "Annuler le téléchargement"
+
+msgid "Install now"
+msgstr "Installer maintenant"
+
+msgid "Installed version"
+msgstr "Version installée"
+
+msgid "Latest version"
+msgstr "Dernière version"
+
+msgid "Download size"
+msgstr "Taille du téléchargement"
+
+msgid "Download speed"
+msgstr "Vitesse de téléchargement"
+
+msgid "Downloaded"
+msgstr "Téléchargé"
+
+msgid "Downloading..."
+msgstr "Téléchargement..."
+
+msgid "Starting..."
+msgstr "Démarrage..."
+
+msgid "Filename"
+msgstr "Nom du fichier"
+
+msgid "File size"
+msgstr "Taille du fichier"
+
+msgid "Progress"
+msgstr "Progression"
+
+msgid "Release notes"
+msgstr "Notes de version"
+
+msgid "Failed"
+msgstr "Échec"
+
+msgid "Could not start the installer: {error}"
+msgstr "Impossible de lancer l'installateur : {error}"

@@ -4220,3 +4220,81 @@ msgstr "يتبقى {remaining} قبل الوصول إلى حدّك."
 
 msgid "{remaining} remains of your {limit} allowance."
 msgstr "يتبقى {remaining} من حدّك البالغ {limit}."
+
+msgid "ApexShot Update"
+msgstr "تحديث ApexShot"
+
+msgid "ApexShot v{version} is ready to install."
+msgstr "ApexShot v{version} جاهز للتثبيت."
+
+msgid "ApexShot v{version} is on its way. Keep this window open."
+msgstr "ApexShot v{version} في الطريق. أبقِ هذه النافذة مفتوحة."
+
+msgid "ApexShot v{version} has finished downloading."
+msgstr "اكتمل تنزيل ApexShot v{version}."
+
+msgid "ApexShot v{version} could not be updated."
+msgstr "تعذّر تحديث ApexShot v{version}."
+
+msgid "Update available"
+msgstr "يتوفر تحديث"
+
+msgid "Downloading update"
+msgstr "جارٍ تنزيل التحديث"
+
+msgid "Update ready"
+msgstr "التحديث جاهز"
+
+msgid "Update failed"
+msgstr "فشل التحديث"
+
+msgid "Update now"
+msgstr "تحديث الآن"
+
+msgid "Later"
+msgstr "لاحقًا"
+
+msgid "Cancel download"
+msgstr "إلغاء التنزيل"
+
+msgid "Install now"
+msgstr "تثبيت الآن"
+
+msgid "Installed version"
+msgstr "الإصدار المثبَّت"
+
+msgid "Latest version"
+msgstr "أحدث إصدار"
+
+msgid "Download size"
+msgstr "حجم التنزيل"
+
+msgid "Download speed"
+msgstr "سرعة التنزيل"
+
+msgid "Downloaded"
+msgstr "تم التنزيل"
+
+msgid "Downloading..."
+msgstr "جارٍ التنزيل..."
+
+msgid "Starting..."
+msgstr "جارٍ البدء..."
+
+msgid "Filename"
+msgstr "اسم الملف"
+
+msgid "File size"
+msgstr "حجم الملف"
+
+msgid "Progress"
+msgstr "التقدم"
+
+msgid "Release notes"
+msgstr "ملاحظات الإصدار"
+
+msgid "Failed"
+msgstr "فشل"
+
+msgid "Could not start the installer: {error}"
+msgstr "تعذّر تشغيل برنامج التثبيت: {error}"
