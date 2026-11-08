@@ -49,6 +49,11 @@ pub(crate) mod windowing;
 // The first-run entry point starts the tray shell when setup finishes.
 pub use self::windowing::launch_shell;
 
+/// Publish the YAML config to the C++ shell's JSON mirror.
+pub fn sync_shell_settings() -> anyhow::Result<()> {
+    actions::sync_shell_settings_on_start()
+}
+
 /// Top inset for page content. The Windows surface removes the page-title row,
 /// so the first section needs only a hairline of breathing room.
 pub(crate) const PAGE_TOP_MARGIN: i32 = if cfg!(target_os = "windows") { 4 } else { 20 };
@@ -404,12 +409,14 @@ fn build_settings_window(app: &Application) {
         )));
     }
     annotate.section.prepend(&platform_note(&t(
-        "The annotate editor is not available in the Windows build yet. These preferences are saved for a future release.",
+        "These annotate preferences are not applied by the Windows image editor yet.",
     )));
-    cloud.section.prepend(&platform_note(&t(
-        "Cloud uploads are not wired in the Windows build yet. Destination and XBackBone settings are saved for a future release.",
-    )));
-    let (cloud_page, cloud_login) = cloud_login::wrap_cloud_page(&cloud.section);
+    let (cloud_page, cloud_login) = cloud_login::wrap_cloud_page(&cloud.section, {
+        let auto_upload_check = cloud.auto_upload_check.clone();
+        move || {
+            auto_upload_check.set_active(load_config().cloud_auto_upload_after_capture);
+        }
+    });
     cloud
         .connect_btn
         .connect_clicked(move |_| cloud_login.begin());
@@ -420,10 +427,6 @@ fn build_settings_window(app: &Application) {
 
     // Controls that have no Windows implementation yet stay visible but
     // disabled, so the page still documents the setting.
-    after_capture.screenshot_after_capture_checks[3].set_sensitive(false);
-    after_capture.screenshot_after_capture_checks[3].set_tooltip_text(Some(&t(
-        "The annotate editor is not available on Windows yet.",
-    )));
     after_capture.rec_save.set_tooltip_text(Some(&t(
         "When off, recordings remain in the temporary folder for the result card and editor.",
     )));
@@ -464,11 +467,8 @@ fn build_settings_window(app: &Application) {
         )));
     quick_access
         .close_after_uploading_check
-        .set_sensitive(false);
-    quick_access
-        .close_after_uploading_check
         .set_tooltip_text(Some(&t(
-            "Uploading from the result card is not available on Windows yet.",
+            "Close the result card when its Upload action starts an upload.",
         )));
     advanced
         .telemetry_enabled_check

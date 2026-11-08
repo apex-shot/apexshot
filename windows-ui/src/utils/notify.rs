@@ -74,6 +74,43 @@ pub fn desktop_notification_important(summary: &str, body: &str) {
     });
 }
 
+/// The shell has no replace-by-id call, so a replaced notification is simply
+/// the next one. Upload paths use this and ignore the returned id.
+pub fn desktop_notification_replace(_replaces_id: u32, summary: &str, body: &str) -> u32 {
+    desktop_notification(summary, body);
+    0
+}
+
+/// Show one notification and wait until the shell takes it down.
+///
+/// A helper process that exits right after queueing a balloon tears down the
+/// hidden window the shell is drawing from, so nothing appears. This keeps
+/// the process alive for the balloon's lifetime instead.
+pub fn desktop_notification_and_wait(summary: &str, body: &str, important: bool) {
+    const WAIT_LIFETIME: Duration = Duration::from_secs(15);
+
+    if summary.is_empty() && body.is_empty() {
+        return;
+    }
+    let Some(mut host) = Host::create() else {
+        return;
+    };
+    host.show(&Notification {
+        summary: summary.to_owned(),
+        body: body.to_owned(),
+        important,
+    });
+    let shown = Instant::now();
+    while shown.elapsed() < WAIT_LIFETIME {
+        host.pump();
+        if BALLOON_CLOSED.swap(false, Ordering::AcqRel) {
+            break;
+        }
+        std::thread::sleep(POLL_INTERVAL);
+    }
+    host.hide();
+}
+
 struct Notification {
     summary: String,
     body: String,

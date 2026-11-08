@@ -262,6 +262,9 @@ ShellSettings loadShellSettings()
             .toBool(out.screenshots.afterCopyToClipboard);
     out.screenshots.afterSave =
         shots.value(QStringLiteral("after_save")).toBool(out.screenshots.afterSave);
+    out.screenshots.afterOpenEditor =
+        shots.value(QStringLiteral("after_open_editor"))
+            .toBool(out.screenshots.afterOpenEditor);
     out.screenshots.highDpiSuffix =
         shots.value(QStringLiteral("high_dpi_suffix")).toBool(out.screenshots.highDpiSuffix);
 
@@ -329,6 +332,16 @@ ShellSettings loadShellSettings()
     out.quickAccess.autoCloseSeconds =
         quickAccess.value(QStringLiteral("auto_close_seconds"))
             .toInt(out.quickAccess.autoCloseSeconds);
+    out.quickAccess.closeAfterUploading =
+        quickAccess.value(QStringLiteral("close_after_uploading"))
+            .toBool(out.quickAccess.closeAfterUploading);
+
+    const QJsonObject cloud = root.value(QStringLiteral("cloud")).toObject();
+    out.cloud.autoUploadAfterCapture =
+        cloud.value(QStringLiteral("auto_upload_after_capture"))
+            .toBool(out.cloud.autoUploadAfterCapture);
+    out.cloud.configured =
+        cloud.value(QStringLiteral("configured")).toBool(out.cloud.configured);
 
     const QJsonObject ocr = root.value(QStringLiteral("ocr")).toObject();
     out.ocr.language = ocr.value(QStringLiteral("language")).toString(out.ocr.language).trimmed();

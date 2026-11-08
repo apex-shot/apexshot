@@ -102,6 +102,26 @@ pub fn launch_shell(open_menu: bool) -> anyhow::Result<()> {
         };
         command.env("PATH", path);
     }
+    if let Ok(settings) = std::env::current_exe() {
+        // The shell resolves these helpers beside itself. A checkout keeps the
+        // shell in capture-overlay/build and the editors in the Cargo target,
+        // so hand over the paths this binary knows instead.
+        for (name, file) in [
+            ("APEXSHOT_SETTINGS", "apexshot-settings.exe"),
+            ("APEXSHOT_HISTORY", "apexshot-history.exe"),
+            ("APEXSHOT_IMAGE_EDITOR", "apexshot-image-editor.exe"),
+            ("APEXSHOT_VIDEO_EDITOR", "apexshot-video-editor.exe"),
+            ("APEXSHOT_UPDATE", "apexshot-update.exe"),
+        ] {
+            if std::env::var_os(name).is_some() {
+                continue;
+            }
+            let path = settings.with_file_name(file);
+            if path.is_file() {
+                command.env(name, path);
+            }
+        }
+    }
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -267,6 +287,10 @@ fn startup_script(shell: &std::path::Path, settings: &std::path::Path, dirs: &[P
         (
             "APEXSHOT_HISTORY",
             settings.with_file_name("apexshot-history.exe"),
+        ),
+        (
+            "APEXSHOT_IMAGE_EDITOR",
+            settings.with_file_name("apexshot-image-editor.exe"),
         ),
         (
             "APEXSHOT_VIDEO_EDITOR",

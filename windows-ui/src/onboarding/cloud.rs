@@ -2,8 +2,8 @@
 //!
 //! The same browser device-authorization handoff the Linux flow runs, with a
 //! Skip on every view: linking an account is never required to use ApexShot.
-//! The upload transport is not wired on Windows yet, so the connected view says
-//! what the account is for instead of promising a share link.
+//! Signing in selects ApexShot Cloud as the upload destination, so the
+//! connected view names what the account is for.
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -68,7 +68,7 @@ fn intro(view: &View) {
     view.body.append(&heading(
         scale,
         &t("ApexShot Cloud"),
-        &t("Optional. Link your account now so it’s ready when uploads arrive on Windows."),
+        &t("Optional. Link your account to upload screenshots and recordings to ApexShot Cloud."),
     ));
 
     let skip_btn = Button::with_label(&t("Skip for now"));
@@ -90,7 +90,7 @@ fn connected(view: &View, config: &AppConfig) {
     view.body.append(&heading(
         scale,
         &t("You're connected"),
-        &t("Cloud uploads are not available in the Windows build yet"),
+        &t("Captures and recordings can now upload from this PC."),
     ));
 
     let tier = config.cloud_plan_tier.trim();

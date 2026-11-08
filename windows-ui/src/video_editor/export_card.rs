@@ -1,7 +1,7 @@
 //! A quiet, full-window export screen with live progress and completion actions.
 
 use super::export::{start_export_with_settings, ExportModel, ExportSettings, ExportUpdate};
-use crate::i18n::t;
+use crate::i18n::{t, tfmt};
 use gtk4::prelude::*;
 use gtk4::{gdk, glib, Align, Box as GtkBox, Button, Label, Orientation, Overlay, ProgressBar};
 use std::cell::Cell;
@@ -56,9 +56,12 @@ pub(super) fn show(
     actions.set_margin_top(px(18.0));
     actions.set_visible(false);
     let back = Button::with_label(&t("Back to editor"));
+    let upload = Button::with_label(&t("Upload"));
+    upload.set_visible(false);
     let reveal = Button::with_label(&t("Show in Explorer"));
     reveal.add_css_class("video-export-primary");
     actions.append(&back);
+    actions.append(&upload);
     actions.append(&reveal);
     for widget in [
         destination.upcast_ref::<gtk4::Widget>(),
@@ -194,6 +197,86 @@ pub(super) fn show(
                         }
                         detail.set_visible(true);
                     }
+                    upload.set_visible(true);
+                    upload.connect_clicked({
+                        let path = path.clone();
+                        let detail = detail.clone();
+                        let shell = shell.downgrade();
+                        move |button| {
+                            if !button.is_sensitive() {
+                                return;
+                            }
+                            let config = crate::config::load_config().sanitized();
+                            if !crate::cloud::upload::is_configured(&config) {
+                                let (title, body) =
+                                    crate::cloud::upload::not_configured_notification(&config);
+                                crate::utils::notify::desktop_notification_important(&title, &body);
+                                return;
+                            }
+
+                            button.set_sensitive(false);
+                            button.set_label(&t("Uploading…"));
+                            let (sender, receiver) = std::sync::mpsc::channel::<
+                                Result<String, crate::cloud::upload::UploadError>,
+                            >();
+                            let path = path.clone();
+                            std::thread::spawn(move || {
+                                let result = crate::cloud::upload::
+                                    upload_file_with_notifications_without_clipboard(
+                                        &config, &path,
+                                    )
+                                    .map(|result| result.share_url);
+                                let _ = sender.send(result);
+                            });
+
+                            let button = button.clone();
+                            let detail = detail.clone();
+                            let shell = shell.clone();
+                            glib::timeout_add_local(Duration::from_millis(100), move || {
+                                match receiver.try_recv() {
+                                    Ok(Ok(share_url)) => {
+                                        if let Some(display) = gdk::Display::default() {
+                                            display.clipboard().set_text(&share_url);
+                                        }
+                                        button.set_label(&t("Uploaded"));
+                                        detail.set_text(&tfmt(
+                                            "Share link copied to clipboard: {url}",
+                                            &[("url", &share_url)],
+                                        ));
+                                        detail.set_visible(true);
+                                        glib::ControlFlow::Break
+                                    }
+                                    Ok(Err(
+                                        crate::cloud::upload::UploadError::UpgradeRequired(message),
+                                    )) => {
+                                        button.set_sensitive(true);
+                                        button.set_label(&t("Upload"));
+                                        if let Some(window) = shell
+                                            .upgrade()
+                                            .and_then(|shell| shell.root())
+                                            .and_then(|root| root.downcast::<gtk4::Window>().ok())
+                                        {
+                                            crate::cloud::upgrade::show_prompt(&window, &message);
+                                        }
+                                        glib::ControlFlow::Break
+                                    }
+                                    Ok(Err(_)) => {
+                                        button.set_sensitive(true);
+                                        button.set_label(&t("Upload"));
+                                        glib::ControlFlow::Break
+                                    }
+                                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                                        glib::ControlFlow::Continue
+                                    }
+                                    Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                                        button.set_sensitive(true);
+                                        button.set_label(&t("Upload"));
+                                        glib::ControlFlow::Break
+                                    }
+                                }
+                            });
+                        }
+                    });
                     reveal.connect_clicked({
                         let detail = detail.clone();
                         move |_| {
@@ -216,6 +299,7 @@ pub(super) fn show(
                 detail.set_visible(true);
                 timing.set_visible(false);
                 reveal.set_visible(false);
+                upload.set_visible(false);
             }
             bar.set_visible(false);
             stop.set_visible(false);

@@ -362,7 +362,7 @@ void setRecordingCountdownSeconds(int seconds)
     settings.setValue(QStringLiteral("recording/countdown"), seconds);
 }
 
-void openSettingsWindow()
+QString settingsExecutable()
 {
     QString executable = qEnvironmentVariable("APEXSHOT_SETTINGS");
     if (executable.isEmpty()) {
@@ -374,6 +374,23 @@ void openSettingsWindow()
     }
     if (executable.isEmpty())
         executable = QStringLiteral("apexshot-settings.exe");
+    return executable;
+}
+
+/// Hand a capture to the Rust helper, which owns the Cloud transport. The
+/// helper exits after the request and its notification.
+bool startCloudUpload(const QString& path)
+{
+    if (path.isEmpty())
+        return false;
+    return QProcess::startDetached(settingsExecutable(),
+                                   {QStringLiteral("--upload"),
+                                    QDir::toNativeSeparators(path)});
+}
+
+void openSettingsWindow()
+{
+    const QString executable = settingsExecutable();
 
     if (!QProcess::startDetached(executable, {})) {
         QMessageBox::warning(
@@ -453,6 +470,30 @@ void startUpdateCheck()
     debugLog(QStringLiteral("update check: %1 started=%2")
                  .arg(QDir::toNativeSeparators(executable))
                  .arg(started));
+}
+
+void openImageEditorWindow(const QString& path = QString())
+{
+    QString executable = qEnvironmentVariable("APEXSHOT_IMAGE_EDITOR");
+    if (executable.isEmpty()) {
+        const QString sibling =
+            QDir(QCoreApplication::applicationDirPath())
+                .filePath(QStringLiteral("apexshot-image-editor.exe"));
+        if (QFileInfo::exists(sibling))
+            executable = sibling;
+    }
+    if (executable.isEmpty())
+        executable = QStringLiteral("apexshot-image-editor.exe");
+
+    const QStringList arguments = path.isEmpty() ? QStringList() : QStringList{path};
+    if (!QProcess::startDetached(executable, arguments)) {
+        QMessageBox::warning(
+            nullptr,
+            QStringLiteral("ApexShot Image Editor"),
+            QStringLiteral("Could not start the image editor:\n%1\n\n"
+                           "Set APEXSHOT_IMAGE_EDITOR to the editor executable.")
+                .arg(QDir::toNativeSeparators(executable)));
+    }
 }
 
 QIcon appIcon()
@@ -1368,6 +1409,19 @@ public:
         });
         row->addWidget(folder);
 
+        if (!path.isEmpty() && settings.cloud.configured) {
+            auto* upload = new QToolButton;
+            upload->setText(QStringLiteral("Upload"));
+            upload->setCursor(Qt::PointingHandCursor);
+            upload->setFont(uiFont(13, true));
+            const bool closeAfter = settings.quickAccess.closeAfterUploading;
+            connect(upload, &QToolButton::clicked, this, [this, path, closeAfter] {
+                if (startCloudUpload(path) && closeAfter)
+                    close();
+            });
+            row->addWidget(upload);
+        }
+
         row->addStretch();
 
         auto* dismiss = new QToolButton;
@@ -1461,6 +1515,20 @@ public:
     {
         if (m_tray)
             m_tray->showMessage(title, body, m_tray->icon(), 6000);
+    }
+
+    /// The shell has no Cloud transport; Settings mirrors whether auto-upload
+    /// is on and a destination is configured, and the Rust helper does the
+    /// request and reports the result.
+    void maybeAutoUpload(const QString& path, const Platform::ShellSettings& settings)
+    {
+        if (path.isEmpty() || !settings.cloud.autoUploadAfterCapture
+            || !settings.cloud.configured)
+            return;
+        if (!QProcess::startDetached(settingsExecutable(),
+                                     {QStringLiteral("--auto-upload"),
+                                      QDir::toNativeSeparators(path)}))
+            debugLog(QStringLiteral("auto upload could not start"));
     }
 
     void openMenu()
@@ -2961,6 +3029,10 @@ private:
         m_lastScreenshotText.clear();
         if (!path.isEmpty())
             QSettings().setValue(QStringLiteral("shortcuts/last_screenshot"), path);
+        maybeAutoUpload(path, settings);
+
+        if (settings.screenshots.afterOpenEditor && !path.isEmpty())
+            openImageEditorWindow(path);
 
         if (settings.screenshots.afterCopyToClipboard)
             Platform::copyCaptureToClipboard(image, path, settings.screenshots.clipboardMode);
@@ -2988,6 +3060,7 @@ private:
                           const Platform::ShellSettings& settings)
     {
         m_telemetry->recordRecording();
+        maybeAutoUpload(path, settings);
         if (settings.recording.afterCopyToClipboard) {
             auto* mime = new QMimeData;
             mime->setUrls({QUrl::fromLocalFile(path)});
@@ -3083,6 +3156,10 @@ private:
         m_lastScreenshotText = text;
         if (!path.isEmpty())
             QSettings().setValue(QStringLiteral("shortcuts/last_screenshot"), path);
+        maybeAutoUpload(path, settings);
+        if (settings.screenshots.afterOpenEditor && !path.isEmpty())
+            openImageEditorWindow(path);
+
         if (!settings.screenshots.afterShowResult) {
             // The hint is what the card would have said - text copied, image
             // copied, saved - so with the card off the notification carries it.
