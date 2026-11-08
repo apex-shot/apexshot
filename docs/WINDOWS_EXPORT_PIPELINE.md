@@ -29,6 +29,36 @@ The exporter picks the cheapest path that still produces the requested frame:
    encoder, is the bottleneck, so splitting encode work adds process start-up
    and slower libx264 pieces without reducing wall time.
 
+## GPU crop and scale
+
+When an export needs a camera view — a zoom, or an output size different from
+the source — and has no cursor, click ripple, or camera layer, the frame stays
+in NV12 and D3D11's video processor crops and scales it. The CPU path converts
+NV12 to RGBA, scales in software, and converts back; the GPU path uploads one
+NV12 frame, blits it, and reads the result back, so both colour conversions and
+the software scale disappear. Cursor and camera exports still use the CPU
+compositor.
+
+The scaler is best-effort. A missing D3D11 device, a driver without NV12 video
+processing, BT.2020 colour, or `APEXSHOT_EXPORT_GPU=0` falls back to the CPU
+path. A blit failure disables the scaler for the rest of the range and logs it.
+Each parallel range opens its own device and processor, because a D3D11
+immediate context is not thread-safe; at 1080p that is four textures, about
+12 MB per range.
+
+The video processor takes a whole-pixel source rectangle, so a slow zoom snaps
+the crop to whole pixels. At 1080p that is one pixel. This path is not the
+shared-surface ring yet: frames are read back to the CPU and written to ffmpeg.
+Feeding the encoder a D3D11 surface directly is the next step.
+
+On the development machine, a 1080p30 10-second 1.6× zoom export measured
+15.6–16.2 ms/frame with the CPU compositor and 7.5 ms/frame with the video
+processor (two ranges, Quick Sync), roughly twice as fast. A plain passthrough
+export measured 7.4–8.3 ms/frame, so the zoom path now costs about what the
+no-effects path does. A direct GPU-versus-CPU comparison of the same crop
+measured 47 dB luma PSNR with a zero-pixel shift; real `testsrc2` output measured
+38 dB overall because the two scalers filter differently.
+
 ## Encoder choice
 
 `Encoder::fastest()` probes `h264_nvenc`, `h264_qsv`, and `h264_amf` once per
@@ -57,6 +87,7 @@ progress bar resets because the retry starts over.
 - `APEXSHOT_EXPORT_WORKERS=1` disables parallel ranges. Values from 1 to 6 are
   clamped.
 - `APEXSHOT_EXPORT_HYBRID=1` enables the chunked two-encoder path.
+- `APEXSHOT_EXPORT_GPU=0` disables the D3D11 crop and scale path.
 
 Unlike the Linux editor, Windows selects hardware automatically. The quality
 caveat is the same: a CRF tier is passed to hardware encoders as a quantizer,
@@ -95,6 +126,13 @@ integration test:
 
 ```
 cargo test --lib parallel_ranges_match_the_sequential_render -- --ignored --nocapture
+```
+
+The GPU scaler's crop, resize, and range-start behaviour are covered by the
+ignored module tests:
+
+```
+cargo test --lib gpu::tests -- --ignored --nocapture
 ```
 
 On the development machine (20 logical cores, 1080p, 30 fps, 10 s), the

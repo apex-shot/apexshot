@@ -7,6 +7,8 @@
 //! background, frame aspect, rounded corners, motion blur, audio — are not
 //! part of this path.
 
+#[cfg(target_os = "windows")]
+mod gpu;
 mod hybrid;
 
 use super::cursor::preview_ripple;
@@ -501,10 +503,8 @@ fn render_range(
     );
 
     let probed = ffmpeg::probe_color_space(&model.source);
-    let converter = Nv12Converter::new(YuvSpace::from_probe(
-        probed.0.as_deref(),
-        probed.1.as_deref(),
-    ));
+    let space = YuvSpace::from_probe(probed.0.as_deref(), probed.1.as_deref());
+    let converter = Nv12Converter::new(space);
     let mut sink = Sink::open(
         output,
         size,
@@ -546,6 +546,24 @@ fn render_range(
         .filter(|webcam| webcam.source_size.0 > 0 && webcam.source_size.1 > 0)
         .map(|webcam| f64::from(webcam.source_size.0) / f64::from(webcam.source_size.1))
         .unwrap_or(16.0 / 9.0);
+    #[cfg(target_os = "windows")]
+    let mut gpu = if !plan.passthrough && model.sidecar.is_none() && webcam.is_none() {
+        match gpu::Scaler::new(model.source_size, size, space, fps) {
+            Ok(scaler) => {
+                eprintln!(
+                    "[export] GPU crop and scale: {}x{} -> {}x{}",
+                    model.source_size.0, model.source_size.1, size.0, size.1
+                );
+                Some(scaler)
+            }
+            Err(error) => {
+                eprintln!("[export] GPU crop and scale unavailable: {error}");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let mut cutout = if layouts.uses_cutout() {
         match super::cutout::CutoutProcessor::new() {
             Ok(processor) => Some(processor),
@@ -665,7 +683,6 @@ fn render_range(
                 log_frame(done_index);
                 continue;
             }
-            converter.to_rgba_into(&packed, model.source_size, &mut decoded);
             let source_time = frame_source_time(&plan.spans, done_index, fps)
                 .ok_or_else(|| End::Failed("the frame plan ran out of frames".to_string()))?;
             let composition_time = done_index as f64 / fps;
@@ -679,6 +696,43 @@ fn render_range(
             );
             let view = zoom::view_rect(camera_value.0, camera_value.1, source);
             let cropped = !(view_is_full(view, source) && size == model.source_size);
+            #[cfg(target_os = "windows")]
+            if let Some(scaler) = gpu.as_mut() {
+                let mut nv12 = match sink.buffer(done_index) {
+                    Ok(buffer) => buffer,
+                    Err(error) => {
+                        let _ = decoder.kill();
+                        let _ = decoder.wait();
+                        return Err(error);
+                    }
+                };
+                let rendered = if cropped {
+                    scaler.scale(&packed, view, &mut nv12)
+                } else {
+                    std::mem::swap(&mut packed, &mut nv12);
+                    Ok(())
+                };
+                match rendered {
+                    Ok(()) => {
+                        if let Err(error) = sink.submit(nv12) {
+                            let _ = decoder.kill();
+                            let _ = decoder.wait();
+                            return Err(error);
+                        }
+                        done_index += 1;
+                        done.fetch_add(1, Ordering::Relaxed);
+                        log_frame(done_index);
+                        continue;
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[export] GPU crop and scale failed: {error}; continuing on the CPU"
+                        );
+                        gpu = None;
+                    }
+                }
+            }
+            converter.to_rgba_into(&packed, model.source_size, &mut decoded);
             if cropped {
                 crop_scale_into(&decoded, model.source_size, view, size, &mut scaled);
             }
@@ -1703,8 +1757,17 @@ mod tests {
             .unwrap();
         let text = String::from_utf8_lossy(&compare.stderr);
         assert!(compare.status.success(), "{text}");
+        // The CPU compositor is bit-exact across a split. The D3D11 video
+        // processor can pick a different filter when a range starts mid-zoom,
+        // which moves a few levels; the frames still line up, so accept a high
+        // PSNR instead of `inf` for that path.
+        let average = text
+            .split("average:")
+            .nth(1)
+            .and_then(|tail| tail.split_whitespace().next())
+            .and_then(|value| value.parse::<f64>().ok());
         assert!(
-            text.contains("average:inf"),
+            text.contains("average:inf") || average.is_some_and(|value| value >= 45.0),
             "parallel output differs: {text}"
         );
         let _ = std::fs::remove_dir_all(&dir);
