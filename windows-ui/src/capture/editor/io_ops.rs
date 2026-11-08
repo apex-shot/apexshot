@@ -163,6 +163,50 @@ pub fn png_bytes(image: &RgbaImage) -> Result<Vec<u8>, EditorError> {
     Ok(bytes.into_inner())
 }
 
+/// BMP-encode a frame for the Windows clipboard. GTK's Win32 backend maps
+/// `image/bmp` onto the native `CF_DIB` family, which most Windows apps paste
+/// from; a texture alone only advertises PNG/JPEG/TIFF.
+pub fn bmp_bytes(image: &RgbaImage) -> Result<Vec<u8>, EditorError> {
+    const FILE_HEADER: usize = 14;
+    const INFO_HEADER: usize = 40;
+    let (width, height) = image.dimensions();
+    let row = (width as usize)
+        .checked_mul(4)
+        .ok_or_else(|| EditorError::ImageSave("image is too wide to copy".to_string()))?;
+    let pixels = row
+        .checked_mul(height as usize)
+        .ok_or_else(|| EditorError::ImageSave("image is too large to copy".to_string()))?;
+    let file_size = FILE_HEADER + INFO_HEADER + pixels;
+    let file_size = u32::try_from(file_size)
+        .map_err(|_| EditorError::ImageSave("image is too large to copy".to_string()))?;
+    let pixels = u32::try_from(pixels)
+        .map_err(|_| EditorError::ImageSave("image is too large to copy".to_string()))?;
+
+    let mut bytes = Vec::with_capacity(file_size as usize);
+    bytes.extend_from_slice(b"BM");
+    bytes.extend_from_slice(&file_size.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&((FILE_HEADER + INFO_HEADER) as u32).to_le_bytes());
+    bytes.extend_from_slice(&(INFO_HEADER as u32).to_le_bytes());
+    bytes.extend_from_slice(&(width as i32).to_le_bytes());
+    bytes.extend_from_slice(&(height as i32).to_le_bytes());
+    bytes.extend_from_slice(&1u16.to_le_bytes());
+    bytes.extend_from_slice(&32u16.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&pixels.to_le_bytes());
+    bytes.extend_from_slice(&2835i32.to_le_bytes());
+    bytes.extend_from_slice(&2835i32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    bytes.extend_from_slice(&0u32.to_le_bytes());
+    for y in (0..height).rev() {
+        for x in 0..width {
+            let pixel = image.get_pixel(x, y);
+            bytes.extend_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
+        }
+    }
+    Ok(bytes)
+}
+
 /// Save a clipboard snapshot PNG under `dir`, never overwriting an earlier copy.
 pub fn save_clipboard_image(dir: &Path, state: &EditorState) -> Result<PathBuf, EditorError> {
     let final_image = state.to_final_image()?;
@@ -191,4 +235,34 @@ pub fn save_clipboard_image(dir: &Path, state: &EditorState) -> Result<PathBuf, 
         return Err(EditorError::ImageSave(error.to_string()));
     }
     Ok(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::Rgba;
+
+    #[test]
+    fn bmp_bytes_writes_a_bottom_up_32_bit_dib() {
+        let mut image = RgbaImage::new(2, 2);
+        image.put_pixel(0, 0, Rgba([255, 0, 0, 255]));
+        image.put_pixel(1, 0, Rgba([0, 255, 0, 255]));
+        image.put_pixel(0, 1, Rgba([0, 0, 255, 255]));
+        image.put_pixel(1, 1, Rgba([255, 255, 255, 255]));
+        let bmp = bmp_bytes(&image).unwrap();
+
+        assert_eq!(&bmp[..2], b"BM");
+        assert_eq!(u32::from_le_bytes(bmp[2..6].try_into().unwrap()), 70);
+        assert_eq!(u32::from_le_bytes(bmp[10..14].try_into().unwrap()), 54);
+        assert_eq!(u32::from_le_bytes(bmp[14..18].try_into().unwrap()), 40);
+        assert_eq!(i32::from_le_bytes(bmp[18..22].try_into().unwrap()), 2);
+        assert_eq!(i32::from_le_bytes(bmp[22..26].try_into().unwrap()), 2);
+        assert_eq!(u16::from_le_bytes(bmp[26..28].try_into().unwrap()), 1);
+        assert_eq!(u16::from_le_bytes(bmp[28..30].try_into().unwrap()), 32);
+        // The file starts with the image's bottom row, stored BGRA.
+        assert_eq!(&bmp[54..58], &[255, 0, 0, 255]);
+        assert_eq!(&bmp[58..62], &[255, 255, 255, 255]);
+        assert_eq!(&bmp[62..66], &[0, 0, 255, 255]);
+        assert_eq!(&bmp[66..70], &[0, 255, 0, 255]);
+    }
 }

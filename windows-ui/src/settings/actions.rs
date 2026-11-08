@@ -432,6 +432,7 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
             "after_show_result": config.after_capture_show_quick_access,
             "after_copy_to_clipboard": config.after_capture_copy_file_to_clipboard,
             "after_save": config.after_capture_save,
+            "after_open_editor": config.after_capture_open_annotate,
             "high_dpi_suffix": config.adv_retina_suffix,
         },
         "recording": {
@@ -466,6 +467,11 @@ fn write_shell_settings_to(path: &Path, config: &AppConfig) -> anyhow::Result<()
             "overlay_scale": config.quick_access_overlay_size,
             "auto_close_enabled": config.quick_access_auto_close_enabled,
             "auto_close_seconds": config.quick_access_auto_close_interval,
+            "close_after_uploading": config.quick_access_close_after_uploading,
+        },
+        "cloud": {
+            "auto_upload_after_capture": config.cloud_auto_upload_after_capture,
+            "configured": crate::cloud::upload::is_configured(config),
         },
         "ocr": {
             "language": config.adv_ocr_language,
@@ -595,6 +601,7 @@ mod tests {
             screenshot_show_cursor: false,
             after_capture_save: false,
             after_capture_copy_file_to_clipboard: true,
+            after_capture_open_annotate: true,
             video_export_location: "C:\\videos".into(),
             rec_filename_pattern: "Clip {Date} {Time}".into(),
             rec_video_fps: 3,
@@ -636,6 +643,11 @@ mod tests {
             quick_access_overlay_size: 1.2,
             quick_access_auto_close_enabled: true,
             quick_access_auto_close_interval: 45,
+            quick_access_close_after_uploading: true,
+            cloud_destination: "xbackbone".into(),
+            cloud_auto_upload_after_capture: true,
+            xbackbone_url: "https://xb.example".into(),
+            xbackbone_api_token: "token".into(),
             adv_ocr_language: "deu".into(),
             adv_ocr_keep_line_breaks: false,
             windows_telemetry_enabled: true,
@@ -656,6 +668,7 @@ mod tests {
         assert_eq!(value["screenshots"]["show_cursor"], false);
         assert_eq!(value["screenshots"]["after_save"], false);
         assert_eq!(value["screenshots"]["after_copy_to_clipboard"], true);
+        assert_eq!(value["screenshots"]["after_open_editor"], true);
         assert_eq!(value["recording"]["show_countdown"], false);
         assert_eq!(value["recording"]["show_controls"], false);
         assert_eq!(value["recording"]["high_dpi"], false);
@@ -680,6 +693,9 @@ mod tests {
         assert_eq!(value["quick_access"]["overlay_scale"], 1.2);
         assert_eq!(value["quick_access"]["auto_close_enabled"], true);
         assert_eq!(value["quick_access"]["auto_close_seconds"], 45);
+        assert_eq!(value["quick_access"]["close_after_uploading"], true);
+        assert_eq!(value["cloud"]["auto_upload_after_capture"], true);
+        assert_eq!(value["cloud"]["configured"], true);
         assert_eq!(value["ocr"]["language"], "deu");
         assert_eq!(value["ocr"]["keep_line_breaks"], false);
         assert_eq!(value["telemetry"]["enabled"], true);
@@ -708,7 +724,10 @@ mod tests {
         assert_eq!(updated["recording"]["after_save"], true);
         assert_eq!(updated["general"]["shutter_sound"], "Camera");
         assert_eq!(updated["screenshots"]["high_dpi_suffix"], true);
+        assert_eq!(updated["screenshots"]["after_open_editor"], false);
         assert_eq!(updated["telemetry"]["enabled"], false);
+        assert_eq!(updated["cloud"]["configured"], false);
+        assert_eq!(updated["quick_access"]["close_after_uploading"], true);
 
         std::fs::remove_dir_all(&root).ok();
     }

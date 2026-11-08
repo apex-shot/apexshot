@@ -17,9 +17,7 @@ pub fn open_in_apexshot_editor(entry: &CaptureEntry) -> Result<String, String> {
     ensure_exists(&entry.path)?;
     match entry.kind {
         MediaKind::Video => launch_video_editor(&entry.path),
-        MediaKind::Image => Err(t(
-            "The image editor is not available in the Windows build yet",
-        )),
+        MediaKind::Image => launch_image_editor(&entry.path),
     }
 }
 
@@ -56,6 +54,40 @@ pub fn launch_video_editor(path: &Path) -> Result<String, String> {
         .unwrap_or_else(|| path.display().to_string());
     Ok(tfmt(
         "Opened {name} in the video editor",
+        &[("name", &name)],
+    ))
+}
+
+/// Start the image editor on a capture, resolving its executable the same way
+/// the video editor resolves.
+pub fn launch_image_editor(path: &Path) -> Result<String, String> {
+    ensure_exists(path)?;
+    let sibling = std::env::current_exe()
+        .ok()
+        .and_then(|current| current.parent().map(Path::to_path_buf))
+        .map(|directory| directory.join("apexshot-image-editor.exe"))
+        .filter(|sibling| sibling.is_file());
+    let executable = std::env::var_os("APEXSHOT_IMAGE_EDITOR")
+        .map(PathBuf::from)
+        .or(sibling)
+        .unwrap_or_else(|| PathBuf::from("apexshot-image-editor.exe"));
+
+    crate::utils::hidden_command(&executable)
+        .arg(path)
+        .spawn()
+        .map_err(|error| {
+            tfmt(
+                "Could not start the image editor: {message}",
+                &[("message", &error.to_string())],
+            )
+        })?;
+
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string());
+    Ok(tfmt(
+        "Opened {name} in the image editor",
         &[("name", &name)],
     ))
 }
@@ -134,9 +166,19 @@ pub fn reveal_in_file_manager(entry: &CaptureEntry) -> Result<String, String> {
 
 pub fn upload_to_cloud(entry: &CaptureEntry) -> Result<String, String> {
     ensure_exists(&entry.path)?;
-    Err(t(
-        "Cloud uploads are not available in the Windows build yet",
-    ))
+    let config = crate::config::load_config().sanitized();
+    if !crate::cloud::upload::is_configured(&config) {
+        let (title, body) = crate::cloud::upload::not_configured_notification(&config);
+        return Err(format!("{title}\n{body}"));
+    }
+    crate::cloud::upload::upload_file_with_notifications(&config, &entry.path)
+        .map(|_| {
+            tfmt(
+                "Uploaded {name} and copied its share link",
+                &[("name", &entry.display_name)],
+            )
+        })
+        .map_err(|error| error.to_string())
 }
 
 pub fn delete_capture(entry: &CaptureEntry) -> Result<String, String> {

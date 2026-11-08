@@ -122,6 +122,9 @@ fn spawn_background_decode(
 }
 
 type CachedCard = (u64, Vec<AnnotationAction>, f64, ImageSurface);
+/// The working image with its committed annotations, baked once per drag so
+/// pointer updates only redraw the in-progress stroke.
+type CachedAnnotations = (u64, usize, Option<usize>, ImageSurface);
 type CachedShadow = (
     crate::capture::editor::render::scene_shadow::SceneShadowGeometry,
     bool,
@@ -155,6 +158,9 @@ pub struct EditorHost {
     /// Prepared Cairo surface for the working image, keyed by its revision.
     surface_cache: RefCell<Option<(u64, ImageSurface)>>,
     card_cache: RefCell<Option<CachedCard>>,
+    /// Built on the first paint of a pen/highlighter drag; dropped when the
+    /// drag ends. Only used while no card transform is active.
+    annotation_cache: RefCell<Option<CachedAnnotations>>,
     shadow_cache: RefCell<Option<CachedShadow>>,
     glass_cache: RefCell<Option<CachedGlass>>,
     background_cache: RefCell<Option<(u64, u32, u32, ImageSurface)>>,
@@ -188,6 +194,7 @@ impl EditorHost {
             on_error,
             surface_cache: RefCell::new(None),
             card_cache: RefCell::new(None),
+            annotation_cache: RefCell::new(None),
             shadow_cache: RefCell::new(None),
             glass_cache: RefCell::new(None),
             background_cache: RefCell::new(None),
@@ -224,6 +231,7 @@ impl EditorHost {
         *self.editor.borrow_mut() = Some(state);
         *self.surface_cache.borrow_mut() = None;
         *self.card_cache.borrow_mut() = None;
+        *self.annotation_cache.borrow_mut() = None;
         *self.shadow_cache.borrow_mut() = None;
         *self.glass_cache.borrow_mut() = None;
         *self.background_cache.borrow_mut() = None;
@@ -586,6 +594,9 @@ impl EditorHost {
         let Some(st) = borrow.as_ref() else {
             return;
         };
+        if st.drag_start.is_none() {
+            let _ = self.annotation_cache.borrow_mut().take();
+        }
         let Some(surface) = self.working_surface(st) else {
             return;
         };
@@ -840,16 +851,40 @@ impl EditorHost {
         let _ = context.save();
         context.translate(t.offset_x, t.offset_y);
         context.scale(t.scale, t.scale);
-        render::rounded_rect_path(
-            context,
-            0.0,
-            0.0,
-            f64::from(st.working_image.width()),
-            f64::from(st.working_image.height()),
-            layout.radius,
-        );
-        context.clip();
-        context.set_source_surface(&surface, 0.0, 0.0).ok();
+        let drag_annotations = if !motion
+            && !t.has_background
+            && st.drag_start.is_some()
+            && matches!(st.selected_tool, Tool::Pen | Tool::Highlighter)
+            && !st.auto_expand_canvas
+        {
+            self.drag_annotation_frame(st)
+        } else {
+            None
+        };
+        if let Some(cached) = &drag_annotations {
+            // The cached frame already has the rounded image baked in; its
+            // annotations are only clipped to the image rectangle, exactly
+            // like the direct path below.
+            context.rectangle(
+                0.0,
+                0.0,
+                f64::from(st.working_image.width()),
+                f64::from(st.working_image.height()),
+            );
+            context.clip();
+            context.set_source_surface(cached, 0.0, 0.0).ok();
+        } else {
+            render::rounded_rect_path(
+                context,
+                0.0,
+                0.0,
+                f64::from(st.working_image.width()),
+                f64::from(st.working_image.height()),
+                layout.radius,
+            );
+            context.clip();
+            context.set_source_surface(&surface, 0.0, 0.0).ok();
+        }
         // A live frame resamples the screenshot under a moving scale; the
         // quality convolution costs tens of milliseconds there. The parked
         // frame is painted again with the full filter.
@@ -882,16 +917,18 @@ impl EditorHost {
                 .as_ref()
                 .and_then(|input| input.editing_action_index)
         };
-        for (index, action) in st.actions.iter().enumerate() {
-            if Some(index) == editing
-                || matches!(
-                    action,
-                    AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }
-                )
-            {
-                continue;
+        if drag_annotations.is_none() {
+            for (index, action) in st.actions.iter().enumerate() {
+                if Some(index) == editing
+                    || matches!(
+                        action,
+                        AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }
+                    )
+                {
+                    continue;
+                }
+                draw_annotation_action(context, action);
             }
-            draw_annotation_action(context, action);
         }
         if !motion {
             if let Some(draft) = st.draft_action() {
@@ -1022,6 +1059,70 @@ impl EditorHost {
             let _ = context.paint();
             let _ = context.restore();
         }
+    }
+
+    /// The working image with every committed annotation already composited,
+    /// for the length of a pen/highlighter drag. Rebuilding it per frame is
+    /// what makes long strokes lag once a few are on the canvas.
+    fn drag_annotation_frame(&self, st: &EditorState) -> Option<ImageSurface> {
+        let editing = st
+            .active_text_input
+            .as_ref()
+            .and_then(|input| input.editing_action_index);
+        let cached = self.annotation_cache.borrow();
+        if let Some((revision, actions, cached_editing, surface)) = cached.as_ref() {
+            if *revision == st.working_image_revision
+                && *actions == st.actions.len()
+                && *cached_editing == editing
+            {
+                return Some(surface.clone());
+            }
+        }
+        drop(cached);
+
+        let source = self.working_surface(st)?;
+        let surface = ImageSurface::create(
+            gtk4::cairo::Format::ARgb32,
+            st.working_image.width() as i32,
+            st.working_image.height() as i32,
+        )
+        .ok()?;
+        let context = gtk4::cairo::Context::new(&surface).ok()?;
+        let layout = st
+            .background
+            .layout(st.working_image.width(), st.working_image.height());
+        let _ = context.save();
+        render::rounded_rect_path(
+            &context,
+            0.0,
+            0.0,
+            f64::from(st.working_image.width()),
+            f64::from(st.working_image.height()),
+            layout.radius,
+        );
+        context.clip();
+        context.set_source_surface(&source, 0.0, 0.0).ok()?;
+        context.paint().ok()?;
+        let _ = context.restore();
+        for (index, action) in st.actions.iter().enumerate() {
+            if Some(index) == editing
+                || matches!(
+                    action,
+                    AnnotationAction::Obfuscate { .. } | AnnotationAction::Focus { .. }
+                )
+            {
+                continue;
+            }
+            draw_annotation_action(&context, action);
+        }
+        surface.flush();
+        *self.annotation_cache.borrow_mut() = Some((
+            st.working_image_revision,
+            st.actions.len(),
+            editing,
+            surface.clone(),
+        ));
+        Some(surface)
     }
 
     fn working_surface(&self, st: &EditorState) -> Option<ImageSurface> {
@@ -1818,6 +1919,7 @@ impl EditorHost {
     }
 
     fn drag_begin(&self, t: &ViewTransform, gesture: &gtk4::GestureDrag, view_point: Point) {
+        *self.annotation_cache.borrow_mut() = None;
         let shift = gesture
             .current_event_state()
             .contains(gdk::ModifierType::SHIFT_MASK);
@@ -2136,6 +2238,7 @@ impl EditorHost {
     }
 
     fn drag_end(&self, t: &ViewTransform, gesture: &gtk4::GestureDrag, ox: f64, oy: f64) {
+        *self.annotation_cache.borrow_mut() = None;
         let shift = gesture
             .current_event_state()
             .contains(gdk::ModifierType::SHIFT_MASK);
@@ -2394,14 +2497,32 @@ impl EditorHost {
             );
             return;
         };
+        self.write_snapshot_to_clipboard(snapshot);
+    }
+
+    /// Clipboard an already rendered frame, the current Motion pose, through
+    /// the same BMP and PNG provider the flattened document uses.
+    pub fn copy_frame_to_clipboard(&self, frame: image::RgbaImage) {
+        if self.background_loading() {
+            self.report_error(crate::i18n::t(
+                "Wait for the background image to finish loading.",
+            ));
+            return;
+        }
+        self.write_snapshot_to_clipboard(frame);
+    }
+
+    fn write_snapshot_to_clipboard(&self, snapshot: image::RgbaImage) {
         let report = self.on_error.clone();
-        let (sender, receiver) = mpsc::channel::<Option<Vec<u8>>>();
+        let (sender, receiver) = mpsc::channel::<Option<(Vec<u8>, Vec<u8>)>>();
         std::thread::spawn(move || {
-            let _ = sender.send(crate::capture::editor::io_ops::png_bytes(&snapshot).ok());
+            let bmp = crate::capture::editor::io_ops::bmp_bytes(&snapshot).ok();
+            let png = crate::capture::editor::io_ops::png_bytes(&snapshot).ok();
+            let _ = sender.send(bmp.zip(png));
         });
         glib::timeout_add_local(Duration::from_millis(16), move || {
-            let bytes = match receiver.try_recv() {
-                Ok(bytes) => bytes,
+            let encoded = match receiver.try_recv() {
+                Ok(encoded) => encoded,
                 Err(mpsc::TryRecvError::Empty) => return glib::ControlFlow::Continue,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     report_output_failure(
@@ -2412,20 +2533,41 @@ impl EditorHost {
                     return glib::ControlFlow::Break;
                 }
             };
-            match bytes.and_then(|b| gdk::Texture::from_bytes(&glib::Bytes::from_owned(b)).ok()) {
-                Some(texture) => {
-                    if let Some(display) = gdk::Display::default() {
-                        display.clipboard().set_texture(&texture);
-                    }
-                }
-                None => report_output_failure(
+            let copied = encoded.is_some_and(|(bmp, png)| {
+                let bmp = glib::Bytes::from_owned(bmp);
+                let png = glib::Bytes::from_owned(png);
+                let provider = gdk::ContentProvider::new_union(&[
+                    gdk::ContentProvider::for_bytes("image/bmp", &bmp),
+                    gdk::ContentProvider::for_bytes("image/png", &png),
+                ]);
+                gdk::Display::default()
+                    .is_some_and(|display| display.clipboard().set_content(Some(&provider)).is_ok())
+            });
+            if copied {
+                report(crate::i18n::t("Image copied to clipboard"));
+            } else {
+                report_output_failure(
                     &*report,
                     &crate::i18n::t("Copy failed"),
                     "Could not copy the image to the clipboard.",
-                ),
+                );
             }
             glib::ControlFlow::Break
         });
+    }
+
+    /// The flattened document for a Cloud upload. Commits inline text first
+    /// and refuses while the background image is still loading, exactly like
+    /// Copy and Save As.
+    pub fn upload_snapshot(&self) -> Option<image::RgbaImage> {
+        if self.background_loading() {
+            self.report_error(crate::i18n::t(
+                "Wait for the background image to finish loading.",
+            ));
+            return None;
+        }
+        self.commit_text_if_active();
+        self.with_state(|st| st.to_final_image().ok()).flatten()
     }
 
     /// Save the flattened document with the platform file dialog handling
@@ -2447,6 +2589,11 @@ impl EditorHost {
             );
             return;
         };
+        self.save_snapshot(path, snapshot);
+        let _ = parent;
+    }
+
+    fn save_snapshot(&self, path: &std::path::Path, snapshot: image::RgbaImage) {
         let path = path.to_path_buf();
         let report = self.on_error.clone();
         let reported_path = path.clone();
@@ -2478,7 +2625,6 @@ impl EditorHost {
                 Err(_) => glib::ControlFlow::Break,
             }
         });
-        let _ = parent;
     }
 }
 
@@ -2678,6 +2824,102 @@ mod tests {
 
     fn host() -> Rc<EditorHost> {
         EditorHost::new(Rc::new(|| {}), Rc::new(|_| {}), Rc::new(|| (0.0, 0.0)))
+    }
+
+    #[test]
+    fn drag_annotation_cache_matches_direct_paint() {
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            160,
+            100,
+            image::Rgba([240, 240, 240, 255]),
+        ));
+        state.selected_tool = Tool::Highlighter;
+        state.actions = vec![AnnotationAction::Highlighter {
+            points: vec![
+                Point { x: 20.0, y: 30.0 },
+                Point { x: 60.0, y: 40.0 },
+                Point { x: 100.0, y: 25.0 },
+                Point { x: 140.0, y: 60.0 },
+            ],
+            color: crate::capture::editor::types::DrawColor::new(1.0, 0.85, 0.1, 1.0),
+            stroke_size: 14.0,
+        }];
+        state.drag_start = Some(Point { x: 10.0, y: 10.0 });
+        *host.editor.borrow_mut() = Some(state);
+
+        let transform = ViewTransform::for_image(160.0, 100.0);
+        let render = |dragging: bool| {
+            *host.annotation_cache.borrow_mut() = None;
+            host.mutate(|state| {
+                state.drag_start = dragging.then_some(Point { x: 10.0, y: 10.0 });
+            });
+            let mut surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 160, 100).unwrap();
+            let context = gtk4::cairo::Context::new(&surface).unwrap();
+            host.paint_document(&context, transform);
+            drop(context);
+            surface.flush();
+            let data = surface.data().unwrap().to_vec();
+            drop(surface);
+            data
+        };
+
+        assert_eq!(render(true), render(false));
+    }
+
+    #[test]
+    #[ignore = "manual highlighter paint measurement"]
+    fn measure_highlighter_paint() {
+        let host = host();
+        let mut state = EditorState::new(RgbaImage::from_pixel(
+            1920,
+            1080,
+            image::Rgba([230, 230, 230, 255]),
+        ));
+        state.selected_tool = Tool::Highlighter;
+        state.drag_start = Some(Point { x: 10.0, y: 10.0 });
+        *host.editor.borrow_mut() = Some(state);
+        let surface = ImageSurface::create(gtk4::cairo::Format::ARgb32, 1920, 1080).unwrap();
+        let context = gtk4::cairo::Context::new(&surface).unwrap();
+        let transform = ViewTransform::for_image(1920.0, 1080.0);
+        for count in [0usize, 1, 3, 6, 10] {
+            host.mutate(|state| {
+                state.actions = (0..count)
+                    .map(|index| {
+                        let points = (0..500)
+                            .map(|i| Point {
+                                x: 40.0 + i as f64 * 1.8,
+                                y: 120.0 + index as f64 * 90.0 + (i as f64 * 0.05).sin() * 50.0,
+                            })
+                            .collect();
+                        AnnotationAction::Highlighter {
+                            points,
+                            color: crate::capture::editor::types::DrawColor::new(
+                                1.0, 0.9, 0.1, 1.0,
+                            ),
+                            stroke_size: 40.0,
+                        }
+                    })
+                    .collect();
+            });
+            host.paint_document(&context, transform);
+            let start = std::time::Instant::now();
+            for _ in 0..10 {
+                host.paint_document(&context, transform);
+            }
+            let cached = start.elapsed() / 10;
+            host.mutate(|state| state.drag_start = None);
+            host.paint_document(&context, transform);
+            let start = std::time::Instant::now();
+            for _ in 0..10 {
+                host.paint_document(&context, transform);
+            }
+            let direct = start.elapsed() / 10;
+            host.mutate(|state| state.drag_start = Some(Point { x: 10.0, y: 10.0 }));
+            eprintln!(
+                "{count} committed strokes: cached {cached:?}/frame, direct {direct:?}/frame"
+            );
+        }
     }
 
     #[test]
@@ -3865,6 +4107,75 @@ mod tests {
         assert!(crate::capture::editor::io_ops::save_image_snapshot(&bogus, img).is_err());
         assert_eq!(std::fs::read(&bogus).unwrap(), b"keep");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Manual probe: the editor's Copy must advertise a native Windows image
+    /// format while the owning process is still alive.
+    #[test]
+    #[ignore = "clobbers the live clipboard; run manually with --ignored --nocapture"]
+    fn copy_to_clipboard_advertises_windows_image_format() {
+        gtk4::init().expect("GTK must initialize for the clipboard probe");
+        let messages: Rc<std::cell::RefCell<Vec<String>>> =
+            Rc::new(std::cell::RefCell::new(Vec::new()));
+        let sink = messages.clone();
+        let h = EditorHost::new(
+            Rc::new(|| {}),
+            Rc::new(move |message: String| sink.borrow_mut().push(message)),
+            Rc::new(|| (0.0, 0.0)),
+        );
+        h.load_document_headless(test_image(64, 64));
+        h.copy_to_clipboard();
+
+        let main_loop = glib::MainLoop::new(None, false);
+        let quit = main_loop.clone();
+        glib::timeout_add_local_once(std::time::Duration::from_millis(1500), move || quit.quit());
+        main_loop.run();
+
+        let mut formats = Vec::new();
+        unsafe {
+            use windows_sys::Win32::System::DataExchange::{
+                CloseClipboard, EnumClipboardFormats, GetClipboardFormatNameW, OpenClipboard,
+            };
+            if OpenClipboard(std::ptr::null_mut()) != 0 {
+                let mut format = 0;
+                loop {
+                    format = EnumClipboardFormats(format);
+                    if format == 0 {
+                        break;
+                    }
+                    let mut name = [0u16; 128];
+                    let len = GetClipboardFormatNameW(format, name.as_mut_ptr(), name.len() as i32);
+                    let name = if len > 0 {
+                        String::from_utf16_lossy(&name[..len as usize])
+                    } else {
+                        match format {
+                            1 => "CF_TEXT".to_string(),
+                            2 => "CF_BITMAP".to_string(),
+                            8 => "CF_DIB".to_string(),
+                            13 => "CF_UNICODETEXT".to_string(),
+                            17 => "CF_DIBV5".to_string(),
+                            other => format!("predefined {other}"),
+                        }
+                    };
+                    formats.push((format, name));
+                }
+                CloseClipboard();
+            }
+        }
+        assert!(
+            formats
+                .iter()
+                .any(|(format, _)| *format == 8 || *format == 17),
+            "no CF_DIB/CF_DIBV5 image on the Windows clipboard: {formats:?}"
+        );
+        assert!(
+            !messages
+                .borrow()
+                .iter()
+                .any(|message| message.contains("Could not copy")),
+            "copy reported a failure: {:?}",
+            messages.borrow()
+        );
     }
 
     /// End-to-end proof the WinRT PowerShell helper detects real text:

@@ -81,9 +81,13 @@ pub fn build_cloud_section(config: &AppConfig) -> CloudSettingsWidgets {
     let auto_label = Label::new(Some(&t("Upload after capture")));
     auto_label.set_xalign(0.0);
     auto_label.set_hexpand(true);
-    let auto_help = Label::new(Some(&t(
-        "Uploads each saved screenshot and copies the share link. Does nothing until you Connect.",
-    )));
+    // The Windows shell auto-uploads recordings too.
+    let auto_help_text = if cfg!(target_os = "windows") {
+        t("Uploads each saved screenshot and recording and copies the share link. Does nothing until you Connect.")
+    } else {
+        t("Uploads each saved screenshot and copies the share link. Does nothing until you Connect.")
+    };
+    let auto_help = Label::new(Some(&auto_help_text));
     auto_help.add_css_class("dim-label");
     auto_help.set_wrap(true);
     auto_help.set_xalign(0.0);

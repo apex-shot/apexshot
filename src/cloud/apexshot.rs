@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 use crate::config::{resolve_cloud_backend_url, AppConfig};
 
+#[allow(unused_imports)]
 pub(crate) use super::auth::{refresh_access_token, RefreshError};
 use super::upload::{guess_content_type, UploadError, UploadResult};
 

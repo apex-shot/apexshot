@@ -49,6 +49,8 @@ struct ShellSettings {
         bool afterShowResult = true;
         bool afterCopyToClipboard = false;
         bool afterSave = true;
+        /// Open the annotated capture in the image editor once it is saved.
+        bool afterOpenEditor = false;
         bool highDpiSuffix = false;
     } screenshots;
 
@@ -89,7 +91,15 @@ struct ShellSettings {
         double overlayScale = 1.0;
         bool autoCloseEnabled = false;
         int autoCloseSeconds = 30;
+        bool closeAfterUploading = false;
     } quickAccess;
+
+    /// The Rust window owns the Cloud tokens; the shell only needs to know
+    /// whether auto-upload can run and whether a destination is ready.
+    struct Cloud {
+        bool autoUploadAfterCapture = false;
+        bool configured = false;
+    } cloud;
 
     struct Ocr {
         /// Tesseract-style code from the Rust config (`eng`, `spa`, ...).

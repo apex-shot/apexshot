@@ -90,46 +90,60 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     canvas.root.add_overlay(&sub_bars.root);
     canvas.root.add_overlay(&toolbar.history);
 
+    // Upload keeps its own busy state so a document change mid-request cannot
+    // re-enable the button.
+    let uploading = Rc::new(Cell::new(false));
+    // Copy, Upload and Export act on the Motion composition while that page
+    // is up; video exports disable the button until the encoder finishes.
+    let in_motion = Rc::new(Cell::new(false));
+    let exporting = Rc::new(Cell::new(false));
+    let motion_export_name = initial
+        .and_then(|path| path.file_stem())
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.is_empty())
+        .map(|stem| format!("{stem} Motion.mp4"))
+        .unwrap_or_else(|| "ApexShot Motion.mp4".to_string());
+
     // Model -> chrome: bars, history sensitivity and action buttons refresh
     // after every document or selection mutation.
-    {
-        let sync_all = {
-            let sub_bars = sub_bars.clone();
-            let host = canvas.host.clone();
-            let undo = toolbar.undo.clone();
-            let redo = toolbar.redo.clone();
-            let delete = toolbar.delete.clone();
-            let copy = inspector.copy_button.clone();
-            let export = inspector.export_button.clone();
-            let toolbar = toolbar.clone();
-            let canvas = canvas.clone();
-            let effect_control = effect_control.clone();
-            let inspector = inspector.clone();
-            Rc::new(move || {
-                // View math follows the document so crop/undo re-fit and
-                // hit-testing tracks the real pixels.
-                canvas.sync_view_to_document();
-                host.read(|st| {
-                    toolbar.set_active_tool(Tool::from_model(st.selected_tool));
-                    sub_bars.sync(Some(st));
-                    canvas.set_crop_mode(
-                        st.selected_tool == crate::capture::editor::types::Tool::Crop,
-                    );
-                    effect_control.sync(st, &canvas);
-                    undo.set_sensitive(st.can_undo());
-                    redo.set_sensitive(st.can_redo());
-                    delete.set_sensitive(st.selected_action_index.is_some());
-                });
-                let has_doc = host.has_document();
-                inspector.sync_background();
-                copy.set_sensitive(has_doc && !host.background_loading());
-                export.set_sensitive(has_doc && !host.background_loading());
-                canvas.refresh_cursor();
-            })
-        };
-        canvas.add_change_listener(sync_all.clone());
-        sync_all();
-    }
+    let sync_all = {
+        let sub_bars = sub_bars.clone();
+        let host = canvas.host.clone();
+        let undo = toolbar.undo.clone();
+        let redo = toolbar.redo.clone();
+        let delete = toolbar.delete.clone();
+        let copy = inspector.copy_button.clone();
+        let upload = inspector.upload_button.clone();
+        let uploading = uploading.clone();
+        let export = inspector.export_button.clone();
+        let exporting = exporting.clone();
+        let toolbar = toolbar.clone();
+        let canvas = canvas.clone();
+        let effect_control = effect_control.clone();
+        let inspector = inspector.clone();
+        Rc::new(move || {
+            // View math follows the document so crop/undo re-fit and
+            // hit-testing tracks the real pixels.
+            canvas.sync_view_to_document();
+            host.read(|st| {
+                toolbar.set_active_tool(Tool::from_model(st.selected_tool));
+                sub_bars.sync(Some(st));
+                canvas.set_crop_mode(st.selected_tool == crate::capture::editor::types::Tool::Crop);
+                effect_control.sync(st, &canvas);
+                undo.set_sensitive(st.can_undo());
+                redo.set_sensitive(st.can_redo());
+                delete.set_sensitive(st.selected_action_index.is_some());
+            });
+            let has_doc = host.has_document();
+            inspector.sync_background();
+            copy.set_sensitive(has_doc && !host.background_loading());
+            upload.set_sensitive(has_doc && !host.background_loading() && !uploading.get());
+            export.set_sensitive(has_doc && !host.background_loading() && !exporting.get());
+            canvas.refresh_cursor();
+        })
+    };
+    canvas.add_change_listener(sync_all.clone());
+    sync_all();
 
     toolbar.undo.connect_clicked({
         let host = canvas.host.clone();
@@ -147,13 +161,49 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
     inspector.copy_button.connect_clicked({
         let host = canvas.host.clone();
         let window = window.clone();
-        move |_| copy_image(&window, &host)
+        let motion = motion.clone();
+        let in_motion = in_motion.clone();
+        move |_| {
+            if !in_motion.get() {
+                copy_image(&window, &host);
+                return;
+            }
+            match motion.current_frame_image() {
+                Some(frame) => copy_frame_image(&host, frame),
+                None => host.report_error(t("Could not render the Motion frame.")),
+            }
+        }
+    });
+    inspector.upload_button.connect_clicked({
+        let host = canvas.host.clone();
+        let window = window.clone();
+        let button = inspector.upload_button.clone();
+        let uploading = uploading.clone();
+        let motion = motion.clone();
+        let in_motion = in_motion.clone();
+        let name = motion_export_name.clone();
+        move |_| {
+            if !in_motion.get() {
+                upload_image(&window, &host, &button, &uploading);
+                return;
+            }
+            upload_motion_video(&window, &host, &motion, &button, &uploading, &name);
+        }
     });
     inspector.export_button.connect_clicked({
         let host = canvas.host.clone();
         let window = window.clone();
+        let motion = motion.clone();
+        let in_motion = in_motion.clone();
+        let exporting = exporting.clone();
+        let name = motion_export_name.clone();
         move |_| {
-            save_as_dialog(&window, &host);
+            if in_motion.get() {
+                let sync_all: Rc<dyn Fn()> = sync_all.clone();
+                save_motion_video_dialog(&window, &host, &motion, &exporting, &name, sync_all);
+            } else {
+                save_as_dialog(&window, &host);
+            }
         }
     });
 
@@ -192,7 +242,9 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let inspector = inspector.clone();
         let motion = motion.clone();
         let host = canvas.host.clone();
+        let in_motion = in_motion.clone();
         Rc::new(move |motion_now: bool| {
+            in_motion.set(motion_now);
             if motion_now {
                 host.commit_text_if_active();
                 host.set_space_pan(false);
@@ -408,6 +460,120 @@ fn save_as_dialog(window: &ApplicationWindow, host: &Rc<super::annotate::EditorH
     });
 }
 
+/// Export the whole Motion composition as an MP4. The gate matches Motion's
+/// video export entitlement; the encoder renders a frame per main-loop tick
+/// so the dialog and window stay usable while it works.
+fn save_motion_video_dialog(
+    window: &ApplicationWindow,
+    host: &Rc<super::annotate::EditorHost>,
+    motion: &Rc<motion::MotionMode>,
+    exporting: &Rc<Cell<bool>>,
+    name: &str,
+    sync_all: Rc<dyn Fn()>,
+) {
+    if exporting.get() || !host.has_document() || host.background_loading() {
+        return;
+    }
+    let retry_window = window.downgrade();
+    let retry_host = Rc::downgrade(host);
+    let retry_motion = Rc::downgrade(motion);
+    let retry_exporting = exporting.clone();
+    let retry_name = name.to_string();
+    let retry_sync = sync_all.clone();
+    if !crate::studio_upsell::gate(
+        window,
+        crate::studio_entitlement::capabilities_for_motion_export(),
+        move || {
+            if let (Some(window), Some(host), Some(motion)) = (
+                retry_window.upgrade(),
+                retry_host.upgrade(),
+                retry_motion.upgrade(),
+            ) {
+                save_motion_video_dialog(
+                    &window,
+                    &host,
+                    &motion,
+                    &retry_exporting,
+                    &retry_name,
+                    retry_sync.clone(),
+                );
+            }
+        },
+    ) {
+        return;
+    }
+
+    let dialog = gtk4::FileDialog::new();
+    dialog.set_title(&t("Export Motion video"));
+    let config = crate::config::load_config().sanitized();
+    let folder = config.motion_export_dir(&crate::recording::recording_output_dir(&config));
+    dialog.set_initial_folder(Some(&gtk4::gio::File::for_path(&folder)));
+    dialog.set_initial_name(Some(name));
+    let filter = gtk4::FileFilter::new();
+    filter.set_name(Some(&t("MP4 video")));
+    filter.add_mime_type("video/mp4");
+    filter.add_pattern("*.mp4");
+    filter.add_pattern("*.MP4");
+    let filters = gtk4::gio::ListStore::new::<gtk4::FileFilter>();
+    filters.append(&filter);
+    dialog.set_filters(Some(&filters));
+    dialog.set_default_filter(Some(&filter));
+
+    let motion = motion.clone();
+    let host = host.clone();
+    let exporting = exporting.clone();
+    let sync_all = sync_all.clone();
+    dialog.save(Some(window), gtk4::gio::Cancellable::NONE, move |result| {
+        if let Ok(file) = result {
+            if let Some(path) = file.path() {
+                let path = with_mp4_extension(path);
+                exporting.set(true);
+                sync_all();
+                let result = motion.export_video(path, {
+                    let exporting = exporting.clone();
+                    let sync_all = sync_all.clone();
+                    let host = host.clone();
+                    move |result| {
+                        exporting.set(false);
+                        sync_all();
+                        match result {
+                            Ok(path) => {
+                                let mut config = crate::config::load_config();
+                                if config.remember_video_export_dir(&path) {
+                                    let _ = crate::config::save_config(&config);
+                                }
+                                crate::utils::notify::desktop_notification(
+                                    &t("Export complete"),
+                                    &path.display().to_string(),
+                                );
+                            }
+                            Err(error) => host.report_error(error),
+                        }
+                    }
+                });
+                if let Err(error) = result {
+                    exporting.set(false);
+                    sync_all();
+                    host.report_error(error);
+                }
+            }
+        }
+    });
+}
+
+/// Motion is always encoded as MP4, so an extension-less or mis-typed choice
+/// from the Save chooser is corrected rather than written as-is.
+fn with_mp4_extension(mut destination: std::path::PathBuf) -> std::path::PathBuf {
+    let is_mp4 = destination
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("mp4"));
+    if !is_mp4 {
+        destination.set_extension("mp4");
+    }
+    destination
+}
+
 fn gate_image_output(
     window: &ApplicationWindow,
     host: &Rc<super::annotate::EditorHost>,
@@ -434,6 +600,271 @@ fn copy_image(window: &ApplicationWindow, host: &Rc<super::annotate::EditorHost>
     }) {
         host.copy_to_clipboard();
     }
+}
+
+/// Copy the already rendered Motion pose. The Motion composition is its own
+/// output path, so the static image gate does not apply.
+fn copy_frame_image(host: &Rc<super::annotate::EditorHost>, frame: image::RgbaImage) {
+    if !host.has_document() || host.background_loading() {
+        return;
+    }
+    host.copy_frame_to_clipboard(frame);
+}
+
+/// Upload the flattened document as a temporary PNG. The temp file lives only
+/// for the request: Cloud responds with the share URL, which goes to the
+/// clipboard so the next paste carries the link.
+fn upload_image(
+    window: &ApplicationWindow,
+    host: &Rc<super::annotate::EditorHost>,
+    button: &gtk4::Button,
+    uploading: &Rc<Cell<bool>>,
+) {
+    if uploading.get() || !host.has_document() || host.background_loading() {
+        return;
+    }
+    let retry_window = window.downgrade();
+    let retry_host = Rc::downgrade(host);
+    let retry_button = button.downgrade();
+    let retry_uploading = uploading.clone();
+    if !gate_image_output(window, host, move || {
+        if let (Some(window), Some(host), Some(button)) = (
+            retry_window.upgrade(),
+            retry_host.upgrade(),
+            retry_button.upgrade(),
+        ) {
+            upload_image(&window, &host, &button, &retry_uploading);
+        }
+    }) {
+        return;
+    }
+
+    let Some(config) = configured_cloud() else {
+        return;
+    };
+    let Some(snapshot) = host.upload_snapshot() else {
+        return;
+    };
+    upload_rendered_image(window, button, uploading, config, snapshot);
+}
+
+fn configured_cloud() -> Option<crate::config::AppConfig> {
+    let config = crate::config::load_config().sanitized();
+    if !crate::cloud::upload::is_configured(&config) {
+        let (title, body) = crate::cloud::upload::not_configured_notification(&config);
+        crate::utils::notify::desktop_notification_important(&title, &body);
+        return None;
+    }
+    Some(config)
+}
+
+/// Upload the Motion composition as an MP4. Rendering happens first, one
+/// frame per main-loop tick; the finished file goes through the same Cloud
+/// request and share-URL clipboard as a still.
+fn upload_motion_video(
+    window: &ApplicationWindow,
+    host: &Rc<super::annotate::EditorHost>,
+    motion: &Rc<motion::MotionMode>,
+    button: &gtk4::Button,
+    uploading: &Rc<Cell<bool>>,
+    name: &str,
+) {
+    if uploading.get() || !host.has_document() || host.background_loading() {
+        return;
+    }
+    let retry_window = window.downgrade();
+    let retry_host = Rc::downgrade(host);
+    let retry_motion = Rc::downgrade(motion);
+    let retry_button = button.downgrade();
+    let retry_uploading = uploading.clone();
+    let retry_name = name.to_string();
+    if !crate::studio_upsell::gate(
+        window,
+        crate::studio_entitlement::capabilities_for_motion_export(),
+        move || {
+            if let (Some(window), Some(host), Some(motion), Some(button)) = (
+                retry_window.upgrade(),
+                retry_host.upgrade(),
+                retry_motion.upgrade(),
+                retry_button.upgrade(),
+            ) {
+                upload_motion_video(
+                    &window,
+                    &host,
+                    &motion,
+                    &button,
+                    &retry_uploading,
+                    &retry_name,
+                );
+            }
+        },
+    ) {
+        return;
+    }
+
+    let Some(config) = configured_cloud() else {
+        return;
+    };
+    let directory = upload_temp_dir();
+    if let Err(error) = std::fs::create_dir_all(&directory) {
+        host.report_error(format!("Could not prepare the Motion upload: {error}"));
+        return;
+    }
+    let path = directory.join(name);
+    let cleanup = directory.clone();
+    uploading.set(true);
+    button.set_sensitive(false);
+    let result = motion.export_video(path, {
+        let window = window.downgrade();
+        let button = button.downgrade();
+        let uploading = uploading.clone();
+        let host = host.clone();
+        move |result| match result {
+            Ok(path) => {
+                if let (Some(window), Some(button)) = (window.upgrade(), button.upgrade()) {
+                    upload_path(&window, &button, &uploading, config, path, Some(cleanup));
+                } else {
+                    uploading.set(false);
+                    let _ = std::fs::remove_dir_all(&cleanup);
+                }
+            }
+            Err(error) => {
+                uploading.set(false);
+                if let Some(button) = button.upgrade() {
+                    button.set_sensitive(true);
+                }
+                let _ = std::fs::remove_dir_all(&cleanup);
+                crate::utils::notify::desktop_notification_important(&t("Upload failed"), &error);
+                host.report_error(error);
+            }
+        }
+    });
+    if let Err(error) = result {
+        uploading.set(false);
+        button.set_sensitive(true);
+        let _ = std::fs::remove_dir_all(&directory);
+        host.report_error(error);
+    }
+}
+
+fn upload_temp_dir() -> std::path::PathBuf {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    dirs::cache_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("apexshot")
+        .join("upload-snapshots")
+        .join(format!("{}-{stamp}", std::process::id()))
+}
+
+/// Upload a prepared file and put the share URL on the clipboard. `cleanup`
+/// removes the temporary folder once the request finishes.
+fn upload_path(
+    window: &ApplicationWindow,
+    button: &gtk4::Button,
+    uploading: &Rc<Cell<bool>>,
+    config: crate::config::AppConfig,
+    path: std::path::PathBuf,
+    cleanup: Option<std::path::PathBuf>,
+) {
+    uploading.set(true);
+    button.set_sensitive(false);
+    let (sender, receiver) =
+        std::sync::mpsc::channel::<Result<String, crate::cloud::upload::UploadError>>();
+    std::thread::spawn(move || {
+        let result =
+            crate::cloud::upload::upload_file_with_notifications_without_clipboard(&config, &path)
+                .map(|result| result.share_url);
+        if let Some(directory) = cleanup {
+            let _ = std::fs::remove_dir_all(directory);
+        }
+        let _ = sender.send(result);
+    });
+    poll_upload(window, button, uploading, receiver);
+}
+
+fn poll_upload(
+    window: &ApplicationWindow,
+    button: &gtk4::Button,
+    uploading: &Rc<Cell<bool>>,
+    receiver: std::sync::mpsc::Receiver<Result<String, crate::cloud::upload::UploadError>>,
+) {
+    let window = window.downgrade();
+    let button = button.downgrade();
+    let uploading = uploading.clone();
+    gtk4::glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+        match receiver.try_recv() {
+            Ok(result) => {
+                uploading.set(false);
+                if let Some(button) = button.upgrade() {
+                    button.set_sensitive(true);
+                }
+                match result {
+                    Ok(share_url) => {
+                        if let Some(display) = gdk::Display::default() {
+                            display.clipboard().set_text(&share_url);
+                        }
+                    }
+                    Err(crate::cloud::upload::UploadError::UpgradeRequired(message)) => {
+                        if let Some(window) = window.upgrade() {
+                            crate::cloud::upgrade::show_prompt(&window, &message);
+                        }
+                    }
+                    // The upload helper already reported the failure.
+                    Err(_) => {}
+                }
+                gtk4::glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => gtk4::glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                uploading.set(false);
+                if let Some(button) = button.upgrade() {
+                    button.set_sensitive(true);
+                }
+                gtk4::glib::ControlFlow::Break
+            }
+        }
+    });
+}
+
+/// Upload an already rendered frame. Static output ends here so the temporary
+/// file, widget busy state and share-URL clipboard behave the same.
+fn upload_rendered_image(
+    window: &ApplicationWindow,
+    button: &gtk4::Button,
+    uploading: &Rc<Cell<bool>>,
+    config: crate::config::AppConfig,
+    snapshot: image::RgbaImage,
+) {
+    uploading.set(true);
+    button.set_sensitive(false);
+    let directory = upload_temp_dir();
+    let (sender, receiver) =
+        std::sync::mpsc::channel::<Result<String, crate::cloud::upload::UploadError>>();
+    std::thread::spawn(move || {
+        let result = std::fs::create_dir_all(&directory)
+            .map_err(|error| {
+                crate::cloud::upload::UploadError::Server(format!("Could not save edits: {error}"))
+            })
+            .and_then(|()| {
+                let path = directory.join("upload.png");
+                crate::capture::editor::io_ops::save_edited_image_snapshot(&path, snapshot)
+                    .map_err(|error| {
+                        crate::cloud::upload::UploadError::Server(format!(
+                            "Could not save edits: {error}"
+                        ))
+                    })?;
+                crate::cloud::upload::upload_file_with_notifications_without_clipboard(
+                    &config, &path,
+                )
+                .map(|result| result.share_url)
+            });
+        let _ = std::fs::remove_dir_all(&directory);
+        let _ = sender.send(result);
+    });
+    poll_upload(window, button, uploading, receiver);
 }
 
 fn install_keys(

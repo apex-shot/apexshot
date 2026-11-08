@@ -28,8 +28,10 @@ pub(super) struct Inspector {
     pub watermark: WatermarkControls,
     transform: GtkBox,
     background_sync: Rc<dyn Fn()>,
-    /// Clipboard copy and the flattened export the window wires to the document.
+    /// Clipboard copy, the flattened export and the Cloud upload the window
+    /// wires to the document.
     pub copy_button: gtk4::Button,
+    pub upload_button: gtk4::Button,
     pub export_button: gtk4::Button,
 }
 
@@ -38,17 +40,32 @@ impl Inspector {
         (self.background_sync)();
     }
     /// Swap the dock's content for Motion or back: the Motion pages hide the
-    /// Appearance scroll and its bottom actions, keeping the strip the
-    /// caption buttons live in. Entry always lands on the Composition page,
-    /// like the Linux editor applies its mode.
+    /// static Transform but keep the bottom actions, the way the Linux
+    /// sidebar keeps Copy, Upload and Export in both modes. Entry always
+    /// lands on the Composition page, like the Linux editor applies its mode.
     pub(super) fn set_mode(&self, motion: bool) {
-        self.actions.set_visible(!motion);
+        self.actions.set_visible(true);
         self.transform.set_visible(!motion);
         self.motion_stack.set_visible_child_name(if motion {
             "motion"
         } else {
             "motion-appearance"
         });
+        self.copy_button.set_tooltip_text(Some(&t(if motion {
+            "Copy the current frame"
+        } else {
+            "Copy to clipboard"
+        })));
+        self.upload_button.set_tooltip_text(Some(&t(if motion {
+            "Upload the Motion video"
+        } else {
+            "Upload to cloud"
+        })));
+        self.export_button.set_tooltip_text(Some(&t(if motion {
+            "Export the Motion video"
+        } else {
+            "Save the annotated image"
+        })));
     }
 
     /// The static editor's tool switch knows the dock; the pages arrive
@@ -143,8 +160,8 @@ pub(super) fn build(
     root.append(&scroller);
 
     // Bottom actions: copy and upload are icon buttons on the left, Export
-    // owns the right edge as the panel's one accent pill. They belong to the
-    // static editor; Motion's tools export through their own paths.
+    // owns the right edge as the panel's one accent pill. They stay pinned
+    // below both modes; Motion hands them the current pose frame.
     let actions = GtkBox::new(Orientation::Horizontal, px(8.0, scale));
     actions.add_css_class("image-editor-actions");
     let mut action_buttons = Vec::new();
@@ -161,8 +178,6 @@ pub(super) fn build(
     }
     let copy_button = action_buttons[0].clone();
     let upload_button = action_buttons[1].clone();
-    // Upload stays a shell until the Windows cloud backend exists.
-    upload_button.set_sensitive(false);
     let spacer = GtkBox::new(Orientation::Horizontal, 0);
     spacer.set_hexpand(true);
     actions.append(&spacer);
@@ -181,6 +196,7 @@ pub(super) fn build(
         transform,
         background_sync,
         copy_button,
+        upload_button,
         export_button: export,
     }
 }
@@ -269,6 +285,7 @@ mod tests {
             assert_eq!(inspector.motion_stack.visible_child(), Some(page.clone()));
             assert!(inspector.scroller.is_visible());
             assert!(!inspector.transform.is_visible());
+            assert!(inspector.actions.is_visible());
             styles[0]
                 .clone()
                 .downcast::<gtk4::Button>()

@@ -8,6 +8,12 @@ fn main() {
     app::platform::prepare_process();
     app::i18n::init_from_config();
 
+    // The capture shell has no Cloud transport of its own; it runs this
+    // binary in helper mode to upload a finished capture.
+    if let Some(command) = app::cloud::helper::command_from_args(std::env::args_os().skip(1)) {
+        std::process::exit(app::cloud::helper::run(command));
+    }
+
     if needs_onboarding() {
         match app::onboarding::run() {
             Ok(outcome) => {
@@ -19,6 +25,13 @@ fn main() {
                 eprintln!("Failed to open onboarding: {error}");
                 std::process::exit(1);
             }
+        }
+
+        // Publish the finished setup to the C++ shell before it starts, so
+        // auto-upload and the rest of the mirror are current from the first
+        // capture.
+        if let Err(error) = app::settings::sync_shell_settings() {
+            eprintln!("Failed to write the shell settings: {error}");
         }
 
         // Setup is done. The tray shell is the running app: it owns the tray

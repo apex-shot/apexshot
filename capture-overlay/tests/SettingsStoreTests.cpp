@@ -66,6 +66,7 @@ void checkDefaults(const QTemporaryDir& dir)
     CHECK(settings.screenshots.afterShowResult);
     CHECK(!settings.screenshots.afterCopyToClipboard);
     CHECK(settings.screenshots.afterSave);
+    CHECK(!settings.screenshots.afterOpenEditor);
     CHECK(settings.recording.showCountdown);
     CHECK(settings.recording.showControls);
     CHECK(settings.recording.highDpi);
@@ -89,6 +90,9 @@ void checkDefaults(const QTemporaryDir& dir)
     CHECK(qFuzzyCompare(settings.quickAccess.overlayScale, 1.0));
     CHECK(!settings.quickAccess.autoCloseEnabled);
     CHECK(settings.quickAccess.autoCloseSeconds == 30);
+    CHECK(!settings.quickAccess.closeAfterUploading);
+    CHECK(!settings.cloud.autoUploadAfterCapture);
+    CHECK(!settings.cloud.configured);
     CHECK(settings.ocr.language == QStringLiteral("eng"));
     CHECK(settings.ocr.keepLineBreaks);
 }
@@ -111,6 +115,7 @@ void checkParsing(const QTemporaryDir& dir)
     "after_show_result": false,
     "after_copy_to_clipboard": true,
     "after_save": false,
+    "after_open_editor": true,
     "high_dpi_suffix": true
   },
   "recording": {
@@ -144,7 +149,12 @@ void checkParsing(const QTemporaryDir& dir)
     "position": "Right",
     "overlay_scale": 1.2,
     "auto_close_enabled": true,
-    "auto_close_seconds": 45
+    "auto_close_seconds": 45,
+    "close_after_uploading": true
+  },
+  "cloud": {
+    "auto_upload_after_capture": true,
+    "configured": true
   },
   "ocr": {
     "language": "deu",
@@ -171,6 +181,7 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(!settings.screenshots.afterShowResult);
     CHECK(settings.screenshots.afterCopyToClipboard);
     CHECK(!settings.screenshots.afterSave);
+    CHECK(settings.screenshots.afterOpenEditor);
     CHECK(settings.screenshots.highDpiSuffix);
     CHECK(!settings.recording.showCountdown);
     CHECK(!settings.recording.showControls);
@@ -197,6 +208,9 @@ void checkParsing(const QTemporaryDir& dir)
     CHECK(qFuzzyCompare(settings.quickAccess.overlayScale, 1.2));
     CHECK(settings.quickAccess.autoCloseEnabled);
     CHECK(settings.quickAccess.autoCloseSeconds == 45);
+    CHECK(settings.quickAccess.closeAfterUploading);
+    CHECK(settings.cloud.autoUploadAfterCapture);
+    CHECK(settings.cloud.configured);
     CHECK(settings.ocr.language == QStringLiteral("deu"));
     CHECK(!settings.ocr.keepLineBreaks);
 }

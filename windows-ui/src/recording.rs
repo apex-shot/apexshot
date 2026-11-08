@@ -357,6 +357,37 @@ pub mod editor {
             })
         }
 
+        /// Check the bundled tools before an export starts, so the failure
+        /// names the missing binary instead of a generic encoder error.
+        pub fn ensure_tools_available() -> Result<(), String> {
+            for (name, path) in [
+                ("ffmpeg", ffmpeg_executable()),
+                ("ffprobe", ffprobe_executable()),
+            ] {
+                if !tool_available(&path) {
+                    return Err(format!(
+                        "{name} is not available. Reinstall ApexShot or add {name} to PATH."
+                    ));
+                }
+            }
+            Ok(())
+        }
+
+        fn tool_available(path: &Path) -> bool {
+            path.is_file()
+                || crate::utils::hidden_command(path)
+                    .arg("-version")
+                    .output()
+                    .map(|output| output.status.success())
+                    .unwrap_or(false)
+        }
+
+        /// Build the encoder command through the Windows executable lookup, so
+        /// the packaged `bin/ffmpeg.exe` wins over whatever `PATH` holds.
+        pub fn export_command() -> Command {
+            crate::utils::hidden_command(ffmpeg_executable())
+        }
+
         #[cfg(test)]
         mod tests {
             use super::{parse_duration, parse_fps_line, parse_rate};

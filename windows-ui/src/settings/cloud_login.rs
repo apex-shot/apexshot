@@ -30,7 +30,14 @@ enum PrimaryAction {
 }
 
 /// Replace the Cloud page with sign-in without opening a separate window.
-pub(crate) fn wrap_cloud_page(cloud_page: &impl IsA<Widget>) -> (Stack, ConnectFlow) {
+///
+/// `on_connected` runs after a successful sign-in so the Cloud page can
+/// re-read the settings the login flow just saved (notably the auto-upload
+/// default) instead of showing the values from before the account switch.
+pub(crate) fn wrap_cloud_page(
+    cloud_page: &impl IsA<Widget>,
+    on_connected: impl Fn() + 'static,
+) -> (Stack, ConnectFlow) {
     let stack = Stack::new();
     stack.set_transition_type(gtk4::StackTransitionType::Crossfade);
     stack.set_vhomogeneous(false);
@@ -166,6 +173,7 @@ pub(crate) fn wrap_cloud_page(cloud_page: &impl IsA<Widget>) -> (Stack, ConnectF
         polling: Rc::new(Cell::new(false)),
         code: Rc::new(RefCell::new(String::new())),
         uri: Rc::new(RefCell::new(String::new())),
+        on_connected: Rc::new(on_connected),
     };
     ui.wire_actions(&cancel_btn);
     // Leaving Cloud abandons the flow and returns to settings on the next visit.
@@ -239,6 +247,8 @@ struct ConnectUi {
     polling: Rc<Cell<bool>>,
     code: Rc<RefCell<String>>,
     uri: Rc<RefCell<String>>,
+    /// Refresh the Cloud page from the config saved by a completed login.
+    on_connected: Rc<dyn Fn()>,
 }
 
 impl ConnectUi {
@@ -343,6 +353,14 @@ impl ConnectUi {
                     // The session landed and finish_login already saved it —
                     // the account row's refresh picks it up on its next tick.
                     ConnectMsg::Polled(Ok(Some(_account))) => {
+                        // The shell gates auto-upload on the mirror, so publish
+                        // the new session as soon as the account lands.
+                        if let Err(error) = super::actions::sync_shell_settings_on_start() {
+                            eprintln!("[settings] could not refresh the shell settings: {error}");
+                        }
+                        // Login turns auto-upload on by design; show that in
+                        // the controls instead of leaving the pre-login value.
+                        ui.connected();
                         ui.abandon();
                         ui.stack.set_visible_child_name("status");
                         break;
@@ -360,6 +378,11 @@ impl ConnectUi {
         self.session.set(self.session.get() + 1);
         self.spinner.stop();
         self.polling.set(false);
+    }
+
+    /// The account landed: let the Cloud page re-read what login saved.
+    fn connected(&self) {
+        (self.on_connected)();
     }
 
     fn waiting(&self, login: &DeviceLogin) {
@@ -466,7 +489,7 @@ mod tests {
             crate::test_support::with_gtk(|| {
                 let settings = GtkBox::new(Orientation::Vertical, 0);
                 settings.set_size_request(-1, 80);
-                let (stack, _flow) = wrap_cloud_page(&settings);
+                let (stack, _flow) = wrap_cloud_page(&settings, || {});
                 let initial_page = stack.visible_child_name().map(|name| name.to_string());
                 let settings_height = stack.measure(Orientation::Vertical, -1).1;
                 stack.set_visible_child_name("connect");
@@ -520,7 +543,7 @@ mod tests {
     fn only_browser_action_uses_the_primary_style() {
         let Some(classes) = crate::test_support::with_gtk(|| {
             let settings = GtkBox::new(Orientation::Vertical, 0);
-            let (_, flow) = wrap_cloud_page(&settings);
+            let (_, flow) = wrap_cloud_page(&settings, || {});
             (
                 flow.ui.open_btn.has_css_class("settings-primary-btn"),
                 flow.ui.copy_btn.has_css_class("settings-primary-btn"),
@@ -535,6 +558,23 @@ mod tests {
             return;
         };
         assert_eq!(classes, (true, false, false, true, true));
+    }
+
+    #[test]
+    fn completed_login_refreshes_the_cloud_page() {
+        let Some(active) = crate::test_support::with_gtk(|| {
+            let settings = GtkBox::new(Orientation::Vertical, 0);
+            let check = gtk4::CheckButton::new();
+            check.set_active(false);
+            let target = check.clone();
+            let (_, flow) = wrap_cloud_page(&settings, move || target.set_active(true));
+            flow.ui.connected();
+            check.is_active()
+        }) else {
+            eprintln!("skipping: no display available");
+            return;
+        };
+        assert!(active, "the connected hook did not refresh the controls");
     }
 
     #[test]

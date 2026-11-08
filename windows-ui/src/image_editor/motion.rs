@@ -3,10 +3,14 @@
 //! way the Linux editor swaps its stacks; the notch tabs switch the dock's
 //! pages.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
+use std::io::Write;
+use std::path::PathBuf;
+use std::process::{Child, ChildStdin, Stdio};
 use std::rc::Rc;
+use std::time::Duration;
 
-use gtk4::cairo::{Context as CairoContext, Format, ImageSurface};
+use gtk4::cairo::{Context as CairoContext, Format, ImageSurface, Operator};
 use gtk4::prelude::*;
 use gtk4::{Align, Box as GtkBox, Button, DrawingArea, GestureDrag, Image, Orientation, Overlay};
 
@@ -16,9 +20,17 @@ use super::motion_text;
 use super::timeline;
 use super::ui_support::px;
 use super::watermark;
+use crate::capture::editor::state::background::Layout;
 use crate::capture::editor::types::ViewTransform;
 use crate::capture::editor::window::icon_names::{custom, shipped};
 use crate::i18n::t;
+use crate::recording::editor::model::{MotionState, MOTION_EXPORT_FPS};
+
+type VideoDone = Rc<RefCell<Option<Box<dyn FnOnce(Result<PathBuf, String>)>>>>;
+type VideoSetup = (
+    Rc<RefCell<MotionVideoJob>>,
+    Rc<RefCell<Option<ImageSurface>>>,
+);
 
 pub(super) struct MotionMode {
     /// The page the workspace stack shows while Motion is open.
@@ -29,9 +41,171 @@ pub(super) struct MotionMode {
     pub timeline: Rc<timeline::Timeline>,
     inspector: Rc<Inspector>,
     tabs: Rc<std::cell::RefCell<Vec<(Button, &'static str)>>>,
+    host: Rc<super::annotate::EditorHost>,
 }
 
 impl MotionMode {
+    /// Render the frame the preview is showing, at the composition's own
+    /// resolution, for Copy, Upload and Export. The mark and titles are
+    /// painted the same way the preview paints them, so the still matches
+    /// what the user sees.
+    pub(super) fn current_frame_image(&self) -> Option<image::RgbaImage> {
+        if self.host.background_loading() {
+            return None;
+        }
+        let watermark_surface = self.inspector.watermark.surface();
+        frame_image(&self.host, &self.timeline, &watermark_surface)
+    }
+
+    /// Render the whole composition to an MP4 on the main loop, one frame per
+    /// tick, so the window stays responsive. The still card, titles and mark
+    /// are painted through the same preview path used on screen; the backdrop
+    /// is painted once and copied under each pose.
+    pub(super) fn export_video(
+        &self,
+        destination: PathBuf,
+        on_done: impl FnOnce(Result<PathBuf, String>) + 'static,
+    ) -> Result<(), String> {
+        let (job, watermark_surface) = self.prepare_video_job(destination)?;
+        let done: VideoDone = Rc::new(RefCell::new(Some(Box::new(on_done))));
+        let host = self.host.clone();
+        gtk4::glib::timeout_add_local(Duration::from_millis(1), move || {
+            let mut job = job.borrow_mut();
+            let result = if job.frame >= job.frame_count {
+                job.finish()
+            } else {
+                match job.render_frame(&host, &watermark_surface) {
+                    Ok(()) if job.frame >= job.frame_count => job.finish(),
+                    Ok(()) => return gtk4::glib::ControlFlow::Continue,
+                    Err(error) => job.abort(error),
+                }
+            };
+            drop(job);
+            if let Some(callback) = done.borrow_mut().take() {
+                callback(result);
+            }
+            gtk4::glib::ControlFlow::Break
+        });
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn export_video_blocking(&self, destination: PathBuf) -> Result<PathBuf, String> {
+        let (job, watermark_surface) = self.prepare_video_job(destination)?;
+        let mut job = job.borrow_mut();
+        while job.frame < job.frame_count {
+            if let Err(error) = job.render_frame(&self.host, &watermark_surface) {
+                return job.abort(error);
+            }
+        }
+        job.finish()
+    }
+
+    fn prepare_video_job(&self, destination: PathBuf) -> Result<VideoSetup, String> {
+        crate::studio_entitlement::ensure_export_allowed(
+            crate::studio_entitlement::capabilities_for_motion_export(),
+        )
+        .map_err(|error| error.to_string())?;
+        crate::recording::editor::ffmpeg::ensure_tools_available()?;
+
+        let (layout, image_width, image_height) = self
+            .host
+            .read(|st| {
+                let (image_width, image_height) = st.working_image.dimensions();
+                (
+                    st.background.layout(image_width, image_height),
+                    f64::from(image_width),
+                    f64::from(image_height),
+                )
+            })
+            .ok_or_else(|| t("Motion has no still to export."))?;
+        let width = even_output_size(layout.width);
+        let height = even_output_size(layout.height);
+        let extra_x = (f64::from(width) - layout.width) / 2.0;
+        let extra_y = (f64::from(height) - layout.height) / 2.0;
+        let transform = ViewTransform {
+            offset_x: extra_x + layout.image_x,
+            offset_y: extra_y + layout.image_y,
+            canvas_offset_x: extra_x,
+            canvas_offset_y: extra_y,
+            canvas_width: layout.width,
+            canvas_height: layout.height,
+            image_rect_x: layout.image_x,
+            image_rect_y: layout.image_y,
+            ..ViewTransform::for_image(image_width, image_height)
+        };
+
+        let backdrop = ImageSurface::create(Format::ARgb32, width, height)
+            .map_err(|error| error.to_string())?;
+        {
+            let context = CairoContext::new(&backdrop).map_err(|error| error.to_string())?;
+            self.host
+                .paint_motion_background(&context, transform, false);
+        }
+        let surface = ImageSurface::create(Format::ARgb32, width, height)
+            .map_err(|error| error.to_string())?;
+
+        let motion = self.timeline.motion_state();
+        let frame_count = motion_frame_count(motion.duration);
+        let size = format!("{width}x{height}");
+        let fps = MOTION_EXPORT_FPS.to_string();
+        let mut command = crate::recording::editor::ffmpeg::export_command();
+        let mut child = command
+            .args([
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "rawvideo",
+                "-pixel_format",
+                "rgba",
+                "-video_size",
+                size.as_str(),
+                "-framerate",
+                fps.as_str(),
+                "-i",
+                "pipe:0",
+                "-c:v",
+                "libx264",
+                "-pix_fmt",
+                "yuv420p",
+                "-crf",
+                "18",
+                "-movflags",
+                "+faststart",
+            ])
+            .arg(&destination)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("Could not start ffmpeg: {error}"))?;
+        let Some(stdin) = child.stdin.take() else {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(t("Could not open the Motion encoder input."));
+        };
+
+        let job = Rc::new(RefCell::new(MotionVideoJob {
+            child,
+            stdin: Some(stdin),
+            surface,
+            backdrop,
+            transform,
+            layout,
+            image_width,
+            image_height,
+            width,
+            height,
+            motion,
+            frame: 0,
+            frame_count,
+            destination,
+        }));
+        Ok((job, self.inspector.watermark.surface()))
+    }
+
     /// Select one notch tab: highlight it and show its dock page. Entry
     /// always lands on Composition, like the Linux editor applies its mode.
     pub(super) fn set_active_tab(&self, page: &'static str) {
@@ -330,6 +504,7 @@ pub(super) fn build(
         timeline,
         inspector,
         tabs,
+        host: canvas.host.clone(),
     }
 }
 
@@ -559,6 +734,173 @@ fn preview_transform(
     }
 }
 
+/// Paint the preview's current pose into a composition-sized surface at 1:1:
+/// no checkerboard, no inset, no view zoom. Copy, Upload and Export consume
+/// this so all three act on what Motion is showing.
+fn frame_image(
+    host: &super::annotate::EditorHost,
+    timeline: &timeline::Timeline,
+    watermark_surface: &Rc<RefCell<Option<ImageSurface>>>,
+) -> Option<image::RgbaImage> {
+    let (layout, image_width, image_height) = host.read(|st| {
+        let (image_width, image_height) = st.working_image.dimensions();
+        (
+            st.background.layout(image_width, image_height),
+            f64::from(image_width),
+            f64::from(image_height),
+        )
+    })?;
+    let width = layout.width.round().max(1.0) as i32;
+    let height = layout.height.round().max(1.0) as i32;
+    let mut surface = ImageSurface::create(Format::ARgb32, width, height).ok()?;
+    {
+        let context = CairoContext::new(&surface).ok()?;
+        let transform = ViewTransform {
+            offset_x: layout.image_x,
+            offset_y: layout.image_y,
+            canvas_width: layout.width,
+            canvas_height: layout.height,
+            image_rect_x: layout.image_x,
+            image_rect_y: layout.image_y,
+            ..ViewTransform::for_image(image_width, image_height)
+        };
+        let frames = timeline.preview_frames(layout.width, layout.height);
+        paint_frames(host, &context, transform, &frames, false);
+        if let Some((pose, anchor)) = frames.first() {
+            let state = timeline.motion_state();
+            let time = timeline.preview_time();
+            let card = motion_text::card_layout(layout, image_width, image_height, *pose, *anchor);
+            let _ = context.save();
+            context.rectangle(0.0, 0.0, layout.width, layout.height);
+            context.clip();
+            motion_text::paint_motion_text(&context, card, &state, time);
+            if let Some(mark) = watermark_surface.borrow().clone() {
+                watermark::paint(&context, card, &state, &mark);
+            }
+            let _ = context.restore();
+        }
+    }
+    surface.flush();
+    let stride = surface.stride() as usize;
+    let data = surface.data().ok()?.to_vec();
+    Some(crate::capture::editor::render::cairo_argb_to_rgba_image(
+        width as u32,
+        height as u32,
+        stride,
+        &data,
+    ))
+}
+
+/// H.264 with yuv420p needs even dimensions. A composition can end on an odd
+/// pixel after padding or a fractional card scale, so round up.
+fn even_output_size(value: f64) -> i32 {
+    let size = value.round().max(2.0) as i32;
+    size + (size & 1)
+}
+
+fn motion_frame_count(duration: f64) -> usize {
+    let fps = f64::from(MOTION_EXPORT_FPS);
+    ((duration.max(1.0 / fps) * fps).round() as usize).max(1)
+}
+
+/// One MP4 render in progress. The loop owns the encoder, the reused frame
+/// surface and the backdrop, and advances one frame per main-loop tick.
+struct MotionVideoJob {
+    child: Child,
+    stdin: Option<ChildStdin>,
+    surface: ImageSurface,
+    backdrop: ImageSurface,
+    transform: ViewTransform,
+    layout: Layout,
+    image_width: f64,
+    image_height: f64,
+    width: i32,
+    height: i32,
+    motion: MotionState,
+    frame: usize,
+    frame_count: usize,
+    destination: PathBuf,
+}
+
+impl MotionVideoJob {
+    fn render_frame(
+        &mut self,
+        host: &super::annotate::EditorHost,
+        watermark_surface: &Rc<RefCell<Option<ImageSurface>>>,
+    ) -> Result<(), String> {
+        let time = self.frame as f64 / f64::from(MOTION_EXPORT_FPS);
+        let pose = self.motion.sample(time);
+        let anchor = self.motion.zoom_anchor_at(time);
+        {
+            let context = CairoContext::new(&self.surface).map_err(|error| error.to_string())?;
+            context.set_operator(Operator::Source);
+            context
+                .set_source_surface(&self.backdrop, 0.0, 0.0)
+                .map_err(|error| error.to_string())?;
+            context.paint().map_err(|error| error.to_string())?;
+            context.set_operator(Operator::Over);
+            host.paint_motion_foreground(&context, self.transform, pose, anchor, false);
+            let card = motion_text::card_layout(
+                self.layout,
+                self.image_width,
+                self.image_height,
+                pose,
+                anchor,
+            );
+            let _ = context.save();
+            context.rectangle(
+                self.transform.canvas_offset_x,
+                self.transform.canvas_offset_y,
+                self.layout.width,
+                self.layout.height,
+            );
+            context.clip();
+            motion_text::paint_motion_text(&context, card, &self.motion, time);
+            if let Some(mark) = watermark_surface.borrow().clone() {
+                watermark::paint(&context, card, &self.motion, &mark);
+            }
+            let _ = context.restore();
+        }
+        self.surface.flush();
+        let stride = self.surface.stride() as usize;
+        let data = self.surface.data().map_err(|error| error.to_string())?;
+        let rgba = crate::capture::editor::render::cairo_argb_to_rgba_image(
+            self.width as u32,
+            self.height as u32,
+            stride,
+            data.as_ref(),
+        );
+        drop(data);
+        let stdin = self
+            .stdin
+            .as_mut()
+            .ok_or_else(|| t("The Motion encoder is not running."))?;
+        stdin
+            .write_all(rgba.as_raw())
+            .map_err(|error| format!("Could not stream the Motion frame: {error}"))?;
+        self.frame += 1;
+        Ok(())
+    }
+
+    fn finish(&mut self) -> Result<PathBuf, String> {
+        self.stdin.take();
+        let status = self.child.wait().map_err(|error| error.to_string())?;
+        if !status.success() {
+            let _ = std::fs::remove_file(&self.destination);
+            return Err(t("ffmpeg failed to encode the Motion video."));
+        }
+        Ok(self.destination.clone())
+    }
+
+    fn abort(&mut self, error: String) -> Result<PathBuf, String> {
+        self.stdin.take();
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let _ = std::fs::remove_file(&self.destination);
+        Err(error)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -753,5 +1095,127 @@ mod tests {
         paint_frames(&host, &context, transform, &frames, false);
         let optimized = start.elapsed();
         eprintln!("five full scene renders: {original:?}; optimized blur: {optimized:?}");
+    }
+
+    #[test]
+    fn motion_frame_renders_the_composition_at_native_size() {
+        use crate::capture::editor::state::EditorState;
+
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let host = super::super::annotate::EditorHost::new(
+                Rc::new(|| {}),
+                Rc::new(|_| {}),
+                Rc::new(|| (0.0, 0.0)),
+            );
+            let mut state =
+                EditorState::new(RgbaImage::from_pixel(100, 80, Rgba([240, 0, 0, 255])));
+            state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+                1,
+                1,
+                Rgba([0, 0, 255, 255]),
+            )));
+            state.background.padding = 40.0;
+            let layout = state.background.layout(100, 80);
+            *host.editor.borrow_mut() = Some(state);
+            let timeline = timeline::build(1.0, true);
+            let mark = Rc::new(RefCell::new(None));
+
+            let frame = frame_image(&host, &timeline, &mark).expect("motion frame");
+
+            assert_eq!(frame.width(), layout.width.ceil() as u32);
+            assert_eq!(frame.height(), layout.height.ceil() as u32);
+            assert_eq!(*frame.get_pixel(0, 0), Rgba([0, 0, 255, 255]));
+            let center = frame.get_pixel(
+                (layout.image_x + 50.0) as u32,
+                (layout.image_y + 40.0) as u32,
+            );
+            assert!(center[0] > 200 && center[1] < 40 && center[2] < 40);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
+    }
+
+    #[test]
+    fn video_frames_use_even_pixels_and_cover_the_duration() {
+        assert_eq!(even_output_size(100.0), 100);
+        assert_eq!(even_output_size(101.0), 102);
+        assert_eq!(even_output_size(0.0), 2);
+        assert_eq!(motion_frame_count(1.0), 30);
+        assert_eq!(motion_frame_count(0.01), 1);
+    }
+
+    #[test]
+    fn motion_video_export_writes_an_mp4() {
+        if crate::recording::editor::ffmpeg::ensure_tools_available().is_err() {
+            eprintln!("skipping: ffmpeg unavailable");
+            return;
+        }
+        let Some(()) = crate::test_support::with_gtk(|| {
+            let _entitlement = crate::studio_entitlement::test_studio_entitlement();
+            super::super::ui_support::install_css();
+            let app = gtk4::Application::new(
+                Some("org.apexshot.test.motion-export"),
+                gtk4::gio::ApplicationFlags::NON_UNIQUE,
+            );
+            app.register(None::<&gtk4::gio::Cancellable>).unwrap();
+            let window = gtk4::ApplicationWindow::new(&app);
+            let canvas = super::super::canvas::build(1.0, true);
+            *canvas.host.editor.borrow_mut() =
+                Some(crate::capture::editor::state::EditorState::new(
+                    RgbaImage::from_pixel(32, 24, Rgba([210, 40, 30, 255])),
+                ));
+            let inspector = Rc::new(super::super::inspector::build(1.0, &canvas.host, &window));
+            let mode = build(1.0, true, inspector, &canvas);
+            mode.timeline
+                .edit_motion(|state| state.duration = 0.2, false);
+            let path = std::env::temp_dir()
+                .join(format!("apexshot-motion-export-{}.mp4", std::process::id()));
+            let output = mode
+                .export_video_blocking(path.clone())
+                .expect("the Motion export succeeded");
+            assert_eq!(output, path);
+            let length = std::fs::metadata(&output).expect("exported file").len();
+            assert!(length > 1000, "MP4 is only {length} bytes");
+            let probe =
+                std::process::Command::new(crate::recording::editor::ffmpeg::ffprobe_executable())
+                    .args([
+                        "-v",
+                        "error",
+                        "-select_streams",
+                        "v:0",
+                        "-show_entries",
+                        "stream=codec_name,width,height,nb_frames",
+                        "-of",
+                        "default=noprint_wrappers=1",
+                    ])
+                    .arg(&output)
+                    .output()
+                    .expect("run ffprobe");
+            assert!(probe.status.success());
+            let fields = String::from_utf8_lossy(&probe.stdout);
+            let mut codec = "";
+            let mut width = 0;
+            let mut height = 0;
+            let mut frames = 0;
+            for line in fields.lines() {
+                if let Some((key, value)) = line.split_once('=') {
+                    match key {
+                        "codec_name" => codec = value,
+                        "width" => width = value.parse().unwrap_or(0),
+                        "height" => height = value.parse().unwrap_or(0),
+                        "nb_frames" => frames = value.parse().unwrap_or(0),
+                        _ => {}
+                    }
+                }
+            }
+            assert_eq!(codec, "h264");
+            assert!(width > 0 && height > 0 && width % 2 == 0 && height % 2 == 0);
+            assert!(frames > 1, "MP4 has {frames} frames");
+            let _ = std::fs::remove_file(&output);
+        }) else {
+            eprintln!("skipping: GTK unavailable");
+            return;
+        };
     }
 }
