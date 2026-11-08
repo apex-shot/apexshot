@@ -272,6 +272,10 @@ fn startup_script(shell: &std::path::Path, settings: &std::path::Path, dirs: &[P
             "APEXSHOT_VIDEO_EDITOR",
             settings.with_file_name("apexshot-video-editor.exe"),
         ),
+        (
+            "APEXSHOT_UPDATE",
+            settings.with_file_name("apexshot-update.exe"),
+        ),
     ] {
         if path.is_file() {
             script.push_str(&format!(

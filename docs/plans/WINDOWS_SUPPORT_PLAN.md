@@ -215,6 +215,35 @@ each one; annotation storage, rendering, and export are the next slices, which
 is why the bar's history actions and the inspector's output actions are
 disabled and say so.
 
+## Update prompt surface
+
+`apexshot-update` opens the Windows update window: the onboarding layout with
+four states — available, downloading, ready, and failed — and no transitions.
+The Qt capture shell does not need to parse release metadata: it hands the
+binary a resolved release on the command line, and the window owns the
+download, the progress readout, cancellation, and starting the installer:
+
+```
+apexshot-update --version 0.2.37 \
+  --asset-url https://…/ApexShot-0.2.37-setup.exe \
+  --asset-name ApexShot-0.2.37-setup.exe \
+  --asset-size 191234567 \
+  --release-url https://…/releases/tag/v0.2.37
+```
+
+`--asset-name` and `--release-url` are optional; the name defaults to the last
+path segment of the URL. The download goes to a `.part` file in
+`%LOCALAPPDATA%\apexshot\updates` and is renamed once complete.
+
+`apexshot-update --check` performs discovery itself: one stable-release lookup
+per day, cached in `%LOCALAPPDATA%\apexshot\update-check.json`, and only a
+release carrying a `setup.exe` asset counts. The Qt shell runs the check ten
+seconds after startup and then hourly; the daily cache keeps that to one
+request per day. Showing the prompt starts a 24-hour snooze for that version,
+so "Later" (or closing the window) means the next offer comes at the first
+check after a day, while a newer version clears the snooze immediately. The
+tray's desktop notification is unchanged.
+
 ## Deliberately out of scope
 
 - The preview overlay and onboarding. Settings and History are implemented,
@@ -234,4 +263,6 @@ disabled and say so.
    long as the portable sources avoid version-specific APIs.
 
 Settled: MSVC over MinGW (already installed, and the Rust toolchain is
-`stable-x86_64-pc-windows-msvc`), Qt 5.15.2 over Qt 6 for the first cut.
+`stable-x86_64-pc-windows-msvc`), Qt 5.15.2 over Qt 6 for the first cut, and
+update discovery in `apexshot-update --check` (daily lookup, per-version
+snooze).

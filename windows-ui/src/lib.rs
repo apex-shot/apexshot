@@ -32,6 +32,7 @@ pub mod test_support;
 #[path = "../../src/typography.rs"]
 #[rustfmt::skip]
 pub mod typography;
+pub mod update;
 mod usage_telemetry;
 pub mod utils;
 pub mod video_editor;

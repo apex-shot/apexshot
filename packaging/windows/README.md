@@ -55,7 +55,8 @@ The package is **x86_64 only**:
 ApexShot/
   bin/            apexshot-settings.exe, apexshot-history.exe,
                   apexshot-video-editor.exe, apexshot-image-editor.exe,
-                  apexshot-capture.exe, ffmpeg, ffprobe, Qt and GTK DLLs
+                  apexshot-update.exe, apexshot-capture.exe,
+                  ffmpeg, ffprobe, Qt and GTK DLLs
   share/apexshot/ fonts, sounds, background images
   share/          glib-2.0 schemas, icon themes, gtk-4.0 data
   lib/            gdk-pixbuf loaders

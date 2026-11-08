@@ -432,6 +432,29 @@ void openVideoEditorWindow(const QString& path = QString())
     }
 }
 
+/// The updater owns the release lookup, its daily cache, and the window. It is
+/// quiet when there is nothing to offer and when it is not installed beside
+/// the shell.
+void startUpdateCheck()
+{
+    QString executable = qEnvironmentVariable("APEXSHOT_UPDATE");
+    if (executable.isEmpty()) {
+        const QString sibling =
+            QDir(QCoreApplication::applicationDirPath())
+                .filePath(QStringLiteral("apexshot-update.exe"));
+        if (QFileInfo::exists(sibling))
+            executable = sibling;
+    }
+    if (executable.isEmpty()) {
+        debugLog(QStringLiteral("update check: no updater beside the shell"));
+        return;
+    }
+    const bool started = QProcess::startDetached(executable, {QStringLiteral("--check")});
+    debugLog(QStringLiteral("update check: %1 started=%2")
+                 .arg(QDir::toNativeSeparators(executable))
+                 .arg(started));
+}
+
 QIcon appIcon()
 {
     // The tray wears the application's own mark - the same icon the installer
@@ -3325,6 +3348,15 @@ int run(QApplication& app)
     QAction* quit = menu->addAction(QStringLiteral("Quit"));
     tray->setContextMenu(menu);
     tray->show();
+
+    // A release lookup is cached for a day, so this is one quiet request per
+    // day however often the timer fires. The first check waits for the tray
+    // and the hotkeys to settle.
+    QTimer::singleShot(10000, &app, [] { startUpdateCheck(); });
+    auto* updateTimer = new QTimer(&app);
+    updateTimer->setInterval(60 * 60 * 1000);
+    QObject::connect(updateTimer, &QTimer::timeout, &app, [] { startUpdateCheck(); });
+    updateTimer->start();
 
     QObject::connect(settingsAction, &QAction::triggered, shell, [] {
         openSettingsWindow();

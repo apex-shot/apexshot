@@ -1,0 +1,115 @@
+/* Authored at 100% scale, then scaled with the Windows update stylesheet. */
+
+.update-root {
+    font-family: 'DM Sans', 'Noto Sans', system-ui, sans-serif;
+}
+
+.update-pane {
+    background: transparent;
+}
+
+/* A quiet fact card under the headline: no nested Settings table chrome. */
+.update-card {
+    background: #222222;
+    border: 1px solid rgba(243, 240, 236, 0.06);
+    border-radius: 9px;
+    padding: 8px 16px;
+    box-shadow: none;
+}
+
+.update-row {
+    padding: 7px 0;
+}
+
+.update-row-key {
+    font-size: 13px;
+    font-weight: 400;
+    color: #a3a09c;
+}
+
+.update-row-value {
+    font-size: 13px;
+    font-weight: 500;
+    color: #f3f0ec;
+}
+
+progressbar.update-progress {
+    min-width: 0;
+    min-height: 8px;
+}
+
+progressbar.update-progress trough {
+    min-width: 0;
+    min-height: 8px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background-color: #2b2b2b;
+}
+
+progressbar.update-progress progress {
+    min-width: 6px;
+    min-height: 8px;
+    padding: 0;
+    border: none;
+    border-radius: 999px;
+    background-image: none;
+    background-color: #ff670d;
+}
+
+.update-error {
+    font-size: 13px;
+    font-weight: 400;
+    color: #ed786a;
+}
+
+.update-link-status {
+    margin-top: 8px;
+}
+
+/* A text link, matching the About page's link buttons. */
+.editor-root button.update-link {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    color: #ff670d;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+
+.editor-root button.update-link:hover {
+    background: alpha(#ff670d, 0.08);
+    color: #ff670d;
+}
+
+.editor-root.editor-theme-light button.update-link {
+    color: #cf530b;
+}
+
+.editor-root.editor-theme-light button.update-link:hover {
+    background: alpha(#cf530b, 0.08);
+    color: #cf530b;
+}
+
+.editor-theme-light.onboarding-root .update-card {
+    background: #e9e6e0;
+    border-color: rgba(37, 35, 31, 0.07);
+}
+
+.editor-theme-light.onboarding-root .update-row-key {
+    color: #6c6861;
+}
+
+.editor-theme-light.onboarding-root .update-row-value {
+    color: #25231f;
+}
+
+.editor-theme-light.onboarding-root progressbar.update-progress trough {
+    background-color: #d9d5ce;
+}
+
+.editor-theme-light.onboarding-root .update-error {
+    color: #b3402f;
+}

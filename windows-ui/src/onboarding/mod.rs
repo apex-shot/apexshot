@@ -13,7 +13,7 @@ mod cloud;
 mod complete;
 mod howto;
 mod motion;
-mod showcase;
+pub(crate) mod showcase;
 pub(crate) mod ui;
 mod welcome;
 
@@ -621,7 +621,7 @@ fn layout_footer_actions(actions: &GtkBox) {
 
 /// Load the setup-specific surfaces after the editor's styles, with the
 /// same DPI scaling used by the real editor controls in the preview.
-fn install_css(scale: f64) {
+pub(crate) fn install_css(scale: f64) {
     let Some(display) = gtk4::gdk::Display::default() else {
         return;
     };
