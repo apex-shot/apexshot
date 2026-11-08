@@ -69,6 +69,9 @@ pub mod editor {
     pub mod io_ops;
 
     pub mod ui_support {
+        #[cfg(target_os = "windows")]
+        const THEME_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize";
+
         /// Resolve the configured theme. "System" follows the Windows app
         /// theme, then the GTK preference.
         pub fn prefers_dark_glass_theme() -> bool {
@@ -84,36 +87,39 @@ pub mod editor {
             }
         }
 
+        /// Read the app theme straight from the registry. A `reg query`
+        /// subprocess here cost about 30 ms per call, and the windows call it
+        /// two or three times while they are still building.
         #[cfg(target_os = "windows")]
         fn system_prefers_dark() -> Option<bool> {
-            let output = crate::utils::hidden_command("reg")
-                .args([
-                    "query",
-                    r"HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-                    "/v",
-                    "AppsUseLightTheme",
-                ])
-                .output()
-                .ok()?;
-            let text = String::from_utf8_lossy(&output.stdout);
-            apps_use_light_theme(&text).map(|light| !light)
-        }
-
-        /// `reg query` prints DWORDs as `0x0` / `0x1`, not decimal.
-        fn apps_use_light_theme(output: &str) -> Option<bool> {
-            let value = output
-                .lines()
-                .find(|line| line.contains("AppsUseLightTheme"))?
-                .split_whitespace()
-                .last()?;
-            let number = match value
-                .strip_prefix("0x")
-                .or_else(|| value.strip_prefix("0X"))
-            {
-                Some(hex) => u32::from_str_radix(hex, 16).ok()?,
-                None => value.parse::<u32>().ok()?,
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Foundation::ERROR_SUCCESS;
+            use windows_sys::Win32::System::Registry::{
+                RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD,
             };
-            Some(number != 0)
+
+            let key: Vec<u16> = std::ffi::OsStr::new(THEME_KEY)
+                .encode_wide()
+                .chain(Some(0))
+                .collect();
+            let value: Vec<u16> = std::ffi::OsStr::new("AppsUseLightTheme")
+                .encode_wide()
+                .chain(Some(0))
+                .collect();
+            let mut light = 0u32;
+            let mut size = std::mem::size_of::<u32>() as u32;
+            let result = unsafe {
+                RegGetValueW(
+                    HKEY_CURRENT_USER,
+                    key.as_ptr(),
+                    value.as_ptr(),
+                    RRF_RT_REG_DWORD,
+                    std::ptr::null_mut(),
+                    &mut light as *mut u32 as *mut std::ffi::c_void,
+                    &mut size,
+                )
+            };
+            (result == ERROR_SUCCESS).then_some(light == 0)
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -124,24 +130,6 @@ pub mod editor {
         pub fn apply_theme_to_gtk() {
             if let Some(settings) = gtk4::Settings::default() {
                 settings.set_gtk_application_prefer_dark_theme(prefers_dark_glass_theme());
-            }
-        }
-
-        #[cfg(test)]
-        mod tests {
-            use super::apps_use_light_theme;
-
-            #[test]
-            fn registry_dword_is_parsed_as_hex() {
-                assert_eq!(
-                    apps_use_light_theme("    AppsUseLightTheme    REG_DWORD    0x0\n"),
-                    Some(false)
-                );
-                assert_eq!(
-                    apps_use_light_theme("    AppsUseLightTheme    REG_DWORD    0x1\n"),
-                    Some(true)
-                );
-                assert_eq!(apps_use_light_theme(""), None);
             }
         }
     }
