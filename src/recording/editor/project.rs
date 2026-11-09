@@ -1463,6 +1463,7 @@ mod tests {
                 x: 1.0,
                 y: 2.0,
                 kind: crate::recording::editor::sidecar::CursorKind::Default,
+                cursor_id: None,
             });
         sidecar
             .clicks
@@ -1471,6 +1472,7 @@ mod tests {
                 x: 1.0,
                 y: 2.0,
                 button: 1,
+                cursor_id: None,
             });
         state.sidecar = Some(sidecar);
     }

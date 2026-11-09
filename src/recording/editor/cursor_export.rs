@@ -144,13 +144,15 @@ pub(super) fn write_rgba_track_with_view<W: Write>(
                     zh as f64 / video_h.max(1) as f64,
                 );
             }
-            cursor_sprite::draw(
+            let capture = sidecar.cursor_capture(&state.metadata.path, &frame);
+            cursor_sprite::draw_recorded(
                 &cr,
                 0.0,
                 0.0,
                 1.0,
                 press_cursor_scale(sidecar, source_t),
-                frame.kind.as_str(),
+                &frame,
+                capture.as_ref(),
                 overlay_cursor,
                 frame.alpha,
             );
@@ -225,12 +227,14 @@ mod tests {
             x: 10.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 0.2,
             x: 40.0,
             y: 20.0,
             kind: CursorKind::Hand,
+            cursor_id: None,
         });
         state.sidecar = Some(sidecar);
         let mut bytes = Vec::new();
@@ -258,12 +262,14 @@ mod tests {
             x: 2.0,
             y: 2.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.clicks.push(ClickSample {
             t: 0.0,
             x: 40.0,
             y: 30.0,
             button: 1,
+            cursor_id: None,
         });
         state.sidecar = Some(sidecar);
         state.cursor.click_effect = ClickEffect::Ripple;
@@ -301,12 +307,14 @@ mod tests {
             x: 10.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 0.2,
             x: 40.0,
             y: 20.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         state.sidecar = Some(sidecar);
         let mut bytes = Vec::new();
@@ -334,6 +342,7 @@ mod tests {
             x: 10.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.mark_inferred_from_video();
         state.sidecar = Some(sidecar);

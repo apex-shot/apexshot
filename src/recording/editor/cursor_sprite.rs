@@ -4,6 +4,7 @@ use super::click_effect::{
     RIPPLE_BAND_01,
 };
 use super::model::{ClickEffect, CursorSettings, CursorTheme, MAX_CURSOR_SIZE, MIN_CURSOR_SIZE};
+use super::sidecar::{CapturedCursorImage, CursorFrame};
 use gtk4::cairo::{
     Antialias, Context, FillRule, Filter, Format, ImageSurface, RadialGradient, SurfacePattern,
 };
@@ -11,9 +12,10 @@ use image::RgbaImage;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::f64::consts::TAU;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::OnceLock;
+use std::time::SystemTime;
 
 const ADWAITA_DEFAULT: &[u8] = include_bytes!("../../../assets/cursors/adwaita/default.png");
 const ADWAITA_HAND: &[u8] = include_bytes!("../../../assets/cursors/adwaita/hand.png");
@@ -216,6 +218,108 @@ pub fn hotspot(theme: CursorTheme, kind: &str) -> (f64, f64) {
         (CursorTheme::Minimal, SpriteKind::ResizeV) => (7.0, 3.0),
         (CursorTheme::Minimal, SpriteKind::ResizeDiag) => (7.0, 3.0),
     }
+}
+
+struct CapturedSprite {
+    modified: SystemTime,
+    image: Option<Rc<RgbaImage>>,
+}
+
+// Decoded captured cursor PNGs for the current thread. The preview draws on
+// the UI thread and each export worker has its own cache, so a thread-local
+// map avoids sharing a `cairo` surface across threads. The modification time
+// is kept beside each image so a re-recorded sidecar with the same path does
+// not keep serving the previous shape.
+thread_local! {
+    static CAPTURED_SPRITES: RefCell<HashMap<PathBuf, CapturedSprite>> = RefCell::new(HashMap::new());
+}
+
+fn captured_bitmap(path: &Path) -> Option<Rc<RgbaImage>> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    CAPTURED_SPRITES.with(|cache| {
+        if let Some(cached) = cache.borrow().get(path) {
+            if cached.modified == modified {
+                return cached.image.clone();
+            }
+        }
+        let image = image::open(path)
+            .ok()
+            .map(|decoded| Rc::new(decoded.to_rgba8()));
+        cache.borrow_mut().insert(
+            path.to_path_buf(),
+            CapturedSprite {
+                modified,
+                image: image.clone(),
+            },
+        );
+        image
+    })
+}
+
+/// Draw a recorded cursor PNG with its hotspot at `(x, y)`, falling back to
+/// the themed sprite when the catalog image cannot be decoded.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_recorded(
+    cr: &Context,
+    x: f64,
+    y: f64,
+    pulse: f64,
+    press_scale: f64,
+    frame: &CursorFrame,
+    capture: Option<&CapturedCursorImage>,
+    settings: CursorSettings,
+    alpha: f64,
+) {
+    if let Some(capture) = capture {
+        if draw_captured(cr, x, y, pulse, press_scale, capture, settings, alpha) {
+            return;
+        }
+    }
+    draw(
+        cr,
+        x,
+        y,
+        pulse,
+        press_scale,
+        frame.kind.as_str(),
+        settings,
+        alpha,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_captured(
+    cr: &Context,
+    x: f64,
+    y: f64,
+    pulse: f64,
+    press_scale: f64,
+    capture: &CapturedCursorImage,
+    settings: CursorSettings,
+    alpha: f64,
+) -> bool {
+    let alpha = alpha.clamp(0.0, 1.0);
+    if alpha < 0.02 {
+        return true;
+    }
+    let Some(bitmap) = captured_bitmap(&capture.path) else {
+        return false;
+    };
+    let settings = settings.clamped();
+    let scale = overlay_scale(settings.size, 1.0) * pulse.max(0.7) * press_scale.clamp(0.5, 1.5);
+    if scale <= 0.0 {
+        return true;
+    }
+    let surface = surface_from_rgba(&bitmap);
+    let _ = cr.save();
+    cr.translate(x, y);
+    cr.scale(scale, scale);
+    cr.translate(-f64::from(capture.hotspot_x), -f64::from(capture.hotspot_y));
+    let _ = cr.set_source_surface(&surface, 0.0, 0.0);
+    cr.set_antialias(Antialias::Best);
+    let _ = cr.paint_with_alpha(alpha);
+    let _ = cr.restore();
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1760,5 +1864,109 @@ mod tests {
         assert_ne!(no_shadow_edge, default_shadow_edge);
         assert_ne!(default_shadow_edge, full_shadow_edge);
         assert!(full_shadow_edge[0] < default_shadow_edge[0]);
+    }
+
+    fn captured_png(dir: &Path, width: u32, height: u32) -> PathBuf {
+        let path = dir.join("captured-cursor.png");
+        let mut image = RgbaImage::new(width, height);
+        for pixel in image.pixels_mut() {
+            *pixel = image::Rgba([255, 0, 0, 255]);
+        }
+        image.save(&path).unwrap();
+        path
+    }
+
+    fn captured_frame(cursor_id: Option<&str>) -> CursorFrame {
+        CursorFrame {
+            x: 0.0,
+            y: 0.0,
+            kind: super::super::sidecar::CursorKind::Hand,
+            alpha: 1.0,
+            cursor_id: cursor_id.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn a_captured_png_is_painted_with_its_hotspot_on_the_pointer() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-captured-cursor-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let capture = CapturedCursorImage {
+            path: captured_png(&dir, 4, 4),
+            hotspot_x: 1,
+            hotspot_y: 1,
+        };
+        let frame = captured_frame(Some("hand-id"));
+        let mut surface =
+            ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            draw_recorded(
+                &cr,
+                50.0,
+                40.0,
+                1.0,
+                1.0,
+                &frame,
+                Some(&capture),
+                CursorSettings::default(),
+                1.0,
+            );
+        }
+        surface.flush();
+        let pixels = surface.data().unwrap().to_vec();
+        assert_eq!(
+            alpha_bounds_with_size(
+                &pixels,
+                TEST_SURFACE_SIZE as usize,
+                TEST_SURFACE_SIZE as usize
+            ),
+            Some((49, 39, 52, 42))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_captured_png_falls_back_to_the_recorded_kind() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-missing-cursor-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let frame = captured_frame(Some("hand-id"));
+        let capture = CapturedCursorImage {
+            path: dir.join("missing.png"),
+            hotspot_x: 6,
+            hotspot_y: 0,
+        };
+        let render = |asset: Option<&CapturedCursorImage>| {
+            let mut surface =
+                ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
+            {
+                let cr = Context::new(&surface).unwrap();
+                draw_recorded(
+                    &cr,
+                    TEST_SURFACE_SIZE as f64 / 2.0,
+                    TEST_SURFACE_SIZE as f64 / 2.0,
+                    1.0,
+                    1.0,
+                    &frame,
+                    asset,
+                    CursorSettings::default(),
+                    1.0,
+                );
+            }
+            surface.flush();
+            let pixels = surface.data().unwrap().to_vec();
+            pixels
+        };
+        assert_eq!(render(Some(&capture)), render(None));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

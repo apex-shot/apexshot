@@ -6986,6 +6986,7 @@ mod tests {
             width: 640,
             height: 480,
             duration: 10.0,
+            start: 0.0,
             x: 0.7,
             y: 0.55,
             w: 0.2,

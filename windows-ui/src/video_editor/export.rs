@@ -506,6 +506,7 @@ fn render(
                     size,
                     view,
                     sidecar,
+                    model.source.as_path(),
                     model.cursor,
                     source_time,
                     model.source_size,
@@ -868,6 +869,7 @@ fn draw_cursor(
     size: (u32, u32),
     view: ViewRect,
     sidecar: &PointerSidecar,
+    source_path: &Path,
     settings: CursorSettings,
     source_time: f64,
     source_size: (u32, u32),
@@ -980,13 +982,15 @@ fn draw_cursor(
                 f64::from(size.0),
             );
         }
-        cursor_sprite::draw(
+        let capture = sidecar.cursor_capture(source_path, &frame);
+        cursor_sprite::draw_recorded(
             &context,
             cursor_point.0,
             cursor_point.1,
             1.0,
             press_cursor_scale(sidecar, source_time),
-            frame.kind.as_str(),
+            &frame,
+            capture.as_ref(),
             settings,
             frame.alpha,
         );
@@ -1467,6 +1471,7 @@ mod tests {
                 x: 180.0 + step as f64 * 2.0,
                 y: 60.0 + step as f64 * 2.0,
                 kind: CursorKind::Default,
+                cursor_id: None,
             })
             .collect();
         sidecar.clicks = vec![ClickSample {
@@ -1474,6 +1479,7 @@ mod tests {
             x: 190.0,
             y: 72.0,
             button: 1,
+            cursor_id: None,
         }];
         let view = (100.0, 40.0, 200.0, 120.0);
         for effect in [ClickEffect::Ripple, ClickEffect::Circle] {
@@ -1489,7 +1495,15 @@ mod tests {
             )
             .unwrap();
             super::draw_cursor(
-                &mut fast, size, view, &sidecar, settings, 0.21, size, &mut layer,
+                &mut fast,
+                size,
+                view,
+                &sidecar,
+                std::path::Path::new(""),
+                settings,
+                0.21,
+                size,
+                &mut layer,
             );
             let mut reference = frame.clone();
             legacy_draw_cursor(&mut reference, size, view, &sidecar, settings, 0.21, size);
@@ -1939,6 +1953,7 @@ mod webcam_export_tests {
             width: 320,
             height: 320,
             duration: 2.0,
+            start: 0.0,
             x: 0.6,
             y: 0.6,
             w: 0.35,
@@ -2073,6 +2088,7 @@ mod webcam_export_tests {
             width: 320,
             height: 320,
             duration: 4.0,
+            start: 0.0,
             x: 0.6,
             y: 0.6,
             w: 0.35,
@@ -2257,6 +2273,7 @@ mod webcam_export_tests {
             width: 320,
             height: 320,
             duration: 2.0,
+            start: 0.0,
             x: 0.6,
             y: 0.6,
             w: 0.35,
@@ -2343,6 +2360,94 @@ mod webcam_export_tests {
         let _ = fs::remove_file(&sidecar_path);
         let _ = fs::remove_file(&track_path);
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_export_paints_a_captured_png_at_its_recording_hotspot() {
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, CursorAsset, CursorKind, PointerSample, PointerSidecar,
+        };
+        use gtk4::cairo::{Format, ImageSurface};
+
+        let video = std::env::temp_dir().join(format!(
+            "apexshot-export-cursor-{}-{:?}.mp4",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let sidecar_path = PointerSidecar::sidecar_path(&video);
+        let folder_name = format!(
+            "{}.cursors",
+            sidecar_path
+                .file_name()
+                .expect("the sidecar has a file name")
+                .to_string_lossy()
+        );
+        let folder = sidecar_path.parent().unwrap().join(&folder_name);
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut image = image::RgbaImage::new(4, 4);
+        for pixel in image.pixels_mut() {
+            *pixel = image::Rgba([255, 0, 0, 255]);
+        }
+        image.save(folder.join("hand.png")).unwrap();
+
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.cursor_images = Some(folder_name);
+        sidecar.cursors.push(CursorAsset {
+            id: "hand-id".to_string(),
+            file: "hand.png".to_string(),
+            width: 4,
+            height: 4,
+            hotspot_x: 1,
+            hotspot_y: 1,
+            kind: CursorKind::Hand,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 50.0,
+            y: 40.0,
+            kind: CursorKind::Hand,
+            cursor_id: Some("hand-id".to_string()),
+        });
+
+        let size = (100u32, 100u32);
+        let mut pixels = vec![0u8; size.0 as usize * size.1 as usize * 4];
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[0, 0, 0, 255]);
+        }
+        let mut layer = ImageSurface::create(Format::ARgb32, size.0 as i32, size.1 as i32).unwrap();
+        let settings = CursorSettings {
+            smooth: 0.0,
+            ..CursorSettings::default()
+        };
+        super::draw_cursor(
+            &mut pixels,
+            size,
+            (0.0, 0.0, 100.0, 100.0),
+            &sidecar,
+            &video,
+            settings,
+            0.0,
+            size,
+            &mut layer,
+        );
+
+        let mut bounds: Option<(usize, usize, usize, usize)> = None;
+        for y in 0..size.1 as usize {
+            for x in 0..size.0 as usize {
+                let p = &pixels[(y * size.0 as usize + x) * 4..][..4];
+                if p[0] > 180 && p[1] < 60 && p[2] < 60 {
+                    bounds = Some(match bounds {
+                        Some((min_x, min_y, max_x, max_y)) => {
+                            (min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y))
+                        }
+                        None => (x, y, x, y),
+                    });
+                }
+            }
+        }
+        assert_eq!(bounds, Some((49, 39, 52, 42)));
+        let _ = std::fs::remove_dir_all(&folder);
     }
 
     /// The track lands beside the pointer sidecar, exactly as the recorder

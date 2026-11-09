@@ -122,6 +122,8 @@ pub struct CursorFrame {
     pub y: f64,
     pub kind: CursorKind,
     pub alpha: f64,
+    /// Catalog id of the recorded cursor image, when this frame has one.
+    pub cursor_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -130,6 +132,9 @@ pub struct PointerSample {
     pub x: f64,
     pub y: f64,
     pub kind: CursorKind,
+    /// Catalog id of the recorded cursor image shown at this sample.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor_id: Option<String>,
 }
 
 /// A recorded change in whether the selected window has a visible cursor.
@@ -144,12 +149,15 @@ pub struct CursorVisibilitySample {
     pub hold_until_next: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ClickSample {
     pub t: f64,
     pub x: f64,
     pub y: f64,
     pub button: i32,
+    /// Catalog id of the recorded cursor image at the click.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor_id: Option<String>,
 }
 
 /// One mouse button held from `down` to `up` on the recording clock, in
@@ -221,6 +229,34 @@ pub struct CursorAsset {
     pub hotspot_y: i32,
     #[serde(default)]
     pub kind: CursorKind,
+}
+
+/// A captured cursor PNG resolved from the sidecar catalog, with the hotspot
+/// the image must be drawn against.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CapturedCursorImage {
+    pub path: PathBuf,
+    pub hotspot_x: i32,
+    pub hotspot_y: i32,
+}
+
+impl CursorAsset {
+    /// The hotspot in cursor pixels.
+    pub fn hotspot(&self) -> (i32, i32) {
+        (self.hotspot_x, self.hotspot_y)
+    }
+}
+
+/// A catalog name must be a bare file or folder name. Cursor images live
+/// beside the sidecar, so a separator, a drive, or an alternate data stream
+/// would let a hand-edited sidecar point somewhere else.
+fn is_bare_catalog_name(value: &str) -> bool {
+    !value.is_empty()
+        && value != "."
+        && value != ".."
+        && !value
+            .chars()
+            .any(|character| matches!(character, '/' | '\\' | ':' | '\0'))
 }
 
 /// The camera track recorded beside a video.
@@ -394,6 +430,63 @@ impl PointerSidecar {
         Ok(sidecar)
     }
 
+    /// The folder beside this sidecar's directory that holds the cursor PNGs.
+    pub fn cursor_image_directory(&self, sidecar_directory: &Path) -> Option<PathBuf> {
+        let folder = self.cursor_images.as_deref()?;
+        if !is_bare_catalog_name(folder) {
+            return None;
+        }
+        Some(sidecar_directory.join(folder))
+    }
+
+    /// The catalog entry for `cursor_id`.
+    pub fn cursor_asset(&self, cursor_id: &str) -> Option<&CursorAsset> {
+        self.cursors.iter().find(|asset| asset.id == cursor_id)
+    }
+
+    /// Resolve one catalog PNG inside a known sidecar directory. Both the
+    /// folder and the file name must be bare names, and the file must exist.
+    pub fn cursor_asset_path_in(
+        &self,
+        sidecar_directory: &Path,
+        cursor_id: &str,
+    ) -> Option<PathBuf> {
+        let asset = self.cursor_asset(cursor_id)?;
+        if !is_bare_catalog_name(&asset.file) {
+            return None;
+        }
+        let path = self
+            .cursor_image_directory(sidecar_directory)?
+            .join(&asset.file);
+        path.is_file().then_some(path)
+    }
+
+    /// Resolve one catalog PNG beside the sidecar recorded for `video_path`.
+    pub fn cursor_asset_path(&self, video_path: &Path, cursor_id: &str) -> Option<PathBuf> {
+        let directory = Self::sidecar_path(video_path);
+        self.cursor_asset_path_in(directory.parent()?, cursor_id)
+    }
+
+    /// The recorded cursor image for a pointer frame, when the catalog holds
+    /// it and its PNG is on disk. A missing entry or file leaves the renderer
+    /// free to fall back to the sample's `kind`.
+    pub fn cursor_capture(
+        &self,
+        video_path: &Path,
+        frame: &CursorFrame,
+    ) -> Option<CapturedCursorImage> {
+        let cursor_id = frame.cursor_id.as_deref()?;
+        let asset = self.cursor_asset(cursor_id)?;
+        let directory = Self::sidecar_path(video_path);
+        let path = self.cursor_asset_path_in(directory.parent()?, cursor_id)?;
+        let (hotspot_x, hotspot_y) = asset.hotspot();
+        Some(CapturedCursorImage {
+            path,
+            hotspot_x,
+            hotspot_y,
+        })
+    }
+
     /// The camera track's file, resolved beside this sidecar. The recorder
     /// keeps the two together, so the pair is found from the video path alone.
     pub fn webcam_path(&self, video_path: &Path) -> Option<PathBuf> {
@@ -538,14 +631,20 @@ impl PointerSidecar {
     }
 
     pub fn presented_at(&self, t: f64, motion: CursorMotion) -> Option<CursorFrame> {
-        let (_, _, kind) = self.interpolated_at(t)?;
+        let (_, _, kind, cursor_id) = self.interpolated_at_sample(t)?;
         let (x, y) = self.motion_position_at(t, motion.smooth, motion.speed)?;
         let alpha = if motion.hide_idle {
             self.idle_alpha(t, motion.idle_ms)
         } else {
             1.0
         };
-        Some(CursorFrame { x, y, kind, alpha })
+        Some(CursorFrame {
+            x,
+            y,
+            kind,
+            alpha,
+            cursor_id,
+        })
     }
 
     /// Return a pointer frame in the encoded video's pixel coordinate space.
@@ -582,7 +681,7 @@ impl PointerSidecar {
             } else {
                 Self::interpolated_in(samples, t)
             };
-            position.map(|(x, y, _)| (x, y))
+            position.map(|(x, y, _, _)| (x, y))
         } else if samples.is_empty() {
             None
         } else {
@@ -643,7 +742,7 @@ impl PointerSidecar {
             } else {
                 Self::interpolated_in(samples, t)
             };
-            if let Some((ix, iy, _)) = interpolated {
+            if let Some((ix, iy, _, _)) = interpolated {
                 px += (ix - px) * k;
                 py += (iy - py) * k;
             }
@@ -674,6 +773,11 @@ impl PointerSidecar {
     }
 
     pub fn interpolated_at(&self, t: f64) -> Option<(f64, f64, CursorKind)> {
+        self.interpolated_at_sample(t)
+            .map(|(x, y, kind, _)| (x, y, kind))
+    }
+
+    fn interpolated_at_sample(&self, t: f64) -> Option<(f64, f64, CursorKind, Option<String>)> {
         if self.source == PointerDataSource::WindowMetadata {
             Self::interpolated_window_in(self.window_pointer_segment_at(t)?, t)
         } else {
@@ -681,30 +785,36 @@ impl PointerSidecar {
         }
     }
 
-    fn interpolated_window_in(pointer: &[PointerSample], t: f64) -> Option<(f64, f64, CursorKind)> {
+    fn interpolated_window_in(
+        pointer: &[PointerSample],
+        t: f64,
+    ) -> Option<(f64, f64, CursorKind, Option<String>)> {
         let idx = pointer.partition_point(|sample| sample.t <= t);
         if idx > 0 && idx < pointer.len() {
             let prev = &pointer[idx - 1];
             let next = &pointer[idx];
             if next.t - prev.t > WINDOW_CURSOR_STALE_SECONDS {
-                return Some((prev.x, prev.y, prev.kind));
+                return Some((prev.x, prev.y, prev.kind, prev.cursor_id.clone()));
             }
         }
         Self::interpolated_in(pointer, t)
     }
 
-    fn interpolated_in(pointer: &[PointerSample], t: f64) -> Option<(f64, f64, CursorKind)> {
+    fn interpolated_in(
+        pointer: &[PointerSample],
+        t: f64,
+    ) -> Option<(f64, f64, CursorKind, Option<String>)> {
         if pointer.is_empty() {
             return None;
         }
         let idx = pointer.partition_point(|sample| sample.t <= t);
         if idx == 0 {
             let first = &pointer[0];
-            return Some((first.x, first.y, first.kind));
+            return Some((first.x, first.y, first.kind, first.cursor_id.clone()));
         }
         if idx >= pointer.len() {
             let last = pointer.last()?;
-            return Some((last.x, last.y, last.kind));
+            return Some((last.x, last.y, last.kind, last.cursor_id.clone()));
         }
         let prev = &pointer[idx - 1];
         let next = &pointer[idx];
@@ -714,6 +824,7 @@ impl PointerSidecar {
             prev.x + (next.x - prev.x) * alpha,
             prev.y + (next.y - prev.y) * alpha,
             prev.kind,
+            prev.cursor_id.clone(),
         ))
     }
 
@@ -956,6 +1067,7 @@ mod tests {
             x: 10.0,
             y: 20.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.visibility.push(CursorVisibilitySample {
             t: 0.0,
@@ -972,6 +1084,7 @@ mod tests {
             x: 10.0,
             y: 20.0,
             button: 1,
+            cursor_id: None,
         });
 
         let encoded = serde_json::to_vec(&sidecar).unwrap();
@@ -1025,6 +1138,7 @@ mod tests {
             x: 20.0,
             y: 30.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         assert!(sidecar.can_render_cursor_overlay());
 
@@ -1052,12 +1166,14 @@ mod tests {
             x: 480.0,
             y: 270.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.clicks.push(ClickSample {
             t: 0.0,
             x: 480.0,
             y: 270.0,
             button: 1,
+            cursor_id: None,
         });
 
         let frame = sidecar
@@ -1085,6 +1201,7 @@ mod tests {
             x: 480.0,
             y: 270.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         assert_eq!(
             sidecar.motion_position_in_video_at(0.0, 0.0, 1.0, 1920.0, 1080.0),
@@ -1106,6 +1223,7 @@ mod tests {
             x: 250.0,
             y: 180.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         assert_eq!(
             sidecar.motion_position_in_video_at(0.0, 0.0, 1.0, 1920.0, 1080.0),
@@ -1129,12 +1247,14 @@ mod tests {
             x: -640.0,
             y: 200.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.clicks.push(ClickSample {
             t: 0.0,
             x: -640.0,
             y: 200.0,
             button: 1,
+            cursor_id: None,
         });
 
         sidecar.subtract_region();
@@ -1182,12 +1302,14 @@ mod tests {
             x: 100.0,
             y: 200.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.clicks.push(ClickSample {
             t: 1.2,
             x: 100.0,
             y: 200.0,
             button: 1,
+            cursor_id: None,
         });
         sidecar.write_next_to_video(&video).unwrap();
 
@@ -1229,6 +1351,7 @@ mod tests {
             x: 5.0,
             y: 6.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar
             .write(&PointerSidecar::legacy_sidecar_path(&video))
@@ -1259,12 +1382,14 @@ mod tests {
             x: 250.0,
             y: 180.0,
             kind: CursorKind::Hand,
+            cursor_id: None,
         });
         sidecar.clicks.push(ClickSample {
             t: 0.4,
             x: 200.0,
             y: 100.0,
             button: 1,
+            cursor_id: None,
         });
         sidecar.subtract_region();
         assert_eq!(sidecar.pointer[0].x, 50.0);
@@ -1291,18 +1416,21 @@ mod tests {
                 x: 10.0,
                 y: 15.0,
                 kind: CursorKind::Default,
+                cursor_id: None,
             },
             PointerSample {
                 t: 0.1,
                 x: 20.0,
                 y: 25.0,
                 kind: CursorKind::Default,
+                cursor_id: None,
             },
             PointerSample {
                 t: 0.3,
                 x: 30.0,
                 y: 35.0,
                 kind: CursorKind::Default,
+                cursor_id: None,
             },
         ];
         sidecar.visibility = vec![
@@ -1355,6 +1483,7 @@ mod tests {
             x: 10.0,
             y: 15.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.visibility = vec![
             CursorVisibilitySample {
@@ -1394,12 +1523,14 @@ mod tests {
                 x: 10.0,
                 y: 15.0,
                 kind: CursorKind::Default,
+                cursor_id: None,
             },
             PointerSample {
                 t: 1.0,
                 x: 90.0,
                 y: 75.0,
                 kind: CursorKind::Default,
+                cursor_id: None,
             },
         ];
         sidecar.visibility = vec![
@@ -1442,6 +1573,7 @@ mod tests {
             x: 10.0,
             y: 15.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         }];
         sidecar.visibility = vec![
             CursorVisibilitySample {
@@ -1480,6 +1612,7 @@ mod tests {
                 x: index as f64,
                 y: index as f64,
                 kind: CursorKind::Default,
+                cursor_id: None,
             })
             .collect();
         sidecar.compact_samples();
@@ -1501,6 +1634,7 @@ mod tests {
             x: 250.0,
             y: 180.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.subtract_region();
         assert_eq!(sidecar.pointer[0].x, 250.0);
@@ -1516,12 +1650,14 @@ mod tests {
             x: 0.0,
             y: 0.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 0.2,
             x: 200.0,
             y: 0.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         let raw = sidecar.interpolated_at(0.2).unwrap();
         let presented = sidecar
@@ -1547,18 +1683,21 @@ mod tests {
             x: 10.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 0.05,
             x: 12.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 2.0,
             x: 12.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         let shown = sidecar
             .presented_at(
@@ -1593,6 +1732,7 @@ mod tests {
             x: 10.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         let short_delay = sidecar
             .presented_at(
@@ -1628,30 +1768,35 @@ mod tests {
             x: 0.0,
             y: 0.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 1.0,
             x: 100.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 2.0,
             x: 200.0,
             y: 20.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 3.0,
             x: 300.0,
             y: 30.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.clicks.push(ClickSample {
             t: 1.0,
             x: 100.0,
             y: 10.0,
             button: 1,
+            cursor_id: None,
         });
         let expected = sidecar.interpolated_at(1.0).unwrap();
         let presented = sidecar
@@ -1682,12 +1827,14 @@ mod tests {
             x: 0.0,
             y: 0.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 0.2,
             x: 200.0,
             y: 0.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         let slow = sidecar
             .presented_at(
@@ -1723,12 +1870,14 @@ mod tests {
             x: 0.0,
             y: 0.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 1.0,
             x: 100.0,
             y: 50.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         let (x, y, kind) = sidecar.interpolated_at(0.5).unwrap();
         assert!((x - 50.0).abs() < 1e-9);
@@ -1745,6 +1894,7 @@ mod tests {
             x: 0.0,
             y: 0.0,
             button: 1,
+            cursor_id: None,
         });
         assert!((sidecar.click_pulse_at(1.0) - 1.35).abs() < 1e-9);
         assert!((sidecar.click_pulse_at(0.0) - 1.0).abs() < 1e-9);
@@ -1760,6 +1910,7 @@ mod tests {
             x: 40.0,
             y: 80.0,
             button: 1,
+            cursor_id: None,
         });
         assert!(sidecar
             .click_ripples_at(0.5, CLICK_RIPPLE_WINDOW_SECONDS)
@@ -1788,6 +1939,7 @@ mod tests {
             x: 40.0,
             y: 80.0,
             button: 1,
+            cursor_id: None,
         });
         assert!(sidecar.click_ripples_at(1.4, 0.32).is_empty());
         let long = sidecar.click_ripples_at(1.4, 0.5);
@@ -1807,6 +1959,7 @@ mod tests {
             x: 40.0,
             y: 80.0,
             button: 1,
+            cursor_id: None,
         });
         // Age exactly equal to the visible duration is not drawn.
         assert!(sidecar
@@ -1827,6 +1980,7 @@ mod tests {
                 x: index as f64,
                 y: 0.0,
                 button: 1,
+                cursor_id: None,
             });
         }
         let ripples = sidecar.click_ripples_at(1.04, CLICK_RIPPLE_WINDOW_SECONDS);
@@ -2069,5 +2223,162 @@ mod cursor_tests {
         let restored: PointerSidecar = serde_json::from_str(&encoded).unwrap();
         assert_eq!(restored.scrolls, sidecar.scrolls);
         assert_eq!(restored.keys, sidecar.keys);
+    }
+
+    #[test]
+    fn pointer_and_click_cursor_ids_round_trip() {
+        let json = r#"{
+            "version": 2,
+            "t0_monotonic_us": 100,
+            "region": {"x": 0, "y": 0, "w": 320, "h": 240},
+            "pointer": [{
+                "t": 1.0,
+                "x": 12.0,
+                "y": 34.0,
+                "kind": "hand",
+                "cursor_id": "85b8e6f7cad0464a"
+            }],
+            "clicks": [{
+                "t": 1.1,
+                "x": 12.0,
+                "y": 34.0,
+                "button": 1,
+                "cursor_id": "85b8e6f7cad0464a"
+            }]
+        }"#;
+        let sidecar: PointerSidecar = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            sidecar.pointer[0].cursor_id.as_deref(),
+            Some("85b8e6f7cad0464a")
+        );
+        assert_eq!(
+            sidecar.clicks[0].cursor_id.as_deref(),
+            Some("85b8e6f7cad0464a")
+        );
+
+        let encoded = serde_json::to_string(&sidecar).unwrap();
+        let restored: PointerSidecar = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(restored.pointer, sidecar.pointer);
+        assert_eq!(restored.clicks, sidecar.clicks);
+    }
+
+    #[test]
+    fn samples_without_a_cursor_id_omit_the_field() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 1.0,
+            y: 2.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        sidecar.clicks.push(ClickSample {
+            t: 0.0,
+            x: 1.0,
+            y: 2.0,
+            button: 1,
+            cursor_id: None,
+        });
+        let encoded = serde_json::to_string(&sidecar).unwrap();
+        assert!(!encoded.contains("cursor_id"), "{encoded}");
+    }
+
+    #[test]
+    fn a_presented_frame_carries_the_sample_cursor_id() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 20.0,
+            kind: CursorKind::Hand,
+            cursor_id: Some("hand-id".to_string()),
+        });
+        let frame = sidecar
+            .presented_at(0.0, CursorMotion::default())
+            .expect("the frame should render");
+        assert_eq!(frame.kind, CursorKind::Hand);
+        assert_eq!(frame.cursor_id.as_deref(), Some("hand-id"));
+    }
+
+    fn catalog_sidecar(folder: &str, file: &str) -> PointerSidecar {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.cursor_images = Some(folder.to_string());
+        sidecar.cursors.push(CursorAsset {
+            id: "hand-id".to_string(),
+            file: file.to_string(),
+            width: 32,
+            height: 32,
+            hotspot_x: 6,
+            hotspot_y: 0,
+            kind: CursorKind::Hand,
+        });
+        sidecar
+    }
+
+    #[test]
+    fn cursor_catalog_names_must_be_bare_and_inside_the_sidecar_folder() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-cursor-catalog-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let folder = dir.join("clip.cursors");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("hand.png"), b"not a png yet").unwrap();
+
+        let sidecar = catalog_sidecar("clip.cursors", "hand.png");
+        assert!(sidecar.cursor_asset("hand-id").is_some());
+        assert!(sidecar.cursor_asset("missing").is_none());
+        assert_eq!(
+            sidecar.cursor_asset_path_in(&dir, "hand-id"),
+            Some(folder.join("hand.png"))
+        );
+
+        for bad in [
+            "../outside",
+            "nested/folder",
+            "nested\\folder",
+            "C:\\cursors",
+            ".",
+            "..",
+            "",
+        ] {
+            let bad_sidecar = catalog_sidecar(bad, "hand.png");
+            assert!(
+                bad_sidecar.cursor_asset_path_in(&dir, "hand-id").is_none(),
+                "folder {bad:?} must not resolve"
+            );
+        }
+
+        let mut bad_file = catalog_sidecar("clip.cursors", "../hand.png");
+        assert!(bad_file.cursor_asset_path_in(&dir, "hand-id").is_none());
+        bad_file.cursors[0].file = "nested\\hand.png".to_string();
+        assert!(bad_file.cursor_asset_path_in(&dir, "hand-id").is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_catalog_entry_has_no_captured_cursor() {
+        let sidecar = catalog_sidecar("clip.cursors", "hand.png");
+        let frame = CursorFrame {
+            x: 10.0,
+            y: 20.0,
+            kind: CursorKind::Hand,
+            alpha: 1.0,
+            cursor_id: Some("missing".to_string()),
+        };
+        let video = std::env::temp_dir().join("apexshot-cursor-missing.mp4");
+        assert!(sidecar.cursor_capture(&video, &frame).is_none());
+
+        let no_id = CursorFrame {
+            cursor_id: None,
+            ..frame
+        };
+        assert!(sidecar.cursor_capture(&video, &no_id).is_none());
     }
 }

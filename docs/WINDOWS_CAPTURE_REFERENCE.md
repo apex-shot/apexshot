@@ -422,8 +422,6 @@ Still missing:
 - Per-application cursor context (`bundleID`, role, title, caret, breadcrumb).
 - A pixel-comparison hover detector. Scroll-aware suppression is in place, but
   the recorder does not yet compare the pixels around the pointer.
-- Cursor images in the editor. The backend records them; the current cursor
-  renderer still chooses a shape from `kind`.
 
 ### Encoder
 
@@ -475,29 +473,29 @@ Two caveats:
 Autozoom, ripple/circle geometry, cursor themes, and the sidecar already exist.
 The sidecar is version 2 and carries pointer samples, clicks, presses, scrolls,
 keys, visibility, a cursor image catalog, webcam layout, and capture region.
-Mouse moves, clicks, scrolls, and keys are event-driven; editor consumption of
-the cursor catalog, keys, and scrolls remains.
+Mouse moves, clicks, scrolls, and keys are event-driven. The editor now draws
+the recorded cursor PNG at its hotspot in the preview and the export, and falls
+back to the sample's `kind` when the catalog entry or PNG is missing. Placement
+and scaling follow the existing cursor settings, press scale, click effects,
+and smoothing. Editor consumption of keys and scrolls remains.
 
 ## 5. Ranked gaps
 
-1. **Cursor images are recorded but not consumed.** The sidecar carries
-   `cursor_id` and the PNG catalog, while the editor still picks a shape from
-   `cursor_kind`.
-2. **Keys and scrolls have no editor effect.** The streams are recorded and
+1. **Keys and scrolls have no editor effect.** The streams are recorded and
    validated, but nothing consumes them yet. Key capture also stays off by
    default until a product surface owns it.
-3. **Window capture has no live resize policy.** A resized window is cropped or
+2. **Window capture has no live resize policy.** A resized window is cropped or
    letterboxed to the size the segment started with. Window metadata is still
    just a rectangle.
-4. **No camera-delay calibration.** Camera and screen can be offset.
-5. **Camera styling is not implemented.** The backend keeps the clean screen,
+3. **No camera-delay calibration.** Camera and screen can be offset.
+4. **Camera styling is not implemented.** The backend keeps the clean screen,
    camera track, layout, and start offset, but crop, shape, mirror, matte, and
    face tracking are editor work.
-6. **Encoder coverage.** No HEVC recording and no AMF probe.
-7. **The GPU path still downloads frames.** Display and area capture use
+5. **Encoder coverage.** No HEVC recording and no AMF probe.
+6. **The GPU path still downloads frames.** Display and area capture use
    `ddagrab`, but the encoder receives BGRA system memory. A cross-monitor area
    also falls back to `gdigrab`.
-8. **Editor smoothing parity.** The constants exist, but the full two-spring
+7. **Editor smoothing parity.** The constants exist, but the full two-spring
    model and every sync point may not be wired yet.
 
 ## 6. Implementation order
@@ -652,7 +650,7 @@ Still pending:
 
 - window-relative coordinates for window recordings
 - a camera-independent hover detector that compares pixels around the cursor
-- editor consumption of the cursor PNGs and the new key and scroll streams
+- editor consumption of the new key and scroll streams
 
 Validation:
 

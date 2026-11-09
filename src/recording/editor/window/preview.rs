@@ -1216,13 +1216,15 @@ fn draw_preview_overlays(
                 );
             }
             let (px, py) = source_to_zoomed_point(frame.x, frame.y, view, w, h);
-            crate::recording::editor::cursor_sprite::draw(
+            let capture = sidecar.cursor_capture(&state.metadata.path, &frame);
+            crate::recording::editor::cursor_sprite::draw_recorded(
                 cr,
                 px,
                 py,
                 1.0,
                 crate::recording::editor::model::press_cursor_scale(sidecar, source_t),
-                frame.kind.as_str(),
+                &frame,
+                capture.as_ref(),
                 cursor,
                 frame.alpha,
             );
@@ -1314,6 +1316,7 @@ mod tests {
             x: 10.0,
             y: 20.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         for t in [0.2, 1.4, 1.5, 1.6, 1.7, 2.1] {
             sidecar.clicks.push(ClickSample {
@@ -1321,6 +1324,7 @@ mod tests {
                 x: 10.0,
                 y: 20.0,
                 button: 1,
+                cursor_id: None,
             });
         }
         state.sidecar = Some(sidecar);
@@ -1416,6 +1420,7 @@ mod tests {
                 x,
                 y: 540.0,
                 kind: CursorKind::Default,
+                cursor_id: None,
             });
         }
         state.sidecar = Some(sidecar);
