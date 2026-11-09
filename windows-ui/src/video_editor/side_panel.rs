@@ -788,6 +788,30 @@ fn build_cursor_follow_page(
         });
     }
 
+    let default_row = GtkBox::new(Orientation::Horizontal, 8);
+    default_row.add_css_class("recording-editor-zoom-classic");
+    let default_label = Label::new(Some(&t("Always use the default cursor")));
+    default_label.add_css_class("recording-editor-zoom-classic-label");
+    default_label.set_hexpand(true);
+    default_label.set_xalign(0.0);
+    let always_default = Switch::new();
+    always_default.add_css_class("recording-editor-zoom-switch");
+    always_default.set_active(settings.always_use_default);
+    always_default.set_halign(Align::End);
+    always_default.connect_state_set({
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        move |_, use_default| {
+            update_cursor_settings(&cursor, &repaint, |settings| {
+                settings.always_use_default = use_default
+            });
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    default_row.append(&default_label);
+    default_row.append(&always_default);
+    page.append(&default_row);
+
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");
     let idle_label = Label::new(Some(&t("Hide when idle")));

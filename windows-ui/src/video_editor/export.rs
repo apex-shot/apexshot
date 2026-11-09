@@ -1275,8 +1275,9 @@ mod tests {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(0.0);
+        let always_use_default = std::env::var("APEXSHOT_COMPARISON_ALWAYS_DEFAULT").is_ok();
         eprintln!(
-            "export: theme {theme:?} rotation {rotation_mode:?} ratio {rotation_ratio} base {base_rotation_deg}"
+            "export: theme {theme:?} rotation {rotation_mode:?} ratio {rotation_ratio} base {base_rotation_deg} default {always_use_default}"
         );
         if std::env::var("APEXSHOT_COMPARISON_DUMP").is_ok() {
             for t in [0.4, 0.8, 1.2, 2.2, 2.6, 2.9, 3.4, 3.9, 4.4] {
@@ -1301,6 +1302,7 @@ mod tests {
                 rotation_mode,
                 rotate_on_x_movement_ratio: rotation_ratio,
                 base_rotation_deg,
+                always_use_default,
                 ..CursorSettings::default()
             },
             sidecar: Some(sidecar),

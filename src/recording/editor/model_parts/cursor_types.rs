@@ -282,6 +282,9 @@ pub struct CursorSettings {
     pub rotation_mode: CursorRotationMode,
     pub rotate_on_x_movement_ratio: f64,
     pub base_rotation_deg: f64,
+    /// The studied `alwaysUseDefault` rule: paint the arrow whatever the
+    /// recording shows.
+    pub always_use_default: bool,
 }
 
 impl Default for CursorSettings {
@@ -303,6 +306,7 @@ impl Default for CursorSettings {
             rotation_mode: CursorRotationMode::Velocity,
             rotate_on_x_movement_ratio: DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO,
             base_rotation_deg: 0.0,
+            always_use_default: false,
         }
     }
 }
@@ -328,6 +332,7 @@ impl CursorSettings {
             rotation_mode: self.rotation_mode,
             rotate_on_x_movement_ratio: self.rotate_on_x_movement_ratio.clamp(0.0, 1.0),
             base_rotation_deg: self.base_rotation_deg.clamp(-180.0, 180.0),
+            always_use_default: self.always_use_default,
         }
     }
 

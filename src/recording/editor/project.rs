@@ -119,6 +119,8 @@ pub struct VideoProjectFile {
     pub cursor_rotate_on_x_movement_ratio: f64,
     #[serde(default)]
     pub cursor_base_rotation_deg: f64,
+    #[serde(default)]
+    pub cursor_always_use_default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1008,6 +1010,7 @@ impl VideoEditState {
             cursor_rotation_mode: rotation_mode_to_file(self.cursor.rotation_mode),
             cursor_rotate_on_x_movement_ratio: self.cursor.rotate_on_x_movement_ratio,
             cursor_base_rotation_deg: self.cursor.base_rotation_deg,
+            cursor_always_use_default: self.cursor.always_use_default,
         }
     }
 
@@ -1077,6 +1080,7 @@ impl VideoEditState {
             rotation_mode: rotation_mode_from_file(file.cursor_rotation_mode),
             rotate_on_x_movement_ratio: file.cursor_rotate_on_x_movement_ratio,
             base_rotation_deg: file.cursor_base_rotation_deg,
+            always_use_default: file.cursor_always_use_default,
         }
         .clamped();
         self.project_media
@@ -1556,6 +1560,7 @@ mod tests {
         state.cursor.rotation_mode = CursorRotationMode::Directional;
         state.cursor.rotate_on_x_movement_ratio = 0.8;
         state.cursor.base_rotation_deg = 45.0;
+        state.cursor.always_use_default = true;
         let mut json = serde_json::to_value(state.to_project()).unwrap();
         let object = json.as_object_mut().unwrap();
         object.remove("cursor_click_color");
@@ -1565,6 +1570,7 @@ mod tests {
         object.remove("cursor_rotation_mode");
         object.remove("cursor_rotate_on_x_movement_ratio");
         object.remove("cursor_base_rotation_deg");
+        object.remove("cursor_always_use_default");
         for clip in json
             .get_mut("zoom_clips")
             .and_then(|value| value.as_array_mut())
@@ -1583,6 +1589,7 @@ mod tests {
                 < 1e-12
         );
         assert_eq!(file.cursor_base_rotation_deg, 0.0);
+        assert!(!file.cursor_always_use_default);
         assert_eq!(file.zoom_clips[0].easing, ZoomEasingFile::Glide);
 
         let mut restored = VideoEditState::new(metadata_for(&video, 16));
@@ -1605,6 +1612,7 @@ mod tests {
         state.cursor.rotation_mode = CursorRotationMode::Directional;
         state.cursor.rotate_on_x_movement_ratio = 0.35;
         state.cursor.base_rotation_deg = -30.0;
+        state.cursor.always_use_default = true;
         state.zoom_clips.push(ZoomClip {
             start: 0.5,
             end: 2.3,
@@ -1629,6 +1637,7 @@ mod tests {
         );
         assert!((restored.cursor.rotate_on_x_movement_ratio - 0.35).abs() < 1e-12);
         assert!((restored.cursor.base_rotation_deg + 30.0).abs() < 1e-12);
+        assert!(restored.cursor.always_use_default);
         assert_eq!(restored.zoom_clips[0].easing, ZoomEasing::Snappy);
         assert_eq!(restored.zoom_clips[0].ease_ms, 480);
         cleanup_project(&video);

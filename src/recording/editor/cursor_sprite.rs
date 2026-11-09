@@ -319,8 +319,11 @@ pub fn draw_recorded(
         settings.theme,
         CursorTheme::Macos | CursorTheme::Tahoe | CursorTheme::TahoeInverted
     );
-    let use_recorded =
-        recorded_theme && matches!(frame.cursor_id.as_deref(), Some(id) if !id.starts_with("std-"));
+    // The studied `alwaysUseDefault` rule paints the arrow whatever the
+    // recording shows, before any set or recorded image is considered.
+    let use_recorded = !settings.always_use_default
+        && recorded_theme
+        && matches!(frame.cursor_id.as_deref(), Some(id) if !id.starts_with("std-"));
     // The studied velocity profile tilts the cursor about its hotspot, so the
     // pivot stays on the recorded pointer while the art leans with motion.
     let _ = cr.save();
@@ -336,16 +339,12 @@ pub fn draw_recorded(
         }
     }
     if !painted {
-        draw(
-            cr,
-            x,
-            y,
-            pulse,
-            press_scale,
-            frame.kind.as_str(),
-            settings,
-            alpha,
-        );
+        let kind = if settings.always_use_default {
+            "default"
+        } else {
+            frame.kind.as_str()
+        };
+        draw(cr, x, y, pulse, press_scale, kind, settings, alpha);
     }
     let _ = cr.restore();
 }
@@ -2058,6 +2057,35 @@ mod tests {
         });
         let themed = render(CursorSettings::default());
         assert_ne!(recorded, themed);
+        let default_only = render(CursorSettings {
+            theme: CursorTheme::Macos,
+            always_use_default: true,
+            ..CursorSettings::default()
+        });
+        let mut arrow_frame = captured_frame(None);
+        arrow_frame.kind = crate::recording::editor::sidecar::CursorKind::Default;
+        let mut surface =
+            ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            draw_recorded(
+                &cr,
+                50.0,
+                40.0,
+                1.0,
+                1.0,
+                &arrow_frame,
+                None,
+                CursorSettings {
+                    theme: CursorTheme::Macos,
+                    ..CursorSettings::default()
+                },
+                1.0,
+            );
+        }
+        surface.flush();
+        let arrow = surface.data().unwrap().to_vec();
+        assert_eq!(default_only, arrow, "the rule paints the arrow instead");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
