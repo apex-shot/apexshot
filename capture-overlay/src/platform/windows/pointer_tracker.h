@@ -47,6 +47,10 @@ struct WebcamTrack {
     /// The track's own length. The camera's clock is not the desktop's, so the
     /// editor maps a video time onto the track by scaling with it.
     double duration = 0.0;
+    /// Seconds from the start of the video to the first frame of the track.
+    /// The camera process starts after the screen process, so this is usually
+    /// the startup gap the editor has to hold or skip.
+    double start = 0.0;
     double x = 0.0;
     double y = 0.0;
     double w = 0.0;

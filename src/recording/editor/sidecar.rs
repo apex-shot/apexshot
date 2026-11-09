@@ -191,6 +191,11 @@ pub struct WebcamTrack {
     pub height: u32,
     #[serde(default)]
     pub duration: f64,
+    /// Seconds from the start of the video to the first frame of the track.
+    /// The camera process starts after the screen process, so this is usually
+    /// the startup gap the editor has to hold or skip.
+    #[serde(default)]
+    pub start: f64,
     #[serde(default)]
     pub x: f64,
     #[serde(default)]
@@ -225,10 +230,13 @@ impl WebcamTrack {
     /// A video instant as a time in the track. A track of unknown length is
     /// played one to one, which is what a camera that kept up records anyway.
     pub fn track_seconds(&self, video_seconds: f64, video_duration: f64) -> f64 {
-        if video_duration > 0.0 && self.duration > 0.0 {
-            return (video_seconds * (self.duration / video_duration)).max(0.0);
+        let start = self.start.max(0.0);
+        if video_duration > start && self.duration > 0.0 {
+            let available = video_duration - start;
+            let time = (video_seconds - start).max(0.0);
+            return time * (self.duration / available);
         }
-        video_seconds.max(0.0)
+        (video_seconds - start).max(0.0)
     }
 }
 
@@ -1833,6 +1841,7 @@ mod webcam_tests {
         "width": 1280,
         "height": 720,
         "duration": 9.5,
+        "start": 0.4,
         "x": 0.7,
         "y": 0.55,
         "w": 0.2,
@@ -1857,6 +1866,7 @@ mod webcam_tests {
         assert_eq!(track.width, 1280);
         assert_eq!(track.height, 720);
         assert_eq!(track.duration, 9.5);
+        assert_eq!(track.start, 0.4);
         assert_eq!(track.shape, 3);
         assert!(track.flip);
         assert!(track.is_valid());
@@ -1910,5 +1920,16 @@ mod webcam_tests {
         // An unknown length plays one to one rather than freezing the layer.
         let unknown = WebcamTrack::default();
         assert!((unknown.track_seconds(3.6, 10.0) - 3.6).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_late_camera_waits_for_its_start_offset() {
+        let track = WebcamTrack {
+            duration: 8.0,
+            start: 0.5,
+            ..WebcamTrack::default()
+        };
+        assert_eq!(track.track_seconds(0.0, 10.0), 0.0);
+        assert!((track.track_seconds(5.5, 10.0) - (5.0 * 8.0 / 9.5)).abs() < 1e-9);
     }
 }

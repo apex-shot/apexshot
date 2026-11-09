@@ -18,6 +18,7 @@ live in [`plans/`](plans/).
 | [CLOUDFLARE_CDN_SETUP.md](CLOUDFLARE_CDN_SETUP.md) | Cloudflare CDN setup for release assets. |
 | [EXPORT_HARDWARE_ENCODING.md](EXPORT_HARDWARE_ENCODING.md) | Hardware-accelerated export paths and limits. |
 | [GPU_CURSOR_COMPOSITING.md](GPU_CURSOR_COMPOSITING.md) | Cursor compositing on GPU capture paths. |
+| [WINDOWS_CAPTURE_REFERENCE.md](WINDOWS_CAPTURE_REFERENCE.md) | Windows capture architecture, studied constants, current gaps, and delivery order. |
 | [THIRD_PARTY_WALLPAPERS.md](THIRD_PARTY_WALLPAPERS.md) | Third-party wallpaper assets and licensing. |
 | [TEAM_PRODUCT_STANCE.md](TEAM_PRODUCT_STANCE.md) | Product stance on teams and workspaces. |
 | [COMMERCIAL_TRANSITION.md](COMMERCIAL_TRANSITION.md) | Commercial transition notes. |
