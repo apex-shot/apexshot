@@ -357,6 +357,10 @@ Resolved on `feat/autozoom-parity`:
   fallback (`B39:3334-3349`): the first sample at or after the window start
   within 500 ms, otherwise the nearest sample. The camera follows that sample
   instead of freezing on the stored centre.
+- **Spring integration.** The Windows camera now integrates the screen spring
+  in 1 ms steps, like the studied integrator (`CpX:327-350`), while still
+  caching frames on the 1/60 s grid. It also snaps to rest at the studied 0.01
+  position and velocity threshold.
 - **Minimum window.** The generator no longer drops a window shorter than
   100 ms. After merging, `minimum_window` grows the end to the minimum, or
   shifts the start back at the end of the recording, matching the collection's
@@ -481,3 +485,15 @@ Live-follow fallback, 2026-11-09:
 - No physical clip: the existing recordings have pointer samples inside their
   zoom windows. A clip window with no sample and none before it is covered by
   the new camera unit test and the lookahead-selection test.
+
+Spring-integration change, 2026-11-09:
+
+- `cargo test --lib video_editor::zoom::tests` passed 27 of 27 tests, including
+  the 1 ms integration and rest-threshold cases.
+- `cargo test --lib` passed 833 tests with 12 ignored. The known parallel-only
+  `settings::usage` layout test failed and passed when run alone.
+- `rustfmt --check` on the changed file passed.
+- `cargo clippy --all-targets` finished without warnings.
+- The editor binary rebuilt with the change.
+- No new physical clip: the change is a sub-frame integration correction, and
+  the existing spring-motion tests cover the trajectory and rest behavior.

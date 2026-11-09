@@ -2,15 +2,19 @@
 //! damped spring, and a clip with no pointer samples in its footage window
 //! falls back to the static eased framing.
 //!
-//! The spring integrates on a fixed 1/60 s grid anchored at the clip's start,
-//! and each step is cached, so a scrub backwards replays the same path.
-//! [`ZoomCameraSettings`] carries the camera-wide knobs — spring speed and
-//! smoothness, plus the early lead-in — that the Zoom panel edits.
+//! The spring integrates in 1 ms steps, matching the studied camera. The
+//! result is cached on a 1/60 s grid anchored at the clip's start, so a scrub
+//! backwards replays the same path. [`ZoomCameraSettings`] carries the
+//! camera-wide knobs — spring speed and smoothness, plus the early lead-in —
+//! that the Zoom panel edits.
 
 use super::timeline::{ZoomClip, ZoomMode};
 use crate::recording::editor::sidecar::PointerSidecar;
 
-const ZOOM_CAMERA_STEP: f64 = 1.0 / 60.0;
+/// The cached camera frame spacing.
+const ZOOM_CAMERA_FRAME_STEP: f64 = 1.0 / 60.0;
+/// The studied screen spring's integration step.
+const ZOOM_CAMERA_INTEGRATION_STEP: f64 = 1.0 / 1000.0;
 /// The shared follow spring at speed 1.0 and smoothness 0.5. The camera and
 /// the cursor sprite both chase on it.
 pub(super) const CAMERA_FOLLOW_SPRING: CameraSpring = CameraSpring {
@@ -167,9 +171,10 @@ impl CameraMotion {
 
     fn advance(self, target: [f64; 4], spring: CameraSpring, seconds: f64) -> Self {
         let mut motion = self;
-        let steps = (seconds / ZOOM_CAMERA_STEP).ceil() as usize;
+        let steps = (seconds / ZOOM_CAMERA_INTEGRATION_STEP).ceil() as usize;
         for index in 0..steps {
-            let dt = ZOOM_CAMERA_STEP.min((seconds - index as f64 * ZOOM_CAMERA_STEP).max(0.0));
+            let dt = ZOOM_CAMERA_INTEGRATION_STEP
+                .min((seconds - index as f64 * ZOOM_CAMERA_INTEGRATION_STEP).max(0.0));
             for (axis, target) in target.iter().enumerate() {
                 (motion.rect[axis], motion.velocity[axis]) = spring_step(
                     motion.rect[axis],
@@ -450,20 +455,20 @@ impl ZoomCameraPlan {
             return static_camera_at(&self.clips, time, self.frame);
         }
 
-        let frame_index = ((time - start_time) / ZOOM_CAMERA_STEP).floor() as usize;
+        let frame_index = ((time - start_time) / ZOOM_CAMERA_FRAME_STEP).floor() as usize;
         while self.frames.len() <= frame_index {
-            let from = start_time + (self.frames.len() - 1) as f64 * ZOOM_CAMERA_STEP;
+            let from = start_time + (self.frames.len() - 1) as f64 * ZOOM_CAMERA_FRAME_STEP;
             let motion = self.advance(
                 *self
                     .frames
                     .last()
                     .expect("camera plan starts with one frame"),
                 from,
-                from + ZOOM_CAMERA_STEP,
+                from + ZOOM_CAMERA_FRAME_STEP,
             );
             self.frames.push(motion);
         }
-        let from = start_time + frame_index as f64 * ZOOM_CAMERA_STEP;
+        let from = start_time + frame_index as f64 * ZOOM_CAMERA_FRAME_STEP;
         let motion = self.advance(self.frames[frame_index], from, time);
         frame_for_rect(motion.rect, self.frame)
     }
@@ -937,7 +942,14 @@ pub(super) fn spring_step(
     }
     let acceleration = (-(value - target) * stiffness - velocity * damping) / mass;
     let velocity = velocity + acceleration * seconds;
-    (value + velocity * seconds, velocity)
+    let value = value + velocity * seconds;
+    const REST_DISTANCE: f64 = 0.01;
+    const REST_VELOCITY: f64 = 0.01;
+    if (value - target).abs() < REST_DISTANCE && velocity.abs() < REST_VELOCITY {
+        (target, 0.0)
+    } else {
+        (value, velocity)
+    }
 }
 
 fn smoothstep(value: f64) -> f64 {
@@ -952,9 +964,9 @@ fn valid_frame(frame: (f64, f64)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        camera_transform, nearest_follow_sample, placement_rect, source_to_stage,
-        stage_point_to_source, static_camera_at, view_rect, Camera, TimeMapping, ZoomCameraCache,
-        ZoomCameraSettings,
+        camera_transform, nearest_follow_sample, placement_rect, source_to_stage, spring_step,
+        stage_point_to_source, static_camera_at, view_rect, Camera, CameraMotion, TimeMapping,
+        ZoomCameraCache, ZoomCameraSettings, CAMERA_FOLLOW_SPRING,
     };
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
@@ -1056,6 +1068,23 @@ mod tests {
             center.0 > 450.0,
             "the camera must follow the sample: {center:?}"
         );
+    }
+
+    #[test]
+    fn the_spring_rests_at_the_studied_threshold() {
+        let (value, velocity) = spring_step(99.995, 0.004, 100.0, CAMERA_FOLLOW_SPRING, 0.001);
+        assert_eq!(value, 100.0);
+        assert_eq!(velocity, 0.0);
+    }
+
+    #[test]
+    fn the_camera_integrates_the_spring_in_one_millisecond_steps() {
+        let motion = CameraMotion::parked([0.0; 4]).advance([100.0; 4], CAMERA_FOLLOW_SPRING, 0.1);
+        let (mut value, mut velocity) = (0.0, 0.0);
+        for _ in 0..100 {
+            (value, velocity) = spring_step(value, velocity, 100.0, CAMERA_FOLLOW_SPRING, 0.001);
+        }
+        assert!((motion.rect[0] - value).abs() < 1e-9);
     }
 
     #[test]
