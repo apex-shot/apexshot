@@ -110,7 +110,9 @@ pub const MIN_CURSOR_SPEED: f64 = 0.25;
 pub const MAX_CURSOR_SPEED: f64 = 3.0;
 pub const DEFAULT_CURSOR_SPEED: f64 = 1.0;
 pub const DEFAULT_CURSOR_SHADOW: f64 = 0.4;
-pub const DEFAULT_CURSOR_SMOOTH: f64 = 0.35;
+/// Lands in the studied default spring's band; the slider walks the studied
+/// cursor animation presets from there to the softest one.
+pub const DEFAULT_CURSOR_SMOOTH: f64 = 0.2;
 pub const DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO: f64 = 0.5;
 pub const DEFAULT_CURSOR_IDLE_MS: f64 = 800.0;
 pub const DEFAULT_CLICK_INTENSITY: f64 = 0.7;

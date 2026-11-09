@@ -1,3 +1,4 @@
+use super::cursor_path::SpringConfig;
 use super::model::CursorRotationMode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -1080,13 +1081,7 @@ impl PointerSidecar {
         } else if samples.is_empty() {
             None
         } else {
-            Some(self.smoothed_at(
-                samples,
-                t,
-                smooth,
-                speed,
-                self.source == PointerDataSource::WindowMetadata,
-            ))
+            Some(self.smoothed_at(samples, t, smooth, speed))
         }
     }
 
@@ -1107,45 +1102,17 @@ impl PointerSidecar {
         Some(self.map_to_video(x, y, video_width, video_height))
     }
 
+    /// The cursor's travelled position: the studied spring chasing the
+    /// recorded path, with the smoothing slider selecting its preset and the
+    /// speed setting scaling it. See [`super::cursor_path`].
     fn smoothed_at(
         &self,
         samples: &[PointerSample],
         t: f64,
         smooth: f64,
         speed: f64,
-        _window_metadata: bool,
     ) -> (f64, f64) {
-        let Some(first) = samples.first() else {
-            return (0.0, 0.0);
-        };
-        let tau = (0.01 + smooth.clamp(0.0, 1.0).powi(2) * 0.26) / speed.clamp(0.25, 3.0);
-        // The approach toward an event begins inside a bounded window before
-        // it — about four time constants, capped at the studied 1.5 s — so a
-        // long gap holds the cursor instead of drifting toward a move that
-        // has not happened yet.
-        let approach = (4.0 * tau).min(1.5);
-        let mut px = first.x;
-        let mut py = first.y;
-        let mut pt = first.t;
-        for sample in samples.iter().skip(1) {
-            let hold_t = (sample.t - approach).max(pt);
-            let end_t = sample.t.min(t);
-            let k = 1.0 - (-(end_t - hold_t).max(0.0) / tau).exp();
-            if sample.t <= t {
-                px += (sample.x - px) * k;
-                py += (sample.y - py) * k;
-                pt = sample.t;
-                continue;
-            }
-            // Inside the approach window the cursor eases to the recorded
-            // next sample; before it the position holds, never interpolated.
-            if t >= hold_t {
-                px += (sample.x - px) * k;
-                py += (sample.y - py) * k;
-            }
-            break;
-        }
-        (px, py)
+        super::cursor_path::position_at(samples, t, SpringConfig::for_smooth(smooth), speed)
     }
 
     fn idle_alpha(&self, t: f64, idle_ms: f64) -> f64 {
@@ -2041,7 +2008,7 @@ mod tests {
     }
 
     #[test]
-    fn presented_at_smooths_behind_raw_sample() {
+    fn presented_at_springs_behind_the_recorded_point() {
         let mut sidecar =
             PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
         sidecar.pointer.push(PointerSample {
@@ -2052,24 +2019,34 @@ mod tests {
             cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
-            t: 0.2,
+            t: 0.1,
             x: 200.0,
             y: 0.0,
             kind: CursorKind::Default,
             cursor_id: None,
         });
-        let raw = sidecar.interpolated_at(0.2).unwrap();
+        let raw = sidecar.interpolated_at(0.15).unwrap();
         let presented = sidecar
             .presented_at(
-                0.2,
+                0.15,
                 CursorMotion {
                     smooth: 0.8,
                     ..CursorMotion::default()
                 },
             )
             .unwrap();
-        assert!(presented.x < raw.0);
-        assert!(presented.x > 0.0);
+        assert!(presented.x < raw.0, "the spring should trail the point");
+        assert!(presented.x > 0.0, "the spring should be moving");
+        let settled = sidecar
+            .presented_at(
+                4.0,
+                CursorMotion {
+                    smooth: 0.8,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+        assert!((settled.x - 200.0).abs() < 0.01, "the spring should land");
         assert!((presented.alpha - 1.0).abs() < 1e-9);
     }
 
@@ -2218,23 +2195,19 @@ mod tests {
     }
 
     #[test]
-    fn speed_controls_how_quickly_smoothing_catches_up() {
+    fn speed_controls_how_quickly_the_spring_catches_up() {
         let mut sidecar =
             PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
-        sidecar.pointer.push(PointerSample {
-            t: 0.0,
-            x: 0.0,
-            y: 0.0,
-            kind: CursorKind::Default,
-            cursor_id: None,
-        });
-        sidecar.pointer.push(PointerSample {
-            t: 0.2,
-            x: 200.0,
-            y: 0.0,
-            kind: CursorKind::Default,
-            cursor_id: None,
-        });
+        for index in 0..=40 {
+            let t = index as f64 * 0.008;
+            sidecar.pointer.push(PointerSample {
+                t,
+                x: index as f64 * 5.0,
+                y: 0.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
         let slow = sidecar
             .presented_at(
                 0.2,
@@ -2255,9 +2228,10 @@ mod tests {
                 },
             )
             .unwrap();
+        let raw = sidecar.interpolated_at(0.2).unwrap();
 
-        assert!(fast.x > slow.x);
-        assert!(fast.x <= 200.0);
+        assert!(fast.x > slow.x, "a faster spring should trail less");
+        assert!(fast.x <= raw.0);
     }
 
     #[test]

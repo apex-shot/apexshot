@@ -486,8 +486,15 @@ Captured images scale their visible alpha bounds (computed at the mean nonzero
 alpha, matching the studied loader) to the 48 px baseline at the default size.
 Recorded visibility transitions hide and restore the cursor, and a webcam
 export resolves the cursor folder from the loaded sidecar rather than the
-hidden clean-screen file. The smoothed cursor holds between events and eases
-into each move inside a bounded approach window instead of drifting early.
+hidden clean-screen file. The cursor travels on the studied spring: it holds a
+point across gaps longer than 40 ms, interpolates across shorter ones, trails
+the recording by about the spring's own lag, and lands exactly on the final
+point. The smoothing slider walks the studied cursor animation presets (the
+default soft spring, then Rapid, Medium, and Smooth) and the speed setting
+scales stiffness by its square and damping linearly, as the studied speed
+schedule does. The studied lead planner, which raises the lead around clicks,
+drags, hover and cursor-image changes, is not ported yet, so plain movement
+uses no lead.
 Both studied rotation profiles are implemented, both pivot about the pointer,
 and the editor exposes the mode, the velocity ratio, and a base angle that adds
 to either mode. `velocity` (the default, ratio 0.5) tilts with horizontal speed
@@ -699,7 +706,8 @@ capture paths already exist; this phase is about calibration and drift.
 
 Wire the remaining studied behaviour into the editor:
 
-- the two-spring model (`mouseMovementSpring` and `screenMovementSpring`)
+- the lead/speed planning layer over the cursor spring (sync points, lead
+  search, compression, speed levels) and the screen-movement spring
 - click, drag, hover, and cursor-image sync points
 - motion blur amount
 - hover-aware cursor following
