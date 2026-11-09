@@ -4323,3 +4323,18 @@ msgstr "ffmpeg が Motion 動画をエンコードできませんでした。"
 
 msgid "Upgrade to Studio"
 msgstr "Studio にアップグレード"
+
+msgid "Always use the default cursor"
+msgstr "常に既定のカーソルを使用"
+
+msgid "Base angle"
+msgstr "基準角度"
+
+msgid "Point along movement"
+msgstr "移動方向に合わせる"
+
+msgid "Tilt amount"
+msgstr "傾きの量"
+
+msgid "Tilt with motion"
+msgstr "動きに合わせて傾ける"

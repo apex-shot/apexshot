@@ -4405,3 +4405,18 @@ msgstr "ffmpeg не смог закодировать видео Motion."
 
 msgid "Upgrade to Studio"
 msgstr "Перейти на Studio"
+
+msgid "Always use the default cursor"
+msgstr "Всегда использовать курсор по умолчанию"
+
+msgid "Base angle"
+msgstr "Базовый угол"
+
+msgid "Point along movement"
+msgstr "Направление по движению"
+
+msgid "Tilt amount"
+msgstr "Величина наклона"
+
+msgid "Tilt with motion"
+msgstr "Наклонять при движении"
