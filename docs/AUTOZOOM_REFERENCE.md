@@ -432,6 +432,28 @@ Resolved on `feat/autozoom-parity`:
   with only the target point differing (`B39:7955-7964`, `B39:18148`). The
   camera plan now springs these zooms in and out too.
 
+- **No hold across gaps.** The camera used to hold an automatic zoom's
+  framing across a gap of up to 0.5 s before the next one. The studied camera
+  has no such hold: between zooms it targets the full frame, and the only
+  look-ahead is the 350 ms early start when that option is on, which picks the
+  next zoom starting at or after the current time and never an instant one
+  (`B39:1697-1707`, `B39:8296-8303`, `DgH:4405-4411`, `YEi` `lt`/`ct`). The
+  hold is removed.
+- **Adding a zoom at the playhead.** The Zoom button and an empty-lane click
+  now follow the studied add action (`BbP:72-127`, `DXX:2631-2643`): a new
+  zoom runs 3 s or up to the next zoom, is refused under 100 ms, and splits the
+  zoom under the playhead when the playhead is strictly inside one, selecting
+  the right half. A new zoom starts at 2x, or at the scale and instant flag of
+  the zoom last edited in the panel (`CK1:32-64`), and is automatic when the
+  recording has pointer samples, manual otherwise (`DXX:3138-3146`). The
+  last-edited style lasts for the editor session. The Hide track is unchanged.
+- **Not yet matched in the editor.** The studied "Add zoom" tool lets a canvas
+  click create a manual zoom aimed at the clicked point (`B39:1527-1545`); the
+  Windows preview only moves the selected manual zoom's target. The studied
+  build also turns an automatic zoom manual when the recording has no mouse
+  events (`DXX:3271-3276`); the Windows editor leaves it automatic, which
+  frames the same way because it falls back to the stored centre.
+
 There is no remaining confirmed generator gap.
 
 ## 10. Limits

@@ -99,8 +99,6 @@ impl ZoomCameraSettings {
 
 const MAX_CAMERA_SCALE: f64 = 5.0;
 const EASE_SECONDS: f64 = 0.6;
-/// Auto zooms at most this far apart share one continuous move.
-const MORPH_GAP_SECONDS: f64 = 0.5;
 
 pub(super) type Camera = (f64, (f64, f64));
 pub(super) type ViewRect = (f64, f64, f64, f64);
@@ -210,9 +208,6 @@ struct CameraZoom {
     /// its dwell-weighted centre in encoded pixels. Empty when the clip's
     /// footage window has no pointer samples, which keeps the static fallback.
     groups: Vec<(f64, (f64, f64))>,
-    /// A later auto zoom starts within the morph gap, so this clip holds its
-    /// framing through the gap instead of returning to the full frame.
-    holds_for_next: bool,
 }
 
 struct ZoomCameraPlan {
@@ -350,11 +345,7 @@ impl ZoomCameraPlan {
                 } else {
                     Vec::new()
                 };
-                CameraZoom {
-                    clip,
-                    groups,
-                    holds_for_next: morphs_into_neighbour(&clips, clip),
-                }
+                CameraZoom { clip, groups }
             })
             .collect::<Vec<_>>();
         let lead_in = settings.lead_in_seconds();
@@ -393,17 +384,7 @@ impl ZoomCameraPlan {
                 return Some(index);
             }
         }
-        // A playhead in a morph gap holds the clip it just left.
-        self.zooms
-            .iter()
-            .enumerate()
-            .filter(|(_, zoom)| {
-                zoom.holds_for_next
-                    && time > zoom.clip.end
-                    && time - zoom.clip.end <= MORPH_GAP_SECONDS
-            })
-            .max_by(|(_, left), (_, right)| left.clip.end.total_cmp(&right.clip.end))
-            .map(|(index, _)| index)
+        None
     }
 
     fn target_rect(&self, index: usize, time: f64) -> [f64; 4] {
@@ -493,12 +474,7 @@ pub(super) fn static_camera_at(clips: &[ZoomClip], time: f64, frame: (f64, f64))
             && time >= clip.start
             && time <= clip.end
     }) else {
-        // Hold the clip just left across a morph gap so the next auto zoom
-        // continues from its framing instead of flashing the full frame.
-        return match gap_hold_predecessor(clips, time) {
-            Some(previous) => (clips[previous].scale.max(1.0), clips[previous].center),
-            None => (1.0, frame_center),
-        };
+        return (1.0, frame_center);
     };
 
     let clip = &clips[index];
@@ -514,10 +490,7 @@ pub(super) fn static_camera_at(clips: &[ZoomClip], time: f64, frame: (f64, f64))
     }
     if time < clip.start + ease {
         let progress = smoothstep((time - clip.start) / ease);
-        let (from_scale, from_center) = match morph_predecessor(clips, index) {
-            Some(previous) => (clips[previous].scale.max(1.0), clips[previous].center),
-            None => (1.0, clip.center),
-        };
+        let (from_scale, from_center) = (1.0, clip.center);
         return (
             from_scale + (to_scale - from_scale) * progress,
             (
@@ -695,62 +668,6 @@ fn frame_for_rect(rect: [f64; 4], frame: (f64, f64)) -> Camera {
         scale,
         ((frame.0 / 2.0 - x) / scale, (frame.1 / 2.0 - y) / scale),
     )
-}
-
-/// The closest earlier auto zoom that `index` morphs from: it must end
-/// within the morph gap, and both clips must be auto and animated. A hidden
-/// clip never contributes, and neither does a manual or an instant one.
-fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
-    let clip = &clips[index];
-    if clip.mode != ZoomMode::Auto || clip.instant {
-        return None;
-    }
-    clips
-        .iter()
-        .enumerate()
-        .filter(|(other, previous)| {
-            *other != index
-                && previous.mode == ZoomMode::Auto
-                && !previous.instant
-                && !previous.hidden
-                && previous.end <= clip.start
-                && clip.start - previous.end <= MORPH_GAP_SECONDS
-        })
-        .max_by(|(_, left), (_, right)| left.end.total_cmp(&right.end))
-        .map(|(previous, _)| previous)
-}
-
-/// True when a later auto zoom morphs from `clip`, so it holds its framing
-/// through the gap instead of returning to the full frame.
-fn morphs_into_neighbour(clips: &[ZoomClip], clip: ZoomClip) -> bool {
-    clip.mode == ZoomMode::Auto
-        && !clip.instant
-        && !clip.hidden
-        && clips.iter().any(|next| {
-            *next != clip
-                && next.mode == ZoomMode::Auto
-                && !next.instant
-                && !next.hidden
-                && next.start >= clip.end
-                && next.start - clip.end <= MORPH_GAP_SECONDS
-        })
-}
-
-/// The closest auto zoom whose framing is held while `time` sits in a gap.
-fn gap_hold_predecessor(clips: &[ZoomClip], time: f64) -> Option<usize> {
-    clips
-        .iter()
-        .enumerate()
-        .filter(|(_, clip)| {
-            clip.mode == ZoomMode::Auto
-                && !clip.instant
-                && !clip.hidden
-                && clip.end <= time
-                && time - clip.end <= MORPH_GAP_SECONDS
-        })
-        .max_by(|(_, left), (_, right)| left.end.total_cmp(&right.end))
-        .map(|(previous, _)| previous)
-        .filter(|&previous| morphs_into_neighbour(clips, clips[previous]))
 }
 
 /// The pointer sample the studied camera uses when a clip window has none of
@@ -1038,9 +955,9 @@ fn valid_frame(frame: (f64, f64)) -> bool {
 mod tests {
     use super::{
         camera_transform, nearest_follow_sample, placement_rect, source_to_stage, spring_step,
-        stage_point_to_source, static_camera_at, studied_advance, studied_precision, view_rect,
-        Camera, CameraMotion, TimeMapping, ZoomCameraCache, ZoomCameraSettings,
-        CAMERA_FOLLOW_SPRING, SCREEN_SPRING_PRECISION,
+        stage_point_to_source, studied_advance, studied_precision, view_rect, Camera, CameraMotion,
+        TimeMapping, ZoomCameraCache, ZoomCameraSettings, CAMERA_FOLLOW_SPRING,
+        SCREEN_SPRING_PRECISION,
     };
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
@@ -1057,13 +974,6 @@ mod tests {
             mode: ZoomMode::Auto,
             instant: false,
             anchor: None,
-        }
-    }
-
-    fn manual_clip(start: f64, end: f64, scale: f64, center: (f64, f64)) -> ZoomClip {
-        ZoomClip {
-            mode: ZoomMode::Manual,
-            ..auto_clip(start, end, scale, center)
         }
     }
 
@@ -1529,118 +1439,20 @@ mod tests {
     }
 
     #[test]
-    fn auto_zooms_within_the_morph_gap_share_one_continuous_framing() {
-        let frame = (640.0, 480.0);
+    fn a_short_gap_between_auto_zooms_returns_toward_the_full_frame() {
+        // The studied camera targets the full frame between zooms; only the
+        // optional early start looks ahead to the next one.
         let clips = [
-            auto_clip(0.0, 1.5, 2.0, (400.0, 240.0)),
-            auto_clip(1.9, 3.5, 3.0, (300.0, 240.0)),
+            auto_clip(1.0, 2.0, 2.0, (320.0, 240.0)),
+            auto_clip(2.4, 3.4, 2.0, (320.0, 240.0)),
         ];
-        assert!(
-            (static_camera_at(&clips, 1.0, frame).0 - 2.0).abs() < 1e-9,
-            "the first clip holds its framing into the gap"
-        );
-        let gap = static_camera_at(&clips, 1.7, frame);
-        assert!((gap.0 - 2.0).abs() < 1e-9, "gap framing: {gap:?}");
-        assert_eq!(gap.1, (400.0, 240.0));
-        let entry = static_camera_at(&clips, 1.9, frame);
-        assert!(
-            (entry.0 - 2.0).abs() < 1e-9,
-            "no full frame at the next clip: {entry:?}"
-        );
-        assert_eq!(entry.1, (400.0, 240.0));
-        assert_eq!(static_camera_at(&clips, 2.75, frame), (3.0, (300.0, 240.0)));
-
-        let mut previous = static_camera_at(&clips, 1.4, frame);
-        for step in 1..=80 {
-            let time = 1.4 + f64::from(step) * 0.01;
-            let current = static_camera_at(&clips, time, frame);
-            assert!(
-                current.0 > 1.9 || time >= 2.5,
-                "the framing dropped to full between the clips at {time}: {current:?}"
-            );
-            assert!(
-                (current.1 .0 - previous.1 .0).abs() < 15.0,
-                "centre jumped at {time}: {previous:?} -> {current:?}"
-            );
-            previous = current;
-        }
-    }
-
-    #[test]
-    fn auto_zooms_beyond_the_morph_gap_do_not_morph() {
+        let sidecar = sidecar((640, 480), &[]);
         let frame = (640.0, 480.0);
-        let clips = [
-            auto_clip(0.0, 1.5, 2.0, (400.0, 240.0)),
-            auto_clip(2.3, 4.5, 3.0, (300.0, 240.0)),
-        ];
-        assert_eq!(static_camera_at(&clips, 1.5, frame).0, 2.0);
-        assert_eq!(static_camera_at(&clips, 1.51, frame), (1.0, (320.0, 240.0)));
-        assert_eq!(static_camera_at(&clips, 1.9, frame), (1.0, (320.0, 240.0)));
-        assert_eq!(static_camera_at(&clips, 2.3, frame), (1.0, (300.0, 240.0)));
-        assert_eq!(static_camera_at(&clips, 3.2, frame), (3.0, (300.0, 240.0)));
-    }
-
-    #[test]
-    fn the_follow_camera_holds_through_the_morph_gap() {
-        let frame = (640.0, 480.0);
-        let clips = [
-            auto_clip(0.5, 2.0, 2.0, (320.0, 240.0)),
-            auto_clip(2.4, 4.0, 3.0, (320.0, 240.0)),
-        ];
-        let sidecar = sidecar(
-            (640, 480),
-            &[
-                (0.5, 400.0, 240.0),
-                (2.0, 400.0, 240.0),
-                (2.4, 300.0, 240.0),
-                (4.0, 300.0, 240.0),
-            ],
-        );
-        let in_gap = evaluate(&clips, &sidecar, frame, 2.2);
+        let held = evaluate(&clips, &sidecar, frame, 2.0).0;
+        let gap = evaluate(&clips, &sidecar, frame, 2.35).0;
         assert!(
-            in_gap.0 > 1.8,
-            "gap must not fall back to full frame: {in_gap:?}"
-        );
-        let after_entry = evaluate(&clips, &sidecar, frame, 2.45);
-        assert!(
-            after_entry.0 > 1.8,
-            "the next clip must continue from the held framing: {after_entry:?}"
-        );
-    }
-
-    #[test]
-    fn a_manual_clip_never_morphs_in_either_direction() {
-        let frame = (640.0, 480.0);
-        let auto_then_manual = [
-            auto_clip(0.0, 1.5, 2.0, (400.0, 240.0)),
-            manual_clip(1.9, 3.5, 3.0, (300.0, 240.0)),
-        ];
-        assert_eq!(
-            static_camera_at(&auto_then_manual, 1.9, frame),
-            (1.0, (300.0, 240.0))
-        );
-        assert!(
-            (static_camera_at(&auto_then_manual, 1.4, frame).0 - 2.0).abs() < 0.2,
-            "the auto clip holds its own framing to its end: {:?}",
-            static_camera_at(&auto_then_manual, 1.4, frame)
-        );
-        assert_eq!(
-            static_camera_at(&auto_then_manual, 1.6, frame),
-            (1.0, (320.0, 240.0)),
-            "a manual neighbour must not hold the auto clip past its end"
-        );
-
-        let manual_then_auto = [
-            manual_clip(0.0, 1.5, 2.0, (400.0, 240.0)),
-            auto_clip(1.9, 3.5, 3.0, (300.0, 240.0)),
-        ];
-        assert_eq!(
-            static_camera_at(&manual_then_auto, 1.9, frame),
-            (1.0, (300.0, 240.0))
-        );
-        assert_eq!(
-            static_camera_at(&manual_then_auto, 1.7, frame),
-            (1.0, (320.0, 240.0))
+            gap < held - 0.2,
+            "the gap must head back out: held={held} gap={gap}"
         );
     }
 

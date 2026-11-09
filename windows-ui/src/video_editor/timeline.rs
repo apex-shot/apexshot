@@ -36,7 +36,8 @@ use super::history::EditHistory;
 const PLACEHOLDER_SECONDS: f64 = 30.0;
 const FIT_SCALE_RANGE: f64 = 7.0;
 const MIN_CLIP_SECONDS: f64 = 0.1;
-const DEFAULT_ZOOM_SCALE: f64 = 1.8;
+const DEFAULT_ZOOM_SCALE: f64 = 2.0;
+const DEFAULT_ZOOM_SECONDS: f64 = 3.0;
 const DEFAULT_EFFECT_SECONDS: f64 = 1.8;
 const MIN_ZOOM_SCALE: f64 = 1.2;
 const MAX_ZOOM_SCALE: f64 = 5.0;
@@ -171,6 +172,11 @@ struct Data {
     zoom_selection_epoch: u64,
     selected_hide: Option<usize>,
     clipboard: Option<ClipTemplate>,
+    /// The scale and instant flag of the zoom the user last edited; new zooms
+    /// start from it, as in the studied build.
+    last_zoom_style: Option<(f64, bool)>,
+    /// The recording has pointer samples, so new zooms can follow the pointer.
+    pointer_available: bool,
     /// Where the pointer sits on each pill lane, in composition time. Copy and
     /// Cut put a clip aside invisibly, so the lane draws that clip under the
     /// pointer as a ghost to show what a click would place.
@@ -614,6 +620,8 @@ impl Data {
         self.selected_hide = None;
         self.zoom_selection_epoch = 0;
         self.clipboard = None;
+        self.last_zoom_style = None;
+        self.pointer_available = false;
         self.hover_zoom = None;
         self.hover_hide = None;
         self.dragging_effect = false;
@@ -1091,9 +1099,15 @@ impl Data {
         }
     }
 
-    /// Drop the toolbar's default-length effect at `start`, in composition
-    /// time. Refused when there is no room left or it would overlap a sibling,
-    /// which is what the source editor does instead of stacking pills.
+    /// Drop a default-length effect at `start`, in composition time.
+    ///
+    /// A zoom dropped inside another splits that one at the playhead, so the
+    /// two halves keep their framing instead of stacking pills on one span. A
+    /// new zoom starts from the scale and snap flag the user last edited, and
+    /// it follows the pointer only when the recording has samples for it.
+    /// A hide is refused when there is no room left or it would overlap a
+    /// sibling, which is what the studied build does instead of stacking
+    /// pills.
     fn add_effect(&mut self, track: EffectTrack, start: f64) -> Option<usize> {
         if !self.has_media() {
             return None;
@@ -1103,12 +1117,63 @@ impl Data {
             return None;
         }
         let start = start.clamp(0.0, (limit - MIN_CLIP_SECONDS).max(0.0));
-        let end = (start + DEFAULT_EFFECT_SECONDS).min(limit);
         let before = self.snapshot();
-        let index = self.insert_effect(track, start, end, DEFAULT_ZOOM_SCALE, false)?;
-        self.select_effect(track, Some(index));
-        self.record_edit(before);
-        Some(index)
+        match track {
+            EffectTrack::Zoom => {
+                if let Some(index) = self
+                    .zoom_clips
+                    .iter()
+                    .position(|clip| clip.start < start && start < clip.end)
+                {
+                    let clip = self.zoom_clips[index];
+                    if start - clip.start < MIN_CLIP_SECONDS || clip.end - start < MIN_CLIP_SECONDS
+                    {
+                        return None;
+                    }
+                    self.zoom_clips[index].end = start;
+                    let right = ZoomClip { start, ..clip };
+                    self.zoom_clips.insert(index + 1, right);
+                    self.select_effect(track, Some(index + 1));
+                    self.record_edit(before);
+                    return Some(index + 1);
+                }
+                let next_start = self
+                    .zoom_clips
+                    .iter()
+                    .filter(|clip| clip.start >= start)
+                    .map(|clip| clip.start)
+                    .reduce(f64::min)
+                    .unwrap_or(limit);
+                let end = (start + DEFAULT_ZOOM_SECONDS).min(next_start).min(limit);
+                if end - start < MIN_CLIP_SECONDS {
+                    return None;
+                }
+                let scale = self
+                    .last_zoom_style
+                    .map(|(scale, _)| scale)
+                    .unwrap_or(DEFAULT_ZOOM_SCALE)
+                    .clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+                let instant = self.last_zoom_style.is_some_and(|(_, instant)| instant);
+                let mode = if self.pointer_available {
+                    ZoomMode::Auto
+                } else {
+                    ZoomMode::Manual
+                };
+                let index = self.insert_effect(track, start, end, scale, false)?;
+                self.zoom_clips[index].mode = mode;
+                self.zoom_clips[index].instant = instant;
+                self.select_effect(track, Some(index));
+                self.record_edit(before);
+                Some(index)
+            }
+            EffectTrack::Hide => {
+                let end = (start + DEFAULT_EFFECT_SECONDS).min(limit);
+                let index = self.insert_effect(track, start, end, DEFAULT_ZOOM_SCALE, false)?;
+                self.select_effect(track, Some(index));
+                self.record_edit(before);
+                Some(index)
+            }
+        }
     }
 
     /// Insert one effect somewhere in the lane, keeping the lane sorted and
@@ -1435,6 +1500,8 @@ impl Data {
         }
         self.record_continuous_edit();
         self.zoom_clips[index].scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+        let clip = self.zoom_clips[index];
+        self.last_zoom_style = Some((clip.scale, clip.instant));
     }
 
     fn set_selected_zoom_instant(&mut self, instant: bool) {
@@ -1450,6 +1517,8 @@ impl Data {
         let before = self.snapshot();
         self.zoom_clips[index].instant = instant;
         self.record_edit(before);
+        let clip = self.zoom_clips[index];
+        self.last_zoom_style = Some((clip.scale, clip.instant));
     }
 
     fn reset_zoom_animation(&mut self) {
@@ -3194,6 +3263,7 @@ pub(super) fn build(
         &zoom_track_lane,
         EffectTrack::Zoom,
         data.clone(),
+        cursor.clone(),
         source_size.clone(),
         repaint.clone(),
         sync_play_icon.clone(),
@@ -3203,6 +3273,7 @@ pub(super) fn build(
         &hide_track,
         EffectTrack::Hide,
         data.clone(),
+        cursor.clone(),
         source_size.clone(),
         repaint.clone(),
         sync_play_icon.clone(),
@@ -3212,12 +3283,16 @@ pub(super) fn build(
     for (button, track) in [(&zoom, EffectTrack::Zoom), (&hide, EffectTrack::Hide)] {
         button.connect_clicked({
             let data = data.clone();
+            let cursor = cursor.clone();
             let source_size = source_size.clone();
             let repaint = repaint.clone();
             move |_| {
                 {
                     let mut data = data.borrow_mut();
                     data.set_frame_size(source_size.get());
+                    data.pointer_available = cursor
+                        .sidecar()
+                        .is_some_and(|sidecar| !sidecar.pointer.is_empty());
                     let at = data.playhead;
                     data.add_effect(track, at);
                 }
@@ -4333,10 +4408,12 @@ enum EffectDrag {
     Extend,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn bind_effect_lane(
     lane: &DrawingArea,
     track: EffectTrack,
     data: Rc<RefCell<Data>>,
+    cursor: super::cursor::CursorModel,
     source_size: Rc<Cell<Option<(u32, u32)>>>,
     repaint: Rc<dyn Fn()>,
     sync_play_icon: Rc<dyn Fn()>,
@@ -4349,6 +4426,7 @@ fn bind_effect_lane(
     click.set_button(1);
     click.connect_pressed({
         let data = data.clone();
+        let cursor = cursor.clone();
         let source_size = source_size.clone();
         let repaint = repaint.clone();
         let sync_play_icon = sync_play_icon.clone();
@@ -4374,10 +4452,13 @@ fn bind_effect_lane(
                     // a clip the way it always has. Placing first means a click
                     // that lands the ghost never leaves an extra clip behind.
                     let at = snap_time_to_playhead(&data, width, data.x_to_time(x, width), scale);
-                    if data.paste_effect_at(track, at).is_none()
-                        && data.add_effect(track, at).is_none()
-                    {
-                        data.select_effect(track, None);
+                    if data.paste_effect_at(track, at).is_none() {
+                        data.pointer_available = cursor
+                            .sidecar()
+                            .is_some_and(|sidecar| !sidecar.pointer.is_empty());
+                        if data.add_effect(track, at).is_none() {
+                            data.select_effect(track, None);
+                        }
                     }
                 }
             }
@@ -6317,7 +6398,7 @@ mod tests {
         assert_eq!(data.add_effect(EffectTrack::Hide, 2.0), Some(0));
         let zoom = data.zoom_clips[0];
         assert!((zoom.start - 2.0).abs() < 1e-9);
-        assert!((zoom.end - 3.8).abs() < 1e-9);
+        assert!((zoom.end - 5.0).abs() < 1e-9);
         assert!((zoom.scale - DEFAULT_ZOOM_SCALE).abs() < 1e-9);
         assert_eq!(zoom.center, (960.0, 540.0));
         assert_eq!(data.selected_zoom, Some(0));
@@ -6328,9 +6409,82 @@ mod tests {
     #[test]
     fn effects_do_not_stack_on_each_other() {
         let mut data = loaded();
+        assert_eq!(data.add_effect(EffectTrack::Zoom, 1.0), Some(0));
+        assert!((data.zoom_clips[0].start - 1.0).abs() < 1e-9);
+        assert!((data.zoom_clips[0].end - 4.0).abs() < 1e-9);
+
+        // A drop inside the zoom splits it at the playhead and selects the
+        // right half instead of stacking a second pill on the same span.
+        assert_eq!(data.add_effect(EffectTrack::Zoom, 2.0), Some(1));
+        assert_eq!(data.zoom_clips.len(), 2);
+        assert!((data.zoom_clips[0].start - 1.0).abs() < 1e-9);
+        assert!((data.zoom_clips[0].end - 2.0).abs() < 1e-9);
+        assert!((data.zoom_clips[1].start - 2.0).abs() < 1e-9);
+        assert!((data.zoom_clips[1].end - 4.0).abs() < 1e-9);
+        assert_eq!(data.selected_zoom, Some(1));
+
+        // Past the split zoom, a new one runs its default length.
+        assert_eq!(data.add_effect(EffectTrack::Zoom, 4.0), Some(2));
+        assert!((data.zoom_clips[2].start - 4.0).abs() < 1e-9);
+        assert!((data.zoom_clips[2].end - 7.0).abs() < 1e-9);
+
+        // Hide still refuses a drop on top of another hide.
+        assert!(data.add_effect(EffectTrack::Hide, 1.0).is_some());
+        assert!(data.add_effect(EffectTrack::Hide, 2.0).is_none());
+    }
+
+    #[test]
+    fn a_new_zoom_runs_three_seconds_or_to_the_next_zoom() {
+        let mut data = loaded();
+        assert!(data.add_effect(EffectTrack::Zoom, 5.0).is_some());
+        assert!((data.zoom_clips[0].start - 5.0).abs() < 1e-9);
+        assert!((data.zoom_clips[0].end - 8.0).abs() < 1e-9);
+
+        // The next zoom's start caps the new clip's length.
+        assert!(data.add_effect(EffectTrack::Zoom, 3.0).is_some());
+        assert_eq!(data.zoom_clips.len(), 2);
+        assert!((data.zoom_clips[0].start - 3.0).abs() < 1e-9);
+        assert!((data.zoom_clips[0].end - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn adding_inside_a_zoom_splits_it_at_the_playhead() {
+        let mut data = loaded();
         assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
-        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_none());
-        assert!(data.add_effect(EffectTrack::Zoom, 4.0).is_some());
+        data.set_selected_zoom_scale(2.5);
+        assert_eq!(data.add_effect(EffectTrack::Zoom, 2.5), Some(1));
+        assert_eq!(data.zoom_clips.len(), 2);
+        assert!((data.zoom_clips[0].start - 1.0).abs() < 1e-9);
+        assert!((data.zoom_clips[0].end - 2.5).abs() < 1e-9);
+        assert!((data.zoom_clips[1].start - 2.5).abs() < 1e-9);
+        assert!((data.zoom_clips[1].end - 4.0).abs() < 1e-9);
+        assert_eq!(data.selected_zoom, Some(1));
+        assert!((data.zoom_clips[0].scale - 2.5).abs() < 1e-9);
+        assert!((data.zoom_clips[1].scale - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn new_zooms_inherit_the_last_edited_scale_and_instant_flag() {
+        let mut data = loaded();
+        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        data.set_selected_zoom_scale(3.0);
+        data.set_selected_zoom_instant(true);
+
+        assert!(data.add_effect(EffectTrack::Zoom, 6.0).is_some());
+        let clip = data.zoom_clips[1];
+        assert!((clip.scale - 3.0).abs() < 1e-9);
+        assert!(clip.instant);
+    }
+
+    #[test]
+    fn new_zooms_are_automatic_only_with_pointer_data() {
+        let mut data = loaded();
+        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert_eq!(data.zoom_clips[0].mode, ZoomMode::Manual);
+
+        data.pointer_available = true;
+        assert!(data.add_effect(EffectTrack::Zoom, 5.0).is_some());
+        assert_eq!(data.zoom_clips[1].mode, ZoomMode::Auto);
     }
 
     #[test]
@@ -6386,7 +6540,7 @@ mod tests {
         let first = data.zoom_clips[0];
         let second = data.zoom_clips[1];
         assert!((second.start - 3.0).abs() < 1e-9);
-        assert!((second.end - 4.8).abs() < 1e-9);
+        assert!((second.end - 6.0).abs() < 1e-9);
         assert!(second.start >= first.end);
     }
 
@@ -6466,7 +6620,7 @@ mod tests {
         let pasted = data.paste_effect().expect("the paste should land");
         let clip = data.zoom_clips[pasted];
         assert!((clip.start - 6.0).abs() < 1e-9);
-        assert!((clip.end - 7.8).abs() < 1e-9);
+        assert!((clip.end - 9.0).abs() < 1e-9);
         assert!((clip.scale - DEFAULT_ZOOM_SCALE).abs() < 1e-9);
         assert_eq!(data.selected_zoom, Some(pasted));
     }
@@ -6500,7 +6654,7 @@ mod tests {
         assert!(data.add_effect(EffectTrack::Zoom, 0.0).is_some());
         assert!(data.duplicate_effect(EffectTrack::Zoom, 0).is_some());
         assert_eq!(data.zoom_clips.len(), 2);
-        assert!((data.zoom_clips[1].start - 1.8).abs() < 1e-9);
+        assert!((data.zoom_clips[1].start - 3.0).abs() < 1e-9);
         assert_eq!(data.selected_zoom, Some(1));
 
         // A span that runs past the ten-second composition is refused, as is
