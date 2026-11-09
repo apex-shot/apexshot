@@ -14,6 +14,129 @@ pub const CLICK_RIPPLE_WINDOW_SECONDS: f64 =
 /// The studied recorder keeps at most this many recent clicks alive at once.
 pub const MAX_SIMULTANEOUS_CLICKS: usize = 3;
 
+/// The studied cursor velocity profile: tilt follows horizontal speed, clamped
+/// to a modest angle and calmed for the first half second. These are the
+/// studied defaults (`velocity` mode, `rotateOnXMovementRatio` 0.5).
+pub const ROTATE_ON_X_MOVEMENT_RATIO: f64 = 0.5;
+pub const BASE_CURSOR_ROTATION_RAD: f64 = 0.0;
+const ROTATION_STEP_MS: f64 = 16.0;
+const ROTATION_TILT_DEG_PER_VELOCITY: f64 = 12.0;
+const ROTATION_MAX_TILT_DEG: f64 = 20.0;
+const ROTATION_VELOCITY_SMOOTHING_MS: f64 = 120.0;
+const ROTATION_STARTUP_CALM_MS: f64 = 500.0;
+const ROTATION_ENTRY_TELEPORT_SPEED: f64 = 15.0;
+const ROTATION_EMIT_EPSILON: f64 = 0.0015;
+
+#[derive(Default)]
+struct RotationEmitter {
+    keyframes: Vec<(f64, f64)>,
+    last: f64,
+    pending: Option<(f64, f64)>,
+}
+
+impl RotationEmitter {
+    fn emit(&mut self, time_ms: f64, radians: f64, force: bool) {
+        if !force && (radians - self.last).abs() < ROTATION_EMIT_EPSILON {
+            self.pending = Some((time_ms, radians));
+            return;
+        }
+        if let Some((pending_time, pending_radians)) = self.pending.take() {
+            if pending_time < time_ms {
+                self.keyframes.push((pending_time, pending_radians));
+            }
+        }
+        if let Some(last) = self.keyframes.last_mut() {
+            if (last.0 - time_ms).abs() < 1e-9 {
+                last.1 = radians;
+                self.last = radians;
+                return;
+            }
+        }
+        self.keyframes.push((time_ms, radians));
+        self.last = radians;
+    }
+}
+
+fn tilt_for_velocity(velocity_px_per_ms: f64, ratio: f64) -> f64 {
+    (velocity_px_per_ms * ROTATION_TILT_DEG_PER_VELOCITY * ratio)
+        .clamp(-ROTATION_MAX_TILT_DEG, ROTATION_MAX_TILT_DEG)
+        .to_radians()
+}
+
+fn simulate_rotation(
+    velocity: &mut f64,
+    emitter: &mut RotationEmitter,
+    ratio: f64,
+    start_ms: f64,
+    span_ms: f64,
+    target: f64,
+) {
+    let steps = (span_ms / ROTATION_STEP_MS).ceil().max(1.0);
+    let step = span_ms / steps;
+    let alpha = 1.0 - (-step / ROTATION_VELOCITY_SMOOTHING_MS).exp();
+    for index in 1..=(steps as usize) {
+        *velocity += (target - *velocity) * alpha;
+        emitter.emit(
+            start_ms + index as f64 * step,
+            tilt_for_velocity(*velocity, ratio),
+            false,
+        );
+    }
+}
+
+/// Whether the pointer entered the footage fast enough to be a teleport: the
+/// studied profile skips the first two samples' velocity when it does.
+fn entry_is_fast(samples: &[PointerSample]) -> bool {
+    if samples.len() < 2 {
+        return false;
+    }
+    let first = &samples[0];
+    let second = &samples[1];
+    let dt = (second.t - first.t) * 1000.0;
+    dt > 0.0 && (second.x - first.x).hypot(second.y - first.y) / dt > ROTATION_ENTRY_TELEPORT_SPEED
+}
+
+/// Horizontal speed at the sample `start`, looking forward within the
+/// smoothing window. Mirrors the studied `velocitySmoothingMs` scan.
+fn horizontal_velocity(samples: &[PointerSample], start: usize) -> f64 {
+    let Some(previous) = start.checked_sub(1).and_then(|index| samples.get(index)) else {
+        return 0.0;
+    };
+    for index in start..samples.len() {
+        let sample = &samples[index];
+        let dt = (sample.t - previous.t) * 1000.0;
+        if dt >= ROTATION_VELOCITY_SMOOTHING_MS || index == samples.len() - 1 {
+            return if dt > 0.0 {
+                (sample.x - previous.x) / dt
+            } else {
+                0.0
+            };
+        }
+    }
+    0.0
+}
+
+fn interpolate_rotation(keyframes: &[(f64, f64)], time_ms: f64) -> f64 {
+    let Some((_, first_radians)) = keyframes.first().copied() else {
+        return 0.0;
+    };
+    let after = keyframes.partition_point(|(time, _)| *time <= time_ms);
+    if after == 0 {
+        return first_radians;
+    }
+    let (from_time, from_radians) = keyframes[after - 1];
+    let Some((to_time, to_radians)) = keyframes.get(after).copied() else {
+        return from_radians;
+    };
+    let span = to_time - from_time;
+    let amount = if span > 0.0 {
+        ((time_ms - from_time) / span).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    from_radians + (to_radians - from_radians) * amount
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PointerDataSource {
@@ -122,6 +245,8 @@ pub struct CursorFrame {
     pub y: f64,
     pub kind: CursorKind,
     pub alpha: f64,
+    /// Tilt in radians about the pointer, from the studied velocity profile.
+    pub rotation: f64,
     /// Catalog id of the recorded cursor image, when this frame has one.
     pub cursor_id: Option<String>,
 }
@@ -661,8 +786,66 @@ impl PointerSidecar {
             y,
             kind,
             alpha,
+            rotation: self.cursor_rotation_at(
+                t,
+                ROTATE_ON_X_MOVEMENT_RATIO,
+                BASE_CURSOR_ROTATION_RAD,
+            ),
             cursor_id,
         })
+    }
+
+    /// The studied cursor tilt at `t`: a velocity profile that leans the cursor
+    /// with horizontal speed, clamped to the studied limits and calmed for the
+    /// first half second. Times are converted to the profile's milliseconds.
+    pub fn cursor_rotation_at(&self, t: f64, ratio: f64, base_radians: f64) -> f64 {
+        if !ratio.is_finite() || ratio == 0.0 || self.pointer.is_empty() {
+            return base_radians;
+        }
+        let keyframes = self.rotation_keyframes(ratio);
+        base_radians + interpolate_rotation(&keyframes, t * 1000.0)
+    }
+
+    fn rotation_keyframes(&self, ratio: f64) -> Vec<(f64, f64)> {
+        let samples = &self.pointer;
+        let teleport = if entry_is_fast(samples) { 2 } else { 1 };
+        let mut emitter = RotationEmitter::default();
+        let mut velocity = horizontal_velocity(samples, teleport);
+        let first = &samples[0];
+
+        emitter.emit(first.t * 1000.0, tilt_for_velocity(velocity, ratio), true);
+        let mut previous = first;
+        for (index, sample) in samples.iter().enumerate().skip(1) {
+            let dt = (sample.t - previous.t) * 1000.0;
+            if dt > 0.0 {
+                let target = if index < teleport {
+                    0.0
+                } else {
+                    (sample.x - previous.x) / dt
+                };
+                simulate_rotation(&mut velocity, &mut emitter, ratio, previous.t * 1000.0, dt, target);
+            }
+            previous = sample;
+        }
+        let tail = ROTATION_VELOCITY_SMOOTHING_MS * 6.0;
+        simulate_rotation(&mut velocity, &mut emitter, ratio, previous.t * 1000.0, tail, 0.0);
+        emitter.emit(previous.t * 1000.0 + tail, 0.0, true);
+
+        let keyframes = emitter.keyframes;
+        if keyframes.len() < 2 {
+            return keyframes;
+        }
+        // The studied path holds the opening rotation for its startup window
+        // instead of easing out of a first-frame spike.
+        let calm_at = keyframes[0].0 + ROTATION_STARTUP_CALM_MS;
+        let calm = interpolate_rotation(&keyframes, calm_at);
+        let mut result = vec![(keyframes[0].0, calm), (calm_at, calm)];
+        result.extend(
+            keyframes
+                .into_iter()
+                .filter(|(time, _)| *time > calm_at),
+        );
+        result
     }
 
     /// Whether a directly recorded cursor is visible at `t`. Window metadata
@@ -2339,6 +2522,28 @@ mod cursor_tests {
     }
 
     #[test]
+    fn the_cursor_tilts_with_horizontal_velocity() {
+        let rotation = |step: f64| {
+            let mut sidecar =
+                PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+            for index in 0..25 {
+                let t = index as f64 * 0.016;
+                sidecar.pointer.push(PointerSample {
+                    t,
+                    x: step * index as f64,
+                    y: 100.0,
+                    kind: CursorKind::Default,
+                    cursor_id: None,
+                });
+            }
+            sidecar.cursor_rotation_at(0.2, ROTATE_ON_X_MOVEMENT_RATIO, BASE_CURSOR_ROTATION_RAD)
+        };
+        assert!(rotation(40.0) > 0.05, "rightward motion should lean right");
+        assert!(rotation(-40.0) < -0.05, "leftward motion should lean left");
+        assert!(rotation(0.0).abs() < 1e-9, "no motion should not tilt");
+    }
+
+    #[test]
     fn recorded_visibility_hides_and_restores_the_cursor() {
         let mut sidecar =
             PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
@@ -2406,6 +2611,7 @@ mod cursor_tests {
             y: 0.0,
             kind: CursorKind::Hand,
             alpha: 1.0,
+            rotation: 0.0,
             cursor_id: Some("hand-id".to_string()),
         };
         assert_eq!(
@@ -2483,6 +2689,7 @@ mod cursor_tests {
             y: 20.0,
             kind: CursorKind::Hand,
             alpha: 1.0,
+            rotation: 0.0,
             cursor_id: Some("missing".to_string()),
         };
         let video = std::env::temp_dir().join("apexshot-cursor-missing.mp4");

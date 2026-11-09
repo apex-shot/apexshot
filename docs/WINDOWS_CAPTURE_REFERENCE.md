@@ -488,7 +488,10 @@ Recorded visibility transitions hide and restore the cursor, and a webcam
 export resolves the cursor folder from the loaded sidecar rather than the
 hidden clean-screen file. The smoothed cursor holds between events and eases
 into each move inside a bounded approach window instead of drifting early.
-Editor consumption of keys and scrolls remains.
+The cursor tilts with horizontal velocity on the studied default profile
+(`velocity`, ratio 0.5, 12° per px/ms, clamped to ±20°, 120 ms smoothing, 500 ms
+startup calm) and pivots about the pointer. Rotation settings, and editor
+consumption of keys and scrolls, remain.
 
 ## 5. Ranked gaps
 

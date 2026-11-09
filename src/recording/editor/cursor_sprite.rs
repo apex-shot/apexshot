@@ -321,23 +321,33 @@ pub fn draw_recorded(
     );
     let use_recorded =
         recorded_theme && matches!(frame.cursor_id.as_deref(), Some(id) if !id.starts_with("std-"));
+    // The studied velocity profile tilts the cursor about its hotspot, so the
+    // pivot stays on the recorded pointer while the art leans with motion.
+    let _ = cr.save();
+    if frame.rotation != 0.0 {
+        cr.translate(x, y);
+        cr.rotate(frame.rotation);
+        cr.translate(-x, -y);
+    }
+    let mut painted = false;
     if use_recorded {
         if let Some(capture) = capture {
-            if draw_captured(cr, x, y, pulse, press_scale, capture, settings, alpha) {
-                return;
-            }
+            painted = draw_captured(cr, x, y, pulse, press_scale, capture, settings, alpha);
         }
     }
-    draw(
-        cr,
-        x,
-        y,
-        pulse,
-        press_scale,
-        frame.kind.as_str(),
-        settings,
-        alpha,
-    );
+    if !painted {
+        draw(
+            cr,
+            x,
+            y,
+            pulse,
+            press_scale,
+            frame.kind.as_str(),
+            settings,
+            alpha,
+        );
+    }
+    let _ = cr.restore();
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1937,6 +1947,7 @@ mod tests {
             y: 0.0,
             kind: super::super::sidecar::CursorKind::Hand,
             alpha: 1.0,
+            rotation: 0.0,
             cursor_id: cursor_id.map(str::to_string),
         }
     }
