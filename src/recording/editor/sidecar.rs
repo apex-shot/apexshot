@@ -1182,6 +1182,29 @@ impl PointerSidecar {
                 });
             }
         }
+        // A held button is a sync point twice over: at the press and release
+        // the studied planner must meet the pointer exactly, and while the
+        // pointer is dragged every recorded move carries the same demand.
+        for press in &self.presses {
+            sync.push(SyncPoint {
+                time_ms: press.down * 1000.0,
+                tolerance: 2.0,
+            });
+            sync.push(SyncPoint {
+                time_ms: press.up * 1000.0,
+                tolerance: 2.0,
+            });
+            if press.dragged {
+                for sample in &self.pointer {
+                    if press.contains(sample.t) {
+                        sync.push(SyncPoint {
+                            time_ms: sample.t * 1000.0,
+                            tolerance: 2.0,
+                        });
+                    }
+                }
+            }
+        }
         let duration_ms = self
             .pointer
             .last()
@@ -1221,6 +1244,11 @@ impl PointerSidecar {
                 .iter()
                 .filter(|sample| sample.cursor_id.is_some())
                 .count() as u64,
+            self.presses.len() as u64,
+            self.presses
+                .last()
+                .map(|press| press.up.to_bits())
+                .unwrap_or(0),
             spring.stiffness.to_bits(),
             spring.damping.to_bits(),
             spring.mass.to_bits(),
@@ -2350,6 +2378,39 @@ mod tests {
 
         assert!(fast.x > slow.x, "a faster spring should trail less");
         assert!(fast.x <= raw.0);
+    }
+
+    #[test]
+    fn a_drag_keeps_the_cursor_on_the_recorded_path() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0_u32..=100 {
+            let moving = index.saturating_sub(40) as f64;
+            sidecar.pointer.push(PointerSample {
+                t: index as f64 * 0.008,
+                x: 100.0 + moving * 8.0,
+                y: 200.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        sidecar.presses.push(PressSample {
+            down: 0.32,
+            up: 1.1,
+            button: 1,
+            dragged: true,
+        });
+        let motion = CursorMotion {
+            smooth: 0.8,
+            speed: 1.0,
+            ..CursorMotion::default()
+        };
+        let raw = sidecar.interpolated_at(0.6).unwrap();
+        let dragged = sidecar.presented_at(0.6, motion).unwrap();
+        assert!(
+            (dragged.x - raw.0).abs() <= 2.0 && (dragged.y - raw.1).abs() <= 2.0,
+            "the dragged cursor should stay on the path, got {dragged:?} for {raw:?}"
+        );
     }
 
     #[test]
