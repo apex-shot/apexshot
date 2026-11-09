@@ -49,6 +49,12 @@ pub mod editor {
     #[rustfmt::skip]
     pub mod cursor_path;
 
+    /// The studied planner that feeds the cursor spring.
+    #[allow(dead_code)]
+    #[path = "../../../../src/recording/editor/cursor_planner.rs"]
+    #[rustfmt::skip]
+    pub mod cursor_planner;
+
     #[allow(dead_code)]
     #[path = "../../../../src/recording/editor/sidecar.rs"]
     #[rustfmt::skip]

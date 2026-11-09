@@ -492,9 +492,14 @@ the recording by about the spring's own lag, and lands exactly on the final
 point. The smoothing slider walks the studied cursor animation presets (the
 default soft spring, then Rapid, Medium, and Smooth) and the speed setting
 scales stiffness by its square and damping linearly, as the studied speed
-schedule does. The studied lead planner, which raises the lead around clicks,
-drags, hover and cursor-image changes, is not ported yet, so plain movement
-uses no lead.
+schedule does. The studied planner runs over it: recorded clicks and
+cursor-image changes form sync groups (100 ms grouping, 400 ms merging), each
+group searches lead (up to 600 ms) and a spring-speed level until the cursor
+meets its points inside the accepted error, lead knots decay at 0.35 per ms
+with compression capped at 1.4, and one simulation on a one-millisecond grid
+serves every frame. Plain movement therefore carries no lead. Hover changes and
+drag points are not recorded by the capture layer yet, so they do not form
+groups.
 Both studied rotation profiles are implemented, both pivot about the pointer,
 and the editor exposes the mode, the velocity ratio, and a base angle that adds
 to either mode. `velocity` (the default, ratio 0.5) tilts with horizontal speed
@@ -706,9 +711,8 @@ capture paths already exist; this phase is about calibration and drift.
 
 Wire the remaining studied behaviour into the editor:
 
-- the lead/speed planning layer over the cursor spring (sync points, lead
-  search, compression, speed levels) and the screen-movement spring
-- click, drag, hover, and cursor-image sync points
+- the screen-movement spring, and cut and loop ranges feeding the cursor plan
+- drag and hover sync points, which the capture layer does not record yet
 - motion blur amount
 - hover-aware cursor following
 

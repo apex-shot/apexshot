@@ -1,8 +1,10 @@
 use super::cursor_path::SpringConfig;
+use super::cursor_planner::{self, PlannedPath, PlannerPoint, SyncPoint};
 use super::model::CursorRotationMode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 pub const SIDECAR_VERSION: u32 = 2;
 pub const MAX_POINTER_SAMPLES: usize = 8_000;
@@ -655,6 +657,31 @@ impl WebcamTrack {
     }
 }
 
+/// The cursor path planned for one spring and speed, kept between frames.
+#[derive(Debug, Default)]
+struct CachedPlan {
+    key: Option<u64>,
+    path: Option<Arc<PlannedPath>>,
+}
+
+/// Runtime-only cache. Two sidecars compare equal regardless of what each
+/// planned, and a clone starts cold so a copied sidecar never shows another's
+/// recording.
+#[derive(Debug, Default)]
+struct PlanCache(Mutex<Option<CachedPlan>>);
+
+impl Clone for PlanCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for PlanCache {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PointerSidecar {
     pub version: u32,
@@ -698,6 +725,9 @@ pub struct PointerSidecar {
     /// original recording's sidecar.
     #[serde(skip)]
     pub sidecar_directory: Option<PathBuf>,
+    /// The planned cursor path for the current spring and speed.
+    #[serde(skip)]
+    plan_cache: PlanCache,
 }
 
 impl PointerSidecar {
@@ -718,6 +748,7 @@ impl PointerSidecar {
             webcam: None,
             screen_file: None,
             sidecar_directory: None,
+            plan_cache: PlanCache::default(),
         }
     }
 
@@ -1081,7 +1112,7 @@ impl PointerSidecar {
         } else if samples.is_empty() {
             None
         } else {
-            Some(self.smoothed_at(samples, t, smooth, speed))
+            Some(self.smoothed_at(t, smooth, speed))
         }
     }
 
@@ -1102,17 +1133,104 @@ impl PointerSidecar {
         Some(self.map_to_video(x, y, video_width, video_height))
     }
 
-    /// The cursor's travelled position: the studied spring chasing the
-    /// recorded path, with the smoothing slider selecting its preset and the
-    /// speed setting scaling it. See [`super::cursor_path`].
-    fn smoothed_at(
-        &self,
-        samples: &[PointerSample],
-        t: f64,
-        smooth: f64,
-        speed: f64,
-    ) -> (f64, f64) {
-        super::cursor_path::position_at(samples, t, SpringConfig::for_smooth(smooth), speed)
+    /// The cursor's travelled position: the studied spring on the studied
+    /// planned path, with the smoothing slider selecting its preset and the
+    /// speed setting scaling it. See [`super::cursor_planner`].
+    fn smoothed_at(&self, t: f64, smooth: f64, speed: f64) -> (f64, f64) {
+        let Some(path) = self.planned_path(SpringConfig::for_smooth(smooth), speed) else {
+            return (0.0, 0.0);
+        };
+        path.position_at(t * 1000.0)
+    }
+
+    /// Plan the cursor path once per spring and speed, then answer frames from
+    /// it. The moments the plan must be exact are the recorded clicks and the
+    /// cursor-image changes, matching the reference's sync points.
+    fn planned_path(&self, spring: SpringConfig, speed: f64) -> Option<Arc<PlannedPath>> {
+        let key = self.plan_key(spring, speed);
+        if let Ok(cache) = self.plan_cache.0.lock() {
+            if let Some(cached) = cache.as_ref() {
+                if let (Some(cached_key), Some(path)) = (cached.key, cached.path.as_ref()) {
+                    if cached_key == key {
+                        return Some(Arc::clone(path));
+                    }
+                }
+            }
+        }
+        let points: Vec<PlannerPoint> = self
+            .pointer
+            .iter()
+            .map(|sample| PlannerPoint {
+                time_ms: sample.t * 1000.0,
+                x: sample.x,
+                y: sample.y,
+            })
+            .collect();
+        let mut sync: Vec<SyncPoint> = self
+            .clicks
+            .iter()
+            .map(|click| SyncPoint {
+                time_ms: click.t * 1000.0,
+                tolerance: 2.0,
+            })
+            .collect();
+        for pair in self.pointer.windows(2) {
+            if pair[0].cursor_id != pair[1].cursor_id {
+                sync.push(SyncPoint {
+                    time_ms: pair[1].t * 1000.0,
+                    tolerance: 6.0,
+                });
+            }
+        }
+        let duration_ms = self
+            .pointer
+            .last()
+            .map(|sample| sample.t * 1000.0 + 1000.0)
+            .unwrap_or(0.0);
+        let planned = Arc::new(cursor_planner::plan(
+            &points,
+            &sync,
+            spring,
+            speed,
+            duration_ms,
+        ));
+        if let Ok(mut cache) = self.plan_cache.0.lock() {
+            *cache = Some(CachedPlan {
+                key: Some(key),
+                path: Some(Arc::clone(&planned)),
+            });
+        }
+        Some(planned)
+    }
+
+    /// A cheap identity for a planned path: everything that changes the plan.
+    fn plan_key(&self, spring: SpringConfig, speed: f64) -> u64 {
+        let mut hash: u64 = 1469598103934665603;
+        let mut values = vec![
+            self.pointer.len() as u64,
+            self.clicks.len() as u64,
+            self.pointer
+                .first()
+                .map(|sample| sample.t.to_bits())
+                .unwrap_or(0),
+            self.pointer
+                .last()
+                .map(|sample| sample.t.to_bits())
+                .unwrap_or(0),
+            self.pointer
+                .iter()
+                .filter(|sample| sample.cursor_id.is_some())
+                .count() as u64,
+            spring.stiffness.to_bits(),
+            spring.damping.to_bits(),
+            spring.mass.to_bits(),
+            speed.to_bits(),
+        ];
+        for value in values.drain(..) {
+            hash ^= value;
+            hash = hash.wrapping_mul(1099511628211);
+        }
+        hash
     }
 
     fn idle_alpha(&self, t: f64, idle_ms: f64) -> f64 {
