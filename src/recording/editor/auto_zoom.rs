@@ -26,7 +26,8 @@ pub const END_IGNORE_SECONDS: f64 = 1.0;
 pub const END_MARGIN_SECONDS: f64 = 0.8;
 /// Zoom level an automatic zoom opens at.
 pub const DEFAULT_SCALE: f64 = 2.0;
-/// Windows shorter than this are not worth a shot.
+/// The studied collection's minimum zoom duration. A shorter window grows to
+/// this instead of being dropped.
 pub const MIN_WINDOW_SECONDS: f64 = 0.1;
 
 /// A recorded click in source time and encoded-video pixels.
@@ -62,6 +63,20 @@ fn window_for_click(time: f64, duration: f64) -> (f64, f64) {
         (time - LEAD_SECONDS).max(START_FLOOR_SECONDS),
         (time + TAIL_SECONDS).min(duration - END_MARGIN_SECONDS),
     )
+}
+
+/// Grow a window that is shorter than the minimum instead of dropping it.
+///
+/// The studied collection expands a short item to its 100 ms minimum on
+/// insertion. Grow the end first; at the end of the recording, shift the start
+/// back so the window still keeps its minimum.
+fn minimum_window(start: f64, end: f64, duration: f64) -> (f64, f64) {
+    if end - start >= MIN_WINDOW_SECONDS {
+        return (start, end);
+    }
+    let end = (start + MIN_WINDOW_SECONDS).min(duration);
+    let start = start.min((end - MIN_WINDOW_SECONDS).max(0.0));
+    (start, end)
 }
 
 /// Merge sorted windows that are no further apart than `gap`.
@@ -139,7 +154,6 @@ pub fn automatic_zooms(clicks: &[Click], pointer: &[PointerPoint], duration: f64
         .iter()
         .filter(|click| click.time.is_finite() && click.time >= 0.0 && click.time < cutoff)
         .map(|click| window_for_click(click.time, duration))
-        .filter(|(start, end)| end - start >= MIN_WINDOW_SECONDS)
         .collect();
     if windows.is_empty() {
         return Vec::new();
@@ -147,6 +161,7 @@ pub fn automatic_zooms(clicks: &[Click], pointer: &[PointerPoint], duration: f64
 
     merge_windows(windows, MERGE_GAP_SECONDS)
         .into_iter()
+        .map(|(start, end)| minimum_window(start, end, duration))
         .filter_map(|(start, end)| {
             // The start floor can open a window up to 1 ms after a click that
             // sits on the first frame, so the focus lookup tolerates the same
@@ -311,6 +326,20 @@ mod tests {
         assert!((zooms[0].start - 2.7).abs() < 1e-9);
         assert!((zooms[0].end - 5.5).abs() < 1e-9);
         assert!((zooms[0].scale - DEFAULT_SCALE).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_short_window_grows_to_the_minimum() {
+        let (start, end) = minimum_window(3.0, 3.04, 20.0);
+        assert!((start - 3.0).abs() < 1e-9);
+        assert!((end - MIN_WINDOW_SECONDS - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_short_window_at_the_end_keeps_the_minimum_by_moving_back() {
+        let (start, end) = minimum_window(19.95, 20.0, 20.0);
+        assert!((start - 19.9).abs() < 1e-9);
+        assert!((end - 20.0).abs() < 1e-9);
     }
 
     #[test]

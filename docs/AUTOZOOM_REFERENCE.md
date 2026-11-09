@@ -352,16 +352,15 @@ Resolved on `feat/autozoom-parity`:
   has no movement group. That fallback now follows the studied rule: the first
   pointer sample at or after the range start within 500 ms, otherwise the
   nearest sample (`B39:3324-3332`), and only then the click position.
+- **Minimum window.** The generator no longer drops a window shorter than
+  100 ms. After merging, `minimum_window` grows the end to the minimum, or
+  shifts the start back at the end of the recording, matching the collection's
+  `add` (`DXX:2667-2679`). With the current lead and tail constants a generated
+  window is always at least about 199 ms, so this is a structural guard rather
+  than a visible change.
 
-The remaining exactness gap is:
-
-1. **Short windows.** ApexShot drops windows shorter than 0.1 s
-   (`src/recording/editor/auto_zoom.rs:122`). The studied collection enforces
-   its own 100 ms minimum when an item is inserted, which can fit or reject the
-   item rather than filtering it in the generator.
-
-None of these require changing the generator unless exact visual parity is the
-goal. The camera model is already the important part.
+There is no remaining confirmed generator gap. The camera model is already the
+important part.
 
 ## 10. Limits
 
@@ -448,3 +447,16 @@ Focus-fallback change, 2026-11-09:
 - No new physical clip: the existing recordings have pointer samples, so they
   exercise the movement-group path, which is unchanged. The fallback is covered
   directly by the new unit test.
+
+Minimum-window change, 2026-11-09:
+
+- `cargo test --lib auto_zoom` passed 21 of 21 tests, including the two new
+  minimum-window cases.
+- `cargo test --lib` passed 829 tests with 12 ignored. The known parallel-only
+  `settings::usage` layout test failed and passed when run alone.
+- `rustfmt --check` on the changed file passed.
+- `cargo clippy --all-targets` finished without warnings.
+- The editor binary rebuilt with the change.
+- No physical clip: the current lead and tail constants make every generated
+  window at least about 199 ms, so the expansion cannot be reached from a click
+  recording. The helper is covered directly instead.
