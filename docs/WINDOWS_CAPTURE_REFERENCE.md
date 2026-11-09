@@ -348,6 +348,83 @@ Still missing:
   camera delay from the webcam and microphone files. The sidecar has room for
   that adjustment, but the measurement is not implemented yet.
 
+### Cursor and clicks
+
+The studied recorder separates input from pixels:
+
+- `InputSession` writes `mouseMovesFilename`, `mouseClicksFilename`, and
+  `keyStrokesFilename` as independent streams.
+- `InputEvent` carries the event type, its time since the recording epoch, and
+  a `cursorId`.
+- `MouseEvent` carries `kind`, `timeMs`, `position`, and `cursorId`; move and
+  click streams are read separately and merged by time for analysis.
+- `CursorRecorder` writes a `cursorsInfoFile` and a `cursorImagesFolder`.
+  Each cursor entry carries `hotspot`, `size`, `shape`, `tiffRepresentation`,
+  `systemCursor`, and `isPrivate`.
+- A stationary cursor that changes shape is emitted as a move event, so hover
+  changes are not lost when the pointer does not move.
+
+ApexShot now uses the same core contract:
+
+- A `WH_MOUSE_LL` low-level hook records moves and button transitions at event
+  time. The existing timer remains as a fallback and as the detector for a
+  stationary cursor whose shape changes.
+- The hook maps its 32-bit event time onto the recording media clock instead of
+  using the time the callback happens to run.
+- Hook and polling share the active-press state, so an injected or very fast
+  click is recorded once rather than twice.
+- `pointer` and `clicks` entries gain an optional `cursor_id`.
+- The sidecar gains `cursor_images`, naming a folder beside the sidecar, and a
+  `cursors` catalog with `id`, `file`, `width`, `height`, `hotspot_x`,
+  `hotspot_y`, and `kind`.
+- Cursor images are written as 32-bit PNGs with alpha. A monochrome cursor
+  supplies two 1-bit rows, an AND mask and an XOR mask; both are decoded so an
+  I-beam keeps its white stroke instead of becoming an empty PNG. Color
+  cursors without alpha use the AND mask for transparency. The recording test
+  now rejects a catalog PNG whose pixels are all transparent.
+- `presses` still records the down/up interval and whether the pointer dragged,
+  so click effects and press hold behave as before.
+
+The remaining input streams follow the same model:
+
+- `WM_MOUSEWHEEL` and `WM_MOUSEHWHEEL` hook events append a scroll sample with
+  `t`, `x`, `y`, `delta`, `horizontal`, and optional `modifiers` and
+  `cursor_id`. The vertical delta keeps the sign the hook reports.
+- `WH_KEYBOARD_LL` appends `keys` samples with `t`, `type` (`key_down` or
+  `key_up`), `key`, `scan_code`, and optional `modifiers` and `cursor_id`. Key
+  capture is off by default and starts only when
+  `RecordingRequest::captureKeystrokes` is set, which keeps the recorder from
+  logging keystrokes the rest of the product does not yet consume.
+- `pointer`, `clicks`, and `scrolls` carry `modifiers` only when a modifier is
+  held. The array uses `shift`, `control`, `alt`, and `win`.
+- A cursor visibility change appends `visibility` with `t` and `visible`. The
+  first sample, every show or hide, and the state at stop are recorded, so the
+  editor can hide the pointer during typing or while a window hides it.
+- A stationary shape change within 150 ms of a scroll is treated as content
+  moving under the pointer, not as a hover. The catalog still learns the new
+  shape, but the pointer stream is not given a spurious hover event.
+
+The recording test verifies the whole catalog: seven move samples, one click,
+one press, two cursor shapes, and both PNGs on disk. The default cursor was
+32×32 at hotspot 0,0; the hand was 32×32 at hotspot 6,0. A rapid-click pass
+injected thirty clicks at two-millisecond spacing and recorded thirty click and
+press intervals. The keyboard pass injected Ctrl+Shift+K and recorded six key
+samples, with `shift` and `control` on the K down and up events. The scroll
+pass injected one wheel step each way and recorded both samples. The full
+capture suite passes.
+
+Still missing:
+
+- Click exclusion windows around a click (`clickExclusionBeforeMs` and
+  `clickExclusionAfterMs`). In the studied build these belong to the
+  sensitive-data analysis pass, not the basic input recorder, so they stay out
+  of the capture stream.
+- Per-application cursor context (`bundleID`, role, title, caret, breadcrumb).
+- A pixel-comparison hover detector. Scroll-aware suppression is in place, but
+  the recorder does not yet compare the pixels around the pointer.
+- Cursor images in the editor. The backend records them; the current cursor
+  renderer still chooses a shape from `kind`.
+
 ### Encoder
 
 The Windows recorder uses H.264 with `-bf 2`, a GOP of `fps * 2`, and
@@ -396,26 +473,31 @@ Two caveats:
 ### Editor
 
 Autozoom, ripple/circle geometry, cursor themes, and the sidecar already exist.
-The sidecar is version 2 and carries pointer samples, clicks, presses, webcam
-layout, visibility, and capture region. The largest missing editor inputs are
-hover changes, cursor-image changes, and accurate click timing.
+The sidecar is version 2 and carries pointer samples, clicks, presses, scrolls,
+keys, visibility, a cursor image catalog, webcam layout, and capture region.
+Mouse moves, clicks, scrolls, and keys are event-driven; editor consumption of
+the cursor catalog, keys, and scrolls remains.
 
 ## 5. Ranked gaps
 
-1. **Click and cursor metadata are polled.** Fast clicks are lost, click times
-   are imprecise, and hover and cursor-image changes are absent.
-2. **Window capture has no live resize policy.** A resized window is cropped or
+1. **Cursor images are recorded but not consumed.** The sidecar carries
+   `cursor_id` and the PNG catalog, while the editor still picks a shape from
+   `cursor_kind`.
+2. **Keys and scrolls have no editor effect.** The streams are recorded and
+   validated, but nothing consumes them yet. Key capture also stays off by
+   default until a product surface owns it.
+3. **Window capture has no live resize policy.** A resized window is cropped or
    letterboxed to the size the segment started with. Window metadata is still
    just a rectangle.
-3. **No camera-delay calibration.** Camera and screen can be offset.
-4. **Camera styling is not implemented.** The backend keeps the clean screen,
+4. **No camera-delay calibration.** Camera and screen can be offset.
+5. **Camera styling is not implemented.** The backend keeps the clean screen,
    camera track, layout, and start offset, but crop, shape, mirror, matte, and
    face tracking are editor work.
-5. **Encoder coverage.** No HEVC recording and no AMF probe.
-6. **The GPU path still downloads frames.** Display and area capture use
+6. **Encoder coverage.** No HEVC recording and no AMF probe.
+7. **The GPU path still downloads frames.** Display and area capture use
    `ddagrab`, but the encoder receives BGRA system memory. A cross-monitor area
    also falls back to `gdigrab`.
-7. **Editor smoothing parity.** The constants exist, but the full two-spring
+8. **Editor smoothing parity.** The constants exist, but the full two-spring
    model and every sync point may not be wired yet.
 
 ## 6. Implementation order
@@ -559,30 +641,27 @@ Still to validate:
 
 ### Phase 3: cursor and click accuracy
 
-Replace polling for button events with a low-level mouse hook
-(`WH_MOUSE_LL`) or Raw Input. The hook should capture:
+Status: core implemented. `WH_MOUSE_LL` records button down/up, drag state, the
+event position, and the media time; the timer remains the fallback for position
+and for a stationary cursor whose shape changes. `WH_KEYBOARD_LL` records key
+down/up when `captureKeystrokes` is enabled. Wheel events record scroll samples.
+The sidecar carries a cursor image catalog, `cursor_id` on pointer, click, scroll,
+and key samples, modifier flags, and cursor visibility intervals.
 
-- button down and up
-- drag state
-- exact position at the event
-- event time mapped onto the recording media clock
+Still pending:
 
-Keep polling for cursor shape, visibility, and fallback position. Extend the
-sidecar:
-
-- cursor id and image changes
-- hover-change times
-- cursor visibility intervals
 - window-relative coordinates for window recordings
-
-Add a camera-independent hover detector that compares pixels around the cursor
-and skips changes explained by scrolling.
+- a camera-independent hover detector that compares pixels around the cursor
+- editor consumption of the cursor PNGs and the new key and scroll streams
 
 Validation:
 
-- Twenty rapid clicks, including clicks shorter than one frame interval.
+- Thirty rapid clicks, including clicks shorter than one frame interval.
 - Drags across the drag threshold.
 - Clicks during pause and immediately after resume.
+- Ctrl+Shift+K injected as six key events with modifiers.
+- One wheel step each way recorded with the signed delta.
+- Cursor visibility sampled at start, on every change, and at stop.
 - 24, 30, 50, and 60 fps recordings.
 - Window and area recordings.
 - Click count and timestamps compared with an independent hook log.

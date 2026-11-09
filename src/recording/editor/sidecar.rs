@@ -175,6 +175,54 @@ impl PressSample {
     }
 }
 
+/// One wheel event on the recording clock. `delta` keeps the sign the native
+/// hook reports; `horizontal` separates a side wheel from a vertical one.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ScrollSample {
+    pub t: f64,
+    pub x: f64,
+    pub y: f64,
+    pub delta: i32,
+    #[serde(default)]
+    pub horizontal: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modifiers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor_id: Option<String>,
+}
+
+/// One key down or up on the recording clock. `kind` is `key_down` or
+/// `key_up`; `key` is the virtual-key code and `scan_code` the hardware scan
+/// code. Capture is opt-in, so an older sidecar simply has no key stream.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct KeySample {
+    pub t: f64,
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub key: i32,
+    #[serde(default)]
+    pub scan_code: i32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub modifiers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor_id: Option<String>,
+}
+
+/// A cursor shape captured beside the pointer samples. `file` is relative to
+/// the sidecar's `cursor_images` folder; the hotspot is in cursor pixels, so
+/// the editor draws the true pointer instead of guessing from `CursorKind`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct CursorAsset {
+    pub id: String,
+    pub file: String,
+    pub width: u32,
+    pub height: u32,
+    pub hotspot_x: i32,
+    pub hotspot_y: i32,
+    #[serde(default)]
+    pub kind: CursorKind,
+}
+
 /// The camera track recorded beside a video.
 ///
 /// `file` names a file in the pointer sidecar's own directory, and the fractions
@@ -257,8 +305,20 @@ pub struct PointerSidecar {
     /// empty list and are otherwise unchanged.
     #[serde(default)]
     pub presses: Vec<PressSample>,
+    /// Wheel events. Absent when the platform recorder does not capture them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub scrolls: Vec<ScrollSample>,
+    /// Key events. Empty unless the recorder was asked to capture keystrokes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keys: Vec<KeySample>,
     #[serde(default)]
     pub source: PointerDataSource,
+    /// Folder beside the sidecar holding the cursor PNG files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor_images: Option<String>,
+    /// Cursor shapes referenced by `cursor_id` on pointer and click samples.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cursors: Vec<CursorAsset>,
     /// The camera layer, absent for a recording made without one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webcam: Option<WebcamTrack>,
@@ -277,7 +337,11 @@ impl PointerSidecar {
             clicks: Vec::new(),
             visibility: Vec::new(),
             presses: Vec::new(),
+            scrolls: Vec::new(),
+            keys: Vec::new(),
             source: PointerDataSource::Recorded,
+            cursor_images: None,
+            cursors: Vec::new(),
             webcam: None,
             screen_file: None,
         }
@@ -1931,5 +1995,79 @@ mod webcam_tests {
         };
         assert_eq!(track.track_seconds(0.0, 10.0), 0.0);
         assert!((track.track_seconds(5.5, 10.0) - (5.0 * 8.0 / 9.5)).abs() < 1e-9);
+    }
+}
+
+#[cfg(test)]
+mod cursor_tests {
+    use super::*;
+
+    #[test]
+    fn a_sidecar_carries_the_cursor_catalog() {
+        let json = r#"{
+            "version": 2,
+            "t0_monotonic_us": 100,
+            "region": {"x": 0, "y": 0, "w": 320, "h": 240},
+            "pointer": [],
+            "clicks": [],
+            "cursor_images": "recording.cursors",
+            "cursors": [{
+                "id": "70cb1326f7ca717b",
+                "file": "70cb1326f7ca717b.png",
+                "width": 32,
+                "height": 32,
+                "hotspot_x": 6,
+                "hotspot_y": 0,
+                "kind": "hand"
+            }]
+        }"#;
+        let sidecar: PointerSidecar = serde_json::from_str(json).unwrap();
+        assert_eq!(sidecar.cursor_images.as_deref(), Some("recording.cursors"));
+        assert_eq!(sidecar.cursors.len(), 1);
+        assert_eq!(sidecar.cursors[0].kind, CursorKind::Hand);
+        assert_eq!(sidecar.cursors[0].hotspot_x, 6);
+    }
+
+    #[test]
+    fn scrolls_and_keys_survive_a_round_trip() {
+        let json = r#"{
+            "version": 2,
+            "t0_monotonic_us": 100,
+            "region": {"x": 0, "y": 0, "w": 320, "h": 240},
+            "pointer": [],
+            "clicks": [],
+            "scrolls": [{
+                "t": 1.5,
+                "x": 12.0,
+                "y": 34.0,
+                "delta": -120,
+                "horizontal": false,
+                "cursor_id": "70cb1326f7ca717b"
+            }],
+            "keys": [{
+                "t": 2.0,
+                "type": "key_down",
+                "key": 75,
+                "scan_code": 37,
+                "modifiers": ["shift", "control"],
+                "cursor_id": "70cb1326f7ca717b"
+            }]
+        }"#;
+        let sidecar: PointerSidecar = serde_json::from_str(json).unwrap();
+        assert_eq!(sidecar.scrolls.len(), 1);
+        assert_eq!(sidecar.scrolls[0].delta, -120);
+        assert_eq!(
+            sidecar.scrolls[0].cursor_id.as_deref(),
+            Some("70cb1326f7ca717b")
+        );
+        assert_eq!(sidecar.keys.len(), 1);
+        assert_eq!(sidecar.keys[0].kind, "key_down");
+        assert_eq!(sidecar.keys[0].key, 75);
+        assert_eq!(sidecar.keys[0].modifiers, ["shift", "control"]);
+
+        let encoded = serde_json::to_string(&sidecar).unwrap();
+        let restored: PointerSidecar = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(restored.scrolls, sidecar.scrolls);
+        assert_eq!(restored.keys, sidecar.keys);
     }
 }

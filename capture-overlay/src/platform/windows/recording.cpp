@@ -1615,6 +1615,7 @@ void RecordingSession::Private::removeDiscardedSidecar()
         return;
     QFile::remove(path);
     QFile::remove(path + QStringLiteral(".webcam.mp4"));
+    QDir(path + QStringLiteral(".cursors")).removeRecursively();
     if (!webcamTrack.screenFile.isEmpty()) {
         QFileInfo info(request.outputPath);
         QFile::remove(info.dir().filePath(webcamTrack.screenFile));
@@ -2046,7 +2047,8 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
     d->active.start();
     d->pointerTracker.start(d->request.region,
                             d->request.fps,
-                            [d = d] { return d->elapsedMs(); });
+                            [d = d] { return d->elapsedMs(); },
+                            d->request.captureKeystrokes);
     d->tick->start();
     emit stateChanged();
     emit elapsedChanged(0);
