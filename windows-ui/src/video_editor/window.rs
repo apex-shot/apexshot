@@ -123,6 +123,7 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 .estimate
                 .set_composition_seconds(frame.composition_seconds);
             stage.set_placement(frame.placement);
+            stage.set_add_zoom(frame.add_zoom);
             stage.set_camera(frame.camera);
             let trail = stage.source_size.get().and_then(|(width, height)| {
                 let source = (f64::from(width), f64::from(height));
@@ -152,6 +153,16 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let timeline = timeline.clone();
         Rc::new(move |center| timeline.set_selected_zoom_center(center))
     });
+    stage.connect_add_zoom(
+        {
+            let timeline = timeline.clone();
+            Rc::new(move |point| timeline.place_zoom_at(point))
+        },
+        {
+            let timeline = timeline.clone();
+            Rc::new(move || timeline.add_automatic_zoom())
+        },
+    );
 
     let shell = build_editor_shell(&root, &title_bar, &editor_body);
 
@@ -701,6 +712,14 @@ struct Stage {
     camera_view: Rc<Cell<Option<super::zoom::ViewRect>>>,
     /// The Manual zoom outline the preview shows, as `(scale, focus point)`.
     placement: Placement,
+    /// The armed Add zoom tool, while the transport is stopped.
+    add_zoom: Rc<Cell<Option<super::timeline::AddZoomTool>>>,
+    /// Where the pointer is over the video while the tool is armed, in source
+    /// pixels: the centre of the outline the tool draws.
+    add_zoom_hover: Rc<Cell<Option<(f64, f64)>>>,
+    add_zoom_bar: GtkBox,
+    add_zoom_hint: Label,
+    add_zoom_auto: Button,
     zoom_provider: CssProvider,
     last_zoom_transform: Rc<Cell<CameraTransform>>,
     last_zoom_css: Rc<RefCell<String>>,
@@ -880,9 +899,111 @@ impl Stage {
             return;
         }
         self.placement.set(placement);
-        self.canvas
-            .set_cursor_from_name(placement.map(|_| "crosshair"));
+        self.canvas.set_cursor_from_name(
+            (placement.is_some() || self.add_zoom.get().is_some()).then_some("crosshair"),
+        );
         self.cursor_layer.queue_draw();
+    }
+
+    /// Show or put away the armed Add zoom tool: its prompt, the Automatic
+    /// zoom button when the recording can follow the pointer, and the outline
+    /// that follows the pointer.
+    fn set_add_zoom(&self, tool: Option<super::timeline::AddZoomTool>) {
+        if self.add_zoom.get() == tool {
+            return;
+        }
+        self.add_zoom.set(tool);
+        if tool.is_none() {
+            self.add_zoom_hover.set(None);
+        }
+        let automatic = tool.is_some_and(|tool| tool.automatic);
+        self.add_zoom_hint.set_text(&if automatic {
+            t("Click where to zoom in, or use Automatic zoom")
+        } else {
+            t("Click where to zoom in")
+        });
+        self.add_zoom_auto.set_visible(automatic);
+        self.add_zoom_bar.set_visible(tool.is_some());
+        self.canvas.set_cursor_from_name(
+            (tool.is_some() || self.placement.get().is_some()).then_some("crosshair"),
+        );
+        self.cursor_layer.queue_draw();
+    }
+
+    /// The source pixel under a point in the preview overlay, or `None` off the
+    /// video.
+    fn source_point_at(&self, x: f64, y: f64) -> Option<(f64, f64)> {
+        let (source_width, source_height) = self.source_size.get()?;
+        let video = clip_video_rect(
+            &self.clip,
+            self.overlay.allocated_width(),
+            self.overlay.allocated_height(),
+            (source_width, source_height),
+        )?;
+        if x < video.x || y < video.y || x > video.x + video.width || y > video.y + video.height {
+            return None;
+        }
+        let view = self.camera_view.get().unwrap_or((
+            0.0,
+            0.0,
+            f64::from(source_width),
+            f64::from(source_height),
+        ));
+        Some(super::zoom::stage_point_to_source(
+            (x, y),
+            view,
+            [video.x, video.y, video.width, video.height],
+        ))
+    }
+
+    /// With the Add zoom tool armed, the outline follows the pointer and a
+    /// click on the video places a zoom there; the prompt's button adds an
+    /// automatic one instead.
+    fn connect_add_zoom(&self, place: Rc<dyn Fn((f64, f64))>, automatic: Rc<dyn Fn()>) {
+        let motion = gtk4::EventControllerMotion::new();
+        motion.connect_motion({
+            let stage = self.clone();
+            move |_, x, y| {
+                if stage.add_zoom.get().is_none() {
+                    return;
+                }
+                stage.add_zoom_hover.set(stage.source_point_at(x, y));
+                stage.cursor_layer.queue_draw();
+            }
+        });
+        motion.connect_leave({
+            let stage = self.clone();
+            move |_| {
+                if stage.add_zoom_hover.take().is_some() {
+                    stage.cursor_layer.queue_draw();
+                }
+            }
+        });
+        self.overlay.add_controller(motion);
+
+        let click = gtk4::GestureClick::new();
+        click.set_button(1);
+        click.connect_released({
+            let stage = self.clone();
+            move |_, _, x, y| {
+                if stage.add_zoom.get().is_none() {
+                    return;
+                }
+                // A press on the prompt's button is that button's, not a placement.
+                if let Some(picked) = stage.overlay.pick(x, y, gtk4::PickFlags::DEFAULT) {
+                    let button = stage.add_zoom_auto.upcast_ref::<gtk4::Widget>();
+                    if &picked == button || picked.is_ancestor(button) {
+                        return;
+                    }
+                }
+                if let Some(point) = stage.source_point_at(x, y) {
+                    place(point);
+                }
+            }
+        });
+        self.overlay.add_controller(click);
+
+        self.add_zoom_auto.connect_clicked(move |_| automatic());
     }
 
     /// Dragging the preview places the selected Manual zoom's focus point.
@@ -1217,6 +1338,8 @@ fn build_stage(
         move || layer.queue_draw()
     }));
     let placement: Placement = Rc::new(Cell::new(None));
+    let add_zoom: Rc<Cell<Option<super::timeline::AddZoomTool>>> = Rc::new(Cell::new(None));
+    let add_zoom_hover: Rc<Cell<Option<(f64, f64)>>> = Rc::new(Cell::new(None));
     cursor_layer.set_draw_func({
         let cursor = cursor.clone();
         let webcam = webcam.clone();
@@ -1225,6 +1348,8 @@ fn build_stage(
         let source_seconds = source_seconds.clone();
         let camera_view = camera_view.clone();
         let placement = placement.clone();
+        let add_zoom = add_zoom.clone();
+        let add_zoom_hover = add_zoom_hover.clone();
         move |_, context, width, height| {
             let source = source_size.get();
             let video = source.and_then(|source| clip_video_rect(&clip, width, height, source));
@@ -1276,7 +1401,12 @@ fn build_stage(
                         height,
                         source,
                         camera_view.get(),
-                        placement.get(),
+                        placement.get().or_else(|| {
+                            add_zoom
+                                .get()
+                                .zip(add_zoom_hover.get())
+                                .map(|(tool, point)| (tool.scale, point))
+                        }),
                         scale,
                     );
                 },
@@ -1292,6 +1422,25 @@ fn build_stage(
     hint.set_wrap(true);
     hint.set_can_target(false);
     overlay.add_overlay(&hint);
+
+    // The armed Add zoom tool's prompt, along the bottom of the preview.
+    let add_zoom_bar = GtkBox::new(Orientation::Horizontal, (8.0 * scale).round() as i32);
+    add_zoom_bar.add_css_class("video-editor-add-zoom-bar");
+    add_zoom_bar.set_halign(Align::Center);
+    add_zoom_bar.set_valign(Align::End);
+    add_zoom_bar.set_margin_bottom((16.0 * scale).round() as i32);
+    add_zoom_bar.set_visible(false);
+    let add_zoom_hint = Label::new(Some(&t("Click where to zoom in")));
+    add_zoom_hint.add_css_class("video-editor-add-zoom-hint");
+    add_zoom_hint.set_can_target(false);
+    let add_zoom_auto = Button::with_label(&t("Automatic zoom"));
+    add_zoom_auto.add_css_class("video-editor-add-zoom-auto");
+    add_zoom_auto.set_tooltip_text(Some(&t(
+        "Adds a zoom that automatically follows the mouse activity",
+    )));
+    add_zoom_bar.append(&add_zoom_hint);
+    add_zoom_bar.append(&add_zoom_auto);
+    overlay.add_overlay(&add_zoom_bar);
 
     canvas.set_child(Some(&overlay));
     workspace.append(&canvas);
@@ -1387,6 +1536,11 @@ fn build_stage(
         clip_margins: Rc::new(RefCell::new((i32::MIN, 0, 0, 0))),
         camera_view,
         placement,
+        add_zoom,
+        add_zoom_hover,
+        add_zoom_bar,
+        add_zoom_hint,
+        add_zoom_auto,
         zoom_provider,
         last_zoom_transform,
         last_zoom_css,
@@ -1608,6 +1762,9 @@ fn wire_history_keys(
     keys.connect_key_pressed(move |_, key, _, modifiers| {
         if shell.child().is_some_and(|editor| !editor.is_sensitive()) {
             return gtk4::glib::Propagation::Proceed;
+        }
+        if key == gdk::Key::Escape && timeline.disarm_add_zoom_tool() {
+            return gtk4::glib::Propagation::Stop;
         }
         let Some(action) = history_key(key, modifiers) else {
             return gtk4::glib::Propagation::Proceed;
@@ -1929,6 +2086,32 @@ fn install_css() {
         .editor-theme-light .video-editor-panel-placeholder {{
             color: alpha(#111827,0.46);
         }}
+        .video-editor-add-zoom-bar {{
+            padding: {add_zoom_y}px {add_zoom_x}px;
+            border-radius: 999px;
+            background: alpha(black,0.62);
+        }}
+        .video-editor-add-zoom-hint {{
+            color: alpha(white,0.92);
+            font-size: {add_zoom_text}px;
+        }}
+        button.video-editor-add-zoom-auto {{
+            min-height: 0;
+            padding: {add_zoom_button_y}px {add_zoom_button_x}px;
+            border-radius: 999px;
+            color: white;
+            background: alpha(white,0.16);
+            font-size: {add_zoom_text}px;
+        }}
+        button.video-editor-add-zoom-auto:hover {{
+            background: alpha(white,0.24);
+        }}
+        .video-editor-root button.recording-editor-timeline-tool.video-editor-tool-armed {{
+            background: alpha(white,0.12);
+        }}
+        .video-editor-root.editor-theme-light button.recording-editor-timeline-tool.video-editor-tool-armed {{
+            background: alpha(#111827,0.09);
+        }}
         "#,
         titlebar = px(TITLE_BAR_HEIGHT),
         title = px(15.0),
@@ -1941,6 +2124,11 @@ fn install_css() {
         panel_detail = px(13.0),
         placeholder_top = px(16.0),
         placeholder = px(13.0),
+        add_zoom_y = px(6.0),
+        add_zoom_x = px(8.0),
+        add_zoom_text = px(13.0),
+        add_zoom_button_y = px(3.0),
+        add_zoom_button_x = px(10.0),
     );
 
     let provider = CssProvider::new();

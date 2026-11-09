@@ -439,20 +439,35 @@ Resolved on `feat/autozoom-parity`:
   next zoom starting at or after the current time and never an instant one
   (`B39:1697-1707`, `B39:8296-8303`, `DgH:4405-4411`, `YEi` `lt`/`ct`). The
   hold is removed.
-- **Adding a zoom at the playhead.** The Zoom button and an empty-lane click
-  now follow the studied add action (`BbP:72-127`, `DXX:2631-2643`): a new
+- **Adding a zoom at the playhead.** An empty-lane click and the armed tool's
+  Automatic zoom button now follow the studied add action (`BbP:72-127`, `DXX:2631-2643`): a new
   zoom runs 3 s or up to the next zoom, is refused under 100 ms, and splits the
   zoom under the playhead when the playhead is strictly inside one, selecting
   the right half. A new zoom starts at 2x, or at the scale and instant flag of
   the zoom last edited in the panel (`CK1:32-64`), and is automatic when the
   recording has pointer samples, manual otherwise (`DXX:3138-3146`). The
   last-edited style lasts for the editor session. The Hide track is unchanged.
-- **Not yet matched in the editor.** The studied "Add zoom" tool lets a canvas
-  click create a manual zoom aimed at the clicked point (`B39:1527-1545`); the
-  Windows preview only moves the selected manual zoom's target. The studied
-  build also turns an automatic zoom manual when the recording has no mouse
-  events (`DXX:3271-3276`); the Windows editor leaves it automatic, which
-  frames the same way because it falls back to the stored centre.
+- **The Add zoom tool.** The Zoom button arms a tool, as the studied
+  `$toggleAddZoomTool` does (`BbP:128-145`): arming pauses and clears the
+  selection, and the preview shows the whole frame with an outline the size
+  of the zoomed view (the last-edited scale, 2x by default) following the
+  pointer (`B39:1477-1527`). A click adds a manual zoom at the playhead aimed
+  at the clicked point, through the same add rules, so it splits a zoom under
+  the playhead into a manual right half (`B39:1528-1536`, `BbP:44-58`). When
+  the recording has pointer samples the prompt also offers Automatic zoom,
+  which adds the ordinary playhead zoom (`B39:1541-1545`). Adding selects the
+  new zoom, and selecting any clip disarms the tool, as the studied
+  `setSidebarItem` does (`B0e:2358-2362`); Escape and the Zoom button disarm it
+  too (`B39:1565-1570`, `B0e:2329-2335`). Playing hides the prompt without
+  disarming. One difference: the outline is clamped to the frame the way the
+  placed zoom will frame it; the studied outline is centred on the pointer.
+- **Not yet matched in the editor.** The studied build turns an automatic
+  zoom manual when the recording has no mouse events (`DXX:3271-3276`); the
+  Windows editor leaves it automatic, which frames the same way because it
+  falls back to the stored centre.
+- **Zoom levels.** The panel chips are 1.25x, 1.5x, 2x, 2.2x, 3.5x and 5x.
+  The studied build offers 1x to 2.6x in 0.2 steps plus the default, on a
+  1x-4x slider in 0.1 steps (`BbP:274-338`).
 
 There is no remaining confirmed generator gap.
 
