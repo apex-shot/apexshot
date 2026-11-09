@@ -2249,6 +2249,7 @@ impl Timeline {
     /// slider is on screen in the same event instead of at the next tick.
     fn current_frame(&self) -> PreviewFrame {
         let data = self.data.borrow();
+        self.cursor.set_cuts(&data.cuts);
         if let Some(webcam) = data.webcam.clone() {
             webcam.set_composition_time(data.playhead);
         }

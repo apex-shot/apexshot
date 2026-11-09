@@ -24,6 +24,9 @@ const SPEED_BLEND_IN_MS: f64 = 250.0;
 const SPEED_BLEND_OUT_MS: f64 = 300.0;
 const ACCEPTED_ERROR_RATIO: f64 = 0.75;
 const KNOT_EPSILON_MS: f64 = 0.001;
+/// A cut at exactly the queried instant still bounds the lead, matching the
+/// studied first-cut-later-than test.
+const CUT_EPSILON_MS: f64 = 1e-9;
 const PATH_INTERPOLATION_GAP_MS: f64 = 40.0;
 const MIN_LEAD_STEP_MS: f64 = 0.25;
 const REFINE_LIMIT: usize = 6;
@@ -225,9 +228,19 @@ impl<'a> Path<'a> {
 #[derive(Debug, Clone, Default)]
 struct LeadKnots {
     knots: Vec<(f64, f64)>,
+    /// Source times the footage cuts at. A lead never reaches across one,
+    /// because the frames on the other side are not in the edit.
+    cut_times_ms: Vec<f64>,
 }
 
 impl LeadKnots {
+    fn with_cuts(cut_times_ms: &[f64]) -> Self {
+        Self {
+            knots: Vec::new(),
+            cut_times_ms: cut_times_ms.to_vec(),
+        }
+    }
+
     fn add(&mut self, time_ms: f64, lead_ms: f64) {
         if let Some(last) = self.knots.last() {
             if time_ms < last.0 {
@@ -253,6 +266,22 @@ impl LeadKnots {
             return from_lead;
         }
         from_lead + (to_lead - from_lead) * (time_ms - from_time) / (to_time - from_time)
+    }
+
+    /// The lead in use at `time_ms`: the planned lead, never negative and
+    /// never reaching past the next cut.
+    fn at(&self, time_ms: f64) -> f64 {
+        let planned = self.planned_at(time_ms);
+        if planned <= 0.0 || self.cut_times_ms.is_empty() {
+            return planned.max(0.0);
+        }
+        let index = self
+            .cut_times_ms
+            .partition_point(|cut| *cut < time_ms + CUT_EPSILON_MS);
+        match self.cut_times_ms.get(index) {
+            Some(cut) => planned.min(cut - time_ms),
+            None => planned,
+        }
     }
 
     fn end_lead(&self) -> f64 {
@@ -343,7 +372,7 @@ impl Simulation<'_> {
     }
 
     fn target_at(&self, lead: &LeadKnots, time_ms: f64) -> (f64, f64) {
-        self.path.position_at(time_ms + lead.planned_at(time_ms))
+        self.path.position_at(time_ms + lead.at(time_ms))
     }
 
     fn resting_at(&self, (x, y): (f64, f64)) -> State {
@@ -470,12 +499,17 @@ struct Record {
 }
 
 /// Plan the cursor path over the recording.
+///
+/// `cut_times_ms` are the source instants the edit cuts at, ascending. The
+/// plan may lead the cursor ahead of a movement, but never past the next cut,
+/// where the frames it was leading toward are gone from the edit.
 pub fn plan(
     points: &[PlannerPoint],
     sync: &[SyncPoint],
     spring: SpringConfig,
     speed_scale: f64,
     duration_ms: f64,
+    cut_times_ms: &[f64],
 ) -> PlannedPath {
     if points.len() < 2 {
         return PlannedPath {
@@ -495,7 +529,7 @@ pub fn plan(
     sorted.sort_by(|left, right| left.time_ms.total_cmp(&right.time_ms));
     let mut groups = group_sync_points(&sorted);
     let start = path.start_ms().min(0.0);
-    let mut lead = LeadKnots::default();
+    let mut lead = LeadKnots::with_cuts(cut_times_ms);
     let mut speed = SpeedSchedule::default();
     let mut records: Vec<Record> = Vec::new();
     let mut index = 0;
@@ -1149,7 +1183,7 @@ mod tests {
     #[test]
     fn plain_movement_trails_and_lands() {
         let points = sweep(50, 4.0);
-        let path = plan(&points, &[], SpringConfig::NONE, 1.0, 1400.0);
+        let path = plan(&points, &[], SpringConfig::NONE, 1.0, 1400.0, &[]);
         let (moving, _) = path.position_at(200.0);
         let (raw, _) = (200.0 / 400.0 * 200.0, 0.0);
         assert!(moving > 0.0 && moving < raw, "plain movement trails");
@@ -1164,8 +1198,8 @@ mod tests {
             time_ms: 400.0,
             tolerance: 2.0,
         };
-        let planned = plan(&points, &[click], SpringConfig::NONE, 1.0, 1400.0);
-        let plain = plan(&points, &[], SpringConfig::NONE, 1.0, 1400.0);
+        let planned = plan(&points, &[click], SpringConfig::NONE, 1.0, 1400.0, &[]);
+        let plain = plan(&points, &[], SpringConfig::NONE, 1.0, 1400.0, &[]);
         let (met, _) = planned.position_at(400.0);
         let (trailed, _) = plain.position_at(400.0);
         assert!(
@@ -1191,7 +1225,7 @@ mod tests {
                 tolerance: 2.0,
             },
         ];
-        let path = plan(&points, &sync, SpringConfig::RAPID, 1.0, 1400.0);
+        let path = plan(&points, &sync, SpringConfig::RAPID, 1.0, 1400.0, &[]);
         let (first, _) = path.position_at(240.0);
         let (second, _) = path.position_at(300.0);
         assert!(first.is_finite() && second.is_finite());
@@ -1206,8 +1240,60 @@ mod tests {
             x: 100.0,
             y: 0.0,
         });
-        let path = plan(&points, &[], SpringConfig::NONE, 1.0, 4000.0);
+        let path = plan(&points, &[], SpringConfig::NONE, 1.0, 4000.0, &[]);
         let (rest, _) = path.position_at(2000.0);
         assert!((rest - 100.0).abs() < 0.5, "the cursor should be at rest");
+    }
+
+    #[test]
+    fn a_lead_never_reaches_past_the_next_cut() {
+        let mut lead = LeadKnots::with_cuts(&[500.0, 900.0]);
+        lead.add(0.0, 200.0);
+        assert_eq!(lead.at(200.0), 200.0);
+        assert_eq!(lead.at(400.0), 100.0);
+        assert_eq!(
+            lead.at(500.0),
+            200.0,
+            "a cut behind the query must not bound it"
+        );
+        assert_eq!(lead.at(850.0), 50.0);
+        let mut negative = LeadKnots::default();
+        negative.add(0.0, -30.0);
+        assert_eq!(negative.at(10.0), 0.0);
+    }
+
+    #[test]
+    fn a_cut_stops_the_lead_before_it() {
+        // A click at 400 ms drives a lead that keeps the cursor ahead of its
+        // recorded position. Without the cut the cursor is already about 24 px
+        // past the 430 ms cut one millisecond before it.
+        let points = sweep(100, 8.0);
+        let click = SyncPoint {
+            time_ms: 400.0,
+            tolerance: 2.0,
+        };
+        let led = plan(&points, &[click], SpringConfig::NONE, 1.0, 1400.0, &[]);
+        let cut = plan(&points, &[click], SpringConfig::NONE, 1.0, 1400.0, &[430.0]);
+        let (met, _) = led.position_at(400.0);
+        let (bounded, _) = cut.position_at(400.0);
+        assert!(
+            (met - 400.0).abs() <= 2.0,
+            "the click should be met without a cut, got {met}"
+        );
+        assert!(
+            (bounded - 400.0).abs() <= 2.0,
+            "the cut point is on the click, got {bounded}"
+        );
+        let (led_near, _) = led.position_at(429.0);
+        let (cut_near, _) = cut.position_at(429.0);
+        assert!(
+            led_near - cut_near > 15.0,
+            "the cut should hold the cursor back: {cut_near} vs {led_near}"
+        );
+        let (at_cut, _) = cut.position_at(430.0);
+        assert!(
+            at_cut <= 432.0,
+            "the plan must not travel past the cut, got {at_cut}"
+        );
     }
 }

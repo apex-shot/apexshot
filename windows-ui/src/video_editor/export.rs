@@ -172,10 +172,14 @@ pub(super) fn start_export(model: ExportModel, output: PathBuf) -> ExportHandle 
 }
 
 pub(super) fn start_export_with_settings(
-    model: ExportModel,
+    mut model: ExportModel,
     output: PathBuf,
     settings: ExportSettings,
 ) -> ExportHandle {
+    let cuts = model.cuts.clone();
+    if let Some(sidecar) = model.sidecar.as_mut() {
+        sidecar.set_cut_times(&cuts);
+    }
     let (sender, receiver) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     if let Err(error) =
@@ -1276,8 +1280,24 @@ mod tests {
             .and_then(|value| value.parse().ok())
             .unwrap_or(0.0);
         let always_use_default = std::env::var("APEXSHOT_COMPARISON_ALWAYS_DEFAULT").is_ok();
+        let cuts: Vec<f64> = std::env::var("APEXSHOT_COMPARISON_CUTS")
+            .ok()
+            .map(|text| {
+                text.split(',')
+                    .filter_map(|value| value.trim().parse().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let trim_start = std::env::var("APEXSHOT_COMPARISON_TRIM_START")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.0);
+        let trim_end = std::env::var("APEXSHOT_COMPARISON_TRIM_END")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(duration);
         eprintln!(
-            "export: theme {theme:?} rotation {rotation_mode:?} ratio {rotation_ratio} base {base_rotation_deg} default {always_use_default}"
+            "export: theme {theme:?} rotation {rotation_mode:?} ratio {rotation_ratio} base {base_rotation_deg} default {always_use_default} trim {trim_start}..{trim_end} cuts {cuts:?}"
         );
         if std::env::var("APEXSHOT_COMPARISON_DUMP").is_ok() {
             for t in [0.4, 0.8, 1.2, 2.2, 2.6, 2.9, 3.4, 3.9, 4.4] {
@@ -1289,12 +1309,39 @@ mod tests {
                 );
             }
         }
+        if std::env::var("APEXSHOT_COMPARISON_PLAN").is_ok() {
+            let motion = crate::recording::editor::sidecar::CursorMotion {
+                smooth: CursorSettings::default().smooth,
+                speed: 1.0,
+                ..crate::recording::editor::sidecar::CursorMotion::default()
+            };
+            let free = {
+                let mut free = sidecar.clone();
+                free.set_cut_times(&[]);
+                free
+            };
+            let with_cuts = {
+                let mut with_cuts = sidecar.clone();
+                with_cuts.set_cut_times(&cuts);
+                with_cuts
+            };
+            let text = std::env::var("APEXSHOT_COMPARISON_PLAN_TIMES")
+                .unwrap_or_else(|_| "1.40,1.45,1.49,1.50,1.55".to_string());
+            for t in text
+                .split(',')
+                .filter_map(|value| value.trim().parse::<f64>().ok())
+            {
+                let free_x = free.presented_at(t, motion).map(|frame| frame.x);
+                let cut_x = with_cuts.presented_at(t, motion).map(|frame| frame.x);
+                eprintln!("plan {t}: free {free_x:?} cut {cut_x:?}");
+            }
+        }
         let model = ExportModel {
             source,
             source_size: (width, height),
-            trim_start: 0.0,
-            trim_end: duration,
-            cuts: Vec::new(),
+            trim_start,
+            trim_end,
+            cuts,
             zooms: Vec::new(),
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings {

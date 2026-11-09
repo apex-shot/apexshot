@@ -725,6 +725,10 @@ pub struct PointerSidecar {
     /// original recording's sidecar.
     #[serde(skip)]
     pub sidecar_directory: Option<PathBuf>,
+    /// Source instants the edit cuts at, ascending. Pushed in by the editor
+    /// before it draws or exports; runtime-only, like the plan built from it.
+    #[serde(skip)]
+    cuts_seconds: Vec<f64>,
     /// The planned cursor path for the current spring and speed.
     #[serde(skip)]
     plan_cache: PlanCache,
@@ -748,6 +752,7 @@ impl PointerSidecar {
             webcam: None,
             screen_file: None,
             sidecar_directory: None,
+            cuts_seconds: Vec::new(),
             plan_cache: PlanCache::default(),
         }
     }
@@ -1143,6 +1148,15 @@ impl PointerSidecar {
         path.position_at(t * 1000.0)
     }
 
+    /// Where the edit cuts the recording, in source seconds. The plan leads the
+    /// cursor, but never across a cut, so it never travels toward footage the
+    /// edit removed.
+    pub fn set_cut_times(&mut self, cuts: &[f64]) {
+        self.cuts_seconds = cuts.iter().copied().filter(|cut| cut.is_finite()).collect();
+        self.cuts_seconds.sort_by(f64::total_cmp);
+        self.cuts_seconds.dedup();
+    }
+
     /// Plan the cursor path once per spring and speed, then answer frames from
     /// it. The moments the plan must be exact are the recorded clicks and the
     /// cursor-image changes, matching the reference's sync points.
@@ -1210,12 +1224,14 @@ impl PointerSidecar {
             .last()
             .map(|sample| sample.t * 1000.0 + 1000.0)
             .unwrap_or(0.0);
+        let cuts_ms: Vec<f64> = self.cuts_seconds.iter().map(|cut| cut * 1000.0).collect();
         let planned = Arc::new(cursor_planner::plan(
             &points,
             &sync,
             spring,
             speed,
             duration_ms,
+            &cuts_ms,
         ));
         if let Ok(mut cache) = self.plan_cache.0.lock() {
             *cache = Some(CachedPlan {
@@ -1254,6 +1270,8 @@ impl PointerSidecar {
             spring.mass.to_bits(),
             speed.to_bits(),
         ];
+        values.push(self.cuts_seconds.len() as u64);
+        values.extend(self.cuts_seconds.iter().map(|cut| cut.to_bits()));
         for value in values.drain(..) {
             hash ^= value;
             hash = hash.wrapping_mul(1099511628211);
@@ -2410,6 +2428,45 @@ mod tests {
         assert!(
             (dragged.x - raw.0).abs() <= 2.0 && (dragged.y - raw.1).abs() <= 2.0,
             "the dragged cursor should stay on the path, got {dragged:?} for {raw:?}"
+        );
+    }
+
+    #[test]
+    fn a_cut_holds_the_planned_cursor_back() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0_u32..=100 {
+            sidecar.pointer.push(PointerSample {
+                t: index as f64 * 0.008,
+                x: index as f64 * 8.0,
+                y: 0.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        sidecar.clicks.push(ClickSample {
+            t: 0.4,
+            x: 320.0,
+            y: 0.0,
+            button: 1,
+            cursor_id: None,
+        });
+        let motion = CursorMotion {
+            smooth: 0.8,
+            speed: 1.0,
+            ..CursorMotion::default()
+        };
+        let free = sidecar.presented_at(0.429, motion).unwrap().x;
+        sidecar.set_cut_times(&[0.430]);
+        let cut = sidecar.presented_at(0.429, motion).unwrap().x;
+        assert!(
+            free - cut > 10.0,
+            "the cut should hold the cursor back: {cut} vs {free}"
+        );
+        let again = sidecar.presented_at(0.429, motion).unwrap().x;
+        assert!(
+            (again - cut).abs() < 1e-9,
+            "the cached plan must stay cut-aware: {again} vs {cut}"
         );
     }
 

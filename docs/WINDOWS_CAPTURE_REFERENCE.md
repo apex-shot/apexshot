@@ -145,6 +145,21 @@ A spring has stiffness, damping, mass, and clamp. `lagMs` is
 positions are stored and `positionAt` interpolates between samples.
 `instantRanges` disable smoothing for specific slices.
 
+### Leads and cuts
+
+The lead is the amount the smoothed cursor is allowed to run ahead of its
+recorded position. Two rules bound it:
+
+- it is never negative, so the cursor never trails the plan before its start;
+- it never reaches past the next cut in the edit. The studied code stores the
+  cut instants beside the lead knots and evaluates each target as
+  `min(plannedLead, nextCut - time)`, using the first cut strictly later than
+  the queried instant. Without cuts the planned lead is used unchanged.
+
+The clamp is applied when the target is looked up, not when the knots are
+built, so the plan holds the cursor at the cut's pose instead of letting it
+travel toward frames the edit removed.
+
 ### Cursor defaults
 
 ```text
