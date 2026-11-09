@@ -3,18 +3,18 @@
 //! falls back to the static eased framing.
 //!
 //! The spring integrates in 1 ms steps, matching the studied camera. The
-//! result is cached on a 1/60 s grid anchored at the clip's start, so a scrub
-//! backwards replays the same path. [`ZoomCameraSettings`] carries the
-//! camera-wide knobs — spring speed and smoothness, plus the early lead-in —
-//! that the Zoom panel edits.
+//! result is cached on the composition frame grid anchored at the clip's
+//! start, so a scrub backwards replays the same path. [`ZoomCameraSettings`]
+//! carries the camera-wide knobs — spring speed and smoothness, plus the early
+//! lead-in — that the Zoom panel edits.
 
+use super::pointer_path::{self, PointerEvent, PointerKind};
 use super::timeline::{ZoomClip, ZoomMode};
+use crate::recording::editor::auto_zoom::release_position;
 use crate::recording::editor::sidecar::PointerSidecar;
 
-/// The cached camera frame spacing.
-const ZOOM_CAMERA_FRAME_STEP: f64 = 1.0 / 60.0;
-/// The studied screen spring's integration step.
-const ZOOM_CAMERA_INTEGRATION_STEP: f64 = 1.0 / 1000.0;
+/// The studied screen spring's precision setting (`CpX:53-58`).
+const SCREEN_SPRING_PRECISION: f64 = 0.002;
 /// The shared follow spring at speed 1.0 and smoothness 0.5. The camera and
 /// the cursor sprite both chase on it.
 pub(super) const CAMERA_FOLLOW_SPRING: CameraSpring = CameraSpring {
@@ -30,6 +30,8 @@ pub(super) struct ZoomCameraSettings {
     pub smoothness: f64,
     pub start_early: bool,
     pub motion_blur: f64,
+    /// Composition frame rate. The studied spring advances once per rendered frame.
+    pub frame_rate: f64,
 }
 
 impl Default for ZoomCameraSettings {
@@ -39,6 +41,7 @@ impl Default for ZoomCameraSettings {
             smoothness: 0.5,
             start_early: false,
             motion_blur: 1.0,
+            frame_rate: 60.0,
         }
     }
 }
@@ -64,6 +67,11 @@ impl ZoomCameraSettings {
                 self.motion_blur.clamp(0.0, 1.0)
             } else {
                 defaults.motion_blur
+            },
+            frame_rate: if self.frame_rate.is_finite() && self.frame_rate > 0.0 {
+                self.frame_rate.clamp(1.0, 240.0)
+            } else {
+                defaults.frame_rate
             },
         }
     }
@@ -93,8 +101,6 @@ const MAX_CAMERA_SCALE: f64 = 5.0;
 const EASE_SECONDS: f64 = 0.6;
 /// Auto zooms at most this far apart share one continuous move.
 const MORPH_GAP_SECONDS: f64 = 0.5;
-/// Pointer samples closer than this to the last kept one are jitter.
-const FOLLOW_JITTER_PIXELS: f64 = 10.0;
 
 pub(super) type Camera = (f64, (f64, f64));
 pub(super) type ViewRect = (f64, f64, f64, f64);
@@ -163,6 +169,8 @@ pub(super) struct CameraSpring {
 struct CameraMotion {
     rect: [f64; 4],
     velocity: [f64; 4],
+    target: [f64; 4],
+    precision: [f64; 4],
 }
 
 impl CameraMotion {
@@ -170,24 +178,27 @@ impl CameraMotion {
         Self {
             rect,
             velocity: [0.0; 4],
+            target: rect,
+            precision: [1.0; 4],
         }
     }
 
     fn advance(self, target: [f64; 4], spring: CameraSpring, seconds: f64) -> Self {
         let mut motion = self;
-        let steps = (seconds / ZOOM_CAMERA_INTEGRATION_STEP).ceil() as usize;
-        for index in 0..steps {
-            let dt = ZOOM_CAMERA_INTEGRATION_STEP
-                .min((seconds - index as f64 * ZOOM_CAMERA_INTEGRATION_STEP).max(0.0));
-            for (axis, target) in target.iter().enumerate() {
-                (motion.rect[axis], motion.velocity[axis]) = spring_step(
-                    motion.rect[axis],
-                    motion.velocity[axis],
-                    *target,
-                    spring,
-                    dt,
-                );
+        for (axis, &goal) in target.iter().enumerate() {
+            if goal != motion.target[axis] {
+                motion.precision[axis] =
+                    studied_precision(motion.rect[axis], goal, SCREEN_SPRING_PRECISION);
+                motion.target[axis] = goal;
             }
+            (motion.rect[axis], motion.velocity[axis]) = studied_advance(
+                motion.rect[axis],
+                motion.velocity[axis],
+                goal,
+                spring,
+                motion.precision[axis],
+                seconds * 1000.0,
+            );
         }
         motion
     }
@@ -210,7 +221,6 @@ struct ZoomCameraPlan {
     zooms: Vec<CameraZoom>,
     settings: ZoomCameraSettings,
     start_time: Option<f64>,
-    boundaries: Vec<f64>,
     frames: Vec<CameraMotion>,
 }
 
@@ -278,20 +288,46 @@ impl ZoomCameraPlan {
     ) -> Self {
         let mut clips = clips.to_vec();
         clips.sort_by(|left, right| left.start.total_cmp(&right.start));
-        let samples = sidecar
+        let events = sidecar
             .map(|sidecar| {
-                sidecar
-                    .pointer
-                    .iter()
-                    .filter(|sample| {
-                        sample.t.is_finite() && sample.x.is_finite() && sample.y.is_finite()
-                    })
-                    .map(|sample| {
-                        let (x, y) = sidecar.map_to_video(sample.x, sample.y, frame.0, frame.1);
-                        (sample.t, x, y)
-                    })
-                    .filter(|&(_, x, y)| x.is_finite() && y.is_finite())
-                    .collect::<Vec<_>>()
+                let map = |x: f64, y: f64| sidecar.map_to_video(x, y, frame.0, frame.1);
+                let mut events: Vec<PointerEvent> = Vec::new();
+                for sample in &sidecar.pointer {
+                    let (x, y) = map(sample.x, sample.y);
+                    events.push(PointerEvent {
+                        t: sample.t,
+                        x,
+                        y,
+                        kind: PointerKind::Move,
+                    });
+                }
+                for click in &sidecar.clicks {
+                    let (x, y) = map(click.x, click.y);
+                    events.push(PointerEvent {
+                        t: click.t,
+                        x,
+                        y,
+                        kind: PointerKind::Down,
+                    });
+                }
+                for press in &sidecar.presses {
+                    if !press.up.is_finite() || press.up < press.down {
+                        continue;
+                    }
+                    if let Some((x, y)) = release_position(sidecar, press, frame.0, frame.1) {
+                        events.push(PointerEvent {
+                            t: press.up,
+                            x,
+                            y,
+                            kind: PointerKind::Up,
+                        });
+                    }
+                }
+                events.retain(|e| e.t.is_finite() && e.x.is_finite() && e.y.is_finite());
+                events.sort_by(|a, b| a.t.total_cmp(&b.t));
+                // The studied camera reads the recording's pointer path after
+                // its default shake filter (`B39:3274-3284`, `DgH:3254`).
+                pointer_path::remove_shakes(&events, pointer_path::SHAKE_THRESHOLD)
             })
             .unwrap_or_default();
         let zooms = clips
@@ -306,7 +342,7 @@ impl ZoomCameraPlan {
             })
             .map(|clip| {
                 let groups = if clip.mode == ZoomMode::Auto {
-                    let points = follow_points(&samples, mapping, clip);
+                    let points = follow_points(&events, mapping, clip);
                     group_centers(&movement_groups(
                         &points,
                         movement_group_budget(frame, clip.scale),
@@ -326,16 +362,6 @@ impl ZoomCameraPlan {
             .iter()
             .map(|zoom| (zoom.clip.start - lead_in).max(0.0))
             .min_by(f64::total_cmp);
-        let mut boundaries = Vec::new();
-        for zoom in &zooms {
-            boundaries.extend([
-                (zoom.clip.start - lead_in).max(0.0),
-                zoom.clip.start,
-                zoom.clip.end,
-            ]);
-        }
-        boundaries.sort_by(f64::total_cmp);
-        boundaries.dedup();
         let frames = start_time
             .map(|_| vec![CameraMotion::parked(full_rect(frame))])
             .unwrap_or_default();
@@ -345,7 +371,6 @@ impl ZoomCameraPlan {
             zooms,
             settings,
             start_time,
-            boundaries,
             frames,
         }
     }
@@ -395,42 +420,20 @@ impl ZoomCameraPlan {
         focus_rect(zoom.clip.scale, center, self.frame)
     }
 
-    fn advance(&self, mut motion: CameraMotion, mut from: f64, to: f64) -> CameraMotion {
-        let mut events: Vec<_> = self
-            .boundaries
-            .iter()
-            .copied()
-            .filter(|event| *event > from && *event < to)
-            .collect();
-        events.push(to);
-        let spring = self.settings.spring();
-        for end in events {
-            let sample_time = (from + end) / 2.0;
-            if let Some(index) = self.target_index_at(sample_time) {
-                let zoom = &self.zooms[index];
-                if zoom.clip.instant {
-                    // An instant zoom is a cut: the camera is already at its
-                    // target instead of travelling there on the spring.
-                    motion = CameraMotion::parked(self.target_rect(index, sample_time));
-                } else {
-                    motion =
-                        motion.advance(self.target_rect(index, sample_time), spring, end - from);
-                }
-            } else {
-                // An instant clip releases just as abruptly as it enters.
-                let released_instantly = self
-                    .zooms
-                    .iter()
-                    .any(|zoom| zoom.clip.instant && (from - zoom.clip.end).abs() < 1e-9);
-                motion = if released_instantly {
-                    CameraMotion::parked(full_rect(self.frame))
-                } else {
-                    motion.advance(full_rect(self.frame), spring, end - from)
-                };
-            }
-            from = end;
+    fn advance(&self, motion: CameraMotion, from: f64, to: f64) -> CameraMotion {
+        if to <= from {
+            return motion;
         }
-        motion
+        let target = match self.target_index_at(to) {
+            Some(index) => self.target_rect(index, to),
+            None => full_rect(self.frame),
+        };
+        // An instant zoom swaps in a zero spring through its window, which
+        // runs 50 ms past the clip (`B39:7908-7915`), so the camera snaps.
+        if instant_blur_disabled(&self.clips, to) {
+            return CameraMotion::parked(target);
+        }
+        motion.advance(target, self.settings.spring(), to - from)
     }
 
     fn evaluate(&mut self, time: f64) -> Camera {
@@ -450,20 +453,21 @@ impl ZoomCameraPlan {
             return static_camera_at(&self.clips, time, self.frame);
         }
 
-        let frame_index = ((time - start_time) / ZOOM_CAMERA_FRAME_STEP).floor() as usize;
+        let step = 1.0 / self.settings.frame_rate;
+        let frame_index = ((time - start_time) / step).floor() as usize;
         while self.frames.len() <= frame_index {
-            let from = start_time + (self.frames.len() - 1) as f64 * ZOOM_CAMERA_FRAME_STEP;
+            let from = start_time + (self.frames.len() - 1) as f64 * step;
             let motion = self.advance(
                 *self
                     .frames
                     .last()
                     .expect("camera plan starts with one frame"),
                 from,
-                from + ZOOM_CAMERA_FRAME_STEP,
+                from + step,
             );
             self.frames.push(motion);
         }
-        let from = start_time + frame_index as f64 * ZOOM_CAMERA_FRAME_STEP;
+        let from = start_time + frame_index as f64 * step;
         let motion = self.advance(self.frames[frame_index], from, time);
         frame_for_rect(motion.rect, self.frame)
     }
@@ -769,50 +773,60 @@ fn nearest_follow_sample(samples: &[(f64, f64, f64)], start: f64) -> Option<(f64
 }
 
 /// The pointer samples one clip's follow camera reads, as
-/// `(composition_time, x, y)`. Samples within the jitter threshold are
-/// dropped, and the last sample before each footage window is carried in at
-/// the window's first instant so the first movement group starts where the
+/// `(composition_time, x, y)`. Moves closer than the studied 10 px to the
+/// last kept event are dropped, but presses and releases are always kept,
+/// and the last sample before each footage window is carried in at the
+/// window's first instant so the first movement group starts where the
 /// pointer already was. When the clip has no sample before or inside its
 /// windows, the studied nearest-sample fallback keeps the camera following
 /// instead of freezing on the stored centre.
 fn follow_points(
-    samples: &[(f64, f64, f64)],
+    samples: &[PointerEvent],
     mapping: &TimeMapping,
     clip: ZoomClip,
 ) -> Vec<(f64, f64, f64)> {
-    let mut points = Vec::new();
+    let mut points: Vec<PointerEvent> = Vec::new();
     let mut first_window = None;
     for (start, _, source_start, source_end) in mapping.windows(clip) {
         first_window.get_or_insert((start, source_start));
-        let index = samples.partition_point(|&(time, _, _)| time < source_start);
-        if let Some(&(_, x, y)) = index.checked_sub(1).and_then(|before| samples.get(before)) {
-            points.push((start - 0.001, x, y));
+        let index = samples.partition_point(|e| e.t < source_start);
+        if let Some(before) = index.checked_sub(1).and_then(|before| samples.get(before)) {
+            points.push(PointerEvent {
+                t: start - 0.001,
+                kind: PointerKind::Move,
+                ..*before
+            });
         }
         points.extend(
             samples[index..]
                 .iter()
-                .take_while(|&&(time, _, _)| time <= source_end)
-                .map(|&(time, x, y)| (start + (time - source_start), x, y)),
+                .take_while(|e| e.t <= source_end)
+                .map(|e| PointerEvent {
+                    t: start + (e.t - source_start),
+                    ..*e
+                }),
         );
     }
     if points.is_empty() {
         if let Some((start, source_start)) = first_window {
-            if let Some((time, x, y)) = nearest_follow_sample(samples, source_start) {
-                points.push((start + (time - source_start), x, y));
+            let tuples = &samples.iter().map(|e| (e.t, e.x, e.y)).collect::<Vec<_>>();
+            if let Some((time, x, y)) = nearest_follow_sample(tuples, source_start) {
+                points.push(PointerEvent {
+                    t: start + (time - source_start),
+                    x,
+                    y,
+                    kind: PointerKind::Move,
+                });
             }
         }
     }
-    points.sort_by(|left, right| left.0.total_cmp(&right.0));
-    let mut kept: Vec<(f64, f64, f64)> = Vec::with_capacity(points.len());
-    for point in points {
-        if kept
-            .last()
-            .is_none_or(|&(_, x, y)| (point.1 - x).hypot(point.2 - y) >= FOLLOW_JITTER_PIXELS)
-        {
-            kept.push(point);
-        }
-    }
-    kept
+    points.sort_by(|left, right| left.t.total_cmp(&right.t));
+    // The studied focus path keeps clicks and drops moves closer than 10 px
+    // to the last kept event (`B39:2804-2826`, `B39:3333`).
+    pointer_path::decimate(&points, pointer_path::DECIMATE_DISTANCE)
+        .into_iter()
+        .map(|e| (e.t, e.x, e.y))
+        .collect()
 }
 
 /// Half the zoomed view: the movement-group budget at this scale. A tighter
@@ -920,6 +934,64 @@ fn group_center_at(centers: &[(f64, (f64, f64))], time: f64) -> Option<(f64, f64
     Some(centers[active].1)
 }
 
+/// The rest tolerance the studied spring sets whenever its target changes:
+/// the move's size times the precision setting, never under one move unit.
+fn studied_precision(value: f64, target: f64, precision: f64) -> f64 {
+    if value == target {
+        return 1.0;
+    }
+    (value - target).abs().max(1.0) * precision
+}
+
+/// One studied spring advance (`CpX:314-350`): the overspeed damping is chosen
+/// once per call, then the spring integrates in whole milliseconds. The last
+/// step uses the studied fractional rule exactly.
+fn studied_advance(
+    mut value: f64,
+    mut velocity: f64,
+    target: f64,
+    spring: CameraSpring,
+    precision: f64,
+    millis: f64,
+) -> (f64, f64) {
+    if millis.is_nan()
+        || millis <= 0.0
+        || !value.is_finite()
+        || !velocity.is_finite()
+        || !target.is_finite()
+    {
+        return (value, velocity);
+    }
+    let stiffness = spring.stiffness.max(f64::EPSILON);
+    let mass = spring.mass.max(f64::EPSILON);
+    let mut damping = spring.damping.max(0.0);
+    let displacement = target - value;
+    if velocity * displacement > 0.0 {
+        let natural = (stiffness / mass).sqrt();
+        if velocity.abs() > displacement.abs() * natural {
+            damping = damping.max(2.0 * (mass * stiffness).sqrt());
+        }
+    }
+    let steps = millis.ceil() as u64;
+    for step in 1..=steps {
+        let step = step as f64;
+        let dt = if step > millis {
+            (step - millis) / 1000.0
+        } else {
+            0.001
+        };
+        let acceleration = (-(value - target) * stiffness - velocity * damping) / mass;
+        let next_velocity = velocity + acceleration * dt;
+        let next_value = value + next_velocity * dt;
+        if next_velocity.abs() < precision && (next_value - target).abs() < precision {
+            return (target, 0.0);
+        }
+        velocity = next_velocity;
+        value = next_value;
+    }
+    (value, velocity)
+}
+
 pub(super) fn spring_step(
     value: f64,
     velocity: f64,
@@ -966,8 +1038,9 @@ fn valid_frame(frame: (f64, f64)) -> bool {
 mod tests {
     use super::{
         camera_transform, nearest_follow_sample, placement_rect, source_to_stage, spring_step,
-        stage_point_to_source, static_camera_at, view_rect, Camera, CameraMotion, TimeMapping,
-        ZoomCameraCache, ZoomCameraSettings, CAMERA_FOLLOW_SPRING,
+        stage_point_to_source, static_camera_at, studied_advance, studied_precision, view_rect,
+        Camera, CameraMotion, TimeMapping, ZoomCameraCache, ZoomCameraSettings,
+        CAMERA_FOLLOW_SPRING, SCREEN_SPRING_PRECISION,
     };
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
@@ -1066,6 +1139,26 @@ mod tests {
     }
 
     #[test]
+    fn the_follow_camera_ignores_a_lone_pointer_spike() {
+        let mut points: Vec<(f64, f64, f64)> = (0..=30)
+            .map(|i| (1.0 + i as f64 * 0.1, 900.0, 500.0))
+            .collect();
+        // One far sample, as from a cursor warp, then straight back.
+        points.insert(11, (2.05, 50.0, 50.0));
+        let sidecar = sidecar((1280, 720), &points);
+        let clips = [auto_clip(1.0, 4.0, 2.0, (640.0, 360.0))];
+        let frame = (1280.0, 720.0);
+        for step in 0..=12 {
+            let time = 2.0 + step as f64 * 0.05;
+            let (_, center) = evaluate(&clips, &sidecar, frame, time);
+            assert!(
+                (center.0 - 900.0).abs() < 1.0 && (center.1 - 500.0).abs() < 1.0,
+                "time={time} center={center:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_clip_before_the_pointer_starts_follows_the_nearest_sample() {
         let clips = [auto_clip(1.0, 2.0, 3.0, (320.0, 240.0))];
         // The pointer appears long after this clip ends. The studied camera
@@ -1088,13 +1181,76 @@ mod tests {
     }
 
     #[test]
-    fn the_camera_integrates_the_spring_in_one_millisecond_steps() {
+    fn the_camera_runs_the_studied_integrator_once_per_frame() {
         let motion = CameraMotion::parked([0.0; 4]).advance([100.0; 4], CAMERA_FOLLOW_SPRING, 0.1);
-        let (mut value, mut velocity) = (0.0, 0.0);
-        for _ in 0..100 {
-            (value, velocity) = spring_step(value, velocity, 100.0, CAMERA_FOLLOW_SPRING, 0.001);
-        }
+        let precision = studied_precision(0.0, 100.0, SCREEN_SPRING_PRECISION);
+        let (value, _) = studied_advance(0.0, 0.0, 100.0, CAMERA_FOLLOW_SPRING, precision, 100.0);
         assert!((motion.rect[0] - value).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_camera_spring_matches_the_studied_integrator_frame_by_frame() {
+        // Reference values come from running the studied build's own spring
+        // functions (`CpX:283-392`) per rendered frame: a 600 px move from
+        // rest at 60, 30, and 24 fps, and an overspeed start that triggers the
+        // damping clamp.
+        let run = |start: CameraMotion, goal: f64, fps: f64, frames: usize| {
+            let mut motion = start;
+            let mut values = Vec::new();
+            for _ in 0..frames {
+                motion = motion.advance([goal; 4], CAMERA_FOLLOW_SPRING, 1.0 / fps);
+                values.push(motion.rect[0]);
+            }
+            values
+        };
+        let check = |values: &[f64], expected: &[(usize, f64)]| {
+            for &(frame, value) in expected {
+                assert!(
+                    (values[frame] - value).abs() < 1e-6,
+                    "frame {frame}: {} vs {value}",
+                    values[frame]
+                );
+            }
+        };
+        let rest = CameraMotion::parked([0.0; 4]);
+        check(
+            &run(rest, 600.0, 60.0, 90),
+            &[
+                (0, 6.77845978490818),
+                (1, 25.109368517395612),
+                (7, 279.8052349666634),
+                (8, 327.48356247411374),
+                (9, 368.0416739380785),
+                (85, 600.0),
+            ],
+        );
+        check(
+            &run(rest, 600.0, 30.0, 45),
+            &[(0, 26.57250330819989), (4, 382.62526235836464), (40, 600.0)],
+        );
+        check(
+            &run(rest, 600.0, 24.0, 36),
+            &[(0, 38.91758891664947), (4, 440.3020284892068), (31, 600.0)],
+        );
+        let fast = CameraMotion {
+            velocity: [3000.0; 4],
+            ..rest
+        };
+        check(
+            &run(fast, 100.0, 60.0, 6),
+            &[
+                (0, 42.84784030863177),
+                (1, 75.66619104852342),
+                (5, 151.72445540251965),
+            ],
+        );
+    }
+
+    #[test]
+    fn the_studied_precision_scales_with_the_move() {
+        assert_eq!(studied_precision(5.0, 5.0, 0.002), 1.0);
+        assert!((studied_precision(0.0, 600.0, 0.002) - 1.2).abs() < 1e-12);
+        assert!((studied_precision(0.0, 0.3, 0.002) - 0.002).abs() < 1e-12);
     }
 
     #[test]

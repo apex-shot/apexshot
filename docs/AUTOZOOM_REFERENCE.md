@@ -371,10 +371,33 @@ Resolved on `feat/autozoom-parity`:
   fallback (`B39:3334-3349`): the first sample at or after the window start
   within 500 ms, otherwise the nearest sample. The camera follows that sample
   instead of freezing on the stored centre.
-- **Spring integration.** The Windows camera now integrates the screen spring
-  in 1 ms steps, like the studied integrator (`CpX:327-350`), while still
-  caching frames on the 1/60 s grid. It also snaps to rest at the studied 0.01
-  position and velocity threshold.
+- **Spring integration.** The Windows camera now runs the studied integrator
+  exactly, once per composition frame, in place of the earlier 1/60 s grid
+  (`CpX:314-392`, per-path advance `CpX:594-624`):
+  - the overspeed damping clamp is chosen once per advance, not per step;
+  - an advance of `d` ms runs `ceil(d)` steps, and the last step lasts
+    `(ceil(d) - d)` ms, as the studied loop computes it. A 60 fps frame
+    therefore integrates 16.33 ms and a 30 fps frame 33.67 ms, so the studied
+    camera's speed depends slightly on the frame rate, and ours now does too;
+  - the rest tolerance is set when a target changes, to
+    `max(1, |value - target|) * 0.002`, or 1 when the value already equals the
+    target. The earlier 0.01 threshold was not the studied rule.
+  - The settle-time snap for very long advances (`CpX:353-382`) is not ported.
+    The camera advances one frame at a time, so a frame never reaches it.
+  - Each frame takes its target at the frame's own time, and an instant zoom
+    snaps to its target through the window that ends 50 ms after the clip.
+- **Pointer shake filter and click-keeping decimation.** The camera now reads
+  pointer moves, presses, and releases (release positions from the nearest
+  pointer sample), after the studied default shake filter: an event is dropped
+  when both of the next two events are more than 500 px away in Manhattan
+  distance, and a press dropped that way drops its release (`B39:2846-2862`,
+  default `DgH:3254`, applied at `B39:3274-3284`). Decimation then keeps every
+  press and release and drops moves within 10 px of the last kept event
+  (`B39:2804-2826`). The filter runs in encoded-video pixels, while the studied
+  filter runs in recording pixels after the crop, so the two differ only when
+  the recording was scaled before encoding. The studied filter also runs before
+  trimming, and ours runs per clip after it, which only matters right at a
+  window edge.
 - **Minimum window.** The generator no longer drops a window shorter than
   100 ms. After merging, `minimum_window` grows the end to the minimum, or
   shifts the start back at the end of the recording, matching the collection's
@@ -595,3 +618,21 @@ Screen motion-blur sampling and manual-zoom spring, 2026-11-10:
   `cargo clippy --all-targets` finished without warnings. Three camera tests
   that asserted the old static fallback now assert the spring entry, hold,
   and exit instead.
+
+Studied spring and pointer filters, 2026-11-10:
+
+- Evidence from the studied code itself: `artifacts/studied-harness/` (local,
+  untracked) copies the studied spring (`CpX:283-392`), shake filter, and
+  decimation (`B39:2801-2862`) verbatim and runs them under Node. The camera
+  test `the_camera_spring_matches_the_studied_integrator_frame_by_frame`
+  checks our camera against those outputs within 1e-6: a 600 px move from rest
+  at 60, 30, and 24 fps, and an overspeed start that triggers the damping
+  clamp. The pointer-path tests reproduce the harness's shake and decimation
+  outputs event for event. One studied behaviour is easy to misread: a press
+  far from the moves around it is kept, because its own release is next to it.
+  The release and the move before the press are dropped instead.
+- `the_follow_camera_ignores_a_lone_pointer_spike` fails with the filter
+  bypassed: the camera is pulled 6.5 px toward the spike at 2.05 s.
+- `cargo test --lib video_editor` passed 314 with 5 ignored,
+  `cargo test --lib auto_zoom` passed 22, `rustfmt --check` on the changed
+  files passed, and `cargo clippy --all-targets` finished without warnings.

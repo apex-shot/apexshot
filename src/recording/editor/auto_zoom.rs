@@ -246,7 +246,7 @@ pub fn clicks_from_sidecar(sidecar: &PointerSidecar, width: f64, height: f64) ->
 /// The recorder stores the press interval but not a separate release point, so
 /// read the pointer sample nearest the release. If there is no pointer sample
 /// close enough, reuse the down click that opened the press.
-fn release_position(
+pub(crate) fn release_position(
     sidecar: &PointerSidecar,
     press: &PressSample,
     width: f64,

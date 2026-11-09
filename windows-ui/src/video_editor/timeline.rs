@@ -884,6 +884,7 @@ impl Data {
             smoothness: file.zoom_camera.smoothness,
             start_early: file.zoom_camera.start_early,
             motion_blur: file.zoom_camera.motion_blur,
+            frame_rate: super::zoom::ZoomCameraSettings::default().frame_rate,
         }
         .clamped();
         if let (Some(webcam), Some(layer)) = (self.webcam.as_ref(), file.webcam.as_ref()) {
@@ -2263,6 +2264,11 @@ impl Timeline {
             webcam.set_composition_time(data.playhead);
         }
         let placement = data.placement();
+        let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
+        let camera_settings = super::zoom::ZoomCameraSettings {
+            frame_rate: fps,
+            ..data.zoom_camera
+        };
         let camera = match placement {
             Some(_) => (1.0, data.frame_center()),
             None => {
@@ -2274,13 +2280,12 @@ impl Timeline {
                     &data.zoom_clips,
                     frame,
                     &data.camera_mapping(),
-                    data.zoom_camera,
+                    camera_settings,
                     data.playhead,
                     || self.cursor.sidecar(),
                 )
             }
         };
-        let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
         let camera_before = if placement.is_some()
             || super::zoom::instant_blur_disabled(&data.zoom_clips, data.playhead)
         {
@@ -2294,7 +2299,7 @@ impl Timeline {
                 &data.zoom_clips,
                 frame,
                 &data.camera_mapping(),
-                data.zoom_camera,
+                camera_settings,
                 (data.playhead - 1.0 / fps).max(0.0),
                 || self.cursor.sidecar(),
             )
@@ -2675,11 +2680,15 @@ impl Timeline {
         let data = self.data.borrow();
         let (width, height) = data.frame_size?;
         let frame = (f64::from(width), f64::from(height));
+        let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
         Some(self.camera_cache.borrow_mut().evaluate(
             &data.zoom_clips,
             frame,
             &data.camera_mapping(),
-            data.zoom_camera,
+            super::zoom::ZoomCameraSettings {
+                frame_rate: fps,
+                ..data.zoom_camera
+            },
             data.playhead,
             || self.cursor.sidecar(),
         ))
@@ -3456,6 +3465,11 @@ pub(super) fn build(
                     webcam.set_composition_time(composition_time);
                 }
                 let placement = data.placement();
+                let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
+                let camera_settings = super::zoom::ZoomCameraSettings {
+                    frame_rate: fps,
+                    ..data.zoom_camera
+                };
                 let camera = match placement {
                     Some(_) => (1.0, data.frame_center()),
                     None => {
@@ -3467,13 +3481,12 @@ pub(super) fn build(
                             &data.zoom_clips,
                             frame,
                             &data.camera_mapping(),
-                            data.zoom_camera,
+                            camera_settings,
                             composition_time,
                             || cursor.sidecar(),
                         )
                     }
                 };
-                let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
                 let camera_before = if placement.is_some()
                     || super::zoom::instant_blur_disabled(&data.zoom_clips, composition_time)
                 {
@@ -3487,7 +3500,7 @@ pub(super) fn build(
                         &data.zoom_clips,
                         frame,
                         &data.camera_mapping(),
-                        data.zoom_camera,
+                        camera_settings,
                         (composition_time - 1.0 / fps).max(0.0),
                         || cursor.sidecar(),
                     )

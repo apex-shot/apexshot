@@ -16,6 +16,7 @@ mod export_options;
 mod history;
 mod motion_blur;
 mod pixels;
+mod pointer_path;
 mod press;
 mod preview;
 mod project;

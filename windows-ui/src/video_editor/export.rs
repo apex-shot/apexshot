@@ -364,6 +364,10 @@ fn render(
     let frame_bytes = size.0 as usize * size.1 as usize * 3 / 2;
     let pipe = EncoderPipe::new(encoder_input, frame_bytes, pipe_depth(frame_bytes));
     let mut camera = ZoomCameraCache::default();
+    let camera_settings = zoom::ZoomCameraSettings {
+        frame_rate: fps,
+        ..model.zoom_camera
+    };
     let mut decoded = vec![0u8; model.source_size.0 as usize * model.source_size.1 as usize * 4];
     let mut packed = vec![0u8; model.source_size.0 as usize * model.source_size.1 as usize * 3 / 2];
     let mut scaled = vec![0u8; size.0 as usize * size.1 as usize * 4];
@@ -466,7 +470,7 @@ fn render(
                 &model.zooms,
                 source,
                 &mapping,
-                model.zoom_camera,
+                camera_settings,
                 composition_time,
                 || model.sidecar.clone(),
             );
@@ -478,7 +482,7 @@ fn render(
                     &model.zooms,
                     source,
                     &mapping,
-                    model.zoom_camera,
+                    camera_settings,
                     (composition_time - 1.0 / fps).max(0.0),
                     || model.sidecar.clone(),
                 );
