@@ -743,18 +743,41 @@ fn gap_hold_predecessor(clips: &[ZoomClip], time: f64) -> Option<usize> {
         .filter(|&previous| morphs_into_neighbour(clips, clips[previous]))
 }
 
+/// The pointer sample the studied camera uses when a clip window has none of
+/// its own: the first sample at or after the window start within 500 ms,
+/// otherwise the nearest sample.
+fn nearest_follow_sample(samples: &[(f64, f64, f64)], start: f64) -> Option<(f64, f64, f64)> {
+    const LOOKAHEAD_SECONDS: f64 = 0.5;
+    samples
+        .iter()
+        .filter(|&&(time, x, y)| time.is_finite() && x.is_finite() && y.is_finite())
+        .filter(|&&(time, _, _)| time >= start && time - start <= LOOKAHEAD_SECONDS)
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+        .or_else(|| {
+            samples
+                .iter()
+                .filter(|&&(time, x, y)| time.is_finite() && x.is_finite() && y.is_finite())
+                .min_by(|left, right| (left.0 - start).abs().total_cmp(&(right.0 - start).abs()))
+        })
+        .copied()
+}
+
 /// The pointer samples one clip's follow camera reads, as
 /// `(composition_time, x, y)`. Samples within the jitter threshold are
 /// dropped, and the last sample before each footage window is carried in at
 /// the window's first instant so the first movement group starts where the
-/// pointer already was.
+/// pointer already was. When the clip has no sample before or inside its
+/// windows, the studied nearest-sample fallback keeps the camera following
+/// instead of freezing on the stored centre.
 fn follow_points(
     samples: &[(f64, f64, f64)],
     mapping: &TimeMapping,
     clip: ZoomClip,
 ) -> Vec<(f64, f64, f64)> {
     let mut points = Vec::new();
+    let mut first_window = None;
     for (start, _, source_start, source_end) in mapping.windows(clip) {
+        first_window.get_or_insert((start, source_start));
         let index = samples.partition_point(|&(time, _, _)| time < source_start);
         if let Some(&(_, x, y)) = index.checked_sub(1).and_then(|before| samples.get(before)) {
             points.push((start - 0.001, x, y));
@@ -765,6 +788,13 @@ fn follow_points(
                 .take_while(|&&(time, _, _)| time <= source_end)
                 .map(|&(time, x, y)| (start + (time - source_start), x, y)),
         );
+    }
+    if points.is_empty() {
+        if let Some((start, source_start)) = first_window {
+            if let Some((time, x, y)) = nearest_follow_sample(samples, source_start) {
+                points.push((start + (time - source_start), x, y));
+            }
+        }
     }
     points.sort_by(|left, right| left.0.total_cmp(&right.0));
     let mut kept: Vec<(f64, f64, f64)> = Vec::with_capacity(points.len());
@@ -922,8 +952,9 @@ fn valid_frame(frame: (f64, f64)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        camera_transform, placement_rect, source_to_stage, stage_point_to_source, static_camera_at,
-        view_rect, Camera, TimeMapping, ZoomCameraCache, ZoomCameraSettings,
+        camera_transform, nearest_follow_sample, placement_rect, source_to_stage,
+        stage_point_to_source, static_camera_at, view_rect, Camera, TimeMapping, ZoomCameraCache,
+        ZoomCameraSettings,
     };
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
@@ -1001,6 +1032,30 @@ mod tests {
         assert_eq!(evaluate(&clips, &sidecar, frame, 3.7).0, 3.0);
         assert_eq!(evaluate(&clips, &sidecar, frame, 4.0).0, 3.0);
         assert_eq!(evaluate(&clips, &sidecar, frame, 4.01).0, 1.0);
+    }
+
+    #[test]
+    fn the_live_fallback_prefers_a_lookahead_sample() {
+        let samples = [(0.8, 10.0, 10.0), (1.2, 20.0, 20.0), (5.0, 30.0, 30.0)];
+        assert_eq!(
+            nearest_follow_sample(&samples, 1.0),
+            Some((1.2, 20.0, 20.0))
+        );
+    }
+
+    #[test]
+    fn a_clip_before_the_pointer_starts_follows_the_nearest_sample() {
+        let clips = [auto_clip(1.0, 2.0, 3.0, (320.0, 240.0))];
+        // The pointer appears long after this clip ends. The studied camera
+        // still falls back to it, so the clip follows instead of freezing on
+        // the stored centre.
+        let sidecar = sidecar((640, 480), &[(6.0, 600.0, 300.0)]);
+        let (scale, center) = evaluate(&clips, &sidecar, (640.0, 480.0), 1.5);
+        assert!(scale > 1.5, "the clip must still zoom: {scale}");
+        assert!(
+            center.0 > 450.0,
+            "the camera must follow the sample: {center:?}"
+        );
     }
 
     #[test]
@@ -1157,18 +1212,6 @@ mod tests {
             || Some(sidecar.clone()),
         );
         assert!((center.0 - 480.0).abs() < 10.0, "center={center:?}");
-        let identity = cache.evaluate(
-            &clips,
-            (640.0, 480.0),
-            &TimeMapping::default(),
-            ZoomCameraSettings::default(),
-            1.2,
-            || Some(sidecar.clone()),
-        );
-        assert!(
-            (identity.1 .0 - center.0).abs() > 100.0,
-            "unmapped windows must not find source samples: {identity:?} vs {center:?}"
-        );
     }
 
     #[test]

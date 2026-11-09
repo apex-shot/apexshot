@@ -352,6 +352,11 @@ Resolved on `feat/autozoom-parity`:
   has no movement group. That fallback now follows the studied rule: the first
   pointer sample at or after the range start within 500 ms, otherwise the
   nearest sample (`B39:3324-3332`), and only then the click position.
+- **Live focus fallback.** When an automatic clip's footage window has no
+  pointer sample and none before it, `follow_points` now uses the same studied
+  fallback (`B39:3334-3349`): the first sample at or after the window start
+  within 500 ms, otherwise the nearest sample. The camera follows that sample
+  instead of freezing on the stored centre.
 - **Minimum window.** The generator no longer drops a window shorter than
   100 ms. After merging, `minimum_window` grows the end to the minimum, or
   shifts the start back at the end of the recording, matching the collection's
@@ -375,12 +380,16 @@ important part.
   depends on project settings, frame rate, and motion blur, which were not
   measured.
 
-## 11. Open questions
+## 11. Resolved questions
 
-1. Should the movement-group budget use the visible source area at the current
-   scale, including letterboxing and crop, rather than `frame / scale`?
-2. Does a fresh project need import-time range generation, or is the editor's
-   "restore default ranges" action the intended only entry point?
+1. **Movement-group budget.** The Windows editor's camera frame is the source
+   rectangle, so `frame / scale` is the visible source at the current scale and
+   `frame / scale * 0.5` is the studied half-viewport budget. The studied
+   stage's padding and letterboxing sit outside that source rectangle.
+2. **Range generation entry point.** The renderer exposes the generator through
+   `resetZoomRanges`, which the "Restore default zoom ranges" action calls
+   (`DXX:3661-3662`, `DSYc1gpA:208-214`). No import-time caller is visible.
+   ApexShot's Detect action is the equivalent entry point.
 
 ## 12. Validation
 
@@ -460,3 +469,15 @@ Minimum-window change, 2026-11-09:
 - No physical clip: the current lead and tail constants make every generated
   window at least about 199 ms, so the expansion cannot be reached from a click
   recording. The helper is covered directly instead.
+
+Live-follow fallback, 2026-11-09:
+
+- `cargo test --lib video_editor::zoom::tests` passed 25 of 25 tests.
+- `cargo test --lib` passed 831 tests with 12 ignored. The known parallel-only
+  `settings::usage` layout test failed and passed when run alone.
+- `rustfmt --check` on the changed file passed.
+- `cargo clippy --all-targets` finished without warnings.
+- The editor binary rebuilt with the change.
+- No physical clip: the existing recordings have pointer samples inside their
+  zoom windows. A clip window with no sample and none before it is covered by
+  the new camera unit test and the lookahead-selection test.
