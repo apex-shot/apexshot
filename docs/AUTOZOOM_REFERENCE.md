@@ -340,22 +340,22 @@ Resolved on `feat/autozoom-parity`:
   screen spring returns to the full frame. The 0.6 s early exit was removed from
   the camera plan and the static fallback in
   `windows-ui/src/video_editor/zoom.rs`. This matches the studied build.
+- **Click source.** The generator now adds a click seed at every press release
+  as well as the recorded down event, in `clicks_from_sidecar`. The studied
+  collection uses the whole `mouseclicks` stream (`DXX` line 1253), and that
+  stream exposes both `mouseDown` and `mouseUp` (`YEiLxxgG` 2276-2292). The
+  release time is exact; its position comes from the nearest pointer sample,
+  falling back to the down click because the sidecar stores the press interval
+  but not a separate release point.
+- **Focus fallback.** The live camera already uses movement groups and their
+  dwell-weighted centres. The stored centre is only the fallback when a range
+  has no movement group. That fallback now follows the studied rule: the first
+  pointer sample at or after the range start within 500 ms, otherwise the
+  nearest sample (`B39:3324-3332`), and only then the click position.
 
-The remaining exactness gaps are:
+The remaining exactness gap is:
 
-1. **Click source.** ApexShot's sidecar records a click on button-down
-   (`capture-overlay/src/platform/windows/pointer_tracker.cpp:764`, `:893`),
-   while the studied generator seeds from both down and up. For short clicks the
-   difference is milliseconds; for long presses the studied tail follows the
-   release. This also changes which clicks near the recording end survive the
-   1 s cutoff.
-2. **Baked focus.** `automatic_zooms` stores a bounding-box midpoint as the clip
-   centre (`src/recording/editor/auto_zoom.rs:88-104`). The studied generator
-   stores no focus at all. ApexShot's editor recomputes movement groups for
-   automatic clips, so this centre is mostly a seed and fallback. It becomes
-   visible when the sidecar has no usable pointer data, and its fallback rule
-   differs from the studied nearest-sample rule.
-3. **Short windows.** ApexShot drops windows shorter than 0.1 s
+1. **Short windows.** ApexShot drops windows shorter than 0.1 s
    (`src/recording/editor/auto_zoom.rs:122`). The studied collection enforces
    its own 100 ms minimum when an item is inserted, which can fit or reject the
    item rather than filtering it in the generator.
@@ -370,21 +370,17 @@ goal. The camera model is already the important part.
 - The main process is V8 bytecode, so import-time creation of zoom ranges is not
   proven. The renderer proves the generator and the "Restore default zoom
   ranges" path.
-- The exact contents of `mouseclicks` are inferred from the getters that split
-  it into down and up events. No recorded project fixture was inspected.
+- The contents of `mouseclicks` are read from the getters that split it into
+  down and up events. No recorded project fixture was inspected.
 - The spring behaviour is read from the engine source. Perceived motion also
   depends on project settings, frame rate, and motion blur, which were not
   measured.
 
 ## 11. Open questions
 
-1. Should ApexShot anchor the end of a zoom on button-up, matching the studied
-   click stream, or keep the current down-only rule?
-2. Should the generator stop baking a focus point and let the editor derive the
-   target entirely?
-3. Should the movement-group budget use the visible source area at the current
+1. Should the movement-group budget use the visible source area at the current
    scale, including letterboxing and crop, rather than `frame / scale`?
-4. Does a fresh project need import-time range generation, or is the editor's
+2. Does a fresh project need import-time range generation, or is the editor's
    "restore default ranges" action the intended only entry point?
 
 ## 12. Validation
@@ -420,3 +416,35 @@ Exit-timing change, 2026-11-09:
   start returning after `T+4.5`.
 - The editor was opened with the clip and left running; the maintainer presses
   Detect and checks the hold. Physical confirmation is still pending.
+
+Click-source change, 2026-11-09:
+
+- `cargo fmt --all -- --check` exited 0.
+- `cargo clippy --all-targets` finished without warnings.
+- `cargo test --lib auto_zoom` passed 18 of 18 tests.
+- `cargo test --lib` passed 826 tests with 12 ignored. The known parallel-only
+  `settings::usage` layout failure occurred once and passed when run alone.
+- The editor binary rebuilt with the change.
+- Physical clip: `artifacts/physical/zoom-click-source.mp4`, recorded through
+  `zoom_click_source_harness.py`. The sidecar has one click at `4.985 s` and one
+  press from `4.985 s` to `6.482 s`, at region `(901, 508)`, the crosshair.
+- Old range: `4.685-7.485 s`. Release-extended range: `4.685-8.982 s`, because
+  the `6.482 s` release adds a window and the two merge.
+- The clip's `T+` clock puts the press at `2.012 s`, the release at `3.552 s`,
+  the old end at about `4.512 s`, and the new end at about `6.009 s`. At
+  `T+4.7` the editor must still be at 2.00x; the old build would already be back
+  at the full frame. The editor was opened with this clip and left running for
+  the maintainer's Detect check.
+
+Focus-fallback change, 2026-11-09:
+
+- `cargo test --lib auto_zoom` passed 19 of 19 tests, including the new
+  nearest-pointer fallback and the existing group-centre tests.
+- `cargo test --lib` passed 827 tests with 12 ignored. The known parallel-only
+  `settings::usage` layout failure occurred once and passed alone.
+- `rustfmt --check` on the changed file passed. The workspace-wide format check
+  still reports the checkout's CRLF newline style on untouched files.
+- `cargo clippy --all-targets` finished without warnings.
+- No new physical clip: the existing recordings have pointer samples, so they
+  exercise the movement-group path, which is unchanged. The fallback is covered
+  directly by the new unit test.

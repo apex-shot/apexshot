@@ -7,7 +7,7 @@
 //! anchored in source time, so trimming, cutting, or retiming the composition
 //! leaves the zoom on the footage it was placed for.
 
-use crate::recording::editor::sidecar::PointerSidecar;
+use crate::recording::editor::sidecar::{PointerSidecar, PressSample};
 
 /// How far before a click its zoom opens.
 pub const LEAD_SECONDS: f64 = 0.3;
@@ -80,6 +80,31 @@ fn merge_windows(mut windows: Vec<(f64, f64)>, gap: f64) -> Vec<(f64, f64)> {
     merged
 }
 
+/// The studied fallback when a range has no pointer sample inside it: prefer
+/// the first sample at or after the start within 500 ms, otherwise the nearest
+/// recorded sample.
+fn nearest_pointer(pointer: &[PointerPoint], start: f64) -> Option<(f64, f64)> {
+    const SMOOTHING_LOOKAHEAD_SECONDS: f64 = 0.5;
+    pointer
+        .iter()
+        .find(|point| {
+            point.time.is_finite()
+                && point.time >= start
+                && point.time - start <= SMOOTHING_LOOKAHEAD_SECONDS
+        })
+        .or_else(|| {
+            pointer
+                .iter()
+                .filter(|point| point.time.is_finite())
+                .min_by(|left, right| {
+                    (left.time - start)
+                        .abs()
+                        .total_cmp(&(right.time - start).abs())
+                })
+        })
+        .map(|point| point.position)
+}
+
 /// The centre of the box every point inside a window covers.
 ///
 /// The focus is the middle of the range the pointer covered, not the click
@@ -135,6 +160,7 @@ pub fn automatic_zooms(clicks: &[Click], pointer: &[PointerPoint], duration: f64
                     .filter(|p| in_window(p.time))
                     .map(|p| (p.time, p.position)),
             )
+            .or_else(|| nearest_pointer(pointer, start))
             .or_else(|| {
                 focus_within(
                     clicks
@@ -169,15 +195,71 @@ pub fn automatic_zooms(clicks: &[Click], pointer: &[PointerPoint], duration: f64
 }
 
 /// Recorded clicks mapped into encoded-video pixels.
+///
+/// The studied detector seeds from both button-down and button-up events. The
+/// sidecar stores down events in `clicks` and the release time in `presses`, so
+/// add a seed at each release. A release has no stored position of its own; use
+/// the nearest pointer sample, falling back to the down click that opened the
+/// press.
 pub fn clicks_from_sidecar(sidecar: &PointerSidecar, width: f64, height: f64) -> Vec<Click> {
-    sidecar
+    let mut clicks: Vec<Click> = sidecar
         .clicks
         .iter()
         .map(|click| Click {
             time: click.t,
             position: sidecar.map_to_video(click.x, click.y, width, height),
         })
-        .collect()
+        .collect();
+
+    for press in &sidecar.presses {
+        if !press.up.is_finite() || press.up < press.down {
+            continue;
+        }
+        if let Some(position) = release_position(sidecar, press, width, height) {
+            clicks.push(Click {
+                time: press.up,
+                position,
+            });
+        }
+    }
+
+    clicks
+}
+
+/// Where a press came up, in encoded-video pixels.
+///
+/// The recorder stores the press interval but not a separate release point, so
+/// read the pointer sample nearest the release. If there is no pointer sample
+/// close enough, reuse the down click that opened the press.
+fn release_position(
+    sidecar: &PointerSidecar,
+    press: &PressSample,
+    width: f64,
+    height: f64,
+) -> Option<(f64, f64)> {
+    const NEAREST_POINTER_SECONDS: f64 = 0.5;
+    const PRESS_MATCH_SECONDS: f64 = 0.001;
+    let nearest = sidecar
+        .pointer
+        .iter()
+        .min_by(|left, right| {
+            (left.t - press.up)
+                .abs()
+                .total_cmp(&(right.t - press.up).abs())
+        })
+        .filter(|point| (point.t - press.up).abs() <= NEAREST_POINTER_SECONDS)
+        .map(|point| sidecar.map_to_video(point.x, point.y, width, height));
+    if nearest.is_some() {
+        return nearest;
+    }
+
+    sidecar
+        .clicks
+        .iter()
+        .find(|click| {
+            click.button == press.button && (click.t - press.down).abs() <= PRESS_MATCH_SECONDS
+        })
+        .map(|click| sidecar.map_to_video(click.x, click.y, width, height))
 }
 
 /// Recorded pointer samples mapped into encoded-video pixels.
@@ -199,6 +281,21 @@ pub fn pointer_from_sidecar(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::recording::editor::sidecar::{
+        CaptureRegion, ClickSample, CursorKind, PointerSample, PressSample,
+    };
+
+    fn sidecar() -> PointerSidecar {
+        PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 640,
+                h: 480,
+            },
+        )
+    }
 
     fn click(time: f64) -> Click {
         Click {
@@ -311,5 +408,137 @@ mod tests {
         let zooms = automatic_zooms(&[click(3.0)], &[], 20.0);
         assert!((zooms[0].center.0 - 640.0).abs() < 1e-9);
         assert!((zooms[0].center.1 - 360.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn focus_falls_back_to_the_nearest_pointer_sample() {
+        let pointer = [
+            PointerPoint {
+                time: 2.6,
+                position: (10.0, 10.0),
+            },
+            PointerPoint {
+                time: 5.6,
+                position: (400.0, 400.0),
+            },
+        ];
+        // The click window is 2.7-5.5, so neither sample is inside it. The
+        // studied fallback picks the sample nearest the window start.
+        let zooms = automatic_zooms(&[click(3.0)], &pointer, 20.0);
+        assert!((zooms[0].center.0 - 10.0).abs() < 1e-9);
+        assert!((zooms[0].center.1 - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_press_release_adds_a_second_click_seed() {
+        let mut sidecar = sidecar();
+        sidecar.clicks.push(ClickSample {
+            t: 3.0,
+            x: 320.0,
+            y: 240.0,
+            button: 1,
+            cursor_id: None,
+        });
+        sidecar.presses.push(PressSample {
+            down: 3.0,
+            up: 3.4,
+            button: 1,
+            dragged: false,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 3.0,
+            x: 320.0,
+            y: 240.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 3.4,
+            x: 340.0,
+            y: 260.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+
+        let clicks = clicks_from_sidecar(&sidecar, 640.0, 480.0);
+        assert_eq!(clicks.len(), 2);
+        assert!((clicks[1].time - 3.4).abs() < 1e-9);
+        assert_eq!(clicks[1].position, (340.0, 260.0));
+
+        let pointer = pointer_from_sidecar(&sidecar, 640.0, 480.0);
+        let zooms = automatic_zooms(&clicks, &pointer, 20.0);
+        assert_eq!(zooms.len(), 1);
+        assert!((zooms[0].start - 2.7).abs() < 1e-9);
+        assert!((zooms[0].end - 5.9).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_release_falls_back_to_the_down_position() {
+        let mut sidecar = sidecar();
+        sidecar.clicks.push(ClickSample {
+            t: 3.0,
+            x: 120.0,
+            y: 80.0,
+            button: 1,
+            cursor_id: None,
+        });
+        sidecar.presses.push(PressSample {
+            down: 3.0,
+            up: 3.4,
+            button: 1,
+            dragged: false,
+        });
+
+        let clicks = clicks_from_sidecar(&sidecar, 640.0, 480.0);
+        assert_eq!(clicks.len(), 2);
+        assert_eq!(clicks[1].position, (120.0, 80.0));
+    }
+
+    #[test]
+    fn a_release_without_a_down_click_still_seeds_a_zoom() {
+        let mut sidecar = sidecar();
+        sidecar.presses.push(PressSample {
+            down: 0.0,
+            up: 0.5,
+            button: 1,
+            dragged: false,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 0.5,
+            x: 100.0,
+            y: 100.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+
+        let clicks = clicks_from_sidecar(&sidecar, 640.0, 480.0);
+        assert_eq!(clicks.len(), 1);
+        assert!((clicks[0].time - 0.5).abs() < 1e-9);
+        let zooms = automatic_zooms(&clicks, &pointer_from_sidecar(&sidecar, 640.0, 480.0), 20.0);
+        assert_eq!(zooms.len(), 1);
+        assert!((zooms[0].end - 3.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_release_in_the_last_second_is_ignored() {
+        let mut sidecar = sidecar();
+        sidecar.clicks.push(ClickSample {
+            t: 3.0,
+            x: 320.0,
+            y: 240.0,
+            button: 1,
+            cursor_id: None,
+        });
+        sidecar.presses.push(PressSample {
+            down: 3.0,
+            up: 9.5,
+            button: 1,
+            dragged: false,
+        });
+
+        let clicks = clicks_from_sidecar(&sidecar, 640.0, 480.0);
+        let zooms = automatic_zooms(&clicks, &[], 10.0);
+        assert_eq!(zooms.len(), 1);
+        assert!((zooms[0].end - 5.5).abs() < 1e-9);
     }
 }
