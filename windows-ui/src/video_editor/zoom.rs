@@ -324,7 +324,6 @@ impl ZoomCameraPlan {
         let lead_in = settings.lead_in_seconds();
         let start_time = zooms
             .iter()
-            .filter(|zoom| !zoom.groups.is_empty())
             .map(|zoom| (zoom.clip.start - lead_in).max(0.0))
             .min_by(f64::total_cmp);
         let mut boundaries = Vec::new();
@@ -413,11 +412,6 @@ impl ZoomCameraPlan {
                     // An instant zoom is a cut: the camera is already at its
                     // target instead of travelling there on the spring.
                     motion = CameraMotion::parked(self.target_rect(index, sample_time));
-                } else if zoom.groups.is_empty() {
-                    motion = CameraMotion::parked(camera_rect(
-                        static_camera_at(&self.clips, sample_time, self.frame),
-                        self.frame,
-                    ));
                 } else {
                     motion =
                         motion.advance(self.target_rect(index, sample_time), spring, end - from);
@@ -447,9 +441,6 @@ impl ZoomCameraPlan {
         if let Some(index) = self.target_index_at(time) {
             if self.zooms[index].clip.instant {
                 return frame_for_rect(self.target_rect(index, time), self.frame);
-            }
-            if self.zooms[index].groups.is_empty() {
-                return static_camera_at(&self.clips, time, self.frame);
             }
         }
         let Some(start_time) = self.start_time else {
@@ -1043,17 +1034,26 @@ mod tests {
     }
 
     #[test]
-    fn camera_eases_in_and_holds_a_plateau_without_pointer_samples() {
+    fn camera_springs_in_holds_and_springs_out_without_pointer_samples() {
         let clips = [auto_clip(1.0, 4.0, 3.0, (320.0, 240.0))];
         let frame = (640.0, 480.0);
         let sidecar = sidecar((640, 480), &[]);
-        assert_eq!(evaluate(&clips, &sidecar, frame, 1.0).0, 1.0);
-        assert!((evaluate(&clips, &sidecar, frame, 1.3).0 - 2.0).abs() < 1e-9);
-        assert_eq!(evaluate(&clips, &sidecar, frame, 1.6).0, 3.0);
-        assert_eq!(evaluate(&clips, &sidecar, frame, 2.5).0, 3.0);
-        assert_eq!(evaluate(&clips, &sidecar, frame, 3.7).0, 3.0);
-        assert_eq!(evaluate(&clips, &sidecar, frame, 4.0).0, 3.0);
-        assert_eq!(evaluate(&clips, &sidecar, frame, 4.01).0, 1.0);
+        assert!(evaluate(&clips, &sidecar, frame, 1.0).0 < 1.01);
+        let entering = evaluate(&clips, &sidecar, frame, 1.3).0;
+        assert!(
+            entering > 1.5 && entering < 3.2,
+            "entry rides the spring, got {entering}"
+        );
+        for time in [2.5, 3.7, 4.0] {
+            let held = evaluate(&clips, &sidecar, frame, time).0;
+            assert!((held - 3.0).abs() < 0.01, "time={time} held={held}");
+        }
+        let leaving = evaluate(&clips, &sidecar, frame, 4.05).0;
+        assert!(
+            leaving > 1.5 && leaving < 3.0,
+            "exit rides the spring, got {leaving}"
+        );
+        assert!(evaluate(&clips, &sidecar, frame, 5.5).0 < 1.01);
     }
 
     #[test]
@@ -1129,14 +1129,19 @@ mod tests {
     }
 
     #[test]
-    fn a_short_clip_eases_in_at_the_midpoint_and_holds_to_its_end() {
+    fn a_short_clip_springs_in_and_does_not_cut_at_its_end() {
         let clips = [auto_clip(1.0, 1.8, 3.0, (320.0, 240.0))];
         let sidecar = sidecar((640, 480), &[]);
-        assert!((evaluate(&clips, &sidecar, (640.0, 480.0), 1.2).0 - 2.0).abs() < 1e-9);
-        assert_eq!(evaluate(&clips, &sidecar, (640.0, 480.0), 1.4).0, 3.0);
-        assert_eq!(evaluate(&clips, &sidecar, (640.0, 480.0), 1.6).0, 3.0);
-        assert_eq!(evaluate(&clips, &sidecar, (640.0, 480.0), 1.8).0, 3.0);
-        assert_eq!(evaluate(&clips, &sidecar, (640.0, 480.0), 1.81).0, 1.0);
+        let frame = (640.0, 480.0);
+        let entering = evaluate(&clips, &sidecar, frame, 1.2).0;
+        assert!(entering > 1.0 && entering < 3.2, "got {entering}");
+        let last = evaluate(&clips, &sidecar, frame, 1.8).0;
+        assert!(last > 2.5, "still zoomed on its last frame, got {last}");
+        let after = evaluate(&clips, &sidecar, frame, 1.81).0;
+        assert!(
+            after > 2.0,
+            "the end springs back instead of cutting, got {after}"
+        );
     }
 
     #[test]
@@ -1250,7 +1255,7 @@ mod tests {
     }
 
     #[test]
-    fn clips_without_pointer_samples_keep_the_static_camera_even_with_clicks() {
+    fn clips_without_pointer_samples_keep_the_stored_centre_even_with_clicks() {
         let clips = [auto_clip(1.0, 4.0, 3.0, (100.0, 300.0))];
         let mut sidecar = sidecar((640, 480), &[]);
         sidecar.clicks.push(ClickSample {
@@ -1260,10 +1265,20 @@ mod tests {
             button: 1,
             cursor_id: None,
         });
-        let time = 2.0;
-        assert_eq!(
-            evaluate(&clips, &sidecar, (640.0, 480.0), time),
-            static_camera_at(&clips, time, (640.0, 480.0))
+        let frame = (640.0, 480.0);
+        let expected = super::frame_for_rect(super::focus_rect(3.0, (100.0, 300.0), frame), frame);
+        let actual = evaluate(&clips, &sidecar, frame, 3.5);
+        assert!(
+            (actual.0 - expected.0).abs() < 0.01,
+            "{actual:?} vs {expected:?}"
+        );
+        assert!(
+            (actual.1 .0 - expected.1 .0).abs() < 0.5,
+            "{actual:?} vs {expected:?}"
+        );
+        assert!(
+            (actual.1 .1 - expected.1 .1).abs() < 0.5,
+            "{actual:?} vs {expected:?}"
         );
     }
 

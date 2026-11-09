@@ -385,12 +385,29 @@ Resolved on `feat/autozoom-parity`:
 - **Screen motion blur.** The Windows preview and exporter now use the current
   and previous camera rectangles, frame-rate-scaled strength, the studied
   playback/export fetch budgets, and squared-colour averaging. The amount is
-  saved with the project and defaults to 1 for older files. The CPU renderer is
-  an approximation of the studied GPU shader: it does not implement texture
-  gradient filtering or rounded-edge reconstruction, and the preview applies
-  the trail in the picture's source coordinates, reflecting at source edges.
+  saved with the project and defaults to 1 for older files. Each fetch now
+  covers its own step along the trail, the way the studied shader's gradient
+  sample does: the renderer builds a box-filtered mip chain and takes up to
+  four trilinear taps across the step at the matching level, mirroring the
+  studied sampler's linear mip filter and 4x anisotropy (`vPAFtiYS:3859-3863`,
+  `B39:10552-10575`). Fetches are jittered by the studied screen-space 8x8
+  Bayer threshold (`vPAFtiYS:7333-7370`, `B39:12405-12408`), and both preview
+  and export clamp at source edges like the studied clamp-to-edge sampler.
+  Playback in the preview uses one tap per fetch to stay within frame budget.
   Cursor and webcam motion blur remain separate gaps. Preview effect work runs
   on a bounded worker, so slow frames can be skipped rather than blocking UI.
+- **Rounded-edge reconstruction does not apply.** The studied shader
+  reconstructs coverage of the card's rounded body, outline, and shadow along
+  the trail (`B39:12259-12340`) because its zoom moves and grows the whole
+  card across the stage. The Windows editor zooms by cropping the source inside
+  a fixed card, so there is no moving card edge to smear. Matching that would
+  mean adopting the studied framing model, which is a separate gap.
+- **Zooms without movement groups now ride the spring.** Manual zooms, and
+  automatic zooms with no pointer data, used the old static fallback: a
+  smoothstep entry and a hard cut back to the full frame at `clip.end`. The
+  studied build drives every non-instant zoom through the same screen spring,
+  with only the target point differing (`B39:7955-7964`, `B39:18148`). The
+  camera plan now springs these zooms in and out too.
 
 There is no remaining confirmed generator gap.
 
@@ -551,3 +568,30 @@ Screen motion blur, 2026-11-09:
   moving the effect to a bounded worker. This is not an end-to-end playback
   frame-rate measurement. No rendered studied-build fixture was available, so
   visual and numerical parity remain unverified.
+
+Screen motion-blur sampling and manual-zoom spring, 2026-11-10:
+
+- Real exports of `artifacts/physical/zoom-click-source.mp4` (0-11 s, a 2x
+  zoom over 4.685-8.982 s) at 24, 30, and 60 fps with blur on and off, plus a
+  pan into the top-left corner, an instant zoom, and a cut variant. Exports
+  showed the hard cut at the end of zooms without pointer data: full frame
+  18 ms after `clip.end`. After the spring change, blur-on and blur-off frames
+  differ through the entry (4.70-5.10 s) and the exit (9.00-9.90 s), and are
+  near identical at rest and through the hold. The instant zoom still snaps.
+- Accuracy against a brute-force reference: one source frame rendered with up
+  to 256 point samples per pixel at a quarter-texel span stands in for the
+  continuous trail. Mean absolute error, 0-255 per channel:
+
+  | Case | No blur | Export (16 fetches, 4 taps) | Playback (6 fetches, 1 tap) |
+  | --- | --- | --- | --- |
+  | Zoom entry, 1.45x to 1.6x | 11.0 | 0.77 (p99 7) | 3.97 (p99 36) |
+  | Pan, 2x, 60 px by 20 px | 14.7 | 1.09 (p99 8) | 4.21 (p99 32) |
+
+  This checks that the renderer integrates the trail. It is not studied-build
+  evidence: the studied build ships only as a macOS app, so no frames it
+  rendered were available, and visual and numerical parity with it remain
+  unverified.
+- `cargo test --lib video_editor` passed 305 with 5 ignored, and
+  `cargo clippy --all-targets` finished without warnings. Three camera tests
+  that asserted the old static fallback now assert the spring entry, hold,
+  and exit instead.
