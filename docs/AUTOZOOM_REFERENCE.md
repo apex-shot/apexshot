@@ -441,10 +441,17 @@ Resolved on `feat/autozoom-parity`:
   the card rect, so a layout change glides; the Windows card follows the
   sprung camera instead, so the aim blends toward the free strip by the
   overlay's opacity rather than jumping.
-- **Still open in the framing.** Motion blur smears only the
-  picture inside the card; the studied shader also reconstructs the moving
-  card's rounded edge, outline, and shadow along the trail
-  (`B39:12259-12340`).
+- **The moving card's edges now smear in the preview.** While the card moves,
+  each stage pixel the card swept averages the screen along the stretch of
+  the trail where the card covered it, and that stretch's share of the trail
+  becomes the pixel's opacity, as the studied shader does
+  (`B39:12259-12340`). Both the leading and trailing edges and the rounded
+  corners therefore smear over the background. Straight edges are solved
+  along the trail with a half-pixel antialias band; corners are weighted per
+  fetch. The layer reuses the screen blur's fetch counts, mips, dither, and
+  linear-light averaging, and is drawn at stage size capped at 1600 px; a
+  card at rest goes back to the sharp clip. The Windows card has no outline
+  or shadow, so the studied outline and shadow terms have nothing to draw.
 - **Zooms without movement groups now ride the spring.** Manual zooms, and
   automatic zooms with no pointer data, used the old static fallback: a
   smoothstep entry and a hard cut back to the full frame at `clip.end`. The

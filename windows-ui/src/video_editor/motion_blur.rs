@@ -184,6 +184,260 @@ impl ScreenTrail {
     }
 }
 
+/// The whole moving card's trail over the stage, as the studied build blurs
+/// it: each stage pixel averages the screen along the stretch of the trail
+/// where the card covered it, and that stretch's share of the trail becomes
+/// the pixel's opacity, so the card's leading and trailing edges both smear
+/// over the background.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct CardTrail {
+    /// The card at the start of the trail and now, in output pixels.
+    before: [f64; 4],
+    now: [f64; 4],
+    /// The corner radius as a fraction of the card's width.
+    radius: f64,
+}
+
+impl CardTrail {
+    /// `now` and `previous` are the card in stage pixels this frame and the
+    /// frame before; `stage` is the stage's size in those units, drawn into
+    /// `output` pixels. `None` when the card did not move a pixel.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn new(
+        now: (f64, f64, f64, f64),
+        previous: (f64, f64, f64, f64),
+        stage: (f64, f64),
+        output: (u32, u32),
+        fps: f64,
+        amount: f64,
+        radius: f64,
+    ) -> Option<Self> {
+        if !(stage.0 > 0.0 && stage.1 > 0.0)
+            || output.0 == 0
+            || output.1 == 0
+            || !fps.is_finite()
+            || fps <= 0.0
+            || !amount.is_finite()
+            || amount <= 0.0
+        {
+            return None;
+        }
+        let sx = f64::from(output.0) / stage.0;
+        let sy = f64::from(output.1) / stage.1;
+        let rect = |r: (f64, f64, f64, f64)| [r.0 * sx, r.1 * sy, r.2 * sx, r.3 * sy];
+        let now = rect(now);
+        let previous = rect(previous);
+        let strength = amount.clamp(0.0, 1.0) * fps / 60.0;
+        let before: [f64; 4] = std::array::from_fn(|i| now[i] + (previous[i] - now[i]) * strength);
+        if now.iter().chain(before.iter()).any(|v| !v.is_finite())
+            || now[2] <= 0.0
+            || now[3] <= 0.0
+            || before[2] <= 0.0
+            || before[3] <= 0.0
+            || now.iter().zip(before).all(|(a, b)| (a - b).abs() < 1.0)
+        {
+            return None;
+        }
+        let radius = if radius.is_finite() {
+            radius.max(0.0)
+        } else {
+            0.0
+        };
+        Some(Self {
+            before,
+            now,
+            radius,
+        })
+    }
+
+    /// Draw the trail into `output`, premultiplied RGBA at `output_size`.
+    /// Pixels the card never covered stay transparent.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn render(
+        self,
+        pixels: &[u8],
+        size: (u32, u32),
+        output_size: (u32, u32),
+        output: &mut [u8],
+        quality: usize,
+        span: f64,
+        anisotropy: usize,
+    ) {
+        let w = size.0 as usize;
+        let h = size.1 as usize;
+        let out_w = output_size.0 as usize;
+        let out_h = output_size.1 as usize;
+        if w == 0
+            || h == 0
+            || out_w == 0
+            || out_h == 0
+            || pixels.len() < w * h * 4
+            || output.len() != out_w * out_h * 4
+        {
+            return;
+        }
+        output.fill(0);
+        let quality = quality.max(1);
+        let span = span.max(1.0);
+        let anisotropy = anisotropy.max(1);
+        let mips = build_mips(pixels, w, h);
+        let (before, now, radius) = (self.before, self.now, self.radius);
+        // Source texels per output pixel.
+        let minor = (w as f64 / now[2]).max(h as f64 / now[3]).max(1e-6);
+        // Only the box the card swept can be covered.
+        let left = before[0].min(now[0]).floor().max(0.0) as usize;
+        let right =
+            ((before[0] + before[2]).max(now[0] + now[2]).ceil().max(0.0) as usize).min(out_w);
+        let top = before[1].min(now[1]).floor().max(0.0) as usize;
+        let bottom =
+            ((before[1] + before[3]).max(now[1] + now[3]).ceil().max(0.0) as usize).min(out_h);
+        if left >= right || top >= bottom {
+            return;
+        }
+        output
+            .par_chunks_mut(out_w * 4)
+            .enumerate()
+            .skip(top)
+            .take(bottom - top)
+            .for_each(|(y, row)| {
+                let py = y as f64 + 0.5;
+                // Card-space v at the trail's start and end, and the half
+                // pixel that antialiases an edge that is standing still.
+                let v0 = (py - before[1]) / before[3];
+                let v1 = (py - now[1]) / now[3];
+                let ev = 0.5 / now[3];
+                let eu = 0.5 / now[2];
+                for x in left..right {
+                    let px = x as f64 + 0.5;
+                    let u0 = (px - before[0]) / before[2];
+                    let u1 = (px - now[0]) / now[2];
+                    let inner = intersect(
+                        linear_interval(u0, u1, eu, 1.0 - eu),
+                        linear_interval(v0, v1, ev, 1.0 - ev),
+                    );
+                    let outer = intersect(
+                        linear_interval(u0, u1, -eu, 1.0 + eu),
+                        linear_interval(v0, v1, -ev, 1.0 + ev),
+                    );
+                    let coverage = 0.5 * (span_length(inner) + span_length(outer));
+                    if coverage <= 1e-4 {
+                        continue;
+                    }
+                    let (ta, tb) = outer;
+                    let texel = |t: f64| {
+                        (
+                            (u0 + (u1 - u0) * t) * w as f64 - 0.5,
+                            (v0 + (v1 - v0) * t) * h as f64 - 0.5,
+                        )
+                    };
+                    let start = texel(ta);
+                    let end = texel(tb);
+                    let dx = (end.0 - start.0) * now[2] / w as f64;
+                    let dy = (end.1 - start.1) * now[3] / h as f64;
+                    let distance = dx.hypot(dy);
+                    let count = if distance < 1.0 {
+                        1
+                    } else {
+                        ((distance / span).ceil() as usize).clamp(1, quality)
+                    };
+                    let phase = if distance < 1.0 { 0.5 } else { bayer8(x, y) };
+                    let step = (
+                        (end.0 - start.0) / count as f64,
+                        (end.1 - start.1) / count as f64,
+                    );
+                    let major = step.0.hypot(step.1);
+                    let taps = ((major / minor).ceil() as usize).clamp(1, anisotropy);
+                    let lod = (major / taps as f64).max(minor).log2().max(0.0);
+                    let mut sum = [0.0; 3];
+                    let mut weight = 0.0;
+                    for i in 0..count {
+                        let t = ta + (tb - ta) * (i as f64 + phase) / count as f64;
+                        let u = u0 + (u1 - u0) * t;
+                        let v = v0 + (v1 - v0) * t;
+                        let card_w = before[2] + (now[2] - before[2]) * t;
+                        let card_h = before[3] + (now[3] - before[3]) * t;
+                        let corner = corner_coverage(
+                            u * card_w,
+                            v * card_h,
+                            card_w,
+                            card_h,
+                            (radius * card_w).min(card_w.min(card_h) / 2.0),
+                        );
+                        if corner <= 0.0 {
+                            continue;
+                        }
+                        let (cx, cy) = texel(t);
+                        let mut average = [0.0; 3];
+                        for k in 0..taps {
+                            let o = (k as f64 + 0.5) / taps as f64 - 0.5;
+                            let sx = (cx + step.0 * o).clamp(0.0, (w - 1) as f64);
+                            let sy = (cy + step.1 * o).clamp(0.0, (h - 1) as f64);
+                            let sample = trilinear(&mips, lod, sx, sy);
+                            for c in 0..3 {
+                                average[c] += sample[c];
+                            }
+                        }
+                        for c in 0..3 {
+                            let value = average[c] / taps as f64;
+                            sum[c] += corner * value * value;
+                        }
+                        weight += corner;
+                    }
+                    if weight <= 0.0 {
+                        continue;
+                    }
+                    let alpha = (coverage * weight / count as f64).clamp(0.0, 1.0);
+                    for c in 0..3 {
+                        row[x * 4 + c] =
+                            ((sum[c] / weight).sqrt() * alpha).round().clamp(0.0, 255.0) as u8;
+                    }
+                    row[x * 4 + 3] = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+                }
+            });
+    }
+}
+
+/// The stretch of t in [0, 1] over which a value moving linearly from `a` to
+/// `b` stays within [lo, hi]. Empty when its start passes its end.
+fn linear_interval(a: f64, b: f64, lo: f64, hi: f64) -> (f64, f64) {
+    if lo > hi {
+        return (1.0, 0.0);
+    }
+    let delta = b - a;
+    if delta.abs() < 1e-12 {
+        return if a >= lo && a <= hi {
+            (0.0, 1.0)
+        } else {
+            (1.0, 0.0)
+        };
+    }
+    let from = (lo - a) / delta;
+    let to = (hi - a) / delta;
+    let (start, end) = if from < to { (from, to) } else { (to, from) };
+    (start.max(0.0), end.min(1.0))
+}
+
+fn intersect(a: (f64, f64), b: (f64, f64)) -> (f64, f64) {
+    (a.0.max(b.0), a.1.min(b.1))
+}
+
+fn span_length(span: (f64, f64)) -> f64 {
+    (span.1 - span.0).max(0.0)
+}
+
+/// How much of the pixel at (x, y), in card pixels, the rounded corners keep.
+fn corner_coverage(x: f64, y: f64, width: f64, height: f64, radius: f64) -> f64 {
+    if radius <= 0.0 {
+        return 1.0;
+    }
+    let dx = (radius - x).max(x - (width - radius)).max(0.0);
+    let dy = (radius - y).max(y - (height - radius)).max(0.0);
+    if dx <= 0.0 || dy <= 0.0 {
+        return 1.0;
+    }
+    (0.5 - (dx.hypot(dy) - radius)).clamp(0.0, 1.0)
+}
+
 /// Screen-space 8x8 Bayer threshold in [0, 1), as the studied build uses for its trail jitter.
 fn bayer8(x: usize, y: usize) -> f64 {
     let (x, y) = (x % 8, y % 8);
@@ -267,7 +521,7 @@ fn trilinear(mips: &[Mip], lod: f64, sx: f64, sy: f64) -> [f64; 3] {
 
 #[cfg(test)]
 mod tests {
-    use super::ScreenTrail;
+    use super::{CardTrail, ScreenTrail};
 
     #[test]
     fn trail_scales_previous_motion_with_fps_and_amount() {
@@ -373,5 +627,84 @@ mod tests {
             let v = output[4 * x];
             assert!((100..=160).contains(&v), "column {x} ghosted to {v}");
         }
+    }
+
+    fn uniform(size: (usize, usize), value: u8) -> Vec<u8> {
+        let mut pixels = vec![255; size.0 * size.1 * 4];
+        for texel in pixels.chunks_mut(4) {
+            texel[..3].copy_from_slice(&[value, value, value]);
+        }
+        pixels
+    }
+
+    #[test]
+    fn card_trail_scales_to_the_output_and_needs_motion() {
+        let trail = CardTrail::new(
+            (100.0, 0.0, 100.0, 100.0),
+            (90.0, 0.0, 100.0, 100.0),
+            (200.0, 100.0),
+            (400, 200),
+            60.0,
+            1.0,
+            0.0,
+        )
+        .unwrap();
+        assert!((trail.before[0] - 180.0).abs() < 1e-9);
+        assert!((trail.now[0] - 200.0).abs() < 1e-9);
+        let still = (100.0, 0.0, 100.0, 100.0);
+        assert!(CardTrail::new(still, still, (200.0, 100.0), (400, 200), 60.0, 1.0, 0.0).is_none());
+    }
+
+    #[test]
+    fn a_moving_card_smears_both_edges_over_transparency() {
+        let pixels = uniform((16, 16), 200);
+        let trail = CardTrail {
+            before: [8.0, 0.0, 16.0, 16.0],
+            now: [16.0, 0.0, 16.0, 16.0],
+            radius: 0.0,
+        };
+        let mut output = vec![7; 48 * 16 * 4];
+        trail.render(&pixels, (16, 16), (48, 16), &mut output, 16, 1.0, 4);
+        let at = |x: usize| {
+            let p = (8 * 48 + x) * 4;
+            (output[p], output[p + 3])
+        };
+        assert_eq!(at(4), (0, 0), "never covered");
+        assert_eq!(at(20), (200, 255), "covered the whole trail");
+        let (trailing, trailing_alpha) = at(12);
+        assert!(
+            (130..=155).contains(&trailing_alpha),
+            "trailing edge alpha {trailing_alpha}"
+        );
+        let expected = 200.0 * f64::from(trailing_alpha) / 255.0;
+        assert!(
+            (f64::from(trailing) - expected).abs() <= 2.0,
+            "premultiplied {trailing}"
+        );
+        let (_, leading_alpha) = at(30);
+        assert!(
+            (30..=70).contains(&leading_alpha),
+            "leading edge alpha {leading_alpha}"
+        );
+    }
+
+    #[test]
+    fn card_trail_rounds_the_corners() {
+        let pixels = uniform((16, 16), 200);
+        let trail = CardTrail {
+            before: [0.0, 0.0, 16.0, 16.0],
+            now: [0.0, 0.0, 16.0, 16.0],
+            radius: 0.5,
+        };
+        let mut output = vec![0; 16 * 16 * 4];
+        trail.render(&pixels, (16, 16), (16, 16), &mut output, 16, 1.0, 4);
+        let alpha = |x: usize, y: usize| output[(y * 16 + x) * 4 + 3];
+        assert_eq!(alpha(0, 0), 0);
+        assert_eq!(alpha(8, 8), 255);
+        assert!(
+            (150..=220).contains(&alpha(2, 2)),
+            "corner edge alpha {}",
+            alpha(2, 2)
+        );
     }
 }

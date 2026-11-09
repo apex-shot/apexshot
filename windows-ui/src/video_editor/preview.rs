@@ -74,6 +74,33 @@ struct RawFrame {
 
 type CameraTrail = (super::zoom::ViewRect, super::zoom::ViewRect, f64, f64);
 
+/// Where the zoomed card is this frame and the frame before, in stage pixels,
+/// for the blur that smears its edges over the background.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct CardLayer {
+    pub now: (f64, f64, f64, f64),
+    pub previous: (f64, f64, f64, f64),
+    /// The stage's size in the same units.
+    pub stage: (f64, f64),
+    /// The corner radius as a fraction of the card's width.
+    pub radius: f64,
+    pub fps: f64,
+    pub amount: f64,
+}
+
+/// The card layer is drawn at stage size, capped so playback keeps up.
+const MAX_LAYER_EDGE: f64 = 1600.0;
+
+fn card_layer_size(stage: (f64, f64)) -> (u32, u32) {
+    let scale = (MAX_LAYER_EDGE / stage.0.max(1.0))
+        .min(MAX_LAYER_EDGE / stage.1.max(1.0))
+        .min(1.0);
+    (
+        ((stage.0 * scale).round() as u32).max(2),
+        ((stage.1 * scale).round() as u32).max(2),
+    )
+}
+
 struct EffectJob {
     generation: u64,
     revision: u64,
@@ -81,6 +108,7 @@ struct EffectJob {
     pixels: Arc<Vec<u8>>,
     ripple: Option<PreviewRipple>,
     trail: Option<CameraTrail>,
+    card: Option<CardLayer>,
     playing: bool,
 }
 
@@ -89,6 +117,8 @@ struct EffectFrame {
     revision: u64,
     size: (u32, u32),
     pixels: Vec<u8>,
+    /// A stage-sized, premultiplied card layer rather than a screen frame.
+    layer: bool,
 }
 
 #[derive(Default)]
@@ -115,6 +145,9 @@ pub(super) struct Preview {
     trail: Cell<Option<CameraTrail>>,
     trail_dirty: Cell<bool>,
     trail_playing: Cell<bool>,
+    card: Cell<Option<CardLayer>>,
+    /// The full-stage picture the card layer shows in, and the card it stands in for.
+    card_layer: RefCell<Option<(Picture, gtk4::Widget)>>,
     raw: RefCell<Option<RawFrame>>,
 }
 
@@ -147,6 +180,8 @@ impl Preview {
             trail: Cell::new(None),
             trail_dirty: Cell::new(false),
             trail_playing: Cell::new(false),
+            card: Cell::new(None),
+            card_layer: RefCell::new(None),
             raw: RefCell::new(None),
         });
         glib::timeout_add_local(Duration::from_millis(16), {
@@ -182,6 +217,8 @@ impl Preview {
         self.ripple_dirty.set(false);
         self.trail.set(None);
         self.trail_dirty.set(false);
+        self.card.set(None);
+        self.hide_card_layer();
         *self.raw.borrow_mut() = None;
     }
 
@@ -197,11 +234,25 @@ impl Preview {
         self.ripple_dirty.set(true);
     }
 
-    pub fn set_trail(&self, trail: Option<CameraTrail>, playing: bool) {
+    pub fn set_trail(&self, trail: Option<CameraTrail>, card: Option<CardLayer>, playing: bool) {
         let changed = self.trail.replace(trail) != trail;
+        let card_changed = self.card.replace(card) != card;
         let mode_changed = self.trail_playing.replace(playing) != playing;
-        if changed || mode_changed {
+        if changed || card_changed || mode_changed {
             self.trail_dirty.set(true);
+        }
+    }
+
+    /// Give the preview the full-stage picture the moving card's blur shows in,
+    /// and the sharp card it hides while it does.
+    pub fn set_card_layer(&self, layer: Picture, card: gtk4::Widget) {
+        *self.card_layer.borrow_mut() = Some((layer, card));
+    }
+
+    fn hide_card_layer(&self) {
+        if let Some((layer, card)) = self.card_layer.borrow().as_ref() {
+            layer.set_visible(false);
+            card.set_opacity(1.0);
         }
     }
 
@@ -290,6 +341,7 @@ impl Preview {
                     pixels: raw.pixels.clone(),
                     ripple: self.ripple.borrow().clone(),
                     trail: self.trail.get(),
+                    card: self.card.get(),
                     playing: self.trail_playing.get(),
                 });
             if let Ok(mut slot) = self.effects.job.try_lock() {
@@ -308,7 +360,7 @@ impl Preview {
             );
             if frame.generation == self.generation.get() && valid_revision {
                 self.shown_revision.set(frame.revision);
-                self.show(frame.pixels, frame.size.0, frame.size.1);
+                self.show(frame.pixels, frame.size.0, frame.size.1, frame.layer);
             }
         }
     }
@@ -325,17 +377,33 @@ impl Preview {
         newest.filter(|frame| frame.generation == self.generation.get())
     }
 
-    fn show(&self, pixels: Vec<u8>, width: u32, height: u32) {
+    fn show(&self, pixels: Vec<u8>, width: u32, height: u32, layer: bool) {
         let bytes = glib::Bytes::from_owned(pixels);
+        let format = if layer {
+            gdk::MemoryFormat::R8g8b8a8Premultiplied
+        } else {
+            gdk::MemoryFormat::R8g8b8a8
+        };
         let texture = gdk::MemoryTexture::new(
             width as i32,
             height as i32,
-            gdk::MemoryFormat::R8g8b8a8,
+            format,
             &bytes,
             width as usize * 4,
         );
+        if layer {
+            // The moving card is drawn whole into the stage layer, edges and
+            // all, so the sharp card steps aside while it shows.
+            if let Some((picture, card)) = self.card_layer.borrow().as_ref() {
+                picture.set_paintable(Some(&texture));
+                picture.set_visible(true);
+                card.set_opacity(0.0);
+            }
+            return;
+        }
         self.picture.set_paintable(Some(&texture));
         self.picture.set_visible(true);
+        self.hide_card_layer();
     }
 }
 
@@ -375,6 +443,47 @@ fn effect_loop(queue: Arc<EffectQueue>, sender: mpsc::SyncSender<EffectFrame>) {
             .as_deref()
             .filter(|pixels| !pixels.is_empty())
             .unwrap_or(&job.pixels);
+        // A moving card is blurred whole over the stage, so its edges smear
+        // across the background too.
+        if let Some(card) = job.card {
+            let output_size = card_layer_size(card.stage);
+            if let Some(trail) = super::motion_blur::CardTrail::new(
+                card.now,
+                card.previous,
+                card.stage,
+                output_size,
+                card.fps,
+                card.amount,
+                card.radius,
+            ) {
+                let mut rendered = vec![0; output_size.0 as usize * output_size.1 as usize * 4];
+                let (quality, span, anisotropy) = if job.playing {
+                    (6, 16.0, 1)
+                } else {
+                    (16, 4.0, 4)
+                };
+                trail.render(
+                    pixels,
+                    job.size,
+                    output_size,
+                    &mut rendered,
+                    quality,
+                    span,
+                    anisotropy,
+                );
+                let result = EffectFrame {
+                    generation: job.generation,
+                    revision: job.revision,
+                    size: output_size,
+                    pixels: rendered,
+                    layer: true,
+                };
+                if sender.send(result).is_err() {
+                    return;
+                }
+                continue;
+            }
+        }
         let trail = job.trail.and_then(|(now, before, fps, amount)| {
             super::motion_blur::ScreenTrail::in_camera_coordinates(
                 now, before, job.size, fps, amount,
@@ -405,6 +514,7 @@ fn effect_loop(queue: Arc<EffectQueue>, sender: mpsc::SyncSender<EffectFrame>) {
             revision: job.revision,
             size: job.size,
             pixels,
+            layer: false,
         };
         if sender.send(result).is_err() {
             return;
@@ -536,6 +646,7 @@ mod tests {
             pixels: std::sync::Arc::new(pixels),
             ripple: None,
             trail: Some(((0.0, 0.0, 32.0, 4.0), (8.0, 0.0, 32.0, 4.0), 60.0, 1.0)),
+            card: None,
             playing: false,
         });
         queue.ready.notify_one();

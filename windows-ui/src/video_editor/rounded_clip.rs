@@ -186,6 +186,12 @@ impl RoundedClip {
         self.queue_draw();
     }
 
+    /// The corner radius as a fraction of the card's width, for drawing the
+    /// card somewhere other than this widget.
+    pub(super) fn radius_ratio(&self) -> f64 {
+        scaled_radius(self.imp().radius.get(), self.imp().canvas_width.get(), 1.0)
+    }
+
     /// Clip the child to a normalized pane of the card. `None` fills the card,
     /// which is every layout but the split's screen pane.
     pub(super) fn set_layout_rect(&self, rect: Option<(f64, f64, f64, f64)>) {

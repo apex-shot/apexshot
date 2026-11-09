@@ -139,7 +139,21 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 )
                 .map(|_| (now, before, frame.fps, frame.motion_blur))
             });
-            stage.preview.set_trail(trail, frame.playing);
+            // With the studied framing, the moving card's whole trail is drawn
+            // over the stage so its edges smear across the background.
+            let card = trail.and_then(|_| {
+                let (now, _, stage_size) = stage.card_geometry(frame.camera)?;
+                let (previous, _, _) = stage.card_geometry(frame.camera_before)?;
+                Some(super::preview::CardLayer {
+                    now,
+                    previous,
+                    stage: stage_size,
+                    radius: stage.clip.radius_ratio(),
+                    fps: frame.fps,
+                    amount: frame.motion_blur,
+                })
+            });
+            stage.preview.set_trail(trail, card, frame.playing);
             stage.apply_webcam_layout();
             let ripple = stage
                 .cursor
@@ -1472,6 +1486,17 @@ fn build_stage(
     clip.set_vexpand(true);
     overlay.add_overlay(&clip);
 
+    // While the zoomed card moves, its blur is drawn whole over the stage here,
+    // edges and all, in place of the sharp card.
+    let card_layer = Picture::new();
+    card_layer.set_can_target(false);
+    card_layer.set_can_shrink(true);
+    card_layer.set_content_fit(gtk4::ContentFit::Fill);
+    card_layer.set_hexpand(true);
+    card_layer.set_vexpand(true);
+    card_layer.set_visible(false);
+    overlay.add_overlay(&card_layer);
+
     let cursor_layer = DrawingArea::new();
     cursor_layer.set_hexpand(true);
     cursor_layer.set_vexpand(true);
@@ -1593,6 +1618,7 @@ fn build_stage(
 
     let aspect = Rc::new(Cell::new(FrameAspect::Original));
     let preview = super::preview::Preview::new(picture.clone());
+    preview.set_card_layer(card_layer.clone(), clip.clone().upcast());
     let stage_aspect_label = Label::new(Some(&FrameAspect::Original.label()));
     stage_aspect_label.add_css_class("recording-editor-stage-chip-label");
 
