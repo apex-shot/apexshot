@@ -419,12 +419,25 @@ Resolved on `feat/autozoom-parity`:
   Playback in the preview uses one tap per fetch to stay within frame budget.
   Cursor and webcam motion blur remain separate gaps. Preview effect work runs
   on a bounded worker, so slow frames can be skipped rather than blocking UI.
-- **Rounded-edge reconstruction does not apply.** The studied shader
-  reconstructs coverage of the card's rounded body, outline, and shadow along
-  the trail (`B39:12259-12340`) because its zoom moves and grows the whole
-  card across the stage. The Windows editor zooms by cropping the source inside
-  a fixed card, so there is no moving card edge to smear. Matching that would
-  mean adopting the studied framing model, which is a separate gap.
+- **The card framing now matches in the preview.** A zoom grows the whole
+  card, rounded corners included, the way the studied `Rect.zoom` does
+  (`YEi:998-1033`): the rest rect is moved so the target lands on the focal
+  point, scaled about it, and kept covering the zoom area, the stage inside
+  the padding (`DgH:6219-6221`). A centred zoom therefore covers the padding;
+  near an edge the card stops on that edge of the zoom area and the padding
+  and corner stay visible there. The background zooms by
+  `1 + (zoom - 1) * 0.125` about the target (`B39:7535-7540`). The preview
+  derives both from the sprung camera, where the studied build springs the
+  rects themselves with the same spring (`B39:18148`, `B39:14721-14727`).
+  Split layouts keep cropping inside their pane. Export draws no background,
+  padding, or corners yet, so its frame is already the fully covered card;
+  it must adopt the same card when it gains them.
+- **Still open in the framing.** The focal point is the zoom area's centre.
+  The studied build moves it to the roomiest strip the camera overlay leaves
+  free (`DgH:5452-5530`, `DgH:5869-5871`). Motion blur smears only the
+  picture inside the card; the studied shader also reconstructs the moving
+  card's rounded edge, outline, and shadow along the trail
+  (`B39:12259-12340`).
 - **Zooms without movement groups now ride the spring.** Manual zooms, and
   automatic zooms with no pointer data, used the old static fallback: a
   smoothstep entry and a hard cut back to the full frame at `clip.end`. The

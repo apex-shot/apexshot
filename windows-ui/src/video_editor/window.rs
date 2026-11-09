@@ -127,9 +127,8 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
             stage.set_camera(frame.camera);
             let trail = stage.source_size.get().and_then(|(width, height)| {
                 let source = (f64::from(width), f64::from(height));
-                let now = super::zoom::view_rect(frame.camera.0, frame.camera.1, source);
-                let before =
-                    super::zoom::view_rect(frame.camera_before.0, frame.camera_before.1, source);
+                let now = stage.camera_view_for(frame.camera)?;
+                let before = stage.camera_view_for(frame.camera_before)?;
                 super::motion_blur::ScreenTrail::new(
                     now,
                     before,
@@ -710,6 +709,11 @@ struct Stage {
     clip: super::rounded_clip::RoundedClip,
     clip_margins: Rc<RefCell<(i32, i32, i32, i32)>>,
     camera_view: Rc<Cell<Option<super::zoom::ViewRect>>>,
+    /// The stage inside the padding, as fractions of the stage: the area a
+    /// zoomed card must keep covering.
+    zoom_area: Rc<Cell<Option<super::zoom::StageRect>>>,
+    /// The background's zoom and the stage point it zooms about, as fractions.
+    background_zoom: Rc<Cell<(f64, (f64, f64))>>,
     /// The Manual zoom outline the preview shows, as `(scale, focus point)`.
     placement: Placement,
     /// The armed Add zoom tool, while the transport is stopped.
@@ -738,6 +742,7 @@ impl Stage {
             self.strip_margins();
             self.set_stage_ratio(frame_ratio(self.aspect.get(), None));
             self.clip.set_radius(0.0, 1.0);
+            self.zoom_area.set(None);
             return;
         };
         let aspect = self.aspect.get();
@@ -747,6 +752,15 @@ impl Stage {
         let (video_w, video_h) = video_rect_dimensions(aspect, source, padding, has_fill);
         self.set_stage_ratio(out_w as f32 / out_h.max(1) as f32);
         self.set_video_margins((video_w, video_h), (out_w, out_h));
+        let canvas = canvas_dimensions(aspect, source);
+        let pad = padding_px(canvas, padding, has_fill).round().max(0.0);
+        let (out_w, out_h) = (f64::from(out_w.max(1)), f64::from(out_h.max(1)));
+        self.zoom_area.set(Some((
+            pad / out_w,
+            pad / out_h,
+            ((out_w - pad * 2.0) / out_w).max(0.0),
+            ((out_h - pad * 2.0) / out_h).max(0.0),
+        )));
         let (radius, measured_width) =
             card_radius(aspect, source, padding, has_fill, self.background.radius());
         self.clip.set_radius(radius, measured_width);
@@ -814,12 +828,71 @@ impl Stage {
         self.clip.set_margin_bottom(0);
     }
 
+    /// The card rect, rest rect, and stage size in stage pixels for `camera`,
+    /// or `None` when the studied framing does not apply: no recording, no
+    /// layout yet, or a split layout, which keeps cropping inside its pane.
+    fn card_geometry(
+        &self,
+        camera: super::zoom::Camera,
+    ) -> Option<(super::zoom::StageRect, super::zoom::StageRect, (f64, f64))> {
+        let (source_width, source_height) = self.source_size.get()?;
+        let split = self
+            .webcam
+            .layout_frame(Some((source_width, source_height)))
+            .is_some_and(|frame| !frame.screen.is_full());
+        if split {
+            return None;
+        }
+        let stage_width = f64::from(self.overlay.allocated_width());
+        let stage_height = f64::from(self.overlay.allocated_height());
+        if stage_width < 2.0 || stage_height < 2.0 {
+            return None;
+        }
+        let video = clip_video_rect(
+            &self.clip,
+            self.overlay.allocated_width(),
+            self.overlay.allocated_height(),
+            (source_width, source_height),
+        )?;
+        let rest = (video.x, video.y, video.width, video.height);
+        let area = self
+            .zoom_area
+            .get()
+            .map(|(x, y, w, h)| {
+                (
+                    x * stage_width,
+                    y * stage_height,
+                    w * stage_width,
+                    h * stage_height,
+                )
+            })
+            .unwrap_or(rest);
+        let focal = (area.0 + area.2 / 2.0, area.1 + area.3 / 2.0);
+        let target01 = (
+            camera.1 .0 / f64::from(source_width.max(1)),
+            camera.1 .1 / f64::from(source_height.max(1)),
+        );
+        let card = super::zoom::card_rect(rest, area, focal, camera.0, target01);
+        Some((card, rest, (stage_width, stage_height)))
+    }
+
+    /// The source view that expresses `camera` on the rest rect: the studied
+    /// card when it applies, the plain crop otherwise.
+    fn camera_view_for(&self, camera: super::zoom::Camera) -> Option<super::zoom::ViewRect> {
+        let (width, height) = self.source_size.get()?;
+        let source = (f64::from(width), f64::from(height));
+        Some(match self.card_geometry(camera) {
+            Some((card, rest, _)) => super::zoom::card_view(rest, card, source),
+            None => super::zoom::view_rect(camera.0, camera.1, source),
+        })
+    }
+
     fn set_camera(&self, camera: super::zoom::Camera) {
         let source_size = self.source_size.get();
-        let view = source_size.map(|(width, height)| {
-            super::zoom::view_rect(camera.0, camera.1, (f64::from(width), f64::from(height)))
-        });
+        let geometry = self.card_geometry(camera);
+        let view = self.camera_view_for(camera);
         self.camera_view.set(view);
+        self.apply_card(geometry, camera);
 
         let transform = match (source_size, view) {
             (Some((width, height)), Some(view)) => {
@@ -841,8 +914,49 @@ impl Stage {
         self.update_camera_transform(transform);
     }
 
+    /// Draw the card where the zoom put it and drift the background with it.
+    fn apply_card(
+        &self,
+        geometry: Option<(super::zoom::StageRect, super::zoom::StageRect, (f64, f64))>,
+        camera: super::zoom::Camera,
+    ) {
+        let card = geometry.and_then(|(card, rest, stage)| {
+            let moved = (card.0 - rest.0).abs() > 0.01
+                || (card.1 - rest.1).abs() > 0.01
+                || (card.2 - rest.2).abs() > 0.01
+                || (card.3 - rest.3).abs() > 0.01;
+            moved.then_some((
+                (card.0 - rest.0, card.1 - rest.1, card.2, card.3),
+                (-rest.0, -rest.1, stage.0, stage.1),
+            ))
+        });
+        self.clip.set_card(card);
+
+        let background = match (geometry, self.source_size.get()) {
+            (Some(_), Some((width, height))) => (
+                super::zoom::background_zoom(camera.0),
+                (
+                    (camera.1 .0 / f64::from(width.max(1))).clamp(0.0, 1.0),
+                    (camera.1 .1 / f64::from(height.max(1))).clamp(0.0, 1.0),
+                ),
+            ),
+            _ => (1.0, (0.5, 0.5)),
+        };
+        let (old_zoom, old_pivot) = self.background_zoom.get();
+        if (old_zoom - background.0).abs() > 1e-5
+            || (old_pivot.0 - background.1 .0).abs() > 1e-5
+            || (old_pivot.1 - background.1 .1).abs() > 1e-5
+        {
+            self.background_zoom.set(background);
+            self.background_layer.queue_draw();
+        }
+    }
+
     fn reset_camera(&self) {
         self.camera_view.set(None);
+        self.clip.set_card(None);
+        self.background_zoom.set((1.0, (0.5, 0.5)));
+        self.background_layer.queue_draw();
         self.update_camera_transform(IDENTITY_CAMERA_TRANSFORM);
     }
 
@@ -1282,10 +1396,21 @@ fn build_stage(
     let background_pixbuf = Rc::new(RefCell::new(None::<Pixbuf>));
     let background_fill: Rc<RefCell<Option<super::background::FillPainter>>> =
         Rc::new(RefCell::new(None));
+    let background_zoom = Rc::new(Cell::new((1.0_f64, (0.5_f64, 0.5_f64))));
     background_layer.set_draw_func({
         let background_pixbuf = background_pixbuf.clone();
         let background_fill = background_fill.clone();
+        let background_zoom = background_zoom.clone();
         move |_, context, width, height| {
+            // The background drifts in with the screen zoom, about the target.
+            let (zoom, (pivot_x, pivot_y)) = background_zoom.get();
+            if zoom > 1.0 + 1e-6 {
+                let x = pivot_x * f64::from(width);
+                let y = pivot_y * f64::from(height);
+                context.translate(x, y);
+                context.scale(zoom, zoom);
+                context.translate(-x, -y);
+            }
             if let Some(pixbuf) = background_pixbuf.borrow().as_ref() {
                 super::background::paint_cover(context, width, height, pixbuf);
                 return;
@@ -1312,6 +1437,7 @@ fn build_stage(
     let last_zoom_transform = Rc::new(Cell::new(IDENTITY_CAMERA_TRANSFORM));
     let last_zoom_css = Rc::new(RefCell::new(IDENTITY_CAMERA_CSS.to_string()));
     let camera_view = Rc::new(Cell::new(None::<super::zoom::ViewRect>));
+    let zoom_area = Rc::new(Cell::new(None::<super::zoom::StageRect>));
 
     let picture = Picture::new();
     picture.add_css_class("recording-editor-video");
@@ -1535,6 +1661,8 @@ fn build_stage(
         clip,
         clip_margins: Rc::new(RefCell::new((i32::MIN, 0, 0, 0))),
         camera_view,
+        zoom_area,
+        background_zoom,
         placement,
         add_zoom,
         add_zoom_hover,

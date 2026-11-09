@@ -530,6 +530,78 @@ pub(super) fn view_rect(scale: f64, center: (f64, f64), frame: (f64, f64)) -> Vi
     (x, y, width, height)
 }
 
+/// A rectangle in stage pixels: x, y, width, height.
+pub(super) type StageRect = (f64, f64, f64, f64);
+
+/// The studied framing: the card at `rest` is moved so the point at
+/// `target01` of it sits on `focal`, scaled by `scale` about that point, then
+/// kept covering `area` (the stage inside the padding). An axis the card no
+/// longer covers is centred in the area instead.
+pub(super) fn card_rect(
+    rest: StageRect,
+    area: StageRect,
+    focal: (f64, f64),
+    scale: f64,
+    target01: (f64, f64),
+) -> StageRect {
+    let scale = if scale.is_finite() {
+        scale.max(1.0)
+    } else {
+        1.0
+    };
+    let tx = if target01.0.is_finite() {
+        target01.0.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    let ty = if target01.1.is_finite() {
+        target01.1.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    let width = rest.2 * scale;
+    let height = rest.3 * scale;
+    let axis = |focal: f64, t: f64, size: f64, start: f64, extent: f64| {
+        if size > extent {
+            (focal - t * size).clamp(start + extent - size, start)
+        } else {
+            start + (extent - size) / 2.0
+        }
+    };
+    (
+        axis(focal.0, tx, width, area.0, area.2),
+        axis(focal.1, ty, height, area.1, area.3),
+        width,
+        height,
+    )
+}
+
+/// The source region that lands on the rest rect once the card is drawn at
+/// `card`, which is how the preview's crop transform and overlays express the
+/// card. It reaches past the source edges when the card does.
+pub(super) fn card_view(rest: StageRect, card: StageRect, source: (f64, f64)) -> ViewRect {
+    let card_width = card.2.max(1e-9);
+    let card_height = card.3.max(1e-9);
+    (
+        (rest.0 - card.0) / card_width * source.0,
+        (rest.1 - card.1) / card_height * source.1,
+        rest.2 / card_width * source.0,
+        rest.3 / card_height * source.1,
+    )
+}
+
+/// How far the background zooms with the screen, as in the studied build.
+pub(super) const BACKGROUND_ZOOM_SHARE: f64 = 0.125;
+
+/// The background's scale for a screen zoom of `scale`.
+pub(super) fn background_zoom(scale: f64) -> f64 {
+    if scale.is_finite() {
+        1.0 + (scale - 1.0).max(0.0) * BACKGROUND_ZOOM_SHARE
+    } else {
+        1.0
+    }
+}
+
 /// Mirrors the shared editor's `zoom_camera_transform` for the video Picture.
 pub(super) fn camera_transform(
     view: ViewRect,
@@ -954,10 +1026,10 @@ fn valid_frame(frame: (f64, f64)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        camera_transform, nearest_follow_sample, placement_rect, source_to_stage, spring_step,
-        stage_point_to_source, studied_advance, studied_precision, view_rect, Camera, CameraMotion,
-        TimeMapping, ZoomCameraCache, ZoomCameraSettings, CAMERA_FOLLOW_SPRING,
-        SCREEN_SPRING_PRECISION,
+        background_zoom, camera_transform, card_rect, card_view, nearest_follow_sample,
+        placement_rect, source_to_stage, spring_step, stage_point_to_source, studied_advance,
+        studied_precision, view_rect, Camera, CameraMotion, TimeMapping, ZoomCameraCache,
+        ZoomCameraSettings, CAMERA_FOLLOW_SPRING, SCREEN_SPRING_PRECISION,
     };
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
@@ -1617,5 +1689,42 @@ mod tests {
             early > 1.02,
             "the lead-in must have moved the camera before the clip starts: {early}"
         );
+    }
+
+    #[test]
+    fn the_card_rests_until_it_zooms() {
+        let area = (100.0, 100.0, 1000.0, 500.0);
+        assert_eq!(card_rect(area, area, (600.0, 350.0), 1.0, (0.3, 0.8)), area);
+    }
+
+    #[test]
+    fn a_centred_zoom_grows_the_card_past_the_padding() {
+        let area = (100.0, 100.0, 1000.0, 500.0);
+        let card = card_rect(area, area, (600.0, 350.0), 2.0, (0.5, 0.5));
+        assert_eq!(card, (-400.0, -150.0, 2000.0, 1000.0));
+        let view = card_view(area, card, (2000.0, 1000.0));
+        assert_eq!(view, view_rect(2.0, (1000.0, 500.0), (2000.0, 1000.0)));
+    }
+
+    #[test]
+    fn an_edge_zoom_keeps_the_card_edge_on_the_padding() {
+        let area = (100.0, 100.0, 1000.0, 500.0);
+        let card = card_rect(area, area, (600.0, 350.0), 2.0, (0.0, 1.0));
+        assert_eq!(card, (100.0, -400.0, 2000.0, 1000.0));
+    }
+
+    #[test]
+    fn a_narrow_card_centres_on_the_axis_it_does_not_cover() {
+        let area = (0.0, 0.0, 1000.0, 500.0);
+        let rest = (375.0, 0.0, 250.0, 500.0);
+        let card = card_rect(rest, area, (500.0, 250.0), 2.0, (0.5, 0.5));
+        assert_eq!(card, (250.0, -250.0, 500.0, 1000.0));
+    }
+
+    #[test]
+    fn the_background_zooms_an_eighth_as_far() {
+        assert!((background_zoom(2.0) - 1.125).abs() < 1e-12);
+        assert!((background_zoom(1.0) - 1.0).abs() < 1e-12);
+        assert!((background_zoom(0.5) - 1.0).abs() < 1e-12);
     }
 }

@@ -26,6 +26,10 @@ mod imp {
         /// The pane the child is clipped to, as fractions of the widget: the
         /// split screen's share of the frame.
         pub layout_rect: Cell<Option<(f64, f64, f64, f64)>>,
+        /// The card the child is drawn into while a zoom grows it, and the
+        /// stage it is cut to, both in this widget's coordinates. The card can
+        /// reach past the widget, over the padding.
+        pub card: Cell<Option<super::CardClip>>,
     }
 
     #[glib::object_subclass]
@@ -60,6 +64,34 @@ mod imp {
                     self.snapshot_layout(snapshot, width, height, rect);
                     return;
                 }
+            }
+            if let Some((card, bounds)) = self.card.get() {
+                let radius = scaled_radius(self.radius.get(), self.canvas_width.get(), card.2)
+                    .min(card.2.min(card.3) / 2.0);
+                snapshot.push_clip(&graphene::Rect::new(
+                    bounds.0 as f32,
+                    bounds.1 as f32,
+                    bounds.2 as f32,
+                    bounds.3 as f32,
+                ));
+                let card_bounds =
+                    graphene::Rect::new(card.0 as f32, card.1 as f32, card.2 as f32, card.3 as f32);
+                if radius > 0.5 {
+                    let corner = graphene::Size::new(radius as f32, radius as f32);
+                    snapshot.push_rounded_clip(&gsk::RoundedRect::new(
+                        card_bounds,
+                        corner,
+                        corner,
+                        corner,
+                        corner,
+                    ));
+                } else {
+                    snapshot.push_clip(&card_bounds);
+                }
+                self.parent_snapshot(snapshot);
+                snapshot.pop();
+                snapshot.pop();
+                return;
             }
             let radius = scaled_radius(self.radius.get(), self.canvas_width.get(), width)
                 .min(width.min(height) / 2.0);
@@ -180,7 +212,20 @@ impl RoundedClip {
         self.imp().layout_rect.set(rect);
         self.queue_draw();
     }
+
+    /// Draw into a zoomed card and cut it to the stage, both in this widget's
+    /// coordinates. `None` is the card at rest, which is the widget itself.
+    pub(super) fn set_card(&self, card: Option<CardClip>) {
+        if self.imp().card.get() == card {
+            return;
+        }
+        self.imp().card.set(card);
+        self.queue_draw();
+    }
 }
+
+/// A zoomed card and the stage it is cut to, in the clip's coordinates.
+pub(super) type CardClip = ((f64, f64, f64, f64), (f64, f64, f64, f64));
 
 /// Where a normalized layout pane lands in a `width` × `height` box.
 #[derive(Debug, Clone, Copy, PartialEq)]
