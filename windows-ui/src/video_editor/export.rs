@@ -1642,7 +1642,16 @@ mod tests {
                 &mut layer,
             );
             let mut reference = frame.clone();
-            legacy_draw_cursor(&mut reference, size, view, &sidecar, settings, 0.21, size);
+            legacy_draw_cursor(
+                &mut reference,
+                size,
+                view,
+                &sidecar,
+                std::path::Path::new(""),
+                settings,
+                0.21,
+                size,
+            );
             let max_delta = fast
                 .iter()
                 .zip(reference.iter())
@@ -1659,11 +1668,13 @@ mod tests {
     /// The previous exporter's compositing path: copy the whole frame into a
     /// cairo surface, draw, and copy the whole frame back. Kept in the tests as
     /// the reference the boxed overlay has to reproduce.
+    #[allow(clippy::too_many_arguments)]
     fn legacy_draw_cursor(
         pixels: &mut [u8],
         size: (u32, u32),
         view: (f64, f64, f64, f64),
         sidecar: &crate::recording::editor::sidecar::PointerSidecar,
+        source_path: &std::path::Path,
         settings: crate::recording::editor::model::CursorSettings,
         time: f64,
         source_size: (u32, u32),
@@ -1690,6 +1701,7 @@ mod tests {
         for pixel in bgra.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
         }
+        let settings = settings.clamped();
         let mut surface = gtk4::cairo::ImageSurface::create_for_data(
             bgra,
             gtk4::cairo::Format::ARgb32,
@@ -1723,13 +1735,15 @@ mod tests {
                 }
             }
             let (x, y) = map((frame.x, frame.y));
-            crate::recording::editor::cursor_sprite::draw(
+            let capture = sidecar.cursor_capture(source_path, &frame);
+            crate::recording::editor::cursor_sprite::draw_recorded(
                 &context,
                 x,
                 y,
                 1.0,
                 super::press_cursor_scale(sidecar, time),
-                frame.kind.as_str(),
+                &frame,
+                capture.as_ref(),
                 settings,
                 frame.alpha,
             );
