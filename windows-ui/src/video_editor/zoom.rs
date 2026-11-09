@@ -451,7 +451,7 @@ impl ZoomCameraPlan {
         let Some(start_time) = self.start_time else {
             return static_camera_at(&self.clips, time, self.frame);
         };
-        if time < start_time || self.zooms.iter().all(|zoom| time > zoom.clip.end) {
+        if time < start_time {
             return static_camera_at(&self.clips, time, self.frame);
         }
 
@@ -1085,6 +1085,25 @@ mod tests {
             (value, velocity) = spring_step(value, velocity, 100.0, CAMERA_FOLLOW_SPRING, 0.001);
         }
         assert!((motion.rect[0] - value).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_auto_zoom_springs_back_after_its_last_frame() {
+        let clips = [auto_clip(1.0, 2.0, 3.0, (320.0, 240.0))];
+        let sidecar = sidecar((640, 480), &[(1.0, 500.0, 240.0), (1.9, 500.0, 240.0)]);
+        assert!(
+            evaluate(&clips, &sidecar, (640.0, 480.0), 2.0).0 > 2.5,
+            "the clip must still be zoomed on its last frame"
+        );
+        let just_after = evaluate(&clips, &sidecar, (640.0, 480.0), 2.05).0;
+        assert!(
+            just_after > 1.5 && just_after < 3.0,
+            "the exit must travel on the spring, got {just_after}"
+        );
+        assert!(
+            evaluate(&clips, &sidecar, (640.0, 480.0), 2.8).0 < 1.05,
+            "the spring must finish returning to the full frame"
+        );
     }
 
     #[test]

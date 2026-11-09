@@ -339,7 +339,11 @@ Resolved on `feat/autozoom-parity`:
 - **Exit timing.** A zoom now holds its framing through `clip.end`, then the
   screen spring returns to the full frame. The 0.6 s early exit was removed from
   the camera plan and the static fallback in
-  `windows-ui/src/video_editor/zoom.rs`. This matches the studied build.
+  `windows-ui/src/video_editor/zoom.rs`. A later export check found the
+  remaining post-clip shortcut: `evaluate` returned the static full frame as
+  soon as the last clip ended, so the export cut instead of springing. That
+  shortcut is gone; the camera now advances through the exit like any other
+  target.
 - **Click source.** The generator now adds a click seed at every press release
   as well as the recorded down event, in `clicks_from_sidecar`. The studied
   collection uses the whole `mouseclicks` stream (`DXX` line 1253), and that
@@ -497,3 +501,19 @@ Spring-integration change, 2026-11-09:
 - The editor binary rebuilt with the change.
 - No new physical clip: the change is a sub-frame integration correction, and
   the existing spring-motion tests cover the trajectory and rest behavior.
+
+Export regression, 2026-11-09:
+
+- Exported `artifacts/physical/zoom-click-source.mp4` through the real exporter
+  with the saved project state: range `4.685-8.982 s`, 2x, centre `(901,
+  507.3945)`, 1202x838, 60 fps, 883 frames.
+- The export exposed a real exit bug: at `8.9 s` the frame was still 2x, but at
+  `9.1 s` it was already full frame. The camera plan was returning the static
+  frame as soon as the last clip ended, bypassing the spring exit.
+- The plan now keeps advancing after the last clip. Re-exported frames show the
+  spring return: 2x at `8.9 s`, still cropped at `9.1 s`, wider at `9.3 s`, and
+  full by `9.6-10.0 s`.
+- `cargo test --lib video_editor::zoom::tests` passed 28 of 28 tests, including
+  the new post-clip spring-exit test.
+- The temporary fixture export test was removed before committing; the shipped
+  coverage is the camera exit test.
