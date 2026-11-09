@@ -284,8 +284,18 @@ Because the active movement group can change during a range, one autozoom can
 contain several camera moves. The range stays one item; the camera pans because
 the group centre changes, not because the range was split.
 
-`motionBlurAmount` (default 1) adds motion blur based on the screen's motion, so
-fast pans read as movement rather than a teleport.
+`motionBlurAmount` defaults to 1 and the control ranges from 0 to 1
+(`DgH:292-295`, `Brm6UpoL2:195-198`). The screen uses its current and previous
+frame rectangles (`B39:9547-9549`, `B39:18015-18055`). The trail starts at the
+current rectangle interpolated toward the previous rectangle by
+`motionBlurAmount * fps / 60` (`B39:10094-10099`, `B39:12614-12632`); instant
+zooms disable blur during their snap window (`B39:18139-18159`). The renderer
+samples the current frame's texture along that trail, accumulating in squared
+colour space and taking the square root on output (`B39:10440-10443`,
+`B39:10478-10489`, `B39:10497-10541`). Export uses up to 16 texture fetches
+at a 4-pixel span, while playback uses up to 6 at a 16-pixel span
+(`B39:9688-9700`). Its GPU shader also uses texture gradients, dithering,
+per-pixel coverage and rounded-edge reconstruction.
 
 ## 7. Manual zooms and guards
 
@@ -372,8 +382,17 @@ Resolved on `feat/autozoom-parity`:
   window is always at least about 199 ms, so this is a structural guard rather
   than a visible change.
 
-There is no remaining confirmed generator gap. The camera model is already the
-important part.
+- **Screen motion blur.** The Windows preview and exporter now use the current
+  and previous camera rectangles, frame-rate-scaled strength, the studied
+  playback/export fetch budgets, and squared-colour averaging. The amount is
+  saved with the project and defaults to 1 for older files. The CPU renderer is
+  an approximation of the studied GPU shader: it does not implement texture
+  gradient filtering or rounded-edge reconstruction, and the preview applies
+  the trail in the picture's source coordinates, reflecting at source edges.
+  Cursor and webcam motion blur remain separate gaps. Preview effect work runs
+  on a bounded worker, so slow frames can be skipped rather than blocking UI.
+
+There is no remaining confirmed generator gap.
 
 ## 10. Limits
 
@@ -517,3 +536,18 @@ Export regression, 2026-11-09:
   the new post-clip spring-exit test.
 - The temporary fixture export test was removed before committing; the shipped
   coverage is the camera exit test.
+
+Screen motion blur, 2026-11-09:
+
+- The click-source fixture exported at 1202x838, 60 fps, 883 frames in 23.69 s
+  with the debug exporter. The motion-blurred export differs from the prior
+  unblurred export most during the entry and exit, and much less during the
+  held section. Encoding differences mean this is not an exact blur metric.
+- A portable FFmpeg integration test exported with blur on and off at 24 and
+  60 fps, and checked moving frames differ more than resting frames. Run it with
+  `APEXSHOT_EXPORT_TEST=1` and
+  `cargo test --lib video_editor::export::tests::motion_blur_reaches_real_export_frames`.
+- A debug 1280x720 high-motion preview sample took about 31 ms per frame before
+  moving the effect to a bounded worker. This is not an end-to-end playback
+  frame-rate measurement. No rendered studied-build fixture was available, so
+  visual and numerical parity remain unverified.

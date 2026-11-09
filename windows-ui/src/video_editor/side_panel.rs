@@ -990,6 +990,20 @@ fn build_zoom_panel(
         },
     );
     body.append(&smoothness_slider.widget());
+    let blur_slider = value_slider_control(
+        &t("Motion blur"),
+        0.0,
+        1.0,
+        camera.motion_blur,
+        0.01,
+        2,
+        scale,
+        {
+            let timeline = timeline.clone();
+            move |value| timeline.update_zoom_camera(|settings| settings.motion_blur = value)
+        },
+    );
+    body.append(&blur_slider.widget());
 
     let early_row = GtkBox::new(Orientation::Horizontal, 8);
     early_row.add_css_class("recording-editor-zoom-classic");
@@ -1077,6 +1091,7 @@ fn build_zoom_panel(
         let chip_buttons = chip_buttons.clone();
         let speed_slider = speed_slider.clone();
         let smoothness_slider = smoothness_slider.clone();
+        let blur_slider = blur_slider.clone();
         let start_early = start_early.clone();
         let reset = reset.clone();
         Rc::new(move || {
@@ -1133,6 +1148,7 @@ fn build_zoom_panel(
             reset.set_sensitive(has_clip || state.camera != Default::default());
             speed_slider.set_value(state.camera.speed);
             smoothness_slider.set_value(state.camera.smoothness);
+            blur_slider.set_value(state.camera.motion_blur);
             start_early.set_active(state.camera.start_early);
             syncing.set(false);
         }) as Rc<dyn Fn()>

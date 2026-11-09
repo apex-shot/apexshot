@@ -150,6 +150,7 @@ struct Data {
     path: Option<PathBuf>,
     duration: f64,
     frame_size: Option<(u32, u32)>,
+    fps: f64,
     trim_start: f64,
     trim_end: f64,
     playhead: f64,
@@ -222,6 +223,7 @@ struct EditSnapshot {
     path: Option<PathBuf>,
     duration: f64,
     frame_size: Option<(u32, u32)>,
+    fps: f64,
     frames: Vec<gtk4::gdk_pixbuf::Pixbuf>,
     trim_start: f64,
     trim_end: f64,
@@ -596,6 +598,7 @@ impl Data {
         self.path = None;
         self.duration = 0.0;
         self.frame_size = None;
+        self.fps = 0.0;
         self.trim_start = 0.0;
         self.trim_end = 0.0;
         self.playhead = 0.0;
@@ -630,6 +633,7 @@ impl Data {
             path: self.path.clone(),
             duration: self.duration,
             frame_size: self.frame_size,
+            fps: self.fps,
             frames: self.frames.clone(),
             trim_start: self.trim_start,
             trim_end: self.trim_end,
@@ -727,6 +731,7 @@ impl Data {
         self.path = snapshot.path;
         self.duration = snapshot.duration;
         self.frame_size = snapshot.frame_size;
+        self.fps = snapshot.fps;
         self.trim_start = snapshot.trim_start;
         self.trim_end = snapshot.trim_end;
         self.cuts = snapshot.cuts;
@@ -802,6 +807,7 @@ impl Data {
                 speed: self.zoom_camera.speed,
                 smoothness: self.zoom_camera.smoothness,
                 start_early: self.zoom_camera.start_early,
+                motion_blur: self.zoom_camera.motion_blur,
             },
             cursor_hide_clips: self
                 .hide_clips
@@ -877,6 +883,7 @@ impl Data {
             speed: file.zoom_camera.speed,
             smoothness: file.zoom_camera.smoothness,
             start_early: file.zoom_camera.start_early,
+            motion_blur: file.zoom_camera.motion_blur,
         }
         .clamped();
         if let (Some(webcam), Some(layer)) = (self.webcam.as_ref(), file.webcam.as_ref()) {
@@ -2153,6 +2160,9 @@ pub(super) struct PreviewFrame {
     pub composition_time: f64,
     pub playing: bool,
     pub camera: super::zoom::Camera,
+    pub camera_before: super::zoom::Camera,
+    pub fps: f64,
+    pub motion_blur: f64,
     /// Set while a Manual zoom's focus point is being placed: the clip's scale
     /// and its focus point, outlined over an unzoomed preview.
     pub placement: Option<(f64, (f64, f64))>,
@@ -2270,12 +2280,34 @@ impl Timeline {
                 )
             }
         };
+        let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
+        let camera_before = if placement.is_some()
+            || super::zoom::instant_blur_disabled(&data.zoom_clips, data.playhead)
+        {
+            camera
+        } else {
+            let frame = data
+                .frame_size
+                .map(|(w, h)| (f64::from(w), f64::from(h)))
+                .unwrap_or((0.0, 0.0));
+            self.camera_cache.borrow_mut().evaluate(
+                &data.zoom_clips,
+                frame,
+                &data.camera_mapping(),
+                data.zoom_camera,
+                (data.playhead - 1.0 / fps).max(0.0),
+                || self.cursor.sidecar(),
+            )
+        };
         PreviewFrame {
             source_seconds: data.playhead_source_time(),
             composition_seconds: data.total_duration(),
             composition_time: data.playhead,
             playing: data.playing,
             camera,
+            camera_before,
+            fps,
+            motion_blur: data.zoom_camera.motion_blur,
             placement,
         }
     }
@@ -2711,6 +2743,9 @@ impl Timeline {
         let mut restored = None;
         if let Some(source) = &source {
             duration = ffmpeg::probe_duration(source).unwrap_or(0.0);
+            data.fps = ffmpeg::probe_frame_rate(source)
+                .filter(|fps| fps.is_finite() && *fps > 0.0)
+                .unwrap_or(30.0);
             data.path = Some(source.clone());
             data.duration = duration;
             data.trim_end = duration;
@@ -3438,6 +3473,25 @@ pub(super) fn build(
                         )
                     }
                 };
+                let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
+                let camera_before = if placement.is_some()
+                    || super::zoom::instant_blur_disabled(&data.zoom_clips, composition_time)
+                {
+                    camera
+                } else {
+                    let frame = data
+                        .frame_size
+                        .map(|(w, h)| (f64::from(w), f64::from(h)))
+                        .unwrap_or((0.0, 0.0));
+                    camera_cache.borrow_mut().evaluate(
+                        &data.zoom_clips,
+                        frame,
+                        &data.camera_mapping(),
+                        data.zoom_camera,
+                        (composition_time - 1.0 / fps).max(0.0),
+                        || cursor.sidecar(),
+                    )
+                };
                 (
                     data.playing,
                     was_playing || data.playing,
@@ -3447,6 +3501,9 @@ pub(super) fn build(
                         composition_time,
                         playing: data.playing,
                         camera,
+                        camera_before,
+                        fps,
+                        motion_blur: data.zoom_camera.motion_blur,
                         placement,
                     },
                 )
@@ -6191,6 +6248,7 @@ mod tests {
                 speed: 9.0,
                 smoothness: -1.0,
                 start_early: true,
+                motion_blur: 1.0,
             },
             cursor_hide_clips: vec![project::HideClipFile {
                 start: 1.0,

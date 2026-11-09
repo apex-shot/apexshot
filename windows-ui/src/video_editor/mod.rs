@@ -14,6 +14,7 @@ mod export;
 mod export_card;
 mod export_options;
 mod history;
+mod motion_blur;
 mod pixels;
 mod press;
 mod preview;

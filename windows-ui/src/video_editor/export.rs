@@ -4,7 +4,7 @@
 //! order, and every frame is composited by the same code the preview uses:
 //! the follow camera, the click ripple warp, and the cursor sprite with its
 //! press spring. Presentation effects that only make sense in the live stage —
-//! background, frame aspect, rounded corners, motion blur, audio — are not
+//! background, frame aspect, rounded corners, audio — are not
 //! part of this path.
 
 use super::cursor::preview_ripple;
@@ -471,8 +471,31 @@ fn render(
                 || model.sidecar.clone(),
             );
             let view = zoom::view_rect(camera_value.0, camera_value.1, source);
-            let cropped = !(view_is_full(view, source) && size == model.source_size);
-            if cropped {
+            let trail = if zoom::instant_blur_disabled(&model.zooms, composition_time) {
+                None
+            } else {
+                let previous = camera.evaluate(
+                    &model.zooms,
+                    source,
+                    &mapping,
+                    model.zoom_camera,
+                    (composition_time - 1.0 / fps).max(0.0),
+                    || model.sidecar.clone(),
+                );
+                super::motion_blur::ScreenTrail::new(
+                    view,
+                    zoom::view_rect(previous.0, previous.1, source),
+                    source,
+                    size,
+                    fps,
+                    model.zoom_camera.motion_blur,
+                )
+            };
+            let cropped =
+                trail.is_some() || !(view_is_full(view, source) && size == model.source_size);
+            if let Some(trail) = trail {
+                trail.render(&decoded, model.source_size, size, &mut scaled, 16, 4.0);
+            } else if cropped {
                 crop_scale_into(&decoded, model.source_size, view, size, &mut scaled);
             }
             let base: &[u8] = if cropped { &scaled } else { &decoded };
@@ -1144,6 +1167,113 @@ mod tests {
             ExportSettings::default().dimensions((1919, 1079)),
             (1918, 1078)
         );
+    }
+
+    #[test]
+    fn motion_blur_reaches_real_export_frames() {
+        if std::env::var("APEXSHOT_EXPORT_TEST").ok().as_deref() != Some("1") {
+            return;
+        }
+        use crate::video_editor::timeline::{ZoomClip, ZoomMode};
+        let dir =
+            std::env::temp_dir().join(format!("apexshot-blur-export-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        let status = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc=size=320x180:rate=60:duration=2",
+                "-threads",
+                "2",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&source)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let mut model = ExportModel {
+            source,
+            source_size: (320, 180),
+            trim_start: 0.0,
+            trim_end: 2.0,
+            cuts: vec![],
+            zooms: vec![ZoomClip {
+                start: 0.2,
+                end: 1.4,
+                scale: 2.0,
+                center: (220.0, 110.0),
+                hidden: false,
+                mode: ZoomMode::Manual,
+                instant: false,
+                anchor: None,
+            }],
+            zoom_camera: zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: None,
+            webcam: None,
+            crf: 18,
+        };
+        for fps in [24, 60] {
+            let mut videos = Vec::new();
+            for amount in [0.0, 1.0] {
+                model.zoom_camera.motion_blur = amount;
+                let output = dir.join(format!("output-{fps}-{amount}.mp4"));
+                let (sender, _receiver) = mpsc::channel();
+                let cancel = Arc::new(AtomicBool::new(false));
+                match render(
+                    &model,
+                    &output,
+                    &sender,
+                    &cancel,
+                    Encoder::X264,
+                    ExportSettings {
+                        fps: Some(fps),
+                        resolution: None,
+                    },
+                ) {
+                    Ok(()) => (),
+                    Err(End::Failed(message)) => panic!("export failed: {message}"),
+                    Err(End::Cancelled) => panic!("export cancelled"),
+                }
+                videos.push(output);
+            }
+            let read_frame = |video: &PathBuf, time: &str| {
+                let output = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+                    .args(["-hide_banner", "-loglevel", "error", "-ss", time, "-i"])
+                    .arg(video)
+                    .args(["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"])
+                    .output()
+                    .unwrap();
+                assert!(output.status.success());
+                assert_eq!(output.stdout.len(), 320 * 180 * 3);
+                output.stdout
+            };
+            let difference = |time: &str| {
+                let first = read_frame(&videos[0], time);
+                let second = read_frame(&videos[1], time);
+                first
+                    .iter()
+                    .zip(second.iter())
+                    .map(|(a, b)| a.abs_diff(*b) as u64)
+                    .sum::<u64>() as f64
+                    / first.len() as f64
+            };
+            let moving = difference("0.35");
+            let resting = difference("1.0");
+            assert!(moving > 1.0, "{fps} fps motion did not blur: {moving}");
+            assert!(
+                moving > resting * 2.0,
+                "{fps} fps rest changed too much: moving={moving}, resting={resting}"
+            );
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

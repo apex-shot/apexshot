@@ -124,6 +124,22 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 .set_composition_seconds(frame.composition_seconds);
             stage.set_placement(frame.placement);
             stage.set_camera(frame.camera);
+            let trail = stage.source_size.get().and_then(|(width, height)| {
+                let source = (f64::from(width), f64::from(height));
+                let now = super::zoom::view_rect(frame.camera.0, frame.camera.1, source);
+                let before =
+                    super::zoom::view_rect(frame.camera_before.0, frame.camera_before.1, source);
+                super::motion_blur::ScreenTrail::new(
+                    now,
+                    before,
+                    source,
+                    (width, height),
+                    frame.fps,
+                    frame.motion_blur,
+                )
+                .map(|_| (now, before, frame.fps, frame.motion_blur))
+            });
+            stage.preview.set_trail(trail, frame.playing);
             stage.apply_webcam_layout();
             let ripple = stage
                 .cursor

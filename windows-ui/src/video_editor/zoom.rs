@@ -23,15 +23,13 @@ pub(super) const CAMERA_FOLLOW_SPRING: CameraSpring = CameraSpring {
     mass: 1.5,
 };
 
-/// Camera-wide zoom settings, the counterpart of the shared editor's
-/// `ZoomCameraSettings`. Only the knobs this editor implements are here:
-/// motion blur needs the preview to blend several camera positions into one
-/// frame, which a picture transform cannot do.
+/// Camera-wide zoom settings, including the screen motion trail.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ZoomCameraSettings {
     pub speed: f64,
     pub smoothness: f64,
     pub start_early: bool,
+    pub motion_blur: f64,
 }
 
 impl Default for ZoomCameraSettings {
@@ -40,6 +38,7 @@ impl Default for ZoomCameraSettings {
             speed: 1.0,
             smoothness: 0.5,
             start_early: false,
+            motion_blur: 1.0,
         }
     }
 }
@@ -61,6 +60,11 @@ impl ZoomCameraSettings {
                 defaults.smoothness
             },
             start_early: self.start_early,
+            motion_blur: if self.motion_blur.is_finite() {
+                self.motion_blur.clamp(0.0, 1.0)
+            } else {
+                defaults.motion_blur
+            },
         }
     }
 
@@ -472,6 +476,12 @@ impl ZoomCameraPlan {
         let motion = self.advance(self.frames[frame_index], from, time);
         frame_for_rect(motion.rect, self.frame)
     }
+}
+
+pub(super) fn instant_blur_disabled(clips: &[ZoomClip], time: f64) -> bool {
+    clips
+        .iter()
+        .any(|clip| !clip.hidden && clip.instant && time >= clip.start && time <= clip.end + 0.05)
 }
 
 pub(super) fn static_camera_at(clips: &[ZoomClip], time: f64, frame: (f64, f64)) -> Camera {
@@ -1085,6 +1095,18 @@ mod tests {
             (value, velocity) = spring_step(value, velocity, 100.0, CAMERA_FOLLOW_SPRING, 0.001);
         }
         assert!((motion.rect[0] - value).abs() < 1e-9);
+    }
+
+    #[test]
+    fn instant_zoom_disables_the_trail_through_its_extended_window() {
+        let mut clip = auto_clip(1.0, 2.0, 2.0, (320.0, 240.0));
+        clip.instant = true;
+        assert!(!super::instant_blur_disabled(&[clip], 0.99));
+        assert!(super::instant_blur_disabled(&[clip], 1.0));
+        assert!(super::instant_blur_disabled(&[clip], 2.049));
+        assert!(!super::instant_blur_disabled(&[clip], 2.051));
+        clip.hidden = true;
+        assert!(!super::instant_blur_disabled(&[clip], 1.5));
     }
 
     #[test]
