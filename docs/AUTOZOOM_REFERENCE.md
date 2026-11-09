@@ -432,9 +432,16 @@ Resolved on `feat/autozoom-parity`:
   Split layouts keep cropping inside their pane. Export draws no background,
   padding, or corners yet, so its frame is already the fully covered card;
   it must adopt the same card when it gains them.
-- **Still open in the framing.** The focal point is the zoom area's centre.
-  The studied build moves it to the roomiest strip the camera overlay leaves
-  free (`DgH:5452-5530`, `DgH:5869-5871`). Motion blur smears only the
+- **The aim avoids the camera overlay.** The focal point is the zoom area's
+  centre unless the camera overlay overlaps the area. Then, as in the studied
+  build, the centre and the middle of each strip the camera leaves free are
+  scored by their room to the nearest area edge or the camera, and the
+  roomiest wins, the closer to the centre on a tie (`DgH:5452-5560`,
+  `DgH:5869-5871`). The camera's rest rect is used. The studied build springs
+  the card rect, so a layout change glides; the Windows card follows the
+  sprung camera instead, so the aim blends toward the free strip by the
+  overlay's opacity rather than jumping.
+- **Still open in the framing.** Motion blur smears only the
   picture inside the card; the studied shader also reconstructs the moving
   card's rounded edge, outline, and shadow along the trail
   (`B39:12259-12340`).

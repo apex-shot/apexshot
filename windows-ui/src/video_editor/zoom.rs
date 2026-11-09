@@ -576,6 +576,92 @@ pub(super) fn card_rect(
     )
 }
 
+/// Where a zoom aims inside `area`: its centre, unless the camera overlay
+/// overlaps it. Then the studied build tries the centre and the middle of each
+/// strip the camera leaves free above, below, left, and right of it, and takes
+/// the one with the most room to the nearest area edge or the camera, the
+/// closer to the centre on a tie.
+pub(super) fn focal_point(area: StageRect, camera: Option<StageRect>) -> (f64, f64) {
+    let centre = (area.0 + area.2 / 2.0, area.1 + area.3 / 2.0);
+    let Some(camera) = camera else {
+        return centre;
+    };
+    if area.2 <= 0.0 || area.3 <= 0.0 {
+        return centre;
+    }
+    let (left, top, right, bottom) = (area.0, area.1, area.0 + area.2, area.1 + area.3);
+    let cam_left = camera.0.max(left);
+    let cam_top = camera.1.max(top);
+    let cam_right = (camera.0 + camera.2).min(right);
+    let cam_bottom = (camera.1 + camera.3).min(bottom);
+    if cam_left >= cam_right
+        || cam_top >= cam_bottom
+        || (cam_left <= left && cam_top <= top && cam_right >= right && cam_bottom >= bottom)
+    {
+        return centre;
+    }
+    let inside_camera =
+        |x: f64, y: f64| x >= cam_left && x <= cam_right && y >= cam_top && y <= cam_bottom;
+    let room = |x: f64, y: f64| {
+        let mut to_left = x - left;
+        let mut to_right = right - x;
+        let mut to_top = y - top;
+        let mut to_bottom = bottom - y;
+        if y > cam_top && y < cam_bottom {
+            if x < cam_left {
+                to_right = to_right.min(cam_left - x);
+            }
+            if x > cam_right {
+                to_left = to_left.min(x - cam_right);
+            }
+        }
+        if x > cam_left && x < cam_right {
+            if y < cam_top {
+                to_bottom = to_bottom.min(cam_top - y);
+            }
+            if y > cam_bottom {
+                to_top = to_top.min(y - cam_bottom);
+            }
+        }
+        to_left.min(to_right).min(to_top).min(to_bottom)
+    };
+    let mut candidates: Vec<(f64, f64)> = Vec::new();
+    if !inside_camera(centre.0, centre.1) {
+        candidates.push(centre);
+    }
+    if cam_top > top {
+        candidates.push((centre.0, (top + cam_top) / 2.0));
+    }
+    if cam_bottom < bottom {
+        candidates.push((centre.0, (cam_bottom + bottom) / 2.0));
+    }
+    if cam_left > left {
+        candidates.push(((left + cam_left) / 2.0, centre.1));
+    }
+    if cam_right < right {
+        candidates.push(((cam_right + right) / 2.0, centre.1));
+    }
+    let mut best: Option<((f64, f64), f64, f64)> = None;
+    for (x, y) in candidates {
+        if x < left || x > right || y < top || y > bottom || inside_camera(x, y) {
+            continue;
+        }
+        let breathing = room(x, y);
+        let distance = (x - centre.0).hypot(y - centre.1);
+        let better = match best {
+            None => true,
+            Some((_, best_room, best_distance)) => {
+                breathing - best_room > 1e-9
+                    || ((breathing - best_room).abs() <= 1e-9 && distance < best_distance)
+            }
+        };
+        if better {
+            best = Some(((x, y), breathing, distance));
+        }
+    }
+    best.map(|(point, _, _)| point).unwrap_or(centre)
+}
+
 /// The source region that lands on the rest rect once the card is drawn at
 /// `card`, which is how the preview's crop transform and overlays express the
 /// card. It reaches past the source edges when the card does.
@@ -1026,10 +1112,10 @@ fn valid_frame(frame: (f64, f64)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        background_zoom, camera_transform, card_rect, card_view, nearest_follow_sample,
-        placement_rect, source_to_stage, spring_step, stage_point_to_source, studied_advance,
-        studied_precision, view_rect, Camera, CameraMotion, TimeMapping, ZoomCameraCache,
-        ZoomCameraSettings, CAMERA_FOLLOW_SPRING, SCREEN_SPRING_PRECISION,
+        background_zoom, camera_transform, card_rect, card_view, focal_point,
+        nearest_follow_sample, placement_rect, source_to_stage, spring_step, stage_point_to_source,
+        studied_advance, studied_precision, view_rect, Camera, CameraMotion, TimeMapping,
+        ZoomCameraCache, ZoomCameraSettings, CAMERA_FOLLOW_SPRING, SCREEN_SPRING_PRECISION,
     };
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
@@ -1726,5 +1812,46 @@ mod tests {
         assert!((background_zoom(2.0) - 1.125).abs() < 1e-12);
         assert!((background_zoom(1.0) - 1.0).abs() < 1e-12);
         assert!((background_zoom(0.5) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_zoom_aims_at_the_centre_without_a_camera() {
+        assert_eq!(focal_point((0.0, 0.0, 1000.0, 500.0), None), (500.0, 250.0));
+    }
+
+    #[test]
+    fn a_small_corner_camera_leaves_the_aim_at_the_centre() {
+        let camera = Some((800.0, 350.0, 200.0, 150.0));
+        assert_eq!(
+            focal_point((0.0, 0.0, 1000.0, 500.0), camera),
+            (500.0, 250.0)
+        );
+    }
+
+    #[test]
+    fn a_tall_camera_moves_the_aim_into_the_free_strip() {
+        let camera = Some((700.0, 0.0, 300.0, 500.0));
+        assert_eq!(
+            focal_point((0.0, 0.0, 1000.0, 500.0), camera),
+            (350.0, 250.0)
+        );
+    }
+
+    #[test]
+    fn a_camera_over_the_whole_area_leaves_the_centre() {
+        let camera = Some((-10.0, -10.0, 2000.0, 1000.0));
+        assert_eq!(
+            focal_point((0.0, 0.0, 1000.0, 500.0), camera),
+            (500.0, 250.0)
+        );
+    }
+
+    #[test]
+    fn a_camera_outside_the_area_leaves_the_centre() {
+        let camera = Some((1100.0, 0.0, 100.0, 100.0));
+        assert_eq!(
+            focal_point((0.0, 0.0, 1000.0, 500.0), camera),
+            (500.0, 250.0)
+        );
     }
 }

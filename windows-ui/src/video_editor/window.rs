@@ -836,11 +836,10 @@ impl Stage {
         camera: super::zoom::Camera,
     ) -> Option<(super::zoom::StageRect, super::zoom::StageRect, (f64, f64))> {
         let (source_width, source_height) = self.source_size.get()?;
-        let split = self
+        let frame = self
             .webcam
-            .layout_frame(Some((source_width, source_height)))
-            .is_some_and(|frame| !frame.screen.is_full());
-        if split {
+            .layout_frame(Some((source_width, source_height)));
+        if frame.is_some_and(|frame| !frame.screen.is_full()) {
             return None;
         }
         let stage_width = f64::from(self.overlay.allocated_width());
@@ -867,7 +866,27 @@ impl Stage {
                 )
             })
             .unwrap_or(rest);
-        let focal = (area.0 + area.2 / 2.0, area.1 + area.3 / 2.0);
+        // The camera overlay moves the aim into the room it leaves free. The
+        // aim blends in with the overlay's opacity, so a layout change fades
+        // the card across instead of snapping it.
+        let centre = (area.0 + area.2 / 2.0, area.1 + area.3 / 2.0);
+        let focal = match frame.filter(|frame| frame.camera_alpha > 0.0) {
+            Some(frame) => {
+                let camera = (
+                    video.x + frame.camera.x * video.width,
+                    video.y + frame.camera.y * video.height,
+                    frame.camera.width * video.width,
+                    frame.camera.height * video.height,
+                );
+                let aim = super::zoom::focal_point(area, Some(camera));
+                let alpha = frame.camera_alpha.clamp(0.0, 1.0);
+                (
+                    centre.0 + (aim.0 - centre.0) * alpha,
+                    centre.1 + (aim.1 - centre.1) * alpha,
+                )
+            }
+            None => centre,
+        };
         let target01 = (
             camera.1 .0 / f64::from(source_width.max(1)),
             camera.1 .1 / f64::from(source_height.max(1)),
