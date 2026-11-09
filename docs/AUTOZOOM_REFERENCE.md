@@ -334,6 +334,13 @@ ApexShot already has the same range constants and most of the camera model:
   (`:16-18`).
 - The 350 ms early-start option is also present (`:75-78`).
 
+Resolved on `feat/autozoom-parity`:
+
+- **Exit timing.** A zoom now holds its framing through `clip.end`, then the
+  screen spring returns to the full frame. The 0.6 s early exit was removed from
+  the camera plan and the static fallback in
+  `windows-ui/src/video_editor/zoom.rs`. This matches the studied build.
+
 The remaining exactness gaps are:
 
 1. **Click source.** ApexShot's sidecar records a click on button-down
@@ -348,11 +355,7 @@ The remaining exactness gaps are:
    automatic clips, so this centre is mostly a seed and fallback. It becomes
    visible when the sidecar has no usable pointer data, and its fallback rule
    differs from the studied nearest-sample rule.
-3. **Exit timing.** ApexShot starts returning to the full frame 0.6 s before the
-   clip end (`windows-ui/src/video_editor/zoom.rs:84-85`, `:381-383`,
-   `:525-530`). The studied build holds the zoom through the end and springs
-   back after it.
-4. **Short windows.** ApexShot drops windows shorter than 0.1 s
+3. **Short windows.** ApexShot drops windows shorter than 0.1 s
    (`src/recording/editor/auto_zoom.rs:122`). The studied collection enforces
    its own 100 ms minimum when an item is inserted, which can fit or reject the
    item rather than filtering it in the generator.
@@ -379,9 +382,41 @@ goal. The camera model is already the important part.
    click stream, or keep the current down-only rule?
 2. Should the generator stop baking a focus point and let the editor derive the
    target entirely?
-3. Should automatic zooms hold to their range end and spring out after it,
-   rather than easing out during the last 0.6 s?
-4. Should the movement-group budget use the visible source area at the current
+3. Should the movement-group budget use the visible source area at the current
    scale, including letterboxing and crop, rather than `frame / scale`?
-5. Does a fresh project need import-time range generation, or is the editor's
+4. Does a fresh project need import-time range generation, or is the editor's
    "restore default ranges" action the intended only entry point?
+
+## 12. Validation
+
+Exit-timing change, 2026-11-09:
+
+- `cargo check --bin apexshot-video-editor` succeeded.
+- `cargo test --lib video_editor::zoom::tests` passed 23 of 23 tests.
+- `cargo test --lib` passed 822 tests with 12 ignored. One unrelated
+  `settings::usage` layout test failed in the parallel run and passed when run
+  alone.
+- `cargo clippy --all-targets` finished without warnings.
+- Physical harness: `artifacts/physical/zoom_exit_harness.py` opens a Tk window
+  that records its own clock, click phase, hold, and release, then records that
+  window through the capture test's `APEXSHOT_TEST_WINDOW_TITLE` path. The clip
+  is `artifacts/physical/zoom-exit-ui.mp4`; the sidecar has one click at recording
+  `5.020 s`, region `(901, 508)`, which is the crosshair.
+- The clip begins with a 3.5 s pre-roll. Its `T+` clock then runs:
+
+  | UI time | Expected editor |
+  | --- | --- |
+  | `0.000-1.500` | full frame, 1.00x |
+  | `1.700-2.136` | lead-in; camera may start moving |
+  | `2.136` | click at the crosshair |
+  | `2.236-4.500` | 2.00x, centered, held |
+  | `3.900` | red tick; the old exit would have started returning |
+  | `4.500-5.500` | spring back to 1.00x |
+  | `5.500-7.500` | full frame |
+
+  The sidecar click maps to an automatic-zoom range of `4.720-7.520 s` in the
+  recording. The old timing would have begun returning at `6.920 s`, which is
+  about `T+4.04`; the new build must still be at 2.00x at `T+4.1` and only
+  start returning after `T+4.5`.
+- The editor was opened with the clip and left running; the maintainer presses
+  Detect and checks the hold. Physical confirmation is still pending.

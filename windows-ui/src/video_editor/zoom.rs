@@ -191,7 +191,7 @@ struct CameraZoom {
     /// footage window has no pointer samples, which keeps the static fallback.
     groups: Vec<(f64, (f64, f64))>,
     /// A later auto zoom starts within the morph gap, so this clip holds its
-    /// framing through its own ease-out instead of returning to full frame.
+    /// framing through the gap instead of returning to the full frame.
     holds_for_next: bool,
 }
 
@@ -323,7 +323,6 @@ impl ZoomCameraPlan {
             boundaries.extend([
                 (zoom.clip.start - lead_in).max(0.0),
                 zoom.clip.start,
-                exit_start(&zoom.clip),
                 zoom.clip.end,
             ]);
         }
@@ -376,11 +375,6 @@ impl ZoomCameraPlan {
 
     fn target_rect(&self, index: usize, time: f64) -> [f64; 4] {
         let zoom = &self.zooms[index];
-        // A clip that a neighbour morphs from holds its framing through the
-        // ease-out instead of settling back to the full frame.
-        if !zoom.holds_for_next && time >= exit_start(&zoom.clip) {
-            return full_rect(self.frame);
-        }
         // A lead-in sample sits before the clip; frame it where the clip
         // itself starts rather than reading a movement group that has not
         // begun yet.
@@ -521,13 +515,6 @@ pub(super) fn static_camera_at(clips: &[ZoomClip], time: f64, frame: (f64, f64))
                 from_center.1 + (clip.center.1 - from_center.1) * progress,
             ),
         );
-    }
-    if time > clip.end - ease {
-        if morphs_into_neighbour(clips, *clip) {
-            return (to_scale, clip.center);
-        }
-        let progress = smoothstep((clip.end - time) / ease);
-        return (1.0 + (to_scale - 1.0) * progress, clip.center);
     }
     (to_scale, clip.center)
 }
@@ -724,7 +711,7 @@ fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
 }
 
 /// True when a later auto zoom morphs from `clip`, so it holds its framing
-/// through its own ease-out instead of returning to the full frame.
+/// through the gap instead of returning to the full frame.
 fn morphs_into_neighbour(clips: &[ZoomClip], clip: ZoomClip) -> bool {
     clip.mode == ZoomMode::Auto
         && !clip.instant
@@ -897,10 +884,6 @@ fn group_center_at(centers: &[(f64, (f64, f64))], time: f64) -> Option<(f64, f64
     Some(centers[active].1)
 }
 
-fn exit_start(clip: &ZoomClip) -> f64 {
-    clip.end - EASE_SECONDS.min((clip.end - clip.start) / 2.0)
-}
-
 pub(super) fn spring_step(
     value: f64,
     velocity: f64,
@@ -1007,7 +990,7 @@ mod tests {
     }
 
     #[test]
-    fn camera_eases_in_out_and_holds_a_plateau_without_pointer_samples() {
+    fn camera_eases_in_and_holds_a_plateau_without_pointer_samples() {
         let clips = [auto_clip(1.0, 4.0, 3.0, (320.0, 240.0))];
         let frame = (640.0, 480.0);
         let sidecar = sidecar((640, 480), &[]);
@@ -1015,17 +998,20 @@ mod tests {
         assert!((evaluate(&clips, &sidecar, frame, 1.3).0 - 2.0).abs() < 1e-9);
         assert_eq!(evaluate(&clips, &sidecar, frame, 1.6).0, 3.0);
         assert_eq!(evaluate(&clips, &sidecar, frame, 2.5).0, 3.0);
-        assert!((evaluate(&clips, &sidecar, frame, 3.7).0 - 2.0).abs() < 1e-9);
-        assert_eq!(evaluate(&clips, &sidecar, frame, 4.0).0, 1.0);
+        assert_eq!(evaluate(&clips, &sidecar, frame, 3.7).0, 3.0);
+        assert_eq!(evaluate(&clips, &sidecar, frame, 4.0).0, 3.0);
+        assert_eq!(evaluate(&clips, &sidecar, frame, 4.01).0, 1.0);
     }
 
     #[test]
-    fn short_clip_ease_windows_meet_at_the_midpoint() {
+    fn a_short_clip_eases_in_at_the_midpoint_and_holds_to_its_end() {
         let clips = [auto_clip(1.0, 1.8, 3.0, (320.0, 240.0))];
         let sidecar = sidecar((640, 480), &[]);
         assert!((evaluate(&clips, &sidecar, (640.0, 480.0), 1.2).0 - 2.0).abs() < 1e-9);
         assert_eq!(evaluate(&clips, &sidecar, (640.0, 480.0), 1.4).0, 3.0);
-        assert!((evaluate(&clips, &sidecar, (640.0, 480.0), 1.6).0 - 2.0).abs() < 1e-9);
+        assert_eq!(evaluate(&clips, &sidecar, (640.0, 480.0), 1.6).0, 3.0);
+        assert_eq!(evaluate(&clips, &sidecar, (640.0, 480.0), 1.8).0, 3.0);
+        assert_eq!(evaluate(&clips, &sidecar, (640.0, 480.0), 1.81).0, 1.0);
     }
 
     #[test]
@@ -1303,7 +1289,8 @@ mod tests {
             auto_clip(0.0, 1.5, 2.0, (400.0, 240.0)),
             auto_clip(2.3, 4.5, 3.0, (300.0, 240.0)),
         ];
-        assert_eq!(static_camera_at(&clips, 1.5, frame).0, 1.0);
+        assert_eq!(static_camera_at(&clips, 1.5, frame).0, 2.0);
+        assert_eq!(static_camera_at(&clips, 1.51, frame), (1.0, (320.0, 240.0)));
         assert_eq!(static_camera_at(&clips, 1.9, frame), (1.0, (320.0, 240.0)));
         assert_eq!(static_camera_at(&clips, 2.3, frame), (1.0, (300.0, 240.0)));
         assert_eq!(static_camera_at(&clips, 3.2, frame), (3.0, (300.0, 240.0)));
@@ -1349,9 +1336,14 @@ mod tests {
             (1.0, (300.0, 240.0))
         );
         assert!(
-            (static_camera_at(&auto_then_manual, 1.4, frame).0 - 1.0).abs() < 0.2,
-            "a manual neighbour must not make the auto clip hold: {:?}",
+            (static_camera_at(&auto_then_manual, 1.4, frame).0 - 2.0).abs() < 0.2,
+            "the auto clip holds its own framing to its end: {:?}",
             static_camera_at(&auto_then_manual, 1.4, frame)
+        );
+        assert_eq!(
+            static_camera_at(&auto_then_manual, 1.6, frame),
+            (1.0, (320.0, 240.0)),
+            "a manual neighbour must not hold the auto clip past its end"
         );
 
         let manual_then_auto = [
