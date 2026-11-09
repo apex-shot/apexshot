@@ -494,7 +494,7 @@ fn render(
             let cropped =
                 trail.is_some() || !(view_is_full(view, source) && size == model.source_size);
             if let Some(trail) = trail {
-                trail.render(&decoded, model.source_size, size, &mut scaled, 16, 4.0);
+                trail.render(&decoded, model.source_size, size, &mut scaled, 16, 4.0, 4);
             } else if cropped {
                 crop_scale_into(&decoded, model.source_size, view, size, &mut scaled);
             }

@@ -382,8 +382,20 @@ fn effect_loop(queue: Arc<EffectQueue>, sender: mpsc::SyncSender<EffectFrame>) {
         });
         let pixels = if let Some(trail) = trail {
             let mut rendered = vec![0; pixels.len()];
-            let (quality, span) = if job.playing { (6, 16.0) } else { (16, 4.0) };
-            trail.render(pixels, job.size, job.size, &mut rendered, quality, span);
+            let (quality, span, anisotropy) = if job.playing {
+                (6, 16.0, 1)
+            } else {
+                (16, 4.0, 4)
+            };
+            trail.render(
+                pixels,
+                job.size,
+                job.size,
+                &mut rendered,
+                quality,
+                span,
+                anisotropy,
+            );
             rendered
         } else {
             pixels.to_vec()
