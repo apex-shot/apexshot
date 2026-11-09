@@ -115,6 +115,9 @@ impl CursorModel {
             hide_idle: settings.hide_idle,
             idle_ms: settings.idle_ms,
             speed: settings.speed,
+            rotation_mode: settings.rotation_mode,
+            rotation_ratio: settings.rotate_on_x_movement_ratio,
+            base_rotation_deg: settings.base_rotation_deg,
         };
         let Some(frame) =
             sidecar.presented_in_video_at(source_seconds, motion, video_width, video_height)

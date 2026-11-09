@@ -883,6 +883,9 @@ fn draw_cursor(
         hide_idle: settings.hide_idle,
         idle_ms: settings.idle_ms,
         speed: settings.speed,
+        rotation_mode: settings.rotation_mode,
+        rotation_ratio: settings.rotate_on_x_movement_ratio,
+        base_rotation_deg: settings.base_rotation_deg,
     };
     let Some(frame) = sidecar.presented_in_video_at(
         source_time,
@@ -1025,7 +1028,7 @@ mod tests {
         Encoder, End, ExportModel, ExportSettings, ExportUpdate,
     };
     use crate::recording::editor::ffmpeg;
-    use crate::recording::editor::model::CursorSettings;
+    use crate::recording::editor::model::{CursorRotationMode, CursorSettings};
     use std::path::PathBuf;
     use std::sync::{atomic::AtomicBool, mpsc, Arc};
     use std::time::Duration;
@@ -1260,6 +1263,31 @@ mod tests {
             Ok("macos") => crate::recording::editor::model::CursorTheme::Macos,
             _ => CursorSettings::default().theme,
         };
+        let rotation_mode = match std::env::var("APEXSHOT_COMPARISON_ROTATION").as_deref() {
+            Ok("directional") => CursorRotationMode::Directional,
+            _ => CursorRotationMode::Velocity,
+        };
+        let rotation_ratio = std::env::var("APEXSHOT_COMPARISON_ROTATION_RATIO")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.5);
+        let base_rotation_deg = std::env::var("APEXSHOT_COMPARISON_BASE_DEG")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.0);
+        eprintln!(
+            "export: theme {theme:?} rotation {rotation_mode:?} ratio {rotation_ratio} base {base_rotation_deg}"
+        );
+        if std::env::var("APEXSHOT_COMPARISON_DUMP").is_ok() {
+            for t in [0.4, 0.8, 1.2, 2.2, 2.6, 2.9, 3.4, 3.9, 4.4] {
+                eprintln!(
+                    "rotation {t}: {:.1} deg",
+                    sidecar
+                        .cursor_rotation_at(t, rotation_mode, rotation_ratio, base_rotation_deg)
+                        .to_degrees()
+                );
+            }
+        }
         let model = ExportModel {
             source,
             source_size: (width, height),
@@ -1270,6 +1298,9 @@ mod tests {
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings {
                 theme,
+                rotation_mode,
+                rotate_on_x_movement_ratio: rotation_ratio,
+                base_rotation_deg,
                 ..CursorSettings::default()
             },
             sidecar: Some(sidecar),
@@ -1594,6 +1625,9 @@ mod tests {
             hide_idle: settings.hide_idle,
             idle_ms: settings.idle_ms,
             speed: settings.speed,
+            rotation_mode: settings.rotation_mode,
+            rotation_ratio: settings.rotate_on_x_movement_ratio,
+            base_rotation_deg: settings.base_rotation_deg,
         };
         let Some(frame) = sidecar.presented_in_video_at(
             time,

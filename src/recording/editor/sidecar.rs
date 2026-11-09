@@ -1,3 +1,4 @@
+use super::model::CursorRotationMode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -26,6 +27,17 @@ const ROTATION_VELOCITY_SMOOTHING_MS: f64 = 120.0;
 const ROTATION_STARTUP_CALM_MS: f64 = 500.0;
 const ROTATION_ENTRY_TELEPORT_SPEED: f64 = 15.0;
 const ROTATION_EMIT_EPSILON: f64 = 0.0015;
+
+/// The studied directional profile: the cursor turns toward its travel
+/// heading, measured from the arrow art's own neutral heading, with bounded
+/// turn rate and a short angular damping.
+const DIRECTIONAL_ALIGN_RATE_PER_PX: f64 = 0.00005;
+const DIRECTIONAL_SPEED_SATURATION_PX_PER_MS: f64 = 3.0;
+const DIRECTIONAL_ANGULAR_DAMPING_MS: f64 = 100.0;
+const DIRECTIONAL_MAX_TURN_RATE_DEG_PER_MS: f64 = 0.4;
+const DIRECTIONAL_MAX_FROM_NEUTRAL_DEG: f64 = 135.0;
+const DIRECTIONAL_MIN_TRAVEL_PX: f64 = 4.0;
+const DIRECTIONAL_NEUTRAL_HEADING_DEG: f64 = -112.5;
 
 #[derive(Default)]
 struct RotationEmitter {
@@ -137,6 +149,193 @@ fn interpolate_rotation(keyframes: &[(f64, f64)], time_ms: f64) -> f64 {
     from_radians + (to_radians - from_radians) * amount
 }
 
+/// Hold the studied startup window flat at the rotation it reaches by then,
+/// instead of easing out of the first frame's spike.
+fn calm_startup(keyframes: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    if keyframes.len() < 2 {
+        return keyframes;
+    }
+    let calm_at = keyframes[0].0 + ROTATION_STARTUP_CALM_MS;
+    let calm = interpolate_rotation(&keyframes, calm_at);
+    let mut result = vec![(keyframes[0].0, calm), (calm_at, calm)];
+    result.extend(keyframes.into_iter().filter(|(time, _)| *time > calm_at));
+    result
+}
+
+fn velocity_rotation_keyframes(samples: &[PointerSample], ratio: f64) -> Vec<(f64, f64)> {
+    let teleport = if entry_is_fast(samples) { 2 } else { 1 };
+    let mut emitter = RotationEmitter::default();
+    let mut velocity = horizontal_velocity(samples, teleport);
+    let first = &samples[0];
+
+    emitter.emit(first.t * 1000.0, tilt_for_velocity(velocity, ratio), true);
+    let mut previous = first;
+    for (index, sample) in samples.iter().enumerate().skip(1) {
+        let dt = (sample.t - previous.t) * 1000.0;
+        if dt > 0.0 {
+            let target = if index < teleport {
+                0.0
+            } else {
+                (sample.x - previous.x) / dt
+            };
+            simulate_rotation(
+                &mut velocity,
+                &mut emitter,
+                ratio,
+                previous.t * 1000.0,
+                dt,
+                target,
+            );
+        }
+        previous = sample;
+    }
+    let tail = ROTATION_VELOCITY_SMOOTHING_MS * 6.0;
+    simulate_rotation(
+        &mut velocity,
+        &mut emitter,
+        ratio,
+        previous.t * 1000.0,
+        tail,
+        0.0,
+    );
+    emitter.emit(previous.t * 1000.0 + tail, 0.0, true);
+    calm_startup(emitter.keyframes)
+}
+
+fn directional_rotation_keyframes(samples: &[PointerSample]) -> Vec<(f64, f64)> {
+    let max_from_neutral = DIRECTIONAL_MAX_FROM_NEUTRAL_DEG.to_radians();
+    let teleport = if entry_is_fast(samples) { 2 } else { 1 };
+    let mut emitter = RotationEmitter::default();
+    let mut rotation = heading_for(samples, teleport);
+    let mut angular_velocity = 0.0;
+    let mut sum_x = 0.0;
+    let mut sum_y = 0.0;
+    let mut sum_ms = 0.0;
+
+    emitter.emit(samples[0].t * 1000.0, rotation, true);
+    let mut previous = &samples[0];
+    for (index, sample) in samples.iter().enumerate().skip(1) {
+        let dt = (sample.t - previous.t) * 1000.0;
+        if dt > 0.0 {
+            if index < teleport {
+                step_directional(
+                    &mut rotation,
+                    &mut angular_velocity,
+                    &mut emitter,
+                    previous.t * 1000.0,
+                    dt,
+                    None,
+                    0.0,
+                    max_from_neutral,
+                );
+            } else {
+                sum_x += sample.x - previous.x;
+                sum_y += sample.y - previous.y;
+                sum_ms += dt;
+                let travel = sum_x.hypot(sum_y);
+                if travel >= DIRECTIONAL_MIN_TRAVEL_PX {
+                    let heading = sum_y.atan2(sum_x);
+                    step_directional(
+                        &mut rotation,
+                        &mut angular_velocity,
+                        &mut emitter,
+                        previous.t * 1000.0,
+                        dt,
+                        Some(heading),
+                        travel / sum_ms,
+                        max_from_neutral,
+                    );
+                    sum_x = 0.0;
+                    sum_y = 0.0;
+                    sum_ms = 0.0;
+                } else {
+                    step_directional(
+                        &mut rotation,
+                        &mut angular_velocity,
+                        &mut emitter,
+                        previous.t * 1000.0,
+                        dt,
+                        None,
+                        0.0,
+                        max_from_neutral,
+                    );
+                }
+            }
+        }
+        previous = sample;
+    }
+    let tail = DIRECTIONAL_ANGULAR_DAMPING_MS * 8.0;
+    step_directional(
+        &mut rotation,
+        &mut angular_velocity,
+        &mut emitter,
+        previous.t * 1000.0,
+        tail,
+        None,
+        0.0,
+        max_from_neutral,
+    );
+    emitter.emit(previous.t * 1000.0 + tail, rotation, true);
+    calm_startup(emitter.keyframes)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn step_directional(
+    rotation: &mut f64,
+    angular_velocity: &mut f64,
+    emitter: &mut RotationEmitter,
+    start_ms: f64,
+    span_ms: f64,
+    heading: Option<f64>,
+    travel_speed: f64,
+    max_from_neutral: f64,
+) {
+    let neutral = DIRECTIONAL_NEUTRAL_HEADING_DEG.to_radians();
+    let max_turn_rate = DIRECTIONAL_MAX_TURN_RATE_DEG_PER_MS.to_radians();
+    let steps = (span_ms / ROTATION_STEP_MS).ceil().max(1.0);
+    let step = span_ms / steps;
+    let damping = (-step / DIRECTIONAL_ANGULAR_DAMPING_MS).exp();
+    for index in 1..=(steps as usize) {
+        if let Some(heading) = heading {
+            let delta = heading - (neutral + *rotation);
+            let speed = travel_speed.min(DIRECTIONAL_SPEED_SATURATION_PX_PER_MS);
+            *angular_velocity += DIRECTIONAL_ALIGN_RATE_PER_PX * speed * delta.sin() * step;
+        }
+        *angular_velocity *= damping;
+        *angular_velocity = angular_velocity.clamp(-max_turn_rate, max_turn_rate);
+        *rotation += *angular_velocity * step;
+        if rotation.abs() > max_from_neutral {
+            *rotation = rotation.clamp(-max_from_neutral, max_from_neutral);
+            *angular_velocity = 0.0;
+        }
+        emitter.emit(start_ms + index as f64 * step, *rotation, false);
+    }
+}
+
+/// The studied opening heading: the first travel direction at or after
+/// `start`, relative to the arrow art's neutral heading.
+fn heading_for(samples: &[PointerSample], start: usize) -> f64 {
+    let neutral = DIRECTIONAL_NEUTRAL_HEADING_DEG.to_radians();
+    let max_from_neutral = DIRECTIONAL_MAX_FROM_NEUTRAL_DEG.to_radians();
+    let Some(previous) = start.checked_sub(1).and_then(|index| samples.get(index)) else {
+        return 0.0;
+    };
+    for sample in samples.iter().skip(start) {
+        let dx = sample.x - previous.x;
+        let dy = sample.y - previous.y;
+        if dx.hypot(dy) >= DIRECTIONAL_MIN_TRAVEL_PX {
+            return normalize_radians(dy.atan2(dx) - neutral)
+                .clamp(-max_from_neutral, max_from_neutral);
+        }
+    }
+    0.0
+}
+
+fn normalize_radians(angle: f64) -> f64 {
+    use std::f64::consts::{PI, TAU};
+    ((angle + PI) % TAU + TAU) % TAU - PI
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PointerDataSource {
@@ -226,6 +425,9 @@ pub struct CursorMotion {
     pub hide_idle: bool,
     pub idle_ms: f64,
     pub speed: f64,
+    pub rotation_mode: CursorRotationMode,
+    pub rotation_ratio: f64,
+    pub base_rotation_deg: f64,
 }
 
 impl Default for CursorMotion {
@@ -235,6 +437,9 @@ impl Default for CursorMotion {
             hide_idle: false,
             idle_ms: 800.0,
             speed: 1.0,
+            rotation_mode: CursorRotationMode::Velocity,
+            rotation_ratio: ROTATE_ON_X_MOVEMENT_RATIO,
+            base_rotation_deg: 0.0,
         }
     }
 }
@@ -788,64 +993,39 @@ impl PointerSidecar {
             alpha,
             rotation: self.cursor_rotation_at(
                 t,
-                ROTATE_ON_X_MOVEMENT_RATIO,
-                BASE_CURSOR_ROTATION_RAD,
+                motion.rotation_mode,
+                motion.rotation_ratio,
+                motion.base_rotation_deg,
             ),
             cursor_id,
         })
     }
 
-    /// The studied cursor tilt at `t`: a velocity profile that leans the cursor
-    /// with horizontal speed, clamped to the studied limits and calmed for the
+    /// The studied cursor rotation at `t`. `Velocity` leans the cursor with
+    /// horizontal speed; `Directional` points it along the travel heading.
+    /// Both add `base_degrees`, clamp to their studied limits, and calm the
     /// first half second. Times are converted to the profile's milliseconds.
-    pub fn cursor_rotation_at(&self, t: f64, ratio: f64, base_radians: f64) -> f64 {
-        if !ratio.is_finite() || ratio == 0.0 || self.pointer.is_empty() {
-            return base_radians;
+    pub fn cursor_rotation_at(
+        &self,
+        t: f64,
+        mode: CursorRotationMode,
+        ratio: f64,
+        base_degrees: f64,
+    ) -> f64 {
+        let base = base_degrees.to_radians();
+        if self.pointer.is_empty() {
+            return base;
         }
-        let keyframes = self.rotation_keyframes(ratio);
-        base_radians + interpolate_rotation(&keyframes, t * 1000.0)
-    }
-
-    fn rotation_keyframes(&self, ratio: f64) -> Vec<(f64, f64)> {
-        let samples = &self.pointer;
-        let teleport = if entry_is_fast(samples) { 2 } else { 1 };
-        let mut emitter = RotationEmitter::default();
-        let mut velocity = horizontal_velocity(samples, teleport);
-        let first = &samples[0];
-
-        emitter.emit(first.t * 1000.0, tilt_for_velocity(velocity, ratio), true);
-        let mut previous = first;
-        for (index, sample) in samples.iter().enumerate().skip(1) {
-            let dt = (sample.t - previous.t) * 1000.0;
-            if dt > 0.0 {
-                let target = if index < teleport {
-                    0.0
-                } else {
-                    (sample.x - previous.x) / dt
-                };
-                simulate_rotation(&mut velocity, &mut emitter, ratio, previous.t * 1000.0, dt, target);
+        let keyframes = match mode {
+            CursorRotationMode::Velocity => {
+                if !ratio.is_finite() || ratio == 0.0 {
+                    return base;
+                }
+                velocity_rotation_keyframes(&self.pointer, ratio)
             }
-            previous = sample;
-        }
-        let tail = ROTATION_VELOCITY_SMOOTHING_MS * 6.0;
-        simulate_rotation(&mut velocity, &mut emitter, ratio, previous.t * 1000.0, tail, 0.0);
-        emitter.emit(previous.t * 1000.0 + tail, 0.0, true);
-
-        let keyframes = emitter.keyframes;
-        if keyframes.len() < 2 {
-            return keyframes;
-        }
-        // The studied path holds the opening rotation for its startup window
-        // instead of easing out of a first-frame spike.
-        let calm_at = keyframes[0].0 + ROTATION_STARTUP_CALM_MS;
-        let calm = interpolate_rotation(&keyframes, calm_at);
-        let mut result = vec![(keyframes[0].0, calm), (calm_at, calm)];
-        result.extend(
-            keyframes
-                .into_iter()
-                .filter(|(time, _)| *time > calm_at),
-        );
-        result
+            CursorRotationMode::Directional => directional_rotation_keyframes(&self.pointer),
+        };
+        base + interpolate_rotation(&keyframes, t * 1000.0)
     }
 
     /// Whether a directly recorded cursor is visible at `t`. Window metadata
@@ -2536,11 +2716,49 @@ mod cursor_tests {
                     cursor_id: None,
                 });
             }
-            sidecar.cursor_rotation_at(0.2, ROTATE_ON_X_MOVEMENT_RATIO, BASE_CURSOR_ROTATION_RAD)
+            sidecar.cursor_rotation_at(
+                0.2,
+                CursorRotationMode::Velocity,
+                ROTATE_ON_X_MOVEMENT_RATIO,
+                0.0,
+            )
         };
         assert!(rotation(40.0) > 0.05, "rightward motion should lean right");
         assert!(rotation(-40.0) < -0.05, "leftward motion should lean left");
         assert!(rotation(0.0).abs() < 1e-9, "no motion should not tilt");
+    }
+
+    #[test]
+    fn the_directional_mode_turns_toward_the_travel_heading() {
+        let rotation = |dx: f64, dy: f64| {
+            let mut sidecar =
+                PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+            for index in 0..60 {
+                let t = index as f64 * 0.016;
+                sidecar.pointer.push(PointerSample {
+                    t,
+                    x: 100.0 + dx * index as f64,
+                    y: 100.0 + dy * index as f64,
+                    kind: CursorKind::Default,
+                    cursor_id: None,
+                });
+            }
+            sidecar.cursor_rotation_at(0.7, CursorRotationMode::Directional, 0.5, 0.0)
+        };
+        // Moving right is +112.5 degrees from the arrow's neutral heading.
+        assert!(
+            rotation(6.0, 0.0) > 1.5,
+            "rightward travel should point right"
+        );
+        assert!(
+            (-1.3..=-1.0).contains(&rotation(-6.0, 0.0)),
+            "leftward travel should point left"
+        );
+        // Upward travel is close to the art's neutral heading.
+        assert!(
+            rotation(0.0, -6.0).abs() < 0.6,
+            "upward travel should stay near neutral"
+        );
     }
 
     #[test]

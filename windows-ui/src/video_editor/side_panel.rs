@@ -12,8 +12,9 @@ use crate::capture::editor::window::icon_names;
 use crate::i18n::{t, tfmt};
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
-    ClickEffect, CursorMotionStyle, CursorSettings, CursorTheme,
+    ClickEffect, CursorMotionStyle, CursorRotationMode, CursorSettings, CursorTheme,
 };
+use crate::settings::select::SettingsSelect;
 use gtk4::cairo::{FontSlant, FontWeight};
 use gtk4::gdk;
 use gtk4::gdk_pixbuf::Pixbuf;
@@ -703,6 +704,64 @@ fn build_cursor_follow_page(
         |settings, value| settings.speed = value,
     );
     page.append(&speed_slider.widget());
+
+    let rotation_header = Label::new(Some(&t("Rotation")));
+    rotation_header.add_css_class("recording-editor-zoom-classic-label");
+    rotation_header.set_xalign(0.0);
+    page.append(&rotation_header);
+    let rotation_modes = SettingsSelect::new(
+        [
+            ("velocity", t("Tilt with motion")),
+            ("directional", t("Point along movement")),
+        ],
+        settings.rotation_mode.as_str(),
+    );
+    rotation_modes.widget().set_hexpand(true);
+    page.append(rotation_modes.widget());
+    let tilt_slider = cursor_slider(
+        &t("Tilt amount"),
+        0.0,
+        1.0,
+        settings.rotate_on_x_movement_ratio,
+        0.05,
+        2,
+        scale,
+        cursor.clone(),
+        repaint.clone(),
+        |settings, value| settings.rotate_on_x_movement_ratio = value,
+    );
+    page.append(&tilt_slider.widget());
+    let tilt_widget = tilt_slider.widget().clone();
+    tilt_widget.set_sensitive(settings.rotation_mode == CursorRotationMode::Velocity);
+    rotation_modes.connect_changed({
+        let rotation_modes = rotation_modes.clone();
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        let tilt_widget = tilt_widget.clone();
+        move || {
+            let mode = rotation_modes
+                .active_id()
+                .map(|id| CursorRotationMode::parse(&id))
+                .unwrap_or_default();
+            update_cursor_settings(&cursor, &repaint, |settings| settings.rotation_mode = mode);
+            tilt_widget.set_sensitive(mode == CursorRotationMode::Velocity);
+        }
+    });
+    page.append(
+        &cursor_slider(
+            &t("Base angle"),
+            -180.0,
+            180.0,
+            settings.base_rotation_deg,
+            5.0,
+            0,
+            scale,
+            cursor.clone(),
+            repaint.clone(),
+            |settings, value| settings.base_rotation_deg = value,
+        )
+        .widget(),
+    );
 
     for (button, style) in [
         (focused, CursorMotionStyle::Focused),

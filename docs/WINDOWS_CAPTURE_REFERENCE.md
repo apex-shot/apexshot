@@ -488,10 +488,14 @@ Recorded visibility transitions hide and restore the cursor, and a webcam
 export resolves the cursor folder from the loaded sidecar rather than the
 hidden clean-screen file. The smoothed cursor holds between events and eases
 into each move inside a bounded approach window instead of drifting early.
-The cursor tilts with horizontal velocity on the studied default profile
-(`velocity`, ratio 0.5, 12° per px/ms, clamped to ±20°, 120 ms smoothing, 500 ms
-startup calm) and pivots about the pointer. Rotation settings, and editor
-consumption of keys and scrolls, remain.
+Both studied rotation profiles are implemented, both pivot about the pointer,
+and the editor exposes the mode, the velocity ratio, and a base angle that adds
+to either mode. `velocity` (the default, ratio 0.5) tilts with horizontal speed
+(12° per px/ms, clamped to ±20°, 120 ms smoothing). `directional` points along
+the accumulated travel heading (align rate 0.00005 per px, speed saturated at
+3 px/ms, 100 ms angular damping, 0.4°/ms turn-rate cap, 135° limit from the
+−112.5° neutral heading, 4 px minimum travel) and holds its bearing at rest.
+Both calm the first 500 ms. Editor consumption of keys and scrolls remains.
 
 ## 5. Ranked gaps
 
@@ -697,7 +701,6 @@ Wire the remaining studied behaviour into the editor:
 
 - the two-spring model (`mouseMovementSpring` and `screenMovementSpring`)
 - click, drag, hover, and cursor-image sync points
-- velocity and directional rotation modes
 - motion blur amount
 - hover-aware cursor following
 

@@ -1,3 +1,38 @@
+/// How the cursor leans while it moves. The studied default is velocity: a
+/// bounded tilt with horizontal speed. Directional instead points the cursor
+/// along its travel direction, with the arrow art's own heading as neutral.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CursorRotationMode {
+    #[default]
+    Velocity,
+    Directional,
+}
+
+impl CursorRotationMode {
+    pub const ALL: [Self; 2] = [Self::Velocity, Self::Directional];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Velocity => "velocity",
+            Self::Directional => "directional",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "directional" => Self::Directional,
+            _ => Self::Velocity,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Velocity => "Velocity",
+            Self::Directional => "Directional",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CursorTheme {
     #[default]
@@ -76,6 +111,7 @@ pub const MAX_CURSOR_SPEED: f64 = 3.0;
 pub const DEFAULT_CURSOR_SPEED: f64 = 1.0;
 pub const DEFAULT_CURSOR_SHADOW: f64 = 0.4;
 pub const DEFAULT_CURSOR_SMOOTH: f64 = 0.35;
+pub const DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO: f64 = 0.5;
 pub const DEFAULT_CURSOR_IDLE_MS: f64 = 800.0;
 pub const DEFAULT_CLICK_INTENSITY: f64 = 0.7;
 pub const DEFAULT_CLICK_COLOR: (u8, u8, u8) = (255, 255, 255);
@@ -241,6 +277,9 @@ pub struct CursorSettings {
     pub click_scale: f64,
     pub click_opacity: f64,
     pub click_duration_ms: u32,
+    pub rotation_mode: CursorRotationMode,
+    pub rotate_on_x_movement_ratio: f64,
+    pub base_rotation_deg: f64,
 }
 
 impl Default for CursorSettings {
@@ -259,6 +298,9 @@ impl Default for CursorSettings {
             click_scale: DEFAULT_CLICK_SCALE,
             click_opacity: DEFAULT_CLICK_OPACITY,
             click_duration_ms: DEFAULT_CLICK_DURATION_MS,
+            rotation_mode: CursorRotationMode::Velocity,
+            rotate_on_x_movement_ratio: DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO,
+            base_rotation_deg: 0.0,
         }
     }
 }
@@ -281,6 +323,9 @@ impl CursorSettings {
             click_duration_ms: self
                 .click_duration_ms
                 .clamp(MIN_CLICK_DURATION_MS, MAX_CLICK_DURATION_MS),
+            rotation_mode: self.rotation_mode,
+            rotate_on_x_movement_ratio: self.rotate_on_x_movement_ratio.clamp(0.0, 1.0),
+            base_rotation_deg: self.base_rotation_deg.clamp(-180.0, 180.0),
         }
     }
 
