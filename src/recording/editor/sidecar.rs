@@ -333,8 +333,9 @@ pub struct PointerSidecar {
     pub region: CaptureRegion,
     pub pointer: Vec<PointerSample>,
     pub clicks: Vec<ClickSample>,
-    /// Visibility changes for selected-window cursor metadata. Old sidecars
-    /// have no visibility data and retain their original always-visible rule.
+    /// Visibility changes recorded beside the pointer. Window metadata keeps
+    /// its bounded/stale rules; screen and area recordings use the last sample.
+    /// Old sidecars have no visibility data and stay always visible.
     #[serde(default)]
     pub visibility: Vec<CursorVisibilitySample>,
     /// Mouse press intervals. Absent in version-1 sidecars, which load as an
@@ -361,6 +362,11 @@ pub struct PointerSidecar {
     /// Clean screen footage retained beside a composited recording.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub screen_file: Option<String>,
+    /// Directory the sidecar was loaded from. Runtime-only: an export may read
+    /// the hidden clean-screen file while the cursor catalog stays beside the
+    /// original recording's sidecar.
+    #[serde(skip)]
+    pub sidecar_directory: Option<PathBuf>,
 }
 
 impl PointerSidecar {
@@ -380,6 +386,7 @@ impl PointerSidecar {
             cursors: Vec::new(),
             webcam: None,
             screen_file: None,
+            sidecar_directory: None,
         }
     }
 
@@ -426,8 +433,18 @@ impl PointerSidecar {
 
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let bytes = std::fs::read(path)?;
-        let sidecar: Self = serde_json::from_slice(&bytes)?;
+        let mut sidecar: Self = serde_json::from_slice(&bytes)?;
+        sidecar.sidecar_directory = path.parent().map(Path::to_path_buf);
         Ok(sidecar)
+    }
+
+    /// The directory that owns this sidecar's relative assets.
+    fn asset_directory(&self, video_path: &Path) -> Option<PathBuf> {
+        self.sidecar_directory.clone().or_else(|| {
+            Self::sidecar_path(video_path)
+                .parent()
+                .map(Path::to_path_buf)
+        })
     }
 
     /// The folder beside this sidecar's directory that holds the cursor PNGs.
@@ -463,8 +480,7 @@ impl PointerSidecar {
 
     /// Resolve one catalog PNG beside the sidecar recorded for `video_path`.
     pub fn cursor_asset_path(&self, video_path: &Path, cursor_id: &str) -> Option<PathBuf> {
-        let directory = Self::sidecar_path(video_path);
-        self.cursor_asset_path_in(directory.parent()?, cursor_id)
+        self.cursor_asset_path_in(&self.asset_directory(video_path)?, cursor_id)
     }
 
     /// The recorded cursor image for a pointer frame, when the catalog holds
@@ -477,8 +493,7 @@ impl PointerSidecar {
     ) -> Option<CapturedCursorImage> {
         let cursor_id = frame.cursor_id.as_deref()?;
         let asset = self.cursor_asset(cursor_id)?;
-        let directory = Self::sidecar_path(video_path);
-        let path = self.cursor_asset_path_in(directory.parent()?, cursor_id)?;
+        let path = self.cursor_asset_path_in(&self.asset_directory(video_path)?, cursor_id)?;
         let (hotspot_x, hotspot_y) = asset.hotspot();
         Some(CapturedCursorImage {
             path,
@@ -631,6 +646,9 @@ impl PointerSidecar {
     }
 
     pub fn presented_at(&self, t: f64, motion: CursorMotion) -> Option<CursorFrame> {
+        if self.source != PointerDataSource::WindowMetadata && !self.recorded_cursor_visible_at(t) {
+            return None;
+        }
         let (_, _, kind, cursor_id) = self.interpolated_at_sample(t)?;
         let (x, y) = self.motion_position_at(t, motion.smooth, motion.speed)?;
         let alpha = if motion.hide_idle {
@@ -645,6 +663,20 @@ impl PointerSidecar {
             alpha,
             cursor_id,
         })
+    }
+
+    /// Whether a directly recorded cursor is visible at `t`. Window metadata
+    /// has its own bounded/stale visibility path; recorded screen and area
+    /// sidecars use the last recorded visibility transition.
+    fn recorded_cursor_visible_at(&self, t: f64) -> bool {
+        let index = self.visibility.partition_point(|sample| sample.t <= t);
+        match index
+            .checked_sub(1)
+            .and_then(|index| self.visibility.get(index))
+        {
+            Some(sample) => sample.visible,
+            None => true,
+        }
     }
 
     /// Return a pointer frame in the encoded video's pixel coordinate space.
@@ -718,33 +750,35 @@ impl PointerSidecar {
         t: f64,
         smooth: f64,
         speed: f64,
-        window_metadata: bool,
+        _window_metadata: bool,
     ) -> (f64, f64) {
         let Some(first) = samples.first() else {
             return (0.0, 0.0);
         };
         let tau = (0.01 + smooth.clamp(0.0, 1.0).powi(2) * 0.26) / speed.clamp(0.25, 3.0);
+        // The approach toward an event begins inside a bounded window before
+        // it — about four time constants, capped at the studied 1.5 s — so a
+        // long gap holds the cursor instead of drifting toward a move that
+        // has not happened yet.
+        let approach = (4.0 * tau).min(1.5);
         let mut px = first.x;
         let mut py = first.y;
         let mut pt = first.t;
         for sample in samples.iter().skip(1) {
-            let target_t = sample.t.min(t);
-            let dt = (target_t - pt).max(0.0);
-            let k = 1.0 - (-dt / tau).exp();
+            let hold_t = (sample.t - approach).max(pt);
+            let end_t = sample.t.min(t);
+            let k = 1.0 - (-(end_t - hold_t).max(0.0) / tau).exp();
             if sample.t <= t {
                 px += (sample.x - px) * k;
                 py += (sample.y - py) * k;
                 pt = sample.t;
                 continue;
             }
-            let interpolated = if window_metadata {
-                Self::interpolated_window_in(samples, t)
-            } else {
-                Self::interpolated_in(samples, t)
-            };
-            if let Some((ix, iy, _, _)) = interpolated {
-                px += (ix - px) * k;
-                py += (iy - py) * k;
+            // Inside the approach window the cursor eases to the recorded
+            // next sample; before it the position holds, never interpolated.
+            if t >= hold_t {
+                px += (sample.x - px) * k;
+                py += (sample.y - py) * k;
             }
             break;
         }
@@ -1313,7 +1347,8 @@ mod tests {
         });
         sidecar.write_next_to_video(&video).unwrap();
 
-        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        let mut loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        loaded.sidecar_directory = None;
         assert_eq!(loaded, sidecar);
         PointerSidecar::delete_next_to_video(&video);
         let _ = std::fs::remove_dir_all(&dir);
@@ -1357,7 +1392,8 @@ mod tests {
             .write(&PointerSidecar::legacy_sidecar_path(&video))
             .unwrap();
 
-        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        let mut loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        loaded.sidecar_directory = None;
         assert_eq!(loaded, sidecar);
         assert!(PointerSidecar::sidecar_path(&video).is_file());
         assert!(!PointerSidecar::legacy_sidecar_path(&video).exists());
@@ -2300,6 +2336,83 @@ mod cursor_tests {
             .expect("the frame should render");
         assert_eq!(frame.kind, CursorKind::Hand);
         assert_eq!(frame.cursor_id.as_deref(), Some("hand-id"));
+    }
+
+    #[test]
+    fn recorded_visibility_hides_and_restores_the_cursor() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 20.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        sidecar.visibility = vec![
+            CursorVisibilitySample {
+                t: 0.0,
+                visible: true,
+                hold_until_next: false,
+            },
+            CursorVisibilitySample {
+                t: 1.0,
+                visible: false,
+                hold_until_next: false,
+            },
+            CursorVisibilitySample {
+                t: 2.0,
+                visible: true,
+                hold_until_next: false,
+            },
+        ];
+
+        assert!(sidecar.presented_at(0.5, CursorMotion::default()).is_some());
+        assert!(sidecar.presented_at(1.5, CursorMotion::default()).is_none());
+        assert!(sidecar.presented_at(2.5, CursorMotion::default()).is_some());
+    }
+
+    #[test]
+    fn a_loaded_sidecar_resolves_cursors_from_its_own_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "apexshot-cursor-source-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        let sidecar_path = root.join("sidecar.json");
+        let cursor_folder = root.join("clip.cursors");
+        std::fs::create_dir_all(&cursor_folder).unwrap();
+        std::fs::write(cursor_folder.join("hand.png"), b"not a png yet").unwrap();
+
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.cursor_images = Some("clip.cursors".to_string());
+        sidecar.cursors.push(CursorAsset {
+            id: "hand-id".to_string(),
+            file: "hand.png".to_string(),
+            width: 32,
+            height: 32,
+            hotspot_x: 6,
+            hotspot_y: 0,
+            kind: CursorKind::Hand,
+        });
+        sidecar.write(&sidecar_path).unwrap();
+
+        let loaded = PointerSidecar::load(&sidecar_path).unwrap();
+        let clean_screen = root.join("clean-screen.mp4");
+        let frame = CursorFrame {
+            x: 0.0,
+            y: 0.0,
+            kind: CursorKind::Hand,
+            alpha: 1.0,
+            cursor_id: Some("hand-id".to_string()),
+        };
+        assert_eq!(
+            loaded.cursor_capture(&clean_screen, &frame).unwrap().path,
+            cursor_folder.join("hand.png")
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     fn catalog_sidecar(folder: &str, file: &str) -> PointerSidecar {

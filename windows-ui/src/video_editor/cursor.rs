@@ -268,7 +268,7 @@ fn source_to_stage(
 #[cfg(test)]
 mod tests {
     use super::{source_to_stage, video_rect_for, CursorModel, VideoRect};
-    use crate::recording::editor::model::{ClickEffect, CursorSettings};
+    use crate::recording::editor::model::{ClickEffect, CursorSettings, CursorTheme};
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
     };
@@ -406,7 +406,7 @@ mod tests {
         );
         let folder = sidecar_path.parent().unwrap().join(&folder_name);
         std::fs::create_dir_all(&folder).unwrap();
-        let mut image = image::RgbaImage::new(4, 4);
+        let mut image = image::RgbaImage::new(32, 32);
         for pixel in image.pixels_mut() {
             *pixel = image::Rgba([255, 0, 0, 255]);
         }
@@ -426,8 +426,8 @@ mod tests {
         sidecar.cursors.push(CursorAsset {
             id: "hand-id".to_string(),
             file: "hand.png".to_string(),
-            width: 4,
-            height: 4,
+            width: 32,
+            height: 32,
             hotspot_x: 1,
             hotspot_y: 1,
             kind: CursorKind::Hand,
@@ -443,6 +443,7 @@ mod tests {
         cursor.state.borrow_mut().video_path = Some(video);
         cursor.set_settings(CursorSettings {
             smooth: 0.0,
+            theme: CursorTheme::Macos,
             ..CursorSettings::default()
         });
 
@@ -460,7 +461,7 @@ mod tests {
         }
         surface.flush();
         let pixels = surface.data().unwrap().to_vec();
-        assert_eq!(alpha_bounds(&pixels, 100, 100), Some((49, 39, 52, 42)));
+        assert_eq!(alpha_bounds(&pixels, 100, 100), Some((48, 38, 96, 86)));
 
         let _ = std::fs::remove_dir_all(&folder);
     }

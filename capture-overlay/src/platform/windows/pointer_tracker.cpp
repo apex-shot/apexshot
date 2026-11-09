@@ -416,6 +416,84 @@ QImage cursorImageFromHandle(HCURSOR cursor, QPoint* hotspot)
     return image;
 }
 
+struct StandardBitmap {
+    CursorKind kind;
+    QImage image;
+};
+
+/// The bitmaps of the shared system cursors, captured once. An app that hands
+/// back its own HCURSOR still usually draws the same arrow, hand, or I-beam,
+/// so comparing the pixels recovers the semantic kind a theme can restyle.
+const QVector<StandardBitmap>& standardBitmaps()
+{
+    static const QVector<StandardBitmap> bitmaps = [] {
+        QVector<StandardBitmap> list;
+        const StandardCursorHandles& table = standardCursorHandles();
+        for (size_t i = 0; i < kStandardCursors.size(); ++i) {
+            if (!table.handles[i])
+                continue;
+            QPoint hotspot;
+            const QImage image = cursorImageFromHandle(table.handles[i], &hotspot);
+            if (!image.isNull())
+                list.push_back({kStandardCursors[i].kind, image});
+        }
+        return list;
+    }();
+    return bitmaps;
+}
+
+/// Whether two cursor bitmaps draw the same shape. Cursors are small and
+/// anti-aliasing is identical for the same shape, so a few percent of pixels
+/// may differ without being a different cursor.
+bool similarCursorBitmap(const QImage& a, const QImage& b)
+{
+    if (a.size() != b.size())
+        return false;
+    const QImage left = a.convertToFormat(QImage::Format_ARGB32);
+    const QImage right = b.convertToFormat(QImage::Format_ARGB32);
+    int considered = 0;
+    int differing = 0;
+    for (int y = 0; y < left.height(); ++y) {
+        const QRgb* leftLine = reinterpret_cast<const QRgb*>(left.constScanLine(y));
+        const QRgb* rightLine = reinterpret_cast<const QRgb*>(right.constScanLine(y));
+        for (int x = 0; x < left.width(); ++x) {
+            const QRgb l = leftLine[x];
+            const QRgb r = rightLine[x];
+            const bool leftInk = qAlpha(l) > 8;
+            const bool rightInk = qAlpha(r) > 8;
+            // Transparent padding says nothing about the shape, and two mostly
+            // empty cursors would otherwise match by sharing their emptiness.
+            if (!leftInk && !rightInk)
+                continue;
+            ++considered;
+            if (qAbs(qAlpha(l) - qAlpha(r)) > 24) {
+                ++differing;
+                continue;
+            }
+            if (leftInk && rightInk
+                && qAbs(qRed(l) - qRed(r)) + qAbs(qGreen(l) - qGreen(r))
+                        + qAbs(qBlue(l) - qBlue(r))
+                    > 48) {
+                ++differing;
+            }
+        }
+    }
+    return considered >= 36 && differing * 100 <= considered * 6;
+}
+
+/// The kind a captured bitmap draws, when it matches a standard cursor.
+bool standardKindForBitmap(const QImage& image, CursorKind* kind)
+{
+    for (const StandardBitmap& standard : standardBitmaps()) {
+        if (similarCursorBitmap(image, standard.image)) {
+            if (kind)
+                *kind = standard.kind;
+            return true;
+        }
+    }
+    return false;
+}
+
 PointerTracker* gHookOwner = nullptr;
 
 } // namespace
@@ -447,6 +525,7 @@ public:
     bool haveVisibility = false;
     double lastScrollTime = -1.0;
     QHash<quintptr, QString> cursorIds;
+    QHash<quintptr, CursorKind> cursorKinds;
     QHash<QString, CursorShape> cursors;
 };
 
@@ -483,6 +562,7 @@ void PointerTracker::reset()
     data_->lastScrollTime = -1.0;
     data_->captureKeystrokes = false;
     data_->cursorIds.clear();
+    data_->cursorKinds.clear();
     data_->cursors.clear();
 }
 
@@ -649,9 +729,8 @@ void PointerTracker::sample()
     CURSORINFO cursorInfo{};
     cursorInfo.cbSize = sizeof(cursorInfo);
     const bool haveCursor = GetCursorInfo(&cursorInfo) != 0;
-    const CursorKind kind = haveCursor ? cursorKindFor(cursorInfo.hCursor) : CursorKind::Default;
-    const QString cursorId =
-        haveCursor ? cursorIdFor(cursorInfo.hCursor, kind) : QString();
+    CursorKind kind = haveCursor ? cursorKindFor(cursorInfo.hCursor) : CursorKind::Default;
+    const QString cursorId = haveCursor ? cursorIdFor(cursorInfo.hCursor, kind) : QString();
 
     const bool samePoint = data_->haveLastPoint && data_->lastPoint.x == point.x
         && data_->lastPoint.y == point.y;
@@ -770,7 +849,7 @@ void PointerTracker::handleMouseEvent(WPARAM message, const MSLLHOOKSTRUCT& even
     CURSORINFO cursorInfo{};
     cursorInfo.cbSize = sizeof(cursorInfo);
     const bool haveCursor = GetCursorInfo(&cursorInfo) != 0;
-    const CursorKind kind = haveCursor ? cursorKindFor(cursorInfo.hCursor) : CursorKind::Default;
+    CursorKind kind = haveCursor ? cursorKindFor(cursorInfo.hCursor) : CursorKind::Default;
     QString cursorId = haveCursor ? cursorIdFor(cursorInfo.hCursor, kind) : QString();
     if (cursorId.isEmpty() && !data_->pointer.empty())
         cursorId = data_->pointer.back().cursorId;
@@ -862,7 +941,7 @@ void PointerTracker::handleKeyEvent(WPARAM message, const KBDLLHOOKSTRUCT& event
     CURSORINFO cursorInfo{};
     cursorInfo.cbSize = sizeof(cursorInfo);
     const bool haveCursor = GetCursorInfo(&cursorInfo) != 0;
-    const CursorKind kind = haveCursor ? cursorKindFor(cursorInfo.hCursor) : CursorKind::Default;
+    CursorKind kind = haveCursor ? cursorKindFor(cursorInfo.hCursor) : CursorKind::Default;
     const QString cursorId = haveCursor ? cursorIdFor(cursorInfo.hCursor, kind) : QString();
     const qint64 mediaTimeMs = eventMediaTime(event.time);
     const double t = static_cast<double>(mediaTimeMs) / 1000.0;
@@ -895,20 +974,46 @@ void PointerTracker::updateVisibility(qint64 mediaTimeMs)
                      haveCursor && (cursorInfo.flags & CURSOR_SHOWING) != 0);
 }
 
-QString PointerTracker::cursorIdFor(HCURSOR cursor, CursorKind kind)
+QString PointerTracker::cursorIdFor(HCURSOR cursor, CursorKind& kind)
 {
     if (!cursor)
         return {};
 
     const quintptr key = reinterpret_cast<quintptr>(cursor);
     const auto cached = data_->cursorIds.constFind(key);
-    if (cached != data_->cursorIds.constEnd())
+    if (cached != data_->cursorIds.constEnd()) {
+        const auto cachedKind = data_->cursorKinds.constFind(key);
+        if (cachedKind != data_->cursorKinds.constEnd())
+            kind = cachedKind.value();
         return cached.value();
+    }
 
     QPoint hotspot;
     const QImage image = cursorImageFromHandle(cursor, &hotspot);
     if (image.isNull())
         return {};
+
+    // A handle that is not one of the shared standards may still draw one: an
+    // app often installs its own arrow or I-beam. Matching the bitmap recovers
+    // the semantic kind so the chosen theme can restyle it; only a shape no
+    // standard matches stays a recorded-only `custom-` cursor.
+    bool standard = false;
+    {
+        const StandardCursorHandles& table = standardCursorHandles();
+        for (size_t i = 0; i < kStandardCursors.size(); ++i) {
+            if (table.handles[i] && cursor == table.handles[i]) {
+                standard = true;
+                break;
+            }
+        }
+    }
+    if (!standard) {
+        CursorKind matched = kind;
+        if (standardKindForBitmap(image, &matched)) {
+            kind = matched;
+            standard = true;
+        }
+    }
 
     QCryptographicHash hash(QCryptographicHash::Sha256);
     hash.addData(QByteArray::fromRawData(reinterpret_cast<const char*>(image.constBits()),
@@ -922,7 +1027,8 @@ QString PointerTracker::cursorIdFor(HCURSOR cursor, CursorKind kind)
     hash.addData(reinterpret_cast<const char*>(&hotspotX), sizeof(hotspotX));
     hash.addData(reinterpret_cast<const char*>(&hotspotY), sizeof(hotspotY));
     hash.addData(cursorKindName(kind).toUtf8());
-    const QString id = QString::fromLatin1(hash.result().toHex().left(16));
+    const QString prefix = standard ? QStringLiteral("std-") : QStringLiteral("custom-");
+    const QString id = prefix + QString::fromLatin1(hash.result().toHex().left(16));
 
     if (!data_->cursors.contains(id)) {
         CursorShape shape;
@@ -937,6 +1043,7 @@ QString PointerTracker::cursorIdFor(HCURSOR cursor, CursorKind kind)
         data_->cursors.insert(id, shape);
     }
     data_->cursorIds.insert(key, id);
+    data_->cursorKinds.insert(key, kind);
     return id;
 }
 

@@ -108,7 +108,7 @@ private:
                        const QString& cursorId);
     void appendVisibility(double t, bool visible);
     void updateVisibility(qint64 mediaTimeMs);
-    QString cursorIdFor(HCURSOR cursor, CursorKind kind);
+    QString cursorIdFor(HCURSOR cursor, CursorKind& kind);
     bool installHook();
     bool installKeyboardHook();
     void removeHook();

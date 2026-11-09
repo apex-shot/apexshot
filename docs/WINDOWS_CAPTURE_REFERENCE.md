@@ -473,11 +473,22 @@ Two caveats:
 Autozoom, ripple/circle geometry, cursor themes, and the sidecar already exist.
 The sidecar is version 2 and carries pointer samples, clicks, presses, scrolls,
 keys, visibility, a cursor image catalog, webcam layout, and capture region.
-Mouse moves, clicks, scrolls, and keys are event-driven. The editor now draws
-the recorded cursor PNG at its hotspot in the preview and the export, and falls
-back to the sample's `kind` when the catalog entry or PNG is missing. Placement
-and scaling follow the existing cursor settings, press scale, click effects,
-and smoothing. Editor consumption of keys and scrolls remains.
+Mouse moves, clicks, scrolls, and keys are event-driven. Catalog ids are
+prefixed `std-` for recognised standard cursors and `custom-` for app-specific
+shapes, and a custom bitmap that draws a standard shape is classified as that
+standard kind. As in the studied editor, the edited set decides the image:
+`std-` ids always take the themed sprite, while `custom-` ids (and legacy
+unprefixed sidecars) paint their recorded PNG only under the macOS-like themes
+(`Macos`, `Tahoe`, `TahoeInverted`) — the counterpart of the studied `macos`
+set. Every other theme restyles them, with an unrecognised shape falling back
+to the arrow sprite. A missing PNG falls back to `kind`.
+Captured images scale their visible alpha bounds (computed at the mean nonzero
+alpha, matching the studied loader) to the 48 px baseline at the default size.
+Recorded visibility transitions hide and restore the cursor, and a webcam
+export resolves the cursor folder from the loaded sidecar rather than the
+hidden clean-screen file. The smoothed cursor holds between events and eases
+into each move inside a bounded approach window instead of drifting early.
+Editor consumption of keys and scrolls remains.
 
 ## 5. Ranked gaps
 
@@ -659,7 +670,11 @@ Validation:
 - Clicks during pause and immediately after resume.
 - Ctrl+Shift+K injected as six key events with modifiers.
 - One wheel step each way recorded with the signed delta.
-- Cursor visibility sampled at start, on every change, and at stop.
+- Cursor visibility sampled at start, on every change, and at stop, and consumed
+  by the editor so the cursor disappears and returns.
+- Captured cursor PNGs placed at the recorded hotspot, scaled from visible alpha
+  bounds to the 48 px baseline, and resolved from the loaded sidecar during a
+  webcam clean-screen export.
 - 24, 30, 50, and 60 fps recordings.
 - Window and area recordings.
 - Click count and timestamps compared with an independent hook log.

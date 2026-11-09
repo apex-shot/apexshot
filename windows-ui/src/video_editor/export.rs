@@ -1236,6 +1236,62 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "manual recording comparison"]
+    fn export_recording_for_manual_comparison() {
+        let source = PathBuf::from(std::env::var_os("APEXSHOT_COMPARISON_CLIP").unwrap());
+        let output = PathBuf::from(std::env::var_os("APEXSHOT_COMPARISON_OUTPUT").unwrap());
+        assert!(
+            !output.exists(),
+            "refusing to overwrite the comparison output"
+        );
+        let width = std::env::var("APEXSHOT_COMPARISON_WIDTH")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let height = std::env::var("APEXSHOT_COMPARISON_HEIGHT")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let duration = ffmpeg::probe_duration(&source).unwrap();
+        let sidecar_path = PathBuf::from(std::env::var_os("APEXSHOT_COMPARISON_SIDECAR").unwrap());
+        let sidecar = crate::recording::editor::sidecar::PointerSidecar::load(&sidecar_path)
+            .expect("the recording must have a sidecar");
+        let theme = match std::env::var("APEXSHOT_COMPARISON_THEME").as_deref() {
+            Ok("macos") => crate::recording::editor::model::CursorTheme::Macos,
+            _ => CursorSettings::default().theme,
+        };
+        let model = ExportModel {
+            source,
+            source_size: (width, height),
+            trim_start: 0.0,
+            trim_end: duration,
+            cuts: Vec::new(),
+            zooms: Vec::new(),
+            zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings {
+                theme,
+                ..CursorSettings::default()
+            },
+            sidecar: Some(sidecar),
+            webcam: None,
+            crf: 20,
+        };
+        let handle = start_export(model, output.clone());
+        loop {
+            match handle.receiver.recv_timeout(Duration::from_secs(180)) {
+                Ok(ExportUpdate::Progress { .. }) => {}
+                Ok(ExportUpdate::Finished(path)) => {
+                    assert_eq!(path, output);
+                    break;
+                }
+                Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
+                Ok(ExportUpdate::Cancelled) => panic!("export cancelled itself"),
+                Err(error) => panic!("export did not report back: {error}"),
+            }
+        }
+    }
+
+    #[test]
     fn a_trimmed_cut_composition_exports_to_an_mp4() {
         if std::env::var("APEXSHOT_EXPORT_TEST").ok().as_deref() != Some("1") {
             return;
@@ -1748,6 +1804,7 @@ mod tests {
 #[cfg(test)]
 mod webcam_export_tests {
     use super::*;
+    use crate::recording::editor::model::CursorTheme;
     use crate::recording::editor::sidecar::WebcamTrack;
     use crate::video_editor::webcam::{CameraLayout, LayerSettings, LayoutCue, LayoutSettings};
     use std::fs;
@@ -2384,7 +2441,7 @@ mod webcam_export_tests {
         );
         let folder = sidecar_path.parent().unwrap().join(&folder_name);
         std::fs::create_dir_all(&folder).unwrap();
-        let mut image = image::RgbaImage::new(4, 4);
+        let mut image = image::RgbaImage::new(32, 32);
         for pixel in image.pixels_mut() {
             *pixel = image::Rgba([255, 0, 0, 255]);
         }
@@ -2396,8 +2453,8 @@ mod webcam_export_tests {
         sidecar.cursors.push(CursorAsset {
             id: "hand-id".to_string(),
             file: "hand.png".to_string(),
-            width: 4,
-            height: 4,
+            width: 32,
+            height: 32,
             hotspot_x: 1,
             hotspot_y: 1,
             kind: CursorKind::Hand,
@@ -2418,6 +2475,7 @@ mod webcam_export_tests {
         let mut layer = ImageSurface::create(Format::ARgb32, size.0 as i32, size.1 as i32).unwrap();
         let settings = CursorSettings {
             smooth: 0.0,
+            theme: CursorTheme::Macos,
             ..CursorSettings::default()
         };
         super::draw_cursor(
@@ -2446,7 +2504,100 @@ mod webcam_export_tests {
                 }
             }
         }
-        assert_eq!(bounds, Some((49, 39, 52, 42)));
+        assert_eq!(bounds, Some((49, 39, 95, 85)));
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+
+    #[test]
+    fn the_export_finds_the_cursor_png_beside_a_clean_screen_file() {
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, CursorAsset, CursorKind, PointerSample, PointerSidecar,
+        };
+        use gtk4::cairo::{Format, ImageSurface};
+
+        let video = std::env::temp_dir().join(format!(
+            "apexshot-export-clean-cursor-{}-{:?}.mp4",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let clean = video.with_file_name("clean-screen.mp4");
+        let sidecar_path = PointerSidecar::sidecar_path(&video);
+        let folder_name = format!(
+            "{}.cursors",
+            sidecar_path
+                .file_name()
+                .expect("the sidecar has a file name")
+                .to_string_lossy()
+        );
+        let folder = sidecar_path.parent().unwrap().join(&folder_name);
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut image = image::RgbaImage::new(32, 32);
+        for pixel in image.pixels_mut() {
+            *pixel = image::Rgba([255, 0, 0, 255]);
+        }
+        image.save(folder.join("hand.png")).unwrap();
+
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.cursor_images = Some(folder_name);
+        sidecar.cursors.push(CursorAsset {
+            id: "hand-id".to_string(),
+            file: "hand.png".to_string(),
+            width: 32,
+            height: 32,
+            hotspot_x: 1,
+            hotspot_y: 1,
+            kind: CursorKind::Hand,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 50.0,
+            y: 40.0,
+            kind: CursorKind::Hand,
+            cursor_id: Some("hand-id".to_string()),
+        });
+        sidecar.write(&sidecar_path).unwrap();
+        let loaded = PointerSidecar::load(&sidecar_path).unwrap();
+
+        let size = (100u32, 100u32);
+        let mut pixels = vec![0u8; size.0 as usize * size.1 as usize * 4];
+        for pixel in pixels.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[0, 0, 0, 255]);
+        }
+        let mut layer = ImageSurface::create(Format::ARgb32, size.0 as i32, size.1 as i32).unwrap();
+        let settings = CursorSettings {
+            smooth: 0.0,
+            theme: CursorTheme::Macos,
+            ..CursorSettings::default()
+        };
+        super::draw_cursor(
+            &mut pixels,
+            size,
+            (0.0, 0.0, 100.0, 100.0),
+            &loaded,
+            &clean,
+            settings,
+            0.0,
+            size,
+            &mut layer,
+        );
+
+        let mut bounds: Option<(usize, usize, usize, usize)> = None;
+        for y in 0..size.1 as usize {
+            for x in 0..size.0 as usize {
+                let p = &pixels[(y * size.0 as usize + x) * 4..][..4];
+                if p[0] > 180 && p[1] < 60 && p[2] < 60 {
+                    bounds = Some(match bounds {
+                        Some((min_x, min_y, max_x, max_y)) => {
+                            (min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y))
+                        }
+                        None => (x, y, x, y),
+                    });
+                }
+            }
+        }
+        assert_eq!(bounds, Some((49, 39, 95, 85)));
+        let _ = std::fs::remove_file(&sidecar_path);
         let _ = std::fs::remove_dir_all(&folder);
     }
 
