@@ -998,6 +998,7 @@ impl Data {
                 mirror: layer.mirror,
                 delay_seconds: layer.delay_seconds,
                 zoomed_scale: layer.zoomed_scale,
+                hide_during_silence: layer.hide_during_silence,
             });
             webcam.set_layouts(layouts);
         } else if let Some(webcam) = self.webcam.as_ref() {
@@ -8270,6 +8271,7 @@ mod tests {
                 mirror: true,
                 delay_seconds: 0.0,
                 zoomed_scale: super::super::webcam::ZOOMED_CAMERA_SCALE,
+                hide_during_silence: None,
                 layouts: None,
             }),
             playhead_seconds: 0.0,

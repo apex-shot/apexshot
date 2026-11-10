@@ -852,6 +852,14 @@ fn render_range(
                     camera_aspect,
                     shrink,
                 );
+                let layout = webcam::hide_for_silence(
+                    layout,
+                    webcam::silence_hide_at(
+                        &webcam.silence,
+                        source_time,
+                        webcam.settings.hide_during_silence,
+                    ),
+                );
                 if layout.camera_alpha > 0.0 && camera_frame.is_none() {
                     let _ = decoder.kill();
                     let _ = decoder.wait();
@@ -2932,6 +2940,7 @@ mod webcam_export_tests {
                 video_seconds: 2.0,
                 last_frame: 1.95,
                 source_size: (320, 320),
+                silence: Vec::new(),
             }),
             canvas: None,
             crf: 30,
@@ -3700,6 +3709,7 @@ mod webcam_export_tests {
                 video_seconds: 4.0,
                 last_frame: 3.95,
                 source_size: (320, 320),
+                silence: Vec::new(),
             }),
             canvas: None,
             crf: 30,
@@ -3855,6 +3865,7 @@ mod webcam_export_tests {
                 video_seconds: 2.0,
                 last_frame: 1.95,
                 source_size: (320, 320),
+                silence: Vec::new(),
             }),
             canvas: None,
             crf: 30,

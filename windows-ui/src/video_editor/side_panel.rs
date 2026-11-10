@@ -2677,12 +2677,20 @@ struct WebcamCameraContext {
     root: GtkBox,
     mirror: Switch,
     delay: FilledSlider,
+    silence: Switch,
+    silence_length: FilledSlider,
 }
 
 impl WebcamCameraContext {
-    fn refresh(&self, mirror: bool, delay_seconds: f64) {
+    fn refresh(&self, mirror: bool, delay_seconds: f64, hide_during_silence: Option<f64>) {
         self.mirror.set_active(mirror);
         self.delay.set_value(delay_seconds * 1000.0);
+        self.silence.set_active(hide_during_silence.is_some());
+        self.silence_length
+            .set_value(hide_during_silence.unwrap_or(super::webcam::DEFAULT_SILENCE_SECONDS));
+        self.silence_length
+            .widget()
+            .set_visible(hide_during_silence.is_some());
     }
 }
 
@@ -2692,6 +2700,8 @@ fn build_webcam_camera(
     set_mirror: Rc<dyn Fn(bool)>,
     delay_seconds: f64,
     set_delay: Rc<dyn Fn(f64)>,
+    hide_during_silence: Option<f64>,
+    set_silence: Rc<dyn Fn(Option<f64>)>,
 ) -> WebcamCameraContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
@@ -2720,10 +2730,45 @@ fn build_webcam_camera(
         "Shift the camera against the screen and sound. Raise it if your lips move after the words, lower it if they move before.",
     )));
     root.append(&delay.widget());
+    let (silence_row, silence) = setting_switch_row(
+        &t("Hide during silence"),
+        &t("Hide the camera while nobody is talking, and bring it back when they do."),
+    );
+    root.append(&silence_row);
+    silence.set_active(hide_during_silence.is_some());
+    let switch_silence = set_silence.clone();
+    silence.connect_state_set(move |_, active| {
+        switch_silence(if active {
+            Some(super::webcam::DEFAULT_SILENCE_SECONDS)
+        } else {
+            None
+        });
+        gtk4::glib::Propagation::Proceed
+    });
+    let silence_length = value_slider_control(
+        &t("Minimum silence"),
+        super::webcam::MIN_SILENCE_SECONDS,
+        super::webcam::MAX_SILENCE_SECONDS,
+        hide_during_silence.unwrap_or(super::webcam::DEFAULT_SILENCE_SECONDS),
+        0.5,
+        1,
+        scale,
+        {
+            let set = set_silence.clone();
+            move |value| set(Some(value))
+        },
+    )
+    .with_suffix(" s");
+    silence_length
+        .widget()
+        .set_visible(hide_during_silence.is_some());
+    root.append(&silence_length.widget());
     WebcamCameraContext {
         root,
         mirror: switch,
         delay,
+        silence,
+        silence_length,
     }
 }
 
@@ -2772,6 +2817,7 @@ struct WebcamContextActions {
     move_cutout_position: Rc<dyn Fn(f64)>,
     set_mirror: Rc<dyn Fn(bool)>,
     set_delay: Rc<dyn Fn(f64)>,
+    set_silence: Rc<dyn Fn(Option<f64>)>,
     set_transition: Rc<dyn Fn(f64)>,
 }
 
@@ -2791,6 +2837,7 @@ impl WebcamContextActions {
             move_cutout_position: Rc::new(|_| {}),
             set_mirror: Rc::new(|_| {}),
             set_delay: Rc::new(|_| {}),
+            set_silence: Rc::new(|_| {}),
             set_transition: Rc::new(|_| {}),
         }
     }
@@ -2837,7 +2884,8 @@ impl WebcamContext {
             self.cutout.refresh(layouts.cutout_position_x);
         }
         if controls.mirror {
-            self.camera.refresh(layer.mirror, layer.delay_seconds);
+            self.camera
+                .refresh(layer.mirror, layer.delay_seconds, layer.hide_during_silence);
         }
         if controls.transitions {
             self.transition.refresh(layouts.transition_seconds);
@@ -2875,6 +2923,8 @@ fn build_webcam_context(
         actions.set_mirror.clone(),
         layer.delay_seconds,
         actions.set_delay.clone(),
+        layer.hide_during_silence,
+        actions.set_silence.clone(),
     );
     let transition = build_webcam_transition(
         scale,
@@ -3090,6 +3140,15 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             Rc::new(move |seconds| {
                 if !syncing.get() {
                     timeline.update_webcam(|layer| layer.delay_seconds = seconds);
+                }
+            })
+        },
+        set_silence: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |value| {
+                if !syncing.get() {
+                    timeline.update_webcam(|layer| layer.hide_during_silence = value);
                 }
             })
         },

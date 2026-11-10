@@ -51,6 +51,12 @@ const PREVIEW_MAX_HEIGHT: u32 = 1280;
 pub(super) const MIN_SIZE: f64 = 0.06;
 /// The largest bubble that still reads as an overlay.
 pub(super) const MAX_SIZE: f64 = 0.9;
+/// The shortest studied silence the camera can hide in.
+pub(super) const MIN_SILENCE_SECONDS: f64 = 2.0;
+/// The longest silence the camera can hide in.
+pub(super) const MAX_SILENCE_SECONDS: f64 = 15.0;
+/// The studied length a freshly switched-on hide uses.
+pub(super) const DEFAULT_SILENCE_SECONDS: f64 = 5.0;
 /// The studied overlay size range: the camera's longest side as a fraction
 /// of the frame's shortest side.
 pub(super) const MIN_OVERLAY_SIZE_RATIO: f64 = 0.1;
@@ -195,6 +201,8 @@ pub(super) struct LayerSettings {
     pub delay_seconds: f64,
     /// The camera's size while the screen is zoomed, as a fraction of its size; 1 turns the studied shrink off.
     pub zoomed_scale: f64,
+    /// Hide the camera while the audio is silent for at least this many seconds; None is off.
+    pub hide_during_silence: Option<f64>,
 }
 
 impl Default for LayerSettings {
@@ -210,6 +218,7 @@ impl Default for LayerSettings {
             mirror: false,
             delay_seconds: 0.0,
             zoomed_scale: ZOOMED_CAMERA_SCALE,
+            hide_during_silence: None,
         }
     }
 }
@@ -230,6 +239,7 @@ impl LayerSettings {
             mirror: track.flip,
             delay_seconds: 0.0,
             zoomed_scale: ZOOMED_CAMERA_SCALE,
+            hide_during_silence: None,
         }
     }
 
@@ -252,6 +262,10 @@ impl LayerSettings {
         } else {
             ZOOMED_CAMERA_SCALE
         };
+        self.hide_during_silence = self
+            .hide_during_silence
+            .filter(|s| s.is_finite())
+            .map(|s| s.clamp(MIN_SILENCE_SECONDS, MAX_SILENCE_SECONDS));
         self
     }
 
@@ -1035,6 +1049,83 @@ fn zoomed_scale(shrink: f64, target: f64) -> f64 {
     1.0 - (1.0 - target) * shrink
 }
 
+/// The studied hide spring (stiffness, damping, mass), run clamped.
+const HIDE_SPRING: (f64, f64, f64) = (530.0, 40.0, 1.0);
+/// The studied size of a hidden camera, about its centre.
+const HIDDEN_CAMERA_SCALE: f64 = 0.9;
+
+/// How hidden the camera is for silence at source time `t`: 0 shown, 1
+/// hidden. The 0/1 target follows the studied hide spring, replayed over the
+/// last second so a seek lands where playback does.
+pub(super) fn silence_hide_at(ranges: &[(f64, f64)], t: f64, min_seconds: Option<f64>) -> f64 {
+    let Some(min_seconds) = min_seconds else {
+        return 0.0;
+    };
+    if !t.is_finite() || ranges.is_empty() {
+        return 0.0;
+    }
+    let target = |at: f64| -> f64 {
+        if super::silence::silent_at(ranges, at, min_seconds) {
+            1.0
+        } else {
+            0.0
+        }
+    };
+    let (stiffness, damping, mass) = HIDE_SPRING;
+    let omega = (stiffness / mass).sqrt();
+    let critical = 2.0 * (mass * stiffness).sqrt();
+    let start = (t - 1.0).max(0.0);
+    let mut value = target(start);
+    let mut velocity = 0.0;
+    let steps = ((t - start) * 1000.0).ceil() as usize;
+    let mut previous = start;
+    for index in 1..=steps {
+        let at = (start + index as f64 / 1000.0).min(t);
+        let dt = at - previous;
+        previous = at;
+        let goal = target(at);
+        let gap = goal - value;
+        let effective = if velocity * gap > 0.0 && velocity.abs() > gap.abs() * omega {
+            damping.max(critical)
+        } else {
+            damping
+        };
+        velocity += (gap * stiffness - velocity * effective) / mass * dt;
+        value += velocity * dt;
+        if velocity.abs() < CAMERA_SPRING_PRECISION
+            && (goal - value).abs() < CAMERA_SPRING_PRECISION
+        {
+            value = goal;
+            velocity = 0.0;
+        }
+    }
+    value.clamp(0.0, 1.0)
+}
+
+/// A layout frame with the silence hide applied: the camera fades by `hide`
+/// and shrinks toward 0.9 about its centre.
+pub(super) fn hide_for_silence(mut frame: LayoutFrame, hide: f64) -> LayoutFrame {
+    let hide = if hide.is_finite() {
+        hide.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    if hide <= 0.0 {
+        return frame;
+    }
+    frame.camera_alpha *= 1.0 - hide;
+    let factor = 1.0 - (1.0 - HIDDEN_CAMERA_SCALE) * hide;
+    let (cx, cy) = (
+        frame.camera.x + frame.camera.width / 2.0,
+        frame.camera.y + frame.camera.height / 2.0,
+    );
+    frame.camera.width *= factor;
+    frame.camera.height *= factor;
+    frame.camera.x = cx - frame.camera.width / 2.0;
+    frame.camera.y = cy - frame.camera.height / 2.0;
+    frame
+}
+
 fn progress(start: f64, seconds: f64, duration: f64) -> f64 {
     // A zero duration is the project's "cut" setting.
     if !duration.is_finite() || duration <= 1e-9 {
@@ -1284,6 +1375,10 @@ struct Shared {
     frame: Mutex<Option<Frame>>,
     stamp: Mutex<u64>,
     error: Mutex<Option<CameraError>>,
+    /// The silent spans of the recording's audio: None while the analysis
+    /// runs, Some(None) for a recording without audio.
+    #[allow(clippy::type_complexity)]
+    silence: Mutex<Option<Option<Vec<(f64, f64)>>>>,
     /// Bumped by every document load; a worker only publishes frames from the
     /// generation it was asked for.
     generation: Mutex<u64>,
@@ -1390,6 +1485,10 @@ struct State {
     layouts_custom: Cell<bool>,
     composition_seconds: Cell<f64>,
     zoom_shrink: Cell<f64>,
+    /// The source time of the frame on screen, for the silence hide.
+    source_seconds: Cell<f64>,
+    /// The video document this layer was loaded for, for its audio.
+    source_path: RefCell<Option<PathBuf>>,
     cache: RefCell<Option<(u64, ImageSurface)>>,
     cutout_cache: RefCell<Option<(u64, f64, ImageSurface)>>,
     requested: Cell<f64>,
@@ -1410,6 +1509,7 @@ impl WebcamModel {
             frame: Mutex::new(None),
             stamp: Mutex::new(0),
             error: Mutex::new(None),
+            silence: Mutex::new(None),
             generation: Mutex::new(0),
         });
         let worker = shared.clone();
@@ -1425,6 +1525,8 @@ impl WebcamModel {
                 layouts_custom: Cell::new(false),
                 composition_seconds: Cell::new(0.0),
                 zoom_shrink: Cell::new(0.0),
+                source_seconds: Cell::new(0.0),
+                source_path: RefCell::new(None),
                 cache: RefCell::new(None),
                 cutout_cache: RefCell::new(None),
                 requested: Cell::new(-1.0),
@@ -1448,6 +1550,8 @@ impl WebcamModel {
         self.state.layouts_custom.set(false);
         self.state.composition_seconds.set(0.0);
         self.state.zoom_shrink.set(0.0);
+        self.state.source_seconds.set(0.0);
+        *self.state.source_path.borrow_mut() = None;
         *self.state.cache.borrow_mut() = None;
         *self.state.cutout_cache.borrow_mut() = None;
         self.state.requested.set(-1.0);
@@ -1455,6 +1559,7 @@ impl WebcamModel {
         *self.state.shared.frame.lock().unwrap() = None;
         *self.state.shared.job.lock().unwrap() = None;
         *self.state.shared.error.lock().unwrap() = None;
+        *self.state.shared.silence.lock().unwrap() = None;
         drop(generation);
 
         let Some(video) = video else { return };
@@ -1506,6 +1611,19 @@ impl WebcamModel {
             last_frame,
             camera_size: (track.width, track.height),
         });
+        *self.state.source_path.borrow_mut() = Some(video.to_path_buf());
+        *self.state.shared.silence.lock().unwrap() = None;
+        {
+            let shared = self.state.shared.clone();
+            let generation = *shared.generation.lock().unwrap();
+            let source = video.to_path_buf();
+            thread::spawn(move || {
+                let ranges = super::silence::silent_ranges(&source);
+                if *shared.generation.lock().unwrap() == generation {
+                    *shared.silence.lock().unwrap() = Some(ranges);
+                }
+            });
+        }
     }
 
     pub fn has_track(&self) -> bool {
@@ -1612,13 +1730,45 @@ impl WebcamModel {
             .map(|(width, height)| f64::from(width) / f64::from(height))
             .unwrap_or(16.0 / 9.0);
         let camera_aspect = track.camera_size.0 as f64 / f64::from(track.camera_size.1.max(1));
-        Some(self.state.layouts.borrow().frame_at_zoomed(
+        let frame = self.state.layouts.borrow().frame_at_zoomed(
             self.state.composition_seconds.get(),
             settings,
             video_aspect,
             camera_aspect,
             self.state.zoom_shrink.get(),
+        );
+        Some(hide_for_silence(
+            frame,
+            silence_hide_at(
+                &self.silence_ranges(),
+                self.state.source_seconds.get(),
+                settings.hide_during_silence,
+            ),
         ))
+    }
+
+    /// Whether the recording's audio could be analysed: `None` while the
+    /// analysis runs, `Some(false)` for a recording with no audio.
+    #[allow(dead_code)]
+    pub fn has_audio(&self) -> Option<bool> {
+        self.state
+            .shared
+            .silence
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|ranges| ranges.is_some())
+    }
+
+    fn silence_ranges(&self) -> Vec<(f64, f64)> {
+        self.state
+            .shared
+            .silence
+            .lock()
+            .unwrap()
+            .clone()
+            .flatten()
+            .unwrap_or_default()
     }
 
     /// The last failure from the camera decode or the person matte, for the UI
@@ -1645,6 +1795,18 @@ impl WebcamModel {
         if !layouts.uses_camera() || !settings.enabled {
             return None;
         }
+        let silence = if settings.hide_during_silence.is_some() {
+            self.state
+                .shared
+                .silence
+                .lock()
+                .unwrap()
+                .clone()
+                .flatten()
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         Some(WebcamExport {
             path: track.path.clone(),
             settings,
@@ -1654,12 +1816,14 @@ impl WebcamModel {
             video_seconds: track.video_seconds,
             last_frame: track.last_frame,
             source_size: track.camera_size,
+            silence,
         })
     }
 
     /// Ask for the frame the playhead needs. The decode runs on a worker, and
     /// the still preview repaints once it lands; playback repaints anyway.
     pub fn request(&self, source_seconds: f64) {
+        self.state.source_seconds.set(source_seconds);
         let Some(target) = self.target_seconds(source_seconds) else {
             return;
         };
@@ -1854,6 +2018,8 @@ pub(super) struct WebcamExport {
     pub last_frame: f64,
     /// The camera's own frame size, so the decode keeps its aspect.
     pub source_size: (u32, u32),
+    /// The silent spans of the recording's audio, in source seconds.
+    pub silence: Vec<(f64, f64)>,
 }
 
 impl WebcamExport {
@@ -3215,6 +3381,7 @@ mod tests {
             })),
             stamp: Mutex::new(7),
             error: Mutex::new(Some(CameraError::Cutout("the matte failed".to_string()))),
+            silence: Mutex::new(None),
             generation: Mutex::new(2),
         };
         let old = Job {
@@ -4182,6 +4349,42 @@ mod tests {
     }
 
     #[test]
+    fn a_long_silence_hides_the_camera_and_a_short_one_does_not() {
+        assert_eq!(silence_hide_at(&[(0.0, 20.0)], 10.0, Some(5.0)), 1.0);
+        assert_eq!(silence_hide_at(&[(0.0, 20.0)], 10.0, None), 0.0);
+        let springing = silence_hide_at(&[(2.0, 20.0)], 2.55, Some(5.0));
+        assert!(
+            springing > 0.0 && springing < 1.0,
+            "the hide springs in after the margin: {springing}"
+        );
+        assert_eq!(silence_hide_at(&[(2.0, 20.0)], 4.0, Some(5.0)), 1.0);
+    }
+
+    #[test]
+    fn a_hidden_camera_fades_out_and_shrinks_about_its_centre() {
+        let frame = LayoutFrame {
+            screen: Rect::full(),
+            camera: Rect {
+                x: 0.6,
+                y: 0.55,
+                width: 0.2,
+                height: 0.25,
+            },
+            camera_alpha: 1.0,
+            camera_radius: 0.1,
+            cutout: 0.0,
+            mirror: false,
+        };
+        let hidden = hide_for_silence(frame, 1.0);
+        assert_eq!(hidden.camera_alpha, 0.0);
+        assert!((hidden.camera.width - 0.18).abs() < 1e-9);
+        assert!((hidden.camera.height - 0.225).abs() < 1e-9);
+        assert!((hidden.camera.x + hidden.camera.width / 2.0 - 0.7).abs() < 1e-9);
+        assert!((hidden.camera.y + hidden.camera.height / 2.0 - 0.675).abs() < 1e-9);
+        assert_eq!(hide_for_silence(frame, 0.0), frame);
+    }
+
+    #[test]
     fn a_shape_starts_at_the_radius_the_recorder_drew() {
         assert_eq!(radius_for_shape(0), 1.0);
         assert!(radius_for_shape(1) < radius_for_shape(2));
@@ -4237,6 +4440,7 @@ mod tests {
             video_seconds: duration,
             last_frame: last,
             source_size: (32, 32),
+            silence: Vec::new(),
         };
         assert!((export.start_at(duration) - last).abs() < 1e-9);
         let _ = std::fs::remove_dir_all(&dir);
@@ -4253,6 +4457,7 @@ mod tests {
             video_seconds: 10.0,
             last_frame: 7.95,
             source_size: (1280, 720),
+            silence: Vec::new(),
         };
         assert!((export.track_at(1.0) - 0.8).abs() < 1e-9);
         assert!((export.time_scale() - 1.25).abs() < 1e-9);

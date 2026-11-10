@@ -61,6 +61,9 @@ pub(super) struct WebcamLayerFile {
     /// The camera's size while zoomed. Absent in older files, which shrank to the studied 0.8.
     #[serde(default = "default_zoomed_scale")]
     pub zoomed_scale: f64,
+    /// Hide the camera during silences this long; absent is off.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hide_during_silence: Option<f64>,
     /// The layout timeline: the recording's default layout and the changes
     /// that switch it while the composition plays. Absent in files written
     /// before layouts existed, where the two switches above still say what the
@@ -117,6 +120,7 @@ impl WebcamLayerFile {
             mirror: layer.mirror,
             delay_seconds: layer.delay_seconds,
             zoomed_scale: layer.zoomed_scale,
+            hide_during_silence: layer.hide_during_silence,
             layouts: Some(layouts.clone()),
         }
     }
@@ -499,6 +503,7 @@ mod tests {
                 mirror: true,
                 delay_seconds: 0.0,
                 zoomed_scale: super::super::webcam::ZOOMED_CAMERA_SCALE,
+                hide_during_silence: None,
                 layouts: Some(LayoutSettings {
                     default_layout: CameraLayout::SplitScreen,
                     cues: vec![
@@ -743,6 +748,15 @@ mod tests {
             super::super::webcam::ZOOMED_CAMERA_SCALE
         );
         assert_eq!(legacy.zoomed_scale, 0.8);
+    }
+
+    #[test]
+    fn a_camera_block_without_a_silence_length_reads_it_as_off() {
+        let legacy: WebcamLayerFile = serde_json::from_str(
+            r#"{"enabled":true,"fullscreen":false,"x":0.62,"y":0.31,"w":0.18,"h":0.24,"radius":0.5,"mirror":true}"#,
+        )
+        .expect("a camera block without a silence length reads");
+        assert_eq!(legacy.hide_during_silence, None);
     }
 
     #[test]
