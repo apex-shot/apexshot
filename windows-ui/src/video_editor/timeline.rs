@@ -2416,12 +2416,21 @@ impl Timeline {
     fn current_frame(&self) -> PreviewFrame {
         let data = self.data.borrow();
         self.cursor.set_cuts(&data.cuts);
-        if let Some(webcam) = data.webcam.clone() {
-            webcam.set_composition_time(data.playhead);
-        }
         let placement = data.placement();
         let add_zoom = data.add_zoom_tool();
         let unzoomed = placement.is_some() || add_zoom.is_some();
+        if let Some(webcam) = data.webcam.clone() {
+            webcam.set_composition_time(data.playhead);
+            webcam.set_zoom_shrink(if unzoomed {
+                0.0
+            } else {
+                super::webcam::zoom_shrink_at(
+                    &data.zoom_clips,
+                    data.playhead,
+                    data.zoom_camera.lead_in_seconds(),
+                )
+            });
+        }
         let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
         let camera_settings = super::zoom::ZoomCameraSettings {
             frame_rate: fps,

@@ -107,6 +107,16 @@ pub(super) const MAX_SPLIT_RATIO: f64 = 0.9;
 /// How much of the frame's height the cutout's camera covers.
 const CUTOUT_HEIGHT_RATIO: f64 = 0.9;
 
+/// The studied camera size while the screen is zoomed.
+pub(super) const ZOOMED_CAMERA_SCALE: f64 = 0.8;
+/// The studied spring that moves the camera between its sizes, as
+/// (stiffness, damping, mass), run with the studied clamp.
+const CAMERA_SPRING: (f64, f64, f64) = (125.0, 12.0, 1.5);
+const CAMERA_SPRING_PRECISION: f64 = 0.002;
+/// How much history the spring replays before an instant; it has settled
+/// well under its precision within it.
+const CAMERA_SPRING_HISTORY_SECONDS: f64 = 2.0;
+
 /// A rectangle in whichever units its caller works in: fractions of the frame
 /// for layout math, pixels for drawing.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -351,6 +361,22 @@ impl LayerSettings {
             self.resize_overlay(w, h / w);
         }
     }
+
+    /// The layer at `factor` of its size, still at the alignment it had, so
+    /// an anchored corner stays where it is.
+    pub(super) fn scaled_in_place(self, factor: f64) -> Self {
+        let sane = self.clamped();
+        if !factor.is_finite() || (factor - 1.0).abs() < 1e-12 {
+            return sane;
+        }
+        let (alignment_x, alignment_y) = sane.overlay_alignment();
+        let mut scaled = sane;
+        scaled.w = sane.w * factor;
+        scaled.h = sane.h * factor;
+        scaled.x = travel_offset(alignment_x, 1.0 - scaled.w);
+        scaled.y = travel_offset(alignment_y, 1.0 - scaled.h);
+        scaled
+    }
 }
 
 /// How far along its travel a layer sits, as a 0..=1 fraction. A layer with no
@@ -514,6 +540,19 @@ impl LayoutSettings {
         video_aspect: f64,
         camera_aspect: f64,
     ) -> LayoutFrame {
+        self.frame_at_zoomed(seconds, overlay, video_aspect, camera_aspect, 0.0)
+    }
+
+    /// [`Self::frame_at`] while the screen's zoom has shrunk the camera by
+    /// `zoom_shrink` (0..1, see [`zoom_shrink_at`]).
+    pub(super) fn frame_at_zoomed(
+        &self,
+        seconds: f64,
+        overlay: LayerSettings,
+        video_aspect: f64,
+        camera_aspect: f64,
+        zoom_shrink: f64,
+    ) -> LayoutFrame {
         let geometry = Geometry {
             overlay: overlay.clamped(),
             video_aspect: sane_aspect(video_aspect),
@@ -521,6 +560,11 @@ impl LayoutSettings {
             split_ratio: self.split_ratio,
             split_flip: self.split_flip,
             cutout_position_x: self.cutout_position_x,
+            zoom_shrink: if zoom_shrink.is_finite() {
+                zoom_shrink.clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
         };
         // A layer switched off paints the screen alone at every instant. The
         // recorded geometry and the layout timeline stay as they are, so
@@ -594,6 +638,7 @@ struct Geometry {
     split_ratio: f64,
     split_flip: bool,
     cutout_position_x: f64,
+    zoom_shrink: f64,
 }
 
 fn sane_aspect(aspect: f64) -> f64 {
@@ -612,7 +657,10 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             let camera = if geometry.overlay.fullscreen {
                 full
             } else {
-                geometry.overlay.rect_in(full)
+                geometry
+                    .overlay
+                    .scaled_in_place(zoomed_scale(geometry.zoom_shrink))
+                    .rect_in(full)
             };
             LayoutFrame {
                 screen: full,
@@ -770,6 +818,9 @@ fn cutout_rect(geometry: Geometry) -> Rect {
     } else {
         geometry.video_aspect / geometry.camera_aspect
     };
+    let factor = zoomed_scale(geometry.zoom_shrink);
+    let width = width * factor;
+    let height = height * factor;
     let position = if geometry.cutout_position_x.is_finite() {
         geometry.cutout_position_x.clamp(0.0, 1.0)
     } else {
@@ -781,6 +832,71 @@ fn cutout_rect(geometry: Geometry) -> Rect {
         width,
         height,
     }
+}
+
+/// Whether the studied rule shrinks the camera at `time`: inside an enabled
+/// zoom clip, or inside the lead-in before a clip that is not instant.
+fn zoom_shrinks_camera_at(clips: &[super::timeline::ZoomClip], time: f64, lead_in: f64) -> bool {
+    clips.iter().filter(|clip| !clip.hidden).any(|clip| {
+        (time >= clip.start && time <= clip.end)
+            || (lead_in > 0.0 && !clip.instant && time >= clip.start - lead_in && time < clip.start)
+    })
+}
+
+/// How far the camera has shrunk for the screen's zoom at `time`: 0 at its
+/// normal size, 1 at [`ZOOMED_CAMERA_SCALE`]. The 0/1 target is followed by
+/// the studied camera spring in 1 ms semi-implicit Euler steps, replayed
+/// over the last two seconds so a seek lands where playback does.
+pub(super) fn zoom_shrink_at(clips: &[super::timeline::ZoomClip], time: f64, lead_in: f64) -> f64 {
+    if !time.is_finite() || clips.iter().all(|clip| clip.hidden) {
+        return 0.0;
+    }
+    let target = |at: f64| -> f64 {
+        if zoom_shrinks_camera_at(clips, at, lead_in) {
+            1.0
+        } else {
+            0.0
+        }
+    };
+    let (stiffness, damping, mass) = CAMERA_SPRING;
+    let omega = (stiffness / mass).sqrt();
+    let critical = 2.0 * (mass * stiffness).sqrt();
+    let start = (time - CAMERA_SPRING_HISTORY_SECONDS).max(0.0);
+    let mut value = target(start);
+    let mut velocity = 0.0;
+    let steps = ((time - start) * 1000.0).ceil() as usize;
+    let mut previous = start;
+    for index in 1..=steps {
+        let at = (start + index as f64 / 1000.0).min(time);
+        let dt = at - previous;
+        previous = at;
+        let goal = target(at);
+        let gap = goal - value;
+        let effective = if velocity * gap > 0.0 && velocity.abs() > gap.abs() * omega {
+            damping.max(critical)
+        } else {
+            damping
+        };
+        velocity += (gap * stiffness - velocity * effective) / mass * dt;
+        value += velocity * dt;
+        if velocity.abs() < CAMERA_SPRING_PRECISION
+            && (goal - value).abs() < CAMERA_SPRING_PRECISION
+        {
+            value = goal;
+            velocity = 0.0;
+        }
+    }
+    value.clamp(0.0, 1.0)
+}
+
+/// The size factor for a shrink amount.
+fn zoomed_scale(shrink: f64) -> f64 {
+    let shrink = if shrink.is_finite() {
+        shrink.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    1.0 - (1.0 - ZOOMED_CAMERA_SCALE) * shrink
 }
 
 fn progress(start: f64, seconds: f64, duration: f64) -> f64 {
@@ -1083,6 +1199,7 @@ struct State {
     /// enabled/fullscreen switches keep the default layout in step.
     layouts_custom: Cell<bool>,
     composition_seconds: Cell<f64>,
+    zoom_shrink: Cell<f64>,
     cache: RefCell<Option<(u64, ImageSurface)>>,
     cutout_cache: RefCell<Option<(u64, f64, ImageSurface)>>,
     requested: Cell<f64>,
@@ -1117,6 +1234,7 @@ impl WebcamModel {
                 seeded_layouts: RefCell::new(LayoutSettings::default()),
                 layouts_custom: Cell::new(false),
                 composition_seconds: Cell::new(0.0),
+                zoom_shrink: Cell::new(0.0),
                 cache: RefCell::new(None),
                 cutout_cache: RefCell::new(None),
                 requested: Cell::new(-1.0),
@@ -1139,6 +1257,7 @@ impl WebcamModel {
         *self.state.seeded_layouts.borrow_mut() = LayoutSettings::default();
         self.state.layouts_custom.set(false);
         self.state.composition_seconds.set(0.0);
+        self.state.zoom_shrink.set(0.0);
         *self.state.cache.borrow_mut() = None;
         *self.state.cutout_cache.borrow_mut() = None;
         self.state.requested.set(-1.0);
@@ -1261,6 +1380,16 @@ impl WebcamModel {
         self.state.composition_seconds.set(seconds.max(0.0));
     }
 
+    /// How far the screen's zoom has shrunk the camera at the composition
+    /// instant, from [`zoom_shrink_at`].
+    pub fn set_zoom_shrink(&self, shrink: f64) {
+        self.state.zoom_shrink.set(if shrink.is_finite() {
+            shrink.clamp(0.0, 1.0)
+        } else {
+            0.0
+        });
+    }
+
     /// Put the layer back where the recording captured it.
     pub fn reset(&self) {
         let Some(seeded) = *self.state.seeded.borrow() else {
@@ -1293,11 +1422,12 @@ impl WebcamModel {
             .map(|(width, height)| f64::from(width) / f64::from(height))
             .unwrap_or(16.0 / 9.0);
         let camera_aspect = track.camera_size.0 as f64 / f64::from(track.camera_size.1.max(1));
-        Some(self.state.layouts.borrow().frame_at(
+        Some(self.state.layouts.borrow().frame_at_zoomed(
             self.state.composition_seconds.get(),
             settings,
             video_aspect,
             camera_aspect,
+            self.state.zoom_shrink.get(),
         ))
     }
 
@@ -2210,6 +2340,7 @@ fn pixel_rect(rect: Rect, size: (u32, u32)) -> (u32, u32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::video_editor::timeline::{ZoomClip, ZoomMode};
 
     fn solid(width: u32, height: u32, bgra: [u8; 4]) -> Vec<u8> {
         bgra.iter()
@@ -3456,6 +3587,87 @@ mod tests {
         layer.set_overlay_size(0.6, frame);
         assert!((layer.overlay_size_ratio(frame) - 0.6).abs() < 1e-9);
         assert!((layer.pixel_aspect(frame) - 9.0 / 16.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_camera_shrinks_through_a_zoom_and_back() {
+        let clip = |start: f64, end: f64| ZoomClip {
+            start,
+            end,
+            scale: 2.0,
+            center: (0.0, 0.0),
+            hidden: false,
+            mode: ZoomMode::Auto,
+            instant: false,
+            anchor: None,
+        };
+        let clips = vec![clip(3.0, 8.0)];
+        assert_eq!(zoom_shrink_at(&[], 5.0, 0.0), 0.0);
+        assert_eq!(zoom_shrink_at(&clips, 1.0, 0.0), 0.0);
+        assert!(
+            zoom_shrink_at(&clips, 3.0, 0.0) < 0.05,
+            "the shrink eases in"
+        );
+        let mid = zoom_shrink_at(&clips, 3.2, 0.0);
+        assert!(mid > 0.05 && mid < 1.0, "on its way: {mid}");
+        assert!((zoom_shrink_at(&clips, 6.0, 0.0) - 1.0).abs() < 1e-9);
+        assert!(zoom_shrink_at(&clips, 10.5, 0.0) < 1e-9);
+        let mut t = 2.5;
+        while t < 11.0 {
+            let value = zoom_shrink_at(&clips, t, 0.0);
+            assert!((0.0..=1.0).contains(&value), "clamped at {t}: {value}");
+            t += 0.05;
+        }
+        // The lead-in starts the shrink before a gliding clip, never an instant one.
+        assert!(zoom_shrink_at(&clips, 3.0, 0.35) > zoom_shrink_at(&clips, 3.0, 0.0));
+        let instant = vec![ZoomClip {
+            instant: true,
+            ..clip(3.0, 8.0)
+        }];
+        assert_eq!(zoom_shrink_at(&instant, 2.9, 0.35), 0.0);
+        let hidden = vec![ZoomClip {
+            hidden: true,
+            ..clip(3.0, 8.0)
+        }];
+        assert_eq!(zoom_shrink_at(&hidden, 6.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn a_zoom_shrinks_the_overlay_about_its_anchor_and_the_cutout_on_its_edge() {
+        let frame = 16.0 / 9.0;
+        let mut layer = LayerSettings::default();
+        layer.set_overlay_size(0.5, frame);
+        layer.set_overlay_alignment(1.0, 1.0);
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            ..LayoutSettings::default()
+        };
+        let rest = layouts.frame_at_zoomed(0.0, layer, frame, 1.0, 0.0).camera;
+        let full = layouts.frame_at_zoomed(0.0, layer, frame, 1.0, 1.0).camera;
+        let half = layouts.frame_at_zoomed(0.0, layer, frame, 1.0, 0.5).camera;
+        assert!((full.width - 0.8 * rest.width).abs() < 1e-9);
+        assert!((full.height - 0.8 * rest.height).abs() < 1e-9);
+        assert!((half.width - 0.9 * rest.width).abs() < 1e-9);
+        assert!(
+            (full.x + full.width - (rest.x + rest.width)).abs() < 1e-9,
+            "right edge stays"
+        );
+        assert!(
+            (full.y + full.height - (rest.y + rest.height)).abs() < 1e-9,
+            "bottom edge stays"
+        );
+
+        let cutout = LayoutSettings {
+            default_layout: CameraLayout::CameraCutout,
+            ..LayoutSettings::default()
+        };
+        let rest = cutout.frame_at_zoomed(0.0, layer, frame, 1.0, 0.0).camera;
+        let full = cutout.frame_at_zoomed(0.0, layer, frame, 1.0, 1.0).camera;
+        assert!((full.height - 0.8 * rest.height).abs() < 1e-9);
+        assert!(
+            (full.y + full.height - 1.0).abs() < 1e-9,
+            "the cutout stays on the bottom"
+        );
     }
 
     #[test]

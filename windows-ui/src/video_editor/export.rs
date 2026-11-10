@@ -840,11 +840,17 @@ fn render_range(
             // sat over the desktop while the recording ran.
             let camera_frame = track_reader.as_mut().and_then(|reader| reader.next_frame());
             if let Some(webcam) = webcam.as_ref() {
-                let layout = layouts.frame_at(
+                let shrink = webcam::zoom_shrink_at(
+                    &model.zooms,
+                    composition_time,
+                    model.zoom_camera.lead_in_seconds(),
+                );
+                let layout = layouts.frame_at_zoomed(
                     composition_time,
                     webcam.settings,
                     source_aspect,
                     camera_aspect,
+                    shrink,
                 );
                 if layout.camera_alpha > 0.0 && camera_frame.is_none() {
                     let _ = decoder.kill();
@@ -2836,6 +2842,19 @@ mod webcam_export_tests {
         layer: LayerSettings,
         layouts: LayoutSettings,
     ) -> Vec<u8> {
+        exported_frame_with_zooms(dir, source, track_path, name, layer, layouts, Vec::new())
+    }
+
+    /// [`exported_frame`] with `zooms` on the composition's zoom track.
+    fn exported_frame_with_zooms(
+        dir: &Path,
+        source: &Path,
+        track_path: &Path,
+        name: &str,
+        layer: LayerSettings,
+        layouts: LayoutSettings,
+        zooms: Vec<ZoomClip>,
+    ) -> Vec<u8> {
         let output = dir.join(format!("{name}.mp4"));
         let model = ExportModel {
             source: source.to_path_buf(),
@@ -2843,7 +2862,7 @@ mod webcam_export_tests {
             trim_start: 0.0,
             trim_end: 1.5,
             cuts: Vec::new(),
-            zooms: Vec::new(),
+            zooms,
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings::default(),
             sidecar: PointerSidecar::load_next_to_video(source),
@@ -3011,6 +3030,132 @@ mod webcam_export_tests {
 
         let _ = fs::remove_file(&sidecar_path);
         let _ = fs::remove_file(&track_path);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_camera_exports_at_the_studied_size_and_shrinks_in_a_zoom() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-webcam-size-export-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let source = dir.join("screen.mp4");
+        if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
+            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            return;
+        }
+        let Some(track_path) = webcam_track_file(&source) else {
+            eprintln!("skipping the webcam export test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = track_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !split_clip(&track_path, "320x320", 2.0) {
+            return;
+        }
+
+        let track = WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 320,
+            height: 320,
+            duration: 2.0,
+            start: 0.0,
+            x: 0.6,
+            y: 0.6,
+            w: 0.35,
+            h: 0.35,
+            shape: 1,
+            flip: false,
+        };
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+        );
+        sidecar.webcam = Some(track);
+        let sidecar_path = PointerSidecar::sidecar_path(&source);
+        if sidecar.write(&sidecar_path).is_err() {
+            return;
+        }
+
+        // Studied sizing: a square camera at size 0.5 in a 320x240 frame is
+        // 120 px, half the shortest side. Centred: x 100..220, y 60..180.
+        let mut layer = LayerSettings {
+            radius: 0.0,
+            ..LayerSettings::default()
+        };
+        let frame_aspect = 320.0 / 240.0;
+        layer.set_overlay_aspect(1.0, frame_aspect);
+        layer.set_overlay_size(0.5, frame_aspect);
+        layer.set_overlay_alignment(0.5, 0.5);
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            ..LayoutSettings::default()
+        };
+        let rest = exported_frame(&dir, &source, &track_path, "size", layer, layouts.clone());
+        let red = pixel(&rest, 320, 108, 120);
+        let green = pixel(&rest, 320, 212, 120);
+        assert!(
+            red[0] > 150 && red[1] < 90,
+            "the camera's left edge is at 100px: {red:?}"
+        );
+        assert!(
+            green[1] > 150 && green[0] < 90,
+            "the camera's right edge is at 220px: {green:?}"
+        );
+        for (x, y) in [(94, 120), (226, 120), (160, 54), (160, 186)] {
+            let outside = pixel(&rest, 320, x, y);
+            assert!(
+                outside[0] < 70 && outside[1] < 70,
+                "outside the 120px square at ({x},{y}): {outside:?}"
+            );
+        }
+
+        // Inside a zoom the camera is 0.8 of that, 96 px: x 112..208, y 72..168.
+        let zoom = ZoomClip {
+            start: 0.0,
+            end: 1.5,
+            scale: 2.0,
+            center: (0.0, 0.0),
+            hidden: false,
+            mode: crate::video_editor::timeline::ZoomMode::Auto,
+            instant: false,
+            anchor: None,
+        };
+        let zoomed = exported_frame_with_zooms(
+            &dir,
+            &source,
+            &track_path,
+            "zoomed",
+            layer,
+            layouts,
+            vec![zoom],
+        );
+        let red = pixel(&zoomed, 320, 118, 120);
+        let green = pixel(&zoomed, 320, 202, 120);
+        assert!(
+            red[0] > 150 && red[1] < 90,
+            "the zoomed camera's left edge is at 112px: {red:?}"
+        );
+        assert!(
+            green[1] > 150 && green[0] < 90,
+            "the zoomed camera's right edge is at 208px: {green:?}"
+        );
+        for (x, y) in [(106, 120), (214, 120), (160, 66), (160, 174)] {
+            let outside = pixel(&zoomed, 320, x, y);
+            assert!(
+                outside[0] < 70 && outside[1] < 70,
+                "outside the 96px square at ({x},{y}): {outside:?}"
+            );
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 
