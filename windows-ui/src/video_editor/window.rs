@@ -1523,6 +1523,66 @@ fn choose_recording(window: &ApplicationWindow, update_document: UpdateDocument)
     chooser.show();
 }
 
+/// The canvas the stage shows around the video, rendered for the export: the
+/// fill at the canvas size, the centred video rect, and the card's corner
+/// radius. None when the video is the canvas and nothing is rounded.
+fn export_canvas(stage: &Stage, source_size: (u32, u32)) -> Option<super::export::CanvasLayout> {
+    let aspect = stage.aspect.get();
+    let padding = stage.background.padding();
+    let has_fill = stage.background.has_fill();
+    let (radius, _) = card_radius(
+        aspect,
+        source_size,
+        padding,
+        has_fill,
+        stage.background.radius(),
+    );
+    if !has_fill && aspect == FrameAspect::Original && radius <= 0.0 {
+        return None;
+    }
+    let size = output_dimensions(aspect, source_size, padding, has_fill);
+    let video = video_rect_dimensions(aspect, source_size, padding, has_fill);
+    let mut surface = gtk4::cairo::ImageSurface::create(
+        gtk4::cairo::Format::ARgb32,
+        size.0 as i32,
+        size.1 as i32,
+    )
+    .ok()?;
+    {
+        let context = gtk4::cairo::Context::new(&surface).ok()?;
+        context.set_source_rgb(0.0, 0.0, 0.0);
+        let _ = context.paint();
+        // The same fill the stage's background layer paints, in the same order.
+        if let Some(pixbuf) = stage.background_pixbuf.borrow().as_ref() {
+            super::background::paint_cover(&context, size.0 as i32, size.1 as i32, pixbuf);
+        } else if let Some(paint) = stage.background_fill.borrow().as_ref() {
+            paint(&context, size.0 as i32, size.1 as i32);
+        }
+    }
+    surface.flush();
+    let stride = surface.stride() as usize;
+    let data = surface.data().ok()?;
+    let width = size.0 as usize;
+    let mut background = vec![0u8; width * size.1 as usize * 4];
+    for (row, line) in background.chunks_exact_mut(width * 4).enumerate() {
+        let source = &data[row * stride..row * stride + width * 4];
+        for (target, bgra) in line
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(source.as_chunks::<4>().0)
+        {
+            target.copy_from_slice(&[bgra[2], bgra[1], bgra[0], 255]);
+        }
+    }
+    Some(super::export::CanvasLayout {
+        size,
+        video,
+        radius,
+        background: std::sync::Arc::new(background),
+    })
+}
+
 /// The composition an export should write, read fresh when the user commits a
 /// destination so a last-second trim or zoom is included.
 fn export_model(
@@ -1547,6 +1607,7 @@ fn export_model(
         cursor: stage.cursor.settings(),
         sidecar,
         webcam: stage.webcam.export(),
+        canvas: export_canvas(stage, source_size),
         crf: stage.quality.get().crf(),
     })
 }

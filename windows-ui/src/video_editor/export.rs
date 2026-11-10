@@ -3,13 +3,17 @@
 //! The frame plan walks the kept source spans (trim minus cuts) in composition
 //! order, and every frame is composited by the same code the preview uses:
 //! the follow camera, the click ripple warp, and the cursor sprite with its
-//! press spring. Presentation effects that only make sense in the live stage —
-//! background, frame aspect, rounded corners, motion blur, audio — are not
-//! part of this path.
+//! press spring. The canvas around the video — the background fill, padding,
+//! frame aspect, and rounded corners — is laid on afterwards by
+//! `canvas::FramedSink`, so every render path produces only the video rect.
+//! Motion blur and audio are not part of this path.
 
+mod canvas;
 #[cfg(target_os = "windows")]
 mod gpu;
 mod hybrid;
+
+pub(super) use canvas::CanvasLayout;
 
 use super::cursor::preview_ripple;
 use super::pixels::{Nv12Converter, YuvSpace};
@@ -82,6 +86,9 @@ pub(super) struct ExportModel {
     pub sidecar: Option<PointerSidecar>,
     /// The camera layer to bake, when the recording has one.
     pub webcam: Option<webcam::WebcamExport>,
+    /// The canvas around the video (fill, padding, frame, rounded corners), or
+    /// None to export the video edge to edge.
+    pub canvas: Option<CanvasLayout>,
     pub crf: u32,
 }
 
@@ -341,7 +348,10 @@ struct RenderPlan {
     spans: Vec<SourceSpan>,
     total: u64,
     mapping: TimeMapping,
+    /// The video rect the render paths produce.
     size: (u32, u32),
+    /// The encoded frame: the canvas when the export has one, otherwise `size`.
+    output: (u32, u32),
     /// The decoded NV12 can go to the encoder unchanged: no crop, cursor,
     /// ripple, camera layer, or resize touches the frame.
     passthrough: bool,
@@ -376,7 +386,16 @@ fn plan_render(model: &ExportModel, settings: ExportSettings) -> Result<RenderPl
             })
             .collect(),
     );
-    let size = settings.dimensions(model.source_size);
+    let output = settings.dimensions(
+        model
+            .canvas
+            .as_ref()
+            .map_or(model.source_size, |canvas| canvas.size),
+    );
+    let size = model
+        .canvas
+        .as_ref()
+        .map_or(output, |canvas| canvas::video_size(canvas, output));
     let passthrough = size == model.source_size
         && model.sidecar.is_none()
         && model.webcam.is_none()
@@ -387,6 +406,7 @@ fn plan_render(model: &ExportModel, settings: ExportSettings) -> Result<RenderPl
         total,
         mapping,
         size,
+        output,
         passthrough,
     })
 }
@@ -505,9 +525,9 @@ fn render_range(
     let probed = ffmpeg::probe_color_space(&model.source);
     let space = YuvSpace::from_probe(probed.0.as_deref(), probed.1.as_deref());
     let converter = Nv12Converter::new(space);
-    let mut sink = Sink::open(
+    let sink = Sink::open(
         output,
-        size,
+        plan.output,
         fps,
         model.crf,
         encoder,
@@ -515,6 +535,11 @@ fn render_range(
         allow_hybrid && settings.hardware && encoder != Encoder::X264,
         faststart,
     )?;
+    let framer = match &model.canvas {
+        Some(layout) => Some(canvas::Framer::new(layout, plan.output, &converter)?),
+        None => None,
+    };
+    let mut sink = canvas::FramedSink::new(sink, framer);
     let mut camera = ZoomCameraCache::default();
     let mut decoded = if plan.passthrough {
         Vec::new()
@@ -870,7 +895,7 @@ fn worker_count(plan: &RenderPlan, primary: Encoder) -> usize {
     }
     let cores = std::thread::available_parallelism().map_or(1, |count| count.get());
     let by_cores = cores / 3;
-    let pixels = u64::from(plan.size.0) * u64::from(plan.size.1);
+    let pixels = u64::from(plan.output.0) * u64::from(plan.output.1);
     let by_resolution = if pixels >= 3840 * 2160 {
         2
     } else if pixels >= 2560 * 1440 {
@@ -1723,6 +1748,7 @@ mod tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            canvas: None,
             crf: 0,
         };
         let settings = ExportSettings {
@@ -1814,6 +1840,7 @@ mod tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            canvas: None,
             crf: 20,
         };
         for fps in [24, 60] {
@@ -1921,6 +1948,7 @@ mod tests {
             },
             sidecar,
             webcam: None,
+            canvas: None,
             crf: 23,
         };
         let handle = start_export(model, output.clone());
@@ -1971,6 +1999,7 @@ mod tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            canvas: None,
             crf: 23,
         };
         let handle = start_export(model, output.clone());
@@ -2317,6 +2346,7 @@ mod tests {
                 cursor: CursorSettings::default(),
                 sidecar: None,
                 webcam: None,
+                canvas: None,
                 crf: 20,
             };
             let started = std::time::Instant::now();
@@ -2516,6 +2546,7 @@ mod webcam_export_tests {
                 last_frame: 1.95,
                 source_size: (320, 320),
             }),
+            canvas: None,
             crf: 30,
         };
         let handle = start_export(model, output.clone());
@@ -2777,6 +2808,7 @@ mod webcam_export_tests {
                 last_frame: 3.95,
                 source_size: (320, 320),
             }),
+            canvas: None,
             crf: 30,
         };
         let handle = start_export(model, output.clone());
@@ -2929,6 +2961,7 @@ mod webcam_export_tests {
                 last_frame: 1.95,
                 source_size: (320, 320),
             }),
+            canvas: None,
             crf: 30,
         };
         let handle = start_export(model, output.clone());
@@ -3010,6 +3043,7 @@ mod webcam_export_tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            canvas: None,
             crf: 18,
         };
         let settings = ExportSettings {
@@ -3026,6 +3060,92 @@ mod webcam_export_tests {
         assert!(
             red > 150 && green < 80 && blue < 80,
             "the frame lost its colour: {red}, {green}, {blue}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "integration: shells out to ffmpeg"]
+    fn a_canvas_export_frames_the_video_on_its_background() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-canvas-export-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        let generated = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=320x180:r=30:d=1",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&source)
+            .status()
+            .expect("ffmpeg should be available");
+        assert!(generated.success());
+        let size = (400u32, 260u32);
+        let mut background = vec![0u8; size.0 as usize * size.1 as usize * 4];
+        for pixel in background.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[0, 200, 0, 255]);
+        }
+        let output = dir.join("canvas.mp4");
+        let model = ExportModel {
+            source,
+            source_size: (320, 180),
+            trim_start: 0.0,
+            trim_end: 1.0,
+            cuts: Vec::new(),
+            zooms: Vec::new(),
+            zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: None,
+            webcam: None,
+            canvas: Some(CanvasLayout {
+                size,
+                video: (320, 180),
+                radius: 24.0,
+                background: Arc::new(background),
+            }),
+            crf: 18,
+        };
+        let settings = ExportSettings {
+            fps: Some(30),
+            hardware: false,
+            ..ExportSettings::default()
+        };
+        let (sender, _receiver) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        render(&model, &output, &sender, &cancel, Encoder::X264, settings)
+            .unwrap_or_else(|error| panic!("export failed: {error:?}"));
+        let frame = frame_rgb(&output, 0.5, size).expect("the export should decode");
+        assert_eq!(frame.len(), size.0 as usize * size.1 as usize * 3);
+        let [red, green, _] = pixel(&frame, size.0, 4, 4);
+        assert!(
+            green > 150 && red < 80,
+            "the padding lost its fill: {red}, {green}"
+        );
+        let [red, green, _] = pixel(&frame, size.0, 200, 130);
+        assert!(
+            red > 150 && green < 80,
+            "the video centre is not the video: {red}, {green}"
+        );
+        let [red, green, _] = pixel(&frame, size.0, 41, 41);
+        assert!(
+            green > 150 && red < 80,
+            "the corner was not rounded: {red}, {green}"
+        );
+        let [red, green, _] = pixel(&frame, size.0, 200, 42);
+        assert!(
+            red > 150 && green < 80,
+            "the video's top edge is missing: {red}, {green}"
         );
         let _ = fs::remove_dir_all(&dir);
     }
