@@ -2477,11 +2477,12 @@ struct WebcamSplitContext {
     first_label: Label,
     second: ToggleButton,
     second_label: Label,
+    auto: Switch,
     width: FilledSlider,
 }
 
 impl WebcamSplitContext {
-    fn refresh(&self, ratio: f64, flip: bool, portrait: bool) {
+    fn refresh(&self, ratio: f64, flip: bool, portrait: bool, auto: bool, auto_ratio: f64) {
         let (first, second) = if portrait {
             ("Top", "Bottom")
         } else {
@@ -2494,17 +2495,23 @@ impl WebcamSplitContext {
         } else {
             self.second.set_active(true);
         }
-        self.width.set_value(ratio * 100.0);
+        self.auto.set_active(auto);
+        self.width.widget().set_sensitive(!auto);
+        self.width
+            .set_value(if auto { auto_ratio } else { ratio } * 100.0);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_webcam_split(
     scale: f64,
     ratio: f64,
     flip: bool,
+    split_auto: bool,
     portrait: bool,
     set_flip: Rc<dyn Fn(bool)>,
     set_ratio: Rc<dyn Fn(f64)>,
+    set_auto: Rc<dyn Fn(bool)>,
 ) -> WebcamSplitContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
@@ -2524,6 +2531,16 @@ fn build_webcam_split(
     root.append(&webcam_kicker(&t("CAMERA")));
     root.append(&segment);
     root.append(&webcam_kicker(&t("SCREEN SHARE")));
+    let (auto_row, auto) = setting_switch_row(
+        &t("Automatic width"),
+        &t("Keep the screen's shape and give the camera the rest of the frame."),
+    );
+    auto.set_active(split_auto);
+    auto.connect_state_set(move |_, active| {
+        set_auto(active);
+        gtk4::glib::Propagation::Proceed
+    });
+    root.append(&auto_row);
     let width = value_slider_control(
         &t("Width"),
         10.0,
@@ -2535,6 +2552,7 @@ fn build_webcam_split(
         move |value| set_ratio(value / 100.0),
     )
     .with_suffix("%");
+    width.widget().set_sensitive(!split_auto);
     width.widget().set_tooltip_text(Some(&t(
         "The screen's share of the split, as a percentage.",
     )));
@@ -2558,9 +2576,10 @@ fn build_webcam_split(
         first_label,
         second,
         second_label,
+        auto,
         width,
     };
-    context.refresh(ratio, flip, portrait);
+    context.refresh(ratio, flip, portrait, split_auto, ratio);
     context
 }
 
@@ -2732,6 +2751,7 @@ struct WebcamContextActions {
     set_radius: Rc<dyn Fn(f64)>,
     set_split_flip: Rc<dyn Fn(bool)>,
     set_split_ratio: Rc<dyn Fn(f64)>,
+    set_split_auto: Rc<dyn Fn(bool)>,
     set_cutout_position: Rc<dyn Fn(f64)>,
     move_cutout_position: Rc<dyn Fn(f64)>,
     set_mirror: Rc<dyn Fn(bool)>,
@@ -2750,6 +2770,7 @@ impl WebcamContextActions {
             set_radius: Rc::new(|_| {}),
             set_split_flip: Rc::new(|_| {}),
             set_split_ratio: Rc::new(|_| {}),
+            set_split_auto: Rc::new(|_| {}),
             set_cutout_position: Rc::new(|_| {}),
             move_cutout_position: Rc::new(|_| {}),
             set_mirror: Rc::new(|_| {}),
@@ -2789,6 +2810,11 @@ impl WebcamContext {
                 layouts.split_ratio,
                 layouts.split_flip,
                 webcam_frame_aspect(frame_aspect) < 1.0,
+                layouts.split_auto,
+                super::webcam::auto_split_screen_ratio(
+                    webcam_frame_aspect(frame_aspect),
+                    webcam_frame_aspect(frame_aspect),
+                ),
             );
         }
         if controls.cutout {
@@ -2815,9 +2841,11 @@ fn build_webcam_context(
         scale,
         layouts.split_ratio,
         layouts.split_flip,
+        layouts.split_auto,
         webcam_frame_aspect(frame_aspect) < 1.0,
         actions.set_split_flip.clone(),
         actions.set_split_ratio.clone(),
+        actions.set_split_auto.clone(),
     );
     let cutout = build_webcam_cutout(
         scale,
@@ -2994,8 +3022,18 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             Rc::new(move |value| {
                 if !syncing.get() {
                     timeline.update_webcam_layouts_continuous(|layouts| {
+                        layouts.split_auto = false;
                         layouts.split_ratio = value;
                     });
+                }
+            })
+        },
+        set_split_auto: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |auto| {
+                if !syncing.get() {
+                    timeline.update_webcam_layouts(|layouts| layouts.split_auto = auto);
                 }
             })
         },

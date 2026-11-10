@@ -724,6 +724,13 @@ mod tests {
     }
 
     #[test]
+    fn a_layout_block_without_an_automatic_split_reads_it_as_on() {
+        let layouts: LayoutSettings =
+            serde_json::from_str(r#"{"default_layout":"split_screen","split_ratio":0.5}"#).unwrap();
+        assert!(layouts.split_auto);
+    }
+
+    #[test]
     fn an_older_file_states_its_hidden_camera_as_a_screen_only_default() {
         let layouts = legacy_webcam(false, false).resolved_layouts();
         assert_eq!(layouts.default_layout, CameraLayout::ScreenOnly);

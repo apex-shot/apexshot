@@ -3359,6 +3359,7 @@ mod webcam_export_tests {
         };
         let layouts = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             ..LayoutSettings::default()
         };
         // At rest the camera fills the right-hand pane.
@@ -3412,6 +3413,83 @@ mod webcam_export_tests {
         assert!(
             green[1] > 150 && green[0] < 90,
             "camera right half at 295: {green:?}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_automatic_split_gives_the_screen_most_of_the_frame() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-webcam-auto-split-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let source = dir.join("screen.mp4");
+        if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
+            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            return;
+        }
+        let Some(track_path) = webcam_track_file(&source) else {
+            eprintln!("skipping the webcam export test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = track_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !split_clip(&track_path, "320x320", 2.0) {
+            return;
+        }
+
+        let track = WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 320,
+            height: 320,
+            duration: 2.0,
+            start: 0.0,
+            x: 0.6,
+            y: 0.6,
+            w: 0.35,
+            h: 0.35,
+            shape: 1,
+            flip: false,
+        };
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+        );
+        sidecar.webcam = Some(track);
+        let sidecar_path = PointerSidecar::sidecar_path(&source);
+        if sidecar.write(&sidecar_path).is_err() {
+            return;
+        }
+
+        let layer = LayerSettings {
+            radius: 0.0,
+            ..LayerSettings::default()
+        };
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            ..LayoutSettings::default()
+        };
+        // 320x240 is 4:3: the camera gets a column half as wide as the frame
+        // is tall (120 px), so the screen keeps x 0..200.
+        let frame = exported_frame(&dir, &source, &track_path, "auto-split", layer, layouts);
+        let screen = pixel(&frame, 320, 190, 120);
+        assert!(
+            screen[0] < 70 && screen[1] < 70,
+            "the screen reaches x 200: {screen:?}"
+        );
+        let camera = pixel(&frame, 320, 212, 120);
+        assert!(
+            camera[0] > 150 || camera[1] > 150,
+            "the camera column starts at x 200: {camera:?}"
         );
         let _ = fs::remove_dir_all(&dir);
     }
@@ -3591,6 +3669,7 @@ mod webcam_export_tests {
                 },
             ],
             transition_seconds: 0.12,
+            split_auto: false,
             ..LayoutSettings::default()
         };
         let bubble = LayerSettings {

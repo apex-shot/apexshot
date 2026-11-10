@@ -442,6 +442,10 @@ pub(super) struct LayoutSettings {
     pub transition_seconds: f64,
     /// The screen's share of the split's long axis, in 0.1..=0.9.
     pub split_ratio: f64,
+    /// Sizes the split the studied way instead of by `split_ratio`: the
+    /// screen keeps its shape at full height when the camera column that
+    /// leaves is wide enough. On by default; older projects read it as on.
+    pub split_auto: bool,
     /// Puts the screen on the far side of the split.
     pub split_flip: bool,
     /// Where the cutout sits across the frame's width, in 0..=1: zero holds
@@ -457,6 +461,7 @@ impl Default for LayoutSettings {
             cues: Vec::new(),
             transition_seconds: DEFAULT_TRANSITION_SECONDS,
             split_ratio: 0.5,
+            split_auto: true,
             split_flip: false,
             cutout_position_x: 0.5,
         }
@@ -568,6 +573,7 @@ impl LayoutSettings {
             video_aspect: sane_aspect(video_aspect),
             camera_aspect: sane_aspect(camera_aspect),
             split_ratio: self.split_ratio,
+            split_auto: self.split_auto,
             split_flip: self.split_flip,
             cutout_position_x: self.cutout_position_x,
             zoom_shrink: if zoom_shrink.is_finite() {
@@ -681,6 +687,7 @@ struct Geometry {
     video_aspect: f64,
     camera_aspect: f64,
     split_ratio: f64,
+    split_auto: bool,
     split_flip: bool,
     cutout_position_x: f64,
     zoom_shrink: f64,
@@ -767,6 +774,20 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
     }
 }
 
+/// The studied automatic split, as the screen's share of the frame's width.
+/// `stage_aspect` is the frame's width over height and `screen_aspect` the
+/// recording's. A stacked split halves the frame.
+pub(super) fn auto_split_screen_ratio(stage_aspect: f64, screen_aspect: f64) -> f64 {
+    let stage = sane_aspect(stage_aspect);
+    if stage < 1.0 {
+        return 0.5;
+    }
+    // Camera column width, in units of the frame's height.
+    let rest = stage - sane_aspect(screen_aspect);
+    let camera = if rest > 0.4 { rest } else { 0.5 };
+    (1.0 - camera / stage).clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO)
+}
+
 /// Screen and camera rects for the split.
 ///
 /// A landscape frame splits side by side and a portrait frame splits top and
@@ -776,7 +797,11 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
 /// [`screen_cover_rect`] — cover-cropped, never stretched or letterboxed —
 /// while the camera fills its share from the raw camera aspect.
 fn split_rects(geometry: Geometry) -> (Rect, Rect) {
-    let ratio = geometry.split_ratio.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO);
+    let ratio = if geometry.split_auto {
+        auto_split_screen_ratio(geometry.video_aspect, geometry.video_aspect)
+    } else {
+        geometry.split_ratio.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO)
+    };
     if geometry.video_aspect >= 1.0 {
         let screen_width = ratio;
         let camera = Rect {
@@ -2652,6 +2677,7 @@ mod tests {
     fn a_split_gives_the_screen_its_whole_share_of_the_frame() {
         let split = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             ..LayoutSettings::default()
         };
         let frame = resting(&split, 0.0);
@@ -2666,6 +2692,7 @@ mod tests {
 
         let split = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             split_flip: true,
             ..LayoutSettings::default()
         };
@@ -2690,6 +2717,7 @@ mod tests {
 
         let wide_share = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             split_ratio: 0.3,
             ..LayoutSettings::default()
         };
@@ -2698,6 +2726,33 @@ mod tests {
         assert!((frame.camera.x - 0.3).abs() < 1e-9);
         assert!((frame.camera.width - 0.7).abs() < 1e-9);
         assert!((frame.screen.height - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_automatic_split_keeps_the_screen_shape_when_the_camera_column_fits() {
+        // A 16:10 recording in its own frame leaves no column: the camera gets
+        // half the height's width and the screen keeps 1 - 0.5/1.6.
+        assert!((auto_split_screen_ratio(1.6, 1.6) - 0.6875).abs() < 1e-9);
+        assert!((auto_split_screen_ratio(4.0 / 3.0, 4.0 / 3.0) - 0.625).abs() < 1e-9);
+        // A frame widened for the camera: the screen keeps exactly its shape.
+        let wide = 1.6 + 0.5625;
+        assert!((auto_split_screen_ratio(wide, 1.6) - 1.6 / wide).abs() < 1e-9);
+        // A column no wider than 0.4 of the height falls back to half.
+        assert!((auto_split_screen_ratio(2.0, 1.6) - (1.0 - 0.5 / 2.0)).abs() < 1e-9);
+        // Stacked splits halve the frame.
+        assert_eq!(auto_split_screen_ratio(9.0 / 16.0, 9.0 / 16.0), 0.5);
+        // The layout uses it unless the project turned it off.
+        let layer = LayerSettings::default();
+        let auto = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            ..LayoutSettings::default()
+        };
+        assert!((auto.frame_at(0.0, layer, 1.6, 1.0).screen.width - 0.6875).abs() < 1e-9);
+        let fixed = LayoutSettings {
+            split_auto: false,
+            ..auto.clone()
+        };
+        assert!((fixed.frame_at(0.0, layer, 1.6, 1.0).screen.width - 0.5).abs() < 1e-9);
     }
 
     #[test]
@@ -2784,13 +2839,16 @@ mod tests {
 
     #[test]
     fn transitions_move_between_the_resting_rects() {
-        let settings = settings(
-            vec![
-                cue(1.0, CameraLayout::SplitScreen),
-                cue(2.0, CameraLayout::FullscreenCamera),
-            ],
-            1.0,
-        );
+        let settings = LayoutSettings {
+            split_auto: false,
+            ..settings(
+                vec![
+                    cue(1.0, CameraLayout::SplitScreen),
+                    cue(2.0, CameraLayout::FullscreenCamera),
+                ],
+                1.0,
+            )
+        };
         let before = resting(&settings, 1.0);
         let middle = resting(&settings, 1.5);
         let end = resting(&settings, 5.0);
@@ -3509,6 +3567,7 @@ mod tests {
         }
         let layout = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             ..LayoutSettings::default()
         };
         let frame = layout.frame_at(0.0, LayerSettings::default(), 16.0 / 9.0, 16.0 / 9.0);
@@ -3579,6 +3638,7 @@ mod tests {
         let camera = solid(64, 64, [0, 255, 0, 255]);
         let layout = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             ..LayoutSettings::default()
         };
         let frame = layout.frame_at(0.0, LayerSettings::default(), 16.0 / 9.0, 16.0 / 9.0);
@@ -3941,6 +4001,7 @@ mod tests {
         };
         let split = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             ..LayoutSettings::default()
         };
         let rest = split.frame_at_zoomed(0.0, layer, frame, 1.0, 0.0);
