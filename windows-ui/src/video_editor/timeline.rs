@@ -59,8 +59,8 @@ const RULER_HEIGHT: f64 = 28.0;
 const VIDEO_LANE_HEIGHT: f64 = 42.0;
 /// Height of one effect lane, in unscaled pixels.
 const EFFECT_LANE_HEIGHT: f64 = 32.0;
-/// Height of the compact camera-layout lane, in unscaled pixels.
-const LAYOUT_LANE_HEIGHT: f64 = 26.0;
+/// Height of a collapsed lane, in unscaled pixels.
+const THIN_LANE_HEIGHT: f64 = 14.0;
 /// Gap between rows, in unscaled pixels.
 const LANE_GAP: f64 = 6.0;
 /// Horizontal room a chip gives its label, in unscaled pixels.
@@ -86,6 +86,25 @@ enum EffectTrack {
     Hide,
 }
 
+/// The secondary lane that is drawn at full height. The others rest as thin
+/// strips, so the timeline keeps one height whichever lane is in use.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum TimelineLane {
+    #[default]
+    Zoom,
+    Hide,
+    Layout,
+}
+
+impl TimelineLane {
+    fn of_effect(track: EffectTrack) -> Self {
+        match track {
+            EffectTrack::Zoom => Self::Zoom,
+            EffectTrack::Hide => Self::Hide,
+        }
+    }
+}
+
 /// What the lane stack shows: which rows are present. Playback never changes
 /// it, so the layout cannot breathe in and out while the playhead moves.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -93,6 +112,7 @@ struct LaneState {
     camera: bool,
     zoom: bool,
     hide: bool,
+    expanded: TimelineLane,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -217,6 +237,8 @@ struct Data {
     /// When a layout slider last reported. One sweep is one undo step, and it
     /// must not fold into a geometry sweep that just ended.
     layout_burst: Option<Instant>,
+    /// The secondary lane drawn at full height; the others rest thin.
+    expanded_lane: TimelineLane,
 }
 
 /// The document as one undo step restores it.
@@ -636,6 +658,7 @@ impl Data {
         self.selected_layout = None;
         self.layout_selection_epoch = 0;
         self.layout_burst = None;
+        self.expanded_lane = TimelineLane::Zoom;
     }
 
     /// The editable state, as one undo step keeps it.
@@ -1099,6 +1122,7 @@ impl Data {
             self.selected = false;
             // Selecting a clip puts the Add zoom tool away, as in the studied build.
             self.add_zoom_tool = false;
+            self.expanded_lane = TimelineLane::of_effect(track);
         }
         if track == EffectTrack::Zoom && index.is_some() {
             self.zoom_selection_epoch = self.zoom_selection_epoch.wrapping_add(1);
@@ -1382,7 +1406,20 @@ impl Data {
                 .is_some_and(|webcam| webcam.has_track()),
             zoom: true,
             hide: true,
+            expanded: self.expanded_lane,
         }
+    }
+
+    /// Whether `lane` is the one drawn at full height.
+    fn lane_expanded(&self, lane: TimelineLane) -> bool {
+        self.expanded_lane == lane
+    }
+
+    /// Make `lane` the full-height one. Returns whether it changed.
+    fn expand_lane(&mut self, lane: TimelineLane) -> bool {
+        let changed = self.expanded_lane != lane;
+        self.expanded_lane = lane;
+        changed
     }
 
     fn hover_time(&self, track: EffectTrack) -> Option<f64> {
@@ -1994,6 +2031,7 @@ impl Data {
             .position(|cue| (cue.at - at).abs() <= LAYOUT_CUE_EPSILON)
         {
             self.selected_layout = Some(index);
+            self.expanded_lane = TimelineLane::Layout;
             self.layout_selection_epoch = self.layout_selection_epoch.wrapping_add(1);
             return Some(index);
         }
@@ -2010,6 +2048,7 @@ impl Data {
         self.record_layout_edit(false);
         self.selected_layout = index;
         if index.is_some() {
+            self.expanded_lane = TimelineLane::Layout;
             self.layout_selection_epoch = self.layout_selection_epoch.wrapping_add(1);
         }
         webcam.set_layouts(next);
@@ -2071,6 +2110,7 @@ impl Data {
         };
         self.playing = false;
         self.selected_layout = Some(index);
+        self.expanded_lane = TimelineLane::Layout;
         self.layout_selection_epoch = self.layout_selection_epoch.wrapping_add(1);
         self.playhead = cue.at.clamp(0.0, self.total_duration());
         true
@@ -3171,47 +3211,121 @@ pub(super) fn build(
     zoom_track_lane.set_draw_func({
         let data = data.clone();
         move |_, context, width, height| {
-            draw_effect_clips(
-                context,
-                width,
-                height,
-                &data.borrow(),
-                EffectTrack::Zoom,
-                prefers_dark,
-                scale,
-            );
+            let data = data.borrow();
+            let lane = TimelineLane::of_effect(EffectTrack::Zoom);
+            if data.lane_expanded(lane) {
+                draw_effect_clips(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    EffectTrack::Zoom,
+                    prefers_dark,
+                    scale,
+                );
+            } else {
+                let bars: Vec<_> = data
+                    .effect_spans(EffectTrack::Zoom)
+                    .into_iter()
+                    .map(|(index, start, end)| {
+                        let tone = effect_tone(
+                            EffectTrack::Zoom,
+                            prefers_dark,
+                            data.effect_hidden(EffectTrack::Zoom, index),
+                        );
+                        (start, end, tone.fill)
+                    })
+                    .collect();
+                draw_thin_lane(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    &t("Zoom"),
+                    &bars,
+                    prefers_dark,
+                    scale,
+                );
+            }
         }
     });
 
     let hide_track = DrawingArea::new();
     hide_track.add_css_class("recording-editor-card-hide-track");
     hide_track.set_hexpand(true);
-    hide_track.set_size_request(-1, (EFFECT_LANE_HEIGHT * scale).round() as i32);
+    hide_track.set_size_request(-1, (THIN_LANE_HEIGHT * scale).round() as i32);
     hide_track.set_draw_func({
         let data = data.clone();
         move |_, context, width, height| {
-            draw_effect_clips(
-                context,
-                width,
-                height,
-                &data.borrow(),
-                EffectTrack::Hide,
-                prefers_dark,
-                scale,
-            );
+            let data = data.borrow();
+            let lane = TimelineLane::of_effect(EffectTrack::Hide);
+            if data.lane_expanded(lane) {
+                draw_effect_clips(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    EffectTrack::Hide,
+                    prefers_dark,
+                    scale,
+                );
+            } else {
+                let bars: Vec<_> = data
+                    .effect_spans(EffectTrack::Hide)
+                    .into_iter()
+                    .map(|(index, start, end)| {
+                        let tone = effect_tone(
+                            EffectTrack::Hide,
+                            prefers_dark,
+                            data.effect_hidden(EffectTrack::Hide, index),
+                        );
+                        (start, end, tone.fill)
+                    })
+                    .collect();
+                draw_thin_lane(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    &t("Hide"),
+                    &bars,
+                    prefers_dark,
+                    scale,
+                );
+            }
         }
     });
 
     let layout_track = DrawingArea::new();
     layout_track.add_css_class("recording-editor-card-layout-track");
     layout_track.set_hexpand(true);
-    layout_track.set_size_request(-1, (LAYOUT_LANE_HEIGHT * scale).round() as i32);
+    layout_track.set_size_request(-1, (THIN_LANE_HEIGHT * scale).round() as i32);
     layout_track.set_visible(false);
     layout_track.set_tooltip_text(Some(&t("Camera layout changes")));
     layout_track.set_draw_func({
         let data = data.clone();
         move |_, context, width, height| {
-            draw_layout_lane(context, width, height, &data.borrow(), prefers_dark, scale);
+            let data = data.borrow();
+            if data.lane_expanded(TimelineLane::Layout) {
+                draw_layout_lane(context, width, height, &data, prefers_dark, scale);
+            } else {
+                let mut bars = vec![(0.0, data.total_duration(), (0.10, 0.155, 0.15, 1.0))];
+                if let Some(layouts) = data.webcam_layouts() {
+                    for cue in &layouts.cues {
+                        bars.push((cue.at, cue.at, (0.45, 0.80, 0.70, 0.95)));
+                    }
+                }
+                draw_thin_lane(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    &t("Layout"),
+                    &bars,
+                    prefers_dark,
+                    scale,
+                );
+            }
         }
     });
 
@@ -3350,7 +3464,7 @@ pub(super) fn build(
             // lane heights.
             if lane_state.get() != Some(state) {
                 lane_state.set(Some(state));
-                apply_lane_state(state, &layout_track, &zoom_track_lane, &hide_track);
+                apply_lane_state(state, &layout_track, &zoom_track_lane, &hide_track, scale);
             }
             if let Some(listener) = zoom_listener.borrow().as_ref() {
                 listener();
@@ -3816,12 +3930,24 @@ fn apply_lane_state(
     layout_track: &DrawingArea,
     zoom_track: &DrawingArea,
     hide_track: &DrawingArea,
+    scale: f64,
 ) {
     layout_track.set_visible(state.camera);
     // Both effect lanes are permanent drop targets, so their rows never
     // collapse, even while empty.
     zoom_track.set_visible(state.zoom);
     hide_track.set_visible(state.hide);
+    let height = |lane: TimelineLane, full: f64| {
+        let unscaled = if state.expanded == lane {
+            full
+        } else {
+            THIN_LANE_HEIGHT
+        };
+        (unscaled * scale).round() as i32
+    };
+    zoom_track.set_size_request(-1, height(TimelineLane::Zoom, EFFECT_LANE_HEIGHT));
+    hide_track.set_size_request(-1, height(TimelineLane::Hide, EFFECT_LANE_HEIGHT));
+    layout_track.set_size_request(-1, height(TimelineLane::Layout, EFFECT_LANE_HEIGHT));
 }
 
 /// The one stylesheet this card adds on top of the shared editor sheet.
@@ -3831,14 +3957,16 @@ fn apply_lane_state(
 /// shared sheet's floors are sized for a taller timeline; the Windows editor
 /// keeps its timeline compact so the preview gets the height, so every lane
 /// floor and the board's own floor are restated here at the compact sizes.
+/// The lanes rest thin and one of them expands, so their floors never stop a
+/// lane from shrinking.
 fn timeline_css(scale: f64) -> String {
     let px = |value: f64| format!("{}px", (value * scale).round() as i32);
     let board = RULER_HEIGHT
         + LANE_GAP
         + VIDEO_LANE_HEIGHT
-        + 2.0 * EFFECT_LANE_HEIGHT
-        + LAYOUT_LANE_HEIGHT
-        + 3.0 * LANE_GAP;
+        + EFFECT_LANE_HEIGHT
+        + THIN_LANE_HEIGHT
+        + 2.0 * LANE_GAP;
     format!(
         "
 .recording-editor-timeline-compact .recording-editor-card-board {{
@@ -3863,8 +3991,8 @@ fn timeline_css(scale: f64) -> String {
         board_padding = px(4.0),
         ruler = px(RULER_HEIGHT),
         video = px(VIDEO_LANE_HEIGHT),
-        effect = px(EFFECT_LANE_HEIGHT),
-        camera = px(LAYOUT_LANE_HEIGHT),
+        effect = px(THIN_LANE_HEIGHT),
+        camera = px(THIN_LANE_HEIGHT),
     )
 }
 
@@ -4642,6 +4770,17 @@ fn bind_effect_lane(
             {
                 let mut data = data.borrow_mut();
                 data.set_frame_size(source_size.get());
+                let lane = TimelineLane::of_effect(track);
+                if !data.lane_expanded(lane) {
+                    data.expand_lane(lane);
+                    if let Some(index) = effect_at(&data, track, width, x, scale) {
+                        data.select_effect(track, Some(index));
+                    }
+                    drop(data);
+                    sync_play_icon();
+                    repaint();
+                    return;
+                }
                 if in_extend_band(&data, width, x, scale) {
                     // The band is the video's extend affordance, not the pill
                     // lane: a click there must not add a clip.
@@ -4681,6 +4820,9 @@ fn bind_effect_lane(
         let repaint = repaint.clone();
         let lane = lane.clone();
         move |_, _, x, y| {
+            if !data.borrow().lane_expanded(TimelineLane::of_effect(track)) {
+                return;
+            }
             let width = lane.allocated_width().max(1) as f64;
             let Some(index) = effect_at(&data.borrow(), track, width, x, scale) else {
                 return;
@@ -4716,6 +4858,10 @@ fn bind_effect_lane(
         let repaint = repaint.clone();
         let sync_play_icon = sync_play_icon.clone();
         move |gesture, x, _| {
+            if !data.borrow().lane_expanded(TimelineLane::of_effect(track)) {
+                drag_kind.set(EffectDrag::None);
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -4820,6 +4966,12 @@ fn bind_effect_lane(
         let data = data.clone();
         let lane = lane.clone();
         move |_, x, _| {
+            if !data.borrow().lane_expanded(TimelineLane::of_effect(track)) {
+                data.borrow_mut().set_hover_time(track, None);
+                lane.set_cursor_from_name(Some("pointer"));
+                lane.queue_draw();
+                return;
+            }
             let width = lane.allocated_width().max(1) as f64;
             let mut data = data.borrow_mut();
             let edge = effect_edge_at(&data, track, width, x, scale).is_some();
@@ -4872,6 +5024,10 @@ fn bind_layout_lane(
         let timeline = timeline.clone();
         let sync_play_icon = sync_play_icon.clone();
         move |_, _, x, _| {
+            if !data.borrow().lane_expanded(TimelineLane::Layout) {
+                data.borrow_mut().expand_lane(TimelineLane::Layout);
+                (timeline.repaint)();
+            }
             let width = lane.allocated_width().max(1) as f64;
             let hit = {
                 let data = data.borrow();
@@ -4900,6 +5056,9 @@ fn bind_layout_lane(
         let timeline = timeline.clone();
         let sync_play_icon = sync_play_icon.clone();
         move |gesture, x, _| {
+            if !data.borrow().lane_expanded(TimelineLane::Layout) {
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -5598,6 +5757,48 @@ fn draw_effect_clips(
             );
         }
     }
+}
+
+/// A resting lane: its name, and each clip as a thin bar at its time.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn draw_thin_lane(
+    context: &Context,
+    width: i32,
+    height: i32,
+    data: &Data,
+    label: &str,
+    bars: &[(f64, f64, (f64, f64, f64, f64))],
+    prefers_dark: bool,
+    scale: f64,
+) {
+    let width = width.max(1) as f64;
+    let height = height.max(1) as f64;
+    let bar_h = (height - 6.0 * scale).max(3.0);
+    let y = (height - bar_h) / 2.0;
+    for (start, end, fill) in bars {
+        let x0 = data.time_to_x(*start, width);
+        let x1 = data.time_to_x(*end, width).max(x0 + 4.0 * scale);
+        rounded_rect(
+            context,
+            x0,
+            y,
+            x1 - x0,
+            bar_h,
+            (bar_h / 2.0).min(3.0 * scale),
+        );
+        context.set_source_rgba(fill.0, fill.1, fill.2, fill.3);
+        let _ = context.fill();
+    }
+    let ink = if prefers_dark { 1.0 } else { 0.0 };
+    context.set_source_rgba(ink, ink, ink, 0.55);
+    context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
+    context.set_font_size((10.0 * scale).round());
+    let extents = context.text_extents(label).ok();
+    let text_h = extents
+        .map(|extents| extents.height())
+        .unwrap_or(7.0 * scale);
+    context.move_to(6.0 * scale, (height + text_h) / 2.0);
+    let _ = context.show_text(label);
 }
 
 /// The clip held on the clipboard, drawn where a click would drop it.
@@ -7636,6 +7837,14 @@ mod tests {
     }
 
     #[test]
+    fn adding_a_layout_change_expands_its_lane() {
+        let (mut data, scratch) = webcam_loaded("lanes");
+        assert!(data.add_layout_cue(2.0).is_some());
+        assert!(data.lane_expanded(TimelineLane::Layout));
+        clean_up(scratch);
+    }
+
+    #[test]
     fn a_layout_change_undoes_and_redoes() {
         let (mut data, scratch) = webcam_loaded("undo");
         let index = data.add_layout_cue(3.0).expect("the cue");
@@ -8395,14 +8604,31 @@ mod tests {
     }
 
     #[test]
+    fn one_lane_is_expanded_and_a_selection_brings_its_lane_forward() {
+        let mut data = Data::default();
+        assert!(
+            data.lane_expanded(TimelineLane::Zoom),
+            "zoom starts expanded"
+        );
+        assert!(!data.lane_expanded(TimelineLane::Hide));
+        assert!(data.expand_lane(TimelineLane::Hide));
+        assert!(!data.expand_lane(TimelineLane::Hide), "already expanded");
+        assert!(data.lane_expanded(TimelineLane::Hide) && !data.lane_expanded(TimelineLane::Zoom));
+        data.select_effect(EffectTrack::Zoom, Some(0));
+        assert!(
+            data.lane_expanded(TimelineLane::Zoom),
+            "selecting a zoom expands its lane"
+        );
+        assert_eq!(data.lane_state().expanded, TimelineLane::Zoom);
+    }
+
+    #[test]
     fn the_scoped_stylesheet_keeps_the_timeline_compact() {
         let css = timeline_css(1.25);
         assert!(css.contains("recording-editor-card-layout-track"));
-        assert!(css.contains("min-height: 33px"), "the camera lane is 26px");
+        assert!(css.contains("min-height: 18px"), "a resting lane is 14px");
         assert!(css.contains("min-height: 53px"), "the filmstrip is 42px");
-        assert!(css.contains("min-height: 40px"), "an effect lane is 32px");
-        // 28 + 6 + 42 + 32 + 32 + 26 + 3 * 6 = 184px of rows.
-        assert!(css.contains("min-height: 230px"), "the board fits its rows");
+        assert!(css.contains("min-height: 168px"), "the board fits its rows");
         assert!(!css.contains("min-height: 0"));
         // The lane rail is gone, so the sheet carries no gutter rules at all.
         assert!(!css.contains("recording-editor-timeline-gutter"));
