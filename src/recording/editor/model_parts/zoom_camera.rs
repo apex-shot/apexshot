@@ -555,6 +555,7 @@ mod zoom_camera_tests {
             x,
             y,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         state.sidecar = Some(sidecar);
     }
@@ -644,6 +645,7 @@ mod zoom_camera_tests {
             x: 1500.0,
             y: 540.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         state.add_cut(5.0);
         state.segment_order = vec![1, 0];

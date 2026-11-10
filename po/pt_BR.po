@@ -4421,3 +4421,18 @@ msgstr "Aceleração por hardware"
 
 msgid "Use the GPU encoder when one is available. Falls back to the CPU automatically."
 msgstr "Usa o codificador da GPU quando houver um disponível. Volta para a CPU automaticamente."
+
+msgid "Always use the default cursor"
+msgstr "Usar sempre o cursor padrão"
+
+msgid "Base angle"
+msgstr "Ângulo base"
+
+msgid "Point along movement"
+msgstr "Apontar no sentido do movimento"
+
+msgid "Tilt amount"
+msgstr "Intensidade da inclinação"
+
+msgid "Tilt with motion"
+msgstr "Inclinar com o movimento"

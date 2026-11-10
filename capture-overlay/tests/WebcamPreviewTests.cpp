@@ -22,11 +22,6 @@
 
 #include <cstdio>
 
-namespace Platform {
-void keepTopmost(quintptr) {}
-void excludeFromCapture(quintptr) {}
-}
-
 namespace {
 
 bool waitUntil(const std::function<bool()>& condition, int milliseconds)
@@ -221,7 +216,7 @@ bool checkRecording(const QString& fakeCamera)
     if (!output.isValid())
         return false;
     Platform::RecordingRequest request;
-    request.target = Platform::RecordingRequest::Target::Window;
+    request.target = Platform::RecordingRequest::Target::Area;
     request.region = QRect(0, 0, 320, 240);
     request.outputPath = output.filePath(QStringLiteral("preview-test.mp4"));
     struct Cleanup {
@@ -275,15 +270,21 @@ bool checkRecording(const QString& fakeCamera)
     if (!sidecar.open(QIODevice::ReadOnly))
         return false;
     const QJsonObject metadata = QJsonDocument::fromJson(sidecar.readAll()).object();
+    const QJsonObject camera = metadata.value(QStringLiteral("webcam")).toObject();
     const QString cleanName = metadata.value(QStringLiteral("screen_file")).toString();
-    const QString cameraName = metadata.value(QStringLiteral("webcam")).toObject()
-                                   .value(QStringLiteral("file")).toString();
+    const QString cameraName = camera.value(QStringLiteral("file")).toString();
     if (cleanName.isEmpty() || cameraName.isEmpty()
         || !QFileInfo::exists(output.filePath(cleanName))
-        || !QFileInfo::exists(Platform::webcamTrackPathFor(request.outputPath))) {
-        std::fprintf(stderr, "editable window footage is missing\n");
+        || !QFileInfo::exists(Platform::webcamTrackPathFor(request.outputPath))
+        || camera.value(QStringLiteral("duration")).toDouble() <= 0.0
+        || camera.value(QStringLiteral("start")).toDouble() < 0.0) {
+        std::fprintf(stderr, "editable area footage is missing\n");
         return false;
     }
+    std::printf("camera track start=%.3fs duration=%.3fs clean=%s\n",
+                camera.value(QStringLiteral("start")).toDouble(),
+                camera.value(QStringLiteral("duration")).toDouble(),
+                qPrintable(cleanName));
     QProcess extract;
     extract.setProgram(realFfmpeg);
     extract.setArguments({QStringLiteral("-v"), QStringLiteral("error"), QStringLiteral("-ss"),
@@ -303,16 +304,25 @@ bool checkRecording(const QString& fakeCamera)
         std::fprintf(stderr, "recorded webcam is missing or not mirrored\n");
         return false;
     }
-    // The square's rounded corner is cut away, so the bubble's own corner pixel
-    // is the desktop rather than the camera behind it.
+    // The square's rounded corner is cut away, so the bubble's own corner
+    // should match the desktop nearby rather than the camera. Compare against
+    // a desktop pixel instead of assuming the wallpaper is not red or blue.
     const QColor edge = image.pixelColor(180, 83);
     const QColor corner = image.pixelColor(160, 80);
+    const QColor outside = image.pixelColor(150, 70);
+    const auto colorDistance = [](const QColor& first, const QColor& second) {
+        return std::abs(first.red() - second.red())
+            + std::abs(first.green() - second.green())
+            + std::abs(first.blue() - second.blue());
+    };
     if (edge.blue() < 150 || edge.red() > 100) {
         std::fprintf(stderr, "recorded webcam does not reach its top edge\n");
         return false;
     }
-    if (corner.blue() > 150 || corner.red() > 150) {
-        std::fprintf(stderr, "recorded webcam kept its square corner\n");
+    if (colorDistance(corner, outside) > 60) {
+        std::fprintf(stderr, "recorded webcam kept its square corner: corner=%s outside=%s\n",
+                     qPrintable(corner.name()),
+                     qPrintable(outside.name()));
         return false;
     }
     if (previousFfmpeg.isEmpty())

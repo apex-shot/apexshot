@@ -19,7 +19,11 @@ if(WIN32)
         src/platform/windows/quick_access.h
         src/platform/recording.h
         src/platform/recording_settings.h
+        src/platform/windows/ddagrab.cpp
+        src/platform/windows/ddagrab.h
         src/platform/windows/recording.cpp
+        src/platform/windows/window_capture.cpp
+        src/platform/windows/window_capture.h
         src/platform/windows/pointer_tracker.cpp
         src/platform/windows/pointer_tracker.h
         src/platform/windows/recording_settings.cpp
@@ -106,7 +110,7 @@ if(WIN32)
     target_link_libraries(apexshot-capture
         PRIVATE Qt5::Widgets Qt5::DBus Qt5::Network Qt5::Concurrent
             windowsapp runtimeobject dwmapi uiautomationcore winmm
-            mmdevapi ole32 oleaut32 strmiids shell32 uuid winhttp
+            mmdevapi ole32 oleaut32 strmiids shell32 uuid winhttp dxgi d3d11
     )
 
     if(MSVC)
@@ -141,7 +145,12 @@ if(WIN32)
             tests/WebcamPreviewTests.cpp
             src/platform/recording.h
             src/platform/recording_settings.h
+            src/platform/windows/ddagrab.cpp
+            src/platform/windows/ddagrab.h
             src/platform/windows/recording.cpp
+            src/platform/windows/window_capture.cpp
+            src/platform/windows/window_capture.h
+            src/platform/windows/screen_capture.cpp
             src/platform/windows/audio_devices.cpp
             src/platform/windows/pointer_tracker.cpp
             src/platform/windows/recording_settings.cpp
@@ -156,7 +165,8 @@ if(WIN32)
         )
         target_include_directories(apexshot-webcam-preview-tests PRIVATE src)
         target_link_libraries(apexshot-webcam-preview-tests PRIVATE
-            Qt5::Widgets Qt5::Network mmdevapi ole32 oleaut32 strmiids shell32 uuid)
+            Qt5::Widgets Qt5::Network mmdevapi ole32 oleaut32 strmiids shell32 uuid
+            dxgi dwmapi d3d11 windowsapp runtimeobject)
         add_dependencies(apexshot-webcam-preview-tests apexshot-fake-webcam)
         add_test(NAME apexshot-webcam-preview-tests COMMAND apexshot-webcam-preview-tests)
         set_tests_properties(apexshot-webcam-preview-tests PROPERTIES
@@ -166,7 +176,12 @@ if(WIN32)
             tests/WindowsRecordingTests.cpp
             src/platform/recording.h
             src/platform/recording_settings.h
+            src/platform/windows/ddagrab.cpp
+            src/platform/windows/ddagrab.h
             src/platform/windows/recording.cpp
+            src/platform/windows/window_capture.cpp
+            src/platform/windows/window_capture.h
+            src/platform/windows/screen_capture.cpp
             src/platform/windows/audio_devices.cpp
             src/platform/windows/audio_devices.h
             src/platform/windows/pointer_tracker.cpp
@@ -181,10 +196,31 @@ if(WIN32)
         )
         target_include_directories(apexshot-recording-tests PRIVATE src)
         target_link_libraries(apexshot-recording-tests PRIVATE Qt5::Core Qt5::Gui
-            mmdevapi ole32 oleaut32 strmiids shell32 uuid)
+            mmdevapi ole32 oleaut32 strmiids shell32 uuid dxgi dwmapi d3d11
+            windowsapp runtimeobject)
         add_test(NAME apexshot-recording-tests COMMAND apexshot-recording-tests)
         # The smoke test reports 77 when ffmpeg is absent instead of failing.
         set_tests_properties(apexshot-recording-tests PROPERTIES SKIP_RETURN_CODE 77)
+
+        add_executable(apexshot-ddagrab-tests
+            tests/DdagrabTests.cpp
+            src/platform/windows/ddagrab.cpp
+            src/platform/windows/ddagrab.h
+            src/platform/windows/screen_capture.cpp
+        )
+        target_include_directories(apexshot-ddagrab-tests PRIVATE src)
+        target_link_libraries(apexshot-ddagrab-tests PRIVATE Qt5::Core Qt5::Gui dxgi ole32 dwmapi)
+        add_test(NAME apexshot-ddagrab-tests COMMAND apexshot-ddagrab-tests)
+
+        add_executable(apexshot-window-capture-tests
+            tests/WindowCaptureTests.cpp
+            src/platform/windows/window_capture.cpp
+            src/platform/windows/window_capture.h
+        )
+        target_include_directories(apexshot-window-capture-tests PRIVATE src)
+        target_link_libraries(apexshot-window-capture-tests PRIVATE
+            Qt5::Core Qt5::Gui d3d11 windowsapp ole32 runtimeobject)
+        add_test(NAME apexshot-window-capture-tests COMMAND apexshot-window-capture-tests)
 
         add_executable(apexshot-recording-settings-tests
             tests/RecordingSettingsTests.cpp

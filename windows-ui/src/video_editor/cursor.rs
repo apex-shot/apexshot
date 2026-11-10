@@ -14,6 +14,7 @@ pub(super) struct CursorModel {
 
 struct State {
     sidecar: Option<PointerSidecar>,
+    video_path: Option<std::path::PathBuf>,
     settings: CursorSettings,
 }
 
@@ -30,13 +31,16 @@ impl CursorModel {
         Self {
             state: Rc::new(RefCell::new(State {
                 sidecar: None,
+                video_path: None,
                 settings: CursorSettings::default(),
             })),
         }
     }
 
     pub fn load(&self, path: Option<&Path>) {
-        self.state.borrow_mut().sidecar = path.and_then(PointerSidecar::load_next_to_video);
+        let mut state = self.state.borrow_mut();
+        state.sidecar = path.and_then(PointerSidecar::load_next_to_video);
+        state.video_path = path.map(Path::to_path_buf);
     }
 
     pub fn settings(&self) -> CursorSettings {
@@ -49,6 +53,14 @@ impl CursorModel {
 
     pub fn set_settings(&self, settings: CursorSettings) {
         self.state.borrow_mut().settings = settings.clamped();
+    }
+
+    /// Where the timeline cuts the footage. The cursor plan leads the cursor
+    /// but stops at the next cut, so the preview matches the export.
+    pub fn set_cuts(&self, cuts: &[f64]) {
+        if let Some(sidecar) = self.state.borrow_mut().sidecar.as_mut() {
+            sidecar.set_cut_times(cuts);
+        }
     }
 
     /// The click ripple the current frame should warp, if any.
@@ -111,6 +123,9 @@ impl CursorModel {
             hide_idle: settings.hide_idle,
             idle_ms: settings.idle_ms,
             speed: settings.speed,
+            rotation_mode: settings.rotation_mode,
+            rotation_ratio: settings.rotate_on_x_movement_ratio,
+            base_rotation_deg: settings.base_rotation_deg,
         };
         let Some(frame) =
             sidecar.presented_in_video_at(source_seconds, motion, video_width, video_height)
@@ -152,13 +167,18 @@ impl CursorModel {
         // The click effect is the feedback: the shared preview passes a flat
         // pulse and lets the ripple warp or the drawn circle carry the click,
         // so the sprite never paints its own halo on top of either.
-        crate::recording::editor::cursor_sprite::draw(
+        let capture = state
+            .video_path
+            .as_deref()
+            .and_then(|path| sidecar.cursor_capture(path, &frame));
+        crate::recording::editor::cursor_sprite::draw_recorded(
             cr,
             x,
             y,
             1.0,
             super::press::press_cursor_scale(sidecar, source_seconds),
-            frame.kind.as_str(),
+            &frame,
+            capture.as_ref(),
             settings,
             frame.alpha,
         );
@@ -259,7 +279,7 @@ fn source_to_stage(
 #[cfg(test)]
 mod tests {
     use super::{source_to_stage, video_rect_for, CursorModel, VideoRect};
-    use crate::recording::editor::model::{ClickEffect, CursorSettings};
+    use crate::recording::editor::model::{ClickEffect, CursorSettings, CursorTheme};
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
     };
@@ -280,12 +300,14 @@ mod tests {
             x: 300.0,
             y: 220.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.clicks.push(ClickSample {
             t: 1.0,
             x: 320.0,
             y: 240.0,
             button: 1,
+            cursor_id: None,
         });
         cursor.state.borrow_mut().sidecar = Some(sidecar);
         cursor.set_settings(CursorSettings {
@@ -349,5 +371,109 @@ mod tests {
             source_to_stage((0.0, 0.0), rect, 1000.0, 800.0),
             (50.0, 0.0)
         );
+    }
+
+    fn alpha_bounds(
+        pixels: &[u8],
+        width: usize,
+        height: usize,
+    ) -> Option<(usize, usize, usize, usize)> {
+        let mut bounds: Option<(usize, usize, usize, usize)> = None;
+        for y in 0..height {
+            for x in 0..width {
+                if pixels[(y * width + x) * 4 + 3] == 0 {
+                    continue;
+                }
+                bounds = Some(match bounds {
+                    Some((min_x, min_y, max_x, max_y)) => {
+                        (min_x.min(x), min_y.min(y), max_x.max(x), max_y.max(y))
+                    }
+                    None => (x, y, x, y),
+                });
+            }
+        }
+        bounds
+    }
+
+    #[test]
+    fn the_preview_paints_a_captured_png_at_its_recorded_hotspot() {
+        use crate::recording::editor::sidecar::{
+            CaptureRegion, CursorAsset, CursorKind, PointerSample, PointerSidecar,
+        };
+        use gtk4::cairo::{Context, Format, ImageSurface};
+
+        let video = std::env::temp_dir().join(format!(
+            "apexshot-preview-cursor-{}-{:?}.mp4",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let sidecar_path = PointerSidecar::sidecar_path(&video);
+        let folder_name = format!(
+            "{}.cursors",
+            sidecar_path
+                .file_name()
+                .expect("the sidecar has a file name")
+                .to_string_lossy()
+        );
+        let folder = sidecar_path.parent().unwrap().join(&folder_name);
+        std::fs::create_dir_all(&folder).unwrap();
+        let mut image = image::RgbaImage::new(32, 32);
+        for pixel in image.pixels_mut() {
+            *pixel = image::Rgba([255, 0, 0, 255]);
+        }
+        image.save(folder.join("hand.png")).unwrap();
+
+        let cursor = CursorModel::new();
+        let mut sidecar = PointerSidecar::new(
+            0,
+            CaptureRegion {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 0,
+            },
+        );
+        sidecar.cursor_images = Some(folder_name);
+        sidecar.cursors.push(CursorAsset {
+            id: "hand-id".to_string(),
+            file: "hand.png".to_string(),
+            width: 32,
+            height: 32,
+            hotspot_x: 1,
+            hotspot_y: 1,
+            kind: CursorKind::Hand,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 50.0,
+            y: 40.0,
+            kind: CursorKind::Hand,
+            cursor_id: Some("hand-id".to_string()),
+        });
+        cursor.state.borrow_mut().sidecar = Some(sidecar);
+        cursor.state.borrow_mut().video_path = Some(video);
+        cursor.set_settings(CursorSettings {
+            smooth: 0.0,
+            theme: CursorTheme::Macos,
+            ..CursorSettings::default()
+        });
+
+        let mut surface = ImageSurface::create(Format::ARgb32, 100, 100).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            cursor.draw(
+                &cr,
+                100,
+                100,
+                0.0,
+                Some((100, 100)),
+                Some((0.0, 0.0, 100.0, 100.0)),
+            );
+        }
+        surface.flush();
+        let pixels = surface.data().unwrap().to_vec();
+        assert_eq!(alpha_bounds(&pixels, 100, 100), Some((48, 38, 96, 86)));
+
+        let _ = std::fs::remove_dir_all(&folder);
     }
 }

@@ -4355,3 +4355,18 @@ msgstr "تسريع العتاد"
 
 msgid "Use the GPU encoder when one is available. Falls back to the CPU automatically."
 msgstr "استخدام مُرمِّز وحدة معالجة الرسومات عند توفره. يعود إلى المعالج المركزي تلقائيًا."
+
+msgid "Always use the default cursor"
+msgstr "استخدم المؤشر الافتراضي دائمًا"
+
+msgid "Base angle"
+msgstr "الزاوية الأساسية"
+
+msgid "Point along movement"
+msgstr "الإشارة في اتجاه الحركة"
+
+msgid "Tilt amount"
+msgstr "مقدار الميل"
+
+msgid "Tilt with motion"
+msgstr "الإمالة مع الحركة"

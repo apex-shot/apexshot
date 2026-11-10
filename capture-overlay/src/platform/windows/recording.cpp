@@ -2,9 +2,11 @@
 
 #include "platform/recording_settings.h"
 #include "platform/windows/audio_devices.h"
+#include "platform/windows/ddagrab.h"
 #include "platform/windows/pointer_tracker.h"
 #include "platform/windows/settings_store.h"
 #include "platform/windows/webcam_format.h"
+#include "platform/windows/window_capture.h"
 #include "platform/windows/win_util.h"
 
 #include <QCoreApplication>
@@ -195,6 +197,46 @@ void appendVideoEncoder(QStringList& args, int quality, const QSize& size, int f
          << QStringLiteral("-pix_fmt") << QStringLiteral("yuv420p");
 }
 
+/// Whether this ffmpeg can capture the selected DXGI output and download it to
+/// a normal frame. Probing the real output matters when output 0 is detached
+/// and the only attached display is a later index.
+bool ddagrabSupported(int outputIndex)
+{
+    static QHash<int, bool> results;
+    if (results.contains(outputIndex))
+        return results.value(outputIndex);
+
+    QString output;
+    QString error;
+    const QStringList args{
+        QStringLiteral("-hide_banner"),
+        QStringLiteral("-loglevel"),
+        QStringLiteral("error"),
+        QStringLiteral("-f"),
+        QStringLiteral("lavfi"),
+        QStringLiteral("-i"),
+        QStringLiteral("ddagrab=output_idx=%1:draw_mouse=0:framerate=30:video_size=16x16")
+            .arg(outputIndex),
+        QStringLiteral("-frames:v"),
+        QStringLiteral("1"),
+        QStringLiteral("-vf"),
+        QStringLiteral("hwdownload,format=bgra"),
+        QStringLiteral("-f"),
+        QStringLiteral("null"),
+        QStringLiteral("-"),
+    };
+    const bool supported = runProbe(args, &output, &error);
+    if (!supported) {
+        recordingLog(QStringLiteral("capture: ddagrab unavailable for output %1: %2")
+                         .arg(outputIndex)
+                         .arg(error));
+    } else {
+        recordingLog(QStringLiteral("capture: ddagrab available for output %1").arg(outputIndex));
+    }
+    results.insert(outputIndex, supported);
+    return supported;
+}
+
 QStringList audioInputs()
 {
     return Platform::directShowDevices(false);
@@ -275,35 +317,75 @@ bool runFfprobe(const QStringList& arguments, QString* out)
     return probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0;
 }
 
-/// The size a camera delivers at `fps`, or an empty size when it cannot be
-/// opened. `pixelFormat` pins the dshow mode the way the recording will ask
-/// for it. The answer is cached per camera, rate, and format: opening a
-/// capture device takes about a second, and the recorder asks once per
-/// recording.
-QSize cameraFrameSize(const QString& device, int fps, const QString& pixelFormat)
+struct CameraProbe {
+    QSize size;
+    double fps = 0.0;
+};
+
+double parseFrameRate(const QString& text)
 {
-    static QHash<QString, QSize> sizes;
+    bool ok = false;
+    const double direct = text.trimmed().toDouble(&ok);
+    if (ok)
+        return direct;
+
+    const QStringList parts = text.trimmed().split(QLatin1Char('/'));
+    if (parts.size() != 2)
+        return 0.0;
+    bool numeratorOk = false;
+    bool denominatorOk = false;
+    const double numerator = parts[0].toDouble(&numeratorOk);
+    const double denominator = parts[1].toDouble(&denominatorOk);
+    return numeratorOk && denominatorOk && denominator > 0.0 ? numerator / denominator : 0.0;
+}
+
+/// The size and default rate a camera opens at, without pinning a rate. This
+/// follows the studied recorder: the camera's active format is chosen by
+/// size, and its own frame rate is reported separately instead of copying
+/// the desktop's rate. Cached because opening a capture device takes about a
+/// second and the recorder asks once per recording.
+CameraProbe probeCamera(const QString& device, const QSize& size, const QString& pixelFormat)
+{
+    static QHash<QString, CameraProbe> probes;
     const QString key =
-        QStringLiteral("%1|%2|%3").arg(device).arg(fps).arg(pixelFormat);
-    const auto cached = sizes.constFind(key);
-    if (cached != sizes.constEnd())
+        QStringLiteral("%1|%2x%3|%4").arg(device).arg(size.width()).arg(size.height()).arg(
+            pixelFormat);
+    const auto cached = probes.constFind(key);
+    if (cached != probes.constEnd())
         return cached.value();
 
     QStringList arguments{QStringLiteral("-v"), QStringLiteral("error"),
                           QStringLiteral("-f"), QStringLiteral("dshow")};
+    if (!size.isEmpty()) {
+        arguments << QStringLiteral("-video_size")
+                  << QStringLiteral("%1x%2").arg(size.width()).arg(size.height());
+    }
     if (!pixelFormat.isEmpty())
         arguments << QStringLiteral("-pixel_format") << pixelFormat;
-    if (fps > 0)
-        arguments << QStringLiteral("-framerate") << QString::number(fps);
     arguments << QStringLiteral("-i") << QStringLiteral("video=%1").arg(device)
               << QStringLiteral("-select_streams") << QStringLiteral("v:0")
-              << QStringLiteral("-show_entries") << QStringLiteral("stream=width,height")
+              << QStringLiteral("-show_entries")
+              << QStringLiteral("stream=width,height,avg_frame_rate,r_frame_rate")
               << QStringLiteral("-of") << QStringLiteral("csv=p=0");
 
+    CameraProbe probe;
     QString output;
-    const QSize size = runFfprobe(arguments, &output) ? parseProbeSize(output) : QSize();
-    sizes.insert(key, size);
-    return size;
+    if (runFfprobe(arguments, &output)) {
+        probe.size = parseProbeSize(output);
+        const QStringList fields =
+            output.split(QRegularExpression(QStringLiteral("[\\r\\n]+")), Qt::SkipEmptyParts)
+                .value(0)
+                .split(QLatin1Char(','), Qt::SkipEmptyParts);
+        for (int index = 2; index < fields.size(); ++index) {
+            const double rate = parseFrameRate(fields[index]);
+            if (rate > 0.0) {
+                probe.fps = rate;
+                break;
+            }
+        }
+    }
+    probes.insert(key, probe);
+    return probe;
 }
 
 /// The camera mode to open at: the shared picker's best at 24fps within its
@@ -467,6 +549,12 @@ public:
     State state = State::Idle;
     RecordingRequest request;
     QProcess* process = nullptr;
+    /// Window recordings feed ffmpeg from a Windows Graphics Capture pipe
+    /// instead of reading the desktop rectangle through gdigrab.
+    std::unique_ptr<WindowCaptureSource> windowCapture;
+    /// A window-capture start failure falls back to gdigrab for the rest of
+    /// this recording instead of retrying the same failing pipe every segment.
+    bool windowCaptureDisabled = false;
     /// The camera runs in its own process: a single ffmpeg doing the desktop,
     /// a camera, and two encodes at once starves every real-time input, and
     /// the forced frame rate turns the gaps into staggering on both tracks.
@@ -503,6 +591,11 @@ public:
     /// The dshow pixel_format the input asks for; empty uses the driver's
     /// default, which can be the heaviest raw layout the camera lists.
     QString webcamPixelFormat;
+    /// The camera's own frame rate. The desktop rate is not applied to the
+    /// track: the studied recorder keeps a device frame rate separate from
+    /// the display refresh rate, and a 60 fps desktop can outrun a 30 fps
+    /// camera.
+    int webcamFps = 30;
     /// The bubble-sized frame the preview pipe carries.
     QSize webcamPreviewSize;
     QByteArray webcamPreviewBuffer;
@@ -598,23 +691,76 @@ QStringList RecordingSession::Private::buildScreenArguments(const QString& segme
          << QStringLiteral("error") << QStringLiteral("-nostats");
 
     const int fps = request.fps > 0 ? request.fps : 30;
-    // Raw 4K frames are roughly 32 MiB each, so bounding this queue matters.
-    args << QStringLiteral("-thread_queue_size") << QStringLiteral("8")
-         << QStringLiteral("-f") << QStringLiteral("gdigrab") << QStringLiteral("-framerate")
-         << QString::number(fps) << QStringLiteral("-draw_mouse")
-         << (request.includeCursor ? QStringLiteral("1") : QStringLiteral("0"))
-         << QStringLiteral("-offset_x") << QString::number(request.region.x())
-         << QStringLiteral("-offset_y") << QString::number(request.region.y())
-         << QStringLiteral("-video_size")
-         << QStringLiteral("%1x%2").arg(request.region.width()).arg(request.region.height())
-         << QStringLiteral("-i") << QStringLiteral("desktop");
 
-    const QSize outputSize =
-        recordingOutputSize(request.region.size(),
-                            QSize(request.maxWidth, request.maxHeight),
-                            request.displayScale);
+    // Windows Graphics Capture and DXGI Desktop Duplication both hand back
+    // composited frames, unlike the GDI path gdigrab uses. Desktop Duplication
+    // is the smaller change: ffmpeg already exposes it as a lavfi source, and
+    // the same crop and encoder arguments follow it.
+    const bool useWindowCapture =
+        request.target == RecordingRequest::Target::Window && windowCapture
+        && windowCapture->isPrepared();
+    bool useDdagrab = false;
+    DdagrabSource ddagrab;
+    if (!useWindowCapture && request.target != RecordingRequest::Target::Window) {
+        ddagrab = ddagrabSourceForRegion(request.region, Platform::monitors());
+        useDdagrab = ddagrab.valid && ddagrabSupported(ddagrab.outputIndex);
+        if (useDdagrab) {
+            recordingLog(QStringLiteral("capture: ddagrab output=%1 offset=%2,%3 size=%4x%5")
+                             .arg(ddagrab.outputIndex)
+                             .arg(ddagrab.offset.x())
+                             .arg(ddagrab.offset.y())
+                             .arg(ddagrab.size.width())
+                             .arg(ddagrab.size.height()));
+        } else if (!ddagrab.valid) {
+            recordingLog(QStringLiteral("capture: ddagrab skipped for %1,%2 %3x%4: %5")
+                             .arg(request.region.x())
+                             .arg(request.region.y())
+                             .arg(request.region.width())
+                             .arg(request.region.height())
+                             .arg(ddagrab.reason));
+        }
+    }
+
+    // Raw 4K frames are roughly 32 MiB each, so bounding this queue matters.
+    args << QStringLiteral("-thread_queue_size") << QStringLiteral("8");
+    if (useWindowCapture) {
+        recordingLog(QStringLiteral("capture: window graphics pipe=%1 size=%2x%3")
+                         .arg(windowCapture->pipePath())
+                         .arg(windowCapture->size().width())
+                         .arg(windowCapture->size().height()));
+        args << QStringLiteral("-f") << QStringLiteral("rawvideo") << QStringLiteral("-pixel_format")
+             << QStringLiteral("bgra") << QStringLiteral("-video_size")
+             << QStringLiteral("%1x%2")
+                    .arg(windowCapture->size().width())
+                    .arg(windowCapture->size().height())
+             << QStringLiteral("-framerate") << QString::number(fps) << QStringLiteral("-i")
+             << windowCapture->pipePath();
+    } else if (useDdagrab) {
+        args << QStringLiteral("-f") << QStringLiteral("lavfi") << QStringLiteral("-i")
+             << ddagrabFilter(ddagrab, fps, request.includeCursor);
+    } else {
+        args << QStringLiteral("-f") << QStringLiteral("gdigrab") << QStringLiteral("-framerate")
+             << QString::number(fps) << QStringLiteral("-draw_mouse")
+             << (request.includeCursor ? QStringLiteral("1") : QStringLiteral("0"))
+             << QStringLiteral("-offset_x") << QString::number(request.region.x())
+             << QStringLiteral("-offset_y") << QString::number(request.region.y())
+             << QStringLiteral("-video_size")
+             << QStringLiteral("%1x%2").arg(request.region.width()).arg(request.region.height())
+             << QStringLiteral("-i") << QStringLiteral("desktop");
+    }
+
+    const QSize sourceSize =
+        useWindowCapture ? windowCapture->size() : request.region.size();
+    const QSize outputSize = recordingOutputSize(sourceSize,
+                                                 QSize(request.maxWidth, request.maxHeight),
+                                                 request.displayScale);
     const QString scale = recordingScaleFilter(outputSize);
-    args << QStringLiteral("-map") << QStringLiteral("0:v") << QStringLiteral("-vf") << scale;
+    // ddagrab hands the filter graph a D3D11 frame. Download it before the
+    // normal scaler and encoder, which work on system-memory frames.
+    const QString videoFilter =
+        useDdagrab ? QStringLiteral("hwdownload,format=bgra,%1").arg(scale) : scale;
+    args << QStringLiteral("-map") << QStringLiteral("0:v") << QStringLiteral("-vf")
+         << videoFilter;
 
     const int crfBase = request.crf > 0 ? request.crf : 20;
     // Same resolution compensation as the Linux encoder: smaller outputs get a
@@ -640,7 +786,7 @@ QStringList RecordingSession::Private::buildWebcamArguments(
     args << QStringLiteral("-y") << QStringLiteral("-hide_banner") << QStringLiteral("-loglevel")
          << QStringLiteral("error") << QStringLiteral("-nostats");
 
-    const int fps = request.fps > 0 ? request.fps : 30;
+    const int fps = webcamFps > 0 ? webcamFps : 30;
     // The camera runs on its own clock; a deep buffer keeps the encoder from
     // making dshow drop frames out of the track.
     args << QStringLiteral("-thread_queue_size") << QStringLiteral("1024");
@@ -714,6 +860,19 @@ bool RecordingSession::Private::startSegment(QString& error)
             : QString();
     processOutput.clear();
     webcamPreviewBuffer.clear();
+
+    windowCapture.reset();
+    if (request.target == RecordingRequest::Target::Window && !windowCaptureDisabled) {
+        auto capture = std::make_unique<WindowCaptureSource>();
+        QString captureError;
+        if (capture->prepare(request.windowId, request.region.size(), request.fps, &captureError)) {
+            windowCapture = std::move(capture);
+        } else {
+            recordingLog(QStringLiteral("capture: window graphics skipped: %1")
+                             .arg(captureError));
+        }
+    }
+
     process = new QProcess(q);
     process->setProgram(ffmpegExecutable());
     process->setArguments(buildScreenArguments(path));
@@ -740,6 +899,20 @@ bool RecordingSession::Private::startSegment(QString& error)
         process = nullptr;
         return false;
     }
+
+    if (windowCapture && !windowCapture->start(&error)) {
+        // The pipe never delivered frames. Retry this segment through the
+        // gdigrab fallback rather than failing the recording outright.
+        recordingLog(QStringLiteral("capture: window graphics failed: %1").arg(error));
+        process->kill();
+        process->waitForFinished(1000);
+        delete process;
+        process = nullptr;
+        windowCapture.reset();
+        windowCaptureDisabled = true;
+        return startSegment(error);
+    }
+
     segments.append(path);
 
     if (!webcamPath.isEmpty()) {
@@ -842,6 +1015,8 @@ void RecordingSession::Private::onProcessError(QProcess::ProcessError error)
 
 void RecordingSession::Private::onCaptureFinished(int exitCode, QProcess::ExitStatus status)
 {
+    if (windowCapture)
+        windowCapture->stop();
     if (process) {
         processOutput.append(process->readAllStandardError());
         process->deleteLater();
@@ -949,6 +1124,9 @@ void RecordingSession::Private::checkCaptureStopped()
 
 void RecordingSession::Private::requestQuit(int timeoutMs)
 {
+    // Closing the window-capture pipe gives ffmpeg a clean end of input.
+    if (windowCapture)
+        windowCapture->stop();
     for (QProcess* target : {process, webcamProcess}) {
         if (!target)
             continue;
@@ -966,6 +1144,8 @@ void RecordingSession::Private::requestQuit(int timeoutMs)
 void RecordingSession::Private::fail(const QString& reason)
 {
     tick->stop();
+    if (windowCapture)
+        windowCapture->stop();
     if (systemAudio)
         systemAudio->stop();
     pointerTracker.discard();
@@ -1184,6 +1364,11 @@ void RecordingSession::Private::completeWebcamTrack(const QString& videoPath)
         webcamTrack.width = size.width();
         webcamTrack.height = size.height();
         webcamTrack.duration = videoDuration(trackPath);
+        // The camera process starts after the desktop process and both stop
+        // together, so the track is shorter from the front. Store that gap so
+        // the editor knows where the camera starts in video time.
+        const double videoSeconds = videoDuration(videoPath);
+        webcamTrack.start = std::max(0.0, videoSeconds - webcamTrack.duration);
         if (!webcamTrack.is_valid()) {
             QFile::remove(trackPath);
             finish(false, QStringLiteral("the camera track had no readable frames"));
@@ -1192,20 +1377,17 @@ void RecordingSession::Private::completeWebcamTrack(const QString& videoPath)
         compositeWebcam(
             videoPath,
             trackPath,
-            [this, trackPath, finish](bool baked, const QString& detail) {
-                if (baked && request.target != RecordingRequest::Target::Window) {
-                    // The saved recording carries the camera. Leaving the
-                    // track in the sidecar would make the editor add a second
-                    // copy on top of it.
-                    webcamTrack = Platform::WebcamTrack{};
-                    QFile::remove(trackPath);
-                } else if (!detail.isEmpty()) {
+            [this, finish](bool baked, const QString& detail) {
+                if (!baked && !detail.isEmpty()) {
                     recordingLog(QStringLiteral("webcam composite failed: %1").arg(detail));
                     qWarning().noquote() << "[recording] webcam composite failed:" << detail;
                     emit q->warning(
                         QStringLiteral("The webcam could not be added to the recording: %1")
                             .arg(detail));
                 }
+                // The camera track and any clean screen file stay beside the
+                // sidecar even when the saved video already carries the
+                // camera, so the editor can rebuild the layer.
                 finish(true, QString());
             });
     };
@@ -1354,9 +1536,16 @@ void RecordingSession::Private::compositeWebcam(
         QStringLiteral("0:a?"),
     };
     // The composite is what the saved video shows, and it is the second
-    // generation of the screen capture, so it gets more bits than the segment
-    // that came before it.
-    appendVideoEncoder(compositeArgs, 16, videoSize, request.fps > 0 ? request.fps : 30);
+    // generation of the screen capture. Keep the selected tier, but give it
+    // two extra quality points so the re-encode does not flatten the choice.
+    const int compositeBase = request.crf > 0 ? request.crf : 20;
+    const int compositeReduction = recordingCrfResolutionReduction(videoSize.width(),
+                                                                   videoSize.height());
+    const int compositeCrf = std::max(1, compositeBase - compositeReduction - 2);
+    appendVideoEncoder(compositeArgs,
+                       compositeCrf,
+                       videoSize,
+                       request.fps > 0 ? request.fps : 30);
     compositeArgs << QStringLiteral("-c:a") << QStringLiteral("copy")
                   << QStringLiteral("-movflags") << QStringLiteral("+faststart")
                   << compositePath;
@@ -1377,28 +1566,21 @@ void RecordingSession::Private::compositeWebcam(
                 return;
             }
 
-            // Keep the original until the composited file is in its place; a
-            // failed rename must not leave the recording without either.
-            const bool keepScreen = request.target == RecordingRequest::Target::Window;
-            const QString parked = keepScreen
-                ? QFileInfo(videoPath).dir().filePath(
-                      QStringLiteral(".apexshot-screen-%1.mp4")
-                          .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)))
-                : videoPath + QStringLiteral(".video");
-            if (!keepScreen)
-                QFile::remove(parked);
+            // Keep the clean screen footage beside the composited video. The
+            // editor uses it to rebuild the camera layer without drawing the
+            // camera that is already baked into the playable file.
+            const QString parked = QFileInfo(videoPath).dir().filePath(
+                QStringLiteral(".apexshot-screen-%1.mp4")
+                    .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+            QFile::remove(parked);
             const bool held = QFile::rename(videoPath, parked);
             if (held && QFile::rename(compositePath, videoPath)) {
-                if (keepScreen) {
-                    const DWORD attributes = GetFileAttributesW(
-                        reinterpret_cast<LPCWSTR>(parked.utf16()));
-                    if (attributes != INVALID_FILE_ATTRIBUTES)
-                        SetFileAttributesW(reinterpret_cast<LPCWSTR>(parked.utf16()),
-                                           attributes | FILE_ATTRIBUTE_HIDDEN);
-                    webcamTrack.screenFile = QFileInfo(parked).fileName();
-                } else {
-                    QFile::remove(parked);
-                }
+                const DWORD attributes =
+                    GetFileAttributesW(reinterpret_cast<LPCWSTR>(parked.utf16()));
+                if (attributes != INVALID_FILE_ATTRIBUTES)
+                    SetFileAttributesW(reinterpret_cast<LPCWSTR>(parked.utf16()),
+                                       attributes | FILE_ATTRIBUTE_HIDDEN);
+                webcamTrack.screenFile = QFileInfo(parked).fileName();
                 done(true, QString());
             } else {
                 if (held)
@@ -1433,6 +1615,7 @@ void RecordingSession::Private::removeDiscardedSidecar()
         return;
     QFile::remove(path);
     QFile::remove(path + QStringLiteral(".webcam.mp4"));
+    QDir(path + QStringLiteral(".cursors")).removeRecursively();
     if (!webcamTrack.screenFile.isEmpty()) {
         QFileInfo info(request.outputPath);
         QFile::remove(info.dir().filePath(webcamTrack.screenFile));
@@ -1577,6 +1760,8 @@ RecordingSession::RecordingSession(QObject* parent)
 
 RecordingSession::~RecordingSession()
 {
+    if (d->windowCapture)
+        d->windowCapture->stop();
     if (d->process) {
         d->process->kill();
         d->process->waitForFinished(1000);
@@ -1681,6 +1866,7 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
     d->webcamCameraSize = QSize();
     d->webcamCaptureSize = QSize();
     d->webcamPixelFormat.clear();
+    d->webcamFps = 30;
     d->webcamPreviewSize = QSize();
     d->webcamPreviewBuffer.clear();
     d->webcamPreviewLogged = false;
@@ -1710,24 +1896,30 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         // format, so the track reuses that stream instead of reopening the
         // device for a second, colder view of the same picture.
         recordingLog(QStringLiteral("webcam stream reuse requested"));
+        d->webcamFps = std::min(d->request.fps, 30);
         d->webcamActive = true;
     } else if (!camera.isEmpty()) {
         const Platform::WebcamCameraFormat captureFormat = cameraCaptureFormat(camera);
         QString pixelFormat = captureFormat.pixelFormat;
-        QSize cameraSize = cameraFrameSize(camera, d->request.fps, pixelFormat);
-        if (cameraSize.isEmpty() && !pixelFormat.isEmpty()) {
+        CameraProbe probe = probeCamera(camera, captureFormat.size, pixelFormat);
+        if (probe.size.isEmpty() && !pixelFormat.isEmpty()) {
             // A driver can list a format it then refuses to open; ask for its
             // default rather than lose the track over the pin.
-            cameraSize = cameraFrameSize(camera, d->request.fps, {});
             pixelFormat.clear();
+            probe = probeCamera(camera, captureFormat.size, {});
         }
-        recordingLog(QStringLiteral("webcam probe %1 -> %2x%3 capture=%4x%5 %6")
-                         .arg(camera)
-                         .arg(cameraSize.width())
-                         .arg(cameraSize.height())
-                         .arg(captureFormat.size.width())
-                         .arg(captureFormat.size.height())
-                         .arg(captureFormat.mjpeg ? QStringLiteral("mjpeg") : pixelFormat));
+        const QSize cameraSize = probe.size;
+        const int cameraFps = probe.fps > 0.0 ? int(std::lround(probe.fps)) : 30;
+        d->webcamFps = std::max(1, cameraFps);
+        recordingLog(
+            QStringLiteral("webcam probe %1 -> %2x%3 at %4 fps (camera default) capture=%5x%6 %7")
+                .arg(camera)
+                .arg(cameraSize.width())
+                .arg(cameraSize.height())
+                .arg(cameraFps)
+                .arg(captureFormat.size.width())
+                .arg(captureFormat.size.height())
+                .arg(captureFormat.mjpeg ? QStringLiteral("mjpeg") : pixelFormat));
         if (cameraSize.isEmpty()) {
             warnings.append(QStringLiteral("The camera \"%1\" could not be opened; recording "
                                            "without a webcam track.")
@@ -1759,6 +1951,7 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
 
     d->segments.clear();
     d->segmentIndex = 0;
+    d->windowCaptureDisabled = false;
     d->elapsedBeforeMs = 0;
     d->processOutput.clear();
     d->discardRequested = false;
@@ -1854,7 +2047,8 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
     d->active.start();
     d->pointerTracker.start(d->request.region,
                             d->request.fps,
-                            [d = d] { return d->elapsedMs(); });
+                            [d = d] { return d->elapsedMs(); },
+                            d->request.captureKeystrokes);
     d->tick->start();
     emit stateChanged();
     emit elapsedChanged(0);

@@ -522,6 +522,7 @@ fn push_mapped_sample(
         x: mapped_x,
         y: mapped_y,
         kind: CursorKind::Default,
+        cursor_id: None,
     });
 }
 

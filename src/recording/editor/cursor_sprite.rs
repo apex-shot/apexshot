@@ -4,6 +4,7 @@ use super::click_effect::{
     RIPPLE_BAND_01,
 };
 use super::model::{ClickEffect, CursorSettings, CursorTheme, MAX_CURSOR_SIZE, MIN_CURSOR_SIZE};
+use super::sidecar::{CapturedCursorImage, CursorFrame};
 use gtk4::cairo::{
     Antialias, Context, FillRule, Filter, Format, ImageSurface, RadialGradient, SurfacePattern,
 };
@@ -11,9 +12,10 @@ use image::RgbaImage;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::f64::consts::TAU;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::OnceLock;
+use std::time::SystemTime;
 
 const ADWAITA_DEFAULT: &[u8] = include_bytes!("../../../assets/cursors/adwaita/default.png");
 const ADWAITA_HAND: &[u8] = include_bytes!("../../../assets/cursors/adwaita/hand.png");
@@ -107,6 +109,11 @@ const MINIMAL_RESIZE_H: &[u8] = include_bytes!("../../../assets/cursors/minimal/
 const MINIMAL_RESIZE_V: &[u8] = include_bytes!("../../../assets/cursors/minimal/resize_v.png");
 const MINIMAL_RESIZE_DIAG: &[u8] =
     include_bytes!("../../../assets/cursors/minimal/resize_diag.png");
+/// The studied cursor config defaults to a 48 px cursor. Themed sprites are
+/// drawn at 48 px at the default size, so captured cursor PNGs scale their
+/// visible alpha bounds to the same target instead of using their raw bitmap
+/// size.
+const CAPTURED_CURSOR_HEIGHT: f64 = 48.0;
 const CURSOR_SHADOW_OFFSET_X: f64 = 2.2;
 const CURSOR_SHADOW_OFFSET_Y: f64 = 3.2;
 const DOT_CURSOR_RADIUS: f64 = 21.0;
@@ -216,6 +223,167 @@ pub fn hotspot(theme: CursorTheme, kind: &str) -> (f64, f64) {
         (CursorTheme::Minimal, SpriteKind::ResizeV) => (7.0, 3.0),
         (CursorTheme::Minimal, SpriteKind::ResizeDiag) => (7.0, 3.0),
     }
+}
+
+struct CapturedSprite {
+    modified: SystemTime,
+    image: Option<Rc<RgbaImage>>,
+    visible_height: Option<f64>,
+}
+
+// Decoded captured cursor PNGs for the current thread. The preview draws on
+// the UI thread and each export worker has its own cache, so a thread-local
+// map avoids sharing a `cairo` surface across threads. The modification time
+// is kept beside each image so a re-recorded sidecar with the same path does
+// not keep serving the previous shape.
+thread_local! {
+    static CAPTURED_SPRITES: RefCell<HashMap<PathBuf, CapturedSprite>> = RefCell::new(HashMap::new());
+}
+
+fn captured_bitmap(path: &Path) -> Option<(Rc<RgbaImage>, f64)> {
+    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
+    CAPTURED_SPRITES.with(|cache| {
+        if let Some(cached) = cache.borrow().get(path) {
+            if cached.modified == modified {
+                return cached
+                    .image
+                    .as_ref()
+                    .zip(cached.visible_height)
+                    .map(|(image, height)| (Rc::clone(image), height));
+            }
+        }
+        let image = image::open(path)
+            .ok()
+            .map(|decoded| Rc::new(decoded.to_rgba8()));
+        let visible_height = image.as_deref().and_then(visible_alpha_height);
+        cache.borrow_mut().insert(
+            path.to_path_buf(),
+            CapturedSprite {
+                modified,
+                image: image.clone(),
+                visible_height,
+            },
+        );
+        image.zip(visible_height)
+    })
+}
+
+/// The height of the cursor's visible pixels, not the full PNG including its
+/// transparent padding. The studied image loader computes the same bounds from
+/// alpha before sizing the cursor.
+fn visible_alpha_height(image: &RgbaImage) -> Option<f64> {
+    let (sum, count) = image.pixels().fold((0_u64, 0_u64), |(sum, count), pixel| {
+        let alpha = u64::from(pixel.0[3]);
+        if alpha == 0 {
+            (sum, count)
+        } else {
+            (sum + alpha, count + 1)
+        }
+    });
+    if count == 0 {
+        return None;
+    }
+    let mut top = None;
+    let mut bottom = 0;
+    for (_, y, pixel) in image.enumerate_pixels() {
+        let alpha = u64::from(pixel.0[3]);
+        if alpha == 0 || alpha * count < sum {
+            continue;
+        }
+        top.get_or_insert(y);
+        bottom = bottom.max(y);
+    }
+    top.map(|top| f64::from(bottom - top + 1))
+}
+
+/// Draw a recorded cursor PNG with its hotspot at `(x, y)`, falling back to
+/// the themed sprite when the catalog image cannot be decoded.
+#[allow(clippy::too_many_arguments)]
+pub fn draw_recorded(
+    cr: &Context,
+    x: f64,
+    y: f64,
+    pulse: f64,
+    press_scale: f64,
+    frame: &CursorFrame,
+    capture: Option<&CapturedCursorImage>,
+    settings: CursorSettings,
+    alpha: f64,
+) {
+    // The studied editor draws a recorded cursor PNG only inside its `macos`
+    // set; every other set restyles standard and unrecognised cursors from the
+    // theme, with an unknown shape falling back to the arrow sprite. Mirror
+    // that: `std-` ids always take the theme, and a custom or legacy id paints
+    // its recorded PNG only under the macOS-like themes.
+    let recorded_theme = matches!(
+        settings.theme,
+        CursorTheme::Macos | CursorTheme::Tahoe | CursorTheme::TahoeInverted
+    );
+    // The studied `alwaysUseDefault` rule paints the arrow whatever the
+    // recording shows, before any set or recorded image is considered.
+    let use_recorded = !settings.always_use_default
+        && recorded_theme
+        && matches!(frame.cursor_id.as_deref(), Some(id) if !id.starts_with("std-"));
+    // The studied velocity profile tilts the cursor about its hotspot, so the
+    // pivot stays on the recorded pointer while the art leans with motion.
+    let _ = cr.save();
+    if frame.rotation != 0.0 {
+        cr.translate(x, y);
+        cr.rotate(frame.rotation);
+        cr.translate(-x, -y);
+    }
+    let mut painted = false;
+    if use_recorded {
+        if let Some(capture) = capture {
+            painted = draw_captured(cr, x, y, pulse, press_scale, capture, settings, alpha);
+        }
+    }
+    if !painted {
+        let kind = if settings.always_use_default {
+            "default"
+        } else {
+            frame.kind.as_str()
+        };
+        draw(cr, x, y, pulse, press_scale, kind, settings, alpha);
+    }
+    let _ = cr.restore();
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_captured(
+    cr: &Context,
+    x: f64,
+    y: f64,
+    pulse: f64,
+    press_scale: f64,
+    capture: &CapturedCursorImage,
+    settings: CursorSettings,
+    alpha: f64,
+) -> bool {
+    let alpha = alpha.clamp(0.0, 1.0);
+    if alpha < 0.02 {
+        return true;
+    }
+    let Some((bitmap, visible_height)) = captured_bitmap(&capture.path) else {
+        return false;
+    };
+    let settings = settings.clamped();
+    let target_height = CAPTURED_CURSOR_HEIGHT * settings.size;
+    let scale =
+        target_height / visible_height.max(1.0) * pulse.max(0.7) * press_scale.clamp(0.5, 1.5);
+    if scale <= 0.0 {
+        return true;
+    }
+    let surface = surface_from_rgba(&bitmap);
+    let _ = cr.save();
+    cr.translate(x, y);
+    cr.scale(scale, scale);
+    cr.translate(-f64::from(capture.hotspot_x), -f64::from(capture.hotspot_y));
+    let _ = cr.set_source_surface(&surface, 0.0, 0.0);
+    cr.set_antialias(Antialias::Best);
+    let _ = cr.paint_with_alpha(alpha);
+    let _ = cr.restore();
+    true
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1760,5 +1928,207 @@ mod tests {
         assert_ne!(no_shadow_edge, default_shadow_edge);
         assert_ne!(default_shadow_edge, full_shadow_edge);
         assert!(full_shadow_edge[0] < default_shadow_edge[0]);
+    }
+
+    fn captured_png(dir: &Path, width: u32, height: u32) -> PathBuf {
+        let path = dir.join("captured-cursor.png");
+        let mut image = RgbaImage::new(width, height);
+        for pixel in image.pixels_mut() {
+            *pixel = image::Rgba([255, 0, 0, 255]);
+        }
+        image.save(&path).unwrap();
+        path
+    }
+
+    fn captured_frame(cursor_id: Option<&str>) -> CursorFrame {
+        CursorFrame {
+            x: 0.0,
+            y: 0.0,
+            kind: super::super::sidecar::CursorKind::Hand,
+            alpha: 1.0,
+            rotation: 0.0,
+            cursor_id: cursor_id.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn visible_cursor_bounds_ignore_transparent_padding() {
+        let mut image = RgbaImage::new(8, 8);
+        for y in 2..5 {
+            for x in 1..7 {
+                image.put_pixel(x, y, image::Rgba([255, 0, 0, 255]));
+            }
+        }
+        assert_eq!(visible_alpha_height(&image), Some(3.0));
+        image.put_pixel(3, 0, image::Rgba([255, 0, 0, 30]));
+        image.put_pixel(3, 7, image::Rgba([255, 0, 0, 30]));
+        assert_eq!(visible_alpha_height(&image), Some(3.0));
+
+        let transparent = RgbaImage::new(8, 8);
+        assert_eq!(visible_alpha_height(&transparent), None);
+    }
+
+    #[test]
+    fn a_captured_png_is_painted_with_its_hotspot_on_the_pointer() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-captured-cursor-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let capture = CapturedCursorImage {
+            path: captured_png(&dir, 32, 32),
+            hotspot_x: 1,
+            hotspot_y: 1,
+        };
+        let frame = captured_frame(Some("custom-hand-id"));
+        let mut surface =
+            ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            draw_recorded(
+                &cr,
+                50.0,
+                40.0,
+                1.0,
+                1.0,
+                &frame,
+                Some(&capture),
+                CursorSettings {
+                    theme: CursorTheme::Macos,
+                    ..CursorSettings::default()
+                },
+                1.0,
+            );
+        }
+        surface.flush();
+        let pixels = surface.data().unwrap().to_vec();
+        assert_eq!(
+            alpha_bounds_with_size(
+                &pixels,
+                TEST_SURFACE_SIZE as usize,
+                TEST_SURFACE_SIZE as usize
+            ),
+            Some((48, 38, 96, 86))
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_non_recorded_theme_restyles_even_a_custom_cursor() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-themed-cursor-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let capture = CapturedCursorImage {
+            path: captured_png(&dir, 32, 32),
+            hotspot_x: 1,
+            hotspot_y: 1,
+        };
+        let frame = captured_frame(Some("custom-hand-id"));
+        let render = |settings: CursorSettings| {
+            let mut surface =
+                ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
+            {
+                let cr = Context::new(&surface).unwrap();
+                draw_recorded(
+                    &cr,
+                    50.0,
+                    40.0,
+                    1.0,
+                    1.0,
+                    &frame,
+                    Some(&capture),
+                    settings,
+                    1.0,
+                );
+            }
+            surface.flush();
+            let pixels = surface.data().unwrap().to_vec();
+            pixels
+        };
+        let recorded = render(CursorSettings {
+            theme: CursorTheme::Macos,
+            ..CursorSettings::default()
+        });
+        let themed = render(CursorSettings::default());
+        assert_ne!(recorded, themed);
+        let default_only = render(CursorSettings {
+            theme: CursorTheme::Macos,
+            always_use_default: true,
+            ..CursorSettings::default()
+        });
+        let mut arrow_frame = captured_frame(None);
+        arrow_frame.kind = crate::recording::editor::sidecar::CursorKind::Default;
+        let mut surface =
+            ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
+        {
+            let cr = Context::new(&surface).unwrap();
+            draw_recorded(
+                &cr,
+                50.0,
+                40.0,
+                1.0,
+                1.0,
+                &arrow_frame,
+                None,
+                CursorSettings {
+                    theme: CursorTheme::Macos,
+                    ..CursorSettings::default()
+                },
+                1.0,
+            );
+        }
+        surface.flush();
+        let arrow = surface.data().unwrap().to_vec();
+        assert_eq!(default_only, arrow, "the rule paints the arrow instead");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_captured_png_falls_back_to_the_recorded_kind() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-missing-cursor-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let frame = captured_frame(Some("custom-hand-id"));
+        let capture = CapturedCursorImage {
+            path: dir.join("missing.png"),
+            hotspot_x: 6,
+            hotspot_y: 0,
+        };
+        let render = |asset: Option<&CapturedCursorImage>| {
+            let mut surface =
+                ImageSurface::create(Format::ARgb32, TEST_SURFACE_SIZE, TEST_SURFACE_SIZE).unwrap();
+            {
+                let cr = Context::new(&surface).unwrap();
+                draw_recorded(
+                    &cr,
+                    TEST_SURFACE_SIZE as f64 / 2.0,
+                    TEST_SURFACE_SIZE as f64 / 2.0,
+                    1.0,
+                    1.0,
+                    &frame,
+                    asset,
+                    CursorSettings {
+                        theme: CursorTheme::Macos,
+                        ..CursorSettings::default()
+                    },
+                    1.0,
+                );
+            }
+            surface.flush();
+            let pixels = surface.data().unwrap().to_vec();
+            pixels
+        };
+        assert_eq!(render(Some(&capture)), render(None));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

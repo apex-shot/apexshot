@@ -47,6 +47,10 @@ struct WebcamTrack {
     /// The track's own length. The camera's clock is not the desktop's, so the
     /// editor maps a video time onto the track by scaling with it.
     double duration = 0.0;
+    /// Seconds from the start of the video to the first frame of the track.
+    /// The camera process starts after the screen process, so this is usually
+    /// the startup gap the editor has to hold or skip.
+    double start = 0.0;
     double x = 0.0;
     double y = 0.0;
     double w = 0.0;
@@ -66,7 +70,10 @@ public:
     explicit PointerTracker(QObject* parent = nullptr);
     ~PointerTracker() override;
 
-    void start(const QRect& region, int fps, MediaClock mediaClock);
+    void start(const QRect& region,
+               int fps,
+               MediaClock mediaClock,
+               bool captureKeystrokes = false);
     void pause(qint64 mediaTimeMs);
     void resume();
     void stop(qint64 mediaTimeMs);
@@ -89,6 +96,22 @@ private:
     void sample();
     void closePresses(qint64 mediaTimeMs);
     void reset();
+    static LRESULT CALLBACK mouseHook(int code, WPARAM wParam, LPARAM lParam);
+    static LRESULT CALLBACK keyboardHook(int code, WPARAM wParam, LPARAM lParam);
+    void handleMouseEvent(WPARAM message, const MSLLHOOKSTRUCT& event);
+    void handleKeyEvent(WPARAM message, const KBDLLHOOKSTRUCT& event);
+    qint64 eventMediaTime(DWORD eventTime) const;
+    qint64 eventMediaTime(const MSLLHOOKSTRUCT& event) const;
+    void appendPointer(qint64 mediaTimeMs,
+                       const POINT& point,
+                       CursorKind kind,
+                       const QString& cursorId);
+    void appendVisibility(double t, bool visible);
+    void updateVisibility(qint64 mediaTimeMs);
+    QString cursorIdFor(HCURSOR cursor, CursorKind& kind);
+    bool installHook();
+    bool installKeyboardHook();
+    void removeHook();
 
     QRect region_;
     MediaClock mediaClock_;
