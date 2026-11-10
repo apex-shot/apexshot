@@ -110,8 +110,12 @@ const MAX_TRANSITION_SECONDS: f64 = 3.0;
 pub(super) const MIN_SPLIT_RATIO: f64 = 0.1;
 /// The widest share of the split the screen may take.
 pub(super) const MAX_SPLIT_RATIO: f64 = 0.9;
-/// How much of the frame's height the cutout's camera covers.
-const CUTOUT_HEIGHT_RATIO: f64 = 0.9;
+/// The smallest share of the frame's shortest side the cutout may take.
+pub(super) const MIN_CUTOUT_SIZE: f64 = 0.2;
+/// The largest share of the frame's shortest side the cutout may take.
+pub(super) const MAX_CUTOUT_SIZE: f64 = 1.0;
+/// The furthest the person's edge may be pulled in, in camera pixels.
+pub(super) const MAX_CUTOUT_INSET: f64 = 8.0;
 
 /// The studied camera size while the screen is zoomed.
 pub(super) const ZOOMED_CAMERA_SCALE: f64 = 0.8;
@@ -477,6 +481,13 @@ pub(super) struct LayoutSettings {
     /// the person against the left edge, one against the right, and half
     /// centres them. It applies to every cutout in the composition.
     pub cutout_position_x: f64,
+    /// The cutout's size: a square of this fraction of the frame's shortest
+    /// side, the camera fitted inside it. The studied range is 0.2..=1.
+    pub cutout_size: f64,
+    /// How soft the person's edge is, 0 hard to 1 softest.
+    pub cutout_softness: f64,
+    /// How far the person's edge is pulled in, in camera pixels.
+    pub cutout_inset: f64,
 }
 
 impl Default for LayoutSettings {
@@ -489,6 +500,9 @@ impl Default for LayoutSettings {
             split_auto: true,
             split_flip: false,
             cutout_position_x: 0.5,
+            cutout_size: 0.5,
+            cutout_softness: 0.2,
+            cutout_inset: 0.0,
         }
     }
 }
@@ -512,6 +526,21 @@ impl LayoutSettings {
             self.cutout_position_x.clamp(0.0, 1.0)
         } else {
             LayoutSettings::default().cutout_position_x
+        };
+        self.cutout_size = if self.cutout_size.is_finite() {
+            self.cutout_size.clamp(MIN_CUTOUT_SIZE, MAX_CUTOUT_SIZE)
+        } else {
+            LayoutSettings::default().cutout_size
+        };
+        self.cutout_softness = if self.cutout_softness.is_finite() {
+            self.cutout_softness.clamp(0.0, 1.0)
+        } else {
+            LayoutSettings::default().cutout_softness
+        };
+        self.cutout_inset = if self.cutout_inset.is_finite() {
+            self.cutout_inset.clamp(0.0, MAX_CUTOUT_INSET)
+        } else {
+            LayoutSettings::default().cutout_inset
         };
 
         let mut cues: Vec<LayoutCue> = self
@@ -601,6 +630,7 @@ impl LayoutSettings {
             split_auto: self.split_auto,
             split_flip: self.split_flip,
             cutout_position_x: self.cutout_position_x,
+            cutout_size: self.cutout_size,
             zoom_shrink: if zoom_shrink.is_finite() {
                 zoom_shrink.clamp(0.0, 1.0)
             } else {
@@ -715,6 +745,7 @@ struct Geometry {
     split_auto: bool,
     split_flip: bool,
     cutout_position_x: f64,
+    cutout_size: f64,
     zoom_shrink: f64,
 }
 
@@ -956,16 +987,14 @@ pub(super) fn screen_cover_rect(screen: Rect) -> Rect {
 /// The bottom-aligned camera of the cutout, sized from the raw camera aspect
 /// and placed across the frame by the project's cutout position.
 fn cutout_rect(geometry: Geometry) -> Rect {
-    let height = CUTOUT_HEIGHT_RATIO;
-    let width = (height * geometry.camera_aspect / geometry.video_aspect).min(1.0);
-    let height = if width < 1.0 {
-        height
-    } else {
-        geometry.video_aspect / geometry.camera_aspect
-    };
+    let (width, height) = overlay_size_hw(
+        geometry.video_aspect,
+        geometry.camera_aspect,
+        geometry.cutout_size,
+    );
     let factor = zoomed_scale(geometry.zoom_shrink, geometry.overlay.zoomed_scale);
-    let width = width * factor;
-    let height = height * factor;
+    let width = (width * factor).min(1.0);
+    let height = (height * factor).min(1.0);
     let position = if geometry.cutout_position_x.is_finite() {
         geometry.cutout_position_x.clamp(0.0, 1.0)
     } else {
@@ -1346,6 +1375,9 @@ struct Job {
     size: (u32, u32),
     /// Whether the decoded frame also needs its person matte.
     cutout: bool,
+    /// The person matte's edge controls, as (softness, inset in this decode's
+    /// pixels).
+    matte: (f64, f64),
 }
 
 struct Frame {
@@ -1493,6 +1525,7 @@ struct State {
     cutout_cache: RefCell<Option<(u64, f64, ImageSurface)>>,
     requested: Cell<f64>,
     requested_cutout: Cell<bool>,
+    requested_matte: Cell<(f64, f64)>,
     repaint: Rc<dyn Fn()>,
 }
 
@@ -1531,6 +1564,7 @@ impl WebcamModel {
                 cutout_cache: RefCell::new(None),
                 requested: Cell::new(-1.0),
                 requested_cutout: Cell::new(false),
+                requested_matte: Cell::new((0.0, 0.0)),
                 repaint,
             }),
         }
@@ -1556,6 +1590,7 @@ impl WebcamModel {
         *self.state.cutout_cache.borrow_mut() = None;
         self.state.requested.set(-1.0);
         self.state.requested_cutout.set(false);
+        self.state.requested_matte.set((0.0, 0.0));
         *self.state.shared.frame.lock().unwrap() = None;
         *self.state.shared.job.lock().unwrap() = None;
         *self.state.shared.error.lock().unwrap() = None;
@@ -1842,14 +1877,6 @@ impl WebcamModel {
         let cutout = self
             .layout_frame(None)
             .is_some_and(|frame| frame.cutout > 1e-3);
-        if (self.state.requested.get() - target).abs() < REQUEST_STEP_SECONDS
-            && self.state.requested_cutout.get() == cutout
-        {
-            return;
-        }
-        self.state.requested.set(target);
-        self.state.requested_cutout.set(cutout);
-
         let (path, camera_size) = {
             let track = self.state.track.borrow();
             let Some(track) = track.as_ref() else {
@@ -1857,6 +1884,24 @@ impl WebcamModel {
             };
             (track.path.clone(), track.camera_size)
         };
+        let job_width = preview_size(camera_size).0;
+        let matte = {
+            let layouts = self.state.layouts.borrow();
+            (
+                layouts.cutout_softness,
+                layouts.cutout_inset * f64::from(job_width) / f64::from(camera_size.0.max(1)),
+            )
+        };
+        if (self.state.requested.get() - target).abs() < REQUEST_STEP_SECONDS
+            && self.state.requested_cutout.get() == cutout
+            && self.state.requested_matte.get() == matte
+        {
+            return;
+        }
+        self.state.requested.set(target);
+        self.state.requested_cutout.set(cutout);
+        self.state.requested_matte.set(matte);
+
         let generation = *self.state.shared.generation.lock().unwrap();
         *self.state.shared.job.lock().unwrap() = Some(Job {
             path,
@@ -1864,6 +1909,7 @@ impl WebcamModel {
             generation,
             size: preview_size(camera_size),
             cutout,
+            matte,
         });
 
         let repaint = self.state.repaint.clone();
@@ -2069,6 +2115,56 @@ fn layout_from_legacy(settings: &LayerSettings) -> CameraLayout {
     }
 }
 
+/// The person matte with the studied edge controls applied: `inset` pulls
+/// the edge in by that many pixels (a min filter), and `softness` sets how
+/// wide the edge's ramp is around the matte's midpoint (0 hard, 1 as soft as
+/// the matte itself).
+pub(super) fn refine_matte(mask: &mut [f32], size: (u32, u32), softness: f64, inset: f64) {
+    let (width, height) = (size.0 as usize, size.1 as usize);
+    if width == 0 || height == 0 || mask.len() != width * height {
+        return;
+    }
+    let radius = if inset.is_finite() {
+        inset.max(0.0).round() as usize
+    } else {
+        0
+    };
+    if radius > 0 {
+        // Separable erosion: rows, then columns.
+        let mut scratch = mask.to_vec();
+        for y in 0..height {
+            let row = &mask[y * width..(y + 1) * width];
+            for x in 0..width {
+                let lo = x.saturating_sub(radius);
+                let hi = (x + radius).min(width - 1);
+                scratch[y * width + x] = row[lo..=hi].iter().copied().fold(f32::INFINITY, f32::min);
+            }
+        }
+        for x in 0..width {
+            for y in 0..height {
+                let lo = y.saturating_sub(radius);
+                let hi = (y + radius).min(height - 1);
+                let mut value = f32::INFINITY;
+                for yy in lo..=hi {
+                    value = value.min(scratch[yy * width + x]);
+                }
+                mask[y * width + x] = value;
+            }
+        }
+    }
+    let softness = if softness.is_finite() {
+        softness.clamp(0.0, 1.0)
+    } else {
+        0.2
+    };
+    let half = (0.5 * softness).max(0.01) as f32;
+    let (lo, hi) = (0.5 - half, 0.5 + half);
+    for value in mask.iter_mut() {
+        let t = ((*value - lo) / (hi - lo)).clamp(0.0, 1.0);
+        *value = t * t * (3.0 - 2.0 * t);
+    }
+}
+
 /// Multiply a raw camera frame's alpha by the blended person matte and
 /// premultiply its colour, ready for cairo's `ARgb32`.
 fn camera_premultiplied(
@@ -2196,7 +2292,10 @@ fn decode_loop(shared: Arc<Shared>) {
             }
             match processor.as_mut() {
                 Some(processor) => match processor.matte(&pixels, (width, height)) {
-                    Ok(mask) => Some(mask),
+                    Ok(mut mask) => {
+                        refine_matte(&mut mask, (width, height), job.matte.0, job.matte.1);
+                        Some(mask)
+                    }
                     Err(error) => {
                         with_current_generation(shared.as_ref(), &job, || {
                             *shared.error.lock().unwrap() = Some(CameraError::Cutout(format!(
@@ -3222,7 +3321,7 @@ mod tests {
         };
         let wide = resting(&settings, 0.0);
         assert!((wide.camera.y + wide.camera.height - 1.0).abs() < 1e-9);
-        assert!((wide.camera.height - CUTOUT_HEIGHT_RATIO).abs() < 1e-9);
+        assert!((wide.camera.height - 0.28125).abs() < 1e-9);
         assert!((wide.camera.x + wide.camera.width / 2.0 - 0.5).abs() < 1e-9);
         assert_eq!(wide.cutout, 1.0);
         assert!(settings.uses_cutout());
@@ -3233,6 +3332,30 @@ mod tests {
         assert!(
             (portrait.camera.width / portrait.camera.height * 16.0 / 9.0 - 9.0 / 16.0).abs() < 1e-9
         );
+    }
+
+    #[test]
+    fn the_cutout_takes_the_studied_size_on_the_bottom_edge() {
+        let frame = 16.0 / 9.0;
+        let layer = LayerSettings::default();
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraCutout,
+            ..LayoutSettings::default()
+        };
+        let rest = layouts.frame_at(0.0, layer, frame, 1.0).camera;
+        // Size 0.5 of the 1080 shortest side: a square camera 540 px tall.
+        assert!((rest.height - 0.5).abs() < 1e-9, "{}", rest.height);
+        assert!(
+            (rest.y + rest.height - 1.0).abs() < 1e-9,
+            "stands on the bottom"
+        );
+        let big = LayoutSettings {
+            cutout_size: 1.0,
+            ..layouts.clone()
+        }
+        .frame_at(0.0, layer, frame, 1.0)
+        .camera;
+        assert!((big.height - 1.0).abs() < 1e-9);
     }
 
     #[test]
@@ -3335,18 +3458,18 @@ mod tests {
         )
         .unwrap();
         assert!(
-            pixel(&left, size.0, 8, 90)[1] > 200,
+            pixel(&left, size.0, 8, 170)[1] > 200,
             "the left placement covers the left edge"
         );
-        assert_eq!(pixel(&right, size.0, 8, 90), [10, 20, 30, 255]);
+        assert_eq!(pixel(&right, size.0, 8, 170), [10, 20, 30, 255]);
         assert!(
-            pixel(&right, size.0, 311, 90)[1] > 200,
+            pixel(&right, size.0, 311, 170)[1] > 200,
             "the right placement covers the right edge"
         );
-        assert_eq!(pixel(&left, size.0, 311, 90), [10, 20, 30, 255]);
+        assert_eq!(pixel(&left, size.0, 311, 170), [10, 20, 30, 255]);
         assert!(
-            pixel(&left, size.0, 160, 90)[1] > 200 && pixel(&right, size.0, 160, 90)[1] > 200,
-            "both placements still cover the middle of the frame"
+            pixel(&left, size.0, 45, 170)[1] > 200 && pixel(&right, size.0, 275, 170)[1] > 200,
+            "each placement covers the middle of its own band"
         );
     }
 
@@ -3364,6 +3487,27 @@ mod tests {
 
         assert!(camera_premultiplied(&camera, (2, 1), None, 1.0).is_err());
         assert!(camera_premultiplied(&camera, (2, 1), Some(&[1.0]), 1.0).is_err());
+    }
+
+    #[test]
+    fn the_matte_edge_follows_softness_and_inset() {
+        // A 1-px-tall ramp from 0 to 1 across 11 pixels.
+        let mut hard: Vec<f32> = (0..11).map(|i| i as f32 / 10.0).collect();
+        refine_matte(&mut hard, (11, 1), 0.0, 0.0);
+        assert!(
+            hard[3] < 0.01 && hard[7] > 0.99,
+            "softness 0 is a hard edge: {hard:?}"
+        );
+        let mut soft: Vec<f32> = (0..11).map(|i| i as f32 / 10.0).collect();
+        refine_matte(&mut soft, (11, 1), 1.0, 0.0);
+        assert!(
+            soft[3] > 0.05 && soft[3] < 0.5,
+            "softness 1 keeps a ramp: {soft:?}"
+        );
+        let mut person = vec![0.0f32, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0];
+        refine_matte(&mut person, (9, 1), 0.0, 1.0);
+        assert_eq!(person[2], 0.0, "inset pulls the edge in by one pixel");
+        assert_eq!(person[4], 1.0);
     }
 
     #[test]
@@ -3390,6 +3534,7 @@ mod tests {
             generation: 1,
             size: (2, 2),
             cutout: true,
+            matte: (0.2, 0.0),
         };
         assert!(!publish_frame(
             &shared,

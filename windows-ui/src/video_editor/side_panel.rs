@@ -2603,23 +2603,36 @@ struct WebcamCutoutContext {
     root: GtkBox,
     sides: Vec<ToggleButton>,
     horizontal: FilledSlider,
+    size: FilledSlider,
+    softness: FilledSlider,
+    inset: FilledSlider,
 }
 
 impl WebcamCutoutContext {
-    fn refresh(&self, position: f64) {
+    fn refresh(&self, position: f64, cutout_size: f64, cutout_softness: f64, cutout_inset: f64) {
         let step = webcam_alignment_step(position);
         for (index, button) in self.sides.iter().enumerate() {
             button.set_active(step == Some(index));
         }
         self.horizontal.set_value(position * 100.0);
+        self.size.set_value(cutout_size * 100.0);
+        self.softness.set_value(cutout_softness * 100.0);
+        self.inset.set_value(cutout_inset);
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_webcam_cutout(
     scale: f64,
     position: f64,
     set_position: Rc<dyn Fn(f64)>,
     move_position: Rc<dyn Fn(f64)>,
+    cutout_size: f64,
+    cutout_softness: f64,
+    cutout_inset: f64,
+    set_cutout_size: Rc<dyn Fn(f64)>,
+    set_cutout_softness: Rc<dyn Fn(f64)>,
+    set_cutout_inset: Rc<dyn Fn(f64)>,
 ) -> WebcamCutoutContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
@@ -2664,12 +2677,63 @@ fn build_webcam_cutout(
         .widget()
         .set_tooltip_text(Some(&t("Percentage of the frame width.")));
     root.append(&horizontal.widget());
+    let size = value_slider_control(
+        &t("Size"),
+        super::webcam::MIN_CUTOUT_SIZE * 100.0,
+        super::webcam::MAX_CUTOUT_SIZE * 100.0,
+        cutout_size * 100.0,
+        1.0,
+        0,
+        scale,
+        {
+            let set = set_cutout_size.clone();
+            move |value| set(value / 100.0)
+        },
+    )
+    .with_suffix("%");
+    size.widget().set_tooltip_text(Some(&t(
+        "The person's size, as a percentage of the frame's shortest side.",
+    )));
+    let softness = value_slider_control(
+        &t("Edge softness"),
+        0.0,
+        100.0,
+        cutout_softness * 100.0,
+        1.0,
+        0,
+        scale,
+        {
+            let set = set_cutout_softness.clone();
+            move |value| set(value / 100.0)
+        },
+    )
+    .with_suffix("%");
+    let inset = value_slider_control(
+        &t("Edge inset"),
+        0.0,
+        super::webcam::MAX_CUTOUT_INSET,
+        cutout_inset,
+        0.1,
+        1,
+        scale,
+        {
+            let set = set_cutout_inset.clone();
+            move |value| set(value)
+        },
+    )
+    .with_suffix(" px");
+    root.append(&size.widget());
+    root.append(&softness.widget());
+    root.append(&inset.widget());
     let context = WebcamCutoutContext {
         root,
         sides,
         horizontal,
+        size,
+        softness,
+        inset,
     };
-    context.refresh(position);
+    context.refresh(position, cutout_size, cutout_softness, cutout_inset);
     context
 }
 
@@ -2815,6 +2879,9 @@ struct WebcamContextActions {
     set_split_auto: Rc<dyn Fn(bool)>,
     set_cutout_position: Rc<dyn Fn(f64)>,
     move_cutout_position: Rc<dyn Fn(f64)>,
+    set_cutout_size: Rc<dyn Fn(f64)>,
+    set_cutout_softness: Rc<dyn Fn(f64)>,
+    set_cutout_inset: Rc<dyn Fn(f64)>,
     set_mirror: Rc<dyn Fn(bool)>,
     set_delay: Rc<dyn Fn(f64)>,
     set_silence: Rc<dyn Fn(Option<f64>)>,
@@ -2835,6 +2902,9 @@ impl WebcamContextActions {
             set_split_auto: Rc::new(|_| {}),
             set_cutout_position: Rc::new(|_| {}),
             move_cutout_position: Rc::new(|_| {}),
+            set_cutout_size: Rc::new(|_| {}),
+            set_cutout_softness: Rc::new(|_| {}),
+            set_cutout_inset: Rc::new(|_| {}),
             set_mirror: Rc::new(|_| {}),
             set_delay: Rc::new(|_| {}),
             set_silence: Rc::new(|_| {}),
@@ -2881,7 +2951,12 @@ impl WebcamContext {
             );
         }
         if controls.cutout {
-            self.cutout.refresh(layouts.cutout_position_x);
+            self.cutout.refresh(
+                layouts.cutout_position_x,
+                layouts.cutout_size,
+                layouts.cutout_softness,
+                layouts.cutout_inset,
+            );
         }
         if controls.mirror {
             self.camera
@@ -2916,6 +2991,12 @@ fn build_webcam_context(
         layouts.cutout_position_x,
         actions.set_cutout_position.clone(),
         actions.move_cutout_position.clone(),
+        layouts.cutout_size,
+        layouts.cutout_softness,
+        layouts.cutout_inset,
+        actions.set_cutout_size.clone(),
+        actions.set_cutout_softness.clone(),
+        actions.set_cutout_inset.clone(),
     );
     let camera = build_webcam_camera(
         scale,
@@ -3122,6 +3203,37 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                     timeline.update_webcam_layouts_continuous(|layouts| {
                         layouts.cutout_position_x = position;
                     });
+                }
+            })
+        },
+        set_cutout_size: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |value| {
+                if !syncing.get() {
+                    timeline
+                        .update_webcam_layouts_continuous(|layouts| layouts.cutout_size = value);
+                }
+            })
+        },
+        set_cutout_softness: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |value| {
+                if !syncing.get() {
+                    timeline.update_webcam_layouts_continuous(|layouts| {
+                        layouts.cutout_softness = value
+                    });
+                }
+            })
+        },
+        set_cutout_inset: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |value| {
+                if !syncing.get() {
+                    timeline
+                        .update_webcam_layouts_continuous(|layouts| layouts.cutout_inset = value);
                 }
             })
         },

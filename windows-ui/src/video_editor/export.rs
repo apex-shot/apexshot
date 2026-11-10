@@ -878,7 +878,16 @@ fn render_range(
                         ));
                     };
                     match processor.matte(pixels, matte_size) {
-                        Ok(mask) => Some(mask),
+                        Ok(mut mask) => {
+                            webcam::refine_matte(
+                                &mut mask,
+                                matte_size,
+                                webcam.layouts.cutout_softness,
+                                webcam.layouts.cutout_inset * f64::from(matte_size.0)
+                                    / f64::from(webcam.source_size.0.max(1)),
+                            );
+                            Some(mask)
+                        }
                         Err(error) => {
                             let _ = decoder.kill();
                             let _ = decoder.wait();
