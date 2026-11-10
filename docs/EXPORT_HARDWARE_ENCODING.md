@@ -1,5 +1,9 @@
 # Hardware encoding in the editor export
 
+> This note covers the Linux editor. The Windows editor has its own policy:
+> hardware encoding is automatic, with an opt-out. See
+> `WINDOWS_EXPORT_PIPELINE.md`.
+
 The editor export encodes with `libx264` by default. A working VA-API or NVENC
 encoder can be selected explicitly with `APEXSHOT_EXPORT_HW_ENCODER`; this note
 records why the switch is opt-in rather than automatic.

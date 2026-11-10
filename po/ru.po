@@ -4420,3 +4420,24 @@ msgstr "Щёлкните там, где нужно увеличить"
 
 msgid "Click where to zoom in, or use Automatic zoom"
 msgstr "Щёлкните там, где нужно увеличить, или выберите «Автоматический зум»"
+
+msgid "Hardware acceleration"
+msgstr "Аппаратное ускорение"
+
+msgid "Use the GPU encoder when one is available. Falls back to the CPU automatically."
+msgstr "Использовать кодировщик GPU, если он доступен. При необходимости автоматически переключается на CPU."
+
+msgid "Always use the default cursor"
+msgstr "Всегда использовать курсор по умолчанию"
+
+msgid "Base angle"
+msgstr "Базовый угол"
+
+msgid "Point along movement"
+msgstr "Направление по движению"
+
+msgid "Tilt amount"
+msgstr "Величина наклона"
+
+msgid "Tilt with motion"
+msgstr "Наклонять при движении"

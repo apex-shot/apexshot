@@ -55,6 +55,14 @@ impl CursorModel {
         self.state.borrow_mut().settings = settings.clamped();
     }
 
+    /// Where the timeline cuts the footage. The cursor plan leads the cursor
+    /// but stops at the next cut, so the preview matches the export.
+    pub fn set_cuts(&self, cuts: &[f64]) {
+        if let Some(sidecar) = self.state.borrow_mut().sidecar.as_mut() {
+            sidecar.set_cut_times(cuts);
+        }
+    }
+
     /// The click ripple the current frame should warp, if any.
     ///
     /// The decoded texture holds the whole encoded frame, so the ripple's view
@@ -115,6 +123,9 @@ impl CursorModel {
             hide_idle: settings.hide_idle,
             idle_ms: settings.idle_ms,
             speed: settings.speed,
+            rotation_mode: settings.rotation_mode,
+            rotation_ratio: settings.rotate_on_x_movement_ratio,
+            base_rotation_deg: settings.base_rotation_deg,
         };
         let Some(frame) =
             sidecar.presented_in_video_at(source_seconds, motion, video_width, video_height)

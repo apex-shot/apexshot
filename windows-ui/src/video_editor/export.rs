@@ -3,9 +3,17 @@
 //! The frame plan walks the kept source spans (trim minus cuts) in composition
 //! order, and every frame is composited by the same code the preview uses:
 //! the follow camera, the click ripple warp, and the cursor sprite with its
-//! press spring. Presentation effects that only make sense in the live stage —
-//! background, frame aspect, rounded corners, audio — are not
-//! part of this path.
+//! press spring. The canvas around the video — the background fill, padding,
+//! frame aspect, and rounded corners — is laid on afterwards by
+//! `canvas::FramedSink`, so every render path produces only the video rect.
+//! Audio is not part of this path.
+
+mod canvas;
+#[cfg(target_os = "windows")]
+mod gpu;
+mod hybrid;
+
+pub(super) use canvas::CanvasLayout;
 
 use super::cursor::preview_ripple;
 use super::pixels::{Nv12Converter, YuvSpace};
@@ -23,19 +31,31 @@ use rayon::prelude::*;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, OnceLock};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 const DEFAULT_FPS: f64 = 30.0;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub(super) struct ExportSettings {
     /// None preserves the recording's frame rate.
     pub fps: Option<u32>,
     /// The short edge, preserving the recording's aspect ratio. None keeps its size.
     pub resolution: Option<u32>,
+    /// Use the GPU encoder when the machine has one that opens.
+    pub hardware: bool,
+}
+
+impl Default for ExportSettings {
+    fn default() -> Self {
+        Self {
+            fps: None,
+            resolution: None,
+            hardware: true,
+        }
+    }
 }
 
 impl ExportSettings {
@@ -66,6 +86,9 @@ pub(super) struct ExportModel {
     pub sidecar: Option<PointerSidecar>,
     /// The camera layer to bake, when the recording has one.
     pub webcam: Option<webcam::WebcamExport>,
+    /// The canvas around the video (fill, padding, frame, rounded corners), or
+    /// None to export the video edge to edge.
+    pub canvas: Option<CanvasLayout>,
     pub crf: u32,
 }
 
@@ -172,10 +195,14 @@ pub(super) fn start_export(model: ExportModel, output: PathBuf) -> ExportHandle 
 }
 
 pub(super) fn start_export_with_settings(
-    model: ExportModel,
+    mut model: ExportModel,
     output: PathBuf,
     settings: ExportSettings,
 ) -> ExportHandle {
+    let cuts = model.cuts.clone();
+    if let Some(sidecar) = model.sidecar.as_mut() {
+        sidecar.set_cut_times(&cuts);
+    }
     let (sender, receiver) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));
     if let Err(error) =
@@ -237,12 +264,10 @@ impl Encoder {
     fn fastest() -> Self {
         static FASTEST: OnceLock<Encoder> = OnceLock::new();
         *FASTEST.get_or_init(|| {
-            let chosen = [Self::Nvenc, Self::QuickSync, Self::Amf]
+            [Self::Nvenc, Self::QuickSync, Self::Amf]
                 .into_iter()
                 .find(|encoder| encoder.opens())
-                .unwrap_or(Self::X264);
-            eprintln!("[export] encoder: {}", chosen.codec());
-            chosen
+                .unwrap_or(Self::X264)
         })
     }
 
@@ -257,9 +282,14 @@ impl Encoder {
 
     /// The codec, constant-quality rate control at the editor's CRF, and the
     /// pixel format the encoder takes without another conversion.
-    fn args(self, crf: u32) -> Vec<String> {
+    fn args(self, crf: u32, size: (u32, u32), fps: f64) -> Vec<String> {
         let crf = crf.to_string();
         let crf = crf.as_str();
+        let profile = if self == Self::X264 && crf == "0" {
+            "high444"
+        } else {
+            "high"
+        };
         let settings: Vec<&str> = match self {
             Self::Nvenc => vec![
                 "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", crf, "-b:v", "0", "-pix_fmt",
@@ -279,11 +309,18 @@ impl Encoder {
             ],
             Self::X264 => vec!["-preset", "veryfast", "-crf", crf, "-pix_fmt", "yuv420p"],
         };
-        ["-c:v", self.codec()]
-            .into_iter()
-            .chain(settings)
-            .map(str::to_string)
-            .collect()
+        [
+            "-c:v",
+            self.codec(),
+            "-profile:v",
+            profile,
+            "-level:v",
+            h264_level(size, fps),
+        ]
+        .into_iter()
+        .chain(settings)
+        .map(str::to_string)
+        .collect()
     }
 
     /// Whether ffmpeg can open this encoder here: a build lists every GPU
@@ -294,7 +331,7 @@ impl Encoder {
             .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
             .args(["-f", "lavfi", "-i", "color=c=black:s=320x240:r=30"])
             .args(["-frames:v", "2"])
-            .args(self.args(23))
+            .args(self.args(23, (320, 240), 30.0))
             .args(["-f", "null", "-"])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -304,19 +341,27 @@ impl Encoder {
     }
 }
 
+#[derive(Debug)]
 enum End {
     Cancelled,
     Failed(String),
 }
 
-fn render(
-    model: &ExportModel,
-    output: &Path,
-    sender: &Sender<ExportUpdate>,
-    cancel: &Arc<AtomicBool>,
-    encoder: Encoder,
-    settings: ExportSettings,
-) -> Result<(), End> {
+struct RenderPlan {
+    fps: f64,
+    spans: Vec<SourceSpan>,
+    total: u64,
+    mapping: TimeMapping,
+    /// The video rect the render paths produce.
+    size: (u32, u32),
+    /// The encoded frame: the canvas when the export has one, otherwise `size`.
+    output: (u32, u32),
+    /// The decoded NV12 can go to the encoder unchanged: no crop, cursor,
+    /// ripple, camera layer, or resize touches the frame.
+    passthrough: bool,
+}
+
+fn plan_render(model: &ExportModel, settings: ExportSettings) -> Result<RenderPlan, End> {
     let fps = settings
         .fps
         .map(f64::from)
@@ -331,11 +376,6 @@ fn render(
     if model.source_size.0 == 0 || model.source_size.1 == 0 {
         return Err(End::Failed("the recording has no frame size".to_string()));
     }
-    let source = (
-        f64::from(model.source_size.0),
-        f64::from(model.source_size.1),
-    );
-    let size = settings.dimensions(model.source_size);
     let mapping = TimeMapping::new(
         spans
             .iter()
@@ -350,27 +390,176 @@ fn render(
             })
             .collect(),
     );
+    let output = settings.dimensions(
+        model
+            .canvas
+            .as_ref()
+            .map_or(model.source_size, |canvas| canvas.size),
+    );
+    let size = model
+        .canvas
+        .as_ref()
+        .map_or(output, |canvas| canvas::video_size(canvas, output));
+    let passthrough = size == model.source_size
+        && model.sidecar.is_none()
+        && model.webcam.is_none()
+        && model.zooms.iter().all(|zoom| zoom.hidden);
+    Ok(RenderPlan {
+        fps,
+        spans,
+        total,
+        mapping,
+        size,
+        output,
+        passthrough,
+    })
+}
+
+/// The chunked two-encoder path is opt-in until the compositor stops being
+/// the bottleneck; at that point encoding is split, not the frame loop.
+fn hybrid_requested() -> bool {
+    std::env::var("APEXSHOT_EXPORT_HYBRID").ok().as_deref() == Some("1")
+}
+
+/// A recovery switch for machines whose hardware encoder misbehaves.
+fn software_forced() -> bool {
+    std::env::var("APEXSHOT_EXPORT_HARDWARE").ok().as_deref() == Some("0")
+}
+
+fn worker_override() -> Option<usize> {
+    std::env::var("APEXSHOT_EXPORT_WORKERS")
+        .ok()?
+        .parse::<usize>()
+        .ok()
+}
+
+fn render(
+    model: &ExportModel,
+    output: &Path,
+    sender: &Sender<ExportUpdate>,
+    cancel: &Arc<AtomicBool>,
+    encoder: Encoder,
+    settings: ExportSettings,
+) -> Result<(), End> {
+    render_with_workers(model, output, sender, cancel, encoder, settings, None)
+}
+
+fn render_with_workers(
+    model: &ExportModel,
+    output: &Path,
+    sender: &Sender<ExportUpdate>,
+    cancel: &Arc<AtomicBool>,
+    encoder: Encoder,
+    settings: ExportSettings,
+    workers: Option<usize>,
+) -> Result<(), End> {
+    let plan = plan_render(model, settings)?;
+    let hardware = settings.hardware && !software_forced();
+    let primary = if hardware { encoder } else { Encoder::X264 };
+    let workers = workers
+        .or_else(worker_override)
+        .unwrap_or_else(|| worker_count(&plan, primary))
+        .clamp(1, 6);
+    let done = Arc::new(AtomicU64::new(0));
+    let finished = Arc::new(AtomicBool::new(false));
+    let reporter = {
+        let done = done.clone();
+        let finished = finished.clone();
+        let sender = sender.clone();
+        let total = plan.total;
+        std::thread::spawn(move || {
+            while !finished.load(Ordering::Relaxed) {
+                let _ = sender.send(ExportUpdate::Progress {
+                    done: done.load(Ordering::Relaxed),
+                    total,
+                });
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        })
+    };
+    let result = if workers > 1 {
+        render_parallel(
+            model, output, cancel, primary, settings, &plan, &done, workers,
+        )
+    } else {
+        render_range(
+            model,
+            output,
+            cancel,
+            primary,
+            settings,
+            &plan,
+            &done,
+            (0, plan.total),
+            true,
+            hybrid_requested() && hardware,
+        )
+    };
+    finished.store(true, Ordering::Relaxed);
+    let _ = reporter.join();
+    result
+}
+
+/// Compositor frames an export range. Every range opens its own decoder,
+/// compositor, and encoder, so ranges run on separate cores and join later.
+#[allow(clippy::too_many_arguments)]
+fn render_range(
+    model: &ExportModel,
+    output: &Path,
+    cancel: &AtomicBool,
+    encoder: Encoder,
+    settings: ExportSettings,
+    plan: &RenderPlan,
+    done: &AtomicU64,
+    range: (u64, u64),
+    faststart: bool,
+    allow_hybrid: bool,
+) -> Result<(), End> {
+    let (first, end) = range;
+    if first >= end {
+        return Ok(());
+    }
+    let fps = plan.fps;
+    let size = plan.size;
+    let source = (
+        f64::from(model.source_size.0),
+        f64::from(model.source_size.1),
+    );
 
     let probed = ffmpeg::probe_color_space(&model.source);
-    let converter = Nv12Converter::new(YuvSpace::from_probe(
-        probed.0.as_deref(),
-        probed.1.as_deref(),
-    ));
-    let mut encoder = spawn_encoder(output, size, fps, model.crf, encoder)?;
-    let encoder_input = encoder
-        .stdin
-        .take()
-        .ok_or_else(|| End::Failed("the encoder did not open its input".to_string()))?;
-    let frame_bytes = size.0 as usize * size.1 as usize * 3 / 2;
-    let pipe = EncoderPipe::new(encoder_input, frame_bytes, pipe_depth(frame_bytes));
+    let space = YuvSpace::from_probe(probed.0.as_deref(), probed.1.as_deref());
+    let converter = Nv12Converter::new(space);
+    let sink = Sink::open(
+        output,
+        plan.output,
+        fps,
+        model.crf,
+        encoder,
+        plan.total,
+        allow_hybrid && settings.hardware && encoder != Encoder::X264,
+        faststart,
+    )?;
+    let framer = match &model.canvas {
+        Some(layout) => Some(canvas::Framer::new(layout, plan.output, &converter)?),
+        None => None,
+    };
+    let mut sink = canvas::FramedSink::new(sink, framer);
     let mut camera = ZoomCameraCache::default();
     let camera_settings = zoom::ZoomCameraSettings {
         frame_rate: fps,
         ..model.zoom_camera
     };
-    let mut decoded = vec![0u8; model.source_size.0 as usize * model.source_size.1 as usize * 4];
+    let mut decoded = if plan.passthrough {
+        Vec::new()
+    } else {
+        vec![0u8; model.source_size.0 as usize * model.source_size.1 as usize * 4]
+    };
     let mut packed = vec![0u8; model.source_size.0 as usize * model.source_size.1 as usize * 3 / 2];
-    let mut scaled = vec![0u8; size.0 as usize * size.1 as usize * 4];
+    let mut scaled = if plan.passthrough {
+        Vec::new()
+    } else {
+        vec![0u8; size.0 as usize * size.1 as usize * 4]
+    };
     let mut cursor_layer = match &model.sidecar {
         Some(_) => Some(
             ImageSurface::create(Format::ARgb32, size.0 as i32, size.1 as i32).map_err(
@@ -390,11 +579,28 @@ fn render(
         .filter(|webcam| webcam.source_size.0 > 0 && webcam.source_size.1 > 0)
         .map(|webcam| f64::from(webcam.source_size.0) / f64::from(webcam.source_size.1))
         .unwrap_or(16.0 / 9.0);
+    #[cfg(target_os = "windows")]
+    let mut gpu = if !plan.passthrough && model.sidecar.is_none() && webcam.is_none() {
+        match gpu::Scaler::new(model.source_size, size, space, fps) {
+            Ok(scaler) => {
+                eprintln!(
+                    "[export] GPU crop and scale: {}x{} -> {}x{}",
+                    model.source_size.0, model.source_size.1, size.0, size.1
+                );
+                Some(scaler)
+            }
+            Err(error) => {
+                eprintln!("[export] GPU crop and scale unavailable: {error}");
+                None
+            }
+        }
+    } else {
+        None
+    };
     let mut cutout = if layouts.uses_cutout() {
         match super::cutout::CutoutProcessor::new() {
             Ok(processor) => Some(processor),
             Err(error) => {
-                stop(&mut encoder);
                 return Err(End::Failed(format!(
                     "the camera cutout could not start: {error}"
                 )));
@@ -403,30 +609,60 @@ fn render(
     } else {
         None
     };
-    let mut done = 0u64;
+    let mut done_index = first;
     let started = Instant::now();
+    let log_frame = |done_index: u64| {
+        if done_index.is_multiple_of(100) || done_index == end {
+            let elapsed = started.elapsed().as_secs_f64();
+            eprintln!(
+                "[export] frame {done_index}/{} at {:.1} ms/frame",
+                plan.total,
+                elapsed * 1000.0 / (done_index - first + 1) as f64
+            );
+        }
+    };
+    let mut span_base = 0u64;
 
-    for span in &spans {
-        let (mut decoder, mut stdout) =
-            match spawn_decoder(&model.source, *span, fps, model.source_size) {
-                Ok(mut decoder) => match decoder.stdout.take() {
-                    Some(stdout) => (decoder, stdout),
-                    None => {
-                        stop(&mut encoder);
-                        return Err(End::Failed(
-                            "the decoder did not open its output".to_string(),
-                        ));
-                    }
-                },
-                Err(error) => {
-                    stop(&mut encoder);
-                    return Err(error);
+    for span in &plan.spans {
+        let span_end = span_base + span.frames;
+        if span_end <= first {
+            span_base = span_end;
+            continue;
+        }
+        if span_base >= end {
+            break;
+        }
+        let local_first = first.saturating_sub(span_base);
+        let local_last = (end - span_base).min(span.frames);
+        let count = local_last.saturating_sub(local_first);
+        if count == 0 {
+            span_base = span_end;
+            continue;
+        }
+        let (mut decoder, mut stdout) = match spawn_decoder(
+            &model.source,
+            *span,
+            local_first,
+            count,
+            fps,
+            model.source_size,
+        ) {
+            Ok(mut decoder) => match decoder.stdout.take() {
+                Some(stdout) => (decoder, stdout),
+                None => {
+                    return Err(End::Failed(
+                        "the decoder did not open its output".to_string(),
+                    ));
                 }
-            };
+            },
+            Err(error) => {
+                return Err(error);
+            }
+        };
         let mut track_reader = match webcam.as_ref() {
             Some(webcam) => {
-                let start = webcam.start_at(span.source_start);
-                let duration = span.frames as f64 / fps;
+                let start = webcam.start_at(span.source_start + local_first as f64 / fps);
+                let duration = count as f64 / fps;
                 let decode = webcam::camera_decode_size(webcam.source_size, size);
                 match webcam::TrackReader::open(
                     &webcam.path,
@@ -440,7 +676,6 @@ fn render(
                     None => {
                         let _ = decoder.kill();
                         let _ = decoder.wait();
-                        stop(&mut encoder);
                         return Err(End::Failed(format!(
                             "could not open the camera track: {}",
                             webcam.path.display()
@@ -451,25 +686,43 @@ fn render(
             None => None,
         };
         let mut span_frame = 0u64;
-        while span_frame < span.frames {
+        while span_frame < count {
             if cancel.load(Ordering::Relaxed) {
                 let _ = decoder.kill();
                 let _ = decoder.wait();
-                stop(&mut encoder);
                 return Err(End::Cancelled);
             }
             if stdout.read_exact(&mut packed).is_err() {
                 break;
             }
-            converter.to_rgba_into(&packed, model.source_size, &mut decoded);
-            let source_time = frame_source_time(&spans, done, fps)
-                .ok_or_else(|| End::Failed("the frame plan ran out of frames".to_string()))?;
-            let composition_time = done as f64 / fps;
             span_frame += 1;
+            if plan.passthrough {
+                let mut nv12 = match sink.buffer(done_index) {
+                    Ok(buffer) => buffer,
+                    Err(error) => {
+                        let _ = decoder.kill();
+                        let _ = decoder.wait();
+                        return Err(error);
+                    }
+                };
+                std::mem::swap(&mut packed, &mut nv12);
+                if let Err(error) = sink.submit(nv12) {
+                    let _ = decoder.kill();
+                    let _ = decoder.wait();
+                    return Err(error);
+                }
+                done_index += 1;
+                done.fetch_add(1, Ordering::Relaxed);
+                log_frame(done_index);
+                continue;
+            }
+            let source_time = frame_source_time(&plan.spans, done_index, fps)
+                .ok_or_else(|| End::Failed("the frame plan ran out of frames".to_string()))?;
+            let composition_time = done_index as f64 / fps;
             let camera_value = camera.evaluate(
                 &model.zooms,
                 source,
-                &mapping,
+                &plan.mapping,
                 camera_settings,
                 composition_time,
                 || model.sidecar.clone(),
@@ -481,7 +734,7 @@ fn render(
                 let previous = camera.evaluate(
                     &model.zooms,
                     source,
-                    &mapping,
+                    &plan.mapping,
                     camera_settings,
                     (composition_time - 1.0 / fps).max(0.0),
                     || model.sidecar.clone(),
@@ -497,6 +750,46 @@ fn render(
             };
             let cropped =
                 trail.is_some() || !(view_is_full(view, source) && size == model.source_size);
+            // The GPU path only crops and scales; a blurred frame takes the CPU path.
+            #[cfg(target_os = "windows")]
+            if trail.is_none() {
+                if let Some(scaler) = gpu.as_mut() {
+                    let mut nv12 = match sink.buffer(done_index) {
+                        Ok(buffer) => buffer,
+                        Err(error) => {
+                            let _ = decoder.kill();
+                            let _ = decoder.wait();
+                            return Err(error);
+                        }
+                    };
+                    let rendered = if cropped {
+                        scaler.scale(&packed, view, &mut nv12)
+                    } else {
+                        std::mem::swap(&mut packed, &mut nv12);
+                        Ok(())
+                    };
+                    match rendered {
+                        Ok(()) => {
+                            if let Err(error) = sink.submit(nv12) {
+                                let _ = decoder.kill();
+                                let _ = decoder.wait();
+                                return Err(error);
+                            }
+                            done_index += 1;
+                            done.fetch_add(1, Ordering::Relaxed);
+                            log_frame(done_index);
+                            continue;
+                        }
+                        Err(error) => {
+                            eprintln!(
+                                "[export] GPU crop and scale failed: {error}; continuing on the CPU"
+                            );
+                            gpu = None;
+                        }
+                    }
+                }
+            }
+            converter.to_rgba_into(&packed, model.source_size, &mut decoded);
             if let Some(trail) = trail {
                 trail.render(&decoded, model.source_size, size, &mut scaled, 16, 4.0, 4);
             } else if cropped {
@@ -553,7 +846,6 @@ fn render(
                 if layout.camera_alpha > 0.0 && camera_frame.is_none() {
                     let _ = decoder.kill();
                     let _ = decoder.wait();
-                    stop(&mut encoder);
                     return Err(End::Failed(format!(
                         "the camera track could not be decoded: {}",
                         webcam.path.display()
@@ -564,7 +856,6 @@ fn render(
                     let Some(processor) = cutout.as_mut() else {
                         let _ = decoder.kill();
                         let _ = decoder.wait();
-                        stop(&mut encoder);
                         return Err(End::Failed(
                             "the camera cutout has no segmentation model".to_string(),
                         ));
@@ -574,7 +865,6 @@ fn render(
                         Err(error) => {
                             let _ = decoder.kill();
                             let _ = decoder.wait();
-                            stop(&mut encoder);
                             return Err(End::Failed(format!("the camera cutout failed: {error}")));
                         }
                     }
@@ -595,58 +885,260 @@ fn render(
                 ) {
                     let _ = decoder.kill();
                     let _ = decoder.wait();
-                    stop(&mut encoder);
                     return Err(End::Failed(error));
                 }
             }
 
-            let mut nv12 = pipe.buffer();
+            let mut nv12 = match sink.buffer(done_index) {
+                Ok(buffer) => buffer,
+                Err(error) => {
+                    let _ = decoder.kill();
+                    let _ = decoder.wait();
+                    return Err(error);
+                }
+            };
             converter.convert_into(frame, size, &mut nv12);
-            if let Err(error) = pipe.submit(nv12) {
+            if let Err(error) = sink.submit(nv12) {
                 let _ = decoder.kill();
                 let _ = decoder.wait();
-                stop(&mut encoder);
                 return Err(error);
             }
-            done += 1;
-            if done.is_multiple_of(100) || done == total {
-                let elapsed = started.elapsed().as_secs_f64();
-                eprintln!(
-                    "[export] frame {done}/{total} at {:.1} ms/frame",
-                    elapsed * 1000.0 / done as f64
-                );
-            }
-            let _ = sender.send(ExportUpdate::Progress { done, total });
+            done_index += 1;
+            done.fetch_add(1, Ordering::Relaxed);
+            log_frame(done_index);
         }
         let _ = decoder.kill();
         let _ = decoder.wait();
-        if span_frame < span.frames {
-            stop(&mut encoder);
+        if span_frame < count {
             return Err(End::Failed(
                 "the recording ended before the planned frames".to_string(),
             ));
         }
+        span_base = span_end;
     }
 
     if cancel.load(Ordering::Relaxed) {
-        stop(&mut encoder);
         return Err(End::Cancelled);
     }
-    if let Err(error) = pipe.finish() {
-        stop(&mut encoder);
+    sink.finish()?;
+    Ok(())
+}
+
+fn worker_count(plan: &RenderPlan, primary: Encoder) -> usize {
+    if plan.passthrough || plan.total < (plan.fps * 8.0).round() as u64 {
+        return 1;
+    }
+    let cores = std::thread::available_parallelism().map_or(1, |count| count.get());
+    let by_cores = cores / 3;
+    let pixels = u64::from(plan.output.0) * u64::from(plan.output.1);
+    let by_resolution = if pixels >= 3840 * 2160 {
+        2
+    } else if pixels >= 2560 * 1440 {
+        3
+    } else {
+        4
+    };
+    let by_sessions = if primary == Encoder::X264 { 4 } else { 3 };
+    let by_frames = (plan.total / (plan.fps * 4.0).round().max(1.0) as u64).max(1) as usize;
+    by_cores
+        .clamp(1, 6)
+        .min(by_resolution)
+        .min(by_sessions)
+        .min(by_frames)
+}
+
+fn split_ranges(total: u64, workers: usize) -> Vec<(u64, u64)> {
+    let workers = workers.max(1) as u64;
+    let base = total / workers;
+    let extra = total % workers;
+    let mut start = 0u64;
+    (0..workers)
+        .filter_map(|index| {
+            let length = base + u64::from(index < extra);
+            let range = (start, start + length);
+            start += length;
+            (range.1 > range.0).then_some(range)
+        })
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_parallel(
+    model: &ExportModel,
+    output: &Path,
+    cancel: &Arc<AtomicBool>,
+    encoder: Encoder,
+    settings: ExportSettings,
+    plan: &RenderPlan,
+    done: &AtomicU64,
+    workers: usize,
+) -> Result<(), End> {
+    let dir = hybrid::PartDir::create(output)?;
+    let ranges = split_ranges(plan.total, workers);
+    let mut parts = Vec::with_capacity(ranges.len());
+    let mut failure = None;
+    std::thread::scope(|scope| {
+        let mut handles = Vec::with_capacity(ranges.len());
+        for (index, range) in ranges.iter().copied().enumerate() {
+            let part = dir.path().join(format!("part-{index:03}.mp4"));
+            parts.push(part.clone());
+            handles.push(scope.spawn(move || {
+                render_range(
+                    model, &part, cancel, encoder, settings, plan, done, range, false, false,
+                )
+                .map_err(|error| (index, error))
+            }));
+        }
+        for handle in handles {
+            match handle.join() {
+                Ok(Ok(())) => {}
+                Ok(Err((index, error))) => {
+                    if failure.is_none() {
+                        failure = Some((index, error));
+                    }
+                    cancel.store(true, Ordering::Relaxed);
+                }
+                Err(_) => {
+                    if failure.is_none() {
+                        failure = Some((
+                            usize::MAX,
+                            End::Failed("an export worker panicked".to_string()),
+                        ));
+                    }
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            }
+        }
+    });
+    if let Some((_, error)) = failure {
         return Err(error);
     }
-    let result = encoder
-        .wait_with_output()
-        .map_err(|error| End::Failed(format!("the encoder did not finish: {error}")))?;
-    if !result.status.success() {
-        let detail = String::from_utf8_lossy(&result.stderr);
-        return Err(End::Failed(format!(
-            "the encoder failed: {}",
-            detail.trim()
-        )));
+    if cancel.load(Ordering::Relaxed) {
+        return Err(End::Cancelled);
     }
-    Ok(())
+    hybrid::join_segments(dir.path(), &parts, output)
+}
+
+/// Where composited frames go: one encoder for the whole file, or the chunked
+/// pair that lets a hardware encoder and the CPU encoder share the timeline.
+enum Sink {
+    Single(SingleSink),
+    Segmented(Box<hybrid::SegmentedSink>),
+}
+
+impl Sink {
+    #[allow(clippy::too_many_arguments)]
+    fn open(
+        output: &Path,
+        size: (u32, u32),
+        fps: f64,
+        crf: u32,
+        primary: Encoder,
+        total: u64,
+        hybrid: bool,
+        faststart: bool,
+    ) -> Result<Self, End> {
+        if hybrid && hybrid::supported(primary, total, fps) {
+            let sink = hybrid::SegmentedSink::new(primary, output, size, fps, crf, total)?;
+            eprintln!(
+                "[export] encoder: {} + libx264 (chunked pieces)",
+                primary.codec()
+            );
+            return Ok(Self::Segmented(Box::new(sink)));
+        }
+        eprintln!("[export] encoder: {}", primary.codec());
+        let mut child = spawn_encoder(output, size, fps, crf, primary, faststart)?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| End::Failed("the encoder did not open its input".to_string()))?;
+        let frame_bytes = size.0 as usize * size.1 as usize * 3 / 2;
+        Ok(Self::Single(SingleSink {
+            pipe: Some(EncoderPipe::new(
+                stdin,
+                frame_bytes,
+                pipe_depth(frame_bytes),
+            )),
+            child: Some(child),
+        }))
+    }
+
+    fn buffer(&mut self, index: u64) -> Result<Vec<u8>, End> {
+        match self {
+            Self::Single(sink) => sink.buffer(),
+            Self::Segmented(sink) => sink.buffer(index),
+        }
+    }
+
+    fn submit(&mut self, frame: Vec<u8>) -> Result<(), End> {
+        match self {
+            Self::Single(sink) => sink.submit(frame),
+            Self::Segmented(sink) => sink.submit(frame),
+        }
+    }
+
+    fn finish(self) -> Result<(), End> {
+        match self {
+            Self::Single(sink) => sink.finish(),
+            Self::Segmented(sink) => sink.finish(),
+        }
+    }
+}
+
+struct SingleSink {
+    pipe: Option<EncoderPipe>,
+    child: Option<Child>,
+}
+
+impl SingleSink {
+    fn buffer(&self) -> Result<Vec<u8>, End> {
+        self.pipe
+            .as_ref()
+            .map(EncoderPipe::buffer)
+            .ok_or_else(|| End::Failed("the encoder stopped accepting frames".to_string()))
+    }
+
+    fn submit(&self, frame: Vec<u8>) -> Result<(), End> {
+        self.pipe
+            .as_ref()
+            .ok_or_else(|| End::Failed("the encoder stopped accepting frames".to_string()))?
+            .submit(frame)
+    }
+
+    fn finish(mut self) -> Result<(), End> {
+        let pipe = self
+            .pipe
+            .take()
+            .ok_or_else(|| End::Failed("the encoder stopped accepting frames".to_string()))?;
+        let mut child = self
+            .child
+            .take()
+            .ok_or_else(|| End::Failed("the encoder disappeared".to_string()))?;
+        if let Err(error) = pipe.finish() {
+            stop(&mut child);
+            return Err(error);
+        }
+        let result = child
+            .wait_with_output()
+            .map_err(|error| End::Failed(format!("the encoder did not finish: {error}")))?;
+        if !result.status.success() {
+            let detail = String::from_utf8_lossy(&result.stderr);
+            return Err(End::Failed(format!(
+                "the encoder failed: {}",
+                detail.trim()
+            )));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for SingleSink {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            stop(&mut child);
+        }
+        self.pipe.take();
+    }
 }
 
 fn stop(child: &mut Child) {
@@ -657,13 +1149,16 @@ fn stop(child: &mut Child) {
 fn spawn_decoder(
     source: &Path,
     span: SourceSpan,
+    first: u64,
+    count: u64,
     fps: f64,
     size: (u32, u32),
 ) -> Result<Child, End> {
-    let duration = span.frames as f64 / fps;
+    let source_start = span.source_start + first as f64 / fps;
+    let duration = count as f64 / fps;
     crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
         .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
-        .args(["-ss", &format!("{:.6}", span.source_start)])
+        .args(["-ss", &format!("{source_start:.6}")])
         .arg("-i")
         .arg(source)
         .args(["-t", &format!("{duration:.6}")])
@@ -671,7 +1166,7 @@ fn spawn_decoder(
         // A seek between source frames leaves a positive first timestamp.
         // Fill that leading gap on the output grid instead of losing a frame.
         .args(["-vf", &format!("scale={}:{},fps={fps}:start_time=0", size.0, size.1)])
-        .args(["-frames:v", &span.frames.to_string()])
+        .args(["-frames:v", &count.to_string()])
         .args(["-f", "rawvideo", "-pix_fmt", "nv12", "pipe:1"])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -685,8 +1180,10 @@ fn spawn_encoder(
     fps: f64,
     crf: u32,
     encoder: Encoder,
+    faststart: bool,
 ) -> Result<Child, End> {
-    crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+    let mut command = crate::utils::hidden_command(ffmpeg::ffmpeg_executable());
+    command
         .args(["-hide_banner", "-loglevel", "error", "-nostdin", "-y"])
         .args([
             "-f",
@@ -701,14 +1198,42 @@ fn spawn_encoder(
             "pipe:0",
         ])
         .arg("-an")
-        .args(encoder.args(crf))
-        .args(["-movflags", "+faststart"])
+        .args(encoder.args(crf, size, fps));
+    if faststart {
+        command.args(["-movflags", "+faststart"]);
+    }
+    command
         .arg(output)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| End::Failed(format!("could not start the encoder: {error}")))
+}
+
+/// The smallest H.264 level that holds the frame size and rate.
+///
+/// Every encoder in a chunked export is opened with this level, so the pieces
+/// share a stream format and the join can copy packets instead of re-encoding.
+/// The table is the level's macroblock and macroblock-rate limit.
+fn h264_level(size: (u32, u32), fps: f64) -> &'static str {
+    const LEVELS: [(&str, u64, u64); 8] = [
+        ("3.1", 3_600, 108_000),
+        ("3.2", 5_120, 216_000),
+        ("4.0", 8_192, 245_760),
+        ("4.1", 8_192, 245_760),
+        ("4.2", 8_704, 522_240),
+        ("5.0", 22_080, 589_824),
+        ("5.1", 36_864, 983_040),
+        ("5.2", 36_864, 2_073_600),
+    ];
+    let macroblocks = u64::from(size.0.div_ceil(16)) * u64::from(size.1.div_ceil(16));
+    let rate = macroblocks as f64 * fps.max(1.0);
+    LEVELS
+        .iter()
+        .find(|(_, frame, throughput)| macroblocks <= *frame && rate <= *throughput as f64)
+        .map(|(name, _, _)| *name)
+        .unwrap_or("5.2")
 }
 
 /// How many finished frames may wait for the encoder.
@@ -775,10 +1300,22 @@ impl EncoderPipe {
             .map_err(|_| End::Failed("the encoder stopped accepting frames".to_string()))
     }
 
+    /// Stop accepting frames without waiting for the encoder to finish. The
+    /// writer drains what is already queued while the next piece starts.
+    fn close(&mut self) {
+        self.queue.take();
+    }
+
+    fn is_finished(&self) -> bool {
+        self.writer
+            .as_ref()
+            .is_none_or(|writer| writer.is_finished())
+    }
+
     /// Close the pipe and wait for the writer, reporting the first write
     /// error the encoder caused.
     fn finish(mut self) -> Result<(), End> {
-        self.queue.take();
+        self.close();
         match self.writer.take().map(|writer| writer.join()) {
             Some(Ok(Ok(()))) | None => Ok(()),
             Some(Ok(Err(error))) => {
@@ -910,6 +1447,9 @@ fn draw_cursor(
         hide_idle: settings.hide_idle,
         idle_ms: settings.idle_ms,
         speed: settings.speed,
+        rotation_mode: settings.rotation_mode,
+        rotation_ratio: settings.rotate_on_x_movement_ratio,
+        base_rotation_deg: settings.base_rotation_deg,
     };
     let Some(frame) = sidecar.presented_in_video_at(
         source_time,
@@ -1048,11 +1588,12 @@ fn draw_cursor(
 #[cfg(test)]
 mod tests {
     use super::{
-        frame_plan, frame_source_time, output_size, render, start_export, total_frames, zoom,
-        Encoder, End, ExportModel, ExportSettings, ExportUpdate,
+        frame_plan, frame_source_time, h264_level, output_size, render, render_with_workers,
+        split_ranges, start_export, total_frames, zoom, Encoder, End, ExportModel, ExportSettings,
+        ExportUpdate,
     };
     use crate::recording::editor::ffmpeg;
-    use crate::recording::editor::model::CursorSettings;
+    use crate::recording::editor::model::{CursorRotationMode, CursorSettings};
     use std::path::PathBuf;
     use std::sync::{atomic::AtomicBool, mpsc, Arc};
     use std::time::Duration;
@@ -1174,6 +1715,132 @@ mod tests {
     }
 
     #[test]
+    fn h264_levels_cover_common_export_sizes() {
+        assert_eq!(h264_level((1280, 720), 30.0), "3.1");
+        assert_eq!(h264_level((1920, 1080), 30.0), "4.0");
+        assert_eq!(h264_level((1920, 1080), 60.0), "4.2");
+        assert_eq!(h264_level((2560, 1440), 30.0), "5.0");
+        assert_eq!(h264_level((3840, 2160), 30.0), "5.1");
+        assert_eq!(h264_level((3840, 2160), 60.0), "5.2");
+    }
+
+    #[test]
+    fn parallel_ranges_cover_each_frame_once() {
+        for (total, workers) in [(300, 2), (301, 4), (5, 6), (1, 4)] {
+            let ranges = split_ranges(total, workers);
+            let covered: u64 = ranges.iter().map(|(first, end)| end - first).sum();
+            assert_eq!(covered, total);
+            assert_eq!(ranges.first().unwrap().0, 0);
+            assert_eq!(ranges.last().unwrap().1, total);
+            for pair in ranges.windows(2) {
+                assert_eq!(pair[0].1, pair[1].0);
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "integration: shells out to ffmpeg"]
+    fn parallel_ranges_match_the_sequential_render() {
+        let dir =
+            std::env::temp_dir().join(format!("apexshot-parallel-parity-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        let generated = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "testsrc2=s=640x360:r=30:d=6",
+                "-c:v",
+                "libx264",
+                "-preset",
+                "ultrafast",
+                "-crf",
+                "18",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&source)
+            .status()
+            .expect("ffmpeg should be available");
+        assert!(generated.success());
+        let model = ExportModel {
+            source,
+            source_size: (640, 360),
+            trim_start: 0.0,
+            trim_end: 6.0,
+            cuts: vec![2.0],
+            zooms: vec![crate::video_editor::timeline::ZoomClip {
+                start: 1.0,
+                end: 4.0,
+                scale: 1.5,
+                center: (320.0, 180.0),
+                hidden: false,
+                mode: crate::video_editor::timeline::ZoomMode::Manual,
+                instant: false,
+                anchor: None,
+            }],
+            zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: None,
+            webcam: None,
+            canvas: None,
+            crf: 0,
+        };
+        let settings = ExportSettings {
+            fps: Some(30),
+            hardware: false,
+            ..ExportSettings::default()
+        };
+        let mut outputs = Vec::new();
+        for (workers, name) in [(1usize, "sequential"), (2, "parallel")] {
+            let output = dir.join(format!("{name}.mp4"));
+            let (sender, _receiver) = mpsc::channel();
+            let cancel = Arc::new(AtomicBool::new(false));
+            render_with_workers(
+                &model,
+                &output,
+                &sender,
+                &cancel,
+                Encoder::X264,
+                settings,
+                Some(workers),
+            )
+            .unwrap_or_else(|error| panic!("{name} failed: {error:?}"));
+            outputs.push(output);
+        }
+        let compare = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .args(["-hide_banner", "-loglevel", "info", "-i"])
+            .arg(&outputs[0])
+            .arg("-i")
+            .arg(&outputs[1])
+            .args(["-lavfi", "[0:v][1:v]psnr", "-f", "null", "-"])
+            .output()
+            .unwrap();
+        let text = String::from_utf8_lossy(&compare.stderr);
+        assert!(compare.status.success(), "{text}");
+        // The CPU compositor is bit-exact across a split. The D3D11 video
+        // processor can pick a different filter when a range starts mid-zoom,
+        // which moves a few levels; the frames still line up, so accept a high
+        // PSNR instead of `inf` for that path.
+        let average = text
+            .split("average:")
+            .nth(1)
+            .and_then(|tail| tail.split_whitespace().next())
+            .and_then(|value| value.parse::<f64>().ok());
+        assert!(
+            text.contains("average:inf") || average.is_some_and(|value| value >= 45.0),
+            "parallel output differs: {text}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn motion_blur_reaches_real_export_frames() {
         if std::env::var("APEXSHOT_EXPORT_TEST").ok().as_deref() != Some("1") {
             return;
@@ -1222,6 +1889,7 @@ mod tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            canvas: None,
             crf: 18,
         };
         for fps in [24, 60] {
@@ -1239,7 +1907,7 @@ mod tests {
                     Encoder::X264,
                     ExportSettings {
                         fps: Some(fps),
-                        resolution: None,
+                        ..ExportSettings::default()
                     },
                 ) {
                     Ok(()) => (),
@@ -1321,12 +1989,14 @@ mod tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            canvas: None,
             crf: 20,
         };
         for fps in [24, 60] {
             let settings = ExportSettings {
                 fps: Some(fps),
                 resolution: Some(90),
+                ..ExportSettings::default()
             };
             let output = dir.join(format!("output-{fps}.mp4"));
             let (sender, _receiver) = mpsc::channel();
@@ -1394,20 +2064,94 @@ mod tests {
             Ok("macos") => crate::recording::editor::model::CursorTheme::Macos,
             _ => CursorSettings::default().theme,
         };
+        let rotation_mode = match std::env::var("APEXSHOT_COMPARISON_ROTATION").as_deref() {
+            Ok("directional") => CursorRotationMode::Directional,
+            _ => CursorRotationMode::Velocity,
+        };
+        let rotation_ratio = std::env::var("APEXSHOT_COMPARISON_ROTATION_RATIO")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.5);
+        let base_rotation_deg = std::env::var("APEXSHOT_COMPARISON_BASE_DEG")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.0);
+        let always_use_default = std::env::var("APEXSHOT_COMPARISON_ALWAYS_DEFAULT").is_ok();
+        let cuts: Vec<f64> = std::env::var("APEXSHOT_COMPARISON_CUTS")
+            .ok()
+            .map(|text| {
+                text.split(',')
+                    .filter_map(|value| value.trim().parse().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let trim_start = std::env::var("APEXSHOT_COMPARISON_TRIM_START")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0.0);
+        let trim_end = std::env::var("APEXSHOT_COMPARISON_TRIM_END")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(duration);
+        eprintln!(
+            "export: theme {theme:?} rotation {rotation_mode:?} ratio {rotation_ratio} base {base_rotation_deg} default {always_use_default} trim {trim_start}..{trim_end} cuts {cuts:?}"
+        );
+        if std::env::var("APEXSHOT_COMPARISON_DUMP").is_ok() {
+            for t in [0.4, 0.8, 1.2, 2.2, 2.6, 2.9, 3.4, 3.9, 4.4] {
+                eprintln!(
+                    "rotation {t}: {:.1} deg",
+                    sidecar
+                        .cursor_rotation_at(t, rotation_mode, rotation_ratio, base_rotation_deg)
+                        .to_degrees()
+                );
+            }
+        }
+        if std::env::var("APEXSHOT_COMPARISON_PLAN").is_ok() {
+            let motion = crate::recording::editor::sidecar::CursorMotion {
+                smooth: CursorSettings::default().smooth,
+                speed: 1.0,
+                ..crate::recording::editor::sidecar::CursorMotion::default()
+            };
+            let free = {
+                let mut free = sidecar.clone();
+                free.set_cut_times(&[]);
+                free
+            };
+            let with_cuts = {
+                let mut with_cuts = sidecar.clone();
+                with_cuts.set_cut_times(&cuts);
+                with_cuts
+            };
+            let text = std::env::var("APEXSHOT_COMPARISON_PLAN_TIMES")
+                .unwrap_or_else(|_| "1.40,1.45,1.49,1.50,1.55".to_string());
+            for t in text
+                .split(',')
+                .filter_map(|value| value.trim().parse::<f64>().ok())
+            {
+                let free_x = free.presented_at(t, motion).map(|frame| frame.x);
+                let cut_x = with_cuts.presented_at(t, motion).map(|frame| frame.x);
+                eprintln!("plan {t}: free {free_x:?} cut {cut_x:?}");
+            }
+        }
         let model = ExportModel {
             source,
             source_size: (width, height),
-            trim_start: 0.0,
-            trim_end: duration,
-            cuts: Vec::new(),
+            trim_start,
+            trim_end,
+            cuts,
             zooms: Vec::new(),
             zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
             cursor: CursorSettings {
                 theme,
+                rotation_mode,
+                rotate_on_x_movement_ratio: rotation_ratio,
+                base_rotation_deg,
+                always_use_default,
                 ..CursorSettings::default()
             },
             sidecar: Some(sidecar),
             webcam: None,
+            canvas: None,
             crf: 20,
         };
         let handle = start_export(model, output.clone());
@@ -1483,6 +2227,7 @@ mod tests {
             },
             sidecar,
             webcam: None,
+            canvas: None,
             crf: 23,
         };
         let handle = start_export(model, output.clone());
@@ -1533,6 +2278,7 @@ mod tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            canvas: None,
             crf: 23,
         };
         let handle = start_export(model, output.clone());
@@ -1696,7 +2442,16 @@ mod tests {
                 &mut layer,
             );
             let mut reference = frame.clone();
-            legacy_draw_cursor(&mut reference, size, view, &sidecar, settings, 0.21, size);
+            legacy_draw_cursor(
+                &mut reference,
+                size,
+                view,
+                &sidecar,
+                std::path::Path::new(""),
+                settings,
+                0.21,
+                size,
+            );
             let max_delta = fast
                 .iter()
                 .zip(reference.iter())
@@ -1713,11 +2468,13 @@ mod tests {
     /// The previous exporter's compositing path: copy the whole frame into a
     /// cairo surface, draw, and copy the whole frame back. Kept in the tests as
     /// the reference the boxed overlay has to reproduce.
+    #[allow(clippy::too_many_arguments)]
     fn legacy_draw_cursor(
         pixels: &mut [u8],
         size: (u32, u32),
         view: (f64, f64, f64, f64),
         sidecar: &crate::recording::editor::sidecar::PointerSidecar,
+        source_path: &std::path::Path,
         settings: crate::recording::editor::model::CursorSettings,
         time: f64,
         source_size: (u32, u32),
@@ -1728,6 +2485,9 @@ mod tests {
             hide_idle: settings.hide_idle,
             idle_ms: settings.idle_ms,
             speed: settings.speed,
+            rotation_mode: settings.rotation_mode,
+            rotation_ratio: settings.rotate_on_x_movement_ratio,
+            base_rotation_deg: settings.base_rotation_deg,
         };
         let Some(frame) = sidecar.presented_in_video_at(
             time,
@@ -1741,6 +2501,7 @@ mod tests {
         for pixel in bgra.as_chunks_mut::<4>().0 {
             pixel.swap(0, 2);
         }
+        let settings = settings.clamped();
         let mut surface = gtk4::cairo::ImageSurface::create_for_data(
             bgra,
             gtk4::cairo::Format::ARgb32,
@@ -1774,13 +2535,15 @@ mod tests {
                 }
             }
             let (x, y) = map((frame.x, frame.y));
-            crate::recording::editor::cursor_sprite::draw(
+            let capture = sidecar.cursor_capture(source_path, &frame);
+            crate::recording::editor::cursor_sprite::draw_recorded(
                 &context,
                 x,
                 y,
                 1.0,
                 super::press_cursor_scale(sidecar, time),
-                frame.kind.as_str(),
+                &frame,
+                capture.as_ref(),
                 settings,
                 frame.alpha,
             );
@@ -1889,6 +2652,7 @@ mod tests {
                 cursor: CursorSettings::default(),
                 sidecar: None,
                 webcam: None,
+                canvas: None,
                 crf: 20,
             };
             let started = std::time::Instant::now();
@@ -2089,6 +2853,7 @@ mod webcam_export_tests {
                 last_frame: 1.95,
                 source_size: (320, 320),
             }),
+            canvas: None,
             crf: 30,
         };
         let handle = start_export(model, output.clone());
@@ -2352,6 +3117,7 @@ mod webcam_export_tests {
                 last_frame: 3.95,
                 source_size: (320, 320),
             }),
+            canvas: None,
             crf: 30,
         };
         let handle = start_export(model, output.clone());
@@ -2505,6 +3271,7 @@ mod webcam_export_tests {
                 last_frame: 1.95,
                 source_size: (320, 320),
             }),
+            canvas: None,
             crf: 30,
         };
         let handle = start_export(model, output.clone());
@@ -2743,5 +3510,135 @@ mod webcam_export_tests {
         sidecar
             .parent()
             .map(|dir| dir.join(format!("{stem}-camera.mp4")))
+    }
+
+    #[test]
+    #[ignore = "integration: shells out to ffmpeg"]
+    fn a_plain_export_passes_the_decoded_frame_through() {
+        let dir = std::env::temp_dir().join(format!("apexshot-passthrough-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        if !solid_clip(&source, "red", "320x240", 2.0) {
+            eprintln!("skipping: ffmpeg could not make the clip");
+            return;
+        }
+        let output = dir.join("output.mp4");
+        let model = ExportModel {
+            source,
+            source_size: (320, 240),
+            trim_start: 0.0,
+            trim_end: 1.0,
+            cuts: Vec::new(),
+            zooms: Vec::new(),
+            zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: None,
+            webcam: None,
+            canvas: None,
+            crf: 18,
+        };
+        let settings = ExportSettings {
+            fps: Some(30),
+            hardware: false,
+            ..ExportSettings::default()
+        };
+        let (sender, _receiver) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        render(&model, &output, &sender, &cancel, Encoder::X264, settings)
+            .unwrap_or_else(|error| panic!("export failed: {error:?}"));
+        let frame = frame_rgb(&output, 0.5, (320, 240)).expect("the export should decode");
+        let [red, green, blue] = pixel(&frame, 320, 160, 120);
+        assert!(
+            red > 150 && green < 80 && blue < 80,
+            "the frame lost its colour: {red}, {green}, {blue}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    #[ignore = "integration: shells out to ffmpeg"]
+    fn a_canvas_export_frames_the_video_on_its_background() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-canvas-export-test-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let source = dir.join("source.mp4");
+        let generated = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=320x180:r=30:d=1",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(&source)
+            .status()
+            .expect("ffmpeg should be available");
+        assert!(generated.success());
+        let size = (400u32, 260u32);
+        let mut background = vec![0u8; size.0 as usize * size.1 as usize * 4];
+        for pixel in background.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[0, 200, 0, 255]);
+        }
+        let output = dir.join("canvas.mp4");
+        let model = ExportModel {
+            source,
+            source_size: (320, 180),
+            trim_start: 0.0,
+            trim_end: 1.0,
+            cuts: Vec::new(),
+            zooms: Vec::new(),
+            zoom_camera: crate::video_editor::zoom::ZoomCameraSettings::default(),
+            cursor: CursorSettings::default(),
+            sidecar: None,
+            webcam: None,
+            canvas: Some(CanvasLayout {
+                size,
+                video: (320, 180),
+                radius: 24.0,
+                background: Arc::new(background),
+            }),
+            crf: 18,
+        };
+        let settings = ExportSettings {
+            fps: Some(30),
+            hardware: false,
+            ..ExportSettings::default()
+        };
+        let (sender, _receiver) = mpsc::channel();
+        let cancel = Arc::new(AtomicBool::new(false));
+        render(&model, &output, &sender, &cancel, Encoder::X264, settings)
+            .unwrap_or_else(|error| panic!("export failed: {error:?}"));
+        let frame = frame_rgb(&output, 0.5, size).expect("the export should decode");
+        assert_eq!(frame.len(), size.0 as usize * size.1 as usize * 3);
+        let [red, green, _] = pixel(&frame, size.0, 4, 4);
+        assert!(
+            green > 150 && red < 80,
+            "the padding lost its fill: {red}, {green}"
+        );
+        let [red, green, _] = pixel(&frame, size.0, 200, 130);
+        assert!(
+            red > 150 && green < 80,
+            "the video centre is not the video: {red}, {green}"
+        );
+        let [red, green, _] = pixel(&frame, size.0, 41, 41);
+        assert!(
+            green > 150 && red < 80,
+            "the corner was not rounded: {red}, {green}"
+        );
+        let [red, green, _] = pixel(&frame, size.0, 200, 42);
+        assert!(
+            red > 150 && green < 80,
+            "the video's top edge is missing: {red}, {green}"
+        );
+        let _ = fs::remove_dir_all(&dir);
     }
 }

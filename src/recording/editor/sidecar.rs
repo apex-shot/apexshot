@@ -1,6 +1,10 @@
+use super::cursor_path::SpringConfig;
+use super::cursor_planner::{self, PlannedPath, PlannerPoint, SyncPoint};
+use super::model::CursorRotationMode;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 pub const SIDECAR_VERSION: u32 = 2;
 pub const MAX_POINTER_SAMPLES: usize = 8_000;
@@ -13,6 +17,327 @@ pub const CLICK_RIPPLE_WINDOW_SECONDS: f64 =
     crate::recording::editor::click_effect::RIPPLE_VISIBLE_DURATION_MS / 1000.0;
 /// The studied recorder keeps at most this many recent clicks alive at once.
 pub const MAX_SIMULTANEOUS_CLICKS: usize = 3;
+
+/// The studied cursor velocity profile: tilt follows horizontal speed, clamped
+/// to a modest angle and calmed for the first half second. These are the
+/// studied defaults (`velocity` mode, `rotateOnXMovementRatio` 0.5).
+pub const ROTATE_ON_X_MOVEMENT_RATIO: f64 = 0.5;
+pub const BASE_CURSOR_ROTATION_RAD: f64 = 0.0;
+const ROTATION_STEP_MS: f64 = 16.0;
+const ROTATION_TILT_DEG_PER_VELOCITY: f64 = 12.0;
+const ROTATION_MAX_TILT_DEG: f64 = 20.0;
+const ROTATION_VELOCITY_SMOOTHING_MS: f64 = 120.0;
+const ROTATION_STARTUP_CALM_MS: f64 = 500.0;
+const ROTATION_ENTRY_TELEPORT_SPEED: f64 = 15.0;
+const ROTATION_EMIT_EPSILON: f64 = 0.0015;
+
+/// The studied directional profile: the cursor turns toward its travel
+/// heading, measured from the arrow art's own neutral heading, with bounded
+/// turn rate and a short angular damping.
+const DIRECTIONAL_ALIGN_RATE_PER_PX: f64 = 0.00005;
+const DIRECTIONAL_SPEED_SATURATION_PX_PER_MS: f64 = 3.0;
+const DIRECTIONAL_ANGULAR_DAMPING_MS: f64 = 100.0;
+const DIRECTIONAL_MAX_TURN_RATE_DEG_PER_MS: f64 = 0.4;
+const DIRECTIONAL_MAX_FROM_NEUTRAL_DEG: f64 = 135.0;
+const DIRECTIONAL_MIN_TRAVEL_PX: f64 = 4.0;
+const DIRECTIONAL_NEUTRAL_HEADING_DEG: f64 = -112.5;
+
+#[derive(Default)]
+struct RotationEmitter {
+    keyframes: Vec<(f64, f64)>,
+    last: f64,
+    pending: Option<(f64, f64)>,
+}
+
+impl RotationEmitter {
+    fn emit(&mut self, time_ms: f64, radians: f64, force: bool) {
+        if !force && (radians - self.last).abs() < ROTATION_EMIT_EPSILON {
+            self.pending = Some((time_ms, radians));
+            return;
+        }
+        if let Some((pending_time, pending_radians)) = self.pending.take() {
+            if pending_time < time_ms {
+                self.keyframes.push((pending_time, pending_radians));
+            }
+        }
+        if let Some(last) = self.keyframes.last_mut() {
+            if (last.0 - time_ms).abs() < 1e-9 {
+                last.1 = radians;
+                self.last = radians;
+                return;
+            }
+        }
+        self.keyframes.push((time_ms, radians));
+        self.last = radians;
+    }
+}
+
+fn tilt_for_velocity(velocity_px_per_ms: f64, ratio: f64) -> f64 {
+    (velocity_px_per_ms * ROTATION_TILT_DEG_PER_VELOCITY * ratio)
+        .clamp(-ROTATION_MAX_TILT_DEG, ROTATION_MAX_TILT_DEG)
+        .to_radians()
+}
+
+fn simulate_rotation(
+    velocity: &mut f64,
+    emitter: &mut RotationEmitter,
+    ratio: f64,
+    start_ms: f64,
+    span_ms: f64,
+    target: f64,
+) {
+    let steps = (span_ms / ROTATION_STEP_MS).ceil().max(1.0);
+    let step = span_ms / steps;
+    let alpha = 1.0 - (-step / ROTATION_VELOCITY_SMOOTHING_MS).exp();
+    for index in 1..=(steps as usize) {
+        *velocity += (target - *velocity) * alpha;
+        emitter.emit(
+            start_ms + index as f64 * step,
+            tilt_for_velocity(*velocity, ratio),
+            false,
+        );
+    }
+}
+
+/// Whether the pointer entered the footage fast enough to be a teleport: the
+/// studied profile skips the first two samples' velocity when it does.
+fn entry_is_fast(samples: &[PointerSample]) -> bool {
+    if samples.len() < 2 {
+        return false;
+    }
+    let first = &samples[0];
+    let second = &samples[1];
+    let dt = (second.t - first.t) * 1000.0;
+    dt > 0.0 && (second.x - first.x).hypot(second.y - first.y) / dt > ROTATION_ENTRY_TELEPORT_SPEED
+}
+
+/// Horizontal speed at the sample `start`, looking forward within the
+/// smoothing window. Mirrors the studied `velocitySmoothingMs` scan.
+fn horizontal_velocity(samples: &[PointerSample], start: usize) -> f64 {
+    let Some(previous) = start.checked_sub(1).and_then(|index| samples.get(index)) else {
+        return 0.0;
+    };
+    for index in start..samples.len() {
+        let sample = &samples[index];
+        let dt = (sample.t - previous.t) * 1000.0;
+        if dt >= ROTATION_VELOCITY_SMOOTHING_MS || index == samples.len() - 1 {
+            return if dt > 0.0 {
+                (sample.x - previous.x) / dt
+            } else {
+                0.0
+            };
+        }
+    }
+    0.0
+}
+
+fn interpolate_rotation(keyframes: &[(f64, f64)], time_ms: f64) -> f64 {
+    let Some((_, first_radians)) = keyframes.first().copied() else {
+        return 0.0;
+    };
+    let after = keyframes.partition_point(|(time, _)| *time <= time_ms);
+    if after == 0 {
+        return first_radians;
+    }
+    let (from_time, from_radians) = keyframes[after - 1];
+    let Some((to_time, to_radians)) = keyframes.get(after).copied() else {
+        return from_radians;
+    };
+    let span = to_time - from_time;
+    let amount = if span > 0.0 {
+        ((time_ms - from_time) / span).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    from_radians + (to_radians - from_radians) * amount
+}
+
+/// Hold the studied startup window flat at the rotation it reaches by then,
+/// instead of easing out of the first frame's spike.
+fn calm_startup(keyframes: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    if keyframes.len() < 2 {
+        return keyframes;
+    }
+    let calm_at = keyframes[0].0 + ROTATION_STARTUP_CALM_MS;
+    let calm = interpolate_rotation(&keyframes, calm_at);
+    let mut result = vec![(keyframes[0].0, calm), (calm_at, calm)];
+    result.extend(keyframes.into_iter().filter(|(time, _)| *time > calm_at));
+    result
+}
+
+fn velocity_rotation_keyframes(samples: &[PointerSample], ratio: f64) -> Vec<(f64, f64)> {
+    let teleport = if entry_is_fast(samples) { 2 } else { 1 };
+    let mut emitter = RotationEmitter::default();
+    let mut velocity = horizontal_velocity(samples, teleport);
+    let first = &samples[0];
+
+    emitter.emit(first.t * 1000.0, tilt_for_velocity(velocity, ratio), true);
+    let mut previous = first;
+    for (index, sample) in samples.iter().enumerate().skip(1) {
+        let dt = (sample.t - previous.t) * 1000.0;
+        if dt > 0.0 {
+            let target = if index < teleport {
+                0.0
+            } else {
+                (sample.x - previous.x) / dt
+            };
+            simulate_rotation(
+                &mut velocity,
+                &mut emitter,
+                ratio,
+                previous.t * 1000.0,
+                dt,
+                target,
+            );
+        }
+        previous = sample;
+    }
+    let tail = ROTATION_VELOCITY_SMOOTHING_MS * 6.0;
+    simulate_rotation(
+        &mut velocity,
+        &mut emitter,
+        ratio,
+        previous.t * 1000.0,
+        tail,
+        0.0,
+    );
+    emitter.emit(previous.t * 1000.0 + tail, 0.0, true);
+    calm_startup(emitter.keyframes)
+}
+
+fn directional_rotation_keyframes(samples: &[PointerSample]) -> Vec<(f64, f64)> {
+    let max_from_neutral = DIRECTIONAL_MAX_FROM_NEUTRAL_DEG.to_radians();
+    let teleport = if entry_is_fast(samples) { 2 } else { 1 };
+    let mut emitter = RotationEmitter::default();
+    let mut rotation = heading_for(samples, teleport);
+    let mut angular_velocity = 0.0;
+    let mut sum_x = 0.0;
+    let mut sum_y = 0.0;
+    let mut sum_ms = 0.0;
+
+    emitter.emit(samples[0].t * 1000.0, rotation, true);
+    let mut previous = &samples[0];
+    for (index, sample) in samples.iter().enumerate().skip(1) {
+        let dt = (sample.t - previous.t) * 1000.0;
+        if dt > 0.0 {
+            if index < teleport {
+                step_directional(
+                    &mut rotation,
+                    &mut angular_velocity,
+                    &mut emitter,
+                    previous.t * 1000.0,
+                    dt,
+                    None,
+                    0.0,
+                    max_from_neutral,
+                );
+            } else {
+                sum_x += sample.x - previous.x;
+                sum_y += sample.y - previous.y;
+                sum_ms += dt;
+                let travel = sum_x.hypot(sum_y);
+                if travel >= DIRECTIONAL_MIN_TRAVEL_PX {
+                    let heading = sum_y.atan2(sum_x);
+                    step_directional(
+                        &mut rotation,
+                        &mut angular_velocity,
+                        &mut emitter,
+                        previous.t * 1000.0,
+                        dt,
+                        Some(heading),
+                        travel / sum_ms,
+                        max_from_neutral,
+                    );
+                    sum_x = 0.0;
+                    sum_y = 0.0;
+                    sum_ms = 0.0;
+                } else {
+                    step_directional(
+                        &mut rotation,
+                        &mut angular_velocity,
+                        &mut emitter,
+                        previous.t * 1000.0,
+                        dt,
+                        None,
+                        0.0,
+                        max_from_neutral,
+                    );
+                }
+            }
+        }
+        previous = sample;
+    }
+    let tail = DIRECTIONAL_ANGULAR_DAMPING_MS * 8.0;
+    step_directional(
+        &mut rotation,
+        &mut angular_velocity,
+        &mut emitter,
+        previous.t * 1000.0,
+        tail,
+        None,
+        0.0,
+        max_from_neutral,
+    );
+    emitter.emit(previous.t * 1000.0 + tail, rotation, true);
+    calm_startup(emitter.keyframes)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn step_directional(
+    rotation: &mut f64,
+    angular_velocity: &mut f64,
+    emitter: &mut RotationEmitter,
+    start_ms: f64,
+    span_ms: f64,
+    heading: Option<f64>,
+    travel_speed: f64,
+    max_from_neutral: f64,
+) {
+    let neutral = DIRECTIONAL_NEUTRAL_HEADING_DEG.to_radians();
+    let max_turn_rate = DIRECTIONAL_MAX_TURN_RATE_DEG_PER_MS.to_radians();
+    let steps = (span_ms / ROTATION_STEP_MS).ceil().max(1.0);
+    let step = span_ms / steps;
+    let damping = (-step / DIRECTIONAL_ANGULAR_DAMPING_MS).exp();
+    for index in 1..=(steps as usize) {
+        if let Some(heading) = heading {
+            let delta = heading - (neutral + *rotation);
+            let speed = travel_speed.min(DIRECTIONAL_SPEED_SATURATION_PX_PER_MS);
+            *angular_velocity += DIRECTIONAL_ALIGN_RATE_PER_PX * speed * delta.sin() * step;
+        }
+        *angular_velocity *= damping;
+        *angular_velocity = angular_velocity.clamp(-max_turn_rate, max_turn_rate);
+        *rotation += *angular_velocity * step;
+        if rotation.abs() > max_from_neutral {
+            *rotation = rotation.clamp(-max_from_neutral, max_from_neutral);
+            *angular_velocity = 0.0;
+        }
+        emitter.emit(start_ms + index as f64 * step, *rotation, false);
+    }
+}
+
+/// The studied opening heading: the first travel direction at or after
+/// `start`, relative to the arrow art's neutral heading.
+fn heading_for(samples: &[PointerSample], start: usize) -> f64 {
+    let neutral = DIRECTIONAL_NEUTRAL_HEADING_DEG.to_radians();
+    let max_from_neutral = DIRECTIONAL_MAX_FROM_NEUTRAL_DEG.to_radians();
+    let Some(previous) = start.checked_sub(1).and_then(|index| samples.get(index)) else {
+        return 0.0;
+    };
+    for sample in samples.iter().skip(start) {
+        let dx = sample.x - previous.x;
+        let dy = sample.y - previous.y;
+        if dx.hypot(dy) >= DIRECTIONAL_MIN_TRAVEL_PX {
+            return normalize_radians(dy.atan2(dx) - neutral)
+                .clamp(-max_from_neutral, max_from_neutral);
+        }
+    }
+    0.0
+}
+
+fn normalize_radians(angle: f64) -> f64 {
+    use std::f64::consts::{PI, TAU};
+    ((angle + PI) % TAU + TAU) % TAU - PI
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -103,6 +428,9 @@ pub struct CursorMotion {
     pub hide_idle: bool,
     pub idle_ms: f64,
     pub speed: f64,
+    pub rotation_mode: CursorRotationMode,
+    pub rotation_ratio: f64,
+    pub base_rotation_deg: f64,
 }
 
 impl Default for CursorMotion {
@@ -112,6 +440,9 @@ impl Default for CursorMotion {
             hide_idle: false,
             idle_ms: 800.0,
             speed: 1.0,
+            rotation_mode: CursorRotationMode::Velocity,
+            rotation_ratio: ROTATE_ON_X_MOVEMENT_RATIO,
+            base_rotation_deg: 0.0,
         }
     }
 }
@@ -122,6 +453,8 @@ pub struct CursorFrame {
     pub y: f64,
     pub kind: CursorKind,
     pub alpha: f64,
+    /// Tilt in radians about the pointer, from the studied velocity profile.
+    pub rotation: f64,
     /// Catalog id of the recorded cursor image, when this frame has one.
     pub cursor_id: Option<String>,
 }
@@ -324,6 +657,31 @@ impl WebcamTrack {
     }
 }
 
+/// The cursor path planned for one spring and speed, kept between frames.
+#[derive(Debug, Default)]
+struct CachedPlan {
+    key: Option<u64>,
+    path: Option<Arc<PlannedPath>>,
+}
+
+/// Runtime-only cache. Two sidecars compare equal regardless of what each
+/// planned, and a clone starts cold so a copied sidecar never shows another's
+/// recording.
+#[derive(Debug, Default)]
+struct PlanCache(Mutex<Option<CachedPlan>>);
+
+impl Clone for PlanCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for PlanCache {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PointerSidecar {
     pub version: u32,
@@ -367,6 +725,13 @@ pub struct PointerSidecar {
     /// original recording's sidecar.
     #[serde(skip)]
     pub sidecar_directory: Option<PathBuf>,
+    /// Source instants the edit cuts at, ascending. Pushed in by the editor
+    /// before it draws or exports; runtime-only, like the plan built from it.
+    #[serde(skip)]
+    cuts_seconds: Vec<f64>,
+    /// The planned cursor path for the current spring and speed.
+    #[serde(skip)]
+    plan_cache: PlanCache,
 }
 
 impl PointerSidecar {
@@ -387,6 +752,8 @@ impl PointerSidecar {
             webcam: None,
             screen_file: None,
             sidecar_directory: None,
+            cuts_seconds: Vec::new(),
+            plan_cache: PlanCache::default(),
         }
     }
 
@@ -661,8 +1028,41 @@ impl PointerSidecar {
             y,
             kind,
             alpha,
+            rotation: self.cursor_rotation_at(
+                t,
+                motion.rotation_mode,
+                motion.rotation_ratio,
+                motion.base_rotation_deg,
+            ),
             cursor_id,
         })
+    }
+
+    /// The studied cursor rotation at `t`. `Velocity` leans the cursor with
+    /// horizontal speed; `Directional` points it along the travel heading.
+    /// Both add `base_degrees`, clamp to their studied limits, and calm the
+    /// first half second. Times are converted to the profile's milliseconds.
+    pub fn cursor_rotation_at(
+        &self,
+        t: f64,
+        mode: CursorRotationMode,
+        ratio: f64,
+        base_degrees: f64,
+    ) -> f64 {
+        let base = base_degrees.to_radians();
+        if self.pointer.is_empty() {
+            return base;
+        }
+        let keyframes = match mode {
+            CursorRotationMode::Velocity => {
+                if !ratio.is_finite() || ratio == 0.0 {
+                    return base;
+                }
+                velocity_rotation_keyframes(&self.pointer, ratio)
+            }
+            CursorRotationMode::Directional => directional_rotation_keyframes(&self.pointer),
+        };
+        base + interpolate_rotation(&keyframes, t * 1000.0)
     }
 
     /// Whether a directly recorded cursor is visible at `t`. Window metadata
@@ -717,13 +1117,7 @@ impl PointerSidecar {
         } else if samples.is_empty() {
             None
         } else {
-            Some(self.smoothed_at(
-                samples,
-                t,
-                smooth,
-                speed,
-                self.source == PointerDataSource::WindowMetadata,
-            ))
+            Some(self.smoothed_at(t, smooth, speed))
         }
     }
 
@@ -744,45 +1138,145 @@ impl PointerSidecar {
         Some(self.map_to_video(x, y, video_width, video_height))
     }
 
-    fn smoothed_at(
-        &self,
-        samples: &[PointerSample],
-        t: f64,
-        smooth: f64,
-        speed: f64,
-        _window_metadata: bool,
-    ) -> (f64, f64) {
-        let Some(first) = samples.first() else {
+    /// The cursor's travelled position: the studied spring on the studied
+    /// planned path, with the smoothing slider selecting its preset and the
+    /// speed setting scaling it. See [`super::cursor_planner`].
+    fn smoothed_at(&self, t: f64, smooth: f64, speed: f64) -> (f64, f64) {
+        let Some(path) = self.planned_path(SpringConfig::for_smooth(smooth), speed) else {
             return (0.0, 0.0);
         };
-        let tau = (0.01 + smooth.clamp(0.0, 1.0).powi(2) * 0.26) / speed.clamp(0.25, 3.0);
-        // The approach toward an event begins inside a bounded window before
-        // it — about four time constants, capped at the studied 1.5 s — so a
-        // long gap holds the cursor instead of drifting toward a move that
-        // has not happened yet.
-        let approach = (4.0 * tau).min(1.5);
-        let mut px = first.x;
-        let mut py = first.y;
-        let mut pt = first.t;
-        for sample in samples.iter().skip(1) {
-            let hold_t = (sample.t - approach).max(pt);
-            let end_t = sample.t.min(t);
-            let k = 1.0 - (-(end_t - hold_t).max(0.0) / tau).exp();
-            if sample.t <= t {
-                px += (sample.x - px) * k;
-                py += (sample.y - py) * k;
-                pt = sample.t;
-                continue;
+        path.position_at(t * 1000.0)
+    }
+
+    /// Where the edit cuts the recording, in source seconds. The plan leads the
+    /// cursor, but never across a cut, so it never travels toward footage the
+    /// edit removed.
+    pub fn set_cut_times(&mut self, cuts: &[f64]) {
+        self.cuts_seconds = cuts.iter().copied().filter(|cut| cut.is_finite()).collect();
+        self.cuts_seconds.sort_by(f64::total_cmp);
+        self.cuts_seconds.dedup();
+    }
+
+    /// Plan the cursor path once per spring and speed, then answer frames from
+    /// it. The moments the plan must be exact are the recorded clicks and the
+    /// cursor-image changes, matching the reference's sync points.
+    fn planned_path(&self, spring: SpringConfig, speed: f64) -> Option<Arc<PlannedPath>> {
+        let key = self.plan_key(spring, speed);
+        if let Ok(cache) = self.plan_cache.0.lock() {
+            if let Some(cached) = cache.as_ref() {
+                if let (Some(cached_key), Some(path)) = (cached.key, cached.path.as_ref()) {
+                    if cached_key == key {
+                        return Some(Arc::clone(path));
+                    }
+                }
             }
-            // Inside the approach window the cursor eases to the recorded
-            // next sample; before it the position holds, never interpolated.
-            if t >= hold_t {
-                px += (sample.x - px) * k;
-                py += (sample.y - py) * k;
-            }
-            break;
         }
-        (px, py)
+        let points: Vec<PlannerPoint> = self
+            .pointer
+            .iter()
+            .map(|sample| PlannerPoint {
+                time_ms: sample.t * 1000.0,
+                x: sample.x,
+                y: sample.y,
+            })
+            .collect();
+        let mut sync: Vec<SyncPoint> = self
+            .clicks
+            .iter()
+            .map(|click| SyncPoint {
+                time_ms: click.t * 1000.0,
+                tolerance: 2.0,
+            })
+            .collect();
+        for pair in self.pointer.windows(2) {
+            if pair[0].cursor_id != pair[1].cursor_id {
+                sync.push(SyncPoint {
+                    time_ms: pair[1].t * 1000.0,
+                    tolerance: 6.0,
+                });
+            }
+        }
+        // A held button is a sync point twice over: at the press and release
+        // the studied planner must meet the pointer exactly, and while the
+        // pointer is dragged every recorded move carries the same demand.
+        for press in &self.presses {
+            sync.push(SyncPoint {
+                time_ms: press.down * 1000.0,
+                tolerance: 2.0,
+            });
+            sync.push(SyncPoint {
+                time_ms: press.up * 1000.0,
+                tolerance: 2.0,
+            });
+            if press.dragged {
+                for sample in &self.pointer {
+                    if press.contains(sample.t) {
+                        sync.push(SyncPoint {
+                            time_ms: sample.t * 1000.0,
+                            tolerance: 2.0,
+                        });
+                    }
+                }
+            }
+        }
+        let duration_ms = self
+            .pointer
+            .last()
+            .map(|sample| sample.t * 1000.0 + 1000.0)
+            .unwrap_or(0.0);
+        let cuts_ms: Vec<f64> = self.cuts_seconds.iter().map(|cut| cut * 1000.0).collect();
+        let planned = Arc::new(cursor_planner::plan(
+            &points,
+            &sync,
+            spring,
+            speed,
+            duration_ms,
+            &cuts_ms,
+        ));
+        if let Ok(mut cache) = self.plan_cache.0.lock() {
+            *cache = Some(CachedPlan {
+                key: Some(key),
+                path: Some(Arc::clone(&planned)),
+            });
+        }
+        Some(planned)
+    }
+
+    /// A cheap identity for a planned path: everything that changes the plan.
+    fn plan_key(&self, spring: SpringConfig, speed: f64) -> u64 {
+        let mut hash: u64 = 1469598103934665603;
+        let mut values = vec![
+            self.pointer.len() as u64,
+            self.clicks.len() as u64,
+            self.pointer
+                .first()
+                .map(|sample| sample.t.to_bits())
+                .unwrap_or(0),
+            self.pointer
+                .last()
+                .map(|sample| sample.t.to_bits())
+                .unwrap_or(0),
+            self.pointer
+                .iter()
+                .filter(|sample| sample.cursor_id.is_some())
+                .count() as u64,
+            self.presses.len() as u64,
+            self.presses
+                .last()
+                .map(|press| press.up.to_bits())
+                .unwrap_or(0),
+            spring.stiffness.to_bits(),
+            spring.damping.to_bits(),
+            spring.mass.to_bits(),
+            speed.to_bits(),
+        ];
+        values.push(self.cuts_seconds.len() as u64);
+        values.extend(self.cuts_seconds.iter().map(|cut| cut.to_bits()));
+        for value in values.drain(..) {
+            hash ^= value;
+            hash = hash.wrapping_mul(1099511628211);
+        }
+        hash
     }
 
     fn idle_alpha(&self, t: f64, idle_ms: f64) -> f64 {
@@ -1678,7 +2172,7 @@ mod tests {
     }
 
     #[test]
-    fn presented_at_smooths_behind_raw_sample() {
+    fn presented_at_springs_behind_the_recorded_point() {
         let mut sidecar =
             PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
         sidecar.pointer.push(PointerSample {
@@ -1689,24 +2183,34 @@ mod tests {
             cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
-            t: 0.2,
+            t: 0.1,
             x: 200.0,
             y: 0.0,
             kind: CursorKind::Default,
             cursor_id: None,
         });
-        let raw = sidecar.interpolated_at(0.2).unwrap();
+        let raw = sidecar.interpolated_at(0.15).unwrap();
         let presented = sidecar
             .presented_at(
-                0.2,
+                0.15,
                 CursorMotion {
                     smooth: 0.8,
                     ..CursorMotion::default()
                 },
             )
             .unwrap();
-        assert!(presented.x < raw.0);
-        assert!(presented.x > 0.0);
+        assert!(presented.x < raw.0, "the spring should trail the point");
+        assert!(presented.x > 0.0, "the spring should be moving");
+        let settled = sidecar
+            .presented_at(
+                4.0,
+                CursorMotion {
+                    smooth: 0.8,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+        assert!((settled.x - 200.0).abs() < 0.01, "the spring should land");
         assert!((presented.alpha - 1.0).abs() < 1e-9);
     }
 
@@ -1855,23 +2359,19 @@ mod tests {
     }
 
     #[test]
-    fn speed_controls_how_quickly_smoothing_catches_up() {
+    fn speed_controls_how_quickly_the_spring_catches_up() {
         let mut sidecar =
             PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
-        sidecar.pointer.push(PointerSample {
-            t: 0.0,
-            x: 0.0,
-            y: 0.0,
-            kind: CursorKind::Default,
-            cursor_id: None,
-        });
-        sidecar.pointer.push(PointerSample {
-            t: 0.2,
-            x: 200.0,
-            y: 0.0,
-            kind: CursorKind::Default,
-            cursor_id: None,
-        });
+        for index in 0..=40 {
+            let t = index as f64 * 0.008;
+            sidecar.pointer.push(PointerSample {
+                t,
+                x: index as f64 * 5.0,
+                y: 0.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
         let slow = sidecar
             .presented_at(
                 0.2,
@@ -1892,9 +2392,82 @@ mod tests {
                 },
             )
             .unwrap();
+        let raw = sidecar.interpolated_at(0.2).unwrap();
 
-        assert!(fast.x > slow.x);
-        assert!(fast.x <= 200.0);
+        assert!(fast.x > slow.x, "a faster spring should trail less");
+        assert!(fast.x <= raw.0);
+    }
+
+    #[test]
+    fn a_drag_keeps_the_cursor_on_the_recorded_path() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0_u32..=100 {
+            let moving = index.saturating_sub(40) as f64;
+            sidecar.pointer.push(PointerSample {
+                t: index as f64 * 0.008,
+                x: 100.0 + moving * 8.0,
+                y: 200.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        sidecar.presses.push(PressSample {
+            down: 0.32,
+            up: 1.1,
+            button: 1,
+            dragged: true,
+        });
+        let motion = CursorMotion {
+            smooth: 0.8,
+            speed: 1.0,
+            ..CursorMotion::default()
+        };
+        let raw = sidecar.interpolated_at(0.6).unwrap();
+        let dragged = sidecar.presented_at(0.6, motion).unwrap();
+        assert!(
+            (dragged.x - raw.0).abs() <= 2.0 && (dragged.y - raw.1).abs() <= 2.0,
+            "the dragged cursor should stay on the path, got {dragged:?} for {raw:?}"
+        );
+    }
+
+    #[test]
+    fn a_cut_holds_the_planned_cursor_back() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0_u32..=100 {
+            sidecar.pointer.push(PointerSample {
+                t: index as f64 * 0.008,
+                x: index as f64 * 8.0,
+                y: 0.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        sidecar.clicks.push(ClickSample {
+            t: 0.4,
+            x: 320.0,
+            y: 0.0,
+            button: 1,
+            cursor_id: None,
+        });
+        let motion = CursorMotion {
+            smooth: 0.8,
+            speed: 1.0,
+            ..CursorMotion::default()
+        };
+        let free = sidecar.presented_at(0.429, motion).unwrap().x;
+        sidecar.set_cut_times(&[0.430]);
+        let cut = sidecar.presented_at(0.429, motion).unwrap().x;
+        assert!(
+            free - cut > 10.0,
+            "the cut should hold the cursor back: {cut} vs {free}"
+        );
+        let again = sidecar.presented_at(0.429, motion).unwrap().x;
+        assert!(
+            (again - cut).abs() < 1e-9,
+            "the cached plan must stay cut-aware: {again} vs {cut}"
+        );
     }
 
     #[test]
@@ -2339,6 +2912,66 @@ mod cursor_tests {
     }
 
     #[test]
+    fn the_cursor_tilts_with_horizontal_velocity() {
+        let rotation = |step: f64| {
+            let mut sidecar =
+                PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+            for index in 0..25 {
+                let t = index as f64 * 0.016;
+                sidecar.pointer.push(PointerSample {
+                    t,
+                    x: step * index as f64,
+                    y: 100.0,
+                    kind: CursorKind::Default,
+                    cursor_id: None,
+                });
+            }
+            sidecar.cursor_rotation_at(
+                0.2,
+                CursorRotationMode::Velocity,
+                ROTATE_ON_X_MOVEMENT_RATIO,
+                0.0,
+            )
+        };
+        assert!(rotation(40.0) > 0.05, "rightward motion should lean right");
+        assert!(rotation(-40.0) < -0.05, "leftward motion should lean left");
+        assert!(rotation(0.0).abs() < 1e-9, "no motion should not tilt");
+    }
+
+    #[test]
+    fn the_directional_mode_turns_toward_the_travel_heading() {
+        let rotation = |dx: f64, dy: f64| {
+            let mut sidecar =
+                PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+            for index in 0..60 {
+                let t = index as f64 * 0.016;
+                sidecar.pointer.push(PointerSample {
+                    t,
+                    x: 100.0 + dx * index as f64,
+                    y: 100.0 + dy * index as f64,
+                    kind: CursorKind::Default,
+                    cursor_id: None,
+                });
+            }
+            sidecar.cursor_rotation_at(0.7, CursorRotationMode::Directional, 0.5, 0.0)
+        };
+        // Moving right is +112.5 degrees from the arrow's neutral heading.
+        assert!(
+            rotation(6.0, 0.0) > 1.5,
+            "rightward travel should point right"
+        );
+        assert!(
+            (-1.3..=-1.0).contains(&rotation(-6.0, 0.0)),
+            "leftward travel should point left"
+        );
+        // Upward travel is close to the art's neutral heading.
+        assert!(
+            rotation(0.0, -6.0).abs() < 0.6,
+            "upward travel should stay near neutral"
+        );
+    }
+
+    #[test]
     fn recorded_visibility_hides_and_restores_the_cursor() {
         let mut sidecar =
             PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
@@ -2406,6 +3039,7 @@ mod cursor_tests {
             y: 0.0,
             kind: CursorKind::Hand,
             alpha: 1.0,
+            rotation: 0.0,
             cursor_id: Some("hand-id".to_string()),
         };
         assert_eq!(
@@ -2483,6 +3117,7 @@ mod cursor_tests {
             y: 20.0,
             kind: CursorKind::Hand,
             alpha: 1.0,
+            rotation: 0.0,
             cursor_id: Some("missing".to_string()),
         };
         let video = std::env::temp_dir().join("apexshot-cursor-missing.mp4");

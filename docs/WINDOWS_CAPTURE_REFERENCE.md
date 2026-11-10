@@ -145,6 +145,21 @@ A spring has stiffness, damping, mass, and clamp. `lagMs` is
 positions are stored and `positionAt` interpolates between samples.
 `instantRanges` disable smoothing for specific slices.
 
+### Leads and cuts
+
+The lead is the amount the smoothed cursor is allowed to run ahead of its
+recorded position. Two rules bound it:
+
+- it is never negative, so the cursor never trails the plan before its start;
+- it never reaches past the next cut in the edit. The studied code stores the
+  cut instants beside the lead knots and evaluates each target as
+  `min(plannedLead, nextCut - time)`, using the first cut strictly later than
+  the queried instant. Without cuts the planned lead is used unchanged.
+
+The clamp is applied when the target is looked up, not when the knots are
+built, so the plan holds the cursor at the cut's pose instead of letting it
+travel toward frames the edit removed.
+
 ### Cursor defaults
 
 ```text
@@ -486,9 +501,28 @@ Captured images scale their visible alpha bounds (computed at the mean nonzero
 alpha, matching the studied loader) to the 48 px baseline at the default size.
 Recorded visibility transitions hide and restore the cursor, and a webcam
 export resolves the cursor folder from the loaded sidecar rather than the
-hidden clean-screen file. The smoothed cursor holds between events and eases
-into each move inside a bounded approach window instead of drifting early.
-Editor consumption of keys and scrolls remains.
+hidden clean-screen file. The cursor travels on the studied spring: it holds a
+point across gaps longer than 40 ms, interpolates across shorter ones, trails
+the recording by about the spring's own lag, and lands exactly on the final
+point. The smoothing slider walks the studied cursor animation presets (the
+default soft spring, then Rapid, Medium, and Smooth) and the speed setting
+scales stiffness by its square and damping linearly, as the studied speed
+schedule does. The studied planner runs over it: recorded clicks and
+cursor-image changes form sync groups (100 ms grouping, 400 ms merging), each
+group searches lead (up to 600 ms) and a spring-speed level until the cursor
+meets its points inside the accepted error, lead knots decay at 0.35 per ms
+with compression capped at 1.4, and one simulation on a one-millisecond grid
+serves every frame. Plain movement therefore carries no lead. Hover changes and
+drag points are not recorded by the capture layer yet, so they do not form
+groups.
+Both studied rotation profiles are implemented, both pivot about the pointer,
+and the editor exposes the mode, the velocity ratio, and a base angle that adds
+to either mode. `velocity` (the default, ratio 0.5) tilts with horizontal speed
+(12° per px/ms, clamped to ±20°, 120 ms smoothing). `directional` points along
+the accumulated travel heading (align rate 0.00005 per px, speed saturated at
+3 px/ms, 100 ms angular damping, 0.4°/ms turn-rate cap, 135° limit from the
+−112.5° neutral heading, 4 px minimum travel) and holds its bearing at rest.
+Both calm the first 500 ms. Editor consumption of keys and scrolls remains.
 
 ## 5. Ranked gaps
 
@@ -692,9 +726,8 @@ capture paths already exist; this phase is about calibration and drift.
 
 Wire the remaining studied behaviour into the editor:
 
-- the two-spring model (`mouseMovementSpring` and `screenMovementSpring`)
-- click, drag, hover, and cursor-image sync points
-- velocity and directional rotation modes
+- the screen-movement spring, and cut and loop ranges feeding the cursor plan
+- drag and hover sync points, which the capture layer does not record yet
 - motion blur amount
 - hover-aware cursor following
 

@@ -4440,3 +4440,24 @@ msgstr "Klicke, wohin gezoomt werden soll"
 
 msgid "Click where to zoom in, or use Automatic zoom"
 msgstr "Klicke, wohin gezoomt werden soll, oder verwende die Option „Automatischer Zoom“"
+
+msgid "Hardware acceleration"
+msgstr "Hardwarebeschleunigung"
+
+msgid "Use the GPU encoder when one is available. Falls back to the CPU automatically."
+msgstr "Den GPU-Encoder verwenden, wenn einer verfügbar ist. Wechselt automatisch zur CPU."
+
+msgid "Always use the default cursor"
+msgstr "Immer den Standardcursor verwenden"
+
+msgid "Base angle"
+msgstr "Basiswinkel"
+
+msgid "Point along movement"
+msgstr "In Bewegungsrichtung ausrichten"
+
+msgid "Tilt amount"
+msgstr "Neigungsstärke"
+
+msgid "Tilt with motion"
+msgstr "Mit der Bewegung neigen"

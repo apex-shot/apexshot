@@ -61,6 +61,9 @@ pub(super) fn write_rgba_track_with_view<W: Write>(
         hide_idle: cursor.hide_idle,
         idle_ms: cursor.idle_ms,
         speed: cursor.speed,
+        rotation_mode: cursor.rotation_mode,
+        rotation_ratio: cursor.rotate_on_x_movement_ratio,
+        base_rotation_deg: cursor.base_rotation_deg,
     };
     let mut surface = ImageSurface::create(Format::ARgb32, width as i32, height as i32)?;
     let mut pixels = vec![0u8; (width * height * 4) as usize];

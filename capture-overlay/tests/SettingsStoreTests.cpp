@@ -2,6 +2,7 @@
 
 #include "platform/windows/settings_store.h"
 
+#include <QColorSpace>
 #include <QCoreApplication>
 #include <QDate>
 #include <QDateTime>
@@ -316,6 +317,12 @@ void checkSaving(const QTemporaryDir& dir)
     CHECK(QFileInfo::exists(path));
     CHECK(QFileInfo(path).suffix() == QStringLiteral("png"));
     CHECK(QFileInfo(path).fileName().contains(QStringLiteral("@2x")));
+    {
+        const QImage restored(path);
+        CHECK(restored.dotsPerMeterX() == qRound(3779.527559 * 2.0));
+        CHECK(restored.dotsPerMeterY() == qRound(3779.527559 * 2.0));
+        CHECK(restored.colorSpace().isValid());
+    }
     const QString originalPath = path;
 
     settings.screenshots.highDpiSuffix = false;
@@ -328,6 +335,18 @@ void checkSaving(const QTemporaryDir& dir)
     CHECK(Platform::saveScreenshotImage(image, settings, folder, 2.0, path, error));
     CHECK(path != originalPath);
     CHECK(QFileInfo::exists(originalPath));
+
+    {
+        QImage noisy(64, 64, QImage::Format_RGB32);
+        for (int y = 0; y < noisy.height(); ++y)
+            for (int x = 0; x < noisy.width(); ++x)
+                noisy.setPixel(x, y, qRgb((x * 37 + y * 11) & 0xff, (x * 5 + y * 71) & 0xff,
+                                          (x * y * 13) & 0xff));
+        settings.screenshots.format = QStringLiteral("WebP");
+        CHECK(Platform::saveScreenshotImage(noisy, settings, folder, 1.0, path, error));
+        const QImage restored = QImage(path).convertToFormat(QImage::Format_RGB32);
+        CHECK(restored == noisy);
+    }
 
     for (const auto& entry : {qMakePair(QStringLiteral("JPEG"), QStringLiteral("jpg")),
                               qMakePair(QStringLiteral("WebP"), QStringLiteral("webp"))}) {

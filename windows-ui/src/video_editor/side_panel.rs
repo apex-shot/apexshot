@@ -12,8 +12,9 @@ use crate::capture::editor::window::icon_names;
 use crate::i18n::{t, tfmt};
 use crate::recording::editor::cursor_sprite;
 use crate::recording::editor::model::{
-    ClickEffect, CursorMotionStyle, CursorSettings, CursorTheme,
+    ClickEffect, CursorMotionStyle, CursorRotationMode, CursorSettings, CursorTheme,
 };
+use crate::settings::select::SettingsSelect;
 use gtk4::cairo::{FontSlant, FontWeight};
 use gtk4::gdk;
 use gtk4::gdk_pixbuf::Pixbuf;
@@ -704,6 +705,64 @@ fn build_cursor_follow_page(
     );
     page.append(&speed_slider.widget());
 
+    let rotation_header = Label::new(Some(&t("Rotation")));
+    rotation_header.add_css_class("recording-editor-zoom-classic-label");
+    rotation_header.set_xalign(0.0);
+    page.append(&rotation_header);
+    let rotation_modes = SettingsSelect::new(
+        [
+            ("velocity", t("Tilt with motion")),
+            ("directional", t("Point along movement")),
+        ],
+        settings.rotation_mode.as_str(),
+    );
+    rotation_modes.widget().set_hexpand(true);
+    page.append(rotation_modes.widget());
+    let tilt_slider = cursor_slider(
+        &t("Tilt amount"),
+        0.0,
+        1.0,
+        settings.rotate_on_x_movement_ratio,
+        0.05,
+        2,
+        scale,
+        cursor.clone(),
+        repaint.clone(),
+        |settings, value| settings.rotate_on_x_movement_ratio = value,
+    );
+    page.append(&tilt_slider.widget());
+    let tilt_widget = tilt_slider.widget().clone();
+    tilt_widget.set_sensitive(settings.rotation_mode == CursorRotationMode::Velocity);
+    rotation_modes.connect_changed({
+        let rotation_modes = rotation_modes.clone();
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        let tilt_widget = tilt_widget.clone();
+        move || {
+            let mode = rotation_modes
+                .active_id()
+                .map(|id| CursorRotationMode::parse(&id))
+                .unwrap_or_default();
+            update_cursor_settings(&cursor, &repaint, |settings| settings.rotation_mode = mode);
+            tilt_widget.set_sensitive(mode == CursorRotationMode::Velocity);
+        }
+    });
+    page.append(
+        &cursor_slider(
+            &t("Base angle"),
+            -180.0,
+            180.0,
+            settings.base_rotation_deg,
+            5.0,
+            0,
+            scale,
+            cursor.clone(),
+            repaint.clone(),
+            |settings, value| settings.base_rotation_deg = value,
+        )
+        .widget(),
+    );
+
     for (button, style) in [
         (focused, CursorMotionStyle::Focused),
         (smooth, CursorMotionStyle::Smooth),
@@ -728,6 +787,30 @@ fn build_cursor_follow_page(
             }
         });
     }
+
+    let default_row = GtkBox::new(Orientation::Horizontal, 8);
+    default_row.add_css_class("recording-editor-zoom-classic");
+    let default_label = Label::new(Some(&t("Always use the default cursor")));
+    default_label.add_css_class("recording-editor-zoom-classic-label");
+    default_label.set_hexpand(true);
+    default_label.set_xalign(0.0);
+    let always_default = Switch::new();
+    always_default.add_css_class("recording-editor-zoom-switch");
+    always_default.set_active(settings.always_use_default);
+    always_default.set_halign(Align::End);
+    always_default.connect_state_set({
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        move |_, use_default| {
+            update_cursor_settings(&cursor, &repaint, |settings| {
+                settings.always_use_default = use_default
+            });
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    default_row.append(&default_label);
+    default_row.append(&always_default);
+    page.append(&default_row);
 
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");

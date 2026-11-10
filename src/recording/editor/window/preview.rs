@@ -1257,6 +1257,9 @@ fn cursor_motion(cursor: CursorSettings) -> CursorMotion {
         hide_idle: cursor.hide_idle,
         idle_ms: cursor.idle_ms,
         speed: cursor.speed,
+        rotation_mode: cursor.rotation_mode,
+        rotation_ratio: cursor.rotate_on_x_movement_ratio,
+        base_rotation_deg: cursor.base_rotation_deg,
     }
 }
 

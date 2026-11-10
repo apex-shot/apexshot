@@ -7,7 +7,8 @@ use crate::settings::select::SettingsSelect;
 use crate::settings::ui_support::{window_control_button, WindowControl};
 use gtk4::prelude::*;
 use gtk4::{
-    gdk, Align, Box as GtkBox, Button, Grid, Image, Label, Orientation, Overlay, ToggleButton,
+    gdk, Align, Box as GtkBox, Button, CheckButton, Grid, Image, Label, Orientation, Overlay,
+    ToggleButton,
 };
 use std::cell::Cell;
 use std::rc::Rc;
@@ -191,6 +192,22 @@ pub(super) fn show(
     }
     quality_group.append(&presets);
     quality_group.append(&description);
+
+    let hardware = CheckButton::with_label(&t("Hardware acceleration"));
+    hardware.set_active(settings.get().hardware);
+    hardware.set_tooltip_text(Some(&t(
+        "Use the GPU encoder when one is available. Falls back to the CPU automatically.",
+    )));
+    hardware.connect_toggled({
+        let settings = settings.clone();
+        move |button| {
+            settings.set(ExportSettings {
+                hardware: button.is_active(),
+                ..settings.get()
+            });
+        }
+    });
+    quality_group.append(&hardware);
 
     let footer = GtkBox::new(Orientation::Vertical, px(16.0));
     let summary = GtkBox::new(Orientation::Vertical, px(4.0));
@@ -391,6 +408,7 @@ mod tests {
                     cursor: crate::recording::editor::model::CursorSettings::default(),
                     sidecar: None,
                     webcam: None,
+                    canvas: None,
                     crf: 20,
                 };
                 let chosen = Rc::new(Cell::new(None));
