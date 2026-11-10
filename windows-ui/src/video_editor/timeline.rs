@@ -54,15 +54,15 @@ const PLAYHEAD_SNAP: f64 = 12.0;
 /// at a resting playhead selects the first instead of stacking a second.
 const LAYOUT_CUE_EPSILON: f64 = 0.01;
 /// Height of the ruler row, in unscaled pixels.
-const RULER_HEIGHT: f64 = 36.0;
+const RULER_HEIGHT: f64 = 28.0;
 /// Height of the filmstrip lane, in unscaled pixels.
-const VIDEO_LANE_HEIGHT: f64 = 56.0;
+const VIDEO_LANE_HEIGHT: f64 = 42.0;
 /// Height of one effect lane, in unscaled pixels.
-const EFFECT_LANE_HEIGHT: f64 = 56.0;
+const EFFECT_LANE_HEIGHT: f64 = 32.0;
 /// Height of the compact camera-layout lane, in unscaled pixels.
-const LAYOUT_LANE_HEIGHT: f64 = 34.0;
+const LAYOUT_LANE_HEIGHT: f64 = 26.0;
 /// Gap between rows, in unscaled pixels.
-const LANE_GAP: f64 = 10.0;
+const LANE_GAP: f64 = 6.0;
 /// Horizontal room a chip gives its label, in unscaled pixels.
 const LAYOUT_CHIP_LABEL_PADDING: f64 = 22.0;
 /// The seam a chip leaves before the next cue, in unscaled pixels.
@@ -3828,17 +3828,42 @@ fn apply_lane_state(
 ///
 /// It is scoped to the timeline dock and uses only properties this theme
 /// parser accepts: `min-height`, `padding`, `color` and `font-size`. The
-/// shared sheet already sizes the board, ruler, filmstrip and
-/// effect lanes; only the camera lane has no shared rule, so it is the one
-/// lane minimum set here.
+/// shared sheet's floors are sized for a taller timeline; the Windows editor
+/// keeps its timeline compact so the preview gets the height, so every lane
+/// floor and the board's own floor are restated here at the compact sizes.
 fn timeline_css(scale: f64) -> String {
     let px = |value: f64| format!("{}px", (value * scale).round() as i32);
+    let board = RULER_HEIGHT
+        + LANE_GAP
+        + VIDEO_LANE_HEIGHT
+        + 2.0 * EFFECT_LANE_HEIGHT
+        + LAYOUT_LANE_HEIGHT
+        + 3.0 * LANE_GAP;
     format!(
         "
+.recording-editor-timeline-compact .recording-editor-card-board {{
+    min-height: {board};
+    padding: 0 0 {board_padding} 0;
+}}
+.recording-editor-timeline-compact .recording-editor-card-ruler {{
+    min-height: {ruler};
+}}
+.recording-editor-timeline-compact .recording-editor-card-video-track {{
+    min-height: {video};
+}}
+.recording-editor-timeline-compact .recording-editor-card-zoom-track,
+.recording-editor-timeline-compact .recording-editor-card-hide-track {{
+    min-height: {effect};
+}}
 .recording-editor-timeline-compact .recording-editor-card-layout-track {{
     min-height: {camera};
 }}
 ",
+        board = px(board),
+        board_padding = px(4.0),
+        ruler = px(RULER_HEIGHT),
+        video = px(VIDEO_LANE_HEIGHT),
+        effect = px(EFFECT_LANE_HEIGHT),
         camera = px(LAYOUT_LANE_HEIGHT),
     )
 }
@@ -8370,14 +8395,14 @@ mod tests {
     }
 
     #[test]
-    fn the_scoped_stylesheet_keeps_only_the_camera_lane_floor() {
+    fn the_scoped_stylesheet_keeps_the_timeline_compact() {
         let css = timeline_css(1.25);
         assert!(css.contains("recording-editor-card-layout-track"));
-        assert!(css.contains("min-height: 43px"), "the camera lane is 34px");
-        assert!(!css.contains("recording-editor-card-board"));
-        assert!(!css.contains("recording-editor-card-video-track"));
-        assert!(!css.contains("recording-editor-card-zoom-track"));
-        assert!(!css.contains("recording-editor-card-hide-track"));
+        assert!(css.contains("min-height: 33px"), "the camera lane is 26px");
+        assert!(css.contains("min-height: 53px"), "the filmstrip is 42px");
+        assert!(css.contains("min-height: 40px"), "an effect lane is 32px");
+        // 28 + 6 + 42 + 32 + 32 + 26 + 3 * 6 = 184px of rows.
+        assert!(css.contains("min-height: 230px"), "the board fits its rows");
         assert!(!css.contains("min-height: 0"));
         // The lane rail is gone, so the sheet carries no gutter rules at all.
         assert!(!css.contains("recording-editor-timeline-gutter"));
