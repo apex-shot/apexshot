@@ -661,7 +661,9 @@ fn render_range(
         };
         let mut track_reader = match webcam.as_ref() {
             Some(webcam) => {
-                let start = webcam.start_at(span.source_start + local_first as f64 / fps);
+                let at = span.source_start + local_first as f64 / fps;
+                let start = webcam.start_at(at);
+                let lead = webcam.lead_at(at);
                 let duration = count as f64 / fps;
                 let decode = webcam::camera_decode_size(webcam.source_size, size);
                 match webcam::TrackReader::open(
@@ -671,6 +673,7 @@ fn render_range(
                     fps,
                     decode,
                     webcam.time_scale(),
+                    lead,
                 ) {
                     Some(reader) => Some(reader),
                     None => {
@@ -2849,6 +2852,7 @@ mod webcam_export_tests {
                 settings: layer,
                 layouts,
                 track_seconds: 2.0,
+                start: 0.0,
                 video_seconds: 2.0,
                 last_frame: 1.95,
                 source_size: (320, 320),
@@ -3113,6 +3117,7 @@ mod webcam_export_tests {
                 settings: bubble,
                 layouts,
                 track_seconds: 4.0,
+                start: 0.0,
                 video_seconds: 4.0,
                 last_frame: 3.95,
                 source_size: (320, 320),
@@ -3267,6 +3272,7 @@ mod webcam_export_tests {
                     ..LayoutSettings::default()
                 },
                 track_seconds: 2.0,
+                start: 0.0,
                 video_seconds: 2.0,
                 last_frame: 1.95,
                 source_size: (320, 320),

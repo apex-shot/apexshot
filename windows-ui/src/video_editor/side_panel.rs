@@ -2621,11 +2621,13 @@ fn build_webcam_cutout(
 struct WebcamCameraContext {
     root: GtkBox,
     mirror: Switch,
+    delay: FilledSlider,
 }
 
 impl WebcamCameraContext {
-    fn refresh(&self, mirror: bool) {
+    fn refresh(&self, mirror: bool, delay_seconds: f64) {
         self.mirror.set_active(mirror);
+        self.delay.set_value(delay_seconds * 1000.0);
     }
 }
 
@@ -2633,6 +2635,8 @@ fn build_webcam_camera(
     scale: f64,
     mirror: bool,
     set_mirror: Rc<dyn Fn(bool)>,
+    delay_seconds: f64,
+    set_delay: Rc<dyn Fn(f64)>,
 ) -> WebcamCameraContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
@@ -2647,9 +2651,25 @@ fn build_webcam_camera(
         gtk4::glib::Propagation::Proceed
     });
     root.append(&row);
+    let max_ms = super::webcam::MAX_CAMERA_DELAY_SECONDS * 1000.0;
+    let delay = value_slider_control(
+        &t("Camera delay (ms)"),
+        -max_ms,
+        max_ms,
+        delay_seconds * 1000.0,
+        5.0,
+        0,
+        scale,
+        move |value| set_delay(value / 1000.0),
+    );
+    delay.widget().set_tooltip_text(Some(&t(
+        "Shift the camera against the screen and sound. Raise it if your lips move after the words, lower it if they move before.",
+    )));
+    root.append(&delay.widget());
     WebcamCameraContext {
         root,
         mirror: switch,
+        delay,
     }
 }
 
@@ -2696,6 +2716,7 @@ struct WebcamContextActions {
     set_cutout_position: Rc<dyn Fn(f64)>,
     move_cutout_position: Rc<dyn Fn(f64)>,
     set_mirror: Rc<dyn Fn(bool)>,
+    set_delay: Rc<dyn Fn(f64)>,
     set_transition: Rc<dyn Fn(f64)>,
 }
 
@@ -2712,6 +2733,7 @@ impl WebcamContextActions {
             set_cutout_position: Rc::new(|_| {}),
             move_cutout_position: Rc::new(|_| {}),
             set_mirror: Rc::new(|_| {}),
+            set_delay: Rc::new(|_| {}),
             set_transition: Rc::new(|_| {}),
         }
     }
@@ -2753,7 +2775,7 @@ impl WebcamContext {
             self.cutout.refresh(layouts.cutout_position_x);
         }
         if controls.mirror {
-            self.camera.refresh(layer.mirror);
+            self.camera.refresh(layer.mirror, layer.delay_seconds);
         }
         if controls.transitions {
             self.transition.refresh(layouts.transition_seconds);
@@ -2783,7 +2805,13 @@ fn build_webcam_context(
         actions.set_cutout_position.clone(),
         actions.move_cutout_position.clone(),
     );
-    let camera = build_webcam_camera(scale, layer.mirror, actions.set_mirror.clone());
+    let camera = build_webcam_camera(
+        scale,
+        layer.mirror,
+        actions.set_mirror.clone(),
+        layer.delay_seconds,
+        actions.set_delay.clone(),
+    );
     let transition = build_webcam_transition(
         scale,
         layouts.transition_seconds,
@@ -2972,6 +3000,15 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             Rc::new(move |mirror| {
                 if !syncing.get() {
                     timeline.update_webcam(|layer| layer.mirror = mirror);
+                }
+            })
+        },
+        set_delay: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |seconds| {
+                if !syncing.get() {
+                    timeline.update_webcam(|layer| layer.delay_seconds = seconds);
                 }
             })
         },

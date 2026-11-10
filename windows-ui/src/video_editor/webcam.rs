@@ -126,6 +126,8 @@ pub(super) struct LayerSettings {
     pub h: f64,
     pub radius: f64,
     pub mirror: bool,
+    /// Manual camera sync, in seconds: positive shows the camera later.
+    pub delay_seconds: f64,
 }
 
 impl Default for LayerSettings {
@@ -139,6 +141,7 @@ impl Default for LayerSettings {
             h: 0.25,
             radius: 0.12,
             mirror: false,
+            delay_seconds: 0.0,
         }
     }
 }
@@ -157,6 +160,7 @@ impl LayerSettings {
             h,
             radius: radius_for_shape(track.shape),
             mirror: track.flip,
+            delay_seconds: 0.0,
         }
     }
 
@@ -168,6 +172,12 @@ impl LayerSettings {
         self.x = self.x.clamp(0.0, 1.0 - self.w);
         self.y = self.y.clamp(0.0, 1.0 - self.h);
         self.radius = self.radius.clamp(0.0, 1.0);
+        self.delay_seconds = if self.delay_seconds.is_finite() {
+            self.delay_seconds
+                .clamp(-MAX_CAMERA_DELAY_SECONDS, MAX_CAMERA_DELAY_SECONDS)
+        } else {
+            0.0
+        };
         self
     }
 
@@ -880,6 +890,8 @@ struct Shared {
 struct Track {
     path: PathBuf,
     duration: f64,
+    /// Seconds into the video where the track's first frame sits.
+    start: f64,
     video_seconds: f64,
     /// The last instant a seek can land on and still find a decoded frame.
     last_frame: f64,
@@ -896,6 +908,71 @@ fn last_camera_seconds(duration: f64, fps: Option<f64>) -> f64 {
         .map(|fps| 1.5 / fps)
         .unwrap_or_else(|| (duration * 0.02).clamp(0.04, 1.0));
     (duration - gap).max(0.0)
+}
+
+/// The largest manual camera delay, either way: the studied adjustment range.
+pub(super) const MAX_CAMERA_DELAY_SECONDS: f64 = 0.2;
+
+/// Where a video instant lands in the camera track.
+///
+/// The track's first frame sits `start` seconds into the video (the gap the
+/// recorder measured), and from there it runs on its own clock. `rate` is
+/// track seconds per video second after that gap: 1 for a recording that
+/// stored its gap, and the old length ratio for a sidecar written before the
+/// gap existed. `delay` is the user's adjustment; a positive delay samples
+/// the camera later.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct CameraClock {
+    pub start: f64,
+    pub rate: f64,
+    pub delay: f64,
+}
+
+impl CameraClock {
+    pub fn new(start: f64, track_seconds: f64, video_seconds: f64, delay: f64) -> Self {
+        let start = if start.is_finite() {
+            start.max(0.0)
+        } else {
+            0.0
+        };
+        let rate = if video_seconds.is_finite()
+            && track_seconds.is_finite()
+            && video_seconds > start
+            && track_seconds > 0.0
+        {
+            (track_seconds / (video_seconds - start)).clamp(0.01, 100.0)
+        } else {
+            1.0
+        };
+        let delay = if delay.is_finite() {
+            delay.clamp(-MAX_CAMERA_DELAY_SECONDS, MAX_CAMERA_DELAY_SECONDS)
+        } else {
+            0.0
+        };
+        Self { start, rate, delay }
+    }
+
+    /// The track instant, negative while the camera has not started yet.
+    fn raw(&self, video_seconds: f64) -> f64 {
+        (video_seconds - self.start) * self.rate + self.delay
+    }
+
+    /// The track instant for a video instant; the first frame before the
+    /// camera starts.
+    pub fn track_at(&self, video_seconds: f64) -> f64 {
+        self.raw(video_seconds).max(0.0)
+    }
+
+    /// Video seconds from `video_seconds` until the camera's first frame,
+    /// which is held over that lead.
+    pub fn lead_at(&self, video_seconds: f64) -> f64 {
+        (-self.raw(video_seconds)).max(0.0) / self.rate
+    }
+
+    /// The timestamp multiplier that puts track frames on the video's clock.
+    pub fn time_scale(&self) -> f64 {
+        1.0 / self.rate
+    }
 }
 
 struct State {
@@ -1019,6 +1096,7 @@ impl WebcamModel {
         *self.state.track.borrow_mut() = Some(Track {
             path,
             duration: track.duration,
+            start: track.start,
             video_seconds,
             last_frame,
             camera_size: (track.width, track.height),
@@ -1156,6 +1234,7 @@ impl WebcamModel {
             settings,
             layouts,
             track_seconds: track.duration,
+            start: track.start,
             video_seconds: track.video_seconds,
             last_frame: track.last_frame,
             source_size: track.camera_size,
@@ -1273,14 +1352,14 @@ impl WebcamModel {
     }
 
     fn target_seconds(&self, source_seconds: f64) -> Option<f64> {
+        let delay = self
+            .settings()
+            .map(|settings| settings.delay_seconds)
+            .unwrap_or(0.0);
         let track = self.state.track.borrow();
         let track = track.as_ref()?;
-        let target = if track.video_seconds > 0.0 && track.duration > 0.0 {
-            (source_seconds * (track.duration / track.video_seconds)).max(0.0)
-        } else {
-            source_seconds.max(0.0)
-        };
-        Some(target.min(track.last_frame))
+        let clock = CameraClock::new(track.start, track.duration, track.video_seconds, delay);
+        Some(clock.track_at(source_seconds).min(track.last_frame))
     }
 
     /// The newest decoded frame as a surface, rebuilt only when a new frame
@@ -1352,6 +1431,8 @@ pub(super) struct WebcamExport {
     pub settings: LayerSettings,
     pub layouts: LayoutSettings,
     pub track_seconds: f64,
+    /// Seconds into the video where the track's first frame sits.
+    pub start: f64,
     pub video_seconds: f64,
     /// The last instant a seek can land on and still find a decoded frame.
     pub last_frame: f64,
@@ -1360,12 +1441,18 @@ pub(super) struct WebcamExport {
 }
 
 impl WebcamExport {
+    fn clock(&self) -> CameraClock {
+        CameraClock::new(
+            self.start,
+            self.track_seconds,
+            self.video_seconds,
+            self.settings.delay_seconds,
+        )
+    }
+
     /// A video instant as a time in the track.
     pub fn track_at(&self, video_seconds: f64) -> f64 {
-        if self.video_seconds > 0.0 && self.track_seconds > 0.0 {
-            return (video_seconds * (self.track_seconds / self.video_seconds)).max(0.0);
-        }
-        video_seconds.max(0.0)
+        self.clock().track_at(video_seconds)
     }
 
     /// The decode start for a video instant, capped at the camera's last real
@@ -1374,16 +1461,16 @@ impl WebcamExport {
         self.track_at(video_seconds).min(self.last_frame)
     }
 
+    /// Video seconds the first camera frame is held for before the track
+    /// starts playing, from a video instant.
+    pub fn lead_at(&self, video_seconds: f64) -> f64 {
+        self.clock().lead_at(video_seconds)
+    }
+
     /// The timestamp multiplier that puts the track's frames on the video's
-    /// clock: a track that recorded less than the video is slowed by the
-    /// reciprocal of its length ratio, so a video instant still asks for the
-    /// same camera instant.
+    /// clock.
     pub fn time_scale(&self) -> f64 {
-        if self.video_seconds > 0.0 && self.track_seconds > 0.0 {
-            (self.video_seconds / self.track_seconds).clamp(0.01, 100.0)
-        } else {
-            1.0
-        }
+        self.clock().time_scale()
     }
 }
 
@@ -1617,6 +1704,8 @@ impl TrackReader {
     /// `time_scale` is the track's clock against the video's, so a camera that
     /// recorded faster or slower than the screen is resampled onto the output
     /// timeline instead of playing at 1x and drifting.
+    /// `lead_seconds` holds the first frame before the track starts, for a span
+    /// that opens before the camera did.
     pub fn open(
         path: &Path,
         start_seconds: f64,
@@ -1624,6 +1713,7 @@ impl TrackReader {
         fps: f64,
         size: (u32, u32),
         time_scale: f64,
+        lead_seconds: f64,
     ) -> Option<Self> {
         let frame_len = size.0 as usize * size.1 as usize * 4;
         let frames = (duration_seconds.max(0.0) * fps).ceil().max(1.0) as u64;
@@ -1632,18 +1722,26 @@ impl TrackReader {
         } else {
             1.0
         };
+        let lead_seconds = if lead_seconds.is_finite() {
+            lead_seconds.max(0.0)
+        } else {
+            0.0
+        };
+        let mut filter = format!(
+            "scale={}:{},setsar=1,setpts=(PTS-STARTPTS)*{time_scale:.9},fps={fps}",
+            size.0, size.1
+        );
+        if lead_seconds * fps >= 0.5 {
+            filter.push_str(&format!(
+                ",tpad=start_mode=clone:start_duration={lead_seconds:.6}"
+            ));
+        }
         let mut child = Command::new(crate::recording::editor::ffmpeg::ffmpeg_executable())
             .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
             .args(["-ss", &format!("{start_seconds:.6}")])
             .arg("-i")
             .arg(path)
-            .args([
-                "-vf",
-                &format!(
-                    "scale={}:{},setsar=1,setpts=(PTS-STARTPTS)*{time_scale:.9},fps={fps}",
-                    size.0, size.1
-                ),
-            ])
+            .args(["-vf", &filter])
             .args(["-frames:v", &frames.to_string()])
             .args(["-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"])
             .stdout(Stdio::piped())
@@ -3360,6 +3458,7 @@ mod tests {
             settings: LayerSettings::default(),
             layouts: LayoutSettings::default(),
             track_seconds: duration,
+            start: 0.0,
             video_seconds: duration,
             last_frame: last,
             source_size: (32, 32),
@@ -3375,6 +3474,7 @@ mod tests {
             settings: LayerSettings::default(),
             layouts: LayoutSettings::default(),
             track_seconds: 8.0,
+            start: 0.0,
             video_seconds: 10.0,
             last_frame: 7.95,
             source_size: (1280, 720),
@@ -3387,5 +3487,38 @@ mod tests {
         };
         assert!((unknown.track_at(3.6) - 3.6).abs() < 1e-9);
         assert!((unknown.time_scale() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_recorded_gap_plays_the_camera_one_to_one() {
+        // A 9.6 s track that started 0.4 s into a 10 s video.
+        let clock = CameraClock::new(0.4, 9.6, 10.0, 0.0);
+        assert!((clock.rate - 1.0).abs() < 1e-9);
+        assert_eq!(clock.track_at(0.0), 0.0);
+        assert!((clock.lead_at(0.0) - 0.4).abs() < 1e-9);
+        assert!((clock.track_at(1.0) - 0.6).abs() < 1e-9);
+        assert_eq!(clock.lead_at(1.0), 0.0);
+        assert!((clock.track_at(10.0) - 9.6).abs() < 1e-9);
+        assert!((clock.time_scale() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_camera_delay_shifts_the_track() {
+        let later = CameraClock::new(0.4, 9.6, 10.0, 0.1);
+        assert!((later.track_at(1.0) - 0.7).abs() < 1e-9);
+        let earlier = CameraClock::new(0.4, 9.6, 10.0, -0.2);
+        assert!((earlier.track_at(1.0) - 0.4).abs() < 1e-9);
+        assert!((earlier.lead_at(0.0) - 0.6).abs() < 1e-9);
+        // The adjustment is clamped to the slider's range.
+        let wild = CameraClock::new(0.0, 10.0, 10.0, 5.0);
+        assert!((wild.delay - MAX_CAMERA_DELAY_SECONDS).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_sidecar_without_a_gap_keeps_the_length_ratio() {
+        let clock = CameraClock::new(0.0, 8.0, 10.0, 0.0);
+        assert!((clock.track_at(1.0) - 0.8).abs() < 1e-9);
+        assert!((clock.time_scale() - 1.25).abs() < 1e-9);
+        assert_eq!(clock.lead_at(1.0), 0.0);
     }
 }

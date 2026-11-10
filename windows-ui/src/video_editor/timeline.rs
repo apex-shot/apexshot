@@ -917,6 +917,7 @@ impl Data {
                 h: layer.h,
                 radius: layer.radius,
                 mirror: layer.mirror,
+                delay_seconds: layer.delay_seconds,
             });
             webcam.set_layouts(layouts);
         } else if let Some(webcam) = self.webcam.as_ref() {
@@ -7734,6 +7735,7 @@ mod tests {
                 h: 0.25,
                 radius: 0.5,
                 mirror: true,
+                delay_seconds: 0.0,
                 layouts: None,
             }),
             playhead_seconds: 0.0,

@@ -54,6 +54,10 @@ pub(super) struct WebcamLayerFile {
     pub h: f64,
     pub radius: f64,
     pub mirror: bool,
+    /// Manual camera sync in seconds. Absent in files written before it
+    /// existed, which played the camera with no adjustment.
+    #[serde(default)]
+    pub delay_seconds: f64,
     /// The layout timeline: the recording's default layout and the changes
     /// that switch it while the composition plays. Absent in files written
     /// before layouts existed, where the two switches above still say what the
@@ -104,6 +108,7 @@ impl WebcamLayerFile {
             h: layer.h,
             radius: layer.radius,
             mirror: layer.mirror,
+            delay_seconds: layer.delay_seconds,
             layouts: Some(layouts.clone()),
         }
     }
@@ -484,6 +489,7 @@ mod tests {
                 h: 0.24,
                 radius: 0.5,
                 mirror: true,
+                delay_seconds: 0.0,
                 layouts: Some(LayoutSettings {
                     default_layout: CameraLayout::SplitScreen,
                     cues: vec![
@@ -697,6 +703,24 @@ mod tests {
         let file = WebcamLayerFile::from_layer(layer, &layouts);
         assert!(file.enabled);
         assert!(file.fullscreen);
+    }
+
+    #[test]
+    fn the_camera_delay_reads_as_zero_before_it_existed_and_survives_a_round_trip() {
+        let legacy: WebcamLayerFile = serde_json::from_str(
+            r#"{"enabled":true,"fullscreen":false,"x":0.62,"y":0.31,"w":0.18,"h":0.24,"radius":0.5,"mirror":true}"#,
+        )
+        .expect("a camera block without a delay reads");
+        assert_eq!(legacy.delay_seconds, 0.0);
+
+        let layer = super::super::webcam::LayerSettings {
+            delay_seconds: 0.05,
+            ..super::super::webcam::LayerSettings::default()
+        };
+        let file = WebcamLayerFile::from_layer(layer, &LayoutSettings::default());
+        let text = serde_json::to_string(&file).unwrap();
+        let loaded: WebcamLayerFile = serde_json::from_str(&text).unwrap();
+        assert_eq!(loaded.delay_seconds, 0.05);
     }
 
     #[test]
