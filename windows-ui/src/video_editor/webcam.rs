@@ -437,6 +437,8 @@ pub(super) struct LayoutCue {
 pub(super) struct LayoutSettings {
     pub default_layout: CameraLayout,
     pub cues: Vec<LayoutCue>,
+    /// Any non-zero value moves the change on the studied layout spring; zero
+    /// cuts.
     pub transition_seconds: f64,
     /// The screen's share of the split's long axis, in 0.1..=0.9.
     pub split_ratio: f64,
@@ -588,28 +590,63 @@ impl LayoutSettings {
         let mut from = default;
         let mut to = default;
         let mut started: Option<f64> = None;
-        for cue in &self.cues {
-            if !cue.at.is_finite() || cue.at < 0.0 || cue.at > seconds {
-                continue;
+        for (at, target) in self.targets(geometry, default) {
+            if at > seconds {
+                break;
             }
-            let target = canonical(cue.layout, geometry);
             if target == to {
                 continue;
             }
             let state_at_cue = match started {
-                Some(start) => {
-                    interpolate(from, to, progress(start, cue.at, self.transition_seconds))
-                }
+                Some(start) => transition(from, to, progress(start, at, self.transition_seconds)),
                 None => to,
             };
             from = state_at_cue;
             to = target;
-            started = Some(cue.at);
+            started = Some(at);
         }
         match started {
-            Some(start) => interpolate(from, to, progress(start, seconds, self.transition_seconds)),
+            Some(start) => transition(from, to, progress(start, seconds, self.transition_seconds)),
             None => default,
         }
+    }
+
+    /// The resting frame each change aims at, in time order.
+    ///
+    /// Studied: under a fullscreen camera the screen keeps its neighbour's
+    /// layout, the one before the change until the midpoint to the next
+    /// change and the next one after it, so it never moves while the camera
+    /// covers it and is already in place when the camera leaves. The midpoint
+    /// is a target of its own, which keeps every move continuous.
+    fn targets(&self, geometry: Geometry, default: LayoutFrame) -> Vec<(f64, LayoutFrame)> {
+        let mut cues: Vec<&LayoutCue> = self
+            .cues
+            .iter()
+            .filter(|cue| cue.at.is_finite() && cue.at >= 0.0)
+            .collect();
+        cues.sort_by(|a, b| a.at.total_cmp(&b.at));
+        let mut targets = Vec::with_capacity(cues.len() * 2);
+        let mut previous_screen = default.screen;
+        for (index, cue) in cues.iter().enumerate() {
+            let mut target = canonical(cue.layout, geometry);
+            if cue.layout == CameraLayout::FullscreenCamera {
+                target.screen = previous_screen;
+                targets.push((cue.at, target));
+                if let Some(next) = cues.get(index + 1) {
+                    if next.layout != CameraLayout::FullscreenCamera {
+                        let mut handed_on = target;
+                        handed_on.screen = canonical(next.layout, geometry).screen;
+                        targets.push(((cue.at + next.at) / 2.0, handed_on));
+                    }
+                }
+            } else {
+                targets.push((cue.at, target));
+            }
+            if let Some((_, last)) = targets.last() {
+                previous_screen = last.screen;
+            }
+        }
+        targets
     }
 
     /// Whether the camera contributes a pixel at this instant.
@@ -955,11 +992,50 @@ fn zoomed_scale(shrink: f64) -> f64 {
 }
 
 fn progress(start: f64, seconds: f64, duration: f64) -> f64 {
+    // A zero duration is the project's "cut" setting.
     if !duration.is_finite() || duration <= 1e-9 {
         return 1.0;
     }
-    let t = ((seconds - start) / duration).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
+    let elapsed = seconds - start;
+    if !elapsed.is_finite() || elapsed <= 0.0 {
+        return 0.0;
+    }
+    // The project's transition length is the spring's speed: the default is
+    // the studied spring itself, and a shorter one runs the same motion
+    // faster, the way the zoom's speed scales its spring.
+    spring_step_response(elapsed * DEFAULT_TRANSITION_SECONDS / duration)
+}
+
+/// The studied layout spring's step response from rest: how far a value has
+/// travelled toward a new target `elapsed` seconds after the target changed,
+/// in 1 ms semi-implicit Euler steps with the studied clamp, so it never
+/// overshoots.
+fn spring_step_response(elapsed: f64) -> f64 {
+    let (stiffness, damping, mass) = CAMERA_SPRING;
+    let omega = (stiffness / mass).sqrt();
+    let critical = 2.0 * (mass * stiffness).sqrt();
+    let steps = (elapsed * 1000.0).ceil().min(5000.0) as usize;
+    let mut value: f64 = 0.0;
+    let mut velocity: f64 = 0.0;
+    for index in 1..=steps {
+        let dt = ((index as f64 / 1000.0).min(elapsed) - ((index - 1) as f64 / 1000.0)).max(0.0);
+        let gap = 1.0 - value;
+        let effective = if velocity * gap > 0.0 && velocity.abs() > gap.abs() * omega {
+            damping.max(critical)
+        } else {
+            damping
+        };
+        velocity += (gap * stiffness - velocity * effective) / mass * dt;
+        value += velocity * dt;
+        if velocity.abs() < CAMERA_SPRING_PRECISION && gap.abs() < CAMERA_SPRING_PRECISION {
+            return 1.0;
+        }
+    }
+    if steps >= 5000 {
+        1.0
+    } else {
+        value.clamp(0.0, 1.0)
+    }
 }
 
 fn interpolate(from: LayoutFrame, to: LayoutFrame, t: f64) -> LayoutFrame {
@@ -971,6 +1047,21 @@ fn interpolate(from: LayoutFrame, to: LayoutFrame, t: f64) -> LayoutFrame {
         cutout: from.cutout + (to.cutout - from.cutout) * t,
         mirror: to.mirror,
     }
+}
+
+/// A layout change between two resting frames. Like [`interpolate`], except
+/// a change to or from a hidden camera (Screen only) is a cut for the camera:
+/// the studied renderer snaps its rect and opacity rather than fading.
+fn transition(from: LayoutFrame, to: LayoutFrame, t: f64) -> LayoutFrame {
+    let mut frame = interpolate(from, to, t);
+    let hidden = |frame: &LayoutFrame| frame.camera_alpha <= 1e-6;
+    if t > 0.0 && (hidden(&from) || hidden(&to)) {
+        frame.camera = to.camera;
+        frame.camera_alpha = to.camera_alpha;
+        frame.camera_radius = to.camera_radius;
+        frame.cutout = to.cutout;
+    }
+    frame
 }
 
 /// The corner radius a shape index starts at, as a fraction of the shorter side.
@@ -2692,7 +2783,7 @@ mod tests {
     }
 
     #[test]
-    fn transitions_smoothstep_between_the_resting_rects() {
+    fn transitions_move_between_the_resting_rects() {
         let settings = settings(
             vec![
                 cue(1.0, CameraLayout::SplitScreen),
@@ -2702,16 +2793,124 @@ mod tests {
         );
         let before = resting(&settings, 1.0);
         let middle = resting(&settings, 1.5);
-        let end = resting(&settings, 3.0);
+        let end = resting(&settings, 5.0);
+        let p = progress(1.0, 1.5, 1.0);
+        assert!(p > 0.0 && p < 1.0, "half way through the move: {p}");
         assert!((before.screen.width - 1.0).abs() < 1e-9);
-        assert!((middle.screen.width - 0.75).abs() < 1e-9);
+        assert!((middle.screen.width - (1.0 - 0.5 * p)).abs() < 1e-9);
         assert!(
             (middle.screen.height - 1.0).abs() < 1e-9,
             "the growing split pane keeps the frame's full height"
         );
-        assert!((middle.camera.y - 0.275).abs() < 1e-9);
-        assert!((end.screen.width - 1.0).abs() < 1e-9);
+        assert!((middle.camera.y - 0.55 * (1.0 - p)).abs() < 1e-9);
+        // Under the fullscreen camera the screen keeps the split's pane.
+        assert!((end.screen.width - 0.5).abs() < 1e-9);
+        assert!(end.camera.is_full());
         assert!((middle.camera_alpha - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_layout_change_moves_on_the_studied_spring() {
+        assert_eq!(progress(1.0, 1.0, 0.45), 0.0);
+        assert_eq!(progress(1.0, 1.5, 0.0), 1.0, "a zero duration cuts");
+        let mut previous = 0.0;
+        let mut t = 0.0;
+        while t <= 3.0 {
+            let value = progress(0.0, t, 0.45);
+            assert!(
+                value >= previous - 1e-12 && value <= 1.0,
+                "monotonic and clamped at {t}: {value}"
+            );
+            previous = value;
+            t += 0.01;
+        }
+        // The studied spring is about 0.31 of the way after 0.1 s and has
+        // settled within ~1.2 s.
+        assert!(
+            progress(0.0, 0.1, 0.45) < 0.35,
+            "{}",
+            progress(0.0, 0.1, 0.45)
+        );
+        assert!(
+            progress(0.0, 0.5, 0.45) > 0.6,
+            "{}",
+            progress(0.0, 0.5, 0.45)
+        );
+        assert!(
+            progress(0.0, 1.5, 0.45) > 0.99,
+            "{}",
+            progress(0.0, 1.5, 0.45)
+        );
+    }
+
+    #[test]
+    fn screen_only_cuts_the_camera_both_ways() {
+        let layer = LayerSettings::default();
+        let to_screen = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            cues: vec![LayoutCue {
+                at: 1.0,
+                layout: CameraLayout::ScreenOnly,
+            }],
+            ..LayoutSettings::default()
+        };
+        assert_eq!(
+            to_screen
+                .frame_at(1.01, layer, 16.0 / 9.0, 1.0)
+                .camera_alpha,
+            0.0
+        );
+        let from_screen = LayoutSettings {
+            default_layout: CameraLayout::ScreenOnly,
+            cues: vec![LayoutCue {
+                at: 1.0,
+                layout: CameraLayout::CameraOverlay,
+            }],
+            ..LayoutSettings::default()
+        };
+        let frame = from_screen.frame_at(1.01, layer, 16.0 / 9.0, 1.0);
+        let rest = from_screen.frame_at(5.0, layer, 16.0 / 9.0, 1.0);
+        assert_eq!(frame.camera_alpha, 1.0);
+        assert_eq!(frame.camera, rest.camera, "the camera appears in place");
+    }
+
+    #[test]
+    fn a_fullscreen_camera_holds_the_screen_and_switches_it_at_the_midpoint() {
+        let layer = LayerSettings::default();
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            cues: vec![
+                LayoutCue {
+                    at: 2.0,
+                    layout: CameraLayout::FullscreenCamera,
+                },
+                LayoutCue {
+                    at: 6.0,
+                    layout: CameraLayout::CameraOverlay,
+                },
+            ],
+            ..LayoutSettings::default()
+        };
+        let aspect = 16.0 / 9.0;
+        let split_screen = layouts.frame_at(1.0, layer, aspect, 1.0).screen;
+        assert!(!split_screen.is_full());
+        // Under the camera, before the midpoint (4.0): the split's screen.
+        assert_eq!(
+            layouts.frame_at(2.1, layer, aspect, 1.0).screen,
+            split_screen
+        );
+        assert_eq!(
+            layouts.frame_at(3.9, layer, aspect, 1.0).screen,
+            split_screen
+        );
+        // From the midpoint (4.0) the screen springs, still under the camera,
+        // to the overlay's screen (the whole frame) and settles there before
+        // the camera leaves.
+        let handing_on = layouts.frame_at(4.1, layer, aspect, 1.0).screen;
+        assert!(handing_on.width > split_screen.width && handing_on.width < 1.0);
+        assert!(layouts.frame_at(5.9, layer, aspect, 1.0).screen.is_full());
+        // Leaving the fullscreen change, the screen is already in place.
+        assert!(layouts.frame_at(6.05, layer, aspect, 1.0).screen.is_full());
     }
 
     #[test]
@@ -2750,7 +2949,9 @@ mod tests {
         );
         assert_eq!(resting(&without, 1.5), resting(&with, 1.5));
         assert_eq!(resting(&without, 2.0), resting(&with, 2.0));
-        assert!((resting(&with, 2.0).camera.width - 1.0).abs() < 1e-9);
+        // A spring settles rather than landing at a set time; once settled
+        // the camera fills the frame.
+        assert!((resting(&with, 4.5).camera.width - 1.0).abs() < 1e-9);
     }
 
     #[test]
@@ -2801,11 +3002,17 @@ mod tests {
             1.0,
         );
         let into = resting(&settings, 1.5);
-        assert!((into.cutout - 0.5).abs() < 1e-9);
+        assert!((into.cutout - progress(1.0, 1.5, 1.0)).abs() < 1e-9);
         assert!((into.camera_alpha - 1.0).abs() < 1e-9);
         assert!(into.camera.y > 0.0);
         let out = resting(&settings, 2.5);
-        assert!((out.cutout - 0.5).abs() < 1e-9);
+        let at_change = progress(1.0, 2.0, 1.0);
+        let expected = at_change * (1.0 - progress(2.0, 2.5, 1.0));
+        assert!(
+            (out.cutout - expected).abs() < 1e-9,
+            "{} vs {expected}",
+            out.cutout
+        );
     }
 
     #[test]

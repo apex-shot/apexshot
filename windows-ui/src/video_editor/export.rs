@@ -3220,6 +3220,87 @@ mod webcam_export_tests {
     }
 
     #[test]
+    fn a_change_to_screen_only_cuts_the_camera_in_the_export() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-webcam-screen-cut-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let source = dir.join("screen.mp4");
+        if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
+            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            return;
+        }
+        let Some(track_path) = webcam_track_file(&source) else {
+            eprintln!("skipping the webcam export test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = track_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !split_clip(&track_path, "320x320", 2.0) {
+            return;
+        }
+
+        let track = WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 320,
+            height: 320,
+            duration: 2.0,
+            start: 0.0,
+            x: 0.6,
+            y: 0.6,
+            w: 0.35,
+            h: 0.35,
+            shape: 1,
+            flip: false,
+        };
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+        );
+        sidecar.webcam = Some(track);
+        let sidecar_path = PointerSidecar::sidecar_path(&source);
+        if sidecar.write(&sidecar_path).is_err() {
+            return;
+        }
+
+        let mut layer = LayerSettings {
+            radius: 0.0,
+            ..LayerSettings::default()
+        };
+        layer.set_overlay_aspect(1.0, 320.0 / 240.0);
+        layer.set_overlay_size(0.5, 320.0 / 240.0);
+        layer.set_overlay_alignment(0.5, 0.5);
+        // The camera switches to Screen only at 0.45 s; the frame at 0.5 s is
+        // 50 ms later, which the old 0.45 s fade would still show at ~95%.
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            cues: vec![LayoutCue {
+                at: 0.45,
+                layout: CameraLayout::ScreenOnly,
+            }],
+            ..LayoutSettings::default()
+        };
+        let frame = exported_frame(&dir, &source, &track_path, "screen-cut", layer, layouts);
+        for (x, y) in [(120, 120), (200, 120)] {
+            let screen = pixel(&frame, 320, x, y);
+            assert!(
+                screen[0] < 70 && screen[1] < 70,
+                "no camera after the cut at ({x},{y}): {screen:?}"
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_zoomed_split_exports_the_full_screen_and_a_floating_camera() {
         let dir = std::env::temp_dir().join(format!(
             "apexshot-webcam-split-zoom-{}-{:?}",
