@@ -689,6 +689,8 @@ pub(super) fn background_zoom(scale: f64) -> f64 {
 }
 
 /// Mirrors the shared editor's `zoom_camera_transform` for the video Picture.
+/// A clip of another aspect contains the picture, so the view is mapped onto
+/// the contained rect rather than onto the whole clip.
 pub(super) fn camera_transform(
     view: ViewRect,
     src_w: f64,
@@ -697,11 +699,28 @@ pub(super) fn camera_transform(
     clip_h: f64,
 ) -> (f64, f64, f64, f64) {
     let (view_x, view_y, view_w, view_h) = view;
+    let scale_x = src_w / view_w.max(1.0);
+    let scale_y = src_h / view_h.max(1.0);
+    let source_aspect = src_w / src_h.max(1e-9);
+    if (clip_w / clip_h.max(1e-9) - source_aspect).abs() <= 1e-6 {
+        return (
+            -view_x / view_w.max(1.0) * clip_w,
+            -view_y / view_h.max(1.0) * clip_h,
+            scale_x,
+            scale_y,
+        );
+    }
+    // The picture is contained in a clip of another aspect: put the view on
+    // the contained rect, not on the whole clip.
+    let contained_w = clip_w.min(clip_h * source_aspect);
+    let contained_h = contained_w / source_aspect;
+    let left = (clip_w - contained_w) / 2.0;
+    let top = (clip_h - contained_h) / 2.0;
     (
-        -view_x / view_w.max(1.0) * clip_w,
-        -view_y / view_h.max(1.0) * clip_h,
-        src_w / view_w.max(1.0),
-        src_h / view_h.max(1.0),
+        left - scale_x * left - view_x / view_w.max(1.0) * contained_w,
+        top - scale_y * top - view_y / view_h.max(1.0) * contained_h,
+        scale_x,
+        scale_y,
     )
 }
 
@@ -1594,6 +1613,21 @@ mod tests {
             camera_transform(view, 640.0, 480.0, 640.0, 480.0),
             (-320.0, -240.0, 2.0, 2.0)
         );
+    }
+
+    #[test]
+    fn camera_transform_maps_onto_the_contained_picture() {
+        let identity = camera_transform((0.0, 0.0, 320.0, 200.0), 320.0, 200.0, 432.0, 200.0);
+        assert!((identity.0 - 0.0).abs() < 1e-9);
+        assert!((identity.1 - 0.0).abs() < 1e-9);
+        assert!((identity.2 - 1.0).abs() < 1e-9);
+        assert!((identity.3 - 1.0).abs() < 1e-9);
+
+        let view = camera_transform((80.0, 50.0, 160.0, 100.0), 320.0, 200.0, 432.0, 200.0);
+        assert!((view.0 - -216.0).abs() < 1e-9);
+        assert!((view.1 - -100.0).abs() < 1e-9);
+        assert!((view.2 - 2.0).abs() < 1e-9);
+        assert!((view.3 - 2.0).abs() < 1e-9);
     }
 
     #[test]

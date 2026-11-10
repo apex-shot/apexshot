@@ -645,9 +645,31 @@ impl LayoutSettings {
         camera_aspect: f64,
         zoom_shrink: f64,
     ) -> LayoutFrame {
+        self.frame_at_staged(
+            seconds,
+            overlay,
+            video_aspect,
+            video_aspect,
+            camera_aspect,
+            zoom_shrink,
+        )
+    }
+
+    /// [`Self::frame_at_zoomed`] on a stage of `stage_aspect` that holds a
+    /// screen of `screen_aspect`. Rects are fractions of the stage.
+    pub(super) fn frame_at_staged(
+        &self,
+        seconds: f64,
+        overlay: LayerSettings,
+        stage_aspect: f64,
+        screen_aspect: f64,
+        camera_aspect: f64,
+        zoom_shrink: f64,
+    ) -> LayoutFrame {
         let geometry = Geometry {
             overlay: overlay.clamped(),
-            video_aspect: sane_aspect(video_aspect),
+            video_aspect: sane_aspect(stage_aspect),
+            screen_aspect: sane_aspect(screen_aspect),
             camera_aspect: sane_aspect(camera_aspect),
             split_ratio: self.split_ratio,
             split_auto: self.split_auto,
@@ -764,6 +786,9 @@ pub(super) struct LayoutFrame {
 struct Geometry {
     overlay: LayerSettings,
     video_aspect: f64,
+    /// The screen recording's own aspect. `video_aspect` is the stage's,
+    /// which is wider when the stage is widened for the split.
+    screen_aspect: f64,
     camera_aspect: f64,
     split_ratio: f64,
     split_auto: bool,
@@ -783,6 +808,7 @@ fn sane_aspect(aspect: f64) -> f64 {
 
 /// The geometry a layout rests at, before any transition.
 fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
+    let screen = contained_screen(geometry.video_aspect, geometry.screen_aspect);
     let full = Rect::full();
     match layout {
         CameraLayout::CameraOverlay => {
@@ -798,7 +824,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
                     .rect_in(full)
             };
             LayoutFrame {
-                screen: full,
+                screen,
                 camera,
                 camera_alpha: if geometry.overlay.enabled { 1.0 } else { 0.0 },
                 camera_radius: if geometry.overlay.fullscreen {
@@ -811,7 +837,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             }
         }
         CameraLayout::FullscreenCamera => LayoutFrame {
-            screen: full,
+            screen,
             camera: full,
             camera_alpha: 1.0,
             camera_radius: 0.0,
@@ -839,7 +865,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             }
         }
         CameraLayout::ScreenOnly => LayoutFrame {
-            screen: full,
+            screen,
             camera: geometry.overlay.rect_in(full),
             camera_alpha: 0.0,
             camera_radius: geometry.overlay.radius,
@@ -847,7 +873,7 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             mirror: geometry.overlay.mirror,
         },
         CameraLayout::CameraCutout => LayoutFrame {
-            screen: full,
+            screen,
             camera: cutout_rect(geometry),
             camera_alpha: 1.0,
             camera_radius: 0.0,
@@ -871,6 +897,61 @@ pub(super) fn auto_split_screen_ratio(stage_aspect: f64, screen_aspect: f64) -> 
     (1.0 - camera / stage).clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO)
 }
 
+/// The camera column the studied auto stage adds beside the screen, as a
+/// width over the stage's inner height.
+const AUTO_STAGE_CAMERA_ASPECT: f64 = 9.0 / 16.0;
+/// The widest auto stage the studied build allows.
+const AUTO_STAGE_MAX_ASPECT: f64 = 2.4;
+
+/// The studied automatic stage aspect for a composition whose default layout
+/// is the split: a 16:9 stage when a side camera column between 0.4 and 16/9
+/// of the inner height fits beside the screen, otherwise the screen plus a
+/// 9:16 camera column (and `padding` around and between them), 1.0..=2.4.
+pub(super) fn auto_split_stage_aspect(screen_aspect: f64, padding: f64) -> f64 {
+    let screen = sane_aspect(screen_aspect);
+    let padding = if padding.is_finite() {
+        padding.clamp(0.0, 0.25)
+    } else {
+        0.0
+    };
+    let inset = padding * 1080.0;
+    let inner = 1080.0 - inset * 2.0;
+    let column = (1920.0 - inset * 3.0 - screen * inner) / inner;
+    if (0.4..=16.0 / 9.0).contains(&column) {
+        return 16.0 / 9.0;
+    }
+    ((padding * 3.0 + screen + AUTO_STAGE_CAMERA_ASPECT) / (1.0 + padding * 2.0))
+        .clamp(1.0, AUTO_STAGE_MAX_ASPECT)
+}
+
+/// Where the whole screen sits on a stage of another aspect: fitted inside it
+/// and centred, the studied rest place for every layout but the split. The
+/// whole stage when the two aspects match.
+pub(super) fn contained_screen(stage_aspect: f64, screen_aspect: f64) -> Rect {
+    let stage = sane_aspect(stage_aspect);
+    let screen = sane_aspect(screen_aspect);
+    if (stage - screen).abs() <= 1e-9 {
+        return Rect::full();
+    }
+    if screen < stage {
+        let width = screen / stage;
+        Rect {
+            x: (1.0 - width) / 2.0,
+            y: 0.0,
+            width,
+            height: 1.0,
+        }
+    } else {
+        let height = stage / screen;
+        Rect {
+            x: 0.0,
+            y: (1.0 - height) / 2.0,
+            width: 1.0,
+            height,
+        }
+    }
+}
+
 /// Screen and camera rects for the split.
 ///
 /// A landscape frame splits side by side and a portrait frame splits top and
@@ -881,7 +962,7 @@ pub(super) fn auto_split_screen_ratio(stage_aspect: f64, screen_aspect: f64) -> 
 /// while the camera fills its share from the raw camera aspect.
 fn split_rects(geometry: Geometry) -> (Rect, Rect) {
     let ratio = if geometry.split_auto {
-        auto_split_screen_ratio(geometry.video_aspect, geometry.video_aspect)
+        auto_split_screen_ratio(geometry.video_aspect, geometry.screen_aspect)
     } else {
         geometry.split_ratio.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO)
     };
@@ -958,7 +1039,7 @@ fn split_zoomed(geometry: Geometry, overlay_radius: f64) -> LayoutFrame {
         (1.0, if geometry.split_flip { 0.0 } else { 1.0 })
     };
     LayoutFrame {
-        screen: Rect::full(),
+        screen: contained_screen(geometry.video_aspect, geometry.screen_aspect),
         camera: Rect {
             x: inset_x + align_x * (1.0 - 2.0 * inset_x - width).max(0.0),
             y: inset_y + align_y * (1.0 - 2.0 * inset_y - height).max(0.0),
@@ -1005,6 +1086,35 @@ pub(super) fn screen_cover_rect(screen: Rect) -> Rect {
         y: y + (height - side) / 2.0,
         width: side,
         height: side,
+    }
+}
+
+/// [`screen_cover_rect`] on a stage of `stage_aspect` for a screen of
+/// `screen_aspect`: the rect, in stage fractions, the whole screen is drawn
+/// into so it covers `screen` with its own aspect, centred on it.
+pub(super) fn screen_cover_rect_in(screen: Rect, stage_aspect: f64, screen_aspect: f64) -> Rect {
+    let stage = sane_aspect(stage_aspect);
+    let source = sane_aspect(screen_aspect);
+    let x = if screen.x.is_finite() { screen.x } else { 0.0 };
+    let y = if screen.y.is_finite() { screen.y } else { 0.0 };
+    let width = if screen.width.is_finite() && screen.width > 0.0 {
+        screen.width
+    } else {
+        1.0
+    };
+    let height = if screen.height.is_finite() && screen.height > 0.0 {
+        screen.height
+    } else {
+        1.0
+    };
+    // In units of the stage's height.
+    let scale = (width * stage / source).max(height);
+    let draw_width = source * scale / stage;
+    Rect {
+        x: x + (width - draw_width) / 2.0,
+        y: y + (height - scale) / 2.0,
+        width: draw_width,
+        height: scale,
     }
 }
 
@@ -1553,6 +1663,8 @@ struct State {
     /// enabled/fullscreen switches keep the default layout in step.
     layouts_custom: Cell<bool>,
     composition_seconds: Cell<f64>,
+    /// The preview stage's aspect when it is wider than the screen, else 0.
+    stage_aspect: Cell<f64>,
     zoom_shrink: Cell<f64>,
     /// The source time of the frame on screen, for the silence hide.
     source_seconds: Cell<f64>,
@@ -1594,6 +1706,7 @@ impl WebcamModel {
                 seeded_layouts: RefCell::new(LayoutSettings::default()),
                 layouts_custom: Cell::new(false),
                 composition_seconds: Cell::new(0.0),
+                stage_aspect: Cell::new(0.0),
                 zoom_shrink: Cell::new(0.0),
                 source_seconds: Cell::new(0.0),
                 source_path: RefCell::new(None),
@@ -1760,6 +1873,28 @@ impl WebcamModel {
         self.state.composition_seconds.set(seconds.max(0.0));
     }
 
+    /// The preview stage's aspect, or 0 for a stage with the screen's own.
+    pub fn set_stage_aspect(&self, aspect: f64) {
+        let aspect = if aspect.is_finite() && aspect > 0.0 {
+            aspect
+        } else {
+            0.0
+        };
+        if (self.state.stage_aspect.get() - aspect).abs() < 1e-12 {
+            return;
+        }
+        self.state.stage_aspect.set(aspect);
+        (self.state.repaint)();
+    }
+
+    /// Whether the studied auto stage widens for this composition: a camera
+    /// that is on, whose default layout is the split.
+    pub fn widens_stage(&self) -> bool {
+        self.has_track()
+            && self.settings().is_some_and(|settings| settings.enabled)
+            && self.state.layouts.borrow().default_layout == CameraLayout::SplitScreen
+    }
+
     /// How far the screen's zoom has shrunk the camera at the composition
     /// instant, from [`zoom_shrink_at`].
     pub fn set_zoom_shrink(&self, shrink: f64) {
@@ -1802,9 +1937,14 @@ impl WebcamModel {
             .map(|(width, height)| f64::from(width) / f64::from(height))
             .unwrap_or(16.0 / 9.0);
         let camera_aspect = track.camera_size.0 as f64 / f64::from(track.camera_size.1.max(1));
-        let frame = self.state.layouts.borrow().frame_at_zoomed(
+        let stage = match self.state.stage_aspect.get() {
+            aspect if aspect > 0.0 => aspect,
+            _ => video_aspect,
+        };
+        let frame = self.state.layouts.borrow().frame_at_staged(
             self.state.composition_seconds.get(),
             settings,
+            stage,
             video_aspect,
             camera_aspect,
             self.state.zoom_shrink.get(),
@@ -2734,6 +2874,62 @@ pub(super) fn composite_layout_trail_into(
     Ok(())
 }
 
+/// [`composite_layout_trail_into`] for a stage wider than the screen: each
+/// layout places the whole screen on the stage first, then the camera.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn composite_stage_trail_into(
+    stage: &mut [u8],
+    stage_size: (u32, u32),
+    frames: &[LayoutFrame],
+    screen: &[u8],
+    screen_size: (u32, u32),
+    background: Option<&[u8]>,
+    camera: &[u8],
+    camera_size: (u32, u32),
+    mask: Option<&[f32]>,
+) -> Result<(), String> {
+    let draw = |target: &mut [u8], frame: LayoutFrame| {
+        place_screen_into(
+            target,
+            stage_size,
+            screen,
+            screen_size,
+            frame.screen,
+            background,
+        );
+        composite_layout_into(
+            target,
+            stage_size,
+            LayoutFrame {
+                screen: Rect::full(),
+                ..frame
+            },
+            camera,
+            camera_size,
+            mask,
+        )
+    };
+    match frames {
+        [] => return Ok(()),
+        [frame] => return draw(stage, *frame),
+        _ => {}
+    }
+    let mut scratch = vec![0u8; stage.len()];
+    let mut sum = vec![0.0f32; stage.len()];
+    for frame in frames {
+        draw(&mut scratch, *frame)?;
+        for (s, v) in sum.iter_mut().zip(&scratch) {
+            let v = f32::from(*v);
+            *s += v * v;
+        }
+    }
+    let n = frames.len() as f32;
+    for (p, s) in stage.iter_mut().zip(&sum) {
+        *p = (s / n).sqrt().round().clamp(0.0, 255.0) as u8;
+    }
+    Ok(())
+}
+
 fn camera_surface(
     camera: &[u8],
     camera_size: (u32, u32),
@@ -2824,6 +3020,49 @@ fn shrink_screen(pixels: &mut [u8], size: (u32, u32), screen: Rect) {
     }
 }
 
+/// Draw the whole screen (`screen`, `screen_size` pixels) onto a stage of
+/// `stage_size` pixels so it covers `pane`, and fill the rest of the stage
+/// with `background` (RGBA at `stage_size`) or black.
+pub(super) fn place_screen_into(
+    stage: &mut [u8],
+    stage_size: (u32, u32),
+    screen: &[u8],
+    screen_size: (u32, u32),
+    pane: Rect,
+    background: Option<&[u8]>,
+) {
+    match background.filter(|background| background.len() == stage.len()) {
+        Some(background) => stage.copy_from_slice(background),
+        None => {
+            for pixel in stage.as_chunks_mut::<4>().0 {
+                pixel.copy_from_slice(&[0, 0, 0, 255]);
+            }
+        }
+    }
+    if stage_size.0 == 0 || stage_size.1 == 0 || screen_size.0 == 0 || screen_size.1 == 0 {
+        return;
+    }
+    let (x0, y0, x1, y1) = pixel_rect(pane, stage_size);
+    let width = x1.saturating_sub(x0);
+    let height = y1.saturating_sub(y0);
+    if width == 0 || height == 0 {
+        return;
+    }
+    let cover = screen_cover_rect_in(
+        pane,
+        f64::from(stage_size.0) / f64::from(stage_size.1),
+        f64::from(screen_size.0) / f64::from(screen_size.1),
+    );
+    let scaled = resample_rgba_from(screen, screen_size, stage_size, cover, (x0, y0, x1, y1));
+    let stride = stage_size.0 as usize * 4;
+    let row_bytes = width as usize * 4;
+    for y in 0..height as usize {
+        let source = &scaled[y * row_bytes..(y + 1) * row_bytes];
+        let target = (y0 as usize + y) * stride + x0 as usize * 4;
+        stage[target..target + row_bytes].copy_from_slice(source);
+    }
+}
+
 /// Bilinear RGBA resize of the source region `cover` into `destination`.
 ///
 /// `cover` is in normalized frame units and may reach outside the frame on the
@@ -2836,17 +3075,35 @@ fn resample_rgba(
     cover: Rect,
     destination: (u32, u32, u32, u32),
 ) -> Vec<u8> {
+    resample_rgba_from(pixels, size, size, cover, destination)
+}
+
+/// [`resample_rgba`] reading a source of `source_size` pixels while `cover`
+/// and `destination` are measured on a frame of `frame` pixels.
+fn resample_rgba_from(
+    pixels: &[u8],
+    source_size: (u32, u32),
+    frame: (u32, u32),
+    cover: Rect,
+    destination: (u32, u32, u32, u32),
+) -> Vec<u8> {
     let (x0, y0, x1, y1) = destination;
     let out_width = x1.saturating_sub(x0) as usize;
     let out_height = y1.saturating_sub(y0) as usize;
     let mut output = vec![0u8; out_width * out_height * 4];
-    if out_width == 0 || out_height == 0 || size.0 == 0 || size.1 == 0 {
+    if out_width == 0
+        || out_height == 0
+        || source_size.0 == 0
+        || source_size.1 == 0
+        || frame.0 == 0
+        || frame.1 == 0
+    {
         return output;
     }
-    let source_width = size.0 as usize;
-    let source_height = size.1 as usize;
-    let frame_width = f64::from(size.0);
-    let frame_height = f64::from(size.1);
+    let source_width = source_size.0 as usize;
+    let source_height = source_size.1 as usize;
+    let frame_width = f64::from(frame.0);
+    let frame_height = f64::from(frame.1);
     let start_x = (x0 as f64 + 0.5) / frame_width;
     let start_y = (y0 as f64 + 0.5) / frame_height;
     let base_x = (start_x - cover.x) / cover.width;
@@ -2858,14 +3115,14 @@ fn resample_rgba(
         .enumerate()
         .for_each(|(y, row)| {
             let normalized_y = base_y + y as f64 * step_y;
-            let source_y = normalized_y * frame_height - 0.5;
+            let source_y = normalized_y * f64::from(source_size.1) - 0.5;
             let clamped_y = source_y.clamp(0.0, source_height.saturating_sub(1) as f64);
             let y0_index = clamped_y as usize;
             let y1_index = (y0_index + 1).min(source_height.saturating_sub(1));
             let fy = clamped_y - y0_index as f64;
             for x in 0..out_width {
                 let normalized_x = base_x + x as f64 * step_x;
-                let source_x = normalized_x * frame_width - 0.5;
+                let source_x = normalized_x * f64::from(source_size.0) - 0.5;
                 let clamped_x = source_x.clamp(0.0, source_width.saturating_sub(1) as f64);
                 let x0_index = clamped_x as usize;
                 let x1_index = (x0_index + 1).min(source_width.saturating_sub(1));
@@ -4882,5 +5139,138 @@ mod tests {
         assert!(every > 235, "the samples all cover the middle: {every}");
         let never = pixel(&frame, 200, 5, 50)[1];
         assert!(never < 5, "the trail never reaches the left edge: {never}");
+    }
+
+    #[test]
+    fn the_auto_stage_follows_the_studied_resolver() {
+        assert!((auto_split_stage_aspect(1.6, 0.0) - 2.1625).abs() < 1e-9);
+        assert!(
+            (auto_split_stage_aspect(16.0 / 9.0, 0.0) - (16.0 / 9.0 + 9.0 / 16.0)).abs() < 1e-9
+        );
+        assert!((auto_split_stage_aspect(1.0, 0.0) - 16.0 / 9.0).abs() < 1e-9);
+        assert!((auto_split_stage_aspect(4.0 / 3.0, 0.0) - 16.0 / 9.0).abs() < 1e-9);
+        assert!((auto_split_stage_aspect(3.0, 0.0) - 2.4).abs() < 1e-9);
+        assert!((auto_split_stage_aspect(1.6, 0.1) - (0.3 + 1.6 + 0.5625) / 1.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_screen_is_contained_on_a_wider_stage() {
+        assert_eq!(contained_screen(1.6, 1.6), Rect::full());
+        let contained = contained_screen(2.1625, 1.6);
+        let width = 1.6 / 2.1625;
+        assert!((contained.width - width).abs() < 1e-9);
+        assert!((contained.x - (1.0 - width) / 2.0).abs() < 1e-9);
+        assert!(contained.y.abs() < 1e-9);
+        assert!((contained.height - 1.0).abs() < 1e-9);
+        let tall = contained_screen(1.0, 2.0);
+        assert!((tall.width - 1.0).abs() < 1e-9);
+        assert!((tall.height - 0.5).abs() < 1e-9);
+        assert!((tall.y - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_widened_split_keeps_the_screen_uncropped() {
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: true,
+            split_flip: false,
+            ..LayoutSettings::default()
+        };
+        let layer = LayerSettings {
+            enabled: true,
+            ..LayerSettings::default()
+        };
+        let frame = split.frame_at_staged(0.0, layer, 2.1625, 1.6, 1.0, 0.0);
+        let width = 1.6 / 2.1625;
+        assert!(frame.screen.x.abs() < 1e-9);
+        assert!((frame.screen.height - 1.0).abs() < 1e-9);
+        assert!((frame.screen.width - width).abs() < 1e-9);
+        assert!((frame.camera.x - frame.screen.width).abs() < 1e-9);
+        assert!((frame.camera.width - (1.0 - frame.screen.width)).abs() < 1e-9);
+        let cover = screen_cover_rect_in(frame.screen, 2.1625, 1.6);
+        assert!((cover.x - frame.screen.x).abs() < 1e-9);
+        assert!((cover.y - frame.screen.y).abs() < 1e-9);
+        assert!((cover.width - frame.screen.width).abs() < 1e-9);
+        assert!((cover.height - frame.screen.height).abs() < 1e-9);
+    }
+
+    #[test]
+    fn other_layouts_contain_the_screen_on_a_widened_stage() {
+        let layout = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            ..LayoutSettings::default()
+        };
+        let frame = layout.frame_at_staged(0.0, LayerSettings::default(), 2.1625, 1.6, 1.0, 0.0);
+        let contained = contained_screen(2.1625, 1.6);
+        assert!((frame.screen.x - contained.x).abs() < 1e-9);
+        assert!((frame.screen.y - contained.y).abs() < 1e-9);
+        assert!((frame.screen.width - contained.width).abs() < 1e-9);
+        assert!((frame.screen.height - contained.height).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_two_aspect_cover_matches_the_one_aspect_cover() {
+        for screen in [
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 1.0,
+            },
+            Rect {
+                x: 0.5,
+                y: 0.0,
+                width: 0.5,
+                height: 1.0,
+            },
+            Rect {
+                x: 0.25,
+                y: 0.25,
+                width: 0.5,
+                height: 0.5,
+            },
+            Rect {
+                x: 0.0,
+                y: 0.5,
+                width: 1.0,
+                height: 0.5,
+            },
+        ] {
+            let one = screen_cover_rect(screen);
+            let two = screen_cover_rect_in(screen, 1.6, 1.6);
+            assert!((two.x - one.x).abs() < 1e-9);
+            assert!((two.y - one.y).abs() < 1e-9);
+            assert!((two.width - one.width).abs() < 1e-9);
+            assert!((two.height - one.height).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn a_screen_placed_on_a_wider_stage_shows_the_background_beside_it() {
+        let screen = solid(20, 20, [255, 0, 0, 255]);
+        let background = solid(40, 20, [0, 255, 0, 255]);
+        let mut stage = vec![0u8; 40 * 20 * 4];
+        place_screen_into(
+            &mut stage,
+            (40, 20),
+            &screen,
+            (20, 20),
+            contained_screen(2.0, 1.0),
+            Some(&background),
+        );
+        assert_eq!(pixel(&stage, 40, 20, 10), [255, 0, 0, 255]);
+        assert_eq!(pixel(&stage, 40, 2, 10), [0, 255, 0, 255]);
+        assert_eq!(pixel(&stage, 40, 37, 10), [0, 255, 0, 255]);
+
+        let mut empty = vec![0u8; 40 * 20 * 4];
+        place_screen_into(
+            &mut empty,
+            (40, 20),
+            &screen,
+            (20, 20),
+            contained_screen(2.0, 1.0),
+            None,
+        );
+        assert_eq!(pixel(&empty, 40, 2, 10), [0, 0, 0, 255]);
     }
 }

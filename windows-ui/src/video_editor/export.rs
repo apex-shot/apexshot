@@ -86,6 +86,10 @@ pub(super) struct ExportModel {
     pub sidecar: Option<PointerSidecar>,
     /// The camera layer to bake, when the recording has one.
     pub webcam: Option<webcam::WebcamExport>,
+    /// The stage the camera layouts are placed on, in source pixels, when it
+    /// is wider than the screen; `None` keeps the screen's own shape. Only
+    /// used with a camera.
+    pub stage: Option<(u32, u32)>,
     /// The canvas around the video (fill, padding, frame, rounded corners), or
     /// None to export the video edge to edge.
     pub canvas: Option<CanvasLayout>,
@@ -354,6 +358,9 @@ struct RenderPlan {
     mapping: TimeMapping,
     /// The video rect the render paths produce.
     size: (u32, u32),
+    /// The screen's own picture inside `size`: equal to it unless the stage
+    /// is widened, then the source fitted inside the stage.
+    screen: (u32, u32),
     /// The encoded frame: the canvas when the export has one, otherwise `size`.
     output: (u32, u32),
     /// The decoded NV12 can go to the encoder unchanged: no crop, cursor,
@@ -390,17 +397,28 @@ fn plan_render(model: &ExportModel, settings: ExportSettings) -> Result<RenderPl
             })
             .collect(),
     );
-    let output = settings.dimensions(
-        model
-            .canvas
-            .as_ref()
-            .map_or(model.source_size, |canvas| canvas.size),
-    );
+    let base = model
+        .stage
+        .filter(|_| model.webcam.is_some())
+        .unwrap_or(model.source_size);
+    let output = settings.dimensions(model.canvas.as_ref().map_or(base, |canvas| canvas.size));
     let size = model
         .canvas
         .as_ref()
         .map_or(output, |canvas| canvas::video_size(canvas, output));
+    let screen = if base == model.source_size {
+        size
+    } else {
+        let scale = (f64::from(size.0) / f64::from(model.source_size.0))
+            .min(f64::from(size.1) / f64::from(model.source_size.1));
+        let even = |value: f64, max: u32| ((value.round() as u32) & !1).clamp(2, max.max(2));
+        (
+            even(f64::from(model.source_size.0) * scale, size.0),
+            even(f64::from(model.source_size.1) * scale, size.1),
+        )
+    };
     let passthrough = size == model.source_size
+        && screen == size
         && model.sidecar.is_none()
         && model.webcam.is_none()
         && model.zooms.iter().all(|zoom| zoom.hidden);
@@ -410,6 +428,7 @@ fn plan_render(model: &ExportModel, settings: ExportSettings) -> Result<RenderPl
         total,
         mapping,
         size,
+        screen,
         output,
         passthrough,
     })
@@ -521,6 +540,8 @@ fn render_range(
     }
     let fps = plan.fps;
     let size = plan.size;
+    let screen_size = plan.screen;
+    let widened = screen_size != size;
     let source = (
         f64::from(model.source_size.0),
         f64::from(model.source_size.1),
@@ -558,13 +579,14 @@ fn render_range(
     let mut scaled = if plan.passthrough {
         Vec::new()
     } else {
-        vec![0u8; size.0 as usize * size.1 as usize * 4]
+        vec![0u8; screen_size.0 as usize * screen_size.1 as usize * 4]
     };
     let mut cursor_layer = match &model.sidecar {
         Some(_) => Some(
-            ImageSurface::create(Format::ARgb32, size.0 as i32, size.1 as i32).map_err(
-                |error| End::Failed(format!("could not allocate the cursor layer: {error}")),
-            )?,
+            ImageSurface::create(Format::ARgb32, screen_size.0 as i32, screen_size.1 as i32)
+                .map_err(|error| {
+                    End::Failed(format!("could not allocate the cursor layer: {error}"))
+                })?,
         ),
         None => None,
     };
@@ -574,6 +596,24 @@ fn render_range(
         .map(|webcam| webcam.layouts.clone().clamped())
         .unwrap_or_default();
     let source_aspect = f64::from(model.source_size.0) / f64::from(model.source_size.1);
+    let mut staged = if widened {
+        vec![0u8; size.0 as usize * size.1 as usize * 4]
+    } else {
+        Vec::new()
+    };
+    let stage_background = if widened {
+        model
+            .canvas
+            .as_ref()
+            .map(|layout| canvas::video_background(layout, plan.output))
+    } else {
+        None
+    };
+    let stage_aspect = if widened {
+        f64::from(size.0) / f64::from(size.1.max(1))
+    } else {
+        source_aspect
+    };
     let camera_aspect = webcam
         .as_ref()
         .filter(|webcam| webcam.source_size.0 > 0 && webcam.source_size.1 > 0)
@@ -746,13 +786,13 @@ fn render_range(
                     view,
                     zoom::view_rect(previous.0, previous.1, source),
                     source,
-                    size,
+                    screen_size,
                     fps,
                     model.zoom_camera.motion_blur,
                 )
             };
-            let cropped =
-                trail.is_some() || !(view_is_full(view, source) && size == model.source_size);
+            let cropped = trail.is_some()
+                || !(view_is_full(view, source) && screen_size == model.source_size);
             // The GPU path only crops and scales; a blurred frame takes the CPU path.
             #[cfg(target_os = "windows")]
             if trail.is_none() {
@@ -794,9 +834,17 @@ fn render_range(
             }
             converter.to_rgba_into(&packed, model.source_size, &mut decoded);
             if let Some(trail) = trail {
-                trail.render(&decoded, model.source_size, size, &mut scaled, 16, 4.0, 4);
+                trail.render(
+                    &decoded,
+                    model.source_size,
+                    screen_size,
+                    &mut scaled,
+                    16,
+                    4.0,
+                    4,
+                );
             } else if cropped {
-                crop_scale_into(&decoded, model.source_size, view, size, &mut scaled);
+                crop_scale_into(&decoded, model.source_size, view, screen_size, &mut scaled);
             }
             let base: &[u8] = if cropped { &scaled } else { &decoded };
 
@@ -807,9 +855,9 @@ fn render_range(
             if let Some(ripple) = &ripple {
                 let pixels = ripple.warp_pixels(
                     base,
-                    size,
-                    (0.0, 0.0, f64::from(size.0), f64::from(size.1)),
-                    size,
+                    screen_size,
+                    (0.0, 0.0, f64::from(screen_size.0), f64::from(screen_size.1)),
+                    screen_size,
                 );
                 if pixels.len() == base.len() {
                     warped = Some(pixels);
@@ -826,7 +874,7 @@ fn render_range(
             if let (Some(sidecar), Some(layer)) = (&model.sidecar, cursor_layer.as_mut()) {
                 draw_cursor(
                     frame,
-                    size,
+                    screen_size,
                     view,
                     sidecar,
                     model.source.as_path(),
@@ -852,9 +900,10 @@ fn render_range(
                         model.zoom_camera.lead_in_seconds(),
                     );
                     webcam::hide_for_silence(
-                        layouts.frame_at_zoomed(
+                        layouts.frame_at_staged(
                             time,
                             webcam.settings,
+                            stage_aspect,
                             source_aspect,
                             camera_aspect,
                             shrink,
@@ -931,14 +980,29 @@ fn render_range(
                     Some((pixels, size)) => (pixels, size),
                     None => (&[][..], (0, 0)),
                 };
-                if let Err(error) = webcam::composite_layout_trail_into(
-                    frame,
-                    size,
-                    &trail,
-                    camera_pixels,
-                    camera_size,
-                    mask.as_deref(),
-                ) {
+                let composited = if widened {
+                    webcam::composite_stage_trail_into(
+                        &mut staged,
+                        size,
+                        &trail,
+                        frame,
+                        screen_size,
+                        stage_background.as_deref(),
+                        camera_pixels,
+                        camera_size,
+                        mask.as_deref(),
+                    )
+                } else {
+                    webcam::composite_layout_trail_into(
+                        frame,
+                        size,
+                        &trail,
+                        camera_pixels,
+                        camera_size,
+                        mask.as_deref(),
+                    )
+                };
+                if let Err(error) = composited {
                     let _ = decoder.kill();
                     let _ = decoder.wait();
                     return Err(End::Failed(error));
@@ -953,7 +1017,8 @@ fn render_range(
                     return Err(error);
                 }
             };
-            converter.convert_into(frame, size, &mut nv12);
+            let picture: &[u8] = if widened { &staged } else { frame };
+            converter.convert_into(picture, size, &mut nv12);
             if let Err(error) = sink.submit(nv12) {
                 let _ = decoder.kill();
                 let _ = decoder.wait();
@@ -1845,6 +1910,7 @@ mod tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            stage: None,
             canvas: None,
             crf: 0,
         };
@@ -1945,6 +2011,7 @@ mod tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            stage: None,
             canvas: None,
             crf: 18,
         };
@@ -2045,6 +2112,7 @@ mod tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            stage: None,
             canvas: None,
             crf: 20,
         };
@@ -2207,6 +2275,7 @@ mod tests {
             },
             sidecar: Some(sidecar),
             webcam: None,
+            stage: None,
             canvas: None,
             crf: 20,
         };
@@ -2283,6 +2352,7 @@ mod tests {
             },
             sidecar,
             webcam: None,
+            stage: None,
             canvas: None,
             crf: 23,
         };
@@ -2334,6 +2404,7 @@ mod tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            stage: None,
             canvas: None,
             crf: 23,
         };
@@ -2708,6 +2779,7 @@ mod tests {
                 cursor: CursorSettings::default(),
                 sidecar: None,
                 webcam: None,
+                stage: None,
                 canvas: None,
                 crf: 20,
             };
@@ -2981,6 +3053,7 @@ mod webcam_export_tests {
                 source_size: (320, 320),
                 silence: Vec::new(),
             }),
+            stage: None,
             canvas: None,
             crf: 30,
         };
@@ -3762,6 +3835,7 @@ mod webcam_export_tests {
                 source_size: (320, 320),
                 silence: Vec::new(),
             }),
+            stage: None,
             canvas: None,
             crf: 30,
         };
@@ -3918,6 +3992,7 @@ mod webcam_export_tests {
                 source_size: (320, 320),
                 silence: Vec::new(),
             }),
+            stage: None,
             canvas: None,
             crf: 30,
         };
@@ -4256,6 +4331,7 @@ mod webcam_export_tests {
                     source_size: (320, 320),
                     silence: Vec::new(),
                 }),
+                stage: None,
                 canvas: None,
                 crf: 30,
             };
@@ -4352,6 +4428,7 @@ mod webcam_export_tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            stage: None,
             canvas: None,
             crf: 18,
         };
@@ -4417,6 +4494,7 @@ mod webcam_export_tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            stage: None,
             canvas: Some(CanvasLayout {
                 size,
                 video: (320, 180),
@@ -4456,6 +4534,184 @@ mod webcam_export_tests {
             red > 150 && green < 80,
             "the video's top edge is missing: {red}, {green}"
         );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_split_default_widens_the_export_stage() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-webcam-stage-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let source = dir.join("screen.mp4");
+        if !solid_clip(&source, "0xc83232", "320x200", 5.0) {
+            eprintln!("skipping the widened stage test: ffmpeg is unavailable");
+            return;
+        }
+        let Some(track_path) = webcam_track_file(&source) else {
+            eprintln!("skipping the widened stage test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = track_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !solid_clip(&track_path, "0x00ff00", "320x320", 4.0) {
+            return;
+        }
+        let track = WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 320,
+            height: 320,
+            duration: 4.0,
+            start: 0.0,
+            x: 0.6,
+            y: 0.6,
+            w: 0.3,
+            h: 0.3,
+            shape: 1,
+            flip: false,
+        };
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+        );
+        sidecar.webcam = Some(track);
+        let sidecar_path = PointerSidecar::sidecar_path(&source);
+        if sidecar.write(&sidecar_path).is_err() {
+            return;
+        }
+
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: true,
+            split_flip: false,
+            cues: vec![LayoutCue {
+                at: 0.8,
+                layout: CameraLayout::CameraOverlay,
+                position: None,
+                cutout_x: None,
+            }],
+            transition_seconds: 0.12,
+            ..LayoutSettings::default()
+        };
+        let bubble = LayerSettings {
+            x: 0.6,
+            y: 0.6,
+            w: 0.3,
+            h: 0.3,
+            radius: 0.0,
+            ..Default::default()
+        };
+        let export = |name: &str, canvas: Option<CanvasLayout>| -> PathBuf {
+            let output = dir.join(name);
+            let model = ExportModel {
+                source: source.clone(),
+                source_size: (320, 200),
+                trim_start: 0.0,
+                trim_end: 1.5,
+                cuts: Vec::new(),
+                zooms: Vec::new(),
+                zoom_camera: crate::video_editor::zoom::ZoomCameraSettings {
+                    motion_blur: 0.0,
+                    ..Default::default()
+                },
+                cursor: CursorSettings::default(),
+                sidecar: PointerSidecar::load_next_to_video(&source),
+                webcam: Some(webcam::WebcamExport {
+                    path: track_path.clone(),
+                    settings: bubble,
+                    layouts: layouts.clone(),
+                    track_seconds: 4.0,
+                    start: 0.0,
+                    video_seconds: 4.0,
+                    last_frame: 3.95,
+                    source_size: (320, 320),
+                    silence: Vec::new(),
+                }),
+                stage: Some((432, 200)),
+                canvas,
+                crf: 30,
+            };
+            let handle = start_export(model, output.clone());
+            loop {
+                match handle.receiver.recv_timeout(Duration::from_secs(120)) {
+                    Ok(ExportUpdate::Progress { .. }) => {}
+                    Ok(ExportUpdate::Finished(path)) => {
+                        assert_eq!(path, output);
+                        break;
+                    }
+                    Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
+                    Ok(ExportUpdate::Cancelled) => panic!("export cancelled itself"),
+                    Err(error) => panic!("export did not report back: {error}"),
+                }
+            }
+            output
+        };
+        let plain = export("wide.mp4", None);
+        assert_eq!(video_dimensions(&plain), Some((432, 200)));
+        let split = frame_rgb(&plain, 0.4, (432, 200)).expect("the export decodes");
+        let [red, green, blue] = pixel(&split, 432, 100, 100);
+        assert!(
+            red > 150 && green < 90,
+            "the split screen is not red: {red}, {green}, {blue}"
+        );
+        let [red, green, blue] = pixel(&split, 432, 300, 100);
+        assert!(
+            red > 150 && green < 90,
+            "the split screen stops early: {red}, {green}, {blue}"
+        );
+        let [red, green, blue] = pixel(&split, 432, 400, 100);
+        assert!(
+            green > 150 && red < 90,
+            "the split camera is not beside the screen: {red}, {green}, {blue}"
+        );
+        let overlay = frame_rgb(&plain, 1.3, (432, 200)).expect("the export decodes");
+        let [red, green, blue] = pixel(&overlay, 432, 20, 100);
+        assert!(
+            red < 40 && green < 40 && blue < 40,
+            "the gap beside the screen is not black: {red}, {green}, {blue}"
+        );
+        let [red, green, blue] = pixel(&overlay, 432, 100, 100);
+        assert!(
+            red > 150 && green < 90,
+            "the screen is not red: {red}, {green}, {blue}"
+        );
+
+        let mut blue = vec![0u8; 432 * 200 * 4];
+        for pixel in blue.as_chunks_mut::<4>().0 {
+            pixel.copy_from_slice(&[0, 0, 255, 255]);
+        }
+        let framed = export(
+            "framed.mp4",
+            Some(CanvasLayout {
+                size: (432, 200),
+                video: (432, 200),
+                radius: 0.0,
+                background: std::sync::Arc::new(blue),
+            }),
+        );
+        let overlay = frame_rgb(&framed, 1.3, (432, 200)).expect("the export decodes");
+        let [red, green, blue] = pixel(&overlay, 432, 20, 100);
+        assert!(
+            blue > 150 && red < 90 && green < 90,
+            "the gap beside the screen lost its fill: {red}, {green}, {blue}"
+        );
+        let [red, green, blue] = pixel(&overlay, 432, 100, 100);
+        assert!(
+            red > 150 && green < 90,
+            "the screen is not red: {red}, {green}, {blue}"
+        );
+
+        let _ = fs::remove_file(&sidecar_path);
+        let _ = fs::remove_file(&track_path);
         let _ = fs::remove_dir_all(&dir);
     }
 }

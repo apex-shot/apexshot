@@ -30,6 +30,8 @@ mod imp {
         /// stage it is cut to, both in this widget's coordinates. The card can
         /// reach past the widget, over the padding.
         pub card: Cell<Option<super::CardClip>>,
+        /// The source's own aspect, or zero for the box's own aspect.
+        pub screen_aspect: Cell<f64>,
     }
 
     #[glib::object_subclass]
@@ -121,7 +123,7 @@ mod imp {
             height: f64,
             rect: (f64, f64, f64, f64),
         ) {
-            let placement = super::pane_placement(width, height, rect);
+            let placement = super::pane_placement(width, height, rect, self.screen_aspect.get());
             let (clip_x, clip_y, clip_width, clip_height) = placement.clip;
             let radius = scaled_radius(self.radius.get(), self.canvas_width.get(), clip_width)
                 .min(clip_width.min(clip_height) / 2.0);
@@ -219,6 +221,21 @@ impl RoundedClip {
         self.queue_draw();
     }
 
+    /// The source's own aspect, for a box wider than the source. 0 is the
+    /// box's own aspect.
+    pub(super) fn set_screen_aspect(&self, aspect: f64) {
+        let aspect = if aspect.is_finite() && aspect > 0.0 {
+            aspect
+        } else {
+            0.0
+        };
+        if (self.imp().screen_aspect.get() - aspect).abs() < 1e-12 {
+            return;
+        }
+        self.imp().screen_aspect.set(aspect);
+        self.queue_draw();
+    }
+
     /// Draw into a zoomed card and cut it to the stage, both in this widget's
     /// coordinates. `None` is the card at rest, which is the widget itself.
     pub(super) fn set_card(&self, card: Option<CardClip>) {
@@ -241,6 +258,9 @@ pub(super) struct PanePlacement {
     /// The whole source scaled uniformly until it covers the pane and centred
     /// on it, which the pane then crops.
     pub draw: (f64, f64, f64, f64),
+    /// Where the whole source lands, cover-fitted to the pane with its own
+    /// aspect. Equal to `draw` when the box has the source's aspect.
+    pub source: (f64, f64, f64, f64),
 }
 
 /// Place a normalized layout pane, and the whole source, in a box.
@@ -248,21 +268,46 @@ pub(super) fn pane_placement(
     width: f64,
     height: f64,
     (x, y, w, h): (f64, f64, f64, f64),
+    screen_aspect: f64,
 ) -> PanePlacement {
-    let cover = super::webcam::screen_cover_rect(super::webcam::Rect {
-        x,
-        y,
-        width: w,
-        height: h,
-    });
+    let box_aspect = width / height.max(1e-9);
+    let screen_aspect = if screen_aspect.is_finite() && screen_aspect > 0.0 {
+        screen_aspect
+    } else {
+        box_aspect
+    };
+    let cover = super::webcam::screen_cover_rect_in(
+        super::webcam::Rect {
+            x,
+            y,
+            width: w,
+            height: h,
+        },
+        box_aspect,
+        screen_aspect,
+    );
+    let source = (
+        cover.x * width,
+        cover.y * height,
+        cover.width * width,
+        cover.height * height,
+    );
+    // The child draws the source contained in the whole box, so the box is
+    // scaled uniformly until that contained picture lands on `source`.
+    let contained_width = width.min(height * screen_aspect);
+    let contained_height = contained_width / screen_aspect;
+    let offset_x = (width - contained_width) / 2.0;
+    let offset_y = (height - contained_height) / 2.0;
+    let scale = source.2 / contained_width.max(1e-9);
     PanePlacement {
         clip: (x * width, y * height, w * width, h * height),
         draw: (
-            cover.x * width,
-            cover.y * height,
-            cover.width * width,
-            cover.height * height,
+            source.0 - offset_x * scale,
+            source.1 - offset_y * scale,
+            width * scale,
+            height * scale,
         ),
+        source,
     }
 }
 
@@ -282,7 +327,7 @@ mod tests {
 
     #[test]
     fn a_landscape_split_covers_its_pane() {
-        let placement = pane_placement(320.0, 240.0, (0.0, 0.0, 0.5, 1.0));
+        let placement = pane_placement(320.0, 240.0, (0.0, 0.0, 0.5, 1.0), 0.0);
         assert_eq!(placement.clip, (0.0, 0.0, 160.0, 240.0));
         assert_eq!(placement.draw, (-80.0, 0.0, 320.0, 240.0));
         assert_eq!(placement.draw.3, placement.clip.3);
@@ -291,7 +336,7 @@ mod tests {
 
     #[test]
     fn a_portrait_split_covers_its_pane() {
-        let placement = pane_placement(240.0, 320.0, (0.0, 0.5, 1.0, 0.5));
+        let placement = pane_placement(240.0, 320.0, (0.0, 0.5, 1.0, 0.5), 0.0);
         assert_eq!(placement.clip, (0.0, 160.0, 240.0, 160.0));
         assert_eq!(placement.draw, (0.0, 80.0, 240.0, 320.0));
         assert_eq!(placement.draw.2, placement.clip.2);
@@ -300,23 +345,36 @@ mod tests {
 
     #[test]
     fn a_flipped_split_centres_the_cover_on_the_other_pane() {
-        let placement = pane_placement(320.0, 240.0, (0.5, 0.0, 0.5, 1.0));
+        let placement = pane_placement(320.0, 240.0, (0.5, 0.0, 0.5, 1.0), 0.0);
         assert_eq!(placement.clip, (160.0, 0.0, 160.0, 240.0));
         assert_eq!(placement.draw, (80.0, 0.0, 320.0, 240.0));
     }
 
     #[test]
     fn a_proportional_pane_is_its_own_cover() {
-        let placement = pane_placement(320.0, 240.0, (0.25, 0.25, 0.5, 0.5));
+        let placement = pane_placement(320.0, 240.0, (0.25, 0.25, 0.5, 0.5), 0.0);
         assert_eq!(placement.clip, (80.0, 60.0, 160.0, 120.0));
         assert_eq!(placement.draw, (80.0, 60.0, 160.0, 120.0));
     }
 
     #[test]
     fn a_full_frame_stays_unscaled() {
-        let placement = pane_placement(320.0, 240.0, (0.0, 0.0, 1.0, 1.0));
+        let placement = pane_placement(320.0, 240.0, (0.0, 0.0, 1.0, 1.0), 0.0);
         assert_eq!(placement.clip, (0.0, 0.0, 320.0, 240.0));
         assert_eq!(placement.draw, (0.0, 0.0, 320.0, 240.0));
+    }
+
+    #[test]
+    fn a_wide_box_places_the_whole_source_with_its_own_aspect() {
+        // A 432x200 box holding a 320x200 source contained in it.
+        let placement = pane_placement(432.0, 200.0, (56.0 / 432.0, 0.0, 320.0 / 432.0, 1.0), 1.6);
+        // The source fills the contained pane exactly...
+        assert!((placement.source.0 - 56.0).abs() < 1e-6);
+        assert!((placement.source.2 - 320.0).abs() < 1e-6);
+        assert!((placement.source.3 - 200.0).abs() < 1e-6);
+        // ...and the box, which already contains it there, is not moved.
+        assert!((placement.draw.0 - 0.0).abs() < 1e-6);
+        assert!((placement.draw.2 - 432.0).abs() < 1e-6);
     }
 
     #[test]
