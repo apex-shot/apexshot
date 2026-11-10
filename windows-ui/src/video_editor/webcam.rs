@@ -51,6 +51,51 @@ const PREVIEW_MAX_HEIGHT: u32 = 1280;
 pub(super) const MIN_SIZE: f64 = 0.06;
 /// The largest bubble that still reads as an overlay.
 pub(super) const MAX_SIZE: f64 = 0.9;
+/// The studied overlay size range: the camera's longest side as a fraction
+/// of the frame's shortest side.
+pub(super) const MIN_OVERLAY_SIZE_RATIO: f64 = 0.1;
+pub(super) const MAX_OVERLAY_SIZE_RATIO: f64 = 0.75;
+/// The studied overlay aspect choices, width over height.
+pub(super) const OVERLAY_ASPECTS: [(&str, f64); 5] = [
+    ("16:9", 16.0 / 9.0),
+    ("4:3", 4.0 / 3.0),
+    ("1:1", 1.0),
+    ("3:4", 3.0 / 4.0),
+    ("9:16", 9.0 / 16.0),
+];
+
+/// The studied overlay sizing: a square of `size_ratio` times the frame's
+/// shortest side, with the camera's aspect (width over height) fitted inside
+/// it. Returns the camera's width and height as fractions of the frame.
+pub(super) fn overlay_size_hw(
+    frame_aspect: f64,
+    camera_aspect: f64,
+    size_ratio: f64,
+) -> (f64, f64) {
+    let frame = if frame_aspect.is_finite() && frame_aspect > 0.0 {
+        frame_aspect
+    } else {
+        16.0 / 9.0
+    };
+    let camera = if camera_aspect.is_finite() && camera_aspect > 0.0 {
+        camera_aspect
+    } else {
+        1.0
+    };
+    let ratio = if size_ratio.is_finite() {
+        size_ratio.max(0.0)
+    } else {
+        0.0
+    };
+    // The shortest side over the width, and over the height.
+    let short_over_width = 1.0 / frame.max(1.0);
+    let short_over_height = frame.min(1.0);
+    (
+        ratio * short_over_width * camera.min(1.0),
+        ratio * short_over_height * (1.0 / camera).min(1.0),
+    )
+}
+
 /// How long a layout transition takes when the project has not said.
 const DEFAULT_TRANSITION_SECONDS: f64 = 0.45;
 /// The longest transition a project may ask for.
@@ -254,6 +299,57 @@ impl LayerSettings {
         self.h = height;
         self.x = travel_offset(alignment_x, 1.0 - width);
         self.y = travel_offset(alignment_y, 1.0 - height);
+    }
+
+    /// The bubble's width over height in the frame's pixels.
+    pub(super) fn pixel_aspect(&self, frame_aspect: f64) -> f64 {
+        let frame = if frame_aspect.is_finite() && frame_aspect > 0.0 {
+            frame_aspect
+        } else {
+            16.0 / 9.0
+        };
+        if self.w > 0.0 && self.h > 0.0 && self.w.is_finite() && self.h.is_finite() {
+            self.w * frame / self.h
+        } else {
+            1.0
+        }
+    }
+
+    /// The bubble's longest side as a fraction of the frame's shortest side.
+    pub(super) fn overlay_size_ratio(&self, frame_aspect: f64) -> f64 {
+        let frame = if frame_aspect.is_finite() && frame_aspect > 0.0 {
+            frame_aspect
+        } else {
+            16.0 / 9.0
+        };
+        // Both sides in units of the frame height.
+        let longest = (self.w * frame).max(self.h);
+        let shortest = frame.min(1.0);
+        if longest.is_finite() && longest > 0.0 {
+            longest / shortest
+        } else {
+            0.0
+        }
+    }
+
+    /// Resize to a studied size ratio at the bubble's current aspect, keeping
+    /// its alignment.
+    pub(super) fn set_overlay_size(&mut self, size_ratio: f64, frame_aspect: f64) {
+        let aspect = self.pixel_aspect(frame_aspect);
+        let (w, h) = overlay_size_hw(frame_aspect, aspect, size_ratio);
+        if w > 0.0 && h > 0.0 {
+            self.resize_overlay(w, h / w);
+        }
+    }
+
+    /// Refit the bubble to an aspect (width over height in pixels) at the
+    /// size it has, keeping its alignment.
+    pub(super) fn set_overlay_aspect(&mut self, camera_aspect: f64, frame_aspect: f64) {
+        let ratio = self.overlay_size_ratio(frame_aspect);
+        let (w, h) = overlay_size_hw(frame_aspect, camera_aspect, ratio);
+        if w > 0.0 && h > 0.0 {
+            self.resize_overlay(w, h / w);
+        }
     }
 }
 
@@ -3314,6 +3410,52 @@ mod tests {
         assert!((guarded.w - 0.2).abs() < 1e-9);
         assert!((guarded.h - 0.2).abs() < 1e-9);
         assert!((guarded.x - 0.4).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_overlay_size_is_the_longest_side_over_the_shortest_frame_side() {
+        let close =
+            |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4;
+        assert!(close(
+            overlay_size_hw(16.0 / 9.0, 16.0 / 9.0, 0.5),
+            (0.28125, 0.28125)
+        ));
+        assert!(close(overlay_size_hw(16.0 / 9.0, 1.0, 0.5), (0.28125, 0.5)));
+        assert!(close(
+            overlay_size_hw(9.0 / 16.0, 16.0 / 9.0, 0.5),
+            (0.5, 0.1582)
+        ));
+        for (frame, camera) in [
+            (16.0 / 9.0, 16.0 / 9.0),
+            (16.0 / 9.0, 1.0),
+            (9.0 / 16.0, 16.0 / 9.0),
+            (1.6, 0.75),
+        ] {
+            let (w, h) = overlay_size_hw(frame, camera, 0.5);
+            let layer = LayerSettings {
+                w,
+                h,
+                ..LayerSettings::default()
+            };
+            assert!((layer.overlay_size_ratio(frame) - 0.5).abs() < 1e-9);
+            assert!((layer.pixel_aspect(frame) - camera).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn an_aspect_change_keeps_the_size_and_the_anchor() {
+        let frame = 16.0 / 9.0;
+        let mut layer = LayerSettings::default();
+        layer.set_overlay_size(0.4, frame);
+        layer.set_overlay_alignment(1.0, 1.0);
+        layer.set_overlay_aspect(9.0 / 16.0, frame);
+        assert!((layer.overlay_size_ratio(frame) - 0.4).abs() < 1e-9);
+        assert!((layer.pixel_aspect(frame) - 9.0 / 16.0).abs() < 1e-9);
+        assert!((layer.x + layer.w - 1.0).abs() < 1e-9);
+        assert!((layer.y + layer.h - 1.0).abs() < 1e-9);
+        layer.set_overlay_size(0.6, frame);
+        assert!((layer.overlay_size_ratio(frame) - 0.6).abs() < 1e-9);
+        assert!((layer.pixel_aspect(frame) - 9.0 / 16.0).abs() < 1e-9);
     }
 
     #[test]

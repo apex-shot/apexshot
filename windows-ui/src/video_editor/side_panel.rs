@@ -1442,6 +1442,14 @@ fn webcam_shape_index(layer: &LayerSettings, frame_aspect: f64) -> Option<usize>
     })
 }
 
+/// Which studied aspect chip the bubble matches, if any.
+fn webcam_aspect_index(layer: &LayerSettings, frame_aspect: f64) -> Option<usize> {
+    let aspect = layer.pixel_aspect(webcam_frame_aspect(frame_aspect));
+    super::webcam::OVERLAY_ASPECTS
+        .iter()
+        .position(|(_, value)| (aspect / value - 1.0).abs() < 0.02)
+}
+
 fn webcam_layout_card(
     layout: CameraLayout,
     layer: Option<&LayerSettings>,
@@ -2391,13 +2399,19 @@ struct WebcamOverlayContext {
     root: GtkBox,
     position: WebcamPositionContext,
     size: FilledSlider,
+    aspects: Vec<ToggleButton>,
     shape: WebcamShapeContext,
 }
 
 impl WebcamOverlayContext {
     fn refresh(&self, layer: &LayerSettings, frame_aspect: f64) {
         self.position.refresh(layer);
-        self.size.set_value(layer.w * 100.0);
+        self.size
+            .set_value(layer.overlay_size_ratio(webcam_frame_aspect(frame_aspect)) * 100.0);
+        let aspect = webcam_aspect_index(layer, frame_aspect);
+        for (index, button) in self.aspects.iter().enumerate() {
+            button.set_active(aspect == Some(index));
+        }
         self.shape
             .refresh(webcam_shape_index(layer, frame_aspect), layer.radius);
     }
@@ -2420,9 +2434,9 @@ fn build_webcam_overlay(
     let resize = actions.resize.clone();
     let size = value_slider_control(
         &t("Size"),
-        super::webcam::MIN_SIZE * 100.0,
-        super::webcam::MAX_SIZE * 100.0,
-        layer.w * 100.0,
+        super::webcam::MIN_OVERLAY_SIZE_RATIO * 100.0,
+        super::webcam::MAX_OVERLAY_SIZE_RATIO * 100.0,
+        layer.overlay_size_ratio(webcam_frame_aspect(frame_aspect)) * 100.0,
         1.0,
         0,
         scale,
@@ -2430,9 +2444,26 @@ fn build_webcam_overlay(
     )
     .with_suffix("%");
     size.widget().set_tooltip_text(Some(&t(
-        "The bubble's width, as a percentage of the frame.",
+        "The camera's longest side, as a percentage of the frame's shortest side.",
     )));
     root.append(&size.widget());
+    root.append(&webcam_kicker(&t("ASPECT RATIO")));
+    let aspect_grid = Grid::new();
+    aspect_grid.set_column_homogeneous(true);
+    aspect_grid.set_column_spacing((4.0 * scale).round() as u32);
+    aspect_grid.set_hexpand(true);
+    aspect_grid.set_halign(Align::Fill);
+    let chip_height = (28.0 * scale).round() as i32;
+    let mut aspects = Vec::with_capacity(super::webcam::OVERLAY_ASPECTS.len());
+    for (index, (label, value)) in super::webcam::OVERLAY_ASPECTS.iter().enumerate() {
+        let button = webcam_shape_button(label, chip_height);
+        let set_aspect = actions.set_aspect.clone();
+        let value = *value;
+        button.connect_clicked(move |_| set_aspect(value));
+        aspect_grid.attach(&button, index as i32, 0, 1, 1);
+        aspects.push(button);
+    }
+    root.append(&aspect_grid);
     let shape = build_webcam_shape(
         scale,
         webcam_shape_index(layer, frame_aspect),
@@ -2445,6 +2476,7 @@ fn build_webcam_overlay(
         root,
         position,
         size,
+        aspects,
         shape,
     };
     context.refresh(layer, frame_aspect);
@@ -2709,6 +2741,7 @@ fn build_webcam_transition(
 struct WebcamContextActions {
     move_alignment: Rc<dyn Fn(bool, f64)>,
     resize: Rc<dyn Fn(f64)>,
+    set_aspect: Rc<dyn Fn(f64)>,
     set_shape: Rc<dyn Fn(u8)>,
     set_radius: Rc<dyn Fn(f64)>,
     set_split_flip: Rc<dyn Fn(bool)>,
@@ -2726,6 +2759,7 @@ impl WebcamContextActions {
         Self {
             move_alignment: Rc::new(|_, _| {}),
             resize: Rc::new(|_| {}),
+            set_aspect: Rc::new(|_| {}),
             set_shape: Rc::new(|_| {}),
             set_radius: Rc::new(|_| {}),
             set_split_flip: Rc::new(|_| {}),
@@ -2927,10 +2961,18 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             let syncing = syncing.clone();
             Rc::new(move |value| {
                 if !syncing.get() {
-                    timeline.update_webcam(|layer| {
-                        let aspect = layer.h / layer.w;
-                        layer.resize_overlay(value / 100.0, aspect);
-                    });
+                    let frame = timeline.webcam_frame_aspect();
+                    timeline.update_webcam(|layer| layer.set_overlay_size(value / 100.0, frame));
+                }
+            })
+        },
+        set_aspect: {
+            let timeline = timeline.clone();
+            let syncing = syncing.clone();
+            Rc::new(move |aspect| {
+                if !syncing.get() {
+                    let frame = timeline.webcam_frame_aspect();
+                    timeline.update_webcam(|layer| layer.set_overlay_aspect(aspect, frame));
                 }
             })
         },

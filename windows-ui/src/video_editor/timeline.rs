@@ -2162,9 +2162,11 @@ impl Data {
     /// camera layer's global shape, as one undo step with the layout.
     ///
     /// The shape is fitted to the recording's frame aspect so a circle stays
-    /// round on screen, and both dimensions scale together to stay inside the
-    /// layer's size bounds. The layer keeps the alignment it had, so a preset
-    /// taken at an edge stays on that edge instead of drifting off it.
+    /// round on screen, at the size the layer already had (its longest side
+    /// against the frame's shortest), and both dimensions scale together to
+    /// stay inside the layer's size bounds. The layer keeps the alignment it
+    /// had, so a preset taken at an edge stays on that edge instead of
+    /// drifting off it.
     fn set_webcam_editing_layout(
         &mut self,
         layout: super::webcam::CameraLayout,
@@ -2202,9 +2204,9 @@ impl Data {
         if let (Some(shape), Some(layer)) = (overlay_shape, next_layer.as_mut()) {
             let previous = (layer.w, layer.h, layer.radius);
             let radius = super::webcam::radius_for_shape(shape);
-            layer.resize_overlay(
-                layer.w,
-                self.frame_aspect() * super::webcam::aspect_for_shape(shape),
+            layer.set_overlay_aspect(
+                1.0 / super::webcam::aspect_for_shape(shape),
+                self.frame_aspect(),
             );
             layer.radius = radius;
             layer_changed = (layer.w - previous.0).abs() > f64::EPSILON
@@ -2537,6 +2539,11 @@ impl Timeline {
     pub fn webcam_settings(&self) -> Option<super::webcam::LayerSettings> {
         let webcam = self.data.borrow().webcam.clone()?;
         webcam.settings()
+    }
+
+    /// The recording frame's width over height, for sizing the camera layer.
+    pub fn webcam_frame_aspect(&self) -> f64 {
+        self.data.borrow().frame_aspect()
     }
 
     /// Change the camera layer: the preview redraws from it and the autosave
@@ -7886,8 +7893,12 @@ mod tests {
         let expected_height =
             after.w * data.frame_aspect() * super::super::webcam::aspect_for_shape(2);
         assert!((after.h - expected_height).abs() < 1e-9);
-        assert!((after.w - before.w).abs() < 1e-9);
-        assert!((after.x - before.x).abs() < 1e-9);
+        assert!(
+            (after.overlay_size_ratio(data.frame_aspect())
+                - before.overlay_size_ratio(data.frame_aspect()))
+            .abs()
+                < 1e-9
+        );
         let (before_x, before_y) = before.overlay_alignment();
         let (after_x, after_y) = after.overlay_alignment();
         assert!((after_x - before_x).abs() < 1e-9);
@@ -8003,7 +8014,12 @@ mod tests {
         assert!((y - 1.0).abs() < 1e-9, "the shape stays on the bottom edge");
         assert!((shaped.x + shaped.w - 1.0).abs() < 1e-9);
         assert!((shaped.y + shaped.h - 1.0).abs() < 1e-9);
-        assert!((shaped.w - corner.w).abs() < 1e-9);
+        assert!(
+            (shaped.overlay_size_ratio(data.frame_aspect())
+                - corner.overlay_size_ratio(data.frame_aspect()))
+            .abs()
+                < 1e-9
+        );
 
         let mut centred = shaped;
         centred.set_overlay_alignment(0.5, 0.5);
