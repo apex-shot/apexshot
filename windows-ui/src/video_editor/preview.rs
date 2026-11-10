@@ -16,8 +16,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use std::rc::Rc;
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
 /// Frames are decoded small enough that a raw RGBA frame crosses the pipe
@@ -63,14 +64,68 @@ struct State {
     still_at: Option<f64>,
 }
 
-/// The raw frame last shown while a warp is running, kept so a changing ripple
-/// can re-warp it without decoding again. Holding it is only worth the memory
-/// during the ripple's visible lifetime.
+/// The latest decoded frame, retained so effect changes can repaint without decoding.
 struct RawFrame {
     generation: u64,
     width: u32,
     height: u32,
+    pixels: Arc<Vec<u8>>,
+}
+
+type CameraTrail = (super::zoom::ViewRect, super::zoom::ViewRect, f64, f64);
+
+/// Where the zoomed card is this frame and the frame before, in stage pixels,
+/// for the blur that smears its edges over the background.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct CardLayer {
+    pub now: (f64, f64, f64, f64),
+    pub previous: (f64, f64, f64, f64),
+    /// The stage's size in the same units.
+    pub stage: (f64, f64),
+    /// The corner radius as a fraction of the card's width.
+    pub radius: f64,
+    pub fps: f64,
+    pub amount: f64,
+}
+
+/// The card layer is drawn at stage size, capped so playback keeps up.
+const MAX_LAYER_EDGE: f64 = 1600.0;
+
+fn card_layer_size(stage: (f64, f64)) -> (u32, u32) {
+    let scale = (MAX_LAYER_EDGE / stage.0.max(1.0))
+        .min(MAX_LAYER_EDGE / stage.1.max(1.0))
+        .min(1.0);
+    (
+        ((stage.0 * scale).round() as u32).max(2),
+        ((stage.1 * scale).round() as u32).max(2),
+    )
+}
+
+struct EffectJob {
+    generation: u64,
+    revision: u64,
+    size: (u32, u32),
+    pixels: Arc<Vec<u8>>,
+    ripple: Option<PreviewRipple>,
+    trail: Option<CameraTrail>,
+    card: Option<CardLayer>,
+    playing: bool,
+}
+
+struct EffectFrame {
+    generation: u64,
+    revision: u64,
+    size: (u32, u32),
     pixels: Vec<u8>,
+    /// A stage-sized, premultiplied card layer rather than a screen frame.
+    layer: bool,
+}
+
+#[derive(Default)]
+struct EffectQueue {
+    job: Mutex<Option<EffectJob>>,
+    ready: Condvar,
+    stopped: AtomicBool,
 }
 
 /// The stage's decoder. `Picture` and the presentation tick live on the main
@@ -80,35 +135,64 @@ pub(super) struct Preview {
     state: Rc<RefCell<State>>,
     shared: Arc<Shared>,
     frames: Receiver<Frame>,
+    effects: Arc<EffectQueue>,
+    effected_frames: Receiver<EffectFrame>,
+    effect_revision: Cell<u64>,
+    shown_revision: Cell<u64>,
     generation: Rc<Cell<u64>>,
     ripple: RefCell<Option<PreviewRipple>>,
     ripple_dirty: Cell<bool>,
+    trail: Cell<Option<CameraTrail>>,
+    trail_dirty: Cell<bool>,
+    trail_playing: Cell<bool>,
+    card: Cell<Option<CardLayer>>,
+    /// The full-stage picture the card layer shows in, and the card it stands in for.
+    card_layer: RefCell<Option<(Picture, gtk4::Widget)>>,
     raw: RefCell<Option<RawFrame>>,
 }
 
 impl Preview {
     pub fn new(picture: Picture) -> Rc<Self> {
-        let (sender, receiver) = mpsc::channel();
+        let (sender, receiver) = mpsc::sync_channel(2);
         let shared = Arc::new(Shared::default());
         {
             let shared = shared.clone();
             std::thread::spawn(move || decode_loop(shared, sender));
+        }
+        let effects = Arc::new(EffectQueue::default());
+        let (effect_sender, effected_frames) = mpsc::sync_channel(1);
+        {
+            let effects = effects.clone();
+            std::thread::spawn(move || effect_loop(effects, effect_sender));
         }
         let preview = Rc::new(Self {
             picture,
             state: Rc::new(RefCell::new(State::default())),
             shared,
             frames: receiver,
+            effects,
+            effected_frames,
+            effect_revision: Cell::new(0),
+            shown_revision: Cell::new(0),
             generation: Rc::new(Cell::new(0)),
             ripple: RefCell::new(None),
             ripple_dirty: Cell::new(false),
+            trail: Cell::new(None),
+            trail_dirty: Cell::new(false),
+            trail_playing: Cell::new(false),
+            card: Cell::new(None),
+            card_layer: RefCell::new(None),
             raw: RefCell::new(None),
         });
         glib::timeout_add_local(Duration::from_millis(16), {
-            let preview = preview.clone();
+            let preview = Rc::downgrade(&preview);
             move || {
-                preview.present();
-                glib::ControlFlow::Continue
+                if let Some(preview) = preview.upgrade() {
+                    preview.present();
+                    glib::ControlFlow::Continue
+                } else {
+                    glib::ControlFlow::Break
+                }
             }
         });
         preview
@@ -131,6 +215,10 @@ impl Preview {
         self.cancel();
         *self.ripple.borrow_mut() = None;
         self.ripple_dirty.set(false);
+        self.trail.set(None);
+        self.trail_dirty.set(false);
+        self.card.set(None);
+        self.hide_card_layer();
         *self.raw.borrow_mut() = None;
     }
 
@@ -144,6 +232,28 @@ impl Preview {
         }
         *slot = ripple;
         self.ripple_dirty.set(true);
+    }
+
+    pub fn set_trail(&self, trail: Option<CameraTrail>, card: Option<CardLayer>, playing: bool) {
+        let changed = self.trail.replace(trail) != trail;
+        let card_changed = self.card.replace(card) != card;
+        let mode_changed = self.trail_playing.replace(playing) != playing;
+        if changed || card_changed || mode_changed {
+            self.trail_dirty.set(true);
+        }
+    }
+
+    /// Give the preview the full-stage picture the moving card's blur shows in,
+    /// and the sharp card it hides while it does.
+    pub fn set_card_layer(&self, layer: Picture, card: gtk4::Widget) {
+        *self.card_layer.borrow_mut() = Some((layer, card));
+    }
+
+    fn hide_card_layer(&self) {
+        if let Some((layer, card)) = self.card_layer.borrow().as_ref() {
+            layer.set_visible(false);
+            card.set_opacity(1.0);
+        }
     }
 
     /// Show the frame at a source time. While playing, the stream is only
@@ -207,68 +317,52 @@ impl Preview {
     /// that is already stale are dropped instead of flashing on screen.
     fn present(&self) {
         let newest = self.newest_frame();
-        let ripple = self.ripple.borrow().clone();
-        let dirty = self.ripple_dirty.replace(false);
-
+        let dirty = self.ripple_dirty.replace(false) | self.trail_dirty.replace(false);
+        let changed = newest.is_some() || dirty;
         if let Some(frame) = newest {
-            match &ripple {
-                Some(ripple) => self.present_warped(ripple, frame),
-                None => {
-                    *self.raw.borrow_mut() = None;
-                    self.show(frame.pixels, frame.width, frame.height);
-                }
-            }
-            return;
+            *self.raw.borrow_mut() = Some(RawFrame {
+                generation: frame.generation,
+                width: frame.width,
+                height: frame.height,
+                pixels: Arc::new(frame.pixels),
+            });
         }
-        // While the stream is running, every new frame warps with the ages of
-        // its own arrival; re-warping the same still between them only repeats
-        // that work. A paused playhead does need this path: its frame is static
-        // and a scrub or effect change has to reach the picture without a new
-        // decode.
-        if !dirty || self.state.borrow().playing {
-            return;
-        }
-        match &ripple {
-            Some(ripple) => {
-                let warped = {
-                    let raw = self.raw.borrow();
-                    raw.as_ref()
-                        .filter(|raw| raw.generation == self.generation.get())
-                        .map(|raw| {
-                            (
-                                warp_frame(ripple, &raw.pixels, (raw.width, raw.height)),
-                                raw.width,
-                                raw.height,
-                            )
-                        })
-                };
-                if let Some((pixels, width, height)) = warped.filter(|warped| !warped.0.is_empty())
-                {
-                    self.show(pixels, width, height);
-                }
-            }
-            None => {
-                if let Some(raw) = self.raw.borrow_mut().take() {
-                    self.show(raw.pixels, raw.width, raw.height);
-                }
+        if changed {
+            let revision = self.effect_revision.get().wrapping_add(1);
+            self.effect_revision.set(revision);
+            let raw = self.raw.borrow();
+            let job = raw
+                .as_ref()
+                .filter(|raw| raw.generation == self.generation.get())
+                .map(|raw| EffectJob {
+                    generation: raw.generation,
+                    revision,
+                    size: (raw.width, raw.height),
+                    pixels: raw.pixels.clone(),
+                    ripple: self.ripple.borrow().clone(),
+                    trail: self.trail.get(),
+                    card: self.card.get(),
+                    playing: self.trail_playing.get(),
+                });
+            if let Ok(mut slot) = self.effects.job.try_lock() {
+                *slot = job;
+                self.effects.ready.notify_one();
+            } else {
+                self.trail_dirty.set(true);
             }
         }
-    }
-
-    fn present_warped(&self, ripple: &PreviewRipple, frame: Frame) {
-        let warped = warp_frame(ripple, &frame.pixels, (frame.width, frame.height));
-        if warped.is_empty() {
-            *self.raw.borrow_mut() = None;
-            self.show(frame.pixels, frame.width, frame.height);
-            return;
+        while let Ok(frame) = self.effected_frames.try_recv() {
+            let valid_revision = accepts_effect_frame(
+                self.state.borrow().playing,
+                frame.revision,
+                self.shown_revision.get(),
+                self.effect_revision.get(),
+            );
+            if frame.generation == self.generation.get() && valid_revision {
+                self.shown_revision.set(frame.revision);
+                self.show(frame.pixels, frame.size.0, frame.size.1, frame.layer);
+            }
         }
-        self.show(warped, frame.width, frame.height);
-        *self.raw.borrow_mut() = Some(RawFrame {
-            generation: frame.generation,
-            width: frame.width,
-            height: frame.height,
-            pixels: frame.pixels,
-        });
     }
 
     fn newest_frame(&self) -> Option<Frame> {
@@ -283,21 +377,152 @@ impl Preview {
         newest.filter(|frame| frame.generation == self.generation.get())
     }
 
-    fn show(&self, pixels: Vec<u8>, width: u32, height: u32) {
+    fn show(&self, pixels: Vec<u8>, width: u32, height: u32, layer: bool) {
         let bytes = glib::Bytes::from_owned(pixels);
+        let format = if layer {
+            gdk::MemoryFormat::R8g8b8a8Premultiplied
+        } else {
+            gdk::MemoryFormat::R8g8b8a8
+        };
         let texture = gdk::MemoryTexture::new(
             width as i32,
             height as i32,
-            gdk::MemoryFormat::R8g8b8a8,
+            format,
             &bytes,
             width as usize * 4,
         );
+        if layer {
+            // The moving card is drawn whole into the stage layer, edges and
+            // all, so the sharp card steps aside while it shows.
+            if let Some((picture, card)) = self.card_layer.borrow().as_ref() {
+                picture.set_paintable(Some(&texture));
+                picture.set_visible(true);
+                card.set_opacity(0.0);
+            }
+            return;
+        }
         self.picture.set_paintable(Some(&texture));
         self.picture.set_visible(true);
+        self.hide_card_layer();
     }
 }
 
-fn decode_loop(shared: Arc<Shared>, sender: Sender<Frame>) {
+fn accepts_effect_frame(playing: bool, revision: u64, shown: u64, latest: u64) -> bool {
+    if playing {
+        revision > shown
+    } else {
+        revision == latest
+    }
+}
+
+impl Drop for Preview {
+    fn drop(&mut self) {
+        let _slot = self.effects.job.lock().unwrap();
+        self.effects.stopped.store(true, Ordering::Relaxed);
+        self.effects.ready.notify_one();
+    }
+}
+
+fn effect_loop(queue: Arc<EffectQueue>, sender: mpsc::SyncSender<EffectFrame>) {
+    loop {
+        let job = {
+            let mut slot = queue.job.lock().unwrap();
+            while slot.is_none() && !queue.stopped.load(Ordering::Relaxed) {
+                slot = queue.ready.wait(slot).unwrap();
+            }
+            if queue.stopped.load(Ordering::Relaxed) {
+                return;
+            }
+            slot.take().unwrap()
+        };
+        let warped = job
+            .ripple
+            .as_ref()
+            .map(|ripple| warp_frame(ripple, &job.pixels, job.size));
+        let pixels = warped
+            .as_deref()
+            .filter(|pixels| !pixels.is_empty())
+            .unwrap_or(&job.pixels);
+        // A moving card is blurred whole over the stage, so its edges smear
+        // across the background too.
+        if let Some(card) = job.card {
+            let output_size = card_layer_size(card.stage);
+            if let Some(trail) = super::motion_blur::CardTrail::new(
+                card.now,
+                card.previous,
+                card.stage,
+                output_size,
+                card.fps,
+                card.amount,
+                card.radius,
+            ) {
+                let mut rendered = vec![0; output_size.0 as usize * output_size.1 as usize * 4];
+                let (quality, span, anisotropy) = if job.playing {
+                    (6, 16.0, 1)
+                } else {
+                    (16, 4.0, 4)
+                };
+                trail.render(
+                    pixels,
+                    job.size,
+                    output_size,
+                    &mut rendered,
+                    quality,
+                    span,
+                    anisotropy,
+                );
+                let result = EffectFrame {
+                    generation: job.generation,
+                    revision: job.revision,
+                    size: output_size,
+                    pixels: rendered,
+                    layer: true,
+                };
+                if sender.send(result).is_err() {
+                    return;
+                }
+                continue;
+            }
+        }
+        let trail = job.trail.and_then(|(now, before, fps, amount)| {
+            super::motion_blur::ScreenTrail::in_camera_coordinates(
+                now, before, job.size, fps, amount,
+            )
+        });
+        let pixels = if let Some(trail) = trail {
+            let mut rendered = vec![0; pixels.len()];
+            let (quality, span, anisotropy) = if job.playing {
+                (6, 16.0, 1)
+            } else {
+                (16, 4.0, 4)
+            };
+            trail.render(
+                pixels,
+                job.size,
+                job.size,
+                &mut rendered,
+                quality,
+                span,
+                anisotropy,
+            );
+            rendered
+        } else {
+            pixels.to_vec()
+        };
+        let result = EffectFrame {
+            generation: job.generation,
+            revision: job.revision,
+            size: job.size,
+            pixels,
+            layer: false,
+        };
+        if sender.send(result).is_err() {
+            return;
+        }
+    }
+}
+
+fn decode_loop(shared: Arc<Shared>, sender: mpsc::SyncSender<Frame>) {
     loop {
         let Some(job) = shared.slot.lock().unwrap().take() else {
             std::thread::sleep(Duration::from_millis(8));
@@ -307,7 +532,7 @@ fn decode_loop(shared: Arc<Shared>, sender: Sender<Frame>) {
     }
 }
 
-fn decode(shared: &Shared, sender: &Sender<Frame>, job: Job) {
+fn decode(shared: &Shared, sender: &mpsc::SyncSender<Frame>, job: Job) {
     let frame_len = job.width as usize * job.height as usize * 4;
     if frame_len == 0 {
         return;
@@ -339,7 +564,15 @@ fn decode(shared: &Shared, sender: &Sender<Frame>, job: Job) {
             height: job.height,
             pixels: buffer.clone(),
         };
-        if sender.send(frame).is_err() {
+        let sent = if job.realtime {
+            match sender.try_send(frame) {
+                Ok(()) | Err(mpsc::TrySendError::Full(_)) => true,
+                Err(mpsc::TrySendError::Disconnected(_)) => false,
+            }
+        } else {
+            sender.send(frame).is_ok()
+        };
+        if !sent {
             break;
         }
         if !job.realtime {
@@ -390,6 +623,59 @@ mod tests {
     use crate::recording::editor::click_effect::{ripple_pull_px, RIPPLE_PULL_SIZE_01};
     use crate::recording::editor::ripple_preview::{PreviewRipple, PreviewRippleClick};
     use crate::video_editor::zoom;
+
+    #[test]
+    fn worker_repaints_and_terminates_after_a_blur_job() {
+        let queue = std::sync::Arc::new(super::EffectQueue::default());
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        let worker_queue = queue.clone();
+        let worker = std::thread::spawn(move || super::effect_loop(worker_queue, sender));
+        let size = (32, 4);
+        let mut pixels = vec![0u8; size.0 as usize * size.1 as usize * 4];
+        for y in 0..4 {
+            for x in 0..32 {
+                let i = (y * 32 + x) * 4;
+                let value = if x >= 16 { 255 } else { 0 };
+                pixels[i..i + 4].copy_from_slice(&[value, value, value, 255]);
+            }
+        }
+        *queue.job.lock().unwrap() = Some(super::EffectJob {
+            generation: 7,
+            revision: 9,
+            size,
+            pixels: std::sync::Arc::new(pixels),
+            ripple: None,
+            trail: Some(((0.0, 0.0, 32.0, 4.0), (8.0, 0.0, 32.0, 4.0), 60.0, 1.0)),
+            card: None,
+            playing: false,
+        });
+        queue.ready.notify_one();
+        let frame = receiver
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        assert_eq!((frame.generation, frame.revision), (7, 9));
+        let pixel = frame.pixels[4 * 12];
+        assert!(
+            pixel > 0 && pixel < 255,
+            "expected an intermediate edge, got {pixel}"
+        );
+        {
+            let _slot = queue.job.lock().unwrap();
+            queue
+                .stopped
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            queue.ready.notify_one();
+        }
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn playback_presents_completed_frames_without_starving_and_pause_rejects_stale_frames() {
+        assert!(super::accepts_effect_frame(true, 4, 3, 10));
+        assert!(!super::accepts_effect_frame(true, 3, 3, 10));
+        assert!(!super::accepts_effect_frame(false, 4, 3, 10));
+        assert!(super::accepts_effect_frame(false, 10, 3, 10));
+    }
 
     fn gradient(size: (u32, u32)) -> Vec<u8> {
         let (width, height) = size;

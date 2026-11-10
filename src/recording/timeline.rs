@@ -869,7 +869,9 @@ mod tests {
             8.0,
         );
         assert_eq!(zooms.len(), 1);
-        assert_eq!(zooms[0].center_time, 4.0);
+        // The press seeds at its release too, so the range centres between
+        // the button-down (4.0) and button-up (4.5) seeds.
+        assert_eq!(zooms[0].center_time, 4.25);
         assert_eq!(zooms[0].start, 4.0 - auto_zoom::LEAD_SECONDS);
         assert_eq!(zooms[0].center, (320.0, 200.0));
     }

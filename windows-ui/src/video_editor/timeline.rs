@@ -36,7 +36,8 @@ use super::history::EditHistory;
 const PLACEHOLDER_SECONDS: f64 = 30.0;
 const FIT_SCALE_RANGE: f64 = 7.0;
 const MIN_CLIP_SECONDS: f64 = 0.1;
-const DEFAULT_ZOOM_SCALE: f64 = 1.8;
+const DEFAULT_ZOOM_SCALE: f64 = 2.0;
+const DEFAULT_ZOOM_SECONDS: f64 = 3.0;
 const DEFAULT_EFFECT_SECONDS: f64 = 1.8;
 const MIN_ZOOM_SCALE: f64 = 1.2;
 const MAX_ZOOM_SCALE: f64 = 5.0;
@@ -150,6 +151,7 @@ struct Data {
     path: Option<PathBuf>,
     duration: f64,
     frame_size: Option<(u32, u32)>,
+    fps: f64,
     trim_start: f64,
     trim_end: f64,
     playhead: f64,
@@ -170,6 +172,13 @@ struct Data {
     zoom_selection_epoch: u64,
     selected_hide: Option<usize>,
     clipboard: Option<ClipTemplate>,
+    /// The scale and instant flag of the zoom the user last edited; new zooms
+    /// start from it, as in the studied build.
+    last_zoom_style: Option<(f64, bool)>,
+    /// The recording has pointer samples, so new zooms can follow the pointer.
+    pointer_available: bool,
+    /// The Add zoom tool is armed: a click on the preview places a zoom.
+    add_zoom_tool: bool,
     /// Where the pointer sits on each pill lane, in composition time. Copy and
     /// Cut put a clip aside invisibly, so the lane draws that clip under the
     /// pointer as a ghost to show what a click would place.
@@ -222,6 +231,7 @@ struct EditSnapshot {
     path: Option<PathBuf>,
     duration: f64,
     frame_size: Option<(u32, u32)>,
+    fps: f64,
     frames: Vec<gtk4::gdk_pixbuf::Pixbuf>,
     trim_start: f64,
     trim_end: f64,
@@ -596,6 +606,7 @@ impl Data {
         self.path = None;
         self.duration = 0.0;
         self.frame_size = None;
+        self.fps = 0.0;
         self.trim_start = 0.0;
         self.trim_end = 0.0;
         self.playhead = 0.0;
@@ -611,6 +622,9 @@ impl Data {
         self.selected_hide = None;
         self.zoom_selection_epoch = 0;
         self.clipboard = None;
+        self.last_zoom_style = None;
+        self.pointer_available = false;
+        self.add_zoom_tool = false;
         self.hover_zoom = None;
         self.hover_hide = None;
         self.dragging_effect = false;
@@ -630,6 +644,7 @@ impl Data {
             path: self.path.clone(),
             duration: self.duration,
             frame_size: self.frame_size,
+            fps: self.fps,
             frames: self.frames.clone(),
             trim_start: self.trim_start,
             trim_end: self.trim_end,
@@ -727,6 +742,7 @@ impl Data {
         self.path = snapshot.path;
         self.duration = snapshot.duration;
         self.frame_size = snapshot.frame_size;
+        self.fps = snapshot.fps;
         self.trim_start = snapshot.trim_start;
         self.trim_end = snapshot.trim_end;
         self.cuts = snapshot.cuts;
@@ -802,6 +818,7 @@ impl Data {
                 speed: self.zoom_camera.speed,
                 smoothness: self.zoom_camera.smoothness,
                 start_early: self.zoom_camera.start_early,
+                motion_blur: self.zoom_camera.motion_blur,
             },
             cursor_hide_clips: self
                 .hide_clips
@@ -877,6 +894,8 @@ impl Data {
             speed: file.zoom_camera.speed,
             smoothness: file.zoom_camera.smoothness,
             start_early: file.zoom_camera.start_early,
+            motion_blur: file.zoom_camera.motion_blur,
+            frame_rate: super::zoom::ZoomCameraSettings::default().frame_rate,
         }
         .clamped();
         if let (Some(webcam), Some(layer)) = (self.webcam.as_ref(), file.webcam.as_ref()) {
@@ -1077,16 +1096,37 @@ impl Data {
         }
         if index.is_some() {
             self.selected = false;
+            // Selecting a clip puts the Add zoom tool away, as in the studied build.
+            self.add_zoom_tool = false;
         }
         if track == EffectTrack::Zoom && index.is_some() {
             self.zoom_selection_epoch = self.zoom_selection_epoch.wrapping_add(1);
         }
     }
 
-    /// Drop the toolbar's default-length effect at `start`, in composition
-    /// time. Refused when there is no room left or it would overlap a sibling,
-    /// which is what the source editor does instead of stacking pills.
     fn add_effect(&mut self, track: EffectTrack, start: f64) -> Option<usize> {
+        self.add_effect_at(track, start, None)
+    }
+
+    /// Drop a default-length effect at `start`, in composition time.
+    ///
+    /// A zoom dropped inside another splits that one at the playhead, so the
+    /// two halves keep their framing instead of stacking pills on one span. A
+    /// new zoom starts from the scale and snap flag the user last edited, and
+    /// it follows the pointer only when the recording has samples for it.
+    /// A hide is refused when there is no room left or it would overlap a
+    /// sibling, which is what the studied build does instead of stacking
+    /// pills.
+    ///
+    /// A target point, in source pixels, makes the zoom Manual and aims it
+    /// there; that is what a click on the preview with the Add zoom tool
+    /// places.
+    fn add_effect_at(
+        &mut self,
+        track: EffectTrack,
+        start: f64,
+        target: Option<(f64, f64)>,
+    ) -> Option<usize> {
         if !self.has_media() {
             return None;
         }
@@ -1095,12 +1135,80 @@ impl Data {
             return None;
         }
         let start = start.clamp(0.0, (limit - MIN_CLIP_SECONDS).max(0.0));
-        let end = (start + DEFAULT_EFFECT_SECONDS).min(limit);
         let before = self.snapshot();
-        let index = self.insert_effect(track, start, end, DEFAULT_ZOOM_SCALE, false)?;
-        self.select_effect(track, Some(index));
-        self.record_edit(before);
-        Some(index)
+        match track {
+            EffectTrack::Zoom => {
+                let target = match (target, self.frame_size) {
+                    (None, _) => None,
+                    (Some((x, y)), Some((width, height))) if x.is_finite() && y.is_finite() => {
+                        Some((
+                            x.clamp(0.0, f64::from(width)),
+                            y.clamp(0.0, f64::from(height)),
+                        ))
+                    }
+                    _ => return None,
+                };
+                if let Some(index) = self
+                    .zoom_clips
+                    .iter()
+                    .position(|clip| clip.start < start && start < clip.end)
+                {
+                    let clip = self.zoom_clips[index];
+                    if start - clip.start < MIN_CLIP_SECONDS || clip.end - start < MIN_CLIP_SECONDS
+                    {
+                        return None;
+                    }
+                    self.zoom_clips[index].end = start;
+                    let mut right = ZoomClip { start, ..clip };
+                    if let Some(center) = target {
+                        right.mode = ZoomMode::Manual;
+                        right.center = center;
+                    }
+                    self.zoom_clips.insert(index + 1, right);
+                    self.select_effect(track, Some(index + 1));
+                    self.record_edit(before);
+                    return Some(index + 1);
+                }
+                let next_start = self
+                    .zoom_clips
+                    .iter()
+                    .filter(|clip| clip.start >= start)
+                    .map(|clip| clip.start)
+                    .reduce(f64::min)
+                    .unwrap_or(limit);
+                let end = (start + DEFAULT_ZOOM_SECONDS).min(next_start).min(limit);
+                if end - start < MIN_CLIP_SECONDS {
+                    return None;
+                }
+                let scale = self
+                    .last_zoom_style
+                    .map(|(scale, _)| scale)
+                    .unwrap_or(DEFAULT_ZOOM_SCALE)
+                    .clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+                let instant = self.last_zoom_style.is_some_and(|(_, instant)| instant);
+                let mode = if target.is_none() && self.pointer_available {
+                    ZoomMode::Auto
+                } else {
+                    ZoomMode::Manual
+                };
+                let index = self.insert_effect(track, start, end, scale, false)?;
+                self.zoom_clips[index].mode = mode;
+                self.zoom_clips[index].instant = instant;
+                if let Some(center) = target {
+                    self.zoom_clips[index].center = center;
+                }
+                self.select_effect(track, Some(index));
+                self.record_edit(before);
+                Some(index)
+            }
+            EffectTrack::Hide => {
+                let end = (start + DEFAULT_EFFECT_SECONDS).min(limit);
+                let index = self.insert_effect(track, start, end, DEFAULT_ZOOM_SCALE, false)?;
+                self.select_effect(track, Some(index));
+                self.record_edit(before);
+                Some(index)
+            }
+        }
     }
 
     /// Insert one effect somewhere in the lane, keeping the lane sorted and
@@ -1366,6 +1474,43 @@ impl Data {
         (clip.mode == ZoomMode::Manual).then_some((clip.scale, clip.center))
     }
 
+    /// Arm or put away the Add zoom tool. Arming pauses and clears the
+    /// selection, so the preview shows the whole frame to aim at. Returns
+    /// whether anything changed.
+    fn set_add_zoom_tool(&mut self, armed: bool) -> bool {
+        if armed && !self.has_media() {
+            return false;
+        }
+        if self.add_zoom_tool == armed {
+            return false;
+        }
+        self.add_zoom_tool = armed;
+        if armed {
+            self.playing = false;
+            self.selected = false;
+            self.selected_zoom = None;
+            self.selected_hide = None;
+        }
+        true
+    }
+
+    /// The armed tool as the preview draws it. Playing hides it, as in the
+    /// studied build, without putting it away.
+    fn add_zoom_tool(&self) -> Option<AddZoomTool> {
+        if !self.add_zoom_tool || self.playing {
+            return None;
+        }
+        let scale = self
+            .last_zoom_style
+            .map(|(scale, _)| scale)
+            .unwrap_or(DEFAULT_ZOOM_SCALE)
+            .clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+        Some(AddZoomTool {
+            scale,
+            automatic: self.pointer_available,
+        })
+    }
+
     /// Returns whether the focus point actually moved, so the caller can skip a
     /// repaint when a drag event repeats the same pixel.
     fn set_selected_zoom_center(&mut self, center: (f64, f64)) -> bool {
@@ -1427,6 +1572,8 @@ impl Data {
         }
         self.record_continuous_edit();
         self.zoom_clips[index].scale = scale.clamp(MIN_ZOOM_SCALE, MAX_ZOOM_SCALE);
+        let clip = self.zoom_clips[index];
+        self.last_zoom_style = Some((clip.scale, clip.instant));
     }
 
     fn set_selected_zoom_instant(&mut self, instant: bool) {
@@ -1442,6 +1589,8 @@ impl Data {
         let before = self.snapshot();
         self.zoom_clips[index].instant = instant;
         self.record_edit(before);
+        let clip = self.zoom_clips[index];
+        self.last_zoom_style = Some((clip.scale, clip.instant));
     }
 
     fn reset_zoom_animation(&mut self) {
@@ -2142,6 +2291,15 @@ fn thumbnail_timestamp(duration: f64, index: usize, count: usize) -> f64 {
     usable_end * (index as f64 / (count - 1) as f64)
 }
 
+/// The armed Add zoom tool, as the preview draws it: the scale a new zoom
+/// would take, and whether the recording can follow the pointer, which is
+/// what offers the Automatic zoom button.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct AddZoomTool {
+    pub scale: f64,
+    pub automatic: bool,
+}
+
 /// One tick of preview state: what the stage shows and what it outlines.
 #[derive(Clone, Copy)]
 pub(super) struct PreviewFrame {
@@ -2153,9 +2311,14 @@ pub(super) struct PreviewFrame {
     pub composition_time: f64,
     pub playing: bool,
     pub camera: super::zoom::Camera,
+    pub camera_before: super::zoom::Camera,
+    pub fps: f64,
+    pub motion_blur: f64,
     /// Set while a Manual zoom's focus point is being placed: the clip's scale
     /// and its focus point, outlined over an unzoomed preview.
     pub placement: Option<(f64, (f64, f64))>,
+    /// Set while the Add zoom tool is armed and the transport is stopped.
+    pub add_zoom: Option<AddZoomTool>,
 }
 
 /// Everything the Zoom panel shows: which clip is selected, how it frames,
@@ -2254,30 +2417,57 @@ impl Timeline {
             webcam.set_composition_time(data.playhead);
         }
         let placement = data.placement();
-        let camera = match placement {
-            Some(_) => (1.0, data.frame_center()),
-            None => {
+        let add_zoom = data.add_zoom_tool();
+        let unzoomed = placement.is_some() || add_zoom.is_some();
+        let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
+        let camera_settings = super::zoom::ZoomCameraSettings {
+            frame_rate: fps,
+            ..data.zoom_camera
+        };
+        let camera = if unzoomed {
+            (1.0, data.frame_center())
+        } else {
+            let frame = data
+                .frame_size
+                .map(|(width, height)| (f64::from(width), f64::from(height)))
+                .unwrap_or((0.0, 0.0));
+            self.camera_cache.borrow_mut().evaluate(
+                &data.zoom_clips,
+                frame,
+                &data.camera_mapping(),
+                camera_settings,
+                data.playhead,
+                || self.cursor.sidecar(),
+            )
+        };
+        let camera_before =
+            if unzoomed || super::zoom::instant_blur_disabled(&data.zoom_clips, data.playhead) {
+                camera
+            } else {
                 let frame = data
                     .frame_size
-                    .map(|(width, height)| (f64::from(width), f64::from(height)))
+                    .map(|(w, h)| (f64::from(w), f64::from(h)))
                     .unwrap_or((0.0, 0.0));
                 self.camera_cache.borrow_mut().evaluate(
                     &data.zoom_clips,
                     frame,
                     &data.camera_mapping(),
-                    data.zoom_camera,
-                    data.playhead,
+                    camera_settings,
+                    (data.playhead - 1.0 / fps).max(0.0),
                     || self.cursor.sidecar(),
                 )
-            }
-        };
+            };
         PreviewFrame {
             source_seconds: data.playhead_source_time(),
             composition_seconds: data.total_duration(),
             composition_time: data.playhead,
             playing: data.playing,
             camera,
+            camera_before,
+            fps,
+            motion_blur: data.zoom_camera.motion_blur,
             placement,
+            add_zoom,
         }
     }
 
@@ -2616,6 +2806,45 @@ impl Timeline {
         }
     }
 
+    /// Escape puts the armed Add zoom tool away. Returns whether it was armed.
+    pub fn disarm_add_zoom_tool(&self) -> bool {
+        let changed = self.data.borrow_mut().set_add_zoom_tool(false);
+        if changed {
+            (self.repaint)();
+            self.publish_frame();
+        }
+        changed
+    }
+
+    /// A click on the preview with the Add zoom tool armed: a Manual zoom at
+    /// the playhead aimed at `target`, in source pixels.
+    pub fn place_zoom_at(&self, target: (f64, f64)) {
+        self.add_zoom_at_playhead(Some(target));
+    }
+
+    /// The armed tool's Automatic zoom button: the playhead add, following
+    /// the pointer.
+    pub fn add_automatic_zoom(&self) {
+        self.add_zoom_at_playhead(None);
+    }
+
+    fn add_zoom_at_playhead(&self, target: Option<(f64, f64)>) {
+        {
+            let mut data = self.data.borrow_mut();
+            if !data.add_zoom_tool {
+                return;
+            }
+            data.pointer_available = self
+                .cursor
+                .sidecar()
+                .is_some_and(|sidecar| !sidecar.pointer.is_empty());
+            let at = data.playhead;
+            data.add_effect_at(EffectTrack::Zoom, at, target);
+        }
+        (self.repaint)();
+        self.publish_frame();
+    }
+
     /// Back to the animated defaults: the shared spring and an eased clip.
     pub fn reset_zoom_animation(&self) {
         {
@@ -2644,11 +2873,15 @@ impl Timeline {
         let data = self.data.borrow();
         let (width, height) = data.frame_size?;
         let frame = (f64::from(width), f64::from(height));
+        let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
         Some(self.camera_cache.borrow_mut().evaluate(
             &data.zoom_clips,
             frame,
             &data.camera_mapping(),
-            data.zoom_camera,
+            super::zoom::ZoomCameraSettings {
+                frame_rate: fps,
+                ..data.zoom_camera
+            },
             data.playhead,
             || self.cursor.sidecar(),
         ))
@@ -2712,6 +2945,9 @@ impl Timeline {
         let mut restored = None;
         if let Some(source) = &source {
             duration = ffmpeg::probe_duration(source).unwrap_or(0.0);
+            data.fps = ffmpeg::probe_frame_rate(source)
+                .filter(|fps| fps.is_finite() && *fps > 0.0)
+                .unwrap_or(30.0);
             data.path = Some(source.clone());
             data.duration = duration;
             data.trim_end = duration;
@@ -2823,7 +3059,7 @@ pub(super) fn build(
     let zoom = tool_button(
         "zoom-fit-best-symbolic",
         &t("Zoom"),
-        &t("Add zoom at playhead"),
+        &t("Add zoom: click the preview to place it"),
     );
     let hide = tool_button(
         "view-conceal-symbolic",
@@ -3151,6 +3387,7 @@ pub(super) fn build(
         &zoom_track_lane,
         EffectTrack::Zoom,
         data.clone(),
+        cursor.clone(),
         source_size.clone(),
         repaint.clone(),
         sync_play_icon.clone(),
@@ -3160,28 +3397,50 @@ pub(super) fn build(
         &hide_track,
         EffectTrack::Hide,
         data.clone(),
+        cursor.clone(),
         source_size.clone(),
         repaint.clone(),
         sync_play_icon.clone(),
         scale,
     );
 
-    for (button, track) in [(&zoom, EffectTrack::Zoom), (&hide, EffectTrack::Hide)] {
-        button.connect_clicked({
-            let data = data.clone();
-            let source_size = source_size.clone();
-            let repaint = repaint.clone();
-            move |_| {
-                {
-                    let mut data = data.borrow_mut();
-                    data.set_frame_size(source_size.get());
-                    let at = data.playhead;
-                    data.add_effect(track, at);
-                }
-                repaint();
+    hide.connect_clicked({
+        let data = data.clone();
+        let cursor = cursor.clone();
+        let source_size = source_size.clone();
+        let repaint = repaint.clone();
+        move |_| {
+            {
+                let mut data = data.borrow_mut();
+                data.set_frame_size(source_size.get());
+                data.pointer_available = cursor
+                    .sidecar()
+                    .is_some_and(|sidecar| !sidecar.pointer.is_empty());
+                let at = data.playhead;
+                data.add_effect(EffectTrack::Hide, at);
             }
-        });
-    }
+            repaint();
+        }
+    });
+
+    // The Zoom button arms the Add zoom tool rather than adding at once, as in
+    // the studied build: the next click on the preview places the zoom.
+    zoom.connect_clicked({
+        let data = data.clone();
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        move |_| {
+            {
+                let mut data = data.borrow_mut();
+                data.pointer_available = cursor
+                    .sidecar()
+                    .is_some_and(|sidecar| !sidecar.pointer.is_empty());
+                let armed = !data.add_zoom_tool;
+                data.set_add_zoom_tool(armed);
+            }
+            repaint();
+        }
+    });
 
     detect.connect_clicked({
         let data = data.clone();
@@ -3405,6 +3664,8 @@ pub(super) fn build(
         let zoom_scale = zoom_scale.clone();
         let frame_sink = frame_sink.clone();
         let last_playing = Rc::new(Cell::new(false));
+        let zoom_button = zoom.clone();
+        let last_armed = Rc::new(Cell::new(false));
         move || {
             let (playing, changed, preview) = {
                 let mut data = data.borrow_mut();
@@ -3422,22 +3683,46 @@ pub(super) fn build(
                     webcam.set_composition_time(composition_time);
                 }
                 let placement = data.placement();
-                let camera = match placement {
-                    Some(_) => (1.0, data.frame_center()),
-                    None => {
-                        let frame = data
-                            .frame_size
-                            .map(|(width, height)| (f64::from(width), f64::from(height)))
-                            .unwrap_or((0.0, 0.0));
-                        camera_cache.borrow_mut().evaluate(
-                            &data.zoom_clips,
-                            frame,
-                            &data.camera_mapping(),
-                            data.zoom_camera,
-                            composition_time,
-                            || cursor.sidecar(),
-                        )
-                    }
+                let add_zoom = data.add_zoom_tool();
+                let unzoomed = placement.is_some() || add_zoom.is_some();
+                let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
+                let camera_settings = super::zoom::ZoomCameraSettings {
+                    frame_rate: fps,
+                    ..data.zoom_camera
+                };
+                let camera = if unzoomed {
+                    (1.0, data.frame_center())
+                } else {
+                    let frame = data
+                        .frame_size
+                        .map(|(width, height)| (f64::from(width), f64::from(height)))
+                        .unwrap_or((0.0, 0.0));
+                    camera_cache.borrow_mut().evaluate(
+                        &data.zoom_clips,
+                        frame,
+                        &data.camera_mapping(),
+                        camera_settings,
+                        composition_time,
+                        || cursor.sidecar(),
+                    )
+                };
+                let camera_before = if unzoomed
+                    || super::zoom::instant_blur_disabled(&data.zoom_clips, composition_time)
+                {
+                    camera
+                } else {
+                    let frame = data
+                        .frame_size
+                        .map(|(w, h)| (f64::from(w), f64::from(h)))
+                        .unwrap_or((0.0, 0.0));
+                    camera_cache.borrow_mut().evaluate(
+                        &data.zoom_clips,
+                        frame,
+                        &data.camera_mapping(),
+                        camera_settings,
+                        (composition_time - 1.0 / fps).max(0.0),
+                        || cursor.sidecar(),
+                    )
                 };
                 (
                     data.playing,
@@ -3448,13 +3733,26 @@ pub(super) fn build(
                         composition_time,
                         playing: data.playing,
                         camera,
+                        camera_before,
+                        fps,
+                        motion_blur: data.zoom_camera.motion_blur,
                         placement,
+                        add_zoom,
                     },
                 )
             };
             if last_playing.get() != playing {
                 set_play_icon(&play_icon, playing);
                 last_playing.set(playing);
+            }
+            let armed = data.borrow().add_zoom_tool;
+            if last_armed.get() != armed {
+                if armed {
+                    zoom_button.add_css_class("video-editor-tool-armed");
+                } else {
+                    zoom_button.remove_css_class("video-editor-tool-armed");
+                }
+                last_armed.set(armed);
             }
             place_zoom_thumb(&zoom_track, &zoom_thumb, zoom_scale.value() / 100.0);
             if changed {
@@ -4264,10 +4562,12 @@ enum EffectDrag {
     Extend,
 }
 
+#[allow(clippy::too_many_arguments)]
 fn bind_effect_lane(
     lane: &DrawingArea,
     track: EffectTrack,
     data: Rc<RefCell<Data>>,
+    cursor: super::cursor::CursorModel,
     source_size: Rc<Cell<Option<(u32, u32)>>>,
     repaint: Rc<dyn Fn()>,
     sync_play_icon: Rc<dyn Fn()>,
@@ -4280,6 +4580,7 @@ fn bind_effect_lane(
     click.set_button(1);
     click.connect_pressed({
         let data = data.clone();
+        let cursor = cursor.clone();
         let source_size = source_size.clone();
         let repaint = repaint.clone();
         let sync_play_icon = sync_play_icon.clone();
@@ -4305,10 +4606,13 @@ fn bind_effect_lane(
                     // a clip the way it always has. Placing first means a click
                     // that lands the ghost never leaves an extra clip behind.
                     let at = snap_time_to_playhead(&data, width, data.x_to_time(x, width), scale);
-                    if data.paste_effect_at(track, at).is_none()
-                        && data.add_effect(track, at).is_none()
-                    {
-                        data.select_effect(track, None);
+                    if data.paste_effect_at(track, at).is_none() {
+                        data.pointer_available = cursor
+                            .sidecar()
+                            .is_some_and(|sidecar| !sidecar.pointer.is_empty());
+                        if data.add_effect(track, at).is_none() {
+                            data.select_effect(track, None);
+                        }
                     }
                 }
             }
@@ -5653,7 +5957,7 @@ fn draw_layout_lane(
 pub(super) const ZOOM_SCALE_PRESETS: [(&str, f64); 6] = [
     ("1.25×", 1.25),
     ("1.5×", 1.5),
-    ("1.8×", 1.8),
+    ("2×", 2.0),
     ("2.2×", 2.2),
     ("3.5×", 3.5),
     ("5×", 5.0),
@@ -6192,6 +6496,7 @@ mod tests {
                 speed: 9.0,
                 smoothness: -1.0,
                 start_early: true,
+                motion_blur: 1.0,
             },
             cursor_hide_clips: vec![project::HideClipFile {
                 start: 1.0,
@@ -6247,7 +6552,7 @@ mod tests {
         assert_eq!(data.add_effect(EffectTrack::Hide, 2.0), Some(0));
         let zoom = data.zoom_clips[0];
         assert!((zoom.start - 2.0).abs() < 1e-9);
-        assert!((zoom.end - 3.8).abs() < 1e-9);
+        assert!((zoom.end - 5.0).abs() < 1e-9);
         assert!((zoom.scale - DEFAULT_ZOOM_SCALE).abs() < 1e-9);
         assert_eq!(zoom.center, (960.0, 540.0));
         assert_eq!(data.selected_zoom, Some(0));
@@ -6258,9 +6563,82 @@ mod tests {
     #[test]
     fn effects_do_not_stack_on_each_other() {
         let mut data = loaded();
+        assert_eq!(data.add_effect(EffectTrack::Zoom, 1.0), Some(0));
+        assert!((data.zoom_clips[0].start - 1.0).abs() < 1e-9);
+        assert!((data.zoom_clips[0].end - 4.0).abs() < 1e-9);
+
+        // A drop inside the zoom splits it at the playhead and selects the
+        // right half instead of stacking a second pill on the same span.
+        assert_eq!(data.add_effect(EffectTrack::Zoom, 2.0), Some(1));
+        assert_eq!(data.zoom_clips.len(), 2);
+        assert!((data.zoom_clips[0].start - 1.0).abs() < 1e-9);
+        assert!((data.zoom_clips[0].end - 2.0).abs() < 1e-9);
+        assert!((data.zoom_clips[1].start - 2.0).abs() < 1e-9);
+        assert!((data.zoom_clips[1].end - 4.0).abs() < 1e-9);
+        assert_eq!(data.selected_zoom, Some(1));
+
+        // Past the split zoom, a new one runs its default length.
+        assert_eq!(data.add_effect(EffectTrack::Zoom, 4.0), Some(2));
+        assert!((data.zoom_clips[2].start - 4.0).abs() < 1e-9);
+        assert!((data.zoom_clips[2].end - 7.0).abs() < 1e-9);
+
+        // Hide still refuses a drop on top of another hide.
+        assert!(data.add_effect(EffectTrack::Hide, 1.0).is_some());
+        assert!(data.add_effect(EffectTrack::Hide, 2.0).is_none());
+    }
+
+    #[test]
+    fn a_new_zoom_runs_three_seconds_or_to_the_next_zoom() {
+        let mut data = loaded();
+        assert!(data.add_effect(EffectTrack::Zoom, 5.0).is_some());
+        assert!((data.zoom_clips[0].start - 5.0).abs() < 1e-9);
+        assert!((data.zoom_clips[0].end - 8.0).abs() < 1e-9);
+
+        // The next zoom's start caps the new clip's length.
+        assert!(data.add_effect(EffectTrack::Zoom, 3.0).is_some());
+        assert_eq!(data.zoom_clips.len(), 2);
+        assert!((data.zoom_clips[0].start - 3.0).abs() < 1e-9);
+        assert!((data.zoom_clips[0].end - 5.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn adding_inside_a_zoom_splits_it_at_the_playhead() {
+        let mut data = loaded();
         assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
-        assert!(data.add_effect(EffectTrack::Zoom, 2.0).is_none());
-        assert!(data.add_effect(EffectTrack::Zoom, 4.0).is_some());
+        data.set_selected_zoom_scale(2.5);
+        assert_eq!(data.add_effect(EffectTrack::Zoom, 2.5), Some(1));
+        assert_eq!(data.zoom_clips.len(), 2);
+        assert!((data.zoom_clips[0].start - 1.0).abs() < 1e-9);
+        assert!((data.zoom_clips[0].end - 2.5).abs() < 1e-9);
+        assert!((data.zoom_clips[1].start - 2.5).abs() < 1e-9);
+        assert!((data.zoom_clips[1].end - 4.0).abs() < 1e-9);
+        assert_eq!(data.selected_zoom, Some(1));
+        assert!((data.zoom_clips[0].scale - 2.5).abs() < 1e-9);
+        assert!((data.zoom_clips[1].scale - 2.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn new_zooms_inherit_the_last_edited_scale_and_instant_flag() {
+        let mut data = loaded();
+        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        data.set_selected_zoom_scale(3.0);
+        data.set_selected_zoom_instant(true);
+
+        assert!(data.add_effect(EffectTrack::Zoom, 6.0).is_some());
+        let clip = data.zoom_clips[1];
+        assert!((clip.scale - 3.0).abs() < 1e-9);
+        assert!(clip.instant);
+    }
+
+    #[test]
+    fn new_zooms_are_automatic_only_with_pointer_data() {
+        let mut data = loaded();
+        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert_eq!(data.zoom_clips[0].mode, ZoomMode::Manual);
+
+        data.pointer_available = true;
+        assert!(data.add_effect(EffectTrack::Zoom, 5.0).is_some());
+        assert_eq!(data.zoom_clips[1].mode, ZoomMode::Auto);
     }
 
     #[test]
@@ -6316,7 +6694,7 @@ mod tests {
         let first = data.zoom_clips[0];
         let second = data.zoom_clips[1];
         assert!((second.start - 3.0).abs() < 1e-9);
-        assert!((second.end - 4.8).abs() < 1e-9);
+        assert!((second.end - 6.0).abs() < 1e-9);
         assert!(second.start >= first.end);
     }
 
@@ -6396,7 +6774,7 @@ mod tests {
         let pasted = data.paste_effect().expect("the paste should land");
         let clip = data.zoom_clips[pasted];
         assert!((clip.start - 6.0).abs() < 1e-9);
-        assert!((clip.end - 7.8).abs() < 1e-9);
+        assert!((clip.end - 9.0).abs() < 1e-9);
         assert!((clip.scale - DEFAULT_ZOOM_SCALE).abs() < 1e-9);
         assert_eq!(data.selected_zoom, Some(pasted));
     }
@@ -6430,7 +6808,7 @@ mod tests {
         assert!(data.add_effect(EffectTrack::Zoom, 0.0).is_some());
         assert!(data.duplicate_effect(EffectTrack::Zoom, 0).is_some());
         assert_eq!(data.zoom_clips.len(), 2);
-        assert!((data.zoom_clips[1].start - 1.8).abs() < 1e-9);
+        assert!((data.zoom_clips[1].start - 3.0).abs() < 1e-9);
         assert_eq!(data.selected_zoom, Some(1));
 
         // A span that runs past the ten-second composition is refused, as is
@@ -6719,6 +7097,66 @@ mod tests {
         assert!(data.placement().is_some());
         data.select_effect(EffectTrack::Zoom, None);
         assert_eq!(data.placement(), None);
+    }
+
+    #[test]
+    fn a_preview_click_adds_a_manual_zoom_aimed_at_the_point() {
+        let mut data = loaded();
+        data.pointer_available = true;
+        assert!(data.set_add_zoom_tool(true));
+        assert_eq!(
+            data.add_zoom_tool(),
+            Some(AddZoomTool {
+                scale: DEFAULT_ZOOM_SCALE,
+                automatic: true
+            })
+        );
+        assert_eq!(
+            data.add_effect_at(EffectTrack::Zoom, 2.0, Some((300.0, 5000.0))),
+            Some(0)
+        );
+        let zoom = data.zoom_clips[0];
+        assert_eq!(zoom.mode, ZoomMode::Manual);
+        assert_eq!(zoom.center, (300.0, 1080.0));
+        assert!((zoom.end - 5.0).abs() < 1e-9);
+        assert_eq!(data.selected_zoom, Some(0));
+        assert!(
+            !data.add_zoom_tool,
+            "placing a zoom selects it, which disarms the tool"
+        );
+        assert_eq!(data.add_zoom_tool(), None);
+    }
+
+    #[test]
+    fn a_preview_click_inside_a_zoom_splits_it_into_a_manual_half() {
+        let mut data = loaded();
+        data.pointer_available = true;
+        assert!(data.add_effect(EffectTrack::Zoom, 1.0).is_some());
+        assert_eq!(data.zoom_clips[0].mode, ZoomMode::Auto);
+        assert!(data.set_add_zoom_tool(true));
+        assert_eq!(data.selected_zoom, None);
+        assert_eq!(
+            data.add_effect_at(EffectTrack::Zoom, 2.0, Some((100.0, 200.0))),
+            Some(1)
+        );
+        assert_eq!(data.zoom_clips[0].mode, ZoomMode::Auto);
+        assert_eq!(data.zoom_clips[1].mode, ZoomMode::Manual);
+        assert_eq!(data.zoom_clips[1].center, (100.0, 200.0));
+    }
+
+    #[test]
+    fn the_add_zoom_tool_hides_while_playing_and_needs_media() {
+        let mut empty = Data::default();
+        assert!(!empty.set_add_zoom_tool(true));
+        let mut data = loaded();
+        data.playing = true;
+        assert!(data.set_add_zoom_tool(true));
+        assert!(!data.playing, "arming pauses");
+        data.playing = true;
+        assert_eq!(data.add_zoom_tool(), None);
+        assert!(data.add_zoom_tool);
+        assert!(data.set_add_zoom_tool(false));
+        assert!(!data.set_add_zoom_tool(false));
     }
 
     #[test]

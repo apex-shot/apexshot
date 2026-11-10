@@ -4350,6 +4350,21 @@ msgstr "تعذّر على ffmpeg ترميز فيديو Motion."
 msgid "Upgrade to Studio"
 msgstr "الترقية إلى Studio"
 
+msgid "Add zoom: click the preview to place it"
+msgstr "إضافة تكبير: انقر على المعاينة لوضعه"
+
+msgid "Adds a zoom that automatically follows the mouse activity"
+msgstr "يضيف تكبيرًا يتبع حركة الفأرة تلقائيًا"
+
+msgid "Automatic zoom"
+msgstr "تكبير تلقائي"
+
+msgid "Click where to zoom in"
+msgstr "انقر على المكان المراد تكبيره"
+
+msgid "Click where to zoom in, or use Automatic zoom"
+msgstr "انقر على المكان المراد تكبيره، أو استخدم «تكبير تلقائي»"
+
 msgid "Hardware acceleration"
 msgstr "تسريع العتاد"
 

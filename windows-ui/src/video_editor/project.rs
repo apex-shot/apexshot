@@ -214,6 +214,12 @@ pub(super) struct ZoomCameraFile {
     pub speed: f64,
     pub smoothness: f64,
     pub start_early: bool,
+    #[serde(default = "default_motion_blur")]
+    pub motion_blur: f64,
+}
+
+fn default_motion_blur() -> f64 {
+    1.0
 }
 
 impl Default for ZoomCameraFile {
@@ -222,6 +228,7 @@ impl Default for ZoomCameraFile {
             speed: 1.0,
             smoothness: 0.5,
             start_early: false,
+            motion_blur: default_motion_blur(),
         }
     }
 }
@@ -461,6 +468,7 @@ mod tests {
                 speed: 1.5,
                 smoothness: 0.25,
                 start_early: true,
+                motion_blur: 0.7,
             },
             cursor_hide_clips: vec![HideClipFile {
                 start: 3.0,
@@ -502,6 +510,13 @@ mod tests {
             timeline_scale: 42.0,
             timeline_scroll_seconds: 1.25,
         }
+    }
+
+    #[test]
+    fn an_older_zoom_camera_defaults_motion_blur_on() {
+        let camera: super::ZoomCameraFile =
+            serde_json::from_str(r#"{"speed":1.0,"smoothness":0.5,"start_early":false}"#).unwrap();
+        assert_eq!(camera.motion_blur, 1.0);
     }
 
     #[test]

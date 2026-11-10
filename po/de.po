@@ -4426,6 +4426,21 @@ msgstr "ffmpeg konnte das Motion-Video nicht kodieren."
 msgid "Upgrade to Studio"
 msgstr "Auf Studio upgraden"
 
+msgid "Add zoom: click the preview to place it"
+msgstr "Zoom hinzufügen: Klicke auf die Vorschau, um ihn zu platzieren"
+
+msgid "Adds a zoom that automatically follows the mouse activity"
+msgstr "Fügt einen Zoom hinzu, der der Mausaktivität automatisch folgt"
+
+msgid "Automatic zoom"
+msgstr "Automatischer Zoom"
+
+msgid "Click where to zoom in"
+msgstr "Klicke, wohin gezoomt werden soll"
+
+msgid "Click where to zoom in, or use Automatic zoom"
+msgstr "Klicke, wohin gezoomt werden soll, oder verwende die Option „Automatischer Zoom“"
+
 msgid "Hardware acceleration"
 msgstr "Hardwarebeschleunigung"
 

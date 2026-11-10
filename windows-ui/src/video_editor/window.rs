@@ -123,7 +123,37 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
                 .estimate
                 .set_composition_seconds(frame.composition_seconds);
             stage.set_placement(frame.placement);
+            stage.set_add_zoom(frame.add_zoom);
             stage.set_camera(frame.camera);
+            let trail = stage.source_size.get().and_then(|(width, height)| {
+                let source = (f64::from(width), f64::from(height));
+                let now = stage.camera_view_for(frame.camera)?;
+                let before = stage.camera_view_for(frame.camera_before)?;
+                super::motion_blur::ScreenTrail::new(
+                    now,
+                    before,
+                    source,
+                    (width, height),
+                    frame.fps,
+                    frame.motion_blur,
+                )
+                .map(|_| (now, before, frame.fps, frame.motion_blur))
+            });
+            // With the studied framing, the moving card's whole trail is drawn
+            // over the stage so its edges smear across the background.
+            let card = trail.and_then(|_| {
+                let (now, _, stage_size) = stage.card_geometry(frame.camera)?;
+                let (previous, _, _) = stage.card_geometry(frame.camera_before)?;
+                Some(super::preview::CardLayer {
+                    now,
+                    previous,
+                    stage: stage_size,
+                    radius: stage.clip.radius_ratio(),
+                    fps: frame.fps,
+                    amount: frame.motion_blur,
+                })
+            });
+            stage.preview.set_trail(trail, card, frame.playing);
             stage.apply_webcam_layout();
             let ripple = stage
                 .cursor
@@ -136,6 +166,16 @@ pub(super) fn build_window(app: &Application, initial: Option<&Path>) {
         let timeline = timeline.clone();
         Rc::new(move |center| timeline.set_selected_zoom_center(center))
     });
+    stage.connect_add_zoom(
+        {
+            let timeline = timeline.clone();
+            Rc::new(move |point| timeline.place_zoom_at(point))
+        },
+        {
+            let timeline = timeline.clone();
+            Rc::new(move || timeline.add_automatic_zoom())
+        },
+    );
 
     let shell = build_editor_shell(&root, &title_bar, &editor_body);
 
@@ -683,8 +723,21 @@ struct Stage {
     clip: super::rounded_clip::RoundedClip,
     clip_margins: Rc<RefCell<(i32, i32, i32, i32)>>,
     camera_view: Rc<Cell<Option<super::zoom::ViewRect>>>,
+    /// The stage inside the padding, as fractions of the stage: the area a
+    /// zoomed card must keep covering.
+    zoom_area: Rc<Cell<Option<super::zoom::StageRect>>>,
+    /// The background's zoom and the stage point it zooms about, as fractions.
+    background_zoom: Rc<Cell<(f64, (f64, f64))>>,
     /// The Manual zoom outline the preview shows, as `(scale, focus point)`.
     placement: Placement,
+    /// The armed Add zoom tool, while the transport is stopped.
+    add_zoom: Rc<Cell<Option<super::timeline::AddZoomTool>>>,
+    /// Where the pointer is over the video while the tool is armed, in source
+    /// pixels: the centre of the outline the tool draws.
+    add_zoom_hover: Rc<Cell<Option<(f64, f64)>>>,
+    add_zoom_bar: GtkBox,
+    add_zoom_hint: Label,
+    add_zoom_auto: Button,
     zoom_provider: CssProvider,
     last_zoom_transform: Rc<Cell<CameraTransform>>,
     last_zoom_css: Rc<RefCell<String>>,
@@ -703,6 +756,7 @@ impl Stage {
             self.strip_margins();
             self.set_stage_ratio(frame_ratio(self.aspect.get(), None));
             self.clip.set_radius(0.0, 1.0);
+            self.zoom_area.set(None);
             return;
         };
         let aspect = self.aspect.get();
@@ -712,6 +766,15 @@ impl Stage {
         let (video_w, video_h) = video_rect_dimensions(aspect, source, padding, has_fill);
         self.set_stage_ratio(out_w as f32 / out_h.max(1) as f32);
         self.set_video_margins((video_w, video_h), (out_w, out_h));
+        let canvas = canvas_dimensions(aspect, source);
+        let pad = padding_px(canvas, padding, has_fill).round().max(0.0);
+        let (out_w, out_h) = (f64::from(out_w.max(1)), f64::from(out_h.max(1)));
+        self.zoom_area.set(Some((
+            pad / out_w,
+            pad / out_h,
+            ((out_w - pad * 2.0) / out_w).max(0.0),
+            ((out_h - pad * 2.0) / out_h).max(0.0),
+        )));
         let (radius, measured_width) =
             card_radius(aspect, source, padding, has_fill, self.background.radius());
         self.clip.set_radius(radius, measured_width);
@@ -779,12 +842,90 @@ impl Stage {
         self.clip.set_margin_bottom(0);
     }
 
+    /// The card rect, rest rect, and stage size in stage pixels for `camera`,
+    /// or `None` when the studied framing does not apply: no recording, no
+    /// layout yet, or a split layout, which keeps cropping inside its pane.
+    fn card_geometry(
+        &self,
+        camera: super::zoom::Camera,
+    ) -> Option<(super::zoom::StageRect, super::zoom::StageRect, (f64, f64))> {
+        let (source_width, source_height) = self.source_size.get()?;
+        let frame = self
+            .webcam
+            .layout_frame(Some((source_width, source_height)));
+        if frame.is_some_and(|frame| !frame.screen.is_full()) {
+            return None;
+        }
+        let stage_width = f64::from(self.overlay.allocated_width());
+        let stage_height = f64::from(self.overlay.allocated_height());
+        if stage_width < 2.0 || stage_height < 2.0 {
+            return None;
+        }
+        let video = clip_video_rect(
+            &self.clip,
+            self.overlay.allocated_width(),
+            self.overlay.allocated_height(),
+            (source_width, source_height),
+        )?;
+        let rest = (video.x, video.y, video.width, video.height);
+        let area = self
+            .zoom_area
+            .get()
+            .map(|(x, y, w, h)| {
+                (
+                    x * stage_width,
+                    y * stage_height,
+                    w * stage_width,
+                    h * stage_height,
+                )
+            })
+            .unwrap_or(rest);
+        // The camera overlay moves the aim into the room it leaves free. The
+        // aim blends in with the overlay's opacity, so a layout change fades
+        // the card across instead of snapping it.
+        let centre = (area.0 + area.2 / 2.0, area.1 + area.3 / 2.0);
+        let focal = match frame.filter(|frame| frame.camera_alpha > 0.0) {
+            Some(frame) => {
+                let camera = (
+                    video.x + frame.camera.x * video.width,
+                    video.y + frame.camera.y * video.height,
+                    frame.camera.width * video.width,
+                    frame.camera.height * video.height,
+                );
+                let aim = super::zoom::focal_point(area, Some(camera));
+                let alpha = frame.camera_alpha.clamp(0.0, 1.0);
+                (
+                    centre.0 + (aim.0 - centre.0) * alpha,
+                    centre.1 + (aim.1 - centre.1) * alpha,
+                )
+            }
+            None => centre,
+        };
+        let target01 = (
+            camera.1 .0 / f64::from(source_width.max(1)),
+            camera.1 .1 / f64::from(source_height.max(1)),
+        );
+        let card = super::zoom::card_rect(rest, area, focal, camera.0, target01);
+        Some((card, rest, (stage_width, stage_height)))
+    }
+
+    /// The source view that expresses `camera` on the rest rect: the studied
+    /// card when it applies, the plain crop otherwise.
+    fn camera_view_for(&self, camera: super::zoom::Camera) -> Option<super::zoom::ViewRect> {
+        let (width, height) = self.source_size.get()?;
+        let source = (f64::from(width), f64::from(height));
+        Some(match self.card_geometry(camera) {
+            Some((card, rest, _)) => super::zoom::card_view(rest, card, source),
+            None => super::zoom::view_rect(camera.0, camera.1, source),
+        })
+    }
+
     fn set_camera(&self, camera: super::zoom::Camera) {
         let source_size = self.source_size.get();
-        let view = source_size.map(|(width, height)| {
-            super::zoom::view_rect(camera.0, camera.1, (f64::from(width), f64::from(height)))
-        });
+        let geometry = self.card_geometry(camera);
+        let view = self.camera_view_for(camera);
         self.camera_view.set(view);
+        self.apply_card(geometry, camera);
 
         let transform = match (source_size, view) {
             (Some((width, height)), Some(view)) => {
@@ -806,8 +947,49 @@ impl Stage {
         self.update_camera_transform(transform);
     }
 
+    /// Draw the card where the zoom put it and drift the background with it.
+    fn apply_card(
+        &self,
+        geometry: Option<(super::zoom::StageRect, super::zoom::StageRect, (f64, f64))>,
+        camera: super::zoom::Camera,
+    ) {
+        let card = geometry.and_then(|(card, rest, stage)| {
+            let moved = (card.0 - rest.0).abs() > 0.01
+                || (card.1 - rest.1).abs() > 0.01
+                || (card.2 - rest.2).abs() > 0.01
+                || (card.3 - rest.3).abs() > 0.01;
+            moved.then_some((
+                (card.0 - rest.0, card.1 - rest.1, card.2, card.3),
+                (-rest.0, -rest.1, stage.0, stage.1),
+            ))
+        });
+        self.clip.set_card(card);
+
+        let background = match (geometry, self.source_size.get()) {
+            (Some(_), Some((width, height))) => (
+                super::zoom::background_zoom(camera.0),
+                (
+                    (camera.1 .0 / f64::from(width.max(1))).clamp(0.0, 1.0),
+                    (camera.1 .1 / f64::from(height.max(1))).clamp(0.0, 1.0),
+                ),
+            ),
+            _ => (1.0, (0.5, 0.5)),
+        };
+        let (old_zoom, old_pivot) = self.background_zoom.get();
+        if (old_zoom - background.0).abs() > 1e-5
+            || (old_pivot.0 - background.1 .0).abs() > 1e-5
+            || (old_pivot.1 - background.1 .1).abs() > 1e-5
+        {
+            self.background_zoom.set(background);
+            self.background_layer.queue_draw();
+        }
+    }
+
     fn reset_camera(&self) {
         self.camera_view.set(None);
+        self.clip.set_card(None);
+        self.background_zoom.set((1.0, (0.5, 0.5)));
+        self.background_layer.queue_draw();
         self.update_camera_transform(IDENTITY_CAMERA_TRANSFORM);
     }
 
@@ -864,9 +1046,111 @@ impl Stage {
             return;
         }
         self.placement.set(placement);
-        self.canvas
-            .set_cursor_from_name(placement.map(|_| "crosshair"));
+        self.canvas.set_cursor_from_name(
+            (placement.is_some() || self.add_zoom.get().is_some()).then_some("crosshair"),
+        );
         self.cursor_layer.queue_draw();
+    }
+
+    /// Show or put away the armed Add zoom tool: its prompt, the Automatic
+    /// zoom button when the recording can follow the pointer, and the outline
+    /// that follows the pointer.
+    fn set_add_zoom(&self, tool: Option<super::timeline::AddZoomTool>) {
+        if self.add_zoom.get() == tool {
+            return;
+        }
+        self.add_zoom.set(tool);
+        if tool.is_none() {
+            self.add_zoom_hover.set(None);
+        }
+        let automatic = tool.is_some_and(|tool| tool.automatic);
+        self.add_zoom_hint.set_text(&if automatic {
+            t("Click where to zoom in, or use Automatic zoom")
+        } else {
+            t("Click where to zoom in")
+        });
+        self.add_zoom_auto.set_visible(automatic);
+        self.add_zoom_bar.set_visible(tool.is_some());
+        self.canvas.set_cursor_from_name(
+            (tool.is_some() || self.placement.get().is_some()).then_some("crosshair"),
+        );
+        self.cursor_layer.queue_draw();
+    }
+
+    /// The source pixel under a point in the preview overlay, or `None` off the
+    /// video.
+    fn source_point_at(&self, x: f64, y: f64) -> Option<(f64, f64)> {
+        let (source_width, source_height) = self.source_size.get()?;
+        let video = clip_video_rect(
+            &self.clip,
+            self.overlay.allocated_width(),
+            self.overlay.allocated_height(),
+            (source_width, source_height),
+        )?;
+        if x < video.x || y < video.y || x > video.x + video.width || y > video.y + video.height {
+            return None;
+        }
+        let view = self.camera_view.get().unwrap_or((
+            0.0,
+            0.0,
+            f64::from(source_width),
+            f64::from(source_height),
+        ));
+        Some(super::zoom::stage_point_to_source(
+            (x, y),
+            view,
+            [video.x, video.y, video.width, video.height],
+        ))
+    }
+
+    /// With the Add zoom tool armed, the outline follows the pointer and a
+    /// click on the video places a zoom there; the prompt's button adds an
+    /// automatic one instead.
+    fn connect_add_zoom(&self, place: Rc<dyn Fn((f64, f64))>, automatic: Rc<dyn Fn()>) {
+        let motion = gtk4::EventControllerMotion::new();
+        motion.connect_motion({
+            let stage = self.clone();
+            move |_, x, y| {
+                if stage.add_zoom.get().is_none() {
+                    return;
+                }
+                stage.add_zoom_hover.set(stage.source_point_at(x, y));
+                stage.cursor_layer.queue_draw();
+            }
+        });
+        motion.connect_leave({
+            let stage = self.clone();
+            move |_| {
+                if stage.add_zoom_hover.take().is_some() {
+                    stage.cursor_layer.queue_draw();
+                }
+            }
+        });
+        self.overlay.add_controller(motion);
+
+        let click = gtk4::GestureClick::new();
+        click.set_button(1);
+        click.connect_released({
+            let stage = self.clone();
+            move |_, _, x, y| {
+                if stage.add_zoom.get().is_none() {
+                    return;
+                }
+                // A press on the prompt's button is that button's, not a placement.
+                if let Some(picked) = stage.overlay.pick(x, y, gtk4::PickFlags::DEFAULT) {
+                    let button = stage.add_zoom_auto.upcast_ref::<gtk4::Widget>();
+                    if &picked == button || picked.is_ancestor(button) {
+                        return;
+                    }
+                }
+                if let Some(point) = stage.source_point_at(x, y) {
+                    place(point);
+                }
+            }
+        });
+        self.overlay.add_controller(click);
+
+        self.add_zoom_auto.connect_clicked(move |_| automatic());
     }
 
     /// Dragging the preview places the selected Manual zoom's focus point.
@@ -1145,10 +1429,21 @@ fn build_stage(
     let background_pixbuf = Rc::new(RefCell::new(None::<Pixbuf>));
     let background_fill: Rc<RefCell<Option<super::background::FillPainter>>> =
         Rc::new(RefCell::new(None));
+    let background_zoom = Rc::new(Cell::new((1.0_f64, (0.5_f64, 0.5_f64))));
     background_layer.set_draw_func({
         let background_pixbuf = background_pixbuf.clone();
         let background_fill = background_fill.clone();
+        let background_zoom = background_zoom.clone();
         move |_, context, width, height| {
+            // The background drifts in with the screen zoom, about the target.
+            let (zoom, (pivot_x, pivot_y)) = background_zoom.get();
+            if zoom > 1.0 + 1e-6 {
+                let x = pivot_x * f64::from(width);
+                let y = pivot_y * f64::from(height);
+                context.translate(x, y);
+                context.scale(zoom, zoom);
+                context.translate(-x, -y);
+            }
             if let Some(pixbuf) = background_pixbuf.borrow().as_ref() {
                 super::background::paint_cover(context, width, height, pixbuf);
                 return;
@@ -1175,6 +1470,7 @@ fn build_stage(
     let last_zoom_transform = Rc::new(Cell::new(IDENTITY_CAMERA_TRANSFORM));
     let last_zoom_css = Rc::new(RefCell::new(IDENTITY_CAMERA_CSS.to_string()));
     let camera_view = Rc::new(Cell::new(None::<super::zoom::ViewRect>));
+    let zoom_area = Rc::new(Cell::new(None::<super::zoom::StageRect>));
 
     let picture = Picture::new();
     picture.add_css_class("recording-editor-video");
@@ -1190,6 +1486,17 @@ fn build_stage(
     clip.set_vexpand(true);
     overlay.add_overlay(&clip);
 
+    // While the zoomed card moves, its blur is drawn whole over the stage here,
+    // edges and all, in place of the sharp card.
+    let card_layer = Picture::new();
+    card_layer.set_can_target(false);
+    card_layer.set_can_shrink(true);
+    card_layer.set_content_fit(gtk4::ContentFit::Fill);
+    card_layer.set_hexpand(true);
+    card_layer.set_vexpand(true);
+    card_layer.set_visible(false);
+    overlay.add_overlay(&card_layer);
+
     let cursor_layer = DrawingArea::new();
     cursor_layer.set_hexpand(true);
     cursor_layer.set_vexpand(true);
@@ -1201,6 +1508,8 @@ fn build_stage(
         move || layer.queue_draw()
     }));
     let placement: Placement = Rc::new(Cell::new(None));
+    let add_zoom: Rc<Cell<Option<super::timeline::AddZoomTool>>> = Rc::new(Cell::new(None));
+    let add_zoom_hover: Rc<Cell<Option<(f64, f64)>>> = Rc::new(Cell::new(None));
     cursor_layer.set_draw_func({
         let cursor = cursor.clone();
         let webcam = webcam.clone();
@@ -1209,6 +1518,8 @@ fn build_stage(
         let source_seconds = source_seconds.clone();
         let camera_view = camera_view.clone();
         let placement = placement.clone();
+        let add_zoom = add_zoom.clone();
+        let add_zoom_hover = add_zoom_hover.clone();
         move |_, context, width, height| {
             let source = source_size.get();
             let video = source.and_then(|source| clip_video_rect(&clip, width, height, source));
@@ -1260,7 +1571,12 @@ fn build_stage(
                         height,
                         source,
                         camera_view.get(),
-                        placement.get(),
+                        placement.get().or_else(|| {
+                            add_zoom
+                                .get()
+                                .zip(add_zoom_hover.get())
+                                .map(|(tool, point)| (tool.scale, point))
+                        }),
                         scale,
                     );
                 },
@@ -1277,12 +1593,32 @@ fn build_stage(
     hint.set_can_target(false);
     overlay.add_overlay(&hint);
 
+    // The armed Add zoom tool's prompt, along the bottom of the preview.
+    let add_zoom_bar = GtkBox::new(Orientation::Horizontal, (8.0 * scale).round() as i32);
+    add_zoom_bar.add_css_class("video-editor-add-zoom-bar");
+    add_zoom_bar.set_halign(Align::Center);
+    add_zoom_bar.set_valign(Align::End);
+    add_zoom_bar.set_margin_bottom((16.0 * scale).round() as i32);
+    add_zoom_bar.set_visible(false);
+    let add_zoom_hint = Label::new(Some(&t("Click where to zoom in")));
+    add_zoom_hint.add_css_class("video-editor-add-zoom-hint");
+    add_zoom_hint.set_can_target(false);
+    let add_zoom_auto = Button::with_label(&t("Automatic zoom"));
+    add_zoom_auto.add_css_class("video-editor-add-zoom-auto");
+    add_zoom_auto.set_tooltip_text(Some(&t(
+        "Adds a zoom that automatically follows the mouse activity",
+    )));
+    add_zoom_bar.append(&add_zoom_hint);
+    add_zoom_bar.append(&add_zoom_auto);
+    overlay.add_overlay(&add_zoom_bar);
+
     canvas.set_child(Some(&overlay));
     workspace.append(&canvas);
     frame.append(&workspace);
 
     let aspect = Rc::new(Cell::new(FrameAspect::Original));
     let preview = super::preview::Preview::new(picture.clone());
+    preview.set_card_layer(card_layer.clone(), clip.clone().upcast());
     let stage_aspect_label = Label::new(Some(&FrameAspect::Original.label()));
     stage_aspect_label.add_css_class("recording-editor-stage-chip-label");
 
@@ -1370,7 +1706,14 @@ fn build_stage(
         clip,
         clip_margins: Rc::new(RefCell::new((i32::MIN, 0, 0, 0))),
         camera_view,
+        zoom_area,
+        background_zoom,
         placement,
+        add_zoom,
+        add_zoom_hover,
+        add_zoom_bar,
+        add_zoom_hint,
+        add_zoom_auto,
         zoom_provider,
         last_zoom_transform,
         last_zoom_css,
@@ -1653,6 +1996,9 @@ fn wire_history_keys(
     keys.connect_key_pressed(move |_, key, _, modifiers| {
         if shell.child().is_some_and(|editor| !editor.is_sensitive()) {
             return gtk4::glib::Propagation::Proceed;
+        }
+        if key == gdk::Key::Escape && timeline.disarm_add_zoom_tool() {
+            return gtk4::glib::Propagation::Stop;
         }
         let Some(action) = history_key(key, modifiers) else {
             return gtk4::glib::Propagation::Proceed;
@@ -1974,6 +2320,32 @@ fn install_css() {
         .editor-theme-light .video-editor-panel-placeholder {{
             color: alpha(#111827,0.46);
         }}
+        .video-editor-add-zoom-bar {{
+            padding: {add_zoom_y}px {add_zoom_x}px;
+            border-radius: 999px;
+            background: alpha(black,0.62);
+        }}
+        .video-editor-add-zoom-hint {{
+            color: alpha(white,0.92);
+            font-size: {add_zoom_text}px;
+        }}
+        button.video-editor-add-zoom-auto {{
+            min-height: 0;
+            padding: {add_zoom_button_y}px {add_zoom_button_x}px;
+            border-radius: 999px;
+            color: white;
+            background: alpha(white,0.16);
+            font-size: {add_zoom_text}px;
+        }}
+        button.video-editor-add-zoom-auto:hover {{
+            background: alpha(white,0.24);
+        }}
+        .video-editor-root button.recording-editor-timeline-tool.video-editor-tool-armed {{
+            background: alpha(white,0.12);
+        }}
+        .video-editor-root.editor-theme-light button.recording-editor-timeline-tool.video-editor-tool-armed {{
+            background: alpha(#111827,0.09);
+        }}
         "#,
         titlebar = px(TITLE_BAR_HEIGHT),
         title = px(15.0),
@@ -1986,6 +2358,11 @@ fn install_css() {
         panel_detail = px(13.0),
         placeholder_top = px(16.0),
         placeholder = px(13.0),
+        add_zoom_y = px(6.0),
+        add_zoom_x = px(8.0),
+        add_zoom_text = px(13.0),
+        add_zoom_button_y = px(3.0),
+        add_zoom_button_x = px(10.0),
     );
 
     let provider = CssProvider::new();

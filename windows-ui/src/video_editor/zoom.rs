@@ -2,15 +2,19 @@
 //! damped spring, and a clip with no pointer samples in its footage window
 //! falls back to the static eased framing.
 //!
-//! The spring integrates on a fixed 1/60 s grid anchored at the clip's start,
-//! and each step is cached, so a scrub backwards replays the same path.
-//! [`ZoomCameraSettings`] carries the camera-wide knobs — spring speed and
-//! smoothness, plus the early lead-in — that the Zoom panel edits.
+//! The spring integrates in 1 ms steps, matching the studied camera. The
+//! result is cached on the composition frame grid anchored at the clip's
+//! start, so a scrub backwards replays the same path. [`ZoomCameraSettings`]
+//! carries the camera-wide knobs — spring speed and smoothness, plus the early
+//! lead-in — that the Zoom panel edits.
 
+use super::pointer_path::{self, PointerEvent, PointerKind};
 use super::timeline::{ZoomClip, ZoomMode};
+use crate::recording::editor::auto_zoom::release_position;
 use crate::recording::editor::sidecar::PointerSidecar;
 
-const ZOOM_CAMERA_STEP: f64 = 1.0 / 60.0;
+/// The studied screen spring's precision setting (`CpX:53-58`).
+const SCREEN_SPRING_PRECISION: f64 = 0.002;
 /// The shared follow spring at speed 1.0 and smoothness 0.5. The camera and
 /// the cursor sprite both chase on it.
 pub(super) const CAMERA_FOLLOW_SPRING: CameraSpring = CameraSpring {
@@ -19,15 +23,15 @@ pub(super) const CAMERA_FOLLOW_SPRING: CameraSpring = CameraSpring {
     mass: 1.5,
 };
 
-/// Camera-wide zoom settings, the counterpart of the shared editor's
-/// `ZoomCameraSettings`. Only the knobs this editor implements are here:
-/// motion blur needs the preview to blend several camera positions into one
-/// frame, which a picture transform cannot do.
+/// Camera-wide zoom settings, including the screen motion trail.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(super) struct ZoomCameraSettings {
     pub speed: f64,
     pub smoothness: f64,
     pub start_early: bool,
+    pub motion_blur: f64,
+    /// Composition frame rate. The studied spring advances once per rendered frame.
+    pub frame_rate: f64,
 }
 
 impl Default for ZoomCameraSettings {
@@ -36,6 +40,8 @@ impl Default for ZoomCameraSettings {
             speed: 1.0,
             smoothness: 0.5,
             start_early: false,
+            motion_blur: 1.0,
+            frame_rate: 60.0,
         }
     }
 }
@@ -57,6 +63,16 @@ impl ZoomCameraSettings {
                 defaults.smoothness
             },
             start_early: self.start_early,
+            motion_blur: if self.motion_blur.is_finite() {
+                self.motion_blur.clamp(0.0, 1.0)
+            } else {
+                defaults.motion_blur
+            },
+            frame_rate: if self.frame_rate.is_finite() && self.frame_rate > 0.0 {
+                self.frame_rate.clamp(1.0, 240.0)
+            } else {
+                defaults.frame_rate
+            },
         }
     }
 
@@ -83,10 +99,6 @@ impl ZoomCameraSettings {
 
 const MAX_CAMERA_SCALE: f64 = 5.0;
 const EASE_SECONDS: f64 = 0.6;
-/// Auto zooms at most this far apart share one continuous move.
-const MORPH_GAP_SECONDS: f64 = 0.5;
-/// Pointer samples closer than this to the last kept one are jitter.
-const FOLLOW_JITTER_PIXELS: f64 = 10.0;
 
 pub(super) type Camera = (f64, (f64, f64));
 pub(super) type ViewRect = (f64, f64, f64, f64);
@@ -155,6 +167,8 @@ pub(super) struct CameraSpring {
 struct CameraMotion {
     rect: [f64; 4],
     velocity: [f64; 4],
+    target: [f64; 4],
+    precision: [f64; 4],
 }
 
 impl CameraMotion {
@@ -162,23 +176,27 @@ impl CameraMotion {
         Self {
             rect,
             velocity: [0.0; 4],
+            target: rect,
+            precision: [1.0; 4],
         }
     }
 
     fn advance(self, target: [f64; 4], spring: CameraSpring, seconds: f64) -> Self {
         let mut motion = self;
-        let steps = (seconds / ZOOM_CAMERA_STEP).ceil() as usize;
-        for index in 0..steps {
-            let dt = ZOOM_CAMERA_STEP.min((seconds - index as f64 * ZOOM_CAMERA_STEP).max(0.0));
-            for (axis, target) in target.iter().enumerate() {
-                (motion.rect[axis], motion.velocity[axis]) = spring_step(
-                    motion.rect[axis],
-                    motion.velocity[axis],
-                    *target,
-                    spring,
-                    dt,
-                );
+        for (axis, &goal) in target.iter().enumerate() {
+            if goal != motion.target[axis] {
+                motion.precision[axis] =
+                    studied_precision(motion.rect[axis], goal, SCREEN_SPRING_PRECISION);
+                motion.target[axis] = goal;
             }
+            (motion.rect[axis], motion.velocity[axis]) = studied_advance(
+                motion.rect[axis],
+                motion.velocity[axis],
+                goal,
+                spring,
+                motion.precision[axis],
+                seconds * 1000.0,
+            );
         }
         motion
     }
@@ -190,9 +208,6 @@ struct CameraZoom {
     /// its dwell-weighted centre in encoded pixels. Empty when the clip's
     /// footage window has no pointer samples, which keeps the static fallback.
     groups: Vec<(f64, (f64, f64))>,
-    /// A later auto zoom starts within the morph gap, so this clip holds its
-    /// framing through its own ease-out instead of returning to full frame.
-    holds_for_next: bool,
 }
 
 struct ZoomCameraPlan {
@@ -201,7 +216,6 @@ struct ZoomCameraPlan {
     zooms: Vec<CameraZoom>,
     settings: ZoomCameraSettings,
     start_time: Option<f64>,
-    boundaries: Vec<f64>,
     frames: Vec<CameraMotion>,
 }
 
@@ -269,20 +283,46 @@ impl ZoomCameraPlan {
     ) -> Self {
         let mut clips = clips.to_vec();
         clips.sort_by(|left, right| left.start.total_cmp(&right.start));
-        let samples = sidecar
+        let events = sidecar
             .map(|sidecar| {
-                sidecar
-                    .pointer
-                    .iter()
-                    .filter(|sample| {
-                        sample.t.is_finite() && sample.x.is_finite() && sample.y.is_finite()
-                    })
-                    .map(|sample| {
-                        let (x, y) = sidecar.map_to_video(sample.x, sample.y, frame.0, frame.1);
-                        (sample.t, x, y)
-                    })
-                    .filter(|&(_, x, y)| x.is_finite() && y.is_finite())
-                    .collect::<Vec<_>>()
+                let map = |x: f64, y: f64| sidecar.map_to_video(x, y, frame.0, frame.1);
+                let mut events: Vec<PointerEvent> = Vec::new();
+                for sample in &sidecar.pointer {
+                    let (x, y) = map(sample.x, sample.y);
+                    events.push(PointerEvent {
+                        t: sample.t,
+                        x,
+                        y,
+                        kind: PointerKind::Move,
+                    });
+                }
+                for click in &sidecar.clicks {
+                    let (x, y) = map(click.x, click.y);
+                    events.push(PointerEvent {
+                        t: click.t,
+                        x,
+                        y,
+                        kind: PointerKind::Down,
+                    });
+                }
+                for press in &sidecar.presses {
+                    if !press.up.is_finite() || press.up < press.down {
+                        continue;
+                    }
+                    if let Some((x, y)) = release_position(sidecar, press, frame.0, frame.1) {
+                        events.push(PointerEvent {
+                            t: press.up,
+                            x,
+                            y,
+                            kind: PointerKind::Up,
+                        });
+                    }
+                }
+                events.retain(|e| e.t.is_finite() && e.x.is_finite() && e.y.is_finite());
+                events.sort_by(|a, b| a.t.total_cmp(&b.t));
+                // The studied camera reads the recording's pointer path after
+                // its default shake filter (`B39:3274-3284`, `DgH:3254`).
+                pointer_path::remove_shakes(&events, pointer_path::SHAKE_THRESHOLD)
             })
             .unwrap_or_default();
         let zooms = clips
@@ -297,7 +337,7 @@ impl ZoomCameraPlan {
             })
             .map(|clip| {
                 let groups = if clip.mode == ZoomMode::Auto {
-                    let points = follow_points(&samples, mapping, clip);
+                    let points = follow_points(&events, mapping, clip);
                     group_centers(&movement_groups(
                         &points,
                         movement_group_budget(frame, clip.scale),
@@ -305,30 +345,14 @@ impl ZoomCameraPlan {
                 } else {
                     Vec::new()
                 };
-                CameraZoom {
-                    clip,
-                    groups,
-                    holds_for_next: morphs_into_neighbour(&clips, clip),
-                }
+                CameraZoom { clip, groups }
             })
             .collect::<Vec<_>>();
         let lead_in = settings.lead_in_seconds();
         let start_time = zooms
             .iter()
-            .filter(|zoom| !zoom.groups.is_empty())
             .map(|zoom| (zoom.clip.start - lead_in).max(0.0))
             .min_by(f64::total_cmp);
-        let mut boundaries = Vec::new();
-        for zoom in &zooms {
-            boundaries.extend([
-                (zoom.clip.start - lead_in).max(0.0),
-                zoom.clip.start,
-                exit_start(&zoom.clip),
-                zoom.clip.end,
-            ]);
-        }
-        boundaries.sort_by(f64::total_cmp);
-        boundaries.dedup();
         let frames = start_time
             .map(|_| vec![CameraMotion::parked(full_rect(frame))])
             .unwrap_or_default();
@@ -338,7 +362,6 @@ impl ZoomCameraPlan {
             zooms,
             settings,
             start_time,
-            boundaries,
             frames,
         }
     }
@@ -361,26 +384,11 @@ impl ZoomCameraPlan {
                 return Some(index);
             }
         }
-        // A playhead in a morph gap holds the clip it just left.
-        self.zooms
-            .iter()
-            .enumerate()
-            .filter(|(_, zoom)| {
-                zoom.holds_for_next
-                    && time > zoom.clip.end
-                    && time - zoom.clip.end <= MORPH_GAP_SECONDS
-            })
-            .max_by(|(_, left), (_, right)| left.clip.end.total_cmp(&right.clip.end))
-            .map(|(index, _)| index)
+        None
     }
 
     fn target_rect(&self, index: usize, time: f64) -> [f64; 4] {
         let zoom = &self.zooms[index];
-        // A clip that a neighbour morphs from holds its framing through the
-        // ease-out instead of settling back to the full frame.
-        if !zoom.holds_for_next && time >= exit_start(&zoom.clip) {
-            return full_rect(self.frame);
-        }
         // A lead-in sample sits before the clip; frame it where the clip
         // itself starts rather than reading a movement group that has not
         // begun yet.
@@ -393,47 +401,20 @@ impl ZoomCameraPlan {
         focus_rect(zoom.clip.scale, center, self.frame)
     }
 
-    fn advance(&self, mut motion: CameraMotion, mut from: f64, to: f64) -> CameraMotion {
-        let mut events: Vec<_> = self
-            .boundaries
-            .iter()
-            .copied()
-            .filter(|event| *event > from && *event < to)
-            .collect();
-        events.push(to);
-        let spring = self.settings.spring();
-        for end in events {
-            let sample_time = (from + end) / 2.0;
-            if let Some(index) = self.target_index_at(sample_time) {
-                let zoom = &self.zooms[index];
-                if zoom.clip.instant {
-                    // An instant zoom is a cut: the camera is already at its
-                    // target instead of travelling there on the spring.
-                    motion = CameraMotion::parked(self.target_rect(index, sample_time));
-                } else if zoom.groups.is_empty() {
-                    motion = CameraMotion::parked(camera_rect(
-                        static_camera_at(&self.clips, sample_time, self.frame),
-                        self.frame,
-                    ));
-                } else {
-                    motion =
-                        motion.advance(self.target_rect(index, sample_time), spring, end - from);
-                }
-            } else {
-                // An instant clip releases just as abruptly as it enters.
-                let released_instantly = self
-                    .zooms
-                    .iter()
-                    .any(|zoom| zoom.clip.instant && (from - zoom.clip.end).abs() < 1e-9);
-                motion = if released_instantly {
-                    CameraMotion::parked(full_rect(self.frame))
-                } else {
-                    motion.advance(full_rect(self.frame), spring, end - from)
-                };
-            }
-            from = end;
+    fn advance(&self, motion: CameraMotion, from: f64, to: f64) -> CameraMotion {
+        if to <= from {
+            return motion;
         }
-        motion
+        let target = match self.target_index_at(to) {
+            Some(index) => self.target_rect(index, to),
+            None => full_rect(self.frame),
+        };
+        // An instant zoom swaps in a zero spring through its window, which
+        // runs 50 ms past the clip (`B39:7908-7915`), so the camera snaps.
+        if instant_blur_disabled(&self.clips, to) {
+            return CameraMotion::parked(target);
+        }
+        motion.advance(target, self.settings.spring(), to - from)
     }
 
     fn evaluate(&mut self, time: f64) -> Camera {
@@ -445,34 +426,38 @@ impl ZoomCameraPlan {
             if self.zooms[index].clip.instant {
                 return frame_for_rect(self.target_rect(index, time), self.frame);
             }
-            if self.zooms[index].groups.is_empty() {
-                return static_camera_at(&self.clips, time, self.frame);
-            }
         }
         let Some(start_time) = self.start_time else {
             return static_camera_at(&self.clips, time, self.frame);
         };
-        if time < start_time || self.zooms.iter().all(|zoom| time > zoom.clip.end) {
+        if time < start_time {
             return static_camera_at(&self.clips, time, self.frame);
         }
 
-        let frame_index = ((time - start_time) / ZOOM_CAMERA_STEP).floor() as usize;
+        let step = 1.0 / self.settings.frame_rate;
+        let frame_index = ((time - start_time) / step).floor() as usize;
         while self.frames.len() <= frame_index {
-            let from = start_time + (self.frames.len() - 1) as f64 * ZOOM_CAMERA_STEP;
+            let from = start_time + (self.frames.len() - 1) as f64 * step;
             let motion = self.advance(
                 *self
                     .frames
                     .last()
                     .expect("camera plan starts with one frame"),
                 from,
-                from + ZOOM_CAMERA_STEP,
+                from + step,
             );
             self.frames.push(motion);
         }
-        let from = start_time + frame_index as f64 * ZOOM_CAMERA_STEP;
+        let from = start_time + frame_index as f64 * step;
         let motion = self.advance(self.frames[frame_index], from, time);
         frame_for_rect(motion.rect, self.frame)
     }
+}
+
+pub(super) fn instant_blur_disabled(clips: &[ZoomClip], time: f64) -> bool {
+    clips
+        .iter()
+        .any(|clip| !clip.hidden && clip.instant && time >= clip.start && time <= clip.end + 0.05)
 }
 
 pub(super) fn static_camera_at(clips: &[ZoomClip], time: f64, frame: (f64, f64)) -> Camera {
@@ -489,12 +474,7 @@ pub(super) fn static_camera_at(clips: &[ZoomClip], time: f64, frame: (f64, f64))
             && time >= clip.start
             && time <= clip.end
     }) else {
-        // Hold the clip just left across a morph gap so the next auto zoom
-        // continues from its framing instead of flashing the full frame.
-        return match gap_hold_predecessor(clips, time) {
-            Some(previous) => (clips[previous].scale.max(1.0), clips[previous].center),
-            None => (1.0, frame_center),
-        };
+        return (1.0, frame_center);
     };
 
     let clip = &clips[index];
@@ -510,10 +490,7 @@ pub(super) fn static_camera_at(clips: &[ZoomClip], time: f64, frame: (f64, f64))
     }
     if time < clip.start + ease {
         let progress = smoothstep((time - clip.start) / ease);
-        let (from_scale, from_center) = match morph_predecessor(clips, index) {
-            Some(previous) => (clips[previous].scale.max(1.0), clips[previous].center),
-            None => (1.0, clip.center),
-        };
+        let (from_scale, from_center) = (1.0, clip.center);
         return (
             from_scale + (to_scale - from_scale) * progress,
             (
@@ -521,13 +498,6 @@ pub(super) fn static_camera_at(clips: &[ZoomClip], time: f64, frame: (f64, f64))
                 from_center.1 + (clip.center.1 - from_center.1) * progress,
             ),
         );
-    }
-    if time > clip.end - ease {
-        if morphs_into_neighbour(clips, *clip) {
-            return (to_scale, clip.center);
-        }
-        let progress = smoothstep((clip.end - time) / ease);
-        return (1.0 + (to_scale - 1.0) * progress, clip.center);
     }
     (to_scale, clip.center)
 }
@@ -558,6 +528,164 @@ pub(super) fn view_rect(scale: f64, center: (f64, f64), frame: (f64, f64)) -> Vi
     let x = (center_x - width / 2.0).clamp(0.0, (frame_width - width).max(0.0));
     let y = (center_y - height / 2.0).clamp(0.0, (frame_height - height).max(0.0));
     (x, y, width, height)
+}
+
+/// A rectangle in stage pixels: x, y, width, height.
+pub(super) type StageRect = (f64, f64, f64, f64);
+
+/// The studied framing: the card at `rest` is moved so the point at
+/// `target01` of it sits on `focal`, scaled by `scale` about that point, then
+/// kept covering `area` (the stage inside the padding). An axis the card no
+/// longer covers is centred in the area instead.
+pub(super) fn card_rect(
+    rest: StageRect,
+    area: StageRect,
+    focal: (f64, f64),
+    scale: f64,
+    target01: (f64, f64),
+) -> StageRect {
+    let scale = if scale.is_finite() {
+        scale.max(1.0)
+    } else {
+        1.0
+    };
+    let tx = if target01.0.is_finite() {
+        target01.0.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    let ty = if target01.1.is_finite() {
+        target01.1.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    let width = rest.2 * scale;
+    let height = rest.3 * scale;
+    let axis = |focal: f64, t: f64, size: f64, start: f64, extent: f64| {
+        if size > extent {
+            (focal - t * size).clamp(start + extent - size, start)
+        } else {
+            start + (extent - size) / 2.0
+        }
+    };
+    (
+        axis(focal.0, tx, width, area.0, area.2),
+        axis(focal.1, ty, height, area.1, area.3),
+        width,
+        height,
+    )
+}
+
+/// Where a zoom aims inside `area`: its centre, unless the camera overlay
+/// overlaps it. Then the studied build tries the centre and the middle of each
+/// strip the camera leaves free above, below, left, and right of it, and takes
+/// the one with the most room to the nearest area edge or the camera, the
+/// closer to the centre on a tie.
+pub(super) fn focal_point(area: StageRect, camera: Option<StageRect>) -> (f64, f64) {
+    let centre = (area.0 + area.2 / 2.0, area.1 + area.3 / 2.0);
+    let Some(camera) = camera else {
+        return centre;
+    };
+    if area.2 <= 0.0 || area.3 <= 0.0 {
+        return centre;
+    }
+    let (left, top, right, bottom) = (area.0, area.1, area.0 + area.2, area.1 + area.3);
+    let cam_left = camera.0.max(left);
+    let cam_top = camera.1.max(top);
+    let cam_right = (camera.0 + camera.2).min(right);
+    let cam_bottom = (camera.1 + camera.3).min(bottom);
+    if cam_left >= cam_right
+        || cam_top >= cam_bottom
+        || (cam_left <= left && cam_top <= top && cam_right >= right && cam_bottom >= bottom)
+    {
+        return centre;
+    }
+    let inside_camera =
+        |x: f64, y: f64| x >= cam_left && x <= cam_right && y >= cam_top && y <= cam_bottom;
+    let room = |x: f64, y: f64| {
+        let mut to_left = x - left;
+        let mut to_right = right - x;
+        let mut to_top = y - top;
+        let mut to_bottom = bottom - y;
+        if y > cam_top && y < cam_bottom {
+            if x < cam_left {
+                to_right = to_right.min(cam_left - x);
+            }
+            if x > cam_right {
+                to_left = to_left.min(x - cam_right);
+            }
+        }
+        if x > cam_left && x < cam_right {
+            if y < cam_top {
+                to_bottom = to_bottom.min(cam_top - y);
+            }
+            if y > cam_bottom {
+                to_top = to_top.min(y - cam_bottom);
+            }
+        }
+        to_left.min(to_right).min(to_top).min(to_bottom)
+    };
+    let mut candidates: Vec<(f64, f64)> = Vec::new();
+    if !inside_camera(centre.0, centre.1) {
+        candidates.push(centre);
+    }
+    if cam_top > top {
+        candidates.push((centre.0, (top + cam_top) / 2.0));
+    }
+    if cam_bottom < bottom {
+        candidates.push((centre.0, (cam_bottom + bottom) / 2.0));
+    }
+    if cam_left > left {
+        candidates.push(((left + cam_left) / 2.0, centre.1));
+    }
+    if cam_right < right {
+        candidates.push(((cam_right + right) / 2.0, centre.1));
+    }
+    let mut best: Option<((f64, f64), f64, f64)> = None;
+    for (x, y) in candidates {
+        if x < left || x > right || y < top || y > bottom || inside_camera(x, y) {
+            continue;
+        }
+        let breathing = room(x, y);
+        let distance = (x - centre.0).hypot(y - centre.1);
+        let better = match best {
+            None => true,
+            Some((_, best_room, best_distance)) => {
+                breathing - best_room > 1e-9
+                    || ((breathing - best_room).abs() <= 1e-9 && distance < best_distance)
+            }
+        };
+        if better {
+            best = Some(((x, y), breathing, distance));
+        }
+    }
+    best.map(|(point, _, _)| point).unwrap_or(centre)
+}
+
+/// The source region that lands on the rest rect once the card is drawn at
+/// `card`, which is how the preview's crop transform and overlays express the
+/// card. It reaches past the source edges when the card does.
+pub(super) fn card_view(rest: StageRect, card: StageRect, source: (f64, f64)) -> ViewRect {
+    let card_width = card.2.max(1e-9);
+    let card_height = card.3.max(1e-9);
+    (
+        (rest.0 - card.0) / card_width * source.0,
+        (rest.1 - card.1) / card_height * source.1,
+        rest.2 / card_width * source.0,
+        rest.3 / card_height * source.1,
+    )
+}
+
+/// How far the background zooms with the screen, as in the studied build.
+pub(super) const BACKGROUND_ZOOM_SHARE: f64 = 0.125;
+
+/// The background's scale for a screen zoom of `scale`.
+pub(super) fn background_zoom(scale: f64) -> f64 {
+    if scale.is_finite() {
+        1.0 + (scale - 1.0).max(0.0) * BACKGROUND_ZOOM_SHARE
+    } else {
+        1.0
+    }
 }
 
 /// Mirrors the shared editor's `zoom_camera_transform` for the video Picture.
@@ -700,96 +828,80 @@ fn frame_for_rect(rect: [f64; 4], frame: (f64, f64)) -> Camera {
     )
 }
 
-/// The closest earlier auto zoom that `index` morphs from: it must end
-/// within the morph gap, and both clips must be auto and animated. A hidden
-/// clip never contributes, and neither does a manual or an instant one.
-fn morph_predecessor(clips: &[ZoomClip], index: usize) -> Option<usize> {
-    let clip = &clips[index];
-    if clip.mode != ZoomMode::Auto || clip.instant {
-        return None;
-    }
-    clips
+/// The pointer sample the studied camera uses when a clip window has none of
+/// its own: the first sample at or after the window start within 500 ms,
+/// otherwise the nearest sample.
+fn nearest_follow_sample(samples: &[(f64, f64, f64)], start: f64) -> Option<(f64, f64, f64)> {
+    const LOOKAHEAD_SECONDS: f64 = 0.5;
+    samples
         .iter()
-        .enumerate()
-        .filter(|(other, previous)| {
-            *other != index
-                && previous.mode == ZoomMode::Auto
-                && !previous.instant
-                && !previous.hidden
-                && previous.end <= clip.start
-                && clip.start - previous.end <= MORPH_GAP_SECONDS
+        .filter(|&&(time, x, y)| time.is_finite() && x.is_finite() && y.is_finite())
+        .filter(|&&(time, _, _)| time >= start && time - start <= LOOKAHEAD_SECONDS)
+        .min_by(|left, right| left.0.total_cmp(&right.0))
+        .or_else(|| {
+            samples
+                .iter()
+                .filter(|&&(time, x, y)| time.is_finite() && x.is_finite() && y.is_finite())
+                .min_by(|left, right| (left.0 - start).abs().total_cmp(&(right.0 - start).abs()))
         })
-        .max_by(|(_, left), (_, right)| left.end.total_cmp(&right.end))
-        .map(|(previous, _)| previous)
-}
-
-/// True when a later auto zoom morphs from `clip`, so it holds its framing
-/// through its own ease-out instead of returning to the full frame.
-fn morphs_into_neighbour(clips: &[ZoomClip], clip: ZoomClip) -> bool {
-    clip.mode == ZoomMode::Auto
-        && !clip.instant
-        && !clip.hidden
-        && clips.iter().any(|next| {
-            *next != clip
-                && next.mode == ZoomMode::Auto
-                && !next.instant
-                && !next.hidden
-                && next.start >= clip.end
-                && next.start - clip.end <= MORPH_GAP_SECONDS
-        })
-}
-
-/// The closest auto zoom whose framing is held while `time` sits in a gap.
-fn gap_hold_predecessor(clips: &[ZoomClip], time: f64) -> Option<usize> {
-    clips
-        .iter()
-        .enumerate()
-        .filter(|(_, clip)| {
-            clip.mode == ZoomMode::Auto
-                && !clip.instant
-                && !clip.hidden
-                && clip.end <= time
-                && time - clip.end <= MORPH_GAP_SECONDS
-        })
-        .max_by(|(_, left), (_, right)| left.end.total_cmp(&right.end))
-        .map(|(previous, _)| previous)
-        .filter(|&previous| morphs_into_neighbour(clips, clips[previous]))
+        .copied()
 }
 
 /// The pointer samples one clip's follow camera reads, as
-/// `(composition_time, x, y)`. Samples within the jitter threshold are
-/// dropped, and the last sample before each footage window is carried in at
-/// the window's first instant so the first movement group starts where the
-/// pointer already was.
+/// `(composition_time, x, y)`. Moves closer than the studied 10 px to the
+/// last kept event are dropped, but presses and releases are always kept,
+/// and the last sample before each footage window is carried in at the
+/// window's first instant so the first movement group starts where the
+/// pointer already was. When the clip has no sample before or inside its
+/// windows, the studied nearest-sample fallback keeps the camera following
+/// instead of freezing on the stored centre.
 fn follow_points(
-    samples: &[(f64, f64, f64)],
+    samples: &[PointerEvent],
     mapping: &TimeMapping,
     clip: ZoomClip,
 ) -> Vec<(f64, f64, f64)> {
-    let mut points = Vec::new();
+    let mut points: Vec<PointerEvent> = Vec::new();
+    let mut first_window = None;
     for (start, _, source_start, source_end) in mapping.windows(clip) {
-        let index = samples.partition_point(|&(time, _, _)| time < source_start);
-        if let Some(&(_, x, y)) = index.checked_sub(1).and_then(|before| samples.get(before)) {
-            points.push((start - 0.001, x, y));
+        first_window.get_or_insert((start, source_start));
+        let index = samples.partition_point(|e| e.t < source_start);
+        if let Some(before) = index.checked_sub(1).and_then(|before| samples.get(before)) {
+            points.push(PointerEvent {
+                t: start - 0.001,
+                kind: PointerKind::Move,
+                ..*before
+            });
         }
         points.extend(
             samples[index..]
                 .iter()
-                .take_while(|&&(time, _, _)| time <= source_end)
-                .map(|&(time, x, y)| (start + (time - source_start), x, y)),
+                .take_while(|e| e.t <= source_end)
+                .map(|e| PointerEvent {
+                    t: start + (e.t - source_start),
+                    ..*e
+                }),
         );
     }
-    points.sort_by(|left, right| left.0.total_cmp(&right.0));
-    let mut kept: Vec<(f64, f64, f64)> = Vec::with_capacity(points.len());
-    for point in points {
-        if kept
-            .last()
-            .is_none_or(|&(_, x, y)| (point.1 - x).hypot(point.2 - y) >= FOLLOW_JITTER_PIXELS)
-        {
-            kept.push(point);
+    if points.is_empty() {
+        if let Some((start, source_start)) = first_window {
+            let tuples = &samples.iter().map(|e| (e.t, e.x, e.y)).collect::<Vec<_>>();
+            if let Some((time, x, y)) = nearest_follow_sample(tuples, source_start) {
+                points.push(PointerEvent {
+                    t: start + (time - source_start),
+                    x,
+                    y,
+                    kind: PointerKind::Move,
+                });
+            }
         }
     }
-    kept
+    points.sort_by(|left, right| left.t.total_cmp(&right.t));
+    // The studied focus path keeps clicks and drops moves closer than 10 px
+    // to the last kept event (`B39:2804-2826`, `B39:3333`).
+    pointer_path::decimate(&points, pointer_path::DECIMATE_DISTANCE)
+        .into_iter()
+        .map(|e| (e.t, e.x, e.y))
+        .collect()
 }
 
 /// Half the zoomed view: the movement-group budget at this scale. A tighter
@@ -897,8 +1009,62 @@ fn group_center_at(centers: &[(f64, (f64, f64))], time: f64) -> Option<(f64, f64
     Some(centers[active].1)
 }
 
-fn exit_start(clip: &ZoomClip) -> f64 {
-    clip.end - EASE_SECONDS.min((clip.end - clip.start) / 2.0)
+/// The rest tolerance the studied spring sets whenever its target changes:
+/// the move's size times the precision setting, never under one move unit.
+fn studied_precision(value: f64, target: f64, precision: f64) -> f64 {
+    if value == target {
+        return 1.0;
+    }
+    (value - target).abs().max(1.0) * precision
+}
+
+/// One studied spring advance (`CpX:314-350`): the overspeed damping is chosen
+/// once per call, then the spring integrates in whole milliseconds. The last
+/// step uses the studied fractional rule exactly.
+fn studied_advance(
+    mut value: f64,
+    mut velocity: f64,
+    target: f64,
+    spring: CameraSpring,
+    precision: f64,
+    millis: f64,
+) -> (f64, f64) {
+    if millis.is_nan()
+        || millis <= 0.0
+        || !value.is_finite()
+        || !velocity.is_finite()
+        || !target.is_finite()
+    {
+        return (value, velocity);
+    }
+    let stiffness = spring.stiffness.max(f64::EPSILON);
+    let mass = spring.mass.max(f64::EPSILON);
+    let mut damping = spring.damping.max(0.0);
+    let displacement = target - value;
+    if velocity * displacement > 0.0 {
+        let natural = (stiffness / mass).sqrt();
+        if velocity.abs() > displacement.abs() * natural {
+            damping = damping.max(2.0 * (mass * stiffness).sqrt());
+        }
+    }
+    let steps = millis.ceil() as u64;
+    for step in 1..=steps {
+        let step = step as f64;
+        let dt = if step > millis {
+            (step - millis) / 1000.0
+        } else {
+            0.001
+        };
+        let acceleration = (-(value - target) * stiffness - velocity * damping) / mass;
+        let next_velocity = velocity + acceleration * dt;
+        let next_value = value + next_velocity * dt;
+        if next_velocity.abs() < precision && (next_value - target).abs() < precision {
+            return (target, 0.0);
+        }
+        velocity = next_velocity;
+        value = next_value;
+    }
+    (value, velocity)
 }
 
 pub(super) fn spring_step(
@@ -924,7 +1090,14 @@ pub(super) fn spring_step(
     }
     let acceleration = (-(value - target) * stiffness - velocity * damping) / mass;
     let velocity = velocity + acceleration * seconds;
-    (value + velocity * seconds, velocity)
+    let value = value + velocity * seconds;
+    const REST_DISTANCE: f64 = 0.01;
+    const REST_VELOCITY: f64 = 0.01;
+    if (value - target).abs() < REST_DISTANCE && velocity.abs() < REST_VELOCITY {
+        (target, 0.0)
+    } else {
+        (value, velocity)
+    }
 }
 
 fn smoothstep(value: f64) -> f64 {
@@ -939,8 +1112,10 @@ fn valid_frame(frame: (f64, f64)) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        camera_transform, placement_rect, source_to_stage, stage_point_to_source, static_camera_at,
-        view_rect, Camera, TimeMapping, ZoomCameraCache, ZoomCameraSettings,
+        background_zoom, camera_transform, card_rect, card_view, focal_point,
+        nearest_follow_sample, placement_rect, source_to_stage, spring_step, stage_point_to_source,
+        studied_advance, studied_precision, view_rect, Camera, CameraMotion, TimeMapping,
+        ZoomCameraCache, ZoomCameraSettings, CAMERA_FOLLOW_SPRING, SCREEN_SPRING_PRECISION,
     };
     use crate::recording::editor::sidecar::{
         CaptureRegion, ClickSample, CursorKind, PointerSample, PointerSidecar,
@@ -957,13 +1132,6 @@ mod tests {
             mode: ZoomMode::Auto,
             instant: false,
             anchor: None,
-        }
-    }
-
-    fn manual_clip(start: f64, end: f64, scale: f64, center: (f64, f64)) -> ZoomClip {
-        ZoomClip {
-            mode: ZoomMode::Manual,
-            ..auto_clip(start, end, scale, center)
         }
     }
 
@@ -1007,25 +1175,197 @@ mod tests {
     }
 
     #[test]
-    fn camera_eases_in_out_and_holds_a_plateau_without_pointer_samples() {
+    fn camera_springs_in_holds_and_springs_out_without_pointer_samples() {
         let clips = [auto_clip(1.0, 4.0, 3.0, (320.0, 240.0))];
         let frame = (640.0, 480.0);
         let sidecar = sidecar((640, 480), &[]);
-        assert_eq!(evaluate(&clips, &sidecar, frame, 1.0).0, 1.0);
-        assert!((evaluate(&clips, &sidecar, frame, 1.3).0 - 2.0).abs() < 1e-9);
-        assert_eq!(evaluate(&clips, &sidecar, frame, 1.6).0, 3.0);
-        assert_eq!(evaluate(&clips, &sidecar, frame, 2.5).0, 3.0);
-        assert!((evaluate(&clips, &sidecar, frame, 3.7).0 - 2.0).abs() < 1e-9);
-        assert_eq!(evaluate(&clips, &sidecar, frame, 4.0).0, 1.0);
+        assert!(evaluate(&clips, &sidecar, frame, 1.0).0 < 1.01);
+        let entering = evaluate(&clips, &sidecar, frame, 1.3).0;
+        assert!(
+            entering > 1.5 && entering < 3.2,
+            "entry rides the spring, got {entering}"
+        );
+        for time in [2.5, 3.7, 4.0] {
+            let held = evaluate(&clips, &sidecar, frame, time).0;
+            assert!((held - 3.0).abs() < 0.01, "time={time} held={held}");
+        }
+        let leaving = evaluate(&clips, &sidecar, frame, 4.05).0;
+        assert!(
+            leaving > 1.5 && leaving < 3.0,
+            "exit rides the spring, got {leaving}"
+        );
+        assert!(evaluate(&clips, &sidecar, frame, 5.5).0 < 1.01);
     }
 
     #[test]
-    fn short_clip_ease_windows_meet_at_the_midpoint() {
+    fn the_live_fallback_prefers_a_lookahead_sample() {
+        let samples = [(0.8, 10.0, 10.0), (1.2, 20.0, 20.0), (5.0, 30.0, 30.0)];
+        assert_eq!(
+            nearest_follow_sample(&samples, 1.0),
+            Some((1.2, 20.0, 20.0))
+        );
+    }
+
+    #[test]
+    fn the_follow_camera_ignores_a_lone_pointer_spike() {
+        let mut points: Vec<(f64, f64, f64)> = (0..=30)
+            .map(|i| (1.0 + i as f64 * 0.1, 900.0, 500.0))
+            .collect();
+        // One far sample, as from a cursor warp, then straight back.
+        points.insert(11, (2.05, 50.0, 50.0));
+        let sidecar = sidecar((1280, 720), &points);
+        let clips = [auto_clip(1.0, 4.0, 2.0, (640.0, 360.0))];
+        let frame = (1280.0, 720.0);
+        for step in 0..=12 {
+            let time = 2.0 + step as f64 * 0.05;
+            let (_, center) = evaluate(&clips, &sidecar, frame, time);
+            assert!(
+                (center.0 - 900.0).abs() < 1.0 && (center.1 - 500.0).abs() < 1.0,
+                "time={time} center={center:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_clip_before_the_pointer_starts_follows_the_nearest_sample() {
+        let clips = [auto_clip(1.0, 2.0, 3.0, (320.0, 240.0))];
+        // The pointer appears long after this clip ends. The studied camera
+        // still falls back to it, so the clip follows instead of freezing on
+        // the stored centre.
+        let sidecar = sidecar((640, 480), &[(6.0, 600.0, 300.0)]);
+        let (scale, center) = evaluate(&clips, &sidecar, (640.0, 480.0), 1.5);
+        assert!(scale > 1.5, "the clip must still zoom: {scale}");
+        assert!(
+            center.0 > 450.0,
+            "the camera must follow the sample: {center:?}"
+        );
+    }
+
+    #[test]
+    fn the_spring_rests_at_the_studied_threshold() {
+        let (value, velocity) = spring_step(99.995, 0.004, 100.0, CAMERA_FOLLOW_SPRING, 0.001);
+        assert_eq!(value, 100.0);
+        assert_eq!(velocity, 0.0);
+    }
+
+    #[test]
+    fn the_camera_runs_the_studied_integrator_once_per_frame() {
+        let motion = CameraMotion::parked([0.0; 4]).advance([100.0; 4], CAMERA_FOLLOW_SPRING, 0.1);
+        let precision = studied_precision(0.0, 100.0, SCREEN_SPRING_PRECISION);
+        let (value, _) = studied_advance(0.0, 0.0, 100.0, CAMERA_FOLLOW_SPRING, precision, 100.0);
+        assert!((motion.rect[0] - value).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_camera_spring_matches_the_studied_integrator_frame_by_frame() {
+        // Reference values come from running the studied build's own spring
+        // functions (`CpX:283-392`) per rendered frame: a 600 px move from
+        // rest at 60, 30, and 24 fps, and an overspeed start that triggers the
+        // damping clamp.
+        let run = |start: CameraMotion, goal: f64, fps: f64, frames: usize| {
+            let mut motion = start;
+            let mut values = Vec::new();
+            for _ in 0..frames {
+                motion = motion.advance([goal; 4], CAMERA_FOLLOW_SPRING, 1.0 / fps);
+                values.push(motion.rect[0]);
+            }
+            values
+        };
+        let check = |values: &[f64], expected: &[(usize, f64)]| {
+            for &(frame, value) in expected {
+                assert!(
+                    (values[frame] - value).abs() < 1e-6,
+                    "frame {frame}: {} vs {value}",
+                    values[frame]
+                );
+            }
+        };
+        let rest = CameraMotion::parked([0.0; 4]);
+        check(
+            &run(rest, 600.0, 60.0, 90),
+            &[
+                (0, 6.77845978490818),
+                (1, 25.109368517395612),
+                (7, 279.8052349666634),
+                (8, 327.48356247411374),
+                (9, 368.0416739380785),
+                (85, 600.0),
+            ],
+        );
+        check(
+            &run(rest, 600.0, 30.0, 45),
+            &[(0, 26.57250330819989), (4, 382.62526235836464), (40, 600.0)],
+        );
+        check(
+            &run(rest, 600.0, 24.0, 36),
+            &[(0, 38.91758891664947), (4, 440.3020284892068), (31, 600.0)],
+        );
+        let fast = CameraMotion {
+            velocity: [3000.0; 4],
+            ..rest
+        };
+        check(
+            &run(fast, 100.0, 60.0, 6),
+            &[
+                (0, 42.84784030863177),
+                (1, 75.66619104852342),
+                (5, 151.72445540251965),
+            ],
+        );
+    }
+
+    #[test]
+    fn the_studied_precision_scales_with_the_move() {
+        assert_eq!(studied_precision(5.0, 5.0, 0.002), 1.0);
+        assert!((studied_precision(0.0, 600.0, 0.002) - 1.2).abs() < 1e-12);
+        assert!((studied_precision(0.0, 0.3, 0.002) - 0.002).abs() < 1e-12);
+    }
+
+    #[test]
+    fn instant_zoom_disables_the_trail_through_its_extended_window() {
+        let mut clip = auto_clip(1.0, 2.0, 2.0, (320.0, 240.0));
+        clip.instant = true;
+        assert!(!super::instant_blur_disabled(&[clip], 0.99));
+        assert!(super::instant_blur_disabled(&[clip], 1.0));
+        assert!(super::instant_blur_disabled(&[clip], 2.049));
+        assert!(!super::instant_blur_disabled(&[clip], 2.051));
+        clip.hidden = true;
+        assert!(!super::instant_blur_disabled(&[clip], 1.5));
+    }
+
+    #[test]
+    fn an_auto_zoom_springs_back_after_its_last_frame() {
+        let clips = [auto_clip(1.0, 2.0, 3.0, (320.0, 240.0))];
+        let sidecar = sidecar((640, 480), &[(1.0, 500.0, 240.0), (1.9, 500.0, 240.0)]);
+        assert!(
+            evaluate(&clips, &sidecar, (640.0, 480.0), 2.0).0 > 2.5,
+            "the clip must still be zoomed on its last frame"
+        );
+        let just_after = evaluate(&clips, &sidecar, (640.0, 480.0), 2.05).0;
+        assert!(
+            just_after > 1.5 && just_after < 3.0,
+            "the exit must travel on the spring, got {just_after}"
+        );
+        assert!(
+            evaluate(&clips, &sidecar, (640.0, 480.0), 2.8).0 < 1.05,
+            "the spring must finish returning to the full frame"
+        );
+    }
+
+    #[test]
+    fn a_short_clip_springs_in_and_does_not_cut_at_its_end() {
         let clips = [auto_clip(1.0, 1.8, 3.0, (320.0, 240.0))];
         let sidecar = sidecar((640, 480), &[]);
-        assert!((evaluate(&clips, &sidecar, (640.0, 480.0), 1.2).0 - 2.0).abs() < 1e-9);
-        assert_eq!(evaluate(&clips, &sidecar, (640.0, 480.0), 1.4).0, 3.0);
-        assert!((evaluate(&clips, &sidecar, (640.0, 480.0), 1.6).0 - 2.0).abs() < 1e-9);
+        let frame = (640.0, 480.0);
+        let entering = evaluate(&clips, &sidecar, frame, 1.2).0;
+        assert!(entering > 1.0 && entering < 3.2, "got {entering}");
+        let last = evaluate(&clips, &sidecar, frame, 1.8).0;
+        assert!(last > 2.5, "still zoomed on its last frame, got {last}");
+        let after = evaluate(&clips, &sidecar, frame, 1.81).0;
+        assert!(
+            after > 2.0,
+            "the end springs back instead of cutting, got {after}"
+        );
     }
 
     #[test]
@@ -1139,7 +1479,7 @@ mod tests {
     }
 
     #[test]
-    fn clips_without_pointer_samples_keep_the_static_camera_even_with_clicks() {
+    fn clips_without_pointer_samples_keep_the_stored_centre_even_with_clicks() {
         let clips = [auto_clip(1.0, 4.0, 3.0, (100.0, 300.0))];
         let mut sidecar = sidecar((640, 480), &[]);
         sidecar.clicks.push(ClickSample {
@@ -1149,10 +1489,20 @@ mod tests {
             button: 1,
             cursor_id: None,
         });
-        let time = 2.0;
-        assert_eq!(
-            evaluate(&clips, &sidecar, (640.0, 480.0), time),
-            static_camera_at(&clips, time, (640.0, 480.0))
+        let frame = (640.0, 480.0);
+        let expected = super::frame_for_rect(super::focus_rect(3.0, (100.0, 300.0), frame), frame);
+        let actual = evaluate(&clips, &sidecar, frame, 3.5);
+        assert!(
+            (actual.0 - expected.0).abs() < 0.01,
+            "{actual:?} vs {expected:?}"
+        );
+        assert!(
+            (actual.1 .0 - expected.1 .0).abs() < 0.5,
+            "{actual:?} vs {expected:?}"
+        );
+        assert!(
+            (actual.1 .1 - expected.1 .1).abs() < 0.5,
+            "{actual:?} vs {expected:?}"
         );
     }
 
@@ -1171,18 +1521,6 @@ mod tests {
             || Some(sidecar.clone()),
         );
         assert!((center.0 - 480.0).abs() < 10.0, "center={center:?}");
-        let identity = cache.evaluate(
-            &clips,
-            (640.0, 480.0),
-            &TimeMapping::default(),
-            ZoomCameraSettings::default(),
-            1.2,
-            || Some(sidecar.clone()),
-        );
-        assert!(
-            (identity.1 .0 - center.0).abs() > 100.0,
-            "unmapped windows must not find source samples: {identity:?} vs {center:?}"
-        );
     }
 
     #[test]
@@ -1259,112 +1597,20 @@ mod tests {
     }
 
     #[test]
-    fn auto_zooms_within_the_morph_gap_share_one_continuous_framing() {
-        let frame = (640.0, 480.0);
+    fn a_short_gap_between_auto_zooms_returns_toward_the_full_frame() {
+        // The studied camera targets the full frame between zooms; only the
+        // optional early start looks ahead to the next one.
         let clips = [
-            auto_clip(0.0, 1.5, 2.0, (400.0, 240.0)),
-            auto_clip(1.9, 3.5, 3.0, (300.0, 240.0)),
+            auto_clip(1.0, 2.0, 2.0, (320.0, 240.0)),
+            auto_clip(2.4, 3.4, 2.0, (320.0, 240.0)),
         ];
-        assert!(
-            (static_camera_at(&clips, 1.0, frame).0 - 2.0).abs() < 1e-9,
-            "the first clip holds its framing into the gap"
-        );
-        let gap = static_camera_at(&clips, 1.7, frame);
-        assert!((gap.0 - 2.0).abs() < 1e-9, "gap framing: {gap:?}");
-        assert_eq!(gap.1, (400.0, 240.0));
-        let entry = static_camera_at(&clips, 1.9, frame);
-        assert!(
-            (entry.0 - 2.0).abs() < 1e-9,
-            "no full frame at the next clip: {entry:?}"
-        );
-        assert_eq!(entry.1, (400.0, 240.0));
-        assert_eq!(static_camera_at(&clips, 2.75, frame), (3.0, (300.0, 240.0)));
-
-        let mut previous = static_camera_at(&clips, 1.4, frame);
-        for step in 1..=80 {
-            let time = 1.4 + f64::from(step) * 0.01;
-            let current = static_camera_at(&clips, time, frame);
-            assert!(
-                current.0 > 1.9 || time >= 2.5,
-                "the framing dropped to full between the clips at {time}: {current:?}"
-            );
-            assert!(
-                (current.1 .0 - previous.1 .0).abs() < 15.0,
-                "centre jumped at {time}: {previous:?} -> {current:?}"
-            );
-            previous = current;
-        }
-    }
-
-    #[test]
-    fn auto_zooms_beyond_the_morph_gap_do_not_morph() {
+        let sidecar = sidecar((640, 480), &[]);
         let frame = (640.0, 480.0);
-        let clips = [
-            auto_clip(0.0, 1.5, 2.0, (400.0, 240.0)),
-            auto_clip(2.3, 4.5, 3.0, (300.0, 240.0)),
-        ];
-        assert_eq!(static_camera_at(&clips, 1.5, frame).0, 1.0);
-        assert_eq!(static_camera_at(&clips, 1.9, frame), (1.0, (320.0, 240.0)));
-        assert_eq!(static_camera_at(&clips, 2.3, frame), (1.0, (300.0, 240.0)));
-        assert_eq!(static_camera_at(&clips, 3.2, frame), (3.0, (300.0, 240.0)));
-    }
-
-    #[test]
-    fn the_follow_camera_holds_through_the_morph_gap() {
-        let frame = (640.0, 480.0);
-        let clips = [
-            auto_clip(0.5, 2.0, 2.0, (320.0, 240.0)),
-            auto_clip(2.4, 4.0, 3.0, (320.0, 240.0)),
-        ];
-        let sidecar = sidecar(
-            (640, 480),
-            &[
-                (0.5, 400.0, 240.0),
-                (2.0, 400.0, 240.0),
-                (2.4, 300.0, 240.0),
-                (4.0, 300.0, 240.0),
-            ],
-        );
-        let in_gap = evaluate(&clips, &sidecar, frame, 2.2);
+        let held = evaluate(&clips, &sidecar, frame, 2.0).0;
+        let gap = evaluate(&clips, &sidecar, frame, 2.35).0;
         assert!(
-            in_gap.0 > 1.8,
-            "gap must not fall back to full frame: {in_gap:?}"
-        );
-        let after_entry = evaluate(&clips, &sidecar, frame, 2.45);
-        assert!(
-            after_entry.0 > 1.8,
-            "the next clip must continue from the held framing: {after_entry:?}"
-        );
-    }
-
-    #[test]
-    fn a_manual_clip_never_morphs_in_either_direction() {
-        let frame = (640.0, 480.0);
-        let auto_then_manual = [
-            auto_clip(0.0, 1.5, 2.0, (400.0, 240.0)),
-            manual_clip(1.9, 3.5, 3.0, (300.0, 240.0)),
-        ];
-        assert_eq!(
-            static_camera_at(&auto_then_manual, 1.9, frame),
-            (1.0, (300.0, 240.0))
-        );
-        assert!(
-            (static_camera_at(&auto_then_manual, 1.4, frame).0 - 1.0).abs() < 0.2,
-            "a manual neighbour must not make the auto clip hold: {:?}",
-            static_camera_at(&auto_then_manual, 1.4, frame)
-        );
-
-        let manual_then_auto = [
-            manual_clip(0.0, 1.5, 2.0, (400.0, 240.0)),
-            auto_clip(1.9, 3.5, 3.0, (300.0, 240.0)),
-        ];
-        assert_eq!(
-            static_camera_at(&manual_then_auto, 1.9, frame),
-            (1.0, (300.0, 240.0))
-        );
-        assert_eq!(
-            static_camera_at(&manual_then_auto, 1.7, frame),
-            (1.0, (320.0, 240.0))
+            gap < held - 0.2,
+            "the gap must head back out: held={held} gap={gap}"
         );
     }
 
@@ -1528,6 +1774,84 @@ mod tests {
         assert!(
             early > 1.02,
             "the lead-in must have moved the camera before the clip starts: {early}"
+        );
+    }
+
+    #[test]
+    fn the_card_rests_until_it_zooms() {
+        let area = (100.0, 100.0, 1000.0, 500.0);
+        assert_eq!(card_rect(area, area, (600.0, 350.0), 1.0, (0.3, 0.8)), area);
+    }
+
+    #[test]
+    fn a_centred_zoom_grows_the_card_past_the_padding() {
+        let area = (100.0, 100.0, 1000.0, 500.0);
+        let card = card_rect(area, area, (600.0, 350.0), 2.0, (0.5, 0.5));
+        assert_eq!(card, (-400.0, -150.0, 2000.0, 1000.0));
+        let view = card_view(area, card, (2000.0, 1000.0));
+        assert_eq!(view, view_rect(2.0, (1000.0, 500.0), (2000.0, 1000.0)));
+    }
+
+    #[test]
+    fn an_edge_zoom_keeps_the_card_edge_on_the_padding() {
+        let area = (100.0, 100.0, 1000.0, 500.0);
+        let card = card_rect(area, area, (600.0, 350.0), 2.0, (0.0, 1.0));
+        assert_eq!(card, (100.0, -400.0, 2000.0, 1000.0));
+    }
+
+    #[test]
+    fn a_narrow_card_centres_on_the_axis_it_does_not_cover() {
+        let area = (0.0, 0.0, 1000.0, 500.0);
+        let rest = (375.0, 0.0, 250.0, 500.0);
+        let card = card_rect(rest, area, (500.0, 250.0), 2.0, (0.5, 0.5));
+        assert_eq!(card, (250.0, -250.0, 500.0, 1000.0));
+    }
+
+    #[test]
+    fn the_background_zooms_an_eighth_as_far() {
+        assert!((background_zoom(2.0) - 1.125).abs() < 1e-12);
+        assert!((background_zoom(1.0) - 1.0).abs() < 1e-12);
+        assert!((background_zoom(0.5) - 1.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn a_zoom_aims_at_the_centre_without_a_camera() {
+        assert_eq!(focal_point((0.0, 0.0, 1000.0, 500.0), None), (500.0, 250.0));
+    }
+
+    #[test]
+    fn a_small_corner_camera_leaves_the_aim_at_the_centre() {
+        let camera = Some((800.0, 350.0, 200.0, 150.0));
+        assert_eq!(
+            focal_point((0.0, 0.0, 1000.0, 500.0), camera),
+            (500.0, 250.0)
+        );
+    }
+
+    #[test]
+    fn a_tall_camera_moves_the_aim_into_the_free_strip() {
+        let camera = Some((700.0, 0.0, 300.0, 500.0));
+        assert_eq!(
+            focal_point((0.0, 0.0, 1000.0, 500.0), camera),
+            (350.0, 250.0)
+        );
+    }
+
+    #[test]
+    fn a_camera_over_the_whole_area_leaves_the_centre() {
+        let camera = Some((-10.0, -10.0, 2000.0, 1000.0));
+        assert_eq!(
+            focal_point((0.0, 0.0, 1000.0, 500.0), camera),
+            (500.0, 250.0)
+        );
+    }
+
+    #[test]
+    fn a_camera_outside_the_area_leaves_the_centre() {
+        let camera = Some((1100.0, 0.0, 100.0, 100.0));
+        assert_eq!(
+            focal_point((0.0, 0.0, 1000.0, 500.0), camera),
+            (500.0, 250.0)
         );
     }
 }

@@ -284,8 +284,18 @@ Because the active movement group can change during a range, one autozoom can
 contain several camera moves. The range stays one item; the camera pans because
 the group centre changes, not because the range was split.
 
-`motionBlurAmount` (default 1) adds motion blur based on the screen's motion, so
-fast pans read as movement rather than a teleport.
+`motionBlurAmount` defaults to 1 and the control ranges from 0 to 1
+(`DgH:292-295`, `Brm6UpoL2:195-198`). The screen uses its current and previous
+frame rectangles (`B39:9547-9549`, `B39:18015-18055`). The trail starts at the
+current rectangle interpolated toward the previous rectangle by
+`motionBlurAmount * fps / 60` (`B39:10094-10099`, `B39:12614-12632`); instant
+zooms disable blur during their snap window (`B39:18139-18159`). The renderer
+samples the current frame's texture along that trail, accumulating in squared
+colour space and taking the square root on output (`B39:10440-10443`,
+`B39:10478-10489`, `B39:10497-10541`). Export uses up to 16 texture fetches
+at a 4-pixel span, while playback uses up to 6 at a 16-pixel span
+(`B39:9688-9700`). Its GPU shader also uses texture gradients, dithering,
+per-pixel coverage and rounded-edge reconstruction.
 
 ## 7. Manual zooms and guards
 
@@ -334,31 +344,159 @@ ApexShot already has the same range constants and most of the camera model:
   (`:16-18`).
 - The 350 ms early-start option is also present (`:75-78`).
 
-The remaining exactness gaps are:
+Resolved on `feat/autozoom-parity`:
 
-1. **Click source.** ApexShot's sidecar records a click on button-down
-   (`capture-overlay/src/platform/windows/pointer_tracker.cpp:764`, `:893`),
-   while the studied generator seeds from both down and up. For short clicks the
-   difference is milliseconds; for long presses the studied tail follows the
-   release. This also changes which clicks near the recording end survive the
-   1 s cutoff.
-2. **Baked focus.** `automatic_zooms` stores a bounding-box midpoint as the clip
-   centre (`src/recording/editor/auto_zoom.rs:88-104`). The studied generator
-   stores no focus at all. ApexShot's editor recomputes movement groups for
-   automatic clips, so this centre is mostly a seed and fallback. It becomes
-   visible when the sidecar has no usable pointer data, and its fallback rule
-   differs from the studied nearest-sample rule.
-3. **Exit timing.** ApexShot starts returning to the full frame 0.6 s before the
-   clip end (`windows-ui/src/video_editor/zoom.rs:84-85`, `:381-383`,
-   `:525-530`). The studied build holds the zoom through the end and springs
-   back after it.
-4. **Short windows.** ApexShot drops windows shorter than 0.1 s
-   (`src/recording/editor/auto_zoom.rs:122`). The studied collection enforces
-   its own 100 ms minimum when an item is inserted, which can fit or reject the
-   item rather than filtering it in the generator.
+- **Exit timing.** A zoom now holds its framing through `clip.end`, then the
+  screen spring returns to the full frame. The 0.6 s early exit was removed from
+  the camera plan and the static fallback in
+  `windows-ui/src/video_editor/zoom.rs`. A later export check found the
+  remaining post-clip shortcut: `evaluate` returned the static full frame as
+  soon as the last clip ended, so the export cut instead of springing. That
+  shortcut is gone; the camera now advances through the exit like any other
+  target.
+- **Click source.** The generator now adds a click seed at every press release
+  as well as the recorded down event, in `clicks_from_sidecar`. The studied
+  collection uses the whole `mouseclicks` stream (`DXX` line 1253), and that
+  stream exposes both `mouseDown` and `mouseUp` (`YEiLxxgG` 2276-2292). The
+  release time is exact; its position comes from the nearest pointer sample,
+  falling back to the down click because the sidecar stores the press interval
+  but not a separate release point.
+- **Focus fallback.** The live camera already uses movement groups and their
+  dwell-weighted centres. The stored centre is only the fallback when a range
+  has no movement group. That fallback now follows the studied rule: the first
+  pointer sample at or after the range start within 500 ms, otherwise the
+  nearest sample (`B39:3324-3332`), and only then the click position.
+- **Live focus fallback.** When an automatic clip's footage window has no
+  pointer sample and none before it, `follow_points` now uses the same studied
+  fallback (`B39:3334-3349`): the first sample at or after the window start
+  within 500 ms, otherwise the nearest sample. The camera follows that sample
+  instead of freezing on the stored centre.
+- **Spring integration.** The Windows camera now runs the studied integrator
+  exactly, once per composition frame, in place of the earlier 1/60 s grid
+  (`CpX:314-392`, per-path advance `CpX:594-624`):
+  - the overspeed damping clamp is chosen once per advance, not per step;
+  - an advance of `d` ms runs `ceil(d)` steps, and the last step lasts
+    `(ceil(d) - d)` ms, as the studied loop computes it. A 60 fps frame
+    therefore integrates 16.33 ms and a 30 fps frame 33.67 ms, so the studied
+    camera's speed depends slightly on the frame rate, and ours now does too;
+  - the rest tolerance is set when a target changes, to
+    `max(1, |value - target|) * 0.002`, or 1 when the value already equals the
+    target. The earlier 0.01 threshold was not the studied rule.
+  - The settle-time snap for very long advances (`CpX:353-382`) is not ported.
+    The camera advances one frame at a time, so a frame never reaches it.
+  - Each frame takes its target at the frame's own time, and an instant zoom
+    snaps to its target through the window that ends 50 ms after the clip.
+- **Pointer shake filter and click-keeping decimation.** The camera now reads
+  pointer moves, presses, and releases (release positions from the nearest
+  pointer sample), after the studied default shake filter: an event is dropped
+  when both of the next two events are more than 500 px away in Manhattan
+  distance, and a press dropped that way drops its release (`B39:2846-2862`,
+  default `DgH:3254`, applied at `B39:3274-3284`). Decimation then keeps every
+  press and release and drops moves within 10 px of the last kept event
+  (`B39:2804-2826`). The filter runs in encoded-video pixels, while the studied
+  filter runs in recording pixels after the crop, so the two differ only when
+  the recording was scaled before encoding. The studied filter also runs before
+  trimming, and ours runs per clip after it, which only matters right at a
+  window edge.
+- **Minimum window.** The generator no longer drops a window shorter than
+  100 ms. After merging, `minimum_window` grows the end to the minimum, or
+  shifts the start back at the end of the recording, matching the collection's
+  `add` (`DXX:2667-2679`). With the current lead and tail constants a generated
+  window is always at least about 199 ms, so this is a structural guard rather
+  than a visible change.
 
-None of these require changing the generator unless exact visual parity is the
-goal. The camera model is already the important part.
+- **Screen motion blur.** The Windows preview and exporter now use the current
+  and previous camera rectangles, frame-rate-scaled strength, the studied
+  playback/export fetch budgets, and squared-colour averaging. The amount is
+  saved with the project and defaults to 1 for older files. Each fetch now
+  covers its own step along the trail, the way the studied shader's gradient
+  sample does: the renderer builds a box-filtered mip chain and takes up to
+  four trilinear taps across the step at the matching level, mirroring the
+  studied sampler's linear mip filter and 4x anisotropy (`vPAFtiYS:3859-3863`,
+  `B39:10552-10575`). Fetches are jittered by the studied screen-space 8x8
+  Bayer threshold (`vPAFtiYS:7333-7370`, `B39:12405-12408`), and both preview
+  and export clamp at source edges like the studied clamp-to-edge sampler.
+  Playback in the preview uses one tap per fetch to stay within frame budget.
+  Cursor and webcam motion blur remain separate gaps. Preview effect work runs
+  on a bounded worker, so slow frames can be skipped rather than blocking UI.
+- **The card framing now matches in the preview.** A zoom grows the whole
+  card, rounded corners included, the way the studied `Rect.zoom` does
+  (`YEi:998-1033`): the rest rect is moved so the target lands on the focal
+  point, scaled about it, and kept covering the zoom area, the stage inside
+  the padding (`DgH:6219-6221`). A centred zoom therefore covers the padding;
+  near an edge the card stops on that edge of the zoom area and the padding
+  and corner stay visible there. The background zooms by
+  `1 + (zoom - 1) * 0.125` about the target (`B39:7535-7540`). The preview
+  derives both from the sprung camera, where the studied build springs the
+  rects themselves with the same spring (`B39:18148`, `B39:14721-14727`).
+  Split layouts keep cropping inside their pane. Export draws no background,
+  padding, or corners yet, so its frame is already the fully covered card;
+  it must adopt the same card when it gains them.
+- **The aim avoids the camera overlay.** The focal point is the zoom area's
+  centre unless the camera overlay overlaps the area. Then, as in the studied
+  build, the centre and the middle of each strip the camera leaves free are
+  scored by their room to the nearest area edge or the camera, and the
+  roomiest wins, the closer to the centre on a tie (`DgH:5452-5560`,
+  `DgH:5869-5871`). The camera's rest rect is used. The studied build springs
+  the card rect, so a layout change glides; the Windows card follows the
+  sprung camera instead, so the aim blends toward the free strip by the
+  overlay's opacity rather than jumping.
+- **The moving card's edges now smear in the preview.** While the card moves,
+  each stage pixel the card swept averages the screen along the stretch of
+  the trail where the card covered it, and that stretch's share of the trail
+  becomes the pixel's opacity, as the studied shader does
+  (`B39:12259-12340`). Both the leading and trailing edges and the rounded
+  corners therefore smear over the background. Straight edges are solved
+  along the trail with a half-pixel antialias band; corners are weighted per
+  fetch. The layer reuses the screen blur's fetch counts, mips, dither, and
+  linear-light averaging, and is drawn at stage size capped at 1600 px; a
+  card at rest goes back to the sharp clip. The Windows card has no outline
+  or shadow, so the studied outline and shadow terms have nothing to draw.
+- **Zooms without movement groups now ride the spring.** Manual zooms, and
+  automatic zooms with no pointer data, used the old static fallback: a
+  smoothstep entry and a hard cut back to the full frame at `clip.end`. The
+  studied build drives every non-instant zoom through the same screen spring,
+  with only the target point differing (`B39:7955-7964`, `B39:18148`). The
+  camera plan now springs these zooms in and out too.
+
+- **No hold across gaps.** The camera used to hold an automatic zoom's
+  framing across a gap of up to 0.5 s before the next one. The studied camera
+  has no such hold: between zooms it targets the full frame, and the only
+  look-ahead is the 350 ms early start when that option is on, which picks the
+  next zoom starting at or after the current time and never an instant one
+  (`B39:1697-1707`, `B39:8296-8303`, `DgH:4405-4411`, `YEi` `lt`/`ct`). The
+  hold is removed.
+- **Adding a zoom at the playhead.** An empty-lane click and the armed tool's
+  Automatic zoom button now follow the studied add action (`BbP:72-127`, `DXX:2631-2643`): a new
+  zoom runs 3 s or up to the next zoom, is refused under 100 ms, and splits the
+  zoom under the playhead when the playhead is strictly inside one, selecting
+  the right half. A new zoom starts at 2x, or at the scale and instant flag of
+  the zoom last edited in the panel (`CK1:32-64`), and is automatic when the
+  recording has pointer samples, manual otherwise (`DXX:3138-3146`). The
+  last-edited style lasts for the editor session. The Hide track is unchanged.
+- **The Add zoom tool.** The Zoom button arms a tool, as the studied
+  `$toggleAddZoomTool` does (`BbP:128-145`): arming pauses and clears the
+  selection, and the preview shows the whole frame with an outline the size
+  of the zoomed view (the last-edited scale, 2x by default) following the
+  pointer (`B39:1477-1527`). A click adds a manual zoom at the playhead aimed
+  at the clicked point, through the same add rules, so it splits a zoom under
+  the playhead into a manual right half (`B39:1528-1536`, `BbP:44-58`). When
+  the recording has pointer samples the prompt also offers Automatic zoom,
+  which adds the ordinary playhead zoom (`B39:1541-1545`). Adding selects the
+  new zoom, and selecting any clip disarms the tool, as the studied
+  `setSidebarItem` does (`B0e:2358-2362`); Escape and the Zoom button disarm it
+  too (`B39:1565-1570`, `B0e:2329-2335`). Playing hides the prompt without
+  disarming. One difference: the outline is clamped to the frame the way the
+  placed zoom will frame it; the studied outline is centred on the pointer.
+- **Not yet matched in the editor.** The studied build turns an automatic
+  zoom manual when the recording has no mouse events (`DXX:3271-3276`); the
+  Windows editor leaves it automatic, which frames the same way because it
+  falls back to the stored centre.
+- **Zoom levels.** The panel chips are 1.25x, 1.5x, 2x, 2.2x, 3.5x and 5x.
+  The studied build offers 1x to 2.6x in 0.2 steps plus the default, on a
+  1x-4x slider in 0.1 steps (`BbP:274-338`).
+
+There is no remaining confirmed generator gap.
 
 ## 10. Limits
 
@@ -367,21 +505,198 @@ goal. The camera model is already the important part.
 - The main process is V8 bytecode, so import-time creation of zoom ranges is not
   proven. The renderer proves the generator and the "Restore default zoom
   ranges" path.
-- The exact contents of `mouseclicks` are inferred from the getters that split
-  it into down and up events. No recorded project fixture was inspected.
+- The contents of `mouseclicks` are read from the getters that split it into
+  down and up events. No recorded project fixture was inspected.
 - The spring behaviour is read from the engine source. Perceived motion also
   depends on project settings, frame rate, and motion blur, which were not
   measured.
 
-## 11. Open questions
+## 11. Resolved questions
 
-1. Should ApexShot anchor the end of a zoom on button-up, matching the studied
-   click stream, or keep the current down-only rule?
-2. Should the generator stop baking a focus point and let the editor derive the
-   target entirely?
-3. Should automatic zooms hold to their range end and spring out after it,
-   rather than easing out during the last 0.6 s?
-4. Should the movement-group budget use the visible source area at the current
-   scale, including letterboxing and crop, rather than `frame / scale`?
-5. Does a fresh project need import-time range generation, or is the editor's
-   "restore default ranges" action the intended only entry point?
+1. **Movement-group budget.** The Windows editor's camera frame is the source
+   rectangle, so `frame / scale` is the visible source at the current scale and
+   `frame / scale * 0.5` is the studied half-viewport budget. The studied
+   stage's padding and letterboxing sit outside that source rectangle.
+2. **Range generation entry point.** The renderer exposes the generator through
+   `resetZoomRanges`, which the "Restore default zoom ranges" action calls
+   (`DXX:3661-3662`, `DSYc1gpA:208-214`). No import-time caller is visible.
+   ApexShot's Detect action is the equivalent entry point.
+
+## 12. Validation
+
+Exit-timing change, 2026-11-09:
+
+- `cargo check --bin apexshot-video-editor` succeeded.
+- `cargo test --lib video_editor::zoom::tests` passed 23 of 23 tests.
+- `cargo test --lib` passed 822 tests with 12 ignored. One unrelated
+  `settings::usage` layout test failed in the parallel run and passed when run
+  alone.
+- `cargo clippy --all-targets` finished without warnings.
+- Physical harness: `artifacts/physical/zoom_exit_harness.py` opens a Tk window
+  that records its own clock, click phase, hold, and release, then records that
+  window through the capture test's `APEXSHOT_TEST_WINDOW_TITLE` path. The clip
+  is `artifacts/physical/zoom-exit-ui.mp4`; the sidecar has one click at recording
+  `5.020 s`, region `(901, 508)`, which is the crosshair.
+- The clip begins with a 3.5 s pre-roll. Its `T+` clock then runs:
+
+  | UI time | Expected editor |
+  | --- | --- |
+  | `0.000-1.500` | full frame, 1.00x |
+  | `1.700-2.136` | lead-in; camera may start moving |
+  | `2.136` | click at the crosshair |
+  | `2.236-4.500` | 2.00x, centered, held |
+  | `3.900` | red tick; the old exit would have started returning |
+  | `4.500-5.500` | spring back to 1.00x |
+  | `5.500-7.500` | full frame |
+
+  The sidecar click maps to an automatic-zoom range of `4.720-7.520 s` in the
+  recording. The old timing would have begun returning at `6.920 s`, which is
+  about `T+4.04`; the new build must still be at 2.00x at `T+4.1` and only
+  start returning after `T+4.5`.
+- The editor was opened with the clip and left running; the maintainer presses
+  Detect and checks the hold. Physical confirmation is still pending.
+
+Click-source change, 2026-11-09:
+
+- `cargo fmt --all -- --check` exited 0.
+- `cargo clippy --all-targets` finished without warnings.
+- `cargo test --lib auto_zoom` passed 18 of 18 tests.
+- `cargo test --lib` passed 826 tests with 12 ignored. The known parallel-only
+  `settings::usage` layout failure occurred once and passed when run alone.
+- The editor binary rebuilt with the change.
+- Physical clip: `artifacts/physical/zoom-click-source.mp4`, recorded through
+  `zoom_click_source_harness.py`. The sidecar has one click at `4.985 s` and one
+  press from `4.985 s` to `6.482 s`, at region `(901, 508)`, the crosshair.
+- Old range: `4.685-7.485 s`. Release-extended range: `4.685-8.982 s`, because
+  the `6.482 s` release adds a window and the two merge.
+- The clip's `T+` clock puts the press at `2.012 s`, the release at `3.552 s`,
+  the old end at about `4.512 s`, and the new end at about `6.009 s`. At
+  `T+4.7` the editor must still be at 2.00x; the old build would already be back
+  at the full frame. The editor was opened with this clip and left running for
+  the maintainer's Detect check.
+
+Focus-fallback change, 2026-11-09:
+
+- `cargo test --lib auto_zoom` passed 19 of 19 tests, including the new
+  nearest-pointer fallback and the existing group-centre tests.
+- `cargo test --lib` passed 827 tests with 12 ignored. The known parallel-only
+  `settings::usage` layout failure occurred once and passed alone.
+- `rustfmt --check` on the changed file passed. The workspace-wide format check
+  still reports the checkout's CRLF newline style on untouched files.
+- `cargo clippy --all-targets` finished without warnings.
+- No new physical clip: the existing recordings have pointer samples, so they
+  exercise the movement-group path, which is unchanged. The fallback is covered
+  directly by the new unit test.
+
+Minimum-window change, 2026-11-09:
+
+- `cargo test --lib auto_zoom` passed 21 of 21 tests, including the two new
+  minimum-window cases.
+- `cargo test --lib` passed 829 tests with 12 ignored. The known parallel-only
+  `settings::usage` layout test failed and passed when run alone.
+- `rustfmt --check` on the changed file passed.
+- `cargo clippy --all-targets` finished without warnings.
+- The editor binary rebuilt with the change.
+- No physical clip: the current lead and tail constants make every generated
+  window at least about 199 ms, so the expansion cannot be reached from a click
+  recording. The helper is covered directly instead.
+
+Live-follow fallback, 2026-11-09:
+
+- `cargo test --lib video_editor::zoom::tests` passed 25 of 25 tests.
+- `cargo test --lib` passed 831 tests with 12 ignored. The known parallel-only
+  `settings::usage` layout test failed and passed when run alone.
+- `rustfmt --check` on the changed file passed.
+- `cargo clippy --all-targets` finished without warnings.
+- The editor binary rebuilt with the change.
+- No physical clip: the existing recordings have pointer samples inside their
+  zoom windows. A clip window with no sample and none before it is covered by
+  the new camera unit test and the lookahead-selection test.
+
+Spring-integration change, 2026-11-09:
+
+- `cargo test --lib video_editor::zoom::tests` passed 27 of 27 tests, including
+  the 1 ms integration and rest-threshold cases.
+- `cargo test --lib` passed 833 tests with 12 ignored. The known parallel-only
+  `settings::usage` layout test failed and passed when run alone.
+- `rustfmt --check` on the changed file passed.
+- `cargo clippy --all-targets` finished without warnings.
+- The editor binary rebuilt with the change.
+- No new physical clip: the change is a sub-frame integration correction, and
+  the existing spring-motion tests cover the trajectory and rest behavior.
+
+Export regression, 2026-11-09:
+
+- Exported `artifacts/physical/zoom-click-source.mp4` through the real exporter
+  with the saved project state: range `4.685-8.982 s`, 2x, centre `(901,
+  507.3945)`, 1202x838, 60 fps, 883 frames.
+- The export exposed a real exit bug: at `8.9 s` the frame was still 2x, but at
+  `9.1 s` it was already full frame. The camera plan was returning the static
+  frame as soon as the last clip ended, bypassing the spring exit.
+- The plan now keeps advancing after the last clip. Re-exported frames show the
+  spring return: 2x at `8.9 s`, still cropped at `9.1 s`, wider at `9.3 s`, and
+  full by `9.6-10.0 s`.
+- `cargo test --lib video_editor::zoom::tests` passed 28 of 28 tests, including
+  the new post-clip spring-exit test.
+- The temporary fixture export test was removed before committing; the shipped
+  coverage is the camera exit test.
+
+Screen motion blur, 2026-11-09:
+
+- The click-source fixture exported at 1202x838, 60 fps, 883 frames in 23.69 s
+  with the debug exporter. The motion-blurred export differs from the prior
+  unblurred export most during the entry and exit, and much less during the
+  held section. Encoding differences mean this is not an exact blur metric.
+- A portable FFmpeg integration test exported with blur on and off at 24 and
+  60 fps, and checked moving frames differ more than resting frames. Run it with
+  `APEXSHOT_EXPORT_TEST=1` and
+  `cargo test --lib video_editor::export::tests::motion_blur_reaches_real_export_frames`.
+- A debug 1280x720 high-motion preview sample took about 31 ms per frame before
+  moving the effect to a bounded worker. This is not an end-to-end playback
+  frame-rate measurement. No rendered studied-build fixture was available, so
+  visual and numerical parity remain unverified.
+
+Screen motion-blur sampling and manual-zoom spring, 2026-11-10:
+
+- Real exports of `artifacts/physical/zoom-click-source.mp4` (0-11 s, a 2x
+  zoom over 4.685-8.982 s) at 24, 30, and 60 fps with blur on and off, plus a
+  pan into the top-left corner, an instant zoom, and a cut variant. Exports
+  showed the hard cut at the end of zooms without pointer data: full frame
+  18 ms after `clip.end`. After the spring change, blur-on and blur-off frames
+  differ through the entry (4.70-5.10 s) and the exit (9.00-9.90 s), and are
+  near identical at rest and through the hold. The instant zoom still snaps.
+- Accuracy against a brute-force reference: one source frame rendered with up
+  to 256 point samples per pixel at a quarter-texel span stands in for the
+  continuous trail. Mean absolute error, 0-255 per channel:
+
+  | Case | No blur | Export (16 fetches, 4 taps) | Playback (6 fetches, 1 tap) |
+  | --- | --- | --- | --- |
+  | Zoom entry, 1.45x to 1.6x | 11.0 | 0.77 (p99 7) | 3.97 (p99 36) |
+  | Pan, 2x, 60 px by 20 px | 14.7 | 1.09 (p99 8) | 4.21 (p99 32) |
+
+  This checks that the renderer integrates the trail. It is not studied-build
+  evidence: the studied build ships only as a macOS app, so no frames it
+  rendered were available, and visual and numerical parity with it remain
+  unverified.
+- `cargo test --lib video_editor` passed 305 with 5 ignored, and
+  `cargo clippy --all-targets` finished without warnings. Three camera tests
+  that asserted the old static fallback now assert the spring entry, hold,
+  and exit instead.
+
+Studied spring and pointer filters, 2026-11-10:
+
+- Evidence from the studied code itself: `artifacts/studied-harness/` (local,
+  untracked) copies the studied spring (`CpX:283-392`), shake filter, and
+  decimation (`B39:2801-2862`) verbatim and runs them under Node. The camera
+  test `the_camera_spring_matches_the_studied_integrator_frame_by_frame`
+  checks our camera against those outputs within 1e-6: a 600 px move from rest
+  at 60, 30, and 24 fps, and an overspeed start that triggers the damping
+  clamp. The pointer-path tests reproduce the harness's shake and decimation
+  outputs event for event. One studied behaviour is easy to misread: a press
+  far from the moves around it is kept, because its own release is next to it.
+  The release and the move before the press are dropped instead.
+- `the_follow_camera_ignores_a_lone_pointer_spike` fails with the filter
+  bypassed: the camera is pulled 6.5 px toward the spike at 2.05 s.
+- `cargo test --lib video_editor` passed 314 with 5 ignored,
+  `cargo test --lib auto_zoom` passed 22, `rustfmt --check` on the changed
+  files passed, and `cargo clippy --all-targets` finished without warnings.

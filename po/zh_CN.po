@@ -4313,6 +4313,21 @@ msgstr "ffmpeg 无法编码 Motion 视频。"
 msgid "Upgrade to Studio"
 msgstr "升级到 Studio"
 
+msgid "Add zoom: click the preview to place it"
+msgstr "添加缩放：点击预览以放置"
+
+msgid "Adds a zoom that automatically follows the mouse activity"
+msgstr "添加一个自动跟随鼠标活动的缩放"
+
+msgid "Automatic zoom"
+msgstr "自动缩放"
+
+msgid "Click where to zoom in"
+msgstr "点击要缩放的位置"
+
+msgid "Click where to zoom in, or use Automatic zoom"
+msgstr "点击要缩放的位置，或使用自动缩放"
+
 msgid "Hardware acceleration"
 msgstr "硬件加速"
 
