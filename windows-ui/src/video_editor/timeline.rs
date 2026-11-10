@@ -1489,21 +1489,18 @@ impl Data {
     fn step_lane_progress(&mut self, dt: f64) -> bool {
         // About 180 ms to settle: an exponential ease with a 45 ms constant.
         let amount = 1.0 - (-dt.max(0.0) / 0.045).exp();
-        let mut moving = false;
+        let mut next = self.lane_progress;
+        let mut targets = [0.0; 3];
         for lane in TimelineLane::ALL {
-            let target = if self.expanded_lane == lane { 1.0 } else { 0.0 };
-            let value = &mut self.lane_progress[lane.index()];
-            let next = *value + (target - *value) * amount;
-            *value = if (target - next).abs() < 0.002 {
-                target
-            } else {
-                next
-            };
-            if *value != target {
-                moving = true;
-            }
+            let index = lane.index();
+            targets[index] = if self.expanded_lane == lane { 1.0 } else { 0.0 };
+            next[index] += (targets[index] - next[index]) * amount;
         }
-        moving
+        // Snap only once every lane has arrived: snapping one early would
+        // break their sum, which is what keeps the timeline's height fixed.
+        let arrived = (0..3).all(|index| (targets[index] - next[index]).abs() < 0.002);
+        self.lane_progress = if arrived { targets } else { next };
+        !arrived
     }
 
     fn hover_time(&self, track: EffectTrack) -> Option<f64> {
@@ -3485,6 +3482,10 @@ pub(super) fn build(
         let hide = hide_track.clone();
         let layout = layout_track.clone();
         let last = Rc::new(Cell::new(None::<i64>));
+        // The heights on screen. Every tick derives them from the progress
+        // and which lanes show, and applies them only when they change, so a
+        // lane appearing or the first switch never jumps the total a pixel.
+        let applied = Rc::new(Cell::new([0i32; 3]));
         move |_, clock| {
             let now = clock.frame_time();
             let dt = last
@@ -3498,10 +3499,18 @@ pub(super) fn build(
                 let moving = data.step_lane_progress(dt);
                 (moving || before != data.lane_progress, data.lane_progress)
             };
+            let heights = lane_heights(
+                progress,
+                [zoom.is_visible(), hide.is_visible(), layout.is_visible()],
+                scale,
+            );
+            if heights != applied.get() {
+                applied.set(heights);
+                zoom.set_size_request(-1, heights[0]);
+                hide.set_size_request(-1, heights[1]);
+                layout.set_size_request(-1, heights[2]);
+            }
             if moving {
-                zoom.set_size_request(-1, lane_height(progress[0], scale));
-                hide.set_size_request(-1, lane_height(progress[1], scale));
-                layout.set_size_request(-1, lane_height(progress[2], scale));
                 zoom.queue_draw();
                 hide.queue_draw();
                 layout.queue_draw();
@@ -4096,12 +4105,51 @@ pub(super) fn build(
     timeline
 }
 
-/// A lane's height for how expanded it is drawn, in device pixels.
-fn lane_height(progress: f64, scale: f64) -> i32 {
+/// A lane's height for how expanded it is drawn, in device pixels. Linear
+/// in `progress`: the lanes' progress always sums to one expanded lane, so
+/// linear heights keep the timeline's total height fixed while they trade.
+fn lane_height_exact(progress: f64, scale: f64) -> f64 {
     let progress = progress.clamp(0.0, 1.0);
-    // Ease in and out so the row does not start or stop abruptly.
-    let eased = progress * progress * (3.0 - 2.0 * progress);
-    ((THIN_LANE_HEIGHT + (EFFECT_LANE_HEIGHT - THIN_LANE_HEIGHT) * eased) * scale).round() as i32
+    (THIN_LANE_HEIGHT + (EFFECT_LANE_HEIGHT - THIN_LANE_HEIGHT) * progress) * scale
+}
+
+/// [`lane_height_exact`] rounded to whole pixels on its own.
+fn lane_height(progress: f64, scale: f64) -> i32 {
+    lane_height_exact(progress, scale).round() as i32
+}
+
+/// Whole-pixel heights for the visible lanes whose sum never changes while
+/// they trade height: each lane takes the difference between the rounded
+/// running totals, so a pixel one lane loses to rounding the next one gains.
+/// Rounding each lane alone made the total wobble by a pixel a frame, and
+/// the preview above resized with it.
+fn lane_heights(progress: [f64; 3], visible: [bool; 3], scale: f64) -> [i32; 3] {
+    let mut heights = [0; 3];
+    let shown: Vec<usize> = (0..3).filter(|&index| visible[index]).collect();
+    // The resting total: one lane full and the rest thin, in whole pixels.
+    // Pinning the sum to it keeps a total that lands on half a pixel from
+    // flipping between frames on floating-point noise.
+    let resting = (lane_height_exact(1.0, scale)
+        + lane_height_exact(0.0, scale) * shown.len().saturating_sub(1) as f64)
+        .round() as i32;
+    let mut total = 0.0;
+    let mut placed = 0;
+    for (position, &index) in shown.iter().enumerate() {
+        if position + 1 == shown.len() {
+            heights[index] = resting - placed;
+            break;
+        }
+        total += lane_height_exact(progress[index], scale);
+        let rounded = total.round() as i32;
+        heights[index] = rounded - placed;
+        placed = rounded;
+    }
+    for index in 0..3 {
+        if !visible[index] {
+            heights[index] = lane_height(progress[index], scale);
+        }
+    }
+    heights
 }
 
 /// Apply a lane snapshot to the drawing areas. Only called when the snapshot
@@ -4130,6 +4178,11 @@ fn apply_lane_state(
 /// lane from shrinking.
 fn timeline_css(scale: f64) -> String {
     let px = |value: f64| format!("{}px", (value * scale).round() as i32);
+    // A lane's floor rounds down: the animation hands each lane whole pixels
+    // that sum to a fixed total, so a lane may be asked for the pixel below
+    // its exact height. A floor rounded up would refuse that pixel, grow
+    // the timeline by one and make the preview above it shake.
+    let floor = |value: f64| format!("{}px", (value * scale).floor() as i32);
     let board = RULER_HEIGHT
         + LANE_GAP
         + VIDEO_LANE_HEIGHT
@@ -4160,8 +4213,8 @@ fn timeline_css(scale: f64) -> String {
         board_padding = px(4.0),
         ruler = px(RULER_HEIGHT),
         video = px(VIDEO_LANE_HEIGHT),
-        effect = px(THIN_LANE_HEIGHT),
-        camera = px(THIN_LANE_HEIGHT),
+        effect = floor(THIN_LANE_HEIGHT),
+        camera = floor(THIN_LANE_HEIGHT),
     )
 }
 
@@ -8810,6 +8863,26 @@ mod tests {
     }
 
     #[test]
+    fn the_lanes_keep_one_total_height_while_they_trade() {
+        let mut data = Data::default();
+        let resting: i32 = lane_heights(data.lane_progress, [true; 3], 1.25)
+            .iter()
+            .sum();
+        data.expand_lane(TimelineLane::Hide);
+        for frame in 0..40 {
+            if frame == 6 {
+                // A second switch mid-move keeps three lanes moving at once.
+                data.expand_lane(TimelineLane::Layout);
+            }
+            data.step_lane_progress(0.016);
+            let total: i32 = lane_heights(data.lane_progress, [true; 3], 1.25)
+                .iter()
+                .sum();
+            assert_eq!(total, resting, "frame {frame}: {:?}", data.lane_progress);
+        }
+    }
+
+    #[test]
     fn a_lane_eases_to_its_new_height_and_settles() {
         let mut data = Data::default();
         assert_eq!(data.lane_progress, [1.0, 0.0, 0.0]);
@@ -8834,7 +8907,10 @@ mod tests {
     fn the_scoped_stylesheet_keeps_the_timeline_compact() {
         let css = timeline_css(1.25);
         assert!(css.contains("recording-editor-card-layout-track"));
-        assert!(css.contains("min-height: 23px"), "a resting lane is 18px");
+        assert!(
+            css.contains("min-height: 22px"),
+            "a resting lane's 18px floor rounds down to 22.5 -> 22"
+        );
         assert!(css.contains("min-height: 53px"), "the filmstrip is 42px");
         assert!(css.contains("min-height: 193px"), "the board fits its rows");
         assert!(!css.contains("min-height: 0"));
