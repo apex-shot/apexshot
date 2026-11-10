@@ -2013,6 +2013,7 @@ mod tests {
             },
             sidecar: Some(sidecar),
             webcam: None,
+            canvas: None,
             crf: 20,
         };
         let handle = start_export(model, output.clone());
