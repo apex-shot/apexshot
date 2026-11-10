@@ -97,10 +97,20 @@ enum TimelineLane {
 }
 
 impl TimelineLane {
+    const ALL: [Self; 3] = [Self::Zoom, Self::Hide, Self::Layout];
+
     fn of_effect(track: EffectTrack) -> Self {
         match track {
             EffectTrack::Zoom => Self::Zoom,
             EffectTrack::Hide => Self::Hide,
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            Self::Zoom => 0,
+            Self::Hide => 1,
+            Self::Layout => 2,
         }
     }
 }
@@ -166,7 +176,6 @@ struct ClipTemplate {
     instant: bool,
 }
 
-#[derive(Default)]
 struct Data {
     path: Option<PathBuf>,
     duration: f64,
@@ -239,6 +248,52 @@ struct Data {
     layout_burst: Option<Instant>,
     /// The secondary lane drawn at full height; the others rest thin.
     expanded_lane: TimelineLane,
+    /// How expanded each lane is drawn right now, 0 thin .. 1 full.
+    lane_progress: [f64; 3],
+}
+
+impl Default for Data {
+    fn default() -> Self {
+        Self {
+            path: None,
+            duration: 0.0,
+            frame_size: None,
+            fps: 0.0,
+            trim_start: 0.0,
+            trim_end: 0.0,
+            playhead: 0.0,
+            scale: 0.0,
+            scroll: 0.0,
+            playing: false,
+            selected: false,
+            hover: None,
+            frames: Vec::new(),
+            zoom_clips: Vec::new(),
+            zoom_camera: super::zoom::ZoomCameraSettings::default(),
+            hide_clips: Vec::new(),
+            selected_zoom: None,
+            zoom_selection_epoch: 0,
+            selected_hide: None,
+            clipboard: None,
+            last_zoom_style: None,
+            pointer_available: false,
+            add_zoom_tool: false,
+            hover_zoom: None,
+            hover_hide: None,
+            dragging_effect: false,
+            cuts: Vec::new(),
+            segment_starts: Vec::new(),
+            moving_segment: None,
+            freeze_tail: 0.0,
+            history: EditHistory::default(),
+            webcam: None,
+            selected_layout: None,
+            layout_selection_epoch: 0,
+            layout_burst: None,
+            expanded_lane: TimelineLane::Zoom,
+            lane_progress: [1.0, 0.0, 0.0],
+        }
+    }
 }
 
 /// The document as one undo step restores it.
@@ -659,6 +714,7 @@ impl Data {
         self.layout_selection_epoch = 0;
         self.layout_burst = None;
         self.expanded_lane = TimelineLane::Zoom;
+        self.lane_progress = [1.0, 0.0, 0.0];
     }
 
     /// The editable state, as one undo step keeps it.
@@ -1420,6 +1476,33 @@ impl Data {
         let changed = self.expanded_lane != lane;
         self.expanded_lane = lane;
         changed
+    }
+
+    /// How far `lane` is drawn toward full height right now, 0..=1.
+    fn lane_progress(&self, lane: TimelineLane) -> f64 {
+        self.lane_progress[lane.index()]
+    }
+
+    /// Ease every lane toward its target (1 for the expanded lane, 0 for the
+    /// rest) by `dt` seconds. Returns whether anything is still moving.
+    fn step_lane_progress(&mut self, dt: f64) -> bool {
+        // About 180 ms to settle: an exponential ease with a 45 ms constant.
+        let amount = 1.0 - (-dt.max(0.0) / 0.045).exp();
+        let mut moving = false;
+        for lane in TimelineLane::ALL {
+            let target = if self.expanded_lane == lane { 1.0 } else { 0.0 };
+            let value = &mut self.lane_progress[lane.index()];
+            let next = *value + (target - *value) * amount;
+            *value = if (target - next).abs() < 0.002 {
+                target
+            } else {
+                next
+            };
+            if *value != target {
+                moving = true;
+            }
+        }
+        moving
     }
 
     fn hover_time(&self, track: EffectTrack) -> Option<f64> {
@@ -3213,17 +3296,8 @@ pub(super) fn build(
         move |_, context, width, height| {
             let data = data.borrow();
             let lane = TimelineLane::of_effect(EffectTrack::Zoom);
-            if data.lane_expanded(lane) {
-                draw_effect_clips(
-                    context,
-                    width,
-                    height,
-                    &data,
-                    EffectTrack::Zoom,
-                    prefers_dark,
-                    scale,
-                );
-            } else {
+            let progress = data.lane_progress(lane);
+            let thin = |context: &Context| {
                 let bars: Vec<_> = data
                     .effect_spans(EffectTrack::Zoom)
                     .into_iter()
@@ -3246,6 +3320,31 @@ pub(super) fn build(
                     prefers_dark,
                     scale,
                 );
+            };
+            let full = |context: &Context| {
+                draw_effect_clips(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    EffectTrack::Zoom,
+                    prefers_dark,
+                    scale,
+                );
+            };
+            if progress >= 0.999 {
+                full(context);
+            } else if progress <= 0.001 {
+                thin(context);
+            } else {
+                context.push_group();
+                thin(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(1.0 - progress);
+                context.push_group();
+                full(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(progress);
             }
         }
     });
@@ -3259,17 +3358,8 @@ pub(super) fn build(
         move |_, context, width, height| {
             let data = data.borrow();
             let lane = TimelineLane::of_effect(EffectTrack::Hide);
-            if data.lane_expanded(lane) {
-                draw_effect_clips(
-                    context,
-                    width,
-                    height,
-                    &data,
-                    EffectTrack::Hide,
-                    prefers_dark,
-                    scale,
-                );
-            } else {
+            let progress = data.lane_progress(lane);
+            let thin = |context: &Context| {
                 let bars: Vec<_> = data
                     .effect_spans(EffectTrack::Hide)
                     .into_iter()
@@ -3292,6 +3382,31 @@ pub(super) fn build(
                     prefers_dark,
                     scale,
                 );
+            };
+            let full = |context: &Context| {
+                draw_effect_clips(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    EffectTrack::Hide,
+                    prefers_dark,
+                    scale,
+                );
+            };
+            if progress >= 0.999 {
+                full(context);
+            } else if progress <= 0.001 {
+                thin(context);
+            } else {
+                context.push_group();
+                thin(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(1.0 - progress);
+                context.push_group();
+                full(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(progress);
             }
         }
     });
@@ -3306,13 +3421,22 @@ pub(super) fn build(
         let data = data.clone();
         move |_, context, width, height| {
             let data = data.borrow();
-            if data.lane_expanded(TimelineLane::Layout) {
-                draw_layout_lane(context, width, height, &data, prefers_dark, scale);
-            } else {
-                let mut bars = vec![(0.0, data.total_duration(), (0.10, 0.155, 0.15, 1.0))];
+            let progress = data.lane_progress(TimelineLane::Layout);
+            let thin = |context: &Context| {
+                let bar = if prefers_dark {
+                    (0.10, 0.155, 0.15, 1.0)
+                } else {
+                    (0.87, 0.915, 0.905, 1.0)
+                };
+                let tick = if prefers_dark {
+                    (0.45, 0.80, 0.70, 0.95)
+                } else {
+                    (0.15, 0.50, 0.42, 0.95)
+                };
+                let mut bars = vec![(0.0, data.total_duration(), bar)];
                 if let Some(layouts) = data.webcam_layouts() {
                     for cue in &layouts.cues {
-                        bars.push((cue.at, cue.at, (0.45, 0.80, 0.70, 0.95)));
+                        bars.push((cue.at, cue.at, tick));
                     }
                 }
                 draw_thin_lane(
@@ -3325,6 +3449,23 @@ pub(super) fn build(
                     prefers_dark,
                     scale,
                 );
+            };
+            let full = |context: &Context| {
+                draw_layout_lane(context, width, height, &data, prefers_dark, scale);
+            };
+            if progress >= 0.999 {
+                full(context);
+            } else if progress <= 0.001 {
+                thin(context);
+            } else {
+                context.push_group();
+                thin(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(1.0 - progress);
+                context.push_group();
+                full(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(progress);
             }
         }
     });
@@ -3336,6 +3477,37 @@ pub(super) fn build(
     lanes.append(&zoom_track_lane);
     lanes.append(&hide_track);
     lanes.append(&layout_track);
+
+    lanes.add_tick_callback({
+        let data = data.clone();
+        let zoom = zoom_track_lane.clone();
+        let hide = hide_track.clone();
+        let layout = layout_track.clone();
+        let last = Rc::new(Cell::new(None::<i64>));
+        move |_, clock| {
+            let now = clock.frame_time();
+            let dt = last
+                .replace(Some(now))
+                .map(|previous| (now - previous) as f64 / 1_000_000.0)
+                .unwrap_or(0.0)
+                .min(0.1);
+            let (moving, progress) = {
+                let mut data = data.borrow_mut();
+                let before = data.lane_progress;
+                let moving = data.step_lane_progress(dt);
+                (moving || before != data.lane_progress, data.lane_progress)
+            };
+            if moving {
+                zoom.set_size_request(-1, lane_height(progress[0], scale));
+                hide.set_size_request(-1, lane_height(progress[1], scale));
+                layout.set_size_request(-1, lane_height(progress[2], scale));
+                zoom.queue_draw();
+                hide.queue_draw();
+                layout.queue_draw();
+            }
+            gtk4::glib::ControlFlow::Continue
+        }
+    });
 
     // The frosted extend area is one layer over the lanes, so it spans the
     // video, zoom, hide and camera-layout rows (and the gaps between them)
@@ -3464,7 +3636,7 @@ pub(super) fn build(
             // lane heights.
             if lane_state.get() != Some(state) {
                 lane_state.set(Some(state));
-                apply_lane_state(state, &layout_track, &zoom_track_lane, &hide_track, scale);
+                apply_lane_state(state, &layout_track, &zoom_track_lane, &hide_track);
             }
             if let Some(listener) = zoom_listener.borrow().as_ref() {
                 listener();
@@ -3923,6 +4095,14 @@ pub(super) fn build(
     timeline
 }
 
+/// A lane's height for how expanded it is drawn, in device pixels.
+fn lane_height(progress: f64, scale: f64) -> i32 {
+    let progress = progress.clamp(0.0, 1.0);
+    // Ease in and out so the row does not start or stop abruptly.
+    let eased = progress * progress * (3.0 - 2.0 * progress);
+    ((THIN_LANE_HEIGHT + (EFFECT_LANE_HEIGHT - THIN_LANE_HEIGHT) * eased) * scale).round() as i32
+}
+
 /// Apply a lane snapshot to the drawing areas. Only called when the snapshot
 /// changes, so playback never re-measures the card.
 fn apply_lane_state(
@@ -3930,24 +4110,12 @@ fn apply_lane_state(
     layout_track: &DrawingArea,
     zoom_track: &DrawingArea,
     hide_track: &DrawingArea,
-    scale: f64,
 ) {
     layout_track.set_visible(state.camera);
     // Both effect lanes are permanent drop targets, so their rows never
     // collapse, even while empty.
     zoom_track.set_visible(state.zoom);
     hide_track.set_visible(state.hide);
-    let height = |lane: TimelineLane, full: f64| {
-        let unscaled = if state.expanded == lane {
-            full
-        } else {
-            THIN_LANE_HEIGHT
-        };
-        (unscaled * scale).round() as i32
-    };
-    zoom_track.set_size_request(-1, height(TimelineLane::Zoom, EFFECT_LANE_HEIGHT));
-    hide_track.set_size_request(-1, height(TimelineLane::Hide, EFFECT_LANE_HEIGHT));
-    layout_track.set_size_request(-1, height(TimelineLane::Layout, EFFECT_LANE_HEIGHT));
 }
 
 /// The one stylesheet this card adds on top of the shared editor sheet.
@@ -8637,6 +8805,27 @@ mod tests {
             "selecting a zoom expands its lane"
         );
         assert_eq!(data.lane_state().expanded, TimelineLane::Zoom);
+    }
+
+    #[test]
+    fn a_lane_eases_to_its_new_height_and_settles() {
+        let mut data = Data::default();
+        assert_eq!(data.lane_progress, [1.0, 0.0, 0.0]);
+        data.expand_lane(TimelineLane::Hide);
+        assert!(data.step_lane_progress(0.016), "a change starts moving");
+        let zoom = data.lane_progress(TimelineLane::Zoom);
+        let hide = data.lane_progress(TimelineLane::Hide);
+        assert!(zoom < 1.0 && zoom > 0.5, "zoom shrinks gradually: {zoom}");
+        assert!(hide > 0.0 && hide < 0.5, "hide grows gradually: {hide}");
+        let mut steps = 0;
+        while data.step_lane_progress(0.016) {
+            steps += 1;
+            assert!(steps < 100, "it settles");
+        }
+        assert_eq!(data.lane_progress, [0.0, 1.0, 0.0]);
+        assert!(steps > 5, "it takes several frames, not a jump: {steps}");
+        assert_eq!(lane_height(0.0, 1.0), THIN_LANE_HEIGHT as i32);
+        assert_eq!(lane_height(1.0, 1.0), EFFECT_LANE_HEIGHT as i32);
     }
 
     #[test]
