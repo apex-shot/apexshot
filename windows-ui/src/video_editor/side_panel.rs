@@ -23,7 +23,7 @@ use gtk4::{
     Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DrawingArea,
     EventControllerMotion, FileChooserAction, FileChooserNative, FileFilter, GestureClick,
     GestureDrag, Grid, Image, Label, Orientation, PolicyType, ResponseType, Revealer,
-    RevealerTransitionType, ScrolledWindow, Separator, SpinButton, Stack, StackTransitionType,
+    RevealerTransitionType, ScrolledWindow, SpinButton, Stack, StackTransitionType,
     Switch, ToggleButton,
 };
 use std::cell::{Cell, RefCell};
@@ -1983,57 +1983,58 @@ fn webcam_kicker(label: &str) -> Label {
     kicker
 }
 
-/// A titled group of controls whose body folds under its header.
+/// A titled group of controls whose body folds under its header: the same
+/// raised card, uppercase title and chevron the image editor's inspector uses.
 struct WebcamSection {
     root: GtkBox,
     body: GtkBox,
 }
 
 fn webcam_section(scale: f64, title: &str, open: bool) -> WebcamSection {
-    let root = GtkBox::new(Orientation::Vertical, 0);
+    let px = |value: f64| (value * scale).round() as i32;
+    let root = GtkBox::new(Orientation::Vertical, px(8.0));
+    root.add_css_class("video-editor-section");
     root.set_hexpand(true);
-    root.append(&Separator::new(Orientation::Horizontal));
 
-    let header = Button::new();
-    header.set_has_frame(false);
-    header.add_css_class("recording-editor-webcam-section");
-    header.set_hexpand(true);
-    let row = GtkBox::new(Orientation::Horizontal, (6.0 * scale).round() as i32);
-    row.set_margin_top((10.0 * scale).round() as i32);
-    row.set_margin_bottom((6.0 * scale).round() as i32);
-    let label = Label::new(None);
-    label.add_css_class("recording-editor-webcam-section-title");
-    label.set_markup(&format!("<b>{}</b>", gtk4::glib::markup_escape_text(title)));
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
-    let chevron = Image::from_icon_name(if open {
-        "pan-up-symbolic"
-    } else {
-        "pan-down-symbolic"
-    });
-    row.append(&label);
-    row.append(&chevron);
-    header.set_child(Some(&row));
+    let header = GtkBox::new(Orientation::Horizontal, px(8.0));
+    header.add_css_class("video-editor-disclosure-header");
+    let heading = Label::new(Some(&title.to_uppercase()));
+    heading.add_css_class("video-editor-section-title");
+    heading.set_xalign(0.0);
+    heading.set_hexpand(true);
+    let chevron_name = |open: bool| {
+        if open {
+            "chevron-down-regular"
+        } else {
+            "chevron-right-regular"
+        }
+    };
+    let chevron = Image::from_icon_name(chevron_name(open));
+    chevron.set_pixel_size(px(12.0));
+    chevron.set_valign(Align::Center);
+    chevron.add_css_class("video-editor-disclosure-chevron");
+    header.append(&heading);
+    header.append(&chevron);
     root.append(&header);
 
-    let body = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
+    let body = GtkBox::new(Orientation::Vertical, px(8.0));
     body.set_hexpand(true);
-    body.set_margin_bottom((10.0 * scale).round() as i32);
-    let revealer = Revealer::new();
-    revealer.set_transition_type(RevealerTransitionType::SlideDown);
+    let revealer = Revealer::builder()
+        .transition_type(RevealerTransitionType::SlideDown)
+        .transition_duration(120)
+        .child(&body)
+        .build();
+    revealer.set_halign(Align::Fill);
     revealer.set_reveal_child(open);
-    revealer.set_child(Some(&body));
     root.append(&revealer);
 
-    header.connect_clicked(move |_| {
+    let click = GestureClick::new();
+    click.connect_pressed(move |_, _, _, _| {
         let open = !revealer.reveals_child();
         revealer.set_reveal_child(open);
-        chevron.set_icon_name(Some(if open {
-            "pan-up-symbolic"
-        } else {
-            "pan-down-symbolic"
-        }));
+        chevron.set_icon_name(Some(chevron_name(open)));
     });
+    header.add_controller(click);
     WebcamSection { root, body }
 }
 
