@@ -2254,8 +2254,8 @@ struct WebcamPositionContext {
 }
 
 impl WebcamPositionContext {
-    fn refresh(&self, layer: &LayerSettings) {
-        self.pad.refresh(layer.overlay_alignment());
+    fn refresh(&self, alignment: (f64, f64)) {
+        self.pad.refresh(alignment);
     }
 }
 
@@ -2278,7 +2278,7 @@ fn build_webcam_position(
     let pad = WebcamPositionPad::new(scale, frame_aspect, alignment, on_move);
     root.append(&pad.area);
     let context = WebcamPositionContext { pad };
-    context.refresh(layer);
+    context.refresh(alignment);
     (root, context)
 }
 
@@ -2312,8 +2312,8 @@ struct WebcamOverlayContext {
 }
 
 impl WebcamOverlayContext {
-    fn refresh(&self, layer: &LayerSettings, frame_aspect: f64) {
-        self.position.refresh(layer);
+    fn refresh(&self, layer: &LayerSettings, frame_aspect: f64, alignment: (f64, f64)) {
+        self.position.refresh(alignment);
         self.size
             .set_value(layer.overlay_size_ratio(webcam_frame_aspect(frame_aspect)) * 100.0);
         let shrinking = layer.zoomed_scale < 1.0;
@@ -2483,7 +2483,7 @@ fn build_webcam_overlay(
         aspects,
         roundness,
     };
-    context.refresh(layer, frame_aspect);
+    context.refresh(layer, frame_aspect, layer.overlay_alignment());
     context
 }
 
@@ -2928,6 +2928,7 @@ impl WebcamContext {
         layer: &LayerSettings,
         layouts: &LayoutSettings,
         frame_aspect: f64,
+        cue: Option<LayoutCue>,
         controls: WebcamControlUse,
     ) {
         self.overlay.root.set_visible(controls.overlay);
@@ -2936,7 +2937,11 @@ impl WebcamContext {
         self.camera.root.set_visible(controls.mirror);
         self.transition.root.set_visible(controls.transitions);
         if controls.overlay {
-            self.overlay.refresh(layer, frame_aspect);
+            let alignment = cue
+                .and_then(|cue| cue.position)
+                .map(|[x, y]| (x, y))
+                .unwrap_or(layer.overlay_alignment());
+            self.overlay.refresh(layer, frame_aspect, alignment);
         }
         if controls.split {
             self.split.refresh(
@@ -2951,8 +2956,11 @@ impl WebcamContext {
             );
         }
         if controls.cutout {
+            let position = cue
+                .and_then(|cue| cue.cutout_x)
+                .unwrap_or(layouts.cutout_position_x);
             self.cutout.refresh(
-                layouts.cutout_position_x,
+                position,
                 layouts.cutout_size,
                 layouts.cutout_softness,
                 layouts.cutout_inset,
@@ -3105,6 +3113,25 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                 if syncing.get() {
                     return;
                 }
+                let state = timeline.webcam_panel_state();
+                if let Some((index, cue)) = webcam_selected_cue(&state) {
+                    let (mut x, mut y) = cue
+                        .position
+                        .map(|[x, y]| (x, y))
+                        .or_else(|| state.layer.map(|layer| layer.overlay_alignment()))
+                        .unwrap_or((1.0, 1.0));
+                    if horizontal {
+                        x = value;
+                    } else {
+                        y = value;
+                    }
+                    timeline.update_webcam_layouts_continuous(|layouts| {
+                        if let Some(cue) = layouts.cues.get_mut(index) {
+                            cue.position = Some([x, y]);
+                        }
+                    });
+                    return;
+                }
                 timeline.update_webcam(|layer| {
                     let (mut x, mut y) = layer.overlay_alignment();
                     if horizontal {
@@ -3189,6 +3216,14 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             let syncing = syncing.clone();
             Rc::new(move |position| {
                 if !syncing.get() {
+                    if let Some((index, _)) = webcam_selected_cue(&timeline.webcam_panel_state()) {
+                        timeline.update_webcam_layouts(|layouts| {
+                            if let Some(cue) = layouts.cues.get_mut(index) {
+                                cue.cutout_x = Some(position);
+                            }
+                        });
+                        return;
+                    }
                     timeline.update_webcam_layouts(|layouts| {
                         layouts.cutout_position_x = position;
                     });
@@ -3200,6 +3235,14 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             let syncing = syncing.clone();
             Rc::new(move |position| {
                 if !syncing.get() {
+                    if let Some((index, _)) = webcam_selected_cue(&timeline.webcam_panel_state()) {
+                        timeline.update_webcam_layouts_continuous(|layouts| {
+                            if let Some(cue) = layouts.cues.get_mut(index) {
+                                cue.cutout_x = Some(position);
+                            }
+                        });
+                        return;
+                    }
                     timeline.update_webcam_layouts_continuous(|layouts| {
                         layouts.cutout_position_x = position;
                     });
@@ -3523,7 +3566,13 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                     Some(&layer),
                     state.frame_aspect,
                 ));
-                context.refresh(&layer, &layouts, state.frame_aspect, controls);
+                context.refresh(
+                    &layer,
+                    &layouts,
+                    state.frame_aspect,
+                    webcam_selected_cue(&state).map(|(_, cue)| cue),
+                    controls,
+                );
                 shape_section_root.set_visible(controls.overlay);
                 if let Some((_, cue)) = selected {
                     time_spin.adjustment().set_upper(state.duration.max(0.1));
@@ -4761,7 +4810,12 @@ mod tests {
     const WIDE: f64 = 16.0 / 9.0;
 
     fn cue(at: f64, layout: CameraLayout) -> LayoutCue {
-        LayoutCue { at, layout }
+        LayoutCue {
+            at,
+            layout,
+            position: None,
+            cutout_x: None,
+        }
     }
 
     fn panel_state(
@@ -5282,7 +5336,7 @@ mod tests {
                 window.set_child(Some(&context.root));
                 for card in WebcamLayoutCard::ALL {
                     let controls = controls_for(card);
-                    context.refresh(&layer, &layouts, frame_aspect, controls);
+                    context.refresh(&layer, &layouts, frame_aspect, None, controls);
                     let (minimum, natural) = measure_width(&context.root);
                     assert!(
                         minimum <= scroll_width,

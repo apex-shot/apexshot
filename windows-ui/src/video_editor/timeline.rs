@@ -2121,6 +2121,8 @@ impl Data {
         next.cues.push(super::webcam::LayoutCue {
             at,
             layout: layouts.layout_at(at),
+            position: None,
+            cutout_x: None,
         });
         let next = next.clamped();
         let index = next
@@ -8030,26 +8032,38 @@ mod tests {
             super::super::webcam::LayoutCue {
                 at: 8.0,
                 layout: CameraLayout::SplitScreen,
+                position: None,
+                cutout_x: None,
             },
             super::super::webcam::LayoutCue {
                 at: 1.0,
                 layout: CameraLayout::ScreenOnly,
+                position: None,
+                cutout_x: None,
             },
             super::super::webcam::LayoutCue {
                 at: f64::NAN,
                 layout: CameraLayout::CameraOverlay,
+                position: None,
+                cutout_x: None,
             },
             super::super::webcam::LayoutCue {
                 at: 4.0,
                 layout: CameraLayout::CameraOverlay,
+                position: None,
+                cutout_x: None,
             },
             super::super::webcam::LayoutCue {
                 at: 4.004,
                 layout: CameraLayout::FullscreenCamera,
+                position: None,
+                cutout_x: None,
             },
             super::super::webcam::LayoutCue {
                 at: 40.0,
                 layout: CameraLayout::SplitScreen,
+                position: None,
+                cutout_x: None,
             },
         ];
         normalize_layout_cues(&mut cues, 10.0);

@@ -510,14 +510,20 @@ mod tests {
                         LayoutCue {
                             at: 1.5,
                             layout: CameraLayout::FullscreenCamera,
+                            position: None,
+                            cutout_x: None,
                         },
                         LayoutCue {
                             at: 4.25,
                             layout: CameraLayout::CameraOverlay,
+                            position: None,
+                            cutout_x: None,
                         },
                         LayoutCue {
                             at: 9.0,
                             layout: CameraLayout::ScreenOnly,
+                            position: None,
+                            cutout_x: None,
                         },
                     ],
                     transition_seconds: 0.6,
@@ -681,6 +687,8 @@ mod tests {
             cues: vec![LayoutCue {
                 at: 2.0,
                 layout: CameraLayout::CameraCutout,
+                position: None,
+                cutout_x: None,
             }],
             transition_seconds: 0.3,
             split_ratio: 0.4,

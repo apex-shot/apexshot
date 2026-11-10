@@ -458,6 +458,12 @@ pub(super) struct LayoutCue {
     /// Composition seconds, where the composition starts at zero.
     pub at: f64,
     pub layout: CameraLayout,
+    /// The bubble's alignment for this change, overriding the shared one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 2]>,
+    /// The cutout's position across the frame for this change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cutout_x: Option<f64>,
 }
 
 /// Every layout the composition uses, and how it moves between them.
@@ -547,6 +553,23 @@ impl LayoutSettings {
             .cues
             .into_iter()
             .filter(|cue| cue.at.is_finite() && cue.at >= 0.0)
+            .map(|mut cue| {
+                cue.position = cue.position.and_then(|[x, y]| {
+                    if x.is_finite() && y.is_finite() {
+                        Some([x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)])
+                    } else {
+                        None
+                    }
+                });
+                cue.cutout_x = cue.cutout_x.and_then(|x| {
+                    if x.is_finite() {
+                        Some(x.clamp(0.0, 1.0))
+                    } else {
+                        None
+                    }
+                });
+                cue
+            })
             .collect();
         cues.sort_by(|left, right| left.at.total_cmp(&right.at));
         let mut deduped: Vec<LayoutCue> = Vec::with_capacity(cues.len());
@@ -689,14 +712,15 @@ impl LayoutSettings {
         let mut targets = Vec::with_capacity(cues.len() * 2);
         let mut previous_screen = default.screen;
         for (index, cue) in cues.iter().enumerate() {
-            let mut target = canonical(cue.layout, geometry);
+            let mut target = canonical(cue.layout, cue_geometry(geometry, cue));
             if cue.layout == CameraLayout::FullscreenCamera {
                 target.screen = previous_screen;
                 targets.push((cue.at, target));
                 if let Some(next) = cues.get(index + 1) {
                     if next.layout != CameraLayout::FullscreenCamera {
                         let mut handed_on = target;
-                        handed_on.screen = canonical(next.layout, geometry).screen;
+                        handed_on.screen =
+                            canonical(next.layout, cue_geometry(geometry, next)).screen;
                         targets.push(((cue.at + next.at) / 2.0, handed_on));
                     }
                 }
@@ -984,6 +1008,19 @@ pub(super) fn screen_cover_rect(screen: Rect) -> Rect {
     }
 }
 
+/// The geometry a change rests at: the shared one, with this change's camera
+/// alignment and cutout position merged over it.
+fn cue_geometry(geometry: Geometry, cue: &LayoutCue) -> Geometry {
+    let mut geometry = geometry;
+    if let Some([x, y]) = cue.position {
+        geometry.overlay.set_overlay_alignment(x, y);
+    }
+    if let Some(x) = cue.cutout_x {
+        geometry.cutout_position_x = x;
+    }
+    geometry
+}
+
 /// The bottom-aligned camera of the cutout, sized from the raw camera aspect
 /// and placed across the frame by the project's cutout position.
 fn cutout_rect(geometry: Geometry) -> Rect {
@@ -1228,12 +1265,12 @@ fn transition(from: LayoutFrame, to: LayoutFrame, t: f64) -> LayoutFrame {
     frame
 }
 
-/// The corner radius a shape index starts at, as a fraction of the shorter side.
+/// The corner radius a shape index starts at, as a fraction of half the shorter side.
+/// 0.30 is the studied 0.15 of the shorter side; a circle is an ellipse.
 pub(super) fn radius_for_shape(shape: u8) -> f64 {
     match shape {
         0 => 1.0,
-        1 => 0.08,
-        _ => 0.12,
+        _ => 0.30,
     }
 }
 
@@ -2841,7 +2878,12 @@ mod tests {
     }
 
     fn cue(at: f64, layout: CameraLayout) -> LayoutCue {
-        LayoutCue { at, layout }
+        LayoutCue {
+            at,
+            layout,
+            position: None,
+            cutout_x: None,
+        }
     }
 
     fn settings(cues: Vec<LayoutCue>, transition: f64) -> LayoutSettings {
@@ -2899,6 +2941,54 @@ mod tests {
             );
             assert_eq!(frame.cutout, 0.0, "and no matte at {seconds}");
         }
+    }
+
+    #[test]
+    fn a_change_can_carry_its_own_camera_position() {
+        let frame = 16.0 / 9.0;
+        let mut layer = LayerSettings::default();
+        layer.set_overlay_alignment(1.0, 1.0);
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            cues: vec![
+                LayoutCue {
+                    at: 2.0,
+                    layout: CameraLayout::CameraOverlay,
+                    position: Some([0.0, 0.0]),
+                    cutout_x: None,
+                },
+                LayoutCue {
+                    at: 6.0,
+                    layout: CameraLayout::CameraOverlay,
+                    position: None,
+                    cutout_x: None,
+                },
+            ],
+            ..LayoutSettings::default()
+        };
+        let shared = layouts.frame_at(1.0, layer, frame, 1.0).camera;
+        assert!(
+            (shared.x + shared.width - 1.0).abs() < 1e-9,
+            "the default sits bottom-right"
+        );
+        let own = layouts.frame_at(5.0, layer, frame, 1.0).camera;
+        assert!(
+            own.x.abs() < 1e-9 && own.y.abs() < 1e-9,
+            "the change sits top-left: {own:?}"
+        );
+        let back = layouts.frame_at(9.0, layer, frame, 1.0).camera;
+        assert!(
+            (back.x + back.width - 1.0).abs() < 1e-9,
+            "a change without a position uses the shared one"
+        );
+    }
+
+    #[test]
+    fn a_change_without_a_position_reads_as_none() {
+        let cue: LayoutCue =
+            serde_json::from_str(r#"{"at":1.0,"layout":"camera_overlay"}"#).unwrap();
+        assert_eq!(cue.position, None);
+        assert_eq!(cue.cutout_x, None);
     }
 
     #[test]
@@ -3193,6 +3283,8 @@ mod tests {
             cues: vec![LayoutCue {
                 at: 1.0,
                 layout: CameraLayout::ScreenOnly,
+                position: None,
+                cutout_x: None,
             }],
             ..LayoutSettings::default()
         };
@@ -3207,6 +3299,8 @@ mod tests {
             cues: vec![LayoutCue {
                 at: 1.0,
                 layout: CameraLayout::CameraOverlay,
+                position: None,
+                cutout_x: None,
             }],
             ..LayoutSettings::default()
         };
@@ -3225,10 +3319,14 @@ mod tests {
                 LayoutCue {
                     at: 2.0,
                     layout: CameraLayout::FullscreenCamera,
+                    position: None,
+                    cutout_x: None,
                 },
                 LayoutCue {
                     at: 6.0,
                     layout: CameraLayout::CameraOverlay,
+                    position: None,
+                    cutout_x: None,
                 },
             ],
             ..LayoutSettings::default()
@@ -4532,7 +4630,8 @@ mod tests {
     #[test]
     fn a_shape_starts_at_the_radius_the_recorder_drew() {
         assert_eq!(radius_for_shape(0), 1.0);
-        assert!(radius_for_shape(1) < radius_for_shape(2));
+        assert_eq!(radius_for_shape(1), 0.30);
+        assert_eq!(radius_for_shape(2), 0.30);
         assert_eq!(aspect_for_shape(0), aspect_for_shape(1));
         assert!(aspect_for_shape(3) > aspect_for_shape(2));
     }

@@ -1496,7 +1496,8 @@ void RecordingSession::Private::compositeWebcam(
                            .arg(height / 2.0, 0, 'f', 3)
                            .arg(width / 2.0, 0, 'f', 3));
     } else {
-        const double radius = double(width) * (layout.shape == 1 ? 0.04 : 0.06);
+        // The studied corner: 0.15 of the camera's shorter side.
+        const double radius = 0.15 * double(std::min(width, height));
         filter += mask(QStringLiteral("sqrt(max(abs(X-%1)-%2,0)*max(abs(X-%1)-%2,0)"
                                       "+max(abs(Y-%3)-%4,0)*max(abs(Y-%3)-%4,0))-%5")
                            .arg(width / 2.0, 0, 'f', 3)

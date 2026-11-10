@@ -3304,6 +3304,8 @@ mod webcam_export_tests {
             cues: vec![LayoutCue {
                 at: 0.45,
                 layout: CameraLayout::ScreenOnly,
+                position: None,
+                cutout_x: None,
             }],
             ..LayoutSettings::default()
         };
@@ -3668,22 +3670,32 @@ mod webcam_export_tests {
                 LayoutCue {
                     at: 0.2,
                     layout: CameraLayout::CameraOverlay,
+                    position: None,
+                    cutout_x: None,
                 },
                 LayoutCue {
                     at: 0.7,
                     layout: CameraLayout::ScreenOnly,
+                    position: None,
+                    cutout_x: None,
                 },
                 LayoutCue {
                     at: 1.2,
                     layout: CameraLayout::SplitScreen,
+                    position: None,
+                    cutout_x: None,
                 },
                 LayoutCue {
                     at: 1.7,
                     layout: CameraLayout::FullscreenCamera,
+                    position: None,
+                    cutout_x: None,
                 },
                 LayoutCue {
                     at: 2.2,
                     layout: CameraLayout::CameraCutout,
+                    position: None,
+                    cutout_x: None,
                 },
             ],
             transition_seconds: 0.12,
