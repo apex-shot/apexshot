@@ -4461,3 +4461,15 @@ msgstr "Neigungsstärke"
 
 msgid "Tilt with motion"
 msgstr "Mit der Bewegung neigen"
+
+msgid "Backgrounds and style"
+msgstr "Hintergründe und Stil"
+
+msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
+msgstr "Hintergrundbilder, Ränder, abgerundete Ecken, Schatten und Rahmen für Standbilder."
+
+msgid "Included with Studio"
+msgstr "In Studio enthalten"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images."
+msgstr "Studio-Vorschau. Eine nicht standardmäßig gerenderte Pose erfordert für finale Bilder eine Aktivierung."

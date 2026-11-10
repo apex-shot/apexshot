@@ -4348,3 +4348,15 @@ msgstr "倾斜程度"
 
 msgid "Tilt with motion"
 msgstr "随移动倾斜"
+
+msgid "Backgrounds and style"
+msgstr "背景与样式"
+
+msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
+msgstr "为静态图像添加壁纸、边距、圆角、阴影和边框。"
+
+msgid "Included with Studio"
+msgstr "包含在 Studio 中"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images."
+msgstr "Studio 预览。最终图像使用非默认渲染姿态需要激活。"

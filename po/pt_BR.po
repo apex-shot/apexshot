@@ -4451,3 +4451,15 @@ msgstr "Intensidade da inclinação"
 
 msgid "Tilt with motion"
 msgstr "Inclinar com o movimento"
+
+msgid "Backgrounds and style"
+msgstr "Fundos e estilo"
+
+msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
+msgstr "Papéis de parede, margens, cantos arredondados, sombras e molduras para imagens estáticas."
+
+msgid "Included with Studio"
+msgstr "Incluído no Studio"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images."
+msgstr "Prévia do Studio. Uma pose renderizada fora do padrão exige ativação para as imagens finais."

@@ -53,17 +53,6 @@ impl EditorState {
             height as i32,
         )
         .map_err(|e| EditorError::ImageSave(e.to_string()))?;
-        let glass = if !transform || self.static_image_transform.is_identity() {
-            super::super::glass_render::render(
-                appearance,
-                layout,
-                image_width,
-                image_height,
-                layout.width.max(layout.height),
-            )
-        } else {
-            None
-        };
 
         {
             let context = gtk4::cairo::Context::new(&surface)
@@ -93,7 +82,7 @@ impl EditorState {
                     super::super::render::scene_shadow::paint_shadow(&context, shadow, false);
                 }
             }
-            let style = super::super::style_render::StyleGeometry::new(
+            let mut style = super::super::style_render::StyleGeometry::new(
                 layout,
                 f64::from(image_width),
                 f64::from(image_height),
@@ -104,6 +93,7 @@ impl EditorState {
                 },
                 appearance.frame_style,
             );
+            style.over_fill = appearance.has_fill();
             style.paint_backings(&context);
             style.paint_underlay(&context);
             if transform && !self.static_image_transform.is_identity() {
@@ -136,11 +126,7 @@ impl EditorState {
                     .ok();
                 context.paint().ok();
                 context.restore().ok();
-                if let Some(glass) = &glass {
-                    glass.paint(&context);
-                } else {
-                    style.paint_frame(&context);
-                }
+                style.paint_frame(&context);
                 context.translate(layout.image_x, layout.image_y);
                 context.scale(self.export_scale, self.export_scale);
                 for action in self.vector_annotation_actions() {
@@ -161,13 +147,29 @@ impl EditorState {
         ))
     }
 
+    /// Whether the appearance uses a Studio presentation control. Padding,
+    /// blur, noise and the scene shadow only render over a fill, and every
+    /// fill is already Studio, so they need no separate term. Frame ratios
+    /// stay free.
+    pub(crate) fn uses_studio_style(&self) -> bool {
+        let background = &self.background;
+        background.has_fill()
+            || background.radius > 0.0
+            || background.frame_style != super::super::types::FrameStyle::Default
+    }
+
+    pub(crate) fn studio_capabilities(&self) -> crate::studio_entitlement::StudioCapabilities {
+        crate::studio_entitlement::capabilities_for_image_style(
+            self.static_image_transform,
+            self.uses_studio_style(),
+        )
+    }
+
     /// The final export image. Always flattens `base + actions` so a pending
     /// preview rebuild cannot leak an unredacted frame.
     pub fn to_final_image(&self) -> Result<RgbaImage, EditorError> {
-        crate::studio_entitlement::ensure_export_allowed(
-            crate::studio_entitlement::capabilities_for_static_image(self.static_image_transform),
-        )
-        .map_err(|error| EditorError::ImageSave(error.to_string()))?;
+        crate::studio_entitlement::ensure_export_allowed(self.studio_capabilities())
+            .map_err(|error| EditorError::ImageSave(error.to_string()))?;
         self.to_export_image()
     }
 
@@ -466,7 +468,10 @@ mod tests {
         let left_cast = state.to_export_image().unwrap();
         assert!(right_cast.get_pixel(205, 100)[0] < left_cast.get_pixel(205, 100)[0]);
         assert_eq!(state.to_motion_card_image().unwrap(), card);
-        assert!(state.to_final_image().is_ok(), "shadows remain free");
+        assert!(
+            state.to_final_image().is_err(),
+            "a wallpaper is a Studio style"
+        );
         state.static_image_transform.yaw = 18.0;
         let transformed = state.to_export_image().unwrap();
         assert_ne!(transformed, left_cast);
@@ -562,6 +567,81 @@ mod tests {
         assert_eq!(
             state.to_final_image().unwrap(),
             state.to_export_image().unwrap()
+        );
+    }
+
+    #[test]
+    fn default_appearance_is_free() {
+        assert!(!document().uses_studio_style());
+    }
+
+    #[test]
+    fn each_decorative_control_marks_the_document_studio() {
+        let mut fill = document();
+        fill.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            1,
+            1,
+            Rgba([0, 0, 255, 255]),
+        )));
+        assert!(fill.uses_studio_style());
+
+        let mut radius = document();
+        radius.background.radius = 20.0;
+        assert!(radius.uses_studio_style());
+
+        let mut style = document();
+        style.background.frame_style = FrameStyle::InsetLight;
+        assert!(style.uses_studio_style());
+
+        let mut ratio = document();
+        ratio.background.frame_aspect = Some(FrameRatio {
+            width: 1,
+            height: 1,
+        });
+        assert!(!ratio.uses_studio_style(), "frame ratios stay free");
+    }
+
+    #[test]
+    fn a_stale_padding_without_a_fill_stays_free() {
+        let mut state = document();
+        state.background.padding = 16.0;
+        assert!(!state.uses_studio_style());
+    }
+
+    #[test]
+    fn a_shadow_without_a_wallpaper_stays_free() {
+        let mut state = document();
+        state.scene_shadow.preset = MotionSceneShadowPreset::Spread;
+        assert!(!state.uses_studio_style());
+        state.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            1,
+            1,
+            Rgba([0, 0, 255, 255]),
+        )));
+        assert!(state.uses_studio_style());
+    }
+
+    #[test]
+    fn a_styled_document_is_locked_and_a_clean_one_is_not() {
+        let mut styled = document();
+        styled.background.fill = Fill::Image(Arc::new(RgbaImage::from_pixel(
+            1,
+            1,
+            Rgba([0, 0, 255, 255]),
+        )));
+        styled.background.radius = 20.0;
+        let error = styled
+            .to_final_image()
+            .expect_err("a styled still fails closed");
+        assert!(error.to_string().contains("Studio"), "{error}");
+        assert!(
+            document().to_final_image().is_ok(),
+            "a clean still stays free"
+        );
+        let _entitlement = crate::studio_entitlement::test_studio_entitlement();
+        assert_eq!(
+            styled.to_final_image().unwrap(),
+            styled.to_export_image().unwrap()
         );
     }
 

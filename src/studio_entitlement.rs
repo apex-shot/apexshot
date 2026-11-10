@@ -31,11 +31,18 @@ pub struct StudioCapabilities {
     pub static_presentation: bool,
     pub advanced_zoom: bool,
     pub image_upscale: bool,
+    /// Decorative still-image presentation: wallpaper, padding, radius,
+    /// blur, noise, shadow, frame style.
+    pub studio_style: bool,
 }
 
 impl StudioCapabilities {
     pub fn requires_studio(self) -> bool {
-        self.motion_export || self.static_presentation || self.advanced_zoom || self.image_upscale
+        self.motion_export
+            || self.static_presentation
+            || self.advanced_zoom
+            || self.image_upscale
+            || self.studio_style
     }
 }
 
@@ -289,6 +296,19 @@ pub fn capabilities_for_image_export(
 ) -> StudioCapabilities {
     StudioCapabilities {
         image_upscale: upscale,
+        ..capabilities_for_static_image(transform)
+    }
+}
+
+/// The still-image export's capabilities: the frozen pose plus the
+/// decorative appearance. The caller computes `style` because only the
+/// document knows its appearance.
+pub fn capabilities_for_image_style(
+    transform: StaticImageTransform,
+    style: bool,
+) -> StudioCapabilities {
+    StudioCapabilities {
+        studio_style: style,
         ..capabilities_for_static_image(transform)
     }
 }
@@ -852,6 +872,16 @@ mod tests {
             Err(StudioEntitlementError::NotActivated)
         );
     }
+
+    #[test]
+    fn a_decorative_style_needs_studio_but_a_clean_still_stays_free() {
+        let clean = StaticImageTransform::default();
+        assert!(!capabilities_for_image_style(clean, false).requires_studio());
+        let styled = capabilities_for_image_style(clean, true);
+        assert!(styled.studio_style);
+        assert!(styled.requires_studio());
+    }
+
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use ed25519_dalek::{Signer, SigningKey};
     use std::time::{SystemTime, UNIX_EPOCH};

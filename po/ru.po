@@ -4441,3 +4441,15 @@ msgstr "Величина наклона"
 
 msgid "Tilt with motion"
 msgstr "Наклонять при движении"
+
+msgid "Backgrounds and style"
+msgstr "Фоны и стиль"
+
+msgid "Wallpapers, padding, rounded corners, shadows and frames for stills."
+msgstr "Обои, отступы, скруглённые углы, тени и рамки для статичных изображений."
+
+msgid "Included with Studio"
+msgstr "Входит в Studio"
+
+msgid "Studio preview. A non-default rendered pose needs activation for final images."
+msgstr "Предпросмотр Studio. Для итоговых изображений с нестандартной позой требуется активация."

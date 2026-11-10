@@ -4,8 +4,8 @@ use gtk4::cairo::Context;
 
 use super::image_transform::StaticImageTransform;
 use super::state::background::Layout;
+use super::transform_render;
 use super::types::{DrawColor, FrameStyle};
-use super::{render, transform_render};
 
 /// How far an inset band overscans the card edge. The screenshot is clipped to
 /// the card outline, so a band that stops exactly on that outline shares its
@@ -24,6 +24,10 @@ pub(crate) struct StyleGeometry {
     pub style: FrameStyle,
     pub border_unit: f64,
     pub backing_unit: f64,
+    /// The card sits on a wallpaper. Offset's sheet is then a solid black
+    /// drop; over a transparent export it stays a light card so it never
+    /// reads as a black slab.
+    pub over_fill: bool,
 }
 
 impl StyleGeometry {
@@ -42,6 +46,7 @@ impl StyleGeometry {
             style,
             border_unit: width.max(height) / 400.0,
             backing_unit: 1.0,
+            over_fill: false,
         }
     }
 
@@ -150,7 +155,11 @@ impl StyleGeometry {
                 }
             }
             context.close_path();
-            color(context, backing.color);
+            if self.style == FrameStyle::Retro && self.over_fill {
+                context.set_source_rgb(0.0, 0.0, 0.0);
+            } else {
+                color(context, backing.color);
+            }
             context.fill().ok();
         }
         context.restore().ok();
@@ -163,19 +172,8 @@ impl StyleGeometry {
         let spec = self.style.spec();
         let _ = context.save();
         self.clip(context);
-        if let Some(liquid) =
-            render::LiquidFrame::resolve(&spec, spec.border_thickness, self.border_unit)
-        {
-            let corners =
-                transform_render::card_corners(self.layout, self.width, self.height, self.pose);
-            let top = corners.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
-            let bottom = corners
-                .iter()
-                .map(|p| p.1)
-                .fold(f64::NEG_INFINITY, f64::max);
-            liquid.paint(context, top, bottom, |context, expand| {
-                self.path(context, expand)
-            });
+        if spec.liquid {
+            self.paint_glass(context);
         }
         let mut expand = 0.0;
         if !spec.liquid && spec.border_thickness > 0.0 {
@@ -208,6 +206,113 @@ impl StyleGeometry {
             }
         }
         context.restore().ok();
+    }
+
+    /// The glass presets: the wallpaper seen through a lifted, vivid band with
+    /// a bright lip along the outer edge (strongest at the top, where the
+    /// light comes from) and a faint contact line against the card. Drawn with
+    /// blend operators over what is already painted, so the preview, a drag,
+    /// a tilted pose and the export all look the same.
+    fn paint_glass(&self, context: &Context) {
+        use gtk4::cairo::{LinearGradient, Operator};
+        let spec = self.style.spec();
+        let gap = (spec.border_thickness + spec.outer1.map_or(0.0, |outer| outer.thickness))
+            * self.border_unit;
+        if gap <= 0.5 {
+            return;
+        }
+        let corners =
+            transform_render::card_corners(self.layout, self.width, self.height, self.pose);
+        let top = corners.iter().map(|p| p.1).fold(f64::INFINITY, f64::min) - gap;
+        let bottom = corners
+            .iter()
+            .map(|p| p.1)
+            .fold(f64::NEG_INFINITY, f64::max)
+            + gap;
+        let lit = |high: f64, low: f64| {
+            let gradient = LinearGradient::new(0.0, top, 0.0, bottom);
+            gradient.add_color_stop_rgba(0.0, 1.0, 1.0, 1.0, high);
+            gradient.add_color_stop_rgba(1.0, 1.0, 1.0, 1.0, low);
+            gradient
+        };
+        // The band starts just under the card so it covers the card's own
+        // antialiased edge instead of leaving a seam beside it.
+        let band = |context: &Context| {
+            context.new_path();
+            context.set_fill_rule(gtk4::cairo::FillRule::EvenOdd);
+            self.path(context, gap);
+            self.path(context, -0.6);
+        };
+        let _ = context.save();
+
+        // Body.
+        match self.style {
+            FrameStyle::GlassDark => {
+                // Smoke: the wallpaper multiplied down to ~40%, which keeps
+                // its hue vivid, a touch deeper toward the card.
+                band(context);
+                context.set_operator(Operator::Multiply);
+                context.set_source_rgb(0.40, 0.40, 0.40);
+                let _ = context.fill();
+                context.new_path();
+                self.path(context, gap * 0.2);
+                context.set_line_width(gap * 0.4);
+                context.set_source_rgb(0.90, 0.90, 0.90);
+                let _ = context.stroke();
+                context.set_operator(Operator::Over);
+            }
+            FrameStyle::Liquid => {
+                band(context);
+                context.set_operator(Operator::Add);
+                let _ = context.set_source(lit(0.16, 0.09));
+                let _ = context.fill();
+            }
+            _ => {
+                // Frost: a milky veil, whitest at the outer edge and easing
+                // toward the card, the wallpaper tinting it from beneath.
+                band(context);
+                context.set_source_rgba(1.0, 1.0, 1.0, 0.40);
+                let _ = context.fill();
+                context.new_path();
+                self.path(context, gap * 0.75);
+                context.set_line_width(gap * 0.5);
+                context.set_source_rgba(1.0, 1.0, 1.0, 0.16);
+                let _ = context.stroke();
+                context.new_path();
+                self.path(context, gap * 0.15);
+                context.set_line_width(gap * 0.3);
+                context.set_source_rgba(0.0, 0.0, 0.0, 0.06);
+                let _ = context.stroke();
+            }
+        }
+
+        // Bright outer lip, one band-pixel in from the outer edge. Frost's
+        // veil is its own highlight, so it keeps a soft edge instead.
+        context.set_operator(Operator::Add);
+        if self.style == FrameStyle::GlassLight {
+            context.set_operator(Operator::Over);
+        }
+        context.new_path();
+        self.path(context, gap - 0.75 * self.border_unit.clamp(1.0, 1.5));
+        context.set_line_width(1.5);
+        let lip = match self.style {
+            // Smoke has no lit lip; the stroke below adds nothing.
+            FrameStyle::GlassDark => lit(0.0, 0.0),
+            FrameStyle::Liquid => lit(0.30, 0.10),
+            _ => lit(0.10, 0.04),
+        };
+        let _ = context.set_source(lip);
+        let _ = context.stroke();
+
+        // Faint contact line where the glass meets the card.
+        context.set_operator(Operator::Over);
+        context.new_path();
+        self.path(context, 0.5);
+        context.set_line_width(1.0);
+        context.set_source_rgba(0.0, 0.0, 0.0, 0.18);
+        let _ = context.stroke();
+
+        let _ = context.restore();
     }
 }
 

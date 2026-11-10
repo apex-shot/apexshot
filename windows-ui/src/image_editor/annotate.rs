@@ -85,10 +85,16 @@ fn preview_card_size(width: u32, height: u32) -> (u32, u32) {
 
 type DecodedBackground = (RgbaImage, Vec<u8>);
 
+/// How long the full wallpaper may take before its thumbnail stands in.
+/// Most decodes finish inside it, so a switch goes straight to the sharp
+/// image instead of flashing a blurry thumbnail first.
+const BACKGROUND_PREVIEW_GRACE: Duration = Duration::from_millis(300);
+
 fn spawn_background_decode(
     path: std::path::PathBuf,
     preview_path: Option<std::path::PathBuf>,
     cancel: Arc<AtomicBool>,
+    grace: Duration,
 ) -> mpsc::Receiver<(bool, image::ImageResult<DecodedBackground>)> {
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
@@ -97,6 +103,32 @@ fn spawn_background_decode(
             let bytes = render::rgba_to_cairo_argb_bytes(&image);
             (image, bytes)
         };
+        let (full_sender, full_receiver) = mpsc::channel();
+        {
+            let cancel = Arc::clone(&cancel);
+            std::thread::spawn(move || {
+                let Ok(_guard) = BACKGROUND_DECODE_LOCK.lock() else {
+                    return;
+                };
+                if cancel.load(Ordering::Relaxed) {
+                    return;
+                }
+                let _ = full_sender.send(image::open(path));
+            });
+        }
+        let send_full = |image: image::ImageResult<image::DynamicImage>| {
+            if !cancel.load(Ordering::Relaxed) {
+                let _ = sender.send((false, image.map(prepare)));
+            }
+        };
+        match full_receiver.recv_timeout(grace) {
+            Ok(image) => {
+                send_full(image);
+                return;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+        }
         if let Some(path) = preview_path {
             if let Ok(image) = image::open(path) {
                 if cancel.load(Ordering::Relaxed)
@@ -106,17 +138,9 @@ fn spawn_background_decode(
                 }
             }
         }
-        let Ok(_guard) = BACKGROUND_DECODE_LOCK.lock() else {
-            return;
-        };
-        if cancel.load(Ordering::Relaxed) {
-            return;
+        if let Ok(image) = full_receiver.recv() {
+            send_full(image);
         }
-        let image = image::open(path);
-        if cancel.load(Ordering::Relaxed) {
-            return;
-        }
-        let _ = sender.send((false, image.map(prepare)));
     });
     receiver
 }
@@ -125,21 +149,14 @@ type CachedCard = (u64, Vec<AnnotationAction>, f64, ImageSurface);
 /// The working image with its committed annotations, baked once per drag so
 /// pointer updates only redraw the in-progress stroke.
 type CachedAnnotations = (u64, usize, Option<usize>, ImageSurface);
+/// Preview wallpaper: revision, image width and height, raster edge, surface.
+type CachedBackground = (u64, u32, u32, u32, ImageSurface);
 type CachedShadow = (
     crate::capture::editor::render::scene_shadow::SceneShadowGeometry,
     bool,
     f64,
     ImageSurface,
 );
-type CachedGlass = (
-    u64,
-    crate::capture::editor::state::background::Layout,
-    u32,
-    u32,
-    u32,
-    Option<crate::capture::editor::glass_render::GlassOverlay>,
-);
-
 #[derive(Clone, Copy, PartialEq)]
 enum MotionPaintPart {
     Complete,
@@ -162,8 +179,9 @@ pub struct EditorHost {
     /// drag ends. Only used while no card transform is active.
     annotation_cache: RefCell<Option<CachedAnnotations>>,
     shadow_cache: RefCell<Option<CachedShadow>>,
-    glass_cache: RefCell<Option<CachedGlass>>,
-    background_cache: RefCell<Option<(u64, u32, u32, ImageSurface)>>,
+    background_cache: RefCell<Option<CachedBackground>>,
+    studio_unlock_cache: RefCell<Option<(std::time::Instant, bool)>>,
+    studio_text_ratio: Cell<Option<f64>>,
     background_source: RefCell<Option<(Arc<RgbaImage>, ImageSurface)>>,
     /// Bumped on every document load so stale async results are rejected.
     pub session_generation: Rc<Cell<u64>>,
@@ -196,8 +214,9 @@ impl EditorHost {
             card_cache: RefCell::new(None),
             annotation_cache: RefCell::new(None),
             shadow_cache: RefCell::new(None),
-            glass_cache: RefCell::new(None),
             background_cache: RefCell::new(None),
+            studio_unlock_cache: RefCell::new(None),
+            studio_text_ratio: Cell::new(None),
             background_source: RefCell::new(None),
             session_generation: Rc::new(Cell::new(0)),
             background_generation: Cell::new(0),
@@ -233,7 +252,6 @@ impl EditorHost {
         *self.card_cache.borrow_mut() = None;
         *self.annotation_cache.borrow_mut() = None;
         *self.shadow_cache.borrow_mut() = None;
-        *self.glass_cache.borrow_mut() = None;
         *self.background_cache.borrow_mut() = None;
         *self.background_source.borrow_mut() = None;
         self.cancel_background_load();
@@ -275,6 +293,69 @@ impl EditorHost {
         borrow.as_ref().map(f)
     }
 
+    /// The licence state, re-read at most once a second so painting never
+    /// touches the entitlement file per frame.
+    fn studio_unlocked_cached(&self) -> bool {
+        let now = std::time::Instant::now();
+        if let Some((at, value)) = *self.studio_unlock_cache.borrow() {
+            if now.duration_since(at) < std::time::Duration::from_secs(1) {
+                return value;
+            }
+        }
+        let value = crate::studio_entitlement::studio_unlocked();
+        *self.studio_unlock_cache.borrow_mut() = Some((now, value));
+        value
+    }
+
+    /// Forget the cached licence state, e.g. right after activation.
+    pub(crate) fn invalidate_studio_cache(&self) {
+        *self.studio_unlock_cache.borrow_mut() = None;
+    }
+
+    /// Whether the mark is due: the document uses a Studio style and no
+    /// licence covers this build.
+    pub(crate) fn studio_mark_active(&self) -> bool {
+        self.read(|st| st.uses_studio_style()).unwrap_or(false) && !self.studio_unlocked_cached()
+    }
+
+    /// Paint the Studio preview mark in screen pixels over the visible canvas.
+    pub(crate) fn paint_studio_mark(
+        &self,
+        context: &gtk4::cairo::Context,
+        canvas: crate::capture::editor::studio_watermark::ScreenRect,
+        image: crate::capture::editor::studio_watermark::ScreenRect,
+        visible: crate::capture::editor::studio_watermark::ScreenRect,
+    ) {
+        use crate::capture::editor::studio_watermark as mark;
+        if !self.studio_mark_active() {
+            return;
+        }
+        let Some(region) = canvas.intersect(visible) else {
+            return;
+        };
+        let ratio = self.studio_text_ratio.get().unwrap_or_else(|| {
+            let ratio = mark::text_ratio(context);
+            self.studio_text_ratio.set(Some(ratio));
+            ratio
+        });
+        let stage = mark::Stage {
+            canvas,
+            image,
+            visible,
+        };
+        let Some(rect) = mark::place(stage, ratio) else {
+            return;
+        };
+        let ink = self
+            .read(|st| mark::ink_for_image(&st.working_image, rect, image))
+            .unwrap_or_else(mark::Ink::light);
+        let _ = context.save();
+        context.rectangle(region.x, region.y, region.width, region.height);
+        context.clip();
+        mark::paint(context, rect, ink);
+        let _ = context.restore();
+    }
+
     /// Surface an error message through the window's toast.
     pub(crate) fn report_error(&self, message: String) {
         (self.on_error)(message);
@@ -314,7 +395,8 @@ impl EditorHost {
         self.background_loading.set(true);
         self.changed();
         let generation = self.background_generation.get();
-        let receiver = spawn_background_decode(path, preview_path, cancel);
+        let receiver =
+            spawn_background_decode(path, preview_path, cancel, BACKGROUND_PREVIEW_GRACE);
         let host = Rc::downgrade(self);
         let mut on_selected = Some(on_selected);
         let mut on_failure = Some(on_failure);
@@ -785,13 +867,14 @@ impl EditorHost {
                 let _ = context.restore();
             }
         }
-        let style = crate::capture::editor::style_render::StyleGeometry::new(
+        let mut style = crate::capture::editor::style_render::StyleGeometry::new(
             layout,
             f64::from(st.working_image.width()),
             f64::from(st.working_image.height()),
             pose,
             st.background.frame_style,
         );
+        style.over_fill = st.background.has_fill();
         let _ = context.save();
         context.translate(t.canvas_offset_x, t.canvas_offset_y);
         context.scale(t.canvas_scale, t.canvas_scale);
@@ -899,9 +982,7 @@ impl EditorHost {
         let _ = context.save();
         context.translate(t.canvas_offset_x, t.canvas_offset_y);
         context.scale(t.canvas_scale, t.canvas_scale);
-        if !self.paint_glass_frame(context, st, layout, t.canvas_scale) {
-            style.paint_frame(context);
-        }
+        style.paint_frame(context);
         let _ = context.restore();
 
         let _ = context.save();
@@ -957,58 +1038,6 @@ impl EditorHost {
         Some(surface)
     }
 
-    fn paint_glass_frame(
-        &self,
-        context: &gtk4::cairo::Context,
-        st: &EditorState,
-        layout: crate::capture::editor::state::background::Layout,
-        zoom: f64,
-    ) -> bool {
-        if !st.background.frame_style.spec().liquid || st.history_interaction_before.is_some() {
-            return false;
-        }
-        let (width, height) = st.working_image.dimensions();
-        let edge = (layout.width.max(layout.height) * zoom)
-            .ceil()
-            .clamp(1.0, 1200.0) as u32;
-        let cached = self.glass_cache.borrow();
-        let glass = cached
-            .as_ref()
-            .filter(|(revision, bounds, w, h, size, _)| {
-                *revision == st.background.revision
-                    && *bounds == layout
-                    && *w == width
-                    && *h == height
-                    && *size == edge
-            })
-            .map(|(_, _, _, _, _, overlay)| overlay.clone());
-        drop(cached);
-        let glass = glass.unwrap_or_else(|| {
-            let overlay = crate::capture::editor::glass_render::render(
-                &st.background,
-                layout,
-                width,
-                height,
-                f64::from(edge),
-            );
-            *self.glass_cache.borrow_mut() = Some((
-                st.background.revision,
-                layout,
-                width,
-                height,
-                edge,
-                overlay.clone(),
-            ));
-            overlay
-        });
-        if let Some(glass) = glass {
-            glass.paint(context);
-            true
-        } else {
-            false
-        }
-    }
-
     fn paint_composited_background(
         &self,
         context: &gtk4::cairo::Context,
@@ -1017,20 +1046,26 @@ impl EditorHost {
         layout: crate::capture::editor::state::background::Layout,
         live: bool,
     ) {
+        // Raster at the canvas's on-screen size, rounded up to 256 px steps so
+        // small zoom changes reuse the cache; never above 4096.
+        let edge = ((layout.width.max(layout.height) * t.canvas_scale / 256.0).ceil() * 256.0)
+            .clamp(256.0, 4096.0) as u32;
         let key = (
             st.background.revision,
             st.working_image.width(),
             st.working_image.height(),
+            edge,
         );
         let cached = self.background_cache.borrow();
         let background = cached
             .as_ref()
-            .filter(|(revision, width, height, _)| (*revision, *width, *height) == key)
-            .map(|(_, _, _, surface)| surface.clone());
+            .filter(|(revision, width, height, size, _)| (*revision, *width, *height, *size) == key)
+            .map(|(_, _, _, _, surface)| surface.clone());
         drop(cached);
         let background = background.or_else(|| {
-            let surface = st.background.surface(layout, 1200.0)?;
-            *self.background_cache.borrow_mut() = Some((key.0, key.1, key.2, surface.clone()));
+            let surface = st.background.surface(layout, f64::from(edge))?;
+            *self.background_cache.borrow_mut() =
+                Some((key.0, key.1, key.2, key.3, surface.clone()));
             Some(surface)
         });
         if let Some(background) = background {
@@ -3451,7 +3486,7 @@ mod tests {
     }
 
     #[test]
-    fn refractive_glass_preview_matches_export_and_is_cached() {
+    fn glass_preview_matches_export() {
         use crate::capture::editor::state::background::Fill;
         use crate::capture::editor::types::FrameStyle;
         let host = host();
@@ -3517,24 +3552,6 @@ mod tests {
                 )
             };
             assert_eq!(paint(), exported, "glass preview differs for {style:?}");
-            let cached = host
-                .glass_cache
-                .borrow()
-                .as_ref()
-                .unwrap()
-                .5
-                .clone()
-                .unwrap();
-            paint();
-            let reused = host
-                .glass_cache
-                .borrow()
-                .as_ref()
-                .unwrap()
-                .5
-                .clone()
-                .unwrap();
-            assert!(cached.same_surface(&reused));
         }
     }
 
@@ -3701,6 +3718,7 @@ mod tests {
             path.clone(),
             Some(thumb.clone()),
             Arc::new(AtomicBool::new(false)),
+            Duration::ZERO,
         );
         let (preview, image) = receiver.recv_timeout(Duration::from_secs(15)).unwrap();
         assert!(preview);
@@ -3708,8 +3726,29 @@ mod tests {
         let (preview, image) = receiver.recv_timeout(Duration::from_secs(15)).unwrap();
         assert!(!preview);
         assert_eq!(image.unwrap().0.dimensions(), (1920, 1080));
-        let receiver = spawn_background_decode(path, Some(thumb), Arc::new(AtomicBool::new(true)));
+        let receiver = spawn_background_decode(
+            path,
+            Some(thumb),
+            Arc::new(AtomicBool::new(true)),
+            Duration::ZERO,
+        );
         assert!(receiver.recv_timeout(Duration::from_secs(15)).is_err());
+    }
+
+    #[test]
+    fn a_quick_full_decode_skips_the_thumbnail() {
+        let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../src/capture/editor/background-images");
+        let receiver = spawn_background_decode(
+            assets.join("wallpaper-001.jpg"),
+            Some(assets.join("wallpaper-thumb-001.jpg")),
+            Arc::new(AtomicBool::new(false)),
+            Duration::from_secs(30),
+        );
+        let (preview, image) = receiver.recv_timeout(Duration::from_secs(30)).unwrap();
+        assert!(!preview, "the full image arrives first");
+        assert_eq!(image.unwrap().0.dimensions(), (1920, 1080));
+        assert!(receiver.recv_timeout(Duration::from_millis(200)).is_err());
     }
 
     #[test]
@@ -3722,6 +3761,7 @@ mod tests {
             assets.join("wallpaper-001.jpg"),
             Some(assets.join("wallpaper-thumb-001.jpg")),
             Arc::new(AtomicBool::new(false)),
+            Duration::ZERO,
         );
         let mut on_selected = Some(|_: &RgbaImage| {});
         let (preview, result) = receiver.recv_timeout(Duration::from_secs(15)).unwrap();
