@@ -29,6 +29,33 @@ The exporter picks the cheapest path that still produces the requested frame:
    encoder, is the bottleneck, so splitting encode work adds process start-up
    and slower libx264 pieces without reducing wall time.
 
+## Canvas
+
+The background fill, padding, frame aspect (16:9, 9:16), and the video
+card's rounded corners are laid on after the frame is rendered. The editor
+renders the fill once at the canvas size and hands the export the canvas, the
+centred video rect, and the corner radius (`CanvasLayout`). Every path above
+then renders only the video rect, so passthrough and the GPU crop keep working
+with a background, and `canvas::FramedSink` lays each frame onto the canvas:
+
+- the fill is converted to NV12 once per range;
+- each frame copies the background, then the video rows into the centre;
+- only the rows that hold a rounded corner are blended, with a one-pixel
+  anti-aliased edge, and chroma uses the average of its four luma samples.
+
+A resolution pick scales the whole canvas: the video rect and the radius scale
+with it, and both video edges stay even. The video rect's origin is rounded
+down to an even pixel so its chroma lines up, which can leave the video one
+pixel off centre.
+
+The preview draws the cursor and the camera layer above the rounded clip; the
+export rounds after them, so a cursor or camera bubble at the very corner is
+clipped.
+
+On the development machine, framing a 1080p passthrough export on a 2150×1310
+canvas raised it from 7.0 to 7.8–8.4 ms/frame. A zoomed export on a fixed frame
+is faster than without one, because the video rect is smaller than the source.
+
 ## GPU crop and scale
 
 When an export needs a camera view — a zoom, or an output size different from

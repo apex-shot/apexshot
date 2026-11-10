@@ -408,6 +408,7 @@ mod tests {
                     cursor: crate::recording::editor::model::CursorSettings::default(),
                     sidecar: None,
                     webcam: None,
+                    canvas: None,
                     crf: 20,
                 };
                 let chosen = Rc::new(Cell::new(None));
