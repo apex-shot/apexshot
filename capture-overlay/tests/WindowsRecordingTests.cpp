@@ -4,6 +4,7 @@
 // pause and a resume. Each run must produce a non-empty MP4. Intentional
 // console output; this is not part of the shipped binary.
 
+#include "platform/platform.h"
 #include "platform/recording.h"
 #include "platform/windows/pointer_tracker.h"
 #include "platform/windows/webcam_layout.h"
@@ -14,16 +15,19 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QSet>
 #include <QStringList>
 #include <QTimer>
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <dwmapi.h>
 #include <cstdio>
 
 namespace {
@@ -40,6 +44,24 @@ bool setLeftButton(bool down)
     INPUT input{};
     input.type = INPUT_MOUSE;
     input.mi.dwFlags = down ? MOUSEEVENTF_LEFTDOWN : MOUSEEVENTF_LEFTUP;
+    return SendInput(1, &input, sizeof(input)) == 1;
+}
+
+bool sendKey(WORD key, bool down)
+{
+    INPUT input{};
+    input.type = INPUT_KEYBOARD;
+    input.ki.wVk = key;
+    input.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
+    return SendInput(1, &input, sizeof(input)) == 1;
+}
+
+bool sendWheel(int delta)
+{
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    input.mi.dwFlags = MOUSEEVENTF_WHEEL;
+    input.mi.mouseData = static_cast<DWORD>(delta);
     return SendInput(1, &input, sizeof(input)) == 1;
 }
 
@@ -171,18 +193,71 @@ bool validateSidecar(const QString& videoPath, double recordedSeconds)
     const QJsonArray pointer = object.value(QStringLiteral("pointer")).toArray();
     const QJsonArray clicks = object.value(QStringLiteral("clicks")).toArray();
     const QJsonArray presses = object.value(QStringLiteral("presses")).toArray();
-    if (object.value(QStringLiteral("version")).toInt() != 2 || pointer.size() < 10
-        || clicks.isEmpty() || presses.isEmpty()
+    const QJsonArray visibility = object.value(QStringLiteral("visibility")).toArray();
+    const QJsonArray scrolls = object.value(QStringLiteral("scrolls")).toArray();
+    const QJsonArray keys = object.value(QStringLiteral("keys")).toArray();
+    const QJsonArray cursors = object.value(QStringLiteral("cursors")).toArray();
+    const QString cursorFolderName = object.value(QStringLiteral("cursor_images")).toString();
+    if (object.value(QStringLiteral("version")).toInt() != 2 || pointer.size() < 4
+        || clicks.isEmpty() || presses.isEmpty() || visibility.isEmpty() || cursors.isEmpty()
+        || cursorFolderName.isEmpty()
+        || QFileInfo(cursorFolderName).fileName() != cursorFolderName
         || !object.value(QStringLiteral("t0_monotonic_us")).isDouble()
         || object.value(QStringLiteral("t0_monotonic_us")).toDouble() <= 0.0
         || region.value(QStringLiteral("x")).toInt() != kRegion.x()
         || region.value(QStringLiteral("y")).toInt() != kRegion.y()
         || region.value(QStringLiteral("w")).toInt() != kRegion.width()
         || region.value(QStringLiteral("h")).toInt() != kRegion.height()
-        || !object.value(QStringLiteral("visibility")).toArray().isEmpty()
         || object.value(QStringLiteral("source")).toString() != QStringLiteral("recorded")) {
-        std::printf("FAIL sidecar version or sample counts are invalid\n");
+        std::printf("FAIL sidecar version, sample counts, or cursor catalog are invalid\n");
         return false;
+    }
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_KEYSTROKES") && keys.size() < 6) {
+        std::printf("FAIL keystrokes were lost: keys=%d\n", keys.size());
+        return false;
+    }
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_SCROLL") && scrolls.size() < 2) {
+        std::printf("FAIL scroll events were lost: scrolls=%d\n", scrolls.size());
+        return false;
+    }
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_RAPID_CLICKS")
+        && (clicks.size() < 20 || presses.size() < 20)) {
+        std::printf("FAIL rapid clicks were lost: clicks=%d presses=%d\n",
+                    clicks.size(),
+                    presses.size());
+        return false;
+    }
+
+    static const QRegularExpression cursorIdPattern(QStringLiteral("^[0-9a-f]{16}$"));
+    const QDir cursorFolder = sidecarInfo.dir().filePath(cursorFolderName);
+    QSet<QString> cursorIds;
+    for (const QJsonValue& value : cursors) {
+        const QJsonObject cursor = value.toObject();
+        const QString id = cursor.value(QStringLiteral("id")).toString();
+        const QString file = cursor.value(QStringLiteral("file")).toString();
+        const int width = cursor.value(QStringLiteral("width")).toInt();
+        const int height = cursor.value(QStringLiteral("height")).toInt();
+        const int hotspotX = cursor.value(QStringLiteral("hotspot_x")).toInt();
+        const int hotspotY = cursor.value(QStringLiteral("hotspot_y")).toInt();
+        const QImage image(cursorFolder.filePath(file));
+        bool hasVisiblePixel = false;
+        for (int y = 0; y < image.height() && !hasVisiblePixel; ++y) {
+            const QRgb* line = reinterpret_cast<const QRgb*>(image.constScanLine(y));
+            for (int x = 0; x < image.width(); ++x) {
+                if (qAlpha(line[x]) != 0) {
+                    hasVisiblePixel = true;
+                    break;
+                }
+            }
+        }
+        if (!cursorIdPattern.match(id).hasMatch() || file.isEmpty() || image.isNull()
+            || image.width() != width || image.height() != height || !hasVisiblePixel
+            || width <= 0 || height <= 0 || hotspotX < 0 || hotspotX >= width
+            || hotspotY < 0 || hotspotY >= height) {
+            std::printf("FAIL cursor catalog entry is invalid\n");
+            return false;
+        }
+        cursorIds.insert(id);
     }
     if (clicks.first().toObject().value(QStringLiteral("button")).toInt() != 1
         || presses.first().toObject().value(QStringLiteral("button")).toInt() != 1) {
@@ -200,6 +275,44 @@ bool validateSidecar(const QString& videoPath, double recordedSeconds)
         return std::isfinite(x) && std::isfinite(y) && x >= -64.0
             && x <= kRegion.width() + 64.0 && y >= -64.0 && y <= kRegion.height() + 64.0;
     };
+    for (const QJsonValue& value : visibility) {
+        const QJsonObject sample = value.toObject();
+        if (!validTime(sample.value(QStringLiteral("t")).toDouble())
+            || !sample.value(QStringLiteral("visible")).isBool()) {
+            std::printf("FAIL cursor visibility sample is invalid\n");
+            return false;
+        }
+    }
+    for (const QJsonValue& value : scrolls) {
+        const QJsonObject sample = value.toObject();
+        if (!validTime(sample.value(QStringLiteral("t")).toDouble()) || !validPosition(sample)
+            || !sample.value(QStringLiteral("delta")).isDouble()
+            || !sample.value(QStringLiteral("horizontal")).isBool()) {
+            std::printf("FAIL scroll sample is invalid\n");
+            return false;
+        }
+    }
+    bool sawModifiedKey = false;
+    for (const QJsonValue& value : keys) {
+        const QJsonObject sample = value.toObject();
+        const QString type = sample.value(QStringLiteral("type")).toString();
+        if (!validTime(sample.value(QStringLiteral("t")).toDouble())
+            || (type != QStringLiteral("key_down") && type != QStringLiteral("key_up"))
+            || !sample.value(QStringLiteral("key")).isDouble()
+            || !sample.value(QStringLiteral("scan_code")).isDouble()) {
+            std::printf("FAIL key sample is invalid\n");
+            return false;
+        }
+        const QJsonArray modifiers = sample.value(QStringLiteral("modifiers")).toArray();
+        if (modifiers.contains(QStringLiteral("shift"))
+            && modifiers.contains(QStringLiteral("control"))) {
+            sawModifiedKey = true;
+        }
+    }
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_KEYSTROKES") && !sawModifiedKey) {
+        std::printf("FAIL the key stream carries no shift/control modifiers\n");
+        return false;
+    }
     // The editor's kind parse falls back to default for anything it does not
     // know, so a sample has to carry one of the six shared names exactly.
     static const QStringList sharedKinds = {QStringLiteral("default"),
@@ -221,6 +334,10 @@ bool validateSidecar(const QString& videoPath, double recordedSeconds)
                         qPrintable(kind.toVariant().toString()));
             return false;
         }
+        if (!cursorIds.contains(sample.value(QStringLiteral("cursor_id")).toString())) {
+            std::printf("FAIL pointer sample has no cursor catalog entry\n");
+            return false;
+        }
         if (kind.toString() == QStringLiteral("default"))
             ++defaultKinds;
     }
@@ -228,6 +345,10 @@ bool validateSidecar(const QString& videoPath, double recordedSeconds)
         const QJsonObject sample = value.toObject();
         if (!validTime(sample.value(QStringLiteral("t")).toDouble()) || !validPosition(sample)) {
             std::printf("FAIL click sample has an invalid time or position\n");
+            return false;
+        }
+        if (!cursorIds.contains(sample.value(QStringLiteral("cursor_id")).toString())) {
+            std::printf("FAIL click sample has no cursor catalog entry\n");
             return false;
         }
     }
@@ -265,14 +386,18 @@ bool validateSidecar(const QString& videoPath, double recordedSeconds)
 int recordOnce(bool pauseAndResume)
 {
     Platform::RecordingSession session;
-    const QString path = QDir(QDir::tempPath())
-                             .filePath(pauseAndResume
-                                           ? QStringLiteral("apexshot-record-pause.mp4")
-                                           : QStringLiteral("apexshot-record-basic.mp4"));
+    QString path = QDir(QDir::tempPath())
+                       .filePath(pauseAndResume
+                                     ? QStringLiteral("apexshot-record-pause.mp4")
+                                     : QStringLiteral("apexshot-record-basic.mp4"));
+    const QString requestedPath = qEnvironmentVariable("APEXSHOT_TEST_OUTPUT").trimmed();
+    if (!requestedPath.isEmpty())
+        path = requestedPath;
     const QString oldSidecarPath = Platform::sidecarPathFor(path);
     if (!oldSidecarPath.isEmpty())
         QFile::remove(oldSidecarPath);
     QFile::remove(path);
+    QDir().mkpath(QFileInfo(path).absolutePath());
 
     // The test drives the real pointer, so put it back where it was found.
     POINT originalCursor{};
@@ -289,17 +414,37 @@ int recordOnce(bool pauseAndResume)
         return 77;
     }
 
+    QRect region = kRegion;
+    int fps = 30;
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_FULL_SCREEN")) {
+        const QVector<Platform::MonitorInfo> monitors = Platform::monitors();
+        if (!monitors.isEmpty()) {
+            region = monitors.first().geometry;
+            fps = 60;
+        }
+    }
+
     Platform::RecordingRequest request;
-    request.region = kRegion;
+    request.region = region;
     request.outputPath = path;
     // The editor draws the pointer from the sidecar, so the frames carry none.
     request.includeCursor = false;
+    request.captureKeystrokes = !qEnvironmentVariableIsEmpty("APEXSHOT_TEST_KEYSTROKES");
     request.includeMicrophone = !qEnvironmentVariableIsEmpty("APEXSHOT_TEST_MIC");
-    request.fps = 30;
+    request.fps = fps;
     request.crf = 28;
+    const int requestedCrf = qEnvironmentVariableIntValue("APEXSHOT_TEST_CRF");
+    if (requestedCrf > 0)
+        request.crf = requestedCrf;
+
+    int durationMs = 2400;
+    const int requestedSeconds = qEnvironmentVariableIntValue("APEXSHOT_TEST_SECONDS");
+    if (!pauseAndResume && requestedSeconds > 0)
+        durationMs = requestedSeconds * 1000;
 
     int result = 1;
     bool inputInjectionRefused = false;
+    bool extraInputRefused = false;
     QString inputRefusalReason;
     double recordedSeconds = 0.0;
     QElapsedTimer recordingClock;
@@ -322,9 +467,11 @@ int recordOnce(bool pauseAndResume)
                      &session,
                      [&](bool kept, const QString& output, const QString& error) {
                          const QFileInfo info(output);
-                         if (inputInjectionRefused) {
+                         if (inputInjectionRefused || extraInputRefused) {
                              std::printf("SKIP: desktop session refused %s input injection\n",
-                                         qPrintable(inputRefusalReason));
+                                         inputInjectionRefused
+                                             ? qPrintable(inputRefusalReason)
+                                             : "synthetic");
                              result = 77;
                              QFile::remove(output);
                              loop.quit();
@@ -342,6 +489,7 @@ int recordOnce(bool pauseAndResume)
                                          static_cast<long long>(info.size()));
                              result = 0;
                              if (!pauseAndResume
+                                 && qEnvironmentVariableIsEmpty("APEXSHOT_TEST_FULL_SCREEN_ONCE")
                                  && !validateSidecar(output, recordedSeconds))
                                  result = 1;
                              if (qEnvironmentVariableIsEmpty("APEXSHOT_KEEP_TEST_OUTPUT"))
@@ -410,7 +558,36 @@ int recordOnce(bool pauseAndResume)
         inject(1000, QPoint(kRegion.x() + 175, kRegion.y() + 160), 0);
         inject(1250, QPoint(kRegion.x() + 175, kRegion.y() + 160), -1);
         inject(1450, QPoint(kRegion.x() + 230, kRegion.y() + 180), 0);
-        QTimer::singleShot(2400,
+        if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_RAPID_CLICKS")) {
+            for (int index = 0; index < 30; ++index) {
+                const int delay = 1600 + index * 4;
+                QTimer::singleShot(delay, &session, [&extraInputRefused] {
+                    if (!setLeftButton(true))
+                        extraInputRefused = true;
+                });
+                QTimer::singleShot(delay + 2, &session, [&extraInputRefused] {
+                    if (!setLeftButton(false))
+                        extraInputRefused = true;
+                });
+            }
+        }
+        if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_KEYSTROKES")) {
+            QTimer::singleShot(1800, &session, [&extraInputRefused] {
+                const bool ok = sendKey(VK_CONTROL, true) && sendKey(VK_SHIFT, true)
+                    && sendKey(static_cast<WORD>('K'), true)
+                    && sendKey(static_cast<WORD>('K'), false)
+                    && sendKey(VK_SHIFT, false) && sendKey(VK_CONTROL, false);
+                if (!ok)
+                    extraInputRefused = true;
+            });
+        }
+        if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_SCROLL")) {
+            QTimer::singleShot(1900, &session, [&extraInputRefused] {
+                if (!sendWheel(-WHEEL_DELTA) || !sendWheel(WHEEL_DELTA))
+                    extraInputRefused = true;
+            });
+        }
+        QTimer::singleShot(durationMs,
                            &session,
                            [&session, &recordingClock, &recordedSeconds, &cursorGuard] {
             recordedSeconds = recordingClock.elapsed() / 1000.0;
@@ -419,7 +596,7 @@ int recordOnce(bool pauseAndResume)
         });
     }
 
-    QTimer::singleShot(20000, &session, [&loop] {
+    QTimer::singleShot(durationMs + 30000, &session, [&loop] {
         std::printf("FAIL timeout\n");
         loop.quit();
     });
@@ -427,6 +604,316 @@ int recordOnce(bool pauseAndResume)
     loop.exec();
     restoreCursor();
     return result;
+}
+
+struct WindowSearch {
+    QString needle;
+    HWND window = nullptr;
+    qint64 area = 0;
+};
+
+BOOL CALLBACK findWindowProc(HWND window, LPARAM userData)
+{
+    auto* search = reinterpret_cast<WindowSearch*>(userData);
+    if (!search || !IsWindowVisible(window))
+        return TRUE;
+
+    wchar_t title[512]{};
+    GetWindowTextW(window, title, 512);
+    if (!QString::fromWCharArray(title).contains(search->needle, Qt::CaseInsensitive))
+        return TRUE;
+
+    RECT frame{};
+    if (!GetWindowRect(window, &frame))
+        return TRUE;
+    const qint64 area = static_cast<qint64>(frame.right - frame.left)
+        * static_cast<qint64>(frame.bottom - frame.top);
+    if (area > search->area) {
+        search->window = window;
+        search->area = area;
+    }
+    return TRUE;
+}
+
+QRect windowFrame(HWND window)
+{
+    RECT frame{};
+    if (SUCCEEDED(DwmGetWindowAttribute(window,
+                                        DWMWA_EXTENDED_FRAME_BOUNDS,
+                                        &frame,
+                                        sizeof(frame)))) {
+        if (frame.right > frame.left && frame.bottom > frame.top)
+            return QRect(QPoint(frame.left, frame.top),
+                         QSize(frame.right - frame.left, frame.bottom - frame.top));
+    }
+    if (GetWindowRect(window, &frame))
+        return QRect(QPoint(frame.left, frame.top),
+                     QSize(frame.right - frame.left, frame.bottom - frame.top));
+    return {};
+}
+
+enum class WindowRunResult {
+    Kept,
+    Discarded,
+    Failed,
+};
+
+WindowRunResult runWindowSession(HWND window,
+                                 const QRect& region,
+                                 const QString& path,
+                                 int seconds,
+                                 int fps,
+                                 int crf,
+                                 int discardAfterMs,
+                                 QString* failure)
+{
+    QFile::remove(path);
+    const QString oldSidecar = Platform::sidecarPathFor(path);
+    if (!oldSidecar.isEmpty())
+        QFile::remove(oldSidecar);
+
+    Platform::RecordingSession session;
+    Platform::RecordingRequest request;
+    request.target = Platform::RecordingRequest::Target::Window;
+    request.windowId = reinterpret_cast<quintptr>(window);
+    request.region = region;
+    request.outputPath = path;
+    request.includeCursor = false;
+    request.fps = fps;
+    request.crf = crf;
+
+    bool finished = false;
+    bool kept = false;
+    QEventLoop loop;
+    QObject::connect(&session,
+                     &Platform::RecordingSession::finished,
+                     &session,
+                     [&](bool wasKept, const QString& output, const QString& error) {
+                         finished = true;
+                         kept = wasKept;
+                         const QFileInfo info(output);
+                         if (wasKept && info.exists() && info.size() > 0) {
+                             std::printf("OK window: %s (%lld bytes)\n",
+                                         qPrintable(output),
+                                         static_cast<long long>(info.size()));
+                         } else if (discardAfterMs <= 0) {
+                             if (failure)
+                                 *failure = error.isEmpty() ? QStringLiteral("no output") : error;
+                             std::printf("FAIL window recording: %s\n",
+                                         failure ? qPrintable(*failure) : "no output");
+                         }
+                         loop.quit();
+                     });
+
+    QString error;
+    if (!session.start(request, error)) {
+        if (failure)
+            *failure = error;
+        std::printf("FAIL window start: %s\n", qPrintable(error));
+        return WindowRunResult::Failed;
+    }
+
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WINDOW_PAUSE")) {
+        QTimer::singleShot(800, &session, [&session] { session.pause(); });
+        QTimer::singleShot(1800, &session, [&session] { session.resume(); });
+    }
+    if (discardAfterMs > 0)
+        QTimer::singleShot(discardAfterMs, &session, [&session] { session.discard(); });
+    else
+        QTimer::singleShot(seconds * 1000, &session, [&session] { session.stop(); });
+    QTimer::singleShot((seconds + 30) * 1000, &session, [&loop] {
+        std::printf("FAIL window recording timeout\n");
+        loop.quit();
+    });
+    loop.exec();
+
+    if (!finished)
+        return WindowRunResult::Failed;
+    if (discardAfterMs > 0)
+        return kept ? WindowRunResult::Failed : WindowRunResult::Discarded;
+    return kept && QFileInfo(path).exists() && QFileInfo(path).size() > 0
+        ? WindowRunResult::Kept
+        : WindowRunResult::Failed;
+}
+
+int recordDemo()
+{
+    const QString output = qEnvironmentVariable("APEXSHOT_TEST_OUTPUT").trimmed();
+    if (output.isEmpty()) {
+        std::printf("FAIL set APEXSHOT_TEST_OUTPUT to record a demo clip\n");
+        return 1;
+    }
+
+    QRect region;
+    const QString regionSpec = qEnvironmentVariable("APEXSHOT_TEST_DEMO_REGION").trimmed();
+    if (!regionSpec.isEmpty()) {
+        const QStringList parts = regionSpec.split(QLatin1Char(','));
+        if (parts.size() == 4)
+            region = QRect(parts[0].toInt(), parts[1].toInt(), parts[2].toInt(), parts[3].toInt());
+    }
+    if (region.isEmpty()) {
+        const QVector<Platform::MonitorInfo> monitors = Platform::monitors();
+        if (monitors.isEmpty()) {
+            std::printf("FAIL no monitor is available for a demo recording\n");
+            return 1;
+        }
+        region = monitors.first().geometry;
+    }
+
+    int seconds = qEnvironmentVariableIntValue("APEXSHOT_TEST_SECONDS");
+    if (seconds <= 0)
+        seconds = 10;
+
+    QFile::remove(output);
+    QDir().mkpath(QFileInfo(output).absolutePath());
+
+    Platform::RecordingRequest request;
+    request.target = Platform::RecordingRequest::Target::Screen;
+    request.region = region;
+    request.outputPath = output;
+    request.includeCursor = true;
+    request.captureKeystrokes = true;
+    request.fps = 30;
+    request.crf = 20;
+
+    Platform::RecordingSession session;
+    QEventLoop loop;
+    int result = 1;
+    QObject::connect(&session,
+                     &Platform::RecordingSession::finished,
+                     &session,
+                     [&](bool kept, const QString& path, const QString& error) {
+                         const QFileInfo info(path);
+                         if (!kept || path.isEmpty() || !info.exists() || info.size() <= 0) {
+                             std::printf("FAIL demo: %s\n",
+                                         error.isEmpty() ? "no output" : qPrintable(error));
+                             loop.quit();
+                             return;
+                         }
+                         std::printf("OK demo: %s (%lld bytes)\n",
+                                     qPrintable(path),
+                                     static_cast<long long>(info.size()));
+                         const QString sidecarPath = Platform::sidecarPathFor(path);
+                         QFile sidecar(sidecarPath);
+                         if (sidecar.open(QIODevice::ReadOnly)) {
+                             const QJsonDocument document = QJsonDocument::fromJson(sidecar.readAll());
+                             const QJsonObject object = document.object();
+                             std::printf("DEMO pointer=%d clicks=%d presses=%d scrolls=%d keys=%d "
+                                         "visibility=%d cursors=%d\n",
+                                         object.value(QStringLiteral("pointer")).toArray().size(),
+                                         object.value(QStringLiteral("clicks")).toArray().size(),
+                                         object.value(QStringLiteral("presses")).toArray().size(),
+                                         object.value(QStringLiteral("scrolls")).toArray().size(),
+                                         object.value(QStringLiteral("keys")).toArray().size(),
+                                         object.value(QStringLiteral("visibility")).toArray().size(),
+                                         object.value(QStringLiteral("cursors")).toArray().size());
+                         }
+                         result = 0;
+                         loop.quit();
+                     });
+
+    QString error;
+    if (!session.start(request, error)) {
+        std::printf("FAIL demo start: %s\n", qPrintable(error));
+        return 1;
+    }
+    std::printf("DEMO recording %dx%d at %d,%d for %ds\n",
+                region.width(),
+                region.height(),
+                region.x(),
+                region.y(),
+                seconds);
+    QTimer::singleShot(seconds * 1000, &session, [&session] { session.stop(); });
+    QTimer::singleShot((seconds + 30) * 1000, &loop, [&] {
+        std::printf("FAIL demo timeout\n");
+        loop.quit();
+    });
+    loop.exec();
+    return result;
+}
+
+int recordWindow()
+{
+    const QString needle = qEnvironmentVariable("APEXSHOT_TEST_WINDOW_TITLE").trimmed();
+    if (needle.isEmpty()) {
+        std::printf("SKIP: set APEXSHOT_TEST_WINDOW_TITLE to record a window\n");
+        return 77;
+    }
+
+    WindowSearch search;
+    search.needle = needle;
+    EnumWindows(findWindowProc, reinterpret_cast<LPARAM>(&search));
+    if (!search.window) {
+        std::printf("FAIL no visible window title contains \"%s\"\n", qPrintable(needle));
+        return 1;
+    }
+
+    if (IsIconic(search.window)) {
+        ShowWindow(search.window, SW_RESTORE);
+        Sleep(300);
+    }
+
+    const QRect region = windowFrame(search.window);
+    if (region.width() < 2 || region.height() < 2) {
+        std::printf("FAIL the matched window has no usable frame\n");
+        return 1;
+    }
+
+    int seconds = qEnvironmentVariableIntValue("APEXSHOT_TEST_WINDOW_SECONDS");
+    if (seconds <= 0)
+        seconds = 30;
+    const QString path = qEnvironmentVariable("APEXSHOT_TEST_WINDOW_OUTPUT").trimmed();
+    if (path.isEmpty()) {
+        std::printf("SKIP: set APEXSHOT_TEST_WINDOW_OUTPUT to name the recording\n");
+        return 77;
+    }
+
+    std::printf("window: %s %dx%d at %d,%d for %d seconds\n",
+                qPrintable(needle),
+                region.width(),
+                region.height(),
+                region.x(),
+                region.y(),
+                seconds);
+
+    int crf = qEnvironmentVariableIntValue("APEXSHOT_TEST_WINDOW_CRF");
+    if (crf <= 0)
+        crf = 20;
+
+    QString failure;
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WINDOW_RESTART")) {
+        const QString firstPath = path + QStringLiteral(".first.mp4");
+        const WindowRunResult first = runWindowSession(search.window,
+                                                       region,
+                                                       firstPath,
+                                                       2,
+                                                       60,
+                                                       crf,
+                                                       1000,
+                                                       &failure);
+        QFile::remove(firstPath);
+        const QString firstSidecar = Platform::sidecarPathFor(firstPath);
+        if (!firstSidecar.isEmpty())
+            QFile::remove(firstSidecar);
+        if (first != WindowRunResult::Discarded) {
+            std::printf("FAIL restart discard: %s\n", qPrintable(failure));
+            return 1;
+        }
+        std::printf("OK restart: first take discarded\n");
+
+        const WindowRunResult second =
+            runWindowSession(search.window, region, path, seconds, 60, crf, 0, &failure);
+        if (second != WindowRunResult::Kept) {
+            std::printf("FAIL restart recording: %s\n", qPrintable(failure));
+            return 1;
+        }
+        std::printf("OK restart: second take kept\n");
+        return 0;
+    }
+
+    const WindowRunResult result =
+        runWindowSession(search.window, region, path, seconds, 60, crf, 0, &failure);
+    return result == WindowRunResult::Kept ? 0 : 1;
 }
 
 } // namespace
@@ -445,22 +932,47 @@ int recordWithWebcam()
     }
 
     Platform::RecordingSession session;
-    const QString path =
+    QString path =
         QDir(QDir::tempPath()).filePath(QStringLiteral("apexshot-record-webcam.mp4"));
+    const QString requestedPath = qEnvironmentVariable("APEXSHOT_TEST_WEBCAM_OUTPUT").trimmed();
+    if (!requestedPath.isEmpty())
+        path = requestedPath;
     const QString existingSidecar = Platform::sidecarPathFor(path);
     if (!existingSidecar.isEmpty())
         QFile::remove(existingSidecar);
     QFile::remove(path);
+    QDir().mkpath(QFileInfo(path).absolutePath());
+
+    QRect region = kRegion;
+    int fps = 30;
+    int crf = 28;
+    int milliseconds = 2500;
+    bool cursor = false;
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WEBCAM_FULL_SCREEN")) {
+        const QVector<Platform::MonitorInfo> monitors = Platform::monitors();
+        if (!monitors.isEmpty()) {
+            region = monitors.first().geometry;
+            fps = 60;
+            crf = 20;
+            milliseconds = 10000;
+            cursor = true;
+        }
+    }
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WEBCAM_SECONDS")) {
+        milliseconds = qEnvironmentVariableIntValue("APEXSHOT_TEST_WEBCAM_SECONDS") * 1000;
+    }
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WEBCAM_CRF"))
+        crf = qEnvironmentVariableIntValue("APEXSHOT_TEST_WEBCAM_CRF");
 
     const Platform::WebcamLayout layout =
-        Platform::webcamLayoutFor(kRegion, 2, 1, 0.0, 1.0, true);
+        Platform::webcamLayoutFor(region, 2, 1, 0.0, 1.0, true);
 
     Platform::RecordingRequest request;
-    request.region = kRegion;
+    request.region = region;
     request.outputPath = path;
-    request.includeCursor = false;
-    request.fps = 30;
-    request.crf = 28;
+    request.includeCursor = cursor;
+    request.fps = fps;
+    request.crf = crf;
     request.webcamEnabled = true;
     request.webcamDevice = camera;
     request.webcamLayout = layout;
@@ -549,6 +1061,15 @@ int recordWithWebcam()
                                      layout.h,
                                      layout.shape,
                                      layout.flip ? 1 : 0);
+                         std::printf("WEBCAM_RECORDING %s %dx%d fps=%d crf=%d start=%.3f "
+                                     "duration=%.3f\n",
+                                     qPrintable(output),
+                                     region.width(),
+                                     region.height(),
+                                     fps,
+                                     crf,
+                                     webcam.value(QStringLiteral("start")).toDouble(),
+                                     webcam.value(QStringLiteral("duration")).toDouble());
                          result = 0;
                      });
 
@@ -557,7 +1078,7 @@ int recordWithWebcam()
         std::printf("SKIP: the webcam recording did not start: %s\n", qPrintable(error));
         return 77;
     }
-    QTimer::singleShot(2500, &session, [&session] { session.stop(); });
+    QTimer::singleShot(milliseconds, &session, [&session] { session.stop(); });
     loop.exec();
     return result;
 }
@@ -605,6 +1126,9 @@ bool checkWebcamPlacement()
 
 int main(int argc, char** argv)
 {
+    // The recorder is per-monitor DPI aware. Without this the test sees
+    // virtualized monitor and window rectangles and records a smaller crop.
+    Platform::enableDpiAwareness();
     QCoreApplication app(argc, argv);
 
     if (!checkCursorKinds())
@@ -617,6 +1141,15 @@ int main(int argc, char** argv)
         std::printf("SKIP: %s\n", qPrintable(error));
         return 77;
     }
+
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_DEMO"))
+        return recordDemo();
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WINDOW_TITLE"))
+        return recordWindow();
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_FULL_SCREEN_ONCE"))
+        return recordOnce(false);
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_FULL_SCREEN"))
+        return recordOnce(true);
 
     // The cursor checks need a desktop that accepts input injection, which a
     // locked or game-focused session refuses; the camera path can still run.

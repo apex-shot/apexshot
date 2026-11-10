@@ -10,12 +10,13 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use super::model::{
-    AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorSettings, CursorTheme,
-    DimensionPreset, ExportQuality, GradientKind, GradientStop, ProjectMedia, ProjectMediaKind,
-    VideoBackground, VideoEditState, VideoGradient, ZoomAnchor, ZoomCameraSettings, ZoomClip,
-    ZoomEasing, ZoomMode, ZoomOrigin, ZoomStyle, DEFAULT_CLICK_COLOR, DEFAULT_CLICK_DURATION_MS,
-    DEFAULT_CLICK_INTENSITY, DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE, DEFAULT_CURSOR_IDLE_MS,
-    DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH, DEFAULT_CURSOR_SPEED,
+    AudioMode, ClickEffect, CropSelection, CursorHideClip, CursorRotationMode, CursorSettings,
+    CursorTheme, DimensionPreset, ExportQuality, GradientKind, GradientStop, ProjectMedia,
+    ProjectMediaKind, VideoBackground, VideoEditState, VideoGradient, ZoomAnchor,
+    ZoomCameraSettings, ZoomClip, ZoomEasing, ZoomMode, ZoomOrigin, ZoomStyle, DEFAULT_CLICK_COLOR,
+    DEFAULT_CLICK_DURATION_MS, DEFAULT_CLICK_INTENSITY, DEFAULT_CLICK_OPACITY, DEFAULT_CLICK_SCALE,
+    DEFAULT_CURSOR_IDLE_MS, DEFAULT_CURSOR_SHADOW, DEFAULT_CURSOR_SIZE, DEFAULT_CURSOR_SMOOTH,
+    DEFAULT_CURSOR_SPEED, DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO,
 };
 
 pub const VIDEO_PROJECT_VERSION: u32 = 1;
@@ -112,6 +113,14 @@ pub struct VideoProjectFile {
     pub cursor_click_opacity: f64,
     #[serde(default = "default_click_duration_ms")]
     pub cursor_click_duration_ms: u32,
+    #[serde(default)]
+    pub cursor_rotation_mode: CursorRotationModeFile,
+    #[serde(default = "default_rotate_on_x_movement_ratio")]
+    pub cursor_rotate_on_x_movement_ratio: f64,
+    #[serde(default)]
+    pub cursor_base_rotation_deg: f64,
+    #[serde(default)]
+    pub cursor_always_use_default: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -226,6 +235,14 @@ pub enum CursorThemeFile {
     Dot,
     #[serde(alias = "figma")]
     Minimal,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CursorRotationModeFile {
+    #[default]
+    Velocity,
+    Directional,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -782,6 +799,24 @@ fn cursor_theme_from_file(theme: CursorThemeFile) -> CursorTheme {
     }
 }
 
+fn rotation_mode_to_file(mode: CursorRotationMode) -> CursorRotationModeFile {
+    match mode {
+        CursorRotationMode::Velocity => CursorRotationModeFile::Velocity,
+        CursorRotationMode::Directional => CursorRotationModeFile::Directional,
+    }
+}
+
+fn rotation_mode_from_file(mode: CursorRotationModeFile) -> CursorRotationMode {
+    match mode {
+        CursorRotationModeFile::Velocity => CursorRotationMode::Velocity,
+        CursorRotationModeFile::Directional => CursorRotationMode::Directional,
+    }
+}
+
+fn default_rotate_on_x_movement_ratio() -> f64 {
+    DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO
+}
+
 fn default_cursor_size() -> f64 {
     DEFAULT_CURSOR_SIZE
 }
@@ -972,6 +1007,10 @@ impl VideoEditState {
             cursor_click_scale: self.cursor.click_scale,
             cursor_click_opacity: self.cursor.click_opacity,
             cursor_click_duration_ms: self.cursor.click_duration_ms,
+            cursor_rotation_mode: rotation_mode_to_file(self.cursor.rotation_mode),
+            cursor_rotate_on_x_movement_ratio: self.cursor.rotate_on_x_movement_ratio,
+            cursor_base_rotation_deg: self.cursor.base_rotation_deg,
+            cursor_always_use_default: self.cursor.always_use_default,
         }
     }
 
@@ -1038,6 +1077,10 @@ impl VideoEditState {
             click_scale: file.cursor_click_scale,
             click_opacity: file.cursor_click_opacity,
             click_duration_ms: file.cursor_click_duration_ms,
+            rotation_mode: rotation_mode_from_file(file.cursor_rotation_mode),
+            rotate_on_x_movement_ratio: file.cursor_rotate_on_x_movement_ratio,
+            base_rotation_deg: file.cursor_base_rotation_deg,
+            always_use_default: file.cursor_always_use_default,
         }
         .clamped();
         self.project_media
@@ -1463,6 +1506,7 @@ mod tests {
                 x: 1.0,
                 y: 2.0,
                 kind: crate::recording::editor::sidecar::CursorKind::Default,
+                cursor_id: None,
             });
         sidecar
             .clicks
@@ -1471,6 +1515,7 @@ mod tests {
                 x: 1.0,
                 y: 2.0,
                 button: 1,
+                cursor_id: None,
             });
         state.sidecar = Some(sidecar);
     }
@@ -1512,12 +1557,20 @@ mod tests {
         state.cursor.click_scale = 1.6;
         state.cursor.click_opacity = 0.4;
         state.cursor.click_duration_ms = 900;
+        state.cursor.rotation_mode = CursorRotationMode::Directional;
+        state.cursor.rotate_on_x_movement_ratio = 0.8;
+        state.cursor.base_rotation_deg = 45.0;
+        state.cursor.always_use_default = true;
         let mut json = serde_json::to_value(state.to_project()).unwrap();
         let object = json.as_object_mut().unwrap();
         object.remove("cursor_click_color");
         object.remove("cursor_click_scale");
         object.remove("cursor_click_opacity");
         object.remove("cursor_click_duration_ms");
+        object.remove("cursor_rotation_mode");
+        object.remove("cursor_rotate_on_x_movement_ratio");
+        object.remove("cursor_base_rotation_deg");
+        object.remove("cursor_always_use_default");
         for clip in json
             .get_mut("zoom_clips")
             .and_then(|value| value.as_array_mut())
@@ -1530,11 +1583,19 @@ mod tests {
         assert!((file.cursor_click_scale - DEFAULT_CLICK_SCALE).abs() < 1e-12);
         assert!((file.cursor_click_opacity - DEFAULT_CLICK_OPACITY).abs() < 1e-12);
         assert_eq!(file.cursor_click_duration_ms, DEFAULT_CLICK_DURATION_MS);
+        assert_eq!(file.cursor_rotation_mode, CursorRotationModeFile::Velocity);
+        assert!(
+            (file.cursor_rotate_on_x_movement_ratio - DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO).abs()
+                < 1e-12
+        );
+        assert_eq!(file.cursor_base_rotation_deg, 0.0);
+        assert!(!file.cursor_always_use_default);
         assert_eq!(file.zoom_clips[0].easing, ZoomEasingFile::Glide);
 
         let mut restored = VideoEditState::new(metadata_for(&video, 16));
         restored.apply_project(file);
         assert_eq!(restored.cursor.click_color, DEFAULT_CLICK_COLOR);
+        assert_eq!(restored.cursor.rotation_mode, CursorRotationMode::Velocity);
         assert_eq!(restored.zoom_clips[0].easing, ZoomEasing::Glide);
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1548,6 +1609,10 @@ mod tests {
         state.cursor.click_scale = 1.4;
         state.cursor.click_opacity = 0.55;
         state.cursor.click_duration_ms = 800;
+        state.cursor.rotation_mode = CursorRotationMode::Directional;
+        state.cursor.rotate_on_x_movement_ratio = 0.35;
+        state.cursor.base_rotation_deg = -30.0;
+        state.cursor.always_use_default = true;
         state.zoom_clips.push(ZoomClip {
             start: 0.5,
             end: 2.3,
@@ -1566,6 +1631,13 @@ mod tests {
         assert!((restored.cursor.click_scale - 1.4).abs() < 1e-12);
         assert!((restored.cursor.click_opacity - 0.55).abs() < 1e-12);
         assert_eq!(restored.cursor.click_duration_ms, 800);
+        assert_eq!(
+            restored.cursor.rotation_mode,
+            CursorRotationMode::Directional
+        );
+        assert!((restored.cursor.rotate_on_x_movement_ratio - 0.35).abs() < 1e-12);
+        assert!((restored.cursor.base_rotation_deg + 30.0).abs() < 1e-12);
+        assert!(restored.cursor.always_use_default);
         assert_eq!(restored.zoom_clips[0].easing, ZoomEasing::Snappy);
         assert_eq!(restored.zoom_clips[0].ease_ms, 480);
         cleanup_project(&video);

@@ -207,6 +207,7 @@ impl RecordingTimeline {
                 x: sample.x,
                 y: sample.y,
                 kind: CursorKind::Default,
+                cursor_id: None,
             })
             .collect();
         sidecar.visibility = track
@@ -422,6 +423,7 @@ mod tests {
             x,
             y: 20.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         }
     }
 
@@ -431,6 +433,7 @@ mod tests {
             x: 10.0,
             y: 20.0,
             button: 1,
+            cursor_id: None,
         }
     }
 
@@ -839,12 +842,14 @@ mod tests {
             x: 320.0,
             y: 200.0,
             kind: CursorKind::Hand,
+            cursor_id: None,
         }];
         sidecar.clicks = vec![ClickSample {
             t: 7.0,
             x: 320.0,
             y: 200.0,
             button: 1,
+            cursor_id: None,
         }];
         sidecar.presses = vec![press(7.0, 7.5)];
         assert!(clock.rebase(&mut sidecar));

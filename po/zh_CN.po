@@ -4312,3 +4312,18 @@ msgstr "ffmpeg 无法编码 Motion 视频。"
 
 msgid "Upgrade to Studio"
 msgstr "升级到 Studio"
+
+msgid "Always use the default cursor"
+msgstr "始终使用默认光标"
+
+msgid "Base angle"
+msgstr "基准角度"
+
+msgid "Point along movement"
+msgstr "沿移动方向指向"
+
+msgid "Tilt amount"
+msgstr "倾斜程度"
+
+msgid "Tilt with motion"
+msgstr "随移动倾斜"

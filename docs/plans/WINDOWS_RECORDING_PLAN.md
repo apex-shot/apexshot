@@ -195,15 +195,10 @@ source list is unchanged.
 
 ## Deferred
 
-- **True window capture.** The rectangle path records whatever is on screen in
-  the window's frame, including windows on top of it. Windows.Graphics.Capture
-  with a window item is the follow-up.
 - **System audio without a loopback device.** Needs WASAPI loopback, either
   native or an ffmpeg build that exposes one.
 - **Hardware encoders.** `h264_nvenc`, `h264_qsv`, and `h264_amf` should be
   probed and offered as profiles, mirroring the Linux encoder selection.
-- **`ddagrab`.** Faster per-output capture once the DXGI output-to-monitor
-  mapping is settled.
 - **Restart and delete-last-segment** controls, now that segments exist.
 - **Video editor backend, cursor track, and click effects.** The standalone
   Windows editor window and its Background, Cursor, Frames, and Takes side
