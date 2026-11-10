@@ -1,8 +1,12 @@
 #include "platform/windows/win_util.h"
 
 #include "platform/platform.h"
+#include "platform/windows/hdr_capture.h"
 
+#include <QDebug>
 #include <QVector>
+
+#include <cstring>
 
 void Platform::Win::drawCaptureCursor(HDC target,
                                       const QRect& frame,
@@ -158,10 +162,10 @@ bool isMostlyBlack(const QImage& image)
     return true;
 }
 
-bool grabScreenRect(const QRect& rect,
-                    bool includeCursor,
-                    Platform::CaptureResult& out,
-                    QString& outError)
+bool grabGdiRect(const QRect& rect,
+                 bool includeCursor,
+                 Platform::CaptureResult& out,
+                 QString& outError)
 {
     if (rect.width() <= 0 || rect.height() <= 0) {
         outError = QStringLiteral("empty capture rectangle");
@@ -189,7 +193,8 @@ bool grabScreenRect(const QRect& rect,
     HGDIOBJ previous = SelectObject(memoryDc, bitmap);
     bool ok = false;
 
-    // CAPTUREBLT includes layered windows, which is what modern apps use.
+    // Desktop composition is always on, so the screen DC already includes
+    // layered windows. CAPTUREBLT would only make the cursor flicker.
     if (!BitBlt(memoryDc,
                 0,
                 0,
@@ -198,7 +203,7 @@ bool grabScreenRect(const QRect& rect,
                 screenDc,
                 rect.x(),
                 rect.y(),
-                SRCCOPY | CAPTUREBLT)) {
+                SRCCOPY)) {
         outError = lastErrorText("BitBlt");
     } else {
         if (includeCursor)
@@ -217,6 +222,89 @@ bool grabScreenRect(const QRect& rect,
     DeleteDC(memoryDc);
     ReleaseDC(nullptr, screenDc);
     return ok;
+}
+
+/// Paint the cursor onto an image that is no longer in a GDI bitmap.
+void drawCursorOnImage(QImage& image, const QRect& rect)
+{
+    if (image.format() != QImage::Format_RGB32)
+        image = image.convertToFormat(QImage::Format_RGB32);
+
+    BITMAPINFO info{};
+    info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    info.bmiHeader.biWidth = image.width();
+    info.bmiHeader.biHeight = -image.height(); // top-down rows
+    info.bmiHeader.biPlanes = 1;
+    info.bmiHeader.biBitCount = 32;
+    info.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HDC dc = CreateCompatibleDC(nullptr);
+    HBITMAP dib = dc ? CreateDIBSection(dc, &info, DIB_RGB_COLORS, &bits, nullptr, 0) : nullptr;
+    if (!dc || !dib || !bits) {
+        if (dib)
+            DeleteObject(dib);
+        if (dc)
+            DeleteDC(dc);
+        return;
+    }
+
+    HGDIOBJ previous = SelectObject(dc, dib);
+    const size_t rowBytes = static_cast<size_t>(image.width()) * 4;
+    auto* rows = static_cast<uchar*>(bits);
+    for (int y = 0; y < image.height(); ++y)
+        std::memcpy(rows + y * rowBytes, image.constScanLine(y), rowBytes);
+    drawCursor(dc, rect);
+    GdiFlush();
+    for (int y = 0; y < image.height(); ++y)
+        std::memcpy(image.scanLine(y), rows + y * rowBytes, rowBytes);
+
+    SelectObject(dc, previous);
+    DeleteObject(dib);
+    DeleteDC(dc);
+}
+
+/// Screen pixels for a rectangle. GDI hands back the desktop already
+/// converted to SDR, which clips HDR content, so displays in HDR mode are
+/// grabbed through desktop duplication and painted over the GDI frame.
+bool grabScreenRect(const QRect& rect,
+                    bool includeCursor,
+                    Platform::CaptureResult& out,
+                    QString& outError)
+{
+    QVector<Platform::MonitorInfo> hdrDisplays;
+    for (const Platform::MonitorInfo& display : Platform::monitors()) {
+        if (display.geometry.intersects(rect)
+            && Platform::Win::hdrSdrWhiteNits(display.name) > 0.0f)
+            hdrDisplays.append(display);
+    }
+    if (hdrDisplays.isEmpty())
+        return grabGdiRect(rect, includeCursor, out, outError);
+
+    if (!grabGdiRect(rect, false, out, outError))
+        return false;
+
+    QImage& image = out.image;
+    for (const Platform::MonitorInfo& display : hdrDisplays) {
+        QImage hdr;
+        QString hdrError;
+        if (!Platform::Win::captureHdrDisplay(display.name, display.geometry.size(), hdr,
+                                              hdrError)) {
+            qWarning().noquote() << "[capture] HDR grab failed, keeping GDI pixels:" << hdrError;
+            continue;
+        }
+        const QRect part = display.geometry.intersected(rect);
+        const QPoint source = part.topLeft() - display.geometry.topLeft();
+        const QPoint target = part.topLeft() - rect.topLeft();
+        for (int y = 0; y < part.height(); ++y) {
+            std::memcpy(image.scanLine(target.y() + y) + static_cast<size_t>(target.x()) * 4,
+                        hdr.constScanLine(source.y() + y) + static_cast<size_t>(source.x()) * 4,
+                        static_cast<size_t>(part.width()) * 4);
+        }
+    }
+    if (includeCursor)
+        drawCursorOnImage(image, rect);
+    return true;
 }
 
 } // namespace
@@ -296,23 +384,36 @@ bool captureWindowPixels(HWND hwnd,
                          QString& outError)
 {
     // PrintWindow renders the window itself, so a covered or partly off-screen
-    // window still captures correctly.
+    // window still captures correctly. It paints the full window rectangle,
+    // invisible resize border included, from (0,0), so the visible frame is
+    // cropped out of that afterwards.
+    RECT windowRect{};
+    QRect painted = frame;
+    if (GetWindowRect(hwnd, &windowRect)) {
+        const QRect outer(QPoint(windowRect.left, windowRect.top),
+                          QSize(windowRect.right - windowRect.left,
+                                windowRect.bottom - windowRect.top));
+        if (outer.contains(frame))
+            painted = outer;
+    }
+    const QRect crop(frame.topLeft() - painted.topLeft(), frame.size());
+
     HDC screenDc = GetDC(nullptr);
     if (screenDc) {
         HDC memoryDc = CreateCompatibleDC(screenDc);
-        HBITMAP bitmap = CreateCompatibleBitmap(screenDc, frame.width(), frame.height());
+        HBITMAP bitmap = CreateCompatibleBitmap(screenDc, painted.width(), painted.height());
         if (memoryDc && bitmap) {
             HGDIOBJ previous = SelectObject(memoryDc, bitmap);
             if (PrintWindow(hwnd, memoryDc, PW_RENDERFULLCONTENT)) {
                 QImage image;
                 QString ignored;
-                if (imageFromBitmap(memoryDc, bitmap, frame.size(), image, ignored)
-                    && !isMostlyBlack(image)) {
+                if (imageFromBitmap(memoryDc, bitmap, painted.size(), image, ignored)
+                    && !isMostlyBlack(image.copy(crop))) {
                     if (includeCursor) {
-                        drawCursor(memoryDc, frame);
-                        imageFromBitmap(memoryDc, bitmap, frame.size(), image, ignored);
+                        drawCursor(memoryDc, painted);
+                        imageFromBitmap(memoryDc, bitmap, painted.size(), image, ignored);
                     }
-                    out.image = image;
+                    out.image = image.copy(crop);
                     out.geometry = frame;
                     SelectObject(memoryDc, previous);
                     DeleteObject(bitmap);
@@ -466,7 +567,8 @@ bool captureWindow(quintptr id, bool includeCursor, CaptureResult& out, QString&
 }
 
 bool captureVirtualDesktop(bool includeCursor, CaptureResult& out, QString& outError)
-{    const QVector<MonitorInfo> all = monitors();
+{
+    const QVector<MonitorInfo> all = monitors();
     if (all.isEmpty()) {
         outError = QStringLiteral("no displays reported by EnumDisplayMonitors");
         return false;
