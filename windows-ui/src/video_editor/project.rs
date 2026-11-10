@@ -58,12 +58,19 @@ pub(super) struct WebcamLayerFile {
     /// existed, which played the camera with no adjustment.
     #[serde(default)]
     pub delay_seconds: f64,
+    /// The camera's size while zoomed. Absent in older files, which shrank to the studied 0.8.
+    #[serde(default = "default_zoomed_scale")]
+    pub zoomed_scale: f64,
     /// The layout timeline: the recording's default layout and the changes
     /// that switch it while the composition plays. Absent in files written
     /// before layouts existed, where the two switches above still say what the
     /// default was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layouts: Option<super::webcam::LayoutSettings>,
+}
+
+fn default_zoomed_scale() -> f64 {
+    super::webcam::ZOOMED_CAMERA_SCALE
 }
 
 impl WebcamLayerFile {
@@ -109,6 +116,7 @@ impl WebcamLayerFile {
             radius: layer.radius,
             mirror: layer.mirror,
             delay_seconds: layer.delay_seconds,
+            zoomed_scale: layer.zoomed_scale,
             layouts: Some(layouts.clone()),
         }
     }
@@ -490,6 +498,7 @@ mod tests {
                 radius: 0.5,
                 mirror: true,
                 delay_seconds: 0.0,
+                zoomed_scale: super::super::webcam::ZOOMED_CAMERA_SCALE,
                 layouts: Some(LayoutSettings {
                     default_layout: CameraLayout::SplitScreen,
                     cues: vec![
@@ -721,6 +730,19 @@ mod tests {
         let text = serde_json::to_string(&file).unwrap();
         let loaded: WebcamLayerFile = serde_json::from_str(&text).unwrap();
         assert_eq!(loaded.delay_seconds, 0.05);
+    }
+
+    #[test]
+    fn the_zoomed_scale_reads_as_the_studied_default_before_it_existed() {
+        let legacy: WebcamLayerFile = serde_json::from_str(
+            r#"{"enabled":true,"fullscreen":false,"x":0.62,"y":0.31,"w":0.18,"h":0.24,"radius":0.5,"mirror":true}"#,
+        )
+        .expect("a camera block without a zoomed scale reads");
+        assert_eq!(
+            legacy.zoomed_scale,
+            super::super::webcam::ZOOMED_CAMERA_SCALE
+        );
+        assert_eq!(legacy.zoomed_scale, 0.8);
     }
 
     #[test]

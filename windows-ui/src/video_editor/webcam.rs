@@ -109,6 +109,8 @@ const CUTOUT_HEIGHT_RATIO: f64 = 0.9;
 
 /// The studied camera size while the screen is zoomed.
 pub(super) const ZOOMED_CAMERA_SCALE: f64 = 0.8;
+/// The smallest studied size during a zoom.
+pub(super) const MIN_ZOOMED_CAMERA_SCALE: f64 = 0.25;
 /// The studied split-screen camera while zoomed: an overlay at this size,
 /// inset from the frame edges by this fraction of its shortest side (the
 /// studied 0.5 padding setting resolved against the default stage padding),
@@ -191,6 +193,8 @@ pub(super) struct LayerSettings {
     pub mirror: bool,
     /// Manual camera sync, in seconds: positive shows the camera later.
     pub delay_seconds: f64,
+    /// The camera's size while the screen is zoomed, as a fraction of its size; 1 turns the studied shrink off.
+    pub zoomed_scale: f64,
 }
 
 impl Default for LayerSettings {
@@ -205,6 +209,7 @@ impl Default for LayerSettings {
             radius: 0.12,
             mirror: false,
             delay_seconds: 0.0,
+            zoomed_scale: ZOOMED_CAMERA_SCALE,
         }
     }
 }
@@ -224,6 +229,7 @@ impl LayerSettings {
             radius: radius_for_shape(track.shape),
             mirror: track.flip,
             delay_seconds: 0.0,
+            zoomed_scale: ZOOMED_CAMERA_SCALE,
         }
     }
 
@@ -240,6 +246,11 @@ impl LayerSettings {
                 .clamp(-MAX_CAMERA_DELAY_SECONDS, MAX_CAMERA_DELAY_SECONDS)
         } else {
             0.0
+        };
+        self.zoomed_scale = if self.zoomed_scale.is_finite() {
+            self.zoomed_scale.clamp(MIN_ZOOMED_CAMERA_SCALE, 1.0)
+        } else {
+            ZOOMED_CAMERA_SCALE
         };
         self
     }
@@ -711,7 +722,10 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
             } else {
                 geometry
                     .overlay
-                    .scaled_in_place(zoomed_scale(geometry.zoom_shrink))
+                    .scaled_in_place(zoomed_scale(
+                        geometry.zoom_shrink,
+                        geometry.overlay.zoomed_scale,
+                    ))
                     .rect_in(full)
             };
             LayoutFrame {
@@ -935,7 +949,7 @@ fn cutout_rect(geometry: Geometry) -> Rect {
     } else {
         geometry.video_aspect / geometry.camera_aspect
     };
-    let factor = zoomed_scale(geometry.zoom_shrink);
+    let factor = zoomed_scale(geometry.zoom_shrink, geometry.overlay.zoomed_scale);
     let width = width * factor;
     let height = height * factor;
     let position = if geometry.cutout_position_x.is_finite() {
@@ -1007,13 +1021,18 @@ pub(super) fn zoom_shrink_at(clips: &[super::timeline::ZoomClip], time: f64, lea
 }
 
 /// The size factor for a shrink amount.
-fn zoomed_scale(shrink: f64) -> f64 {
+fn zoomed_scale(shrink: f64, target: f64) -> f64 {
     let shrink = if shrink.is_finite() {
         shrink.clamp(0.0, 1.0)
     } else {
         0.0
     };
-    1.0 - (1.0 - ZOOMED_CAMERA_SCALE) * shrink
+    let target = if target.is_finite() {
+        target.clamp(MIN_ZOOMED_CAMERA_SCALE, 1.0)
+    } else {
+        ZOOMED_CAMERA_SCALE
+    };
+    1.0 - (1.0 - target) * shrink
 }
 
 fn progress(start: f64, seconds: f64, duration: f64) -> f64 {
@@ -3990,6 +4009,33 @@ mod tests {
             (full.y + full.height - 1.0).abs() < 1e-9,
             "the cutout stays on the bottom"
         );
+    }
+
+    #[test]
+    fn the_layer_chooses_how_far_the_zoom_shrinks_it() {
+        let frame = 16.0 / 9.0;
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            ..LayoutSettings::default()
+        };
+        let mut layer = LayerSettings::default();
+        layer.set_overlay_size(0.5, frame);
+        layer.set_overlay_alignment(1.0, 1.0);
+
+        let mut off = layer;
+        off.zoomed_scale = 1.0;
+        assert_eq!(
+            layouts.frame_at_zoomed(0.0, off, frame, 1.0, 1.0).camera,
+            layouts.frame_at_zoomed(0.0, off, frame, 1.0, 0.0).camera,
+            "a shrink of 1 keeps the camera at its rest size"
+        );
+
+        let mut half = layer;
+        half.zoomed_scale = 0.5;
+        let rest = layouts.frame_at_zoomed(0.0, half, frame, 1.0, 0.0).camera;
+        let full = layouts.frame_at_zoomed(0.0, half, frame, 1.0, 1.0).camera;
+        assert!((full.width - 0.5 * rest.width).abs() < 1e-9);
+        assert!((full.height - 0.5 * rest.height).abs() < 1e-9);
     }
 
     #[test]
