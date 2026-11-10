@@ -109,6 +109,14 @@ const CUTOUT_HEIGHT_RATIO: f64 = 0.9;
 
 /// The studied camera size while the screen is zoomed.
 pub(super) const ZOOMED_CAMERA_SCALE: f64 = 0.8;
+/// The studied split-screen camera while zoomed: an overlay at this size,
+/// inset from the frame edges by this fraction of its shortest side (the
+/// studied 0.5 padding setting resolved against the default stage padding),
+/// with its aspect held inside the studied 9:16..16:9 range.
+const SPLIT_ZOOMED_CAMERA_SIZE: f64 = 0.5;
+const SPLIT_ZOOMED_CAMERA_INSET: f64 = 0.0625;
+const SPLIT_ZOOMED_MIN_ASPECT: f64 = 9.0 / 16.0;
+const SPLIT_ZOOMED_MAX_ASPECT: f64 = 16.0 / 9.0;
 /// The studied spring that moves the camera between its sizes, as
 /// (stiffness, damping, mass), run with the studied clamp.
 const CAMERA_SPRING: (f64, f64, f64) = (125.0, 12.0, 1.5);
@@ -685,13 +693,22 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
         },
         CameraLayout::SplitScreen => {
             let (screen, camera) = split_rects(geometry);
-            LayoutFrame {
+            let rest = LayoutFrame {
                 screen,
                 camera,
                 camera_alpha: 1.0,
                 camera_radius: 0.0,
                 cutout: 0.0,
                 mirror: geometry.overlay.mirror,
+            };
+            if geometry.zoom_shrink <= 0.0 {
+                rest
+            } else {
+                interpolate(
+                    rest,
+                    split_zoomed(geometry, geometry.overlay.radius),
+                    geometry.zoom_shrink,
+                )
             }
         }
         CameraLayout::ScreenOnly => LayoutFrame {
@@ -769,6 +786,44 @@ fn split_rects(geometry: Geometry) -> (Rect, Rect) {
             height: screen_height,
         };
         (screen, camera)
+    }
+}
+
+/// The split layout while the screen is zoomed: the screen takes the whole
+/// frame and the camera floats as a studied overlay in the corner opposite
+/// the screen's pane: the bottom corner for a side-by-side split, and the
+/// far edge's right corner for a stacked one.
+fn split_zoomed(geometry: Geometry, overlay_radius: f64) -> LayoutFrame {
+    let (_, pane) = split_rects(geometry);
+    let frame = geometry.video_aspect;
+    let pane_aspect = if pane.height > 0.0 {
+        pane.width * frame / pane.height
+    } else {
+        1.0
+    };
+    let aspect = pane_aspect.clamp(SPLIT_ZOOMED_MIN_ASPECT, SPLIT_ZOOMED_MAX_ASPECT);
+    let (width, height) = overlay_size_hw(frame, aspect, SPLIT_ZOOMED_CAMERA_SIZE);
+    let inset_x = SPLIT_ZOOMED_CAMERA_INSET / frame.max(1.0);
+    let inset_y = SPLIT_ZOOMED_CAMERA_INSET * frame.min(1.0);
+    let (align_x, align_y) = if frame >= 1.0 {
+        // Side by side: the screen's opposite side, bottom corner.
+        (if geometry.split_flip { 0.0 } else { 1.0 }, 1.0)
+    } else {
+        // Stacked: the screen's opposite edge, right corner.
+        (1.0, if geometry.split_flip { 0.0 } else { 1.0 })
+    };
+    LayoutFrame {
+        screen: Rect::full(),
+        camera: Rect {
+            x: inset_x + align_x * (1.0 - 2.0 * inset_x - width).max(0.0),
+            y: inset_y + align_y * (1.0 - 2.0 * inset_y - height).max(0.0),
+            width,
+            height,
+        },
+        camera_alpha: 1.0,
+        camera_radius: overlay_radius,
+        cutout: 0.0,
+        mirror: geometry.overlay.mirror,
     }
 }
 
@@ -3668,6 +3723,58 @@ mod tests {
             (full.y + full.height - 1.0).abs() < 1e-9,
             "the cutout stays on the bottom"
         );
+    }
+
+    #[test]
+    fn a_zoomed_split_fills_the_frame_and_floats_the_camera_opposite_the_screen() {
+        let frame = 4.0 / 3.0;
+        let layer = LayerSettings {
+            radius: 0.3,
+            ..LayerSettings::default()
+        };
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            ..LayoutSettings::default()
+        };
+        let rest = split.frame_at_zoomed(0.0, layer, frame, 1.0, 0.0);
+        assert!(!rest.screen.is_full(), "at rest the screen keeps its pane");
+        let zoomed = split.frame_at_zoomed(0.0, layer, frame, 1.0, 1.0);
+        assert!(
+            zoomed.screen.is_full(),
+            "zoomed, the screen takes the frame"
+        );
+        // Default split 0.5: the camera pane is 160x240 in a 320x240 frame,
+        // aspect 2:3. At size 0.5 the camera is 80x120 px, inset 15 px,
+        // bottom-right: x 225..305, y 105..225.
+        let px = |rect: Rect| {
+            (
+                rect.x * 320.0,
+                rect.y * 240.0,
+                rect.width * 320.0,
+                rect.height * 240.0,
+            )
+        };
+        let (x, y, w, h) = px(zoomed.camera);
+        assert!(
+            (w - 80.0).abs() < 1e-6 && (h - 120.0).abs() < 1e-6,
+            "{w}x{h}"
+        );
+        assert!(
+            (x - 225.0).abs() < 1e-6 && (y - 105.0).abs() < 1e-6,
+            "{x},{y}"
+        );
+        assert!((zoomed.camera_radius - 0.3).abs() < 1e-9);
+        let flipped = LayoutSettings {
+            split_flip: true,
+            ..split.clone()
+        };
+        let (x, _, _, _) = px(flipped.frame_at_zoomed(0.0, layer, frame, 1.0, 1.0).camera);
+        assert!(
+            (x - 15.0).abs() < 1e-6,
+            "a flipped split floats the camera bottom-left: {x}"
+        );
+        let half = split.frame_at_zoomed(0.0, layer, frame, 1.0, 0.5);
+        assert!(half.screen.width > rest.screen.width && half.screen.width < 1.0);
     }
 
     #[test]

@@ -2786,6 +2786,35 @@ mod webcam_export_tests {
         matches!(status, Ok(status) if status.success())
     }
 
+    /// A clip that is red for `first` seconds, then lime until `seconds`.
+    fn timed_clip(path: &Path, size: &str, first: f64, seconds: f64) -> bool {
+        let status = crate::utils::hidden_command(ffmpeg::ffmpeg_executable())
+            .args(["-y", "-hide_banner", "-loglevel", "error"])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c=red:s={size}:d={first}:r=30"),
+            ])
+            .args([
+                "-f",
+                "lavfi",
+                "-i",
+                &format!("color=c=lime:s={size}:d={}:r=30", seconds - first),
+            ])
+            .args([
+                "-filter_complex",
+                "[0:v][1:v]concat=n=2:v=1:a=0",
+                "-pix_fmt",
+                "yuv420p",
+            ])
+            .arg(path)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        matches!(status, Ok(status) if status.success())
+    }
+
     /// A clip with a bright centre stripe between two edge stripes, so a
     /// uniform cover crop shows the centre while a squeezed copy shows all
     /// three.
@@ -2855,6 +2884,34 @@ mod webcam_export_tests {
         layouts: LayoutSettings,
         zooms: Vec<ZoomClip>,
     ) -> Vec<u8> {
+        exported_frames(
+            dir,
+            source,
+            track_path,
+            name,
+            layer,
+            layouts,
+            zooms,
+            0.0,
+            &[0.5],
+        )
+        .remove(0)
+    }
+
+    /// [`exported_frame`] with `zooms` on the composition's zoom track,
+    /// `camera_start` into the camera track, for every instant in `times`.
+    #[allow(clippy::too_many_arguments)]
+    fn exported_frames(
+        dir: &Path,
+        source: &Path,
+        track_path: &Path,
+        name: &str,
+        layer: LayerSettings,
+        layouts: LayoutSettings,
+        zooms: Vec<ZoomClip>,
+        camera_start: f64,
+        times: &[f64],
+    ) -> Vec<Vec<u8>> {
         let output = dir.join(format!("{name}.mp4"));
         let model = ExportModel {
             source: source.to_path_buf(),
@@ -2871,7 +2928,7 @@ mod webcam_export_tests {
                 settings: layer,
                 layouts,
                 track_seconds: 2.0,
-                start: 0.0,
+                start: camera_start,
                 video_seconds: 2.0,
                 last_frame: 1.95,
                 source_size: (320, 320),
@@ -2892,9 +2949,12 @@ mod webcam_export_tests {
                 Err(error) => panic!("export did not report back: {error}"),
             }
         }
-        let frame = frame_rgb(&output, 0.5, (320, 240)).expect("the export should decode");
+        let frames = times
+            .iter()
+            .map(|t| frame_rgb(&output, *t, (320, 240)).expect("the export should decode"))
+            .collect();
         let _ = fs::remove_file(&output);
-        frame
+        frames
     }
 
     #[test]
@@ -3156,6 +3216,220 @@ mod webcam_export_tests {
                 "outside the 96px square at ({x},{y}): {outside:?}"
             );
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_zoomed_split_exports_the_full_screen_and_a_floating_camera() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-webcam-split-zoom-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let source = dir.join("screen.mp4");
+        if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
+            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            return;
+        }
+        let Some(track_path) = webcam_track_file(&source) else {
+            eprintln!("skipping the webcam export test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = track_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !split_clip(&track_path, "320x320", 2.0) {
+            return;
+        }
+
+        let track = WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 320,
+            height: 320,
+            duration: 2.0,
+            start: 0.0,
+            x: 0.6,
+            y: 0.6,
+            w: 0.35,
+            h: 0.35,
+            shape: 1,
+            flip: false,
+        };
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+        );
+        sidecar.webcam = Some(track);
+        let sidecar_path = PointerSidecar::sidecar_path(&source);
+        if sidecar.write(&sidecar_path).is_err() {
+            return;
+        }
+
+        let layer = LayerSettings {
+            radius: 0.0,
+            ..LayerSettings::default()
+        };
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            ..LayoutSettings::default()
+        };
+        // At rest the camera fills the right-hand pane.
+        let rest = exported_frame(
+            &dir,
+            &source,
+            &track_path,
+            "split-rest",
+            layer,
+            layouts.clone(),
+        );
+        let pane = pixel(&rest, 320, 170, 50);
+        assert!(
+            pane[0] > 150 || pane[1] > 150,
+            "at rest the camera fills its pane: {pane:?}"
+        );
+        // Zoomed: the screen covers the frame and the camera floats bottom-right
+        // at x 225..305, y 105..225.
+        let zoom = ZoomClip {
+            start: 0.0,
+            end: 1.5,
+            scale: 2.0,
+            center: (0.0, 0.0),
+            hidden: false,
+            mode: crate::video_editor::timeline::ZoomMode::Auto,
+            instant: false,
+            anchor: None,
+        };
+        let zoomed = exported_frame_with_zooms(
+            &dir,
+            &source,
+            &track_path,
+            "split-zoomed",
+            layer,
+            layouts,
+            vec![zoom],
+        );
+        for (x, y) in [(170, 50), (100, 165), (215, 165), (265, 95), (265, 233)] {
+            let screen = pixel(&zoomed, 320, x, y);
+            assert!(
+                screen[0] < 70 && screen[1] < 70,
+                "the screen shows at ({x},{y}): {screen:?}"
+            );
+        }
+        let red = pixel(&zoomed, 320, 235, 165);
+        let green = pixel(&zoomed, 320, 295, 165);
+        assert!(
+            red[0] > 150 && red[1] < 90,
+            "camera left half at 235: {red:?}"
+        );
+        assert!(
+            green[1] > 150 && green[0] < 90,
+            "camera right half at 295: {green:?}"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_late_camera_holds_its_first_frame_then_plays_in_step() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-webcam-late-start-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let source = dir.join("screen.mp4");
+        if !solid_clip(&source, "0x1e1e1e", "320x240", 2.0) {
+            eprintln!("skipping the webcam export test: ffmpeg is unavailable");
+            return;
+        }
+        let Some(track_path) = webcam_track_file(&source) else {
+            eprintln!("skipping the webcam export test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = track_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !timed_clip(&track_path, "320x320", 0.5, 2.0) {
+            return;
+        }
+
+        let track = WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 320,
+            height: 320,
+            duration: 2.0,
+            start: 0.5,
+            x: 0.6,
+            y: 0.6,
+            w: 0.35,
+            h: 0.35,
+            shape: 1,
+            flip: false,
+        };
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+        );
+        sidecar.webcam = Some(track);
+        let sidecar_path = PointerSidecar::sidecar_path(&source);
+        if sidecar.write(&sidecar_path).is_err() {
+            return;
+        }
+
+        let mut layer = LayerSettings {
+            radius: 0.0,
+            ..LayerSettings::default()
+        };
+        layer.set_overlay_aspect(1.0, 320.0 / 240.0);
+        layer.set_overlay_size(0.5, 320.0 / 240.0);
+        layer.set_overlay_alignment(0.5, 0.5);
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            ..LayoutSettings::default()
+        };
+        // The track's first frame sits 0.5 s into the video: before that the
+        // first (red) frame holds; at 0.75 s the track is 0.25 s in (still
+        // red); at 1.25 s it is 0.75 s in (lime). A whole-track stretch would
+        // already show lime at 0.75 s.
+        let frames = exported_frames(
+            &dir,
+            &source,
+            &track_path,
+            "late",
+            layer,
+            layouts,
+            Vec::new(),
+            0.5,
+            &[0.25, 0.75, 1.25],
+        );
+        let at = |index: usize| pixel(&frames[index], 320, 160, 120);
+        assert!(
+            at(0)[0] > 150 && at(0)[1] < 90,
+            "held first frame at 0.25 s: {:?}",
+            at(0)
+        );
+        assert!(
+            at(1)[0] > 150 && at(1)[1] < 90,
+            "track 0.25 s at 0.75 s: {:?}",
+            at(1)
+        );
+        assert!(
+            at(2)[1] > 150 && at(2)[0] < 90,
+            "track 0.75 s at 1.25 s: {:?}",
+            at(2)
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
