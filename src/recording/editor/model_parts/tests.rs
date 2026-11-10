@@ -30,6 +30,7 @@ fn attach_pointer(state: &mut VideoEditState, x: f64, y: f64) {
             x,
             y,
             kind: crate::recording::editor::sidecar::CursorKind::Default,
+            cursor_id: None,
         });
     state.sidecar = Some(sidecar);
 }
@@ -741,6 +742,7 @@ fn a_morph_gap_keeps_the_evaluated_camera_endpoint() {
             x: 1900.0,
             y: 300.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
     }
     state.sidecar = Some(sidecar);
@@ -1028,6 +1030,7 @@ fn default_zoom_center_maps_area_pointer_into_video_pixels() {
             x: 480.0,
             y: 270.0,
             kind: crate::recording::editor::sidecar::CursorKind::Default,
+            cursor_id: None,
         });
     state.sidecar = Some(sidecar);
 
@@ -1049,6 +1052,7 @@ fn default_zoom_center_converts_composition_time_to_source_time() {
                 x,
                 y,
                 kind: crate::recording::editor::sidecar::CursorKind::Default,
+                cursor_id: None,
             });
     }
     state.sidecar = Some(sidecar);
@@ -1075,6 +1079,7 @@ fn default_zoom_center_accounts_for_clip_speed() {
                 x,
                 y,
                 kind: crate::recording::editor::sidecar::CursorKind::Default,
+                cursor_id: None,
             });
     }
     state.sidecar = Some(sidecar);
@@ -1107,6 +1112,7 @@ fn auto_zoom_follows_the_cursor_in_video_space() {
                 x,
                 y,
                 kind: crate::recording::editor::sidecar::CursorKind::Default,
+                cursor_id: None,
             });
     }
     state.sidecar = Some(sidecar);
@@ -1153,6 +1159,7 @@ fn auto_zoom_camera_lags_a_pointer_jump() {
                 x,
                 y: 540.0,
                 kind: crate::recording::editor::sidecar::CursorKind::Default,
+                cursor_id: None,
             });
     }
     state.sidecar = Some(sidecar);
@@ -1257,6 +1264,7 @@ fn follow_camera_matches_across_random_and_sequential_seeks() {
                 x,
                 y: 540.0,
                 kind: crate::recording::editor::sidecar::CursorKind::Default,
+                cursor_id: None,
             });
     }
     state.sidecar = Some(sidecar);
@@ -1528,11 +1536,12 @@ fn attach_sidecar_with_clicks(state: &mut VideoEditState, clicks: &[(f64, f64, f
             x: 960.0,
             y: 540.0,
             kind: crate::recording::editor::sidecar::CursorKind::Default,
+            cursor_id: None,
         });
     for &(t, x, y) in clicks {
         sidecar
             .clicks
-            .push(crate::recording::editor::sidecar::ClickSample { t, x, y, button: 1 });
+            .push(crate::recording::editor::sidecar::ClickSample { t, x, y, button: 1, cursor_id: None });
     }
     state.sidecar = Some(sidecar);
 }

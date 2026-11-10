@@ -2339,6 +2339,7 @@ mod tests {
             x: 20.0,
             y: 20.0,
             button: 1,
+            cursor_id: None,
         });
         let args = warp_args(&state);
         let graph = graph_of(&args);
@@ -2499,6 +2500,7 @@ mod tests {
             x: 160.0,
             y: 120.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         state.sidecar = Some(sidecar);
         let with_cursor = scratch.path.join("with-cursor.mp4");
@@ -2551,6 +2553,7 @@ mod tests {
             x: 160.0,
             y: 120.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         state.sidecar = Some(sidecar);
         let track =
@@ -2689,12 +2692,14 @@ mod tests {
             x: 10.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 0.2,
             x: 40.0,
             y: 20.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         state.sidecar = Some(sidecar);
 
@@ -2746,6 +2751,7 @@ mod tests {
             x: 10.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         state.sidecar = Some(sidecar);
 
@@ -2789,6 +2795,7 @@ mod tests {
             x: 10.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         state.sidecar = Some(sidecar);
         state
@@ -2853,6 +2860,7 @@ mod tests {
             x: 20.0,
             y: 20.0,
             button: 1,
+            cursor_id: None,
         });
         let args = warp_args(&state);
         let graph = graph_of(&args);
@@ -2899,6 +2907,7 @@ mod tests {
             x: 20.0,
             y: 20.0,
             button: 1,
+            cursor_id: None,
         });
         assert_eq!(
             normalized_graph(&composite_graph(&circle)),
@@ -2926,6 +2935,7 @@ mod tests {
             x: 20.0,
             y: 20.0,
             button: 1,
+            cursor_id: None,
         });
         let args = warp_args(&state);
         let graph = graph_of(&args);
@@ -3278,12 +3288,14 @@ mod tests {
             x: 10.0,
             y: 10.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.pointer.push(PointerSample {
             t: 0.2,
             x: 40.0,
             y: 20.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         s.sidecar = Some(sidecar);
 
@@ -3468,6 +3480,7 @@ mod tests {
                 x: 160.0,
                 y: 120.0,
                 kind: CursorKind::Default,
+                cursor_id: None,
             });
         }
         tracked.sidecar = Some(sidecar);
@@ -3715,6 +3728,7 @@ mod tests {
                     x: 240.0,
                     y: 120.0,
                     kind: crate::recording::editor::sidecar::CursorKind::Default,
+                    cursor_id: None,
                 });
         }
         state.sidecar = Some(sidecar);

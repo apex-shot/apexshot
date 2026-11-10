@@ -4329,3 +4329,18 @@ msgstr "ハードウェアアクセラレーション"
 
 msgid "Use the GPU encoder when one is available. Falls back to the CPU automatically."
 msgstr "利用可能な場合は GPU エンコーダーを使用します。自動的に CPU にフォールバックします。"
+
+msgid "Always use the default cursor"
+msgstr "常に既定のカーソルを使用"
+
+msgid "Base angle"
+msgstr "基準角度"
+
+msgid "Point along movement"
+msgstr "移動方向に合わせる"
+
+msgid "Tilt amount"
+msgstr "傾きの量"
+
+msgid "Tilt with motion"
+msgstr "動きに合わせて傾ける"

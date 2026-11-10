@@ -189,6 +189,7 @@ mod tests {
             x: 0.0,
             y: 0.0,
             button: 1,
+            cursor_id: None,
         }));
         sidecar
     }

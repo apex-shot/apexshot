@@ -1,6 +1,8 @@
 pub mod auto_zoom;
 pub mod click_effect;
 pub mod cursor_export;
+pub mod cursor_path;
+pub mod cursor_planner;
 pub mod cursor_sprite;
 pub mod cursor_track;
 pub(crate) mod export_cache;

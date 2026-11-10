@@ -809,6 +809,12 @@ mod tests {
     #[test]
     fn signed_out_content_is_centered_in_the_scrolled_page() {
         let Some(result) = crate::test_support::with_gtk(|| {
+            // The page's CSS is installed at the machine's UI scale, so the
+            // fixture allocates in the same units. Preparing the process here
+            // also pins the scale and the bundled faces, so the measurement no
+            // longer depends on whether an earlier GTK test prepared them.
+            crate::platform::prepare_process();
+            let scale = crate::platform::ui_scale() as f32;
             let root = build(|| {});
             let states = root.first_child().unwrap().downcast::<Stack>().unwrap();
             let signed_out = states.child_by_name("signed-out").unwrap();
@@ -828,16 +834,19 @@ mod tests {
             column.append(&root);
             let scroller = gtk4::ScrolledWindow::new();
             scroller.set_child(Some(&column));
+            let wide = (800.0 * scale) as i32;
+            let tall = (600.0 * scale) as i32;
             scroller.measure(Orientation::Horizontal, -1);
-            scroller.measure(Orientation::Vertical, 800);
-            scroller.allocate(800, 600, -1, None);
+            scroller.measure(Orientation::Vertical, wide);
+            scroller.allocate(wide, tall, -1, None);
             let bounds = signed_out.compute_bounds(&scroller).unwrap();
             let center = (
                 bounds.x() + bounds.width() / 2.0,
                 bounds.y() + bounds.height() / 2.0,
             );
-            scroller.measure(Orientation::Vertical, 360);
-            scroller.allocate(360, 400, -1, None);
+            let narrow = (360.0 * scale) as i32;
+            scroller.measure(Orientation::Vertical, narrow);
+            scroller.allocate(narrow, (400.0 * scale) as i32, -1, None);
             let small_bounds = signed_out.compute_bounds(&scroller).unwrap();
             (
                 root.vexpands(),
@@ -845,18 +854,20 @@ mod tests {
                 heading.xalign(),
                 hint.xalign(),
                 button.halign(),
+                scale,
                 center,
                 (small_bounds.x(), small_bounds.width()),
             )
         }) else {
             return;
         };
-        let (root_expands, states_expand, heading_x, hint_x, alignment, center, small) = result;
+        let (root_expands, states_expand, heading_x, hint_x, alignment, scale, center, small) =
+            result;
         assert!(root_expands && states_expand);
         assert_eq!((heading_x, hint_x, alignment), (0.5, 0.5, Align::Center));
-        assert!((center.0 - 400.0).abs() < 2.0);
-        assert!((center.1 - 300.0).abs() < 20.0);
-        assert!(small.0 >= 0.0 && small.0 + small.1 <= 360.0);
+        assert!((center.0 - 400.0 * scale).abs() < 2.0 * scale);
+        assert!((center.1 - 300.0 * scale).abs() < 20.0 * scale);
+        assert!(small.0 >= 0.0 && small.0 + small.1 <= 360.0 * scale);
     }
 
     #[test]
