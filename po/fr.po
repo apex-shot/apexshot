@@ -4435,3 +4435,9 @@ msgstr "ffmpeg n'a pas pu encoder la vidéo Motion."
 
 msgid "Upgrade to Studio"
 msgstr "Passer à Studio"
+
+msgid "Hardware acceleration"
+msgstr "Accélération matérielle"
+
+msgid "Use the GPU encoder when one is available. Falls back to the CPU automatically."
+msgstr "Utilise l’encodeur du GPU lorsqu’il est disponible. Repasse automatiquement sur le CPU."

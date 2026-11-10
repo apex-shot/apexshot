@@ -4349,3 +4349,9 @@ msgstr "تعذّر على ffmpeg ترميز فيديو Motion."
 
 msgid "Upgrade to Studio"
 msgstr "الترقية إلى Studio"
+
+msgid "Hardware acceleration"
+msgstr "تسريع العتاد"
+
+msgid "Use the GPU encoder when one is available. Falls back to the CPU automatically."
+msgstr "استخدام مُرمِّز وحدة معالجة الرسومات عند توفره. يعود إلى المعالج المركزي تلقائيًا."

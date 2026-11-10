@@ -4405,3 +4405,9 @@ msgstr "ffmpeg не смог закодировать видео Motion."
 
 msgid "Upgrade to Studio"
 msgstr "Перейти на Studio"
+
+msgid "Hardware acceleration"
+msgstr "Аппаратное ускорение"
+
+msgid "Use the GPU encoder when one is available. Falls back to the CPU automatically."
+msgstr "Использовать кодировщик GPU, если он доступен. При необходимости автоматически переключается на CPU."

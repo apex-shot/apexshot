@@ -4415,3 +4415,9 @@ msgstr "O ffmpeg não conseguiu codificar o vídeo do Motion."
 
 msgid "Upgrade to Studio"
 msgstr "Atualizar para o Studio"
+
+msgid "Hardware acceleration"
+msgstr "Aceleração por hardware"
+
+msgid "Use the GPU encoder when one is available. Falls back to the CPU automatically."
+msgstr "Usa o codificador da GPU quando houver um disponível. Volta para a CPU automaticamente."
