@@ -83,20 +83,16 @@ jobs:
             exit 1
           fi
 
+      # Only main saves the cache. Every pull request saving its own multi-GB
+      # target/ crowded the 10 GB repository cache and evicted everything else.
       - name: Cache cargo dependencies
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-lint-
+          shared-key: linux-lint
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore cached system packages
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/apt-debs
           key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/release.yml') }}
@@ -110,6 +106,8 @@ jobs:
           mkdir -p "$HOME/.cache/apt-debs"
           sudo mkdir -p /var/cache/apt/archives/partial
           sudo cp -n "$HOME"/.cache/apt-debs/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+          # Skip the man-db rebuild apt triggers after every install; it costs minutes.
+          sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update
           for i in 1 2 3; do
             sudo apt-get install -y --fix-missing \
@@ -132,6 +130,13 @@ jobs:
             sudo apt-get update
           done
           cp -n /var/cache/apt/archives/*.deb "$HOME/.cache/apt-debs/" 2>/dev/null || true
+
+      - name: Save cached system packages
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/apt-debs
+          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/release.yml') }}-lint-${{ github.run_id }}
 
       - name: Build gtk4-layer-shell from source
         run: |
@@ -171,20 +176,16 @@ jobs:
           rustup toolchain install stable --profile minimal
           rustup default stable
 
+      # Only main saves the cache. Every pull request saving its own multi-GB
+      # target/ crowded the 10 GB repository cache and evicted everything else.
       - name: Cache cargo dependencies
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          shared-key: linux-ci
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Restore cached system packages
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/apt-debs
           key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/release.yml') }}
@@ -198,6 +199,8 @@ jobs:
           mkdir -p "$HOME/.cache/apt-debs"
           sudo mkdir -p /var/cache/apt/archives/partial
           sudo cp -n "$HOME"/.cache/apt-debs/*.deb /var/cache/apt/archives/ 2>/dev/null || true
+          # Skip the man-db rebuild apt triggers after every install; it costs minutes.
+          sudo rm -f /var/lib/man-db/auto-update
           sudo apt-get update
           for i in 1 2 3; do
             sudo apt-get install -y --fix-missing \
@@ -228,6 +231,13 @@ jobs:
           done
           cp -n /var/cache/apt/archives/*.deb "$HOME/.cache/apt-debs/" 2>/dev/null || true
 
+      - name: Save cached system packages
+        if: github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/apt-debs
+          key: ${{ runner.os }}-apt-${{ hashFiles('.github/workflows/release.yml') }}-ci-${{ github.run_id }}
+
       - name: Build gtk4-layer-shell from source
         run: |
           git clone --depth 1 --branch "${GTK4_LAYER_SHELL_TAG}" \
@@ -237,8 +247,15 @@ jobs:
           sudo ninja -C build install
           sudo ldconfig
 
+      # Pull requests only need the test build. A release build on top of it
+      # compiled the whole workspace a second time in another profile; the
+      # packaging jobs still build release on tags.
       - name: Build
+        if: github.event_name != 'pull_request'
         run: cargo build --release --verbose
+
+      - name: Build tests
+        run: cargo test --no-run
 
       - name: Run tests
         run: cargo test --jobs 2 -- --test-threads=1

@@ -84,17 +84,13 @@ jobs:
             --component rustfmt,clippy
           rustup default stable-x86_64-pc-windows-gnu
 
+      # Only main saves the cache, so pull requests stop evicting each other.
       - name: Cache cargo dependencies
-        uses: actions/cache@v4
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            windows-ui/target/
-          key: windows-cargo-${{ hashFiles('windows-ui/Cargo.lock') }}
-          restore-keys: |
-            windows-cargo-
+          workspaces: windows-ui -> target
+          shared-key: windows-ui
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
       # Run inside the MSYS2 shell so pkg-config finds the MinGW GTK4 .pc files
       # and the test binaries find the GTK DLLs at run time.
