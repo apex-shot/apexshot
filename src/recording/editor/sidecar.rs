@@ -30,6 +30,16 @@ const ROTATION_VELOCITY_SMOOTHING_MS: f64 = 120.0;
 const ROTATION_STARTUP_CALM_MS: f64 = 500.0;
 const ROTATION_ENTRY_TELEPORT_SPEED: f64 = 15.0;
 const ROTATION_EMIT_EPSILON: f64 = 0.0015;
+/// The studied tilt springs as (stiffness, damping, mass): a softer one for
+/// velocity tilt, a firmer one for the directional heading. Both run with the
+/// studied default clamp and a 0.002 rest precision.
+const VELOCITY_TILT_SPRING: (f64, f64, f64) = (120.0, 8.0, 1.0);
+const DIRECTIONAL_TILT_SPRING: (f64, f64, f64) = (320.0, 28.0, 1.0);
+const TILT_SPRING_PRECISION: f64 = 0.002;
+/// How much history the spring replays before an instant. Both springs have
+/// settled to well under the precision within it, so any seek lands on the
+/// same angle playback reaches.
+const TILT_SPRING_HISTORY_MS: f64 = 2000.0;
 
 /// The studied directional profile: the cursor turns toward its travel
 /// heading, measured from the arrow art's own neutral heading, with bounded
@@ -150,6 +160,51 @@ fn interpolate_rotation(keyframes: &[(f64, f64)], time_ms: f64) -> f64 {
         0.0
     };
     from_radians + (to_radians - from_radians) * amount
+}
+
+/// The tilt as the studied renderer draws it: the keyframed target followed
+/// by a spring in 1 ms semi-implicit Euler steps. The studied clamp raises the
+/// damping to critical while the angle heads for its target faster than the
+/// undamped spring would close the gap, so it eases in without overshooting.
+fn sprung_rotation(keyframes: &[(f64, f64)], time_ms: f64, spring: (f64, f64, f64)) -> f64 {
+    let (stiffness, damping, mass) = spring;
+    let Some((first_ms, _)) = keyframes.first().copied() else {
+        return 0.0;
+    };
+    if !time_ms.is_finite() || mass <= 0.0 || stiffness <= 0.0 {
+        return interpolate_rotation(keyframes, time_ms);
+    }
+    let start = (time_ms - TILT_SPRING_HISTORY_MS).max(first_ms);
+    if time_ms <= start {
+        return interpolate_rotation(keyframes, time_ms);
+    }
+    let omega = (stiffness / mass).sqrt();
+    let critical = 2.0 * (mass * stiffness).sqrt();
+    let mut value = interpolate_rotation(keyframes, start);
+    let mut velocity = 0.0;
+    let steps = (time_ms - start).ceil() as usize;
+    let mut previous = start;
+    for index in 1..=steps {
+        let at = (start + index as f64).min(time_ms);
+        let dt = (at - previous) / 1000.0;
+        previous = at;
+        let target = interpolate_rotation(keyframes, at);
+        let gap = target - value;
+        let effective = if velocity * gap > 0.0 && velocity.abs() > gap.abs() * omega {
+            damping.max(critical)
+        } else {
+            damping
+        };
+        let acceleration = (gap * stiffness - velocity * effective) / mass;
+        velocity += acceleration * dt;
+        value += velocity * dt;
+        if velocity.abs() < TILT_SPRING_PRECISION && (target - value).abs() < TILT_SPRING_PRECISION
+        {
+            value = target;
+            velocity = 0.0;
+        }
+    }
+    value
 }
 
 /// Hold the studied startup window flat at the rotation it reaches by then,
@@ -1042,6 +1097,7 @@ impl PointerSidecar {
     /// horizontal speed; `Directional` points it along the travel heading.
     /// Both add `base_degrees`, clamp to their studied limits, and calm the
     /// first half second. Times are converted to the profile's milliseconds.
+    /// The angle follows the target on the studied tilt spring.
     pub fn cursor_rotation_at(
         &self,
         t: f64,
@@ -1062,7 +1118,11 @@ impl PointerSidecar {
             }
             CursorRotationMode::Directional => directional_rotation_keyframes(&self.pointer),
         };
-        base + interpolate_rotation(&keyframes, t * 1000.0)
+        let spring = match mode {
+            CursorRotationMode::Velocity => VELOCITY_TILT_SPRING,
+            CursorRotationMode::Directional => DIRECTIONAL_TILT_SPRING,
+        };
+        base + sprung_rotation(&keyframes, t * 1000.0, spring)
     }
 
     /// Whether a directly recorded cursor is visible at `t`. Window metadata
@@ -2936,6 +2996,45 @@ mod cursor_tests {
         assert!(rotation(40.0) > 0.05, "rightward motion should lean right");
         assert!(rotation(-40.0) < -0.05, "leftward motion should lean left");
         assert!(rotation(0.0).abs() < 1e-9, "no motion should not tilt");
+    }
+
+    #[test]
+    fn the_tilt_springs_toward_a_step_without_overshooting() {
+        let keyframes = vec![(0.0, 0.0), (1000.0, 0.0), (1001.0, 0.3), (6000.0, 0.3)];
+        let at = |ms: f64| sprung_rotation(&keyframes, ms, VELOCITY_TILT_SPRING);
+        assert!(
+            at(1005.0) < 0.05,
+            "the angle should not jump with its target"
+        );
+        let mid = at(1150.0);
+        assert!(
+            mid > 0.0 && mid < 0.3,
+            "the angle should be on its way: {mid}"
+        );
+        let mut ms = 1000.0;
+        while ms <= 3000.0 {
+            assert!(
+                at(ms) <= 0.3 + 1e-9,
+                "the clamp should stop an overshoot at {ms}"
+            );
+            ms += 5.0;
+        }
+        assert!((at(4000.0) - 0.3).abs() <= TILT_SPRING_PRECISION);
+    }
+
+    #[test]
+    fn a_settled_tilt_is_its_target() {
+        let keyframes = vec![(0.0, 0.25), (5000.0, 0.25)];
+        assert!((sprung_rotation(&keyframes, 3000.0, VELOCITY_TILT_SPRING) - 0.25).abs() < 1e-9);
+        assert!((sprung_rotation(&keyframes, 3000.0, DIRECTIONAL_TILT_SPRING) - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_directional_spring_is_firmer() {
+        let keyframes = vec![(0.0, 0.0), (1000.0, 0.0), (1001.0, 0.5), (6000.0, 0.5)];
+        let soft = sprung_rotation(&keyframes, 1080.0, VELOCITY_TILT_SPRING);
+        let firm = sprung_rotation(&keyframes, 1080.0, DIRECTIONAL_TILT_SPRING);
+        assert!(firm > soft, "firm {firm} should lead soft {soft}");
     }
 
     #[test]
