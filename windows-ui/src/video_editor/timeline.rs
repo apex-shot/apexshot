@@ -58,11 +58,11 @@ const RULER_HEIGHT: f64 = 28.0;
 /// Height of the filmstrip lane, in unscaled pixels.
 const VIDEO_LANE_HEIGHT: f64 = 42.0;
 /// Height of one effect lane, in unscaled pixels.
-const EFFECT_LANE_HEIGHT: f64 = 32.0;
+const EFFECT_LANE_HEIGHT: f64 = 42.0;
 /// Height of a collapsed lane, in unscaled pixels.
-const THIN_LANE_HEIGHT: f64 = 14.0;
+const THIN_LANE_HEIGHT: f64 = 18.0;
 /// Gap between rows, in unscaled pixels.
-const LANE_GAP: f64 = 6.0;
+const LANE_GAP: f64 = 8.0;
 /// Horizontal room a chip gives its label, in unscaled pixels.
 const LAYOUT_CHIP_LABEL_PADDING: f64 = 22.0;
 /// The seam a chip leaves before the next cue, in unscaled pixels.
@@ -5680,11 +5680,11 @@ fn draw_effect_clips(
         let x0 = data.time_to_x(start, width);
         let x1 = data.time_to_x(end, width).max(x0 + 22.0 * scale);
         let pill_w = x1 - x0;
-        let y = 7.0 * scale;
-        let pill_h = (height - 14.0 * scale).max(10.0);
+        let y = 2.0 * scale;
+        let pill_h = (height - 4.0 * scale).max(10.0);
         let tone = effect_tone(track, prefers_dark, data.effect_hidden(track, index));
 
-        rounded_rect(context, x0, y, pill_w, pill_h, 5.0 * scale);
+        rounded_rect(context, x0, y, pill_w, pill_h, 8.0 * scale);
         context.set_source_rgba(tone.fill.0, tone.fill.1, tone.fill.2, tone.fill.3);
         let _ = context.fill();
 
@@ -5759,7 +5759,9 @@ fn draw_effect_clips(
     }
 }
 
-/// A resting lane: its name, and each clip as a thin bar at its time.
+/// A resting lane, drawn the studied way: its name sits at the left edge and
+/// each clip is a slim bar at its time. A bar that runs under the name fades
+/// in from transparent behind it, so the name never sits on solid colour.
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn draw_thin_lane(
     context: &Context,
@@ -5773,7 +5775,20 @@ fn draw_thin_lane(
 ) {
     let width = width.max(1) as f64;
     let height = height.max(1) as f64;
-    let bar_h = (height - 6.0 * scale).max(3.0);
+    context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Bold);
+    context.set_font_size((12.0 * scale).round());
+    let extents = context.text_extents(label).ok();
+    let text_w = extents
+        .map(|extents| extents.x_advance())
+        .unwrap_or(40.0 * scale);
+    let text_h = extents
+        .map(|extents| extents.height())
+        .unwrap_or(9.0 * scale);
+    let label_x = 6.0 * scale;
+    let label_end = label_x + text_w;
+    let fade_end = label_end + 40.0 * scale;
+
+    let bar_h = (height - 4.0 * scale).max(3.0);
     let y = (height - bar_h) / 2.0;
     for (start, end, fill) in bars {
         let x0 = data.time_to_x(*start, width);
@@ -5784,20 +5799,22 @@ fn draw_thin_lane(
             y,
             x1 - x0,
             bar_h,
-            (bar_h / 2.0).min(3.0 * scale),
+            (bar_h * 0.35).min(5.0 * scale),
         );
-        context.set_source_rgba(fill.0, fill.1, fill.2, fill.3);
+        if x0 < fade_end {
+            let fade = gtk4::cairo::LinearGradient::new(0.0, 0.0, fade_end, 0.0);
+            fade.add_color_stop_rgba(0.0, fill.0, fill.1, fill.2, 0.0);
+            fade.add_color_stop_rgba(label_end / fade_end, fill.0, fill.1, fill.2, fill.3 * 0.15);
+            fade.add_color_stop_rgba(1.0, fill.0, fill.1, fill.2, fill.3);
+            let _ = context.set_source(&fade);
+        } else {
+            context.set_source_rgba(fill.0, fill.1, fill.2, fill.3);
+        }
         let _ = context.fill();
     }
     let ink = if prefers_dark { 1.0 } else { 0.0 };
-    context.set_source_rgba(ink, ink, ink, 0.55);
-    context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Normal);
-    context.set_font_size((10.0 * scale).round());
-    let extents = context.text_extents(label).ok();
-    let text_h = extents
-        .map(|extents| extents.height())
-        .unwrap_or(7.0 * scale);
-    context.move_to(6.0 * scale, (height + text_h) / 2.0);
+    context.set_source_rgba(ink, ink, ink, 0.6);
+    context.move_to(label_x, (height + text_h) / 2.0);
     let _ = context.show_text(label);
 }
 
@@ -5822,8 +5839,8 @@ fn draw_effect_ghost(
     let x0 = data.time_to_x(placed, width);
     let x1 = data.time_to_x(placed + duration, width);
     let pill_w = (x1 - x0).max(22.0 * scale);
-    let y = 7.0 * scale;
-    let pill_h = (height - 14.0 * scale).max(10.0);
+    let y = 2.0 * scale;
+    let pill_h = (height - 4.0 * scale).max(10.0);
     let free = data.paste_spot_free(track, placed, duration);
     let (base_r, base_g, base_b) = match track {
         EffectTrack::Zoom => (0.0, 0.0, 1.0),
@@ -5831,7 +5848,7 @@ fn draw_effect_ghost(
     };
     let fill_alpha = if free { 0.45 } else { 0.10 };
 
-    rounded_rect(context, x0, y, pill_w, pill_h, 5.0 * scale);
+    rounded_rect(context, x0, y, pill_w, pill_h, 8.0 * scale);
     context.set_source_rgba(
         base_r,
         base_g,
@@ -8626,9 +8643,9 @@ mod tests {
     fn the_scoped_stylesheet_keeps_the_timeline_compact() {
         let css = timeline_css(1.25);
         assert!(css.contains("recording-editor-card-layout-track"));
-        assert!(css.contains("min-height: 18px"), "a resting lane is 14px");
+        assert!(css.contains("min-height: 23px"), "a resting lane is 18px");
         assert!(css.contains("min-height: 53px"), "the filmstrip is 42px");
-        assert!(css.contains("min-height: 168px"), "the board fits its rows");
+        assert!(css.contains("min-height: 193px"), "the board fits its rows");
         assert!(!css.contains("min-height: 0"));
         // The lane rail is gone, so the sheet carries no gutter rules at all.
         assert!(!css.contains("recording-editor-timeline-gutter"));
