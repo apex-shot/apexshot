@@ -4324,6 +4324,12 @@ msgstr "ffmpeg が Motion 動画をエンコードできませんでした。"
 msgid "Upgrade to Studio"
 msgstr "Studio にアップグレード"
 
+msgid "Hardware acceleration"
+msgstr "ハードウェアアクセラレーション"
+
+msgid "Use the GPU encoder when one is available. Falls back to the CPU automatically."
+msgstr "利用可能な場合は GPU エンコーダーを使用します。自動的に CPU にフォールバックします。"
+
 msgid "Always use the default cursor"
 msgstr "常に既定のカーソルを使用"
 
