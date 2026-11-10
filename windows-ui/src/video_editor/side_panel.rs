@@ -22,8 +22,9 @@ use gtk4::prelude::*;
 use gtk4::{
     Align, ApplicationWindow, Box as GtkBox, Button, CssProvider, DrawingArea,
     EventControllerMotion, FileChooserAction, FileChooserNative, FileFilter, GestureClick,
-    GestureDrag, Grid, Image, Label, Orientation, PolicyType, ResponseType, ScrolledWindow,
-    SpinButton, Stack, StackTransitionType, Switch, ToggleButton,
+    GestureDrag, Grid, Image, Label, Orientation, PolicyType, ResponseType, Revealer,
+    RevealerTransitionType, ScrolledWindow, Separator, SpinButton, Stack, StackTransitionType,
+    Switch, ToggleButton,
 };
 use std::cell::{Cell, RefCell};
 use std::f64::consts::{FRAC_PI_2, PI, TAU};
@@ -1252,70 +1253,63 @@ const WEBCAM_TRANSITION_MAX: f64 = 3.0;
 const WEBCAM_PREVIEW_HEIGHT: f64 = 40.0;
 
 /// The fixed height of one layout tile, before scale.
-const WEBCAM_CARD_HEIGHT: f64 = 62.0;
+const WEBCAM_CARD_HEIGHT: f64 = 70.0;
 
 /// The horizontal padding the camera body inherits from the shared panel sheet.
 const WEBCAM_BODY_INSET: f64 = 28.0;
 
-/// The six cards the layout chooser offers, in the order it draws them.
+/// The five cards the layout chooser offers, in the order it draws them.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum WebcamLayoutCard {
-    Screen,
-    Camera,
     Bubble,
-    Circle,
     Split,
     Cutout,
+    Camera,
+    Screen,
 }
 
 impl WebcamLayoutCard {
-    const ALL: [Self; 6] = [
-        Self::Screen,
-        Self::Camera,
+    const ALL: [Self; 5] = [
         Self::Bubble,
-        Self::Circle,
         Self::Split,
         Self::Cutout,
+        Self::Camera,
+        Self::Screen,
     ];
 
     fn label(self) -> &'static str {
         match self {
-            Self::Screen => "Screen",
-            Self::Camera => "Camera",
             Self::Bubble => "Bubble",
-            Self::Circle => "Circle",
             Self::Split => "Split",
             Self::Cutout => "Cutout",
+            Self::Camera => "Camera",
+            Self::Screen => "Screen",
         }
     }
 
     fn tooltip(self) -> &'static str {
         match self {
-            Self::Screen => "Show the screen on its own.",
-            Self::Camera => "Fill the frame with the camera.",
             Self::Bubble => "Camera bubble on the screen.",
-            Self::Circle => "Round camera bubble on the screen.",
             Self::Split => "Put the screen and camera side by side.",
             Self::Cutout => "Set the camera person on the screen.",
+            Self::Camera => "Fill the frame with the camera.",
+            Self::Screen => "Show the screen on its own.",
         }
     }
 
     fn layout(self) -> CameraLayout {
         match self {
-            Self::Screen => CameraLayout::ScreenOnly,
-            Self::Camera => CameraLayout::FullscreenCamera,
-            Self::Bubble | Self::Circle => CameraLayout::CameraOverlay,
+            Self::Bubble => CameraLayout::CameraOverlay,
             Self::Split => CameraLayout::SplitScreen,
             Self::Cutout => CameraLayout::CameraCutout,
+            Self::Camera => CameraLayout::FullscreenCamera,
+            Self::Screen => CameraLayout::ScreenOnly,
         }
     }
 
+    /// Choosing a card keeps the bubble's shape; the Shape controls change it.
     fn overlay_shape(self) -> Option<u8> {
-        match self {
-            Self::Bubble => Some(2),
-            Self::Circle => Some(0),
-            _ => None,
-        }
+        None
     }
 }
 
@@ -1452,19 +1446,13 @@ fn webcam_aspect_index(layer: &LayerSettings, frame_aspect: f64) -> Option<usize
 
 fn webcam_layout_card(
     layout: CameraLayout,
-    layer: Option<&LayerSettings>,
-    frame_aspect: f64,
+    _layer: Option<&LayerSettings>,
+    _frame_aspect: f64,
 ) -> WebcamLayoutCard {
     match layout {
         CameraLayout::ScreenOnly => WebcamLayoutCard::Screen,
         CameraLayout::FullscreenCamera => WebcamLayoutCard::Camera,
-        CameraLayout::CameraOverlay => {
-            if layer.is_some_and(|layer| webcam_shape_index(layer, frame_aspect) == Some(0)) {
-                WebcamLayoutCard::Circle
-            } else {
-                WebcamLayoutCard::Bubble
-            }
-        }
+        CameraLayout::CameraOverlay => WebcamLayoutCard::Bubble,
         CameraLayout::SplitScreen => WebcamLayoutCard::Split,
         CameraLayout::CameraCutout => WebcamLayoutCard::Cutout,
     }
@@ -1534,26 +1522,6 @@ fn webcam_card_ellipse_fill(
     let _ = context.restore();
     context.set_source_rgba(color.0, color.1, color.2, color.3);
     let _ = context.fill();
-}
-
-fn webcam_card_ellipse_outline(
-    context: &gtk4::cairo::Context,
-    rect: WebcamCardRect,
-    line_width: f64,
-    color: (f64, f64, f64, f64),
-) {
-    let (x, y, width, height) = rect;
-    if width <= 0.0 || height <= 0.0 {
-        return;
-    }
-    let _ = context.save();
-    context.translate(x + width / 2.0, y + height / 2.0);
-    context.scale(width / 2.0, height / 2.0);
-    context.arc(0.0, 0.0, 1.0, 0.0, TAU);
-    let _ = context.restore();
-    context.set_source_rgba(color.0, color.1, color.2, color.3);
-    context.set_line_width(line_width);
-    let _ = context.stroke();
 }
 
 fn webcam_card_person(
@@ -1657,39 +1625,6 @@ fn draw_webcam_card_schematic(
                     bubble_y + bubble_height * 0.14,
                     bubble_width * 0.64,
                     bubble_height * 0.72,
-                ),
-                person,
-            );
-        }
-        WebcamLayoutCard::Circle => {
-            webcam_card_frame(
-                context,
-                (x, y, frame_width, frame_height),
-                frame_radius,
-                screen_fill,
-                screen_stroke,
-            );
-            let diameter = frame_height * 0.42;
-            let bubble_x = x + frame_width - diameter - 2.0;
-            let bubble_y = y + frame_height - diameter - 2.0;
-            webcam_card_ellipse_fill(
-                context,
-                (bubble_x, bubble_y, diameter, diameter),
-                camera_fill,
-            );
-            webcam_card_ellipse_outline(
-                context,
-                (bubble_x, bubble_y, diameter, diameter),
-                1.0,
-                camera_stroke,
-            );
-            webcam_card_person(
-                context,
-                (
-                    bubble_x + diameter * 0.19,
-                    bubble_y + diameter * 0.16,
-                    diameter * 0.62,
-                    diameter * 0.68,
                 ),
                 person,
             );
@@ -2046,6 +1981,60 @@ fn webcam_kicker(label: &str) -> Label {
     kicker.add_css_class("recording-editor-webcam-kicker");
     kicker.set_xalign(0.0);
     kicker
+}
+
+/// A titled group of controls whose body folds under its header.
+struct WebcamSection {
+    root: GtkBox,
+    body: GtkBox,
+}
+
+fn webcam_section(scale: f64, title: &str, open: bool) -> WebcamSection {
+    let root = GtkBox::new(Orientation::Vertical, 0);
+    root.set_hexpand(true);
+    root.append(&Separator::new(Orientation::Horizontal));
+
+    let header = Button::new();
+    header.set_has_frame(false);
+    header.add_css_class("recording-editor-webcam-section");
+    header.set_hexpand(true);
+    let row = GtkBox::new(Orientation::Horizontal, (6.0 * scale).round() as i32);
+    row.set_margin_top((10.0 * scale).round() as i32);
+    row.set_margin_bottom((6.0 * scale).round() as i32);
+    let label = Label::new(None);
+    label.add_css_class("recording-editor-webcam-section-title");
+    label.set_markup(&format!("<b>{}</b>", gtk4::glib::markup_escape_text(title)));
+    label.set_xalign(0.0);
+    label.set_hexpand(true);
+    let chevron = Image::from_icon_name(if open {
+        "pan-up-symbolic"
+    } else {
+        "pan-down-symbolic"
+    });
+    row.append(&label);
+    row.append(&chevron);
+    header.set_child(Some(&row));
+    root.append(&header);
+
+    let body = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
+    body.set_hexpand(true);
+    body.set_margin_bottom((10.0 * scale).round() as i32);
+    let revealer = Revealer::new();
+    revealer.set_transition_type(RevealerTransitionType::SlideDown);
+    revealer.set_reveal_child(open);
+    revealer.set_child(Some(&body));
+    root.append(&revealer);
+
+    header.connect_clicked(move |_| {
+        let open = !revealer.reveals_child();
+        revealer.set_reveal_child(open);
+        chevron.set_icon_name(Some(if open {
+            "pan-up-symbolic"
+        } else {
+            "pan-down-symbolic"
+        }));
+    });
+    WebcamSection { root, body }
 }
 
 /// The camera's placement: a field you drag the dot around inside, with a
@@ -2425,7 +2414,6 @@ fn build_webcam_overlay(
 ) -> WebcamOverlayContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
-    root.append(&webcam_hint(&t("Shared by every overlay.")));
     root.append(&webcam_kicker(&t("POSITION")));
     let (position_box, position) =
         build_webcam_position(scale, layer, frame_aspect, actions.move_alignment.clone());
@@ -2672,7 +2660,6 @@ fn build_webcam_camera(
 ) -> WebcamCameraContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
-    root.append(&webcam_hint(&t("Shared by every camera layout.")));
     let (row, switch) = setting_switch_row(
         &t("Mirror camera"),
         &t("Flip the camera left to right, the way a mirror shows it."),
@@ -2723,7 +2710,6 @@ fn build_webcam_transition(
 ) -> WebcamTransitionContext {
     let root = GtkBox::new(Orientation::Vertical, (8.0 * scale).round() as i32);
     root.set_hexpand(true);
-    root.append(&webcam_hint(&t("Shared by every layout change.")));
     let duration = value_slider_control(
         &t("Duration"),
         0.0,
@@ -2857,8 +2843,6 @@ fn build_webcam_context(
     root.append(&overlay.root);
     root.append(&split.root);
     root.append(&cutout.root);
-    root.append(&camera.root);
-    root.append(&transition.root);
     WebcamContext {
         root,
         overlay,
@@ -2915,7 +2899,7 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
     // The layer's own switch sits above the layouts: off paints the screen
     // alone and leaves every layout change where it is.
     let (camera_row, camera_switch) = setting_switch_row(
-        &t("Camera layer"),
+        &t("Show camera"),
         &t("Draw the camera over the screen. Off shows the screen alone and keeps your layout changes."),
     );
     camera_switch.set_active(initial_layer.enabled);
@@ -2932,10 +2916,11 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
     editor.append(&camera_row);
 
     let rows = build_webcam_control_rows(scale);
-    editor.append(&rows.root);
-
     let cards = build_webcam_layout_grid(scale, initial.frame_aspect);
-    editor.append(&cards.root);
+    let layout_section = webcam_section(scale, &t("Layout"), true);
+    layout_section.body.append(&rows.root);
+    layout_section.body.append(&cards.root);
+    editor.append(&layout_section.root);
 
     let actions = WebcamContextActions {
         move_alignment: {
@@ -3073,7 +3058,15 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
         initial.frame_aspect,
         actions,
     );
-    editor.append(&context.root);
+    let settings_section = webcam_section(scale, &t("Layout settings"), true);
+    settings_section.body.append(&context.root);
+    editor.append(&settings_section.root);
+    let camera_section = webcam_section(scale, &t("Camera"), true);
+    camera_section.body.append(&context.camera.root);
+    editor.append(&camera_section.root);
+    let motion_section = webcam_section(scale, &t("Transitions"), false);
+    motion_section.body.append(&context.transition.root);
+    editor.append(&motion_section.root);
 
     let scroll = ScrolledWindow::new();
     scroll.add_css_class("recording-editor-zoom-scroll");
@@ -4626,14 +4619,14 @@ mod tests {
     }
 
     #[test]
-    fn six_cards_keep_the_chooser_order_and_cover_the_layouts() {
+    fn five_cards_keep_the_chooser_order_and_cover_the_layouts() {
         let labels: Vec<&str> = WebcamLayoutCard::ALL
             .iter()
             .map(|card| card.label())
             .collect();
         assert_eq!(
             labels,
-            vec!["Screen", "Camera", "Bubble", "Circle", "Split", "Cutout"]
+            vec!["Bubble", "Split", "Cutout", "Camera", "Screen"]
         );
 
         let layouts: Vec<CameraLayout> = WebcamLayoutCard::ALL
@@ -4643,29 +4636,25 @@ mod tests {
         assert_eq!(
             layouts,
             vec![
-                CameraLayout::ScreenOnly,
-                CameraLayout::FullscreenCamera,
-                CameraLayout::CameraOverlay,
                 CameraLayout::CameraOverlay,
                 CameraLayout::SplitScreen,
                 CameraLayout::CameraCutout,
+                CameraLayout::FullscreenCamera,
+                CameraLayout::ScreenOnly,
             ]
         );
-        assert_eq!(WebcamLayoutCard::Bubble.overlay_shape(), Some(2));
-        assert_eq!(WebcamLayoutCard::Circle.overlay_shape(), Some(0));
-        assert_eq!(WebcamLayoutCard::Screen.overlay_shape(), None);
-        assert_eq!(WebcamLayoutCard::Camera.overlay_shape(), None);
-        assert_eq!(WebcamLayoutCard::Split.overlay_shape(), None);
-        assert_eq!(WebcamLayoutCard::Cutout.overlay_shape(), None);
+        for card in WebcamLayoutCard::ALL {
+            assert_eq!(card.overlay_shape(), None);
+        }
     }
 
     #[test]
-    fn circle_and_bubble_follow_the_frame_aspect() {
+    fn every_overlay_lights_the_bubble_card() {
         let circle = shaped(0);
         assert_eq!(webcam_shape_index(&circle, WIDE), Some(0));
         assert_eq!(
             webcam_layout_card(CameraLayout::CameraOverlay, Some(&circle), WIDE),
-            WebcamLayoutCard::Circle
+            WebcamLayoutCard::Bubble
         );
 
         let bubble = shaped(2);
@@ -4710,7 +4699,7 @@ mod tests {
                 Some(&circle_portrait),
                 portrait
             ),
-            WebcamLayoutCard::Circle
+            WebcamLayoutCard::Bubble
         );
     }
 
