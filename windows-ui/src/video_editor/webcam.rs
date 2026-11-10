@@ -2665,6 +2665,75 @@ pub(super) fn composite_layout_into(
     Ok(())
 }
 
+/// The studied camera blur strength: the motion blur amount scaled to the
+/// frame rate, and nothing while the camera is hidden.
+pub(super) fn camera_blur_strength(amount: f64, fps: f64, camera_alpha: f64) -> f64 {
+    if !amount.is_finite()
+        || !fps.is_finite()
+        || fps <= 0.0
+        || camera_alpha.is_nan()
+        || camera_alpha <= 0.0
+    {
+        return 0.0;
+    }
+    amount.clamp(0.0, 1.0) * fps / 60.0
+}
+
+/// How many layouts to average along a camera trail from `before` to `now`
+/// on a frame of `size` pixels: one when neither the camera nor the screen
+/// moved a pixel, otherwise one per 4 pixels of the longest move, 2..=16.
+pub(super) fn trail_sample_count(now: LayoutFrame, before: LayoutFrame, size: (u32, u32)) -> usize {
+    let (w, h) = (f64::from(size.0), f64::from(size.1));
+    let edges = |r: Rect| [r.x * w, r.y * h, (r.x + r.width) * w, (r.y + r.height) * h];
+    let mut longest: f64 = 0.0;
+    for (a, b) in [(now.camera, before.camera), (now.screen, before.screen)] {
+        for (p, q) in edges(a).into_iter().zip(edges(b)) {
+            let d = (p - q).abs();
+            if d.is_finite() {
+                longest = longest.max(d);
+            }
+        }
+    }
+    if longest < 1.0 {
+        return 1;
+    }
+    ((longest / 4.0).ceil() as usize + 1).clamp(2, 16)
+}
+
+/// Composite the camera along its trail: every layout in `frames` is drawn
+/// over its own copy of the frame and the copies are averaged in squared
+/// light. One layout is exactly [`composite_layout_into`].
+pub(super) fn composite_layout_trail_into(
+    pixels: &mut [u8],
+    size: (u32, u32),
+    frames: &[LayoutFrame],
+    camera: &[u8],
+    camera_size: (u32, u32),
+    mask: Option<&[f32]>,
+) -> Result<(), String> {
+    match frames {
+        [] => return Ok(()),
+        [frame] => return composite_layout_into(pixels, size, *frame, camera, camera_size, mask),
+        _ => {}
+    }
+    let base = pixels.to_vec();
+    let mut scratch = vec![0u8; pixels.len()];
+    let mut sum = vec![0.0f32; pixels.len()];
+    for frame in frames {
+        scratch.copy_from_slice(&base);
+        composite_layout_into(&mut scratch, size, *frame, camera, camera_size, mask)?;
+        for (s, v) in sum.iter_mut().zip(&scratch) {
+            let v = f32::from(*v);
+            *s += v * v;
+        }
+    }
+    let n = frames.len() as f32;
+    for (p, s) in pixels.iter_mut().zip(&sum) {
+        *p = (s / n).sqrt().round().clamp(0.0, 255.0) as u8;
+    }
+    Ok(())
+}
+
 fn camera_surface(
     camera: &[u8],
     camera_size: (u32, u32),
@@ -4744,5 +4813,74 @@ mod tests {
         assert!((clock.track_at(1.0) - 0.8).abs() < 1e-9);
         assert!((clock.time_scale() - 1.25).abs() < 1e-9);
         assert_eq!(clock.lead_at(1.0), 0.0);
+    }
+
+    #[test]
+    fn the_camera_blur_follows_the_studied_strength() {
+        assert!((camera_blur_strength(1.0, 60.0, 1.0) - 1.0).abs() < 1e-9);
+        assert!((camera_blur_strength(0.5, 30.0, 1.0) - 0.25).abs() < 1e-9);
+        assert_eq!(camera_blur_strength(1.0, 60.0, 0.0), 0.0);
+        assert_eq!(camera_blur_strength(0.0, 60.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn a_still_camera_trail_is_the_plain_composite() {
+        let size = (200, 100);
+        let camera = camera_with(32, 32, |_, _| GREEN);
+        let layout = LayoutFrame {
+            screen: Rect::full(),
+            camera: Rect {
+                x: 0.1,
+                y: 0.2,
+                width: 0.3,
+                height: 0.5,
+            },
+            camera_alpha: 1.0,
+            camera_radius: 0.0,
+            cutout: 0.0,
+            mirror: false,
+        };
+        assert_eq!(trail_sample_count(layout, layout, size), 1);
+        let mut plain = solid(size.0, size.1, [0, 0, 0, 255]);
+        composite_layout_into(&mut plain, size, layout, &camera, (32, 32), None).unwrap();
+        let mut trail = solid(size.0, size.1, [0, 0, 0, 255]);
+        composite_layout_trail_into(&mut trail, size, &[layout], &camera, (32, 32), None).unwrap();
+        assert_eq!(plain, trail);
+    }
+
+    #[test]
+    fn a_moving_camera_trail_smears_its_edge() {
+        let size = (200, 100);
+        let camera = camera_with(32, 32, |_, _| GREEN);
+        let at = |x: f64| LayoutFrame {
+            screen: Rect::full(),
+            camera: Rect {
+                x,
+                y: 0.2,
+                width: 0.3,
+                height: 0.5,
+            },
+            camera_alpha: 1.0,
+            camera_radius: 0.0,
+            cutout: 0.0,
+            mirror: false,
+        };
+        let before = at(0.1);
+        let now = at(0.3);
+        assert_eq!(trail_sample_count(now, before, size), 11);
+        let frames: Vec<LayoutFrame> = (0..11)
+            .map(|k| at(0.1 + 0.2 * f64::from(k) / 10.0))
+            .collect();
+        let mut frame = solid(size.0, size.1, [0, 0, 0, 255]);
+        composite_layout_trail_into(&mut frame, size, &frames, &camera, (32, 32), None).unwrap();
+        let first = pixel(&frame, 200, 25, 50)[1];
+        assert!(
+            first > 20 && first < 235,
+            "the first samples alone soften the edge: {first}"
+        );
+        let every = pixel(&frame, 200, 70, 50)[1];
+        assert!(every > 235, "the samples all cover the middle: {every}");
+        let never = pixel(&frame, 200, 5, 50)[1];
+        assert!(never < 5, "the trail never reaches the left edge: {never}");
     }
 }

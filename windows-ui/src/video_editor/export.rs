@@ -840,27 +840,54 @@ fn render_range(
             // sat over the desktop while the recording ran.
             let camera_frame = track_reader.as_mut().and_then(|reader| reader.next_frame());
             if let Some(webcam) = webcam.as_ref() {
-                let shrink = webcam::zoom_shrink_at(
-                    &model.zooms,
-                    composition_time,
-                    model.zoom_camera.lead_in_seconds(),
+                let hidden = webcam::silence_hide_at(
+                    &webcam.silence,
+                    source_time,
+                    webcam.settings.hide_during_silence,
                 );
-                let layout = layouts.frame_at_zoomed(
-                    composition_time,
-                    webcam.settings,
-                    source_aspect,
-                    camera_aspect,
-                    shrink,
+                let layout_at = |time: f64| {
+                    let shrink = webcam::zoom_shrink_at(
+                        &model.zooms,
+                        time,
+                        model.zoom_camera.lead_in_seconds(),
+                    );
+                    webcam::hide_for_silence(
+                        layouts.frame_at_zoomed(
+                            time,
+                            webcam.settings,
+                            source_aspect,
+                            camera_aspect,
+                            shrink,
+                        ),
+                        hidden,
+                    )
+                };
+                let layout = layout_at(composition_time);
+                // The studied camera blur: a trail back over `strength` frames,
+                // only while the camera shows and something moved.
+                let strength = webcam::camera_blur_strength(
+                    model.zoom_camera.motion_blur,
+                    fps,
+                    layout.camera_alpha,
                 );
-                let layout = webcam::hide_for_silence(
-                    layout,
-                    webcam::silence_hide_at(
-                        &webcam.silence,
-                        source_time,
-                        webcam.settings.hide_during_silence,
-                    ),
-                );
-                if layout.camera_alpha > 0.0 && camera_frame.is_none() {
+                let trail = if strength > 0.0 {
+                    let span = strength / fps;
+                    let before = layout_at((composition_time - span).max(0.0));
+                    let count = webcam::trail_sample_count(layout, before, size);
+                    if count <= 1 {
+                        vec![layout]
+                    } else {
+                        (0..count)
+                            .map(|k| {
+                                let back = span * (count - 1 - k) as f64 / (count - 1) as f64;
+                                layout_at((composition_time - back).max(0.0))
+                            })
+                            .collect()
+                    }
+                } else {
+                    vec![layout]
+                };
+                if trail.iter().any(|f| f.camera_alpha > 0.0) && camera_frame.is_none() {
                     let _ = decoder.kill();
                     let _ = decoder.wait();
                     return Err(End::Failed(format!(
@@ -868,7 +895,10 @@ fn render_range(
                         webcam.path.display()
                     )));
                 }
-                let mask = if layout.cutout > 1e-3 && layout.camera_alpha > 0.0 {
+                let mask = if trail
+                    .iter()
+                    .any(|f| f.cutout > 1e-3 && f.camera_alpha > 0.0)
+                {
                     let (pixels, matte_size) = camera_frame.expect("checked above");
                     let Some(processor) = cutout.as_mut() else {
                         let _ = decoder.kill();
@@ -901,10 +931,10 @@ fn render_range(
                     Some((pixels, size)) => (pixels, size),
                     None => (&[][..], (0, 0)),
                 };
-                if let Err(error) = webcam::composite_layout_into(
+                if let Err(error) = webcam::composite_layout_trail_into(
                     frame,
                     size,
-                    layout,
+                    &trail,
                     camera_pixels,
                     camera_size,
                     mask.as_deref(),
@@ -4127,6 +4157,176 @@ mod webcam_export_tests {
         sidecar
             .parent()
             .map(|dir| dir.join(format!("{stem}-camera.mp4")))
+    }
+
+    #[test]
+    fn a_moving_camera_blurs_and_a_still_one_stays_sharp() {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-webcam-blur-{}-{:?}",
+            std::process::id(),
+            std::thread::current().id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        if fs::create_dir_all(&dir).is_err() {
+            return;
+        }
+        let source = dir.join("screen.mp4");
+        if !solid_clip(&source, "0x1e1e1e", "320x240", 5.0) {
+            eprintln!("skipping the camera blur test: ffmpeg is unavailable");
+            return;
+        }
+        let Some(track_path) = webcam_track_file(&source) else {
+            eprintln!("skipping the camera blur test: no sidecar directory");
+            return;
+        };
+        if let Some(parent) = track_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        if !solid_clip(&track_path, "0x00ff00", "320x320", 4.0) {
+            return;
+        }
+        let track = WebcamTrack {
+            file: track_path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            width: 320,
+            height: 320,
+            duration: 4.0,
+            start: 0.0,
+            x: 0.0,
+            y: 0.6,
+            w: 0.3,
+            h: 0.3,
+            shape: 1,
+            flip: false,
+        };
+        let mut sidecar = PointerSidecar::new(
+            0,
+            crate::recording::editor::sidecar::CaptureRegion::from_capture(None, None, None, None),
+        );
+        sidecar.webcam = Some(track);
+        let sidecar_path = PointerSidecar::sidecar_path(&source);
+        if sidecar.write(&sidecar_path).is_err() {
+            return;
+        }
+
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            cues: vec![LayoutCue {
+                at: 0.5,
+                layout: CameraLayout::CameraOverlay,
+                position: Some([1.0, 1.0]),
+                cutout_x: None,
+            }],
+            transition_seconds: 0.45,
+            ..LayoutSettings::default()
+        };
+        let bubble = LayerSettings {
+            x: 0.0,
+            y: 0.6,
+            w: 0.3,
+            h: 0.3,
+            radius: 0.0,
+            ..Default::default()
+        };
+        let export = |name: &str, motion_blur: f64| -> PathBuf {
+            let output = dir.join(name);
+            let model = ExportModel {
+                source: source.clone(),
+                source_size: (320, 240),
+                trim_start: 0.0,
+                trim_end: 1.5,
+                cuts: Vec::new(),
+                zooms: Vec::new(),
+                zoom_camera: crate::video_editor::zoom::ZoomCameraSettings {
+                    motion_blur,
+                    ..Default::default()
+                },
+                cursor: CursorSettings::default(),
+                sidecar: PointerSidecar::load_next_to_video(&source),
+                webcam: Some(webcam::WebcamExport {
+                    path: track_path.clone(),
+                    settings: bubble,
+                    layouts: layouts.clone(),
+                    track_seconds: 4.0,
+                    start: 0.0,
+                    video_seconds: 4.0,
+                    last_frame: 3.95,
+                    source_size: (320, 320),
+                    silence: Vec::new(),
+                }),
+                canvas: None,
+                crf: 30,
+            };
+            let handle = start_export(model, output.clone());
+            loop {
+                match handle.receiver.recv_timeout(Duration::from_secs(120)) {
+                    Ok(ExportUpdate::Progress { .. }) => {}
+                    Ok(ExportUpdate::Finished(path)) => {
+                        assert_eq!(path, output);
+                        break;
+                    }
+                    Ok(ExportUpdate::Failed(message)) => panic!("export failed: {message}"),
+                    Ok(ExportUpdate::Cancelled) => panic!("export cancelled itself"),
+                    Err(error) => panic!("export did not report back: {error}"),
+                }
+            }
+            output
+        };
+        let sharp = export("sharp.mp4", 0.0);
+        let blurred = export("blurred.mp4", 1.0);
+
+        let sharp_still = frame_rgb(&sharp, 0.25, (320, 240)).expect("the sharp export decodes");
+        let blurred_still = frame_rgb(&blurred, 0.25, (320, 240)).expect("the export decodes");
+        let mut row = 0u32;
+        let mut best = 0u8;
+        for y in 0..240 {
+            let green = pixel(&sharp_still, 320, 20, y)[1];
+            if green >= best {
+                best = green;
+                row = y;
+            }
+        }
+        assert!(best > 150, "the bubble starts on the left");
+        for (index, (sharp_byte, blurred_byte)) in
+            sharp_still.iter().zip(&blurred_still).enumerate()
+        {
+            let difference = sharp_byte.abs_diff(*blurred_byte);
+            assert!(
+                difference <= 6,
+                "a still camera is not blurred: byte {index} differs by {difference}"
+            );
+        }
+
+        let edges = |frame: &[u8]| {
+            (0..320)
+                .filter(|x| {
+                    let green = pixel(frame, 320, *x, row)[1];
+                    (40..=200).contains(&green)
+                })
+                .count()
+        };
+        let mut last = (0.0, 0usize, 0usize);
+        let mut smeared = false;
+        for t in [0.62, 0.70] {
+            let sharp_frame = frame_rgb(&sharp, t, (320, 240)).expect("the sharp export decodes");
+            let blurred_frame = frame_rgb(&blurred, t, (320, 240)).expect("the export decodes");
+            let sharp_edges = edges(&sharp_frame);
+            let blurred_edges = edges(&blurred_frame);
+            eprintln!("camera blur edge: t={t} sharp={sharp_edges} blurred={blurred_edges}");
+            smeared |= blurred_edges >= sharp_edges + 4;
+            last = (t, sharp_edges, blurred_edges);
+        }
+        assert!(
+            smeared,
+            "a moving camera does not blur: t={} sharp={} blurred={}",
+            last.0, last.1, last.2
+        );
+
+        let _ = fs::remove_file(&sidecar_path);
+        let _ = fs::remove_file(&track_path);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
