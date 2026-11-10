@@ -1512,6 +1512,27 @@ impl Data {
         })
     }
 
+    /// Put the camera layer on the playhead: the composition instant its
+    /// layouts run on, and how far the screen's zoom has shrunk it there.
+    /// Both preview paths (the tick and a published edit) call this, so the
+    /// camera never runs on a clock the shrink was not computed for.
+    fn sync_webcam_to_playhead(&self) {
+        let Some(webcam) = self.webcam.as_ref() else {
+            return;
+        };
+        webcam.set_composition_time(self.playhead);
+        let unzoomed = self.placement().is_some() || self.add_zoom_tool().is_some();
+        webcam.set_zoom_shrink(if unzoomed {
+            0.0
+        } else {
+            super::webcam::zoom_shrink_at(
+                &self.zoom_clips,
+                self.playhead,
+                self.zoom_camera.lead_in_seconds(),
+            )
+        });
+    }
+
     /// Returns whether the focus point actually moved, so the caller can skip a
     /// repaint when a drag event repeats the same pixel.
     fn set_selected_zoom_center(&mut self, center: (f64, f64)) -> bool {
@@ -2419,18 +2440,7 @@ impl Timeline {
         let placement = data.placement();
         let add_zoom = data.add_zoom_tool();
         let unzoomed = placement.is_some() || add_zoom.is_some();
-        if let Some(webcam) = data.webcam.clone() {
-            webcam.set_composition_time(data.playhead);
-            webcam.set_zoom_shrink(if unzoomed {
-                0.0
-            } else {
-                super::webcam::zoom_shrink_at(
-                    &data.zoom_clips,
-                    data.playhead,
-                    data.zoom_camera.lead_in_seconds(),
-                )
-            });
-        }
+        data.sync_webcam_to_playhead();
         let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
         let camera_settings = super::zoom::ZoomCameraSettings {
             frame_rate: fps,
@@ -3696,9 +3706,7 @@ pub(super) fn build(
                     }
                 }
                 let composition_time = data.playhead;
-                if let Some(webcam) = data.webcam.clone() {
-                    webcam.set_composition_time(composition_time);
-                }
+                data.sync_webcam_to_playhead();
                 let placement = data.placement();
                 let add_zoom = data.add_zoom_tool();
                 let unzoomed = placement.is_some() || add_zoom.is_some();
