@@ -2197,6 +2197,22 @@ impl Data {
         true
     }
 
+    /// Select a layout change where it is, the way a zoom or hide clip is
+    /// selected on its lane: the playhead and playback stay as they are, so
+    /// grabbing a change to move or resize it never jumps the playhead.
+    fn select_layout_cue_in_place(&mut self, index: usize) -> bool {
+        let Some(layouts) = self.webcam_layouts() else {
+            return false;
+        };
+        if index >= layouts.cues.len() {
+            return false;
+        }
+        self.selected_layout = Some(index);
+        self.expanded_lane = TimelineLane::Layout;
+        self.layout_selection_epoch = self.layout_selection_epoch.wrapping_add(1);
+        true
+    }
+
     /// Drop the layout-change selection without moving the playhead and
     /// without taking an undo step.
     fn clear_layout_cue_selection(&mut self) -> bool {
@@ -2209,8 +2225,14 @@ impl Data {
     /// within one cue epsilon of another change is refused: one instant has
     /// one layout. The list stays ordered and whichever change was selected
     /// keeps that selection. A successful move pauses and seeks to the cue.
+    /// Move a change to a typed time from the panel, which asks to go there:
+    /// unlike a drag on the lane, the playhead follows it.
     fn set_layout_cue_time(&mut self, index: usize, at: f64) -> bool {
-        self.move_layout_cue(index, at, false)
+        let moved = self.move_layout_cue(index, at, false);
+        if moved {
+            self.playhead = at.clamp(0.0, self.total_duration());
+        }
+        moved
     }
 
     /// The earliest and latest instant the change at `index` can reach without
@@ -2294,7 +2316,6 @@ impl Data {
             })
         });
         self.playing = false;
-        self.playhead = at.clamp(0.0, self.total_duration());
         self.clamp_layout_cues();
         true
     }
@@ -2823,6 +2844,19 @@ impl Timeline {
         let selected = {
             let mut data = self.data.borrow_mut();
             data.select_layout_cue(index)
+        };
+        if selected {
+            (self.repaint)();
+            self.publish_frame();
+        }
+    }
+
+    /// Select a layout change from the timeline lane without moving the
+    /// playhead.
+    pub fn select_webcam_layout_cue_in_place(&self, index: usize) {
+        let selected = {
+            let mut data = self.data.borrow_mut();
+            data.select_layout_cue_in_place(index)
         };
         if selected {
             (self.repaint)();
@@ -5256,7 +5290,7 @@ fn bind_layout_lane(
                 layout_cue_at(&data, width, x, scale)
             };
             match hit {
-                Some(index) => timeline.select_webcam_layout_cue(index),
+                Some(index) => timeline.select_webcam_layout_cue_in_place(index),
                 None => {
                     timeline.clear_webcam_layout_cue_selection();
                 }
@@ -5306,7 +5340,7 @@ fn bind_layout_lane(
             grab.set(grabbed);
             match grabbed {
                 LayoutGrab::Move(index) | LayoutGrab::Resize(index) => {
-                    timeline.select_webcam_layout_cue(index);
+                    timeline.select_webcam_layout_cue_in_place(index);
                     data.borrow_mut().playing = false;
                 }
                 LayoutGrab::None => {}
@@ -5380,7 +5414,9 @@ fn bind_layout_lane(
                 }
             };
             match target {
-                MenuTarget::Layout(Some(index)) => timeline.select_webcam_layout_cue(index),
+                MenuTarget::Layout(Some(index)) => {
+                    timeline.select_webcam_layout_cue_in_place(index)
+                }
                 _ => {
                     timeline.clear_webcam_layout_cue_selection();
                 }
@@ -5657,7 +5693,7 @@ fn layout_menu_items(
                 let timeline = timeline.clone();
                 Rc::new(move || {
                     match cue {
-                        Some(index) => timeline.select_webcam_layout_cue(index),
+                        Some(index) => timeline.select_webcam_layout_cue_in_place(index),
                         None => {
                             timeline.clear_webcam_layout_cue_selection();
                         }
@@ -8840,6 +8876,22 @@ mod tests {
         );
         let probe = start + (end - start) / 2.0;
         assert_eq!(layout_cue_at(&data, width, probe, 1.0), Some(0));
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn grabbing_a_layout_change_on_its_lane_leaves_the_playhead() {
+        let (mut data, scratch) = webcam_loaded("grab");
+        let index = data.add_layout_cue(2.0).expect("the cue");
+        data.playhead = 5.0;
+        assert!(data.select_layout_cue_in_place(index));
+        assert_eq!(data.selected_layout, Some(index));
+        assert!((data.playhead - 5.0).abs() < 1e-9, "the playhead stays put");
+        assert!(data.move_layout_cue(index, 3.0, true));
+        assert!(
+            (data.playhead - 5.0).abs() < 1e-9,
+            "moving the change leaves it too"
+        );
         clean_up(scratch);
     }
 
