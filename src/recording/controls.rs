@@ -142,6 +142,7 @@ fn window_clicks_from_shell_track(
                             x: local_x,
                             y: local_y,
                             button: *button,
+                            cursor_id: None,
                         },
                     ))
                 })
@@ -367,6 +368,7 @@ impl PointerTrackSession {
                         x: x as f64,
                         y: y as f64,
                         kind: CursorKind::parse(&kind),
+                        cursor_id: None,
                     })
                     .collect();
                 sidecar.clicks = result
@@ -377,6 +379,7 @@ impl PointerTrackSession {
                         x: x as f64,
                         y: y as f64,
                         button,
+                        cursor_id: None,
                     })
                     .collect();
                 sidecar.presses = result
@@ -1334,12 +1337,14 @@ mod tests {
                     x: 12.0,
                     y: 18.0,
                     button: 1,
+                    cursor_id: None,
                 },
                 ClickSample {
                     t: 1.0,
                     x: 30.0,
                     y: 40.0,
                     button: 1,
+                    cursor_id: None,
                 },
             ]
         );
@@ -1365,6 +1370,7 @@ mod tests {
                 x: 12.0,
                 y: 18.0,
                 button: 1,
+                cursor_id: None,
             }]
         );
     }
@@ -1392,6 +1398,7 @@ mod tests {
                 x: 12.0,
                 y: 18.0,
                 button: 1,
+                cursor_id: None,
             }]
         );
     }
@@ -1520,6 +1527,7 @@ mod tests {
                 x: 30.0,
                 y: 35.0,
                 button: 1,
+                cursor_id: None,
             }]
         );
     }

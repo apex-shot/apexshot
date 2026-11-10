@@ -4423,3 +4423,18 @@ msgstr "ffmpeg no pudo codificar el vídeo de Motion."
 
 msgid "Upgrade to Studio"
 msgstr "Actualiza a Studio"
+
+msgid "Always use the default cursor"
+msgstr "Usar siempre el cursor predeterminado"
+
+msgid "Base angle"
+msgstr "Ángulo base"
+
+msgid "Point along movement"
+msgstr "Apuntar en la dirección del movimiento"
+
+msgid "Tilt amount"
+msgstr "Intensidad de la inclinación"
+
+msgid "Tilt with motion"
+msgstr "Inclinar con el movimiento"

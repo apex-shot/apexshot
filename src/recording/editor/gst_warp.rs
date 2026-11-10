@@ -576,12 +576,14 @@ mod tests {
             x: 1.0,
             y: 1.0,
             kind: CursorKind::Default,
+            cursor_id: None,
         });
         sidecar.clicks.push(ClickSample {
             t: 1.0,
             x: 100.0,
             y: 100.0,
             button: 1,
+            cursor_id: None,
         });
         state.sidecar = Some(sidecar);
         assert!(WarpSetup::from_state(&state, 0.5, 1.5).is_some());

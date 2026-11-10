@@ -57,6 +57,9 @@ struct RecordingRequest {
     /// Final MP4 path. The parent directory is created when missing.
     QString outputPath;
     bool includeCursor = true;
+    /// Capture key down/up events. Off by default: a recording should not
+    /// collect keystrokes unless the caller explicitly asks for them.
+    bool captureKeystrokes = false;
     bool includeMicrophone = false;
     /// The microphone's DirectShow friendly name. Empty uses the default.
     QString microphoneDevice;

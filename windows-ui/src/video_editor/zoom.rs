@@ -984,6 +984,7 @@ mod tests {
                 x,
                 y,
                 kind: CursorKind::Default,
+                cursor_id: None,
             }));
         sidecar
     }
@@ -1146,6 +1147,7 @@ mod tests {
             x: 100.0,
             y: 300.0,
             button: 1,
+            cursor_id: None,
         });
         let time = 2.0;
         assert_eq!(
