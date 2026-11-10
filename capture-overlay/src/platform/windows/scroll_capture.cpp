@@ -24,6 +24,10 @@ namespace {
 
 constexpr int kWheelNotches = 3;
 constexpr int kFirstFrameDelayMs = 650;
+// The wheel needs the cursor over the target, but a cursor left there paints
+// hover highlights and tooltips into the frames. Park it once the wheel has
+// been delivered and before the first settle poll.
+constexpr int kParkDelayMs = 60;
 // Smooth scrolling can still be animating after a wheel step. Poll until two
 // captures agree instead of assuming a fixed settle time.
 constexpr int kPollMs = 180;
@@ -168,6 +172,20 @@ int estimateOverlapRows(const QImage& previous, const QImage& next, int expected
                 bestOffset = offset;
             }
         }
+        // The coarse pass steps by two rows; settle on the exact row.
+        for (const int neighbour : {bestOffset - 1, bestOffset + 1}) {
+            if (neighbour < start || neighbour > end)
+                continue;
+            const double score = templateMatchScore(previous,
+                                                    previous.height() - templateHeight,
+                                                    templateHeight,
+                                                    next,
+                                                    neighbour);
+            if (score < bestScore) {
+                bestScore = score;
+                bestOffset = neighbour;
+            }
+        }
     };
 
     double bestScore = std::numeric_limits<double>::max();
@@ -293,6 +311,31 @@ int estimateOverlapRowsExact(const QImage& stitched, const QImage& next)
     return bestIndex + 1;
 }
 
+/// Columns at the right edge that did not scroll with the content, such as a
+/// scrollbar thumb, after the central columns matched row for row. Each
+/// appended strip would otherwise repeat whatever that column showed.
+int nonScrollingRightColumns(const QImage& stitched, const QImage& next, int overlap)
+{
+    const int width = std::min(stitched.width(), next.width());
+    const int margin = width / 20;
+    const int rows = std::min({overlap, stitched.height(), next.height()});
+    if (margin <= 0 || rows <= 0)
+        return 0;
+
+    for (int x = width - margin; x < width; ++x) {
+        int differing = 0;
+        for (int y = 0; y < rows; ++y) {
+            const uchar* a = stitched.constScanLine(stitched.height() - rows + y) + x * 4;
+            const uchar* b = next.constScanLine(y) + x * 4;
+            const int diff = std::abs(int(a[0]) - int(b[0])) + std::abs(int(a[1]) - int(b[1]))
+                + std::abs(int(a[2]) - int(b[2]));
+            if (diff > 24 && ++differing >= 2)
+                return width - x;
+        }
+    }
+    return 0;
+}
+
 QImage contentBand(const QImage& frame, int top, int bottom)
 {
     const int height = frame.height() - top - bottom;
@@ -347,6 +390,29 @@ HWND resolveTarget(quintptr windowId, const QPoint& point)
     return hwnd;
 }
 
+/// A point outside the scroll region for the cursor to rest on while frames
+/// are captured. The user's own cursor position wins when it is already
+/// outside; otherwise the first spot beside the region that is on a display.
+POINT parkingPoint(const QRect& region, const POINT& original)
+{
+    if (!region.contains(QPoint(original.x, original.y)))
+        return original;
+    const QPoint candidates[] = {
+        QPoint(region.right() + 24, region.center().y()),
+        QPoint(region.left() - 24, region.center().y()),
+        QPoint(region.center().x(), region.bottom() + 24),
+        QPoint(region.center().x(), region.top() - 24),
+    };
+    for (const QPoint& candidate : candidates) {
+        const POINT point{candidate.x(), candidate.y()};
+        if (MonitorFromPoint(point, MONITOR_DEFAULTTONULL))
+            return point;
+    }
+    // The region covers every display: the bottom-right corner sits in the
+    // scrollbar margin the overlap search already ignores.
+    return POINT{region.right(), region.bottom()};
+}
+
 } // namespace
 
 namespace Platform {
@@ -366,6 +432,7 @@ public:
     bool capture(QImage& out, QString& error);
     void advanceScroll();
     void sendWheel();
+    void parkCursor();
     void processFrame(const QImage& frame);
 
     bool initUia();
@@ -387,6 +454,7 @@ public:
     bool edgesDetected = false;
     int headerRows = 0;
     int footerRows = 0;
+    int scrollbarColumns = 0;
     QImage header;
     QImage content;
     QImage footer;
@@ -467,6 +535,7 @@ void ScrollCaptureSession::Private::sendWheel()
         const WPARAM wheel = MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA * kWheelNotches));
         const LPARAM position = MAKELPARAM(center.x(), center.y());
         PostMessageW(receiver, WM_MOUSEWHEEL, wheel, position);
+        QTimer::singleShot(kParkDelayMs, q, [this] { if (active) parkCursor(); });
         return;
     }
 
@@ -475,6 +544,13 @@ void ScrollCaptureSession::Private::sendWheel()
     input.mi.dwFlags = MOUSEEVENTF_WHEEL;
     input.mi.mouseData = static_cast<DWORD>(-WHEEL_DELTA * kWheelNotches);
     SendInput(1, &input, sizeof(INPUT));
+    QTimer::singleShot(kParkDelayMs, q, [this] { if (active) parkCursor(); });
+}
+
+void ScrollCaptureSession::Private::parkCursor()
+{
+    const POINT point = parkingPoint(region, originalCursor);
+    SetCursorPos(point.x, point.y);
 }
 
 bool ScrollCaptureSession::Private::initUia()
@@ -725,12 +801,17 @@ void ScrollCaptureSession::Private::processFrame(const QImage& frame)
         pendingViewSize = -1;
     }
 
-    int overlap = estimateOverlapRowsExact(content, nextContent);
+    const int exactOverlap = estimateOverlapRowsExact(content, nextContent);
+    int overlap = exactOverlap;
     if (overlap < 0)
         overlap = estimateOverlapRows(previousContent, nextContent, expectedOverlap);
     overlap = std::max(0, std::min(overlap, nextContent.height() - 1));
     const int appendHeight = nextContent.height() - overlap;
     if (appendHeight > 2) {
+        // Only a row-exact match proves the margin difference is not content.
+        if (exactOverlap > 0)
+            scrollbarColumns =
+                std::max(scrollbarColumns, nonScrollingRightColumns(content, nextContent, overlap));
         QImage combined(content.width(), content.height() + appendHeight,
                         QImage::Format_RGBA8888);
         combined.fill(Qt::transparent);
@@ -927,8 +1008,14 @@ void ScrollCaptureSession::Private::finalize(const QString& reason)
             painter.drawImage(0, y, footer);
     }
 
+    if (scrollbarColumns > 0 && scrollbarColumns < result.width())
+        result = result.copy(0, 0, result.width() - scrollbarColumns, result.height());
+    // Every pixel is painted, so the alpha channel carries nothing.
+    result = result.convertToFormat(QImage::Format_RGB32);
+
     SetCursorPos(originalCursor.x, originalCursor.y);
     qInfo().noquote() << "[scroll]" << reason << "frames=" << frames
+                      << "scrollbar=" << scrollbarColumns
                       << "size=" << result.width() << "x" << result.height();
     emit q->statusChanged(reason);
     emit q->finished(true, result, QString());
@@ -994,12 +1081,16 @@ bool ScrollCaptureSession::start(const QRect& region, quintptr windowId, QString
     if (d->initUia())
         d->findScrollPattern();
 
+    // The first frame is grabbed after a delay; keep the cursor out of it.
+    d->parkCursor();
+
     d->active = true;
     d->discardRequested = false;
     d->usePostedWheel = false;
     d->frames = 0;
     d->similar = 0;
     d->edgesDetected = false;
+    d->scrollbarColumns = 0;
     d->header = QImage();
     d->footer = QImage();
     d->content = QImage();

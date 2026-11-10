@@ -57,6 +57,8 @@ if(WIN32)
         src/platform/windows/webcam_layout.cpp
         src/platform/windows/webcam_layout.h
         src/platform/windows/screen_capture.cpp
+        src/platform/windows/hdr_capture.cpp
+        src/platform/windows/hdr_capture.h
         src/platform/windows/window_list.cpp
         src/platform/windows/ocr.cpp
         src/platform/windows/ocr.h
@@ -247,9 +249,10 @@ if(WIN32)
         add_executable(apexshot-windows-screenshot-tests
             tests/WindowsScreenshotTests.cpp
             src/platform/windows/screen_capture.cpp
+            src/platform/windows/hdr_capture.cpp
         )
         target_include_directories(apexshot-windows-screenshot-tests PRIVATE src)
-        target_link_libraries(apexshot-windows-screenshot-tests PRIVATE Qt5::Core Qt5::Gui dwmapi)
+        target_link_libraries(apexshot-windows-screenshot-tests PRIVATE Qt5::Core Qt5::Gui dwmapi d3d11 dxgi)
         add_test(NAME apexshot-windows-screenshot-tests COMMAND apexshot-windows-screenshot-tests)
 
         add_executable(apexshot-windows-usage-telemetry-tests

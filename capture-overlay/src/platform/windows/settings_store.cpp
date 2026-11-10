@@ -1,6 +1,7 @@
 #include "platform/windows/settings_store.h"
 
 #include <QClipboard>
+#include <QColorSpace>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -483,11 +484,24 @@ bool saveScreenshotImage(const QImage& image,
         return false;
     }
 
+    // Tag the file so viewers show it at its intended size and colours: the
+    // density follows the capture scale (96 DPI at 100%), and the pixels are
+    // what the display showed, which Windows composes as sRGB.
+    QImage tagged = image;
+    const int dotsPerMeter = qRound(3779.527559 * std::max<qreal>(1.0, devicePixelRatio));
+    tagged.setDotsPerMeterX(dotsPerMeter);
+    tagged.setDotsPerMeterY(dotsPerMeter);
+    if (!tagged.colorSpace().isValid())
+        tagged.setColorSpace(QColorSpace(QColorSpace::SRgb));
+
     QImageWriter writer(path, format.toLatin1());
-    if (format == QLatin1String("JPEG") || format == QLatin1String("WebP"))
+    // WebP at quality 100 is lossless, which keeps text and UI edges exact.
+    if (format == QLatin1String("WebP"))
+        writer.setQuality(100);
+    else if (format == QLatin1String("JPEG"))
         writer.setQuality(92);
 
-    if (!writer.write(image)) {
+    if (!writer.write(tagged)) {
         outError = writer.errorString();
         if (outError.isEmpty())
             outError = QStringLiteral("could not write %1").arg(QDir::toNativeSeparators(path));
