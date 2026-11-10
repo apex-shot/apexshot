@@ -4323,3 +4323,18 @@ msgstr "ffmpeg が Motion 動画をエンコードできませんでした。"
 
 msgid "Upgrade to Studio"
 msgstr "Studio にアップグレード"
+
+msgid "Add zoom: click the preview to place it"
+msgstr "ズームを追加：プレビューをクリックして配置"
+
+msgid "Adds a zoom that automatically follows the mouse activity"
+msgstr "マウスの動きに自動で追従するズームを追加します"
+
+msgid "Automatic zoom"
+msgstr "自動ズーム"
+
+msgid "Click where to zoom in"
+msgstr "ズームする位置をクリック"
+
+msgid "Click where to zoom in, or use Automatic zoom"
+msgstr "ズームする位置をクリック、または自動ズームを使用"

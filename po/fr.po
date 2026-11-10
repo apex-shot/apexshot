@@ -4435,3 +4435,18 @@ msgstr "ffmpeg n'a pas pu encoder la vidéo Motion."
 
 msgid "Upgrade to Studio"
 msgstr "Passer à Studio"
+
+msgid "Add zoom: click the preview to place it"
+msgstr "Ajouter un zoom : cliquez sur l’aperçu pour le placer"
+
+msgid "Adds a zoom that automatically follows the mouse activity"
+msgstr "Ajoute un zoom qui suit automatiquement l’activité de la souris"
+
+msgid "Automatic zoom"
+msgstr "Zoom automatique"
+
+msgid "Click where to zoom in"
+msgstr "Cliquez à l’endroit où zoomer"
+
+msgid "Click where to zoom in, or use Automatic zoom"
+msgstr "Cliquez à l’endroit où zoomer, ou utilisez le mode Zoom automatique"

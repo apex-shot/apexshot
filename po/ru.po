@@ -4405,3 +4405,18 @@ msgstr "ffmpeg не смог закодировать видео Motion."
 
 msgid "Upgrade to Studio"
 msgstr "Перейти на Studio"
+
+msgid "Add zoom: click the preview to place it"
+msgstr "Добавить зум: щёлкните по предпросмотру, чтобы разместить его"
+
+msgid "Adds a zoom that automatically follows the mouse activity"
+msgstr "Добавляет зум, который автоматически следует за активностью мыши"
+
+msgid "Automatic zoom"
+msgstr "Автоматический зум"
+
+msgid "Click where to zoom in"
+msgstr "Щёлкните там, где нужно увеличить"
+
+msgid "Click where to zoom in, or use Automatic zoom"
+msgstr "Щёлкните там, где нужно увеличить, или выберите «Автоматический зум»"
