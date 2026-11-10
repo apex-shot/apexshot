@@ -2216,6 +2216,32 @@ impl Data {
         true
     }
 
+    /// Put the playhead inside the change at `index` when it is not already,
+    /// at the middle of the span the change holds (the studied place a new
+    /// change opens at), so editing a change from the panel shows it.
+    /// Returns whether the playhead moved.
+    fn show_layout_cue(&mut self, index: usize) -> bool {
+        let Some(layouts) = self.webcam_layouts() else {
+            return false;
+        };
+        let Some(cue) = layouts.cues.get(index).copied() else {
+            return false;
+        };
+        let duration = self.total_duration();
+        let end = layouts
+            .cues
+            .iter()
+            .map(|other| other.at)
+            .filter(|at| *at > cue.at)
+            .fold(duration, f64::min);
+        if self.playhead >= cue.at && self.playhead < end {
+            return false;
+        }
+        self.playing = false;
+        self.playhead = ((cue.at + end) / 2.0).clamp(0.0, duration);
+        true
+    }
+
     /// Drop the layout-change selection without moving the playhead and
     /// without taking an undo step.
     fn clear_layout_cue_selection(&mut self) -> bool {
@@ -2862,6 +2888,19 @@ impl Timeline {
             data.select_layout_cue_in_place(index)
         };
         if selected {
+            (self.repaint)();
+            self.publish_frame();
+        }
+    }
+
+    /// Bring the playhead into a layout change before the panel edits it, so
+    /// the preview shows the change being edited.
+    pub fn show_webcam_layout_cue(&self, index: usize) {
+        let moved = {
+            let mut data = self.data.borrow_mut();
+            data.show_layout_cue(index)
+        };
+        if moved {
             (self.repaint)();
             self.publish_frame();
         }
@@ -8892,6 +8931,24 @@ mod tests {
         );
         let probe = start + (end - start) / 2.0;
         assert_eq!(layout_cue_at(&data, width, probe, 1.0), Some(0));
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn editing_a_change_from_the_panel_brings_the_playhead_into_it() {
+        let (mut data, scratch) = webcam_loaded("show");
+        let first = data.add_layout_cue(2.0).expect("the first cue");
+        data.add_layout_cue(6.0).expect("the second cue");
+        data.playhead = 1.0;
+        assert!(data.show_layout_cue(first));
+        assert!(
+            (data.playhead - 4.0).abs() < 1e-9,
+            "the middle of 2..6: {}",
+            data.playhead
+        );
+        data.playhead = 3.0;
+        assert!(!data.show_layout_cue(first), "already inside, it stays");
+        assert!((data.playhead - 3.0).abs() < 1e-9);
         clean_up(scratch);
     }
 

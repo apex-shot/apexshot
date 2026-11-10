@@ -3115,6 +3115,7 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                 }
                 let state = timeline.webcam_panel_state();
                 if let Some((index, cue)) = webcam_selected_cue(&state) {
+                    timeline.show_webcam_layout_cue(index);
                     let (mut x, mut y) = cue
                         .position
                         .map(|[x, y]| (x, y))
@@ -3217,6 +3218,7 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             Rc::new(move |position| {
                 if !syncing.get() {
                     if let Some((index, _)) = webcam_selected_cue(&timeline.webcam_panel_state()) {
+                        timeline.show_webcam_layout_cue(index);
                         timeline.update_webcam_layouts(|layouts| {
                             if let Some(cue) = layouts.cues.get_mut(index) {
                                 cue.cutout_x = Some(position);
@@ -3236,6 +3238,7 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
             Rc::new(move |position| {
                 if !syncing.get() {
                     if let Some((index, _)) = webcam_selected_cue(&timeline.webcam_panel_state()) {
+                        timeline.show_webcam_layout_cue(index);
                         timeline.update_webcam_layouts_continuous(|layouts| {
                             if let Some(cue) = layouts.cues.get_mut(index) {
                                 cue.cutout_x = Some(position);
