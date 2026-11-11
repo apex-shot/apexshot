@@ -142,6 +142,10 @@ fn build_capture_overlay() {
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/pointer_tracker.cpp");
     #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/recording_manifest.cpp");
+    #[rustfmt::skip]
+    println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/recording_manifest.h");
+    #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/pointer_tracker.h");
     #[rustfmt::skip]
     println!("cargo:rerun-if-changed=capture-overlay/src/platform/windows/hotkey_parser.cpp");

@@ -4,6 +4,7 @@
 #include "platform/windows/audio_devices.h"
 #include "platform/windows/ddagrab.h"
 #include "platform/windows/pointer_tracker.h"
+#include "platform/windows/recording_manifest.h"
 #include "platform/windows/settings_store.h"
 #include "platform/windows/webcam_format.h"
 #include "platform/windows/window_capture.h"
@@ -544,6 +545,9 @@ public:
     [[nodiscard]] QStringList buildWebcamArguments(const QString& webcamSegmentPath) const;
     [[nodiscard]] QStringList buildAudioArguments(QStringList& warnings) const;
     [[nodiscard]] QString captureOutput() const;
+    void openManifestSession();
+    void closeManifestSession();
+    void writeManifest(const QString& videoPath);
 
     RecordingSession* q = nullptr;
     State state = State::Idle;
@@ -622,6 +626,19 @@ public:
     qint64 pauseWallMs = 0;
     /// Paused spans in elapsed time: [start, start + paused wall duration).
     QVector<QPair<qint64, qint64>> micPauseSpans;
+
+    /// The manifest written beside the sidecar when the recording is kept.
+    qint64 recordingStartedAtUnixMs = 0;
+    QVector<RecordingManifest::Session> manifestSessions;
+    bool manifestSessionOpen = false;
+    WindowIdentity manifestWindow;
+    qint64 firstScreenStartUnixMs = 0;
+    qint64 cameraProcessDelayMs = -1;
+    /// Set by buildScreenArguments for the segment it builds.
+    mutable QString manifestCaptureBackend;
+    mutable QString manifestEncoder;
+    mutable QSize manifestOutputSize;
+    mutable int manifestCrf = 0;
 };
 
 qint64 RecordingSession::Private::elapsedMs() const
@@ -772,6 +789,13 @@ QStringList RecordingSession::Private::buildScreenArguments(const QString& segme
             : 0;
     const int crf = std::max(1, crfBase - reduction);
     appendVideoEncoder(args, crf, outputSize, fps);
+    manifestCaptureBackend = useWindowCapture ? QStringLiteral("window-graphics")
+        : useDdagrab                          ? QStringLiteral("ddagrab")
+                                              : QStringLiteral("gdigrab");
+    const QString hardware = hardwareVideoEncoder(outputSize, fps);
+    manifestEncoder = hardware.isEmpty() ? QStringLiteral("libx264") : hardware;
+    manifestOutputSize = outputSize;
+    manifestCrf = crf;
     args << QStringLiteral("-g") << QString::number(fps * 2) << QStringLiteral("-bf")
          << QStringLiteral("2") << QStringLiteral("-r") << QString::number(fps);
 
@@ -914,6 +938,8 @@ bool RecordingSession::Private::startSegment(QString& error)
     }
 
     segments.append(path);
+    if (segmentIndex == 0)
+        firstScreenStartUnixMs = QDateTime::currentMSecsSinceEpoch();
 
     if (!webcamPath.isEmpty()) {
         webcamProcess = new QProcess(q);
@@ -951,6 +977,9 @@ bool RecordingSession::Private::startSegment(QString& error)
             webcamTrack = Platform::WebcamTrack{};
         } else {
             webcamSegments.append(webcamPath);
+            if (segmentIndex == 0 && firstScreenStartUnixMs > 0)
+                cameraProcessDelayMs =
+                    QDateTime::currentMSecsSinceEpoch() - firstScreenStartUnixMs;
         }
     }
 
@@ -1615,6 +1644,7 @@ void RecordingSession::Private::removeDiscardedSidecar()
         return;
     QFile::remove(path);
     QFile::remove(path + QStringLiteral(".webcam.mp4"));
+    QFile::remove(path + QStringLiteral(".recording.json"));
     QDir(path + QStringLiteral(".cursors")).removeRecursively();
     if (!webcamTrack.screenFile.isEmpty()) {
         QFileInfo info(request.outputPath);
@@ -1636,6 +1666,7 @@ void RecordingSession::Private::cleanupAndEmit(bool kept,
         QString sidecarError;
         if (!pointerTracker.writeSidecar(path, webcamTrack, &sidecarError))
             qWarning().noquote() << "[recording] could not write pointer sidecar:" << sidecarError;
+        writeManifest(path);
     } else if (!kept && discardRequested) {
         pointerTracker.discard();
         removeDiscardedSidecar();
@@ -1644,6 +1675,89 @@ void RecordingSession::Private::cleanupAndEmit(bool kept,
         cleanupWorkDir();
     emit q->finished(kept, kept ? path : QString(), failure);
     emit q->stateChanged();
+}
+
+void RecordingSession::Private::openManifestSession()
+{
+    if (manifestSessionOpen)
+        return;
+    RecordingManifest::Session session;
+    session.startedAtUnixMs = QDateTime::currentMSecsSinceEpoch();
+    session.startMs = elapsedBeforeMs;
+    if (request.target == RecordingRequest::Target::Window)
+        session.windowBounds = windowIdentity(request.windowId).bounds;
+    manifestSessions.append(session);
+    manifestSessionOpen = true;
+}
+
+void RecordingSession::Private::closeManifestSession()
+{
+    if (!manifestSessionOpen || manifestSessions.isEmpty())
+        return;
+    manifestSessions.last().endedAtUnixMs = QDateTime::currentMSecsSinceEpoch();
+    manifestSessions.last().endMs = elapsedBeforeMs;
+    manifestSessionOpen = false;
+}
+
+void RecordingSession::Private::writeManifest(const QString& videoPath)
+{
+    closeManifestSession();
+    RecordingManifest manifest;
+    manifest.startedAtUnixMs = recordingStartedAtUnixMs;
+    manifest.finishedAtUnixMs = QDateTime::currentMSecsSinceEpoch();
+    manifest.durationMs = elapsedBeforeMs;
+    switch (request.target) {
+    case RecordingRequest::Target::Screen:
+        manifest.target = QStringLiteral("screen");
+        break;
+    case RecordingRequest::Target::Area:
+        manifest.target = QStringLiteral("area");
+        break;
+    case RecordingRequest::Target::Window:
+        manifest.target = QStringLiteral("window");
+        break;
+    }
+    manifest.region = request.region;
+    manifest.fps = request.fps;
+    manifest.displayScale = request.displayScale;
+    manifest.displayRefreshRate = displayRefreshRateAt(request.region.center());
+    manifest.outputSize = manifestOutputSize;
+    manifest.encoder = manifestEncoder;
+    manifest.crf = manifestCrf;
+    manifest.captureBackend = manifestCaptureBackend;
+    if (request.target == RecordingRequest::Target::Window) {
+        manifest.hasWindow = true;
+        manifest.windowId = request.windowId;
+        manifest.windowTitle = manifestWindow.title;
+        manifest.windowApp = manifestWindow.app;
+        manifest.windowBounds = manifestWindow.bounds;
+    }
+    manifest.microphone = !micPath.isEmpty();
+    manifest.microphoneDevice = request.microphoneDevice;
+    if (!systemAudioPath.isEmpty()) {
+        manifest.systemAudio =
+            request.systemAudio == RecordingRequest::SystemAudio::Application
+                ? QStringLiteral("app")
+                : QStringLiteral("all");
+        manifest.systemAudioApplication = request.systemAudioApplication;
+    }
+    manifest.monoAudio = request.monoAudio;
+    if (webcamActive && webcamTrack.is_valid()) {
+        manifest.hasCamera = true;
+        manifest.cameraDevice = request.webcamDevice;
+        manifest.cameraWidth = webcamTrack.width;
+        manifest.cameraHeight = webcamTrack.height;
+        manifest.cameraFps = webcamFps;
+        manifest.cameraStartMs = qRound64(webcamTrack.start * 1000.0);
+        manifest.cameraDurationMs = qRound64(webcamTrack.duration * 1000.0);
+        manifest.cameraProcessDelayMs = cameraProcessDelayMs;
+    }
+    manifest.keys = request.captureKeystrokes;
+    manifest.sessions = manifestSessions;
+
+    QString error;
+    if (!writeRecordingManifest(videoPath, manifest, &error))
+        qWarning().noquote() << "[recording] could not write the recording manifest:" << error;
 }
 
 void RecordingSession::Private::finalize()
@@ -2029,6 +2143,14 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
         }
     }
 
+    d->recordingStartedAtUnixMs = QDateTime::currentMSecsSinceEpoch();
+    d->manifestSessions.clear();
+    d->manifestSessionOpen = false;
+    d->firstScreenStartUnixMs = 0;
+    d->cameraProcessDelayMs = -1;
+    d->manifestWindow = d->request.target == RecordingRequest::Target::Window
+        ? windowIdentity(d->request.windowId)
+        : WindowIdentity{};
     if (!d->startSegment(error)) {
         if (d->systemAudio)
             d->systemAudio->stop();
@@ -2045,6 +2167,7 @@ bool RecordingSession::start(const RecordingRequest& request, QString& error)
 
     d->state = Private::State::Recording;
     d->active.start();
+    d->openManifestSession();
     d->pointerTracker.start(d->request.region,
                             d->request.fps,
                             [d = d] { return d->elapsedMs(); },
@@ -2061,6 +2184,7 @@ void RecordingSession::pause()
         return;
 
     d->elapsedBeforeMs += d->active.elapsed();
+    d->closeManifestSession();
     d->pointerTracker.pause(d->elapsedBeforeMs);
     // The mic keeps recording through the pause; the span is cut at mux time.
     d->micPauseStartMs = d->elapsedBeforeMs;
@@ -2098,6 +2222,7 @@ void RecordingSession::resume()
 
     d->state = Private::State::Recording;
     d->active.start();
+    d->openManifestSession();
     d->pointerTracker.resume();
     if (d->micPauseStartMs >= 0) {
         const qint64 paused = QDateTime::currentMSecsSinceEpoch() - d->pauseWallMs;
@@ -2120,6 +2245,7 @@ void RecordingSession::stop()
 
     if (d->state == Private::State::Recording)
         d->elapsedBeforeMs += d->active.elapsed();
+    d->closeManifestSession();
     d->pointerTracker.stop(d->elapsedBeforeMs);
     if (d->systemAudio)
         d->systemAudio->stop();
