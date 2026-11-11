@@ -8,6 +8,7 @@
 #include "platform/recording.h"
 #include "platform/windows/disk_space.h"
 #include "platform/windows/pointer_tracker.h"
+#include "platform/windows/recording_manifest.h"
 #include "platform/windows/webcam_layout.h"
 
 #include <QCoreApplication>
@@ -142,6 +143,48 @@ bool checkCursorKinds()
     }
 
     std::printf("CURSOR_KINDS=ok\n");
+    return true;
+}
+
+/// The manifest JSON: two sessions, a camera, and no window.
+bool checkRecordingManifestJson()
+{
+    Platform::RecordingManifest manifest;
+    manifest.target = QStringLiteral("area");
+    manifest.region = QRect(10, 20, 300, 200);
+    manifest.fps = 30;
+    manifest.encoder = QStringLiteral("libx264");
+    manifest.hasCamera = true;
+    manifest.cameraWidth = 1280;
+    manifest.cameraHeight = 720;
+    manifest.cameraStartMs = 120;
+    Platform::RecordingManifest::Session first;
+    first.startMs = 0;
+    first.endMs = 800;
+    Platform::RecordingManifest::Session second;
+    second.startMs = 800;
+    second.endMs = 1800;
+    manifest.sessions = {first, second};
+
+    const QJsonObject json = Platform::recordingManifestJson(manifest);
+    const QJsonArray sessions = json.value(QStringLiteral("sessions")).toArray();
+    const QJsonObject region = json.value(QStringLiteral("region")).toObject();
+    const QJsonObject camera = json.value(QStringLiteral("camera")).toObject();
+    const bool ok = json.value(QStringLiteral("version")).toInt() == 1
+        && json.value(QStringLiteral("target")).toString() == QStringLiteral("area")
+        && region.value(QStringLiteral("w")).toInt() == 300
+        && sessions.size() == 2
+        && sessions.at(1).toObject().value(QStringLiteral("startMs")).toInt() == 800
+        && !sessions.at(0).toObject().contains(QStringLiteral("windowBounds"))
+        && camera.value(QStringLiteral("width")).toInt() == 1280
+        && camera.value(QStringLiteral("startMs")).toInt() == 120
+        && json.value(QStringLiteral("window")).isNull();
+    if (!ok) {
+        std::printf("FAIL manifest json: %s\n",
+                    QJsonDocument(json).toJson(QJsonDocument::Compact).constData());
+        return false;
+    }
+    std::printf("OK manifest json\n");
     return true;
 }
 
@@ -493,12 +536,41 @@ int recordOnce(bool pauseAndResume)
                                  && qEnvironmentVariableIsEmpty("APEXSHOT_TEST_FULL_SCREEN_ONCE")
                                  && !validateSidecar(output, recordedSeconds))
                                  result = 1;
+                             if (pauseAndResume) {
+                                 QFile manifestFile(Platform::recordingManifestPathFor(output));
+                                 const QJsonObject manifest =
+                                     manifestFile.open(QIODevice::ReadOnly)
+                                     ? QJsonDocument::fromJson(manifestFile.readAll()).object()
+                                     : QJsonObject();
+                                 const QJsonArray sessions =
+                                     manifest.value(QStringLiteral("sessions")).toArray();
+                                 const qint64 firstEnd = sessions.size() == 2
+                                     ? sessions.at(0).toObject().value(QStringLiteral("endMs"))
+                                           .toVariant().toLongLong()
+                                     : -1;
+                                 const qint64 secondStart = sessions.size() == 2
+                                     ? sessions.at(1).toObject().value(QStringLiteral("startMs"))
+                                           .toVariant().toLongLong()
+                                     : -1;
+                                 if (manifest.value(QStringLiteral("version")).toInt() != 1
+                                     || sessions.size() != 2 || firstEnd <= 0
+                                     || secondStart != firstEnd) {
+                                     std::printf("FAIL pause/resume manifest: %d sessions\n",
+                                                 int(sessions.size()));
+                                     result = 1;
+                                 } else {
+                                     std::printf("OK pause/resume manifest: pause at %lld ms\n",
+                                                 static_cast<long long>(firstEnd));
+                                 }
+                             }
                              if (qEnvironmentVariableIsEmpty("APEXSHOT_KEEP_TEST_OUTPUT"))
                                  QFile::remove(output);
                              if (qEnvironmentVariableIsEmpty("APEXSHOT_KEEP_TEST_OUTPUT")) {
                                  const QString sidecar = Platform::sidecarPathFor(output);
-                                 if (!sidecar.isEmpty())
+                                 if (!sidecar.isEmpty()) {
                                      QFile::remove(sidecar);
+                                     QFile::remove(Platform::recordingManifestPathFor(output));
+                                 }
                              }
                          }
                          loop.quit();
@@ -1232,6 +1304,8 @@ int main(int argc, char** argv)
     if (!checkCursorKinds())
         return 1;
     if (!checkWebcamPlacement())
+        return 1;
+    if (!checkRecordingManifestJson())
         return 1;
 
     QString error;

@@ -953,6 +953,9 @@ impl PointerSidecar {
                 webcam_path.push(".webcam.mp4");
                 let _ = std::fs::remove_file(webcam_path);
             }
+            let mut manifest_path = current_path.as_os_str().to_os_string();
+            manifest_path.push(".recording.json");
+            let _ = std::fs::remove_file(manifest_path);
             remove_sidecar(&current_path);
         }
 
