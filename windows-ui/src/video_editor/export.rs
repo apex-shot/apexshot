@@ -415,7 +415,10 @@ impl Encoder {
             Self::HevcNvenc => (&["-preset", "p4", "-tune", "hq", "-rc", "vbr"], "nv12"),
             Self::HevcQuickSync => (&["-preset", "medium"], "nv12"),
             Self::HevcAmf => (&["-quality", "balanced", "-rc", "vbr_peak"], "nv12"),
-            _ => (&["-preset", "veryfast", "-x265-params", "log-level=error"], "yuv420p"),
+            _ => (
+                &["-preset", "veryfast", "-x265-params", "log-level=error"],
+                "yuv420p",
+            ),
         };
         ["-c:v", self.codec(), "-profile:v", "main"]
             .into_iter()
@@ -2209,8 +2212,8 @@ mod tests {
 
     #[test]
     fn hevc_encoders_use_a_bitrate_and_the_hvc1_tag() {
-        let expected = (rate::hevc_bits_per_second(24, (1920, 1080), 60.0).round() as u64)
-            .to_string();
+        let expected =
+            (rate::hevc_bits_per_second(24, (1920, 1080), 60.0).round() as u64).to_string();
         for encoder in [
             Encoder::HevcNvenc,
             Encoder::HevcQuickSync,
@@ -2236,10 +2239,8 @@ mod tests {
 
     #[test]
     fn an_hevc_export_plays_as_hvc1_with_its_sound() {
-        let dir = std::env::temp_dir().join(format!(
-            "apexshot-export-hevc-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("apexshot-export-hevc-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let source = dir.join("src.mp4");

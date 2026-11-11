@@ -160,7 +160,11 @@ pub(super) fn show(
     fields.attach(&size_group, 0, 0, 1, 1);
     fields.attach(&fps_group, 1, 0, 1, 1);
 
-    let codec_group = group("Codec", themed_icon(custom::VIDEO, custom::VIDEO_LIGHT), scale);
+    let codec_group = group(
+        "Codec",
+        themed_icon(custom::VIDEO, custom::VIDEO_LIGHT),
+        scale,
+    );
     let codecs = SettingsSelect::new(
         [("h264", "H.264".to_string()), ("hevc", "HEVC".to_string())],
         "h264",
