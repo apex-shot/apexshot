@@ -55,6 +55,11 @@ pub mod editor {
     #[rustfmt::skip]
     pub mod cursor_planner;
 
+    /// The studied shake filter that thins the planner's input.
+    #[path = "../../../../src/recording/editor/cursor_shake.rs"]
+    #[rustfmt::skip]
+    pub mod cursor_shake;
+
     #[allow(dead_code)]
     #[path = "../../../../src/recording/editor/sidecar.rs"]
     #[rustfmt::skip]

@@ -121,6 +121,8 @@ pub struct VideoProjectFile {
     pub cursor_base_rotation_deg: f64,
     #[serde(default)]
     pub cursor_always_use_default: bool,
+    #[serde(default = "default_cursor_remove_shake_threshold")]
+    pub cursor_remove_shake_threshold: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -837,6 +839,10 @@ fn default_cursor_idle_ms() -> f64 {
     DEFAULT_CURSOR_IDLE_MS
 }
 
+fn default_cursor_remove_shake_threshold() -> f64 {
+    crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD
+}
+
 fn default_click_intensity() -> f64 {
     DEFAULT_CLICK_INTENSITY
 }
@@ -1011,6 +1017,7 @@ impl VideoEditState {
             cursor_rotate_on_x_movement_ratio: self.cursor.rotate_on_x_movement_ratio,
             cursor_base_rotation_deg: self.cursor.base_rotation_deg,
             cursor_always_use_default: self.cursor.always_use_default,
+            cursor_remove_shake_threshold: self.cursor.remove_shake_threshold,
         }
     }
 
@@ -1081,6 +1088,7 @@ impl VideoEditState {
             rotate_on_x_movement_ratio: file.cursor_rotate_on_x_movement_ratio,
             base_rotation_deg: file.cursor_base_rotation_deg,
             always_use_default: file.cursor_always_use_default,
+            remove_shake_threshold: file.cursor_remove_shake_threshold,
         }
         .clamped();
         self.project_media
@@ -1571,6 +1579,7 @@ mod tests {
         object.remove("cursor_rotate_on_x_movement_ratio");
         object.remove("cursor_base_rotation_deg");
         object.remove("cursor_always_use_default");
+        object.remove("cursor_remove_shake_threshold");
         for clip in json
             .get_mut("zoom_clips")
             .and_then(|value| value.as_array_mut())
@@ -1590,6 +1599,7 @@ mod tests {
         );
         assert_eq!(file.cursor_base_rotation_deg, 0.0);
         assert!(!file.cursor_always_use_default);
+        assert_eq!(file.cursor_remove_shake_threshold, 500.0);
         assert_eq!(file.zoom_clips[0].easing, ZoomEasingFile::Glide);
 
         let mut restored = VideoEditState::new(metadata_for(&video, 16));
@@ -1613,6 +1623,7 @@ mod tests {
         state.cursor.rotate_on_x_movement_ratio = 0.35;
         state.cursor.base_rotation_deg = -30.0;
         state.cursor.always_use_default = true;
+        state.cursor.remove_shake_threshold = 0.0;
         state.zoom_clips.push(ZoomClip {
             start: 0.5,
             end: 2.3,
@@ -1638,6 +1649,7 @@ mod tests {
         assert!((restored.cursor.rotate_on_x_movement_ratio - 0.35).abs() < 1e-12);
         assert!((restored.cursor.base_rotation_deg + 30.0).abs() < 1e-12);
         assert!(restored.cursor.always_use_default);
+        assert_eq!(restored.cursor.remove_shake_threshold, 0.0);
         assert_eq!(restored.zoom_clips[0].easing, ZoomEasing::Snappy);
         assert_eq!(restored.zoom_clips[0].ease_ms, 480);
         cleanup_project(&video);

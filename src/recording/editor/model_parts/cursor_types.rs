@@ -285,6 +285,10 @@ pub struct CursorSettings {
     /// The studied `alwaysUseDefault` rule: paint the arrow whatever the
     /// recording shows.
     pub always_use_default: bool,
+    /// The studied `removeShakeTreshold`: pointer events farther than this
+    /// many pixels from both of the next two are dropped before the cursor
+    /// path is planned. Zero turns the filter off.
+    pub remove_shake_threshold: f64,
 }
 
 impl Default for CursorSettings {
@@ -307,6 +311,8 @@ impl Default for CursorSettings {
             rotate_on_x_movement_ratio: DEFAULT_ROTATE_ON_X_MOVEMENT_RATIO,
             base_rotation_deg: 0.0,
             always_use_default: false,
+            remove_shake_threshold:
+                crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD,
         }
     }
 }
@@ -333,6 +339,7 @@ impl CursorSettings {
             rotate_on_x_movement_ratio: self.rotate_on_x_movement_ratio.clamp(0.0, 1.0),
             base_rotation_deg: self.base_rotation_deg.clamp(-180.0, 180.0),
             always_use_default: self.always_use_default,
+            remove_shake_threshold: self.remove_shake_threshold.clamp(0.0, 2000.0),
         }
     }
 

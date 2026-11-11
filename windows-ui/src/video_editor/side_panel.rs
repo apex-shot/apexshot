@@ -812,6 +812,36 @@ fn build_cursor_follow_page(
     default_row.append(&always_default);
     page.append(&default_row);
 
+    let shake_row = GtkBox::new(Orientation::Horizontal, 8);
+    shake_row.add_css_class("recording-editor-zoom-classic");
+    let shake_label = Label::new(Some(&t("Remove cursor shake")));
+    shake_label.add_css_class("recording-editor-zoom-classic-label");
+    shake_label.set_hexpand(true);
+    shake_label.set_xalign(0.0);
+    let remove_shake = Switch::new();
+    remove_shake.add_css_class("recording-editor-zoom-switch");
+    remove_shake.set_active(settings.remove_shake_threshold > 0.0);
+    remove_shake.set_halign(Align::End);
+    remove_shake.connect_state_set({
+        let cursor = cursor.clone();
+        let repaint = repaint.clone();
+        move |_, active| {
+            // The studied panel turns the filter off by writing zero and back
+            // on at its default threshold.
+            update_cursor_settings(&cursor, &repaint, |settings| {
+                settings.remove_shake_threshold = if active {
+                    crate::recording::editor::cursor_shake::DEFAULT_REMOVE_SHAKE_THRESHOLD
+                } else {
+                    0.0
+                }
+            });
+            gtk4::glib::Propagation::Proceed
+        }
+    });
+    shake_row.append(&shake_label);
+    shake_row.append(&remove_shake);
+    page.append(&shake_row);
+
     let idle_row = GtkBox::new(Orientation::Horizontal, 8);
     idle_row.add_css_class("recording-editor-zoom-classic");
     let idle_label = Label::new(Some(&t("Hide when idle")));
