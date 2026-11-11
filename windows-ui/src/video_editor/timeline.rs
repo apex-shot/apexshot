@@ -206,6 +206,9 @@ struct Data {
     last_zoom_style: Option<(f64, bool)>,
     /// The recording has pointer samples, so new zooms can follow the pointer.
     pointer_available: bool,
+    /// Markers and pause points the recorder wrote for this recording, in
+    /// source seconds.
+    recording_marks: crate::recording::editor::sidecar::RecordingMarks,
     /// The Add zoom tool is armed: a click on the preview places a zoom.
     add_zoom_tool: bool,
     /// Where the pointer sits on each pill lane, in composition time. Copy and
@@ -277,6 +280,7 @@ impl Default for Data {
             clipboard: None,
             last_zoom_style: None,
             pointer_available: false,
+            recording_marks: Default::default(),
             add_zoom_tool: false,
             hover_zoom: None,
             hover_hide: None,
@@ -474,6 +478,17 @@ impl Data {
                 return Some(
                     (source_start + (composition_time - start)).clamp(source_start, source_end),
                 );
+            }
+        }
+        None
+    }
+
+    /// Source time to composition time through the first segment that holds
+    /// it. Footage the edit cut away answers `None`.
+    fn composition_time_for_source(&self, source_time: f64) -> Option<f64> {
+        for (index, &(source_start, source_end)) in self.segment_boundaries().iter().enumerate() {
+            if source_time + 1e-9 >= source_start && source_time <= source_end + 1e-9 {
+                return Some(self.segment_start(index) + (source_time - source_start).max(0.0));
             }
         }
         None
@@ -701,6 +716,7 @@ impl Data {
         self.clipboard = None;
         self.last_zoom_style = None;
         self.pointer_available = false;
+        self.recording_marks = Default::default();
         self.add_zoom_tool = false;
         self.hover_zoom = None;
         self.hover_hide = None;
@@ -3198,6 +3214,8 @@ impl Timeline {
                 .filter(|fps| fps.is_finite() && *fps > 0.0)
                 .unwrap_or(30.0);
             data.path = Some(source.clone());
+            data.recording_marks =
+                crate::recording::editor::sidecar::RecordingMarks::for_video(source);
             data.duration = duration;
             data.trim_end = duration;
             // The camera layer follows the document: its own track, its own
@@ -5994,6 +6012,42 @@ fn draw_ruler(
         }
         time += minor;
     }
+    // Where the recording resumed after a pause, and the moments the person
+    // marked while recording, as the studied editor shows them.
+    for &source in &data.recording_marks.pauses {
+        let Some(time) = data.composition_time_for_source(source) else {
+            continue;
+        };
+        let x = data.time_to_x(time, width).floor() + 0.5;
+        if x < -4.0 || x > width + 4.0 {
+            continue;
+        }
+        context.set_source_rgba(tick_r, tick_g, tick_b, if prefers_dark { 0.55 } else { 0.6 });
+        context.set_dash(&[2.0 * scale, 2.0 * scale], 0.0);
+        context.move_to(x, 0.0);
+        context.line_to(x, height);
+        let _ = context.stroke();
+        context.set_dash(&[], 0.0);
+    }
+    for &source in &data.recording_marks.markers {
+        let Some(time) = data.composition_time_for_source(source) else {
+            continue;
+        };
+        let x = data.time_to_x(time, width).floor() + 0.5;
+        if x < -8.0 || x > width + 8.0 {
+            continue;
+        }
+        context.set_source_rgba(0.98, 0.74, 0.18, 1.0);
+        context.move_to(x, 0.0);
+        context.line_to(x, height);
+        let _ = context.stroke();
+        let flag = (6.0 * scale).round();
+        context.move_to(x, 1.0);
+        context.line_to(x + flag, 1.0 + flag * 0.5);
+        context.line_to(x, 1.0 + flag);
+        context.close_path();
+        let _ = context.fill();
+    }
 }
 
 fn draw_effect_clips(
@@ -7474,6 +7528,16 @@ mod tests {
         assert!((data.total_duration() - 12.0).abs() < 1e-9);
         assert_eq!(data.source_time_at(5.0), None);
         assert!((data.source_time_at(6.5).unwrap_or_default() - 4.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn recording_marks_follow_the_footage_through_cuts_and_moves() {
+        let mut data = loaded();
+        assert!(data.add_cut(4.0));
+        data.set_segment_start(1, 6.0);
+        assert!((data.composition_time_for_source(2.0).unwrap() - 2.0).abs() < 1e-9);
+        assert!((data.composition_time_for_source(4.5).unwrap() - 6.5).abs() < 1e-9);
+        assert_eq!(data.composition_time_for_source(42.0), None);
     }
 
     #[test]
