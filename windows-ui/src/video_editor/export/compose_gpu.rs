@@ -83,6 +83,19 @@ pub(super) fn ripple_slots(
     slots
 }
 
+/// Where one `GpuStage::render` call spent its time. `gpu` is only measured
+/// when the stage was opened with tracing on; otherwise the GPU's work is
+/// inside `readback`, which waits for it.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct StageTimings {
+    /// Copying the NV12 frame into the upload texture.
+    pub upload: std::time::Duration,
+    /// Decode, compose and NV12 passes, from submission until the GPU is idle.
+    pub gpu: std::time::Duration,
+    /// Copying the planes to the staging textures and into `out`.
+    pub readback: std::time::Duration,
+}
+
 /// A D3D11 pipeline that composites one NV12 frame at a time.
 pub(super) struct GpuStage {
     context: ID3D11DeviceContext,
@@ -119,6 +132,10 @@ pub(super) struct GpuStage {
     luma_coef: [f32; 4],
     blue_coef: [f32; 4],
     red_coef: [f32; 4],
+    /// An event query to wait for the GPU when tracing; None otherwise.
+    trace_query: Option<ID3D11Query>,
+    /// The last `render` call's timings.
+    pub(super) timings: StageTimings,
     _device: ID3D11Device,
 }
 
@@ -336,6 +353,20 @@ impl GpuStage {
 
             let (decode_coef, luma_coef, blue_coef, red_coef) = colour_constants(space.matrix);
 
+            let trace_query = if trace_requested() {
+                let desc = D3D11_QUERY_DESC {
+                    Query: D3D11_QUERY_EVENT,
+                    MiscFlags: 0,
+                };
+                let mut query = None;
+                match device.CreateQuery(&desc, Some(&mut query)) {
+                    Ok(()) => query,
+                    Err(_) => None,
+                }
+            } else {
+                None
+            };
+
             Ok(Self {
                 context,
                 vertex,
@@ -371,6 +402,8 @@ impl GpuStage {
                 luma_coef,
                 blue_coef,
                 red_coef,
+                trace_query,
+                timings: StageTimings::default(),
                 _device: device,
             })
         }
@@ -393,6 +426,7 @@ impl GpuStage {
         }
 
         unsafe {
+            let started = std::time::Instant::now();
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             self.context
                 .Map(&self.upload, 0, D3D11_MAP_WRITE, 0, Some(&mut mapped))
@@ -418,6 +452,7 @@ impl GpuStage {
             }
             self.context.Unmap(&self.upload, 0);
             self.context.CopyResource(&self.nv12, &self.upload);
+            let uploaded = std::time::Instant::now();
 
             let params = Params {
                 out_size: [width as f32, height as f32],
@@ -506,6 +541,24 @@ impl GpuStage {
                 &[Some(self.composite_srv.clone())],
             );
 
+            if let Some(query) = self.trace_query.as_ref() {
+                self.context.End(query);
+                let mut done = windows::core::BOOL(0);
+                while self
+                    .context
+                    .GetData(
+                        query,
+                        Some(&mut done as *mut _ as *mut std::ffi::c_void),
+                        std::mem::size_of::<windows::core::BOOL>() as u32,
+                        0,
+                    )
+                    .is_ok()
+                    && !done.as_bool()
+                {
+                    std::hint::spin_loop();
+                }
+            }
+            let drawn = std::time::Instant::now();
             self.context.CopyResource(&self.luma_read, &self.luma);
             self.context.CopyResource(&self.chroma_read, &self.chroma);
 
@@ -541,6 +594,12 @@ impl GpuStage {
                 );
             }
             self.context.Unmap(&self.chroma_read, 0);
+
+            self.timings = StageTimings {
+                upload: uploaded - started,
+                gpu: drawn - uploaded,
+                readback: drawn.elapsed(),
+            };
         }
         Ok(())
     }
@@ -576,6 +635,11 @@ impl GpuStage {
 /// The mip count the RGB texture carries: enough for the trail's LOD, capped.
 fn levels(size: (u32, u32)) -> u32 {
     (1 + (size.0.max(size.1).max(1) as f32).log2().floor() as u32).min(8)
+}
+
+/// Whether `APEXSHOT_EXPORT_TRACE=1` asks for per-phase export timings.
+pub(super) fn trace_requested() -> bool {
+    std::env::var("APEXSHOT_EXPORT_TRACE").is_ok_and(|value| value == "1")
 }
 
 /// The colour constants the shaders use, scaled like `pixels.rs` does.

@@ -787,6 +787,17 @@ fn render_range(
     };
     #[cfg(target_os = "windows")]
     let mut stage_cursor_scratch = CursorScratch::default();
+    // Per-phase totals for `APEXSHOT_EXPORT_TRACE=1`, over the frames the stage
+    // renders: waiting on the decoder, the stage's own phases, the cursor, and
+    // waiting for the encoder to take the frame.
+    #[cfg(target_os = "windows")]
+    let trace = compose_gpu::trace_requested();
+    #[cfg(target_os = "windows")]
+    let mut traced = [std::time::Duration::ZERO; 6];
+    #[cfg(target_os = "windows")]
+    let mut traced_frames = 0u64;
+    #[cfg(target_os = "windows")]
+    let mut decode_wait: std::time::Duration;
     #[cfg(target_os = "windows")]
     let mut gpu = if !plan.passthrough && webcam.is_none() && stage.is_none() {
         match gpu::Scaler::new(model.source_size, size, space, fps) {
@@ -906,9 +917,16 @@ fn render_range(
                 let _ = decoder.wait();
                 return Err(End::Cancelled);
             }
+            let read_started = Instant::now();
             if stdout.read_exact(&mut packed).is_err() {
                 break;
             }
+            #[cfg(target_os = "windows")]
+            {
+                decode_wait = read_started.elapsed();
+            }
+            #[cfg(not(target_os = "windows"))]
+            let _ = read_started;
             span_frame += 1;
             if plan.passthrough {
                 let mut nv12 = match sink.buffer(done_index) {
@@ -1090,6 +1108,7 @@ fn render_range(
                 };
                 match rendered {
                     Ok(()) => {
+                        let cursor_started = Instant::now();
                         if let (Some(sidecar), Some(layer)) =
                             (&model.sidecar, stage_cursor_layer.as_mut())
                         {
@@ -1117,10 +1136,21 @@ fn render_range(
                                 &mut stage_cursor_scratch,
                             );
                         }
+                        let submit_started = Instant::now();
                         if let Err(error) = sink.submit_canvas(nv12) {
                             let _ = decoder.kill();
                             let _ = decoder.wait();
                             return Err(error);
+                        }
+                        if trace && !(screen && !cropped && ripple.is_none()) {
+                            let timings = gpu_stage.timings;
+                            traced[0] += decode_wait;
+                            traced[1] += timings.upload;
+                            traced[2] += timings.gpu;
+                            traced[3] += timings.readback;
+                            traced[4] += submit_started - cursor_started;
+                            traced[5] += submit_started.elapsed();
+                            traced_frames += 1;
                         }
                         done_index += 1;
                         done.fetch_add(1, Ordering::Relaxed);
@@ -1348,6 +1378,22 @@ fn render_range(
 
     if cancel.load(Ordering::Relaxed) {
         return Err(End::Cancelled);
+    }
+    #[cfg(target_os = "windows")]
+    if trace && traced_frames > 0 {
+        let per = |total: std::time::Duration| total.as_secs_f64() * 1000.0 / traced_frames as f64;
+        eprintln!(
+            "[export trace] frames {first}..{end}: {traced_frames} through the stage, ms/frame: \
+             decoder wait {:.2}, upload {:.2}, gpu {:.2}, readback {:.2}, cursor {:.2}, \
+             encoder wait {:.2}; range {:.2} ms/frame overall",
+            per(traced[0]),
+            per(traced[1]),
+            per(traced[2]),
+            per(traced[3]),
+            per(traced[4]),
+            per(traced[5]),
+            started.elapsed().as_secs_f64() * 1000.0 / (end - first).max(1) as f64,
+        );
     }
     sink.finish()?;
     Ok(())

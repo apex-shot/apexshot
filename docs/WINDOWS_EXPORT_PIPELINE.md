@@ -82,6 +82,11 @@ In release on the development machine a blurred zoom transition renders in
 5.2 ms at 1080p and 8.7 ms on a 2160x1260 canvas, against about 390 ms per
 moving frame on the CPU.
 
+`APEXSHOT_EXPORT_TRACE=1` logs, per range, the milliseconds per stage frame spent
+waiting on the decoder, uploading, on the GPU, reading back, drawing the cursor,
+and waiting for the encoder to take the frame. Tracing waits for the GPU after
+each frame, so a traced export is slightly slower than an untraced one.
+
 ## GPU crop and scale
 
 When an export needs a camera view — a zoom, or an output size different from
