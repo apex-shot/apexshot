@@ -2546,6 +2546,9 @@ pub(super) struct WebcamPanelState {
     /// label an overlay shape the way the frame will draw it. 16:9 when the
     /// frame size is unknown.
     pub frame_aspect: f64,
+    /// The screen pane's share of the automatic split on the current stage,
+    /// which a widened or padded stage changes.
+    pub auto_split_share: f64,
     /// The layout change the cue chooser edits.
     pub selected: Option<usize>,
     /// Changes on every selection of a layout change, including a second click
@@ -2816,6 +2819,11 @@ impl Timeline {
             playhead,
             duration: data.total_duration(),
             frame_aspect: data.frame_aspect(),
+            auto_split_share: data
+                .webcam
+                .as_ref()
+                .map(|webcam| webcam.auto_split_share(data.frame_aspect()))
+                .unwrap_or(0.5),
         }
     }
 
@@ -3735,6 +3743,13 @@ pub(super) fn build(
             project.mark_changed();
         })
     };
+
+    // A widened or padded stage changes the automatic split's share, which
+    // the Webcam panel shows; the stage is settled by the preview, not here.
+    let webcam = data.borrow().webcam.clone();
+    if let Some(webcam) = webcam {
+        webcam.set_stage_listener(repaint.clone());
+    }
 
     // Autosave. The repaint above only notes that something may have changed;
     // this tick decides whether it is worth a write by comparing against the

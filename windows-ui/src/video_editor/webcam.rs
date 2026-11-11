@@ -943,6 +943,30 @@ pub(super) fn auto_split_screen_ratio(stage_aspect: f64, screen_aspect: f64) -> 
     (1.0 - camera / stage).clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO)
 }
 
+/// The screen pane's share of the automatic split, in the units the panel's
+/// Width slider uses: of the stage's width unpadded, of the width the gap
+/// leaves when padded, and half of a stacked split. `stage_aspect` is the
+/// stage the split is placed on and `gap` the padded split's gap, in stage
+/// heights; [`split_rects`] and [`padded_split_rects`] place the panes the
+/// same way.
+pub(super) fn auto_split_screen_share(stage_aspect: f64, screen_aspect: f64, gap: f64) -> f64 {
+    let stage = sane_aspect(stage_aspect);
+    let gap = finite_non_negative(gap);
+    if gap <= 0.0 {
+        return auto_split_screen_ratio(stage, screen_aspect);
+    }
+    if stage < 1.0 {
+        return 0.5;
+    }
+    let usable = stage - gap.min(stage * 0.5);
+    let rest = usable - sane_aspect(screen_aspect);
+    let camera = if rest > 0.4 { rest } else { 0.5 }.clamp(
+        usable * (1.0 - MAX_SPLIT_RATIO),
+        usable * (1.0 - MIN_SPLIT_RATIO),
+    );
+    (usable - camera) / usable
+}
+
 /// The camera column the studied auto stage adds beside the screen, as a
 /// width over the stage's inner height.
 const AUTO_STAGE_CAMERA_ASPECT: f64 = 9.0 / 16.0;
@@ -1853,6 +1877,9 @@ struct State {
     requested_cutout: Cell<bool>,
     requested_matte: Cell<(f64, f64)>,
     repaint: Rc<dyn Fn()>,
+    /// Told when the stage aspect or the split gap changes, so the panel's
+    /// automatic Width readout follows the stage.
+    stage_listener: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 /// The editor's camera layer: what to draw, from which track, and when.
@@ -1895,6 +1922,7 @@ impl WebcamModel {
                 requested_cutout: Cell::new(false),
                 requested_matte: Cell::new((0.0, 0.0)),
                 repaint,
+                stage_listener: RefCell::new(None),
             }),
         }
     }
@@ -2063,6 +2091,7 @@ impl WebcamModel {
             return;
         }
         self.state.stage_aspect.set(aspect);
+        self.notify_stage();
         (self.state.repaint)();
     }
 
@@ -2077,7 +2106,30 @@ impl WebcamModel {
         }
         self.state.split_gap.set(gap);
         self.state.pane_radius.set(radius);
+        self.notify_stage();
         (self.state.repaint)();
+    }
+
+    /// Called, on the next idle, whenever the stage aspect or the split gap
+    /// changes.
+    pub fn set_stage_listener(&self, listener: Rc<dyn Fn()>) {
+        *self.state.stage_listener.borrow_mut() = Some(listener);
+    }
+
+    fn notify_stage(&self) {
+        if let Some(listener) = self.state.stage_listener.borrow().clone() {
+            gtk4::glib::idle_add_local_once(move || listener());
+        }
+    }
+
+    /// The screen pane's share of the automatic split on the current stage,
+    /// for the panel's Width readout. `screen_aspect` is the recording's.
+    pub fn auto_split_share(&self, screen_aspect: f64) -> f64 {
+        let stage = match self.state.stage_aspect.get() {
+            aspect if aspect > 0.0 => aspect,
+            _ => screen_aspect,
+        };
+        auto_split_screen_share(stage, screen_aspect, self.state.split_gap.get())
     }
 
     /// Whether the studied auto stage widens for this composition: a camera
@@ -5426,6 +5478,20 @@ mod tests {
         assert!((auto_split_stage_aspect(4.0 / 3.0, 0.0) - 16.0 / 9.0).abs() < 1e-9);
         assert!((auto_split_stage_aspect(3.0, 0.0) - 2.4).abs() < 1e-9);
         assert!((auto_split_stage_aspect(1.6, 0.1) - (0.3 + 1.6 + 0.5625) / 1.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_auto_split_share_follows_the_widened_and_padded_stage() {
+        let stage = auto_split_stage_with_gap(1.6, 0.0);
+        let share = auto_split_screen_share(stage, 1.6, 0.0);
+        assert!((share - 1.6 / stage).abs() < 1e-9);
+        assert!((share - 0.74).abs() < 0.01);
+        let gap = 0.05;
+        let stage = auto_split_stage_with_gap(1.6, gap);
+        let share = auto_split_screen_share(stage, 1.6, gap);
+        assert!((share - 1.6 / (stage - gap)).abs() < 1e-9);
+        assert_eq!(auto_split_screen_share(9.0 / 16.0, 9.0 / 16.0, 0.05), 0.5);
+        assert_eq!(auto_split_screen_share(9.0 / 16.0, 9.0 / 16.0, 0.0), 0.5);
     }
 
     #[test]

@@ -1364,6 +1364,7 @@ fn webcam_panel_needs_rebuild(
             || previous.selected != state.selected
             || previous.duration != state.duration
             || previous.frame_aspect != state.frame_aspect
+            || previous.auto_split_share != state.auto_split_share
     })
 }
 
@@ -2516,6 +2517,19 @@ impl WebcamSplitContext {
         };
         self.first_label.set_text(&t(first));
         self.second_label.set_text(&t(second));
+        let (first_tip, second_tip) = if portrait {
+            (
+                "Put the camera above the screen.",
+                "Put the camera below the screen.",
+            )
+        } else {
+            (
+                "Put the camera left of the screen.",
+                "Put the camera right of the screen.",
+            )
+        };
+        self.first.set_tooltip_text(Some(&t(first_tip)));
+        self.second.set_tooltip_text(Some(&t(second_tip)));
         if flip {
             self.first.set_active(true);
         } else {
@@ -2561,9 +2575,9 @@ fn build_webcam_split(
     segment.append(&first);
     segment.append(&second);
 
-    root.append(&webcam_kicker(&t("CAMERA")));
+    root.append(&webcam_kicker(&t("Camera side").to_uppercase()));
     root.append(&segment);
-    root.append(&webcam_kicker(&t("SCREEN SHARE")));
+    root.append(&webcam_kicker(&t("Screen width").to_uppercase()));
     let (auto_row, auto) = setting_switch_row(
         &t("Automatic width"),
         &t("Keep the screen's shape and give the camera the rest of the frame."),
@@ -2605,7 +2619,7 @@ fn build_webcam_split(
     )));
     fill.append(&fill_full);
     fill.append(&fill_padded);
-    root.append(&webcam_kicker(&t("FILL")));
+    root.append(&webcam_kicker(&t("Fill").to_uppercase()));
     root.append(&fill);
     let set_full = set_padded.clone();
     fill_full.connect_clicked(move |button| {
@@ -2830,7 +2844,7 @@ fn build_webcam_camera(
     root.append(&row);
     let max_ms = super::webcam::MAX_CAMERA_DELAY_SECONDS * 1000.0;
     let delay = value_slider_control(
-        &t("Camera delay (ms)"),
+        &t("Camera delay"),
         -max_ms,
         max_ms,
         delay_seconds * 1000.0,
@@ -2838,7 +2852,8 @@ fn build_webcam_camera(
         0,
         scale,
         move |value| set_delay(value / 1000.0),
-    );
+    )
+    .with_suffix(" ms");
     delay.widget().set_tooltip_text(Some(&t(
         "Shift the camera against the screen and sound. Raise it if your lips move after the words, lower it if they move before.",
     )));
@@ -2912,7 +2927,8 @@ fn build_webcam_transition(
         2,
         scale,
         move |value| set_duration(value),
-    );
+    )
+    .with_suffix(" s");
     root.append(&duration.widget());
     WebcamTransitionContext { root, duration }
 }
@@ -2981,6 +2997,7 @@ impl WebcamContext {
         frame_aspect: f64,
         cue: Option<LayoutCue>,
         controls: WebcamControlUse,
+        auto_split_share: f64,
     ) {
         self.overlay.root.set_visible(controls.overlay);
         self.split.root.set_visible(controls.split);
@@ -3000,10 +3017,7 @@ impl WebcamContext {
                 layouts.split_flip,
                 webcam_frame_aspect(frame_aspect) < 1.0,
                 layouts.split_auto,
-                super::webcam::auto_split_screen_ratio(
-                    webcam_frame_aspect(frame_aspect),
-                    webcam_frame_aspect(frame_aspect),
-                ),
+                auto_split_share,
                 layouts.split_padded,
             );
         }
@@ -3638,6 +3652,7 @@ fn build_webcam_panel(scale: f64, timeline: super::timeline::Timeline) -> (GtkBo
                     state.frame_aspect,
                     webcam_selected_cue(&state).map(|(_, cue)| cue),
                     controls,
+                    state.auto_split_share,
                 );
                 shape_section_root.set_visible(controls.overlay);
                 if let Some((_, cue)) = selected {
@@ -4191,6 +4206,16 @@ impl FilledSlider {
         } else {
             (0.07, 0.12, 0.72, 0.82)
         };
+
+        // A switched-off slider still shows its value, faded the way a
+        // disabled switch is, so it never reads as a live control.
+        let dim = if widget.is_sensitive() { 1.0 } else { 0.4 };
+        let (track_alpha, fill_alpha, text_alpha, handle_alpha) = (
+            track_alpha * dim,
+            fill_alpha * dim,
+            text_alpha * dim,
+            handle_alpha * dim,
+        );
 
         rounded_rect(context, 0.0, 0.0, width, height, radius);
         if light {
@@ -4750,6 +4775,7 @@ pub(super) fn install_css() {
             font-size: {webcam_kicker_text}px;
             font-weight: 600;
             letter-spacing: 0.8px;
+            margin-top: {webcam_kicker_gap}px;
         }}
         .recording-editor-webcam-status {{
             color: alpha(white, 0.50);
@@ -4845,6 +4871,7 @@ pub(super) fn install_css() {
         webcam_icon = px(28.0),
         webcam_icon_radius = px(7.0),
         webcam_kicker_text = px(11.0),
+        webcam_kicker_gap = px(6.0),
         webcam_status_text = px(11.0),
     );
     let provider = CssProvider::new();
@@ -4905,6 +4932,7 @@ mod tests {
             cue_at_playhead: None,
             error: None,
             frame_aspect: WIDE,
+            auto_split_share: 0.5,
         }
     }
 
@@ -5402,7 +5430,7 @@ mod tests {
                 window.set_child(Some(&context.root));
                 for card in WebcamLayoutCard::ALL {
                     let controls = controls_for(card);
-                    context.refresh(&layer, &layouts, frame_aspect, None, controls);
+                    context.refresh(&layer, &layouts, frame_aspect, None, controls, 0.5);
                     let (minimum, natural) = measure_width(&context.root);
                     assert!(
                         minimum <= scroll_width,
