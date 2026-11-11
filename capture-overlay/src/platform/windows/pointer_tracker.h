@@ -137,6 +137,19 @@ QString canonicalVideoPathFor(const QString& videoPath);
 /// Returns the app-data sidecar path for an existing video file.
 QString sidecarPathFor(const QString& videoPath);
 
+/// The recording ID stored in a finished recording's MP4 `description` tag
+/// (`apexshot-recording:<uuid>`), or an empty string when there is none.
+QString recordingIdOf(const QString& videoPath);
+
+/// `%LOCALAPPDATA%/apexshot/recordings`, the root of the per-recording folders.
+QString recordingsRootDirectory();
+
+/// The sidecar path inside a recording ID's folder: `<root>/<id>/pointer.json`.
+QString recordingSidecarPathFor(const QString& recordingId);
+
+/// Prefix the MP4 tag value carries before the ID.
+QString recordingIdTagValue(const QString& recordingId);
+
 /// Returns the app-data path of the webcam track recorded beside a video. The
 /// track lives next to the pointer sidecar, so both are found from the video
 /// path alone and neither can be mistaken for user footage.
