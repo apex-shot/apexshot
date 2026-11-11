@@ -1,8 +1,9 @@
 //! MP4 export choices, shown before asking for an output path.
 
+use super::export::rate;
 use super::export::{ExportModel, ExportSettings};
 use crate::capture::editor::window::icon_names::custom;
-use crate::i18n::t;
+use crate::i18n::{t, tfmt};
 use crate::settings::select::SettingsSelect;
 use crate::settings::ui_support::{window_control_button, WindowControl};
 use gtk4::prelude::*;
@@ -15,22 +16,22 @@ use std::rc::Rc;
 
 const QUALITIES: [(u32, &str, &str); 4] = [
     (
-        16,
+        14,
         "Studio",
         "Highest quality, best for further editing. Produces larger files.",
     ),
     (
-        20,
+        24,
         "Social Media",
         "High quality with a smaller file, ready to share.",
     ),
     (
-        24,
+        30,
         "Web",
         "A balanced file size for websites and everyday sharing.",
     ),
     (
-        28,
+        42,
         "Web (Low)",
         "The smallest file, with more visible compression.",
     ),
@@ -133,9 +134,13 @@ pub(super) fn show(
     let fps = SettingsSelect::new(
         [
             ("original", source_label.as_str()),
-            ("24", "24 FPS"),
-            ("30", "30 FPS"),
             ("60", "60 FPS"),
+            ("50", "50 FPS"),
+            ("30", "30 FPS"),
+            ("25", "25 FPS"),
+            ("24", "24 FPS"),
+            ("20", "20 FPS"),
+            ("10", "10 FPS"),
         ],
         "original",
     );
@@ -208,15 +213,20 @@ pub(super) fn show(
         }
     });
     quality_group.append(&hardware);
+    let hardware_note = Label::new(Some(&t(
+        "Hardware encoding uses a bitrate, so file sizes follow the estimate; the software encoder uses a constant quality.",
+    )));
+    hardware_note.add_css_class("video-export-muted");
+    hardware_note.set_xalign(0.0);
+    hardware_note.set_wrap(true);
+    quality_group.append(&hardware_note);
 
     let footer = GtkBox::new(Orientation::Vertical, px(16.0));
     let summary = GtkBox::new(Orientation::Vertical, px(4.0));
     let estimate = Label::new(None);
     estimate.add_css_class("video-export-muted");
     estimate.set_xalign(0.0);
-    let timing = Label::new(Some(&t(
-        "Export time depends on your hardware and effects.",
-    )));
+    let timing = Label::new(None);
     timing.add_css_class("video-export-muted");
     timing.set_xalign(0.0);
     timing.set_wrap(true);
@@ -246,11 +256,10 @@ pub(super) fn show(
     card.append(&footer);
 
     let source_size = model.source_size;
-    let source_bytes = std::fs::metadata(&model.source)
-        .map(|m| m.len())
-        .unwrap_or(0);
-    let source_seconds =
-        crate::recording::editor::ffmpeg::probe_duration(&model.source).unwrap_or(0.0);
+    let frame_size = model
+        .canvas
+        .as_ref()
+        .map_or(model.source_size, |canvas| canvas.size);
     let seconds = (model.trim_end - model.trim_start).max(0.0);
     let update: Rc<dyn Fn()> = Rc::new({
         let settings = settings.clone();
@@ -260,18 +269,22 @@ pub(super) fn show(
             let (width, height) = selected.dimensions(source_size);
             dimensions.set_text(&format!("{width} × {height} px"));
             description.set_text(&t(QUALITIES[quality.get()].2));
-            let size = estimate_bytes(
-                source_bytes,
-                source_seconds,
-                seconds,
-                source_size,
-                selected,
-                QUALITIES[quality.get()].0,
-            );
-            estimate.set_text(&format!(
-                "{} — {:.1} MB",
-                t("Estimated output size"),
-                size / 1_000_000.0
+            let output = selected.dimensions(frame_size);
+            let fps = selected.fps.map_or(source_fps, f64::from);
+            let bps = rate::h264_bits_per_second(QUALITIES[quality.get()].0, output, fps);
+            let (low, _, high) = rate::bytes(bps, rate::MP4_AUDIO_BPS, seconds, rate::H264_SPREAD);
+            let size = if high / low.max(1.0) < 1.5 {
+                rate::format_bytes((low + high) / 2.0)
+            } else {
+                format!("{} – {}", rate::format_bytes(low), rate::format_bytes(high))
+            };
+            estimate.set_text(&tfmt("Estimated output size: {size}", &[("size", &size)]));
+            timing.set_text(&tfmt(
+                "Export time ≈ {time}",
+                &[(
+                    "time",
+                    &rate::format_duration(rate::export_seconds(output, fps, seconds)),
+                )],
             ));
         }
     });
@@ -354,25 +367,6 @@ fn group(title: &str, icon: &str, scale: f64) -> GtkBox {
     group
 }
 
-fn estimate_bytes(
-    bytes: u64,
-    source_seconds: f64,
-    seconds: f64,
-    source: (u32, u32),
-    settings: ExportSettings,
-    crf: u32,
-) -> f64 {
-    let (width, height) = settings.dimensions(source);
-    let pixels = f64::from(source.0) * f64::from(source.1);
-    if source_seconds <= 0.0 || pixels <= 0.0 {
-        return 0.0;
-    }
-    bytes as f64
-        * (seconds / source_seconds)
-        * (f64::from(width) * f64::from(height) / pixels)
-        * 2.0_f64.powf((23.0 - f64::from(crf)) / 6.0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,9 +418,9 @@ mod tests {
                 assert!(!editor.is_sensitive());
                 let pickers = widgets_with_class(shell.upcast_ref(), "settings-select");
                 assert_eq!(pickers.len(), 2);
-                for picker in &pickers {
+                for (picker, expected) in pickers.iter().zip([4, 8]) {
                     let options = widgets_with_class(picker, "history-action-btn");
-                    assert_eq!(options.len(), 4);
+                    assert_eq!(options.len(), expected);
                     options[1]
                         .clone()
                         .downcast::<Button>()
@@ -447,8 +441,8 @@ mod tests {
                     .emit_clicked();
                 let (settings, crf, copied) = chosen.get().expect("the export action must run");
                 assert_eq!(settings.resolution, Some(720));
-                assert_eq!(settings.fps, Some(24));
-                assert_eq!(crf, 20);
+                assert_eq!(settings.fps, Some(60));
+                assert_eq!(crf, 24);
                 assert_eq!(copied, clipboard);
                 assert!(editor.is_sensitive());
 
@@ -475,26 +469,5 @@ mod tests {
             eprintln!("skipping: GTK unavailable");
             return;
         };
-    }
-
-    #[test]
-    fn size_estimate_follows_duration_resolution_and_quality() {
-        let settings = ExportSettings::default();
-        let estimate = |seconds, settings, crf| {
-            estimate_bytes(10_000_000, 10.0, seconds, (1920, 1080), settings, crf)
-        };
-        assert_eq!(estimate(5.0, settings, 23), 5_000_000.0);
-        assert!(estimate(5.0, settings, 16) > estimate(5.0, settings, 28));
-        assert!(
-            estimate(
-                5.0,
-                ExportSettings {
-                    resolution: Some(720),
-                    ..settings
-                },
-                23
-            ) < estimate(5.0, settings, 23)
-        );
-        assert_eq!(estimate_bytes(0, 0.0, 10.0, (0, 0), settings, 23), 0.0);
     }
 }

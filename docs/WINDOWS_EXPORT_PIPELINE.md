@@ -100,6 +100,12 @@ profile, level, pixel format, frame rate, and size, so the pieces can be copied
 into one file without re-encoding. Each piece starts on an IDR, which costs a
 little size at the seams.
 
+Rate control: x264 keeps the editor's CRF. NVENC, Quick Sync, and AMF get the
+bitrate that CRF produces on the shared curve in `export/rate.rs` (capped at
+1.5× with a 2× buffer), so a hardware export's size follows the dialog's
+estimate instead of each driver's quantiser mapping. The dialog's quality tiers
+are CRF 14, 24, 30, and 42.
+
 If a hardware encoder fails at start or mid-export, the export retries once
 from the beginning with `libx264`, matching the previous behaviour. The UI
 progress bar resets because the retry starts over.

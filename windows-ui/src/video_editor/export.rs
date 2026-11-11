@@ -14,6 +14,7 @@ mod canvas;
 #[cfg(target_os = "windows")]
 mod gpu;
 mod hybrid;
+pub(super) mod rate;
 
 pub(super) use canvas::CanvasLayout;
 
@@ -297,34 +298,44 @@ impl Encoder {
         }
     }
 
-    /// The codec, constant-quality rate control at the editor's CRF, and the
-    /// pixel format the encoder takes without another conversion.
+    /// The codec, rate control, and the pixel format the encoder takes without
+    /// another conversion. x264 keeps the editor's CRF; a hardware encoder gets
+    /// the bitrate that CRF produces on the shared rate curve, capped at 1.5x
+    /// with a 2x buffer, because the drivers map a quantiser to very different
+    /// sizes.
     fn args(self, crf: u32, size: (u32, u32), fps: f64) -> Vec<String> {
-        let crf = crf.to_string();
-        let crf = crf.as_str();
-        let profile = if self == Self::X264 && crf == "0" {
+        let profile = if self == Self::X264 && crf == 0 {
             "high444"
         } else {
             "high"
         };
-        let settings: Vec<&str> = match self {
-            Self::Nvenc => vec![
-                "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", crf, "-b:v", "0", "-pix_fmt",
-                "nv12",
-            ],
-            Self::QuickSync => vec![
-                "-preset",
-                "medium",
-                "-global_quality",
-                crf,
-                "-pix_fmt",
-                "nv12",
-            ],
-            Self::Amf => vec![
-                "-quality", "balanced", "-rc", "cqp", "-qp_i", crf, "-qp_p", crf, "-qp_b", crf,
-                "-pix_fmt", "nv12",
-            ],
-            Self::X264 => vec!["-preset", "veryfast", "-crf", crf, "-pix_fmt", "yuv420p"],
+        let bitrate = rate::h264_bits_per_second(crf, size, fps).round().max(1.0) as u64;
+        let bitrate_args = |rc: &[&str]| -> Vec<String> {
+            rc.iter()
+                .map(|value| value.to_string())
+                .chain([
+                    "-b:v".to_string(),
+                    bitrate.to_string(),
+                    "-maxrate".to_string(),
+                    (bitrate * 3 / 2).to_string(),
+                    "-bufsize".to_string(),
+                    (bitrate * 2).to_string(),
+                    "-pix_fmt".to_string(),
+                    "nv12".to_string(),
+                ])
+                .collect()
+        };
+        let crf_text = crf.to_string();
+        let settings: Vec<String> = match self {
+            Self::Nvenc => bitrate_args(&["-preset", "p4", "-tune", "hq", "-rc", "vbr"]),
+            Self::QuickSync => bitrate_args(&["-preset", "medium"]),
+            Self::Amf => bitrate_args(&["-quality", "balanced", "-rc", "vbr_peak"]),
+            Self::X264 => [
+                "-preset", "veryfast", "-crf", &crf_text, "-pix_fmt", "yuv420p",
+            ]
+            .iter()
+            .map(|value| value.to_string())
+            .collect(),
         };
         [
             "-c:v",
@@ -335,8 +346,8 @@ impl Encoder {
             h264_level(size, fps),
         ]
         .into_iter()
-        .chain(settings)
         .map(str::to_string)
+        .chain(settings)
         .collect()
     }
 
@@ -1605,7 +1616,7 @@ fn draw_cursor(
 #[cfg(test)]
 mod tests {
     use super::{
-        frame_plan, frame_source_time, h264_level, output_size, render, render_with_workers,
+        frame_plan, frame_source_time, h264_level, output_size, rate, render, render_with_workers,
         split_ranges, start_export, total_frames, zoom, Encoder, End, ExportModel, ExportSettings,
         ExportUpdate,
     };
@@ -1739,6 +1750,28 @@ mod tests {
         assert_eq!(h264_level((2560, 1440), 30.0), "5.0");
         assert_eq!(h264_level((3840, 2160), 30.0), "5.1");
         assert_eq!(h264_level((3840, 2160), 60.0), "5.2");
+    }
+
+    #[test]
+    fn hardware_encoders_get_the_curve_bitrate() {
+        let expected = rate::h264_bits_per_second(24, (1920, 1080), 60.0)
+            .round()
+            .to_string();
+        for encoder in [Encoder::Nvenc, Encoder::QuickSync, Encoder::Amf] {
+            let args = encoder.args(24, (1920, 1080), 60.0);
+            let bitrate = args
+                .iter()
+                .position(|value| value == "-b:v")
+                .map(|index| args[index + 1].clone());
+            assert_eq!(bitrate.as_deref(), Some(expected.as_str()));
+            for quantiser in ["-cq", "-global_quality", "-qp_i"] {
+                assert!(!args.iter().any(|value| value == quantiser));
+            }
+        }
+        let args = Encoder::X264.args(24, (1920, 1080), 60.0);
+        assert!(args.iter().any(|value| value == "-crf"));
+        assert!(args.iter().any(|value| value == "24"));
+        assert!(!args.iter().any(|value| value == "-b:v"));
     }
 
     #[test]
