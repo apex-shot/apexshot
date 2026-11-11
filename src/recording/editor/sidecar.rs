@@ -691,6 +691,23 @@ impl PartialEq for PlanCache {
     }
 }
 
+/// The pointer samples that survive the shake filter, for the unsmoothed
+/// cursor. Runtime-only and cold on clone, like [`PlanCache`].
+#[derive(Debug, Default)]
+struct ShakeCache(Mutex<Option<(u64, Arc<Vec<PointerSample>>)>>);
+
+impl Clone for ShakeCache {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl PartialEq for ShakeCache {
+    fn eq(&self, _other: &Self) -> bool {
+        true
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PointerSidecar {
     pub version: u32,
@@ -742,6 +759,9 @@ pub struct PointerSidecar {
     /// Pushed in by the editor from the cursor settings; runtime-only.
     #[serde(skip, default = "default_shake_threshold")]
     shake_threshold: f64,
+    /// The samples the shake filter keeps, for the unsmoothed cursor.
+    #[serde(skip)]
+    shake_cache: ShakeCache,
     /// The planned cursor path for the current spring and speed.
     #[serde(skip)]
     plan_cache: PlanCache,
@@ -767,6 +787,7 @@ impl PointerSidecar {
             sidecar_directory: None,
             cuts_seconds: Vec::new(),
             shake_threshold: DEFAULT_REMOVE_SHAKE_THRESHOLD,
+            shake_cache: ShakeCache::default(),
             plan_cache: PlanCache::default(),
         }
     }
@@ -1119,19 +1140,26 @@ impl PointerSidecar {
     /// uses this same path so the viewport and rendered cursor never react to
     /// different pointer data.
     pub fn motion_position_at(&self, t: f64, smooth: f64, speed: f64) -> Option<(f64, f64)> {
-        let samples = if self.source == PointerDataSource::WindowMetadata {
-            self.window_pointer_segment_at(t)?
-        } else {
-            &self.pointer
-        };
-        if smooth <= 0.01 {
-            let position = if self.source == PointerDataSource::WindowMetadata {
-                Self::interpolated_window_in(samples, t)
+        if self.source == PointerDataSource::WindowMetadata {
+            let samples = self.window_pointer_segment_at(t)?;
+            return if smooth <= 0.01 {
+                Self::interpolated_window_in(samples, t).map(|(x, y, _, _)| (x, y))
+            } else if samples.is_empty() {
+                None
             } else {
-                Self::interpolated_in(samples, t)
+                Some(self.smoothed_at(t, smooth, speed))
             };
-            position.map(|(x, y, _, _)| (x, y))
-        } else if samples.is_empty() {
+        }
+        if smooth <= 0.01 {
+            // The planned path filters shake on its own; the raw cursor
+            // reads the same filtered samples so both agree.
+            if self.shake_threshold > 0.0 {
+                let filtered = self.shake_filtered_pointer();
+                return Self::interpolated_in(&filtered, t).map(|(x, y, _, _)| (x, y));
+            }
+            return Self::interpolated_in(&self.pointer, t).map(|(x, y, _, _)| (x, y));
+        }
+        if self.pointer.is_empty() {
             None
         } else {
             Some(self.smoothed_at(t, smooth, speed))
@@ -1256,6 +1284,40 @@ impl PointerSidecar {
             }
         }
         survivors
+    }
+
+    /// The pointer samples the shake filter keeps, built once per threshold
+    /// and recording.
+    fn shake_filtered_pointer(&self) -> Arc<Vec<PointerSample>> {
+        let key = [
+            self.shake_threshold.to_bits(),
+            self.pointer.len() as u64,
+            self.pointer.first().map(|sample| sample.t.to_bits()).unwrap_or(0),
+            self.pointer.last().map(|sample| sample.t.to_bits()).unwrap_or(0),
+        ]
+        .iter()
+        .fold(1469598103934665603_u64, |hash, value| {
+            (hash ^ value).wrapping_mul(1099511628211)
+        });
+        if let Ok(cache) = self.shake_cache.0.lock() {
+            if let Some((cached_key, samples)) = cache.as_ref() {
+                if *cached_key == key {
+                    return Arc::clone(samples);
+                }
+            }
+        }
+        let survivors = self.shake_survivors();
+        let samples: Arc<Vec<PointerSample>> = Arc::new(
+            self.pointer
+                .iter()
+                .zip(&survivors.pointer)
+                .filter_map(|(sample, kept)| kept.then(|| sample.clone()))
+                .collect(),
+        );
+        if let Ok(mut cache) = self.shake_cache.0.lock() {
+            *cache = Some((key, Arc::clone(&samples)));
+        }
+        samples
     }
 
     /// Plan the cursor path once per spring and speed, then answer frames from
@@ -2636,6 +2698,26 @@ mod tests {
             unfiltered > filtered + 50.0,
             "without the filter the spike should pull the cursor: {unfiltered} vs {filtered}"
         );
+    }
+
+    #[test]
+    fn the_shake_filter_also_removes_the_spike_without_smoothing() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0_u32..=20 {
+            sidecar.pointer.push(PointerSample {
+                t: index as f64 * 0.05,
+                x: if index == 10 { 1500.0 } else { 100.0 },
+                y: 100.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        let filtered = sidecar.motion_position_at(0.5, 0.0, 1.0).unwrap().0;
+        sidecar.set_shake_threshold(0.0);
+        let raw = sidecar.motion_position_at(0.5, 0.0, 1.0).unwrap().0;
+        assert!((filtered - 100.0).abs() < 1e-9, "filtered cursor at {filtered}");
+        assert!((raw - 1500.0).abs() < 1e-9, "unfiltered cursor at {raw}");
     }
 
     #[test]
