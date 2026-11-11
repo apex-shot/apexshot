@@ -759,6 +759,15 @@ pub struct PointerSidecar {
     /// Pushed in by the editor from the cursor settings; runtime-only.
     #[serde(skip, default = "default_shake_threshold")]
     shake_threshold: f64,
+    /// The studied stop tail in milliseconds; zero turns it off.
+    #[serde(skip)]
+    stop_tail_ms: f64,
+    /// The studied loop-before-the-end in milliseconds; `None` turns it off.
+    #[serde(skip)]
+    loop_before_end_ms: Option<f64>,
+    /// The source instant the edit ends at; `None` uses the last sample.
+    #[serde(skip)]
+    playback_end_seconds: Option<f64>,
     /// The samples the shake filter keeps, for the unsmoothed cursor.
     #[serde(skip)]
     shake_cache: ShakeCache,
@@ -841,6 +850,9 @@ impl PointerSidecar {
             sidecar_directory: None,
             cuts_seconds: Vec::new(),
             shake_threshold: DEFAULT_REMOVE_SHAKE_THRESHOLD,
+            stop_tail_ms: 0.0,
+            loop_before_end_ms: None,
+            playback_end_seconds: None,
             shake_cache: ShakeCache::default(),
             plan_cache: PlanCache::default(),
         }
@@ -1108,8 +1120,9 @@ impl PointerSidecar {
         if self.source != PointerDataSource::WindowMetadata && !self.recorded_cursor_visible_at(t) {
             return None;
         }
-        let (_, _, kind, cursor_id) = self.interpolated_at_sample(t)?;
-        let (x, y) = self.motion_position_at(t, motion.smooth, motion.speed)?;
+        let motion_t = self.held_motion_time(t);
+        let (_, _, kind, cursor_id) = self.interpolated_at_sample(motion_t)?;
+        let (x, y) = self.motion_position_at(motion_t, motion.smooth, motion.speed)?;
         let alpha = if motion.hide_idle {
             self.idle_alpha(t, motion.idle_ms)
         } else {
@@ -1121,7 +1134,7 @@ impl PointerSidecar {
             kind,
             alpha,
             rotation: self.cursor_rotation_at(
-                t,
+                motion_t,
                 motion.rotation_mode,
                 motion.rotation_ratio,
                 motion.base_rotation_deg,
@@ -1204,14 +1217,24 @@ impl PointerSidecar {
                 Some(self.smoothed_at(t, smooth, speed))
             };
         }
+        let t = self.held_motion_time(t);
         if smooth <= 0.01 {
             // The planned path filters shake on its own; the raw cursor
             // reads the same filtered samples so both agree.
-            if self.shake_threshold > 0.0 {
-                let filtered = self.shake_filtered_pointer();
-                return Self::interpolated_in(&filtered, t).map(|(x, y, _, _)| (x, y));
+            let filtered = if self.shake_threshold > 0.0 {
+                Some(self.shake_filtered_pointer())
+            } else {
+                None
+            };
+            let base: &[PointerSample] = match &filtered {
+                Some(samples) => samples.as_slice(),
+                None => &self.pointer,
+            };
+            let refs: Vec<&PointerSample> = base.iter().collect();
+            if let Some((looped, _)) = self.looped_samples(&refs) {
+                return Self::interpolated_in(&looped, t).map(|(x, y, _, _)| (x, y));
             }
-            return Self::interpolated_in(&self.pointer, t).map(|(x, y, _, _)| (x, y));
+            return Self::interpolated_in(base, t).map(|(x, y, _, _)| (x, y));
         }
         if self.pointer.is_empty() {
             None
@@ -1264,6 +1287,77 @@ impl PointerSidecar {
         } else {
             0.0
         };
+    }
+
+    /// The studied tail behaviours. `stop_movement_in_last_part_ms` holds the
+    /// cursor for that long before the end; `loop_position_before_end_ms`
+    /// sends it back to its first position that long before the end and, as
+    /// in the studied panel, replaces the hold. `playback_end_seconds` is the
+    /// source instant the edit ends at; `None` uses the last pointer sample.
+    pub fn set_cursor_tail(
+        &mut self,
+        stop_movement_in_last_part_ms: f64,
+        loop_position_before_end_ms: Option<f64>,
+        playback_end_seconds: Option<f64>,
+    ) {
+        self.stop_tail_ms = if stop_movement_in_last_part_ms.is_finite() {
+            stop_movement_in_last_part_ms.max(0.0)
+        } else {
+            0.0
+        };
+        self.loop_before_end_ms = loop_position_before_end_ms
+            .filter(|value| value.is_finite())
+            .map(|value| value.max(0.0));
+        self.playback_end_seconds = playback_end_seconds.filter(|end| end.is_finite() && *end > 0.0);
+    }
+
+    /// The source instant the tail behaviours measure back from.
+    fn tail_end_seconds(&self) -> Option<f64> {
+        self.playback_end_seconds
+            .or_else(|| self.pointer.last().map(|sample| sample.t))
+    }
+
+    /// The instant whose cursor is drawn at `t`: `t` itself, or the start of
+    /// the held tail once the studied stop applies.
+    fn held_motion_time(&self, t: f64) -> f64 {
+        if self.source == PointerDataSource::WindowMetadata
+            || self.loop_before_end_ms.is_some()
+            || self.stop_tail_ms <= 0.0
+        {
+            return t;
+        }
+        let Some(end) = self.tail_end_seconds() else {
+            return t;
+        };
+        t.min((end - self.stop_tail_ms / 1000.0).max(0.0))
+    }
+
+    /// The studied loop: the samples up to `end - loop`, then one copy of the
+    /// first of them 1 ms after the last, so the cursor travels home before
+    /// the end. Returns the samples and the cutoff in seconds, or `None` when
+    /// the loop is off or there is nothing to loop.
+    fn looped_samples(&self, samples: &[&PointerSample]) -> Option<(Vec<PointerSample>, f64)> {
+        if self.source == PointerDataSource::WindowMetadata {
+            return None;
+        }
+        let loop_ms = self.loop_before_end_ms?;
+        let end = self.tail_end_seconds()?;
+        let cutoff = (end - loop_ms / 1000.0).max(0.0);
+        let mut kept: Vec<PointerSample> = samples
+            .iter()
+            .filter(|sample| sample.t <= cutoff)
+            .map(|sample| (*sample).clone())
+            .collect();
+        if kept.is_empty() {
+            kept.push((*samples.first()?).clone());
+        }
+        let first = kept[0].clone();
+        let last_t = kept.last()?.t;
+        kept.push(PointerSample {
+            t: last_t + 0.001,
+            ..first
+        });
+        Some((kept, cutoff))
     }
 
     /// Which pointer samples and press ends survive the studied shake filter.
@@ -1402,6 +1496,11 @@ impl PointerSidecar {
             .zip(&survivors.pointer)
             .filter_map(|(sample, kept)| kept.then_some(sample))
             .collect();
+        let looped = self.looped_samples(&kept_pointer);
+        let kept_pointer: Vec<&PointerSample> = match &looped {
+            Some((samples, _)) => samples.iter().collect(),
+            None => kept_pointer,
+        };
         let points: Vec<PlannerPoint> = kept_pointer
             .iter()
             .map(|sample| PlannerPoint {
@@ -1467,11 +1566,22 @@ impl PointerSidecar {
                 }
             }
         }
-        let duration_ms = self
+        // The studied loop plans only up to its cutoff; the synthetic return
+        // point is travel, not a moment to meet.
+        if let Some((_, cutoff)) = &looped {
+            let cutoff_ms = cutoff * 1000.0 + 1e-6;
+            sync.retain(|point| point.time_ms <= cutoff_ms);
+        }
+        let mut duration_ms = self
             .pointer
             .last()
             .map(|sample| sample.t * 1000.0 + 1000.0)
             .unwrap_or(0.0);
+        if looped.is_some() {
+            if let Some(end) = self.tail_end_seconds() {
+                duration_ms = duration_ms.max(end * 1000.0 + 1000.0);
+            }
+        }
         let cuts_ms: Vec<f64> = self.cuts_seconds.iter().map(|cut| cut * 1000.0).collect();
         let planned = Arc::new(cursor_planner::plan(
             &points,
@@ -1518,6 +1628,12 @@ impl PointerSidecar {
             spring.mass.to_bits(),
             speed.to_bits(),
             self.shake_threshold.to_bits(),
+            self.loop_before_end_ms
+                .map(f64::to_bits)
+                .unwrap_or(u64::MAX),
+            self.playback_end_seconds
+                .map(f64::to_bits)
+                .unwrap_or(u64::MAX),
         ];
         values.push(self.cuts_seconds.len() as u64);
         values.extend(self.cuts_seconds.iter().map(|cut| cut.to_bits()));
@@ -1528,21 +1644,41 @@ impl PointerSidecar {
         hash
     }
 
+    /// The studied `hideNotMovingAfterMs`: the cursor is drawn while the last
+    /// pointer event is at most `idle_ms` old, and fades out after that. Any
+    /// move or click restores it on the next sample. This is separate from
+    /// the recorded visibility (typing) intervals, which `presented_at`
+    /// checks first.
     fn idle_alpha(&self, t: f64, idle_ms: f64) -> f64 {
-        let window = (idle_ms / 1000.0).clamp(0.12, 4.0);
-        let Some((cx, cy, _)) = self.interpolated_at(t) else {
-            return 1.0;
-        };
-        let mut last_move = self.pointer.first().map(|sample| sample.t).unwrap_or(0.0);
+        let window = (idle_ms / 1000.0).max(0.0);
+        let mut last_event: Option<f64> = None;
+        let mut previous: Option<&PointerSample> = None;
         for sample in &self.pointer {
             if sample.t > t {
                 break;
             }
-            if (sample.x - cx).hypot(sample.y - cy) > 8.0 {
-                last_move = sample.t;
+            let moved = previous.map_or(true, |previous| {
+                (sample.x - previous.x).hypot(sample.y - previous.y) > 0.5
+            });
+            if moved {
+                last_event = Some(sample.t);
+            }
+            previous = Some(sample);
+        }
+        for time in self
+            .clicks
+            .iter()
+            .map(|click| click.t)
+            .chain(self.presses.iter().flat_map(|press| [press.down, press.up]))
+        {
+            if time <= t && last_event.map_or(true, |last| time > last) {
+                last_event = Some(time);
             }
         }
-        let still = t - last_move;
+        let Some(last_event) = last_event else {
+            return 1.0;
+        };
+        let still = t - last_event;
         if still <= window {
             return 1.0;
         }
@@ -2565,6 +2701,251 @@ mod tests {
 
         assert!(short_delay.alpha < 0.05);
         assert!((long_delay.alpha - 1.0).abs() < 1e-9);
+    }
+
+    fn moving_sidecar() -> PointerSidecar {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for index in 0..=100 {
+            let t = index as f64 / 10.0;
+            sidecar.pointer.push(PointerSample {
+                t,
+                x: 100.0 + 50.0 * t,
+                y: 200.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        sidecar
+    }
+
+    fn approx(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-6
+    }
+
+    fn raw_x(sidecar: &PointerSidecar, t: f64) -> f64 {
+        sidecar
+            .motion_position_at(t, 0.0, 1.0)
+            .expect("raw position")
+            .0
+    }
+
+    fn planned_position(sidecar: &PointerSidecar, t: f64) -> (f64, f64) {
+        sidecar
+            .motion_position_at(t, 0.75, 1.0)
+            .expect("planned position")
+    }
+
+    #[test]
+    fn stop_tail_zero_changes_nothing() {
+        let mut sidecar = moving_sidecar();
+        let expected = raw_x(&sidecar, 9.5);
+        sidecar.set_cursor_tail(0.0, None, Some(10.0));
+        assert!(approx(raw_x(&sidecar, 9.5), expected));
+        assert!(approx(raw_x(&sidecar, 9.5), 575.0));
+    }
+
+    #[test]
+    fn stop_tail_holds_the_cursor_for_the_last_part() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(2000.0, None, Some(10.0));
+        let held = raw_x(&sidecar, 8.0);
+        assert!(approx(held, 500.0));
+        for t in [8.5, 9.0, 9.99, 10.0] {
+            assert!(approx(raw_x(&sidecar, t), held), "raw cursor at {t}");
+        }
+        assert!(approx(raw_x(&sidecar, 7.0), 450.0));
+
+        let first = planned_position(&sidecar, 8.5);
+        for t in [9.0, 9.99] {
+            let position = planned_position(&sidecar, t);
+            assert!((position.0 - first.0).abs() < 1e-9, "planned x at {t}");
+            assert!((position.1 - first.1).abs() < 1e-9, "planned y at {t}");
+        }
+    }
+
+    #[test]
+    fn stop_tail_equal_to_the_duration_holds_the_first_position() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(10_000.0, None, Some(10.0));
+        for t in [5.0, 10.0] {
+            assert!(approx(raw_x(&sidecar, t), 100.0), "raw cursor at {t}");
+        }
+    }
+
+    #[test]
+    fn stop_tail_uses_the_last_sample_without_an_end() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(2000.0, None, None);
+        assert!(approx(raw_x(&sidecar, 9.5), 500.0));
+    }
+
+    #[test]
+    fn loop_none_changes_nothing() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(0.0, None, Some(10.0));
+        assert!(approx(raw_x(&sidecar, 9.0), 550.0));
+    }
+
+    #[test]
+    fn loop_appends_the_first_position_one_ms_after_the_cutoff() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(0.0, Some(2000.0), Some(10.0));
+        assert!(approx(raw_x(&sidecar, 8.0), 500.0));
+        for t in [8.0011, 9.5] {
+            assert!(approx(raw_x(&sidecar, t), 100.0), "raw cursor at {t}");
+        }
+
+        let end = planned_position(&sidecar, 9.99);
+        assert!((end.0 - 100.0).abs() < 5.0, "planned x came home");
+        assert!((end.1 - 200.0).abs() < 5.0, "planned y came home");
+        assert!(planned_position(&sidecar, 7.0).0 > 300.0);
+    }
+
+    #[test]
+    fn loop_zero_returns_after_the_last_sample() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(0.0, Some(0.0), Some(10.0));
+        assert!(approx(raw_x(&sidecar, 10.0), 600.0));
+        assert!(approx(raw_x(&sidecar, 10.002), 100.0));
+    }
+
+    #[test]
+    fn loop_equal_to_the_duration_keeps_the_first_position() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(0.0, Some(10_000.0), Some(10.0));
+        for t in [0.0, 5.0, 10.0] {
+            assert!(approx(raw_x(&sidecar, t), 100.0), "raw cursor at {t}");
+        }
+    }
+
+    #[test]
+    fn loop_replaces_the_stop() {
+        let mut sidecar = moving_sidecar();
+        sidecar.set_cursor_tail(2000.0, Some(2000.0), Some(10.0));
+        assert!(approx(raw_x(&sidecar, 9.5), 100.0));
+    }
+
+    #[test]
+    fn hide_not_moving_off_keeps_the_cursor() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 0.05,
+            x: 12.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        let frame = sidecar
+            .presented_at(
+                5.0,
+                CursorMotion {
+                    hide_idle: false,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+        assert!((frame.alpha - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hide_not_moving_restores_on_the_next_sample() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        for (t, x) in [(0.0, 10.0), (0.05, 12.0), (3.0, 13.0)] {
+            sidecar.pointer.push(PointerSample {
+                t,
+                x,
+                y: 10.0,
+                kind: CursorKind::Default,
+                cursor_id: None,
+            });
+        }
+        let motion = CursorMotion {
+            hide_idle: true,
+            idle_ms: 500.0,
+            ..CursorMotion::default()
+        };
+        let faded = sidecar.presented_at(2.0, motion).unwrap();
+        let restored = sidecar.presented_at(3.0, motion).unwrap();
+        assert!(faded.alpha < 0.05);
+        assert!((restored.alpha - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hide_not_moving_counts_clicks() {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x: 10.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        sidecar.pointer.push(PointerSample {
+            t: 0.05,
+            x: 12.0,
+            y: 10.0,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        sidecar.clicks.push(ClickSample {
+            t: 2.0,
+            x: 12.0,
+            y: 10.0,
+            button: 1,
+            cursor_id: None,
+        });
+        let motion = CursorMotion {
+            hide_idle: true,
+            idle_ms: 500.0,
+            ..CursorMotion::default()
+        };
+        let faded = sidecar.presented_at(1.5, motion).unwrap();
+        let restored = sidecar.presented_at(2.2, motion).unwrap();
+        assert!(faded.alpha < 0.05);
+        assert!((restored.alpha - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn hide_not_moving_after_the_duration_never_hides() {
+        let mut sidecar = moving_sidecar();
+        for sample in sidecar.pointer.iter_mut() {
+            if sample.t > 1.0 {
+                sample.x = 100.0 + 50.0;
+            }
+        }
+        let patient = sidecar
+            .presented_at(
+                10.0,
+                CursorMotion {
+                    hide_idle: true,
+                    idle_ms: 9000.0,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+        assert!((patient.alpha - 1.0).abs() < 1e-9);
+        let eager = sidecar
+            .presented_at(
+                1.5,
+                CursorMotion {
+                    hide_idle: true,
+                    idle_ms: 0.0,
+                    ..CursorMotion::default()
+                },
+            )
+            .unwrap();
+        assert!(eager.alpha < 0.05);
     }
 
     #[test]

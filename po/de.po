@@ -1441,6 +1441,15 @@ msgstr "Zeigerzittern entfernen"
 msgid "Hide when idle"
 msgstr "Bei Inaktivität ausblenden"
 
+msgid "Loop cursor position"
+msgstr "Zeigerposition wiederholen"
+
+msgid "Loop before end"
+msgstr "Wiederholung vor dem Ende"
+
+msgid "Stop at the end"
+msgstr "Am Ende anhalten"
+
 msgid "Hide zoom"
 msgstr "Zoom ausblenden"
 

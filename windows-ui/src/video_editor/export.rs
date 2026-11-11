@@ -230,9 +230,16 @@ pub(super) fn start_export_with_settings(
 ) -> ExportHandle {
     let cuts = model.cuts.clone();
     let shake_threshold = model.cursor.remove_shake_threshold;
+    let stop_movement_in_last_part_ms = model.cursor.stop_movement_in_last_part_ms;
+    let loop_position_before_end_ms = model.cursor.loop_position_before_end_ms;
     if let Some(sidecar) = model.sidecar.as_mut() {
         sidecar.set_cut_times(&cuts);
         sidecar.set_shake_threshold(shake_threshold);
+        sidecar.set_cursor_tail(
+            stop_movement_in_last_part_ms,
+            loop_position_before_end_ms,
+            Some(model.trim_end),
+        );
     }
     let (sender, receiver) = mpsc::channel();
     let cancel = Arc::new(AtomicBool::new(false));

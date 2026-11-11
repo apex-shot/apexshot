@@ -1439,6 +1439,15 @@ msgstr "Eliminar temblor del cursor"
 msgid "Hide when idle"
 msgstr "Ocultar cuando esté inactivo"
 
+msgid "Loop cursor position"
+msgstr "Repetir la posición del cursor"
+
+msgid "Loop before end"
+msgstr "Bucle antes del final"
+
+msgid "Stop at the end"
+msgstr "Detener al final"
+
 msgid "Hide zoom"
 msgstr "Ocultar zoom"
 

@@ -123,6 +123,10 @@ pub struct VideoProjectFile {
     pub cursor_always_use_default: bool,
     #[serde(default = "default_cursor_remove_shake_threshold")]
     pub cursor_remove_shake_threshold: f64,
+    #[serde(default)]
+    pub cursor_stop_movement_in_last_part_ms: f64,
+    #[serde(default)]
+    pub cursor_loop_position_before_end_ms: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1018,6 +1022,8 @@ impl VideoEditState {
             cursor_base_rotation_deg: self.cursor.base_rotation_deg,
             cursor_always_use_default: self.cursor.always_use_default,
             cursor_remove_shake_threshold: self.cursor.remove_shake_threshold,
+            cursor_stop_movement_in_last_part_ms: self.cursor.stop_movement_in_last_part_ms,
+            cursor_loop_position_before_end_ms: self.cursor.loop_position_before_end_ms,
         }
     }
 
@@ -1089,6 +1095,8 @@ impl VideoEditState {
             base_rotation_deg: file.cursor_base_rotation_deg,
             always_use_default: file.cursor_always_use_default,
             remove_shake_threshold: file.cursor_remove_shake_threshold,
+            stop_movement_in_last_part_ms: file.cursor_stop_movement_in_last_part_ms,
+            loop_position_before_end_ms: file.cursor_loop_position_before_end_ms,
         }
         .clamped();
         self.project_media
@@ -1580,6 +1588,8 @@ mod tests {
         object.remove("cursor_base_rotation_deg");
         object.remove("cursor_always_use_default");
         object.remove("cursor_remove_shake_threshold");
+        object.remove("cursor_stop_movement_in_last_part_ms");
+        object.remove("cursor_loop_position_before_end_ms");
         for clip in json
             .get_mut("zoom_clips")
             .and_then(|value| value.as_array_mut())
@@ -1600,6 +1610,8 @@ mod tests {
         assert_eq!(file.cursor_base_rotation_deg, 0.0);
         assert!(!file.cursor_always_use_default);
         assert_eq!(file.cursor_remove_shake_threshold, 500.0);
+        assert_eq!(file.cursor_stop_movement_in_last_part_ms, 0.0);
+        assert_eq!(file.cursor_loop_position_before_end_ms, None);
         assert_eq!(file.zoom_clips[0].easing, ZoomEasingFile::Glide);
 
         let mut restored = VideoEditState::new(metadata_for(&video, 16));
@@ -1624,6 +1636,8 @@ mod tests {
         state.cursor.base_rotation_deg = -30.0;
         state.cursor.always_use_default = true;
         state.cursor.remove_shake_threshold = 0.0;
+        state.cursor.stop_movement_in_last_part_ms = 1500.0;
+        state.cursor.loop_position_before_end_ms = Some(2000.0);
         state.zoom_clips.push(ZoomClip {
             start: 0.5,
             end: 2.3,
@@ -1650,6 +1664,8 @@ mod tests {
         assert!((restored.cursor.base_rotation_deg + 30.0).abs() < 1e-12);
         assert!(restored.cursor.always_use_default);
         assert_eq!(restored.cursor.remove_shake_threshold, 0.0);
+        assert_eq!(restored.cursor.stop_movement_in_last_part_ms, 1500.0);
+        assert_eq!(restored.cursor.loop_position_before_end_ms, Some(2000.0));
         assert_eq!(restored.zoom_clips[0].easing, ZoomEasing::Snappy);
         assert_eq!(restored.zoom_clips[0].ease_ms, 480);
         cleanup_project(&video);

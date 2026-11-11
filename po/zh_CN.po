@@ -1405,6 +1405,15 @@ msgstr "移除光标抖动"
 msgid "Hide when idle"
 msgstr "空闲时隐藏"
 
+msgid "Loop cursor position"
+msgstr "循环光标位置"
+
+msgid "Loop before end"
+msgstr "结束前循环"
+
+msgid "Stop at the end"
+msgstr "结束时停止"
+
 msgid "Hide zoom"
 msgstr "隐藏缩放"
 
