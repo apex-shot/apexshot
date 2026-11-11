@@ -4464,3 +4464,12 @@ msgstr "Neigungsstärke"
 
 msgid "Tilt with motion"
 msgstr "Mit der Bewegung neigen"
+
+msgid "Hardware encoding uses a bitrate, so file sizes follow the estimate; the software encoder uses a constant quality."
+msgstr "Hardware-Kodierung nutzt eine Bitrate, daher folgen Dateigrößen der Schätzung; der Software-Encoder nutzt eine konstante Qualität."
+
+msgid "Estimated output size: {size}"
+msgstr "Geschätzte Dateigröße: {size}"
+
+msgid "Export time ≈ {time}"
+msgstr "Exportdauer ≈ {time}"

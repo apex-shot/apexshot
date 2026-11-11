@@ -4351,3 +4351,12 @@ msgstr "倾斜程度"
 
 msgid "Tilt with motion"
 msgstr "随移动倾斜"
+
+msgid "Hardware encoding uses a bitrate, so file sizes follow the estimate; the software encoder uses a constant quality."
+msgstr "硬件编码使用码率，因此文件大小与估算一致；软件编码器使用恒定质量。"
+
+msgid "Estimated output size: {size}"
+msgstr "预计文件大小：{size}"
+
+msgid "Export time ≈ {time}"
+msgstr "导出时间 ≈ {time}"
