@@ -441,8 +441,10 @@ fn probe_pair(dir: &Path, primary: Encoder) -> Result<bool, End> {
     Ok(decoded.status.success() && decoded.stderr.is_empty())
 }
 
-/// The stream format a packet-copy join depends on: codec, profile, level,
-/// size, pixel format, and frame rate of the first video stream.
+/// The stream format a packet-copy join depends on: codec, profile, size,
+/// pixel format, and frame rate of the first video stream. The level is left
+/// out: a hardware encoder may write its own, and a decoder that can take the
+/// higher level plays both pieces.
 fn stream_format(path: &Path) -> Result<String, End> {
     let output = crate::utils::hidden_command(ffmpeg::ffprobe_executable())
         .args([
@@ -451,7 +453,7 @@ fn stream_format(path: &Path) -> Result<String, End> {
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=codec_name,profile,level,width,height,pix_fmt,r_frame_rate",
+            "stream=codec_name,profile,width,height,pix_fmt,r_frame_rate",
             "-of",
             "csv=p=0",
         ])
