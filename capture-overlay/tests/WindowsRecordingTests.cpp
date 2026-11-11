@@ -17,10 +17,13 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QGuiApplication>
 #include <QImage>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPainter>
+#include <QRasterWindow>
 #include <QRegularExpression>
 #include <QSet>
 #include <QStringList>
@@ -31,6 +34,7 @@
 #include <windows.h>
 #include <dwmapi.h>
 #include <cstdio>
+#include <memory>
 
 namespace {
 
@@ -272,7 +276,7 @@ bool validateSidecar(const QString& videoPath, double recordedSeconds)
         return false;
     }
 
-    static const QRegularExpression cursorIdPattern(QStringLiteral("^[0-9a-f]{16}$"));
+    static const QRegularExpression cursorIdPattern(QStringLiteral("^(std|custom)-[0-9a-f]{16}$"));
     const QDir cursorFolder = sidecarInfo.dir().filePath(cursorFolderName);
     QSet<QString> cursorIds;
     for (const QJsonValue& value : cursors) {
@@ -991,6 +995,67 @@ int recordWindow()
 
 } // namespace
 
+namespace {
+
+/// The live camera drawn on screen, so a screen recording shows the camera
+/// beside its own track and the two can be lined up after the fact.
+class PreviewWindow final : public QRasterWindow
+{
+public:
+    void setFrame(const QImage& frame)
+    {
+        m_frame = frame;
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        painter.fillRect(QRect(QPoint(0, 0), size()), Qt::black);
+        if (!m_frame.isNull())
+            painter.drawImage(QRect(QPoint(0, 0), size()), m_frame);
+    }
+
+private:
+    QImage m_frame;
+};
+
+/// A full-screen window that flips between black and white at irregular
+/// intervals. The screen recording sees each flip on the frame it lands, and
+/// the camera sees it as light on whoever sits in front of the screen, so the
+/// two can be lined up without trusting either pipeline.
+class ScreenFlash final : public QRasterWindow
+{
+public:
+    ScreenFlash()
+    {
+        m_timer.setSingleShot(true);
+        QObject::connect(&m_timer, &QTimer::timeout, &m_timer, [this] {
+            m_white = !m_white;
+            update();
+            // A fixed sequence of uneven gaps keeps the pattern unambiguous.
+            m_step = (m_step * 1103515245u + 12345u) & 0x7fffffffu;
+            m_timer.start(350 + int(m_step % 900u));
+        });
+        m_timer.start(500);
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override
+    {
+        QPainter painter(this);
+        painter.fillRect(QRect(QPoint(0, 0), size()), m_white ? Qt::white : Qt::black);
+    }
+
+private:
+    QTimer m_timer;
+    bool m_white = false;
+    quint32 m_step = 7u;
+};
+
+} // namespace
+
 /// Record a short clip with the webcam track enabled and check the track, the
 /// sidecar block and the live frames the bubble draws.
 ///
@@ -1050,6 +1115,27 @@ int recordWithWebcam()
     request.webcamDevice = camera;
     request.webcamLayout = layout;
 
+    // APEXSHOT_TEST_WEBCAM_SHOW draws the live camera in the middle of the
+    // captured screen, so the sync of the track can be checked against it.
+    std::unique_ptr<PreviewWindow> preview;
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WEBCAM_SHOW")
+        && qobject_cast<QGuiApplication*>(QCoreApplication::instance())) {
+        preview = std::make_unique<PreviewWindow>();
+        preview->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
+        preview->setGeometry(QRect(region.center() - QPoint(240, 240), QSize(480, 480)));
+        preview->show();
+    }
+    // APEXSHOT_TEST_WEBCAM_FLASH flashes the whole captured screen so the
+    // camera sees each flip as light on the face in front of it.
+    std::unique_ptr<ScreenFlash> flash;
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WEBCAM_FLASH")
+        && qobject_cast<QGuiApplication*>(QCoreApplication::instance())) {
+        flash = std::make_unique<ScreenFlash>();
+        flash->setFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
+        flash->setGeometry(region);
+        flash->show();
+    }
+
     int frames = 0;
     QSize frameSize;
     QObject::connect(&session,
@@ -1058,6 +1144,8 @@ int recordWithWebcam()
                      [&](const QImage& frame) {
                          ++frames;
                          frameSize = frame.size();
+                         if (preview)
+                             preview->setFrame(frame);
                      });
     QObject::connect(&session,
                      &Platform::RecordingSession::warning,
@@ -1150,6 +1238,27 @@ int recordWithWebcam()
     if (!session.start(request, error)) {
         std::printf("SKIP: the webcam recording did not start: %s\n", qPrintable(error));
         return 77;
+    }
+    // APEXSHOT_TEST_WEBCAM_PAUSE_AT pauses the recording that many seconds in,
+    // and APEXSHOT_TEST_WEBCAM_PAUSE_FOR (default 2) resumes it after, so the
+    // camera's start in a later segment is exercised. The pause is added to
+    // the stop time.
+    const int pauseAt = qEnvironmentVariableIntValue("APEXSHOT_TEST_WEBCAM_PAUSE_AT");
+    int pauseFor = 2;
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WEBCAM_PAUSE_FOR"))
+        pauseFor = qEnvironmentVariableIntValue("APEXSHOT_TEST_WEBCAM_PAUSE_FOR");
+    if (pauseAt > 0 && pauseFor > 0 && pauseAt * 1000 < milliseconds) {
+        QTimer::singleShot(pauseAt * 1000, &session, [&session] {
+            session.pause();
+            std::puts("WEBCAM_PAUSED");
+            std::fflush(stdout);
+        });
+        QTimer::singleShot((pauseAt + pauseFor) * 1000, &session, [&session] {
+            session.resume();
+            std::puts("WEBCAM_RESUMED");
+            std::fflush(stdout);
+        });
+        milliseconds += pauseFor * 1000;
     }
     QTimer::singleShot(milliseconds, &session, [&session] { session.stop(); });
     loop.exec();
@@ -1392,7 +1501,14 @@ int main(int argc, char** argv)
     // The recorder is per-monitor DPI aware. Without this the test sees
     // virtualized monitor and window rectangles and records a smaller crop.
     Platform::enableDpiAwareness();
-    QCoreApplication app(argc, argv);
+    // The webcam sync check draws the live camera, which needs a GUI
+    // application; every other check runs headless.
+    std::unique_ptr<QCoreApplication> app;
+    if (!qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WEBCAM_SHOW")
+        || !qEnvironmentVariableIsEmpty("APEXSHOT_TEST_WEBCAM_FLASH"))
+        app = std::make_unique<QGuiApplication>(argc, argv);
+    else
+        app = std::make_unique<QCoreApplication>(argc, argv);
 
     if (!checkCursorKinds())
         return 1;

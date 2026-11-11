@@ -40,6 +40,42 @@ const RECORDING_EDITOR_CSS: &str = concat!(
     .editor-theme-light popover.gradient-type-menu button.recording-editor-dropdown-item:hover {
         background: alpha(#111827, 0.10);
     }
+    /* Inspector cards: the image editor's raised section, uppercase title
+       and chevron, so both editors' side panels fold the same way. */
+    .video-editor-section {
+        padding: 10px;
+        background: rgba(255, 255, 255, 0.025);
+        border-radius: 8px;
+    }
+    .editor-theme-light .video-editor-section {
+        background: rgba(17, 24, 39, 0.025);
+    }
+    .video-editor-section-title {
+        color: rgba(255, 255, 255, 0.46);
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.6px;
+        margin-top: 4px;
+    }
+    .editor-theme-light .video-editor-section-title {
+        color: rgba(17, 24, 39, 0.56);
+    }
+    .video-editor-disclosure-header {
+        min-height: 24px;
+    }
+    .video-editor-disclosure-header:hover .video-editor-section-title {
+        color: rgba(255, 255, 255, 0.72);
+    }
+    .editor-theme-light .video-editor-disclosure-header:hover .video-editor-section-title {
+        color: rgba(17, 24, 39, 0.72);
+    }
+    .video-editor-disclosure-chevron {
+        min-width: 12px;
+        color: rgba(255, 255, 255, 0.5);
+    }
+    .editor-theme-light .video-editor-disclosure-chevron {
+        color: rgba(17, 24, 39, 0.5);
+    }
     "#,
 );
 

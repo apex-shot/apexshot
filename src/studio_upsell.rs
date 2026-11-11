@@ -317,6 +317,7 @@ fn card_copy(error: &StudioEntitlementError) -> (String, String) {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Feature {
+    Style,
     Motion,
     Placement,
     Camera,
@@ -326,6 +327,7 @@ enum Feature {
 impl Feature {
     fn is_used_by(self, capabilities: StudioCapabilities) -> bool {
         match self {
+            Self::Style => capabilities.studio_style,
             Self::Motion => capabilities.motion_export,
             Self::Placement => capabilities.static_presentation,
             Self::Camera => capabilities.advanced_zoom,
@@ -336,6 +338,7 @@ impl Feature {
 
 fn features_for(capabilities: StudioCapabilities) -> Vec<(Feature, bool)> {
     let mut features = [
+        Feature::Style,
         Feature::Motion,
         Feature::Placement,
         Feature::Camera,
@@ -615,6 +618,11 @@ fn feature_panel(capabilities: StudioCapabilities, dark: bool) -> GtkBox {
 
     for (feature, used) in features_for(capabilities) {
         let (title, detail, icon_name) = match feature {
+            Feature::Style => (
+                t("Backgrounds and style"),
+                t("Wallpapers, padding, rounded corners, shadows and frames for stills."),
+                custom::IMAGE_ALT_SYMBOLIC,
+            ),
             Feature::Motion => (
                 t("Motion timeline"),
                 t("Animate your captures with titles and easing, then export as MP4."),
@@ -961,6 +969,7 @@ mod tests {
             features,
             vec![
                 (Feature::Camera, true),
+                (Feature::Style, false),
                 (Feature::Motion, false),
                 (Feature::Placement, false),
                 (Feature::Upscale, false),
@@ -975,12 +984,14 @@ mod tests {
             static_presentation: true,
             advanced_zoom: false,
             image_upscale: false,
+            studio_style: false,
         });
         assert_eq!(
             features,
             vec![
                 (Feature::Motion, true),
                 (Feature::Placement, true),
+                (Feature::Style, false),
                 (Feature::Camera, false),
                 (Feature::Upscale, false),
             ]
@@ -991,7 +1002,17 @@ mod tests {
     fn no_feature_is_marked_when_the_export_uses_none() {
         let features = features_for(StudioCapabilities::default());
         assert!(features.iter().all(|(_, used)| !used));
-        assert_eq!(features.len(), 4);
+        assert_eq!(features.len(), 5);
+    }
+
+    #[test]
+    fn a_styled_still_tags_backgrounds_and_style_first() {
+        let features = features_for(StudioCapabilities {
+            studio_style: true,
+            ..StudioCapabilities::default()
+        });
+        assert_eq!(features[0], (Feature::Style, true));
+        assert!(features[1..].iter().all(|(_, used)| !used));
     }
 
     #[test]

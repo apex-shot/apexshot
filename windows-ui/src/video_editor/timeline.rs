@@ -54,15 +54,15 @@ const PLAYHEAD_SNAP: f64 = 12.0;
 /// at a resting playhead selects the first instead of stacking a second.
 const LAYOUT_CUE_EPSILON: f64 = 0.01;
 /// Height of the ruler row, in unscaled pixels.
-const RULER_HEIGHT: f64 = 36.0;
+const RULER_HEIGHT: f64 = 28.0;
 /// Height of the filmstrip lane, in unscaled pixels.
-const VIDEO_LANE_HEIGHT: f64 = 56.0;
+const VIDEO_LANE_HEIGHT: f64 = 42.0;
 /// Height of one effect lane, in unscaled pixels.
-const EFFECT_LANE_HEIGHT: f64 = 56.0;
-/// Height of the compact camera-layout lane, in unscaled pixels.
-const LAYOUT_LANE_HEIGHT: f64 = 34.0;
+const EFFECT_LANE_HEIGHT: f64 = 42.0;
+/// Height of a collapsed lane, in unscaled pixels.
+const THIN_LANE_HEIGHT: f64 = 18.0;
 /// Gap between rows, in unscaled pixels.
-const LANE_GAP: f64 = 10.0;
+const LANE_GAP: f64 = 8.0;
 /// Horizontal room a chip gives its label, in unscaled pixels.
 const LAYOUT_CHIP_LABEL_PADDING: f64 = 22.0;
 /// The seam a chip leaves before the next cue, in unscaled pixels.
@@ -86,6 +86,35 @@ enum EffectTrack {
     Hide,
 }
 
+/// The secondary lane that is drawn at full height. The others rest as thin
+/// strips, so the timeline keeps one height whichever lane is in use.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum TimelineLane {
+    #[default]
+    Zoom,
+    Hide,
+    Layout,
+}
+
+impl TimelineLane {
+    const ALL: [Self; 3] = [Self::Zoom, Self::Hide, Self::Layout];
+
+    fn of_effect(track: EffectTrack) -> Self {
+        match track {
+            EffectTrack::Zoom => Self::Zoom,
+            EffectTrack::Hide => Self::Hide,
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            Self::Zoom => 0,
+            Self::Hide => 1,
+            Self::Layout => 2,
+        }
+    }
+}
+
 /// What the lane stack shows: which rows are present. Playback never changes
 /// it, so the layout cannot breathe in and out while the playhead moves.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -93,6 +122,7 @@ struct LaneState {
     camera: bool,
     zoom: bool,
     hide: bool,
+    expanded: TimelineLane,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -146,7 +176,6 @@ struct ClipTemplate {
     instant: bool,
 }
 
-#[derive(Default)]
 struct Data {
     path: Option<PathBuf>,
     duration: f64,
@@ -217,6 +246,54 @@ struct Data {
     /// When a layout slider last reported. One sweep is one undo step, and it
     /// must not fold into a geometry sweep that just ended.
     layout_burst: Option<Instant>,
+    /// The secondary lane drawn at full height; the others rest thin.
+    expanded_lane: TimelineLane,
+    /// How expanded each lane is drawn right now, 0 thin .. 1 full.
+    lane_progress: [f64; 3],
+}
+
+impl Default for Data {
+    fn default() -> Self {
+        Self {
+            path: None,
+            duration: 0.0,
+            frame_size: None,
+            fps: 0.0,
+            trim_start: 0.0,
+            trim_end: 0.0,
+            playhead: 0.0,
+            scale: 0.0,
+            scroll: 0.0,
+            playing: false,
+            selected: false,
+            hover: None,
+            frames: Vec::new(),
+            zoom_clips: Vec::new(),
+            zoom_camera: super::zoom::ZoomCameraSettings::default(),
+            hide_clips: Vec::new(),
+            selected_zoom: None,
+            zoom_selection_epoch: 0,
+            selected_hide: None,
+            clipboard: None,
+            last_zoom_style: None,
+            pointer_available: false,
+            add_zoom_tool: false,
+            hover_zoom: None,
+            hover_hide: None,
+            dragging_effect: false,
+            cuts: Vec::new(),
+            segment_starts: Vec::new(),
+            moving_segment: None,
+            freeze_tail: 0.0,
+            history: EditHistory::default(),
+            webcam: None,
+            selected_layout: None,
+            layout_selection_epoch: 0,
+            layout_burst: None,
+            expanded_lane: TimelineLane::Zoom,
+            lane_progress: [1.0, 0.0, 0.0],
+        }
+    }
 }
 
 /// The document as one undo step restores it.
@@ -636,6 +713,8 @@ impl Data {
         self.selected_layout = None;
         self.layout_selection_epoch = 0;
         self.layout_burst = None;
+        self.expanded_lane = TimelineLane::Zoom;
+        self.lane_progress = [1.0, 0.0, 0.0];
     }
 
     /// The editable state, as one undo step keeps it.
@@ -917,6 +996,9 @@ impl Data {
                 h: layer.h,
                 radius: layer.radius,
                 mirror: layer.mirror,
+                delay_seconds: layer.delay_seconds,
+                zoomed_scale: layer.zoomed_scale,
+                hide_during_silence: layer.hide_during_silence,
             });
             webcam.set_layouts(layouts);
         } else if let Some(webcam) = self.webcam.as_ref() {
@@ -1098,6 +1180,7 @@ impl Data {
             self.selected = false;
             // Selecting a clip puts the Add zoom tool away, as in the studied build.
             self.add_zoom_tool = false;
+            self.expanded_lane = TimelineLane::of_effect(track);
         }
         if track == EffectTrack::Zoom && index.is_some() {
             self.zoom_selection_epoch = self.zoom_selection_epoch.wrapping_add(1);
@@ -1381,7 +1464,44 @@ impl Data {
                 .is_some_and(|webcam| webcam.has_track()),
             zoom: true,
             hide: true,
+            expanded: self.expanded_lane,
         }
+    }
+
+    /// Whether `lane` is the one drawn at full height.
+    fn lane_expanded(&self, lane: TimelineLane) -> bool {
+        self.expanded_lane == lane
+    }
+
+    /// Make `lane` the full-height one. Returns whether it changed.
+    fn expand_lane(&mut self, lane: TimelineLane) -> bool {
+        let changed = self.expanded_lane != lane;
+        self.expanded_lane = lane;
+        changed
+    }
+
+    /// How far `lane` is drawn toward full height right now, 0..=1.
+    fn lane_progress(&self, lane: TimelineLane) -> f64 {
+        self.lane_progress[lane.index()]
+    }
+
+    /// Ease every lane toward its target (1 for the expanded lane, 0 for the
+    /// rest) by `dt` seconds. Returns whether anything is still moving.
+    fn step_lane_progress(&mut self, dt: f64) -> bool {
+        // About 180 ms to settle: an exponential ease with a 45 ms constant.
+        let amount = 1.0 - (-dt.max(0.0) / 0.045).exp();
+        let mut next = self.lane_progress;
+        let mut targets = [0.0; 3];
+        for lane in TimelineLane::ALL {
+            let index = lane.index();
+            targets[index] = if self.expanded_lane == lane { 1.0 } else { 0.0 };
+            next[index] += (targets[index] - next[index]) * amount;
+        }
+        // Snap only once every lane has arrived: snapping one early would
+        // break their sum, which is what keeps the timeline's height fixed.
+        let arrived = (0..3).all(|index| (targets[index] - next[index]).abs() < 0.002);
+        self.lane_progress = if arrived { targets } else { next };
+        !arrived
     }
 
     fn hover_time(&self, track: EffectTrack) -> Option<f64> {
@@ -1509,6 +1629,44 @@ impl Data {
             scale,
             automatic: self.pointer_available,
         })
+    }
+
+    /// Put the camera layer on the playhead: the composition instant its
+    /// layouts run on, how far the screen's zoom has shrunk it there, and the
+    /// split's resting edge from the cursor.
+    /// Both preview paths (the tick and a published edit) call this, so the
+    /// camera never runs on a clock the shrink was not computed for.
+    fn sync_webcam_to_playhead(
+        &self,
+        sidecar: impl FnOnce() -> Option<crate::recording::editor::sidecar::PointerSidecar>,
+    ) {
+        let Some(webcam) = self.webcam.as_ref() else {
+            return;
+        };
+        webcam.set_composition_time(self.playhead);
+        let unzoomed = self.placement().is_some() || self.add_zoom_tool().is_some();
+        webcam.set_zoom_shrink(if unzoomed {
+            0.0
+        } else {
+            super::webcam::zoom_shrink_at(
+                &self.zoom_clips,
+                self.playhead,
+                self.zoom_camera.lead_in_seconds(),
+            )
+        });
+        let fps = if self.fps > 0.0 { self.fps } else { 30.0 };
+        webcam.set_split_rest_at(
+            self.playhead,
+            &self.zoom_clips,
+            &self.camera_mapping(),
+            self.total_duration(),
+            super::zoom::ZoomCameraSettings {
+                frame_rate: fps,
+                ..self.zoom_camera
+            },
+            self.frame_size,
+            sidecar,
+        );
     }
 
     /// Returns whether the focus point actually moved, so the caller can skip a
@@ -1972,6 +2130,7 @@ impl Data {
             .position(|cue| (cue.at - at).abs() <= LAYOUT_CUE_EPSILON)
         {
             self.selected_layout = Some(index);
+            self.expanded_lane = TimelineLane::Layout;
             self.layout_selection_epoch = self.layout_selection_epoch.wrapping_add(1);
             return Some(index);
         }
@@ -1979,6 +2138,8 @@ impl Data {
         next.cues.push(super::webcam::LayoutCue {
             at,
             layout: layouts.layout_at(at),
+            position: None,
+            cutout_x: None,
         });
         let next = next.clamped();
         let index = next
@@ -1988,6 +2149,7 @@ impl Data {
         self.record_layout_edit(false);
         self.selected_layout = index;
         if index.is_some() {
+            self.expanded_lane = TimelineLane::Layout;
             self.layout_selection_epoch = self.layout_selection_epoch.wrapping_add(1);
         }
         webcam.set_layouts(next);
@@ -2049,8 +2211,51 @@ impl Data {
         };
         self.playing = false;
         self.selected_layout = Some(index);
+        self.expanded_lane = TimelineLane::Layout;
         self.layout_selection_epoch = self.layout_selection_epoch.wrapping_add(1);
         self.playhead = cue.at.clamp(0.0, self.total_duration());
+        true
+    }
+
+    /// Select a layout change where it is, the way a zoom or hide clip is
+    /// selected on its lane: the playhead and playback stay as they are, so
+    /// grabbing a change to move or resize it never jumps the playhead.
+    fn select_layout_cue_in_place(&mut self, index: usize) -> bool {
+        let Some(layouts) = self.webcam_layouts() else {
+            return false;
+        };
+        if index >= layouts.cues.len() {
+            return false;
+        }
+        self.selected_layout = Some(index);
+        self.expanded_lane = TimelineLane::Layout;
+        self.layout_selection_epoch = self.layout_selection_epoch.wrapping_add(1);
+        true
+    }
+
+    /// Put the playhead inside the change at `index` when it is not already,
+    /// at the middle of the span the change holds (the studied place a new
+    /// change opens at), so editing a change from the panel shows it.
+    /// Returns whether the playhead moved.
+    fn show_layout_cue(&mut self, index: usize) -> bool {
+        let Some(layouts) = self.webcam_layouts() else {
+            return false;
+        };
+        let Some(cue) = layouts.cues.get(index).copied() else {
+            return false;
+        };
+        let duration = self.total_duration();
+        let end = layouts
+            .cues
+            .iter()
+            .map(|other| other.at)
+            .filter(|at| *at > cue.at)
+            .fold(duration, f64::min);
+        if self.playhead >= cue.at && self.playhead < end {
+            return false;
+        }
+        self.playing = false;
+        self.playhead = ((cue.at + end) / 2.0).clamp(0.0, duration);
         true
     }
 
@@ -2066,8 +2271,14 @@ impl Data {
     /// within one cue epsilon of another change is refused: one instant has
     /// one layout. The list stays ordered and whichever change was selected
     /// keeps that selection. A successful move pauses and seeks to the cue.
+    /// Move a change to a typed time from the panel, which asks to go there:
+    /// unlike a drag on the lane, the playhead follows it.
     fn set_layout_cue_time(&mut self, index: usize, at: f64) -> bool {
-        self.move_layout_cue(index, at, false)
+        let moved = self.move_layout_cue(index, at, false);
+        if moved {
+            self.playhead = at.clamp(0.0, self.total_duration());
+        }
+        moved
     }
 
     /// The earliest and latest instant the change at `index` can reach without
@@ -2151,7 +2362,6 @@ impl Data {
             })
         });
         self.playing = false;
-        self.playhead = at.clamp(0.0, self.total_duration());
         self.clamp_layout_cues();
         true
     }
@@ -2161,9 +2371,11 @@ impl Data {
     /// camera layer's global shape, as one undo step with the layout.
     ///
     /// The shape is fitted to the recording's frame aspect so a circle stays
-    /// round on screen, and both dimensions scale together to stay inside the
-    /// layer's size bounds. The layer keeps the alignment it had, so a preset
-    /// taken at an edge stays on that edge instead of drifting off it.
+    /// round on screen, at the size the layer already had (its longest side
+    /// against the frame's shortest), and both dimensions scale together to
+    /// stay inside the layer's size bounds. The layer keeps the alignment it
+    /// had, so a preset taken at an edge stays on that edge instead of
+    /// drifting off it.
     fn set_webcam_editing_layout(
         &mut self,
         layout: super::webcam::CameraLayout,
@@ -2201,9 +2413,9 @@ impl Data {
         if let (Some(shape), Some(layer)) = (overlay_shape, next_layer.as_mut()) {
             let previous = (layer.w, layer.h, layer.radius);
             let radius = super::webcam::radius_for_shape(shape);
-            layer.resize_overlay(
-                layer.w,
-                self.frame_aspect() * super::webcam::aspect_for_shape(shape),
+            layer.set_overlay_aspect(
+                1.0 / super::webcam::aspect_for_shape(shape),
+                self.frame_aspect(),
             );
             layer.radius = radius;
             layer_changed = (layer.w - previous.0).abs() > f64::EPSILON
@@ -2351,6 +2563,9 @@ pub(super) struct WebcamPanelState {
     /// label an overlay shape the way the frame will draw it. 16:9 when the
     /// frame size is unknown.
     pub frame_aspect: f64,
+    /// The screen pane's share of the automatic split on the current stage,
+    /// which a widened or padded stage changes.
+    pub auto_split_share: f64,
     /// The layout change the cue chooser edits.
     pub selected: Option<usize>,
     /// Changes on every selection of a layout change, including a second click
@@ -2413,12 +2628,10 @@ impl Timeline {
     fn current_frame(&self) -> PreviewFrame {
         let data = self.data.borrow();
         self.cursor.set_cuts(&data.cuts);
-        if let Some(webcam) = data.webcam.clone() {
-            webcam.set_composition_time(data.playhead);
-        }
         let placement = data.placement();
         let add_zoom = data.add_zoom_tool();
         let unzoomed = placement.is_some() || add_zoom.is_some();
+        data.sync_webcam_to_playhead(|| self.cursor.sidecar());
         let fps = if data.fps > 0.0 { data.fps } else { 30.0 };
         let camera_settings = super::zoom::ZoomCameraSettings {
             frame_rate: fps,
@@ -2538,6 +2751,11 @@ impl Timeline {
         webcam.settings()
     }
 
+    /// The recording frame's width over height, for sizing the camera layer.
+    pub fn webcam_frame_aspect(&self) -> f64 {
+        self.data.borrow().frame_aspect()
+    }
+
     /// Change the camera layer: the preview redraws from it and the autosave
     /// writes it, both because every mutation passes through the repaint.
     pub fn update_webcam(&self, update: impl FnOnce(&mut super::webcam::LayerSettings)) {
@@ -2618,6 +2836,11 @@ impl Timeline {
             playhead,
             duration: data.total_duration(),
             frame_aspect: data.frame_aspect(),
+            auto_split_share: data
+                .webcam
+                .as_ref()
+                .map(|webcam| webcam.auto_split_share(data.frame_aspect()))
+                .unwrap_or(0.5),
         }
     }
 
@@ -2677,6 +2900,32 @@ impl Timeline {
             data.select_layout_cue(index)
         };
         if selected {
+            (self.repaint)();
+            self.publish_frame();
+        }
+    }
+
+    /// Select a layout change from the timeline lane without moving the
+    /// playhead.
+    pub fn select_webcam_layout_cue_in_place(&self, index: usize) {
+        let selected = {
+            let mut data = self.data.borrow_mut();
+            data.select_layout_cue_in_place(index)
+        };
+        if selected {
+            (self.repaint)();
+            self.publish_frame();
+        }
+    }
+
+    /// Bring the playhead into a layout change before the panel edits it, so
+    /// the preview shows the change being edited.
+    pub fn show_webcam_layout_cue(&self, index: usize) {
+        let moved = {
+            let mut data = self.data.borrow_mut();
+            data.show_layout_cue(index)
+        };
+        if moved {
             (self.repaint)();
             self.publish_frame();
         }
@@ -3144,47 +3393,179 @@ pub(super) fn build(
     zoom_track_lane.set_draw_func({
         let data = data.clone();
         move |_, context, width, height| {
-            draw_effect_clips(
-                context,
-                width,
-                height,
-                &data.borrow(),
-                EffectTrack::Zoom,
-                prefers_dark,
-                scale,
-            );
+            let data = data.borrow();
+            let lane = TimelineLane::of_effect(EffectTrack::Zoom);
+            let progress = data.lane_progress(lane);
+            let thin = |context: &Context| {
+                let bars: Vec<_> = data
+                    .effect_spans(EffectTrack::Zoom)
+                    .into_iter()
+                    .map(|(index, start, end)| {
+                        let tone = effect_tone(
+                            EffectTrack::Zoom,
+                            prefers_dark,
+                            data.effect_hidden(EffectTrack::Zoom, index),
+                        );
+                        (start, end, tone.fill)
+                    })
+                    .collect();
+                draw_thin_lane(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    &t("Zoom"),
+                    &bars,
+                    prefers_dark,
+                    scale,
+                );
+            };
+            let full = |context: &Context| {
+                draw_effect_clips(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    EffectTrack::Zoom,
+                    prefers_dark,
+                    scale,
+                );
+            };
+            if progress >= 0.999 {
+                full(context);
+            } else if progress <= 0.001 {
+                thin(context);
+            } else {
+                context.push_group();
+                thin(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(1.0 - progress);
+                context.push_group();
+                full(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(progress);
+            }
         }
     });
 
     let hide_track = DrawingArea::new();
     hide_track.add_css_class("recording-editor-card-hide-track");
     hide_track.set_hexpand(true);
-    hide_track.set_size_request(-1, (EFFECT_LANE_HEIGHT * scale).round() as i32);
+    hide_track.set_size_request(-1, (THIN_LANE_HEIGHT * scale).round() as i32);
     hide_track.set_draw_func({
         let data = data.clone();
         move |_, context, width, height| {
-            draw_effect_clips(
-                context,
-                width,
-                height,
-                &data.borrow(),
-                EffectTrack::Hide,
-                prefers_dark,
-                scale,
-            );
+            let data = data.borrow();
+            let lane = TimelineLane::of_effect(EffectTrack::Hide);
+            let progress = data.lane_progress(lane);
+            let thin = |context: &Context| {
+                let bars: Vec<_> = data
+                    .effect_spans(EffectTrack::Hide)
+                    .into_iter()
+                    .map(|(index, start, end)| {
+                        let tone = effect_tone(
+                            EffectTrack::Hide,
+                            prefers_dark,
+                            data.effect_hidden(EffectTrack::Hide, index),
+                        );
+                        (start, end, tone.fill)
+                    })
+                    .collect();
+                draw_thin_lane(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    &t("Hide"),
+                    &bars,
+                    prefers_dark,
+                    scale,
+                );
+            };
+            let full = |context: &Context| {
+                draw_effect_clips(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    EffectTrack::Hide,
+                    prefers_dark,
+                    scale,
+                );
+            };
+            if progress >= 0.999 {
+                full(context);
+            } else if progress <= 0.001 {
+                thin(context);
+            } else {
+                context.push_group();
+                thin(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(1.0 - progress);
+                context.push_group();
+                full(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(progress);
+            }
         }
     });
 
     let layout_track = DrawingArea::new();
     layout_track.add_css_class("recording-editor-card-layout-track");
     layout_track.set_hexpand(true);
-    layout_track.set_size_request(-1, (LAYOUT_LANE_HEIGHT * scale).round() as i32);
+    layout_track.set_size_request(-1, (THIN_LANE_HEIGHT * scale).round() as i32);
     layout_track.set_visible(false);
     layout_track.set_tooltip_text(Some(&t("Camera layout changes")));
     layout_track.set_draw_func({
         let data = data.clone();
         move |_, context, width, height| {
-            draw_layout_lane(context, width, height, &data.borrow(), prefers_dark, scale);
+            let data = data.borrow();
+            let progress = data.lane_progress(TimelineLane::Layout);
+            let thin = |context: &Context| {
+                let bar = if prefers_dark {
+                    (0.10, 0.155, 0.15, 1.0)
+                } else {
+                    (0.87, 0.915, 0.905, 1.0)
+                };
+                let tick = if prefers_dark {
+                    (0.45, 0.80, 0.70, 0.95)
+                } else {
+                    (0.15, 0.50, 0.42, 0.95)
+                };
+                let mut bars = vec![(0.0, data.total_duration(), bar)];
+                if let Some(layouts) = data.webcam_layouts() {
+                    for cue in &layouts.cues {
+                        bars.push((cue.at, cue.at, tick));
+                    }
+                }
+                draw_thin_lane(
+                    context,
+                    width,
+                    height,
+                    &data,
+                    &t("Layout"),
+                    &bars,
+                    prefers_dark,
+                    scale,
+                );
+            };
+            let full = |context: &Context| {
+                draw_layout_lane(context, width, height, &data, prefers_dark, scale);
+            };
+            if progress >= 0.999 {
+                full(context);
+            } else if progress <= 0.001 {
+                thin(context);
+            } else {
+                context.push_group();
+                thin(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(1.0 - progress);
+                context.push_group();
+                full(context);
+                let _ = context.pop_group_to_source();
+                let _ = context.paint_with_alpha(progress);
+            }
         }
     });
 
@@ -3195,6 +3576,49 @@ pub(super) fn build(
     lanes.append(&zoom_track_lane);
     lanes.append(&hide_track);
     lanes.append(&layout_track);
+
+    lanes.add_tick_callback({
+        let data = data.clone();
+        let zoom = zoom_track_lane.clone();
+        let hide = hide_track.clone();
+        let layout = layout_track.clone();
+        let last = Rc::new(Cell::new(None::<i64>));
+        // The heights on screen. Every tick derives them from the progress
+        // and which lanes show, and applies them only when they change, so a
+        // lane appearing or the first switch never jumps the total a pixel.
+        let applied = Rc::new(Cell::new([0i32; 3]));
+        move |_, clock| {
+            let now = clock.frame_time();
+            let dt = last
+                .replace(Some(now))
+                .map(|previous| (now - previous) as f64 / 1_000_000.0)
+                .unwrap_or(0.0)
+                .min(0.1);
+            let (moving, progress) = {
+                let mut data = data.borrow_mut();
+                let before = data.lane_progress;
+                let moving = data.step_lane_progress(dt);
+                (moving || before != data.lane_progress, data.lane_progress)
+            };
+            let heights = lane_heights(
+                progress,
+                [zoom.is_visible(), hide.is_visible(), layout.is_visible()],
+                scale,
+            );
+            if heights != applied.get() {
+                applied.set(heights);
+                zoom.set_size_request(-1, heights[0]);
+                hide.set_size_request(-1, heights[1]);
+                layout.set_size_request(-1, heights[2]);
+            }
+            if moving {
+                zoom.queue_draw();
+                hide.queue_draw();
+                layout.queue_draw();
+            }
+            gtk4::glib::ControlFlow::Continue
+        }
+    });
 
     // The frosted extend area is one layer over the lanes, so it spans the
     // video, zoom, hide and camera-layout rows (and the gaps between them)
@@ -3336,6 +3760,13 @@ pub(super) fn build(
             project.mark_changed();
         })
     };
+
+    // A widened or padded stage changes the automatic split's share, which
+    // the Webcam panel shows; the stage is settled by the preview, not here.
+    let webcam = data.borrow().webcam.clone();
+    if let Some(webcam) = webcam {
+        webcam.set_stage_listener(repaint.clone());
+    }
 
     // Autosave. The repaint above only notes that something may have changed;
     // this tick decides whether it is worth a write by comparing against the
@@ -3679,9 +4110,7 @@ pub(super) fn build(
                     }
                 }
                 let composition_time = data.playhead;
-                if let Some(webcam) = data.webcam.clone() {
-                    webcam.set_composition_time(composition_time);
-                }
+                data.sync_webcam_to_playhead(|| cursor.sidecar());
                 let placement = data.placement();
                 let add_zoom = data.add_zoom_tool();
                 let unzoomed = placement.is_some() || add_zoom.is_some();
@@ -3784,6 +4213,53 @@ pub(super) fn build(
     timeline
 }
 
+/// A lane's height for how expanded it is drawn, in device pixels. Linear
+/// in `progress`: the lanes' progress always sums to one expanded lane, so
+/// linear heights keep the timeline's total height fixed while they trade.
+fn lane_height_exact(progress: f64, scale: f64) -> f64 {
+    let progress = progress.clamp(0.0, 1.0);
+    (THIN_LANE_HEIGHT + (EFFECT_LANE_HEIGHT - THIN_LANE_HEIGHT) * progress) * scale
+}
+
+/// [`lane_height_exact`] rounded to whole pixels on its own.
+fn lane_height(progress: f64, scale: f64) -> i32 {
+    lane_height_exact(progress, scale).round() as i32
+}
+
+/// Whole-pixel heights for the visible lanes whose sum never changes while
+/// they trade height: each lane takes the difference between the rounded
+/// running totals, so a pixel one lane loses to rounding the next one gains.
+/// Rounding each lane alone made the total wobble by a pixel a frame, and
+/// the preview above resized with it.
+fn lane_heights(progress: [f64; 3], visible: [bool; 3], scale: f64) -> [i32; 3] {
+    let mut heights = [0; 3];
+    let shown: Vec<usize> = (0..3).filter(|&index| visible[index]).collect();
+    // The resting total: one lane full and the rest thin, in whole pixels.
+    // Pinning the sum to it keeps a total that lands on half a pixel from
+    // flipping between frames on floating-point noise.
+    let resting = (lane_height_exact(1.0, scale)
+        + lane_height_exact(0.0, scale) * shown.len().saturating_sub(1) as f64)
+        .round() as i32;
+    let mut total = 0.0;
+    let mut placed = 0;
+    for (position, &index) in shown.iter().enumerate() {
+        if position + 1 == shown.len() {
+            heights[index] = resting - placed;
+            break;
+        }
+        total += lane_height_exact(progress[index], scale);
+        let rounded = total.round() as i32;
+        heights[index] = rounded - placed;
+        placed = rounded;
+    }
+    for index in 0..3 {
+        if !visible[index] {
+            heights[index] = lane_height(progress[index], scale);
+        }
+    }
+    heights
+}
+
 /// Apply a lane snapshot to the drawing areas. Only called when the snapshot
 /// changes, so playback never re-measures the card.
 fn apply_lane_state(
@@ -3803,18 +4279,50 @@ fn apply_lane_state(
 ///
 /// It is scoped to the timeline dock and uses only properties this theme
 /// parser accepts: `min-height`, `padding`, `color` and `font-size`. The
-/// shared sheet already sizes the board, ruler, filmstrip and
-/// effect lanes; only the camera lane has no shared rule, so it is the one
-/// lane minimum set here.
+/// shared sheet's floors are sized for a taller timeline; the Windows editor
+/// keeps its timeline compact so the preview gets the height, so every lane
+/// floor and the board's own floor are restated here at the compact sizes.
+/// The lanes rest thin and one of them expands, so their floors never stop a
+/// lane from shrinking.
 fn timeline_css(scale: f64) -> String {
     let px = |value: f64| format!("{}px", (value * scale).round() as i32);
+    // A lane's floor rounds down: the animation hands each lane whole pixels
+    // that sum to a fixed total, so a lane may be asked for the pixel below
+    // its exact height. A floor rounded up would refuse that pixel, grow
+    // the timeline by one and make the preview above it shake.
+    let floor = |value: f64| format!("{}px", (value * scale).floor() as i32);
+    let board = RULER_HEIGHT
+        + LANE_GAP
+        + VIDEO_LANE_HEIGHT
+        + EFFECT_LANE_HEIGHT
+        + THIN_LANE_HEIGHT
+        + 2.0 * LANE_GAP;
     format!(
         "
+.recording-editor-timeline-compact .recording-editor-card-board {{
+    min-height: {board};
+    padding: 0 0 {board_padding} 0;
+}}
+.recording-editor-timeline-compact .recording-editor-card-ruler {{
+    min-height: {ruler};
+}}
+.recording-editor-timeline-compact .recording-editor-card-video-track {{
+    min-height: {video};
+}}
+.recording-editor-timeline-compact .recording-editor-card-zoom-track,
+.recording-editor-timeline-compact .recording-editor-card-hide-track {{
+    min-height: {effect};
+}}
 .recording-editor-timeline-compact .recording-editor-card-layout-track {{
     min-height: {camera};
 }}
 ",
-        camera = px(LAYOUT_LANE_HEIGHT),
+        board = px(board),
+        board_padding = px(4.0),
+        ruler = px(RULER_HEIGHT),
+        video = px(VIDEO_LANE_HEIGHT),
+        effect = floor(THIN_LANE_HEIGHT),
+        camera = floor(THIN_LANE_HEIGHT),
     )
 }
 
@@ -4592,6 +5100,17 @@ fn bind_effect_lane(
             {
                 let mut data = data.borrow_mut();
                 data.set_frame_size(source_size.get());
+                let lane = TimelineLane::of_effect(track);
+                if !data.lane_expanded(lane) {
+                    data.expand_lane(lane);
+                    if let Some(index) = effect_at(&data, track, width, x, scale) {
+                        data.select_effect(track, Some(index));
+                    }
+                    drop(data);
+                    sync_play_icon();
+                    repaint();
+                    return;
+                }
                 if in_extend_band(&data, width, x, scale) {
                     // The band is the video's extend affordance, not the pill
                     // lane: a click there must not add a clip.
@@ -4631,6 +5150,9 @@ fn bind_effect_lane(
         let repaint = repaint.clone();
         let lane = lane.clone();
         move |_, _, x, y| {
+            if !data.borrow().lane_expanded(TimelineLane::of_effect(track)) {
+                return;
+            }
             let width = lane.allocated_width().max(1) as f64;
             let Some(index) = effect_at(&data.borrow(), track, width, x, scale) else {
                 return;
@@ -4666,6 +5188,10 @@ fn bind_effect_lane(
         let repaint = repaint.clone();
         let sync_play_icon = sync_play_icon.clone();
         move |gesture, x, _| {
+            if !data.borrow().lane_expanded(TimelineLane::of_effect(track)) {
+                drag_kind.set(EffectDrag::None);
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -4770,6 +5296,12 @@ fn bind_effect_lane(
         let data = data.clone();
         let lane = lane.clone();
         move |_, x, _| {
+            if !data.borrow().lane_expanded(TimelineLane::of_effect(track)) {
+                data.borrow_mut().set_hover_time(track, None);
+                lane.set_cursor_from_name(Some("pointer"));
+                lane.queue_draw();
+                return;
+            }
             let width = lane.allocated_width().max(1) as f64;
             let mut data = data.borrow_mut();
             let edge = effect_edge_at(&data, track, width, x, scale).is_some();
@@ -4822,13 +5354,17 @@ fn bind_layout_lane(
         let timeline = timeline.clone();
         let sync_play_icon = sync_play_icon.clone();
         move |_, _, x, _| {
+            if !data.borrow().lane_expanded(TimelineLane::Layout) {
+                data.borrow_mut().expand_lane(TimelineLane::Layout);
+                (timeline.repaint)();
+            }
             let width = lane.allocated_width().max(1) as f64;
             let hit = {
                 let data = data.borrow();
                 layout_cue_at(&data, width, x, scale)
             };
             match hit {
-                Some(index) => timeline.select_webcam_layout_cue(index),
+                Some(index) => timeline.select_webcam_layout_cue_in_place(index),
                 None => {
                     timeline.clear_webcam_layout_cue_selection();
                 }
@@ -4850,6 +5386,9 @@ fn bind_layout_lane(
         let timeline = timeline.clone();
         let sync_play_icon = sync_play_icon.clone();
         move |gesture, x, _| {
+            if !data.borrow().lane_expanded(TimelineLane::Layout) {
+                return;
+            }
             let width = gesture
                 .widget()
                 .map(|widget| widget.allocated_width().max(1) as f64)
@@ -4875,7 +5414,7 @@ fn bind_layout_lane(
             grab.set(grabbed);
             match grabbed {
                 LayoutGrab::Move(index) | LayoutGrab::Resize(index) => {
-                    timeline.select_webcam_layout_cue(index);
+                    timeline.select_webcam_layout_cue_in_place(index);
                     data.borrow_mut().playing = false;
                 }
                 LayoutGrab::None => {}
@@ -4949,7 +5488,9 @@ fn bind_layout_lane(
                 }
             };
             match target {
-                MenuTarget::Layout(Some(index)) => timeline.select_webcam_layout_cue(index),
+                MenuTarget::Layout(Some(index)) => {
+                    timeline.select_webcam_layout_cue_in_place(index)
+                }
                 _ => {
                     timeline.clear_webcam_layout_cue_selection();
                 }
@@ -5226,7 +5767,7 @@ fn layout_menu_items(
                 let timeline = timeline.clone();
                 Rc::new(move || {
                     match cue {
-                        Some(index) => timeline.select_webcam_layout_cue(index),
+                        Some(index) => timeline.select_webcam_layout_cue_in_place(index),
                         None => {
                             timeline.clear_webcam_layout_cue_selection();
                         }
@@ -5471,11 +6012,11 @@ fn draw_effect_clips(
         let x0 = data.time_to_x(start, width);
         let x1 = data.time_to_x(end, width).max(x0 + 22.0 * scale);
         let pill_w = x1 - x0;
-        let y = 7.0 * scale;
-        let pill_h = (height - 14.0 * scale).max(10.0);
+        let y = 2.0 * scale;
+        let pill_h = (height - 4.0 * scale).max(10.0);
         let tone = effect_tone(track, prefers_dark, data.effect_hidden(track, index));
 
-        rounded_rect(context, x0, y, pill_w, pill_h, 5.0 * scale);
+        rounded_rect(context, x0, y, pill_w, pill_h, 8.0 * scale);
         context.set_source_rgba(tone.fill.0, tone.fill.1, tone.fill.2, tone.fill.3);
         let _ = context.fill();
 
@@ -5550,6 +6091,65 @@ fn draw_effect_clips(
     }
 }
 
+/// A resting lane, drawn the studied way: its name sits at the left edge and
+/// each clip is a slim bar at its time. A bar that runs under the name fades
+/// in from transparent behind it, so the name never sits on solid colour.
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+fn draw_thin_lane(
+    context: &Context,
+    width: i32,
+    height: i32,
+    data: &Data,
+    label: &str,
+    bars: &[(f64, f64, (f64, f64, f64, f64))],
+    prefers_dark: bool,
+    scale: f64,
+) {
+    let width = width.max(1) as f64;
+    let height = height.max(1) as f64;
+    context.select_font_face("DM Sans", FontSlant::Normal, FontWeight::Bold);
+    context.set_font_size((12.0 * scale).round());
+    let extents = context.text_extents(label).ok();
+    let text_w = extents
+        .map(|extents| extents.x_advance())
+        .unwrap_or(40.0 * scale);
+    let text_h = extents
+        .map(|extents| extents.height())
+        .unwrap_or(9.0 * scale);
+    let label_x = 6.0 * scale;
+    let label_end = label_x + text_w;
+    let fade_end = label_end + 40.0 * scale;
+
+    let bar_h = (height - 4.0 * scale).max(3.0);
+    let y = (height - bar_h) / 2.0;
+    for (start, end, fill) in bars {
+        let x0 = data.time_to_x(*start, width);
+        let x1 = data.time_to_x(*end, width).max(x0 + 4.0 * scale);
+        rounded_rect(
+            context,
+            x0,
+            y,
+            x1 - x0,
+            bar_h,
+            (bar_h * 0.35).min(5.0 * scale),
+        );
+        if x0 < fade_end {
+            let fade = gtk4::cairo::LinearGradient::new(0.0, 0.0, fade_end, 0.0);
+            fade.add_color_stop_rgba(0.0, fill.0, fill.1, fill.2, 0.0);
+            fade.add_color_stop_rgba(label_end / fade_end, fill.0, fill.1, fill.2, fill.3 * 0.15);
+            fade.add_color_stop_rgba(1.0, fill.0, fill.1, fill.2, fill.3);
+            let _ = context.set_source(&fade);
+        } else {
+            context.set_source_rgba(fill.0, fill.1, fill.2, fill.3);
+        }
+        let _ = context.fill();
+    }
+    let ink = if prefers_dark { 1.0 } else { 0.0 };
+    context.set_source_rgba(ink, ink, ink, 0.6);
+    context.move_to(label_x, (height + text_h) / 2.0);
+    let _ = context.show_text(label);
+}
+
 /// The clip held on the clipboard, drawn where a click would drop it.
 ///
 /// A placeable ghost reads as the real pill, so what the click will produce is
@@ -5571,8 +6171,8 @@ fn draw_effect_ghost(
     let x0 = data.time_to_x(placed, width);
     let x1 = data.time_to_x(placed + duration, width);
     let pill_w = (x1 - x0).max(22.0 * scale);
-    let y = 7.0 * scale;
-    let pill_h = (height - 14.0 * scale).max(10.0);
+    let y = 2.0 * scale;
+    let pill_h = (height - 4.0 * scale).max(10.0);
     let free = data.paste_spot_free(track, placed, duration);
     let (base_r, base_g, base_b) = match track {
         EffectTrack::Zoom => (0.0, 0.0, 1.0),
@@ -5580,7 +6180,7 @@ fn draw_effect_ghost(
     };
     let fill_alpha = if free { 0.45 } else { 0.10 };
 
-    rounded_rect(context, x0, y, pill_w, pill_h, 5.0 * scale);
+    rounded_rect(context, x0, y, pill_w, pill_h, 8.0 * scale);
     context.set_source_rgba(
         base_r,
         base_g,
@@ -7503,26 +8103,38 @@ mod tests {
             super::super::webcam::LayoutCue {
                 at: 8.0,
                 layout: CameraLayout::SplitScreen,
+                position: None,
+                cutout_x: None,
             },
             super::super::webcam::LayoutCue {
                 at: 1.0,
                 layout: CameraLayout::ScreenOnly,
+                position: None,
+                cutout_x: None,
             },
             super::super::webcam::LayoutCue {
                 at: f64::NAN,
                 layout: CameraLayout::CameraOverlay,
+                position: None,
+                cutout_x: None,
             },
             super::super::webcam::LayoutCue {
                 at: 4.0,
                 layout: CameraLayout::CameraOverlay,
+                position: None,
+                cutout_x: None,
             },
             super::super::webcam::LayoutCue {
                 at: 4.004,
                 layout: CameraLayout::FullscreenCamera,
+                position: None,
+                cutout_x: None,
             },
             super::super::webcam::LayoutCue {
                 at: 40.0,
                 layout: CameraLayout::SplitScreen,
+                position: None,
+                cutout_x: None,
             },
         ];
         normalize_layout_cues(&mut cues, 10.0);
@@ -7582,6 +8194,14 @@ mod tests {
         assert!((data.playhead - 3.5).abs() < 1e-9);
         assert_eq!(data.selected_layout, Some(index));
         assert!(!data.select_layout_cue(99));
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn adding_a_layout_change_expands_its_lane() {
+        let (mut data, scratch) = webcam_loaded("lanes");
+        assert!(data.add_layout_cue(2.0).is_some());
+        assert!(data.lane_expanded(TimelineLane::Layout));
         clean_up(scratch);
     }
 
@@ -7734,6 +8354,9 @@ mod tests {
                 h: 0.25,
                 radius: 0.5,
                 mirror: true,
+                delay_seconds: 0.0,
+                zoomed_scale: super::super::webcam::ZOOMED_CAMERA_SCALE,
+                hide_during_silence: None,
                 layouts: None,
             }),
             playhead_seconds: 0.0,
@@ -7884,8 +8507,12 @@ mod tests {
         let expected_height =
             after.w * data.frame_aspect() * super::super::webcam::aspect_for_shape(2);
         assert!((after.h - expected_height).abs() < 1e-9);
-        assert!((after.w - before.w).abs() < 1e-9);
-        assert!((after.x - before.x).abs() < 1e-9);
+        assert!(
+            (after.overlay_size_ratio(data.frame_aspect())
+                - before.overlay_size_ratio(data.frame_aspect()))
+            .abs()
+                < 1e-9
+        );
         let (before_x, before_y) = before.overlay_alignment();
         let (after_x, after_y) = after.overlay_alignment();
         assert!((after_x - before_x).abs() < 1e-9);
@@ -8001,7 +8628,12 @@ mod tests {
         assert!((y - 1.0).abs() < 1e-9, "the shape stays on the bottom edge");
         assert!((shaped.x + shaped.w - 1.0).abs() < 1e-9);
         assert!((shaped.y + shaped.h - 1.0).abs() < 1e-9);
-        assert!((shaped.w - corner.w).abs() < 1e-9);
+        assert!(
+            (shaped.overlay_size_ratio(data.frame_aspect())
+                - corner.overlay_size_ratio(data.frame_aspect()))
+            .abs()
+                < 1e-9
+        );
 
         let mut centred = shaped;
         centred.set_overlay_alignment(0.5, 0.5);
@@ -8335,14 +8967,109 @@ mod tests {
     }
 
     #[test]
-    fn the_scoped_stylesheet_keeps_only_the_camera_lane_floor() {
+    fn editing_a_change_from_the_panel_brings_the_playhead_into_it() {
+        let (mut data, scratch) = webcam_loaded("show");
+        let first = data.add_layout_cue(2.0).expect("the first cue");
+        data.add_layout_cue(6.0).expect("the second cue");
+        data.playhead = 1.0;
+        assert!(data.show_layout_cue(first));
+        assert!(
+            (data.playhead - 4.0).abs() < 1e-9,
+            "the middle of 2..6: {}",
+            data.playhead
+        );
+        data.playhead = 3.0;
+        assert!(!data.show_layout_cue(first), "already inside, it stays");
+        assert!((data.playhead - 3.0).abs() < 1e-9);
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn grabbing_a_layout_change_on_its_lane_leaves_the_playhead() {
+        let (mut data, scratch) = webcam_loaded("grab");
+        let index = data.add_layout_cue(2.0).expect("the cue");
+        data.playhead = 5.0;
+        assert!(data.select_layout_cue_in_place(index));
+        assert_eq!(data.selected_layout, Some(index));
+        assert!((data.playhead - 5.0).abs() < 1e-9, "the playhead stays put");
+        assert!(data.move_layout_cue(index, 3.0, true));
+        assert!(
+            (data.playhead - 5.0).abs() < 1e-9,
+            "moving the change leaves it too"
+        );
+        clean_up(scratch);
+    }
+
+    #[test]
+    fn one_lane_is_expanded_and_a_selection_brings_its_lane_forward() {
+        let mut data = Data::default();
+        assert!(
+            data.lane_expanded(TimelineLane::Zoom),
+            "zoom starts expanded"
+        );
+        assert!(!data.lane_expanded(TimelineLane::Hide));
+        assert!(data.expand_lane(TimelineLane::Hide));
+        assert!(!data.expand_lane(TimelineLane::Hide), "already expanded");
+        assert!(data.lane_expanded(TimelineLane::Hide) && !data.lane_expanded(TimelineLane::Zoom));
+        data.select_effect(EffectTrack::Zoom, Some(0));
+        assert!(
+            data.lane_expanded(TimelineLane::Zoom),
+            "selecting a zoom expands its lane"
+        );
+        assert_eq!(data.lane_state().expanded, TimelineLane::Zoom);
+    }
+
+    #[test]
+    fn the_lanes_keep_one_total_height_while_they_trade() {
+        let mut data = Data::default();
+        let resting: i32 = lane_heights(data.lane_progress, [true; 3], 1.25)
+            .iter()
+            .sum();
+        data.expand_lane(TimelineLane::Hide);
+        for frame in 0..40 {
+            if frame == 6 {
+                // A second switch mid-move keeps three lanes moving at once.
+                data.expand_lane(TimelineLane::Layout);
+            }
+            data.step_lane_progress(0.016);
+            let total: i32 = lane_heights(data.lane_progress, [true; 3], 1.25)
+                .iter()
+                .sum();
+            assert_eq!(total, resting, "frame {frame}: {:?}", data.lane_progress);
+        }
+    }
+
+    #[test]
+    fn a_lane_eases_to_its_new_height_and_settles() {
+        let mut data = Data::default();
+        assert_eq!(data.lane_progress, [1.0, 0.0, 0.0]);
+        data.expand_lane(TimelineLane::Hide);
+        assert!(data.step_lane_progress(0.016), "a change starts moving");
+        let zoom = data.lane_progress(TimelineLane::Zoom);
+        let hide = data.lane_progress(TimelineLane::Hide);
+        assert!(zoom < 1.0 && zoom > 0.5, "zoom shrinks gradually: {zoom}");
+        assert!(hide > 0.0 && hide < 0.5, "hide grows gradually: {hide}");
+        let mut steps = 0;
+        while data.step_lane_progress(0.016) {
+            steps += 1;
+            assert!(steps < 100, "it settles");
+        }
+        assert_eq!(data.lane_progress, [0.0, 1.0, 0.0]);
+        assert!(steps > 5, "it takes several frames, not a jump: {steps}");
+        assert_eq!(lane_height(0.0, 1.0), THIN_LANE_HEIGHT as i32);
+        assert_eq!(lane_height(1.0, 1.0), EFFECT_LANE_HEIGHT as i32);
+    }
+
+    #[test]
+    fn the_scoped_stylesheet_keeps_the_timeline_compact() {
         let css = timeline_css(1.25);
         assert!(css.contains("recording-editor-card-layout-track"));
-        assert!(css.contains("min-height: 43px"), "the camera lane is 34px");
-        assert!(!css.contains("recording-editor-card-board"));
-        assert!(!css.contains("recording-editor-card-video-track"));
-        assert!(!css.contains("recording-editor-card-zoom-track"));
-        assert!(!css.contains("recording-editor-card-hide-track"));
+        assert!(
+            css.contains("min-height: 22px"),
+            "a resting lane's 18px floor rounds down to 22.5 -> 22"
+        );
+        assert!(css.contains("min-height: 53px"), "the filmstrip is 42px");
+        assert!(css.contains("min-height: 193px"), "the board fits its rows");
         assert!(!css.contains("min-height: 0"));
         // The lane rail is gone, so the sheet carries no gutter rules at all.
         assert!(!css.contains("recording-editor-timeline-gutter"));

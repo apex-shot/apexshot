@@ -159,6 +159,8 @@ if(WIN32)
             src/platform/windows/window_capture.cpp
             src/platform/windows/window_capture.h
             src/platform/windows/screen_capture.cpp
+            src/platform/windows/hdr_capture.cpp
+            src/platform/windows/hdr_capture.h
             src/platform/windows/audio_devices.cpp
             src/platform/windows/pointer_tracker.cpp
             src/platform/windows/recording_manifest.cpp
@@ -194,6 +196,8 @@ if(WIN32)
             src/platform/windows/window_capture.cpp
             src/platform/windows/window_capture.h
             src/platform/windows/screen_capture.cpp
+            src/platform/windows/hdr_capture.cpp
+            src/platform/windows/hdr_capture.h
             src/platform/windows/audio_devices.cpp
             src/platform/windows/audio_devices.h
             src/platform/windows/pointer_tracker.cpp
