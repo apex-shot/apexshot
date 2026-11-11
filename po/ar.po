@@ -4191,6 +4191,9 @@ msgstr "استُنفدت رفوعات هذا الشهر"
 msgid "Video exported, but could not copy to clipboard:"
 msgstr "تم تصدير الفيديو، لكن تعذر النسخ إلى الحافظة:"
 
+msgid "Exported, but the sound could not be added:"
+msgstr "تم التصدير، لكن تعذرت إضافة الصوت:"
+
 msgid "Wait for the background image to finish loading."
 msgstr "انتظر اكتمال تحميل صورة الخلفية."
 
@@ -4385,6 +4388,20 @@ msgstr "مقدار الميل"
 
 msgid "Tilt with motion"
 msgstr "الإمالة مع الحركة"
+
+msgid "Codec"
+msgstr "الترميز"
+
+msgid "Smaller files at the same quality, but not every app or browser plays HEVC."
+msgstr "ملفات أصغر بالجودة نفسها، لكن ليس كل تطبيق أو متصفح يشغّل HEVC."
+msgid "Hardware encoding uses a bitrate, so file sizes follow the estimate; the software encoder uses a constant quality."
+msgstr "يستخدم الترميز بالعتاد معدل بت ثابتًا، لذا تتبع أحجام الملفات التقدير؛ ويستخدم المرمّز البرمجي جودة ثابتة."
+
+msgid "Estimated output size: {size}"
+msgstr "الحجم المتوقع للملف: {size}"
+
+msgid "Export time ≈ {time}"
+msgstr "مدة التصدير ≈ {time}"
 
 msgid "Backgrounds and style"
 msgstr "الخلفيات والنمط"

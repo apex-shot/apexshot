@@ -429,9 +429,11 @@ Resolved on `feat/autozoom-parity`:
   `1 + (zoom - 1) * 0.125` about the target (`B39:7535-7540`). The preview
   derives both from the sprung camera, where the studied build springs the
   rects themselves with the same spring (`B39:18148`, `B39:14721-14727`).
-  Split layouts keep cropping inside their pane. Export draws no background,
-  padding, or corners yet, so its frame is already the fully covered card;
-  it must adopt the same card when it gains them.
+  Split layouts keep cropping inside their pane. The export frames the same
+  card with `zoom::card_rect` and `zoom::card_view` when it has a canvas, grows
+  it over the padding, rounds its corners, and drifts the background with
+  `zoom::background_zoom` (`export/canvas.rs`, `Framer::compose_card`). The
+  footage over the padding is not motion-blurred; the video rect is.
 - **The aim avoids the camera overlay.** The focal point is the zoom area's
   centre unless the camera overlay overlaps the area. Then, as in the studied
   build, the centre and the middle of each strip the camera leaves free are

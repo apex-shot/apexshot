@@ -4165,6 +4165,9 @@ msgstr "今月のアップロード枠を使い切りました"
 msgid "Video exported, but could not copy to clipboard:"
 msgstr "動画は書き出しましたが、クリップボードにコピーできませんでした:"
 
+msgid "Exported, but the sound could not be added:"
+msgstr "書き出しましたが、音声を追加できませんでした:"
+
 msgid "Wait for the background image to finish loading."
 msgstr "背景画像の読み込みが完了するまでお待ちください。"
 
@@ -4359,6 +4362,20 @@ msgstr "傾きの量"
 
 msgid "Tilt with motion"
 msgstr "動きに合わせて傾ける"
+
+msgid "Codec"
+msgstr "コーデック"
+
+msgid "Smaller files at the same quality, but not every app or browser plays HEVC."
+msgstr "同じ画質でファイルが小さくなりますが、HEVC を再生できないアプリやブラウザーもあります。"
+msgid "Hardware encoding uses a bitrate, so file sizes follow the estimate; the software encoder uses a constant quality."
+msgstr "ハードウェアエンコードはビットレートを使うため、ファイルサイズは見積もりに沿います。ソフトウェアエンコーダーは一定の品質を使います。"
+
+msgid "Estimated output size: {size}"
+msgstr "推定ファイルサイズ: {size}"
+
+msgid "Export time ≈ {time}"
+msgstr "書き出し時間 ≈ {time}"
 
 msgid "Backgrounds and style"
 msgstr "背景とスタイル"

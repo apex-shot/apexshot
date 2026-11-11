@@ -4154,6 +4154,9 @@ msgstr "本月上传次数已用完"
 msgid "Video exported, but could not copy to clipboard:"
 msgstr "视频已导出，但无法复制到剪贴板："
 
+msgid "Exported, but the sound could not be added:"
+msgstr "已导出，但无法添加声音："
+
 msgid "Wait for the background image to finish loading."
 msgstr "请等待背景图片加载完成。"
 
@@ -4348,6 +4351,20 @@ msgstr "倾斜程度"
 
 msgid "Tilt with motion"
 msgstr "随移动倾斜"
+
+msgid "Codec"
+msgstr "编码格式"
+
+msgid "Smaller files at the same quality, but not every app or browser plays HEVC."
+msgstr "同等画质下文件更小，但并非所有应用或浏览器都能播放 HEVC。"
+msgid "Hardware encoding uses a bitrate, so file sizes follow the estimate; the software encoder uses a constant quality."
+msgstr "硬件编码使用码率，因此文件大小与估算一致；软件编码器使用恒定质量。"
+
+msgid "Estimated output size: {size}"
+msgstr "预计文件大小：{size}"
+
+msgid "Export time ≈ {time}"
+msgstr "导出时间 ≈ {time}"
 
 msgid "Backgrounds and style"
 msgstr "背景与样式"

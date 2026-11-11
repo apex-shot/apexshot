@@ -56,6 +56,37 @@ On the development machine, framing a 1080p passthrough export on a 2150×1310
 canvas raised it from 7.0 to 7.8–8.4 ms/frame. A zoomed export on a fixed frame
 is faster than without one, because the video rect is smaller than the source.
 
+A zoom with a canvas moves and grows the card over the padding, as the
+preview does. Frames whose card has left its rest rect take the CPU path:
+the video rect is rendered as usual (cursor, ripple, camera layer), the
+footage the card shows over the padding is cropped from the full decode, and
+`Framer::compose_card` lays both over the zoomed background inside the card's
+rounded shape in parallel row spans (8 ms for a 2160x1440 frame in release).
+Resting frames keep the fixed-rect path.
+
+## GPU stage
+
+When the machine profile finds a hardware GPU the frame fits on, every frame is
+composited on the GPU (`export/compose_gpu.rs`): the decoded NV12 is uploaded,
+converted to RGB into a mipmapped texture, and one pixel shader places the source
+(the crop stretched over the frame, or the card on a canvas), its rounded
+corners, the zoomed background, the motion blur, ported from `motion_blur.rs`
+at the studied 16 samples and 4-texel fetch span, and the click ripple, which
+displaces each pixel's source position as `ripple_preview.rs` does. Two more
+passes convert to NV12, and the planes are read back for the encoder. The cursor
+is drawn on that frame inside its own box. Exports with a camera layer, and a
+stage that fails mid-export, use the GPU crop and scale or the CPU compositor
+below. `APEXSHOT_EXPORT_GPU_STAGE=0` keeps the CPU compositor.
+
+In release on the development machine a blurred zoom transition renders in
+5.2 ms at 1080p and 8.7 ms on a 2160x1260 canvas, against about 390 ms per
+moving frame on the CPU.
+
+`APEXSHOT_EXPORT_TRACE=1` logs, per range, the milliseconds per stage frame spent
+waiting on the decoder, uploading, on the GPU, reading back, drawing the cursor,
+and waiting for the encoder to take the frame. Tracing waits for the GPU after
+each frame, so a traced export is slightly slower than an untraced one.
+
 ## GPU crop and scale
 
 When an export needs a camera view — a zoom, or an output size different from
@@ -93,6 +124,14 @@ process by encoding two synthetic frames with the exact flags an export uses,
 then falls back to `libx264`. A probe passes only when the driver can actually
 run the encoder; an entry in `ffmpeg -encoders` is not enough.
 
+When none of those opens — for example a vendor runtime ffmpeg cannot load — the
+export tries Windows Media Foundation (`h264_mf` / `hevc_mf`) with hardware
+encoding forced, which uses whichever hardware encoder the drivers registered
+with Windows, before falling back to x264/x265. An NVIDIA driver older than the
+NVENC API the bundled ffmpeg was built against is not covered by this: on the
+development machine NVIDIA's Media Foundation encoder did not activate either,
+and Windows picked Quick Sync.
+
 The chosen codec is opened with a fixed H.264 profile and level for the output
 size and rate (`-profile:v high`, `-level:v …`), and constant-quality rate
 control at the editor's CRF. Every piece in a split export uses the same
@@ -100,9 +139,20 @@ profile, level, pixel format, frame rate, and size, so the pieces can be copied
 into one file without re-encoding. Each piece starts on an IDR, which costs a
 little size at the seams.
 
+Rate control: x264 keeps the editor's CRF. NVENC, Quick Sync, and AMF get the
+bitrate that CRF produces on the shared curve in `export/rate.rs` (capped at
+1.5× with a 2× buffer), so a hardware export's size follows the dialog's
+estimate instead of each driver's quantiser mapping. The dialog's quality tiers
+are CRF 14, 24, 30, and 42.
+
 If a hardware encoder fails at start or mid-export, the export retries once
 from the beginning with `libx264`, matching the previous behaviour. The UI
 progress bar resets because the retry starts over.
+
+HEVC: the dialog's Codec row picks H.264 (default) or HEVC. HEVC tries
+`hevc_nvenc`, `hevc_qsv`, then `hevc_amf`, falling back to `libx265`; every HEVC
+encoder gets a bitrate from the tier's bits per pixel (0.3, 0.05, 0.0175,
+0.0075) and the `hvc1` tag. The chunked two-encoder path stays H.264-only.
 
 ## Policy
 
@@ -111,6 +161,11 @@ progress bar resets because the retry starts over.
 - `APEXSHOT_EXPORT_HARDWARE=0` forces software encoding without changing the
   dialog. This is the recovery switch for a driver whose encoder passes the
   probe but produces bad output.
+- Decoding stays in software by default. `APEXSHOT_EXPORT_HWDECODE=1` decodes
+  with D3D11 (`-hwaccel d3d11va`, falling back to software for a stream the GPU
+  cannot decode), but copying each frame back for the filters made a 4K H.264
+  decode three times slower (10 ms/frame against 3.4) on the development
+  machine. It becomes worth enabling once decoded frames stay on the GPU.
 - `APEXSHOT_EXPORT_WORKERS=1` disables parallel ranges. Values from 1 to 6 are
   clamped.
 - `APEXSHOT_EXPORT_HYBRID=1` enables the chunked two-encoder path.
@@ -136,9 +191,21 @@ machine is limited by the worker count:
 - A hardware encoder that cannot open is skipped by the probe. A hardware
   encoder that fails later triggers the `libx264` retry.
 
-When a GPU compositor lands, its frame ring can be sized from
-`IDXGIAdapter3::QueryVideoMemoryInfo` and the same range split can fall back to
-the CPU compositor on WARP or low-memory adapters.
+The export reads one machine profile (`export/machine.rs`), logged at the start
+of every export: cores, RAM and free RAM, and the GPU. Only a hardware adapter
+counts as a GPU: with none, or only the software Basic Render adapter, the GPU
+crop and scale is skipped and the CPU path runs. With several, the
+low-power adapter is used, the integrated GPU on a hybrid laptop: frames are
+uploaded and read back every frame, and an integrated GPU shares system RAM
+with the CPU and the Quick Sync encoder. On the development machine a zoomed
+1080p export ran 25-27 ms/frame on the Iris Xe and 26-97 ms/frame on the RTX
+A500, which also slowed exports that never touched it by waking it.
+`APEXSHOT_EXPORT_ADAPTER=high-performance` picks the other one. The GPU path also has to
+fit: half the adapter's memory budget, and for an integrated GPU, which takes
+its textures from system RAM, half the free RAM. Parallel ranges are capped so
+they fit in half the free RAM (each range holds its frame buffers and its own
+decoder and encoder). `APEXSHOT_EXPORT_RAM_MB=<n>` and `APEXSHOT_EXPORT_GPU=0`
+simulate a weaker machine.
 
 ## Measuring
 
