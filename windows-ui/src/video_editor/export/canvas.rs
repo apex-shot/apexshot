@@ -39,6 +39,32 @@ pub(super) fn video_size(layout: &CanvasLayout, out: (u32, u32)) -> (u32, u32) {
     (even(layout.video.0, out.0), even(layout.video.1, out.1))
 }
 
+/// The canvas fill behind the video rect, opaque RGBA at [`video_size`], so a
+/// stage wider than its screen shows the background in the gaps.
+pub(super) fn video_background(layout: &CanvasLayout, out: (u32, u32)) -> Vec<u8> {
+    let video = video_size(layout, out);
+    let scaled;
+    let rgba: &[u8] = if out == layout.size {
+        &layout.background
+    } else {
+        let mut buffer = vec![0u8; out.0 as usize * out.1 as usize * 4];
+        let full = (0.0, 0.0, f64::from(layout.size.0), f64::from(layout.size.1));
+        crop_scale_into(&layout.background, layout.size, full, out, &mut buffer);
+        scaled = buffer;
+        &scaled
+    };
+    let left = (((out.0 - video.0) / 2) & !1) as usize;
+    let top = (((out.1 - video.1) / 2) & !1) as usize;
+    let stride = out.0 as usize * 4;
+    let row = video.0 as usize * 4;
+    let mut background = vec![0u8; row * video.1 as usize];
+    for y in 0..video.1 as usize {
+        let start = (top + y) * stride + left * 4;
+        background[y * row..(y + 1) * row].copy_from_slice(&rgba[start..start + row]);
+    }
+    background
+}
+
 /// Lays each video frame onto the canvas.
 pub(super) struct Framer {
     out: (usize, usize),

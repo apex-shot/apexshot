@@ -51,6 +51,57 @@ const PREVIEW_MAX_HEIGHT: u32 = 1280;
 pub(super) const MIN_SIZE: f64 = 0.06;
 /// The largest bubble that still reads as an overlay.
 pub(super) const MAX_SIZE: f64 = 0.9;
+/// The shortest studied silence the camera can hide in.
+pub(super) const MIN_SILENCE_SECONDS: f64 = 2.0;
+/// The longest silence the camera can hide in.
+pub(super) const MAX_SILENCE_SECONDS: f64 = 15.0;
+/// The studied length a freshly switched-on hide uses.
+pub(super) const DEFAULT_SILENCE_SECONDS: f64 = 5.0;
+/// The studied overlay size range: the camera's longest side as a fraction
+/// of the frame's shortest side.
+pub(super) const MIN_OVERLAY_SIZE_RATIO: f64 = 0.1;
+pub(super) const MAX_OVERLAY_SIZE_RATIO: f64 = 0.75;
+/// The studied overlay aspect choices, width over height.
+pub(super) const OVERLAY_ASPECTS: [(&str, f64); 5] = [
+    ("16:9", 16.0 / 9.0),
+    ("4:3", 4.0 / 3.0),
+    ("1:1", 1.0),
+    ("3:4", 3.0 / 4.0),
+    ("9:16", 9.0 / 16.0),
+];
+
+/// The studied overlay sizing: a square of `size_ratio` times the frame's
+/// shortest side, with the camera's aspect (width over height) fitted inside
+/// it. Returns the camera's width and height as fractions of the frame.
+pub(super) fn overlay_size_hw(
+    frame_aspect: f64,
+    camera_aspect: f64,
+    size_ratio: f64,
+) -> (f64, f64) {
+    let frame = if frame_aspect.is_finite() && frame_aspect > 0.0 {
+        frame_aspect
+    } else {
+        16.0 / 9.0
+    };
+    let camera = if camera_aspect.is_finite() && camera_aspect > 0.0 {
+        camera_aspect
+    } else {
+        1.0
+    };
+    let ratio = if size_ratio.is_finite() {
+        size_ratio.max(0.0)
+    } else {
+        0.0
+    };
+    // The shortest side over the width, and over the height.
+    let short_over_width = 1.0 / frame.max(1.0);
+    let short_over_height = frame.min(1.0);
+    (
+        ratio * short_over_width * camera.min(1.0),
+        ratio * short_over_height * (1.0 / camera).min(1.0),
+    )
+}
+
 /// How long a layout transition takes when the project has not said.
 const DEFAULT_TRANSITION_SECONDS: f64 = 0.45;
 /// The longest transition a project may ask for.
@@ -59,8 +110,32 @@ const MAX_TRANSITION_SECONDS: f64 = 3.0;
 pub(super) const MIN_SPLIT_RATIO: f64 = 0.1;
 /// The widest share of the split the screen may take.
 pub(super) const MAX_SPLIT_RATIO: f64 = 0.9;
-/// How much of the frame's height the cutout's camera covers.
-const CUTOUT_HEIGHT_RATIO: f64 = 0.9;
+/// The smallest share of the frame's shortest side the cutout may take.
+pub(super) const MIN_CUTOUT_SIZE: f64 = 0.2;
+/// The largest share of the frame's shortest side the cutout may take.
+pub(super) const MAX_CUTOUT_SIZE: f64 = 1.0;
+/// The furthest the person's edge may be pulled in, in camera pixels.
+pub(super) const MAX_CUTOUT_INSET: f64 = 8.0;
+
+/// The studied camera size while the screen is zoomed.
+pub(super) const ZOOMED_CAMERA_SCALE: f64 = 0.8;
+/// The smallest studied size during a zoom.
+pub(super) const MIN_ZOOMED_CAMERA_SCALE: f64 = 0.25;
+/// The studied split-screen camera while zoomed: an overlay at this size,
+/// inset from the frame edges by this fraction of its shortest side (the
+/// studied 0.5 padding setting resolved against the default stage padding),
+/// with its aspect held inside the studied 9:16..16:9 range.
+const SPLIT_ZOOMED_CAMERA_SIZE: f64 = 0.5;
+const SPLIT_ZOOMED_CAMERA_INSET: f64 = 0.0625;
+const SPLIT_ZOOMED_MIN_ASPECT: f64 = 9.0 / 16.0;
+const SPLIT_ZOOMED_MAX_ASPECT: f64 = 16.0 / 9.0;
+/// The studied spring that moves the camera between its sizes, as
+/// (stiffness, damping, mass), run with the studied clamp.
+const CAMERA_SPRING: (f64, f64, f64) = (125.0, 12.0, 1.5);
+const CAMERA_SPRING_PRECISION: f64 = 0.002;
+/// How much history the spring replays before an instant; it has settled
+/// well under its precision within it.
+const CAMERA_SPRING_HISTORY_SECONDS: f64 = 2.0;
 
 /// A rectangle in whichever units its caller works in: fractions of the frame
 /// for layout math, pixels for drawing.
@@ -126,6 +201,12 @@ pub(super) struct LayerSettings {
     pub h: f64,
     pub radius: f64,
     pub mirror: bool,
+    /// Manual camera sync, in seconds: positive shows the camera later.
+    pub delay_seconds: f64,
+    /// The camera's size while the screen is zoomed, as a fraction of its size; 1 turns the studied shrink off.
+    pub zoomed_scale: f64,
+    /// Hide the camera while the audio is silent for at least this many seconds; None is off.
+    pub hide_during_silence: Option<f64>,
 }
 
 impl Default for LayerSettings {
@@ -139,6 +220,9 @@ impl Default for LayerSettings {
             h: 0.25,
             radius: 0.12,
             mirror: false,
+            delay_seconds: 0.0,
+            zoomed_scale: ZOOMED_CAMERA_SCALE,
+            hide_during_silence: None,
         }
     }
 }
@@ -157,6 +241,9 @@ impl LayerSettings {
             h,
             radius: radius_for_shape(track.shape),
             mirror: track.flip,
+            delay_seconds: 0.0,
+            zoomed_scale: ZOOMED_CAMERA_SCALE,
+            hide_during_silence: None,
         }
     }
 
@@ -168,6 +255,21 @@ impl LayerSettings {
         self.x = self.x.clamp(0.0, 1.0 - self.w);
         self.y = self.y.clamp(0.0, 1.0 - self.h);
         self.radius = self.radius.clamp(0.0, 1.0);
+        self.delay_seconds = if self.delay_seconds.is_finite() {
+            self.delay_seconds
+                .clamp(-MAX_CAMERA_DELAY_SECONDS, MAX_CAMERA_DELAY_SECONDS)
+        } else {
+            0.0
+        };
+        self.zoomed_scale = if self.zoomed_scale.is_finite() {
+            self.zoomed_scale.clamp(MIN_ZOOMED_CAMERA_SCALE, 1.0)
+        } else {
+            ZOOMED_CAMERA_SCALE
+        };
+        self.hide_during_silence = self
+            .hide_during_silence
+            .filter(|s| s.is_finite())
+            .map(|s| s.clamp(MIN_SILENCE_SECONDS, MAX_SILENCE_SECONDS));
         self
     }
 
@@ -245,6 +347,73 @@ impl LayerSettings {
         self.x = travel_offset(alignment_x, 1.0 - width);
         self.y = travel_offset(alignment_y, 1.0 - height);
     }
+
+    /// The bubble's width over height in the frame's pixels.
+    pub(super) fn pixel_aspect(&self, frame_aspect: f64) -> f64 {
+        let frame = if frame_aspect.is_finite() && frame_aspect > 0.0 {
+            frame_aspect
+        } else {
+            16.0 / 9.0
+        };
+        if self.w > 0.0 && self.h > 0.0 && self.w.is_finite() && self.h.is_finite() {
+            self.w * frame / self.h
+        } else {
+            1.0
+        }
+    }
+
+    /// The bubble's longest side as a fraction of the frame's shortest side.
+    pub(super) fn overlay_size_ratio(&self, frame_aspect: f64) -> f64 {
+        let frame = if frame_aspect.is_finite() && frame_aspect > 0.0 {
+            frame_aspect
+        } else {
+            16.0 / 9.0
+        };
+        // Both sides in units of the frame height.
+        let longest = (self.w * frame).max(self.h);
+        let shortest = frame.min(1.0);
+        if longest.is_finite() && longest > 0.0 {
+            longest / shortest
+        } else {
+            0.0
+        }
+    }
+
+    /// Resize to a studied size ratio at the bubble's current aspect, keeping
+    /// its alignment.
+    pub(super) fn set_overlay_size(&mut self, size_ratio: f64, frame_aspect: f64) {
+        let aspect = self.pixel_aspect(frame_aspect);
+        let (w, h) = overlay_size_hw(frame_aspect, aspect, size_ratio);
+        if w > 0.0 && h > 0.0 {
+            self.resize_overlay(w, h / w);
+        }
+    }
+
+    /// Refit the bubble to an aspect (width over height in pixels) at the
+    /// size it has, keeping its alignment.
+    pub(super) fn set_overlay_aspect(&mut self, camera_aspect: f64, frame_aspect: f64) {
+        let ratio = self.overlay_size_ratio(frame_aspect);
+        let (w, h) = overlay_size_hw(frame_aspect, camera_aspect, ratio);
+        if w > 0.0 && h > 0.0 {
+            self.resize_overlay(w, h / w);
+        }
+    }
+
+    /// The layer at `factor` of its size, still at the alignment it had, so
+    /// an anchored corner stays where it is.
+    pub(super) fn scaled_in_place(self, factor: f64) -> Self {
+        let sane = self.clamped();
+        if !factor.is_finite() || (factor - 1.0).abs() < 1e-12 {
+            return sane;
+        }
+        let (alignment_x, alignment_y) = sane.overlay_alignment();
+        let mut scaled = sane;
+        scaled.w = sane.w * factor;
+        scaled.h = sane.h * factor;
+        scaled.x = travel_offset(alignment_x, 1.0 - scaled.w);
+        scaled.y = travel_offset(alignment_y, 1.0 - scaled.h);
+        scaled
+    }
 }
 
 /// How far along its travel a layer sits, as a 0..=1 fraction. A layer with no
@@ -289,6 +458,12 @@ pub(super) struct LayoutCue {
     /// Composition seconds, where the composition starts at zero.
     pub at: f64,
     pub layout: CameraLayout,
+    /// The bubble's alignment for this change, overriding the shared one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position: Option<[f64; 2]>,
+    /// The cutout's position across the frame for this change.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cutout_x: Option<f64>,
 }
 
 /// Every layout the composition uses, and how it moves between them.
@@ -297,15 +472,32 @@ pub(super) struct LayoutCue {
 pub(super) struct LayoutSettings {
     pub default_layout: CameraLayout,
     pub cues: Vec<LayoutCue>,
+    /// Any non-zero value moves the change on the studied layout spring; zero
+    /// cuts.
     pub transition_seconds: f64,
     /// The screen's share of the split's long axis, in 0.1..=0.9.
     pub split_ratio: f64,
+    /// Sizes the split the studied way instead of by `split_ratio`: the
+    /// screen keeps its shape at full height when the camera column that
+    /// leaves is wide enough. On by default; older projects read it as on.
+    pub split_auto: bool,
     /// Puts the screen on the far side of the split.
     pub split_flip: bool,
+    /// The studied Fill option: false fills the stage edge to edge, true
+    /// leaves the Background padding between the screen and the camera and
+    /// rounds both panes.
+    pub split_padded: bool,
     /// Where the cutout sits across the frame's width, in 0..=1: zero holds
     /// the person against the left edge, one against the right, and half
     /// centres them. It applies to every cutout in the composition.
     pub cutout_position_x: f64,
+    /// The cutout's size: a square of this fraction of the frame's shortest
+    /// side, the camera fitted inside it. The studied range is 0.2..=1.
+    pub cutout_size: f64,
+    /// How soft the person's edge is, 0 hard to 1 softest.
+    pub cutout_softness: f64,
+    /// How far the person's edge is pulled in, in camera pixels.
+    pub cutout_inset: f64,
 }
 
 impl Default for LayoutSettings {
@@ -315,8 +507,13 @@ impl Default for LayoutSettings {
             cues: Vec::new(),
             transition_seconds: DEFAULT_TRANSITION_SECONDS,
             split_ratio: 0.5,
+            split_auto: true,
             split_flip: false,
+            split_padded: false,
             cutout_position_x: 0.5,
+            cutout_size: 0.5,
+            cutout_softness: 0.2,
+            cutout_inset: 0.0,
         }
     }
 }
@@ -341,11 +538,43 @@ impl LayoutSettings {
         } else {
             LayoutSettings::default().cutout_position_x
         };
+        self.cutout_size = if self.cutout_size.is_finite() {
+            self.cutout_size.clamp(MIN_CUTOUT_SIZE, MAX_CUTOUT_SIZE)
+        } else {
+            LayoutSettings::default().cutout_size
+        };
+        self.cutout_softness = if self.cutout_softness.is_finite() {
+            self.cutout_softness.clamp(0.0, 1.0)
+        } else {
+            LayoutSettings::default().cutout_softness
+        };
+        self.cutout_inset = if self.cutout_inset.is_finite() {
+            self.cutout_inset.clamp(0.0, MAX_CUTOUT_INSET)
+        } else {
+            LayoutSettings::default().cutout_inset
+        };
 
         let mut cues: Vec<LayoutCue> = self
             .cues
             .into_iter()
             .filter(|cue| cue.at.is_finite() && cue.at >= 0.0)
+            .map(|mut cue| {
+                cue.position = cue.position.and_then(|[x, y]| {
+                    if x.is_finite() && y.is_finite() {
+                        Some([x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)])
+                    } else {
+                        None
+                    }
+                });
+                cue.cutout_x = cue.cutout_x.and_then(|x| {
+                    if x.is_finite() {
+                        Some(x.clamp(0.0, 1.0))
+                    } else {
+                        None
+                    }
+                });
+                cue
+            })
             .collect();
         cues.sort_by(|left, right| left.at.total_cmp(&right.at));
         let mut deduped: Vec<LayoutCue> = Vec::with_capacity(cues.len());
@@ -408,13 +637,68 @@ impl LayoutSettings {
         video_aspect: f64,
         camera_aspect: f64,
     ) -> LayoutFrame {
+        self.frame_at_zoomed(seconds, overlay, video_aspect, camera_aspect, 0.0)
+    }
+
+    /// [`Self::frame_at`] while the screen's zoom has shrunk the camera by
+    /// `zoom_shrink` (0..1, see [`zoom_shrink_at`]).
+    pub(super) fn frame_at_zoomed(
+        &self,
+        seconds: f64,
+        overlay: LayerSettings,
+        video_aspect: f64,
+        camera_aspect: f64,
+        zoom_shrink: f64,
+    ) -> LayoutFrame {
+        self.frame_at_staged(
+            seconds,
+            overlay,
+            StageShape::plain(video_aspect),
+            camera_aspect,
+            zoom_shrink,
+        )
+    }
+
+    /// [`Self::frame_at_zoomed`] on `stage`, whose aspect may differ from the
+    /// screen's. Rects are fractions of the stage.
+    pub(super) fn frame_at_staged(
+        &self,
+        seconds: f64,
+        overlay: LayerSettings,
+        stage: StageShape,
+        camera_aspect: f64,
+        zoom_shrink: f64,
+    ) -> LayoutFrame {
         let geometry = Geometry {
             overlay: overlay.clamped(),
-            video_aspect: sane_aspect(video_aspect),
+            video_aspect: sane_aspect(stage.aspect),
+            screen_aspect: sane_aspect(stage.screen_aspect),
             camera_aspect: sane_aspect(camera_aspect),
             split_ratio: self.split_ratio,
+            split_auto: self.split_auto,
             split_flip: self.split_flip,
+            split_rest: if stage.split_rest.is_finite() {
+                stage.split_rest.clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
+            split_gap: if self.split_padded {
+                finite_non_negative(stage.split_gap)
+            } else {
+                0.0
+            },
+            pane_radius: if self.split_padded {
+                finite_non_negative(stage.pane_radius)
+            } else {
+                0.0
+            },
             cutout_position_x: self.cutout_position_x,
+            cutout_size: self.cutout_size,
+            zoom_shrink: if zoom_shrink.is_finite() {
+                zoom_shrink.clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
         };
         // A layer switched off paints the screen alone at every instant. The
         // recorded geometry and the layout timeline stay as they are, so
@@ -430,28 +714,64 @@ impl LayoutSettings {
         let mut from = default;
         let mut to = default;
         let mut started: Option<f64> = None;
-        for cue in &self.cues {
-            if !cue.at.is_finite() || cue.at < 0.0 || cue.at > seconds {
-                continue;
+        for (at, target) in self.targets(geometry, default) {
+            if at > seconds {
+                break;
             }
-            let target = canonical(cue.layout, geometry);
             if target == to {
                 continue;
             }
             let state_at_cue = match started {
-                Some(start) => {
-                    interpolate(from, to, progress(start, cue.at, self.transition_seconds))
-                }
+                Some(start) => transition(from, to, progress(start, at, self.transition_seconds)),
                 None => to,
             };
             from = state_at_cue;
             to = target;
-            started = Some(cue.at);
+            started = Some(at);
         }
         match started {
-            Some(start) => interpolate(from, to, progress(start, seconds, self.transition_seconds)),
+            Some(start) => transition(from, to, progress(start, seconds, self.transition_seconds)),
             None => default,
         }
+    }
+
+    /// The resting frame each change aims at, in time order.
+    ///
+    /// Studied: under a fullscreen camera the screen keeps its neighbour's
+    /// layout, the one before the change until the midpoint to the next
+    /// change and the next one after it, so it never moves while the camera
+    /// covers it and is already in place when the camera leaves. The midpoint
+    /// is a target of its own, which keeps every move continuous.
+    fn targets(&self, geometry: Geometry, default: LayoutFrame) -> Vec<(f64, LayoutFrame)> {
+        let mut cues: Vec<&LayoutCue> = self
+            .cues
+            .iter()
+            .filter(|cue| cue.at.is_finite() && cue.at >= 0.0)
+            .collect();
+        cues.sort_by(|a, b| a.at.total_cmp(&b.at));
+        let mut targets = Vec::with_capacity(cues.len() * 2);
+        let mut previous_screen = default.screen;
+        for (index, cue) in cues.iter().enumerate() {
+            let mut target = canonical(cue.layout, cue_geometry(geometry, cue));
+            if cue.layout == CameraLayout::FullscreenCamera {
+                target.screen = previous_screen;
+                targets.push((cue.at, target));
+                if let Some(next) = cues.get(index + 1) {
+                    if next.layout != CameraLayout::FullscreenCamera {
+                        let mut handed_on = target;
+                        handed_on.screen =
+                            canonical(next.layout, cue_geometry(geometry, next)).screen;
+                        targets.push(((cue.at + next.at) / 2.0, handed_on));
+                    }
+                }
+            } else {
+                targets.push((cue.at, target));
+            }
+            if let Some((_, last)) = targets.last() {
+                previous_screen = last.screen;
+            }
+        }
+        targets
     }
 
     /// Whether the camera contributes a pixel at this instant.
@@ -475,6 +795,13 @@ pub(super) struct LayoutFrame {
     pub camera_alpha: f64,
     /// The camera's corner radius, as a fraction of its shorter side.
     pub camera_radius: f64,
+    /// The screen pane's corner radius, as a fraction of half its shorter
+    /// side, like `camera_radius`. Only the padded split rounds it.
+    pub screen_radius: f64,
+    /// Where the cover-cropped screen sits in its pane along the axis it
+    /// overflows: 0 shows its left or top edge, 1 its right or bottom edge,
+    /// 0.5 centres it. Only the split crops the screen.
+    pub screen_anchor: f64,
     /// How much of the person's matte blends into the camera, 0..=1.
     pub cutout: f64,
     pub mirror: bool,
@@ -484,10 +811,22 @@ pub(super) struct LayoutFrame {
 struct Geometry {
     overlay: LayerSettings,
     video_aspect: f64,
+    /// The screen recording's own aspect. `video_aspect` is the stage's,
+    /// which is wider when the stage is widened for the split.
+    screen_aspect: f64,
     camera_aspect: f64,
     split_ratio: f64,
+    split_auto: bool,
     split_flip: bool,
+    /// The split's resting edge, see [`StageShape::split_rest`].
+    split_rest: f64,
+    /// The padded split's gap, in stage heights; 0 unless padded.
+    split_gap: f64,
+    /// The padded split's pane radius, in stage heights; 0 unless padded.
+    pane_radius: f64,
     cutout_position_x: f64,
+    cutout_size: f64,
+    zoom_shrink: f64,
 }
 
 fn sane_aspect(aspect: f64) -> f64 {
@@ -498,18 +837,33 @@ fn sane_aspect(aspect: f64) -> f64 {
     }
 }
 
+fn finite_non_negative(value: f64) -> f64 {
+    if value.is_finite() {
+        value.max(0.0)
+    } else {
+        0.0
+    }
+}
+
 /// The geometry a layout rests at, before any transition.
 fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
+    let screen = contained_screen(geometry.video_aspect, geometry.screen_aspect);
     let full = Rect::full();
     match layout {
         CameraLayout::CameraOverlay => {
             let camera = if geometry.overlay.fullscreen {
                 full
             } else {
-                geometry.overlay.rect_in(full)
+                geometry
+                    .overlay
+                    .scaled_in_place(zoomed_scale(
+                        geometry.zoom_shrink,
+                        geometry.overlay.zoomed_scale,
+                    ))
+                    .rect_in(full)
             };
             LayoutFrame {
-                screen: full,
+                screen,
                 camera,
                 camera_alpha: if geometry.overlay.enabled { 1.0 } else { 0.0 },
                 camera_radius: if geometry.overlay.fullscreen {
@@ -517,45 +871,221 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
                 } else {
                     geometry.overlay.radius
                 },
+                screen_radius: 0.0,
+                screen_anchor: 0.5,
                 cutout: 0.0,
                 mirror: geometry.overlay.mirror,
             }
         }
         CameraLayout::FullscreenCamera => LayoutFrame {
-            screen: full,
+            screen,
             camera: full,
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: geometry.overlay.mirror,
         },
         CameraLayout::SplitScreen => {
             let (screen, camera) = split_rects(geometry);
-            LayoutFrame {
+            let rest = LayoutFrame {
                 screen,
                 camera,
                 camera_alpha: 1.0,
-                camera_radius: 0.0,
+                camera_radius: pane_radius(geometry, camera),
+                screen_radius: pane_radius(geometry, screen),
+                // The studied split rests the cropped screen against its own
+                // outer edge (`DgH:7279`, `DgH:7932-7950`); `split_rest`
+                // slides it toward the camera's side.
+                screen_anchor: if geometry.split_flip {
+                    1.0 - geometry.split_rest
+                } else {
+                    geometry.split_rest
+                },
                 cutout: 0.0,
                 mirror: geometry.overlay.mirror,
+            };
+            if geometry.zoom_shrink <= 0.0 {
+                rest
+            } else {
+                interpolate(
+                    rest,
+                    split_zoomed(geometry, geometry.overlay.radius),
+                    geometry.zoom_shrink,
+                )
             }
         }
         CameraLayout::ScreenOnly => LayoutFrame {
-            screen: full,
+            screen,
             camera: geometry.overlay.rect_in(full),
             camera_alpha: 0.0,
             camera_radius: geometry.overlay.radius,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: geometry.overlay.mirror,
         },
         CameraLayout::CameraCutout => LayoutFrame {
-            screen: full,
+            screen,
             camera: cutout_rect(geometry),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 1.0,
             mirror: geometry.overlay.mirror,
         },
+    }
+}
+
+/// The padded split's corner radius for `pane`, as a fraction of half its
+/// shorter side.
+fn pane_radius(geometry: Geometry, pane: Rect) -> f64 {
+    if geometry.pane_radius <= 0.0 {
+        return 0.0;
+    }
+    let shorter = (pane.width * geometry.video_aspect).min(pane.height);
+    if shorter <= 0.0 {
+        return 0.0;
+    }
+    (geometry.pane_radius / (shorter / 2.0)).min(1.0)
+}
+
+/// The studied automatic split, as the screen's share of the frame's width.
+/// `stage_aspect` is the frame's width over height and `screen_aspect` the
+/// recording's. A stacked split halves the frame.
+pub(super) fn auto_split_screen_ratio(stage_aspect: f64, screen_aspect: f64) -> f64 {
+    let stage = sane_aspect(stage_aspect);
+    if stage < 1.0 {
+        return 0.5;
+    }
+    // Camera column width, in units of the frame's height.
+    let rest = stage - sane_aspect(screen_aspect);
+    let camera = if rest > 0.4 { rest } else { 0.5 };
+    (1.0 - camera / stage).clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO)
+}
+
+/// The screen pane's share of the automatic split, in the units the panel's
+/// Width slider uses: of the stage's width unpadded, of the width the gap
+/// leaves when padded, and half of a stacked split. `stage_aspect` is the
+/// stage the split is placed on and `gap` the padded split's gap, in stage
+/// heights; [`split_rects`] and [`padded_split_rects`] place the panes the
+/// same way.
+pub(super) fn auto_split_screen_share(stage_aspect: f64, screen_aspect: f64, gap: f64) -> f64 {
+    let stage = sane_aspect(stage_aspect);
+    let gap = finite_non_negative(gap);
+    if gap <= 0.0 {
+        return auto_split_screen_ratio(stage, screen_aspect);
+    }
+    if stage < 1.0 {
+        return 0.5;
+    }
+    let usable = stage - gap.min(stage * 0.5);
+    let rest = usable - sane_aspect(screen_aspect);
+    let camera = if rest > 0.4 { rest } else { 0.5 }.clamp(
+        usable * (1.0 - MAX_SPLIT_RATIO),
+        usable * (1.0 - MIN_SPLIT_RATIO),
+    );
+    (usable - camera) / usable
+}
+
+/// The camera column the studied auto stage adds beside the screen, as a
+/// width over the stage's inner height.
+const AUTO_STAGE_CAMERA_ASPECT: f64 = 9.0 / 16.0;
+/// The widest auto stage the studied build allows.
+const AUTO_STAGE_MAX_ASPECT: f64 = 2.4;
+
+/// The studied automatic stage aspect for a composition whose default layout
+/// is the split: a 16:9 stage when a side camera column between 0.4 and 16/9
+/// of the inner height fits beside the screen, otherwise the screen plus a
+/// 9:16 camera column (and `padding` around and between them), 1.0..=2.4.
+pub(super) fn auto_split_stage_aspect(screen_aspect: f64, padding: f64) -> f64 {
+    let screen = sane_aspect(screen_aspect);
+    let padding = if padding.is_finite() {
+        padding.clamp(0.0, 0.25)
+    } else {
+        0.0
+    };
+    let inset = padding * 1080.0;
+    let inner = 1080.0 - inset * 2.0;
+    let column = (1920.0 - inset * 3.0 - screen * inner) / inner;
+    if (0.4..=16.0 / 9.0).contains(&column) {
+        return 16.0 / 9.0;
+    }
+    ((padding * 3.0 + screen + AUTO_STAGE_CAMERA_ASPECT) / (1.0 + padding * 2.0))
+        .clamp(1.0, AUTO_STAGE_MAX_ASPECT)
+}
+
+/// [`auto_split_stage_aspect`] for ApexShot's stage, whose Background padding
+/// sits outside it: the padded split's `gap` (in stage heights) joins the
+/// screen and the 9:16 camera column. A zero gap is exactly the studied
+/// unpadded resolver.
+pub(super) fn auto_split_stage_with_gap(screen_aspect: f64, gap: f64) -> f64 {
+    let screen = sane_aspect(screen_aspect);
+    let gap = finite_non_negative(gap);
+    let column = 16.0 / 9.0 - screen - gap;
+    if (0.4..=16.0 / 9.0).contains(&column) {
+        return 16.0 / 9.0;
+    }
+    (screen + gap + AUTO_STAGE_CAMERA_ASPECT).clamp(1.0, AUTO_STAGE_MAX_ASPECT)
+}
+
+/// The stage a composition's layouts are placed on. Lengths are in units of
+/// the stage's height.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct StageShape {
+    /// The stage's width over height.
+    pub aspect: f64,
+    /// The screen recording's width over height.
+    pub screen_aspect: f64,
+    /// The padded split's gap between its panes.
+    pub split_gap: f64,
+    /// The padded split's pane corner radius.
+    pub pane_radius: f64,
+    /// Where the split's screen rests, 0..=1: 0 against its own outer edge,
+    /// 1 against the edge beside the camera.
+    pub split_rest: f64,
+}
+
+impl StageShape {
+    /// A stage with the screen's own aspect and no padding.
+    pub(super) fn plain(aspect: f64) -> Self {
+        Self {
+            aspect,
+            screen_aspect: aspect,
+            split_gap: 0.0,
+            pane_radius: 0.0,
+            split_rest: 0.0,
+        }
+    }
+}
+
+/// Where the whole screen sits on a stage of another aspect: fitted inside it
+/// and centred, the studied rest place for every layout but the split. The
+/// whole stage when the two aspects match.
+pub(super) fn contained_screen(stage_aspect: f64, screen_aspect: f64) -> Rect {
+    let stage = sane_aspect(stage_aspect);
+    let screen = sane_aspect(screen_aspect);
+    if (stage - screen).abs() <= 1e-9 {
+        return Rect::full();
+    }
+    if screen < stage {
+        let width = screen / stage;
+        Rect {
+            x: (1.0 - width) / 2.0,
+            y: 0.0,
+            width,
+            height: 1.0,
+        }
+    } else {
+        let height = stage / screen;
+        Rect {
+            x: 0.0,
+            y: (1.0 - height) / 2.0,
+            width: 1.0,
+            height,
+        }
     }
 }
 
@@ -568,7 +1098,14 @@ fn canonical(layout: CameraLayout, geometry: Geometry) -> LayoutFrame {
 /// [`screen_cover_rect`] — cover-cropped, never stretched or letterboxed —
 /// while the camera fills its share from the raw camera aspect.
 fn split_rects(geometry: Geometry) -> (Rect, Rect) {
-    let ratio = geometry.split_ratio.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO);
+    if geometry.split_gap > 0.0 {
+        return padded_split_rects(geometry);
+    }
+    let ratio = if geometry.split_auto {
+        auto_split_screen_ratio(geometry.video_aspect, geometry.screen_aspect)
+    } else {
+        geometry.split_ratio.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO)
+    };
     if geometry.video_aspect >= 1.0 {
         let screen_width = ratio;
         let camera = Rect {
@@ -618,6 +1155,127 @@ fn split_rects(geometry: Geometry) -> (Rect, Rect) {
     }
 }
 
+/// The studied screen pane may give up at most this share of its height,
+/// when padded, rather than be cropped.
+const SPLIT_PADDED_MAX_REDUCTION: f64 = 0.1;
+
+/// [`split_rects`] with the padded split's gap between the panes. In a
+/// landscape stage the screen pane gives up to a tenth of its height
+/// instead of being cropped, the studied way.
+fn padded_split_rects(geometry: Geometry) -> (Rect, Rect) {
+    let stage = geometry.video_aspect;
+    let ratio = geometry.split_ratio.clamp(MIN_SPLIT_RATIO, MAX_SPLIT_RATIO);
+    if stage >= 1.0 {
+        // In units of the stage's height.
+        let gap = geometry.split_gap.min(stage * 0.5);
+        let usable = stage - gap;
+        let camera = if geometry.split_auto {
+            let rest = usable - geometry.screen_aspect;
+            if rest > 0.4 {
+                rest
+            } else {
+                0.5
+            }
+        } else {
+            usable * (1.0 - ratio)
+        }
+        .clamp(
+            usable * (1.0 - MAX_SPLIT_RATIO),
+            usable * (1.0 - MIN_SPLIT_RATIO),
+        );
+        let zone = usable - camera;
+        let (screen_x, camera_x) = if geometry.split_flip {
+            (camera + gap, 0.0)
+        } else {
+            (0.0, zone + gap)
+        };
+        let height = if geometry.screen_aspect > zone {
+            (zone / geometry.screen_aspect).clamp(1.0 - SPLIT_PADDED_MAX_REDUCTION, 1.0)
+        } else {
+            1.0
+        };
+        (
+            Rect {
+                x: screen_x / stage,
+                y: (1.0 - height) / 2.0,
+                width: zone / stage,
+                height,
+            },
+            Rect {
+                x: camera_x / stage,
+                y: 0.0,
+                width: camera / stage,
+                height: 1.0,
+            },
+        )
+    } else {
+        let gap = geometry.split_gap.min(0.5);
+        let usable = 1.0 - gap;
+        let share = if geometry.split_auto { 0.5 } else { ratio };
+        let zone = usable * share;
+        let camera = usable - zone;
+        let (screen_y, camera_y) = if geometry.split_flip {
+            (camera + gap, 0.0)
+        } else {
+            (0.0, zone + gap)
+        };
+        (
+            Rect {
+                x: 0.0,
+                y: screen_y,
+                width: 1.0,
+                height: zone,
+            },
+            Rect {
+                x: 0.0,
+                y: camera_y,
+                width: 1.0,
+                height: camera,
+            },
+        )
+    }
+}
+
+/// The split layout while the screen is zoomed: the screen takes the whole
+/// frame and the camera floats as a studied overlay in the corner opposite
+/// the screen's pane: the bottom corner for a side-by-side split, and the
+/// far edge's right corner for a stacked one.
+fn split_zoomed(geometry: Geometry, overlay_radius: f64) -> LayoutFrame {
+    let (_, pane) = split_rects(geometry);
+    let frame = geometry.video_aspect;
+    let pane_aspect = if pane.height > 0.0 {
+        pane.width * frame / pane.height
+    } else {
+        1.0
+    };
+    let aspect = pane_aspect.clamp(SPLIT_ZOOMED_MIN_ASPECT, SPLIT_ZOOMED_MAX_ASPECT);
+    let (width, height) = overlay_size_hw(frame, aspect, SPLIT_ZOOMED_CAMERA_SIZE);
+    let inset_x = SPLIT_ZOOMED_CAMERA_INSET / frame.max(1.0);
+    let inset_y = SPLIT_ZOOMED_CAMERA_INSET * frame.min(1.0);
+    let (align_x, align_y) = if frame >= 1.0 {
+        // Side by side: the screen's opposite side, bottom corner.
+        (if geometry.split_flip { 0.0 } else { 1.0 }, 1.0)
+    } else {
+        // Stacked: the screen's opposite edge, right corner.
+        (1.0, if geometry.split_flip { 0.0 } else { 1.0 })
+    };
+    LayoutFrame {
+        screen: contained_screen(geometry.video_aspect, geometry.screen_aspect),
+        camera: Rect {
+            x: inset_x + align_x * (1.0 - 2.0 * inset_x - width).max(0.0),
+            y: inset_y + align_y * (1.0 - 2.0 * inset_y - height).max(0.0),
+            width,
+            height,
+        },
+        camera_alpha: 1.0,
+        camera_radius: overlay_radius,
+        screen_radius: 0.0,
+        screen_anchor: 0.5,
+        cutout: 0.0,
+        mirror: geometry.overlay.mirror,
+    }
+}
+
 /// The rect of the whole screen, uniformly scaled until it covers a screen
 /// pane, and centred on it.
 ///
@@ -632,7 +1290,18 @@ fn split_rects(geometry: Geometry) -> (Rect, Rect) {
 /// the whole frame, or the contained rect a proportional placement gives, maps
 /// to itself, so a picture that already fits is shown whole and is never
 /// cropped.
+#[allow(dead_code)] // The tests place the centred cover through it.
 pub(super) fn screen_cover_rect(screen: Rect) -> Rect {
+    screen_cover_rect_anchored(screen, 0.5)
+}
+
+/// [`screen_cover_rect`] placed by `anchor` along the axis it overflows, 0.5 centred.
+pub(super) fn screen_cover_rect_anchored(screen: Rect, anchor: f64) -> Rect {
+    let anchor = if anchor.is_finite() {
+        anchor.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
     let x = if screen.x.is_finite() { screen.x } else { 0.0 };
     let y = if screen.y.is_finite() { screen.y } else { 0.0 };
     let width = if screen.width.is_finite() && screen.width > 0.0 {
@@ -647,23 +1316,82 @@ pub(super) fn screen_cover_rect(screen: Rect) -> Rect {
     };
     let side = width.max(height);
     Rect {
-        x: x + (width - side) / 2.0,
-        y: y + (height - side) / 2.0,
+        x: x + (width - side) * anchor,
+        y: y + (height - side) * anchor,
         width: side,
         height: side,
     }
 }
 
+/// [`screen_cover_rect`] on a stage of `stage_aspect` for a screen of
+/// `screen_aspect`: the rect, in stage fractions, the whole screen is drawn
+/// into so it covers `screen` with its own aspect, centred on it.
+#[allow(dead_code)] // The tests place the centred cover through it.
+pub(super) fn screen_cover_rect_in(screen: Rect, stage_aspect: f64, screen_aspect: f64) -> Rect {
+    screen_cover_rect_in_anchored(screen, stage_aspect, screen_aspect, 0.5)
+}
+
+/// [`screen_cover_rect_in`] placed by `anchor` along the axis it overflows, 0.5 centred.
+pub(super) fn screen_cover_rect_in_anchored(
+    screen: Rect,
+    stage_aspect: f64,
+    screen_aspect: f64,
+    anchor: f64,
+) -> Rect {
+    let anchor = if anchor.is_finite() {
+        anchor.clamp(0.0, 1.0)
+    } else {
+        0.5
+    };
+    let stage = sane_aspect(stage_aspect);
+    let source = sane_aspect(screen_aspect);
+    let x = if screen.x.is_finite() { screen.x } else { 0.0 };
+    let y = if screen.y.is_finite() { screen.y } else { 0.0 };
+    let width = if screen.width.is_finite() && screen.width > 0.0 {
+        screen.width
+    } else {
+        1.0
+    };
+    let height = if screen.height.is_finite() && screen.height > 0.0 {
+        screen.height
+    } else {
+        1.0
+    };
+    // In units of the stage's height.
+    let scale = (width * stage / source).max(height);
+    let draw_width = source * scale / stage;
+    Rect {
+        x: x + (width - draw_width) * anchor,
+        y: y + (height - scale) * anchor,
+        width: draw_width,
+        height: scale,
+    }
+}
+
+/// The geometry a change rests at: the shared one, with this change's camera
+/// alignment and cutout position merged over it.
+fn cue_geometry(geometry: Geometry, cue: &LayoutCue) -> Geometry {
+    let mut geometry = geometry;
+    if let Some([x, y]) = cue.position {
+        geometry.overlay.set_overlay_alignment(x, y);
+    }
+    if let Some(x) = cue.cutout_x {
+        geometry.cutout_position_x = x;
+    }
+    geometry
+}
+
 /// The bottom-aligned camera of the cutout, sized from the raw camera aspect
 /// and placed across the frame by the project's cutout position.
 fn cutout_rect(geometry: Geometry) -> Rect {
-    let height = CUTOUT_HEIGHT_RATIO;
-    let width = (height * geometry.camera_aspect / geometry.video_aspect).min(1.0);
-    let height = if width < 1.0 {
-        height
-    } else {
-        geometry.video_aspect / geometry.camera_aspect
-    };
+    let (width, height) = overlay_size_hw(
+        geometry.video_aspect,
+        geometry.camera_aspect,
+        geometry.cutout_size,
+    );
+    let factor = zoomed_scale(geometry.zoom_shrink, geometry.overlay.zoomed_scale);
+    let width = (width * factor).min(1.0);
+    let height = (height * factor).min(1.0);
     let position = if geometry.cutout_position_x.is_finite() {
         geometry.cutout_position_x.clamp(0.0, 1.0)
     } else {
@@ -677,12 +1405,198 @@ fn cutout_rect(geometry: Geometry) -> Rect {
     }
 }
 
+/// Whether the studied rule shrinks the camera at `time`: inside an enabled
+/// zoom clip, or inside the lead-in before a clip that is not instant.
+fn zoom_shrinks_camera_at(clips: &[super::timeline::ZoomClip], time: f64, lead_in: f64) -> bool {
+    clips.iter().filter(|clip| !clip.hidden).any(|clip| {
+        (time >= clip.start && time <= clip.end)
+            || (lead_in > 0.0 && !clip.instant && time >= clip.start - lead_in && time < clip.start)
+    })
+}
+
+/// How far the camera has shrunk for the screen's zoom at `time`: 0 at its
+/// normal size, 1 at [`ZOOMED_CAMERA_SCALE`]. The 0/1 target is followed by
+/// the studied camera spring in 1 ms semi-implicit Euler steps, replayed
+/// over the last two seconds so a seek lands where playback does.
+pub(super) fn zoom_shrink_at(clips: &[super::timeline::ZoomClip], time: f64, lead_in: f64) -> f64 {
+    if !time.is_finite() || clips.iter().all(|clip| clip.hidden) {
+        return 0.0;
+    }
+    let target = |at: f64| -> f64 {
+        if zoom_shrinks_camera_at(clips, at, lead_in) {
+            1.0
+        } else {
+            0.0
+        }
+    };
+    let (stiffness, damping, mass) = CAMERA_SPRING;
+    let omega = (stiffness / mass).sqrt();
+    let critical = 2.0 * (mass * stiffness).sqrt();
+    let start = (time - CAMERA_SPRING_HISTORY_SECONDS).max(0.0);
+    let mut value = target(start);
+    let mut velocity = 0.0;
+    let steps = ((time - start) * 1000.0).ceil() as usize;
+    let mut previous = start;
+    for index in 1..=steps {
+        let at = (start + index as f64 / 1000.0).min(time);
+        let dt = at - previous;
+        previous = at;
+        let goal = target(at);
+        let gap = goal - value;
+        let effective = if velocity * gap > 0.0 && velocity.abs() > gap.abs() * omega {
+            damping.max(critical)
+        } else {
+            damping
+        };
+        velocity += (gap * stiffness - velocity * effective) / mass * dt;
+        value += velocity * dt;
+        if velocity.abs() < CAMERA_SPRING_PRECISION
+            && (goal - value).abs() < CAMERA_SPRING_PRECISION
+        {
+            value = goal;
+            velocity = 0.0;
+        }
+    }
+    value.clamp(0.0, 1.0)
+}
+
+/// The size factor for a shrink amount.
+fn zoomed_scale(shrink: f64, target: f64) -> f64 {
+    let shrink = if shrink.is_finite() {
+        shrink.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    let target = if target.is_finite() {
+        target.clamp(MIN_ZOOMED_CAMERA_SCALE, 1.0)
+    } else {
+        ZOOMED_CAMERA_SCALE
+    };
+    1.0 - (1.0 - target) * shrink
+}
+
+/// The studied hide spring (stiffness, damping, mass), run clamped.
+const HIDE_SPRING: (f64, f64, f64) = (530.0, 40.0, 1.0);
+/// The studied size of a hidden camera, about its centre.
+const HIDDEN_CAMERA_SCALE: f64 = 0.9;
+
+/// How hidden the camera is for silence at source time `t`: 0 shown, 1
+/// hidden. The 0/1 target follows the studied hide spring, replayed over the
+/// last second so a seek lands where playback does.
+pub(super) fn silence_hide_at(ranges: &[(f64, f64)], t: f64, min_seconds: Option<f64>) -> f64 {
+    let Some(min_seconds) = min_seconds else {
+        return 0.0;
+    };
+    if !t.is_finite() || ranges.is_empty() {
+        return 0.0;
+    }
+    let target = |at: f64| -> f64 {
+        if super::silence::silent_at(ranges, at, min_seconds) {
+            1.0
+        } else {
+            0.0
+        }
+    };
+    let (stiffness, damping, mass) = HIDE_SPRING;
+    let omega = (stiffness / mass).sqrt();
+    let critical = 2.0 * (mass * stiffness).sqrt();
+    let start = (t - 1.0).max(0.0);
+    let mut value = target(start);
+    let mut velocity = 0.0;
+    let steps = ((t - start) * 1000.0).ceil() as usize;
+    let mut previous = start;
+    for index in 1..=steps {
+        let at = (start + index as f64 / 1000.0).min(t);
+        let dt = at - previous;
+        previous = at;
+        let goal = target(at);
+        let gap = goal - value;
+        let effective = if velocity * gap > 0.0 && velocity.abs() > gap.abs() * omega {
+            damping.max(critical)
+        } else {
+            damping
+        };
+        velocity += (gap * stiffness - velocity * effective) / mass * dt;
+        value += velocity * dt;
+        if velocity.abs() < CAMERA_SPRING_PRECISION
+            && (goal - value).abs() < CAMERA_SPRING_PRECISION
+        {
+            value = goal;
+            velocity = 0.0;
+        }
+    }
+    value.clamp(0.0, 1.0)
+}
+
+/// A layout frame with the silence hide applied: the camera fades by `hide`
+/// and shrinks toward 0.9 about its centre.
+pub(super) fn hide_for_silence(mut frame: LayoutFrame, hide: f64) -> LayoutFrame {
+    let hide = if hide.is_finite() {
+        hide.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    if hide <= 0.0 {
+        return frame;
+    }
+    frame.camera_alpha *= 1.0 - hide;
+    let factor = 1.0 - (1.0 - HIDDEN_CAMERA_SCALE) * hide;
+    let (cx, cy) = (
+        frame.camera.x + frame.camera.width / 2.0,
+        frame.camera.y + frame.camera.height / 2.0,
+    );
+    frame.camera.width *= factor;
+    frame.camera.height *= factor;
+    frame.camera.x = cx - frame.camera.width / 2.0;
+    frame.camera.y = cy - frame.camera.height / 2.0;
+    frame
+}
+
 fn progress(start: f64, seconds: f64, duration: f64) -> f64 {
+    // A zero duration is the project's "cut" setting.
     if !duration.is_finite() || duration <= 1e-9 {
         return 1.0;
     }
-    let t = ((seconds - start) / duration).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
+    let elapsed = seconds - start;
+    if !elapsed.is_finite() || elapsed <= 0.0 {
+        return 0.0;
+    }
+    // The project's transition length is the spring's speed: the default is
+    // the studied spring itself, and a shorter one runs the same motion
+    // faster, the way the zoom's speed scales its spring.
+    spring_step_response(elapsed * DEFAULT_TRANSITION_SECONDS / duration)
+}
+
+/// The studied layout spring's step response from rest: how far a value has
+/// travelled toward a new target `elapsed` seconds after the target changed,
+/// in 1 ms semi-implicit Euler steps with the studied clamp, so it never
+/// overshoots.
+fn spring_step_response(elapsed: f64) -> f64 {
+    let (stiffness, damping, mass) = CAMERA_SPRING;
+    let omega = (stiffness / mass).sqrt();
+    let critical = 2.0 * (mass * stiffness).sqrt();
+    let steps = (elapsed * 1000.0).ceil().min(5000.0) as usize;
+    let mut value: f64 = 0.0;
+    let mut velocity: f64 = 0.0;
+    for index in 1..=steps {
+        let dt = ((index as f64 / 1000.0).min(elapsed) - ((index - 1) as f64 / 1000.0)).max(0.0);
+        let gap = 1.0 - value;
+        let effective = if velocity * gap > 0.0 && velocity.abs() > gap.abs() * omega {
+            damping.max(critical)
+        } else {
+            damping
+        };
+        velocity += (gap * stiffness - velocity * effective) / mass * dt;
+        value += velocity * dt;
+        if velocity.abs() < CAMERA_SPRING_PRECISION && gap.abs() < CAMERA_SPRING_PRECISION {
+            return 1.0;
+        }
+    }
+    if steps >= 5000 {
+        1.0
+    } else {
+        value.clamp(0.0, 1.0)
+    }
 }
 
 fn interpolate(from: LayoutFrame, to: LayoutFrame, t: f64) -> LayoutFrame {
@@ -691,17 +1605,34 @@ fn interpolate(from: LayoutFrame, to: LayoutFrame, t: f64) -> LayoutFrame {
         camera: from.camera.lerp(to.camera, t),
         camera_alpha: from.camera_alpha + (to.camera_alpha - from.camera_alpha) * t,
         camera_radius: from.camera_radius + (to.camera_radius - from.camera_radius) * t,
+        screen_radius: from.screen_radius + (to.screen_radius - from.screen_radius) * t,
+        screen_anchor: from.screen_anchor + (to.screen_anchor - from.screen_anchor) * t,
         cutout: from.cutout + (to.cutout - from.cutout) * t,
         mirror: to.mirror,
     }
 }
 
-/// The corner radius a shape index starts at, as a fraction of the shorter side.
+/// A layout change between two resting frames. Like [`interpolate`], except
+/// a change to or from a hidden camera (Screen only) is a cut for the camera:
+/// the studied renderer snaps its rect and opacity rather than fading.
+fn transition(from: LayoutFrame, to: LayoutFrame, t: f64) -> LayoutFrame {
+    let mut frame = interpolate(from, to, t);
+    let hidden = |frame: &LayoutFrame| frame.camera_alpha <= 1e-6;
+    if t > 0.0 && (hidden(&from) || hidden(&to)) {
+        frame.camera = to.camera;
+        frame.camera_alpha = to.camera_alpha;
+        frame.camera_radius = to.camera_radius;
+        frame.cutout = to.cutout;
+    }
+    frame
+}
+
+/// The corner radius a shape index starts at, as a fraction of half the shorter side.
+/// 0.30 is the studied 0.15 of the shorter side; a circle is an ellipse.
 pub(super) fn radius_for_shape(shape: u8) -> f64 {
     match shape {
         0 => 1.0,
-        1 => 0.08,
-        _ => 0.12,
+        _ => 0.30,
     }
 }
 
@@ -832,6 +1763,46 @@ fn draw_camera_cover(
     let _ = context.restore();
 }
 
+/// [`draw_camera_cover`] with the studied fade blur: the picture is covered
+/// into an unclipped layer, blurred by `sigma` pixels, then cut to the shape,
+/// so the shape's edge stays crisp while the picture softens.
+fn draw_camera_cover_blurred(
+    context: &Context,
+    rect: Rect,
+    radius: f64,
+    flip: bool,
+    alpha: f64,
+    image: &ImageSurface,
+    sigma: f64,
+) {
+    if !sigma.is_finite() || sigma < 0.34 {
+        draw_camera_cover(context, rect, radius, flip, alpha, image);
+        return;
+    }
+    let width = rect.width.ceil().max(1.0) as i32;
+    let height = rect.height.ceil().max(1.0) as i32;
+    let Ok(mut layer) = ImageSurface::create(Format::ARgb32, width, height) else {
+        draw_camera_cover(context, rect, radius, flip, alpha, image);
+        return;
+    };
+    if let Ok(layer_context) = Context::new(&layer) {
+        let local = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: rect.width,
+            height: rect.height,
+        };
+        draw_camera_cover(&layer_context, local, 0.0, flip, 1.0, image);
+    }
+    gaussian_blur_surface(&mut layer, sigma);
+    let _ = context.save();
+    add_shape_path(context, rect, radius);
+    context.clip();
+    let _ = context.set_source_surface(&layer, rect.x, rect.y);
+    let _ = context.paint_with_alpha(alpha.clamp(0.0, 1.0));
+    let _ = context.restore();
+}
+
 struct Job {
     path: PathBuf,
     seconds: f64,
@@ -843,6 +1814,9 @@ struct Job {
     size: (u32, u32),
     /// Whether the decoded frame also needs its person matte.
     cutout: bool,
+    /// The person matte's edge controls, as (softness, inset in this decode's
+    /// pixels).
+    matte: (f64, f64),
 }
 
 struct Frame {
@@ -872,6 +1846,10 @@ struct Shared {
     frame: Mutex<Option<Frame>>,
     stamp: Mutex<u64>,
     error: Mutex<Option<CameraError>>,
+    /// The silent spans of the recording's audio: None while the analysis
+    /// runs, Some(None) for a recording without audio.
+    #[allow(clippy::type_complexity)]
+    silence: Mutex<Option<Option<Vec<(f64, f64)>>>>,
     /// Bumped by every document load; a worker only publishes frames from the
     /// generation it was asked for.
     generation: Mutex<u64>,
@@ -880,6 +1858,8 @@ struct Shared {
 struct Track {
     path: PathBuf,
     duration: f64,
+    /// Seconds into the video where the track's first frame sits.
+    start: f64,
     video_seconds: f64,
     /// The last instant a seek can land on and still find a decoded frame.
     last_frame: f64,
@@ -898,6 +1878,74 @@ fn last_camera_seconds(duration: f64, fps: Option<f64>) -> f64 {
     (duration - gap).max(0.0)
 }
 
+/// The largest manual camera delay, either way: the studied adjustment range.
+pub(super) const MAX_CAMERA_DELAY_SECONDS: f64 = 0.2;
+
+/// Where a video instant lands in the camera track.
+///
+/// The track's first frame sits `start` seconds into the video (the gap the
+/// recorder measured), and from there it runs on its own clock. `rate` is
+/// track seconds per video second after that gap: 1 for a recording that
+/// stored its gap, whose track ends wherever the camera stopped, and the old
+/// length ratio for a sidecar written before the gap existed, which stores
+/// none. `delay` is the user's adjustment; a positive delay samples the
+/// camera later.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(super) struct CameraClock {
+    pub start: f64,
+    pub rate: f64,
+    pub delay: f64,
+}
+
+impl CameraClock {
+    pub fn new(start: f64, track_seconds: f64, video_seconds: f64, delay: f64) -> Self {
+        let start = if start.is_finite() {
+            start.max(0.0)
+        } else {
+            0.0
+        };
+        let rate = if start > 0.0 {
+            1.0
+        } else if video_seconds.is_finite()
+            && track_seconds.is_finite()
+            && video_seconds > start
+            && track_seconds > 0.0
+        {
+            (track_seconds / (video_seconds - start)).clamp(0.01, 100.0)
+        } else {
+            1.0
+        };
+        let delay = if delay.is_finite() {
+            delay.clamp(-MAX_CAMERA_DELAY_SECONDS, MAX_CAMERA_DELAY_SECONDS)
+        } else {
+            0.0
+        };
+        Self { start, rate, delay }
+    }
+
+    /// The track instant, negative while the camera has not started yet.
+    fn raw(&self, video_seconds: f64) -> f64 {
+        (video_seconds - self.start) * self.rate + self.delay
+    }
+
+    /// The track instant for a video instant; the first frame before the
+    /// camera starts.
+    pub fn track_at(&self, video_seconds: f64) -> f64 {
+        self.raw(video_seconds).max(0.0)
+    }
+
+    /// Video seconds from `video_seconds` until the camera's first frame,
+    /// which is held over that lead.
+    pub fn lead_at(&self, video_seconds: f64) -> f64 {
+        (-self.raw(video_seconds)).max(0.0) / self.rate
+    }
+
+    /// The timestamp multiplier that puts track frames on the video's clock.
+    pub fn time_scale(&self) -> f64 {
+        1.0 / self.rate
+    }
+}
+
 struct State {
     shared: Arc<Shared>,
     track: RefCell<Option<Track>>,
@@ -910,11 +1958,36 @@ struct State {
     /// enabled/fullscreen switches keep the default layout in step.
     layouts_custom: Cell<bool>,
     composition_seconds: Cell<f64>,
+    /// The preview stage's aspect when it is wider than the screen, else 0.
+    stage_aspect: Cell<f64>,
+    split_gap: Cell<f64>,
+    pane_radius: Cell<f64>,
+    zoom_shrink: Cell<f64>,
+    /// The split's resting edge at the composition instant, see
+    /// [`super::split_rest`].
+    split_rest: Cell<f64>,
+    /// The plan `split_rest` is read from, and the key it was built for.
+    split_rest_plan: RefCell<
+        Option<(
+            super::split_rest::SplitRestKey,
+            super::split_rest::SplitRestPlan,
+        )>,
+    >,
+    /// The source time of the frame on screen, for the silence hide.
+    source_seconds: Cell<f64>,
+    /// The video document this layer was loaded for, for its audio.
+    source_path: RefCell<Option<PathBuf>>,
     cache: RefCell<Option<(u64, ImageSurface)>>,
     cutout_cache: RefCell<Option<(u64, f64, ImageSurface)>>,
+    /// The camera shadow's surface, rebuilt only when its mask changes.
+    shadow_cache: RefCell<Option<(Rc<super::camera_shadow::ShadowMask>, ImageSurface)>>,
     requested: Cell<f64>,
     requested_cutout: Cell<bool>,
+    requested_matte: Cell<(f64, f64)>,
     repaint: Rc<dyn Fn()>,
+    /// Told when the stage aspect or the split gap changes, so the panel's
+    /// automatic Width readout follows the stage.
+    stage_listener: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 /// The editor's camera layer: what to draw, from which track, and when.
@@ -930,6 +2003,7 @@ impl WebcamModel {
             frame: Mutex::new(None),
             stamp: Mutex::new(0),
             error: Mutex::new(None),
+            silence: Mutex::new(None),
             generation: Mutex::new(0),
         });
         let worker = shared.clone();
@@ -944,11 +2018,22 @@ impl WebcamModel {
                 seeded_layouts: RefCell::new(LayoutSettings::default()),
                 layouts_custom: Cell::new(false),
                 composition_seconds: Cell::new(0.0),
+                stage_aspect: Cell::new(0.0),
+                split_gap: Cell::new(0.0),
+                pane_radius: Cell::new(0.0),
+                zoom_shrink: Cell::new(0.0),
+                split_rest: Cell::new(0.0),
+                split_rest_plan: RefCell::new(None),
+                source_seconds: Cell::new(0.0),
+                source_path: RefCell::new(None),
                 cache: RefCell::new(None),
                 cutout_cache: RefCell::new(None),
+                shadow_cache: RefCell::new(None),
                 requested: Cell::new(-1.0),
                 requested_cutout: Cell::new(false),
+                requested_matte: Cell::new((0.0, 0.0)),
                 repaint,
+                stage_listener: RefCell::new(None),
             }),
         }
     }
@@ -966,13 +2051,19 @@ impl WebcamModel {
         *self.state.seeded_layouts.borrow_mut() = LayoutSettings::default();
         self.state.layouts_custom.set(false);
         self.state.composition_seconds.set(0.0);
+        self.state.zoom_shrink.set(0.0);
+        self.state.source_seconds.set(0.0);
+        *self.state.source_path.borrow_mut() = None;
         *self.state.cache.borrow_mut() = None;
         *self.state.cutout_cache.borrow_mut() = None;
+        *self.state.shadow_cache.borrow_mut() = None;
         self.state.requested.set(-1.0);
         self.state.requested_cutout.set(false);
+        self.state.requested_matte.set((0.0, 0.0));
         *self.state.shared.frame.lock().unwrap() = None;
         *self.state.shared.job.lock().unwrap() = None;
         *self.state.shared.error.lock().unwrap() = None;
+        *self.state.shared.silence.lock().unwrap() = None;
         drop(generation);
 
         let Some(video) = video else { return };
@@ -1019,10 +2110,24 @@ impl WebcamModel {
         *self.state.track.borrow_mut() = Some(Track {
             path,
             duration: track.duration,
+            start: track.start,
             video_seconds,
             last_frame,
             camera_size: (track.width, track.height),
         });
+        *self.state.source_path.borrow_mut() = Some(video.to_path_buf());
+        *self.state.shared.silence.lock().unwrap() = None;
+        {
+            let shared = self.state.shared.clone();
+            let generation = *shared.generation.lock().unwrap();
+            let source = video.to_path_buf();
+            thread::spawn(move || {
+                let ranges = super::silence::silent_ranges(&source);
+                if *shared.generation.lock().unwrap() == generation {
+                    *shared.silence.lock().unwrap() = Some(ranges);
+                }
+            });
+        }
     }
 
     pub fn has_track(&self) -> bool {
@@ -1087,6 +2192,147 @@ impl WebcamModel {
         self.state.composition_seconds.set(seconds.max(0.0));
     }
 
+    /// The preview stage's aspect, or 0 for a stage with the screen's own.
+    pub fn set_stage_aspect(&self, aspect: f64) {
+        let aspect = if aspect.is_finite() && aspect > 0.0 {
+            aspect
+        } else {
+            0.0
+        };
+        if (self.state.stage_aspect.get() - aspect).abs() < 1e-12 {
+            return;
+        }
+        self.state.stage_aspect.set(aspect);
+        self.notify_stage();
+        (self.state.repaint)();
+    }
+
+    /// The padded split's gap and pane radius, in stage heights.
+    pub fn set_split_padding(&self, gap: f64, radius: f64) {
+        let gap = finite_non_negative(gap);
+        let radius = finite_non_negative(radius);
+        if (self.state.split_gap.get() - gap).abs() < 1e-12
+            && (self.state.pane_radius.get() - radius).abs() < 1e-12
+        {
+            return;
+        }
+        self.state.split_gap.set(gap);
+        self.state.pane_radius.set(radius);
+        self.notify_stage();
+        (self.state.repaint)();
+    }
+
+    /// Called, on the next idle, whenever the stage aspect or the split gap
+    /// changes.
+    pub fn set_stage_listener(&self, listener: Rc<dyn Fn()>) {
+        *self.state.stage_listener.borrow_mut() = Some(listener);
+    }
+
+    fn notify_stage(&self) {
+        if let Some(listener) = self.state.stage_listener.borrow().clone() {
+            gtk4::glib::idle_add_local_once(move || listener());
+        }
+    }
+
+    /// The screen pane's share of the automatic split on the current stage,
+    /// for the panel's Width readout. `screen_aspect` is the recording's.
+    pub fn auto_split_share(&self, screen_aspect: f64) -> f64 {
+        let stage = match self.state.stage_aspect.get() {
+            aspect if aspect > 0.0 => aspect,
+            _ => screen_aspect,
+        };
+        auto_split_screen_share(stage, screen_aspect, self.state.split_gap.get())
+    }
+
+    /// Whether the studied auto stage widens for this composition: a camera
+    /// that is on, whose default layout is the split.
+    pub fn widens_stage(&self) -> bool {
+        self.has_track()
+            && self.settings().is_some_and(|settings| settings.enabled)
+            && self.state.layouts.borrow().default_layout == CameraLayout::SplitScreen
+    }
+
+    /// How far the screen's zoom has shrunk the camera at the composition
+    /// instant, from [`zoom_shrink_at`].
+    pub fn set_zoom_shrink(&self, shrink: f64) {
+        self.state.zoom_shrink.set(if shrink.is_finite() {
+            shrink.clamp(0.0, 1.0)
+        } else {
+            0.0
+        });
+    }
+
+    /// Read where the split's screen rests at `time` from the cursor, sprung
+    /// the studied way. The plan is rebuilt only when what it depends on
+    /// changes; `sidecar` is asked for only then.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn set_split_rest_at(
+        &self,
+        time: f64,
+        zooms: &[super::timeline::ZoomClip],
+        mapping: &super::zoom::TimeMapping,
+        duration: f64,
+        zoom: super::zoom::ZoomCameraSettings,
+        source_size: Option<(u32, u32)>,
+        sidecar: impl FnOnce() -> Option<crate::recording::editor::sidecar::PointerSidecar>,
+    ) {
+        let Some(settings) = self.settings() else {
+            self.state.split_rest.set(0.0);
+            return;
+        };
+        let camera_aspect = match self.state.track.borrow().as_ref() {
+            Some(track) => track.camera_size.0 as f64 / f64::from(track.camera_size.1.max(1)),
+            None => {
+                self.state.split_rest.set(0.0);
+                return;
+            }
+        };
+        let Some((width, height)) = source_size.filter(|(w, h)| *w > 0 && *h > 0) else {
+            self.state.split_rest.set(0.0);
+            return;
+        };
+        let video_aspect = f64::from(width) / f64::from(height);
+        let stage = match self.state.stage_aspect.get() {
+            aspect if aspect > 0.0 => aspect,
+            _ => video_aspect,
+        };
+        let key = super::split_rest::SplitRestKey {
+            layouts: self.state.layouts.borrow().clone(),
+            settings,
+            stage: StageShape {
+                aspect: stage,
+                screen_aspect: video_aspect,
+                split_gap: self.state.split_gap.get(),
+                pane_radius: self.state.pane_radius.get(),
+                split_rest: 0.0,
+            },
+            camera_aspect,
+            zooms: zooms.to_vec(),
+            mapping: mapping.clone(),
+            duration,
+            zoom,
+        };
+        let mut cached = self.state.split_rest_plan.borrow_mut();
+        if cached.as_ref().map(|(cached_key, _)| cached_key) != Some(&key) {
+            let cursor = sidecar()
+                .map(|sidecar| {
+                    super::split_rest::cursor_track(&sidecar, (f64::from(width), f64::from(height)))
+                })
+                .unwrap_or_default();
+            let plan = super::split_rest::plan_for(&key, &cursor);
+            *cached = Some((key, plan));
+        }
+        let value = cached
+            .as_ref()
+            .map(|(_, plan)| plan.value_at(time))
+            .unwrap_or(0.0);
+        self.state.split_rest.set(if value.is_finite() {
+            value.clamp(0.0, 1.0)
+        } else {
+            0.0
+        });
+    }
+
     /// Put the layer back where the recording captured it.
     pub fn reset(&self) {
         let Some(seeded) = *self.state.seeded.borrow() else {
@@ -1119,12 +2365,55 @@ impl WebcamModel {
             .map(|(width, height)| f64::from(width) / f64::from(height))
             .unwrap_or(16.0 / 9.0);
         let camera_aspect = track.camera_size.0 as f64 / f64::from(track.camera_size.1.max(1));
-        Some(self.state.layouts.borrow().frame_at(
+        let stage = match self.state.stage_aspect.get() {
+            aspect if aspect > 0.0 => aspect,
+            _ => video_aspect,
+        };
+        let frame = self.state.layouts.borrow().frame_at_staged(
             self.state.composition_seconds.get(),
             settings,
-            video_aspect,
+            StageShape {
+                aspect: stage,
+                screen_aspect: video_aspect,
+                split_gap: self.state.split_gap.get(),
+                pane_radius: self.state.pane_radius.get(),
+                split_rest: self.state.split_rest.get(),
+            },
             camera_aspect,
+            self.state.zoom_shrink.get(),
+        );
+        Some(hide_for_silence(
+            frame,
+            silence_hide_at(
+                &self.silence_ranges(),
+                self.state.source_seconds.get(),
+                settings.hide_during_silence,
+            ),
         ))
+    }
+
+    /// Whether the recording's audio could be analysed: `None` while the
+    /// analysis runs, `Some(false)` for a recording with no audio.
+    #[allow(dead_code)]
+    pub fn has_audio(&self) -> Option<bool> {
+        self.state
+            .shared
+            .silence
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|ranges| ranges.is_some())
+    }
+
+    fn silence_ranges(&self) -> Vec<(f64, f64)> {
+        self.state
+            .shared
+            .silence
+            .lock()
+            .unwrap()
+            .clone()
+            .flatten()
+            .unwrap_or_default()
     }
 
     /// The last failure from the camera decode or the person matte, for the UI
@@ -1151,20 +2440,37 @@ impl WebcamModel {
         if !layouts.uses_camera() || !settings.enabled {
             return None;
         }
+        let silence = if settings.hide_during_silence.is_some() {
+            self.state
+                .shared
+                .silence
+                .lock()
+                .unwrap()
+                .clone()
+                .flatten()
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         Some(WebcamExport {
             path: track.path.clone(),
             settings,
             layouts,
+            split_gap: self.state.split_gap.get(),
+            pane_radius: self.state.pane_radius.get(),
             track_seconds: track.duration,
+            start: track.start,
             video_seconds: track.video_seconds,
             last_frame: track.last_frame,
             source_size: track.camera_size,
+            silence,
         })
     }
 
     /// Ask for the frame the playhead needs. The decode runs on a worker, and
     /// the still preview repaints once it lands; playback repaints anyway.
     pub fn request(&self, source_seconds: f64) {
+        self.state.source_seconds.set(source_seconds);
         let Some(target) = self.target_seconds(source_seconds) else {
             return;
         };
@@ -1183,14 +2489,6 @@ impl WebcamModel {
         let cutout = self
             .layout_frame(None)
             .is_some_and(|frame| frame.cutout > 1e-3);
-        if (self.state.requested.get() - target).abs() < REQUEST_STEP_SECONDS
-            && self.state.requested_cutout.get() == cutout
-        {
-            return;
-        }
-        self.state.requested.set(target);
-        self.state.requested_cutout.set(cutout);
-
         let (path, camera_size) = {
             let track = self.state.track.borrow();
             let Some(track) = track.as_ref() else {
@@ -1198,6 +2496,24 @@ impl WebcamModel {
             };
             (track.path.clone(), track.camera_size)
         };
+        let job_width = preview_size(camera_size).0;
+        let matte = {
+            let layouts = self.state.layouts.borrow();
+            (
+                layouts.cutout_softness,
+                layouts.cutout_inset * f64::from(job_width) / f64::from(camera_size.0.max(1)),
+            )
+        };
+        if (self.state.requested.get() - target).abs() < REQUEST_STEP_SECONDS
+            && self.state.requested_cutout.get() == cutout
+            && self.state.requested_matte.get() == matte
+        {
+            return;
+        }
+        self.state.requested.set(target);
+        self.state.requested_cutout.set(cutout);
+        self.state.requested_matte.set(matte);
+
         let generation = *self.state.shared.generation.lock().unwrap();
         *self.state.shared.job.lock().unwrap() = Some(Job {
             path,
@@ -1205,6 +2521,7 @@ impl WebcamModel {
             generation,
             size: preview_size(camera_size),
             cutout,
+            matte,
         });
 
         let repaint = self.state.repaint.clone();
@@ -1262,25 +2579,76 @@ impl WebcamModel {
             return;
         };
         let radius = frame.camera_radius * rect.width.min(rect.height) / 2.0;
-        draw_camera_cover(
+        self.draw_shadow(context, video, rect, radius, &frame, &image);
+        draw_camera_cover_blurred(
             context,
             rect,
             radius,
             frame.mirror,
             frame.camera_alpha,
             &image,
+            fade_blur_sigma_px(frame.camera_alpha, video.height),
         );
     }
 
+    /// Paint the camera's studied shadow under where the camera will be
+    /// drawn, cut to the stage, faded with the camera.
+    fn draw_shadow(
+        &self,
+        context: &Context,
+        stage: Rect,
+        rect: Rect,
+        radius: f64,
+        frame: &LayoutFrame,
+        image: &ImageSurface,
+    ) {
+        let Some(mask) = super::camera_shadow::camera_shadow(
+            stage,
+            rect,
+            radius,
+            frame.cutout,
+            &|context, rect, radius| {
+                draw_camera_cover(context, rect, radius, frame.mirror, 1.0, image)
+            },
+        ) else {
+            return;
+        };
+        let cached = self
+            .state
+            .shadow_cache
+            .borrow()
+            .as_ref()
+            .filter(|(cached, _)| Rc::ptr_eq(cached, &mask))
+            .map(|(_, surface)| surface.clone());
+        let surface = match cached {
+            Some(surface) => surface,
+            None => {
+                let Some(surface) = super::camera_shadow::preview_surface(&mask) else {
+                    return;
+                };
+                *self.state.shadow_cache.borrow_mut() = Some((mask.clone(), surface.clone()));
+                surface
+            }
+        };
+        let _ = context.save();
+        context.rectangle(stage.x, stage.y, stage.width, stage.height);
+        context.clip();
+        context.translate(rect.x + mask.offset_x, rect.y + mask.offset_y);
+        context.scale(mask.texel, mask.texel);
+        let _ = context.set_source_surface(&surface, 0.0, 0.0);
+        let _ = context.paint_with_alpha(frame.camera_alpha.clamp(0.0, 1.0));
+        let _ = context.restore();
+    }
+
     fn target_seconds(&self, source_seconds: f64) -> Option<f64> {
+        let delay = self
+            .settings()
+            .map(|settings| settings.delay_seconds)
+            .unwrap_or(0.0);
         let track = self.state.track.borrow();
         let track = track.as_ref()?;
-        let target = if track.video_seconds > 0.0 && track.duration > 0.0 {
-            (source_seconds * (track.duration / track.video_seconds)).max(0.0)
-        } else {
-            source_seconds.max(0.0)
-        };
-        Some(target.min(track.last_frame))
+        let clock = CameraClock::new(track.start, track.duration, track.video_seconds, delay);
+        Some(clock.track_at(source_seconds).min(track.last_frame))
     }
 
     /// The newest decoded frame as a surface, rebuilt only when a new frame
@@ -1351,21 +2719,34 @@ pub(super) struct WebcamExport {
     pub path: PathBuf,
     pub settings: LayerSettings,
     pub layouts: LayoutSettings,
+    /// The padded split's gap and pane radius, in stage heights.
+    pub split_gap: f64,
+    pub pane_radius: f64,
     pub track_seconds: f64,
+    /// Seconds into the video where the track's first frame sits.
+    pub start: f64,
     pub video_seconds: f64,
     /// The last instant a seek can land on and still find a decoded frame.
     pub last_frame: f64,
     /// The camera's own frame size, so the decode keeps its aspect.
     pub source_size: (u32, u32),
+    /// The silent spans of the recording's audio, in source seconds.
+    pub silence: Vec<(f64, f64)>,
 }
 
 impl WebcamExport {
+    fn clock(&self) -> CameraClock {
+        CameraClock::new(
+            self.start,
+            self.track_seconds,
+            self.video_seconds,
+            self.settings.delay_seconds,
+        )
+    }
+
     /// A video instant as a time in the track.
     pub fn track_at(&self, video_seconds: f64) -> f64 {
-        if self.video_seconds > 0.0 && self.track_seconds > 0.0 {
-            return (video_seconds * (self.track_seconds / self.video_seconds)).max(0.0);
-        }
-        video_seconds.max(0.0)
+        self.clock().track_at(video_seconds)
     }
 
     /// The decode start for a video instant, capped at the camera's last real
@@ -1374,16 +2755,16 @@ impl WebcamExport {
         self.track_at(video_seconds).min(self.last_frame)
     }
 
+    /// Video seconds the first camera frame is held for before the track
+    /// starts playing, from a video instant.
+    pub fn lead_at(&self, video_seconds: f64) -> f64 {
+        self.clock().lead_at(video_seconds)
+    }
+
     /// The timestamp multiplier that puts the track's frames on the video's
-    /// clock: a track that recorded less than the video is slowed by the
-    /// reciprocal of its length ratio, so a video instant still asks for the
-    /// same camera instant.
+    /// clock.
     pub fn time_scale(&self) -> f64 {
-        if self.video_seconds > 0.0 && self.track_seconds > 0.0 {
-            (self.video_seconds / self.track_seconds).clamp(0.01, 100.0)
-        } else {
-            1.0
-        }
+        self.clock().time_scale()
     }
 }
 
@@ -1397,6 +2778,56 @@ fn layout_from_legacy(settings: &LayerSettings) -> CameraLayout {
         CameraLayout::FullscreenCamera
     } else {
         CameraLayout::CameraOverlay
+    }
+}
+
+/// The person matte with the studied edge controls applied: `inset` pulls
+/// the edge in by that many pixels (a min filter), and `softness` sets how
+/// wide the edge's ramp is around the matte's midpoint (0 hard, 1 as soft as
+/// the matte itself).
+pub(super) fn refine_matte(mask: &mut [f32], size: (u32, u32), softness: f64, inset: f64) {
+    let (width, height) = (size.0 as usize, size.1 as usize);
+    if width == 0 || height == 0 || mask.len() != width * height {
+        return;
+    }
+    let radius = if inset.is_finite() {
+        inset.max(0.0).round() as usize
+    } else {
+        0
+    };
+    if radius > 0 {
+        // Separable erosion: rows, then columns.
+        let mut scratch = mask.to_vec();
+        for y in 0..height {
+            let row = &mask[y * width..(y + 1) * width];
+            for x in 0..width {
+                let lo = x.saturating_sub(radius);
+                let hi = (x + radius).min(width - 1);
+                scratch[y * width + x] = row[lo..=hi].iter().copied().fold(f32::INFINITY, f32::min);
+            }
+        }
+        for x in 0..width {
+            for y in 0..height {
+                let lo = y.saturating_sub(radius);
+                let hi = (y + radius).min(height - 1);
+                let mut value = f32::INFINITY;
+                for yy in lo..=hi {
+                    value = value.min(scratch[yy * width + x]);
+                }
+                mask[y * width + x] = value;
+            }
+        }
+    }
+    let softness = if softness.is_finite() {
+        softness.clamp(0.0, 1.0)
+    } else {
+        0.2
+    };
+    let half = (0.5 * softness).max(0.01) as f32;
+    let (lo, hi) = (0.5 - half, 0.5 + half);
+    for value in mask.iter_mut() {
+        let t = ((*value - lo) / (hi - lo)).clamp(0.0, 1.0);
+        *value = t * t * (3.0 - 2.0 * t);
     }
 }
 
@@ -1527,7 +2958,10 @@ fn decode_loop(shared: Arc<Shared>) {
             }
             match processor.as_mut() {
                 Some(processor) => match processor.matte(&pixels, (width, height)) {
-                    Ok(mask) => Some(mask),
+                    Ok(mut mask) => {
+                        refine_matte(&mut mask, (width, height), job.matte.0, job.matte.1);
+                        Some(mask)
+                    }
                     Err(error) => {
                         with_current_generation(shared.as_ref(), &job, || {
                             *shared.error.lock().unwrap() = Some(CameraError::Cutout(format!(
@@ -1617,6 +3051,8 @@ impl TrackReader {
     /// `time_scale` is the track's clock against the video's, so a camera that
     /// recorded faster or slower than the screen is resampled onto the output
     /// timeline instead of playing at 1x and drifting.
+    /// `lead_seconds` holds the first frame before the track starts, for a span
+    /// that opens before the camera did.
     pub fn open(
         path: &Path,
         start_seconds: f64,
@@ -1624,6 +3060,7 @@ impl TrackReader {
         fps: f64,
         size: (u32, u32),
         time_scale: f64,
+        lead_seconds: f64,
     ) -> Option<Self> {
         let frame_len = size.0 as usize * size.1 as usize * 4;
         let frames = (duration_seconds.max(0.0) * fps).ceil().max(1.0) as u64;
@@ -1632,18 +3069,26 @@ impl TrackReader {
         } else {
             1.0
         };
+        let lead_seconds = if lead_seconds.is_finite() {
+            lead_seconds.max(0.0)
+        } else {
+            0.0
+        };
+        let mut filter = format!(
+            "scale={}:{},setsar=1,setpts=(PTS-STARTPTS)*{time_scale:.9},fps={fps}",
+            size.0, size.1
+        );
+        if lead_seconds * fps >= 0.5 {
+            filter.push_str(&format!(
+                ",tpad=start_mode=clone:start_duration={lead_seconds:.6}"
+            ));
+        }
         let mut child = Command::new(crate::recording::editor::ffmpeg::ffmpeg_executable())
             .args(["-hide_banner", "-loglevel", "error", "-nostdin"])
             .args(["-ss", &format!("{start_seconds:.6}")])
             .arg("-i")
             .arg(path)
-            .args([
-                "-vf",
-                &format!(
-                    "scale={}:{},setsar=1,setpts=(PTS-STARTPTS)*{time_scale:.9},fps={fps}",
-                    size.0, size.1
-                ),
-            ])
+            .args(["-vf", &filter])
             .args(["-frames:v", &frames.to_string()])
             .args(["-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"])
             .stdout(Stdio::piped())
@@ -1798,7 +3243,8 @@ pub(super) fn composite_into(
 /// footage genuinely fills its share instead of being masked over; the cursor
 /// and the ripple are already inside those pixels. The camera then covers its
 /// own rect from the raw camera aspect, with the person's matte blended in when
-/// a cutout is on screen.
+/// a cutout is on screen. The camera's studied shadow darkens the frame under
+/// it first, in the camera's shape or the person's outline.
 pub(super) fn composite_layout_into(
     pixels: &mut [u8],
     size: (u32, u32),
@@ -1810,7 +3256,7 @@ pub(super) fn composite_layout_into(
     if size.0 == 0 || size.1 == 0 {
         return Ok(());
     }
-    shrink_screen(pixels, size, frame.screen);
+    shrink_screen(pixels, size, frame.screen, frame.screen_anchor);
     if frame.camera_alpha <= 0.0 {
         return Ok(());
     }
@@ -1824,6 +3270,7 @@ pub(super) fn composite_layout_into(
         return Ok(());
     }
     let camera_image = camera_surface(camera, camera_size, mask, frame.cutout)?;
+    let radius = frame.camera_radius * f64::from(width.min(height)) / 2.0;
     let mut layer = ImageSurface::create(Format::ARgb32, width as i32, height as i32)
         .map_err(|error| format!("could not allocate the camera layer: {error}"))?;
     {
@@ -1835,10 +3282,60 @@ pub(super) fn composite_layout_into(
             width: f64::from(width),
             height: f64::from(height),
         };
-        let radius = frame.camera_radius * f64::from(width.min(height)) / 2.0;
-        draw_camera_cover(&context, rect, radius, frame.mirror, 1.0, &camera_image);
+        draw_camera_cover_blurred(
+            &context,
+            rect,
+            radius,
+            frame.mirror,
+            1.0,
+            &camera_image,
+            fade_blur_sigma_px(frame.camera_alpha, f64::from(size.1)),
+        );
     }
     layer.mark_dirty();
+    // The studied camera casts its shadow onto whatever is under it, so it
+    // darkens the frame before the camera covers it.
+    let camera_rect = Rect {
+        x: f64::from(x0),
+        y: f64::from(y0),
+        width: f64::from(width),
+        height: f64::from(height),
+    };
+    let stage_rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        width: f64::from(size.0),
+        height: f64::from(size.1),
+    };
+    let shadow = super::camera_shadow::camera_shadow(
+        stage_rect,
+        camera_rect,
+        radius,
+        frame.cutout,
+        &|context, rect, radius| {
+            draw_camera_cover(context, rect, radius, frame.mirror, 1.0, &camera_image)
+        },
+    );
+    if let Some(shadow) = shadow {
+        let stride = layer.stride() as usize;
+        let data = layer
+            .data()
+            .map_err(|error| format!("could not read the camera layer: {error}"))?;
+        super::camera_shadow::darken_rgba(
+            pixels,
+            size,
+            camera_rect,
+            &shadow,
+            frame.camera_alpha,
+            &|x, y| {
+                if x < x0 || y < y0 || x >= x1 || y >= y1 {
+                    return 0.0;
+                }
+                let offset = (y - y0) as usize * stride + (x - x0) as usize * 4 + 3;
+                f64::from(data[offset]) / 255.0
+            },
+        );
+    }
     blend_layer(
         pixels,
         size,
@@ -1846,6 +3343,250 @@ pub(super) fn composite_layout_into(
         &mut layer,
         frame.camera_alpha,
     );
+    Ok(())
+}
+
+/// The studied camera blur strength: the motion blur amount scaled to the
+/// frame rate, and nothing while the camera is hidden.
+pub(super) fn camera_blur_strength(amount: f64, fps: f64, camera_alpha: f64) -> f64 {
+    if !amount.is_finite()
+        || !fps.is_finite()
+        || fps <= 0.0
+        || camera_alpha.is_nan()
+        || camera_alpha <= 0.0
+    {
+        return 0.0;
+    }
+    amount.clamp(0.0, 1.0) * fps / 60.0
+}
+
+/// The studied fade blur's radius at full transparency, in pixels of a stage
+/// 1080 pixels tall.
+const FADE_BLUR_RADIUS_STAGE_PX: f64 = 10.0;
+/// The studied blur's gaussian sigma per pixel of radius.
+const BLUR_SIGMA_PER_RADIUS: f64 = 0.5;
+
+/// The gaussian sigma, in pixels of a stage `stage_height_px` tall, the
+/// camera is blurred by while it fades: the studied
+/// `10 × (1 − alpha)` stage-pixel radius, nothing when fully opaque.
+pub(super) fn fade_blur_sigma_px(camera_alpha: f64, stage_height_px: f64) -> f64 {
+    if !camera_alpha.is_finite() || !stage_height_px.is_finite() || stage_height_px <= 0.0 {
+        return 0.0;
+    }
+    let alpha = camera_alpha.clamp(0.0, 1.0);
+    BLUR_SIGMA_PER_RADIUS * FADE_BLUR_RADIUS_STAGE_PX * (1.0 - alpha) * stage_height_px / 1080.0
+}
+
+/// Box widths whose three passes approximate a gaussian of `sigma`.
+fn gaussian_boxes(sigma: f64) -> [usize; 3] {
+    let ideal = (12.0 * sigma * sigma / 3.0 + 1.0).sqrt();
+    let mut lower = ideal.floor() as usize;
+    if lower.is_multiple_of(2) {
+        lower = lower.saturating_sub(1);
+    }
+    let lower = lower.max(1);
+    let upper = lower + 2;
+    let lower_f = lower as f64;
+    let m = ((12.0 * sigma * sigma - 3.0 * lower_f * lower_f - 12.0 * lower_f - 9.0)
+        / (-4.0 * lower_f - 4.0))
+        .round();
+    let mut boxes = [lower; 3];
+    for (index, size) in boxes.iter_mut().enumerate() {
+        if (index as f64) >= m {
+            *size = upper;
+        }
+    }
+    boxes
+}
+
+/// One box pass of `radius` along rows (`horizontal`) or columns, all four
+/// channels, reading clamped to the edge.
+fn box_pass(
+    src: &[u8],
+    dst: &mut [u8],
+    width: usize,
+    height: usize,
+    stride: usize,
+    radius: usize,
+    horizontal: bool,
+) {
+    let (lines, length) = if horizontal {
+        (height, width)
+    } else {
+        (width, height)
+    };
+    let index = |line: usize, at: usize| {
+        if horizontal {
+            line * stride + at * 4
+        } else {
+            at * stride + line * 4
+        }
+    };
+    let clamp = |at: isize| at.clamp(0, length as isize - 1) as usize;
+    let window = (2 * radius + 1) as u32;
+    for line in 0..lines {
+        let mut sum = [0u32; 4];
+        // The window for output position 0 covers source positions
+        // -radius..=radius, each clamped into 0..length-1.
+        for k in 0..=(2 * radius) {
+            let i = index(line, clamp(k as isize - radius as isize));
+            for c in 0..4 {
+                sum[c] += u32::from(src[i + c]);
+            }
+        }
+        for at in 0..length {
+            let o = index(line, at);
+            for c in 0..4 {
+                dst[o + c] = ((sum[c] + window / 2) / window) as u8;
+            }
+            let out = index(line, clamp(at as isize - radius as isize));
+            let incoming = index(line, clamp(at as isize + radius as isize + 1));
+            for c in 0..4 {
+                sum[c] = sum[c] + u32::from(src[incoming + c]) - u32::from(src[out + c]);
+            }
+        }
+    }
+}
+
+/// Blur a premultiplied ARGB32 surface in place by a gaussian of `sigma`
+/// pixels. Below a third of a pixel it is left alone.
+fn gaussian_blur_surface(surface: &mut ImageSurface, sigma: f64) {
+    if !sigma.is_finite() || sigma < 0.34 {
+        return;
+    }
+    let width = surface.width().max(0) as usize;
+    let height = surface.height().max(0) as usize;
+    let stride = surface.stride().max(0) as usize;
+    if width == 0 || height == 0 {
+        return;
+    }
+    surface.flush();
+    let Ok(mut data) = surface.data() else {
+        return;
+    };
+    let mut scratch = data.to_vec();
+    for size in gaussian_boxes(sigma) {
+        let radius = (size - 1) / 2;
+        if radius == 0 {
+            continue;
+        }
+        box_pass(&data, &mut scratch, width, height, stride, radius, true);
+        box_pass(&scratch, &mut data, width, height, stride, radius, false);
+    }
+    drop(data);
+    surface.mark_dirty();
+}
+
+/// How many layouts to average along a camera trail from `before` to `now`
+/// on a frame of `size` pixels: one when neither the camera nor the screen
+/// moved a pixel, otherwise one per 4 pixels of the longest move, 2..=16.
+pub(super) fn trail_sample_count(now: LayoutFrame, before: LayoutFrame, size: (u32, u32)) -> usize {
+    let (w, h) = (f64::from(size.0), f64::from(size.1));
+    let edges = |r: Rect| [r.x * w, r.y * h, (r.x + r.width) * w, (r.y + r.height) * h];
+    let mut longest: f64 = 0.0;
+    for (a, b) in [(now.camera, before.camera), (now.screen, before.screen)] {
+        for (p, q) in edges(a).into_iter().zip(edges(b)) {
+            let d = (p - q).abs();
+            if d.is_finite() {
+                longest = longest.max(d);
+            }
+        }
+    }
+    if longest < 1.0 {
+        return 1;
+    }
+    ((longest / 4.0).ceil() as usize + 1).clamp(2, 16)
+}
+
+/// Composite the camera along its trail: every layout in `frames` is drawn
+/// over its own copy of the frame and the copies are averaged in squared
+/// light. One layout is exactly [`composite_layout_into`].
+pub(super) fn composite_layout_trail_into(
+    pixels: &mut [u8],
+    size: (u32, u32),
+    frames: &[LayoutFrame],
+    camera: &[u8],
+    camera_size: (u32, u32),
+    mask: Option<&[f32]>,
+) -> Result<(), String> {
+    match frames {
+        [] => return Ok(()),
+        [frame] => return composite_layout_into(pixels, size, *frame, camera, camera_size, mask),
+        _ => {}
+    }
+    let base = pixels.to_vec();
+    let mut scratch = vec![0u8; pixels.len()];
+    let mut sum = vec![0.0f32; pixels.len()];
+    for frame in frames {
+        scratch.copy_from_slice(&base);
+        composite_layout_into(&mut scratch, size, *frame, camera, camera_size, mask)?;
+        for (s, v) in sum.iter_mut().zip(&scratch) {
+            let v = f32::from(*v);
+            *s += v * v;
+        }
+    }
+    let n = frames.len() as f32;
+    for (p, s) in pixels.iter_mut().zip(&sum) {
+        *p = (s / n).sqrt().round().clamp(0.0, 255.0) as u8;
+    }
+    Ok(())
+}
+
+/// [`composite_layout_trail_into`] for a stage wider than the screen: each
+/// layout places the whole screen on the stage first, then the camera.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn composite_stage_trail_into(
+    stage: &mut [u8],
+    stage_size: (u32, u32),
+    frames: &[LayoutFrame],
+    screen: &[u8],
+    screen_size: (u32, u32),
+    background: Option<&[u8]>,
+    camera: &[u8],
+    camera_size: (u32, u32),
+    mask: Option<&[f32]>,
+) -> Result<(), String> {
+    let draw = |target: &mut [u8], frame: LayoutFrame| {
+        place_screen_into(
+            target,
+            stage_size,
+            screen,
+            screen_size,
+            frame.screen,
+            background,
+            frame.screen_radius,
+            frame.screen_anchor,
+        );
+        composite_layout_into(
+            target,
+            stage_size,
+            LayoutFrame {
+                screen: Rect::full(),
+                ..frame
+            },
+            camera,
+            camera_size,
+            mask,
+        )
+    };
+    match frames {
+        [] => return Ok(()),
+        [frame] => return draw(stage, *frame),
+        _ => {}
+    }
+    let mut scratch = vec![0u8; stage.len()];
+    let mut sum = vec![0.0f32; stage.len()];
+    for frame in frames {
+        draw(&mut scratch, *frame)?;
+        for (s, v) in sum.iter_mut().zip(&scratch) {
+            let v = f32::from(*v);
+            *s += v * v;
+        }
+    }
+    let n = frames.len() as f32;
+    for (p, s) in stage.iter_mut().zip(&sum) {
+        *p = (s / n).sqrt().round().clamp(0.0, 255.0) as u8;
+    }
     Ok(())
 }
 
@@ -1913,7 +3654,7 @@ fn blend_layer(
 /// cover rect, so a pane without the footage's aspect shows the middle of the
 /// picture instead of shrinking the whole of it into a letterbox. A full rect
 /// is left untouched, which is every layout but the split.
-fn shrink_screen(pixels: &mut [u8], size: (u32, u32), screen: Rect) {
+fn shrink_screen(pixels: &mut [u8], size: (u32, u32), screen: Rect, anchor: f64) {
     if screen.is_full() {
         return;
     }
@@ -1926,7 +3667,12 @@ fn shrink_screen(pixels: &mut [u8], size: (u32, u32), screen: Rect) {
     if x0 == 0 && y0 == 0 && x1 == size.0 && y1 == size.1 {
         return;
     }
-    let scaled = resample_rgba(pixels, size, screen_cover_rect(screen), (x0, y0, x1, y1));
+    let scaled = resample_rgba(
+        pixels,
+        size,
+        screen_cover_rect_anchored(screen, anchor),
+        (x0, y0, x1, y1),
+    );
     for pixel in pixels.as_chunks_mut::<4>().0 {
         pixel.copy_from_slice(&[0, 0, 0, 255]);
     }
@@ -1936,6 +3682,101 @@ fn shrink_screen(pixels: &mut [u8], size: (u32, u32), screen: Rect) {
         let source = &scaled[y * row_bytes..(y + 1) * row_bytes];
         let target = (y0 as usize + y) * frame_stride + x0 as usize * 4;
         pixels[target..target + row_bytes].copy_from_slice(source);
+    }
+}
+
+/// Draw the whole screen (`screen`, `screen_size` pixels) onto a stage of
+/// `stage_size` pixels so it covers `pane`, and fill the rest of the stage
+/// with `background` (RGBA at `stage_size`) or black. `radius` rounds the
+/// pane's corners, as a fraction of half its shorter side.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn place_screen_into(
+    stage: &mut [u8],
+    stage_size: (u32, u32),
+    screen: &[u8],
+    screen_size: (u32, u32),
+    pane: Rect,
+    background: Option<&[u8]>,
+    radius: f64,
+    anchor: f64,
+) {
+    let fill_from = background.filter(|background| background.len() == stage.len());
+    match fill_from {
+        Some(background) => stage.copy_from_slice(background),
+        None => {
+            for pixel in stage.as_chunks_mut::<4>().0 {
+                pixel.copy_from_slice(&[0, 0, 0, 255]);
+            }
+        }
+    }
+    if stage_size.0 == 0 || stage_size.1 == 0 || screen_size.0 == 0 || screen_size.1 == 0 {
+        return;
+    }
+    let (x0, y0, x1, y1) = pixel_rect(pane, stage_size);
+    let width = x1.saturating_sub(x0);
+    let height = y1.saturating_sub(y0);
+    if width == 0 || height == 0 {
+        return;
+    }
+    let cover = screen_cover_rect_in_anchored(
+        pane,
+        f64::from(stage_size.0) / f64::from(stage_size.1),
+        f64::from(screen_size.0) / f64::from(screen_size.1),
+        anchor,
+    );
+    let scaled = resample_rgba_from(screen, screen_size, stage_size, cover, (x0, y0, x1, y1));
+    let stride = stage_size.0 as usize * 4;
+    let row_bytes = width as usize * 4;
+    for y in 0..height as usize {
+        let source = &scaled[y * row_bytes..(y + 1) * row_bytes];
+        let target = (y0 as usize + y) * stride + x0 as usize * 4;
+        stage[target..target + row_bytes].copy_from_slice(source);
+    }
+    if radius > 0.0 {
+        let r = radius.min(1.0) * f64::from(width.min(height)) / 2.0;
+        if r > 0.0 {
+            let reach = r.ceil().min(f64::from(width)).min(f64::from(height)) as u32;
+            let mut round = |x: u32, y: u32, cx: f64, cy: f64, left: bool, top: bool| {
+                let px = f64::from(x) + 0.5;
+                let py = f64::from(y) + 0.5;
+                let outside_x = if left { px < cx } else { px > cx };
+                let outside_y = if top { py < cy } else { py > cy };
+                if !(outside_x && outside_y) {
+                    return;
+                }
+                let d = ((px - cx) * (px - cx) + (py - cy) * (py - cy)).sqrt();
+                let coverage = (r - d + 0.5).clamp(0.0, 1.0);
+                if coverage >= 1.0 {
+                    return;
+                }
+                let index = (y0 as usize + y as usize) * stride + (x0 as usize + x as usize) * 4;
+                let mut fill = [0u8; 3];
+                if let Some(background) = fill_from {
+                    fill.copy_from_slice(&background[index..index + 3]);
+                }
+                for channel in 0..3 {
+                    let pane = f64::from(stage[index + channel]);
+                    let fill = f64::from(fill[channel]);
+                    stage[index + channel] = (fill + (pane - fill) * coverage).round() as u8;
+                }
+                stage[index + 3] = 255;
+            };
+            for y in 0..reach {
+                for x in 0..reach {
+                    round(x, y, r, r, true, true);
+                    round(width - 1 - x, y, f64::from(width) - r, r, false, true);
+                    round(x, height - 1 - y, r, f64::from(height) - r, true, false);
+                    round(
+                        width - 1 - x,
+                        height - 1 - y,
+                        f64::from(width) - r,
+                        f64::from(height) - r,
+                        false,
+                        false,
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -1951,17 +3792,35 @@ fn resample_rgba(
     cover: Rect,
     destination: (u32, u32, u32, u32),
 ) -> Vec<u8> {
+    resample_rgba_from(pixels, size, size, cover, destination)
+}
+
+/// [`resample_rgba`] reading a source of `source_size` pixels while `cover`
+/// and `destination` are measured on a frame of `frame` pixels.
+fn resample_rgba_from(
+    pixels: &[u8],
+    source_size: (u32, u32),
+    frame: (u32, u32),
+    cover: Rect,
+    destination: (u32, u32, u32, u32),
+) -> Vec<u8> {
     let (x0, y0, x1, y1) = destination;
     let out_width = x1.saturating_sub(x0) as usize;
     let out_height = y1.saturating_sub(y0) as usize;
     let mut output = vec![0u8; out_width * out_height * 4];
-    if out_width == 0 || out_height == 0 || size.0 == 0 || size.1 == 0 {
+    if out_width == 0
+        || out_height == 0
+        || source_size.0 == 0
+        || source_size.1 == 0
+        || frame.0 == 0
+        || frame.1 == 0
+    {
         return output;
     }
-    let source_width = size.0 as usize;
-    let source_height = size.1 as usize;
-    let frame_width = f64::from(size.0);
-    let frame_height = f64::from(size.1);
+    let source_width = source_size.0 as usize;
+    let source_height = source_size.1 as usize;
+    let frame_width = f64::from(frame.0);
+    let frame_height = f64::from(frame.1);
     let start_x = (x0 as f64 + 0.5) / frame_width;
     let start_y = (y0 as f64 + 0.5) / frame_height;
     let base_x = (start_x - cover.x) / cover.width;
@@ -1973,14 +3832,14 @@ fn resample_rgba(
         .enumerate()
         .for_each(|(y, row)| {
             let normalized_y = base_y + y as f64 * step_y;
-            let source_y = normalized_y * frame_height - 0.5;
+            let source_y = normalized_y * f64::from(source_size.1) - 0.5;
             let clamped_y = source_y.clamp(0.0, source_height.saturating_sub(1) as f64);
             let y0_index = clamped_y as usize;
             let y1_index = (y0_index + 1).min(source_height.saturating_sub(1));
             let fy = clamped_y - y0_index as f64;
             for x in 0..out_width {
                 let normalized_x = base_x + x as f64 * step_x;
-                let source_x = normalized_x * frame_width - 0.5;
+                let source_x = normalized_x * f64::from(source_size.0) - 0.5;
                 let clamped_x = source_x.clamp(0.0, source_width.saturating_sub(1) as f64);
                 let x0_index = clamped_x as usize;
                 let x1_index = (x0_index + 1).min(source_width.saturating_sub(1));
@@ -2016,6 +3875,7 @@ fn pixel_rect(rect: Rect, size: (u32, u32)) -> (u32, u32, u32, u32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::video_editor::timeline::{ZoomClip, ZoomMode};
 
     fn solid(width: u32, height: u32, bgra: [u8; 4]) -> Vec<u8> {
         bgra.iter()
@@ -2061,7 +3921,12 @@ mod tests {
     }
 
     fn cue(at: f64, layout: CameraLayout) -> LayoutCue {
-        LayoutCue { at, layout }
+        LayoutCue {
+            at,
+            layout,
+            position: None,
+            cutout_x: None,
+        }
     }
 
     fn settings(cues: Vec<LayoutCue>, transition: f64) -> LayoutSettings {
@@ -2119,6 +3984,54 @@ mod tests {
             );
             assert_eq!(frame.cutout, 0.0, "and no matte at {seconds}");
         }
+    }
+
+    #[test]
+    fn a_change_can_carry_its_own_camera_position() {
+        let frame = 16.0 / 9.0;
+        let mut layer = LayerSettings::default();
+        layer.set_overlay_alignment(1.0, 1.0);
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            cues: vec![
+                LayoutCue {
+                    at: 2.0,
+                    layout: CameraLayout::CameraOverlay,
+                    position: Some([0.0, 0.0]),
+                    cutout_x: None,
+                },
+                LayoutCue {
+                    at: 6.0,
+                    layout: CameraLayout::CameraOverlay,
+                    position: None,
+                    cutout_x: None,
+                },
+            ],
+            ..LayoutSettings::default()
+        };
+        let shared = layouts.frame_at(1.0, layer, frame, 1.0).camera;
+        assert!(
+            (shared.x + shared.width - 1.0).abs() < 1e-9,
+            "the default sits bottom-right"
+        );
+        let own = layouts.frame_at(5.0, layer, frame, 1.0).camera;
+        assert!(
+            own.x.abs() < 1e-9 && own.y.abs() < 1e-9,
+            "the change sits top-left: {own:?}"
+        );
+        let back = layouts.frame_at(9.0, layer, frame, 1.0).camera;
+        assert!(
+            (back.x + back.width - 1.0).abs() < 1e-9,
+            "a change without a position uses the shared one"
+        );
+    }
+
+    #[test]
+    fn a_change_without_a_position_reads_as_none() {
+        let cue: LayoutCue =
+            serde_json::from_str(r#"{"at":1.0,"layout":"camera_overlay"}"#).unwrap();
+        assert_eq!(cue.position, None);
+        assert_eq!(cue.cutout_x, None);
     }
 
     #[test]
@@ -2181,6 +4094,7 @@ mod tests {
     fn a_split_gives_the_screen_its_whole_share_of_the_frame() {
         let split = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             ..LayoutSettings::default()
         };
         let frame = resting(&split, 0.0);
@@ -2195,6 +4109,7 @@ mod tests {
 
         let split = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             split_flip: true,
             ..LayoutSettings::default()
         };
@@ -2219,6 +4134,7 @@ mod tests {
 
         let wide_share = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             split_ratio: 0.3,
             ..LayoutSettings::default()
         };
@@ -2227,6 +4143,33 @@ mod tests {
         assert!((frame.camera.x - 0.3).abs() < 1e-9);
         assert!((frame.camera.width - 0.7).abs() < 1e-9);
         assert!((frame.screen.height - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_automatic_split_keeps_the_screen_shape_when_the_camera_column_fits() {
+        // A 16:10 recording in its own frame leaves no column: the camera gets
+        // half the height's width and the screen keeps 1 - 0.5/1.6.
+        assert!((auto_split_screen_ratio(1.6, 1.6) - 0.6875).abs() < 1e-9);
+        assert!((auto_split_screen_ratio(4.0 / 3.0, 4.0 / 3.0) - 0.625).abs() < 1e-9);
+        // A frame widened for the camera: the screen keeps exactly its shape.
+        let wide = 1.6 + 0.5625;
+        assert!((auto_split_screen_ratio(wide, 1.6) - 1.6 / wide).abs() < 1e-9);
+        // A column no wider than 0.4 of the height falls back to half.
+        assert!((auto_split_screen_ratio(2.0, 1.6) - (1.0 - 0.5 / 2.0)).abs() < 1e-9);
+        // Stacked splits halve the frame.
+        assert_eq!(auto_split_screen_ratio(9.0 / 16.0, 9.0 / 16.0), 0.5);
+        // The layout uses it unless the project turned it off.
+        let layer = LayerSettings::default();
+        let auto = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            ..LayoutSettings::default()
+        };
+        assert!((auto.frame_at(0.0, layer, 1.6, 1.0).screen.width - 0.6875).abs() < 1e-9);
+        let fixed = LayoutSettings {
+            split_auto: false,
+            ..auto.clone()
+        };
+        assert!((fixed.frame_at(0.0, layer, 1.6, 1.0).screen.width - 0.5).abs() < 1e-9);
     }
 
     #[test]
@@ -2312,26 +4255,145 @@ mod tests {
     }
 
     #[test]
-    fn transitions_smoothstep_between_the_resting_rects() {
-        let settings = settings(
-            vec![
-                cue(1.0, CameraLayout::SplitScreen),
-                cue(2.0, CameraLayout::FullscreenCamera),
-            ],
-            1.0,
-        );
+    fn transitions_move_between_the_resting_rects() {
+        let settings = LayoutSettings {
+            split_auto: false,
+            ..settings(
+                vec![
+                    cue(1.0, CameraLayout::SplitScreen),
+                    cue(2.0, CameraLayout::FullscreenCamera),
+                ],
+                1.0,
+            )
+        };
         let before = resting(&settings, 1.0);
         let middle = resting(&settings, 1.5);
-        let end = resting(&settings, 3.0);
+        let end = resting(&settings, 5.0);
+        let p = progress(1.0, 1.5, 1.0);
+        assert!(p > 0.0 && p < 1.0, "half way through the move: {p}");
         assert!((before.screen.width - 1.0).abs() < 1e-9);
-        assert!((middle.screen.width - 0.75).abs() < 1e-9);
+        assert!((middle.screen.width - (1.0 - 0.5 * p)).abs() < 1e-9);
         assert!(
             (middle.screen.height - 1.0).abs() < 1e-9,
             "the growing split pane keeps the frame's full height"
         );
-        assert!((middle.camera.y - 0.275).abs() < 1e-9);
-        assert!((end.screen.width - 1.0).abs() < 1e-9);
+        assert!((middle.camera.y - 0.55 * (1.0 - p)).abs() < 1e-9);
+        // Under the fullscreen camera the screen keeps the split's pane.
+        assert!((end.screen.width - 0.5).abs() < 1e-9);
+        assert!(end.camera.is_full());
         assert!((middle.camera_alpha - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_layout_change_moves_on_the_studied_spring() {
+        assert_eq!(progress(1.0, 1.0, 0.45), 0.0);
+        assert_eq!(progress(1.0, 1.5, 0.0), 1.0, "a zero duration cuts");
+        let mut previous = 0.0;
+        let mut t = 0.0;
+        while t <= 3.0 {
+            let value = progress(0.0, t, 0.45);
+            assert!(
+                value >= previous - 1e-12 && value <= 1.0,
+                "monotonic and clamped at {t}: {value}"
+            );
+            previous = value;
+            t += 0.01;
+        }
+        // The studied spring is about 0.31 of the way after 0.1 s and has
+        // settled within ~1.2 s.
+        assert!(
+            progress(0.0, 0.1, 0.45) < 0.35,
+            "{}",
+            progress(0.0, 0.1, 0.45)
+        );
+        assert!(
+            progress(0.0, 0.5, 0.45) > 0.6,
+            "{}",
+            progress(0.0, 0.5, 0.45)
+        );
+        assert!(
+            progress(0.0, 1.5, 0.45) > 0.99,
+            "{}",
+            progress(0.0, 1.5, 0.45)
+        );
+    }
+
+    #[test]
+    fn screen_only_cuts_the_camera_both_ways() {
+        let layer = LayerSettings::default();
+        let to_screen = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            cues: vec![LayoutCue {
+                at: 1.0,
+                layout: CameraLayout::ScreenOnly,
+                position: None,
+                cutout_x: None,
+            }],
+            ..LayoutSettings::default()
+        };
+        assert_eq!(
+            to_screen
+                .frame_at(1.01, layer, 16.0 / 9.0, 1.0)
+                .camera_alpha,
+            0.0
+        );
+        let from_screen = LayoutSettings {
+            default_layout: CameraLayout::ScreenOnly,
+            cues: vec![LayoutCue {
+                at: 1.0,
+                layout: CameraLayout::CameraOverlay,
+                position: None,
+                cutout_x: None,
+            }],
+            ..LayoutSettings::default()
+        };
+        let frame = from_screen.frame_at(1.01, layer, 16.0 / 9.0, 1.0);
+        let rest = from_screen.frame_at(5.0, layer, 16.0 / 9.0, 1.0);
+        assert_eq!(frame.camera_alpha, 1.0);
+        assert_eq!(frame.camera, rest.camera, "the camera appears in place");
+    }
+
+    #[test]
+    fn a_fullscreen_camera_holds_the_screen_and_switches_it_at_the_midpoint() {
+        let layer = LayerSettings::default();
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            cues: vec![
+                LayoutCue {
+                    at: 2.0,
+                    layout: CameraLayout::FullscreenCamera,
+                    position: None,
+                    cutout_x: None,
+                },
+                LayoutCue {
+                    at: 6.0,
+                    layout: CameraLayout::CameraOverlay,
+                    position: None,
+                    cutout_x: None,
+                },
+            ],
+            ..LayoutSettings::default()
+        };
+        let aspect = 16.0 / 9.0;
+        let split_screen = layouts.frame_at(1.0, layer, aspect, 1.0).screen;
+        assert!(!split_screen.is_full());
+        // Under the camera, before the midpoint (4.0): the split's screen.
+        assert_eq!(
+            layouts.frame_at(2.1, layer, aspect, 1.0).screen,
+            split_screen
+        );
+        assert_eq!(
+            layouts.frame_at(3.9, layer, aspect, 1.0).screen,
+            split_screen
+        );
+        // From the midpoint (4.0) the screen springs, still under the camera,
+        // to the overlay's screen (the whole frame) and settles there before
+        // the camera leaves.
+        let handing_on = layouts.frame_at(4.1, layer, aspect, 1.0).screen;
+        assert!(handing_on.width > split_screen.width && handing_on.width < 1.0);
+        assert!(layouts.frame_at(5.9, layer, aspect, 1.0).screen.is_full());
+        // Leaving the fullscreen change, the screen is already in place.
+        assert!(layouts.frame_at(6.05, layer, aspect, 1.0).screen.is_full());
     }
 
     #[test]
@@ -2370,7 +4432,9 @@ mod tests {
         );
         assert_eq!(resting(&without, 1.5), resting(&with, 1.5));
         assert_eq!(resting(&without, 2.0), resting(&with, 2.0));
-        assert!((resting(&with, 2.0).camera.width - 1.0).abs() < 1e-9);
+        // A spring settles rather than landing at a set time; once settled
+        // the camera fills the frame.
+        assert!((resting(&with, 4.5).camera.width - 1.0).abs() < 1e-9);
     }
 
     #[test]
@@ -2398,7 +4462,7 @@ mod tests {
         };
         let wide = resting(&settings, 0.0);
         assert!((wide.camera.y + wide.camera.height - 1.0).abs() < 1e-9);
-        assert!((wide.camera.height - CUTOUT_HEIGHT_RATIO).abs() < 1e-9);
+        assert!((wide.camera.height - 0.28125).abs() < 1e-9);
         assert!((wide.camera.x + wide.camera.width / 2.0 - 0.5).abs() < 1e-9);
         assert_eq!(wide.cutout, 1.0);
         assert!(settings.uses_cutout());
@@ -2412,6 +4476,30 @@ mod tests {
     }
 
     #[test]
+    fn the_cutout_takes_the_studied_size_on_the_bottom_edge() {
+        let frame = 16.0 / 9.0;
+        let layer = LayerSettings::default();
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraCutout,
+            ..LayoutSettings::default()
+        };
+        let rest = layouts.frame_at(0.0, layer, frame, 1.0).camera;
+        // Size 0.5 of the 1080 shortest side: a square camera 540 px tall.
+        assert!((rest.height - 0.5).abs() < 1e-9, "{}", rest.height);
+        assert!(
+            (rest.y + rest.height - 1.0).abs() < 1e-9,
+            "stands on the bottom"
+        );
+        let big = LayoutSettings {
+            cutout_size: 1.0,
+            ..layouts.clone()
+        }
+        .frame_at(0.0, layer, frame, 1.0)
+        .camera;
+        assert!((big.height - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
     fn a_cutout_transition_blends_the_matte_in_and_out() {
         let settings = settings(
             vec![
@@ -2421,11 +4509,17 @@ mod tests {
             1.0,
         );
         let into = resting(&settings, 1.5);
-        assert!((into.cutout - 0.5).abs() < 1e-9);
+        assert!((into.cutout - progress(1.0, 1.5, 1.0)).abs() < 1e-9);
         assert!((into.camera_alpha - 1.0).abs() < 1e-9);
         assert!(into.camera.y > 0.0);
         let out = resting(&settings, 2.5);
-        assert!((out.cutout - 0.5).abs() < 1e-9);
+        let at_change = progress(1.0, 2.0, 1.0);
+        let expected = at_change * (1.0 - progress(2.0, 2.5, 1.0));
+        assert!(
+            (out.cutout - expected).abs() < 1e-9,
+            "{} vs {expected}",
+            out.cutout
+        );
     }
 
     #[test]
@@ -2505,18 +4599,18 @@ mod tests {
         )
         .unwrap();
         assert!(
-            pixel(&left, size.0, 8, 90)[1] > 200,
+            pixel(&left, size.0, 8, 170)[1] > 200,
             "the left placement covers the left edge"
         );
-        assert_eq!(pixel(&right, size.0, 8, 90), [10, 20, 30, 255]);
+        assert_eq!(pixel(&right, size.0, 8, 170), [10, 20, 30, 255]);
         assert!(
-            pixel(&right, size.0, 311, 90)[1] > 200,
+            pixel(&right, size.0, 311, 170)[1] > 200,
             "the right placement covers the right edge"
         );
-        assert_eq!(pixel(&left, size.0, 311, 90), [10, 20, 30, 255]);
+        assert_eq!(pixel(&left, size.0, 311, 170), [10, 20, 30, 255]);
         assert!(
-            pixel(&left, size.0, 160, 90)[1] > 200 && pixel(&right, size.0, 160, 90)[1] > 200,
-            "both placements still cover the middle of the frame"
+            pixel(&left, size.0, 45, 170)[1] > 200 && pixel(&right, size.0, 275, 170)[1] > 200,
+            "each placement covers the middle of its own band"
         );
     }
 
@@ -2537,6 +4631,27 @@ mod tests {
     }
 
     #[test]
+    fn the_matte_edge_follows_softness_and_inset() {
+        // A 1-px-tall ramp from 0 to 1 across 11 pixels.
+        let mut hard: Vec<f32> = (0..11).map(|i| i as f32 / 10.0).collect();
+        refine_matte(&mut hard, (11, 1), 0.0, 0.0);
+        assert!(
+            hard[3] < 0.01 && hard[7] > 0.99,
+            "softness 0 is a hard edge: {hard:?}"
+        );
+        let mut soft: Vec<f32> = (0..11).map(|i| i as f32 / 10.0).collect();
+        refine_matte(&mut soft, (11, 1), 1.0, 0.0);
+        assert!(
+            soft[3] > 0.05 && soft[3] < 0.5,
+            "softness 1 keeps a ramp: {soft:?}"
+        );
+        let mut person = vec![0.0f32, 0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.0, 0.0];
+        refine_matte(&mut person, (9, 1), 0.0, 1.0);
+        assert_eq!(person[2], 0.0, "inset pulls the edge in by one pixel");
+        assert_eq!(person[4], 1.0);
+    }
+
+    #[test]
     fn a_decode_from_a_replaced_document_cannot_publish() {
         use std::sync::Mutex;
 
@@ -2551,6 +4666,7 @@ mod tests {
             })),
             stamp: Mutex::new(7),
             error: Mutex::new(Some(CameraError::Cutout("the matte failed".to_string()))),
+            silence: Mutex::new(None),
             generation: Mutex::new(2),
         };
         let old = Job {
@@ -2559,6 +4675,7 @@ mod tests {
             generation: 1,
             size: (2, 2),
             cutout: true,
+            matte: (0.2, 0.0),
         };
         assert!(!publish_frame(
             &shared,
@@ -2618,6 +4735,8 @@ mod tests {
             camera: Rect::full(),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -2643,6 +4762,8 @@ mod tests {
             camera: Rect::full(),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -2673,6 +4794,8 @@ mod tests {
             camera: Rect::full(),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -2704,6 +4827,8 @@ mod tests {
             camera: Rect::full(),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: true,
         };
@@ -2782,6 +4907,8 @@ mod tests {
             camera: Rect::full(),
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -2821,6 +4948,8 @@ mod tests {
             },
             camera_alpha: 1.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -2865,7 +4994,7 @@ mod tests {
             let frame = layout.frame_at(0.0, LayerSettings::default(), 160.0 / 90.0, 1.0);
             let (x0, y0, x1, y1) = pixel_rect(frame.screen, size);
             let mut pixels = screen.clone();
-            shrink_screen(&mut pixels, size, frame.screen);
+            shrink_screen(&mut pixels, size, frame.screen, frame.screen_anchor);
             let inside = |x: u32, y: u32| pixel(&pixels, 160, x, y);
             let top_left = inside(x0 + 4, y0 + 4);
             let top_right = inside(x1 - 5, y0 + 4);
@@ -2922,12 +5051,13 @@ mod tests {
         }
         let layout = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             ..LayoutSettings::default()
         };
         let frame = layout.frame_at(0.0, LayerSettings::default(), 16.0 / 9.0, 16.0 / 9.0);
         assert_eq!(pixel_rect(frame.screen, size), (0, 0, 160, 180));
         let mut pixels = screen.clone();
-        shrink_screen(&mut pixels, size, frame.screen);
+        shrink_screen(&mut pixels, size, frame.screen, 0.5);
         let top = pixel(&pixels, size.0, 80, 1);
         assert_eq!(
             top, RED,
@@ -2969,7 +5099,7 @@ mod tests {
         let frame = layout.frame_at(0.0, LayerSettings::default(), 9.0 / 16.0, 9.0 / 16.0);
         assert_eq!(pixel_rect(frame.screen, size), (0, 0, 180, 160));
         let mut pixels = screen.clone();
-        shrink_screen(&mut pixels, size, frame.screen);
+        shrink_screen(&mut pixels, size, frame.screen, 0.5);
         for y in [2, 80, 157] {
             for x in [2, 90, 177] {
                 let shown = pixel(&pixels, size.0, x, y);
@@ -2992,6 +5122,7 @@ mod tests {
         let camera = solid(64, 64, [0, 255, 0, 255]);
         let layout = LayoutSettings {
             default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
             ..LayoutSettings::default()
         };
         let frame = layout.frame_at(0.0, LayerSettings::default(), 16.0 / 9.0, 16.0 / 9.0);
@@ -3052,6 +5183,8 @@ mod tests {
             },
             camera_alpha: 0.0,
             camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
             cutout: 0.0,
             mirror: false,
         };
@@ -3219,6 +5352,213 @@ mod tests {
     }
 
     #[test]
+    fn the_overlay_size_is_the_longest_side_over_the_shortest_frame_side() {
+        let close =
+            |a: (f64, f64), b: (f64, f64)| (a.0 - b.0).abs() < 1e-4 && (a.1 - b.1).abs() < 1e-4;
+        assert!(close(
+            overlay_size_hw(16.0 / 9.0, 16.0 / 9.0, 0.5),
+            (0.28125, 0.28125)
+        ));
+        assert!(close(overlay_size_hw(16.0 / 9.0, 1.0, 0.5), (0.28125, 0.5)));
+        assert!(close(
+            overlay_size_hw(9.0 / 16.0, 16.0 / 9.0, 0.5),
+            (0.5, 0.1582)
+        ));
+        for (frame, camera) in [
+            (16.0 / 9.0, 16.0 / 9.0),
+            (16.0 / 9.0, 1.0),
+            (9.0 / 16.0, 16.0 / 9.0),
+            (1.6, 0.75),
+        ] {
+            let (w, h) = overlay_size_hw(frame, camera, 0.5);
+            let layer = LayerSettings {
+                w,
+                h,
+                ..LayerSettings::default()
+            };
+            assert!((layer.overlay_size_ratio(frame) - 0.5).abs() < 1e-9);
+            assert!((layer.pixel_aspect(frame) - camera).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn an_aspect_change_keeps_the_size_and_the_anchor() {
+        let frame = 16.0 / 9.0;
+        let mut layer = LayerSettings::default();
+        layer.set_overlay_size(0.4, frame);
+        layer.set_overlay_alignment(1.0, 1.0);
+        layer.set_overlay_aspect(9.0 / 16.0, frame);
+        assert!((layer.overlay_size_ratio(frame) - 0.4).abs() < 1e-9);
+        assert!((layer.pixel_aspect(frame) - 9.0 / 16.0).abs() < 1e-9);
+        assert!((layer.x + layer.w - 1.0).abs() < 1e-9);
+        assert!((layer.y + layer.h - 1.0).abs() < 1e-9);
+        layer.set_overlay_size(0.6, frame);
+        assert!((layer.overlay_size_ratio(frame) - 0.6).abs() < 1e-9);
+        assert!((layer.pixel_aspect(frame) - 9.0 / 16.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_camera_shrinks_through_a_zoom_and_back() {
+        let clip = |start: f64, end: f64| ZoomClip {
+            start,
+            end,
+            scale: 2.0,
+            center: (0.0, 0.0),
+            hidden: false,
+            mode: ZoomMode::Auto,
+            instant: false,
+            anchor: None,
+        };
+        let clips = vec![clip(3.0, 8.0)];
+        assert_eq!(zoom_shrink_at(&[], 5.0, 0.0), 0.0);
+        assert_eq!(zoom_shrink_at(&clips, 1.0, 0.0), 0.0);
+        assert!(
+            zoom_shrink_at(&clips, 3.0, 0.0) < 0.05,
+            "the shrink eases in"
+        );
+        let mid = zoom_shrink_at(&clips, 3.2, 0.0);
+        assert!(mid > 0.05 && mid < 1.0, "on its way: {mid}");
+        assert!((zoom_shrink_at(&clips, 6.0, 0.0) - 1.0).abs() < 1e-9);
+        assert!(zoom_shrink_at(&clips, 10.5, 0.0) < 1e-9);
+        let mut t = 2.5;
+        while t < 11.0 {
+            let value = zoom_shrink_at(&clips, t, 0.0);
+            assert!((0.0..=1.0).contains(&value), "clamped at {t}: {value}");
+            t += 0.05;
+        }
+        // The lead-in starts the shrink before a gliding clip, never an instant one.
+        assert!(zoom_shrink_at(&clips, 3.0, 0.35) > zoom_shrink_at(&clips, 3.0, 0.0));
+        let instant = vec![ZoomClip {
+            instant: true,
+            ..clip(3.0, 8.0)
+        }];
+        assert_eq!(zoom_shrink_at(&instant, 2.9, 0.35), 0.0);
+        let hidden = vec![ZoomClip {
+            hidden: true,
+            ..clip(3.0, 8.0)
+        }];
+        assert_eq!(zoom_shrink_at(&hidden, 6.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn a_zoom_shrinks_the_overlay_about_its_anchor_and_the_cutout_on_its_edge() {
+        let frame = 16.0 / 9.0;
+        let mut layer = LayerSettings::default();
+        layer.set_overlay_size(0.5, frame);
+        layer.set_overlay_alignment(1.0, 1.0);
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            ..LayoutSettings::default()
+        };
+        let rest = layouts.frame_at_zoomed(0.0, layer, frame, 1.0, 0.0).camera;
+        let full = layouts.frame_at_zoomed(0.0, layer, frame, 1.0, 1.0).camera;
+        let half = layouts.frame_at_zoomed(0.0, layer, frame, 1.0, 0.5).camera;
+        assert!((full.width - 0.8 * rest.width).abs() < 1e-9);
+        assert!((full.height - 0.8 * rest.height).abs() < 1e-9);
+        assert!((half.width - 0.9 * rest.width).abs() < 1e-9);
+        assert!(
+            (full.x + full.width - (rest.x + rest.width)).abs() < 1e-9,
+            "right edge stays"
+        );
+        assert!(
+            (full.y + full.height - (rest.y + rest.height)).abs() < 1e-9,
+            "bottom edge stays"
+        );
+
+        let cutout = LayoutSettings {
+            default_layout: CameraLayout::CameraCutout,
+            ..LayoutSettings::default()
+        };
+        let rest = cutout.frame_at_zoomed(0.0, layer, frame, 1.0, 0.0).camera;
+        let full = cutout.frame_at_zoomed(0.0, layer, frame, 1.0, 1.0).camera;
+        assert!((full.height - 0.8 * rest.height).abs() < 1e-9);
+        assert!(
+            (full.y + full.height - 1.0).abs() < 1e-9,
+            "the cutout stays on the bottom"
+        );
+    }
+
+    #[test]
+    fn the_layer_chooses_how_far_the_zoom_shrinks_it() {
+        let frame = 16.0 / 9.0;
+        let layouts = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            ..LayoutSettings::default()
+        };
+        let mut layer = LayerSettings::default();
+        layer.set_overlay_size(0.5, frame);
+        layer.set_overlay_alignment(1.0, 1.0);
+
+        let mut off = layer;
+        off.zoomed_scale = 1.0;
+        assert_eq!(
+            layouts.frame_at_zoomed(0.0, off, frame, 1.0, 1.0).camera,
+            layouts.frame_at_zoomed(0.0, off, frame, 1.0, 0.0).camera,
+            "a shrink of 1 keeps the camera at its rest size"
+        );
+
+        let mut half = layer;
+        half.zoomed_scale = 0.5;
+        let rest = layouts.frame_at_zoomed(0.0, half, frame, 1.0, 0.0).camera;
+        let full = layouts.frame_at_zoomed(0.0, half, frame, 1.0, 1.0).camera;
+        assert!((full.width - 0.5 * rest.width).abs() < 1e-9);
+        assert!((full.height - 0.5 * rest.height).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_zoomed_split_fills_the_frame_and_floats_the_camera_opposite_the_screen() {
+        let frame = 4.0 / 3.0;
+        let layer = LayerSettings {
+            radius: 0.3,
+            ..LayerSettings::default()
+        };
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
+            ..LayoutSettings::default()
+        };
+        let rest = split.frame_at_zoomed(0.0, layer, frame, 1.0, 0.0);
+        assert!(!rest.screen.is_full(), "at rest the screen keeps its pane");
+        let zoomed = split.frame_at_zoomed(0.0, layer, frame, 1.0, 1.0);
+        assert!(
+            zoomed.screen.is_full(),
+            "zoomed, the screen takes the frame"
+        );
+        // Default split 0.5: the camera pane is 160x240 in a 320x240 frame,
+        // aspect 2:3. At size 0.5 the camera is 80x120 px, inset 15 px,
+        // bottom-right: x 225..305, y 105..225.
+        let px = |rect: Rect| {
+            (
+                rect.x * 320.0,
+                rect.y * 240.0,
+                rect.width * 320.0,
+                rect.height * 240.0,
+            )
+        };
+        let (x, y, w, h) = px(zoomed.camera);
+        assert!(
+            (w - 80.0).abs() < 1e-6 && (h - 120.0).abs() < 1e-6,
+            "{w}x{h}"
+        );
+        assert!(
+            (x - 225.0).abs() < 1e-6 && (y - 105.0).abs() < 1e-6,
+            "{x},{y}"
+        );
+        assert!((zoomed.camera_radius - 0.3).abs() < 1e-9);
+        let flipped = LayoutSettings {
+            split_flip: true,
+            ..split.clone()
+        };
+        let (x, _, _, _) = px(flipped.frame_at_zoomed(0.0, layer, frame, 1.0, 1.0).camera);
+        assert!(
+            (x - 15.0).abs() < 1e-6,
+            "a flipped split floats the camera bottom-left: {x}"
+        );
+        let half = split.frame_at_zoomed(0.0, layer, frame, 1.0, 0.5);
+        assert!(half.screen.width > rest.screen.width && half.screen.width < 1.0);
+    }
+
+    #[test]
     fn the_track_pixels_land_inside_the_layer_and_nowhere_else() {
         let mut frame = solid(400, 400, [30, 20, 10, 255]);
         let camera = solid(100, 100, [0, 255, 0, 255]);
@@ -3309,9 +5649,48 @@ mod tests {
     }
 
     #[test]
+    fn a_long_silence_hides_the_camera_and_a_short_one_does_not() {
+        assert_eq!(silence_hide_at(&[(0.0, 20.0)], 10.0, Some(5.0)), 1.0);
+        assert_eq!(silence_hide_at(&[(0.0, 20.0)], 10.0, None), 0.0);
+        let springing = silence_hide_at(&[(2.0, 20.0)], 2.55, Some(5.0));
+        assert!(
+            springing > 0.0 && springing < 1.0,
+            "the hide springs in after the margin: {springing}"
+        );
+        assert_eq!(silence_hide_at(&[(2.0, 20.0)], 4.0, Some(5.0)), 1.0);
+    }
+
+    #[test]
+    fn a_hidden_camera_fades_out_and_shrinks_about_its_centre() {
+        let frame = LayoutFrame {
+            screen: Rect::full(),
+            camera: Rect {
+                x: 0.6,
+                y: 0.55,
+                width: 0.2,
+                height: 0.25,
+            },
+            camera_alpha: 1.0,
+            camera_radius: 0.1,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
+            cutout: 0.0,
+            mirror: false,
+        };
+        let hidden = hide_for_silence(frame, 1.0);
+        assert_eq!(hidden.camera_alpha, 0.0);
+        assert!((hidden.camera.width - 0.18).abs() < 1e-9);
+        assert!((hidden.camera.height - 0.225).abs() < 1e-9);
+        assert!((hidden.camera.x + hidden.camera.width / 2.0 - 0.7).abs() < 1e-9);
+        assert!((hidden.camera.y + hidden.camera.height / 2.0 - 0.675).abs() < 1e-9);
+        assert_eq!(hide_for_silence(frame, 0.0), frame);
+    }
+
+    #[test]
     fn a_shape_starts_at_the_radius_the_recorder_drew() {
         assert_eq!(radius_for_shape(0), 1.0);
-        assert!(radius_for_shape(1) < radius_for_shape(2));
+        assert_eq!(radius_for_shape(1), 0.30);
+        assert_eq!(radius_for_shape(2), 0.30);
         assert_eq!(aspect_for_shape(0), aspect_for_shape(1));
         assert!(aspect_for_shape(3) > aspect_for_shape(2));
     }
@@ -3359,10 +5738,14 @@ mod tests {
             path: path.clone(),
             settings: LayerSettings::default(),
             layouts: LayoutSettings::default(),
+            split_gap: 0.0,
+            pane_radius: 0.0,
             track_seconds: duration,
+            start: 0.0,
             video_seconds: duration,
             last_frame: last,
             source_size: (32, 32),
+            silence: Vec::new(),
         };
         assert!((export.start_at(duration) - last).abs() < 1e-9);
         let _ = std::fs::remove_dir_all(&dir);
@@ -3374,10 +5757,14 @@ mod tests {
             path: PathBuf::new(),
             settings: LayerSettings::default(),
             layouts: LayoutSettings::default(),
+            split_gap: 0.0,
+            pane_radius: 0.0,
             track_seconds: 8.0,
+            start: 0.0,
             video_seconds: 10.0,
             last_frame: 7.95,
             source_size: (1280, 720),
+            silence: Vec::new(),
         };
         assert!((export.track_at(1.0) - 0.8).abs() < 1e-9);
         assert!((export.time_scale() - 1.25).abs() < 1e-9);
@@ -3387,5 +5774,582 @@ mod tests {
         };
         assert!((unknown.track_at(3.6) - 3.6).abs() < 1e-9);
         assert!((unknown.time_scale() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_recorded_gap_plays_the_camera_one_to_one() {
+        // A 9.6 s track that started 0.4 s into a 10 s video.
+        let clock = CameraClock::new(0.4, 9.6, 10.0, 0.0);
+        assert!((clock.rate - 1.0).abs() < 1e-9);
+        assert_eq!(clock.track_at(0.0), 0.0);
+        assert!((clock.lead_at(0.0) - 0.4).abs() < 1e-9);
+        assert!((clock.track_at(1.0) - 0.6).abs() < 1e-9);
+        assert_eq!(clock.lead_at(1.0), 0.0);
+        assert!((clock.track_at(10.0) - 9.6).abs() < 1e-9);
+        assert!((clock.time_scale() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_camera_delay_shifts_the_track() {
+        let later = CameraClock::new(0.4, 9.6, 10.0, 0.1);
+        assert!((later.track_at(1.0) - 0.7).abs() < 1e-9);
+        let earlier = CameraClock::new(0.4, 9.6, 10.0, -0.2);
+        assert!((earlier.track_at(1.0) - 0.4).abs() < 1e-9);
+        assert!((earlier.lead_at(0.0) - 0.6).abs() < 1e-9);
+        // The adjustment is clamped to the slider's range.
+        let wild = CameraClock::new(0.0, 10.0, 10.0, 5.0);
+        assert!((wild.delay - MAX_CAMERA_DELAY_SECONDS).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_sidecar_without_a_gap_keeps_the_length_ratio() {
+        let clock = CameraClock::new(0.0, 8.0, 10.0, 0.0);
+        assert!((clock.track_at(1.0) - 0.8).abs() < 1e-9);
+        assert!((clock.time_scale() - 1.25).abs() < 1e-9);
+        assert_eq!(clock.lead_at(1.0), 0.0);
+    }
+
+    #[test]
+    fn a_stored_gap_keeps_the_camera_at_its_own_speed() {
+        // A measured gap leaves the track ending where the camera stopped,
+        // which need not be the video's end; the track must not be stretched.
+        let clock = CameraClock::new(1.375, 29.433, 31.0, 0.0);
+        assert_eq!(clock.rate, 1.0);
+        assert!((clock.track_at(11.375) - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_camera_blur_follows_the_studied_strength() {
+        assert!((camera_blur_strength(1.0, 60.0, 1.0) - 1.0).abs() < 1e-9);
+        assert!((camera_blur_strength(0.5, 30.0, 1.0) - 0.25).abs() < 1e-9);
+        assert_eq!(camera_blur_strength(1.0, 60.0, 0.0), 0.0);
+        assert_eq!(camera_blur_strength(0.0, 60.0, 1.0), 0.0);
+    }
+
+    #[test]
+    fn the_fade_blur_follows_the_studied_radius() {
+        assert_eq!(fade_blur_sigma_px(1.0, 1080.0), 0.0);
+        assert!((fade_blur_sigma_px(0.0, 1080.0) - 5.0).abs() < 1e-9);
+        assert!((fade_blur_sigma_px(0.5, 2160.0) - 5.0).abs() < 1e-9);
+        assert_eq!(fade_blur_sigma_px(f64::NAN, 1080.0), 0.0);
+        assert_eq!(fade_blur_sigma_px(0.5, 0.0), 0.0);
+    }
+
+    #[test]
+    fn a_fading_camera_softens_and_an_opaque_one_stays_sharp() {
+        // A camera split hard down the middle, red | green. It is as wide as
+        // the stage so the seam is a true one-pixel edge; a smaller camera
+        // scaled up would spread the edge over its own filter ramp.
+        let camera = camera_with(1080, 1080, |x, _| if x < 540 { RED } else { GREEN });
+        let layout = |alpha: f64| LayoutFrame {
+            screen: Rect::full(),
+            camera: Rect::full(),
+            camera_alpha: alpha,
+            camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
+            cutout: 0.0,
+            mirror: false,
+        };
+        // A 1080-tall frame so the fade reaches its full studied radius.
+        let size = (1080u32, 1080u32);
+        let mut opaque = solid(size.0, size.1, [0, 0, 0, 255]);
+        composite_layout_into(&mut opaque, size, layout(1.0), &camera, (1080, 1080), None).unwrap();
+        let mut fading = solid(size.0, size.1, [0, 0, 0, 255]);
+        composite_layout_into(&mut fading, size, layout(0.2), &camera, (1080, 1080), None).unwrap();
+        // Two pixels left of the seam: sharp stays pure red, faded mixes in green.
+        let sharp = pixel(&opaque, size.0, 538, 540);
+        let soft = pixel(&fading, size.0, 538, 540);
+        assert!(
+            sharp[1] < 10,
+            "the opaque camera keeps a hard edge: {sharp:?}"
+        );
+        assert!(
+            soft[1] > 5,
+            "the fading camera blurs across the edge: {soft:?}"
+        );
+        // Far from the seam both are flat red (scaled by alpha when fading).
+        let far = pixel(&fading, size.0, 100, 540);
+        assert!(far[1] < 3, "a flat area stays flat under the blur: {far:?}");
+    }
+
+    #[test]
+    fn the_gaussian_blur_keeps_a_flat_surface_flat() {
+        let mut surface = ImageSurface::create(Format::ARgb32, 16, 16).unwrap();
+        {
+            let context = Context::new(&surface).unwrap();
+            context.set_source_rgba(0.2, 0.4, 0.6, 1.0);
+            let _ = context.paint();
+        }
+        let before = surface.data().unwrap().to_vec();
+        gaussian_blur_surface(&mut surface, 3.0);
+        let after = surface.data().unwrap().to_vec();
+        for (a, b) in before.iter().zip(after.iter()) {
+            assert!((i32::from(*a) - i32::from(*b)).abs() <= 1);
+        }
+    }
+
+    #[test]
+    fn a_still_camera_trail_is_the_plain_composite() {
+        let size = (200, 100);
+        let camera = camera_with(32, 32, |_, _| GREEN);
+        let layout = LayoutFrame {
+            screen: Rect::full(),
+            camera: Rect {
+                x: 0.1,
+                y: 0.2,
+                width: 0.3,
+                height: 0.5,
+            },
+            camera_alpha: 1.0,
+            camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
+            cutout: 0.0,
+            mirror: false,
+        };
+        assert_eq!(trail_sample_count(layout, layout, size), 1);
+        let mut plain = solid(size.0, size.1, [0, 0, 0, 255]);
+        composite_layout_into(&mut plain, size, layout, &camera, (32, 32), None).unwrap();
+        let mut trail = solid(size.0, size.1, [0, 0, 0, 255]);
+        composite_layout_trail_into(&mut trail, size, &[layout], &camera, (32, 32), None).unwrap();
+        assert_eq!(plain, trail);
+    }
+
+    #[test]
+    fn a_moving_camera_trail_smears_its_edge() {
+        let size = (200, 100);
+        let camera = camera_with(32, 32, |_, _| GREEN);
+        let at = |x: f64| LayoutFrame {
+            screen: Rect::full(),
+            camera: Rect {
+                x,
+                y: 0.2,
+                width: 0.3,
+                height: 0.5,
+            },
+            camera_alpha: 1.0,
+            camera_radius: 0.0,
+            screen_radius: 0.0,
+            screen_anchor: 0.5,
+            cutout: 0.0,
+            mirror: false,
+        };
+        let before = at(0.1);
+        let now = at(0.3);
+        assert_eq!(trail_sample_count(now, before, size), 11);
+        let frames: Vec<LayoutFrame> = (0..11)
+            .map(|k| at(0.1 + 0.2 * f64::from(k) / 10.0))
+            .collect();
+        let mut frame = solid(size.0, size.1, [0, 0, 0, 255]);
+        composite_layout_trail_into(&mut frame, size, &frames, &camera, (32, 32), None).unwrap();
+        let first = pixel(&frame, 200, 25, 50)[1];
+        assert!(
+            first > 20 && first < 235,
+            "the first samples alone soften the edge: {first}"
+        );
+        let every = pixel(&frame, 200, 70, 50)[1];
+        assert!(every > 235, "the samples all cover the middle: {every}");
+        let never = pixel(&frame, 200, 5, 50)[1];
+        assert!(never < 5, "the trail never reaches the left edge: {never}");
+    }
+
+    #[test]
+    fn the_auto_stage_follows_the_studied_resolver() {
+        assert!((auto_split_stage_aspect(1.6, 0.0) - 2.1625).abs() < 1e-9);
+        assert!(
+            (auto_split_stage_aspect(16.0 / 9.0, 0.0) - (16.0 / 9.0 + 9.0 / 16.0)).abs() < 1e-9
+        );
+        assert!((auto_split_stage_aspect(1.0, 0.0) - 16.0 / 9.0).abs() < 1e-9);
+        assert!((auto_split_stage_aspect(4.0 / 3.0, 0.0) - 16.0 / 9.0).abs() < 1e-9);
+        assert!((auto_split_stage_aspect(3.0, 0.0) - 2.4).abs() < 1e-9);
+        assert!((auto_split_stage_aspect(1.6, 0.1) - (0.3 + 1.6 + 0.5625) / 1.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_auto_split_share_follows_the_widened_and_padded_stage() {
+        let stage = auto_split_stage_with_gap(1.6, 0.0);
+        let share = auto_split_screen_share(stage, 1.6, 0.0);
+        assert!((share - 1.6 / stage).abs() < 1e-9);
+        assert!((share - 0.74).abs() < 0.01);
+        let gap = 0.05;
+        let stage = auto_split_stage_with_gap(1.6, gap);
+        let share = auto_split_screen_share(stage, 1.6, gap);
+        assert!((share - 1.6 / (stage - gap)).abs() < 1e-9);
+        assert_eq!(auto_split_screen_share(9.0 / 16.0, 9.0 / 16.0, 0.05), 0.5);
+        assert_eq!(auto_split_screen_share(9.0 / 16.0, 9.0 / 16.0, 0.0), 0.5);
+    }
+
+    #[test]
+    fn a_screen_is_contained_on_a_wider_stage() {
+        assert_eq!(contained_screen(1.6, 1.6), Rect::full());
+        let contained = contained_screen(2.1625, 1.6);
+        let width = 1.6 / 2.1625;
+        assert!((contained.width - width).abs() < 1e-9);
+        assert!((contained.x - (1.0 - width) / 2.0).abs() < 1e-9);
+        assert!(contained.y.abs() < 1e-9);
+        assert!((contained.height - 1.0).abs() < 1e-9);
+        let tall = contained_screen(1.0, 2.0);
+        assert!((tall.width - 1.0).abs() < 1e-9);
+        assert!((tall.height - 0.5).abs() < 1e-9);
+        assert!((tall.y - 0.25).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_widened_split_keeps_the_screen_uncropped() {
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: true,
+            split_flip: false,
+            ..LayoutSettings::default()
+        };
+        let layer = LayerSettings {
+            enabled: true,
+            ..LayerSettings::default()
+        };
+        let frame = split.frame_at_staged(
+            0.0,
+            layer,
+            StageShape {
+                aspect: 2.1625,
+                screen_aspect: 1.6,
+                split_gap: 0.0,
+                pane_radius: 0.0,
+                split_rest: 0.0,
+            },
+            1.0,
+            0.0,
+        );
+        let width = 1.6 / 2.1625;
+        assert!(frame.screen.x.abs() < 1e-9);
+        assert!((frame.screen.height - 1.0).abs() < 1e-9);
+        assert!((frame.screen.width - width).abs() < 1e-9);
+        assert!((frame.camera.x - frame.screen.width).abs() < 1e-9);
+        assert!((frame.camera.width - (1.0 - frame.screen.width)).abs() < 1e-9);
+        let cover = screen_cover_rect_in(frame.screen, 2.1625, 1.6);
+        assert!((cover.x - frame.screen.x).abs() < 1e-9);
+        assert!((cover.y - frame.screen.y).abs() < 1e-9);
+        assert!((cover.width - frame.screen.width).abs() < 1e-9);
+        assert!((cover.height - frame.screen.height).abs() < 1e-9);
+    }
+
+    #[test]
+    fn other_layouts_contain_the_screen_on_a_widened_stage() {
+        let layout = LayoutSettings {
+            default_layout: CameraLayout::CameraOverlay,
+            ..LayoutSettings::default()
+        };
+        let frame = layout.frame_at_staged(
+            0.0,
+            LayerSettings::default(),
+            StageShape {
+                aspect: 2.1625,
+                screen_aspect: 1.6,
+                split_gap: 0.0,
+                pane_radius: 0.0,
+                split_rest: 0.0,
+            },
+            1.0,
+            0.0,
+        );
+        let contained = contained_screen(2.1625, 1.6);
+        assert!((frame.screen.x - contained.x).abs() < 1e-9);
+        assert!((frame.screen.y - contained.y).abs() < 1e-9);
+        assert!((frame.screen.width - contained.width).abs() < 1e-9);
+        assert!((frame.screen.height - contained.height).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_gapped_auto_stage_matches_the_studied_one_without_a_gap() {
+        for screen in [1.0, 4.0 / 3.0, 1.6, 16.0 / 9.0, 3.0] {
+            let gapped = auto_split_stage_with_gap(screen, 0.0);
+            let studied = auto_split_stage_aspect(screen, 0.0);
+            assert!(
+                (gapped - studied).abs() < 1e-9,
+                "{screen}: {gapped} vs {studied}"
+            );
+        }
+        assert!((auto_split_stage_with_gap(1.6, 0.1) - (1.6 + 0.1 + 0.5625)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_padded_split_leaves_a_gap_and_keeps_the_screen_shape() {
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: true,
+            split_flip: false,
+            split_padded: true,
+            ..LayoutSettings::default()
+        };
+        let stage = StageShape {
+            aspect: 2.2625,
+            screen_aspect: 1.6,
+            split_gap: 0.1,
+            pane_radius: 0.05,
+            split_rest: 0.0,
+        };
+        let layer = LayerSettings {
+            enabled: true,
+            ..LayerSettings::default()
+        };
+        let frame = split.frame_at_staged(0.0, layer, stage, 1.0, 0.0);
+        assert!(frame.screen.x.abs() < 1e-9);
+        assert!((frame.screen.width - 1.6 / 2.2625).abs() < 1e-9);
+        assert!((frame.screen.height - 1.0).abs() < 1e-9);
+        assert!((frame.camera.x - 1.7 / 2.2625).abs() < 1e-9);
+        assert!((frame.camera.width - 0.5625 / 2.2625).abs() < 1e-9);
+        let gap = frame.camera.x - (frame.screen.x + frame.screen.width);
+        assert!((gap - 0.1 / 2.2625).abs() < 1e-9);
+        assert!((frame.screen_radius - 0.05 / 0.5).abs() < 1e-9);
+        assert!((frame.camera_radius - 0.05 / (0.5625 / 2.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn padding_off_keeps_the_fullscreen_split() {
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: true,
+            split_flip: false,
+            split_padded: false,
+            ..LayoutSettings::default()
+        };
+        let layer = LayerSettings {
+            enabled: true,
+            ..LayerSettings::default()
+        };
+        let padded = StageShape {
+            aspect: 2.2625,
+            screen_aspect: 1.6,
+            split_gap: 0.1,
+            pane_radius: 0.05,
+            split_rest: 0.0,
+        };
+        let plain = StageShape {
+            aspect: 2.2625,
+            screen_aspect: 1.6,
+            split_gap: 0.0,
+            pane_radius: 0.0,
+            split_rest: 0.0,
+        };
+        let frame = split.frame_at_staged(0.0, layer, padded, 1.0, 0.0);
+        assert_eq!(frame, split.frame_at_staged(0.0, layer, plain, 1.0, 0.0));
+        assert!((frame.screen.width - (1.0 - frame.camera.width)).abs() < 1e-9);
+        assert_eq!(frame.screen_radius, 0.0);
+        assert_eq!(frame.camera_radius, 0.0);
+    }
+
+    #[test]
+    fn a_padded_screen_gives_up_a_tenth_before_it_crops() {
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
+            split_ratio: 0.6,
+            split_padded: true,
+            ..LayoutSettings::default()
+        };
+        let stage = StageShape {
+            aspect: 16.0 / 9.0,
+            screen_aspect: 16.0 / 9.0,
+            split_gap: 0.05,
+            pane_radius: 0.0,
+            split_rest: 0.0,
+        };
+        let layer = LayerSettings {
+            enabled: true,
+            ..LayerSettings::default()
+        };
+        let frame = split.frame_at_staged(0.0, layer, stage, 1.0, 0.0);
+        let zone = (16.0 / 9.0 - 0.05) * 0.6;
+        assert!((frame.screen.height - 0.9).abs() < 1e-9);
+        assert!((frame.screen.y - 0.05).abs() < 1e-9);
+        assert!((frame.screen.width - zone / (16.0 / 9.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_anchored_cover_slides_along_the_axis_it_overflows() {
+        let pane = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 0.6,
+            height: 1.0,
+        };
+        let left = screen_cover_rect_in_anchored(pane, 16.0 / 9.0, 16.0 / 9.0, 0.0);
+        let right = screen_cover_rect_in_anchored(pane, 16.0 / 9.0, 16.0 / 9.0, 1.0);
+        let middle = screen_cover_rect_in(pane, 16.0 / 9.0, 16.0 / 9.0);
+        assert!((left.width - 1.0).abs() < 1e-9);
+        assert!(left.x.abs() < 1e-9);
+        assert!((right.x - -0.4).abs() < 1e-9);
+        assert!((middle.x - -0.2).abs() < 1e-9);
+        assert!(left.y.abs() < 1e-9 && right.y.abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_split_rests_its_screen_against_its_own_edge() {
+        let split = LayoutSettings {
+            default_layout: CameraLayout::SplitScreen,
+            split_auto: false,
+            split_ratio: 0.6,
+            ..LayoutSettings::default()
+        };
+        let layer = LayerSettings::default();
+        for (flip, rest, anchor) in [
+            (false, 0.0, 0.0),
+            (false, 1.0, 1.0),
+            (true, 0.0, 1.0),
+            (true, 1.0, 0.0),
+        ] {
+            let flipped = LayoutSettings {
+                split_flip: flip,
+                ..split.clone()
+            };
+            let stage = StageShape {
+                aspect: 16.0 / 9.0,
+                screen_aspect: 16.0 / 9.0,
+                split_gap: 0.0,
+                pane_radius: 0.0,
+                split_rest: rest,
+            };
+            let frame = flipped.frame_at_staged(0.0, layer, stage, 1.0, 0.0);
+            assert!(
+                (frame.screen_anchor - anchor).abs() < 1e-9,
+                "flip={flip}, rest={rest}: {}",
+                frame.screen_anchor
+            );
+        }
+        let stage = StageShape {
+            aspect: 16.0 / 9.0,
+            screen_aspect: 16.0 / 9.0,
+            split_gap: 0.0,
+            pane_radius: 0.0,
+            split_rest: 0.0,
+        };
+        let frame = split.frame_at_staged(0.0, layer, stage, 1.0, 1.0);
+        assert!(
+            (frame.screen_anchor - 0.5).abs() < 1e-9,
+            "the zoomed split centres its screen: {}",
+            frame.screen_anchor
+        );
+    }
+
+    #[test]
+    fn the_split_shows_the_anchored_side_of_the_screen() {
+        let screen = camera_with(64, 36, |x, _| if x < 32 { RED } else { GREEN });
+        let pane = Rect {
+            x: 0.0,
+            y: 0.0,
+            width: 0.5,
+            height: 1.0,
+        };
+        for (anchor, expected) in [(0.0, RED), (1.0, GREEN)] {
+            let mut stage = vec![0u8; 64 * 36 * 4];
+            place_screen_into(
+                &mut stage,
+                (64, 36),
+                &screen,
+                (64, 36),
+                pane,
+                None,
+                0.0,
+                anchor,
+            );
+            assert_eq!(
+                pixel(&stage, 64, 16, 18),
+                expected,
+                "anchor={anchor} shows its own edge of the screen"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_aspect_cover_matches_the_one_aspect_cover() {
+        for screen in [
+            Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 1.0,
+            },
+            Rect {
+                x: 0.5,
+                y: 0.0,
+                width: 0.5,
+                height: 1.0,
+            },
+            Rect {
+                x: 0.25,
+                y: 0.25,
+                width: 0.5,
+                height: 0.5,
+            },
+            Rect {
+                x: 0.0,
+                y: 0.5,
+                width: 1.0,
+                height: 0.5,
+            },
+        ] {
+            let one = screen_cover_rect(screen);
+            let two = screen_cover_rect_in(screen, 1.6, 1.6);
+            assert!((two.x - one.x).abs() < 1e-9);
+            assert!((two.y - one.y).abs() < 1e-9);
+            assert!((two.width - one.width).abs() < 1e-9);
+            assert!((two.height - one.height).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn a_screen_placed_on_a_wider_stage_shows_the_background_beside_it() {
+        let screen = solid(20, 20, [255, 0, 0, 255]);
+        let background = solid(40, 20, [0, 255, 0, 255]);
+        let mut stage = vec![0u8; 40 * 20 * 4];
+        place_screen_into(
+            &mut stage,
+            (40, 20),
+            &screen,
+            (20, 20),
+            contained_screen(2.0, 1.0),
+            Some(&background),
+            0.0,
+            0.5,
+        );
+        assert_eq!(pixel(&stage, 40, 20, 10), [255, 0, 0, 255]);
+        assert_eq!(pixel(&stage, 40, 2, 10), [0, 255, 0, 255]);
+        assert_eq!(pixel(&stage, 40, 37, 10), [0, 255, 0, 255]);
+
+        let mut empty = vec![0u8; 40 * 20 * 4];
+        place_screen_into(
+            &mut empty,
+            (40, 20),
+            &screen,
+            (20, 20),
+            contained_screen(2.0, 1.0),
+            None,
+            0.0,
+            0.5,
+        );
+        assert_eq!(pixel(&empty, 40, 2, 10), [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn a_rounded_pane_shows_the_background_in_its_corner() {
+        let screen = solid(20, 20, [255, 0, 0, 255]);
+        let background = solid(40, 20, [0, 255, 0, 255]);
+        let mut stage = vec![0u8; 40 * 20 * 4];
+        place_screen_into(
+            &mut stage,
+            (40, 20),
+            &screen,
+            (20, 20),
+            contained_screen(2.0, 1.0),
+            Some(&background),
+            1.0,
+            0.5,
+        );
+        let corner = pixel(&stage, 40, 10, 0);
+        assert!(
+            corner[1] > corner[0],
+            "the rounded corner shows the background: {corner:?}"
+        );
+        assert_eq!(pixel(&stage, 40, 20, 10), [255, 0, 0, 255]);
     }
 }

@@ -65,6 +65,7 @@ mod tests {
             cursor: CursorSettings::default(),
             sidecar: None,
             webcam: None,
+            stage: None,
             canvas: None,
             crf: 23,
         }

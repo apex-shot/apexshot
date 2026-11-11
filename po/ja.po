@@ -4359,3 +4359,78 @@ msgstr "傾きの量"
 
 msgid "Tilt with motion"
 msgstr "動きに合わせて傾ける"
+
+msgid "Automatic width"
+msgstr "自動の幅"
+
+msgid "Camera delay"
+msgstr "カメラの遅延"
+
+msgid "Camera side"
+msgstr "カメラの位置"
+
+msgid "Edge inset"
+msgstr "端の余白"
+
+msgid "Edge softness"
+msgstr "端のぼかし"
+
+msgid "Fill"
+msgstr "塗りつぶし"
+
+msgid "Hide during silence"
+msgstr "無音中は非表示"
+
+msgid "Hide the camera while nobody is talking, and bring it back when they do."
+msgstr "誰も話していない間はカメラを隠し、話し始めると再び表示します。"
+
+msgid "Keep the screen's shape and give the camera the rest of the frame."
+msgstr "画面の形を保ち、残りのフレームをカメラに割り当てます。"
+
+msgid "Layout"
+msgstr "レイアウト"
+
+msgid "Layout settings"
+msgstr "レイアウト設定"
+
+msgid "Leave the Background padding between the screen and the camera, with rounded corners."
+msgstr "画面とカメラの間に背景のパディングを残し、角を丸くします。"
+
+msgid "Make the camera smaller while the screen is zoomed, so it covers less of the recording."
+msgstr "画面をズームしている間はカメラを小さくして、録画の見える範囲を広げます。"
+
+msgid "Minimum silence"
+msgstr "最小の無音時間"
+
+msgid "Padded"
+msgstr "余白あり"
+
+msgid "Rounded"
+msgstr "角丸"
+
+msgid "Roundness"
+msgstr "丸み"
+
+msgid "Screen width"
+msgstr "画面の幅"
+
+msgid "Shift the camera against the screen and sound. Raise it if your lips move after the words, lower it if they move before."
+msgstr "カメラを画面と音声に対してずらします。言葉より後に唇が動く場合は値を上げ、先に動く場合は下げてください。"
+
+msgid "Shrink during zoom"
+msgstr "ズーム中に縮小"
+
+msgid "Shrink size"
+msgstr "縮小サイズ"
+
+msgid "The camera's longest side, as a percentage of the frame's shortest side."
+msgstr "カメラの長辺を、フレームの短辺に対する割合で指定します。"
+
+msgid "The person's size, as a percentage of the frame's shortest side."
+msgstr "人物の大きさを、フレームの短辺に対する割合で指定します。"
+
+msgid "The split fills the frame edge to edge."
+msgstr "スプリットがフレームの端から端までを占めます。"
+
+msgid "Transitions"
+msgstr "トランジション"

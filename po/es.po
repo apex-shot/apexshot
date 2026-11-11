@@ -4459,3 +4459,78 @@ msgstr "Intensidad de la inclinación"
 
 msgid "Tilt with motion"
 msgstr "Inclinar con el movimiento"
+
+msgid "Automatic width"
+msgstr "Ancho automático"
+
+msgid "Camera delay"
+msgstr "Retraso de la cámara"
+
+msgid "Camera side"
+msgstr "Lado de la cámara"
+
+msgid "Edge inset"
+msgstr "Margen del borde"
+
+msgid "Edge softness"
+msgstr "Suavidad del borde"
+
+msgid "Fill"
+msgstr "Rellenar"
+
+msgid "Hide during silence"
+msgstr "Ocultar durante el silencio"
+
+msgid "Hide the camera while nobody is talking, and bring it back when they do."
+msgstr "Oculta la cámara mientras nadie habla y la vuelve a mostrar cuando alguien lo hace."
+
+msgid "Keep the screen's shape and give the camera the rest of the frame."
+msgstr "Mantiene la forma de la pantalla y da a la cámara el resto del encuadre."
+
+msgid "Layout"
+msgstr "Disposición"
+
+msgid "Layout settings"
+msgstr "Ajustes de disposición"
+
+msgid "Leave the Background padding between the screen and the camera, with rounded corners."
+msgstr "Deja el relleno del fondo entre la pantalla y la cámara, con esquinas redondeadas."
+
+msgid "Make the camera smaller while the screen is zoomed, so it covers less of the recording."
+msgstr "Reduce la cámara mientras la pantalla está ampliada para que cubra menos de la grabación."
+
+msgid "Minimum silence"
+msgstr "Silencio mínimo"
+
+msgid "Padded"
+msgstr "Con relleno"
+
+msgid "Rounded"
+msgstr "Redondeado"
+
+msgid "Roundness"
+msgstr "Redondez"
+
+msgid "Screen width"
+msgstr "Ancho de la pantalla"
+
+msgid "Shift the camera against the screen and sound. Raise it if your lips move after the words, lower it if they move before."
+msgstr "Desplaza la cámara respecto a la pantalla y al sonido. Auméntalo si los labios se mueven después de las palabras y redúcelo si se mueven antes."
+
+msgid "Shrink during zoom"
+msgstr "Reducir al ampliar"
+
+msgid "Shrink size"
+msgstr "Tamaño reducido"
+
+msgid "The camera's longest side, as a percentage of the frame's shortest side."
+msgstr "El lado más largo de la cámara, como porcentaje del lado más corto del encuadre."
+
+msgid "The person's size, as a percentage of the frame's shortest side."
+msgstr "El tamaño de la persona, como porcentaje del lado más corto del encuadre."
+
+msgid "The split fills the frame edge to edge."
+msgstr "El Split llena el encuadre de borde a borde."
+
+msgid "Transitions"
+msgstr "Transiciones"

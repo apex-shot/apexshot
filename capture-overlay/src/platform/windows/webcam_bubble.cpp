@@ -273,7 +273,8 @@ QPainterPath WebcamBubble::shapePath(const QRectF& rect) const
         path.addEllipse(rect);
         return path;
     }
-    const double radius = rect.width() * (m_shape == 1 ? 0.04 : 0.06);
+    // The studied corner: 0.15 of the camera's shorter side.
+    const double radius = 0.15 * std::min(rect.width(), rect.height());
     path.addRoundedRect(rect, radius, radius);
     return path;
 }
