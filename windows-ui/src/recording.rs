@@ -60,6 +60,12 @@ pub mod editor {
     #[rustfmt::skip]
     pub mod cursor_shake;
 
+    /// The recording ID a finished recording carries in its MP4.
+    #[allow(dead_code)]
+    #[path = "../../../../src/recording/editor/recording_id.rs"]
+    #[rustfmt::skip]
+    pub mod recording_id;
+
     #[allow(dead_code)]
     #[path = "../../../../src/recording/editor/sidecar.rs"]
     #[rustfmt::skip]

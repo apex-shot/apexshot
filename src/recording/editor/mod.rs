@@ -4,6 +4,7 @@ pub mod cursor_export;
 pub mod cursor_path;
 pub mod cursor_planner;
 pub mod cursor_shake;
+pub mod recording_id;
 pub mod cursor_sprite;
 pub mod cursor_track;
 pub(crate) mod export_cache;

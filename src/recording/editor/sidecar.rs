@@ -2,6 +2,9 @@ use super::cursor_path::SpringConfig;
 use super::cursor_planner::{self, PlannedPath, PlannerPoint, SyncPoint};
 use super::cursor_shake::{self, ShakeEvent, ShakeEventKind, DEFAULT_REMOVE_SHAKE_THRESHOLD};
 use super::model::CursorRotationMode;
+use super::recording_id::{
+    recording_directory, recording_id_of, recordings_directory, RECORDING_SIDECAR_NAME,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
@@ -813,7 +816,7 @@ impl RecordingMarks {
 
     /// The marks recorded beside `video_path`, or none.
     pub fn for_video(video_path: &Path) -> Self {
-        let mut path = PointerSidecar::sidecar_path(video_path).into_os_string();
+        let mut path = PointerSidecar::resolved_sidecar_path(video_path).into_os_string();
         path.push(".recording.json");
         std::fs::read_to_string(path)
             .map(|text| Self::parse(&text))
@@ -874,6 +877,20 @@ impl PointerSidecar {
         pointer_sidecars_directory().join(sidecar_file_name(video_path))
     }
 
+    /// The sidecar inside the folder named by the video's recording ID, when
+    /// the MP4 carries one. It may not exist yet.
+    pub fn recording_sidecar_path(video_path: &Path) -> Option<PathBuf> {
+        recording_id_of(video_path).map(|id| recording_directory(&id).join(RECORDING_SIDECAR_NAME))
+    }
+
+    /// Where this video's sidecar is read from: the recording-ID folder, then
+    /// the path hash used before recordings carried an ID.
+    pub fn resolved_sidecar_path(video_path: &Path) -> PathBuf {
+        Self::recording_sidecar_path(video_path)
+            .filter(|path| path.is_file())
+            .unwrap_or_else(|| Self::sidecar_path(video_path))
+    }
+
     pub fn legacy_sidecar_path(video_path: &Path) -> PathBuf {
         let parent = video_path.parent().unwrap_or_else(|| Path::new(""));
         let stem = video_path
@@ -884,7 +901,8 @@ impl PointerSidecar {
     }
 
     pub fn exists_next_to_video(video_path: &Path) -> bool {
-        Self::sidecar_path(video_path).is_file() || Self::legacy_sidecar_path(video_path).is_file()
+        Self::resolved_sidecar_path(video_path).is_file()
+            || Self::legacy_sidecar_path(video_path).is_file()
     }
 
     pub fn load(path: &Path) -> anyhow::Result<Self> {
@@ -897,7 +915,7 @@ impl PointerSidecar {
     /// The directory that owns this sidecar's relative assets.
     fn asset_directory(&self, video_path: &Path) -> Option<PathBuf> {
         self.sidecar_directory.clone().or_else(|| {
-            Self::sidecar_path(video_path)
+            Self::resolved_sidecar_path(video_path)
                 .parent()
                 .map(Path::to_path_buf)
         })
@@ -962,7 +980,7 @@ impl PointerSidecar {
     /// keeps the two together, so the pair is found from the video path alone.
     pub fn webcam_path(&self, video_path: &Path) -> Option<PathBuf> {
         let track = self.webcam.as_ref().filter(|track| track.is_valid())?;
-        let directory = Self::sidecar_path(video_path).parent()?.to_path_buf();
+        let directory = self.asset_directory(video_path)?;
         let path = directory.join(&track.file);
         path.is_file().then_some(path)
     }
@@ -984,7 +1002,7 @@ impl PointerSidecar {
     }
 
     pub fn load_next_to_video(video_path: &Path) -> Option<Self> {
-        let path = Self::sidecar_path(video_path);
+        let path = Self::resolved_sidecar_path(video_path);
         if !path.is_file() {
             return Self::load_migrate_legacy_sidecar(video_path);
         }
@@ -1001,29 +1019,36 @@ impl PointerSidecar {
     }
 
     pub fn write_next_to_video(&self, video_path: &Path) -> anyhow::Result<PathBuf> {
-        let path = Self::sidecar_path(video_path);
+        let path = Self::recording_sidecar_path(video_path)
+            .unwrap_or_else(|| Self::sidecar_path(video_path));
         self.write(&path)?;
         Ok(path)
     }
 
     pub fn delete_next_to_video(video_path: &Path) {
+        if let Some(tagged) = Self::recording_sidecar_path(video_path) {
+            if let Some(folder) = tagged.parent() {
+                if tagged.is_file() {
+                    if let Ok(sidecar) = Self::load(&tagged) {
+                        Self::remove_screen_file(&sidecar, video_path);
+                    }
+                }
+                // Only ever a folder directly under the recordings root.
+                if folder.parent() == Some(recordings_directory().as_path()) && folder.is_dir() {
+                    if let Err(err) = std::fs::remove_dir_all(folder) {
+                        eprintln!(
+                            "[recording] failed to delete recording folder {}: {err}",
+                            folder.display()
+                        );
+                    }
+                }
+            }
+        }
+
         let current_path = Self::sidecar_path(video_path);
         if current_path.is_file() {
             if let Ok(sidecar) = Self::load(&current_path) {
-                if let Some(file) = sidecar.screen_file.as_deref() {
-                    let name = Path::new(file);
-                    if file.starts_with(".apexshot-screen-")
-                        && matches!(
-                            name.components().next(),
-                            Some(std::path::Component::Normal(_))
-                        )
-                        && name.components().count() == 1
-                    {
-                        if let Some(parent) = video_path.parent() {
-                            let _ = std::fs::remove_file(parent.join(name));
-                        }
-                    }
-                }
+                Self::remove_screen_file(&sidecar, video_path);
                 let mut webcam_path = current_path.as_os_str().to_os_string();
                 webcam_path.push(".webcam.mp4");
                 let _ = std::fs::remove_file(webcam_path);
@@ -1037,6 +1062,24 @@ impl PointerSidecar {
         let legacy_path = Self::legacy_sidecar_path(video_path);
         if legacy_path.is_file() {
             remove_sidecar(&legacy_path);
+        }
+    }
+
+    /// Remove the clean-screen file a sidecar names beside the video.
+    fn remove_screen_file(sidecar: &Self, video_path: &Path) {
+        if let Some(file) = sidecar.screen_file.as_deref() {
+            let name = Path::new(file);
+            if file.starts_with(".apexshot-screen-")
+                && matches!(
+                    name.components().next(),
+                    Some(std::path::Component::Normal(_))
+                )
+                && name.components().count() == 1
+            {
+                if let Some(parent) = video_path.parent() {
+                    let _ = std::fs::remove_file(parent.join(name));
+                }
+            }
         }
     }
 
@@ -1763,6 +1806,178 @@ pub fn delete_recording_outputs(video_path: &Path) {
     PointerSidecar::delete_next_to_video(video_path);
     if video_path.exists() {
         let _ = std::fs::remove_file(video_path);
+    }
+}
+
+#[cfg(test)]
+mod recording_location_tests {
+    use super::super::recording_id::{recording_directory, tagged_mp4_bytes, RECORDING_ID_PREFIX};
+    use super::*;
+
+    /// A unique, valid ID per test, so parallel tests never share a folder.
+    fn unique_id(offset: u64) -> String {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos() as u64;
+        format!(
+            "{:08x}-0000-4000-8000-{:012x}",
+            std::process::id(),
+            nanos.wrapping_add(offset) & 0xffff_ffff_ffff
+        )
+    }
+
+    fn video_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "apexshot-recording-location-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn write_tagged_video(path: &Path, id: &str) {
+        let tagged = tagged_mp4_bytes(&format!("{RECORDING_ID_PREFIX}{id}"));
+        std::fs::write(path, tagged).unwrap();
+    }
+
+    fn sidecar_with_pointer(x: f64, y: f64) -> PointerSidecar {
+        let mut sidecar =
+            PointerSidecar::new(0, CaptureRegion::from_capture(None, None, None, None));
+        sidecar.pointer.push(PointerSample {
+            t: 0.0,
+            x,
+            y,
+            kind: CursorKind::Default,
+            cursor_id: None,
+        });
+        sidecar
+    }
+
+    #[test]
+    fn a_tagged_video_reads_its_sidecar_from_the_recording_folder() {
+        let id = unique_id(0x1000);
+        let dir = video_dir("reads-from-folder");
+        let video = dir.join("a.mp4");
+        write_tagged_video(&video, &id);
+
+        let sidecar = sidecar_with_pointer(1.0, 2.0);
+        let written = sidecar.write_next_to_video(&video).unwrap();
+        assert_eq!(written, recording_directory(&id).join("pointer.json"));
+
+        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        assert_eq!(loaded.pointer, sidecar.pointer);
+        assert_eq!(loaded.sidecar_directory, Some(recording_directory(&id)));
+        assert!(PointerSidecar::exists_next_to_video(&video));
+
+        let _ = std::fs::remove_dir_all(recording_directory(&id));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn renaming_the_video_keeps_its_sidecar() {
+        let id = unique_id(0x2000);
+        let dir = video_dir("rename");
+        let a = dir.join("a.mp4");
+        let b = dir.join("b.mp4");
+        write_tagged_video(&a, &id);
+        let sidecar = sidecar_with_pointer(3.0, 4.0);
+        sidecar.write_next_to_video(&a).unwrap();
+
+        std::fs::rename(&a, &b).unwrap();
+
+        let loaded = PointerSidecar::load_next_to_video(&b).unwrap();
+        assert_eq!(loaded.pointer, sidecar.pointer);
+
+        std::fs::write(
+            recording_directory(&id).join("pointer.json.recording.json"),
+            r#"{"markers":[1500]}"#,
+        )
+        .unwrap();
+        assert_eq!(RecordingMarks::for_video(&b).markers, vec![1.5]);
+
+        let camera = recording_directory(&id).join("pointer.json.webcam.mp4");
+        std::fs::write(&camera, b"camera").unwrap();
+        let mut with_webcam = sidecar.clone();
+        with_webcam.webcam = Some(WebcamTrack {
+            file: "pointer.json.webcam.mp4".to_string(),
+            width: 640,
+            height: 480,
+            duration: 4.0,
+            start: 0.0,
+            x: 0.1,
+            y: 0.1,
+            w: 0.2,
+            h: 0.2,
+            shape: 0,
+            flip: false,
+        });
+        with_webcam.write_next_to_video(&b).unwrap();
+        let loaded = PointerSidecar::load_next_to_video(&b).unwrap();
+        assert_eq!(loaded.webcam_path(&b), Some(camera));
+
+        let _ = std::fs::remove_dir_all(recording_directory(&id));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_recording_folder_wins_over_the_path_hash() {
+        let id = unique_id(0x3000);
+        let dir = video_dir("folder-wins");
+        let video = dir.join("a.mp4");
+        write_tagged_video(&video, &id);
+
+        let hashed = sidecar_with_pointer(1.0, 0.0);
+        hashed.write(&PointerSidecar::sidecar_path(&video)).unwrap();
+        let tagged = sidecar_with_pointer(2.0, 0.0);
+        tagged.write_next_to_video(&video).unwrap();
+
+        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        assert_eq!(loaded.pointer[0].x, 2.0);
+
+        std::fs::remove_dir_all(recording_directory(&id)).unwrap();
+        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        assert_eq!(loaded.pointer[0].x, 1.0);
+
+        PointerSidecar::delete_next_to_video(&video);
+        assert!(!PointerSidecar::sidecar_path(&video).is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_untagged_video_keeps_the_path_hash() {
+        let dir = video_dir("untagged");
+        let video = dir.join("a.mp4");
+        std::fs::write(&video, b"not an mp4").unwrap();
+
+        let sidecar = sidecar_with_pointer(5.0, 6.0);
+        let written = sidecar.write_next_to_video(&video).unwrap();
+        assert_eq!(written, PointerSidecar::sidecar_path(&video));
+        let loaded = PointerSidecar::load_next_to_video(&video).unwrap();
+        assert_eq!(loaded.pointer, sidecar.pointer);
+
+        PointerSidecar::delete_next_to_video(&video);
+        assert!(!PointerSidecar::sidecar_path(&video).is_file());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn deleting_a_tagged_recording_removes_its_folder() {
+        let id = unique_id(0x5000);
+        let dir = video_dir("delete-folder");
+        let video = dir.join("a.mp4");
+        write_tagged_video(&video, &id);
+        sidecar_with_pointer(0.0, 0.0).write_next_to_video(&video).unwrap();
+        let cursors = recording_directory(&id).join("pointer.json.cursors");
+        std::fs::create_dir_all(&cursors).unwrap();
+        std::fs::write(cursors.join("x.png"), b"png").unwrap();
+
+        delete_recording_outputs(&video);
+
+        assert!(!recording_directory(&id).exists());
+        assert!(!video.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
